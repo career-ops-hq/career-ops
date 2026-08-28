@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Download, ExternalLink, FileText, Search } from "lucide-react";
+import { Download, ExternalLink, FileText, Search, RefreshCw } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import type { ApplicationDocument, DocumentApplication, ReadyDocument, RoleResume } from "@/lib/document-library";
@@ -76,6 +76,7 @@ function DocumentRow({ document, company, applicantName, applicationNumber }: { 
         ) : (
           <button type="button" disabled={busy} onClick={() => void copy(true)} className={cn(buttonVariants({ variant: "primary", size: "sm" }))}>Replace existing copy</button>
         )}
+        {document.kind === "resume" && document.freshness === "stale" && <a href={`/documents/review-updates#application-${applicationNumber}`} className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}><RefreshCw className="size-3.5" />Update Resume</a>}
       </div>
       {message && <p role="status" className="mt-2 text-xs text-muted">{message}</p>}
       {document.workflow?.status === "Review recommended - newer resume exists" && <div className="mt-3 rounded-md border border-brand/30 bg-brand-soft p-3 text-xs text-muted"><span className="font-medium text-brand-text">Review recommended:</span> a newer resume ({document.workflow.resumeVersion}) exists. The approved PDF is preserved. <a href={`/pipeline/${applicationNumber}?cover=prepare`} className="ml-1 font-medium text-brand-text underline">Prepare New Cover Letter</a></div>}
@@ -84,7 +85,7 @@ function DocumentRow({ document, company, applicantName, applicationNumber }: { 
   );
 }
 
-export function DocumentsView({ applications, roleResumes, ready, applicantName }: { applications: DocumentApplication[]; roleResumes: RoleResume[]; ready: ReadyDocument[]; applicantName: string }) {
+export function DocumentsView({ applications, roleResumes, ready, applicantName, staleCount }: { applications: DocumentApplication[]; roleResumes: RoleResume[]; ready: ReadyDocument[]; applicantName: string; staleCount: number }) {
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -94,6 +95,7 @@ export function DocumentsView({ applications, roleResumes, ready, applicantName 
   const filteredRoles = roleResumes.filter((role) => role.targetRole.toLowerCase().includes(query.trim().toLowerCase()));
   return (
     <div className="space-y-8">
+      {staleCount > 0 && <section className="rounded-xl border border-brand/30 bg-brand-soft p-5"><p className="text-xs font-semibold uppercase tracking-wide text-brand-text">Career Profile Updated</p><h2 className="mt-1 font-display text-lg text-landing">Your Career Profile has changed since {staleCount} {staleCount === 1 ? "resume was" : "resumes were"} generated.</h2><p className="mt-1 text-sm text-muted">Review whether the latest approved experience, skills, certifications, projects, or education should be included.</p><a href="/documents/review-updates" className={cn(buttonVariants({ variant: "primary", size: "sm" }), "mt-4")}>Review Resumes</a></section>}
       <label className="relative block">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
         <span className="sr-only">Search applications and documents</span>
@@ -112,6 +114,7 @@ export function DocumentsView({ applications, roleResumes, ready, applicantName 
               <a href={fileUrl(role.latest.path)} target="_blank" rel="noreferrer" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>View PDF</a>
               <a href={fileUrl(role.latest.path, true)} className={cn(buttonVariants({ variant: "outline", size: "sm" }))}><Download className="size-3.5" />Download</a>
               <a href={`/documents/create?mode=general&role=${encodeURIComponent(role.targetRole)}`} className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}>Create New Version</a>
+              {role.freshness === "stale" && <a href={`/documents/review-updates#role-${role.slug}`} className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}><RefreshCw className="size-3.5" />Update Resume</a>}
             </div>
           </article>)}
           {!filteredRoles.length && <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted">No general role resumes{query ? " match your search" : " yet"}.</div>}

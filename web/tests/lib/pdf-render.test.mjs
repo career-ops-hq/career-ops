@@ -106,7 +106,7 @@ test("role resume metadata is written only after the backend PDF exists", async 
   writeFileSync(paths.html, "<!DOCTYPE html><html></html>");
   const spawnFn = () => { writeFileSync(paths.finalPdf, "%PDF"); return fakeChild({ exitCode: 0 }); };
   const plan = { targetRole: "Application Developer", positioning: "Senior Application Developer / Software Engineer", supportedFocusAreas: ["Java"], unsupportedFocusAreas: [], version: "v001" };
-  try { const result = await renderRoleResumePdf({ spawnFn, execPath: "node", root: dir, pdfPaths: paths, format: "letter", plan }); assert.equal(result.kind, "rendered"); assert.equal(readFileSync(paths.html, "utf8"), "<!DOCTYPE html><html></html>"); assert.ok(existsSync(paths.finalPdf)); assert.equal(JSON.parse(readFileSync(paths.metadata, "utf8")).factGate, "passed"); } finally { rmSync(dir, { recursive: true, force: true }); }
+  try { const result = await renderRoleResumePdf({ spawnFn, execPath: "node", root: dir, pdfPaths: paths, format: "letter", plan, profileState: { version: 4, updatedAt: "2026-08-27T10:00:00Z" } }); assert.equal(result.kind, "rendered"); assert.equal(readFileSync(paths.html, "utf8"), "<!DOCTYPE html><html></html>"); assert.ok(existsSync(paths.finalPdf)); const metadata = JSON.parse(readFileSync(paths.metadata, "utf8")); assert.equal(metadata.factGate, "passed"); assert.equal(metadata.profileVersion, 4); assert.equal(metadata.profileUpdatedAt, "2026-08-27T10:00:00Z"); } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("role resume is not successful and writes no metadata when PDF is absent", async () => {

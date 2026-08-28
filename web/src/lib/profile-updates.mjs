@@ -106,7 +106,8 @@ export function buildProfileUpdatePreview(cvValue, requestValue) {
   if (updateType === "project") { section = "Selected Projects"; block = projectBlock(d); duplicate = new RegExp(`^###\\s+${escapeRegExp(esc(d.name))}\\s*$`, "im").test(cv); proposedCv = appendSection(cv, "(?:Selected\\s+)?(?:Infrastructure\\s+)?Projects?", section, block); }
   if (updateType === "education") { section = "Education"; block = educationBlock(d); duplicate = d.entryType === "training" ? norm(cv).includes(norm(d.program)) : norm(cv).includes(norm(d.degree)) && norm(cv).includes(norm(d.school)); proposedCv = appendSection(cv, "Education", section, block); }
   if (updateType === "work") { section = "Professional Experience"; const result = addWorkBullet(cv, d.experienceIndex, d.value, d.changeType); proposedCv = result.cv; block = result.preview; duplicate = result.duplicate; }
-  const description = `${updateType} update in ${section}`;
+  const subject = esc(d.name || d.program || d.degree || d.value || "approved entry").slice(0, 80);
+  const description = `${updateType}: ${subject}`;
   const previewHash = crypto.createHash("sha256").update(cv).update("\0").update(JSON.stringify(request)).digest("hex");
   return { request, proposedCv, preview: { section, markdown: block }, duplicate, warning: duplicate ? `A matching ${updateType} entry already exists.` : "", previewHash, description, workEntries: workEntries.map(({ index, label }) => ({ index, label })) };
 }

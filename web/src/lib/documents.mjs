@@ -36,8 +36,16 @@ function discoverVersions(root, appDir, kind) {
     .map((entry) => ({
       version: entry.name.toLowerCase(),
       path: path.posix.join(...relBase.split(path.sep), entry.name, filename),
+      metadata: readVersionMetadata(path.join(absBase, entry.name, "metadata.json")),
     }))
     .sort((a, b) => compareVersions(a.version, b.version));
+}
+
+function readVersionMetadata(file) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch { return {}; }
 }
 
 export function discoverApplications(root, metadata = [], approvedPaths = new Set()) {

@@ -4,6 +4,7 @@ import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { verifyApprovedProfileUpdate } from "@/lib/profile-updates.mjs";
+import { advanceProfileState } from "@/lib/profile-state.mjs";
 
 export async function POST(req: Request) {
   try {
@@ -12,6 +13,7 @@ export async function POST(req: Request) {
     const cv = fs.readFileSync(cvPath, "utf8");
     const result = verifyApprovedProfileUpdate(cv, body);
     atomicWriteWithBackup(cvPath, result.proposedCv);
+    const profileState = advanceProfileState(root);
     const auditPath = path.join(root, "data", "profile-updates.json");
     let history = [];
     try { const parsed = JSON.parse(fs.readFileSync(auditPath, "utf8")); if (Array.isArray(parsed)) history = parsed; } catch { /* first update */ }
@@ -19,7 +21,7 @@ export async function POST(req: Request) {
     let auditWarning = "";
     try { fs.mkdirSync(path.dirname(auditPath), { recursive: true }); fs.writeFileSync(auditPath, JSON.stringify(history, null, 2) + "\n", "utf8"); }
     catch { auditWarning = "Profile updated, but the local audit entry could not be written."; }
-    return NextResponse.json({ ok: true, backedUp: true, auditWarning });
+    return NextResponse.json({ ok: true, backedUp: true, auditWarning, profileState });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Could not apply profile update." }, { status: 400 });
   }

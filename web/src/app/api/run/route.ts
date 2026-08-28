@@ -19,6 +19,7 @@ import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { parseApprovedRoleResumeInput, reserveRoleResumeDirectory, roleResumePaths } from "@/lib/role-resumes.mjs";
 import { validateRoleResumeHtml } from "@/lib/role-resume-fact-gate.mjs";
+import { readProfileState } from "@/lib/profile-state.mjs";
 import { inspectCodexFinalOutput } from "@/lib/codex-final-output.mjs";
 
 export const runtime = "nodejs";
@@ -399,13 +400,15 @@ export async function POST(req: Request) {
         // unexpected exception here must still close the stream instead of
         // leaving it — and the write-token — open until process shutdown.
         try {
-          const result = kind === "role-resume" ? await renderRoleResumePdf({ spawnFn: spawn, execPath: process.execPath, root: careerOpsRoot(), pdfPaths: paths, format, plan: rolePlan }) : await renderAndMarkPdf({
+          const profileState = readProfileState(careerOpsRoot());
+          const result = kind === "role-resume" ? await renderRoleResumePdf({ spawnFn: spawn, execPath: process.execPath, root: careerOpsRoot(), pdfPaths: paths, format, plan: rolePlan, profileState }) : await renderAndMarkPdf({
             spawnFn: spawn,
             execPath: process.execPath,
             root: careerOpsRoot(),
             pdfPaths: paths,
             format,
             reportNum: input,
+            profileState,
           });
           if (result.kind === "render-failed") {
             send({ type: "error", msg: (result.error || "PDF rendering failed.").slice(0, 200) });

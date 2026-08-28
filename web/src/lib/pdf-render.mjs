@@ -113,13 +113,13 @@ export function spawnGeneratePdf({ spawnFn, execPath, root, html, finalPdf, form
   });
 }
 
-export async function renderRoleResumePdf({ spawnFn, execPath, root, pdfPaths, format, plan }) {
+export async function renderRoleResumePdf({ spawnFn, execPath, root, pdfPaths, format, plan, profileState = { version: 0, updatedAt: null } }) {
   const render = await spawnGeneratePdf({ spawnFn, execPath, root, html: pdfPaths.html, finalPdf: pdfPaths.finalPdf, format });
   if (!render.ok) return { kind: "render-failed", error: render.stderr || "PDF rendering or fact-gate validation failed." };
   if (!fs.existsSync(pdfPaths.finalPdf)) return { kind: "render-failed", error: "The PDF renderer exited successfully but did not create the expected role-resume PDF." };
   const createdAt = new Date().toISOString();
   fs.writeFileSync(pdfPaths.changes, `# ${plan.targetRole} ${plan.version}\n\n- Positioned for ${plan.positioning}.\n- Emphasized only CV-supported focus areas: ${plan.supportedFocusAreas.join(", ") || "none selected"}.\n- Excluded unsupported preferences: ${plan.unsupportedFocusAreas.join(", ") || "none"}.\n`, { encoding: "utf8", flag: "wx" });
-  fs.writeFileSync(pdfPaths.metadata, JSON.stringify({ type: "general-role", targetRole: plan.targetRole, version: plan.version, createdAt, source: "cv.md", factGate: "passed" }, null, 2) + "\n", { encoding: "utf8", flag: "wx" });
+  fs.writeFileSync(pdfPaths.metadata, JSON.stringify({ type: "general-role", targetRole: plan.targetRole, roleSlug: plan.roleSlug, positioning: plan.positioning, supportedFocusAreas: plan.supportedFocusAreas, unsupportedFocusAreas: plan.unsupportedFocusAreas, version: plan.version, createdAt, source: "cv.md", factGate: "passed", profileVersion: profileState.version, profileUpdatedAt: profileState.updatedAt }, null, 2) + "\n", { encoding: "utf8", flag: "wx" });
   return { kind: "rendered", warnings: [] };
 }
 
@@ -197,10 +197,10 @@ export function cleanupPdfScratch(scratchDir, prefix) {
  * Call after writeCvHtml for the same pdfPaths — this reads the HTML that
  * function wrote. `format` is passed in rather than read back off disk, so the two
  * no longer share a file and the only coupling left is the HTML itself.
- * @param {{spawnFn: Function, execPath: string, root: string, pdfPaths: {html: string, finalPdf: string}, format: "letter"|"a4", reportNum: string}} args
+ * @param {{spawnFn: Function, execPath: string, root: string, pdfPaths: {html: string, finalPdf: string}, format: "letter"|"a4", reportNum: string, profileState?: {version: number, updatedAt: string|null}}} args
  * @returns {Promise<RenderResult>}
  */
-export async function renderAndMarkPdf({ spawnFn, execPath, root, pdfPaths, format, reportNum }) {
+export async function renderAndMarkPdf({ spawnFn, execPath, root, pdfPaths, format, reportNum, profileState = { version: 0, updatedAt: null } }) {
   const warnings = [];
 
   const render = await spawnGeneratePdf({ spawnFn, execPath, root, html: pdfPaths.html, finalPdf: pdfPaths.finalPdf, format, reportNum });
@@ -208,6 +208,14 @@ export async function renderAndMarkPdf({ spawnFn, execPath, root, pdfPaths, form
 
   if (!render.ok) {
     return { kind: "render-failed", error: render.stderr || "PDF rendering failed." };
+  }
+
+  // Nested application versions receive a backend-owned sidecar only after the
+  // PDF exists. Legacy flat PDFs intentionally remain metadata-free.
+  if (/[/\\]cv[/\\]tailored[/\\]v\d+[/\\]cv\.pdf$/i.test(pdfPaths.finalPdf)) {
+    const metadataPath = path.join(path.dirname(pdfPaths.finalPdf), "metadata.json");
+    if (fs.existsSync(metadataPath)) return { kind: "render-failed", error: `Refusing to overwrite existing resume metadata: ${metadataPath}` };
+    fs.writeFileSync(metadataPath, JSON.stringify({ type: "application", reportNumber: String(reportNum).padStart(3, "0"), version: path.basename(path.dirname(pdfPaths.finalPdf)), createdAt: new Date().toISOString(), source: "cv.md", factGate: "passed", profileVersion: profileState.version, profileUpdatedAt: profileState.updatedAt }, null, 2) + "\n", { encoding: "utf8", flag: "wx" });
   }
 
   // The PDF is the real deliverable and it already rendered successfully — a

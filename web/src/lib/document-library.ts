@@ -4,13 +4,16 @@ import * as yaml from "js-yaml";
 import { careerOpsRoot, readApplications } from "@/lib/career-ops";
 import { discoverApplications, discoverReadyToApply } from "@/lib/documents.mjs";
 import { discoverRoleResumes } from "@/lib/role-resumes.mjs";
+import { classifyResumeFreshness, readProfileState } from "@/lib/profile-state.mjs";
 
-export type DocumentVersion = { version: string; path: string };
+export type Freshness = "current" | "stale" | "unknown";
+export type DocumentVersion = { version: string; path: string; metadata?: { createdAt?: string; profileVersion?: number; profileUpdatedAt?: string } };
 export type CoverWorkflow = { status: "Draft - Review Required" | "Review recommended - newer resume exists" | "Approved"; resumeVersion: string; targetVersion: string; existingCoverVersion?: string | null };
-export type ApplicationDocument = { kind: "resume" | "cover-letter"; versions: DocumentVersion[]; selectedVersion: string; status: "Approved" | "Latest"; workflow?: CoverWorkflow | null };
+export type ApplicationDocument = { kind: "resume" | "cover-letter"; versions: DocumentVersion[]; selectedVersion: string; status: "Approved" | "Latest"; workflow?: CoverWorkflow | null; freshness?: Freshness };
 export type DocumentApplication = { directory: string; number: string; company: string; role: string; documents: ApplicationDocument[] };
 export type ReadyDocument = { name: string; path: string };
-export type RoleResume = { slug: string; targetRole: string; versions: Array<DocumentVersion & { metadata: { createdAt?: string; factGate?: string } }>; latest: DocumentVersion & { metadata: { createdAt?: string; factGate?: string } } };
+export type RoleResume = { slug: string; targetRole: string; versions: Array<DocumentVersion & { metadata: { createdAt?: string; factGate?: string; profileVersion?: number; profileUpdatedAt?: string; positioning?: string; supportedFocusAreas?: string[] } }>; latest: DocumentVersion & { metadata: { createdAt?: string; factGate?: string; profileVersion?: number; profileUpdatedAt?: string; positioning?: string; supportedFocusAreas?: string[] } }; freshness?: Freshness };
+export type ProfileState = { version: number; updatedAt: string | null };
 
 function approvedPdfPaths(): Set<string> {
   const approved = new Set<string>();
@@ -39,13 +42,24 @@ export function applicantName(): string {
   return "Candidate";
 }
 
-export function readDocumentLibrary(): { applications: DocumentApplication[]; roleResumes: RoleResume[]; ready: ReadyDocument[]; applicantName: string } {
+export function readDocumentLibrary(): { applications: DocumentApplication[]; roleResumes: RoleResume[]; ready: ReadyDocument[]; applicantName: string; profileState: ProfileState; staleCount: number } {
   const root = careerOpsRoot();
   const metadata = readApplications().map((app) => ({ number: app.n, company: app.company, role: app.role }));
+  const profileState = readProfileState(root) as ProfileState;
+  const applications = discoverApplications(root, metadata, approvedPdfPaths()) as DocumentApplication[];
+  const roleResumes = discoverRoleResumes(root) as RoleResume[];
+  for (const app of applications) {
+    const resume = app.documents.find((document) => document.kind === "resume");
+    if (resume?.versions[0]) resume.freshness = classifyResumeFreshness(resume.versions[0].metadata || {}, profileState) as Freshness;
+  }
+  for (const role of roleResumes) role.freshness = classifyResumeFreshness(role.latest.metadata || {}, profileState) as Freshness;
+  const staleCount = roleResumes.filter((role) => role.freshness === "stale").length + applications.filter((app) => app.documents.some((document) => document.kind === "resume" && document.freshness === "stale")).length;
   return {
-    applications: discoverApplications(root, metadata, approvedPdfPaths()) as DocumentApplication[],
-    roleResumes: discoverRoleResumes(root) as RoleResume[],
+    applications,
+    roleResumes,
     ready: discoverReadyToApply(root) as ReadyDocument[],
     applicantName: applicantName(),
+    profileState,
+    staleCount,
   };
 }
