@@ -289,7 +289,15 @@ function isPlaywrightMcpFromPlugin() {
   return Object.entries(enabled).some(([key, on]) => {
     if (on !== true) return false;
     const entries = Array.isArray(installed[key]) ? installed[key] : [];
-    return entries.some(({ installPath } = {}) => {
+    // Read installPath off the entry rather than destructuring it: the `= {}`
+    // default only covers `undefined`, so a manifest carrying a literal `null`
+    // entry - valid JSON, and what a half-written install leaves behind - threw
+    // a TypeError here. That is worse than the miss this function was added to
+    // fix (#2752): doctor dies before printing, so every other check vanishes
+    // with it and the output looks like a broken install rather than one
+    // unconfigured plugin.
+    return entries.some((entry) => {
+      const installPath = entry?.installPath;
       if (typeof installPath !== 'string' || !installPath) return false;
       return hasPlaywrightIn(readConfigIfPresent(join(installPath, '.mcp.json')), { bare: true });
     });

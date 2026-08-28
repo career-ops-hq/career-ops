@@ -208,10 +208,11 @@
 #   - `positive` non-empty → at least one keyword must be present
 #   - If this entire block is absent, descriptions are not filtered (default)
 #
-# Provider support: the scanner is zero-token and only reads descriptions that
-# a provider already returns in its list payload — it never fetches each job
-# page. Currently Lever (`descriptionPlain`) supplies descriptions; jobs from
-# providers that don't always pass this filter (they're never silently dropped).
+# Provider support: the scanner is zero-token and only reads a description when
+# the provider's list API returns it for free — it never fetches each job page.
+# Jobs from a provider that doesn't supply one always pass this filter (never
+# silently dropped). Check which providers qualify:
+# `grep -l 'description:' providers/*.mjs`.
 #
 # Whole-word / stem matching (opt-in, per entry): a plain keyword is a
 # substring, so a negative "java" also rejects "JavaScript" and "ios" rejects
@@ -253,7 +254,8 @@
 # Surfaces roles that sponsor a work visa (H-1B / H-1B1 / O-1 for the US, plus
 # the generic "visa sponsorship" wording) and drops roles that explicitly refuse
 # it. Like content_filter it reads the job DESCRIPTION text, so it only has
-# signal for providers whose list API ships a description (Lever today).
+# signal for providers that populate job.description (see the content_filter
+# provider-support note above).
 # Semantics (case-insensitive substring):
 #   - Any `negative` keyword present → reject (an explicit "no sponsorship")
 #   - require_mention: false (default) → after clearing negatives, pass — jobs

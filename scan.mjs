@@ -488,10 +488,11 @@ export function buildPostedDateFilter(afterIso, beforeIso) {
 // global `positive`/`negative` pair is the fallback for jobs whose matched
 // keyword(s) have no override entry.
 //
-// Provider support: only providers whose list API ships the description for
-// free (no extra per-job request, which would break the zero-token design)
-// populate `job.description`. Lever (`descriptionPlain`) does today; others
-// leave it empty and therefore always pass this filter.
+// Provider support: `job.description` is populated only when the provider's
+// list API returns the description body without a per-job request (the
+// zero-token constraint). Providers that don't supply one leave it empty, and
+// those jobs always pass this filter. The set shifts as providers are updated
+// — check it with `grep -l 'description:' providers/*.mjs`.
 
 // Normalize a keyword list (lowercase/trim/drop-empties) and compile each
 // survivor into a matcher, so a `word:`/`stem:` prefix is honoured and a bare
@@ -616,8 +617,9 @@ export function buildCountryEligibilityFilter(countryEligibilityFilter, candidat
 // Surfaces roles that sponsor a work visa (H-1B / H-1B1 / O-1 for the US, plus
 // the generic "visa sponsorship" wording) and drops roles that explicitly
 // refuse sponsorship. Like content_filter it reads the job DESCRIPTION text, so
-// it only has signal for providers whose list API ships a description (Lever
-// today); jobs without one fall back to the require_mention rule below.
+// it only has signal for providers that populate job.description (see the
+// content_filter header above); jobs without one fall back to the
+// require_mention rule below.
 //
 // Semantics (case-insensitive substring):
 //   - any `negative` keyword present → reject (an explicit "no sponsorship")
