@@ -36,8 +36,9 @@
  *   node verify-cv-structure.mjs --self-test
  */
 
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, mkdtempSync, writeFileSync, mkdirSync } from 'fs';
 import { isAbsolute, join, dirname, basename } from 'path';
+import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
 
@@ -49,14 +50,28 @@ const DEFAULT_SOURCE = 'cv.md';
  * · descriptor]` headers, in file order (which IS the ground-truth
  * chronological order — cv.md is user-authored, never generated).
  *
+ * Scoped to the `## Experience` section only, up to the next level-2
+ * heading: a `### University — City, ST`-shaped header under `## Education`
+ * (or any other section) would otherwise parse as a phantom experience
+ * entry, capable of triggering a false order/descriptor warning if its name
+ * happens to match something in the payload.
+ *
  * @param {string} cvMdText
  * @returns {{ company: string, location: string }[]}
  */
 export function parseCvMdExperience(cvMdText) {
   const entries = [];
+  const sectionHeadingRe = /^##\s+Experience\s*$/m;
+  const sectionMatch = sectionHeadingRe.exec(cvMdText);
+  if (!sectionMatch) return entries;
+  const sectionStart = sectionMatch.index + sectionMatch[0].length;
+  const nextSectionRe = /^##\s+\S/m;
+  const rest = cvMdText.slice(sectionStart);
+  const nextSectionMatch = nextSectionRe.exec(rest);
+  const section = nextSectionMatch ? rest.slice(0, nextSectionMatch.index) : rest;
   const headerRe = /^###\s+(.+?)\s+—\s+(.+)$/gm;
   let match;
-  while ((match = headerRe.exec(cvMdText))) {
+  while ((match = headerRe.exec(section))) {
     entries.push({ company: match[1].trim(), location: match[2].trim() });
   }
   return entries;
@@ -73,11 +88,34 @@ export function parseCvMdExperience(cvMdText) {
  * @param {string} cvMdCompany
  * @returns {boolean}
  */
+function normalizeCompany(name) {
+  return String(name || '').toLowerCase().trim();
+}
+
 function companiesMatch(payloadCompany, cvMdCompany) {
-  const a = String(payloadCompany || '').toLowerCase().trim();
-  const b = String(cvMdCompany || '').toLowerCase().trim();
+  const a = normalizeCompany(payloadCompany);
+  const b = normalizeCompany(cvMdCompany);
   if (!a || !b) return false;
   return a === b || a.startsWith(b) || b.startsWith(a) || a.includes(b) || b.includes(a);
+}
+
+/**
+ * Find the best-matching index for `company` in `entries`. Prefers an exact
+ * (normalized) match; falls back to companiesMatch's fuzzy containment only
+ * when no exact match exists. Without this, "Acme Labs" in the payload
+ * would resolve to an earlier "Acme" entry in cv.md (a valid substring
+ * match) instead of its own "Acme Labs" entry, letting a genuinely swapped
+ * "Acme"/"Acme Labs" pair slip past the order check.
+ *
+ * @param {{company: string}[]} entries
+ * @param {string} company
+ * @returns {number} index in entries, or -1 if nothing matches
+ */
+function findCompanyIndex(entries, company) {
+  const target = normalizeCompany(company);
+  const exactIndex = entries.findIndex((e) => normalizeCompany(e.company) === target);
+  if (exactIndex !== -1) return exactIndex;
+  return entries.findIndex((e) => companiesMatch(company, e.company));
 }
 
 /**
@@ -92,7 +130,7 @@ function companiesMatch(payloadCompany, cvMdCompany) {
  */
 export function checkExperienceOrder(payloadExperience, cvMdExperience) {
   const violations = [];
-  const cvMdIndexOf = (company) => cvMdExperience.findIndex((e) => companiesMatch(company, e.company));
+  const cvMdIndexOf = (company) => findCompanyIndex(cvMdExperience, company);
   const resolved = payloadExperience
     .map((e, payloadIndex) => ({ payloadIndex, company: e.company, cvMdIndex: cvMdIndexOf(e.company) }))
     .filter((e) => e.cvMdIndex !== -1);
@@ -127,7 +165,8 @@ export function checkLocationDescriptors(payloadExperience, cvMdExperience) {
     const descriptorMatch = cvMdEntry.location.match(/·\s*(.+)$/);
     if (!descriptorMatch) continue; // cv.md itself has no descriptor for this entry — nothing to lose
     const descriptor = descriptorMatch[1].trim();
-    const payloadEntry = payloadExperience.find((e) => companiesMatch(e.company, cvMdEntry.company));
+    const payloadIndex = findCompanyIndex(payloadExperience, cvMdEntry.company);
+    const payloadEntry = payloadIndex === -1 ? undefined : payloadExperience[payloadIndex];
     if (!payloadEntry) continue; // entry omitted entirely from this tailored CV — a legitimate choice, not this check's concern
     const payloadLocation = String(payloadEntry.location || '');
     if (!payloadLocation.includes(descriptor)) {
@@ -211,6 +250,8 @@ function runSelfTest() {
   };
 
   const cvMd = [
+    '## Experience',
+    '',
     '### Acme Corp — Austin, TX · Series B fintech',
     '',
     '**VP of Engineering** · Feb 2023 – present',
@@ -224,6 +265,12 @@ function runSelfTest() {
     '**Co-founder & Chief Technology Officer** · Mar 2011 – Jul 2021',
     '',
     '### Early Career — Columbus, OH / Dayton, OH',
+    '',
+    '## Education',
+    '',
+    '### Decoy University — Springfield, IL',
+    '',
+    '**B.S. Computer Science** · 2005 – 2009',
   ].join('\n');
 
   const correctOrder = [
@@ -284,6 +331,76 @@ function runSelfTest() {
   equal('unverified result names no violations (nothing was actually checked)',
     unverifiedResult.orderViolations.length + unverifiedResult.descriptorViolations.length, 0);
 
+  // A "### Company — Location" header outside the Experience section (e.g.
+  // a degree entry under Education) must not be parsed as an experience
+  // entry — cv.md's `## Education` section carries a header shape that
+  // collides with Experience's, and this gate scans by section boundary,
+  // not by header shape alone.
+  const decoyEntries = parseCvMdExperience(cvMd);
+  equal('Education section header is excluded from parsed experience entries',
+    decoyEntries.some((e) => e.company.includes('Decoy University')), false);
+  equal('Experience section still yields its 4 real entries despite the Education decoy',
+    decoyEntries.length, 4);
+
+  // An exact company match must win over a fuzzy substring match: without
+  // this, a payload's "Acme Corp" could resolve to cv.md's unrelated
+  // "Acme" entry (a valid prefix match) instead of its own "Acme Corp"
+  // entry, letting a genuinely swapped pair slip past the order check.
+  const prefixCollisionCvMd = [
+    '## Experience',
+    '',
+    '### Acme — City One, ST',
+    '',
+    '**Engineer** · Jan 2018 – Jan 2020',
+    '',
+    '### Acme Corp — City Two, ST',
+    '',
+    '**Senior Engineer** · Jan 2020 – present',
+  ].join('\n');
+  const prefixCollisionSwapped = [
+    { company: 'Acme Corp', location: 'City Two, ST' },
+    { company: 'Acme', location: 'City One, ST' },
+  ];
+  const prefixCollisionResult = verifyStructure({ experience: prefixCollisionSwapped }, prefixCollisionCvMd);
+  equal('exact match beats fuzzy prefix: swapped "Acme"/"Acme Corp" is still caught',
+    prefixCollisionResult.verdict, 'warn');
+  equal('prefix-collision order violation names the correct pair',
+    prefixCollisionResult.orderViolations,
+    ['"Acme Corp" is rendered before "Acme", but cv.md has them in the opposite order']);
+
+  // CLI-level regression tests: the null-payload and unreadable-source
+  // guards live in runCli(), not verifyStructure(), so exercise them
+  // in-process against real temp files rather than as in-memory unit tests.
+  {
+    const selfTestDir = mkdtempSync(join(tmpdir(), 'verify-cv-structure-selftest-'));
+    const cvMdPath = join(selfTestDir, 'cv.md');
+    writeFileSync(cvMdPath, cvMd, 'utf-8');
+    const nullPayloadPath = join(selfTestDir, 'null-payload.json');
+    writeFileSync(nullPayloadPath, 'null', 'utf-8');
+    const validPayloadPath = join(selfTestDir, 'valid-payload.json');
+    writeFileSync(validPayloadPath, JSON.stringify({ experience: correctOrder }), 'utf-8');
+    const dirAsSourcePath = join(selfTestDir, 'a-directory-not-a-file');
+    mkdirSync(dirAsSourcePath);
+
+    const origError = console.error;
+    const origWarn = console.warn;
+    const origLog = console.log;
+    console.error = () => {};
+    console.warn = () => {};
+    console.log = () => {};
+    let nullExit, dirSourceExit;
+    try {
+      nullExit = runCli([nullPayloadPath, '--source', cvMdPath]);
+      dirSourceExit = runCli([validPayloadPath, '--source', dirAsSourcePath]);
+    } finally {
+      console.error = origError;
+      console.warn = origWarn;
+      console.log = origLog;
+    }
+    equal('CLI rejects a null JSON payload instead of throwing', nullExit, 1);
+    equal('CLI rejects an unreadable (directory) --source instead of throwing', dirSourceExit, 1);
+  }
+
   console.log(`verify-cv-structure self-test: ${passed} passed, ${failed} failed`);
   return failed ? 1 : 0;
 }
@@ -328,7 +445,17 @@ export function runCli(args = process.argv.slice(2)) {
     console.error(`ERROR: payload is not valid JSON: ${err.message}`);
     return 1;
   }
-  const cvMdText = readFileSync(srcPath, 'utf-8');
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    console.error(`ERROR: payload must be a JSON object, got ${payload === null ? 'null' : Array.isArray(payload) ? 'an array' : typeof payload}: ${targetArg}`);
+    return 1;
+  }
+  let cvMdText;
+  try {
+    cvMdText = readFileSync(srcPath, 'utf-8');
+  } catch (err) {
+    console.error(`ERROR: source is not readable: ${sourcePath}: ${err.message}`);
+    return 1;
+  }
   const result = verifyStructure(payload, cvMdText);
   if (result.verdict === 'unverified') {
     console.warn(`⚠️  CV structure check UNVERIFIED: ${basename(targetPath)}`);
