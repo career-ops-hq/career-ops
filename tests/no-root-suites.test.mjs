@@ -23,36 +23,63 @@
 // #3411 moves them into tests/, after which this check reads the same either
 // way — which is the point of matching the discovery pattern rather than a
 // naming convention.
-import { readdirSync, existsSync } from 'fs';
+import { readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
 
 console.log('\ntest-all.mjs — no suite outside discovery');
 
-// 1. Look in the right place first. The assertion below is of the form "nothing
-//    was found", and a wrong ROOT produces exactly that reading while measuring
-//    nothing — a silent pass, which is the same shape as the bug this file
-//    exists to prevent. test-all.mjs is the cheapest sentinel: it is the
-//    harness itself, and it cannot move without this check's premise moving
-//    with it.
-if (existsSync(join(ROOT, 'test-all.mjs'))) {
-  pass('ROOT is the repo root — test-all.mjs is there, so an empty result means empty');
-} else {
-  fail(`ROOT does not contain test-all.mjs (${ROOT}) — this guard is looking in the wrong place and would pass on any tree`);
+// 1. Look in the right place first. The invariant below only ever reports an
+//    ABSENCE, and a wrong or unreadable ROOT produces exactly that reading while
+//    measuring nothing — a silent pass, which is the same shape as the bug this
+//    file exists to prevent. test-all.mjs is the cheapest sentinel: it is the
+//    harness itself and cannot move without this check's premise moving with it.
+//    statSync().isFile() rather than existsSync(), so a directory of that name
+//    cannot satisfy the premise either.
+let rootOk = false;
+try {
+  rootOk = statSync(join(ROOT, 'test-all.mjs')).isFile();
+} catch {
+  rootOk = false;
 }
 
-// 2. The invariant itself.
-const strays = readdirSync(ROOT, { withFileTypes: true })
-  .filter((e) => e.isFile() && e.name.endsWith('.test.mjs'))
-  .map((e) => e.name)
-  .sort();
-
-if (strays.length === 0) {
-  pass('no test suite sits at the repo root — tests/ is the only home');
+if (rootOk) {
+  pass('ROOT is the repo root — test-all.mjs is a file there, so an empty result means empty');
 } else {
-  fail(
-    `${strays.length} suite(s) at the repo root, where discovery does not reach and nothing runs them:\n` +
-      strays.map((n) => `    ${n}`).join('\n') +
-      '\n  Move the file into tests/ — discovery picks it up with no registration.',
-  );
+  fail(`ROOT does not hold test-all.mjs as a file (${ROOT}) — this guard is looking in the wrong place and would otherwise pass on any tree`);
+}
+
+// 2. The invariant itself, and only when the premise holds. Reporting "no stray
+//    suites" beside a failed premise would print the very vacuous pass the
+//    sentinel exists to catch.
+if (rootOk) {
+  let entries;
+  try {
+    entries = readdirSync(ROOT, { withFileTypes: true });
+  } catch (err) {
+    entries = null;
+    fail(`ROOT is unreadable (${ROOT}): ${err.code || err.message} — the scan did not run, so this is not a clean tree`);
+  }
+
+  if (entries) {
+    // isFile() OR isSymbolicLink(): readdirSync does not follow links, so a
+    // symlinked entry reports isFile() === false — the same fact #3140 records
+    // for isDirectory(). A suite linked into the root would otherwise slip past
+    // this guard on every platform that checks symlinks out as symlinks, which
+    // is every platform except a Windows clone with core.symlinks=false (#3364).
+    const strays = entries
+      .filter((e) => (e.isFile() || e.isSymbolicLink()) && e.name.endsWith('.test.mjs'))
+      .map((e) => e.name)
+      .sort();
+
+    if (strays.length === 0) {
+      pass('no test suite sits at the repo root — tests/ is the only home');
+    } else {
+      fail(
+        `${strays.length} suite(s) at the repo root, where discovery does not reach and nothing runs them:\n` +
+          strays.map((n) => `    ${n}`).join('\n') +
+          '\n  Move the file into tests/ — discovery picks it up with no registration.',
+      );
+    }
+  }
 }
