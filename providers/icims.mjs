@@ -138,6 +138,14 @@ export default {
    * Fill in job.postedAt from the posting's detail page (JSON-LD JobPosting
    * `datePosted`) — the list pages carry no date at all. Any failure leaves
    * the job undated; the caller's undated policy then applies as usual.
+   *
+   * The same detail page also carries `jobLocation.address`, so an empty
+   * list-page location is filled here too. Several tenants render the search
+   * card without a location span at all; the empty string that produced then
+   * passes location_filter (an empty location can't match a block term), so a
+   * US-only board reaches the results with no country attached and the reader
+   * has to look each posting up by hand. Measured 2026-08-13: all six iCIMS
+   * matches in a 1,000-company sweep were US postings that arrived this way.
    */
   async enrichDate(job, ctx) {
     const sep = job.url.includes('?') ? '&' : '?';
@@ -158,8 +166,43 @@ export default {
     }
     const ts = Date.parse(pickDatePosted(nodes) || '');
     if (!Number.isNaN(ts)) job.postedAt = ts;
+    if (!String(job.location || '').trim() || /^n\/?a$/i.test(String(job.location).trim())) {
+      const loc = pickLocation(nodes);
+      if (loc) job.location = loc;
+    }
   },
 };
+
+// ISO country codes are what iCIMS emits, but location_filter matches on the
+// words a human wrote in portals.yml ("Canada", "United States"), so a bare
+// "US" would sail past a block list that spells the country out.
+const COUNTRY_NAMES = { US: 'United States', CA: 'Canada' };
+
+// From flattened JSON-LD nodes, build "Locality, Region, Country" out of the
+// first JobPosting's first jobLocation address. Partial addresses are kept:
+// the country alone is already enough for location_filter to decide.
+function pickLocation(nodes) {
+  for (const node of nodes) {
+    if (!node || typeof node !== 'object' || !node.jobLocation) continue;
+    const place = Array.isArray(node.jobLocation) ? node.jobLocation[0] : node.jobLocation;
+    const addr = place?.address;
+    if (!addr || typeof addr !== 'object') continue;
+    const clean = v => {
+      const s = String(v ?? '').trim();
+      // iCIMS writes the literal string UNAVAILABLE into fields it has no value
+      // for, so an unchecked join yields "UNAVAILABLE, MD, United States".
+      return !s || /^unavailable$/i.test(s) ? '' : s;
+    };
+    const country = clean(addr.addressCountry);
+    const parts = [
+      clean(addr.addressLocality),
+      clean(addr.addressRegion),
+      COUNTRY_NAMES[country.toUpperCase()] || country,
+    ].filter(Boolean);
+    if (parts.length) return parts.join(', ');
+  }
+  return null;
+}
 
 // From flattened JSON-LD nodes, return the datePosted of the first JobPosting
 // node; if none carries a @type, fall back to the first node that has a
