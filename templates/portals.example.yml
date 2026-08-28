@@ -922,13 +922,13 @@ search_queries:
 
 # ── Built-in provider examples ────────────────────────────────────
 # One commented stanza per provider in providers/. Uncomment one and adjust.
-# Auto-detected providers only need careers_url; the rest need provider: plus
-# any fields shown.
+# A provider whose host is auto-detected (company ATS or job board) only needs
+# careers_url; the rest need provider: plus any fields shown.
 #
 # Grouped by which list the stanza belongs in: the "Company ATS" group goes
 # under tracked_companies: (one entry = one employer); the "Job boards /
 # aggregators" and "Remote-job feeds" groups go under job_boards: (one entry =
-# many employers, in a single API call).
+# many employers).
 #
 # -- Company ATS  (→ tracked_companies:; careers_url is enough unless noted) --
 #
@@ -1123,7 +1123,7 @@ search_queries:
 #   provider: beesite
 #   enabled: true
 #
-# -- Job boards / aggregators  (→ job_boards:; set provider: explicitly) --
+# -- Job boards / aggregators  (→ job_boards:; set provider: explicitly unless the host auto-detects) --
 #
 # - name: Amazon / AWS                    # global amazon.jobs board
 #   provider: amazon
