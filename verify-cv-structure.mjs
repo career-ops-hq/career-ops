@@ -201,12 +201,24 @@ export function verifyStructure(payload, cvMdText) {
   if (cvMdExperience.length === 0) {
     return { verdict: 'unverified', orderViolations: [], descriptorViolations: [] };
   }
+  // The CLI validates payload shape before ever calling verifyStructure(),
+  // but this is an exported function any other caller can reach directly —
+  // so it must be safe against malformed input on its own, not just when
+  // reached through the CLI's pre-validated path.
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { verdict: 'unverified', orderViolations: [], descriptorViolations: [] };
+  }
   // A present, non-array `experience` (null, an object, a string, ...) is a
   // malformed payload, not "no experience" — silently coercing it to []
   // would let checkExperienceOrder/checkLocationDescriptors find nothing to
-  // compare and report a false 'pass'. The CLI already rejects this before
-  // ever calling verifyStructure(); this guard protects any other caller.
+  // compare and report a false 'pass'.
   if (payload.experience !== undefined && !Array.isArray(payload.experience)) {
+    return { verdict: 'unverified', orderViolations: [], descriptorViolations: [] };
+  }
+  // A null (or otherwise non-object) entry inside an array experience would
+  // otherwise reach checkExperienceOrder/checkLocationDescriptors' `e.company`
+  // access uncaught.
+  if (Array.isArray(payload.experience) && payload.experience.some((e) => e === null || typeof e !== 'object' || Array.isArray(e))) {
     return { verdict: 'unverified', orderViolations: [], descriptorViolations: [] };
   }
   const payloadExperience = Array.isArray(payload.experience) ? payload.experience : [];
@@ -423,6 +435,15 @@ function runSelfTest() {
   const nonArrayExperienceResult = verifyStructure({ experience: 'not an array' }, cvMd);
   equal('verifyStructure never reports pass for a non-array experience value',
     nonArrayExperienceResult.verdict === 'pass', false);
+
+  // verifyStructure() is exported and reachable by any caller, not only the
+  // CLI's pre-validated path — it must not throw on malformed input either.
+  equal('verifyStructure(null, cvMd) reports unverified instead of throwing',
+    verifyStructure(null, cvMd),
+    { verdict: 'unverified', orderViolations: [], descriptorViolations: [] });
+  equal('verifyStructure with a null experience entry reports unverified instead of throwing',
+    verifyStructure({ experience: [null, ...correctOrder] }, cvMd),
+    { verdict: 'unverified', orderViolations: [], descriptorViolations: [] });
 
   console.log(`verify-cv-structure self-test: ${passed} passed, ${failed} failed`);
   return failed ? 1 : 0;
