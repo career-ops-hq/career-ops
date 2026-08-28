@@ -1241,7 +1241,7 @@ search_queries:
 #   careers_url: https://solid.jobs/public-api/offers/engineering
 #   enabled: true
 #
-# -- Remote-job feeds  (→ job_boards:; set provider:, no extra fields) --
+# -- Remote-job feeds  (→ job_boards:; set provider: plus any provider-specific fields) --
 # title_filter / location_filter defined above still apply.
 #
 # - name: Himalayas
