@@ -685,7 +685,7 @@ async function cmdEvaluate(input, ctx) {
 
   try {
     // Save report
-    const today   = new Date().toISOString().split('T')[0];
+    const today   = localToday();
     const num     = reservedNumbers[0];
     const slug    = extractCompanySlug(jdText, typeof input === 'string' ? input : null);
     const numStr  = formatReportNumber(num);
