@@ -12,6 +12,6 @@ test("worker jobs begin at Starting and transition to Error on stream errors", (
 });
 
 test("run route forwards spawn errors and closes the stream", () => {
-  assert.match(route, /child\.on\("error", \(e\) => \{ send\(\{ type: "error", msg: e\.message \}\); close\(\); \}\)/);
-  assert.match(route, /Codex CLI could not be launched on Windows/);
+  assert.match(route, /child\.on\("error",[\s\S]{0,260}send\(\{ type: "error", msg: e\.message \}\); close\(\); \}\)/);
+  assert.match(route, /spawnErrorCode = e\.code/);
 });

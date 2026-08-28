@@ -76,6 +76,23 @@ test("spawnHeadlessCli tolerates a caller that passes stdio itself", async () =>
   assert.equal(stdout, "OK");
 });
 
+test("explicit stdin prompt mode writes the large prompt exactly once and closes stdin", async () => {
+  const prompt = "MASTER CV SOURCE\n" + "x".repeat(12_000);
+  let received = "";
+  const script = 'process.stdin.setEncoding("utf8");process.stdin.on("data",d=>process.stdout.write(d));';
+  const child = spawnHeadlessCli(process.execPath, ["-e", script, "-"], { cwd: process.cwd(), env: process.env }, { stdinMode: "pipe", stdinInput: prompt });
+  child.stdout.on("data", (chunk) => { received += chunk; });
+  const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
+  assert.equal(code, 0); assert.equal(received, prompt); assert.equal(received.length, prompt.length);
+});
+
+test("Windows Codex E2BIG receives a specific command-size error", async () => {
+  const fakeSpawn = () => { const child = new EventEmitter(); child.stdin = new PassThrough(); child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.kill = () => true; queueMicrotask(() => { const error = new Error("spawn E2BIG"); error.code = "E2BIG"; child.emit("error", error); }); return child; };
+  const child = spawnHeadlessCli("C:\\npm\\codex.cmd", ["exec", "-"], { env: { ComSpec: "C:\\Windows\\cmd.exe" } }, { platform: "win32", spawnFn: fakeSpawn, stdinMode: "pipe", stdinInput: "large prompt" });
+  const error = await new Promise((resolve) => child.once("error", resolve));
+  assert.match(error.message, /command was too large for the Windows launcher/);
+});
+
 test("Windows Codex spawn failure surfaces a clear launcher error", async () => {
   const fakeSpawn = () => {
     const child = new EventEmitter();
@@ -98,5 +115,18 @@ test("a real Windows cmd shim streams output and preserves its exit code", { ski
     const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
     assert.equal(output, "alpha|beta");
     assert.equal(code, 7);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a Windows codex.cmd shim receives a large role prompt through stdin", { skip: process.platform !== "win32" }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "co-codex-stdin-"));
+  const shim = path.join(dir, "codex.cmd");
+  const prompt = "MASTER CV SOURCE\n" + "x".repeat(12_000);
+  fs.writeFileSync(shim, `@echo off\r\n"${process.execPath}" -e "process.stdin.pipe(process.stdout)" %*\r\n`);
+  try {
+    const child = spawnHeadlessCli(shim, ["exec", "-"], { cwd: dir, env: process.env }, { stdinMode: "pipe", stdinInput: prompt });
+    let output = ""; child.stdout.on("data", (chunk) => { output += chunk; });
+    const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
+    assert.equal(code, 0); assert.equal(output, prompt);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

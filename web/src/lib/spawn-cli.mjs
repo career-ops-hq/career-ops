@@ -27,7 +27,7 @@ import { CODEX_WINDOWS_LAUNCH_ERROR, prepareCliSpawn } from "./cli-launcher.mjs"
  * @param {string} binPath
  * @param {string[]} args
  * @param {import("node:child_process").SpawnOptionsWithoutStdio} options
- * @param {{platform?: NodeJS.Platform, env?: NodeJS.ProcessEnv, findExecutable?: (name: string) => string|null, spawnFn?: typeof spawn}} [runtime]
+ * @param {{platform?: NodeJS.Platform, env?: NodeJS.ProcessEnv, findExecutable?: (name: string) => string|null, spawnFn?: typeof spawn, stdinMode?: "ignore"|"pipe", stdinInput?: string}} [runtime]
  * @returns {import("node:child_process").ChildProcessWithoutNullStreams}
  */
 export function spawnHeadlessCli(binPath, args, options, runtime = {}) {
@@ -36,8 +36,13 @@ export function spawnHeadlessCli(binPath, args, options, runtime = {}) {
   const spawnFn = runtime.spawnFn || spawn;
   const child = /** @type {import("node:child_process").ChildProcessWithoutNullStreams} */ (spawnFn(prepared.command, prepared.args, { ...options, ...prepared.options }));
   if (platform === "win32" && path.basename(binPath).toLowerCase().startsWith("codex")) {
-    child.prependOnceListener("error", (error) => { error.message = CODEX_WINDOWS_LAUNCH_ERROR; });
+    child.prependOnceListener("error", (error) => {
+      if (error.code === "E2BIG") error.message = "Codex could not start because the command was too large for the Windows launcher.";
+      else if (error.code === "ENOENT") error.message = CODEX_WINDOWS_LAUNCH_ERROR;
+      else error.message = `Codex CLI failed to start on Windows: ${error.message}`;
+    });
   }
-  child.stdin?.end();
+  if (runtime.stdinMode === "pipe") child.stdin?.end(runtime.stdinInput ?? "");
+  else child.stdin?.end();
   return child;
 }

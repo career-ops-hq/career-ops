@@ -146,7 +146,8 @@ export async function POST(req: Request) {
   const codexFinalDir = cliId === "codex" && capturesCv ? fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-codex-final-")) : undefined;
   const codexFinalFile = codexFinalDir ? path.join(codexFinalDir, "final-response.txt") : undefined;
   const roleOutputSchema = nativeRoleSchema ? path.join(careerOpsRoot(), "web", "src", "lib", "role-resume.schema.json") : undefined;
-  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt, kind, { outputLastMessage: codexFinalFile, outputSchema: roleOutputSchema });
+  const promptViaStdin = cliId === "codex" && kind === "role-resume";
+  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt, kind, { outputLastMessage: codexFinalFile, outputSchema: roleOutputSchema, promptViaStdin });
 
   // For write-needing kinds, snapshot reports/ so we can verify the worker
   // actually persisted (non-Claude CLIs lack Write auth and silently no-op).
@@ -175,7 +176,7 @@ export async function POST(req: Request) {
   // every CLI-invoking route (assistant, explore/ai, cv/ingest, the apply planners),
   // which had the identical bug, and puts it behind one tested helper so it cannot
   // drift back in on any single call site.
-  const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env }, promptViaStdin ? { stdinMode: "pipe", stdinInput: prompt } : {});
   // Decode once on the stream, not per chunk. Buffer#toString() decodes each chunk
   // independently, so a chunk boundary falling inside a multi-byte UTF-8 sequence
   // yields a replacement character and mis-decodes the bytes after it. Those bytes
@@ -228,6 +229,9 @@ export async function POST(req: Request) {
       let stdoutChunks = 0;
       let parsedEvents = 0;
       let textEvents = 0;
+      let stderrBytes = 0;
+      let spawnErrorCode = "";
+      let spawnErrorMessage = "";
       // pdf-mode's agent only tailors content now (rendering moved to the
       // backend, #2172) — but its killMs still has to leave real headroom
       // inside the route's overall maxDuration (800s): the render+mark phase
@@ -373,6 +377,7 @@ export async function POST(req: Request) {
         }
       });
       child.stderr.on("data", (chunk: string) => {
+        stderrBytes += Buffer.byteLength(chunk);
         // Match on COMPLETE lines. A chunk boundary can fall mid-word, so testing a
         // raw chunk both misses an error split across two of them and can match a
         // fragment that is not the word it looks like. sawError feeds pdfRunOutcome,
@@ -428,7 +433,7 @@ export async function POST(req: Request) {
         }
       };
 
-      child.on("error", (e) => { send({ type: "error", msg: e.message }); close(); });
+      child.on("error", (e: NodeJS.ErrnoException) => { spawnErrorCode = e.code || "UNKNOWN"; spawnErrorMessage = e.message; send({ type: "error", msg: e.message }); close(); });
       child.on("close", async (code) => {
         // A trailing line with no newline would otherwise never be tested.
         if (stderrBuf) { flagStderrLine(stderrBuf); stderrBuf = ""; }
@@ -466,7 +471,7 @@ export async function POST(req: Request) {
         // all is the same failure mode whether it was evaluating or tailoring
         // a PDF — one place for the condition/message pair instead of two.
         const noOutputError = (): string | null => {
-          if (!emittedText && !sawError && !cleanExit) return "The CLI exited with an error — is it installed and authenticated?";
+          if (!emittedText && !sawError && !cleanExit) return cliId === "codex" ? `Codex exited before producing output (exit code ${code ?? "unknown"}).` : `The CLI exited before producing output (exit code ${code ?? "unknown"}).`;
           if (!emittedText && !sawError) return "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)";
           return null;
         };
@@ -500,11 +505,18 @@ export async function POST(req: Request) {
               launcher: path.extname(binPath).toLowerCase() || "direct",
               kind,
               promptLength: prompt.length,
+              promptBytes: Buffer.byteLength(prompt, "utf8"),
+              argvCharacters: args.reduce((total, value) => total + String(value).length + 1, 0),
+              promptViaStdin,
+              launcherExtension: path.extname(binPath).toLowerCase() || "direct",
               sourceCvLoaded: kind === "role-resume" ? !!roleSource : undefined,
               sourceCvBytes: kind === "role-resume" ? roleSource?.bytes || 0 : undefined,
               workingDirectory: kind === "role-resume" ? path.basename(careerOpsRoot()) : undefined,
               promptSignals: { targetRole: /Target Role:/.test(prompt), positioning: /Approved positioning:/.test(prompt), supportedFocusAreas: /CV-supported focus areas:/.test(prompt), envelopeInstruction: prompt.includes(kind === "role-resume" ? "<<role-resume-json>>" : "<<cv-html") },
               exitCode: code,
+              spawnErrorCode,
+              spawnErrorMessage: spawnErrorMessage ? spawnErrorMessage.slice(0, 200) : "",
+              stderrBytes,
               outputSignals: {
                 jsonlOpenMark: jsonlRaw.includes("<<cv-html"),
                 jsonlBytes: Buffer.byteLength(jsonlRaw, "utf8"),

@@ -15,3 +15,4 @@ test("both approved structured updates and manual CV saves advance profile state
 test("resume generation still uses existing fact-gated workers", () => { assert.match(review, /kind: "role-resume" \| "pdf"/); assert.match(runRoute, /validateRoleResumeHtml/); assert.match(runRoute, /renderAndMarkPdf/); });
 test("Ready-to-Apply and cover workflows are not called by update review", () => { assert.doesNotMatch(review, /ready-to-apply|documents\/copy|cover-letter/); });
 test("Review Resumes regeneration uses the same role-resume source-loading path", () => { assert.match(review, /kind: "role-resume" \| "pdf"/); assert.match(runRoute, /loadRoleResumeSource\(careerOpsRoot\(\)\)/); assert.match(runRoute, /roleSourceCv: roleSource\?\.cv/); });
+test("Review Resume Updates reaches the corrected Codex stdin transport", () => { assert.match(review, /startJob\(/); assert.match(runRoute, /promptViaStdin/); assert.match(runRoute, /stdinMode: "pipe"/); });
