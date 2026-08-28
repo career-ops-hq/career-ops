@@ -152,9 +152,10 @@ test("spawnBuildCvHtml times out and terminates a hung child", async () => {
     if (signal === "SIGTERM") sawTerm();
     return true;
   };
+  const timeoutMs = 50;
   const resultPromise = spawnBuildCvHtml({
     spawnFn: () => child,
-    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs: 5,
+    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs,
   });
   await termSent;
   let resolved = false;
@@ -164,7 +165,7 @@ test("spawnBuildCvHtml times out and terminates a hung child", async () => {
   child.emit("close", null);
   const result = await resultPromise;
   assert.equal(result.ok, false);
-  assert.match(result.stderr, /timed out after 5ms/);
+  assert.match(result.stderr, new RegExp(`timed out after ${timeoutMs}ms`));
   assert.deepEqual(signals, ["SIGTERM"]);
 });
 
@@ -178,12 +179,13 @@ test("spawnBuildCvHtml escalates a timed-out child that ignores SIGTERM", async 
     if (signal === "SIGKILL") queueMicrotask(() => child.emit("close", null));
     return true;
   };
+  const timeoutMs = 50;
   const result = await spawnBuildCvHtml({
     spawnFn: () => child,
-    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs: 5,
+    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs,
   });
   assert.equal(result.ok, false);
-  assert.match(result.stderr, /timed out after 5ms/);
+  assert.match(result.stderr, new RegExp(`timed out after ${timeoutMs}ms`));
   assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
 });
 
@@ -204,9 +206,10 @@ test("spawnBuildCvHtml does not treat a signal-delivery error as child exit", as
     }
     return signal === "SIGKILL";
   };
+  const timeoutMs = 50;
   const resultPromise = spawnBuildCvHtml({
     spawnFn: () => child,
-    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs: 5,
+    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs,
   });
   await termSent;
   await Promise.resolve();
@@ -216,7 +219,7 @@ test("spawnBuildCvHtml does not treat a signal-delivery error as child exit", as
   assert.equal(resolved, false, "signal error does not release scratch cleanup");
   const result = await resultPromise;
   assert.equal(result.ok, false);
-  assert.match(result.stderr, /timed out after 5ms/);
+  assert.match(result.stderr, new RegExp(`timed out after ${timeoutMs}ms`));
   assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
 });
 
