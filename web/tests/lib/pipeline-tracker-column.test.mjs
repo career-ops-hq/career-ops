@@ -18,6 +18,11 @@ test("Tracker is the first sortable Pipeline column", () => {
   assert.match(source, /const SORT_KEYS = \["tracker", "company", "role", "score", "status", "date"\]/);
 });
 
+test("sortable Pipeline headers use native keyboard-operable buttons", () => {
+  assert.match(source, /<th[\s\S]*?aria-sort=[\s\S]*?<button\s+type="button"[\s\S]*?onClick=/);
+  assert.doesNotMatch(source, /<th(?:(?!>).)*onClick/s);
+});
+
 test("the visible tracker identifier uses the canonical tracker route", () => {
   assert.match(source, /<Link href=\{`\/pipeline\/\$\{r\.n\}`\}[^>]*>\s*#\{r\.n\}\s*<\/Link>/);
 });

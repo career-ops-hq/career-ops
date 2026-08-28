@@ -210,15 +210,18 @@ export function PipelineView({
                     key={k}
                     aria-sort={sort.key === k ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
                     className={cn(
-                      "cursor-pointer select-none whitespace-nowrap px-4 py-2.5 font-medium hover:text-foreground",
+                      "whitespace-nowrap px-4 py-2.5 font-medium",
                       k === "date" && "hidden lg:table-cell",
                     )}
-                    onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
                   >
-                    <span className="inline-flex items-center gap-1">
+                    <button
+                      type="button"
+                      className="inline-flex cursor-pointer select-none items-center gap-1 uppercase tracking-wide hover:text-foreground"
+                      onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
+                    >
                       {k}
-                      <ChevronsUpDown className="size-3" />
-                    </span>
+                      <ChevronsUpDown aria-hidden="true" className="size-3" />
+                    </button>
                   </th>
                 ))}
               </tr>
