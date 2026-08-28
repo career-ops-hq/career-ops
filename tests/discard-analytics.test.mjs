@@ -52,14 +52,28 @@ try {
   check('reasons are counted and sorted descending', agg.byReason[0][1] === 2);
   check('domains are extracted from URLs', agg.byDomain.some(([d]) => d === 'boards.greenhouse.io'));
   check('days are bucketed and sorted ascending', agg.byDay[0][0] === '2026-08-25' && agg.byDay[1][0] === '2026-08-26');
-  check('title_mismatch URLs are collected (URLs only)', agg.titleMismatch.length === 3);
+  check('title_mismatch URLs are aggregated (URLs only)', agg.titleMismatch.length === 3);
 
   // ── "dumb" list: URLs only, no keyword inference ──
   const summary = renderSummary(agg, 10, '2026-08-25', '2026-08-26');
   check('summary includes total', summary.includes('Total discards: 5'));
   check('summary lists title_mismatch URLs', summary.includes('Top title_mismatch URLs'));
-  check('summary lists raw URLs, not a suggested keyword', summary.includes('https://example.com/job1'));
+  check('summary lists raw URLs, not a suggested keyword', summary.split('\n').some((line) => line.trim() === '1. https://example.com/job1'));
   check('summary does not infer a keyword', !/add keyword/i.test(summary));
+
+  const repeated = aggregateDiscards(parseDiscardLog([
+    '2026-08-25T10:00:00Z\thttps://example.com/job1\ttitle_mismatch: a',
+    '2026-08-25T11:00:00Z\thttps://example.com/job2\ttitle_mismatch: b',
+    '2026-08-25T12:00:00Z\thttps://example.com/job1\ttitle_mismatch: c',
+  ].join('\n')));
+  check('title_mismatch URLs are ranked by frequency', repeated.titleMismatch[0][0] === 'https://example.com/job1' && repeated.titleMismatch[0][1] === 2);
+
+  const nonMonotonic = aggregateDiscards(parseDiscardLog([
+    '2026-08-27T10:00:00Z\thttps://example.com/job3\tnot_tech: c',
+    '2026-08-25T10:00:00Z\thttps://example.com/job1\ttitle_mismatch: a',
+    '2026-08-26T10:00:00Z\thttps://example.com/job2\tlocation_mismatch: b',
+  ].join('\n')));
+  check('summary period can use chronological bounds', renderSummary(nonMonotonic, 10, nonMonotonic.byDay[0][0], nonMonotonic.byDay[nonMonotonic.byDay.length - 1][0]).includes('Period: 2026-08-25 to 2026-08-27'));
 
   // ── filters (mirror the CLI's --since / --reason behaviour) ──
   const filteredDate = entries.filter((e) => e.timestamp >= '2026-08-26');

@@ -19,7 +19,7 @@
  * the batch variant (same shape, one extra id field per row).
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, statSync } from 'fs';
 import { join } from 'path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -60,14 +60,14 @@ export function parseDiscardLog(text) {
  *   byReason: Array<[string, number]>,
  *   byDomain: Array<[string, number]>,
  *   byDay: Array<[string, number]>,
- *   titleMismatch: string[]
+ *   titleMismatch: Array<[string, number]>
  * }}
  */
 export function aggregateDiscards(entries) {
   const reasonCounts = {};
   const domainCounts = {};
   const dayCounts = {};
-  const titleMismatch = [];
+  const titleMismatchCounts = {};
 
   for (const e of entries) {
     reasonCounts[e.reason] = (reasonCounts[e.reason] || 0) + 1;
@@ -77,12 +77,15 @@ export function aggregateDiscards(entries) {
     } catch { /* malformed URL */ }
     const day = e.timestamp.slice(0, 10);
     dayCounts[day] = (dayCounts[day] || 0) + 1;
-    if (e.reason.includes('title_mismatch')) titleMismatch.push(e.url);
+    if (e.reason.includes('title_mismatch')) {
+      titleMismatchCounts[e.url] = (titleMismatchCounts[e.url] || 0) + 1;
+    }
   }
 
   const byReason = Object.entries(reasonCounts).sort((a, b) => b[1] - a[1]);
   const byDomain = Object.entries(domainCounts).sort((a, b) => b[1] - a[1]);
   const byDay = Object.entries(dayCounts).sort((a, b) => a[0].localeCompare(b[0]));
+  const titleMismatch = Object.entries(titleMismatchCounts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 
   return { total: entries.length, byReason, byDomain, byDay, titleMismatch };
 }
@@ -125,8 +128,8 @@ export function renderSummary(agg, topN, firstDate, lastDate) {
 
   if (agg.titleMismatch.length > 0) {
     lines.push(`Top title_mismatch URLs (review for keyword tuning):`);
-    for (const url of agg.titleMismatch.slice(0, topN)) {
-      lines.push(`  1. ${url}`);
+    for (const [url, count] of agg.titleMismatch.slice(0, topN)) {
+      lines.push(`  ${count}. ${url}`);
     }
     lines.push('');
   }
@@ -154,12 +157,19 @@ if (isMainModule(import.meta.url)) {
   }
 
   const filterReason = argValue('--reason');
-  const topN = parseInt(argValue('--top') || '10', 10);
+  const parsedTopN = Number(argValue('--top') || '10');
+  const topN = Number.isInteger(parsedTopN) && parsedTopN > 0 ? parsedTopN : 10;
   const sinceDate = argValue('--since');
   const customLog = argValue('--log');
 
   const logFile = customLog || join(getCareerOpsRoot(), 'data/discard.log');
-  if (!existsSync(logFile)) {
+  let logStat = null;
+  try {
+    logStat = existsSync(logFile) ? statSync(logFile) : null;
+  } catch {
+    logStat = null;
+  }
+  if (!logStat?.isFile()) {
     console.log(`No discard log found at ${logFile}`);
     process.exit(0);
   }
@@ -174,8 +184,8 @@ if (isMainModule(import.meta.url)) {
   }
 
   const agg = aggregateDiscards(entries);
-  const firstDate = entries[0].timestamp.slice(0, 10);
-  const lastDate = entries[entries.length - 1].timestamp.slice(0, 10);
+  const firstDate = agg.byDay[0][0];
+  const lastDate = agg.byDay[agg.byDay.length - 1][0];
 
   console.log(renderSummary(agg, topN, firstDate, lastDate));
 }
