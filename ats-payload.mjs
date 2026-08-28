@@ -227,6 +227,22 @@ export function validatePayloadShape(payload) {
         errors.push(`the existing \`${category}\` skills category has ${lost.length} member(s) in \`items\` `
           + `with no scalar value: ${describe(lost)}. Merging the competencies into it would drop them.`);
       }
+    } else if (target && present(target.items) && typeof target.items !== 'string') {
+      // A merge target whose `items` is neither a string nor an array: the merge
+      // reads it through toItemList(), gets `[]`, and REPLACES it with the folded
+      // competencies — the supplied value silently overwritten.
+      //
+      // Note the asymmetry with the competency members above, which is real and
+      // not an inconsistency. A member is coerced by `String()` on both sides
+      // (here and in `buildCompetencies()`'s `escapeHtml(String(tag))`), so a
+      // number carries its value through. An `items` CONTAINER is not: the
+      // builder's `joinItems()` returns `''` for anything that is neither string
+      // nor array, so a numeric `items` has no value-preserving path in either
+      // tool. With no way to carry it and no honest way to invent one, refusing
+      // is the only non-destructive answer.
+      errors.push(`the existing \`${category}\` skills category has \`items\` of type `
+        + `${shapeOf(target.items)}; a string or array is expected. Merging the competencies `
+        + 'into it would overwrite that value.');
     }
   }
 
@@ -619,6 +635,29 @@ function runSelfTest() {
     validatePayloadShape({
       skills: [{ category: 'Core Competencies', items: ['X', { y: 1 }] }],
     }), []);
+
+  // Merge target whose `items` is a scalar (PR #3422, third pass). toItemList()
+  // returns [] for it and the merge REPLACES the value — silently overwritten.
+  const scalarItems = (items) => ({ competencies: ['A'], skills: [{ category: 'Core Competencies', items }] });
+  eq('a numeric items on the merge target is refused', validatePayloadShape(scalarItems(2024)).length, 1);
+  eq('a boolean items on the merge target is refused', validatePayloadShape(scalarItems(true)).length, 1);
+  eq('an object items on the merge target is refused', validatePayloadShape(scalarItems({ a: 1 })).length, 1);
+  eq('the error names the offending type',
+    /items` of type number/.test(validatePayloadShape(scalarItems(2024))[0]), true);
+  eq('and that value really was being overwritten before the guard',
+    foldCompetencies(scalarItems(2024)).payload.skills[0].items, 'A');
+
+  // The container forms the merge can actually carry, and the absent case.
+  eq('a string items on the merge target is accepted', validatePayloadShape(scalarItems('X')), []);
+  eq('and it merges rather than being replaced',
+    foldCompetencies(scalarItems('X')).payload.skills[0].items, 'X, A');
+  eq('an array items on the merge target is accepted', validatePayloadShape(scalarItems(['X'])), []);
+  eq('an absent items on the merge target is accepted',
+    validatePayloadShape({ competencies: ['A'], skills: [{ category: 'Core Competencies' }] }), []);
+
+  // Same rule as before: only the category the fold touches is policed.
+  eq('a scalar items on an untouched category is not policed',
+    validatePayloadShape({ competencies: ['A'], skills: [{ category: 'Languages', items: 2024 }] }), []);
 
   // ── The lints ──
   const codes = (p) => lintPayload(p).map((f) => f.code);

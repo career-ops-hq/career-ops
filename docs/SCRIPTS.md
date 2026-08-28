@@ -1029,14 +1029,19 @@ nothing reaches stdout, so a shell redirect cannot capture a half-right artifact
   array holding a member with no scalar value (an object, array or `null`) — that
   member would be dropped rather than folded, thinning the section silently.
 - the existing category the fold would merge into holding such a member in its
-  `items`, for the same reason. Checked only when a fold will actually happen, so
-  a payload that would pass through untouched is never rejected for it.
+  `items`, or an `items` that is neither a string nor an array — the merge reads
+  it, gets nothing, and overwrites the supplied value. Both are checked only when
+  a fold will actually happen, and only for the one category it would touch, so a
+  payload that would pass through untouched is never rejected for it.
 
 The line is drawn at what is *lost*, not at what is not a string: a numeric or
 boolean member is coerced by `String()` and keeps its value, which is what
 `build-cv-html.mjs` does with it too (numeric years and dates must render, not
 vanish — `tests/cv-numeric-scalars.test.mjs`). Rejecting those would make this
-script stricter than the builder it feeds.
+script stricter than the builder it feeds. An `items` *container* is the other
+way round and is refused: the builder's `joinItems()` returns `''` for anything
+that is neither a string nor an array, so a scalar there has no value-preserving
+path in either tool.
 
 Refusing rather than coercing is deliberate: there is no honest place to put a
 string `skills` value inside `skills[]`, and inventing the structure to hold it

@@ -298,6 +298,36 @@ test('a skills category the fold never touches is not policed for it', () => {
   assert.equal(r.status, 0, r.stderr);
 });
 
+test('a scalar items on the merge target is refused and reaches stdout not at all', () => {
+  // toItemList() returns [] for a non-string non-array, so the merge REPLACED
+  // `items: 2024` with the folded competencies — the supplied value silently
+  // overwritten in the artifact this script exists to produce safely.
+  for (const items of [2024, true, { a: 1 }]) {
+    const r = run(['-'], {
+      input: JSON.stringify({ competencies: ['A'], skills: [{ category: 'Core Competencies', items }] }),
+    });
+    assert.equal(r.status, 1, `items=${JSON.stringify(items)} exited ${r.status}, want 1`);
+    assert.equal(r.stdout, '', `items=${JSON.stringify(items)} let a payload reach stdout`);
+    assert.match(r.stderr, /a string or array is expected/);
+  }
+});
+
+test('a string items on the merge target merges instead of being replaced', () => {
+  const r = run(['-'], {
+    input: JSON.stringify({ competencies: ['A'], skills: [{ category: 'Core Competencies', items: 'X' }] }),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).skills[0].items, 'X, A');
+});
+
+test('a scalar items on a category the fold never touches is not policed', () => {
+  const r = run(['-'], {
+    input: JSON.stringify({ competencies: ['A'], skills: [{ category: 'Languages', items: 2024 }] }),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).skills[1].items, 2024, 'the untouched value must pass through unchanged');
+});
+
 test('a second positional argument is refused rather than ignored', () => {
   withFixture(DIRTY_PAYLOAD, (file) => {
     const r = run([file, 'extra.json']);
