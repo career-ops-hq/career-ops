@@ -302,6 +302,7 @@ func TestParseApplicationsUsesTrackerURLBeforeLegacyEnrichment(t *testing.T) {
 |---|------|---------|------|-------|--------|-----|--------|-------|-----|
 | 1 | 2026-08-28 | Acme | Triage Engineer | 4.0/5 | Evaluated | — | — | triage only | https://jobs.example.com/triage |
 | 2 | 2026-08-28 | Globex | Platform Engineer | 4.2/5 | Evaluated | — | [2](../reports/002-globex.md) | has report | https://jobs.example.com/tracker |
+| 3 | 2026-08-28 | Initech | Legacy Engineer | 3.9/5 | Evaluated | — | [3](../reports/003-initech.md) | legacy fallback | |
 `)
 
 	reportsDir := filepath.Join(tempDir, "reports")
@@ -315,16 +316,26 @@ func TestParseApplicationsUsesTrackerURLBeforeLegacyEnrichment(t *testing.T) {
 	); err != nil {
 		t.Fatalf("write report: %v", err)
 	}
+	if err := os.WriteFile(
+		filepath.Join(reportsDir, "003-initech.md"),
+		[]byte("**URL:** https://jobs.example.com/legacy\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write legacy report: %v", err)
+	}
 
 	apps := ParseApplications(tempDir)
-	if len(apps) != 2 {
-		t.Fatalf("expected 2 applications, got %d", len(apps))
+	if len(apps) != 3 {
+		t.Fatalf("expected 3 applications, got %d", len(apps))
 	}
 	if got := apps[0].JobURL; got != "https://jobs.example.com/triage" {
 		t.Errorf("triage-only JobURL = %q, want tracker URL", got)
 	}
 	if got := apps[1].JobURL; got != "https://jobs.example.com/tracker" {
 		t.Errorf("report-backed JobURL = %q, want tracker URL to take precedence", got)
+	}
+	if got := apps[2].JobURL; got != "https://jobs.example.com/legacy" {
+		t.Errorf("legacy JobURL = %q, want report URL fallback", got)
 	}
 }
 
