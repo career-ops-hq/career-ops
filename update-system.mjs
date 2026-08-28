@@ -776,35 +776,46 @@ function missingFromTargetManifest(targetPaths) {
   return missing;
 }
 
-// Must read UNTRIMMED output: gitIn() trims the whole buffer, and the
-// first `--porcelain` line of a worktree/index change begins with a space
-// (` M path`). Trimming rewrites it into `M path`, and the path parse below
-// then drops the first character — a mangled path that no longer matches the
-// real user file in the safety checks. gitRawIn keeps the leading space.
+// Parses the NUL-delimited output of `git status --porcelain -z`. `-z` is the
+// only form that round-trips every path byte-for-byte, which is what the
+// user-layer safety checks depend on — they compare the parsed `path` against
+// real files on disk, and a mangled path is a blind spot (#3048, and the
+// follow-up this replaces):
+//   - never quoted: the newline form C-quotes any path with a space, a quote,
+//     a control char, or (under git's default core.quotepath) a non-ASCII
+//     byte, e.g. ` M "data/my notes.md"` / ` M "data/caf\303\251.md"`. `-z`
+//     emits the raw path, so no dequoting is needed.
+//   - renames/copies as two fields, not one line: the newline form writes
+//     `R  old -> new` on a single line, so a naive slice yields the blob
+//     `old -> new` as the "path". `-z` writes the destination and origin as
+//     two separate NUL-delimited fields; both are surfaced as their own entry
+//     below so the safety check sees every path the move touched.
+//   - no CRLF: `-z` suppresses git's line-ending translation, so there is no
+//     trailing CR to strip on Windows.
 //
-// The parsing itself is extracted as parsePorcelainStatus so the CRLF case can
-// be unit-tested without a real repo: Windows git terminates the last
-// `--porcelain` line with CRLF (its native EOL), and without stripping the
-// trailing CR the sliced `path` would carry a phantom `\r` that matches
-// nothing (same bug class as #3048 — a safety check comparing a mangled path).
+// gitRawIn (not gitIn) because a `-z` field may legitimately begin or end with
+// a space, and trimming the buffer would rewrite it into a different path.
 export function parsePorcelainStatus(status) {
   if (!status) return [];
-  return status
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => {
-      // git never writes a CR inside a path, so a line-terminal '\r' is always
-      // the CRLF half of the line ending, never a path character.
-      const clean = line.endsWith('\r') ? line.slice(0, -1) : line;
-      return {
-        code: clean.slice(0, 2),
-        path: clean.slice(3),
-      };
-    });
+  const fields = status.split('\0');
+  const entries = [];
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i];
+    if (!field) continue;
+    const code = field.slice(0, 2);
+    entries.push({ code, path: field.slice(3) });
+    // R (rename) and C (copy) always sit in the first status column and are
+    // followed by one extra field — the origin path. Emit it too.
+    if (code[0] === 'R' || code[0] === 'C') {
+      const origin = fields[++i];
+      if (origin) entries.push({ code, path: origin });
+    }
+  }
+  return entries;
 }
 
 export function gitStatusEntries(root = ROOT) {
-  return parsePorcelainStatus(gitRawIn(root, 'status', '--porcelain'));
+  return parsePorcelainStatus(gitRawIn(root, 'status', '--porcelain', '-z'));
 }
 
 export function extractArrayFromSource(source, name) {

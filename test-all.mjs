@@ -17439,6 +17439,88 @@ try {
   fail(`formatRunFailure clipping check: ${e.message}`);
 }
 
+// ── FUNDING MANIFEST INTEGRITY (funding.json, fundingjson.org v1.1.0) ──
+// The manifest is CRAWLED by a directory that re-reads it on its own schedule,
+// so a break here degrades silently: the listing goes stale or drops, and the
+// first signal is an email that never arrives. SYSTEM_PATHS coverage only
+// guarantees the file SHIPS; nothing until now checked that it still parses or
+// that its required fields survived an edit.
+//
+// The dated-metric rule is the project's own, not the schema's: every count in
+// a description carries the date it was counted, because a bare "68,000 stars"
+// is stale the week after it's written and a funder reading it cannot tell.
+
+console.log('\n72. Funding manifest integrity (funding.json)');
+
+try {
+  const fundingRaw = readFile('funding.json');
+  let funding = null;
+  try {
+    funding = JSON.parse(fundingRaw);
+    pass('funding.json parses as JSON');
+  } catch (e) {
+    fail(`funding.json does not parse: ${e.message}`);
+  }
+
+  if (funding) {
+    if (funding.version === 'v1.1.0') {
+      pass('funding.json declares schema version v1.1.0');
+    } else {
+      fail(`funding.json version is ${JSON.stringify(funding.version)}, expected "v1.1.0"`);
+    }
+
+    const entity = funding.entity || {};
+    const entityMissing = ['type', 'role', 'name', 'email', 'webpageUrl']
+      .filter((k) => !entity[k]);
+    if (entityMissing.length === 0 && entity.webpageUrl?.url && entity.webpageUrl?.wellKnown) {
+      pass('funding.json entity carries every required field, webpageUrl + wellKnown included');
+    } else {
+      fail(`funding.json entity incomplete: missing ${entityMissing.join(', ') || 'webpageUrl.url/wellKnown'}`);
+    }
+
+    const projects = Array.isArray(funding.projects) ? funding.projects : [];
+    const badProject = projects.find((pr) => !pr.guid || !pr.name || !pr.description
+      || !pr.webpageUrl?.url || !pr.webpageUrl?.wellKnown || !pr.repositoryUrl?.url
+      || !Array.isArray(pr.licenses) || pr.licenses.length === 0);
+    if (projects.length > 0 && !badProject) {
+      pass(`funding.json lists ${projects.length} project(s), each with guid, urls, wellKnown and a license`);
+    } else {
+      fail(`funding.json projects invalid: ${projects.length === 0 ? 'none listed' : `${badProject.guid || '(no guid)'} incomplete`}`);
+    }
+
+    // A plan pointing at a channel guid that no longer exists is the shape an
+    // edit produces: the channel gets renamed, the plan keeps the old id, and
+    // the directory renders a funding option with nowhere to send money.
+    const channels = Array.isArray(funding.funding?.channels) ? funding.funding.channels : [];
+    const plans = Array.isArray(funding.funding?.plans) ? funding.funding.plans : [];
+    const channelIds = new Set(channels.map((c) => c.guid));
+    const orphanPlan = plans.find((pl) => (pl.channels || []).some((c) => !channelIds.has(c)));
+    if (channels.length > 0 && plans.length > 0 && !orphanPlan) {
+      pass(`funding.json has ${channels.length} channel(s) and ${plans.length} plan(s), every plan channel resolvable`);
+    } else if (!channels.length || !plans.length) {
+      fail('funding.json must declare at least one funding channel and one plan');
+    } else {
+      fail(`funding.json plan "${orphanPlan.guid}" references a channel guid that no channel declares`);
+    }
+
+    // Dated metrics: any description quoting a count must say when it was counted.
+    const METRIC_RE = /\d[\d,.]*\+?\s*(?:GitHub\s+)?(?:stars|forks|contributors|merged pull requests|pull requests|community members|installs)/i;
+    const COUNTED_RE = /counted\s+\d{1,2}\s+\w{3,}\s+\d{4}/i;
+    const descriptions = [
+      ['entity', entity.description || ''],
+      ...projects.map((pr) => [`project ${pr.guid}`, pr.description || '']),
+    ];
+    const undated = descriptions.filter(([, text]) => METRIC_RE.test(text) && !COUNTED_RE.test(text));
+    if (undated.length === 0) {
+      pass('every funding.json description that quotes a count also states when it was counted');
+    } else {
+      fail(`funding.json ${undated.map(([w]) => w).join(', ')}: quotes a metric with no "counted <date>"`);
+    }
+  }
+} catch (e) {
+  fail(`funding manifest integrity check: ${e.message}`);
+}
+
 await runDiscovered();
 
 finish();
