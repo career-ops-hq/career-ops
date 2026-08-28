@@ -98,11 +98,12 @@ matching `data/pdf-index.tsv` (`008` and `8` are the same report). Ignore blank
 and comment rows. The manifest writer keeps one current row per report; if a
 hand-edited manifest contains duplicates, use the last matching row.
 
-Resolve the row's workspace-relative `pdf` and `html` columns against the data
-root. Use the HTML companion, never the PDF, as the readable representation of
-the attached CV. It is usable only when the HTML path exists and is a file. Do
-not guess a similarly named file or silently use an artifact belonging to the
-same company but a different report.
+Resolve the row's workspace-relative `pdf` and `html` columns against the
+workspace root (the directory that contains `data/`), matching the base used by
+the manifest writer. Use the HTML companion, never the PDF, as the readable
+representation of the attached CV. It is usable only when the resolved HTML
+path exists and is a file. Do not guess a similarly named file or silently use
+an artifact belonging to the same company but a different report.
 
 The tailored HTML is an **alignment guide, not a new source of truth**. It may
 control which supported bullets are selected and how they are ordered or
@@ -172,7 +173,9 @@ From the report/JD and source-of-truth files, select 2-3 fit points. When the
 Tailored CV alignment source resolved a usable HTML companion, prefer the
 proof points and emphasis present in that artifact so the body describes the
 CV being attached. Otherwise, use `cv.md` as the selection source and say that
-the tailored artifact was unavailable before presenting the draft.
+HTML alignment was unavailable and `cv.md` was used before presenting the
+draft. A missing HTML alignment source does not by itself mean the tailored PDF
+is missing.
 
 - One role-to-profile match: stack, domain, workflow, product type, or delivery
   style.
@@ -204,9 +207,11 @@ Attachments to include:
 Rules:
 - If `application_email.include_attachment_checklist` is `false`, omit this
   checklist.
-- For a report-based invocation, use the PDF from the same manifest row whose
-  HTML companion guided Step 3. Do not select the prose source and attachment
-  from different rows.
+- For a report-based invocation, keep the PDF candidate from the selected
+  manifest row. When that row has a usable HTML companion, let it guide Step 3.
+  When it does not, use `cv.md` for Step 3 as described above, but still show
+  that row's PDF when the resolved PDF path exists. Do not select the prose
+  source and attachment from different rows.
 - Mention only files that exist or are indexed. Do not claim a cover letter
   exists unless it does.
 - Do not attach files or send anything.

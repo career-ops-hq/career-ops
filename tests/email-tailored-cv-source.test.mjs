@@ -13,6 +13,9 @@ const guarantees = [
   ['does not cross role boundaries by company name', 'the same company but a different report'],
   ['keeps tailored output below primary factual sources', 'alignment guide, not a new source of truth'],
   ['falls back to the master CV when tailored HTML is unavailable', 'fall back explicitly to `cv.md`'],
+  ['resolves manifest artifacts from the workspace root', 'workspace root (the directory that contains `data/`)'],
+  ['distinguishes unavailable HTML alignment from a missing tailored PDF', 'does not by itself mean the tailored PDF is missing'],
+  ['retains an existing PDF when its HTML companion is unavailable', "still show that row's PDF when the resolved PDF path exists"],
   ['uses one manifest row for prose and attachment', 'Do not select the prose source and attachment from different rows'],
 ];
 
