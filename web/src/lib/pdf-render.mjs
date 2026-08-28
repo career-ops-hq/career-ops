@@ -7,7 +7,7 @@
  * or career-ops.ts directly, keeping this module free of TypeScript
  * dependencies and letting tests substitute a fake child process.
  *
- * Runs generate-pdf.mjs and mark-pdf-ready.mjs as plain Node child processes
+ * Runs build-cv-html.mjs, generate-pdf.mjs, and mark-pdf-ready.mjs as plain Node child processes
  * — no agent CLI or its sandbox involved — so a browser launch never depends
  * on an interactive sandbox-escalation approval nobody is present to grant in
  * a headless/web-triggered run. The tracker is marked ✅ only after a
@@ -16,6 +16,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
+import { pdfScratchPrefix } from "./pdf-paths.mjs";
+
+export const DEFAULT_PDF_CHILD_TIMEOUT_MS = 120_000;
 
 /**
  * @typedef {Object} PdfRunSignals
@@ -108,22 +111,46 @@ export function writeCvPayload({ pdfPaths, payload, root }) {
 }
 
 /** Spawn build-cv-html.mjs, the sole HTML writer for both CLI and web paths. */
-export function spawnBuildCvHtml({ spawnFn, execPath, root, payload, html }) {
+export function spawnBuildCvHtml({ spawnFn, execPath, root, payload, html, template, timeoutMs }) {
   return spawnResult({
     spawnFn,
     execPath,
-    args: [path.join(root, "build-cv-html.mjs"), payload, html],
+    args: [path.join(root, "build-cv-html.mjs"), payload, html, ...(template ? [template] : [])],
     cwd: root,
     startError: "CV builder failed to start",
+    timeoutMs,
   });
 }
 
-function spawnResult({ spawnFn, execPath, args, cwd, startError }) {
+/** Resolve the profile-selected template through the repository's canonical resolver. */
+export function resolveConfiguredCvTemplate({ spawnFn, execPath, root, timeoutMs }) {
+  return spawnResult({
+    spawnFn,
+    execPath,
+    args: [path.join(root, "cv-templates.mjs"), "resolve", "cv"],
+    cwd: root,
+    startError: "CV template resolver failed to start",
+    timeoutMs,
+  }).then(({ ok, stdout = "", stderr }) => {
+    const template = stdout.trim();
+    return {
+      ok: ok && Boolean(template),
+      template,
+      stderr: stderr || (!template
+        ? "CV template resolver returned no path."
+        : ok ? "" : "CV template resolution failed."),
+    };
+  });
+}
+
+function spawnResult({ spawnFn, execPath, args, cwd, startError, timeoutMs = DEFAULT_PDF_CHILD_TIMEOUT_MS }) {
   return new Promise((resolve) => {
     let settled = false;
+    let timeoutId;
     const finish = (result) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timeoutId);
       resolve(result);
     };
     let child;
@@ -139,6 +166,10 @@ function spawnResult({ spawnFn, execPath, args, cwd, startError }) {
     child.stderr?.on("data", (d) => { stderr += d.toString(); });
     child.on("close", (code) => finish({ ok: code === 0, stdout: stdout.trim(), stderr: stderr.trim() }));
     child.on("error", (e) => finish({ ok: false, stderr: `${startError}: ${e.message}` }));
+    timeoutId = setTimeout(() => {
+      finish({ ok: false, stderr: `${startError}: timed out after ${timeoutMs}ms` });
+      try { child.kill?.("SIGTERM"); } catch { /* already settled as a timeout */ }
+    }, timeoutMs);
   });
 }
 
@@ -147,7 +178,7 @@ function spawnResult({ spawnFn, execPath, args, cwd, startError }) {
  * @param {{spawnFn: Function, execPath: string, root: string, html: string, finalPdf: string, format: "letter"|"a4", reportNum: string}} args
  * @returns {Promise<{ok: boolean, stderr: string}>}
  */
-export function spawnGeneratePdf({ spawnFn, execPath, root, html, finalPdf, format, reportNum }) {
+export function spawnGeneratePdf({ spawnFn, execPath, root, html, finalPdf, format, reportNum, timeoutMs }) {
   return spawnResult({
     spawnFn,
     execPath,
@@ -158,6 +189,7 @@ export function spawnGeneratePdf({ spawnFn, execPath, root, html, finalPdf, form
     args: [path.join(root, "generate-pdf.mjs"), html, finalPdf, `--format=${format}`, `--report=${reportNum}`, "--allow-reorder"],
     cwd: root,
     startError: "PDF rendering failed to start",
+    timeoutMs,
   }).then(({ ok, stderr }) => ({ ok, stderr }));
 }
 
@@ -169,13 +201,14 @@ export function spawnGeneratePdf({ spawnFn, execPath, root, html, finalPdf, form
  * @param {{spawnFn: Function, execPath: string, root: string, reportNum: string}} args
  * @returns {Promise<{ok: boolean, data: object | null, stderr: string}>}
  */
-export function markTrackerReady({ spawnFn, execPath, root, reportNum }) {
+export function markTrackerReady({ spawnFn, execPath, root, reportNum, timeoutMs }) {
   return spawnResult({
     spawnFn,
     execPath,
     args: [path.join(root, "mark-pdf-ready.mjs"), reportNum, "--json"],
     cwd: root,
     startError: "mark-pdf-ready.mjs failed to start",
+    timeoutMs,
   }).then(({ ok, stdout = "", stderr }) => {
     let data = null;
     try { data = JSON.parse(stdout); } catch { /* not JSON, or exited before printing any */ }
@@ -240,12 +273,18 @@ export async function renderAndMarkPdf({ spawnFn, execPath, root, pdfPaths, payl
     const written = writeCvPayload({ pdfPaths, payload, root });
     if (!written.ok) return { kind: "build-failed", error: written.error };
 
+    const resolved = await resolveConfiguredCvTemplate({ spawnFn, execPath, root });
+    if (!resolved.ok) {
+      return { kind: "build-failed", error: `Could not resolve the configured CV template: ${resolved.stderr}` };
+    }
+
     const build = await spawnBuildCvHtml({
       spawnFn,
       execPath,
       root,
       payload: pdfPaths.payload,
       html: pdfPaths.html,
+      template: resolved.template,
     });
     if (!build.ok) {
       return { kind: "build-failed", error: build.stderr || "CV HTML build failed." };
@@ -256,7 +295,7 @@ export async function renderAndMarkPdf({ spawnFn, execPath, root, pdfPaths, payl
       return { kind: "render-failed", error: render.stderr || "PDF rendering failed." };
     }
   } finally {
-    cleanupPdfScratch(path.dirname(pdfPaths.html), `cv-web-${reportNum}.`);
+    cleanupPdfScratch(path.dirname(pdfPaths.html), pdfScratchPrefix(reportNum));
   }
 
   // The PDF is the real deliverable and it already rendered successfully — a

@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { slugify, resolvePdfPaths } from "../../src/lib/pdf-paths.mjs";
+import { slugify, pdfScratchPrefix, resolvePdfPaths } from "../../src/lib/pdf-paths.mjs";
 
 test("slugify: lowercases and hyphenates", () => {
   assert.equal(slugify("Jane Q. Smith"), "jane-q-smith");
@@ -17,6 +17,10 @@ test("slugify: lowercases and hyphenates", () => {
 
 test("slugify: trims leading/trailing hyphens", () => {
   assert.equal(slugify("  -Weird Name!- "), "weird-name");
+});
+
+test("pdfScratchPrefix is the canonical run-scoped cleanup prefix", () => {
+  assert.equal(pdfScratchPrefix("018"), "cv-web-018.");
 });
 
 // Given a career-ops root with a report on disk and a profile.yml naming the candidate

@@ -19,6 +19,11 @@ export function slugify(s) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
+/** Canonical prefix shared by scratch path creation and cleanup. */
+export function pdfScratchPrefix(input) {
+  return `cv-web-${input}.`;
+}
+
 /**
  * @typedef {Object} PdfPaths
  * @property {string} payload - Where the backend writes the parsed JSON payload.
@@ -27,7 +32,7 @@ export function slugify(s) {
  */
 
 /**
- * Precompute the scratch HTML and final PDF paths for a
+ * Precompute the scratch payload, HTML, and final PDF paths for a
  * "pdf" run, so the agent never chooses its own filenames — the backend owns
  * naming, writing (#2185) and rendering. Resolves the report (for the company slug)
  * and config/profile.yml (for the candidate slug) — same naming convention
@@ -37,7 +42,7 @@ export function slugify(s) {
  * the caller (a Next.js route today) decides how to surface `ok: false`.
  *
  * Side effect: creates `.career-ops-web/pdf-tmp/` under `root` if it doesn't
- * exist yet (the backend writes the parsed envelope there, #2185) — this is
+ * exist yet (the backend writes the parsed payload there, #2185) — this is
  * NOT a pure path computation, despite the name.
  *
  * @param {string} input - The report number (e.g. "018").
@@ -78,12 +83,13 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
     }
   }
   const scratchDir = path.join(root, ".career-ops-web", "pdf-tmp");
+  const scratchPrefix = pdfScratchPrefix(input);
   fs.mkdirSync(scratchDir, { recursive: true });
   return {
     ok: true,
     paths: {
-      payload: path.join(scratchDir, `cv-web-${input}.payload.json`),
-      html: path.join(scratchDir, `cv-web-${input}.html`),
+      payload: path.join(scratchDir, `${scratchPrefix}payload.json`),
+      html: path.join(scratchDir, `${scratchPrefix}html`),
       finalPdf: path.join(root, "output", `cv-${candidateSlug}-${companySlug}-${today}.pdf`),
     },
   };
