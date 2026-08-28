@@ -26,7 +26,9 @@ export function careerOpsRoot(): string {
  * as module imports and fails the production build otherwise.
  */
 export function rootScript(nameNoExt: string): string {
-  return path.join(careerOpsRoot(), `${nameNoExt}.mjs`);
+  // The core checkout is selected at runtime and must not be bundled into the
+  // web server output when Turbopack sees this dynamic script path.
+  return path.join(/* turbopackIgnore: true */ careerOpsRoot(), `${nameNoExt}.mjs`);
 }
 
 // Feature-detect the core's `tracker.mjs delete --num` row-delete (#1200) by probing
@@ -278,7 +280,11 @@ export function readReport(n: string): ReportData | null {
   const file = findReportFile(n);
   if (!file) return null;
   try {
-    return { content: fs.readFileSync(file, "utf8"), file: path.basename(file) };
+    // Reports live in the user's runtime checkout, outside the web build graph.
+    return {
+      content: fs.readFileSync(/* turbopackIgnore: true */ file, "utf8"),
+      file: path.basename(file),
+    };
   } catch {
     return null;
   }
