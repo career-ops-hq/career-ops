@@ -1185,8 +1185,17 @@ search_queries:
 # - name: Jobstreet — Indonesia          # SEEK aggregator
 #   provider: jobstreet
 #   searchKeywords: "Software Engineer"
-#   siteKey: ID-Main      # SEEK site key (ID-Main, SG-Main, MY-Main)
+#   siteKey: ID-Main      # SEEK site key (ID-Main, SG-Main, MY-Main, AU-Main, NZ-Main)
 #   searchLocation: ""    # optional location filter
+#   enabled: true
+#
+# - name: SEEK — Australia (Melbourne)   # same SEEK platform, AU host + site key
+#   provider: jobstreet
+#   api: https://www.seek.com.au/api/jobsearch/v5/search
+#   siteKey: AU-Main
+#   searchKeywords: "strategy consultant"
+#   searchLocation: "Melbourne VIC"
+#   appendWorkType: true  # optional: title becomes "Strategy Consultant [Part time]"
 #   enabled: true
 #
 # - name: IBM — Germany SWE              # IBM global careers
