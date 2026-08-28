@@ -20,10 +20,9 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
-
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+import { join } from 'path';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 /**
  * Parse a discard log's contents into entries.
@@ -142,7 +141,7 @@ export function renderSummary(agg, topN, firstDate, lastDate) {
 
 // ── CLI entry point ────────────────────────────────────────────────────────
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (isMainModule(import.meta.url)) {
   if (process.argv.includes('-h') || process.argv.includes('--help')) {
     console.log('Usage: node discard-analytics.mjs [--log <path>] [--reason <pattern>] [--top N] [--since YYYY-MM-DD]');
     console.log('  Analyzes the discard log for filter tuning insights.');
@@ -159,7 +158,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   const sinceDate = argValue('--since');
   const customLog = argValue('--log');
 
-  const logFile = customLog || join(CAREER_OPS, 'data/discard.log');
+  const logFile = customLog || join(getCareerOpsRoot(), 'data/discard.log');
   if (!existsSync(logFile)) {
     console.log(`No discard log found at ${logFile}`);
     process.exit(0);
