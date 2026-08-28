@@ -693,6 +693,13 @@ function runSelfTest() {
   // exactly-three-digit window is for.
   equal('a decimal is not read as grouping',
     auditClaims('Cut build time to 2.5 hours', 'Cut build time to 2.5 hours.').invented, []);
+  // Assert the canonical form directly, not just that the two sides agree:
+  // the case above puts '2.5 hours' on BOTH sides of auditClaims, so a
+  // regression that stripped the period from every claim would keep them
+  // equal and stay green while silently folding 2.5 into 25. Pinning the
+  // output of normalizeClaim is what makes this case able to fail.
+  equal('an ordinary decimal survives normalization',
+    normalizeClaim('2.5 hours'), '2.5 hours');
   // A four-digit left part is a year, not a group: nothing is joined.
   equal('a year is not glued to the next number', auditClaims('Joined in 2026 100 users', foldSource).invented, ['100 users']);
 
