@@ -56,9 +56,21 @@ export function validateRoleResumeContent(value) {
   const arrays = ["workExperience", "projects", "education", "certifications", "awards", "skills"];
   for (const key of arrays) if (!Array.isArray(value[key])) throw new Error(`General Role content field "${key}" must be an array.`);
   value.workExperience.forEach((entry, i) => {
-    const item = exactObject(entry, `workExperience[${i}]`, ["company", "period", "role", "location", "bullets"]);
+    if (!isObject(entry)) throw new Error(`General Role content field "workExperience[${i}]" must be an object.`);
+    const usesGroups = "groups" in entry;
+    const usesLegacyBullets = "bullets" in entry;
+    if (usesGroups === usesLegacyBullets) throw new Error(`General Role content field "workExperience[${i}]" must contain exactly one of "groups" or legacy "bullets".`);
+    const shape = usesGroups ? ["company", "period", "role", "location", "groups"] : ["company", "period", "role", "location", "bullets"];
+    const item = exactObject(entry, `workExperience[${i}]`, shape);
     for (const key of ["company", "period", "role", "location"]) text(item[key], `workExperience[${i}].${key}`);
-    stringArray(item.bullets, `workExperience[${i}].bullets`);
+    if (usesGroups) {
+      if (!Array.isArray(item.groups)) throw new Error(`General Role content field "workExperience[${i}].groups" must be an array.`);
+      item.groups.forEach((group, groupIndex) => {
+        const groupItem = exactObject(group, `workExperience[${i}].groups[${groupIndex}]`, ["heading", "bullets"]);
+        text(groupItem.heading, `workExperience[${i}].groups[${groupIndex}].heading`);
+        stringArray(groupItem.bullets, `workExperience[${i}].groups[${groupIndex}].bullets`);
+      });
+    } else stringArray(item.bullets, `workExperience[${i}].bullets`);
   });
   value.projects.forEach((entry, i) => {
     const item = exactObject(entry, `projects[${i}]`, ["title", "description", "technologies", "url", "badge"]);
@@ -84,6 +96,10 @@ export function validateRoleResumeContent(value) {
 
 const REFUSAL_SUMMARY_RE = /please provide the job description|specify the career-ops task|\bi cannot\b|\bi need more information\b|provide more information|cannot complete|unable to complete/i;
 const nonEmpty = (value) => typeof value === "string" && value.trim().length > 0;
+const experienceGroups = (entry) => Array.isArray(entry?.groups)
+  ? entry.groups
+  : [{ heading: "", bullets: Array.isArray(entry?.bullets) ? entry.bullets : [] }];
+const experienceBullets = (entry) => experienceGroups(entry).flatMap((group) => group.bullets || []);
 
 /** Source-presence policy derived from headings only; never exposes source text. */
 export function roleResumeSourceRequirements(markdown) {
@@ -117,8 +133,20 @@ export function validateRoleResumeCompleteness(content, requirements = {}) {
   for (let i = 0; i < content.workExperience.length; i += 1) {
     const entry = content.workExperience[i];
     for (const field of ["company", "role", "period"]) if (!nonEmpty(entry[field])) return fail(`workExperience[${i}].${field} is empty.`);
-    const bullets = (entry.bullets || []).filter(nonEmpty);
-    if (bullets.length < 2) return fail(`workExperience[${i}].bullets has ${bullets.length} non-empty entries; minimum 2.`);
+    const groups = experienceGroups(entry);
+    if (Array.isArray(entry.groups)) {
+      if (groups.length < 1) return fail(`workExperience[${i}].groups is empty.`);
+      for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
+        if (!nonEmpty(groups[groupIndex].heading)) return fail(`workExperience[${i}].groups[${groupIndex}].heading is empty.`);
+        const groupBullets = (groups[groupIndex].bullets || []).filter(nonEmpty);
+        if (groupBullets.length < 1) return fail(`workExperience[${i}].groups[${groupIndex}].bullets is empty.`);
+      }
+    }
+    const bullets = experienceBullets(entry).filter(nonEmpty);
+    if (bullets.length < 2) return fail(`workExperience[${i}] has ${bullets.length} non-empty experience bullets; minimum 2.`);
+    // A role with enough material for recruiter-hostile density must be split.
+    // Short historical roles remain valid with one group.
+    if (Array.isArray(entry.groups) && bullets.length >= 6 && groups.length < 2) return fail(`workExperience[${i}] has ${bullets.length} bullets but only ${groups.length} group; substantial roles require at least 2 groups.`);
   }
   if (requirements.projects && (!Array.isArray(content?.projects) || content.projects.length < 1)) return fail("projects is empty although cv.md contains project experience.");
   if (requirements.education && (!Array.isArray(content?.education) || content.education.length < 1)) return fail("education is empty although cv.md contains education.");
@@ -141,7 +169,7 @@ export function validateRoleResumeCompleteness(content, requirements = {}) {
     if (items.length < 2) return fail(`skills[${i}].items has ${items.length} non-empty entries; minimum 2.`);
   }
   const substantiveCount = [content.name, summary, ...competencies,
-    ...content.workExperience.flatMap((entry) => [entry.company, entry.role, entry.period, ...entry.bullets]),
+    ...content.workExperience.flatMap((entry) => [entry.company, entry.role, entry.period, ...experienceGroups(entry).flatMap((group) => [group.heading, ...(group.bullets || [])])]),
     ...content.projects.flatMap((entry) => [entry.title, entry.description, ...entry.technologies]),
     ...content.education.flatMap((entry) => [entry.title, entry.organization, entry.year]),
     ...content.certifications.flatMap((entry) => [entry.title, entry.organization, entry.year]),
@@ -239,7 +267,7 @@ export function renderRoleResumeTemplate({ root, content }) {
     PORTFOLIO_URL: safeUrl(content.portfolio.url), PORTFOLIO_DISPLAY: escapeHtml(content.portfolio.display), LOCATION: escapeHtml(content.location),
     SUMMARY_TEXT: escapeHtml(content.professionalSummary),
     COMPETENCIES: content.coreCompetencies.map((item) => `<span class="competency-tag">${escapeHtml(item)}</span>`).join("\n"),
-    EXPERIENCE: content.workExperience.map((item) => `<div class="job-item"><div class="job-header"><span class="job-company">${escapeHtml(item.company)}</span><span class="job-period">${escapeHtml(item.period)}</span></div>${div("job-role", item.role)}${div("job-location", item.location)}<ul>${item.bullets.map((bullet) => `<li>${escapeHtml(bullet)}</li>`).join("")}</ul></div>`).join("\n"),
+    EXPERIENCE: content.workExperience.map((item) => `<div class="job-item"><div class="job-header"><span class="job-company">${escapeHtml(item.company)}</span><span class="job-period">${escapeHtml(item.period)}</span></div>${div("job-role", item.role)}${div("job-location", item.location)}${experienceGroups(item).map((group) => `<div class="experience-group">${group.heading ? div("experience-group-heading", group.heading) : ""}<ul>${group.bullets.map((bullet) => `<li>${escapeHtml(bullet)}</li>`).join("")}</ul></div>`).join("")}</div>`).join("\n"),
     PROJECTS: content.projects.map((item) => `<div class="project-item"><div class="project-title">${item.url && safeUrl(item.url) ? `<a href="${safeUrl(item.url)}">${escapeHtml(item.title)}</a>` : escapeHtml(item.title)}${item.badge ? ` <span class="project-badge">${escapeHtml(item.badge)}</span>` : ""}</div>${div("project-desc", item.description)}${div("project-tech", item.technologies.join(", "))}</div>`).join("\n"),
     EDUCATION: content.education.map((item) => `<div class="edu-item"><div class="edu-header"><div class="edu-title">${escapeHtml(item.title)} <span class="edu-org">${escapeHtml(item.organization)}</span></div><div class="edu-year">${escapeHtml(item.year)}</div></div>${item.description ? div("edu-desc", item.description) : ""}</div>`).join("\n"),
     CERTIFICATIONS: content.certifications.map((item) => `<div class="cert-item"><span class="cert-title">${escapeHtml(item.title)}</span><span class="cert-org">${escapeHtml(item.organization)}</span><span class="cert-year">${escapeHtml(item.year)}</span></div>`).join("\n"),

@@ -33,6 +33,14 @@ test("malformed role plan fails clearly rather than throwing a TypeError", () =>
 test("general role prompt uses structured JSON instead of the application HTML contract", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); assert.doesNotMatch(prompt, /<<cv-html/); assert.match(prompt, /<<role-resume-json>>/); assert.match(prompt, /Do not generate HTML/); });
 test("general role prompt prohibits agent-side writes rendering and updates", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); for (const phrase of ["Do not create, edit, move, or save files", "Do not run Bash", "Do not render a PDF", "ask whether Career-Ops should be updated"]) assert.match(prompt, new RegExp(phrase, "i")); assert.match(prompt, /non-interactive[\s\S]{0,20}web worker/i); });
 test("general role prompt excludes JD and company work", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); assert.match(prompt, /NO job description, employer, company, or posting/); assert.match(prompt, /Skip JD keyword-gap processing and company research/); });
+test("general role prompt requires grouped recruiter-scannable experience", () => {
+  const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26", roleSourceCv: SOURCE_CV, nativeRoleSchema: true });
+  assert.match(prompt, /workExperience[\s\S]*groups[\s\S]*heading[\s\S]*bullets/);
+  assert.match(prompt, /3-5 logical thematic groups/);
+  assert.match(prompt, /2-4 concise bullets/);
+  assert.match(prompt, /Do not return one giant undifferentiated experience block/);
+  assert.match(prompt, /do not force a category or invent experience/i);
+});
 test("a general-role worker envelope parses through the existing contract", () => { const parsed = parseCvEnvelope('<<cv-html format="letter">>\n<!DOCTYPE html><html><body>Application Developer</body></html>\n<</cv-html>>\nVERDICT: 5/5 — complete'); assert.equal(parsed.ok, true); assert.match(parsed.html, /Application Developer/); });
 const ROLE_HTML = fs.readFileSync(new URL("../../../templates/cv-template.html", import.meta.url), "utf8")
   .replace(/{{PHOTO}}/g, "")

@@ -134,7 +134,15 @@ The JSON object MUST contain exactly the fields listed below and no others.
 Do not add status, title, targetRole, roleSlug, version, metadata, notes, verdict, summary, result, success, or any other field.
 ${nativeRoleSchema ? "Do not add VERDICT: native schema validation is the completion verdict. Do not wrap the JSON in another object." : "VERDICT is OUTSIDE the JSON object. Do not put VERDICT inside JSON. Do not wrap the JSON in another object."}
 
-{"format":"letter|a4","lang":"string","name":"string","phone":"string","email":"string","linkedin":{"url":"string","display":"string"},"portfolio":{"url":"string","display":"string"},"location":"string","professionalSummary":"string","coreCompetencies":["string"],"workExperience":[{"company":"string","period":"string","role":"string","location":"string","bullets":["string"]}],"projects":[{"title":"string","description":"string","technologies":["string"],"url":"string|null","badge":"string|null"}],"education":[{"title":"string","organization":"string","year":"string","description":"string|null"}],"certifications":[{"title":"string","organization":"string","year":"string"}],"awards":[{"title":"string","organization":"string","year":"string"}],"interests":"string","skills":[{"category":"string","items":["string"]}]}
+{"format":"letter|a4","lang":"string","name":"string","phone":"string","email":"string","linkedin":{"url":"string","display":"string"},"portfolio":{"url":"string","display":"string"},"location":"string","professionalSummary":"string","coreCompetencies":["string"],"workExperience":[{"company":"string","period":"string","role":"string","location":"string","groups":[{"heading":"string","bullets":["string"]}]}],"projects":[{"title":"string","description":"string","technologies":["string"],"url":"string|null","badge":"string|null"}],"education":[{"title":"string","organization":"string","year":"string","description":"string|null"}],"certifications":[{"title":"string","organization":"string","year":"string"}],"awards":[{"title":"string","organization":"string","year":"string"}],"interests":"string","skills":[{"category":"string","items":["string"]}]}
+
+PROFESSIONAL EXPERIENCE GROUPING:
+- Organize substantial roles into 3-5 logical thematic groups, normally with 2-4 concise bullets per group.
+- Keep each bullet recruiter-scannable and preferably 1-2 rendered lines.
+- Do not return one giant undifferentiated experience block.
+- Short historical roles may use one group when the source supports only limited content.
+- Choose headings appropriate to the actual supported responsibilities; do not force a category or invent experience to populate one.
+- Preserve supported accomplishments, technologies, and metrics, including exact quantified evidence from the MASTER CV SOURCE.
 
 All values are plain text. Do not put HTML, Markdown, template placeholders, or CSS in any field. The backend escapes text and maps these values into the canonical template deterministically.
 Any unlisted JSON key causes the run to fail.

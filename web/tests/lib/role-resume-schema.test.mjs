@@ -20,11 +20,21 @@ const objectSchemas = (node, at = "$") => {
 
 test("every native object is closed and requires every declared property", () => {
   const objects = objectSchemas(schema);
-  assert.equal(objects.length, 9);
+  assert.equal(objects.length, 10);
   for (const [at, definition] of objects) {
     assert.equal(definition.additionalProperties, false, `${at} must reject unknown keys`);
     assert.deepEqual(new Set(definition.required), new Set(Object.keys(definition.properties)), `${at} must require every property`);
   }
+});
+
+test("native work experience requires closed thematic groups", () => {
+  const experience = schema.properties.workExperience.items;
+  assert.deepEqual(experience.required, ["company", "period", "role", "location", "groups"]);
+  assert.equal("bullets" in experience.properties, false);
+  const group = experience.properties.groups.items;
+  assert.equal(group.additionalProperties, false);
+  assert.deepEqual(group.required, ["heading", "bullets"]);
+  assert.deepEqual(Object.keys(group.properties), ["heading", "bullets"]);
 });
 
 test("conceptually optional values are required nullable fields", () => {

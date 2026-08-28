@@ -9,7 +9,7 @@ const content = (overrides = {}) => ({
   linkedin: { url: "https://example.test/in/jane?a=1&b=2", display: "LinkedIn <Jane>" },
   portfolio: { url: "", display: "" }, location: "Remote > US", professionalSummary: "Builds secure & reliable systems.",
   coreCompetencies: ["Java & APIs"],
-  workExperience: [{ company: "Example <Corp>", period: "2020–Present", role: "Engineer", location: "Remote", bullets: ["Improved A & B"] }],
+  workExperience: [{ company: "Example <Corp>", period: "2020–Present", role: "Engineer", location: "Remote", groups: [{ heading: "Backend & Integration", bullets: ["Improved A & B", "Integrated C < D"] }] }],
   projects: [{ title: "Project", description: "Description", technologies: ["Java"], url: null, badge: null }],
   education: [{ title: "Degree", organization: "University", year: "2020", description: null }],
   certifications: [], awards: [], interests: "Learning & systems", skills: [{ category: "Languages", items: ["Java", "SQL"] }],
@@ -20,7 +20,7 @@ const completeContent = (overrides = {}) => content({
   name: "Jane Doe",
   professionalSummary: "Senior software engineer building reliable enterprise backend services, integrations, and scalable production systems across complex regulated environments.",
   coreCompetencies: ["Java", "REST APIs", "Backend Services", "System Design", "Production Reliability", "Performance Engineering"],
-  workExperience: [{ company: "Example Corp", period: "2020–Present", role: "Senior Engineer", location: "Remote", bullets: ["Built supported backend services.", "Resolved complex production issues."] }],
+  workExperience: [{ company: "Example Corp", period: "2020–Present", role: "Senior Engineer", location: "Remote", groups: [{ heading: "Backend Engineering", bullets: ["Built supported backend services.", "Resolved complex production issues."] }] }],
   projects: [{ title: "Platform Modernization", description: "Modernized a supported enterprise platform.", technologies: ["Java", "Docker"], url: null, badge: null }],
   education: [{ title: "Degree", organization: "University", year: "2020", description: null }],
   certifications: [{ title: "Certification", organization: "Issuer", year: "2021" }],
@@ -69,7 +69,23 @@ test("empty competencies and work experience fail clearly", () => {
 });
 test("work experience requires two substantive bullets", () => {
   const workExperience = [{ company: "Example", role: "Engineer", period: "2020", location: "Remote", bullets: ["Only one", " "] }];
-  assert.match(validateRoleResumeCompleteness(completeContent({ workExperience }), sourceRequirements).error, /bullets has 1/);
+  assert.match(validateRoleResumeCompleteness(completeContent({ workExperience }), sourceRequirements).error, /has 1 non-empty experience bullets/);
+});
+test("grouped experience validates with strict nested fields", () => {
+  const grouped = completeContent().workExperience;
+  assert.equal(parseRawRoleResumeJson(JSON.stringify(completeContent({ workExperience: grouped }))).ok, true);
+  const unknown = structuredClone(grouped); unknown[0].groups[0].status = "done";
+  assert.match(parseRawRoleResumeJson(JSON.stringify(completeContent({ workExperience: unknown }))).error, /unexpected field "status"/);
+});
+test("experience groups require non-empty headings and bullets", () => {
+  const emptyHeading = [{ company: "Example", role: "Engineer", period: "2020", location: "Remote", groups: [{ heading: " ", bullets: ["One", "Two"] }] }];
+  const emptyBullets = [{ company: "Example", role: "Engineer", period: "2020", location: "Remote", groups: [{ heading: "Backend", bullets: [] }] }];
+  assert.match(validateRoleResumeCompleteness(completeContent({ workExperience: emptyHeading }), sourceRequirements).error, /heading is empty/);
+  assert.match(validateRoleResumeCompleteness(completeContent({ workExperience: emptyBullets }), sourceRequirements).error, /bullets is empty/);
+});
+test("substantial experience requires multiple thematic groups", () => {
+  const workExperience = [{ company: "Example", role: "Engineer", period: "2020", location: "Remote", groups: [{ heading: "Everything", bullets: ["One", "Two", "Three", "Four", "Five", "Six"] }] }];
+  assert.match(validateRoleResumeCompleteness(completeContent({ workExperience }), sourceRequirements).error, /substantial roles require at least 2 groups/);
 });
 test("source-backed projects education and certifications cannot disappear", () => {
   assert.match(validateRoleResumeCompleteness(completeContent({ projects: [] }), sourceRequirements).error, /projects is empty/);
@@ -92,6 +108,26 @@ test("backend fills the real template with nine preserved sections and landmarks
   assert.equal((rendered.html.match(/class="section-title"/g) || []).length, 9);
   for (const landmark of ["page", "header", "contact-row", "summary-text", "competencies-grid", "cert-table", "award-table", "interests-line"]) assert.match(rendered.html, new RegExp(`class="${landmark}"`));
   assert.doesNotMatch(rendered.html, /{{[^}]+}}/);
+});
+test("multiple experience groups render headings and ATS-readable plain-text bullets", () => {
+  const metric = "Processed 10,000+ infrastructure records efficiently.";
+  const workExperience = [{ company: "Example Corp", period: "2020–Present", role: "Senior Engineer", location: "Remote", groups: [
+    { heading: "Application Modernization", bullets: ["Modernized Java applications.", "Built REST APIs."] },
+    { heading: "Scalability & Reliability", bullets: [metric, "Resolved production issues."] },
+  ] }];
+  const html = renderRoleResumeTemplate({ root, content: content({ workExperience }) }).html;
+  assert.equal((html.match(/class="experience-group-heading"/g) || []).length, 2);
+  assert.match(html, /Application Modernization/);
+  assert.match(html, /Scalability &amp; Reliability/);
+  assert.match(html, /<li>Processed 10,000\+ infrastructure records efficiently\.<\/li>/);
+  assert.doesNotMatch(html, /<table[^>]*>[\s\S]*10,000\+/i);
+});
+test("legacy flat experience remains readable through backend normalization", () => {
+  const legacy = content({ workExperience: [{ company: "Legacy Corp", period: "2018", role: "Engineer", location: "Remote", bullets: ["Built software.", "Supported production."] }] });
+  assert.equal(parseRawRoleResumeJson(JSON.stringify(legacy)).ok, true);
+  const html = renderRoleResumeTemplate({ root, content: legacy }).html;
+  assert.match(html, /<li>Built software\.<\/li>/);
+  assert.doesNotMatch(html, /class="experience-group-heading">/);
 });
 test("missing required JSON field fails clearly", () => {
   const value = content(); delete value.skills;
