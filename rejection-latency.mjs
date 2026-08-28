@@ -56,15 +56,17 @@ import { roleFuzzyMatch } from './role-matcher.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(CAREER_OPS, 'data/active-interviews.md'))
-  ? join(CAREER_OPS, 'data/active-interviews.md')
-  : join(CAREER_OPS, 'active-interviews.md');
-const DEFAULT_TRACKER_PATH = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
-const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS, 'config/profile.yml');
+const DATA_ROOT = getCareerOpsRoot();
+const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(DATA_ROOT, 'data/active-interviews.md'))
+  ? join(DATA_ROOT, 'data/active-interviews.md')
+  : join(DATA_ROOT, 'active-interviews.md');
+const DEFAULT_TRACKER_PATH = existsSync(join(DATA_ROOT, 'data/applications.md'))
+  ? join(DATA_ROOT, 'data/applications.md')
+  : join(DATA_ROOT, 'applications.md');
+const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(DATA_ROOT, 'config/profile.yml');
 
 export const DEFAULT_COURTESY_DAYS = 30;
 
