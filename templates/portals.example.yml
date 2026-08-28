@@ -922,7 +922,8 @@ search_queries:
 
 # ── Built-in provider examples ────────────────────────────────────
 # Commented config for each provider in providers/. Copy a stanza into
-# tracked_companies, uncomment, and adjust. Auto-detected providers only
+# tracked_companies (or into job_boards for the multi-employer aggregators
+# grouped at the end), uncomment, and adjust. Auto-detected providers only
 # need careers_url; the rest need provider: plus any fields shown.
 #
 # -- Auto-detected company ATS (careers_url is enough) --
@@ -1085,7 +1086,7 @@ search_queries:
 #                            # is logged if the cap truncates real results)
 #   enabled: true
 #
-# -- Job boards / aggregators (no careers_url; set provider: explicitly) --
+# -- Job boards / aggregators (put under job_boards:; no careers_url; set provider: explicitly) --
 #
 # - name: Amazon / AWS                    # global amazon.jobs board
 #   provider: amazon
