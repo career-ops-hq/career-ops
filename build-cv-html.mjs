@@ -63,16 +63,27 @@ const DEFAULT_SECTION_TITLES = {
   skills: 'Skills',
 };
 
+/**
+ * Return whether a parsed JSON value is an object record rather than an array.
+ * @param {unknown} value
+ * @returns {boolean}
+ */
 function isPlainObject(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
 }
 
-// Identity and summary are the only required content shared by every supported
-// CV shape. The remaining sections are genuinely optional (see
-// cv-sections-core.mjs), so omitted section keys must keep behaving like empty
-// arrays for CLI users and custom template packs.
+/**
+ * Enforce the smallest payload contract shared by every supported CV shape.
+ *
+ * Identity and summary are required; the remaining sections are genuinely
+ * optional (see cv-sections-core.mjs), so omitted section keys keep behaving
+ * like empty arrays for CLI users and custom template packs.
+ *
+ * @param {unknown} payload
+ * @throws {Error} When candidate identity or summary is absent or malformed.
+ */
 function validatePayload(payload) {
   if (!isPlainObject(payload)) throw new Error('CV payload must be a JSON object.');
   if (!isPlainObject(payload.candidate)) throw new Error('CV payload candidate must be an object.');
@@ -731,6 +742,10 @@ async function writeAndReport(html, absOutput, payload, extra = {}) {
   console.log(JSON.stringify(report, null, 2));
 }
 
+/**
+ * Parse CLI arguments, validate the payload, and build or preview a CV.
+ * @returns {Promise<void>}
+ */
 async function main() {
   const args = process.argv.slice(2);
 

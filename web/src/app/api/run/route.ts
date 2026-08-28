@@ -20,6 +20,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailoring + render is heavy and multi-step
 
+/**
+ * Start a dashboard CLI run and stream structured status events to the client.
+ *
+ * Validates the request and checkout prerequisites, serializes tracker-writing
+ * runs, and delegates parsed PDF payloads to the deterministic render pipeline.
+ * @param req - Request containing kind, input, and cliId.
+ * @returns A stream of status, warning, error, and completion events.
+ */
 export async function POST(req: Request) {
   let body: { kind?: string; input?: string; cliId?: string };
   try {
@@ -347,6 +355,7 @@ export async function POST(req: Request) {
       // triggered run (#2172). The tracker is marked ✅ only after a CONFIRMED
       // successful render, not optimistically — same honesty-gate discipline as
       // the evaluate path below.
+      /** Build and render one parsed CV envelope, then always close the response. */
       const renderPdf = async (paths: PdfPaths, envelope: CvEnvelope) => {
         send({ type: "status", label: "Rendering PDF…" });
         // renderAndMarkPdf is designed to resolve, never throw — but this is
