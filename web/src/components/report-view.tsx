@@ -12,6 +12,8 @@ import { ScoreMethodology } from "@/components/score-methodology";
 import { GeneratePdfButton } from "@/components/generate-pdf-button";
 import { ApplyButton } from "@/components/apply-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
+import { resolveTailoredCv } from "@/lib/apply/cv";
+import { resolveTailoredCover } from "@/lib/apply/cover";
 
 // Progressive disclosure of the report. The core writes prose blocks
 // "## F) Verdict (lead)", "## A) Role Summary", "## B) Match with CV", then
@@ -66,6 +68,13 @@ export function ReportView({
   const date = app?.date || field("Date");
   const archetype = field("Archetype");
   const url = field("URL");
+  const company = app?.company ?? meta?.title ?? id;
+  // Trust the real file, not just the tracker flag: the batch/CLI `pdf` mode writes
+  // output/cv-…-{company}-….pdf without always flipping the tracker's PDF column.
+  // A tailored CV on disk is just as ready.
+  const cvExists = resolveTailoredCv(company) != null;
+  const pdfReady = (app?.pdf ?? "").includes("✅") || cvExists;
+  const coverExists = resolveTailoredCover(company) != null;
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
@@ -97,8 +106,18 @@ export function ReportView({
           })()}
           {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{meta.legitimacy}</Badge>}
           {app && <StatusSelect n={id} current={app.status} />}
-          <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />
-          <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />
+          <GeneratePdfButton n={id} company={company} pdfReady={pdfReady} />
+          <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={company} pdfReady={pdfReady} />
+          {coverExists && (
+            <a
+              href={`/api/cover-pdf?company=${encodeURIComponent(company)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400 max-sm:min-h-[44px]"
+            >
+              <FileText className="size-3.5" /> View cover
+            </a>
+          )}
         </div>
 
         {app && canDelete && (
