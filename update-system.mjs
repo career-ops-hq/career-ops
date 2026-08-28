@@ -641,15 +641,34 @@ function newestBackupBranch(branches) {
   return timestamped[0]?.branch || branchList[0];
 }
 
+/**
+ * Parse a positive integer environment override with a safe fallback.
+ *
+ * @param {unknown} value - Candidate integer value.
+ * @param {number} fallback - Value returned when parsing fails or is <= 0.
+ * @returns {number} Positive parsed integer or the fallback.
+ */
 export function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value || ''), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+/**
+ * Select the timeout budget for a git command.
+ *
+ * @param {string[]} args - Git argv without the leading `git`.
+ * @returns {number} Timeout in milliseconds for the command.
+ */
 export function gitTimeoutMs(args) {
   return args[0] === 'fetch' ? DEFAULT_GIT_FETCH_TIMEOUT_MS : DEFAULT_GIT_TIMEOUT_MS;
 }
 
+/**
+ * Compute the upper bound for the self-reexec update phase.
+ *
+ * @param {number} [updatePathCount] - Count of paths the target checkout may materialize.
+ * @returns {number} Timeout in milliseconds for the reexec buffer.
+ */
 export function reexecTimeoutMs(updatePathCount = SYSTEM_PATHS.length + BOOTSTRAP_PATHS.length) {
   return Math.max(
     120000,
@@ -699,6 +718,13 @@ export function gitRawIn(root, ...args) {
   }
 }
 
+/**
+ * Run git in a target directory and trim stdout for ordinary line output.
+ *
+ * @param {string} root - Directory to use as git cwd.
+ * @param {...string} args - Git argv without the leading `git`.
+ * @returns {string} Trimmed stdout from git.
+ */
 export function gitIn(root, ...args) {
   return gitRawIn(root, ...args).trim();
 }

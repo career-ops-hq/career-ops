@@ -27,8 +27,15 @@ console.log('\n🧪 Testing updater nested-checkout guard (#3334)...');
 
 const canonicalize = realpathSync.native ?? realpathSync;
 
-// An outer repo with a .git-less career-ops copy at tools/career-ops, committed
-// as vendored content — the layout the ZIP install produces.
+/**
+ * Create an outer repo with a .git-less career-ops copy at tools/career-ops.
+ *
+ * The committed vendored content mirrors the ZIP-install layout that makes git
+ * resolve to the enclosing repository instead of the career-ops directory.
+ *
+ * @returns {{dir: string, g: (...args: string[]) => string, nested: string}}
+ * Fixture paths and a git helper rooted at the outer repository.
+ */
 function makeNestedFixture() {
   const dir = mkdtempSync(join(tmpdir(), 'co-nested-'));
   const g = (...args) => gitIn(dir, ...args);
@@ -51,6 +58,14 @@ function makeNestedFixture() {
   return { dir, g, nested };
 }
 
+/**
+ * Run the real updater command inside the nested fixture.
+ *
+ * @param {{dir: string, nested: string}} fixture - Nested install fixture.
+ * @param {string} cmd - Updater subcommand to execute.
+ * @returns {import('child_process').SpawnSyncReturns<string>}
+ * Spawn result with captured stdout/stderr.
+ */
 function runUpdater(fixture, cmd) {
   return spawnSync(NODE, ['update-system.mjs', cmd], {
     cwd: fixture.nested,
