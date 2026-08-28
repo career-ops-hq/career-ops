@@ -188,13 +188,21 @@ function normalizeKeywordList(value) {
 // only boundary-anchors 2-3 letter acronyms. Location keywords need boundaries on
 // every keyword, so they get their own compiler rather than changing title-matching
 // behaviour. Returns a predicate, mirroring compileKeyword()'s shape.
+// The boundary classes are Unicode-aware (\p{L}\p{N}, `u` flag) rather than
+// [a-z0-9]. An ASCII-only lookbehind treats every accented letter as a word
+// boundary, so a keyword can anchor in the MIDDLE of a place name: the allow
+// keyword "al," matches inside "montréal, quebec, can", because the "é" before
+// it is outside [a-z0-9]. Every non-ASCII place name is exposed the same way —
+// Bogotá, Málaga, München, São Paulo — and it fails in the dangerous direction,
+// since a stray match on an `allow` keyword admits a location the user blocks.
 function compileLocationKeyword(keyword) {
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const startsWord = /[a-z0-9]/.test(keyword[0]);
-  const endsWord = /[a-z0-9]/.test(keyword[keyword.length - 1]);
-  const prefix = startsWord ? '(?<![a-z0-9])' : '';
-  const suffix = endsWord ? '(?![a-z0-9])' : '';
-  const re = new RegExp(`${prefix}${escaped}${suffix}`);
+  const WORD = /[\p{L}\p{N}]/u;
+  const startsWord = WORD.test(keyword[0]);
+  const endsWord = WORD.test(keyword[keyword.length - 1]);
+  const prefix = startsWord ? '(?<![\\p{L}\\p{N}])' : '';
+  const suffix = endsWord ? '(?![\\p{L}\\p{N}])' : '';
+  const re = new RegExp(`${prefix}${escaped}${suffix}`, 'u');
   return (lower) => re.test(lower);
 }
 
@@ -224,6 +232,18 @@ export function locationHintFromUrl(url) {
   const segments = pathname.split('/').filter(Boolean);
   const jobIdx = segments.lastIndexOf('job');
   if (jobIdx === -1 || jobIdx === segments.length - 1) return '';
+  // Workday emits TWO url shapes and only one carries a location:
+  //   /job/{Location}/{Title}_{ReqId}   → segment after `job` is the location
+  //   /job/{Title}_{ReqId}              → segment after `job` is the TITLE
+  // Reading the second shape as a location is worse than having no hint at all.
+  // A job title matches no `allow` keyword, but it IS a non-empty hint, so it
+  // defeats buildLocationFilter's "nothing to judge on either field → pass"
+  // escape and the posting is rejected as out-of-region on the strength of its
+  // own title. Measured on a 1,800-row scan ledger, this silently discarded
+  // in-region roles from tenants that use the title-only shape. The location
+  // shape always has the title AFTER it, so the hint segment being the LAST
+  // segment identifies the title-only shape.
+  if (jobIdx + 1 === segments.length - 1) return '';
   let segment = segments[jobIdx + 1];
   try {
     segment = decodeURIComponent(segment);
