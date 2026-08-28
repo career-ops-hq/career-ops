@@ -803,7 +803,9 @@ slug or a dead board 404s silently on every future scan, so this probes each
 portals entry to confirm it still resolves: Greenhouse / Ashby / Lever slugs
 directly, every other host through the same provider plugins the scanner uses.
 Both `tracked_companies` and `job_boards` entries are swept — a job board
-going dark is as invisible on the next scan as a company board 404ing.
+going dark is as invisible on the next scan as a company board 404ing. An entry
+that no provider claims (no `provider:` field and no plugin `detect()` match) is
+reported `skipped`, not confirmed — those are a coverage gap, not a pass.
 
 ```bash
 npm run verify:portals
