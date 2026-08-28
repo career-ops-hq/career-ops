@@ -1,5 +1,5 @@
 /**
- * contacts.test.mjs — Systematic test suite for contacts.mjs
+ * tests/contacts.test.mjs — Systematic test suite for contacts.mjs
  *
  * Tests every exported function across:
  * - TSV phonebook parsing (well-formed, malformed, comments, `-` tracker ref)
@@ -15,7 +15,7 @@
  * Expected vCard strings are built in code on purpose — a committed .vcf
  * fixture would be corrupted by git autocrlf on Windows.
  *
- * Run: node contacts.test.mjs
+ * Run: node tests/contacts.test.mjs   (or: node test-all.mjs --only contacts)
  */
 
 import { parseContacts, escapeVcard, foldLine, slug, uidPart, normalizeForHash, contactUid, contactToVcard, buildVcf } from '../contacts.mjs';

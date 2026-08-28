@@ -1,5 +1,5 @@
 /**
- * discover-ats.test.mjs — Systematic test suite for discover-ats.mjs
+ * tests/discover-ats.test.mjs — Systematic test suite for discover-ats.mjs
  *
  * Tests the pure, network-free functions with inline fixtures:
  * - deriveSlug (lowercasing, punctuation, edge cases)
@@ -13,7 +13,7 @@
  * - CLI behavior (--self-test, default preview never writes, --write opt-in,
  *   unknown --vendors, --help) via execFileSync — no live network.
  *
- * Run: node discover-ats.test.mjs
+ * Run: node tests/discover-ats.test.mjs   (or: node test-all.mjs --only discover-ats)
  *
  * Issue #1864 — github.com/santifer/career-ops
  */

@@ -1,5 +1,5 @@
 /**
- * company-history.test.mjs — External test suite for company-history.mjs
+ * tests/company-history.test.mjs — External test suite for company-history.mjs
  *
  * Complements the 38 in-file `--self-test` fixtures (join/label goldens,
  * right-censoring, rejection-is-an-answer, confidence-vs-label, staleness,
@@ -11,7 +11,7 @@
  * loading real files from disk via the exported loaders, and CLI smoke
  * tests.
  *
- * Run: node company-history.test.mjs
+ * Run: node tests/company-history.test.mjs   (or: node test-all.mjs --only company-history)
  */
 
 import {

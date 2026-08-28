@@ -1,10 +1,10 @@
 /**
- * invite-match.test.mjs — regression tests for invite-match.mjs's ambiguous-
+ * tests/invite-match.test.mjs — regression tests for invite-match.mjs's ambiguous-
  * match ranking, which is the part most likely to silently regress: a wrong
  * top candidate is worse than no candidate at all. Also covers the #2098
  * rejection-classification and --apply-to-Rejected additions.
  *
- * Run: node invite-match.test.mjs
+ * Run: node tests/invite-match.test.mjs   (or: node test-all.mjs --only invite-match)
  */
 
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';

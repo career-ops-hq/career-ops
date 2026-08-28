@@ -1,8 +1,7 @@
-#!/usr/bin/env node
 // @ts-check
 /**
- * test-trust-validator.mjs — Comprehensive test suite for trust validation.
- * Run: node test-trust-validator.mjs
+ * tests/trust-validator.test.mjs — Comprehensive test suite for trust validation.
+ * Run: node tests/trust-validator.test.mjs   (or: node test-all.mjs --only trust-validator)
  *
  * Tests cover:
  *   - buildTrustValidator: disabled/enabled, config merging

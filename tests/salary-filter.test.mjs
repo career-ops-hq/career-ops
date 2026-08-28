@@ -1,8 +1,7 @@
-#!/usr/bin/env node
 // @ts-check
 /**
- * Comprehensive test suite for salary filter and Ashby compensation parsing.
- * Run: node test-salary-filter.mjs
+ * tests/salary-filter.test.mjs — Comprehensive test suite for salary filter and Ashby compensation parsing.
+ * Run: node tests/salary-filter.test.mjs   (or: node test-all.mjs --only salary-filter)
  *
  * Tests cover:
  *   - buildSalaryFilter: range overlap, currency matching, edge cases, validation
