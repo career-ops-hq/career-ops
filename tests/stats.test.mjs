@@ -67,6 +67,29 @@ try {
     fail('computeFunnel should flag everApplied < 10 as smallSample');
   }
 
+  // Ledger-aware funnel (#1428): a declined offer (now Discarded) and a
+  // rejected-after-interview must count for the stages they passed through,
+  // which the status snapshot alone cannot see. Row 3 has no ledger history and
+  // must fall back to its current status (Rejected proves everApplied only).
+  const statusByNum = new Map([[1, 'Discarded'], [2, 'Rejected'], [3, 'Rejected'], [4, 'Interview']]);
+  const ledgerTsv = [
+    '1\t2026-08-19\tInterview\tOffer\tset-status\t',   // row 1 reached Offer, then declined
+    '1\t2026-08-25\tOffer\tDiscarded\tset-status\t',
+    '2\t2026-08-25\tInterview\tRejected\tset-status\t', // row 2 reached Interview, then rejected
+    '2junk\t2026-08-25\tOffer\tHired\tset-status\t',       // partial numeric id must not inflate row 2
+    '4\t2026-08-25\tOffer\t\tset-status\t',                // missing destination is malformed
+    '5\t\tInterview\tOffer\tset-status\t',                 // missing date is malformed
+    'torn-line-no-num',
+  ].join('\n');
+  const ledgerParsed = stats.parseStatusLogStages(ledgerTsv);
+  const fl = stats.computeFunnelWithHistory(statusByNum, ledgerParsed);
+  if (ledgerParsed.length === 3 && fl.everApplied === 4 && fl.everInterview === 3 && fl.everOffer === 1
+      && !ledgerParsed.some(row => row.num === 5 || row.to === '') && fl.basis === 'ledger') {
+    pass('computeFunnelWithHistory folds ledger history (declined offer counts into everOffer)');
+  } else {
+    fail(`computeFunnelWithHistory wrong output: parsed=${ledgerParsed.length} ${JSON.stringify(fl)}`);
+  }
+
   // Lifetime scan totals — CRLF input, torn row skipped, fingerprint column tolerated.
   const scanTsv = [
     'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation',

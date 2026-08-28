@@ -138,3 +138,11 @@ public commit with a stated reason.
 - @bluezeb12 | Joseph Landry | 2026-08-20 | id:3913655 | src:https://github.com/santifer/career-ops/discussions/3108 | n:90
 - @kps2120 | 2026-08-20 | "Career change is hard enough already, trying to match past experiences to many new possibilities and areas of interest. Just leveling it up." | id:166546704 | src:https://github.com/santifer/career-ops/discussions/3121 | n:91
 - @rodolrojas | Rodolfo Rojas Giménez | 2026-08-20 | id:6399387 | src:https://github.com/santifer/career-ops/discussions/3133 | n:92
+- @CodePlato3721 | Alex | 2026-08-21 | id:2314106 | src:https://github.com/santifer/career-ops/discussions/3148 | n:93
+- @gunjanjaswal | Gunjan Jaswal | 2026-08-21 | id:400143 | src:https://github.com/santifer/career-ops/discussions/3151 | n:94
+- @miguel-fg | Miguel Fierro | 2026-08-21 | "one shouldn't need to apply hundreds of times to get one interview" | id:72409412 | src:https://github.com/santifer/career-ops/discussions/3187 | n:95
+- @elefino | 2026-08-22 | "This is a good thing. I'm going to boost this signal." | id:319961379 | src:https://github.com/santifer/career-ops/discussions/3206 | n:96
+- @chorrell | Christopher Horrell | 2026-08-24 | id:2781 | src:https://github.com/santifer/career-ops/discussions/3275 | n:97
+- @qoodboop | qoodboop | 2026-08-25 | "really good we can focus on something else than doomscrolling hiring contracts" | id:23255979 | src:https://github.com/santifer/career-ops/discussions/3313 | n:98
+- @Nardohsu | 2026-08-25 | "Let's get into the AI world!" | id:25312922 | src:https://github.com/santifer/career-ops/discussions/3336 | n:99
+- @prateeksingh1092 | 2026-08-26 | "A non-bloat, grounded in truth, a true example of leveraging AI as a human counterpart." | id:269049851 | src:https://github.com/santifer/career-ops/discussions/3389 | n:100

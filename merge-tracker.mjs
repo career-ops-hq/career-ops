@@ -19,6 +19,7 @@ import { join, basename, dirname, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex } from './find.mjs';
 import { LEGACY_COLMAP, detectColumns, isHeaderRow, resolveScoreStatus, normalizeVia, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
@@ -27,7 +28,7 @@ import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerL
 // can adopt the same key later without the definitions drifting.
 import { normalizeUrl } from './url-key.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 // Support both layouts: data/applications.md (boilerplate) and applications.md
 // (original). CAREER_OPS_TRACKER overrides the path (used by tests and
 // non-standard layouts). Resolution lives in tracker-utils.mjs so every tracker
@@ -864,13 +865,33 @@ if (BACKFILL_URLS) {
     if (!line.startsWith('|')) return line;
     const app = parseAppLine(line);
     if (!app) return line;
-    if ((app.url || '').trim()) { already++; return line; }
+    // Rebuilt, not returned verbatim — a row can carry a URL and STILL be short
+    // of the header on a layout with user-owned columns after `URL`. Returning
+    // `line` there leaves the same unreadable row this fix exists to prevent.
+    if ((app.url || '').trim()) { already++; return buildRow({ ...app }); }
     // Shared derivation with the merge loop — one place that knows how to turn a
     // report link into the posting URL. Tracker links may be root-relative
     // (`reports/...`) or data-relative (`../reports/...`); both resolve.
     const resolved = resolveReportUrl(app.report);
-    if (resolved.reason === 'no-report') { noReport++; return line; }
-    if (resolved.reason === 'no-url') { noUrl++; return line; }
+    // A row we cannot fill is still rebuilt, with an empty URL cell.
+    //
+    // Returning the original line leaves a pre-URL-column row one cell short of
+    // the header, and #3016 established that a short row is exactly what
+    // parseTrackerRow must reject: "a row must span the full header width,
+    // otherwise a missing interior cell would silently shift every later column
+    // one position left". That guard is correct; this writer was producing rows
+    // it correctly refuses. Every reader built on tracker-parse.mjs then skips
+    // the row for good — set-status.mjs reports "No tracker row with #N".
+    //
+    // parseAppLine's guard is `parts.length <= maxIdx`, one cell looser than
+    // parseTrackerRow's `parts.length < width`, which is why the backfill can
+    // still see and repair precisely the rows the readers cannot.
+    //
+    // The DELIMITER is added, never a value: buildRow writes `put('url', '')`,
+    // and an empty URL falls back to the report-number and fuzzy company+role
+    // dedup tiers exactly as it does today. Nothing is fabricated.
+    if (resolved.reason === 'no-report') { noReport++; return buildRow({ ...app, url: '' }); }
+    if (resolved.reason === 'no-url') { noUrl++; return buildRow({ ...app, url: '' }); }
     filled++;
     return buildRow({ ...app, url: resolved.url });
   });

@@ -29,6 +29,8 @@ import {
 } from './reserve-report-num.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
+import { buildTitleFilter } from './title-keywords.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tracker = new TokenAccumulator();
@@ -444,23 +446,26 @@ async function fetchJobPage(url) {
 // search-query companies are handled by the full /career-ops scan pipeline.
 // `rawOverride` lets tests feed YAML text directly (see test-all.mjs drift guard).
 // ---------------------------------------------------------------------------
-function normKeywords(v) {
-  if (!Array.isArray(v)) return [];
-  return v.map(x => String(x ?? '').toLowerCase().trim()).filter(Boolean);
-}
-
 export function parsePortals(rawOverride) {
   const raw = rawOverride ?? readFile('portals.yml');
   if (!raw) throw new Error('portals.yml not found');
   const config = yaml.load(raw) || {};
 
-  const tf = config.title_filter || {};
-  const positive = normKeywords(tf.positive);
-  const negative = normKeywords(tf.negative);
-  function titleMatches(title) {
-    const t = String(title ?? '').toLowerCase();
-    return positive.some(k => t.includes(k)) && !negative.some(k => t.includes(k));
-  }
+  // The shared predicate rather than a second copy of the matching rules. This
+  // path kept its own `includes` loop, and the two had drifted three ways: an
+  // empty positive list accepted every title in scan.mjs and rejected every
+  // title here, AND-groups worked only in scan.mjs, and a non-string YAML entry
+  // was dropped there but coerced into a live keyword here. A `word:` prefix
+  // would have become the fourth — read as literal text, it would have matched
+  // nothing, so the shipped `word:Intern` would stop rejecting "Operations
+  // Intern" here while still working in scan.mjs.
+  //
+  // Side effect worth naming, since it changes this path's verdicts rather than
+  // just its structure: it now also gets the 2-3 char rule. Measured over 2324
+  // real titles that moves one verdict, and it moves it the permissive way —
+  // the negative "iOS" had been matching inside "Biosamples". Nothing becomes
+  // newly rejected.
+  const titleMatches = buildTitleFilter(config.title_filter);
 
   // Companies with a direct JSON `api:` endpoint (the no-CLI scan path).
   const tracked = Array.isArray(config.tracked_companies) ? config.tracked_companies : [];
@@ -794,8 +799,7 @@ async function cmdApply(ref, ctx) {
 // ---------------------------------------------------------------------------
 // Only run the CLI when invoked directly (`node openrouter-runner.mjs ...`), so the
 // module can be imported (e.g. by test-all.mjs) without executing a command.
-const invokedDirectly = process.argv[1] &&
-  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const invokedDirectly = isMainModule(import.meta.url);
 const [,, command, ...args] = invokedDirectly ? process.argv : [];
 const ctx = invokedDirectly ? loadContext() : null;
 
