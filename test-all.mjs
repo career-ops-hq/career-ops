@@ -15328,16 +15328,29 @@ try {
         if (existsSync(join(ROOT, 'web', 'tests', 'lib'))) {
           fail('web/tests/lib contains no *.test.mjs — the #2185 unit suites are not being gated');
         }
-      } else if (run(NODE, ['--test', '--test-concurrency=1', ...webUnits], { timeout: 180000 }) !== null) {
-        pass('web pdf write-scope unit suites pass (#2185)');
       } else {
         // The signal distinguishes a timeout/kill from an assertion failure —
         // run()'s default 30s is short for these suites, and Windows file-lock
-        // release timing makes concurrent node:test workers noisy for the PDF
-        // cleanup/lock probes. Run them serially so this gate checks behavior,
-        // not runner scheduling.
-        const killed = lastRunFailure()?.signal;
-        fail(`web pdf write-scope unit suites failed${killed ? ` (killed: ${killed})` : ''} (run: node --test --test-concurrency=1 ${webUnits.join(' ')})`);
+        // release timing makes one long node:test process noisy for the PDF
+        // cleanup/lock probes. On Windows, isolate each file in a fresh Node
+        // process so this gate checks behavior, not runner cleanup timing.
+        const failedWebUnits = [];
+        if (process.platform === 'win32') {
+          for (const unit of webUnits) {
+            if (run(NODE, ['--test', '--test-concurrency=1', unit], { timeout: 180000 }) === null) {
+              const killed = lastRunFailure()?.signal;
+              failedWebUnits.push(`${unit}${killed ? ` (killed: ${killed})` : ''}`);
+            }
+          }
+        } else if (run(NODE, ['--test', '--test-concurrency=1', ...webUnits], { timeout: 180000 }) === null) {
+          const killed = lastRunFailure()?.signal;
+          failedWebUnits.push(`aggregate${killed ? ` (killed: ${killed})` : ''}`);
+        }
+        if (failedWebUnits.length === 0) {
+          pass('web pdf write-scope unit suites pass (#2185)');
+        } else {
+          fail(`web pdf write-scope unit suites failed: ${failedWebUnits.join(', ')} (run: node --test --test-concurrency=1 ${webUnits.join(' ')})`);
+        }
       }
 
       if (invocation && prompts) {
