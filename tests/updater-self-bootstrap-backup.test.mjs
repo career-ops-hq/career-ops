@@ -41,6 +41,14 @@ try {
   } else {
     fail('apply must preserve bootstrap edits before the destructive checkout');
   }
+
+  const recordAt = source.indexOf('generatedBackupPaths.add(result.backup)');
+  const validationAt = source.indexOf('!generatedBackupPaths.has(file)');
+  if (recordAt > backUpAt && validationAt > recordAt) {
+    pass('apply excludes only its successfully generated backups from user-layer validation');
+  } else {
+    fail('updater-created backups must not be mistaken for user-layer changes');
+  }
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

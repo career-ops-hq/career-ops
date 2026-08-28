@@ -1717,6 +1717,10 @@ async function apply() {
   // TARGET updater as `update-system.mjs apply` with a fixed argv.
   const updateForce = process.argv.includes('--force') || process.env.CAREER_OPS_UPDATE_FORCE === '1';
   const initialStatusPaths = new Set(gitStatusEntries().map(entry => entry.path));
+  // Backups created by this apply run are expected updater output, not user
+  // files the checkout modified. Record only successful copies so an unrelated
+  // pre-existing .bak can never receive this exemption.
+  const generatedBackupPaths = new Set();
   const isReexec = process.env.CAREER_OPS_UPDATE_REEXEC === '1';
 
   // Check for lock
@@ -1833,6 +1837,7 @@ async function apply() {
           // abort the update — the file itself is still listed either way.
           console.log(`  ${result.file}  (could not write ${result.backup}: ${result.error})`);
         } else {
+          generatedBackupPaths.add(result.backup);
           console.log(`  ${result.file}  (local copy saved: ${result.backup})`);
         }
       }
@@ -2024,7 +2029,7 @@ async function apply() {
       // (e.g. writing-samples/README.md is system-owned doc inside a user dir).
       const changed = gitStatusEntries()
         .map((entry) => entry.path)
-        .filter((file) => !initialStatusPaths.has(file));
+        .filter((file) => !initialStatusPaths.has(file) && !generatedBackupPaths.has(file));
       for (const file of userLayerViolations(changed, updatePaths, effectiveUserPaths())) {
         console.error(`SAFETY VIOLATION: User file was modified: ${file}`);
         violatedUserPaths.add(file);
