@@ -39,7 +39,8 @@ browser storage:
 | `data/` | Tracker and other private workflow state |
 | `reports/` | Job evaluations and generated reports |
 
-These paths are intentionally git-ignored because they contain personal data.
+`cv.md`, runtime content under `data/`, and Markdown files directly under
+`reports/` are intentionally git-ignored because they contain personal data.
 That also means a normal web-session branch push does **not** persist them to
 GitHub: a new cloud session starts from the repository again, without the
 ignored files from the previous VM. Keep a personal workflow in one session
