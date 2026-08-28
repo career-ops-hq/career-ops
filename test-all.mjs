@@ -15338,18 +15338,24 @@ try {
         if (process.platform === 'win32') {
           for (const unit of webUnits) {
             if (run(NODE, ['--test', '--test-concurrency=1', unit], { timeout: 180000 }) === null) {
-              const killed = lastRunFailure()?.signal;
-              failedWebUnits.push(`${unit}${killed ? ` (killed: ${killed})` : ''}`);
+              const detail = lastRunFailure();
+              const killed = detail?.signal;
+              failedWebUnits.push({ label: `${unit}${killed ? ` (killed: ${killed})` : ''}`, detail });
             }
           }
         } else if (run(NODE, ['--test', '--test-concurrency=1', ...webUnits], { timeout: 180000 }) === null) {
-          const killed = lastRunFailure()?.signal;
-          failedWebUnits.push(`aggregate${killed ? ` (killed: ${killed})` : ''}`);
+          const detail = lastRunFailure();
+          const killed = detail?.signal;
+          failedWebUnits.push({ label: `aggregate${killed ? ` (killed: ${killed})` : ''}`, detail });
         }
         if (failedWebUnits.length === 0) {
           pass('web pdf write-scope unit suites pass (#2185)');
         } else {
-          fail(`web pdf write-scope unit suites failed: ${failedWebUnits.join(', ')} (run: node --test --test-concurrency=1 ${webUnits.join(' ')})`);
+          fail(`web pdf write-scope unit suites failed: ${failedWebUnits.map((f) => f.label).join(', ')} (run: node --test --test-concurrency=1 ${webUnits.join(' ')})`);
+          for (const failure of failedWebUnits) {
+            const tail = (failure.detail?.stderr || failure.detail?.stdout || '').split('\n').filter(Boolean).slice(-12);
+            for (const line of tail) console.log(`      ${failure.label}: ${line}`);
+          }
         }
       }
 
