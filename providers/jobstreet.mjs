@@ -19,11 +19,16 @@
 //   searchLocation  — Location filter (default: "")
 //   pageSize        — Results per page (default: 30)
 //   maxPages        — Maximum pages to fetch (default: 3)
+//   appendWorkType  — Append the listing's work type(s) to the title, e.g.
+//                     "Strategy Consultant [Part time]", so title filters and
+//                     triage can see employment type at scan time (default: false)
 //
 // Site keys by market:
 //   ID-Main  → id.jobstreet.com (Indonesia)
 //   SG-Main  → sg.jobstreet.com (Singapore)
 //   MY-Main  → my.jobstreet.com (Malaysia)
+//   AU-Main  → www.seek.com.au  (Australia — set api: https://www.seek.com.au/api/jobsearch/v5/search)
+//   NZ-Main  → www.seek.co.nz   (New Zealand)
 
 const DEFAULT_API = 'https://id.jobstreet.com/api/jobsearch/v5/search';
 const DEFAULT_SITE_KEY = 'ID-Main';
@@ -46,6 +51,20 @@ const ALLOWED_JOBSTREET_HOSTS = new Set([
 // resolved against the current origin). We keep the allowlist for SSRF
 // protection on the base URL, then build the v5 search path from it.
 const V5_SEARCH_PATH = '/api/jobsearch/v5/search';
+
+// Job-detail path by market. Only the Indonesian sites carry the `/id/` locale
+// prefix (https://id.jobstreet.com/id/job/<id>). Every other SEEK-platform host
+// — my/sg.jobstreet.com, www.seek.com.au, www.seek.co.nz — serves /job/<id> and
+// answers 404 on /id/job/<id> (verified against live ids, 2026-08-28). A global
+// switch either way breaks one market, which is why this is keyed on the host.
+const ID_LOCALE_HOSTS = new Set(['id.jobstreet.com', 'www.jobstreet.co.id', 'jobstreet.co.id']);
+
+/** @param {string} origin — scheme + hostname */
+function jobDetailPath(origin) {
+  let host = '';
+  try { host = new URL(origin).hostname; } catch { /* fall through to the common path */ }
+  return ID_LOCALE_HOSTS.has(host) ? '/id/job/' : '/job/';
+}
 
 /** @param {string} url */
 function assertJobstreetUrl(url) {
@@ -108,18 +127,27 @@ function toEpochMs(value) {
  * @param {any} item — raw v5 API result item
  * @param {string} origin — scheme + hostname for building job detail URLs
  * @param {string} fallbackCompany — company name fallback from the portal entry
+ * @param {{appendWorkType?: boolean}} [options] — appendWorkType: suffix the
+ *   title with the listing's `workTypes` (e.g. "[Part time]"); off by default
  * @returns {{title: string, url: string, company: string, location: string, postedAt: number|undefined}|null}
  */
-export function parseJobstreetItem(item, origin, fallbackCompany) {
+export function parseJobstreetItem(item, origin, fallbackCompany, options = {}) {
   if (!item || typeof item !== 'object') return null;
 
-  const title = (item.title || '').trim();
+  let title = (item.title || '').trim();
   if (!title) return null;
 
-  // Build job URL from the job ID
+  if (options.appendWorkType) {
+    const types = Array.isArray(item.workTypes)
+      ? item.workTypes.map(t => String(t ?? '').trim()).filter(Boolean)
+      : [];
+    if (types.length) title = `${title} [${types.join(', ')}]`;
+  }
+
+  // Build job URL from the job ID — path prefix depends on the market host
   const jobId = (item.id || '').trim();
   if (!jobId) return null;
-  const url = `${origin}/id/job/${jobId}`;
+  const url = `${origin}${jobDetailPath(origin)}${jobId}`;
 
   // Validate URL hostname belongs to allowed set
   try {
@@ -177,6 +205,7 @@ export default {
     const pageSize = Number(entry.pageSize) || DEFAULT_PAGE_SIZE;
     const maxPages = Number(entry.maxPages) || DEFAULT_MAX_PAGES;
     const fallbackCompany = entry.name || '';
+    const appendWorkType = entry.appendWorkType === true;
 
     const allJobs = [];
 
@@ -204,7 +233,7 @@ export default {
       if (data.length === 0) break;
 
       for (const item of data) {
-        const job = parseJobstreetItem(item, origin, fallbackCompany);
+        const job = parseJobstreetItem(item, origin, fallbackCompany, { appendWorkType });
         if (job) allJobs.push(job);
       }
 
