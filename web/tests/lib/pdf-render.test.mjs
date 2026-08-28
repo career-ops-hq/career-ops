@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync, existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
@@ -133,7 +133,7 @@ test("spawnBuildCvHtml invokes the canonical builder and drains output", async (
   assert.equal(result.ok, true);
   assert.equal(result.stdout, "large report");
   assert.equal(result.stderr, "warning");
-  assert.deepEqual(calls[0].args, ["/root/build-cv-html.mjs", "/tmp/in.json", "/tmp/out.html", "/root/templates/cv-template.modern.html"]);
+  assert.deepEqual(calls[0].args, [join("/root", "build-cv-html.mjs"), "/tmp/in.json", "/tmp/out.html", "/root/templates/cv-template.modern.html"]);
   assert.equal(calls[0].opts.cwd, "/root");
 });
 
@@ -333,7 +333,7 @@ test("cleanupPdfScratch continues after one matching entry cannot be removed", (
  */
 function router(routes, calls) {
   return (execPath, args, opts) => {
-    const script = args[0].split("/").pop();
+    const script = basename(args[0]);
     calls.push(script);
     const fallback = script === "cv-templates.mjs"
       ? { stdout: `${join(opts.cwd, "templates", "cv-template.html")}\n` }
@@ -352,7 +352,7 @@ test("resolveConfiguredCvTemplate delegates to the canonical resolver", async ()
     execPath: "node", root: "/repo",
   });
   assert.deepEqual(result, { ok: true, template: "/repo/templates/cv-template.modern.html", stderr: "" });
-  assert.deepEqual(calls[0].args, ["/repo/cv-templates.mjs", "resolve", "cv"]);
+  assert.deepEqual(calls[0].args, [join("/repo", "cv-templates.mjs"), "resolve", "cv"]);
   assert.equal(calls[0].opts.cwd, "/repo");
 });
 
