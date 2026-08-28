@@ -19,6 +19,10 @@ import {
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
+/**
+ * Model a spawned child whose output and terminal event arrive asynchronously,
+ * preserving the event order the production wrapper must handle.
+ */
 function fakeChild({ stdout = "", stderr = "", exitCode = 0, spawnError = null } = {}) {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
@@ -320,6 +324,10 @@ test("cleanupPdfScratch continues after one matching entry cannot be removed", (
   } finally { console.error = original; rmSync(root, { recursive: true, force: true }); }
 });
 
+/**
+ * Route script launches to configured fake results while recording their order;
+ * template resolution gets the normal fixture path when no override is supplied.
+ */
 function router(routes, calls) {
   return (execPath, args, opts) => {
     const script = args[0].split("/").pop();

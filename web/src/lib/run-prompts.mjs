@@ -37,6 +37,9 @@ export function isShellSafeCompanyName(name) {
 
 const SAFE_COMPANY_NAME = /^[\p{L}\p{N} .,&'()+/-]+$/u;
 
+/** ISO calendar date, the only form the dashboard's POSTED column parses. */
+const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
+
 /**
  * The exact prompt each worker kind is sent.
  *
@@ -45,12 +48,9 @@ const SAFE_COMPANY_NAME = /^[\p{L}\p{N} .,&'()+/-]+$/u;
  * inline instead of writing it), and a guard that greps route.ts for the marker
  * text matched the route's own comments instead. See test-all.mjs §55.6.
  *
- * @param {{kind: string, input: string, memory: string, today: string}} args
+ * @param {{kind: string, input: string, memory: string, today: string, postedAt?: string}} args
  * @returns {string}
  */
-/** ISO calendar date, the only form the dashboard's POSTED column parses. */
-const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
-
 export function buildPrompt({ kind, input, memory, today, postedAt }) {
   const mem = memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "";
   if (kind === "research") {
