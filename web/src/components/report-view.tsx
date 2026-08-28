@@ -13,6 +13,7 @@ import { ScoreMethodology } from "@/components/score-methodology";
 import { GeneratePdfButton } from "@/components/generate-pdf-button";
 import { ApplyButton } from "@/components/apply-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
+import { companyPresentation } from "@/lib/company-presentation.mjs";
 
 // Progressive disclosure of the report. The core writes lettered prose blocks
 // "## A) Role Summary" through "## G) Posting Legitimacy", plus unlettered
@@ -70,6 +71,7 @@ export function ReportView({
   const date = app?.date || field("Date");
   const archetype = field("Archetype");
   const url = field("URL");
+  const company = app ? companyPresentation(app) : null;
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
@@ -83,9 +85,9 @@ export function ReportView({
       <header className="mt-5">
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-faint">#{id}</p>
         <div className="mt-2 flex items-center gap-3">
-          <CompanyLogo name={app?.company ?? meta?.title ?? `Report #${id}`} size={40} />
+          <CompanyLogo name={company?.logoName ?? meta?.title ?? `Report #${id}`} size={40} />
           <h1 className="font-display text-3xl tracking-tight text-landing">
-            {app?.company ?? meta?.title ?? `Report #${id}`}
+            {company?.label ?? meta?.title ?? `Report #${id}`}
           </h1>
         </div>
         {app?.role && <p className="mt-1 text-muted">{app.role}</p>}

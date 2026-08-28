@@ -204,6 +204,7 @@ export function validateManifest(m, dir, dirName) {
     skill = m.skill;
   }
 
+
   return {
     id: m.id,
     apiVersion: 1,
@@ -593,9 +594,10 @@ export function lockGate(manifest, root) {
   }
 }
 
-export async function loadPlugins(kind, { root, dryRun = false }) {
+export async function loadPlugins(kind, { root, dryRun = false, pluginId = null }) {
   const cfg = await loadPluginConfig(root);
-  const manifests = discoverPlugins(pluginRoots(root), resolveSuccessorIds(root)).filter(m => m.hooks.includes(kind));
+  let manifests = discoverPlugins(pluginRoots(root), resolveSuccessorIds(root)).filter(m => m.hooks.includes(kind));
+  if (pluginId) manifests = manifests.filter(m => m.id === pluginId);
   const out = [];
   for (const manifest of manifests) {
     if (!pluginStatus(manifest, cfg).enabled) continue;
@@ -630,12 +632,12 @@ export async function loadDotenvOnce() {
  *
  * @param {string} kind
  * @param {*} payload   For provider this is unused; for ingest none; search a query; export a snapshot; notify a payload.
- * @param {{ root: string, dryRun?: boolean, timeoutMs?: number }} opts
+ * @param {{ root: string, dryRun?: boolean, timeoutMs?: number, pluginId?: string }} opts
  * @returns {Promise<Array<{ id: string, ok: boolean, result?: any, error?: string }>>}
  */
-export async function runHook(kind, payload, { root, dryRun = false, timeoutMs = DEFAULT_HOOK_TIMEOUT_MS }) {
+export async function runHook(kind, payload, { root, dryRun = false, timeoutMs = DEFAULT_HOOK_TIMEOUT_MS, pluginId = null }) {
   await loadDotenvOnce();
-  const loaded = await loadPlugins(kind, { root, dryRun });
+  const loaded = await loadPlugins(kind, { root, dryRun, pluginId });
   const results = [];
   for (const { id, hook, ctx } of loaded) {
     const invoke = kind === 'search'
@@ -656,6 +658,10 @@ export async function runHook(kind, payload, { root, dryRun = false, timeoutMs =
     }
   }
   return results;
+}
+
+export function filterResultsForId(results, id) {
+  return results.filter(r => r.id === id);
 }
 
 /**

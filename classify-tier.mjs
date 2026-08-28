@@ -13,10 +13,8 @@
  * Default tier is 'mid' if no keywords match.
  */
 
-import path from 'path';
-import { fileURLToPath } from 'url';
-
 import { validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 /**
  * Classifies a job title into exactly one seniority tier.
@@ -194,8 +192,7 @@ export function classifyTier(title) {
 export default classifyTier;
 
 // CLI and inline test mode
-const isDirect = process.argv[1] &&
-  (path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url)));
+const isDirect = isMainModule(import.meta.url);
 
 // The title is the only positional, so `--help` was classified as a job title
 // and answered `mid` at exit 0 (#2852). Validated up front via

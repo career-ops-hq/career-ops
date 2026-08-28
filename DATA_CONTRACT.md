@@ -22,6 +22,7 @@ These files contain your personal data, customizations, and work product. Update
 | `interview-prep/{company}-{role}.md` | Company-specific interview prep reports (written by `/career-ops interview-prep`) |
 | `interview-prep/sessions/*.md` | Interview sessions — real transcripts + mock sessions (sensitive: real names/companies; gitignored except scaffold). Drives `patterns` Step 1b targeting signal and `interview-redflag` analysis. Scaffold files (`README.md`, `.gitkeep`) are system-owned. |
 | `documents/*` | Your profile intake sources — master CV, LinkedIn export, diplomas, reference letters (PII — gitignored except scaffold; read locally by `intake.mjs`, see `modes/intake.md`). Scaffold files (`README.md`, `.gitkeep`) are system-owned. |
+| `data/.hired-share-state.json` | Hired Wall ask-state (asked/shared/later/never per hire) — the anti-nag memory; never committed, never read by anything but `hired-share.mjs` |
 | `data/intake-state.json` | Fingerprints of already-ingested intake sources (written by `node intake.mjs --commit`; makes re-runs propose only new material — safe to delete, next intake re-proposes everything) |
 | `portals.yml` | Your customized company list |
 | `config/plugins.yml` | Your plugin activation toggles (opt-in; seeded from `config/plugins.example.yml`) |
@@ -91,6 +92,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/pdf.md` | PDF generation instructions |
 | `modes/cover.md` | Cover letter generation instructions |
 | `modes/latex.md` | LaTeX/Overleaf CV export instructions |
+| `modes/text.md` | Tailored markdown CV instructions |
 | `modes/add.md` | CV addition (project/paper/role) instructions |
 | `modes/scan.md` | Portal scanner instructions |
 | `modes/batch.md` | Batch processing instructions |
@@ -173,3 +175,21 @@ These files contain system logic, scripts, templates, and instructions that impr
 **If a file is in the User Layer, no update process may read, modify, or delete it.**
 
 **If a file is in the System Layer, it can be safely replaced with the latest version from the upstream repo.**
+
+## Custom Data Directory
+
+By default, all User Layer files reside inside the project repository root. You can configure a separate, external directory for your personal data.
+
+### Resolution Precedence:
+1. **Environment Variables (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`):** Set this to the absolute or relative path of your custom data directory.
+2. **Marker File (`.career-ops-data`):** A repository-level marker file named `.career-ops-data` containing the path (absolute or relative) to the user data directory.
+3. **Repository Default:** Defaults to the codebase/repository root directory.
+
+When resolved, all User Layer files/directories (e.g. `cv.md`, `config/profile.yml`, `modes/_profile.md`, `modes/_custom.md`, `data/`, `reports/`, `output/`, `portals.yml`) will be resolved relative to that path. System Layer files continue to be resolved relative to the codebase/repository root, keeping code and personal data completely separate.
+
+### Tracker Path & Writes:
+- **`CAREER_OPS_TRACKER`** can be set to override the applications tracker file path directly (relative paths are resolved relative to the repository root).
+- **Read Resolution:** If no tracker override is set, reading resolves to `{DATA_ROOT}/data/applications.md` if it exists; otherwise falls back to `{DATA_ROOT}/applications.md`.
+- **Write Resolution:** All writes (including merge operations and first-run creation) target the canonical location `{DATA_ROOT}/data/applications.md`.
+
+

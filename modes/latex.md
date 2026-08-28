@@ -95,17 +95,17 @@ Write a JSON file with this structure. `build-cv-latex.mjs` handles template mer
 | `education[].location` | string | Institution location |
 | `education[].degree` | string | Degree name |
 | `education[].dates` | string | Date range |
-| `education[].coursework` | string[] | Optional — generates a coursework line if present |
+| `education[].coursework` | string[] | Optional — generates a coursework line if present. Renders as a bullet, so it supports the same `**…**` emphasis |
 | `experience[]` | object[] | Optional — omit the key or pass `[]` and the Work Experience section is dropped, header included. For candidates with no professional history yet (students, new graduates, career changers); never drop it to hide a gap |
 | `experience[].company` | string | From cv.md Experience |
 | `experience[].role` | string | Job title |
 | `experience[].location` | string | Work location |
 | `experience[].dates` | string | Date range |
-| `experience[].bullets` | string[] | Reordered and keyword-injected achievement bullets |
+| `experience[].bullets` | string[] | Reordered and keyword-injected achievement bullets. Wrap a span in `**…**` to emphasise it — the builder renders it as `\textbf{…}` after escaping (see **Markdown bold in bullets** below) |
 | `projects[].name` | string | From cv.md Projects |
 | `projects[].context` | string | Tech stack — appears next to project name |
 | `projects[].dates` | string | Date range (or empty) |
-| `projects[].bullets` | string[] | Selected project achievements |
+| `projects[].bullets` | string[] | Selected project achievements. Supports the same `**…**` emphasis |
 | `awards[].title` | string | Award name, from cv.md Awards / Honors |
 | `awards[].org` | string | Optional — issuing body, rendered after the title |
 | `awards[].year` | string | Optional — year, right-aligned |
@@ -132,6 +132,24 @@ Write a JSON file with this structure. `build-cv-latex.mjs` handles template mer
 | `→` | `$\rightarrow$` |
 
 **Exception:** URLs inside `\href{}` are NOT escaped by the LaTeX escaper, but `sanitizeUrl()` still validates the scheme (mailto/http/https) and removes dangerous characters to prevent injection.
+
+## Markdown Bold in Bullets
+
+`experience[].bullets`, `projects[].bullets` and `education[].coursework` accept `**…**` around a span you want emphasised — typically the quantified result a recruiter should catch in the six-second scan:
+
+```json
+"bullets": ["Cut p99 latency from 840 ms to **120 ms** across 14 services"]
+```
+
+renders as `\textbf{…}` in the `.tex`. This is the LaTeX half of the same support the HTML path has had since #1728, so **in bullets** one payload emphasises the same way in both output formats.
+
+**The support is bullet-scoped on this side.** Everything this builder emits inside a `\resumeItem` goes through it — `experience[].bullets`, `projects[].bullets`, and the `education[].coursework` line. Every other field (`projects[].name`, `projects[].context`, `awards[].title`, `skills[].category`, `skills[].items`) still renders `**` literally here, while the HTML path bolds them. Keep `**…**` out of those fields unless you are producing HTML only.
+
+**The escaping runs first, and that order is the safety property.** `escapeLatex()` neutralises every backslash and brace before the `**` markers are reinterpreted, so a literal `\textbf{...}` typed into a bullet stays inert text and a bold span keeps its `\&`, `\$`, `\%` escaping intact. Only `**`-delimited spans are affected; single asterisks and unmatched markers stay literal.
+
+**A bold span cannot contain a `*`.** `**tripled *3x* throughput**` matches nothing and ships the asterisks literally — no error, no warning. Rewrite it as `**tripled 3x throughput**` rather than nesting emphasis. The HTML path has the same limit (it is the same regex), so this is a rule about the payload, not about the output format.
+
+Emphasis is not a substitute for evidence — bold reorders attention, it does not add claims. The no-fabrication rule applies to bolded text exactly as it does to the rest of the bullet.
 
 ## ATS Rules (same as pdf mode)
 

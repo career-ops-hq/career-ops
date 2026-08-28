@@ -72,17 +72,20 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { asciiFold } from './lib/ascii-fold.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_CSV = join(CAREER_OPS, 'data/Connections.csv');
-const TRACKER_PATH = join(CAREER_OPS, 'data/applications.md');
-const PORTALS_PATH = join(CAREER_OPS, 'portals.yml');
-const CONTACTS_PATH = join(CAREER_OPS, 'data/contacts.tsv');
+const DATA_ROOT = getCareerOpsRoot();
+const DEFAULT_CSV = join(DATA_ROOT, 'data/Connections.csv');
+const TRACKER_PATH = join(DATA_ROOT, 'data/applications.md');
+const PORTALS_PATH = join(DATA_ROOT, 'portals.yml');
+const CONTACTS_PATH = join(DATA_ROOT, 'data/contacts.tsv');
 
 const args = process.argv.slice(2);
 
@@ -934,6 +937,6 @@ function main() {
 // Entry guard (repo convention, cf. contacts.mjs / stats.mjs / invite-match.mjs):
 // without it, importing this module to unit-test its exports runs the whole CLI
 // and exits the test process.
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (isMainModule(import.meta.url)) {
   process.exit(main());
 }

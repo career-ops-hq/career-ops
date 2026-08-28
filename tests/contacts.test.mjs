@@ -18,39 +18,27 @@
  * Run: node contacts.test.mjs
  */
 
-import { parseContacts, escapeVcard, foldLine, slug, uidPart, normalizeForHash, contactUid, contactToVcard, buildVcf } from './contacts.mjs';
+import { parseContacts, escapeVcard, foldLine, slug, uidPart, normalizeForHash, contactUid, contactToVcard, buildVcf } from '../contacts.mjs';
 import { execFileSync, spawnSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, copyFileSync, readFileSync, existsSync, realpathSync, symlinkSync } from 'fs';
 import { tmpdir } from 'os';
+import { pass, fail } from './helpers.mjs';
 
-let passed = 0;
-let failed = 0;
-const failures = [];
+console.log('\ncontacts.mjs — phonebook and vCard export');
+
 
 function ok(label, cond) {
-  if (cond) {
-    passed++;
-  } else {
-    failed++;
-    failures.push(label);
-    console.log(`  FAIL: ${label}`);
-  }
+  if (cond) pass(label);
+  else fail(label);
 }
 
 function eq(label, actual, expected) {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
-  if (a === e) {
-    passed++;
-  } else {
-    failed++;
-    failures.push(label);
-    console.log(`  FAIL: ${label}`);
-    console.log(`    expected: ${e}`);
-    console.log(`    actual:   ${a}`);
-  }
+  if (a === e) pass(label);
+  else fail(`${label} — expected ${e}, got ${a}`);
 }
 
 const row = (cells) => cells.join('\t');
@@ -314,7 +302,7 @@ ok('the LATER occurrence wins', dupVcf.includes('fresh line') && !dupVcf.include
 // ============================================================================
 console.log('\n--- 9. CLI behavior ---');
 
-const scriptPath = join(dirname(fileURLToPath(import.meta.url)), 'contacts.mjs');
+const scriptPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'contacts.mjs');
 
 try {
   execFileSync('node', [scriptPath, '--self-test'], { encoding: 'utf-8', timeout: 10000 });
@@ -351,15 +339,26 @@ ok('--help --bogus writes nothing to stdout', helpBogusR.stdout === '');
 // data/contacts.tsv and output/ under the temp dir, no dependence on whatever
 // the caller's real workspace contains — a contributor with a real phonebook
 // gets the same results as CI.
-// realpathSync: macOS tmpdir() is a symlink (/var/folders → /private/var); Node
-// realpath-resolves the ESM entry but pathToFileURL(argv[1]) doesn't, so an
-// unresolved temp path silently defeats the copied script's main-guard.
-const tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), 'contacts-cli-')));
+// NOT realpathed, deliberately. macOS tmpdir() is a symlink (/var/folders →
+// /private/var), and this used to be resolved to keep the copied script's
+// hand-rolled main-guard from silently defeating itself. That guard is now
+// lib/is-main-module.mjs, which realpaths both sides (#3170) — and contacts.mjs
+// canonicalizes internally for its own containment checks (realpath-containment
+// right before the write), so nothing here needs a pre-resolved root.
+//
+// This is removal of a dead workaround, NOT coverage of #3170: whether tmpdir()
+// is a symlink at all is a platform accident (macOS yes, Linux CI usually no).
+// The deliberate coverage is in tests/main-guard-convention.test.mjs.
+const tmpRoot = mkdtempSync(join(tmpdir(), 'contacts-cli-'));
 const tmpScript = join(tmpRoot, 'contacts.mjs');
 try {
   copyFileSync(scriptPath, tmpScript);
+  // contacts.mjs resolves user-layer paths via path-resolver.mjs
+  // (CAREER_OPS_ROOT), so the fixture carries that too.
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'path-resolver.mjs'), join(tmpRoot, 'path-resolver.mjs'));
   mkdirSync(join(tmpRoot, 'lib'), { recursive: true });
-  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lib/cli-flags.mjs'), join(tmpRoot, 'lib/cli-flags.mjs'));
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/cli-flags.mjs'), join(tmpRoot, 'lib/cli-flags.mjs'));
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/is-main-module.mjs'), join(tmpRoot, 'lib/is-main-module.mjs'));
   mkdirSync(join(tmpRoot, 'data'), { recursive: true });
   writeFileSync(join(tmpRoot, 'data/contacts.tsv'), [
     '# name\tcompany\ttype\ttitle\tphone\temail\tlinkedin\ttracker\tnotes',
@@ -470,11 +469,15 @@ try {
 }
 
 // Empty store: fresh temp root with NO data/contacts.tsv at all.
-const emptyRoot = realpathSync(mkdtempSync(join(tmpdir(), 'contacts-empty-')));
+const emptyRoot = mkdtempSync(join(tmpdir(), 'contacts-empty-'));
 try {
   copyFileSync(scriptPath, join(emptyRoot, 'contacts.mjs'));
+  // contacts.mjs resolves user-layer paths via path-resolver.mjs
+  // (CAREER_OPS_ROOT), so the fixture carries that too.
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'path-resolver.mjs'), join(emptyRoot, 'path-resolver.mjs'));
   mkdirSync(join(emptyRoot, 'lib'), { recursive: true });
-  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lib/cli-flags.mjs'), join(emptyRoot, 'lib/cli-flags.mjs'));
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/cli-flags.mjs'), join(emptyRoot, 'lib/cli-flags.mjs'));
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/is-main-module.mjs'), join(emptyRoot, 'lib/is-main-module.mjs'));
   const emptyJson = JSON.parse(execFileSync('node', [join(emptyRoot, 'contacts.mjs')], { encoding: 'utf-8', timeout: 10000 }));
   eq('missing store: JSON total = 0', emptyJson.total, 0);
   eq('missing store: contacts = []', emptyJson.contacts, []);
@@ -484,16 +487,3 @@ try {
 } finally {
   rmSync(emptyRoot, { recursive: true, force: true });
 }
-
-// ============================================================================
-// RESULTS
-// ============================================================================
-console.log(`\n${'='.repeat(78)}`);
-console.log(`  Results: ${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  console.log(`\n  Failed tests:`);
-  for (const f of failures) console.log(`    - ${f}`);
-}
-console.log(`${'='.repeat(78)}`);
-
-process.exit(failed > 0 ? 1 : 0);

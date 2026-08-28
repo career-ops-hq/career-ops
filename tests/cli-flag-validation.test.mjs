@@ -6,7 +6,7 @@
 // the script reports a result for inputs nobody asked for at exit 0. Already
 // fixed in scan-ats-full.mjs (#1633/#1635), reply-watch.mjs (#2743/#2745),
 // dedup-tracker.mjs (#2744/#2746), scan.mjs (#2270), doctor.mjs (#2874),
-// and fix-slugs.mjs (#2980).
+// fix-slugs.mjs (#2980), and application-artifacts.mjs (#2774).
 //
 // HERMETIC: paths use tmpdir fixtures; nothing reads or writes the real data.
 import { test } from 'node:test';
@@ -36,6 +36,7 @@ const SCRIPTS = [
   ['fix-slugs.mjs', '--fle'],
   ['linkedin-join.mjs', '--csvv'],
   ['linkedin-join.mjs', '--sinse'],
+  ['application-artifacts.mjs', '--reprot'],
 ];
 
 for (const [script, typo] of SCRIPTS) {
@@ -66,6 +67,31 @@ test('fix-slugs.mjs --help --bogus still errors', () => {
   assert.match(r.all, /unrecognized flag/i);
 });
 
+
+test('application-artifacts.mjs --help exits 0 and prints usage', () => {
+  const r = runScript('application-artifacts.mjs', '--help');
+  assert.equal(r.status, 0, `application-artifacts.mjs --help exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'application-artifacts.mjs --help printed no usage block');
+});
+
+test('application-artifacts.mjs -h exits 0 and prints usage', () => {
+  const r = runScript('application-artifacts.mjs', '-h');
+  assert.equal(r.status, 0, `application-artifacts.mjs -h exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'application-artifacts.mjs -h printed no usage block');
+});
+
+test('application-artifacts.mjs --help --bogus still errors', () => {
+  const r = runScript('application-artifacts.mjs', '--help', '--bogus');
+  assert.equal(r.status, 1, `application-artifacts.mjs --help --bogus exited ${r.status}, want 1`);
+  assert.match(r.all, /unrecognized flag/i);
+});
+
+// --help must not reach the required-argument check: before #2774 the flag was
+// swallowed by parseArgs's strict mode and reported as an unknown option.
+test('application-artifacts.mjs --help wins over the missing-required-args error', () => {
+  const r = runScript('application-artifacts.mjs', '--help');
+  assert.doesNotMatch(r.all, /Unknown option/i, '--help was still treated as an unrecognized option');
+});
 
 test('fix-slugs rejects unknown flags before checking or reading portals file', () => {
   const r = runScript('fix-slugs.mjs', '--file', join(tmpdir(), 'non-existent-portals.yml'), '--unknown-flag');
@@ -175,6 +201,30 @@ test('archive-posting: --role --dry-run does not set the role slug to "--dry-run
   const r = runScript('archive-posting.mjs', 'https://example.com/job', '--role', '--dry-run');
   assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
   assert.match(r.all, /--role requires a value/);
+});
+
+// application-artifacts.mjs opts in rather than carrying its own guard, so
+// every one of its value flags relies on requireOperand. `--report --help` is
+// the shape that matters: without the option it printed usage at exit 0 and
+// the malformed flag was never named.
+test('application-artifacts.mjs rejects a value flag with no operand', () => {
+  for (const flag of ['--report', '--company', '--role', '--version', '--root']) {
+    const r = runScript('application-artifacts.mjs', flag);
+    assert.equal(r.status, 1, `bare ${flag} exited ${r.status}, want 1`);
+    assert.ok(r.all.includes(`${flag} requires a value`), `bare ${flag} was not reported`);
+  }
+});
+
+test('application-artifacts: --report --help does not print usage at exit 0', () => {
+  const r = runScript('application-artifacts.mjs', '--report', '--help');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--report requires a value/);
+});
+
+test('application-artifacts: --report --company does not read "--company" as the value', () => {
+  const r = runScript('application-artifacts.mjs', '--report', '--company', 'Acme');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--report requires a value/);
 });
 
 // linkedin-join.mjs hand-rolled its argv before #3200 review, so `--csv=<path>`

@@ -35,10 +35,43 @@ try {
     fail(`tag stripping = ${JSON.stringify(htmlToText('<p>Hello <b>world</b></p>'))}`);
   }
 
+  const quotedAngles = htmlToText(
+    `<p>Requires 5&amp;gt;3 years <a title="x > y" data-note='a > b' href="z">apply here</a> today</p>`
+  );
+  if (quotedAngles === 'Requires 5>3 years apply here today') {
+    pass('htmlToText() keeps quoted angle brackets inside tag attributes');
+  } else {
+    fail(`quoted angle attribute = ${JSON.stringify(quotedAngles)}`);
+  }
+
+  const encodedQuotes = htmlToText(
+    `<a title="say &quot;hello &#34;there > world&#x22;&quot;" data-note='it&apos;s &#39;still > safe&#x27;&apos;'>apply</a>`
+  );
+  if (encodedQuotes === 'apply') {
+    pass('htmlToText() keeps encoded quotes from becoming attribute delimiters');
+  } else {
+    fail(`encoded quote attribute = ${JSON.stringify(encodedQuotes)}`);
+  }
+
+  if (htmlToText('a <> b') === 'a <> b') {
+    pass('htmlToText() preserves empty angle brackets in plain text');
+  } else {
+    fail(`empty angle brackets = ${JSON.stringify(htmlToText('a <> b'))}`);
+  }
+
   if (htmlToText('<style>.x{color:red}</style><script>evil()</script><p>Body</p>') === 'Body') {
     pass("htmlToText() drops <script>/<style> WITH their contents");
   } else {
     fail(`media strip = ${JSON.stringify(htmlToText('<style>.x{color:red}</style><script>evil()</script><p>Body</p>'))}`);
+  }
+
+  const quotedMedia = htmlToText(
+    `<script data-note="x > </script>">evil()</script><style data-note='x > </style>'>bad{}</style><p>Body</p>`
+  );
+  if (quotedMedia === 'Body') {
+    pass('htmlToText() strips media with quoted angle brackets in attributes');
+  } else {
+    fail(`quoted media attribute = ${JSON.stringify(quotedMedia)}`);
   }
 
   // The double-decode case that motivated greenhouse's pipeline: entity-
