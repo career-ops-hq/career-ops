@@ -57,6 +57,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { collectMjsFiles } from './lib/mjs-files.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -222,14 +223,29 @@ console.log('\n🧪 career-ops test suite\n');
 
 console.log('1. Syntax checks');
 
-const mjsFiles = readdirSync(ROOT).filter(f => f.endsWith('.mjs'));
+// RECURSIVE, and sharing its walk with `npm run lint` (#3419). This read the
+// repository root non-recursively, which covered 121 of the ~575 .mjs files
+// here and printed a `syntax OK` line for each one — so the 263 files under
+// tests/ were absent from a log that looked complete. It also narrowed by one
+// every time a file moved out of the root, silently: #3306 moved eleven suites
+// into tests/ and #3388 nine, and the shortfall was only noticed later as a
+// two-check arithmetic discrepancy in #3411. Both scopes now come from the
+// same collector, so neither can drift from the other again.
+const mjsFiles = collectMjsFiles(ROOT).map(f => f.slice(ROOT.length + 1).replace(/\\/g, '/'));
+
+// State the scope in one line. The per-file `syntax OK` output is what hid the
+// old shortfall: a number the reader can compare against `npm run lint`'s own
+// total makes a narrowing visible at a glance instead of requiring someone to
+// diff two runs' pass labels.
+console.log(`  (${mjsFiles.length} .mjs files, recursive from the repository root)`);
 
 // `node --check` parses a file and exits; it runs no user code, touches no
 // shared state, and its result depends on nothing but that one file. Spawning
-// the 100+ root scripts one at a time was pure process-startup latency, so they
-// go through a bounded pool instead (#2387). Results are collected by index and
-// reported afterwards in the original readdir order, so the log stays
-// byte-identical to the sequential version regardless of completion order.
+// the files one at a time was pure process-startup latency, so they go through
+// a bounded pool instead (#2387) — which is also what keeps the recursive scope
+// above a wall-clock non-event. Results are collected by index and reported
+// afterwards in collector order, so the log stays byte-identical to the
+// sequential version regardless of completion order.
 const SYNTAX_POOL_SIZE = 8;
 const execFileAsync = promisify(execFile);
 const syntaxOk = new Array(mjsFiles.length);
@@ -282,6 +298,23 @@ console.log('\n2. Script execution (graceful on empty data)');
 // before the kill: at 0.75 a 30s script warns at 22.5s, nearly a full run of
 // headroom.
 const SLOW_SCRIPT_WARN_FRACTION = 0.75;
+
+/**
+ * Whether a failed run died with an UNCAUGHT exception rather than exiting.
+ *
+ * The two are not the same outcome and only one of them is ever "expected".
+ * Node prints an uncaught error as `SomeError: message` at the start of a line
+ * followed by a stack; a script reporting its own problem and exiting non-zero
+ * prints neither. Both parts are required, so a script whose own diagnostic
+ * happens to start with "Error: " is not mistaken for a crash.
+ *
+ * @param {{stderr?: string}|null} failure
+ * @returns {boolean}
+ */
+function crashedBeforeRunning(failure) {
+  const stderr = String(failure?.stderr ?? '');
+  return /^[A-Za-z]*Error(?: \[[^\]]+\])?: /m.test(stderr) && /\n\s+at /.test(stderr);
+}
 
 const scripts = [
   { name: 'cv-sync-check.mjs', expectExit: 1, allowFail: true }, // fails without cv.md (normal in repo)
@@ -342,15 +375,6 @@ const scripts = [
   // starts taking half a minute still fails loudly instead of inheriting a
   // budget sized for this one.
   { name: 'tracker-writer-lock-tests.mjs', expectExit: 0, timeoutMs: 180_000 },
-  // Root-level standalone suites shipped in SYSTEM_PATHS but previously never
-  // executed by CI (issue #1624). All are fast (<0.5s each), so they run in
-  // both quick and full mode like their siblings above.
-  //
-  // The nine *.test.mjs that used to sit here moved to tests/ (#3306) and are
-  // auto-discovered. These two remain because they are named test-*.mjs rather
-  // than *.test.mjs, so discovery does not match them.
-  { name: 'test-trust-validator.mjs', expectExit: 0 },
-  { name: 'test-salary-filter.mjs', expectExit: 0 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
   // The bare coverage run is NOT here on purpose: this section executes each
@@ -480,8 +504,16 @@ try {
     }
     if (result !== null) {
       pass(`${name} runs OK`);
-    } else if (allowFail) {
+    } else if (allowFail && !crashedBeforeRunning(lastRunFailure())) {
       warn(`${name} exited with error (expected without user data)`);
+    } else if (allowFail) {
+      // allowFail says "a non-zero exit is expected here", never "any outcome
+      // is fine". A script that dies with an uncaught exception did not run at
+      // all, and reporting that as the expected failure is how #3440 sat in
+      // main: cv-sync-check.mjs threw a ReferenceError at module scope, exited
+      // 1 like a missing cv.md, and the suite printed the reassuring warning
+      // for a script that never reached a single check.
+      fail(`${name} crashed before running — allowFail covers an expected exit, not an uncaught error${formatRunFailure()}`);
     } else {
       // Include the child's exit status and streams. Without them a CI-only
       // failure arrives as a bare `<name> crashed`: no stack, no assertion
@@ -4598,6 +4630,19 @@ if (
   pass('scan.md skips expensive levels after successful local parser');
 } else {
   fail('scan.md missing local_parser_ok skip rules for agent scan');
+}
+
+// #2551's fix landed in modes/pipeline.md only, so modes/scan.md kept ordering parallel
+// Playwright batches at Level 1 — the highest-volume browser-backed step (#3366). The
+// marker assertion is per-file for that reason: a rule that holds in one mode file and
+// not in another is exactly what went unnoticed.
+if (
+  scanMode.includes('**Level 1 — Playwright Scan** (sequential — NEVER parallel Playwright)') &&
+  !scanMode.includes('**Level 1 — Playwright Scan** (parallel')
+) {
+  pass('scan.md Level 1 runs Playwright sequentially, matching the shared-session rule (#3366)');
+} else {
+  fail('scan.md Level 1 still orders parallel Playwright batches, contradicting pipeline.md and _shared.md (#3366)');
 }
 
 // Guard against scan.md's manual-parse conventions drifting from what providers/*.mjs
