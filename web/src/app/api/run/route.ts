@@ -3,6 +3,7 @@
 // on it, #2085), while the PDF render is a plain Node child process with no CLI
 // sandbox in the way (#2172) and so passes `spawn` itself to renderAndMarkPdf.
 import { spawn } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -131,7 +132,12 @@ export async function POST(req: Request) {
       ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
       : undefined;
   const nativeRoleSchema = kind === "role-resume" && cliId === "codex";
-  const prompt = buildPrompt({ kind, input: promptInput, memory: readMemory(), today, postedAt, nativeRoleSchema, roleSourceCv: roleSource?.cv || "" });
+  const projectRoot = careerOpsRoot();
+  const prompt = buildPrompt({ kind, input: promptInput, memory: readMemory(), today, postedAt, nativeRoleSchema, roleSourceCv: roleSource?.cv || "", projectRoot });
+  if (manualJob?.description && (!prompt.includes("<manual-job-description>") || !prompt.includes(JSON.stringify(manualJob.description)))) {
+    return new Response(JSON.stringify({ error: "Manual job description was not included in the evaluation prompt." }), { status: 500, headers: { "Content-Type": "application/json" } });
+  }
+  const manualPromptSha256 = manualJob ? crypto.createHash("sha256").update(prompt, "utf8").digest("hex") : "";
 
   const isClaude = cliId === "claude";
   // Which tools each kind gets, and the whole claude argv, live in
@@ -156,7 +162,9 @@ export async function POST(req: Request) {
   // stdin contract for manual evaluations; ordinary evaluation remains on its
   // established argv path.
   const promptViaStdin = cliId === "codex" && (kind === "role-resume" || !!manualJob);
-  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt, kind, { outputLastMessage: codexFinalFile, outputSchema: roleOutputSchema, promptViaStdin });
+  const isolatedManualCodex = cliId === "codex" && !!manualJob;
+  const manualWorkerDir = isolatedManualCodex ? fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-manual-worker-")) : undefined;
+  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt, kind, { outputLastMessage: codexFinalFile, outputSchema: roleOutputSchema, promptViaStdin, isolatedWorkerCwd: manualWorkerDir, additionalWritableDir: isolatedManualCodex ? projectRoot : undefined });
 
   // For write-needing kinds, snapshot reports/ so we can verify the worker
   // actually persisted (non-Claude CLIs lack Write auth and silently no-op).
@@ -185,7 +193,23 @@ export async function POST(req: Request) {
   // every CLI-invoking route (assistant, explore/ai, cv/ingest, the apply planners),
   // which had the identical bug, and puts it behind one tested helper so it cannot
   // drift back in on any single call site.
-  const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env }, promptViaStdin ? { stdinMode: "pipe", stdinInput: prompt } : {});
+  const child = spawnHeadlessCli(binPath, args, { cwd: manualWorkerDir || projectRoot, env: process.env }, promptViaStdin ? { stdinMode: "pipe", stdinInput: prompt } : {});
+  const promptWrittenToStdin = !!(child as typeof child & { careerOpsPromptWrittenToStdin?: boolean }).careerOpsPromptWrittenToStdin;
+  if (process.env.NODE_ENV !== "production" && manualJob) {
+    console.debug("[career-ops manual prompt spawn]", {
+      manualJobDetected: true,
+      manualPromptIsolationPresent: prompt.includes("MANUAL WEB WORKER ISOLATION"),
+      manualPromptHasDescription: prompt.includes("THE JOB DESCRIPTION IS PRESENT BELOW"),
+      manualPromptBlocksCareerOpsSkill: prompt.includes("Do not invoke or announce the career-ops skill"),
+      promptBytes: Buffer.byteLength(prompt, "utf8"),
+      promptViaStdin,
+      manualPromptSha256,
+      argvEndsWithStdinMarker: args.at(-1) === "-",
+      promptPresentInArgv: args.includes(prompt),
+      promptWrittenToStdin,
+      isolatedWorkerCwd: !!manualWorkerDir,
+    });
+  }
   // Decode once on the stream, not per chunk. Buffer#toString() decodes each chunk
   // independently, so a chunk boundary falling inside a multi-byte UTF-8 sequence
   // yields a replacement character and mis-decodes the bytes after it. Those bytes
@@ -300,6 +324,7 @@ export async function POST(req: Request) {
           if (killer) clearTimeout(killer);
           releaseWriteTokenOnce();
           if (codexFinalDir) { try { fs.rmSync(codexFinalDir, { recursive: true, force: true }); } catch { /* best effort */ } }
+          if (manualWorkerDir) { try { fs.rmSync(manualWorkerDir, { recursive: true, force: true }); } catch { /* best effort */ } }
           try { controller.close(); } catch { /* */ }
         }
       };

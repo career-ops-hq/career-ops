@@ -42,7 +42,9 @@ export function spawnHeadlessCli(binPath, args, options, runtime = {}) {
       else error.message = `Codex CLI failed to start on Windows: ${error.message}`;
     });
   }
-  if (runtime.stdinMode === "pipe") child.stdin?.end(runtime.stdinInput ?? "");
-  else child.stdin?.end();
+  if (runtime.stdinMode === "pipe") {
+    child.stdin?.end(runtime.stdinInput ?? "");
+    Object.defineProperty(child, "careerOpsPromptWrittenToStdin", { value: !!child.stdin, enumerable: false });
+  } else child.stdin?.end();
   return child;
 }

@@ -187,7 +187,10 @@ const GENERIC_FATAL_STDERR_RE =
  * @returns {string[]}
  */
 export function codexStreamArgs(prompt, kind, options = {}) {
-  return ["exec", "--json", "--color", "never", ...(kind === "role-resume" ? ["--sandbox", "read-only", "--ephemeral"] : []), ...(options.outputSchema ? ["--output-schema", options.outputSchema] : []), ...(options.outputLastMessage ? ["--output-last-message", options.outputLastMessage] : []), options.promptViaStdin ? "-" : prompt];
+  const isolatedWorker = options.isolatedWorkerCwd
+    ? ["--sandbox", "workspace-write", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--cd", options.isolatedWorkerCwd, ...(options.additionalWritableDir ? ["--add-dir", options.additionalWritableDir] : []), "--skip-git-repo-check"]
+    : [];
+  return ["exec", "--json", "--color", "never", ...isolatedWorker, ...(kind === "role-resume" ? ["--sandbox", "read-only", "--ephemeral"] : []), ...(options.outputSchema ? ["--output-schema", options.outputSchema] : []), ...(options.outputLastMessage ? ["--output-last-message", options.outputLastMessage] : []), options.promptViaStdin ? "-" : prompt];
 }
 
 /**
