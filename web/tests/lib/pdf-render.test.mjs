@@ -152,7 +152,7 @@ test("spawnBuildCvHtml times out and terminates a hung child", async () => {
     if (signal === "SIGTERM") sawTerm();
     return true;
   };
-  const timeoutMs = 50;
+  const timeoutMs = 500;
   const resultPromise = spawnBuildCvHtml({
     spawnFn: () => child,
     execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs,
@@ -179,7 +179,7 @@ test("spawnBuildCvHtml escalates a timed-out child that ignores SIGTERM", async 
     if (signal === "SIGKILL") queueMicrotask(() => child.emit("close", null));
     return true;
   };
-  const timeoutMs = 50;
+  const timeoutMs = 500;
   const result = await spawnBuildCvHtml({
     spawnFn: () => child,
     execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs,
@@ -206,7 +206,7 @@ test("spawnBuildCvHtml does not treat a signal-delivery error as child exit", as
     }
     return signal === "SIGKILL";
   };
-  const timeoutMs = 50;
+  const timeoutMs = 500;
   const resultPromise = spawnBuildCvHtml({
     spawnFn: () => child,
     execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs,
