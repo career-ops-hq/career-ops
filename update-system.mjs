@@ -732,6 +732,62 @@ function gitQuiet(...args) {
 }
 
 /**
+ * The enclosing repository's toplevel when ROOT is not a git toplevel itself,
+ * or null when ROOT is its own toplevel (or not inside any worktree at all).
+ *
+ * Every git call in this file runs with `cwd: ROOT` and assumes that resolves
+ * to the career-ops checkout. An install with no `.git` of its own that sits
+ * INSIDE another repository — a ZIP unpacked into an existing project — breaks
+ * that silently: git walks up, finds the outer repo, and every rev-parse,
+ * fetch, branch and checkout lands there, with pathspecs failing because at
+ * that root the files are prefixed by the install's subpath (#3334). Callers
+ * use this to refuse before the first side effect.
+ *
+ * A ROOT inside no worktree at all returns null: that layout has no foreign
+ * repo to damage, and each command already has its own handling for git
+ * being unavailable.
+ *
+ * @param {string} [root=ROOT] - Directory to test.
+ * @returns {string|null} The foreign toplevel path, or null.
+ */
+export function gitToplevelMismatch(root = ROOT) {
+  let toplevel;
+  try {
+    toplevel = gitIn(root, 'rev-parse', '--show-toplevel');
+  } catch {
+    return null;
+  }
+  if (!toplevel) return null;
+  // Realpath both sides: git resolves symlinks and reports on-disk casing
+  // (macOS /tmp -> /private/tmp; Windows 8.3 names), while `root` keeps
+  // whatever spelling the process was launched with. Same policy as the CLI
+  // guard at the bottom of this file. On a realpath failure fall back to
+  // resolve(): a false MISMATCH refuses an update, a false match fetches into
+  // a stranger's repo, so the fallback only ever errs toward refusing.
+  const canonicalize = realpathSync.native ?? realpathSync;
+  let same;
+  try {
+    same = canonicalize(toplevel) === canonicalize(root);
+  } catch {
+    same = resolve(toplevel) === resolve(root);
+  }
+  return same ? null : toplevel;
+}
+
+/**
+ * Throw when git operations from ROOT would land in an enclosing repository.
+ * First statement of apply() and rollback(); check() reports a status instead.
+ */
+function assertOwnGitToplevel() {
+  const foreignToplevel = gitToplevelMismatch();
+  if (foreignToplevel) {
+    throw new Error(
+      `career-ops at ${ROOT} is not a git checkout of its own, so git operations would land in the enclosing repository at ${foreignToplevel} — this happens when the install was unpacked from a ZIP or copied without its .git directory. Nothing was changed. To make updates work, clone career-ops fresh (git clone ${CANONICAL_REPO}) and move your user-layer files (cv.md, config/, data/, reports/ — see DATA_CONTRACT.md) into the new clone.`,
+    );
+  }
+}
+
+/**
  * Paths the target manifest ships that did not materialize on disk.
  *
  * apply() reports success without checking that the checkout loop actually
@@ -1336,6 +1392,18 @@ async function check() {
     return;
   }
 
+  // Before any git call: on an install nested inside a foreign repository the
+  // rev-parse below reads the OUTER repo's HEAD and the drift fetch writes the
+  // OUTER repo's FETCH_HEAD, so check reports a phantom system-files-changed
+  // forever on a byte-identical install (#3334). Report the layout as its own
+  // status instead; agents ignore unknown statuses by contract (AGENTS.md),
+  // and apply() refuses the same layout with the actionable message.
+  const foreignToplevel = gitToplevelMismatch();
+  if (foreignToplevel) {
+    console.log(JSON.stringify({ status: 'not-a-git-toplevel', local: localVersion(), toplevel: foreignToplevel }));
+    return;
+  }
+
   const local = localVersion();
   let remote = '';
   let releaseVersion = '';
@@ -1605,6 +1673,7 @@ export function reconcileGitignore(localText, upstreamText) {
 // ── APPLY ───────────────────────────────────────────────────────
 
 async function apply() {
+  assertOwnGitToplevel();
   const local = localVersion();
   // --force overwrites system files this install edited locally (#2337). The
   // env var carries the flag across the self-reexec, which re-invokes the
@@ -2099,6 +2168,9 @@ async function apply() {
 // ── ROLLBACK ────────────────────────────────────────────────────
 
 function rollback() {
+  // Same precondition as apply(): a nested .git-less install would look its
+  // backup branches up — and check files out — in the enclosing repo (#3334).
+  assertOwnGitToplevel();
   // Find most recent backup branch
   try {
     const branches = git('for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads/backup-pre-update-*');
