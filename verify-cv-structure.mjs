@@ -198,10 +198,18 @@ export function checkLocationDescriptors(payloadExperience, cvMdExperience) {
  */
 export function verifyStructure(payload, cvMdText) {
   const cvMdExperience = parseCvMdExperience(cvMdText);
-  const payloadExperience = Array.isArray(payload.experience) ? payload.experience : [];
   if (cvMdExperience.length === 0) {
     return { verdict: 'unverified', orderViolations: [], descriptorViolations: [] };
   }
+  // A present, non-array `experience` (null, an object, a string, ...) is a
+  // malformed payload, not "no experience" — silently coercing it to []
+  // would let checkExperienceOrder/checkLocationDescriptors find nothing to
+  // compare and report a false 'pass'. The CLI already rejects this before
+  // ever calling verifyStructure(); this guard protects any other caller.
+  if (payload.experience !== undefined && !Array.isArray(payload.experience)) {
+    return { verdict: 'unverified', orderViolations: [], descriptorViolations: [] };
+  }
+  const payloadExperience = Array.isArray(payload.experience) ? payload.experience : [];
   const orderViolations = checkExperienceOrder(payloadExperience, cvMdExperience);
   const descriptorViolations = checkLocationDescriptors(payloadExperience, cvMdExperience);
   return {
@@ -383,6 +391,8 @@ function runSelfTest() {
     mkdirSync(dirAsSourcePath);
     const nullEntryPayloadPath = join(selfTestDir, 'null-entry-payload.json');
     writeFileSync(nullEntryPayloadPath, JSON.stringify({ experience: [null, ...correctOrder] }), 'utf-8');
+    const nonArrayExperiencePath = join(selfTestDir, 'non-array-experience-payload.json');
+    writeFileSync(nonArrayExperiencePath, JSON.stringify({ experience: null }), 'utf-8');
 
     const origError = console.error;
     const origWarn = console.warn;
@@ -390,11 +400,12 @@ function runSelfTest() {
     console.error = () => {};
     console.warn = () => {};
     console.log = () => {};
-    let nullExit, dirSourceExit, nullEntryExit;
+    let nullExit, dirSourceExit, nullEntryExit, nonArrayExperienceExit;
     try {
       nullExit = runCli([nullPayloadPath, '--source', cvMdPath]);
       dirSourceExit = runCli([validPayloadPath, '--source', dirAsSourcePath]);
       nullEntryExit = runCli([nullEntryPayloadPath, '--source', cvMdPath]);
+      nonArrayExperienceExit = runCli([nonArrayExperiencePath, '--source', cvMdPath]);
     } finally {
       console.error = origError;
       console.warn = origWarn;
@@ -403,7 +414,15 @@ function runSelfTest() {
     equal('CLI rejects a null JSON payload instead of throwing', nullExit, 1);
     equal('CLI rejects an unreadable (directory) --source instead of throwing', dirSourceExit, 1);
     equal('CLI rejects a null entry inside payload.experience instead of throwing', nullEntryExit, 1);
+    equal('CLI rejects a non-array payload.experience instead of a false pass', nonArrayExperienceExit, 1);
   }
+
+  // verifyStructure() itself must not silently coerce a present, non-array
+  // payload.experience into an empty array — that would report a false
+  // 'pass' against a recognized cv.md without ever checking the payload.
+  const nonArrayExperienceResult = verifyStructure({ experience: 'not an array' }, cvMd);
+  equal('verifyStructure never reports pass for a non-array experience value',
+    nonArrayExperienceResult.verdict === 'pass', false);
 
   console.log(`verify-cv-structure self-test: ${passed} passed, ${failed} failed`);
   return failed ? 1 : 0;
@@ -451,6 +470,11 @@ export function runCli(args = process.argv.slice(2)) {
   }
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
     console.error(`ERROR: payload must be a JSON object, got ${payload === null ? 'null' : Array.isArray(payload) ? 'an array' : typeof payload}: ${targetArg}`);
+    return 1;
+  }
+  if ('experience' in payload && payload.experience !== undefined && !Array.isArray(payload.experience)) {
+    const got = payload.experience === null ? 'null' : typeof payload.experience;
+    console.error(`ERROR: payload.experience must be an array, got ${got}: ${targetArg}`);
     return 1;
   }
   if (Array.isArray(payload.experience)) {
