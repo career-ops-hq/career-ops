@@ -92,6 +92,16 @@ export function isFatalCodexStderr(line) {
   return FATAL_AUTH_STDERR_RE.test(line) || isFatalQuotaStderr(line);
 }
 
+export function isCodexInvalidSchemaError(value) {
+  return /invalid_json_schema|invalid schema for response_format/i.test(String(value ?? ""));
+}
+
+/** Schema rejection text contains schema metadata, not candidate content. */
+export function codexInvalidSchemaMessage(value) {
+  const message = String(value ?? "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "").trim();
+  return isCodexInvalidSchemaError(message) ? message : "";
+}
+
 /**
  * Whether one Claude Code stderr chunk should be treated as a fatal error.
  *
@@ -154,8 +164,8 @@ const GENERIC_FATAL_STDERR_RE =
  * @param {string} prompt
  * @returns {string[]}
  */
-export function codexStreamArgs(prompt) {
-  return ["exec", "--json", "--color", "never", prompt];
+export function codexStreamArgs(prompt, kind, options = {}) {
+  return ["exec", "--json", "--color", "never", ...(kind === "role-resume" ? ["--sandbox", "read-only", "--ephemeral"] : []), ...(options.outputSchema ? ["--output-schema", options.outputSchema] : []), ...(options.outputLastMessage ? ["--output-last-message", options.outputLastMessage] : []), options.promptViaStdin ? "-" : prompt];
 }
 
 /**

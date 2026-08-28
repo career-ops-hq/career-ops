@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Check, X, Loader2, AlertTriangle } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
+import { isWorkerAuthError } from "@/lib/worker-errors.mjs";
 
 // Humanize raw agent tool names into what the user actually cares about, so a
 // multi-minute evaluation reads as progress instead of a cryptic tool dump (#8).
@@ -24,12 +25,6 @@ const humanizeStep = (label: string): string => STEP_LABELS[label] ?? label;
 
 // Auth/sign-in failures are the most common real error — detect them so we can give
 // a concrete next step instead of a dead end (#8).
-function isAuthError(job: Job): boolean {
-  if (job.status !== "error") return false;
-  const hay = `${job.steps[job.steps.length - 1]?.label ?? ""} ${job.text}`.toLowerCase();
-  return /auth|login|sign[ -]?in|credential|api[ -]?key|unauthorized|not authenticated|installed and authenticated/.test(hay);
-}
-
 const fmtElapsed = (ms: number): string => {
   const s = Math.max(0, Math.floor(ms / 1000));
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -85,7 +80,7 @@ export function WorkerCard({
   const bottom = job.status === "done" && job.result?.summary ? job.result.summary : last;
   const inline = variant === "inline";
   const hasScore = job.result?.score != null;
-  const authError = isAuthError(job);
+  const authError = isWorkerAuthError(job);
   const tokens = job.status === "done" ? job.cost?.tokens ?? 0 : 0;
 
   return (

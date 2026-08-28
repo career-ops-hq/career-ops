@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -19,6 +19,7 @@ import {
   markTrackerReady,
   cleanupPdfScratch,
   renderAndMarkPdf,
+  renderRoleResumePdf,
 } from "../../src/lib/pdf-render.mjs";
 
 // A fake child_process.spawn() result: stdout/stderr emit "data" once, then
@@ -95,6 +96,24 @@ test("spawnGeneratePdf: spawn error -> ok:false, descriptive stderr", async () =
   // Then it reports ok:false with a descriptive message, not a raw crash
   assert.equal(result.ok, false);
   assert.match(result.stderr, /PDF rendering failed to start: ENOENT/);
+});
+
+test("role resume metadata is written only after the backend PDF exists", async () => {
+  const dir = makeScratchDir();
+  const versionDir = join(dir, "output", "role-resumes", "application-developer", "v001");
+  mkdirSync(versionDir, { recursive: true });
+  const paths = { html: join(versionDir, "cv.html"), finalPdf: join(versionDir, "cv.pdf"), changes: join(versionDir, "changes.md"), metadata: join(versionDir, "metadata.json") };
+  writeFileSync(paths.html, "<!DOCTYPE html><html></html>");
+  const spawnFn = () => { writeFileSync(paths.finalPdf, "%PDF"); return fakeChild({ exitCode: 0 }); };
+  const plan = { targetRole: "Application Developer", positioning: "Senior Application Developer / Software Engineer", supportedFocusAreas: ["Java"], unsupportedFocusAreas: [], version: "v001" };
+  try { const result = await renderRoleResumePdf({ spawnFn, execPath: "node", root: dir, pdfPaths: paths, format: "letter", plan, profileState: { version: 4, updatedAt: "2026-08-27T10:00:00Z" } }); assert.equal(result.kind, "rendered"); assert.equal(readFileSync(paths.html, "utf8"), "<!DOCTYPE html><html></html>"); assert.ok(existsSync(paths.finalPdf)); const metadata = JSON.parse(readFileSync(paths.metadata, "utf8")); assert.equal(metadata.factGate, "passed"); assert.equal(metadata.profileVersion, 4); assert.equal(metadata.profileUpdatedAt, "2026-08-27T10:00:00Z"); } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("role resume is not successful and writes no metadata when PDF is absent", async () => {
+  const dir = makeScratchDir(); const versionDir = join(dir, "output", "role-resumes", "application-developer", "v001"); mkdirSync(versionDir, { recursive: true });
+  const paths = { html: join(versionDir, "cv.html"), finalPdf: join(versionDir, "cv.pdf"), changes: join(versionDir, "changes.md"), metadata: join(versionDir, "metadata.json") }; writeFileSync(paths.html, "<html></html>");
+  const plan = { targetRole: "Application Developer", positioning: "Senior Application Developer / Software Engineer", supportedFocusAreas: [], unsupportedFocusAreas: [], version: "v001" };
+  try { const result = await renderRoleResumePdf({ spawnFn: () => fakeChild({ exitCode: 0 }), execPath: "node", root: dir, pdfPaths: paths, format: "letter", plan }); assert.equal(result.kind, "render-failed"); assert.equal(existsSync(paths.metadata), false); assert.equal(existsSync(paths.changes), false); } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 // ── markTrackerReady ──

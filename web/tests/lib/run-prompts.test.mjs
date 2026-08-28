@@ -9,7 +9,134 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { buildPrompt, isShellSafeCompanyName } from "../../src/lib/run-prompts.mjs";
+import { CV_ENVELOPE_INSTRUCTION, parseCvEnvelope, validateRoleResumeWorkerResponse } from "../../src/lib/cv-envelope.mjs";
+
+const rolePlan = (overrides = {}) => JSON.stringify({ targetRole: "Application Developer", roleSlug: "application-developer", positioning: "Senior Application Developer / Software Engineer", supportedFocusAreas: ["Java", "REST APIs"], unsupportedFocusAreas: ["AWS"], version: "v001", ...overrides });
+const SOURCE_CV = "# Jane Example\n\n## Professional Experience\n\n### Acme\n**Software Engineer**\n";
+
+test("buildPrompt joins multiple canonical supported focus areas", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); assert.match(prompt, /CV-supported focus areas: Java, REST APIs/); assert.match(prompt, /Target Role: Application Developer/i); });
+test("exact Application Developer prompt carries the complete approved generation task", () => {
+  const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26", roleSourceCv: SOURCE_CV });
+  for (const expected of ["Target Role: Application Developer", "roleSlug: application-developer", "Version: v001", "Approved positioning: Senior Application Developer / Software Engineer", "Java, REST APIs", "MASTER CV SOURCE", "# Jane Example", "NOW PERFORM THE TASK", "Do not merely acknowledge", "VERDICT:", "<<role-resume-json>>"]) assert.ok(prompt.includes(expected), `missing prompt value: ${expected}`);
+  assert.doesNotMatch(prompt, /Read cv\.md|Read config\/profile\.yml|Read modes\/_profile\.md/);
+});
+test("role prompt receives the backend-loaded CV directly and needs no Bash discovery", () => {
+  const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26", roleSourceCv: SOURCE_CV, nativeRoleSchema: true });
+  assert.match(prompt, /<master-cv-source>[\s\S]*# Jane Example[\s\S]*<\/master-cv-source>/);
+  assert.match(prompt, /Do not run Bash[\s\S]*No filesystem discovery is needed/);
+  assert.match(prompt, /Populate name, contact fields/);
+});
+test("Application Developer with an empty supported array reaches the worker prompt", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan({ supportedFocusAreas: [] }), memory: "", today: "2026-08-26" }); assert.match(prompt, /CV-supported focus areas: none selected/); });
+test("malformed role plan fails clearly rather than throwing a TypeError", () => { assert.throws(() => buildPrompt({ kind: "role-resume", input: rolePlan({ supportedFocusAreas: undefined }), memory: "", today: "2026-08-26" }), (error) => error instanceof Error && error.name === "Error" && /supportedFocusAreas.*array/.test(error.message) && !/TypeError/.test(error.name)); });
+test("general role prompt uses structured JSON instead of the application HTML contract", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); assert.doesNotMatch(prompt, /<<cv-html/); assert.match(prompt, /<<role-resume-json>>/); assert.match(prompt, /Do not generate HTML/); });
+test("general role prompt prohibits agent-side writes rendering and updates", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); for (const phrase of ["Do not create, edit, move, or save files", "Do not run Bash", "Do not render a PDF", "ask whether Career-Ops should be updated"]) assert.match(prompt, new RegExp(phrase, "i")); assert.match(prompt, /non-interactive[\s\S]{0,20}web worker/i); });
+test("general role prompt excludes JD and company work", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); assert.match(prompt, /NO job description, employer, company, or posting/); assert.match(prompt, /Skip JD keyword-gap processing and company research/); });
+test("a general-role worker envelope parses through the existing contract", () => { const parsed = parseCvEnvelope('<<cv-html format="letter">>\n<!DOCTYPE html><html><body>Application Developer</body></html>\n<</cv-html>>\nVERDICT: 5/5 — complete'); assert.equal(parsed.ok, true); assert.match(parsed.html, /Application Developer/); });
+const ROLE_HTML = fs.readFileSync(new URL("../../../templates/cv-template.html", import.meta.url), "utf8")
+  .replace(/{{PHOTO}}/g, "")
+  .replace(/{{[^}]+}}/g, "Filled");
+const roleResponse = (html = ROLE_HTML, verdict = "VERDICT: 5/5 - complete") => `<<cv-html format="letter">>\n${html}\n<</cv-html>>\n${verdict}`;
+test("complete General Role worker response passes", () => assert.equal(validateRoleResumeWorkerResponse(roleResponse()).ok, true));
+test("real populated CV template structure passes", () => assert.equal(validateRoleResumeWorkerResponse(roleResponse(ROLE_HTML)).ok, true));
+test("fewer than the template's nine sections fails clearly", () => {
+  const shortened = ROLE_HTML.replace(/<div class="section-title">Filled<\/div>/, "");
+  assert.match(validateRoleResumeWorkerResponse(roleResponse(shortened)).error, /8 template sections; expected 9/);
+});
+test("an unresolved template placeholder fails specifically", () => {
+  const unresolved = ROLE_HTML.replace("<div class=\"summary-text\">Filled</div>", '<div class="summary-text">{{SUMMARY}}</div>');
+  assert.match(validateRoleResumeWorkerResponse(roleResponse(unresolved)).error, /unresolved template placeholder: {{SUMMARY}}/);
+});
+test("alternate HTML with section-title lookalikes fails template structure validation", () => {
+  const alternate = `<!DOCTYPE html><html><body>${Array.from({ length: 9 }, (_, i) => `<h2 class="section-title">${i}</h2>`).join("")}</body></html>`;
+  assert.match(validateRoleResumeWorkerResponse(roleResponse(alternate)).error, /alternate HTML/);
+});
+for (const separator of ["—", "–", "-"]) {
+  test(`General Role VERDICT accepts ${separator === "—" ? "em dash" : separator === "–" ? "en dash" : "hyphen"}`, () => {
+    assert.equal(validateRoleResumeWorkerResponse(roleResponse(ROLE_HTML, `VERDICT: 5/5 ${separator} complete`)).ok, true);
+  });
+}
+for (const acknowledgement of ["I’ll return the requested content.", "I'll return the requested content."]) {
+  test(`acknowledgement-only response fails cleanly: ${acknowledgement.slice(0, 4)}`, () => {
+    assert.deepEqual(validateRoleResumeWorkerResponse(acknowledgement), { ok: false, error: "Codex exited before producing resume content." });
+  });
+}
+test("empty and multiple General Role envelopes fail closed", () => {
+  assert.equal(validateRoleResumeWorkerResponse('<<cv-html format="letter">>\n\n<</cv-html>>\nVERDICT: 5/5 - complete').ok, false);
+  assert.equal(validateRoleResumeWorkerResponse(`${roleResponse()}\n${roleResponse()}`).ok, false);
+});
+test("General Role response requires the final VERDICT", () => assert.match(validateRoleResumeWorkerResponse(roleResponse(ROLE_HTML, "done")).error, /VERDICT/));
+test("General Role response rejects a non-success VERDICT score", () => assert.match(validateRoleResumeWorkerResponse(roleResponse(ROLE_HTML, "VERDICT: 4/5 — incomplete")).error, /VERDICT/));
+test("application PDF envelope parsing remains independent of General Role VERDICT validation", () => {
+  assert.equal(parseCvEnvelope(`<<cv-html format="letter">>\n${ROLE_HTML}\n<</cv-html>>`).ok, true);
+});
+
+test("General Role prompt blocks router, onboarding, doctor, and update workflows", () => {
+  const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" });
+  for (const forbiddenInstruction of [/run (?:the )?career-ops skill/i, /invoke (?:the )?career-ops skill/i, /run doctor/i, /run update-system/i, /check for updates/i]) {
+    assert.doesNotMatch(prompt, forbiddenInstruction);
+  }
+  assert.match(prompt, /Do NOT invoke or announce any skill, skill router/i);
+  assert.match(prompt, /onboarding\/setup flow, doctor check, version\/update check/i);
+});
+test("General Role prompt assigns the canonical template exclusively to the backend", () => {
+  const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" });
+  assert.match(prompt, /backend owns templates\/cv-template\.html/);
+  assert.match(prompt, /All values are plain text/);
+  assert.match(prompt, /unknown fields are rejected/);
+});
+test("General Role prompt forbids status and requires exactly the listed top-level fields", () => {
+  const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" });
+  assert.match(prompt, /MUST contain exactly the fields listed below and no others/);
+  assert.match(prompt, /Do not add status, title, targetRole, roleSlug, version, metadata/);
+  assert.match(prompt, /VERDICT is OUTSIDE the JSON object/);
+  assert.match(prompt, /Do not wrap the JSON in another object/);
+  assert.match(prompt, /Any unlisted JSON key causes the run to fail/);
+});
+test("native Codex General Role prompt requests raw schema JSON without envelope or verdict", () => {
+  const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26", nativeRoleSchema: true });
+  assert.match(prompt, /constrained by Codex --output-schema/);
+  assert.match(prompt, /Return exactly one raw JSON object/);
+  assert.doesNotMatch(prompt, /<<role-resume-json>>/);
+  assert.doesNotMatch(prompt, /VERDICT: \{5/);
+});
+test("General Role prompt makes the approved plan sufficient without a JD or placeholders", () => {
+  const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26", nativeRoleSchema: true });
+  assert.match(prompt, /A job description is NOT required/);
+  assert.match(prompt, /Never ask for a JD or more information/);
+  assert.match(prompt, /actual source-grounded resume content/);
+  assert.match(prompt, /Empty arrays[\s\S]*are not a shortcut/);
+});
+
+test("application PDF prompt keeps the original cv-html envelope contract", () => {
+  const prompt = buildPrompt({ kind: "pdf", input: "001", memory: "", today: "2026-08-26" });
+  assert.ok(prompt.includes(CV_ENVELOPE_INSTRUCTION)); assert.match(prompt, /<<cv-html/); assert.doesNotMatch(prompt, /<<role-resume-json>>/);
+});
+
+test("route fact-gates backend-rendered role HTML before saving", () => {
+  const route = fs.readFileSync(new URL("../../src/app/api/run/route.ts", import.meta.url), "utf8");
+  assert.ok(route.indexOf("renderRoleResumeTemplate") < route.indexOf("if (await saveCv"));
+  assert.match(route, /if \(kind === "role-resume"\)[\s\S]*validateRoleResumeHtml\(envelope\.html/);
+});
+test("route enables native Codex schema only for General Role workers", () => {
+  const route = fs.readFileSync(new URL("../../src/app/api/run/route.ts", import.meta.url), "utf8");
+  assert.match(route, /nativeRoleSchema = kind === "role-resume" && cliId === "codex"/);
+  assert.match(route, /role-resume\.schema\.json/);
+  assert.match(route, /outputSchema: roleOutputSchema/);
+  assert.match(route, /nativeRoleSchema[\s\S]*parseRawRoleResumeJson\(roleWorkerText\)/);
+});
+test("route blocks incomplete General Role content before template rendering and fact gate remains later", () => {
+  const route = fs.readFileSync(new URL("../../src/app/api/run/route.ts", import.meta.url), "utf8");
+  const completenessAt = route.indexOf("validateRoleResumeCompleteness(structured.content");
+  const renderAt = route.indexOf("renderRoleResumeTemplate({ root:", completenessAt);
+  const saveAt = route.indexOf("if (await saveCv", renderAt);
+  const factGateAt = route.indexOf("validateRoleResumeHtml(envelope.html");
+  assert.ok(completenessAt > -1 && renderAt > completenessAt && saveAt > renderAt);
+  assert.ok(factGateAt > -1);
+  assert.match(route, /if \(!completeness\.ok\) envelope = \{ ok: false, error: completeness\.error \};[\s\S]*else \{[\s\S]*renderRoleResumeTemplate/);
+});
+
 import { OPEN_MARK, CLOSE_MARK } from "../../src/lib/cv-envelope.mjs";
 import { grantsWriteCapability, toolScopeFor } from "../../src/lib/claude-invocation.mjs";
 

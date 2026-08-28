@@ -11,12 +11,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   accumulateTokens,
+  codexInvalidSchemaMessage,
   codexStreamArgs,
   completedReportNames,
   hasNewCompletedReport,
   isFatalClaudeStderr,
   isFatalCodexStderr,
   isFatalGenericStderr,
+  isCodexInvalidSchemaError,
   parseClaudeEvent,
   parseCodexEvent,
 } from "../../src/lib/run-cli-support.mjs";
@@ -241,6 +243,13 @@ test("benign Codex stderr diagnostics are not fatal", () => {
   assert.equal(isFatalCodexStderr("ERROR codex_models_manager::cache: failed to load models cache: schema mismatch"), false);
 });
 
+test("Codex invalid-schema diagnostics are recognized and preserved completely", () => {
+  const message = "invalid_request_error code: invalid_json_schema Invalid schema for response_format 'codex_output_schema': In context=(), 'required' must include every key in properties, including 'url'.";
+  assert.equal(isCodexInvalidSchemaError(message), true);
+  assert.equal(codexInvalidSchemaMessage(message), message);
+  assert.equal(codexInvalidSchemaMessage("ordinary provider error"), "");
+});
+
 test("Codex auth-failure stderr phrases are fatal", () => {
   assert.equal(isFatalCodexStderr("Error: unauthorized"), true);
   assert.equal(isFatalCodexStderr("please log in to continue"), true);
@@ -431,6 +440,23 @@ test("codexStreamArgs turns on the JSONL that parseCodexEvent reads", () => {
   // Then: --json produces the events, --color never keeps ANSI out of the strings,
   // and the prompt stays last (a positional, not a flag value).
   assert.deepEqual(args, ["exec", "--json", "--color", "never", "PROMPT"]);
+});
+
+test("role-resume Codex workers are read-only and ephemeral", () => { const args = codexStreamArgs("prompt", "role-resume", { promptViaStdin: true }); assert.deepEqual(args.slice(0, 7), ["exec", "--json", "--color", "never", "--sandbox", "read-only", "--ephemeral"]); assert.equal(args.at(-1), "-"); });
+test("large role-resume prompt is not present in argv when stdin mode is used", () => { const prompt = "Target Role: Application Developer\n" + "x".repeat(20_000); const args = codexStreamArgs(prompt, "role-resume", { promptViaStdin: true }); assert.equal(args.at(-1), "-"); assert.equal(args.includes(prompt), false); assert.ok(args.join(" ").length < 500); });
+test("role-resume Codex receives the native output schema while preserving terminal capture", () => {
+  const args = codexStreamArgs("prompt", "role-resume", { outputSchema: "role-resume.schema.json", outputLastMessage: "final.txt", promptViaStdin: true });
+  assert.deepEqual(args.slice(args.indexOf("--output-schema"), args.indexOf("--output-last-message")), ["--output-schema", "role-resume.schema.json"]);
+  assert.deepEqual(args.slice(args.indexOf("--output-last-message"), -1), ["--output-last-message", "final.txt"]);
+  assert.equal(args.at(-1), "-");
+});
+test("application pdf Codex argv remains unchanged", () => { assert.deepEqual(codexStreamArgs("prompt", "pdf"), ["exec", "--json", "--color", "never", "prompt"]); });
+test("application and General Role PDFs share Codex terminal-output capture", () => {
+  for (const kind of ["pdf", "role-resume"]) {
+    const args = codexStreamArgs("prompt", kind, { outputLastMessage: "final.txt", promptViaStdin: kind === "role-resume" });
+    assert.deepEqual(args.slice(args.indexOf("--output-last-message"), -1), ["--output-last-message", "final.txt"]);
+    assert.equal(args.at(-1), kind === "role-resume" ? "-" : "prompt");
+  }
 });
 
 test("the argv keeps --json and the parser reads the JSONL it turns on", () => {

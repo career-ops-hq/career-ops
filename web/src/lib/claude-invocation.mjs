@@ -91,7 +91,7 @@ const PERSISTING_KINDS = new Set(["evaluate", "fix-portal"]);
  * Unknown kinds still resolve (read-only, see toolScopeFor); this is the set a
  * test can enumerate, not a validity check.
  */
-export const KNOWN_KINDS = Object.freeze(["pdf", "research", "evaluate", "fix-portal"]);
+export const KNOWN_KINDS = Object.freeze(["pdf", "role-resume", "research", "evaluate", "fix-portal"]);
 
 /**
  * Resolve the tool scope for a worker kind.
@@ -145,7 +145,7 @@ export function claudeCliArgs({ kind, prompt }) {
     // this to every kind would silently stop a configured MCP server (e.g. the
     // optional Canva server) from loading on evaluate/research runs. The same gap
     // for the other kinds is #2507.
-    ...(kind === "pdf" ? ["--strict-mcp-config"] : []),
+    ...(kind === "pdf" || kind === "role-resume" ? ["--strict-mcp-config"] : []),
     "--allowedTools", scope.allowed,
     "--disallowedTools", scope.disallowed,
   ];

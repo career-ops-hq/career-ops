@@ -134,6 +134,57 @@ export function parseCvEnvelope(text) {
 }
 
 /**
+ * Validate the stricter completion contract used only by General Role workers.
+ * @param {string} text
+ * @returns {CvEnvelope | {ok: false, error: string}}
+ */
+export function validateRoleResumeWorkerResponse(text) {
+  const raw = typeof text === "string" ? text : "";
+  const envelope = parseCvEnvelope(raw);
+  if (!envelope.ok) {
+    if (!raw.includes(OPEN_MARK) && /\b(?:understood|i(?:'|’)?ll|i will|will return|will produce)\b/i.test(raw)) {
+      return { ok: false, error: "Codex exited before producing resume content." };
+    }
+    return envelope;
+  }
+  const structure = validateRoleResumeHtmlStructure(envelope.html);
+  if (!structure.ok) return structure;
+  const finalLine = raw.trim().split(/\r?\n/).at(-1) || "";
+  if (!/^VERDICT:\s*5\/5\s+(?:—|–|-)\s+\S/i.test(finalLine)) {
+    return { ok: false, error: "The General Role worker exited without the required final VERDICT line." };
+  }
+  return envelope;
+}
+
+export function validateRoleResumeHtmlStructure(html) {
+  if (!/^\s*<!doctype html>/i.test(html) || !/<html\b/i.test(html)) {
+    return { ok: false, error: "The General Role resume is not a complete HTML document." };
+  }
+  const unresolved = html.match(/{{[^}]+}}/);
+  if (unresolved) {
+    return { ok: false, error: `The General Role worker left an unresolved template placeholder: ${unresolved[0]}.` };
+  }
+  const sections = html.match(/class=["'][^"']*\bsection-title\b[^"']*["']/gi) || [];
+  if (sections.length !== 9) {
+    return { ok: false, error: `The General Role worker returned ${sections.length} template sections; expected 9.` };
+  }
+  const templateLandmarks = [
+    /<div\s+class=["'][^"']*\bpage\b[^"']*["']/i,
+    /<div\s+class=["'][^"']*\bheader\b[^"']*["']/i,
+    /<div\s+class=["'][^"']*\bcontact-row\b[^"']*["']/i,
+    /<div\s+class=["'][^"']*\bsummary-text\b[^"']*["']/i,
+    /<div\s+class=["'][^"']*\bcompetencies-grid\b[^"']*["']/i,
+    /<div\s+class=["'][^"']*\bcert-table\b[^"']*["']/i,
+    /<div\s+class=["'][^"']*\baward-table\b[^"']*["']/i,
+    /<div\s+class=["'][^"']*\binterests-line\b[^"']*["']/i,
+  ];
+  if (!templateLandmarks.every((pattern) => pattern.test(html))) {
+    return { ok: false, error: "The General Role worker returned alternate HTML instead of the Career-Ops CV template structure." };
+  }
+  return { ok: true };
+}
+
+/**
  * Could `line` still become a marker once more characters arrive?
  *
  * True both while the text is a prefix of a marker (`<`, `<<c`) and once it has
@@ -179,7 +230,7 @@ function completeMarker(re, s) {
  * actual narration. Chunk boundaries fall wherever the transport likes, so the
  * markers are matched across pushes rather than per chunk.
  *
- * @returns {{push: (chunk: string) => string, flush: () => string, result: () => (CvEnvelope | {ok: false, error: string})}}
+ * @returns {{push: (chunk: string) => string, flush: () => string, result: () => (CvEnvelope | {ok: false, error: string}), rawText: () => string}}
  *   `push` returns the text safe to display, `flush` releases anything still
  *   held at end of stream, `result` parses everything pushed so far.
  */
@@ -246,6 +297,10 @@ export function createCvEnvelopeFilter() {
 
     result() {
       return parseCvEnvelope(raw);
+    },
+
+    rawText() {
+      return raw;
     },
   };
 }

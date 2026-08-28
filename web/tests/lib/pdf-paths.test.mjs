@@ -46,6 +46,19 @@ test("resolvePdfPaths: happy path builds html + finalPdf from report + profile",
   }
 });
 
+test("resolvePdfPaths: existing application resumes increment without overwriting", () => {
+  const root = makeRoot();
+  mkdirSync(join(root, "output", "005-kunai-role", "cv", "tailored", "v001"), { recursive: true });
+  writeFileSync(join(root, "output", "005-kunai-role", "cv", "tailored", "v001", "cv.pdf"), "%PDF");
+  const findReportFile = () => join(root, "reports", "005-kunai-2026-07-01.md");
+  try {
+    const result = resolvePdfPaths("5", "2026-07-26", root, findReportFile);
+    assert.equal(result.ok, true);
+    assert.equal(result.paths.finalPdf, join(root, "output", "005-kunai-role", "cv", "tailored", "v002", "cv.pdf"));
+    assert.equal(existsSync(join(root, "output", "005-kunai-role", "cv", "tailored", "v001", "cv.pdf")), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("resolvePdfPaths: path-traversal selector is rejected before any path is built", () => {
   // Given a findReportFile that would (via parseInt-based matching) resolve a
   // traversal-shaped selector to a real report, and a directory sentinel to

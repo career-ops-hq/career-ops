@@ -4,17 +4,24 @@
 // sandbox in the way (#2172) and so passes `spawn` itself to renderAndMarkPdf.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, codexInvalidSchemaMessage, hasNewCompletedReport, isCodexInvalidSchemaError, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
-import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
-import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
+import { renderAndMarkPdf, renderRoleResumePdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
+import { createCvEnvelopeFilter, validateRoleResumeHtmlStructure, type CvEnvelope } from "@/lib/cv-envelope.mjs";
+import { createRawRoleResumeFilter, createRoleResumeJsonFilter, formatRoleResumeSchemaDiagnostics, inspectRawRoleResumeJsonShape, inspectRoleResumeJsonShape, parseRawRoleResumeJson, parseRoleResumeWorkerResponse, renderRoleResumeTemplate, roleResumeSourceRequirements, validateRoleResumeCompleteness } from "@/lib/role-resume-content.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
+import { parseApprovedRoleResumeInput, reserveRoleResumeDirectory, roleResumePaths } from "@/lib/role-resumes.mjs";
+import { validateRoleResumeHtml } from "@/lib/role-resume-fact-gate.mjs";
+import { readProfileState } from "@/lib/profile-state.mjs";
+import { loadRoleResumeSource } from "@/lib/role-resume-source.mjs";
+import { inspectCodexFinalOutput } from "@/lib/codex-final-output.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,7 +40,10 @@ export async function POST(req: Request) {
   }
   const resolved = resolveCli(cliId);
   if (!resolved) {
-    return new Response(JSON.stringify({ error: `CLI '${cliId}' not found` }), {
+    const error = process.platform === "win32" && cliId === "codex"
+      ? "Codex CLI could not be launched on Windows. A codex.cmd, codex.exe, or runnable codex.ps1 launcher was not found."
+      : `CLI '${cliId}' not found`;
+    return new Response(JSON.stringify({ error }), {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
@@ -42,7 +52,7 @@ export async function POST(req: Request) {
 
   // These run the REAL core (modes/scripts), not just data — fail clearly if the
   // root is incomplete instead of faking it.
-  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs" };
+  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs", "role-resume": "generate-pdf.mjs" };
   const required = needsScript[kind];
   if (required && !fs.existsSync(path.join(careerOpsRoot(), required))) {
     return new Response(
@@ -66,7 +76,7 @@ export async function POST(req: Request) {
 
   // An A–F score is meaningless without a CV to score against — the CLI would
   // hallucinate a fit narrative and still emit a VERDICT. Require cv.md first.
-  if ((kind === "evaluate" || kind === "pdf") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
+  if ((kind === "evaluate" || kind === "pdf" || kind === "role-resume") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
     return new Response(
       JSON.stringify({ error: "Add your CV first so I can score this against you — drop it on the home page." }),
       { status: 400, headers: { "Content-Type": "application/json" } },
@@ -81,6 +91,9 @@ export async function POST(req: Request) {
   // from this run's freshly parsed envelope before any render, and the agent is
   // no longer told these paths, so a stale file cannot survive into a render.
   let pdfPaths: PdfPaths | undefined;
+  let rolePlan: any;
+  let roleSource: { cv: string; bytes: number; file: string } | undefined;
+  let promptInput = input;
   if (kind === "pdf") {
     const pathsResult = resolvePdfPaths(input, today, careerOpsRoot(), findReportFile);
     if (!pathsResult.ok) {
@@ -90,6 +103,16 @@ export async function POST(req: Request) {
       });
     }
     pdfPaths = pathsResult.paths;
+  }
+  if (kind === "role-resume") {
+    try {
+      roleSource = loadRoleResumeSource(careerOpsRoot());
+      rolePlan = parseApprovedRoleResumeInput(careerOpsRoot(), input);
+      pdfPaths = roleResumePaths(careerOpsRoot(), rolePlan);
+      promptInput = JSON.stringify(rolePlan);
+    } catch (error) {
+      return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Invalid role-resume request." }), { status: 400, headers: { "Content-Type": "application/json" } });
+    }
   }
 
   // Resolve the posting date HERE rather than asking the agent for it. The
@@ -102,7 +125,8 @@ export async function POST(req: Request) {
     kind === "evaluate"
       ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
       : undefined;
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt });
+  const nativeRoleSchema = kind === "role-resume" && cliId === "codex";
+  const prompt = buildPrompt({ kind, input: promptInput, memory: readMemory(), today, postedAt, nativeRoleSchema, roleSourceCv: roleSource?.cv || "" });
 
   const isClaude = cliId === "claude";
   // Which tools each kind gets, and the whole claude argv, live in
@@ -118,7 +142,12 @@ export async function POST(req: Request) {
   // A CLI with its own structured stream gets the argv that turns it on, so its
   // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
   // envelope-parsing routes rely on.
-  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt);
+  const capturesCv = kind === "pdf" || kind === "role-resume";
+  const codexFinalDir = cliId === "codex" && capturesCv ? fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-codex-final-")) : undefined;
+  const codexFinalFile = codexFinalDir ? path.join(codexFinalDir, "final-response.txt") : undefined;
+  const roleOutputSchema = nativeRoleSchema ? path.join(careerOpsRoot(), "web", "src", "lib", "role-resume.schema.json") : undefined;
+  const promptViaStdin = cliId === "codex" && kind === "role-resume";
+  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt, kind, { outputLastMessage: codexFinalFile, outputSchema: roleOutputSchema, promptViaStdin });
 
   // For write-needing kinds, snapshot reports/ so we can verify the worker
   // actually persisted (non-Claude CLIs lack Write auth and silently no-op).
@@ -147,7 +176,7 @@ export async function POST(req: Request) {
   // every CLI-invoking route (assistant, explore/ai, cv/ingest, the apply planners),
   // which had the identical bug, and puts it behind one tested helper so it cannot
   // drift back in on any single call site.
-  const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env }, promptViaStdin ? { stdinMode: "pipe", stdinInput: prompt } : {});
   // Decode once on the stream, not per chunk. Buffer#toString() decodes each chunk
   // independently, so a chunk boundary falling inside a multi-byte UTF-8 sequence
   // yields a replacement character and mis-decodes the bytes after it. Those bytes
@@ -190,12 +219,19 @@ export async function POST(req: Request) {
       // successful run as failed on six of the eight runtimes (#1974).
       const isFatalStderr = spec.stderrIsFatal ?? isFatalGenericStderr;
       const flagStderrLine = (line: string) => {
-        if (!line.trim() || !isFatalStderr(line)) return;
+        const schemaError = nativeRoleSchema && isCodexInvalidSchemaError(line);
+        if (!line.trim() || (!schemaError && !isFatalStderr(line))) return;
         sawError = true;
-        send({ type: "error", msg: line.trim().slice(0, 200) });
+        send({ type: "error", msg: schemaError ? codexInvalidSchemaMessage(line) : line.trim().slice(0, 200) });
       };
       let lastTokens = 0; // per-run token cost from the CLI's structured usage event (#6) — local only
       let lastCostUsd: number | null = null;
+      let stdoutChunks = 0;
+      let parsedEvents = 0;
+      let textEvents = 0;
+      let stderrBytes = 0;
+      let spawnErrorCode = "";
+      let spawnErrorMessage = "";
       // pdf-mode's agent only tailors content now (rendering moved to the
       // backend, #2172) — but its killMs still has to leave real headroom
       // inside the route's overall maxDuration (800s): the render+mark phase
@@ -252,6 +288,7 @@ export async function POST(req: Request) {
           if (heartbeat) clearInterval(heartbeat);
           if (killer) clearTimeout(killer);
           releaseWriteTokenOnce();
+          if (codexFinalDir) { try { fs.rmSync(codexFinalDir, { recursive: true, force: true }); } catch { /* best effort */ } }
           try { controller.close(); } catch { /* */ }
         }
       };
@@ -259,7 +296,9 @@ export async function POST(req: Request) {
       // by the agent (#2185). The filter keeps every byte for the backend while
       // holding the 15-25 KB body out of the run log, which is the agent's
       // narration — see cv-envelope.mjs.
-      const cvFilter = kind === "pdf" ? createCvEnvelopeFilter() : null;
+      const cvFilter = kind === "role-resume"
+        ? (nativeRoleSchema ? createRawRoleResumeFilter() : createRoleResumeJsonFilter())
+        : kind === "pdf" ? createCvEnvelopeFilter() : null;
       // While the agent emits the 15-25 KB <<cv-html>> envelope, cvFilter swallows
       // every byte, so the response stream goes completely silent for as long as
       // the model takes to write the CV — a minute or more. Nothing downstream can
@@ -277,7 +316,13 @@ export async function POST(req: Request) {
         for (const w of warnings) send({ type: "text", text: `⚠️ ${w}\n` });
       };
       /** Persist the emitted CV; streams the reason and returns false on failure. */
-      const saveCv = (paths: PdfPaths, envelope: CvEnvelope) => {
+      const saveCv = async (paths: PdfPaths, envelope: CvEnvelope) => {
+        if (kind === "role-resume") {
+          const facts = await validateRoleResumeHtml(envelope.html, careerOpsRoot());
+          if (!facts.ok) { send({ type: "error", msg: `Fact validation failed: ${facts.error}`.slice(0, 300) }); return false; }
+          sendWarnings(facts.warnings || []);
+          try { reserveRoleResumeDirectory(paths); } catch { send({ type: "error", msg: "That role-resume version already exists; refresh and try again." }); return false; }
+        }
         const written = writeCvHtml({ pdfPaths: paths, html: envelope.html });
         if (!written.ok) send({ type: "error", msg: written.error.slice(0, 200) });
         return written.ok;
@@ -291,9 +336,11 @@ export async function POST(req: Request) {
       // it carries.
       const processParsedLine = (line: string) => {
         if (!spec.parseEvent) return;
+        parsedEvents += 1;
         const ev = spec.parseEvent(line);
         if (ev?.text) {
           emittedText = true;
+          textEvents += 1;
           // sendAgentText, NEVER send: pdf's CV arrives inside the agent's text as a
           // <<cv-html>> envelope, so parsed text has to reach cvFilter too or the
           // backend has nothing to save and the 25 KB body floods the run log (#2185).
@@ -308,12 +355,14 @@ export async function POST(req: Request) {
         if (typeof ev?.costUsd === "number") lastCostUsd = ev.costUsd;
         if (ev?.error) {
           sawError = true;
-          send({ type: "error", msg: ev.error.slice(0, 200) });
+          const schemaError = nativeRoleSchema ? codexInvalidSchemaMessage(ev.error) : "";
+          send({ type: "error", msg: schemaError || ev.error.slice(0, 200) });
         }
       };
 
       child.stdout.on("data", (chunk: string) => {
         if (closed) return;
+        stdoutChunks += 1;
         if (!spec.parseEvent) {
           emittedText = true;
           sendAgentText(chunk);
@@ -328,6 +377,7 @@ export async function POST(req: Request) {
         }
       });
       child.stderr.on("data", (chunk: string) => {
+        stderrBytes += Buffer.byteLength(chunk);
         // Match on COMPLETE lines. A chunk boundary can fall mid-word, so testing a
         // raw chunk both misses an error split across two of them and can match a
         // fragment that is not the word it looks like. sawError feeds pdfRunOutcome,
@@ -358,21 +408,23 @@ export async function POST(req: Request) {
         // unexpected exception here must still close the stream instead of
         // leaving it — and the write-token — open until process shutdown.
         try {
-          const result = await renderAndMarkPdf({
+          const profileState = readProfileState(careerOpsRoot());
+          const result = kind === "role-resume" ? await renderRoleResumePdf({ spawnFn: spawn, execPath: process.execPath, root: careerOpsRoot(), pdfPaths: paths, format, plan: rolePlan, profileState }) : await renderAndMarkPdf({
             spawnFn: spawn,
             execPath: process.execPath,
             root: careerOpsRoot(),
             pdfPaths: paths,
             format,
             reportNum: input,
+            profileState,
           });
           if (result.kind === "render-failed") {
-            send({ type: "error", msg: result.error.slice(0, 200) });
+            send({ type: "error", msg: (result.error || "PDF rendering failed.").slice(0, 200) });
             return;
           }
           // Non-fatal issues (a defaulted page format, a tracker row not marked) still
           // surface here rather than only in a server log nobody sees.
-          sendWarnings(result.warnings);
+          sendWarnings("warnings" in result ? (result.warnings || []) : []);
           send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
         } catch (e) {
           send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
@@ -381,8 +433,8 @@ export async function POST(req: Request) {
         }
       };
 
-      child.on("error", (e) => { send({ type: "error", msg: e.message }); close(); });
-      child.on("close", (code) => {
+      child.on("error", (e: NodeJS.ErrnoException) => { spawnErrorCode = e.code || "UNKNOWN"; spawnErrorMessage = e.message; send({ type: "error", msg: e.message }); close(); });
+      child.on("close", async (code) => {
         // A trailing line with no newline would otherwise never be tested.
         if (stderrBuf) { flagStderrLine(stderrBuf); stderrBuf = ""; }
         // A client disconnect can fire cancel() (which kills `child`) before
@@ -419,12 +471,79 @@ export async function POST(req: Request) {
         // all is the same failure mode whether it was evaluating or tailoring
         // a PDF — one place for the condition/message pair instead of two.
         const noOutputError = (): string | null => {
-          if (!emittedText && !sawError && !cleanExit) return "The CLI exited with an error — is it installed and authenticated?";
+          if (!emittedText && !sawError && !cleanExit) return cliId === "codex" ? `Codex exited before producing output (exit code ${code ?? "unknown"}).` : `The CLI exited before producing output (exit code ${code ?? "unknown"}).`;
           if (!emittedText && !sawError) return "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)";
           return null;
         };
 
-        if (kind === "pdf") {
+        if (kind === "pdf" || kind === "role-resume") {
+          const jsonlRaw = cvFilter?.rawText() ?? "";
+          let recovered = { text: "", addition: "", effectiveText: jsonlRaw, byteCount: 0, containsOpenMark: false, containsVerdict: false, looksMarkdown: false, duplicate: false, replaced: false, conflict: false, normalizedSuffixEqual: false, envelopesEquivalent: false, error: undefined as string | undefined };
+          // Codex exposes its authoritative terminal assistant response through
+          // --output-last-message. JSONL still drives live status/tool updates,
+          // but it is not the sole content channel: some runs finish without an
+          // item.completed/agent_message carrying the final body.
+          if (codexFinalFile) {
+            recovered = inspectCodexFinalOutput(codexFinalFile, jsonlRaw, { kind: nativeRoleSchema ? "role-resume-raw" : kind });
+            if (kind === "role-resume" && recovered.text) {
+              emittedText = true;
+              textEvents += 1;
+            }
+            if (recovered.addition && kind !== "role-resume") {
+              emittedText = true;
+              textEvents += 1;
+              sendAgentText(recovered.addition + "\n");
+            }
+          }
+          if (process.env.NODE_ENV !== "production") {
+            const raw = cvFilter?.rawText() ?? "";
+            const roleWorkerText = nativeRoleSchema ? (recovered.text || jsonlRaw) : recovered.effectiveText;
+            const roleSchema = kind === "role-resume" ? formatRoleResumeSchemaDiagnostics(nativeRoleSchema ? inspectRawRoleResumeJsonShape(roleWorkerText) : inspectRoleResumeJsonShape(roleWorkerText)) : null;
+            console.debug("[career-ops worker completion]", {
+              cliId,
+              executable: path.basename(binPath),
+              launcher: path.extname(binPath).toLowerCase() || "direct",
+              kind,
+              promptLength: prompt.length,
+              promptBytes: Buffer.byteLength(prompt, "utf8"),
+              argvCharacters: args.reduce((total, value) => total + String(value).length + 1, 0),
+              promptViaStdin,
+              launcherExtension: path.extname(binPath).toLowerCase() || "direct",
+              sourceCvLoaded: kind === "role-resume" ? !!roleSource : undefined,
+              sourceCvBytes: kind === "role-resume" ? roleSource?.bytes || 0 : undefined,
+              workingDirectory: kind === "role-resume" ? path.basename(careerOpsRoot()) : undefined,
+              promptSignals: { targetRole: /Target Role:/.test(prompt), positioning: /Approved positioning:/.test(prompt), supportedFocusAreas: /CV-supported focus areas:/.test(prompt), envelopeInstruction: prompt.includes(kind === "role-resume" ? "<<role-resume-json>>" : "<<cv-html") },
+              exitCode: code,
+              spawnErrorCode,
+              spawnErrorMessage: spawnErrorMessage ? spawnErrorMessage.slice(0, 200) : "",
+              stderrBytes,
+              outputSignals: {
+                jsonlOpenMark: jsonlRaw.includes("<<cv-html"),
+                jsonlBytes: Buffer.byteLength(jsonlRaw, "utf8"),
+                jsonlLooksMarkdown: /(?:^|\n)#\s+\S|\*\*[^*]+\*\*/.test(jsonlRaw),
+                recoveredBytes: recovered.byteCount,
+                recoveredOpenMark: recovered.containsOpenMark,
+                recoveredVerdict: recovered.containsVerdict,
+                recoveredLooksMarkdown: recovered.looksMarkdown,
+                recoveredDuplicate: recovered.duplicate,
+                recoveredReplacedJsonl: recovered.replaced,
+                recoveredConflict: recovered.conflict,
+                normalizedFinalEqualsJsonlSuffix: recovered.normalizedSuffixEqual,
+                structuredEnvelopesEquivalent: recovered.envelopesEquivalent,
+                jsonlRoleOpeners: (jsonlRaw.match(/^<<role-resume-json>>[ \t]*$/gm) || []).length,
+                recoveredRoleOpeners: (recovered.text.match(/^<<role-resume-json>>[ \t]*$/gm) || []).length,
+                mergedRoleOpeners: (recovered.effectiveText.match(/^<<role-resume-json>>[ \t]*$/gm) || []).length,
+                mergedBytes: Buffer.byteLength(recovered.effectiveText, "utf8"),
+                mergedOpenMark: raw.includes("<<cv-html"),
+                mergedCloseMark: raw.includes("<</cv-html>>"),
+                mergedVerdict: /VERDICT:/.test(raw),
+                roleSchema,
+              },
+              stdoutChunks,
+              parsedEvents,
+              textEvents,
+            });
+          }
           // Release any text the filter was still holding, so the log keeps the
           // agent's closing narration and its VERDICT line.
           const tail = cvFilter?.flush();
@@ -432,7 +551,32 @@ export async function POST(req: Request) {
           // The artifact check moved from the filesystem to the stream (#2185):
           // whether pdfPaths.html exists says nothing now that the backend is its
           // only writer. pdfRunOutcome owns the decision and the message.
-          const envelope = cvFilter?.result();
+          let envelope: CvEnvelope | { ok: false; error: string } | undefined;
+          if (kind === "role-resume") {
+            const roleWorkerText = nativeRoleSchema ? (recovered.text || jsonlRaw) : recovered.effectiveText;
+            const structured = recovered.conflict && !nativeRoleSchema
+              ? { ok: false, error: recovered.error || "Codex returned conflicting role-resume output." }
+              : nativeRoleSchema
+                ? parseRawRoleResumeJson(roleWorkerText)
+                : parseRoleResumeWorkerResponse(roleWorkerText || cvFilter?.rawText() || "");
+            if (!structured.ok) envelope = { ok: false, error: structured.error || "Invalid General Role content." };
+            else {
+              try {
+                const sourceRequirements = roleResumeSourceRequirements(fs.readFileSync(path.join(careerOpsRoot(), "cv.md"), "utf8"));
+                const completeness = validateRoleResumeCompleteness(structured.content, sourceRequirements);
+                if (!completeness.ok) envelope = { ok: false, error: completeness.error };
+                else {
+                  const rendered = renderRoleResumeTemplate({ root: careerOpsRoot(), content: structured.content });
+                  const structure = validateRoleResumeHtmlStructure(rendered.html);
+                  envelope = structure.ok
+                    ? { ok: true, html: rendered.html, format: rendered.format, warnings: [] }
+                    : { ok: false, error: structure.error || "Backend-generated role-resume HTML failed template validation." };
+                }
+              } catch (error) {
+                envelope = { ok: false, error: error instanceof Error ? error.message : "Backend role-resume template rendering failed." };
+              }
+            }
+          } else envelope = cvFilter?.result() as CvEnvelope | { ok: false; error: string } | undefined;
           const outcome = pdfRunOutcome({
             envelope,
             noOutputMessage: noOutputError(),
@@ -442,7 +586,7 @@ export async function POST(req: Request) {
           });
           if (!outcome.ok) {
             send({ type: "error", msg: outcome.message });
-          } else if (!pdfPaths || envelope?.ok !== true) {
+          } else if (!pdfPaths || envelope?.ok !== true || !("html" in envelope) || !("format" in envelope) || !("warnings" in envelope)) {
             // Unreachable: pdfRunOutcome validated both via hasPaths/envelope.ok.
             // Kept for narrowing, but it must REPORT rather than fall through to a
             // bare close() — a stream that ends with neither error nor done is the
@@ -450,7 +594,7 @@ export async function POST(req: Request) {
             send({ type: "error", msg: "Internal error: the pdf run passed its gate with no CV to save — please report this." });
           } else {
             sendWarnings(envelope.warnings);
-            if (saveCv(pdfPaths, envelope)) {
+            if (await saveCv(pdfPaths, envelope)) {
               // Tracked so cancel() can defer releasing writeToken until this
               // settles; close() happens once rendering finishes, not here.
               pdfRenderPromise = renderPdf(pdfPaths, envelope.format);
