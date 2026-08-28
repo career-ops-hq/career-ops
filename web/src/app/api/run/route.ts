@@ -20,6 +20,7 @@ import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registr
 import { parseApprovedRoleResumeInput, reserveRoleResumeDirectory, roleResumePaths } from "@/lib/role-resumes.mjs";
 import { validateRoleResumeHtml } from "@/lib/role-resume-fact-gate.mjs";
 import { readProfileState } from "@/lib/profile-state.mjs";
+import { loadRoleResumeSource } from "@/lib/role-resume-source.mjs";
 import { inspectCodexFinalOutput } from "@/lib/codex-final-output.mjs";
 
 export const runtime = "nodejs";
@@ -91,6 +92,7 @@ export async function POST(req: Request) {
   // no longer told these paths, so a stale file cannot survive into a render.
   let pdfPaths: PdfPaths | undefined;
   let rolePlan: any;
+  let roleSource: { cv: string; bytes: number; file: string } | undefined;
   let promptInput = input;
   if (kind === "pdf") {
     const pathsResult = resolvePdfPaths(input, today, careerOpsRoot(), findReportFile);
@@ -104,6 +106,7 @@ export async function POST(req: Request) {
   }
   if (kind === "role-resume") {
     try {
+      roleSource = loadRoleResumeSource(careerOpsRoot());
       rolePlan = parseApprovedRoleResumeInput(careerOpsRoot(), input);
       pdfPaths = roleResumePaths(careerOpsRoot(), rolePlan);
       promptInput = JSON.stringify(rolePlan);
@@ -123,7 +126,7 @@ export async function POST(req: Request) {
       ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
       : undefined;
   const nativeRoleSchema = kind === "role-resume" && cliId === "codex";
-  const prompt = buildPrompt({ kind, input: promptInput, memory: readMemory(), today, postedAt, nativeRoleSchema });
+  const prompt = buildPrompt({ kind, input: promptInput, memory: readMemory(), today, postedAt, nativeRoleSchema, roleSourceCv: roleSource?.cv || "" });
 
   const isClaude = cliId === "claude";
   // Which tools each kind gets, and the whole claude argv, live in
@@ -497,6 +500,9 @@ export async function POST(req: Request) {
               launcher: path.extname(binPath).toLowerCase() || "direct",
               kind,
               promptLength: prompt.length,
+              sourceCvLoaded: kind === "role-resume" ? !!roleSource : undefined,
+              sourceCvBytes: kind === "role-resume" ? roleSource?.bytes || 0 : undefined,
+              workingDirectory: kind === "role-resume" ? path.basename(careerOpsRoot()) : undefined,
               promptSignals: { targetRole: /Target Role:/.test(prompt), positioning: /Approved positioning:/.test(prompt), supportedFocusAreas: /CV-supported focus areas:/.test(prompt), envelopeInstruction: prompt.includes(kind === "role-resume" ? "<<role-resume-json>>" : "<<cv-html") },
               exitCode: code,
               outputSignals: {

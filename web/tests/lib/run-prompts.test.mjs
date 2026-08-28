@@ -14,11 +14,19 @@ import { buildPrompt, isShellSafeCompanyName } from "../../src/lib/run-prompts.m
 import { CV_ENVELOPE_INSTRUCTION, parseCvEnvelope, validateRoleResumeWorkerResponse } from "../../src/lib/cv-envelope.mjs";
 
 const rolePlan = (overrides = {}) => JSON.stringify({ targetRole: "Application Developer", roleSlug: "application-developer", positioning: "Senior Application Developer / Software Engineer", supportedFocusAreas: ["Java", "REST APIs"], unsupportedFocusAreas: ["AWS"], version: "v001", ...overrides });
+const SOURCE_CV = "# Jane Example\n\n## Professional Experience\n\n### Acme\n**Software Engineer**\n";
 
 test("buildPrompt joins multiple canonical supported focus areas", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" }); assert.match(prompt, /CV-supported focus areas: Java, REST APIs/); assert.match(prompt, /Target Role: Application Developer/i); });
 test("exact Application Developer prompt carries the complete approved generation task", () => {
-  const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26" });
-  for (const expected of ["Target Role: Application Developer", "roleSlug: application-developer", "Version: v001", "Approved positioning: Senior Application Developer / Software Engineer", "Java, REST APIs", "Read cv.md", "config/profile.yml", "modes/_profile.md", "modes/pdf.md", "templates/cv-template.html", "NOW PERFORM THE TASK", "Do not merely acknowledge", "VERDICT:", "<<role-resume-json>>"]) assert.ok(prompt.includes(expected), `missing prompt value: ${expected}`);
+  const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26", roleSourceCv: SOURCE_CV });
+  for (const expected of ["Target Role: Application Developer", "roleSlug: application-developer", "Version: v001", "Approved positioning: Senior Application Developer / Software Engineer", "Java, REST APIs", "MASTER CV SOURCE", "# Jane Example", "NOW PERFORM THE TASK", "Do not merely acknowledge", "VERDICT:", "<<role-resume-json>>"]) assert.ok(prompt.includes(expected), `missing prompt value: ${expected}`);
+  assert.doesNotMatch(prompt, /Read cv\.md|Read config\/profile\.yml|Read modes\/_profile\.md/);
+});
+test("role prompt receives the backend-loaded CV directly and needs no Bash discovery", () => {
+  const prompt = buildPrompt({ kind: "role-resume", input: rolePlan(), memory: "", today: "2026-08-26", roleSourceCv: SOURCE_CV, nativeRoleSchema: true });
+  assert.match(prompt, /<master-cv-source>[\s\S]*# Jane Example[\s\S]*<\/master-cv-source>/);
+  assert.match(prompt, /Do not run Bash[\s\S]*No filesystem discovery is needed/);
+  assert.match(prompt, /Populate name, contact fields/);
 });
 test("Application Developer with an empty supported array reaches the worker prompt", () => { const prompt = buildPrompt({ kind: "role-resume", input: rolePlan({ supportedFocusAreas: [] }), memory: "", today: "2026-08-26" }); assert.match(prompt, /CV-supported focus areas: none selected/); });
 test("malformed role plan fails clearly rather than throwing a TypeError", () => { assert.throws(() => buildPrompt({ kind: "role-resume", input: rolePlan({ supportedFocusAreas: undefined }), memory: "", today: "2026-08-26" }), (error) => error instanceof Error && error.name === "Error" && /supportedFocusAreas.*array/.test(error.message) && !/TypeError/.test(error.name)); });

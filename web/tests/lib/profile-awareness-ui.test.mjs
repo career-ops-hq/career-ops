@@ -14,3 +14,4 @@ test("skip is session-only state", () => { assert.match(review, /useState<string
 test("both approved structured updates and manual CV saves advance profile state", () => { assert.match(profileRoute, /advanceProfileState/); assert.match(cvRoute, /advanceProfileState/); });
 test("resume generation still uses existing fact-gated workers", () => { assert.match(review, /kind: "role-resume" \| "pdf"/); assert.match(runRoute, /validateRoleResumeHtml/); assert.match(runRoute, /renderAndMarkPdf/); });
 test("Ready-to-Apply and cover workflows are not called by update review", () => { assert.doesNotMatch(review, /ready-to-apply|documents\/copy|cover-letter/); });
+test("Review Resumes regeneration uses the same role-resume source-loading path", () => { assert.match(review, /kind: "role-resume" \| "pdf"/); assert.match(runRoute, /loadRoleResumeSource\(careerOpsRoot\(\)\)/); assert.match(runRoute, /roleSourceCv: roleSource\?\.cv/); });
