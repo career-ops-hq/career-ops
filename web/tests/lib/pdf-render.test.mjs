@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync, existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
@@ -325,7 +325,7 @@ test("cleanupPdfScratch continues after one matching entry cannot be removed", (
 
 function router(routes, calls) {
   return (execPath, args, opts) => {
-    const script = args[0].split("/").pop();
+    const script = basename(args[0]);
     calls.push(script);
     const fallback = script === "cv-templates.mjs"
       ? { stdout: `${join(opts.cwd, "templates", "cv-template.html")}\n` }
