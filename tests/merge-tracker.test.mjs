@@ -623,3 +623,67 @@ try {
 } catch (e) {
   fail(`merge-tracker same-run num collision tests crashed: ${e.message}`);
 }
+
+// ── PDF-flag synchronization integration ────────────────────────────────────
+console.log('\nmerge-tracker.mjs — PDF-flag synchronization');
+try {
+  const seed = '| 1 | 2026-01-01 | Acme | Eng | 4.0/5 | Evaluated | ❌ | [1](reports/1-acme.md) | |\n';
+  
+  // Create a custom workspace to inject a pdf-index.tsv
+  const work = mkdtempSync(join(tmpdir(), 'cops-merge-pdf-sync-'));
+  try {
+    const tracker = join(work, 'applications.md');
+    const addsDir = join(work, 'adds');
+    const pdfIndex = join(work, 'pdf-index.tsv');
+    
+    mkdirSync(addsDir, { recursive: true });
+    writeFileSync(tracker, TRACKER_HEADER + seed);
+    writeFileSync(pdfIndex, '# report\tpdf\thtml\tformat\tdate\n1\toutput/1.pdf\toutput/1.html\ta4\t2026-01-01\n');
+    
+    // Normal run should trigger sync and flip the PDF flag
+    const result = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
+      encoding: 'utf-8',
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir, CAREER_OPS_PDF_INDEX: pdfIndex },
+    });
+    
+    const trackerContent = readFileSync(tracker, 'utf-8');
+    if (/\|\s*✅\s*\|\s*\[1\]/.test(trackerContent)) {
+      pass('merge-tracker invokes sync-pdf-flags after a real merge');
+    } else {
+      fail(`merge-tracker did not sync PDF flags: row is ${trackerContent.split('\n').find(l => /Acme/.test(l))}`);
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+
+  // Dry-run should skip the sync
+  const workDry = mkdtempSync(join(tmpdir(), 'cops-merge-pdf-sync-dry-'));
+  try {
+    const tracker = join(workDry, 'applications.md');
+    const addsDir = join(workDry, 'adds');
+    const pdfIndex = join(workDry, 'pdf-index.tsv');
+    
+    mkdirSync(addsDir, { recursive: true });
+    writeFileSync(tracker, TRACKER_HEADER + seed);
+    writeFileSync(pdfIndex, '# report\tpdf\thtml\tformat\tdate\n1\toutput/1.pdf\toutput/1.html\ta4\t2026-01-01\n');
+    
+    // Create a pending addition so the merge has something to "dry-run"
+    writeFileSync(join(addsDir, '2-globex.tsv'), '2\t2026-01-02\tGlobex\tEng\tEvaluated\t4.0/5\t❌\t[2](reports/2.md)\t\n');
+    
+    execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--dry-run'], {
+      encoding: 'utf-8',
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir, CAREER_OPS_PDF_INDEX: pdfIndex },
+    });
+    
+    const trackerContent = readFileSync(tracker, 'utf-8');
+    if (/\|\s*❌\s*\|\s*\[1\]/.test(trackerContent)) {
+      pass('merge-tracker skips sync-pdf-flags on dry-run');
+    } else {
+      fail(`merge-tracker incorrectly synced PDF flags on dry-run: row is ${trackerContent.split('\n').find(l => /Acme/.test(l))}`);
+    }
+  } finally {
+    rmSync(workDry, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`merge-tracker PDF-flag sync tests crashed: ${e.message}`);
+}

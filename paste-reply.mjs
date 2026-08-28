@@ -47,6 +47,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { renameSyncWithRetry } from './tracker-utils.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CANDIDATES_PATH = process.env.CAREER_OPS_REPLY_CANDIDATES
@@ -247,7 +248,7 @@ async function main() {
 
 // Only run when executed directly (`node paste-reply.mjs`), not when imported
 // for unit testing (e.g. `import(pathToFileURL(SCRIPT).href)` in tests).
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error('Fatal:', err);
     process.exit(1);

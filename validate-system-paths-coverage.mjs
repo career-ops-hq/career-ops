@@ -66,6 +66,17 @@ const EXCLUDES = [
   'batch/logs/.gitkeep',
   'batch/tracker-additions/.gitkeep',
   'interview-prep/.gitkeep',
+  // The declaration file itself. Normally untracked, so normally invisible to
+  // this check — but a FORK that runs this suite in CI has to commit it, or CI
+  // checks out the repo without it, every declared path is an orphan there, and
+  // the suite is red on a machine the author cannot inspect. Committing it made
+  // it its own orphan, and it cannot declare itself (localUserPaths refuses,
+  // correctly: its reason is that nothing updates a gitignored file). That loop
+  // sent forks back to editing USER_PATHS in update-system.mjs, which is exactly
+  // the permanent conflict #2421 removed. Excluded rather than declared, because
+  // like the entries above it never reaches an install: what ships is
+  // config/local-paths.example.txt.
+  LOCAL_PATHS_FILE,
 ];
 
 // .gitignore is excluded from the manifest but NOT from installs, and the
@@ -112,6 +123,18 @@ if (process.argv.includes('--self-test')) {
   assert(covered('.gitignore') === true, '.gitignore must be covered (excluded)');
   assert(covered('.coderabbit.yaml') === true, '.coderabbit.yaml must be covered (excluded)');
   assert(covered('.editorconfig') === true, '.editorconfig must be covered (excluded, #1438/#1613)');
+  // Pinned as the CONSTANT, not the literal: if the declaration file is ever
+  // renamed, an assertion on 'config/local-paths.txt' would keep passing while
+  // the real file went back to being an orphan in a fork's CI.
+  assert(covered(LOCAL_PATHS_FILE) === true, 'the local-paths declaration file must be covered when a fork commits it (excluded, #2991)');
+  // The example is asserted through its MECHANISM, not just through covered().
+  // covered() answers true for any of them, EXCLUDES included, so a single
+  // covered() assertion would keep passing if the example were ever folded into
+  // the exclude above; it would then stop shipping, silently, which is the one
+  // failure this pair of assertions exists to catch.
+  assert(!EXCLUDES.includes('config/local-paths.example.txt'), 'the shipped example must NOT ride the exclude: it has to keep reaching installs');
+  assert(SYSTEM_PATHS.includes('config/local-paths.example.txt'), 'the shipped example must stay in SYSTEM_PATHS (#2991)');
+  assert(covered('config/local-paths.example.txt') === true, 'the shipped example must stay covered by SYSTEM_PATHS, not by the exclude');
 
   // Test exact matches in SYSTEM_PATHS / USER_PATHS
   assert(covered('CLAUDE.md') === true, 'CLAUDE.md must be covered (exact match)');
