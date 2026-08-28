@@ -73,7 +73,7 @@
 
 career-ops ([career-ops.org](https://career-ops.org), également connu sous le nom de **careerops**) transforme n'importe quelle interface de ligne de commande (CLI) de codage IA en un véritable centre de commandement pour votre recherche d'emploi. Au lieu de suivre manuellement vos candidatures dans un tableau de bord, vous disposez d'un pipeline alimenté par l'IA qui :
 
-- **Évalue les offres** avec une évaluation structurée de A à F (cinq dimensions alimentant un score de 1,0 à 5,0)
+- **Évalue les offres** avec une évaluation structurée de A à H (cinq dimensions alimentant un score de 1 à 5)
 - **Génère des PDF sur mesure** — des CV optimisés pour les systèmes ATS, personnalisés pour chaque description de poste
 - **Scanne automatiquement les portails** (Greenhouse, Ashby, Lever, pages carrières des entreprises)
 - **Traite en lot** — évalue plus de 10 offres en parallèle avec des sous-agents
@@ -92,7 +92,7 @@ Conçu par quelqu'un qui l'a utilisé pour évaluer plus de 740 offres d'emploi,
 | Fonctionnalité | Description |
 | :--- | :--- |
 | **Pipeline Automatique** | Collez une URL, obtenez une évaluation complète + un CV PDF + une entrée dans le tracker |
-| **Évaluation en 6 Blocs** | Résumé du rôle, correspondance de CV, stratégie de niveau, recherche de salaire, personnalisation, préparation aux entretiens (STAR+R) — avec une vérification de légitimité de l'offre (Bloc G) pour signaler les arnaques et les emplois fantômes |
+| **Évaluation A-H** | Résumé du rôle, correspondance de CV, stratégie de niveau, recherche de salaire, personnalisation, préparation aux entretiens (STAR+R) — avec une vérification de légitimité de l'offre (Bloc G) pour signaler les arnaques et les emplois fantômes |
 | **Banque d'histoires d'entretien** | Accumule les récits STAR+Réflexion à travers les évaluations — 5 à 10 histoires clés pour répondre à n'importe quelle question comportementale |
 | **Scripts de Négociation** | Cadres de négociation de salaire, arguments contre les baisses de salaire géographiques, levier d'offres concurrentes |
 | **Génération de CV ATS** | CV optimisés avec injection de mots-clés, utilisant le design Space Grotesk + DM Sans |
@@ -215,7 +215,7 @@ Vous collez l'URL ou la description d'un emploi
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│ Évaluation A-F   │  Correspondance, lacunes, recherche de salaire, récits STAR
+│ Évaluation A-H   │  Correspondance, lacunes, recherche de salaire, récits STAR
 │ (lit cv.md)      │
 └────────┬─────────┘
          │

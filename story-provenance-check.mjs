@@ -154,8 +154,8 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { fileURLToPath } from 'url';
 import { flagValue } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -314,28 +314,112 @@ function buildCvNumberContexts(cvText) {
  * Content words (length >= 4, not a stopword, not itself a number) in a
  * window around a claim's position — the signal used for the
  * `supportedByResume` heuristic.
+ *
+ * The strip keeps letters, combining marks and digits of ANY script. It used
+ * to be `[^a-z0-9\s]`, which deletes every non-ASCII letter, and that broke
+ * this checker in both directions on a CV that is not written in ASCII:
+ *
+ *   - Cyrillic, Greek, Hebrew, Arabic, CJK — every character is stripped, the
+ *     window yields NO words at all, and an empty list makes both
+ *     hasScopedNumberMatch (`claimWords.includes`) and hasContextOverlap
+ *     (`words.some`) unconditionally false. So `existing` and
+ *     `supportedByResume` are unreachable and every claim the patterns do
+ *     extract lands in `derived-unverified` — including a figure sitting
+ *     verbatim in cv.md with matching context.
+ *   - Accented Latin — the strip does not just delete, it re-cuts the word:
+ *     "évaluation" becomes " valuation", a DIFFERENT real English word that
+ *     can then overlap cv.md prose that has nothing to do with the claim.
+ *     Shorter words vanish outright ("Größe", "naïve", "señor" all fall under
+ *     the length floor once split).
+ *
+ * That matters more here than in a grouping key. `derived-unverified` is what
+ * AGENTS.md's "Confirmation UX invariant" hands to the user to confirm or
+ * deny, and its stated risk is that a confirmed guess launders a guess into a
+ * verified fact. A checker that reports 100% unverified for a non-ASCII CV
+ * hands over a list where every entry is noise, which is how a user learns to
+ * confirm without reading.
+ *
+ * `\p{L}\p{M}\p{N}` is the alphabet tracker-parse.mjs's normalizeTextKey
+ * settled on for exactly this class of bug (#2393/#2429/#2569/#2666), down to
+ * keeping \p{M} so Indic matras survive. It is mirrored rather than imported:
+ * normalizeTextKey builds a solid identity KEY and this needs word boundaries
+ * preserved, and importing tracker-parse.mjs would make a story-bank check
+ * fail hard on a missing tracker-aliases.json it has no other use for.
+ *
  * @param {string} body
  * @param {number} matchIndex
  * @param {number} matchLength
  * @param {number} windowChars
  * @returns {string[]}
  */
+/**
+ * NFKC, lowercased, with the combining dot a lowercased Turkish `İ` leaves
+ * behind removed.
+ *
+ * Extracted so the two sides of every comparison below are folded IDENTICALLY.
+ * contextWords() folds the claim window; hasContextOverlap() searches cv.md.
+ * Folding only one of them is a bug that hides: a cv.md written "İstanbul"
+ * lowercases to `i` + U+0307 and stops matching a claim word the strip has
+ * already reduced to plain "istanbul".
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function foldForContext(text) {
+  return String(text ?? '')
+    // NFKC before the strip so a full-width "４０％" folds like "40%", the same
+    // normalization order normalizeTextKey uses.
+    .normalize('NFKC')
+    .toLowerCase()
+    // Lowercasing a Turkish dotted capital leaves a bare combining dot
+    // (U+0307) behind, and \p{M} in the strip below keeps it — so "İstanbul"
+    // and "Istanbul" would not compare equal. Same one-character strip, and
+    // the same reason, as normalizeTextKey's.
+    .replace(/\u0307/gu, '');
+}
+
 function contextWords(body, matchIndex, matchLength, windowChars = 90) {
   const start = Math.max(0, matchIndex - windowChars);
   const end = Math.min(body.length, matchIndex + matchLength + windowChars);
-  const snippet = body.slice(start, end).toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+  const snippet = foldForContext(body.slice(start, end))
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ');
   const words = snippet.split(/\s+/).filter(Boolean);
-  return [...new Set(words.filter((w) => w.length >= 4 && !STOPWORDS.has(w) && !/^\d+$/.test(w)))];
+  // `\p{N}` not `\d`: a token of Devanagari or full-width digits is just as
+  // much "a number, not a content word" as an ASCII one.
+  return [...new Set(words.filter((w) => w.length >= 4 && !STOPWORDS.has(w) && !/^\p{N}+$/u.test(w)))];
 }
 
 /**
- * Whether any context word appears (word-boundary, case-insensitive) in cv.md prose.
- * @param {string[]} words
- * @param {string} cvTextLower
+ * Whether any context word appears, on a word boundary, in cv.md prose.
+ *
+ * The boundary is a lookaround pair, not `\b`. `\b` is defined against `\w`,
+ * which is `[A-Za-z0-9_]` — so for a Cyrillic, Greek, Hebrew, Arabic or CJK
+ * word BOTH sides of every edge are non-word characters and the assertion is
+ * never satisfied:
+ *
+ *   /\bсократил\b/i.test('сократил расходы')   ->  false
+ *
+ * That made this the second half of the same defect as the ASCII strip in
+ * contextWords: even once the words survive folding, they could never be found
+ * in cv.md, so `supportedByResume` stayed unreachable for a non-Latin CV and
+ * every claim still fell to `derived-unverified`.
+ *
+ * Mirrors the `bounded()` helper scan.mjs already uses for company names, down
+ * to its escape set — `\-` is an invalid identity escape under `u`. Both
+ * operands here are folded output (letters, marks, digits and spaces only), so
+ * the escape is defensive rather than load-bearing.
+ *
+ * @param {string[]} words - Claim context words, already folded.
+ * @param {string} cvText - Raw cv.md; folded here so both sides match.
  * @returns {boolean}
  */
-function hasContextOverlap(words, cvTextLower) {
-  return words.some((w) => new RegExp(`\\b${w}\\b`, 'i').test(cvTextLower));
+function hasContextOverlap(words, cvText) {
+  const haystack = foldForContext(cvText);
+  const bounded = (w) => new RegExp(
+    `(?<![\\p{L}\\p{M}\\p{N}])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{M}\\p{N}])`,
+    'u',
+  );
+  return words.some((w) => bounded(w).test(haystack));
 }
 
 /**
@@ -364,7 +448,6 @@ const USER_STATED_RE = /^user-stated\s+\d{4}-\d{2}-\d{2}$/;
  */
 function classifyStoryBank(storyBankText, cvText) {
   const cvNumberContexts = buildCvNumberContexts(cvText);
-  const cvTextLower = cvText.toLowerCase();
   const stories = parseStoryBlocks(storyBankText);
 
   const buckets = { existing: [], supportedByResume: [], derivedUnverified: [], userCannotConfirm: [] };
@@ -419,7 +502,7 @@ function classifyStoryBank(storyBankText, cvText) {
         continue;
       }
 
-      if (hasContextOverlap(claimWords, cvTextLower)) {
+      if (hasContextOverlap(claimWords, cvText)) {
         buckets.supportedByResume.push({ ...entry, contextWords: claimWords });
         continue;
       }
@@ -706,7 +789,7 @@ Brings 15 years of unrelated professional background in adult education prior to
 
 // ── Main ─────────────────────────────────────────────────────────────
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   if (selfTestMode) {
     runSelfTest();
   } else {
