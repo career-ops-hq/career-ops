@@ -9,11 +9,13 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import {
   accumulateTokens,
   codexInvalidSchemaMessage,
   codexNoOutputMessage,
   codexStreamArgs,
+  hashWorkerPrompt,
   completedReportNames,
   hasNewCompletedReport,
   isFatalClaudeStderr,
@@ -451,6 +453,16 @@ test("large manual evaluation prompt uses the same small Codex stdin argv", () =
   assert.deepEqual(args, ["exec", "--json", "--color", "never", "-"]);
   assert.equal(args.includes(prompt), false);
   assert.ok(args.join(" ").length < 100);
+});
+test("isolated manual Codex worker starts outside the repo and adds only its canonical writable root", () => {
+  const args = codexStreamArgs("private prompt", "evaluate", { promptViaStdin: true, isolatedWorkerCwd: "C:/Temp/co-worker", additionalWritableDir: "C:/Career-Ops" });
+  assert.deepEqual(args, ["exec", "--json", "--color", "never", "--sandbox", "workspace-write", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--cd", "C:/Temp/co-worker", "--add-dir", "C:/Career-Ops", "--skip-git-repo-check", "-"]);
+  assert.equal(args.includes("private prompt"), false);
+});
+test("manual prompt SHA-256 is deterministic and matches the complete built value", () => {
+  const prompt = "MANUAL WEB WORKER ISOLATION\ncomplete prompt";
+  assert.equal(hashWorkerPrompt(prompt), crypto.createHash("sha256").update(prompt, "utf8").digest("hex"));
+  assert.match(hashWorkerPrompt(prompt), /^[a-f0-9]{64}$/);
 });
 test("ordinary non-manual evaluation retains its established argv contract", () => {
   assert.deepEqual(codexStreamArgs("ordinary URL", "evaluate"), ["exec", "--json", "--color", "never", "ordinary URL"]);

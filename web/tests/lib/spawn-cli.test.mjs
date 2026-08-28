@@ -81,6 +81,7 @@ test("explicit stdin prompt mode writes the large prompt exactly once and closes
   let received = "";
   const script = 'process.stdin.setEncoding("utf8");process.stdin.on("data",d=>process.stdout.write(d));';
   const child = spawnHeadlessCli(process.execPath, ["-e", script, "-"], { cwd: process.cwd(), env: process.env }, { stdinMode: "pipe", stdinInput: prompt });
+  assert.equal(child.careerOpsPromptWrittenToStdin, true);
   child.stdout.on("data", (chunk) => { received += chunk; });
   const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
   assert.equal(code, 0); assert.equal(received, prompt); assert.equal(received.length, prompt.length);

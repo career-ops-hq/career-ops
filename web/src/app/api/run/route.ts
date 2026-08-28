@@ -3,12 +3,11 @@
 // on it, #2085), while the PDF render is a plain Node child process with no CLI
 // sandbox in the way (#2172) and so passes `spawn` itself to renderAndMarkPdf.
 import { spawn } from "node:child_process";
-import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { accumulateTokens, codexInvalidSchemaMessage, codexNoOutputMessage, hasNewCompletedReport, isCodexInvalidSchemaError, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, codexInvalidSchemaMessage, codexNoOutputMessage, hashWorkerPrompt, hasNewCompletedReport, isCodexInvalidSchemaError, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
@@ -137,7 +136,7 @@ export async function POST(req: Request) {
   if (manualJob?.description && (!prompt.includes("<manual-job-description>") || !prompt.includes(JSON.stringify(manualJob.description)))) {
     return new Response(JSON.stringify({ error: "Manual job description was not included in the evaluation prompt." }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
-  const manualPromptSha256 = manualJob ? crypto.createHash("sha256").update(prompt, "utf8").digest("hex") : "";
+  const manualPromptSha256 = manualJob ? hashWorkerPrompt(prompt) : "";
 
   const isClaude = cliId === "claude";
   // Which tools each kind gets, and the whole claude argv, live in

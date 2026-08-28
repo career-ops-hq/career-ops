@@ -34,3 +34,17 @@ test("manual UI never supplies arbitrary paths or versions", () => {
   assert.match(runRoute, /Invalid manual job payload/);
 });
 test("existing General Role kind is not used by manual job resumes", () => assert.doesNotMatch(result, /kind: "role-resume"/));
+test("manual runtime proves the isolated prompt and stdin handoff without logging content", () => {
+  assert.match(runRoute, /manualPromptIsolationPresent: prompt\.includes\("MANUAL WEB WORKER ISOLATION"\)/);
+  assert.match(runRoute, /manualPromptHasDescription: prompt\.includes\("THE JOB DESCRIPTION IS PRESENT BELOW"\)/);
+  assert.match(runRoute, /manualPromptBlocksCareerOpsSkill:/);
+  assert.match(runRoute, /manualPromptSha256/);
+  assert.match(runRoute, /promptWrittenToStdin/);
+  assert.match(runRoute, /args\.at\(-1\) === "-"/);
+  assert.match(runRoute, /args\.includes\(prompt\)/);
+});
+test("manual Codex runs outside the repository instruction chain while retaining canonical access", () => {
+  assert.match(runRoute, /career-ops-manual-worker-/);
+  assert.match(runRoute, /additionalWritableDir: isolatedManualCodex \? projectRoot/);
+  assert.match(runRoute, /Manual job description was not included in the evaluation prompt/);
+});

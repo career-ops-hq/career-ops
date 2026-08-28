@@ -5,6 +5,11 @@
 // without an extension, ESM specifiers for plain JS modules must be fully
 // specified.
 import { isReservedReportFile } from "./report-files.mjs";
+import crypto from "node:crypto";
+
+export function hashWorkerPrompt(prompt) {
+  return crypto.createHash("sha256").update(String(prompt), "utf8").digest("hex");
+}
 
 /**
  * Dashboard-friendly shape both `parseCodexEvent` and `parseClaudeEvent` return.

@@ -101,7 +101,7 @@ ${postingSource}
    a. Run \`node "${source("reserve-report-num.mjs")}"\` and use its 3-digit report number.
    b. Write the complete report to ${source(`reports/{num}-{company-slug}-${today}.md`)}.
    c. Append exactly one 10-column, TAB-separated row to ${source("batch/tracker-additions/{num}-{company-slug}.tsv")} in this order:
-      {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](${source(`reports/{num}-{company-slug}-${today}.md`)})\t{one-line note}${postedSegment}\t{posting URL, or empty}
+      {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}${postedSegment}\t{posting URL, or empty}
    d. Run \`node "${source("merge-tracker.mjs")}"\`; never edit ${source("data/applications.md")} directly.
    e. Verify the completed report exists and the tracker contains the merged row.
 
