@@ -141,9 +141,110 @@ try {
   if (liveWarnings.some((w) => w.includes('truncated at max_pages=2'))) pass('fetch() warns when max_pages truncates the live-shape feed');
   else fail(`live-shape truncation warning missing; captured = ${JSON.stringify(liveWarnings)}`);
 
+  // #2547: total_pages outranks the short-page break. On a board that rotates
+  // while a sweep runs, a page can legitimately come back 49/50 because a
+  // listing was deleted between requests — that is not the last page, and the
+  // feed's own total_pages says so. Before the fix iteration stopped there and
+  // returned 149 of 300 jobs, silently: the truncation warning is gated on
+  // max_pages, and page 2 of 6 never reaches the cap. Repro shape from
+  // @FReptar0 on #2547.
+  const rotCalls = [];
+  const rotCtx = {
+    fetchJson: async (url) => {
+      const page = Number(new URL(url).searchParams.get('page'));
+      rotCalls.push(page);
+      const rows = page === 2 ? 49 : 50;
+      return { jobs: Array.from({ length: rows }, (_, i) => mk(page * 50 + i)), total: 300, page, page_size: 50, total_pages: 6 };
+    },
+  };
+  const rotWarnings = [];
+  const rotRealConsoleError = console.error;
+  let rotated;
+  try {
+    console.error = (...args) => rotWarnings.push(args.join(' '));
+    rotated = await provider.fetch({ max_pages: 6 }, rotCtx);
+  } finally {
+    console.error = rotRealConsoleError;
+  }
+  if (rotCalls.join(',') === '0,1,2,3,4,5' && rotated.length === 299) {
+    pass('fetch() keeps paginating past a short-but-nonempty page while total_pages says there is more (#2547)');
+  } else {
+    fail(`#2547 mid-sweep short page = ${JSON.stringify({ pages: rotCalls, jobs: rotated?.length })}`);
+  }
+  // A sweep that lands exactly on max_pages === total_pages is complete, not
+  // truncated: no false "raise max_pages" warning on a board read in full.
+  if (rotWarnings.length === 0) pass('fetch() does not warn when max_pages exactly covers total_pages');
+  else fail(`unexpected warning on a complete sweep = ${JSON.stringify(rotWarnings)}`);
+
+  // Trusting total_pages is only safe because an empty page ends iteration
+  // unconditionally: an OVER-reporting feed stops at the first empty response
+  // instead of burning the page budget. This is the lying-server risk that
+  // sank the page_size variant in #2419, bounded here.
+  const overCalls = [];
+  const overCtx = {
+    fetchJson: async (url) => {
+      const page = Number(new URL(url).searchParams.get('page'));
+      overCalls.push(page);
+      return { jobs: page < 3 ? Array.from({ length: 50 }, (_, i) => mk(page * 50 + i)) : [], total_pages: 50 };
+    },
+  };
+  const over = await provider.fetch({ max_pages: 20 }, overCtx);
+  if (overCalls.length === 4 && over.length === 150) pass('fetch() stops at the first empty page when total_pages over-reports (#2547)');
+  else fail(`over-reported total_pages = ${JSON.stringify({ calls: overCalls.length, jobs: over.length })}`);
+
+  // The other direction, pinned as deliberate: an UNDER-reporting total_pages
+  // truncates, and that is the accepted trade-off — the feed's own count is
+  // the best available statement of board size, and ignoring it is the bug
+  // above. Do not "fix" this back into a short-page race.
+  const underCalls = [];
+  const underCtx = {
+    fetchJson: async (url) => {
+      const page = Number(new URL(url).searchParams.get('page'));
+      underCalls.push(page);
+      return { jobs: Array.from({ length: 50 }, (_, i) => mk(page * 50 + i)), total_pages: 2 };
+    },
+  };
+  const under = await provider.fetch({ max_pages: 10 }, underCtx);
+  if (underCalls.length === 2 && under.length === 100) pass('fetch() honours total_pages as the terminator even when the feed under-reports (#2547, deliberate)');
+  else fail(`under-reported total_pages = ${JSON.stringify({ calls: underCalls.length, jobs: under.length })}`);
+
+  // A non-positive total_pages counts as ABSENT, not as "one page". A feed
+  // reporting 0 (or a negative) alongside 50 real rows contradicts itself, and
+  // `page + 1 >= 0` is true at page 0 — so the metadata branch used to end the
+  // sweep immediately and hand back exactly 50 jobs, the #2419 failure shape,
+  // while the SAME feed with the field omitted swept the full budget. The
+  // assertion is that asymmetry: each non-positive value must produce the same
+  // pages and the same job count as the field-absent control, so the two arms
+  // cannot drift apart later. (CodeRabbit, PR #3358.)
+  const sweep = async (total_pages) => {
+    const calls = [];
+    const ctx = {
+      fetchJson: async (url) => {
+        const page = Number(new URL(url).searchParams.get('page'));
+        calls.push(page);
+        const body = { jobs: Array.from({ length: 50 }, (_, i) => mk(page * 50 + i)) };
+        if (total_pages !== undefined) body.total_pages = total_pages;
+        return body;
+      },
+    };
+    const jobs = await provider.fetch({ max_pages: 6 }, ctx);
+    return { pages: calls.join(','), jobs: jobs.length };
+  };
+  const absent = await sweep(undefined);
+  const zero = await sweep(0);
+  const negative = await sweep(-1);
+  const matchesAbsent = (r) => r.pages === absent.pages && r.jobs === absent.jobs;
+  if (absent.pages === '0,1,2,3,4,5' && absent.jobs === 300 && matchesAbsent(zero) && matchesAbsent(negative)) {
+    pass('fetch() treats total_pages 0 and -1 as absent, sweeping identically to a feed that omits the field');
+  } else {
+    fail(`non-positive total_pages = ${JSON.stringify({ absent, zero, negative })}`);
+  }
+
   // PER_PAGE fallback pinned from both directions when the response omits
-  // page_size/total_pages: a full 50-row page continues (fails if PER_PAGE
-  // regresses above 50), a 49-row page stops (fails if it regresses below 50).
+  // page_size/total_pages — the path a short page still ends iteration on
+  // (#2547; shared with the non-positive total_pages case above): a full
+  // 50-row page continues (fails if PER_PAGE regresses above 50), a 49-row
+  // page stops (fails if it regresses below 50).
   const bareCalls = [];
   const bareCtx = {
     fetchJson: async (url) => {

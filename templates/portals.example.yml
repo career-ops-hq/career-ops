@@ -208,10 +208,22 @@
 #   - `positive` non-empty → at least one keyword must be present
 #   - If this entire block is absent, descriptions are not filtered (default)
 #
-# Provider support: the scanner is zero-token and only reads descriptions that
-# a provider already returns in its list payload — it never fetches each job
-# page. Currently Lever (`descriptionPlain`) supplies descriptions; jobs from
-# providers that don't always pass this filter (they're never silently dropped).
+# Provider support: the scanner is zero-token and only reads a description when
+# the provider's list API returns it for free — it never fetches each job page.
+# Jobs from a provider that doesn't supply one always pass this filter (never
+# silently dropped). Check which providers qualify:
+# `grep -l 'description:' providers/*.mjs`.
+#
+# Whole-word / stem matching (opt-in, per entry): a plain keyword is a
+# substring, so a negative "java" also rejects "JavaScript" and "ios" rejects
+# "curiosity". Prefix an entry with `word:` or `stem:` — identical semantics to
+# title_filter (see that section above for the full table):
+#   - `word:java`   whole word only — keeps "JavaScript", still blocks a Java shop
+#   - `stem:ios`    left boundary only — keeps "curiosity", still blocks "iOS"
+# A keyword that STARTS the unwanted word ("java" in "javascript") needs
+# `word:`; one that lands MID-word ("ios" in "curiosity") is closed by `stem:`
+# too. Entries without a prefix are unchanged, so existing configs behave
+# exactly as before.
 #
 # Example: keep roles that mention Rust/Go, drop legacy PHP/WordPress shops
 # content_filter:
@@ -242,7 +254,8 @@
 # Surfaces roles that sponsor a work visa (H-1B / H-1B1 / O-1 for the US, plus
 # the generic "visa sponsorship" wording) and drops roles that explicitly refuse
 # it. Like content_filter it reads the job DESCRIPTION text, so it only has
-# signal for providers whose list API ships a description (Lever today).
+# signal for providers that populate job.description (see the content_filter
+# provider-support note above).
 # Semantics (case-insensitive substring):
 #   - Any `negative` keyword present → reject (an explicit "no sponsorship")
 #   - require_mention: false (default) → after clearing negatives, pass — jobs
@@ -296,6 +309,41 @@ title_filter:
   # there to catch "Cryptocurrency" too. So anchor the entries that need it and
   # add the suffix forms you still want gone, the way the negative list below
   # pairs `word:Intern` with `word:Interns` and a plain `Internship`.
+  #
+  # Prefix an entry with `stem:` for the half in between. A plain keyword is
+  # loose on BOTH sides, and usually only one of them was meant:
+  #
+  #   agent         Agentforce yes   Agents yes   Reagents yes   <- the default
+  #   stem:agent    Agentforce yes   Agents yes   Reagents NO    <- must START a word
+  #   word:agent    Agentforce NO    Agents NO    Reagents NO    <- the whole word
+  #
+  # So `stem:` is for a keyword that begins a longer word you also want — "Crypto"
+  # reaching "Cryptocurrency", "Fellows" reaching "Fellowship" — without it also
+  # landing in the middle of an unrelated one. It is what separates "Rust
+  # Engineer" from "Zero Trust Engineer" while keeping "Rust Engineering".
+  #
+  # It does NOT cover a keyword that ENDS a longer word instead of starting it:
+  # "Automation" inside the German compound "Gebäudeautomation" still needs the
+  # plain form. That side has no prefix, deliberately — the plain default already
+  # serves it, and nothing has been measured that the pair cannot express.
+  #
+  # Nor does it close the MIRROR case, which is worth knowing before reaching for
+  # it: a keyword that genuinely STARTS the unwanted word. "Solana" does begin
+  # "Solanaceae", "Neutron" begins "Neutronics", "DeFi" begins "Defined" — `stem:`
+  # asks for the left boundary only, so it matches all three on purpose, and only
+  # `word:` closes them. Measured over the 675 observed titles in
+  # tests/fixtures/title-recall-corpus.json, that is where the two prefixes divide:
+  #
+  #   stem: closes      Zero Trust Engineer, NASTAR Course Setter        4 titles
+  #   only word: closes Solanaceae, Neutronics, Software Defined (x3),
+  #                     Product Definer, Product Definition              7 titles
+  #
+  # And `word:` is not free on that same corpus: it also drops 4 titles you
+  # probably wanted — "Engineering Manager, Smart Contracts" and "Engineering
+  # Lead - Crypto and DeFi" among them — because it forbids the suffix too. So
+  # reach for `stem:` when a keyword lands MID-word, and for `word:` when it lands
+  # at the START of a word you did not mean, knowing that costs the plural and
+  # compound forms as well.
   #
   # Use " + " (with spaces) to require SEVERAL terms in any order:
   #
@@ -351,6 +399,48 @@ title_filter:
     - "Business Systems"
     - "Internal Tools"
     - "Transformation"
+    # --- Healthcare example (uncomment your profession, remove the rest) ---
+    # # -- Healthcare roles --
+    # # Adapt for your specialty: "Registered Nurse", "Physician Assistant", "Medical Assistant",
+    # # "Healthcare Administrator", "Clinical Research Coordinator", "ICU Nurse", "Pediatric Nurse", etc.
+    # - "Registered Nurse"
+    # - "RN"
+    # - "Physician Assistant"
+    # - "Medical Assistant"
+    # - "Healthcare Administrator"
+    # - "Clinical Research"
+    # - "Nurse Practitioner"
+    # - "Licensed Practical Nurse"
+    # - "LPN"
+
+    # --- Finance/Operations example (uncomment your profession, remove the rest) ---
+    # # -- Finance/Operations roles --
+    # # Adapt for your specialty: "Financial Analyst", "Financial Planner", "Accountant",
+    # # "Operations Manager", "Project Manager", "Business Analyst", "PMO", "Controller", etc.
+    # - "Financial Analyst"
+    # - "Financial Planner"
+    # - "Accountant"
+    # - "Operations Manager"
+    # - "Project Manager"
+    # - "Business Analyst"
+    # - "PMO"
+    # - "Controller"
+    # - "FP&A"
+    # - "Treasury"
+
+    # --- Marketing/Sales/Customer Success example (uncomment your profession, remove the rest) ---
+    # # -- Marketing/Sales/Customer Success roles --
+    # # Adapt for your specialty: "Marketing Manager", "Sales Manager", "Customer Success Manager",
+    # # "Account Executive", "Business Development", "Growth Marketing", "Product Marketing", etc.
+    # - "Marketing Manager"
+    # - "Sales Manager"
+    # - "Customer Success Manager"
+    # - "Account Executive"
+    # - "Business Development"
+    # - "Growth Marketing"
+    # - "Product Marketing"
+    # - "Content Marketing"
+    # - "Brand Manager"
   negative:
     # [CUSTOMIZE] Add keywords for roles you want to exclude
     - "Junior"
@@ -363,6 +453,9 @@ title_filter:
     - "word:Intern"
     - "word:Interns"
     - "Internship"
+    # -- Engineering-specific negatives (only for engineering searches) --
+    # Remove these if you're targeting other professions - they're tech-stack
+    # filters for software engineering roles.
     - ".NET"
     - "Java "
     - "iOS"
@@ -448,60 +541,80 @@ search_queries:
     query: 'site:wellfound.com "AI Engineer" OR "LLM Engineer" OR "Forward Deployed" ("visa sponsorship" OR "will sponsor")'
     enabled: true
 
-  # -- Ashby --
-  - name: Ashby — AI PM
-    query: 'site:jobs.ashbyhq.com "AI Product Manager" OR "Senior Product Manager AI" remote'
-    enabled: true
+  # --- Healthcare example (uncomment your profession, remove the rest) ---
+  # # -- Healthcare --
+  # # Adapt these terms for your healthcare specialty: "Registered Nurse", "Physician Assistant",
+  # # "Medical Assistant", "Healthcare Administrator", "Clinical Research Coordinator", etc.
+  # # Add location-specific terms like "RN" (Registered Nurse), "LPN" (Licensed Practical Nurse),
+  # # or specialization keywords like "ICU", "Pediatrics", "Emergency", "Cardiology".
+  # - name: Ashby — Healthcare
+  #   query: 'site:jobs.ashbyhq.com "Registered Nurse" OR "RN" OR "Healthcare Administrator" remote'
+  #   enabled: true
+  # 
+  # - name: Greenhouse — Healthcare
+  #   query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Registered Nurse" OR "Physician Assistant" OR "Healthcare Administrator" remote'
+  #   enabled: true
+  # 
+  # - name: Wellfound — Healthcare
+  #   query: 'site:wellfound.com "Registered Nurse" OR "RN" OR "Healthcare Administrator" remote'
+  #   enabled: true
 
-  - name: Ashby — Solutions Architect
-    query: 'site:jobs.ashbyhq.com "Solutions Architect" AI OR automation remote'
-    enabled: true
+  # --- Finance/Operations example (uncomment your profession, remove the rest) ---
+  # # -- Finance / Operations --
+  # # Adapt these terms for your finance/ops specialty: "Financial Analyst", "Financial Planner",
+  # # "Accountant", "Operations Manager", "Project Manager", "Business Analyst", "PMO", etc.
+  # # Add industry-specific terms like "FP&A" (Financial Planning & Analysis), "Controller",
+  # # "Treasury", "Risk Management", "Compliance", "Audit", or specialization keywords like
+  # # "Corporate Finance", "Investment Banking", "Private Equity", "Venture Capital".
+  # - name: Ashby — Finance/Operations
+  #   query: 'site:jobs.ashbyhq.com "Financial Analyst" OR "Operations Manager" OR "Project Manager" remote'
+  #   enabled: true
+  # 
+  # - name: Greenhouse — Finance/Operations
+  #   query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Financial Analyst" OR "FP&A" OR "Operations Manager" remote'
+  #   enabled: true
+  # 
+  # - name: Wellfound — Finance/Operations
+  #   query: 'site:wellfound.com "Financial Analyst" OR "Operations Manager" OR "Project Manager" remote'
+  #   enabled: true
 
+  # --- Marketing/Sales/Customer Success example (uncomment your profession, remove the rest) ---
+  # # -- Marketing / Sales / Customer Success --
+  # # Adapt these terms for your marketing/sales specialty: "Marketing Manager", "Sales Manager",
+  # # "Customer Success Manager", "Account Executive", "Business Development", "Growth Marketing",
+  # # "Product Marketing", "Content Marketing", "Brand Manager", etc.
+  # # Add channel-specific terms like "Digital Marketing", "Social Media Marketing", "Email Marketing",
+  # # "SEO", "SEM", "PPC", "B2B", "B2C", "SaaS", or methodology keywords like "Inbound Marketing",
+  # # "Account-Based Marketing", "Demand Generation", "Lead Generation".
+  # - name: Ashby — Marketing/Sales
+  #   query: 'site:jobs.ashbyhq.com "Marketing Manager" OR "Sales Manager" OR "Customer Success Manager" remote'
+  #   enabled: true
+  # 
+  # - name: Greenhouse — Marketing/Sales
+  #   query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Marketing Manager" OR "Customer Success Manager" OR "Account Executive" remote'
+  #   enabled: true
+  # 
+  # - name: Wellfound — Marketing/Sales
+  #   query: 'site:wellfound.com "Marketing Manager" OR "Sales Manager" OR "Customer Success Manager" remote'
+  #   enabled: true
+
+  # -- Ashby (kept as AI example) --
   - name: Ashby — AI Engineer
     query: 'site:jobs.ashbyhq.com "AI Engineer" OR "LLM Engineer" OR "Forward Deployed" remote'
     enabled: true
 
-  - name: Ashby — Agentic
-    query: 'site:jobs.ashbyhq.com "Agentic" OR "AI Agent" OR "Automation Architect" remote'
-    enabled: true
-
-  # -- Greenhouse --
-  - name: Greenhouse — AI PM
-    query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "AI Product Manager" OR "Senior Product Manager" AI remote'
-    enabled: true
-
-  - name: Greenhouse — SA & FDE
-    query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Solutions Architect" OR "Forward Deployed" AI remote'
-    enabled: true
-
+  # -- Greenhouse (kept as AI example) --
   - name: Greenhouse — AI Engineer
     query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "AI Engineer" OR "LLM" OR "Agentic" remote'
     enabled: true
 
-  # -- Wellfound --
-  - name: Wellfound — AI PM
-    query: 'site:wellfound.com "AI Product Manager" OR "Senior Product Manager" AI remote'
-    enabled: true
 
-  - name: Wellfound — Solutions Architect
-    query: 'site:wellfound.com "Solutions Architect" AI OR automation remote'
-    enabled: true
-    
-  - name: Wellfound — AI Engineer
-    query: 'site:wellfound.com "AI Engineer" OR "LLM Engineer" OR "Forward Deployed" remote'
-    enabled: true
-
-  - name: Wellfound — Agentic
-    query: 'site:wellfound.com "Agentic" OR "AI Agent" OR "Automation Architect" remote'
-    enabled: true
-
-
-  # -- Workable --
+  # -- Workable (AI example) --
   - name: Workable — AI Roles
     query: 'site:apply.workable.com "AI" "Product Manager" OR "Solutions Architect" OR "AI Engineer" remote'
     enabled: true
 
-  # -- No-Code / Low-Code / Automation --
+  # -- No-Code / Low-Code / Automation (general purpose) --
   - name: Ashby — No-Code & Automation
     query: 'site:jobs.ashbyhq.com "no-code" OR "low-code" OR "automation engineer" OR "n8n" OR "Make" OR "Airtable" remote senior'
     enabled: true
@@ -514,58 +627,55 @@ search_queries:
     query: '"GTM Engineer" OR "RevOps Engineer" OR "Growth Engineer" automation Airtable OR Make OR Clay remote'
     enabled: true
 
-  # -- Voice AI & Conversational AI --
-  - name: Voice AI — FDE & SA
-    query: 'site:job-boards.greenhouse.io OR site:jobs.ashbyhq.com "Voice AI" OR "Conversational AI" OR "Speech" "Solutions" OR "Forward Deployed" OR "Customer Engineer"'
-    enabled: true
-
-  - name: Voice AI — AI Engineer
-    query: 'site:job-boards.greenhouse.io OR site:jobs.ashbyhq.com "Voice" OR "Speech" "AI Engineer" OR "Deployment" OR "Integration"'
-    enabled: true
-
-  # -- Contact Center AI --
-  - name: Contact Center AI — SA & SE
-    query: '"contact center" OR "customer service" "AI" "Solutions Architect" OR "Solutions Engineer" OR "Forward Deployed" remote'
-    enabled: true
-
-  # -- FDE specific (cross-portal) --
-  - name: FDE & Deployed Engineer — All portals
-    query: '"Forward Deployed Engineer" OR "Deployed Engineer" OR "Deployment Engineer" AI site:job-boards.greenhouse.io OR site:jobs.ashbyhq.com OR site:jobs.lever.co'
-    enabled: true
-
   # -- Remote-friendly Europe boards --
 
   - name: Remotive — AI/DevRel/SA/FDE
     query: 'site:remotive.com "AI Engineer" OR "Developer Advocate" OR "Solutions Architect" OR "Forward Deployed" OR "DevRel" Europe'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Remotive — Tech Roles
+  #   query: 'site:remotive.com "Engineer" OR "Developer" OR "Manager" Europe'
+  #   enabled: true
 
   - name: WeWorkRemotely — AI & DX
     query: 'site:weworkremotely.com "AI" OR "DevRel" OR "Solutions Engineer" OR "Forward Deployed" OR "Founding Engineer"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: WeWorkRemotely — Tech & Operations
+  #   query: 'site:weworkremotely.com "Engineer" OR "Manager" OR "Operations" OR "Sales"'
+  #   enabled: true
 
   - name: Working Nomads — AI/DevRel/SA
     query: 'site:workingnomads.com "AI Engineer" OR "Developer Advocate" OR "Solutions Architect" OR "Forward Deployed"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Working Nomads — Tech & Business
+  #   query: 'site:workingnomads.com "Engineer" OR "Manager" OR "Analyst" OR "Sales"'
+  #   enabled: true
 
   - name: EU Remote Jobs — AI/DevRel/SA
     query: 'site:euremotejobs.com "AI" OR "DevRel" OR "Solutions Architect" OR "Forward Deployed" OR "Founding Engineer"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: EU Remote Jobs — General
+  #   query: 'site:euremotejobs.com "Engineer" OR "Manager" OR "Analyst" OR "Sales"'
+  #   enabled: true
 
   - name: RemoteOK — AI/DevRel/SA
     query: 'site:remoteok.com "AI Engineer" OR "Developer Advocate" OR "Solutions Architect" OR "Forward Deployed" OR "Founding Engineer"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: RemoteOK — General
+  #   query: 'site:remoteok.com "Engineer" OR "Manager" OR "Analyst" OR "Sales"'
+  #   enabled: true
 
-  # -- Specialized AI / Dev-Tools / FDE boards --
+  # -- Specialized boards (keep AI examples for pattern) --
 
-  - name: ai-jobs.net — DevRel/SA/FDE
+  - name: ai-jobs.net — DevRel/SA/FDE (AI example)
     query: 'site:ai-jobs.net "Developer Advocate" OR "Solutions Architect" OR "Forward Deployed" OR "DevRel" remote Europe'
     enabled: true
 
-  - name: ai-jobs.net — Founding/Applied AI
-    query: 'site:ai-jobs.net "Founding Engineer" OR "Applied AI Engineer" OR "Founding" remote'
-    enabled: true
-
-  - name: fwddeploy.com — Forward Deployed roles
+  - name: fwddeploy.com — Forward Deployed roles (AI example)
     query: 'site:fwddeploy.com "Forward Deployed" OR "Deployed Engineer" remote Europe OR EMEA'
     enabled: true
 
@@ -576,34 +686,62 @@ search_queries:
   - name: YC Jobs — Applied AI
     query: 'site:workatastartup.com "Applied AI" OR "AI Engineer" OR "AI Agent" remote Europe'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: YC Jobs — General Startup Roles
+  #   query: 'site:ycombinator.com/jobs OR site:workatastartup.com "Engineer" OR "Manager" OR "Sales" remote'
+  #   enabled: true
 
   # -- Spanish market specialized (high-value for Madrid/Barcelona-based candidates) --
 
   - name: Manfred — Tech Senior España
     query: 'site:getmanfred.com/en/job-offers "Solutions Architect" OR "DevRel" OR "Forward Deployed" OR "AI Engineer" OR "Founding"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Manfred — Tech Senior España (General)
+  #   query: 'site:getmanfred.com/en/job-offers "Engineer" OR "Manager" OR "Sales" OR "Founding"'
+  #   enabled: true
 
   - name: Manfred — Remote AI/Senior
     query: 'site:getmanfred.com "remote" "AI" OR "Senior" OR "Staff" OR "Lead"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Manfred — Remote Senior (General)
+  #   query: 'site:getmanfred.com "remote" "Senior" OR "Staff" OR "Lead"'
+  #   enabled: true
 
   - name: Tecnoempleo — España IT
     query: 'site:tecnoempleo.com "AI Engineer" OR "Solutions Architect" OR "DevRel" OR "Forward Deployed" OR "Founding Engineer"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Tecnoempleo — España IT (General)
+  #   query: 'site:tecnoempleo.com "Engineer" OR "Architect" OR "Manager" OR "Founding Engineer"'
+  #   enabled: true
 
   - name: Tecnoempleo — Remoto Senior
     query: 'site:tecnoempleo.com "remoto" OR "remote" Senior "AI" OR "Architect" OR "Lead"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Tecnoempleo — Remoto Senior (General)
+  #   query: 'site:tecnoempleo.com "remoto" OR "remote" Senior "Engineer" OR "Architect" OR "Lead"'
+  #   enabled: true
 
   - name: JobFluent — Spain startups
     query: 'site:jobfluent.com Madrid OR Barcelona "AI" OR "Engineer" OR "Solutions" OR "DevRel"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: JobFluent — Spain startups (General)
+  #   query: 'site:jobfluent.com Madrid OR Barcelona "Engineer" OR "Manager" OR "Sales" OR "Marketing"'
+  #   enabled: true
 
   - name: Welcome to the Jungle — Spain tech
     query: 'site:welcometothejungle.com Spain OR Madrid OR Barcelona "AI Engineer" OR "Solutions Architect" OR "DevRel" OR "Forward Deployed"'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Welcome to the Jungle — Spain tech (General)
+  #   query: 'site:welcometothejungle.com Spain OR Madrid OR Barcelona "Engineer" OR "Manager" OR "Sales" OR "Marketing"'
+  #   enabled: true
 
-  # -- DevRel-specific boards --
+  # -- DevRel-specific boards (AI/DevTools example) --
 
   - name: DevRelX Jobs
     query: 'site:devrelx.com/jobs remote OR Europe OR EMEA'
@@ -626,18 +764,34 @@ search_queries:
   - name: Himalayas — Remote AI/Dev-tools
     query: 'site:himalayas.app "AI Engineer" OR "Solutions Architect" OR "Developer Advocate" OR "Forward Deployed" OR "Founding Engineer" Europe'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Himalayas — Remote Tech
+  #   query: 'site:himalayas.app "Engineer" OR "Manager" OR "Developer" OR "Founding" Europe'
+  #   enabled: true
 
   - name: Jooble — España Tech Senior
     query: 'site:jooble.org "AI Engineer" OR "Solutions Architect" OR "DevRel" Madrid OR remote España'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: Jooble — España Tech Senior (General)
+  #   query: 'site:jooble.org "Engineer" OR "Manager" OR "Developer" Madrid OR remote España'
+  #   enabled: true
 
   - name: EU Data Jobs — AI/ML Europe
     query: 'site:eudatajobs.com "AI" OR "ML" OR "Data" "Engineer" OR "Architect" remote Europe'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: EU Data Jobs — Data Europe
+  #   query: 'site:eudatajobs.com "Data" "Engineer" OR "Architect" OR "Analyst" remote Europe'
+  #   enabled: true
 
   - name: HN Who's Hiring — Remote AI
     query: 'site:news.ycombinator.com OR site:hnrss.org "AI Engineer" OR "Forward Deployed" OR "DevRel" OR "Founding Engineer" remote'
     enabled: true
+  # --- Broader search example (uncomment if not filtering by title, or update title_filter.positive to match) ---
+  # - name: HN Who's Hiring — Remote Tech
+  #   query: 'site:news.ycombinator.com OR site:hnrss.org "Engineer" OR "Manager" OR "Developer" remote'
+  #   enabled: true
 
   # -- Türkiye / Turkey job portals --
   # WebSearch queries for Turkish job boards (no public ATS APIs).
@@ -1114,11 +1268,6 @@ search_queries:
 #   provider: jobicy
 #   enabled: true
 #
-# - name: EchoJobs                        # tech jobs aggregated from company ATS boards
-#   provider: echojobs
-#   max_pages: 3                          # 100 jobs/page; raise for deeper coverage
-#   enabled: true
-#
 # - name: getManfred                      # Spanish/EU tech roles, salary ranges published
 #   provider: manfred
 #   lang: EN                              # EN or ES; the API rejects the call without it
@@ -1127,6 +1276,18 @@ search_queries:
 # - name: Senjob                          # Senegal (Dakar) — the first African board
 #   provider: senjob                      # listings only; robots.txt keeps CVs off-limits
 #   enabled: true                         # ~40 postings/page, tech roles are a thin slice
+#
+# - name: ITviec                          # Vietnam's largest IT board (English UI)
+#   provider: itviec                      # server-rendered listing; no auth, no JS
+#   searchKeywords: backend               # optional — narrows via the URL path
+#   searchLocation: Ho Chi Minh           # optional — Ho Chi Minh / Hanoi / Da Nang
+#   enabled: true                         # 20 postings/page; 750ms pacing between pages
+#
+# - name: CareerViet                      # broad-coverage VN board, robots.txt allows ClaudeBot/GPTBot
+#   provider: careerviet                  # server-rendered listing; no auth, no JS
+#   searchKeywords: backend               # optional — narrows via the URL slug
+#   searchLocation: Ho Chi Minh           # optional — only Ho Chi Minh's city code is verified live
+#   enabled: true                         # ~50 postings/page; 750ms pacing between pages
 #
 # - name: Hacker News "Who is hiring?"    # monthly "Ask HN: Who is hiring?" thread
 #   provider: hackernews

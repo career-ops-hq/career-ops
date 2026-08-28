@@ -621,6 +621,39 @@ try {
     }
   }
 
+  // 26. A literal `null` inside a plugin's entry array. This is valid JSON and
+  //     a half-written install can leave it behind, so doctor has to survive
+  //     it. Destructuring the entry threw a TypeError - `= {}` defaults only
+  //     for `undefined`, never for `null` - which killed the run before the
+  //     report printed, turning one unconfigured plugin into "career-ops is
+  //     broken here". The assertion is that doctor still WARNS: a crash and a
+  //     clean miss both leave playwright_mcp false, so only checking the flag
+  //     would pass on the bug.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-26-'));
+    const home = mkdtempSync(join(tmpdir(), 'co-mcp-nullentry-'));
+    try {
+      mkdirSync(join(home, 'plugins'), { recursive: true });
+      writeFileSync(join(home, 'settings.json'), JSON.stringify({ enabledPlugins: { [PLUGIN_KEY]: true } }));
+      writeFileSync(
+        join(home, 'plugins', 'installed_plugins.json'),
+        JSON.stringify({ version: 2, plugins: { [PLUGIN_KEY]: [null] } }),
+      );
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: home });
+      if (state._error) {
+        fail(`#26 null plugin entry crashed doctor: ${state._error}`);
+      } else if (state.playwright_mcp?.claude === false
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('null entry in installed_plugins.json → warns cleanly, no crash');
+      } else {
+        fail(`#26 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
 } catch (e) {
   fail(`opencode-mcp-detection tests crashed: ${e.message}`);
 } finally {
