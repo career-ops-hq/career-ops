@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import * as yaml from "js-yaml";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { parseApplications } from "@/lib/tracker-table.mjs";
 // One definition of the `{n}-RESERVED.md` convention, shared with
@@ -26,7 +27,9 @@ export function careerOpsRoot(): string {
  * as module imports and fails the production build otherwise.
  */
 export function rootScript(nameNoExt: string): string {
-  return path.join(careerOpsRoot(), `${nameNoExt}.mjs`);
+  // The core checkout is selected at runtime and must not be bundled into the
+  // web server output when Turbopack sees this dynamic script path.
+  return path.join(/* turbopackIgnore: true */ careerOpsRoot(), `${nameNoExt}.mjs`);
 }
 
 // Feature-detect the core's `tracker.mjs delete --num` row-delete (#1200) by probing
@@ -278,7 +281,11 @@ export function readReport(n: string): ReportData | null {
   const file = findReportFile(n);
   if (!file) return null;
   try {
-    return { content: fs.readFileSync(file, "utf8"), file: path.basename(file) };
+    // Reports live in the user's runtime checkout, outside the web build graph.
+    return {
+      content: fs.readFileSync(/* turbopackIgnore: true */ file, "utf8"),
+      file: path.basename(file),
+    };
   } catch {
     return null;
   }
@@ -346,4 +353,103 @@ export function rememberFact(fact: string): "ok" | "deduped" | "error" {
   } catch {
     return "error";
   }
+}
+
+
+/**
+ * AGENTS.md's two language axes, resolved from config/profile.yml.
+ *
+ * `language.output` governs human-facing prose; `language.modes_dir` selects the
+ * market vocabulary and local evaluation rules. They compose freely — English
+ * output with DACH vocabulary is a valid configuration — so they are returned
+ * as separate fields rather than collapsed into one "locale".
+ */
+export type LanguageConfig = {
+  /** language.output — prose language for user-facing text. Default "en". */
+  output: string;
+  /** language.modes_dir, normalized without a trailing slash. Default "modes". */
+  modesDir: string;
+  /** The market's evaluation-mode file, repo-root-relative. Default "modes/oferta.md". */
+  evalModeFile: string;
+};
+
+/**
+ * A `modes_dir` value we are willing to turn into a filesystem path.
+ *
+ * profile.yml is user-editable and this value is used to read a directory and
+ * to build a path handed to an agent, so it is validated rather than trusted:
+ * a crafted `modes/../../etc` must not escape the checkout. Rejecting falls
+ * back to the default, which is always correct, never dangerous.
+ */
+const MODES_DIR_RE = /^modes(?:\/[A-Za-z0-9_-]+)?$/;
+
+/**
+ * Every localized evaluation mode's title line states the block range it
+ * produces — "Valutazione completa A-F", "完整的 A-G 维度评估", "전체 평가 A-G".
+ * Older translations say A-F and newer ones A-G (Block G, posting legitimacy),
+ * so both count; the dash may be ASCII or typographic.
+ *
+ * This is what identifies the evaluation mode inside a market directory, in
+ * preference to a hardcoded {dir → filename} map. A map would have to list all
+ * 18 market directories that exist today and would silently go stale the next
+ * time a translation lands — the exact class of bug this function is fixing.
+ * Verified against every market directory in the repo: each contains exactly
+ * one file whose title line matches, and no apply-mode collides.
+ */
+const EVAL_MODE_TITLE_RE = /A[-\u2010-\u2015][FG]/;
+
+const DEFAULT_EVAL_MODE = "modes/oferta.md";
+
+/**
+ * Find the evaluation mode inside a market directory. Returns the default when
+ * the directory is unreadable or nothing in it looks like an evaluation mode —
+ * a wrong-but-working English evaluation beats a run that cannot start.
+ */
+function resolveEvalModeFile(root: string, modesDir: string): string {
+  if (modesDir === "modes") return DEFAULT_EVAL_MODE;
+  let names: string[];
+  try {
+    names = fs.readdirSync(path.join(root, modesDir));
+  } catch {
+    return DEFAULT_EVAL_MODE;
+  }
+  for (const name of names.sort()) {
+    // `_shared.md`, `_profile.md` and friends are includes, never entry points.
+    if (!name.endsWith(".md") || name.startsWith("_") || name === "README.md") continue;
+    try {
+      const first = fs.readFileSync(path.join(root, modesDir, name), "utf8").split("\n", 1)[0] ?? "";
+      if (EVAL_MODE_TITLE_RE.test(first)) return `${modesDir}/${name}`;
+    } catch {
+      /* unreadable file — keep looking */
+    }
+  }
+  return DEFAULT_EVAL_MODE;
+}
+
+/**
+ * Read the language configuration. Never throws: a missing or malformed
+ * profile.yml yields the English/global default, because a broken config
+ * should degrade the market vocabulary, not block every evaluation.
+ */
+export function readLanguageConfig(): LanguageConfig {
+  const root = careerOpsRoot();
+  let modesDir = "modes";
+  let output = "en";
+  try {
+    const parsed = yaml.load(fs.readFileSync(path.join(root, "config", "profile.yml"), "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const language = (parsed as Record<string, unknown>).language;
+      if (language && typeof language === "object" && !Array.isArray(language)) {
+        const l = language as Record<string, unknown>;
+        if (typeof l.output === "string" && l.output.trim()) output = l.output.trim();
+        if (typeof l.modes_dir === "string" && l.modes_dir.trim()) {
+          const candidate = l.modes_dir.trim().replace(/\/+$/, "");
+          if (MODES_DIR_RE.test(candidate)) modesDir = candidate;
+        }
+      }
+    }
+  } catch {
+    /* no profile yet, or malformed — defaults are correct */
+  }
+  return { output, modesDir, evalModeFile: resolveEvalModeFile(root, modesDir) };
 }

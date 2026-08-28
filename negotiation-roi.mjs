@@ -59,14 +59,17 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
 import { parseStories } from './match-star.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const STORY_BANK_PATH = join(CAREER_OPS, 'interview-prep', 'story-bank.md');
-const CV_PATH = join(CAREER_OPS, 'cv.md');
+const DATA_ROOT = getCareerOpsRoot();
+const CV_PATH = join(DATA_ROOT, 'cv.md');
 
 // ── Frequency vocabulary ─────────────────────────────────────────────
 // Occurrences per year, business-cadence convention (matches how a candidate
@@ -699,6 +702,6 @@ function main() {
   }
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (isMainModule(import.meta.url)) {
   main();
 }

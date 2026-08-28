@@ -26,14 +26,17 @@ import { chromium } from 'playwright';
 import { writeFile, readFile } from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import { reportPrefix } from './jd-capture.mjs';
 import { rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
-const JDS_DIR = join(ROOT, 'jds');
-const PIPELINE_PATH = join(ROOT, 'data', 'pipeline.md');
+const DATA_ROOT = getCareerOpsRoot();
+const JDS_DIR = join(DATA_ROOT, 'jds');
+const PIPELINE_PATH = join(DATA_ROOT, 'data', 'pipeline.md');
 
 const KNOWN_FLAGS = ['--company', '--role', '--report', '--pipeline', '--dry-run', '--help', '-h'];
 const VALUE_FLAGS = ['--company', '--role', '--report'];
@@ -471,7 +474,7 @@ async function main() {
   if (failed > 0) process.exit(1);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   parseCliArgs(process.argv.slice(2));
   main().catch(err => {
     console.error('❌  Fatal:', err.message);

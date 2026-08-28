@@ -14,13 +14,14 @@ try {
 } catch (e) {}
 
 import { readFileSync, existsSync } from 'fs';
-import { pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { appendToPipeline, appendToScanHistory, loadSeenUrls } from './scan.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 // Import the deterministic provider
 import hnProvider from './providers/hackernews.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 // ── Configuration ────────────────────────────────────────────────────
 const PORTALS_PATH = 'portals.yml';
@@ -113,11 +114,11 @@ async function main() {
 
   if (newOffers.length > 0) {
     await appendToPipeline(newOffers);
-    await appendToScanHistory(newOffers, new Date().toISOString().slice(0, 10), 'added');
+    await appendToScanHistory(newOffers, localToday(), 'added');
     console.log(`\n🎉 Success: ${newOffers.length} offers added.`);
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main().catch(err => { console.error("Fatal:", err.message); process.exit(1); });
 }
