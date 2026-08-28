@@ -211,7 +211,12 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | `awards[]` | object | `title` (award name), `org` (issuing body, optional), `year` (optional). Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Use it for competitive or academic distinctions (olympiad medals, hackathon wins, dean's list) that carry more signal than a thin experience section. |
 | `skills[]` | object | `category` + `items` (comma-separated string or string array). |
 
-`build-cv-html.mjs` errors out (non-zero exit) if any template placeholder is left unresolved, so a malformed payload fails loudly instead of shipping a broken CV. Run `node build-cv-html.mjs --test` for a self-test render.
+The HTML builder requires a top-level object, a non-empty `candidate.name`, and
+a non-empty `summary`. All CV sections are optional at the builder boundary;
+when supplied, use the array shapes shown above. The builder errors out before
+writing HTML when required content is missing. It also errors if any template
+placeholder is left unresolved, so a malformed payload fails loudly instead of
+shipping a broken CV. Run `node build-cv-html.mjs --test` for a self-test render.
 
 ### Markdown bold
 

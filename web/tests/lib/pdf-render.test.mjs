@@ -1,38 +1,37 @@
-// Tests for pdf-render.mjs using Node's built-in test runner.
-// Imports directly from pdf-render.mjs (the single source of truth) so the
-// test and production code can never drift out of sync. spawnFn is a fake
-// EventEmitter-based child process — no real generate-pdf.mjs/mark-pdf-
-// ready.mjs subprocess is ever spawned by these tests.
-//
-// Run:  node --test tests/lib/pdf-render.test.mjs
-
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { spawn } from "node:child_process";
+import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import {
   pdfRunOutcome,
-  writeCvHtml,
+  writeCvPayload,
+  spawnBuildCvHtml,
+  resolveConfiguredCvTemplate,
   spawnGeneratePdf,
   markTrackerReady,
   cleanupPdfScratch,
   renderAndMarkPdf,
 } from "../../src/lib/pdf-render.mjs";
 
-// A fake child_process.spawn() result: stdout/stderr emit "data" once, then
-// the child emits "close" (or "error" instead, for a spawn failure) on the
-// next microtask — close enough to the real async timing for these tests.
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+// Real timers keep these integration-style child fixtures honest; leave enough
+// headroom for coarse or loaded CI event loops without slowing the suite much.
+const SYNTHETIC_TIMEOUT_MS = 50;
+
+/**
+ * Model a spawned child whose output and terminal event arrive asynchronously,
+ * preserving the event order the production wrapper must handle.
+ */
 function fakeChild({ stdout = "", stderr = "", exitCode = 0, spawnError = null } = {}) {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
   queueMicrotask(() => {
-    if (spawnError) {
-      child.emit("error", spawnError);
-      return;
-    }
+    if (spawnError) return child.emit("error", spawnError);
     if (stdout) child.stdout.emit("data", Buffer.from(stdout));
     if (stderr) child.stderr.emit("data", Buffer.from(stderr));
     child.emit("close", exitCode);
@@ -40,441 +39,423 @@ function fakeChild({ stdout = "", stderr = "", exitCode = 0, spawnError = null }
   return child;
 }
 
-// spawnFn that dispatches based on the script path (args[0]) so a single
-// fake stands in for both generate-pdf.mjs and mark-pdf-ready.mjs calls.
-function makeRouterSpawn(routes) {
+function makeRoot(profile = null) {
+  const root = mkdtempSync(join(tmpdir(), "co-pdfrender-"));
+  mkdirSync(join(root, "config"), { recursive: true });
+  mkdirSync(join(root, "templates"), { recursive: true });
+  writeFileSync(join(root, "templates", "cv-template.html"), "{{NAME}}{{EXPERIENCE}}{{EDUCATION}}");
+  if (profile !== null) writeFileSync(join(root, "config", "profile.yml"), profile);
+  return root;
+}
+
+function paths(root, num = "7") {
+  const dir = join(root, ".career-ops-web", "pdf-tmp");
+  mkdirSync(dir, { recursive: true });
+  return {
+    payload: join(dir, `cv-web-${num}.payload.json`),
+    html: join(dir, `cv-web-${num}.html`),
+    finalPdf: join(root, "output", "cv-jane-acme.pdf"),
+  };
+}
+
+const PAYLOAD = { page_format: "a4", candidate: { name: "Jane" }, summary: "José — <safe>" };
+
+test("pdfRunOutcome gates every signal before backend writes", () => {
+  assert.deepEqual(pdfRunOutcome({ envelope: { ok: true }, noOutputMessage: null, sawError: false, cleanExit: true, hasPaths: true }), { ok: true });
+  assert.deepEqual(
+    pdfRunOutcome({ envelope: { ok: false, error: "bad payload" }, noOutputMessage: null, sawError: false, cleanExit: true, hasPaths: true }),
+    { ok: false, message: "This run didn't produce a tailored CV to render, so no PDF was generated — re-run it to verify. (bad payload)" },
+  );
+  assert.deepEqual(
+    pdfRunOutcome({ envelope: { ok: false, error: "parser reason" }, noOutputMessage: "agent exited without output", sawError: false, cleanExit: true, hasPaths: true }),
+    { ok: false, message: "agent exited without output" },
+  );
+  assert.equal(pdfRunOutcome({ envelope: { ok: true }, noOutputMessage: null, sawError: true, cleanExit: true, hasPaths: true }).ok, false);
+  assert.equal(pdfRunOutcome({ envelope: { ok: true }, noOutputMessage: null, sawError: false, cleanExit: false, hasPaths: true }).ok, false);
+  assert.equal(pdfRunOutcome({ envelope: { ok: true }, noOutputMessage: null, sawError: false, cleanExit: true, hasPaths: false }).ok, false);
+});
+
+test("writeCvPayload truncates stale data and preserves Unicode", () => {
+  const root = makeRoot();
+  const pdfPaths = paths(root);
+  try {
+    writeFileSync(pdfPaths.payload, "x".repeat(1000));
+    const result = writeCvPayload({ pdfPaths, payload: PAYLOAD, root });
+    assert.equal(result.ok, true);
+    assert.deepEqual(JSON.parse(readFileSync(pdfPaths.payload, "utf8")), PAYLOAD);
+    assert.ok(readFileSync(pdfPaths.payload, "utf8").length < 1000);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("writeCvPayload rejects agent-controlled photo fields and trusts profile photo only", () => {
+  const root = makeRoot('candidate:\n  photo: "assets/trusted.png"\n  photo_style: circle\n');
+  const pdfPaths = paths(root);
+  try {
+    const payload = { ...PAYLOAD, candidate: { name: "Jane", photo: "/private/secret.png", photo_style: "square", photoStyle: "rounded" } };
+    assert.equal(writeCvPayload({ pdfPaths, payload, root }).ok, true);
+    const saved = JSON.parse(readFileSync(pdfPaths.payload, "utf8"));
+    assert.equal(saved.candidate.photo, "assets/trusted.png");
+    assert.equal(saved.candidate.photo_style, "circle");
+    assert.equal(saved.candidate.photoStyle, undefined);
+    assert.ok(!readFileSync(pdfPaths.payload, "utf8").includes("/private/secret.png"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("writeCvPayload strips all agent photo fields when profile has none", () => {
+  const root = makeRoot();
+  const pdfPaths = paths(root);
+  try {
+    const payload = { ...PAYLOAD, candidate: { name: "Jane", photo: "/private/secret.png", photo_style: "circle", photoStyle: "rounded" } };
+    assert.equal(writeCvPayload({ pdfPaths, payload, root }).ok, true);
+    assert.equal(JSON.parse(readFileSync(pdfPaths.payload, "utf8")).candidate.photo, undefined);
+    assert.equal(JSON.parse(readFileSync(pdfPaths.payload, "utf8")).candidate.photo_style, undefined);
+    assert.equal(JSON.parse(readFileSync(pdfPaths.payload, "utf8")).candidate.photoStyle, undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("writeCvPayload reports an unwritable target", () => {
+  const root = makeRoot();
+  try {
+    const pdfPaths = { payload: join(root, "missing", "x.json") };
+    const result = writeCvPayload({ pdfPaths, payload: PAYLOAD, root });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /tailored CV payload/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("spawnBuildCvHtml invokes the canonical builder and drains output", async () => {
   const calls = [];
   const spawnFn = (execPath, args, opts) => {
     calls.push({ execPath, args, opts });
-    const scriptPath = args[0];
-    const route = Object.entries(routes).find(([suffix]) => scriptPath.endsWith(suffix));
-    if (!route) throw new Error(`no fake route for ${scriptPath}`);
-    return fakeChild(route[1]);
+    return fakeChild({ stdout: "large report", stderr: "warning", exitCode: 0 });
   };
-  return { spawnFn, calls };
-}
-
-function makeScratchDir() {
-  return mkdtempSync(join(tmpdir(), "co-pdfrender-"));
-}
-
-test("spawnGeneratePdf: clean exit -> ok:true, invokes generate-pdf.mjs with --allow-reorder", async () => {
-  // Given generate-pdf.mjs will exit cleanly
-  const calls = [];
-  const spawnFn = (execPath, args, opts) => { calls.push({ execPath, args, opts }); return fakeChild({ exitCode: 0 }); };
-
-  // When spawning the render
-  const result = await spawnGeneratePdf({ spawnFn, execPath: "node", root: "/root", html: "/root/x.html", finalPdf: "/root/output/x.pdf", format: "letter", reportNum: "018" });
-
-  // Then it reports ok:true and invoked generate-pdf.mjs with the expected args
-  assert.deepEqual(result, { ok: true, stderr: "" });
-  assert.equal(calls.length, 1);
-  assert.match(calls[0].args[0], /generate-pdf\.mjs$/);
-  assert.deepEqual(calls[0].args.slice(1), ["/root/x.html", "/root/output/x.pdf", "--format=letter", "--report=018", "--allow-reorder"]);
+  const result = await spawnBuildCvHtml({ spawnFn, execPath: "node", root: "/root", payload: "/tmp/in.json", html: "/tmp/out.html", template: "/root/templates/cv-template.modern.html" });
+  assert.equal(result.ok, true);
+  assert.equal(result.stdout, "large report");
+  assert.equal(result.stderr, "warning");
+  assert.deepEqual(calls[0].args, ["/root/build-cv-html.mjs", "/tmp/in.json", "/tmp/out.html", "/root/templates/cv-template.modern.html"]);
   assert.equal(calls[0].opts.cwd, "/root");
 });
 
-test("spawnGeneratePdf: non-zero exit -> ok:false, stderr surfaced", async () => {
-  // Given generate-pdf.mjs will exit non-zero with a stderr message
-  const spawnFn = () => fakeChild({ exitCode: 1, stderr: "section order guard failed" });
-
-  // When spawning the render
-  const result = await spawnGeneratePdf({ spawnFn, execPath: "node", root: "/root", html: "x.html", finalPdf: "x.pdf", format: "a4", reportNum: "1" });
-
-  // Then it reports ok:false with that stderr
-  assert.deepEqual(result, { ok: false, stderr: "section order guard failed" });
+test("spawnBuildCvHtml converts nonzero, emitted error, and synchronous throw to failures", async () => {
+  const nonzero = await spawnBuildCvHtml({ spawnFn: () => fakeChild({ exitCode: 2, stderr: "missing candidate.name" }), execPath: "node", root: "/r", payload: "p", html: "h" });
+  assert.equal(nonzero.ok, false);
+  assert.match(nonzero.stderr, /candidate\.name/);
+  const emitted = await spawnBuildCvHtml({ spawnFn: () => fakeChild({ spawnError: new Error("ENOENT") }), execPath: "node", root: "/r", payload: "p", html: "h" });
+  assert.match(emitted.stderr, /failed to start: ENOENT/);
+  const thrown = await spawnBuildCvHtml({ spawnFn: () => { throw new Error("EACCES"); }, execPath: "node", root: "/r", payload: "p", html: "h" });
+  assert.match(thrown.stderr, /failed to start: EACCES/);
 });
 
-test("spawnGeneratePdf: spawn error -> ok:false, descriptive stderr", async () => {
-  // Given the child process itself fails to spawn (e.g. missing binary)
-  const spawnFn = () => fakeChild({ spawnError: new Error("ENOENT") });
-
-  // When spawning the render
-  const result = await spawnGeneratePdf({ spawnFn, execPath: "node", root: "/root", html: "x.html", finalPdf: "x.pdf", format: "letter", reportNum: "1" });
-
-  // Then it reports ok:false with a descriptive message, not a raw crash
+test("spawnBuildCvHtml times out and terminates a hung child", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  const signals = [];
+  let sawTerm;
+  const termSent = new Promise((resolve) => { sawTerm = resolve; });
+  child.kill = (signal) => {
+    signals.push(signal);
+    if (signal === "SIGTERM") sawTerm();
+    return true;
+  };
+  const resultPromise = spawnBuildCvHtml({
+    spawnFn: () => child,
+    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs: SYNTHETIC_TIMEOUT_MS,
+  });
+  await termSent;
+  let resolved = false;
+  void resultPromise.then(() => { resolved = true; });
+  await Promise.resolve();
+  assert.equal(resolved, false, "timeout waits for the child close event before cleanup can begin");
+  child.emit("close", null);
+  const result = await resultPromise;
   assert.equal(result.ok, false);
-  assert.match(result.stderr, /PDF rendering failed to start: ENOENT/);
+  assert.match(result.stderr, new RegExp(`timed out after ${SYNTHETIC_TIMEOUT_MS}ms`));
+  assert.deepEqual(signals, ["SIGTERM"]);
 });
 
-// ── markTrackerReady ──
-
-test("markTrackerReady: clean exit with JSON stdout -> ok:true, data parsed", async () => {
-  // Given mark-pdf-ready.mjs succeeds and prints a --json payload
-  const stdout = JSON.stringify({ changed: true, num: 5, company: "Acme" });
-  const spawnFn = () => fakeChild({ exitCode: 0, stdout });
-
-  // When marking the tracker ready
-  const result = await markTrackerReady({ spawnFn, execPath: "node", root: "/root", reportNum: "5" });
-
-  // Then it reports ok:true with the parsed payload
-  assert.equal(result.ok, true);
-  assert.deepEqual(result.data, { changed: true, num: 5, company: "Acme" });
-});
-
-test("markTrackerReady: failure exit with parseable --json error -> data.error available", async () => {
-  // Given mark-pdf-ready.mjs fails but still prints a structured --json error
-  const stdout = JSON.stringify({ error: "No tracker row links report #5", code: "not-found" });
-  const spawnFn = () => fakeChild({ exitCode: 2, stdout });
-
-  // When marking the tracker ready
-  const result = await markTrackerReady({ spawnFn, execPath: "node", root: "/root", reportNum: "5" });
-
-  // Then it reports ok:false with the specific error available for callers to surface
+test("spawnBuildCvHtml escalates a timed-out child that ignores SIGTERM", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  const signals = [];
+  child.kill = (signal) => {
+    signals.push(signal);
+    if (signal === "SIGKILL") queueMicrotask(() => child.emit("close", null));
+    return true;
+  };
+  const result = await spawnBuildCvHtml({
+    spawnFn: () => child,
+    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs: SYNTHETIC_TIMEOUT_MS,
+  });
   assert.equal(result.ok, false);
-  assert.equal(result.data?.error, "No tracker row links report #5");
+  assert.match(result.stderr, new RegExp(`timed out after ${SYNTHETIC_TIMEOUT_MS}ms`));
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
 });
 
-test("markTrackerReady: failure exit with no/garbled stdout -> data:null, raw stderr kept", async () => {
-  // Given mark-pdf-ready.mjs crashes before printing any JSON
-  const spawnFn = () => fakeChild({ exitCode: 1, stderr: "unexpected crash" });
-
-  // When marking the tracker ready
-  const result = await markTrackerReady({ spawnFn, execPath: "node", root: "/root", reportNum: "5" });
-
-  // Then it reports ok:false with data:null, falling back to the raw stderr
+test("spawnBuildCvHtml does not treat a signal-delivery error as child exit", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  const signals = [];
+  let sawTerm;
+  const termSent = new Promise((resolve) => { sawTerm = resolve; });
+  child.kill = (signal) => {
+    signals.push(signal);
+    if (signal === "SIGTERM") {
+      queueMicrotask(() => child.emit("error", new Error("kill EPERM")));
+      sawTerm();
+    } else {
+      queueMicrotask(() => child.emit("close", null));
+    }
+    return signal === "SIGKILL";
+  };
+  const resultPromise = spawnBuildCvHtml({
+    spawnFn: () => child,
+    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs: SYNTHETIC_TIMEOUT_MS,
+  });
+  await termSent;
+  await Promise.resolve();
+  let resolved = false;
+  void resultPromise.then(() => { resolved = true; });
+  await Promise.resolve();
+  assert.equal(resolved, false, "signal error does not release scratch cleanup");
+  const result = await resultPromise;
   assert.equal(result.ok, false);
-  assert.equal(result.data, null);
-  assert.equal(result.stderr, "unexpected crash");
+  assert.match(result.stderr, new RegExp(`timed out after ${SYNTHETIC_TIMEOUT_MS}ms`));
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
 });
 
-test("markTrackerReady: spawn error -> ok:false, descriptive stderr", async () => {
-  // Given the child process itself fails to spawn
-  const spawnFn = () => fakeChild({ spawnError: new Error("EACCES") });
-
-  // When marking the tracker ready
-  const result = await markTrackerReady({ spawnFn, execPath: "node", root: "/root", reportNum: "5" });
-
-  // Then it reports ok:false with a descriptive message
-  assert.equal(result.ok, false);
-  assert.match(result.stderr, /mark-pdf-ready\.mjs failed to start: EACCES/);
-});
-
-// ── cleanupPdfScratch ──
-
-test("cleanupPdfScratch: removes only files matching the prefix", () => {
-  // Given a scratch dir with this run's files and an unrelated run's files
-  const dir = makeScratchDir();
+test("the web payload path delegates to the canonical builder and escapes text exactly once", async () => {
+  const scratch = makeRoot();
+  const pdfPaths = paths(scratch);
+  const payload = {
+    page_format: "a4",
+    candidate: { name: "Zoë <Admin>" },
+    summary: "R&D shipped <safe> systems — 東京",
+    competencies: ["Node & browser automation"],
+    skills: [{ category: "Languages", items: ["C++", "TypeScript"] }],
+  };
   try {
-    writeFileSync(join(dir, "cv-web-7.html"), "x");
-    writeFileSync(join(dir, "cv-web-7.meta.json"), "{}");
-    writeFileSync(join(dir, "cv-web-7.payload.json"), "{}"); // a backend/generate-pdf.mjs leftover
-    writeFileSync(join(dir, "cv-web-99.html"), "unrelated run");
+    assert.equal(writeCvPayload({ pdfPaths, payload, root: scratch }).ok, true);
+    const webBuild = await spawnBuildCvHtml({
+      spawnFn: spawn, execPath: process.execPath, root: REPO_ROOT,
+      payload: pdfPaths.payload, html: pdfPaths.html,
+    });
+    assert.equal(webBuild.ok, true, webBuild.stderr);
+    const html = readFileSync(pdfPaths.html, "utf8");
+    assert.match(html, /Zoë &lt;Admin&gt;/);
+    assert.match(html, /R&amp;D shipped &lt;safe&gt; systems — 東京/);
+    assert.doesNotMatch(html, /&amp;lt;safe&amp;gt;/);
+  } finally { rmSync(scratch, { recursive: true, force: true }); }
+});
 
-    // When cleaning up report #7's scratch files
+test("spawnGeneratePdf passes canonical format and allow-reorder", async () => {
+  const calls = [];
+  const result = await spawnGeneratePdf({
+    spawnFn: (execPath, args, opts) => { calls.push({ execPath, args, opts }); return fakeChild(); },
+    execPath: "node", root: "/root", html: "/tmp/x.html", finalPdf: "/tmp/x.pdf", format: "letter", reportNum: "7",
+  });
+  assert.deepEqual(result, { ok: true, stderr: "" });
+  assert.deepEqual(calls[0].args.slice(1), ["/tmp/x.html", "/tmp/x.pdf", "--format=letter", "--report=7", "--allow-reorder"]);
+});
+
+test("spawnGeneratePdf converts nonzero, emitted error, and synchronous throw to failures", async () => {
+  const nonzero = await spawnGeneratePdf({ spawnFn: () => fakeChild({ exitCode: 1, stderr: "browser failed" }), execPath: "node", root: "/r", html: "h", finalPdf: "p", format: "a4", reportNum: "7" });
+  assert.deepEqual(nonzero, { ok: false, stderr: "browser failed" });
+  const emitted = await spawnGeneratePdf({ spawnFn: () => fakeChild({ spawnError: new Error("ENOENT") }), execPath: "node", root: "/r", html: "h", finalPdf: "p", format: "a4", reportNum: "7" });
+  assert.match(emitted.stderr, /failed to start: ENOENT/);
+  const thrown = await spawnGeneratePdf({ spawnFn: () => { throw new Error("EACCES"); }, execPath: "node", root: "/r", html: "h", finalPdf: "p", format: "a4", reportNum: "7" });
+  assert.match(thrown.stderr, /failed to start: EACCES/);
+});
+
+test("markTrackerReady parses structured success and error output", async () => {
+  const good = await markTrackerReady({ spawnFn: () => fakeChild({ stdout: '{"changed":true}' }), execPath: "node", root: "/r", reportNum: "7" });
+  assert.equal(good.ok, true);
+  assert.deepEqual(good.data, { changed: true });
+  const bad = await markTrackerReady({ spawnFn: () => fakeChild({ stdout: '{"error":"row missing"}', exitCode: 2 }), execPath: "node", root: "/r", reportNum: "7" });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.data.error, "row missing");
+});
+
+test("markTrackerReady preserves garbled output and converts child start failures", async () => {
+  const garbled = await markTrackerReady({ spawnFn: () => fakeChild({ stdout: "not json", stderr: "crash", exitCode: 1 }), execPath: "node", root: "/r", reportNum: "7" });
+  assert.deepEqual(garbled, { ok: false, data: null, stderr: "crash" });
+  const emitted = await markTrackerReady({ spawnFn: () => fakeChild({ spawnError: new Error("ENOENT") }), execPath: "node", root: "/r", reportNum: "7" });
+  assert.match(emitted.stderr, /failed to start: ENOENT/);
+  const thrown = await markTrackerReady({ spawnFn: () => { throw new Error("EACCES"); }, execPath: "node", root: "/r", reportNum: "7" });
+  assert.match(thrown.stderr, /failed to start: EACCES/);
+});
+
+test("cleanupPdfScratch removes only the current report prefix", () => {
+  const root = makeRoot();
+  const dir = join(root, "scratch");
+  mkdirSync(dir);
+  try {
+    for (const name of ["cv-web-7.payload.json", "cv-web-7.html", "cv-web-8.html"]) writeFileSync(join(dir, name), "x");
     cleanupPdfScratch(dir, "cv-web-7.");
-
-    // Then only the #7-prefixed files are gone
-    assert.deepEqual(readdirSync(dir).sort(), ["cv-web-99.html"]);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+    assert.deepEqual(readdirSync(dir), ["cv-web-8.html"]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("cleanupPdfScratch: missing directory logs but does not throw", () => {
-  // Given the scratch directory itself doesn't exist
-  const parent = makeScratchDir();
-  const dir = join(parent, "does-not-exist");
-  const originalError = console.error;
+test("cleanupPdfScratch logs a missing directory instead of throwing", () => {
+  const root = makeRoot();
   const logged = [];
-  console.error = (msg) => logged.push(msg);
+  const original = console.error;
+  console.error = (message) => logged.push(message);
   try {
-    // When cleaning up
-    // Then it logs the failure instead of throwing, so a caller can't crash on cleanup
-    assert.doesNotThrow(() => cleanupPdfScratch(dir, "cv-web-1."));
+    assert.doesNotThrow(() => cleanupPdfScratch(join(root, "missing"), "cv-web-7."));
     assert.equal(logged.length, 1);
-    assert.match(logged[0], /pdf scratch cleanup: could not list/);
-  } finally {
-    console.error = originalError;
-    // The mkdtemp parent is real even though the child isn't — without this the
-    // suite leaves a co-pdfrender-* directory behind on every run.
-    rmSync(parent, { recursive: true, force: true });
-  }
+    assert.match(logged[0], /could not list/);
+  } finally { console.error = original; rmSync(root, { recursive: true, force: true }); }
 });
 
-test("cleanupPdfScratch: a single file's removal failure logs but does not throw or stop cleanup", () => {
-  // Given one prefixed entry that can't be removed as a plain file (a
-  // subdirectory, which fs.rmSync without `recursive` refuses) alongside a
-  // normal prefixed file that CAN be removed
-  const dir = makeScratchDir();
-  const originalError = console.error;
+test("cleanupPdfScratch continues after one matching entry cannot be removed", () => {
+  const root = makeRoot();
+  const dir = join(root, "scratch");
+  mkdirSync(dir);
+  mkdirSync(join(dir, "cv-web-7.stuck"));
+  writeFileSync(join(dir, "cv-web-7.html"), "x");
   const logged = [];
-  console.error = (msg) => logged.push(msg);
+  const original = console.error;
+  console.error = (message) => logged.push(message);
   try {
-    mkdirSync(join(dir, "cv-web-3.stuck-dir"));
-    writeFileSync(join(dir, "cv-web-3.html"), "x");
-
-    // When cleaning up report #3's scratch files
-    assert.doesNotThrow(() => cleanupPdfScratch(dir, "cv-web-3."));
-
-    // Then the failure is logged, the removable file is still gone, and the
-    // unremovable directory is left behind rather than crashing the caller
-    assert.equal(logged.length, 1);
-    assert.match(logged[0], /pdf scratch cleanup: could not remove cv-web-3\.stuck-dir/);
-    assert.deepEqual(readdirSync(dir), ["cv-web-3.stuck-dir"]);
-  } finally {
-    console.error = originalError;
-    rmSync(dir, { recursive: true, force: true });
-  }
+    assert.doesNotThrow(() => cleanupPdfScratch(dir, "cv-web-7."));
+    assert.deepEqual(readdirSync(dir), ["cv-web-7.stuck"]);
+    assert.match(logged[0], /could not remove cv-web-7\.stuck/);
+  } finally { console.error = original; rmSync(root, { recursive: true, force: true }); }
 });
 
-// ── renderAndMarkPdf ──
-
-function makePdfPaths(dir, reportNum) {
-  return {
-    html: join(dir, `cv-web-${reportNum}.html`),
-    finalPdf: join(dir, "output", `cv-jane-acme-2026-07-26.pdf`),
+/**
+ * Route script launches to configured fake results while recording their order;
+ * template resolution gets the normal fixture path when no override is supplied.
+ */
+function router(routes, calls) {
+  return (execPath, args, opts) => {
+    const script = args[0].split("/").pop();
+    calls.push(script);
+    const fallback = script === "cv-templates.mjs"
+      ? { stdout: `${join(opts.cwd, "templates", "cv-template.html")}\n` }
+      : {};
+    return fakeChild(routes[script] ?? fallback);
   };
 }
 
-test("renderAndMarkPdf: happy path -> rendered with no warnings, scratch cleaned up", async () => {
-  // Given both scripts succeeding
-  const dir = makeScratchDir();
-  const pdfPaths = makePdfPaths(dir, "1");
-  writeFileSync(pdfPaths.html, "<html></html>");
-  const { spawnFn, calls } = makeRouterSpawn({
-    "generate-pdf.mjs": { exitCode: 0 },
-    "mark-pdf-ready.mjs": { exitCode: 0, stdout: JSON.stringify({ changed: true }) },
+test("resolveConfiguredCvTemplate delegates to the canonical resolver", async () => {
+  const calls = [];
+  const result = await resolveConfiguredCvTemplate({
+    spawnFn: (execPath, args, opts) => {
+      calls.push({ execPath, args, opts });
+      return fakeChild({ stdout: "/repo/templates/cv-template.modern.html\n" });
+    },
+    execPath: "node", root: "/repo",
   });
-  try {
-    // When rendering and marking
-    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, format: "a4", reportNum: "1" });
-
-    // Then it reports rendered with no warnings, and scratch is cleaned up
-    assert.deepEqual(result, { kind: "rendered", warnings: [] });
-    assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith("cv-web-1.")), []);
-    // ...and the format actually reached generate-pdf.mjs. The argv was only
-    // inspected on the failure path, so a hardcoded or defaulted format would pass
-    // while every US/Canada CV rendered on the wrong page size.
-    const renderCall = calls.find((c) => c.args.some((a) => String(a).includes("generate-pdf.mjs")));
-    assert.ok(renderCall, "generate-pdf.mjs was never spawned");
-    assert.ok(renderCall.args.includes("--format=a4"), `expected --format=a4, got ${renderCall.args.join(" ")}`);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  assert.deepEqual(result, { ok: true, template: "/repo/templates/cv-template.modern.html", stderr: "" });
+  assert.deepEqual(calls[0].args, ["/repo/cv-templates.mjs", "resolve", "cv"]);
+  assert.equal(calls[0].opts.cwd, "/repo");
 });
 
-test("renderAndMarkPdf: generate-pdf.mjs fails -> render-failed, mark-pdf-ready never invoked, scratch still cleaned up", async () => {
-  // Given generate-pdf.mjs exits non-zero
-  const dir = makeScratchDir();
-  const pdfPaths = makePdfPaths(dir, "3");
-  writeFileSync(pdfPaths.html, "<html></html>");
-  const { spawnFn, calls } = makeRouterSpawn({
-    "generate-pdf.mjs": { exitCode: 1, stderr: "Refusing to write the PDF outside the project directory" },
-    "mark-pdf-ready.mjs": { exitCode: 0 },
-  });
+test("renderAndMarkPdf runs write → build → render → mark and cleans scratch", async () => {
+  const root = makeRoot();
+  const pdfPaths = paths(root);
+  const calls = [];
   try {
-    // When rendering
-    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, format: "letter", reportNum: "3" });
-
-    // Then it reports render-failed with the render's stderr, never calls mark-pdf-ready, and still cleans scratch
-    assert.deepEqual(result, { kind: "render-failed", error: "Refusing to write the PDF outside the project directory" });
-    assert.equal(calls.length, 1);
-    assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith("cv-web-3.")), []);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("renderAndMarkPdf: render succeeds but mark-pdf-ready fails with a parseable error -> rendered with a specific warning", async () => {
-  // Given generate-pdf.mjs succeeds but mark-pdf-ready.mjs fails with a --json error
-  const dir = makeScratchDir();
-  const pdfPaths = makePdfPaths(dir, "4");
-  writeFileSync(pdfPaths.html, "<html></html>");
-  const { spawnFn } = makeRouterSpawn({
-    "generate-pdf.mjs": { exitCode: 0 },
-    "mark-pdf-ready.mjs": { exitCode: 2, stdout: JSON.stringify({ error: "No tracker row links report #4", code: "not-found" }) },
-  });
-  try {
-    // When rendering and marking
-    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, format: "letter", reportNum: "4" });
-
-    // Then the PDF is still reported rendered, but the warning carries mark-pdf-ready's specific error
+    writeFileSync(pdfPaths.html, "stale html");
+    const result = await renderAndMarkPdf({
+      spawnFn: router({ "mark-pdf-ready.mjs": { stdout: '{"changed":true}' } }, calls),
+      execPath: "node", root, pdfPaths, payload: PAYLOAD, format: "a4", reportNum: "7",
+    });
     assert.equal(result.kind, "rendered");
-    assert.equal(result.warnings.length, 1);
-    assert.match(result.warnings[0], /No tracker row links report #4/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+    assert.deepEqual(calls, ["cv-templates.mjs", "build-cv-html.mjs", "generate-pdf.mjs", "mark-pdf-ready.mjs"]);
+    assert.equal(existsSync(pdfPaths.payload), false);
+    assert.equal(existsSync(pdfPaths.html), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("renderAndMarkPdf: render succeeds but mark-pdf-ready fails with no parseable stdout -> rendered with the generic fallback warning", async () => {
-  // Given generate-pdf.mjs succeeds but mark-pdf-ready.mjs crashes before printing any JSON
-  const dir = makeScratchDir();
-  const pdfPaths = makePdfPaths(dir, "5");
-  writeFileSync(pdfPaths.html, "<html></html>");
-  const { spawnFn } = makeRouterSpawn({
-    "generate-pdf.mjs": { exitCode: 0 },
-    "mark-pdf-ready.mjs": { exitCode: 1, stderr: "unexpected crash" },
-  });
+test("renderAndMarkPdf honors the profile-selected CV template", async () => {
+  const root = makeRoot("cv:\n  template: modern\n");
+  const pdfPaths = paths(root);
+  writeFileSync(join(root, "templates", "cv-template.modern.html"), "{{NAME}}{{EXPERIENCE}}{{EDUCATION}}");
+  const calls = [];
   try {
-    // When rendering and marking
-    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, format: "letter", reportNum: "5" });
-
-    // Then the PDF is still reported rendered, with the generic fallback
-    // warning (no mark.data.error to quote) rather than the crash text
+    const result = await renderAndMarkPdf({
+      spawnFn: (execPath, args, opts) => {
+        calls.push({ execPath, args, opts });
+        if (args[0].endsWith("cv-templates.mjs")) {
+          return fakeChild({ stdout: `${join(root, "templates", "cv-template.modern.html")}\n` });
+        }
+        return fakeChild(args[0].endsWith("mark-pdf-ready.mjs") ? { stdout: '{"changed":true}' } : {});
+      },
+      execPath: "node", root, pdfPaths, payload: PAYLOAD, format: "a4", reportNum: "7",
+    });
     assert.equal(result.kind, "rendered");
-    assert.equal(result.warnings.length, 1);
-    assert.match(result.warnings[0], /tracker's PDF column wasn't updated automatically/);
-    assert.match(result.warnings[0], /node mark-pdf-ready\.mjs 5/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+    assert.equal(calls[1].args[3], join(root, "templates", "cv-template.modern.html"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// ── writeCvHtml (#2185) ──
-//
-// The agent no longer writes the tailored CV — it emits it through the
-// <<cv-html>> envelope and the backend persists it here. These cases guard the
-// handover: the bytes must land verbatim, and a failed write must be reported
-// rather than swallowed — a silent failure would render a stale or missing file.
-
-test("writeCvHtml: writes the html verbatim", () => {
-  // Given a tailored document with characters a re-encode would mangle
-  const dir = makeScratchDir();
-  const html = '<!DOCTYPE html>\n<html><head><style>a>b{content:"<<"}</style></head><body>José — 5 &lt; 10</body></html>';
-  const paths = { html: join(dir, "cv-web-018.html"), finalPdf: join(dir, "out.pdf") };
+test("an unknown configured CV template fails before build, render, or mark", async () => {
+  const root = makeRoot("cv:\n  template: missing\n");
+  const pdfPaths = paths(root);
+  const calls = [];
   try {
-    // When persisting the parsed envelope
-    const result = writeCvHtml({ pdfPaths: paths, html });
-
-    // Then the file lands byte-exact. The page format is NOT written here — it
-    // goes straight to renderAndMarkPdf, so there is no sidecar to keep in sync.
-    assert.equal(result.ok, true);
-    assert.equal(readFileSync(paths.html, "utf8"), html);
-    assert.deepEqual(readdirSync(dir), ["cv-web-018.html"]);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+    const result = await renderAndMarkPdf({
+      spawnFn: router({ "cv-templates.mjs": { exitCode: 1, stderr: "Template not found for kind=cv name=missing" } }, calls),
+      execPath: "node", root, pdfPaths, payload: PAYLOAD, format: "a4", reportNum: "7",
+    });
+    assert.equal(result.kind, "build-failed");
+    assert.match(result.error, /configured CV template.*not found/i);
+    assert.deepEqual(calls, ["cv-templates.mjs"]);
+    assert.equal(existsSync(pdfPaths.payload), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("writeCvHtml: an unwritable target reports failure instead of continuing", () => {
-  // Given an html path whose parent directory does not exist
-  const dir = makeScratchDir();
-  const paths = {
-    html: join(dir, "no-such-dir", "cv.html"),
-    finalPdf: join(dir, "out.pdf"),
-  };
+test("builder failure prevents render and mark, surfaces stderr, and cleans", async () => {
+  const root = makeRoot();
+  const pdfPaths = paths(root);
+  const calls = [];
   try {
-    // When persisting
-    const result = writeCvHtml({ pdfPaths: paths, html: "<html></html>" });
-
-    // Then it fails fast and says why — the caller must not go on to render
-    assert.equal(result.ok, false);
-    assert.match(result.error, /cv\.html/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+    const result = await renderAndMarkPdf({
+      spawnFn: router({ "build-cv-html.mjs": { exitCode: 1, stderr: "candidate.name is required" } }, calls),
+      execPath: "node", root, pdfPaths, payload: PAYLOAD, format: "a4", reportNum: "7",
+    });
+    assert.equal(result.kind, "build-failed");
+    assert.match(result.error, /candidate\.name/);
+    assert.deepEqual(calls, ["cv-templates.mjs", "build-cv-html.mjs"]);
+    assert.equal(existsSync(pdfPaths.payload), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("writeCvHtml: an error carrying no path still names a file", () => {
-  // Given a write that fails with a non-fs error — no `.path` property (e.g. an
-  // oversized-content RangeError). Without the fallback the user is told the CV
-  // could not be saved to "undefined".
-  const dir = makeScratchDir();
-  const paths = { html: join(dir, "cv.html"), finalPdf: join(dir, "out.pdf") };
+test("render failure prevents mark and still cleans", async () => {
+  const root = makeRoot();
+  const pdfPaths = paths(root);
+  const calls = [];
   try {
-    // When persisting a value writeFileSync refuses to serialize
-    const result = writeCvHtml({ pdfPaths: paths, html: { not: "a string" } });
-
-    // Then it fails naming the intended file rather than `undefined`
-    assert.equal(result.ok, false);
-    assert.ok(!result.error.includes("undefined"), `error names no file: ${result.error}`);
-    assert.match(result.error, /cv\.html/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+    writeFileSync(pdfPaths.html, "stale html");
+    const result = await renderAndMarkPdf({
+      spawnFn: router({ "generate-pdf.mjs": { exitCode: 1, stderr: "browser failed" } }, calls),
+      execPath: "node", root, pdfPaths, payload: PAYLOAD, format: "a4", reportNum: "7",
+    });
+    assert.equal(result.kind, "render-failed");
+    assert.match(result.error, /browser failed/);
+    assert.deepEqual(calls, ["cv-templates.mjs", "build-cv-html.mjs", "generate-pdf.mjs"]);
+    assert.equal(existsSync(pdfPaths.payload), false);
+    assert.equal(existsSync(pdfPaths.html), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// ── pdfRunOutcome (#2185) ──
-//
-// The honesty gate. It decides both whether anything is written and whether the
-// run is reported as success, so it must never call a run good on thin evidence.
-
-const OK_ENVELOPE = { ok: true, html: "<html></html>", format: "a4", warnings: [] };
-const GOOD = { envelope: OK_ENVELOPE, noOutputMessage: null, sawError: false, cleanExit: true, hasPaths: true };
-
-test("pdfRunOutcome: a clean run with a parsed envelope is the only success", () => {
-  // Given every signal healthy
-  // Then the run proceeds to write and render
-  assert.deepEqual(pdfRunOutcome(GOOD), { ok: true });
-});
-
-test("pdfRunOutcome: each degraded signal on its own blocks the render", () => {
-  // Given one thing wrong at a time — no single failure may be shrugged off
-  const degraded = {
-    "unparsed envelope": { envelope: { ok: false, error: "never closed" } },
-    "missing envelope": { envelope: undefined },
-    "dirty exit": { cleanExit: false },
-    "stderr error": { sawError: true },
-    "no scratch paths": { hasPaths: false },
-  };
-  for (const [label, override] of Object.entries(degraded)) {
-    // When deciding the outcome
-    const outcome = pdfRunOutcome({ ...GOOD, ...override });
-
-    // Then it fails with a message, never silently
-    assert.equal(outcome.ok, false, `${label} must block the render`);
-    assert.ok(outcome.message.length > 0, `${label} must explain itself`);
-  }
-});
-
-test("pdfRunOutcome: the parser's reason is surfaced, not swallowed", () => {
-  // Given the envelope failed for a specific, actionable reason
-  const outcome = pdfRunOutcome({ ...GOOD, envelope: { ok: false, error: "the envelope was never closed" } });
-
-  // Then that reason reaches the user — "never closed" and "no envelope at all"
-  // are different bugs and the difference is what tells them what to do
-  assert.equal(outcome.ok, false);
-  assert.match(outcome.message, /never closed/);
-});
-
-test("pdfRunOutcome: the route's no-output verdict wins over the generic message", () => {
-  // Given the caller already decided the CLI produced nothing usable. That is a
-  // transport question, so the route owns the wording and passes it in — this
-  // module must not carry a second copy of those strings.
-  const outcome = pdfRunOutcome({
-    ...GOOD,
-    envelope: undefined,
-    noOutputMessage: "The CLI produced no output — is it installed and authenticated?",
-  });
-
-  // Then that message is surfaced verbatim, not replaced by "didn't produce a CV",
-  // because "nothing ran" and "ran but fell short" need different advice
-  assert.equal(outcome.ok, false);
-  assert.match(outcome.message, /installed and authenticated/);
-});
-
-test("pdfRunOutcome: a no-output verdict outranks an otherwise healthy envelope", () => {
-  // Given contradictory signals — a parsed envelope but the route saw no output
-  const outcome = pdfRunOutcome({ ...GOOD, noOutputMessage: "nothing came back" });
-
-  // Then it fails closed rather than rendering on the strength of the envelope
-  assert.equal(outcome.ok, false);
-  assert.equal(outcome.message, "nothing came back");
-});
-
-test("writeCvHtml: a shorter re-render leaves no trailing bytes", () => {
-  // Given the same report rendered twice, the second CV shorter than the first.
-  // route.ts clears no stale scratch file because this function is documented to
-  // rewrite the HTML before any render — a claim that rests entirely on
-  // writeFileSync truncating. Switch to an append flag, or to a write-then-rename
-  // helper, and every other test here stays green while the renderer reads the tail
-  // of a previous run's CV.
-  const dir = makeScratchDir();
-  const paths = { html: join(dir, "cv-web-018.html"), finalPdf: join(dir, "out.pdf") };
-  const long = `<!DOCTYPE html><html><body>${"X".repeat(4000)}</body></html>`;
-  const short = "<!DOCTYPE html><html><body>short</body></html>";
+test("mark failure keeps successful PDF result but returns a warning", async () => {
+  const root = makeRoot();
+  const pdfPaths = paths(root);
+  const calls = [];
+  const original = console.error;
+  console.error = () => {};
   try {
-    // When the long document is written and then the short one to the same path
-    assert.equal(writeCvHtml({ pdfPaths: paths, html: long }).ok, true);
-    assert.equal(writeCvHtml({ pdfPaths: paths, html: short }).ok, true);
-
-    // Then the file is exactly the short document, with nothing left over
-    const onDisk = readFileSync(paths.html, "utf8");
-    assert.equal(onDisk, short);
-    assert.ok(!onDisk.includes("XXXX"), "trailing bytes from the earlier write survived");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+    const result = await renderAndMarkPdf({
+      spawnFn: router({ "mark-pdf-ready.mjs": { exitCode: 2, stdout: '{"error":"row missing"}' } }, calls),
+      execPath: "node", root, pdfPaths, payload: PAYLOAD, format: "a4", reportNum: "7",
+    });
+    assert.equal(result.kind, "rendered");
+    assert.match(result.warnings[0], /row missing/);
+  } finally { console.error = original; rmSync(root, { recursive: true, force: true }); }
 });

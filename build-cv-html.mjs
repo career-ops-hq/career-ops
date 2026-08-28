@@ -2,14 +2,15 @@
 
 // Deterministic HTML CV renderer (#557 — the HTML twin of build-cv-latex.mjs).
 //
-// The agent reads cv.md + config/profile.yml, tailors the content, and writes a
-// compact JSON payload. This script merges that payload into the resolved CV
-// template (default templates/cv-template.html; pass a path resolved by
+// The agent reads cv.md + config/profile.yml and tailors the content into a
+// compact JSON payload. A CLI caller may save that payload directly; the web
+// backend saves the agent's parsed envelope. This script merges the payload into
+// the resolved CV template (default templates/cv-template.html; pass a path resolved by
 // cv-templates.mjs to honor config-selectable templates, #1691) — it owns every
 // tag, class, and the HTML escaping,
 // so the model never has to emit the full document. That moves the PDF step's
 // output tokens from full HTML markup down to the structured JSON payload while
-// producing byte-for-byte the same ATS-safe template the agent fills today.
+// producing the same ATS-safe template for every caller.
 //
 // The script does NOT parse cv.md / YAML: the authoritative read of the source
 // files stays in the agent (same contract as build-cv-latex.mjs / modes/latex.md).
@@ -61,6 +62,38 @@ const DEFAULT_SECTION_TITLES = {
   interests: 'Interests',
   skills: 'Skills',
 };
+
+/**
+ * Return whether a parsed JSON value is an object record rather than an array.
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isPlainObject(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Enforce the smallest payload contract shared by every supported CV shape.
+ *
+ * Identity and summary are required; the remaining sections are genuinely
+ * optional (see cv-sections-core.mjs), so omitted section keys keep behaving
+ * like empty arrays for CLI users and custom template packs.
+ *
+ * @param {unknown} payload
+ * @throws {Error} When candidate identity or summary is absent or malformed.
+ */
+function validatePayload(payload) {
+  if (!isPlainObject(payload)) throw new Error('CV payload must be a JSON object.');
+  if (!isPlainObject(payload.candidate)) throw new Error('CV payload candidate must be an object.');
+  if (typeof payload.candidate.name !== 'string' || !payload.candidate.name.trim()) {
+    throw new Error('CV payload candidate.name is required and must be a non-empty string.');
+  }
+  if (typeof payload.summary !== 'string' || !payload.summary.trim()) {
+    throw new Error('CV payload summary is required and must be a non-empty string.');
+  }
+}
 
 // Escape user text for HTML text/attribute context. Covers the five characters
 // that change meaning in markup so tailored bullets containing &, <, >, quotes
@@ -709,6 +742,10 @@ async function writeAndReport(html, absOutput, payload, extra = {}) {
   console.log(JSON.stringify(report, null, 2));
 }
 
+/**
+ * Parse CLI arguments, validate the payload, and build or preview a CV.
+ * @returns {Promise<void>}
+ */
 async function main() {
   const args = process.argv.slice(2);
 
@@ -760,6 +797,7 @@ async function main() {
   let payload;
   try {
     payload = JSON.parse(await readFile(absInput, 'utf-8'));
+    validatePayload(payload);
     payload.candidate = await prepareCandidatePhoto(payload.candidate);
   } catch (err) {
     console.error(`Failed to prepare CV input: ${err.message}`);

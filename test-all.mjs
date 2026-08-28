@@ -15260,7 +15260,7 @@ try {
 
   // 55.6 pdf mode must never hand the agent write access (#2185).
   // The web's "pdf" agent tailors content and nothing else: it emits the CV
-  // through a <<cv-html>> envelope and the BACKEND writes every file. A write
+  // through a <<cv-payload>> envelope and the BACKEND writes every file. A write
   // grant here would be unscoped, so a prompt injection in a posting or report
   // (both enter that agent's context) could redirect it at cv.md.
   //
@@ -15332,9 +15332,9 @@ try {
         pass('web pdf write-scope unit suites pass (#2185)');
       } else {
         // The signal distinguishes a timeout/kill from an assertion failure —
-        // run()'s default 30s is short for six suites in one child process.
+        // run()'s default 30s is short for every discovered suite in one child.
         const killed = lastRunFailure()?.signal;
-        fail(`web pdf write-scope unit suites failed${killed ? ` (killed: ${killed})` : ''} (run: node --test ${webUnits.join(' ')})`);
+        fail(`web pdf write-scope unit suites failed${killed ? ` (killed: ${killed})` : ''} (run: node --test ${webUnits.join(' ')})${formatRunFailure()}`);
       }
 
       if (invocation && prompts) {

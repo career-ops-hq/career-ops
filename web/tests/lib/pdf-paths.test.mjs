@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { slugify, resolvePdfPaths } from "../../src/lib/pdf-paths.mjs";
+import { slugify, pdfScratchPrefix, resolvePdfPaths } from "../../src/lib/pdf-paths.mjs";
 
 test("slugify: lowercases and hyphenates", () => {
   assert.equal(slugify("Jane Q. Smith"), "jane-q-smith");
@@ -17,6 +17,10 @@ test("slugify: lowercases and hyphenates", () => {
 
 test("slugify: trims leading/trailing hyphens", () => {
   assert.equal(slugify("  -Weird Name!- "), "weird-name");
+});
+
+test("pdfScratchPrefix is the canonical run-scoped cleanup prefix", () => {
+  assert.equal(pdfScratchPrefix("018"), "cv-web-018.");
 });
 
 // Given a career-ops root with a report on disk and a profile.yml naming the candidate
@@ -29,7 +33,7 @@ function makeRoot({ profileYaml } = {}) {
   return root;
 }
 
-test("resolvePdfPaths: happy path builds html + finalPdf from report + profile", () => {
+test("resolvePdfPaths: happy path builds payload + html + finalPdf from report + profile", () => {
   // Given a root with a resolvable report and a named candidate
   const root = makeRoot();
   const findReportFile = (input) => (input === "018" ? join(root, "reports", "018-acme-2026-07-01.md") : null);
@@ -39,6 +43,7 @@ test("resolvePdfPaths: happy path builds html + finalPdf from report + profile",
 
     // Then it returns deterministic scratch + final paths using the candidate/company slugs
     assert.equal(result.ok, true);
+    assert.equal(result.paths.payload, join(root, ".career-ops-web", "pdf-tmp", "cv-web-018.payload.json"));
     assert.equal(result.paths.html, join(root, ".career-ops-web", "pdf-tmp", "cv-web-018.html"));
     assert.equal(result.paths.finalPdf, join(root, "output", "cv-jane-smith-acme-2026-07-26.pdf"));
   } finally {

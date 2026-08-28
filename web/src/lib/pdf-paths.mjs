@@ -20,13 +20,23 @@ export function slugify(s) {
 }
 
 /**
+ * Return the run-scoped filename prefix shared by scratch creation and cleanup.
+ * @param {string} input - The validated report selector.
+ * @returns {string}
+ */
+export function pdfScratchPrefix(input) {
+  return `cv-web-${input}.`;
+}
+
+/**
  * @typedef {Object} PdfPaths
- * @property {string} html - Where the backend writes the tailored HTML it parsed out of the agent's envelope (#2185).
+ * @property {string} payload - Where the backend writes the parsed JSON payload.
+ * @property {string} html - Where build-cv-html.mjs writes the tailored HTML.
  * @property {string} finalPdf - Where the backend renders the final PDF (output/cv-{candidate}-{company}-{date}.pdf).
  */
 
 /**
- * Precompute the scratch HTML and final PDF paths for a
+ * Precompute the scratch payload, HTML, and final PDF paths for a
  * "pdf" run, so the agent never chooses its own filenames — the backend owns
  * naming, writing (#2185) and rendering. Resolves the report (for the company slug)
  * and config/profile.yml (for the candidate slug) — same naming convention
@@ -36,7 +46,7 @@ export function slugify(s) {
  * the caller (a Next.js route today) decides how to surface `ok: false`.
  *
  * Side effect: creates `.career-ops-web/pdf-tmp/` under `root` if it doesn't
- * exist yet (the backend writes the parsed envelope there, #2185) — this is
+ * exist yet (the backend writes the parsed payload there, #2185) — this is
  * NOT a pure path computation, despite the name.
  *
  * @param {string} input - The report number (e.g. "018").
@@ -77,11 +87,13 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
     }
   }
   const scratchDir = path.join(root, ".career-ops-web", "pdf-tmp");
+  const scratchPrefix = pdfScratchPrefix(input);
   fs.mkdirSync(scratchDir, { recursive: true });
   return {
     ok: true,
     paths: {
-      html: path.join(scratchDir, `cv-web-${input}.html`),
+      payload: path.join(scratchDir, `${scratchPrefix}payload.json`),
+      html: path.join(scratchDir, `${scratchPrefix}html`),
       finalPdf: path.join(root, "output", `cv-${candidateSlug}-${companySlug}-${today}.pdf`),
     },
   };
