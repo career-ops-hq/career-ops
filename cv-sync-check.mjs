@@ -16,8 +16,7 @@ import { fileURLToPath } from 'url';
 
 import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const CODE_ROOT = __dirname;
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
 
 const warnings = [];
