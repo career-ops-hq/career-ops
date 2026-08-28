@@ -18,6 +18,9 @@ import {
 } from "../../src/lib/pdf-render.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+// Real timers keep these integration-style child fixtures honest; leave enough
+// headroom for coarse or loaded CI event loops without slowing the suite much.
+const SYNTHETIC_TIMEOUT_MS = 50;
 
 /**
  * Model a spawned child whose output and terminal event arrive asynchronously,
@@ -156,10 +159,9 @@ test("spawnBuildCvHtml times out and terminates a hung child", async () => {
     if (signal === "SIGTERM") sawTerm();
     return true;
   };
-  const timeoutMs = 50;
   const resultPromise = spawnBuildCvHtml({
     spawnFn: () => child,
-    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs,
+    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs: SYNTHETIC_TIMEOUT_MS,
   });
   await termSent;
   let resolved = false;
@@ -169,7 +171,7 @@ test("spawnBuildCvHtml times out and terminates a hung child", async () => {
   child.emit("close", null);
   const result = await resultPromise;
   assert.equal(result.ok, false);
-  assert.match(result.stderr, new RegExp(`timed out after ${timeoutMs}ms`));
+  assert.match(result.stderr, new RegExp(`timed out after ${SYNTHETIC_TIMEOUT_MS}ms`));
   assert.deepEqual(signals, ["SIGTERM"]);
 });
 
@@ -183,13 +185,12 @@ test("spawnBuildCvHtml escalates a timed-out child that ignores SIGTERM", async 
     if (signal === "SIGKILL") queueMicrotask(() => child.emit("close", null));
     return true;
   };
-  const timeoutMs = 50;
   const result = await spawnBuildCvHtml({
     spawnFn: () => child,
-    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs,
+    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs: SYNTHETIC_TIMEOUT_MS,
   });
   assert.equal(result.ok, false);
-  assert.match(result.stderr, new RegExp(`timed out after ${timeoutMs}ms`));
+  assert.match(result.stderr, new RegExp(`timed out after ${SYNTHETIC_TIMEOUT_MS}ms`));
   assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
 });
 
@@ -210,10 +211,9 @@ test("spawnBuildCvHtml does not treat a signal-delivery error as child exit", as
     }
     return signal === "SIGKILL";
   };
-  const timeoutMs = 50;
   const resultPromise = spawnBuildCvHtml({
     spawnFn: () => child,
-    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs,
+    execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs: SYNTHETIC_TIMEOUT_MS,
   });
   await termSent;
   await Promise.resolve();
@@ -223,7 +223,7 @@ test("spawnBuildCvHtml does not treat a signal-delivery error as child exit", as
   assert.equal(resolved, false, "signal error does not release scratch cleanup");
   const result = await resultPromise;
   assert.equal(result.ok, false);
-  assert.match(result.stderr, new RegExp(`timed out after ${timeoutMs}ms`));
+  assert.match(result.stderr, new RegExp(`timed out after ${SYNTHETIC_TIMEOUT_MS}ms`));
   assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
 });
 
