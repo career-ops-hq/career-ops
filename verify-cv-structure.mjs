@@ -381,6 +381,8 @@ function runSelfTest() {
     writeFileSync(validPayloadPath, JSON.stringify({ experience: correctOrder }), 'utf-8');
     const dirAsSourcePath = join(selfTestDir, 'a-directory-not-a-file');
     mkdirSync(dirAsSourcePath);
+    const nullEntryPayloadPath = join(selfTestDir, 'null-entry-payload.json');
+    writeFileSync(nullEntryPayloadPath, JSON.stringify({ experience: [null, ...correctOrder] }), 'utf-8');
 
     const origError = console.error;
     const origWarn = console.warn;
@@ -388,10 +390,11 @@ function runSelfTest() {
     console.error = () => {};
     console.warn = () => {};
     console.log = () => {};
-    let nullExit, dirSourceExit;
+    let nullExit, dirSourceExit, nullEntryExit;
     try {
       nullExit = runCli([nullPayloadPath, '--source', cvMdPath]);
       dirSourceExit = runCli([validPayloadPath, '--source', dirAsSourcePath]);
+      nullEntryExit = runCli([nullEntryPayloadPath, '--source', cvMdPath]);
     } finally {
       console.error = origError;
       console.warn = origWarn;
@@ -399,6 +402,7 @@ function runSelfTest() {
     }
     equal('CLI rejects a null JSON payload instead of throwing', nullExit, 1);
     equal('CLI rejects an unreadable (directory) --source instead of throwing', dirSourceExit, 1);
+    equal('CLI rejects a null entry inside payload.experience instead of throwing', nullEntryExit, 1);
   }
 
   console.log(`verify-cv-structure self-test: ${passed} passed, ${failed} failed`);
@@ -448,6 +452,17 @@ export function runCli(args = process.argv.slice(2)) {
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
     console.error(`ERROR: payload must be a JSON object, got ${payload === null ? 'null' : Array.isArray(payload) ? 'an array' : typeof payload}: ${targetArg}`);
     return 1;
+  }
+  if (Array.isArray(payload.experience)) {
+    const badIndex = payload.experience.findIndex(
+      (e) => e === null || typeof e !== 'object' || Array.isArray(e)
+    );
+    if (badIndex !== -1) {
+      const bad = payload.experience[badIndex];
+      const badType = bad === null ? 'null' : Array.isArray(bad) ? 'an array' : typeof bad;
+      console.error(`ERROR: payload.experience[${badIndex}] must be an object, got ${badType}: ${targetArg}`);
+      return 1;
+    }
   }
   let cvMdText;
   try {
