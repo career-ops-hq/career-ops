@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Check, AlertTriangle, Loader2, Trash2 } from "lucide-react";
+import { Check, AlertTriangle, Loader2, Trash2, Plus } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { pillTone } from "@/components/jobs/worker-pills";
 import { cn } from "@/lib/cn";
@@ -25,6 +25,8 @@ export default function JobsHistory() {
             Every evaluation you ran — a persistent log. <span className="tabular-nums">{jobs.length}</span> total.
           </p>
         </div>
+        <div className="flex items-center gap-2">
+        <Link href="/jobs/add" className="inline-flex items-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-white"><Plus className="size-3.5" /> Add Job Posting</Link>
         {jobs.some((j) => j.status !== "running") && (
           <button
             onClick={clearFinished}
@@ -33,6 +35,7 @@ export default function JobsHistory() {
             <Trash2 className="size-3.5" /> Clear finished
           </button>
         )}
+        </div>
       </div>
 
       {jobs.length === 0 ? (

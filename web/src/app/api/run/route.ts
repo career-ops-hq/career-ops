@@ -22,6 +22,7 @@ import { validateRoleResumeHtml } from "@/lib/role-resume-fact-gate.mjs";
 import { readProfileState } from "@/lib/profile-state.mjs";
 import { loadRoleResumeSource } from "@/lib/role-resume-source.mjs";
 import { inspectCodexFinalOutput } from "@/lib/codex-final-output.mjs";
+import { MANUAL_FETCH_FAILURE_MESSAGE, parseManualJobInput } from "@/lib/manual-jobs.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,6 +38,9 @@ export async function POST(req: Request) {
   const { kind = "evaluate", input, cliId } = body;
   if (!input || !cliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
+  }
+  if (kind === "evaluate" && input.trim().startsWith("{") && !parseManualJobInput(input)) {
+    return new Response(JSON.stringify({ error: "Invalid manual job payload." }), { status: 400, headers: { "Content-Type": "application/json" } });
   }
   const resolved = resolveCli(cliId);
   if (!resolved) {
@@ -229,6 +233,7 @@ export async function POST(req: Request) {
       let stdoutChunks = 0;
       let parsedEvents = 0;
       let textEvents = 0;
+      let assistantTextTail = "";
       let stderrBytes = 0;
       let spawnErrorCode = "";
       let spawnErrorMessage = "";
@@ -308,6 +313,7 @@ export async function POST(req: Request) {
       // the stream never idles during the filtered phase. Unknown event types are
       // ignored by the client's switch, so this is safe for older tabs too.
       const sendAgentText = (text: string) => {
+        if (kind === "evaluate") assistantTextTail = (assistantTextTail + text).slice(-2_000);
         const visible = cvFilter ? cvFilter.push(text) : text;
         if (visible) send({ type: "text", text: visible });
       };
@@ -610,7 +616,10 @@ export async function POST(req: Request) {
         // real output, AND (for evaluations) a report actually written. Anything else
         // is surfaced — an errored run must never be banked as a confident score.
         const baseErr = noOutputError();
-        if (baseErr) {
+        const manualFetchFailure = kind === "evaluate" && !!parseManualJobInput(input) && assistantTextTail.includes(MANUAL_FETCH_FAILURE_MESSAGE);
+        if (manualFetchFailure) {
+          send({ type: "error", msg: MANUAL_FETCH_FAILURE_MESSAGE });
+        } else if (baseErr) {
           send({ type: "error", msg: baseErr });
         } else if (persists && !wroteReport) {
           // The worker ran but never wrote the report/tracker row (e.g. a CLI

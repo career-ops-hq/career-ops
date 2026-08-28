@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ChevronsUpDown, X, Compass, ArrowRight } from "lucide-react";
+import { Search, ChevronsUpDown, X, Compass, ArrowRight, Plus } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
@@ -126,6 +126,8 @@ export function PipelineView({
             <span className="tabular-nums">{applications.length}</span> tracked
           </p>
         </div>
+        <div className="flex items-center gap-2">
+        <Link href="/jobs/add" className="inline-flex items-center gap-1.5 rounded-md bg-brand px-3 py-2 text-xs font-medium text-white"><Plus className="size-3.5" /> Add Job Posting</Link>
         {/* the tracker has its own search; the inbox brings its own facet filters */}
         {tab !== "INBOX" && (
           <div className="relative w-64 max-w-[40vw]">
@@ -138,6 +140,7 @@ export function PipelineView({
             />
           </div>
         )}
+        </div>
       </div>
 
       {/* tabs */}

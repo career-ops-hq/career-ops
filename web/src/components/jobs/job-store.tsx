@@ -15,6 +15,7 @@ export type Job = {
   input?: string; // the URL/posting it processed (links inbox rows to their worker)
   kind?: string;
   batchId?: string; // groups jobs fired together (e.g. "evaluate all Anthropic")
+  prepareCoverLetter?: boolean; // explicit draft initialization after a successful application PDF
   status: "running" | "done" | "error";
   steps: JobStep[];
   text: string;
@@ -24,7 +25,7 @@ export type Job = {
   endedAt?: number;
 };
 
-type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string };
+export type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; prepareCoverLetter?: boolean };
 
 type Ctx = {
   jobs: Job[];
@@ -101,6 +102,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         input: opts.input,
         kind: opts.kind,
         batchId: opts.batchId,
+        prepareCoverLetter: opts.prepareCoverLetter,
         status: "running",
         steps: [{ kind: "status", label: "Starting…", ts: Date.now() }],
         text: "",
@@ -154,7 +156,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
               fetch("/api/documents/cover-letter/init", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ applicationId: opts.input }),
+                body: JSON.stringify({ applicationId: opts.input, explicit: opts.prepareCoverLetter }),
               }).catch(() => {});
             }
           }
