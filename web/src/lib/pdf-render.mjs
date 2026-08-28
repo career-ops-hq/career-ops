@@ -110,7 +110,11 @@ export function writeCvPayload({ pdfPaths, payload, root }) {
   }
 }
 
-/** Spawn build-cv-html.mjs, the sole HTML writer for both CLI and web paths. */
+/**
+ * Spawn build-cv-html.mjs, the sole HTML writer for CLI and web paths.
+ * @param {{spawnFn: Function, execPath: string, root: string, payload: string, html: string, template?: string, timeoutMs?: number}} args
+ * @returns {Promise<{ok: boolean, stdout?: string, stderr: string}>}
+ */
 export function spawnBuildCvHtml({ spawnFn, execPath, root, payload, html, template, timeoutMs }) {
   return spawnResult({
     spawnFn,
@@ -122,7 +126,11 @@ export function spawnBuildCvHtml({ spawnFn, execPath, root, payload, html, templ
   });
 }
 
-/** Resolve the profile-selected template through the repository's canonical resolver. */
+/**
+ * Resolve the profile-selected template through the repository's canonical CLI.
+ * @param {{spawnFn: Function, execPath: string, root: string, timeoutMs?: number}} args
+ * @returns {Promise<{ok: boolean, template: string, stderr: string}>}
+ */
 export function resolveConfiguredCvTemplate({ spawnFn, execPath, root, timeoutMs }) {
   return spawnResult({
     spawnFn,
@@ -143,10 +151,16 @@ export function resolveConfiguredCvTemplate({ spawnFn, execPath, root, timeoutMs
   });
 }
 
+/**
+ * Run one bounded child process and normalize spawn, exit, and timeout failures.
+ * @param {{spawnFn: Function, execPath: string, args: string[], cwd: string, startError: string, timeoutMs?: number}} args
+ * @returns {Promise<{ok: boolean, stdout?: string, stderr: string}>}
+ */
 function spawnResult({ spawnFn, execPath, args, cwd, startError, timeoutMs = DEFAULT_PDF_CHILD_TIMEOUT_MS }) {
   return new Promise((resolve) => {
     let settled = false;
     let timeoutId;
+    /** Settle the child-process result once and cancel its outstanding timeout. */
     const finish = (result) => {
       if (settled) return;
       settled = true;

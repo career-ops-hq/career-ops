@@ -19,7 +19,11 @@ export function slugify(s) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
-/** Canonical prefix shared by scratch path creation and cleanup. */
+/**
+ * Return the run-scoped filename prefix shared by scratch creation and cleanup.
+ * @param {string} input - The validated report selector.
+ * @returns {string}
+ */
 export function pdfScratchPrefix(input) {
   return `cv-web-${input}.`;
 }

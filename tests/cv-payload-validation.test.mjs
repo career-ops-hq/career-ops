@@ -4,11 +4,13 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pass, fail, ROOT, rmSync } from "./helpers.mjs";
 
+/** Record one root-harness assertion without aborting the remaining cases. */
 function check(condition, message) {
   if (condition) pass(message);
   else fail(message);
 }
 
+/** Run the real builder against one isolated payload fixture. */
 function run(payload) {
   const dir = mkdtempSync(join(tmpdir(), "co-cv-payload-"));
   const input = join(dir, "payload.json");
