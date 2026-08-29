@@ -1,6 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { safeEncodeURIComponent } from './_safe-url.mjs';
+
 // BambooHR provider — hits the public per-tenant careers list API.
 // Auto-detects from careers_url pattern `https://<tenant>.bamboohr.com[/...]`.
 // Per-tenant subdomains are the variable part, so SSRF defence uses a regex
@@ -101,11 +103,17 @@ export function parseBambooHRResponse(json, companyName, origin) {
       const remote = j.isRemote ? 'Remote' : '';
       const location = [loc.city, loc.state, remote].filter(Boolean).join(', ');
       const id = String(j.id).trim();
+      // A lone surrogate in id throws URIError out of encodeURIComponent and
+      // aborts this .map(), losing every job on the page. Drop this one on a
+      // null; the trailing .filter(Boolean) removes it.
+      const encodedId = safeEncodeURIComponent(id);
+      if (encodedId === null) return null;
       return {
         title: String(j.jobOpeningName),
-        url: `${origin}/careers/${encodeURIComponent(id)}`,
+        url: `${origin}/careers/${encodedId}`,
         company: companyName,
         location,
       };
-    });
+    })
+    .filter(Boolean);
 }

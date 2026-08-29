@@ -18,6 +18,8 @@
 //
 // Wire in via a `job_boards:` entry with `provider: manfred`.
 
+import { safeEncodeURIComponent } from './_safe-url.mjs';
+
 const FEED_BASE = 'https://www.getmanfred.com/api/v2/public/offers';
 const TRUSTED_HOST = 'www.getmanfred.com';
 const OFFER_BASE = 'https://www.getmanfred.com/ofertas-empleo';
@@ -164,7 +166,11 @@ export function normalizeManfredOffer(offer, fallbackCompany) {
   const id = Number(offer.id);
   const slug = typeof offer.slug === 'string' ? offer.slug.trim() : '';
   if (!Number.isInteger(id) || id <= 0 || !slug) return null;
-  const url = `${OFFER_BASE}/${id}/${encodeURIComponent(slug)}`;
+  // A lone surrogate in slug would throw URIError out of encodeURIComponent and
+  // abort the caller's loop over the whole catalogue. Drop this one.
+  const encodedSlug = safeEncodeURIComponent(slug);
+  if (encodedSlug === null) return null;
+  const url = `${OFFER_BASE}/${id}/${encodedSlug}`;
 
   const company =
     typeof offer.company?.name === 'string' && offer.company.name.trim()

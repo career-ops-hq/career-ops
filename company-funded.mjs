@@ -14,6 +14,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 import { decodeEntities } from './providers/_html-entities.mjs';
+import { safeEncodeURIComponent } from './providers/_safe-url.mjs';
 import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -790,7 +791,11 @@ async function fetchHnDiscovery({ months = DEFAULT_MONTHS, diagnostics = [] } = 
     for (const hit of hits) {
       const title = compact(hit.title || hit.story_title || '');
       if (!title) continue;
-      const fallbackUrl = `https://news.ycombinator.com/item?id=${encodeURIComponent(String(hit.objectID || ''))}`;
+      // A lone surrogate in objectID would throw URIError out of
+      // encodeURIComponent and abort the loop over the remaining hits; fall back
+      // to no synthetic URL (hit.url is tried first anyway).
+      const encodedId = safeEncodeURIComponent(hit.objectID || '');
+      const fallbackUrl = encodedId === null ? '' : `https://news.ycombinator.com/item?id=${encodedId}`;
       const itemUrl = trustedEvidenceUrl(hit.url || '', '') || trustedEvidenceUrl(fallbackUrl, 'hacker_news');
       const item = {
         source: 'hacker_news',

@@ -27,6 +27,7 @@
 // vetoes "Sales &amp; Marketing Lead". Shared decoder, same as softgarden and
 // radancy (#2487, #2921).
 import { decodeEntities } from './_html-entities.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 const MAX_PAGES = 60; // safety cap on request count (60*20 = 1200 postings)
 const MAX_JOBS = 1000; // cap total postings pulled
@@ -111,10 +112,17 @@ export function parseQuery(json, cfg) {
     const id = d.id != null ? String(d.id) : '';
     const title = decodeEntities(String(d.title || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
     if (!id || !title) continue;
+    // A lone surrogate in id throws URIError out of encodeURIComponent and
+    // aborts this loop; id is also the dedup key. Drop this row on a null.
+    // cfg.locale is a config-set code ("en"/"de"), so its null path is
+    // unreachable in practice; it shares the helper for one consistent call.
+    const encodedId = safeEncodeURIComponent(id);
+    const encodedLocale = safeEncodeURIComponent(cfg.locale);
+    if (encodedId === null || encodedLocale === null) continue;
     rows.push({
       id,
       title,
-      url: `${cfg.origin}/${encodeURIComponent(cfg.locale)}/job/${slugify(title)}/${encodeURIComponent(id)}`,
+      url: `${cfg.origin}/${encodedLocale}/job/${slugify(title)}/${encodedId}`,
       location: tkmsLocation(d),
       postedAt: parseTkmsDate(d),
     });
