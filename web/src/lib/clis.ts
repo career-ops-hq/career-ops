@@ -24,7 +24,7 @@ export type CliSpec = {
    * claude, by claude-invocation.mjs's `claudeCliArgs`, which spells its own
    * `--output-format stream-json`). Pairing one CLI's parser with a plain-text
    * invocation yields a silent stream of unparseable lines. */
-  streamArgs?: (prompt: string, kind?: string, options?: { outputLastMessage?: string; outputSchema?: string; promptViaStdin?: boolean; isolatedWorkerCwd?: string; additionalWritableDir?: string }) => string[];
+  streamArgs?: (prompt: string, kind?: string, options?: { outputLastMessage?: string; outputSchema?: string; promptViaStdin?: boolean; isolatedWorkerCwd?: string; additionalWritableDir?: string; readOnlyWorker?: boolean }) => string[];
   /** Structured-output CLIs only: parse one stdout line into dashboard events.
    * Absent → the route streams stdout as raw text (the default for every CLI
    * without its own structured output format). */

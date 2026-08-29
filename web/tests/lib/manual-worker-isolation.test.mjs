@@ -30,3 +30,8 @@ test("isolated manual argv leaves the repository instruction-discovery chain", (
   assert.equal(args.at(-1), "-");
 });
 
+test("normal interactive Career-Ops keeps its repository-local skill router", () => {
+  const skill = fs.readFileSync(path.join(projectRoot, ".agents", "skills", "career-ops", "SKILL.md"), "utf8");
+  assert.match(skill, /^name:\s*career-ops$/m);
+  assert.match(skill, /Auto-pipeline detection/);
+});

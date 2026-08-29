@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "company": { "type": "string" },
+    "role": { "type": "string" },
+    "location": { "type": "string" },
+    "compensation": { "type": "string" },
+    "score": { "type": "number", "minimum": 0, "maximum": 5 },
+    "recommendation": { "type": "string", "enum": ["Apply", "Consider", "Skip"] },
+    "trackerNote": { "type": "string" },
+    "reportMarkdown": { "type": "string" },
+    "verdictReason": { "type": "string" }
+  },
+  "required": [
+    "company",
+    "role",
+    "location",
+    "compensation",
+    "score",
+    "recommendation",
+    "trackerNote",
+    "reportMarkdown",
+    "verdictReason"
+  ]
+}

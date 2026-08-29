@@ -23,6 +23,7 @@ import { readProfileState } from "@/lib/profile-state.mjs";
 import { loadRoleResumeSource } from "@/lib/role-resume-source.mjs";
 import { inspectCodexFinalOutput } from "@/lib/codex-final-output.mjs";
 import { MANUAL_FETCH_FAILURE_MESSAGE, parseManualJobInput } from "@/lib/manual-jobs.mjs";
+import { loadManualEvaluationSources, parseManualEvaluationJson, persistManualEvaluation } from "@/lib/manual-evaluation.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -131,9 +132,15 @@ export async function POST(req: Request) {
       ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
       : undefined;
   const nativeRoleSchema = kind === "role-resume" && cliId === "codex";
+  const nativeManualEvaluation = !!manualJob?.description && cliId === "codex";
   const projectRoot = careerOpsRoot();
-  const prompt = buildPrompt({ kind, input: promptInput, memory: readMemory(), today, postedAt, nativeRoleSchema, roleSourceCv: roleSource?.cv || "", projectRoot });
-  if (manualJob?.description && (!prompt.includes("<manual-job-description>") || !prompt.includes(JSON.stringify(manualJob.description)))) {
+  let manualEvaluationSources = null;
+  if (nativeManualEvaluation) {
+    try { manualEvaluationSources = loadManualEvaluationSources(projectRoot); }
+    catch (error) { return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Manual evaluation sources could not be loaded." }), { status: 400, headers: { "Content-Type": "application/json" } }); }
+  }
+  const prompt = buildPrompt({ kind, input: promptInput, memory: readMemory(), today, postedAt, nativeRoleSchema, roleSourceCv: roleSource?.cv || "", projectRoot, manualEvaluationSources });
+  if (manualJob?.description && !prompt.includes(JSON.stringify(manualJob.description))) {
     return new Response(JSON.stringify({ error: "Manual job description was not included in the evaluation prompt." }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
   const manualPromptSha256 = manualJob ? hashWorkerPrompt(prompt) : "";
@@ -153,9 +160,12 @@ export async function POST(req: Request) {
   // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
   // envelope-parsing routes rely on.
   const capturesCv = kind === "pdf" || kind === "role-resume";
-  const codexFinalDir = cliId === "codex" && capturesCv ? fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-codex-final-")) : undefined;
+  const capturesCodexFinal = capturesCv || nativeManualEvaluation;
+  const codexFinalDir = cliId === "codex" && capturesCodexFinal ? fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-codex-final-")) : undefined;
   const codexFinalFile = codexFinalDir ? path.join(codexFinalDir, "final-response.txt") : undefined;
-  const roleOutputSchema = nativeRoleSchema ? path.join(careerOpsRoot(), "web", "src", "lib", "role-resume.schema.json") : undefined;
+  const outputSchema = nativeRoleSchema
+    ? path.join(careerOpsRoot(), "web", "src", "lib", "role-resume.schema.json")
+    : nativeManualEvaluation ? path.join(careerOpsRoot(), "web", "src", "lib", "manual-evaluation.schema.json") : undefined;
   // codex.cmd is launched through cmd.exe on Windows, whose command line is far
   // smaller than the maximum accepted pasted JD. Reuse the explicit Codex `-`
   // stdin contract for manual evaluations; ordinary evaluation remains on its
@@ -163,7 +173,7 @@ export async function POST(req: Request) {
   const promptViaStdin = cliId === "codex" && (kind === "role-resume" || !!manualJob);
   const isolatedManualCodex = cliId === "codex" && !!manualJob;
   const manualWorkerDir = isolatedManualCodex ? fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-manual-worker-")) : undefined;
-  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt, kind, { outputLastMessage: codexFinalFile, outputSchema: roleOutputSchema, promptViaStdin, isolatedWorkerCwd: manualWorkerDir, additionalWritableDir: isolatedManualCodex ? projectRoot : undefined });
+  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt, kind, { outputLastMessage: codexFinalFile, outputSchema, promptViaStdin, isolatedWorkerCwd: manualWorkerDir, additionalWritableDir: isolatedManualCodex && !nativeManualEvaluation ? projectRoot : undefined, readOnlyWorker: nativeManualEvaluation });
 
   // For write-needing kinds, snapshot reports/ so we can verify the worker
   // actually persisted (non-Claude CLIs lack Write auth and silently no-op).
@@ -199,7 +209,7 @@ export async function POST(req: Request) {
       manualJobDetected: true,
       manualPromptIsolationPresent: prompt.includes("MANUAL WEB WORKER ISOLATION"),
       manualPromptHasDescription: prompt.includes("THE JOB DESCRIPTION IS PRESENT BELOW"),
-      manualPromptBlocksCareerOpsSkill: prompt.includes("Do not invoke or announce the career-ops skill"),
+      manualPromptBlocksCareerOpsSkill: prompt.includes("Do not invoke or announce the career-ops skill") || prompt.includes("Do not invoke skills or tools"),
       promptBytes: Buffer.byteLength(prompt, "utf8"),
       promptViaStdin,
       manualPromptSha256,
@@ -207,6 +217,7 @@ export async function POST(req: Request) {
       promptPresentInArgv: args.includes(prompt),
       promptWrittenToStdin,
       isolatedWorkerCwd: !!manualWorkerDir,
+      contentOnlyManualEvaluation: nativeManualEvaluation,
     });
   }
   // Decode once on the stream, not per chunk. Buffer#toString() decodes each chunk
@@ -263,6 +274,7 @@ export async function POST(req: Request) {
       let parsedEvents = 0;
       let textEvents = 0;
       let assistantTextTail = "";
+      let manualStructuredText = "";
       let stderrBytes = 0;
       let spawnErrorCode = "";
       let spawnErrorMessage = "";
@@ -344,6 +356,10 @@ export async function POST(req: Request) {
       // ignored by the client's switch, so this is safe for older tabs too.
       const sendAgentText = (text: string) => {
         if (kind === "evaluate") assistantTextTail = (assistantTextTail + text).slice(-2_000);
+        if (nativeManualEvaluation) {
+          manualStructuredText += text;
+          return;
+        }
         const visible = cvFilter ? cvFilter.push(text) : text;
         if (visible) send({ type: "text", text: visible });
       };
@@ -661,6 +677,32 @@ export async function POST(req: Request) {
               return;
             }
             // saveCv already streamed the specific reason.
+          }
+          return close();
+        }
+
+        if (nativeManualEvaluation) {
+          if (!cleanExit || sawError) {
+            send({ type: "error", msg: noOutputError() || "Codex did not complete the structured manual evaluation." });
+            return close();
+          }
+          let finalText = manualStructuredText;
+          if (codexFinalFile) {
+            try {
+              const recovered = fs.readFileSync(codexFinalFile, "utf8").trim();
+              if (recovered) finalText = recovered;
+            } catch { /* JSONL assistant text remains the fallback */ }
+          }
+          const structured = parseManualEvaluationJson(finalText);
+          if (!structured.ok) {
+            send({ type: "error", msg: structured.error });
+            return close();
+          }
+          try {
+            persistManualEvaluation({ root: projectRoot, today, job: { ...manualJob, postedAt }, content: structured.content });
+            send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+          } catch (error) {
+            send({ type: "error", msg: `The evaluation completed but canonical persistence failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 300) });
           }
           return close();
         }

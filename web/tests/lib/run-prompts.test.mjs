@@ -131,7 +131,7 @@ test("route enables native Codex schema only for General Role workers", () => {
   const route = fs.readFileSync(new URL("../../src/app/api/run/route.ts", import.meta.url), "utf8");
   assert.match(route, /nativeRoleSchema = kind === "role-resume" && cliId === "codex"/);
   assert.match(route, /role-resume\.schema\.json/);
-  assert.match(route, /outputSchema: roleOutputSchema/);
+  assert.match(route, /outputSchema/);
   assert.match(route, /nativeRoleSchema[\s\S]*parseRawRoleResumeJson\(roleWorkerText\)/);
 });
 test("route blocks incomplete General Role content before template rendering and fact gate remains later", () => {

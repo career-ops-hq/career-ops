@@ -45,6 +45,14 @@ test("manual runtime proves the isolated prompt and stdin handoff without loggin
 });
 test("manual Codex runs outside the repository instruction chain while retaining canonical access", () => {
   assert.match(runRoute, /career-ops-manual-worker-/);
-  assert.match(runRoute, /additionalWritableDir: isolatedManualCodex \? projectRoot/);
+  assert.match(runRoute, /additionalWritableDir: isolatedManualCodex && !nativeManualEvaluation \? projectRoot/);
   assert.match(runRoute, /Manual job description was not included in the evaluation prompt/);
+});
+test("pasted manual jobs use backend-loaded sources, native schema, and backend persistence", () => {
+  assert.match(runRoute, /loadManualEvaluationSources/);
+  assert.match(runRoute, /manual-evaluation\.schema\.json/);
+  assert.match(runRoute, /parseManualEvaluationJson/);
+  assert.match(runRoute, /persistManualEvaluation/);
+  assert.match(runRoute, /additionalWritableDir: isolatedManualCodex && !nativeManualEvaluation/);
+  assert.match(runRoute, /readOnlyWorker: nativeManualEvaluation/);
 });
