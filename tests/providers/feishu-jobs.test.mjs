@@ -244,6 +244,75 @@ try {
     fail(`feishu-jobs.fetch() ctx.maxPages=1: ${probe.calls.length} requests, keyword=${JSON.stringify(probe.calls[0] && probe.calls[0].keyword)}`);
   }
 
+  const fractionalEntryLimit = mkCtx(() => ({
+    code: 0,
+    data: { count: 1, job_post_list: [mkJob('7001', '默认页数岗位')] },
+  }));
+  const fractionalEntryJobs = await feishu.fetch(
+    { name: '字节跳动', careers_url: BD_URL, max_pages: 0.5 },
+    fractionalEntryLimit.ctx,
+  );
+  if (fractionalEntryLimit.calls.length === 1 && fractionalEntryJobs.length === 1) {
+    pass('feishu-jobs.fetch() ignores a fractional entry.max_pages instead of making zero requests');
+  } else {
+    fail(`feishu-jobs.fetch() max_pages=0.5: ${fractionalEntryLimit.calls.length} requests, ${fractionalEntryJobs.length} jobs`);
+  }
+
+  const fractionalProbeLimit = mkCtx(() => ({
+    code: 0,
+    data: { count: 1, job_post_list: [mkJob('7002', '探测页数岗位')] },
+  }));
+  fractionalProbeLimit.ctx.maxPages = 0.5;
+  const fractionalProbeJobs = await feishu.fetch(
+    { name: '字节跳动', careers_url: BD_URL },
+    fractionalProbeLimit.ctx,
+  );
+  if (fractionalProbeLimit.calls.length === 1 && fractionalProbeJobs.length === 1) {
+    pass('feishu-jobs.fetch() ignores a fractional ctx.maxPages instead of making zero requests');
+  } else {
+    fail(`feishu-jobs.fetch() ctx.maxPages=0.5: ${fractionalProbeLimit.calls.length} requests, ${fractionalProbeJobs.length} jobs`);
+  }
+
+  const malformedFirstPage = mkCtx(({ offset }) => ({
+    code: 0,
+    data: {
+      count: 101,
+      job_post_list: offset === 0
+        ? Array.from({ length: 100 }, (_, i) => ({ id: String(8000 + i) }))
+        : [mkJob('8100', '后续有效岗位')],
+    },
+  }));
+  const jobsAfterMalformedPage = await feishu.fetch(
+    { name: '字节跳动', careers_url: BD_URL },
+    malformedFirstPage.ctx,
+  );
+  if (malformedFirstPage.calls.length === 2
+      && jobsAfterMalformedPage.length === 1
+      && jobsAfterMalformedPage[0].title === '后续有效岗位') {
+    pass('feishu-jobs.fetch() continues after a source page whose records are all filtered out');
+  } else {
+    fail(`feishu-jobs.fetch() stopped after filtered records: ${malformedFirstPage.calls.length} requests, ${JSON.stringify(jobsAfterMalformedPage)}`);
+  }
+
+  const emptyThenFail = mkCtx(({ keyword }) => {
+    if (keyword === '失败关键词') throw new Error('HTTP 503');
+    return { code: 0, data: { count: 0, job_post_list: [] } };
+  });
+  let emptyThenFailThrew = false;
+  try {
+    await feishu.fetch(
+      { name: '字节跳动', careers_url: BD_URL, keywords: ['空关键词', '失败关键词'] },
+      emptyThenFail.ctx,
+    );
+  } catch {
+    emptyThenFailThrew = true;
+  }
+  if (emptyThenFailThrew && emptyThenFail.calls.length === 2) {
+    pass('feishu-jobs.fetch() throws when a later keyword fails before any job is collected');
+  } else {
+    fail(`feishu-jobs.fetch() swallowed a failure with no partial jobs (threw=${emptyThenFailThrew}, calls=${emptyThenFail.calls.length})`);
+  }
+
   const blip = mkCtx(({ keyword }) => {
     if (keyword === '大模型') throw new Error('HTTP 503');
     return { code: 0, data: { count: 1, job_post_list: [mkJob('7', '幸存岗位')] } };
