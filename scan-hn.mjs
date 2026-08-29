@@ -16,7 +16,7 @@ try {
 import { readFileSync, existsSync } from 'fs';
 import * as yaml from 'js-yaml';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { appendToPipeline, appendToScanHistory, loadSeenUrls } from './scan.mjs';
+import { appendToPipeline, appendToScanHistory, loadSeenUrls, PORTALS_PATH } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
 
 // Import the deterministic provider
@@ -24,7 +24,7 @@ import hnProvider from './providers/hackernews.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 // ── Configuration ────────────────────────────────────────────────────
-const PORTALS_PATH = 'portals.yml';
+// Imported from scan.mjs so it honors CAREER_OPS_PORTALS and the data root (#3510).
 
 function loadKeywords() {
   const defaultKeywords = ["Software Engineer"];
