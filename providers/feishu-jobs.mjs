@@ -131,15 +131,20 @@ export default {
     const keywords = Array.isArray(entry.keywords) && entry.keywords.length
       ? entry.keywords
       : DEFAULT_KEYWORDS;
-    const entryMaxPages = Number(entry.max_pages) > 0 ? Number(entry.max_pages) : DEFAULT_MAX_PAGES;
-    const probeMaxPages = Number(ctx?.maxPages) > 0 ? Number(ctx.maxPages) : Infinity;
+    const entryLimit = Number(entry.max_pages);
+    const probeLimit = Number(ctx?.maxPages);
+    const entryMaxPages = Number.isSafeInteger(entryLimit) && entryLimit > 0
+      ? entryLimit
+      : DEFAULT_MAX_PAGES;
+    const probeMaxPages = Number.isSafeInteger(probeLimit) && probeLimit > 0
+      ? probeLimit
+      : Infinity;
     const maxPages = Math.min(entryMaxPages, probeMaxPages);
 
     /** @type {Map<string, import('./_types.js').Job>} */
     const seen = new Map();
     const sleep = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     let firstRequest = true;
-    let succeededOnce = false;
 
     for (const keyword of keywords) {
       for (let page = 1; page <= maxPages; page++) {
@@ -163,14 +168,14 @@ export default {
             throw new Error(`API error: code=${json?.code}`);
           }
         } catch (err) {
-          if (!succeededOnce) throw err;
+          if (seen.size === 0) throw err;
           console.error(`  ⚠ feishu-jobs: keyword "${keyword}" page ${page} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
           return [...seen.values()];
         }
-        succeededOnce = true;
         const companyName = entry.name || origin;
+        const sourcePage = Array.isArray(json?.data?.job_post_list) ? json.data.job_post_list : [];
         const { jobs, total } = parseFeishuJobsResponse(json, companyName, origin);
-        if (jobs.length === 0) break;
+        if (sourcePage.length === 0) break;
 
         for (const job of jobs) {
           if (!seen.has(job.url)) seen.set(job.url, job);
