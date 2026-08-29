@@ -310,6 +310,9 @@ if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
 let evaluationText;
 try {
+  // Streaming (SSE): llama.cpp/Unsloth brauchen bei langen Generationen den
+  // sofortigen Header; Non-Streaming läuft in Node/undici in den 5-Minuten-
+  // Header-Timeout, bevor die erste Zeile ankommt (8 t/s × 22k-Prefill).
   const res = await fetch(endpoint, {
     method: 'POST',
     headers,
@@ -319,7 +322,7 @@ try {
         buildSystemMessage(systemPrompt, endpointHost),
         { role: 'user', content: `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}` },
       ],
-      stream:      false,
+      stream:      true,
       temperature: 0.4,
     }),
     signal: AbortSignal.timeout(timeoutMs),
@@ -337,10 +340,37 @@ try {
     process.exit(1);
   }
 
-  const data = await res.json();
-  evaluationText = data.choices?.[0]?.message?.content?.trim();
-  const usage = normalizeOpenAIUsage(data.usage);
-  tracker.record('evaluation', usage);
+  // SSE-Zeilen akkumulieren: content + reasoning_content getrennt
+  const parts = [];
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let sseBuf = '';
+  let thinkOpen = false;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    sseBuf += decoder.decode(value, { stream: true });
+    let nl;
+    while ((nl = sseBuf.indexOf('\n')) >= 0) {
+      const line = sseBuf.slice(0, nl).trim();
+      sseBuf = sseBuf.slice(nl + 1);
+      if (!line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (payload === '[DONE]') continue;
+      let delta;
+      try { delta = JSON.parse(payload); } catch { continue; }
+      const d = delta.choices?.[0]?.delta ?? {};
+      if (d.reasoning_content) {
+        if (!thinkOpen) { parts.push('\n<think>\n'); thinkOpen = true; }
+        parts.push(d.reasoning_content);
+      } else {
+        if (thinkOpen) { parts.push('\n</think>\n\n'); thinkOpen = false; }
+        if (d.content) parts.push(d.content);
+      }
+    }
+  }
+  if (thinkOpen) parts.push('\n</think>\n');
+  evaluationText = parts.join('').trim();
   if (!evaluationText) {
     console.error('❌  The endpoint returned an empty response.');
     process.exit(1);
