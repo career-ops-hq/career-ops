@@ -48,15 +48,50 @@ import { isMainModule } from './lib/is-main-module.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const MD_PATH = resolveTrackerPath(CAREER_OPS);
-const DB_PATH = process.env.CAREER_OPS_TRACKER_DB
-  || (MD_PATH.endsWith('.md') ? MD_PATH.slice(0, -3) + '.db' : MD_PATH + '.db');
 
-// SQLite must never open the source of truth itself (an explicit
-// CAREER_OPS_TRACKER_DB could point both names at the same file).
-if (resolve(MD_PATH) === resolve(DB_PATH)) {
-  console.error(`Error: DB path must differ from the markdown path (${MD_PATH}).`);
-  process.exit(1);
+/**
+ * Where the derived SQLite index lives, resolved at call time.
+ *
+ * This used to be a module-scope `const`, which is the right shape for a CLI —
+ * one process, one invocation, env fixed before node starts — and the wrong one
+ * the moment the module is IMPORTED rather than executed. The first importer in
+ * a process froze the path for every later one, so a subsequent
+ * `process.env.CAREER_OPS_TRACKER_DB = ...` was silently ignored: no error, no
+ * warning, and an assignment that reads as though it took effect.
+ *
+ * That is how the test suite came to create an applications.db outside its own
+ * fixtures (#3506). tests/tracker-busy-timeout.test.mjs pins the variable before
+ * importing this module, but test-all.mjs imports tracker.mjs earlier in the same
+ * process for removeRowByNum, so module scope had already run and openDb() built
+ * its schema at the unpinned path. The test passed either way — busy_timeout
+ * reads back 5000 whichever file was opened — so nothing flagged it.
+ *
+ * Resolving per call costs nothing here (openDb is called once per command) and
+ * makes the documented override mean the same thing to an importer as it does on
+ * the command line.
+ *
+ * MD_PATH stays import-time on purpose: it is the source of truth, every writer
+ * reaches it through openTrackerTransaction(MD_PATH), and a tracker path that
+ * could change underneath an open transaction is a different and worse problem
+ * than the one this solves.
+ *
+ * @returns {string} Absolute or relative path to the derived index.
+ */
+function dbPath() {
+  const path = process.env.CAREER_OPS_TRACKER_DB
+    || (MD_PATH.endsWith('.md') ? MD_PATH.slice(0, -3) + '.db' : MD_PATH + '.db');
+  // SQLite must never open the source of truth itself (an explicit
+  // CAREER_OPS_TRACKER_DB could point both names at the same file). Checked here
+  // rather than at import: a module that exits the process as a side effect of
+  // being imported takes its importer down with it, and the check is only
+  // meaningful at the moment the path is actually used.
+  if (resolve(MD_PATH) === resolve(path)) {
+    console.error(`Error: DB path must differ from the markdown path (${MD_PATH}).`);
+    process.exit(1);
+  }
+  return path;
 }
+
 const STATES_PATH = 'templates/states.yml';
 const HEADER = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |';
 const SEPARATOR = '|---|------|---------|------|-------|--------|-----|--------|-------|';
@@ -85,8 +120,9 @@ async function loadSqlite() {
 }
 
 export function openDb(DatabaseSync) {
-  mkdirSync(dirname(DB_PATH) || '.', { recursive: true });
-  const db = new DatabaseSync(DB_PATH);
+  const path = dbPath();
+  mkdirSync(dirname(path) || '.', { recursive: true });
+  const db = new DatabaseSync(path);
   // Wait up to 5s for a lock instead of throwing SQLITE_BUSY on the first
   // contention. The index is read by concurrent callers — a CLI query, a
   // `set-status` write and the Go TUI dashboard can all hit the same db at
@@ -354,7 +390,7 @@ async function sync(args) {
   const DatabaseSync = await loadSqlite();
   const db = openDb(DatabaseSync);
   const { apps, diag } = syncIndex(db, states);
-  console.error(`Indexed ${apps.length} applications from ${MD_PATH} into ${DB_PATH}`);
+  console.error(`Indexed ${apps.length} applications from ${MD_PATH} into ${dbPath()}`);
   reportDiagnostics(diag);
 }
 
