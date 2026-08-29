@@ -336,7 +336,7 @@ export function parseWorkdayHint(company) {
 
   // 2. URL form — check every field that might carry a Workday link. No
   // substring pre-filter here (CodeQL js/incomplete-url-substring-sanitization):
-  // the anchored regex below is the actual gate and already rejects anything
+  // the anchored regexes below are the actual gate and already reject anything
   // that isn't a well-formed *.myworkdayjobs.com URL.
   const urlCandidates = [company.workday, company.careers_url, company.website]
     .filter((v) => typeof v === 'string');
@@ -347,12 +347,17 @@ export function parseWorkdayHint(company) {
     // `careers_url: https://{tenant}.{instance}.myworkdayjobs.com/wday`, a
     // plausible-looking line for a board that doesn't exist (#3498). Checked
     // first, same as providers/workday.mjs resolveEndpoint().
-    const cxs = raw.match(/https?:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/wday\/cxs\/[\w-]+\/([^/?#]+)(?:\/jobs)?(?:[/?#]|$)/);
+    // Both patterns are anchored: unanchored, they match a Workday URL embedded
+    // anywhere in the candidate (e.g. `https://evil.example/r?next=https://acme
+    // .wd5.myworkdayjobs.com/Careers`), so a redirect wrapper silently yields
+    // coordinates for whatever tenant it carries. Anchoring is also what the
+    // comment above has always claimed this gate does.
+    const cxs = raw.match(/^https?:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/wday\/cxs\/[\w-]+\/([^/?#]+)(?:\/jobs)?(?:[/?#]|$)/);
     // The tenant comes from the host, not from the /wday/cxs/{tenant}/ segment:
     // these coordinates rebuild a careers URL host-first (buildWorkdayCandidates),
     // and the host is what has to stay reachable.
     const m = cxs
-      || raw.match(/https?:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)/);
+      || raw.match(/^https?:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)/);
     if (!m) continue;
     const [, tenant, instance, site] = m;
     if (clean(tenant) && clean(instance) && clean(site)) {

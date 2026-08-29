@@ -309,6 +309,20 @@ eq(
   'https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers',
 );
 
+// Both URL patterns are anchored, so a Workday URL embedded in a wrapper (a
+// redirect's next=, a tracking link) is not a hint. Unanchored, such a value
+// silently produces coordinates for whatever tenant it carries.
+eq(
+  'parseWorkdayHint ignores a careers URL embedded in a redirect wrapper',
+  parseWorkdayHint({ name: 'X', website: 'https://evil.example/r?next=https://acme.wd5.myworkdayjobs.com/Careers' }),
+  null,
+);
+eq(
+  'parseWorkdayHint ignores a CXS URL embedded in a redirect wrapper',
+  parseWorkdayHint({ name: 'X', website: 'https://evil.example/r?next=https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/External/jobs' }),
+  null,
+);
+
 eq('parseWorkdayHint returns null without any hint', parseWorkdayHint({ name: 'Adyen', careers_url: 'https://adyen.com' }), null);
 eq('parseWorkdayHint rejects unsafe tenant', parseWorkdayHint({ name: 'X', workday: { tenant: 'a/b', site: 'S' } }), null);
 eq('parseWorkdayHint rejects object missing site', parseWorkdayHint({ name: 'X', workday: { tenant: 'a' } }), null);
