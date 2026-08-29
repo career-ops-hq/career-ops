@@ -14,9 +14,18 @@ import { tmpdir } from 'os';
 
 console.log('\ntracker.mjs — SQLite busy_timeout (#1957)');
 
-// openDb reads DB_PATH once at import time, so point it at a throwaway file
-// before importing tracker.mjs — the test never touches a real applications.db.
+// Point the index at a throwaway file so the test never touches a real
+// applications.db. openDb() resolves the path per call (#3506), so this holds
+// even though test-all.mjs has already imported tracker.mjs earlier in the same
+// process — which is precisely what it did NOT do while the path was a
+// module-scope const.
+//
+// Restored in the finally below. Suites share one process, so an env var left
+// set here outlives this file: every later suite, and every child process they
+// spawn, would inherit a CAREER_OPS_TRACKER_DB pointing at a directory this
+// test has already deleted.
 const work = mkdtempSync(join(tmpdir(), 'cops-busy-'));
+const priorDbEnv = process.env.CAREER_OPS_TRACKER_DB;
 process.env.CAREER_OPS_TRACKER_DB = join(work, 'applications.db');
 
 try {
@@ -35,5 +44,7 @@ try {
 } catch (e) {
   fail(`tracker busy_timeout test crashed: ${e.message}`);
 } finally {
+  if (priorDbEnv === undefined) delete process.env.CAREER_OPS_TRACKER_DB;
+  else process.env.CAREER_OPS_TRACKER_DB = priorDbEnv;
   rmSync(work, { recursive: true, force: true });
 }
