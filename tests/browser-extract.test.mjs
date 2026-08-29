@@ -1,17 +1,20 @@
 // tests/browser-extract.test.mjs — unit coverage for the pure logic in
 // browser-extract.mjs (config resolution + result normalizers). The Playwright
 // navigation path is exercised live, not here.
-import { pass, fail, ROOT } from './helpers.mjs';
+import { pass, fail, rmSync, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 
 console.log('\nbrowser-extract.mjs (config + normalizers)');
 
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'browser-extract.mjs')).href);
-  const { resolveExtractorMode, compactText, normalizeJd, normalizeListing, parseArgs } = mod;
+  const {
+    resolveExtractorMode, compactText, normalizeJd, normalizeListing, parseArgs,
+    workdayCxsUrl, jdHtmlToText, normalizeWorkdayJob,
+  } = mod;
 
   // resolveExtractorMode — default mcp, explicit cli, garbage → mcp, missing → mcp
   const tmp = mkdtempSync(join(tmpdir(), 'career-ops-extractor-'));
@@ -87,6 +90,114 @@ try {
   } else {
     fail(`normalizeJd textCap => raised=${raised.text.length} default=${defaulted.text.length}`);
   }
+
+  // workdayCxsUrl — Workday posting URLs map to the per-job CXS endpoint;
+  // everything else (including a Workday BOARD url with no /job/ segment) is
+  // left to the browser path.
+  const cxs = workdayCxsUrl('https://spgi.wd5.myworkdayjobs.com/spgi_careers/job/London-UK/Lead-PM_329276-2');
+  if (cxs === 'https://spgi.wd5.myworkdayjobs.com/wday/cxs/spgi/spgi_careers/job/London-UK/Lead-PM_329276-2') {
+    pass('workdayCxsUrl derives the per-job CXS endpoint');
+  } else {
+    fail(`workdayCxsUrl => ${cxs}`);
+  }
+  const cxsLocale = workdayCxsUrl('https://acme.wd1.myworkdayjobs.com/en-US/External/job/Toronto-ON-CAN/Eng_R1');
+  if (cxsLocale === 'https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/job/Toronto-ON-CAN/Eng_R1') {
+    pass('workdayCxsUrl drops the optional locale segment');
+  } else {
+    fail(`workdayCxsUrl locale => ${cxsLocale}`);
+  }
+  const notWorkday = [
+    'https://boards.greenhouse.io/acme/jobs/123',          // another ATS — not our branch
+    'https://acme.wd5.myworkdayjobs.com/External',         // a board, not a posting
+    'not a url',
+  ].map(workdayCxsUrl);
+  if (notWorkday.every((v) => v === null)) pass('workdayCxsUrl returns null for non-Workday-posting URLs');
+  else fail(`workdayCxsUrl non-workday => ${JSON.stringify(notWorkday)}`);
+
+  // Path traversal in the job path must not survive into the fixed-host URL.
+  if (workdayCxsUrl('https://acme.wd5.myworkdayjobs.com/External/job/../../evil') === null) {
+    pass('workdayCxsUrl rejects a traversal segment in the job path');
+  } else {
+    fail('workdayCxsUrl must reject ".." in the job path');
+  }
+
+  // jdHtmlToText — block structure survives as newlines, entities decode
+  // (including entity-escaped markup), script/style bodies are dropped.
+  const html = jdHtmlToText('<h1>About</h1><p>We build&nbsp;things &amp; ship.</p><style>p{color:red}</style><ul><li>Own the roadmap</li><li>Ship</li></ul><p>Line<br/>break</p>');
+  if (html === 'About\nWe build things & ship.\n\n- Own the roadmap\n- Ship\nLine\nbreak') {
+    pass('jdHtmlToText keeps block breaks and bullets, decodes entities, drops <style>');
+  } else {
+    fail(`jdHtmlToText => ${JSON.stringify(html)}`);
+  }
+  if (jdHtmlToText('&lt;p&gt;Escaped &lt;b&gt;markup&lt;/b&gt;&lt;/p&gt;') === 'Escaped markup') {
+    pass('jdHtmlToText double-decodes entity-escaped markup');
+  } else {
+    fail(`jdHtmlToText escaped => ${JSON.stringify(jdHtmlToText('&lt;p&gt;Escaped &lt;b&gt;markup&lt;/b&gt;&lt;/p&gt;'))}`);
+  }
+  if (jdHtmlToText(null) === '' && jdHtmlToText('') === '' && jdHtmlToText(42) === '') {
+    pass('jdHtmlToText returns "" for a non-string / empty body');
+  } else {
+    fail('jdHtmlToText should return "" for non-string input');
+  }
+
+  // normalizeWorkdayJob — same { url, title, text } contract as the scraped path
+  const wdPayload = {
+    jobPostingInfo: {
+      title: '  Lead Product Manager  ',
+      jobDescription: '<p>Build the thing.</p><ul><li>Own it</li></ul>',
+      location: 'London, UK',
+      additionalLocations: ['Gurugram, Haryana'],
+      timeType: 'Full time',
+      postedOn: 'Posted 17 Days Ago',
+      jobReqId: '329276',
+      canApply: true,
+    },
+  };
+  const wd = normalizeWorkdayJob(wdPayload, 'https://spgi.wd5.myworkdayjobs.com/spgi_careers/job/London-UK/Lead-PM_329276-2');
+  if (wd
+      && wd.url === 'https://spgi.wd5.myworkdayjobs.com/spgi_careers/job/London-UK/Lead-PM_329276-2'
+      && wd.title === 'Lead Product Manager'
+      && wd.text.includes('Location: London, UK | Gurugram, Haryana')
+      && wd.text.includes('Job type: Full time')
+      && wd.text.includes('Req ID: 329276')
+      && wd.text.includes('Build the thing.')
+      && wd.text.includes('- Own it')
+      && !wd.text.includes('canApply')) {
+    pass('normalizeWorkdayJob shapes { url, title, text } with a metadata header');
+  } else {
+    fail(`normalizeWorkdayJob => ${JSON.stringify(wd)}`);
+  }
+
+  // canApply:false is a liveness signal and must reach the JD text.
+  const closed = normalizeWorkdayJob(
+    { jobPostingInfo: { title: 'X', jobDescription: '<p>Body</p>', canApply: false } },
+    'https://acme.wd5.myworkdayjobs.com/External/job/Loc/X_1',
+  );
+  if (closed && closed.text.includes('Applications closed (canApply: false)')) {
+    pass('normalizeWorkdayJob surfaces canApply: false');
+  } else {
+    fail(`normalizeWorkdayJob canApply => ${JSON.stringify(closed)}`);
+  }
+
+  // Anything that isn't a job payload, or carries no description, returns null
+  // so the caller falls through to the browser instead of emitting an empty JD.
+  const nulls = [
+    normalizeWorkdayJob(null, 'https://x/1'),
+    normalizeWorkdayJob({}, 'https://x/1'),
+    normalizeWorkdayJob({ jobPostingInfo: { title: 'X' } }, 'https://x/1'),
+    normalizeWorkdayJob({ jobPostingInfo: { title: 'X', jobDescription: '<p> </p>' } }, 'https://x/1'),
+  ];
+  if (nulls.every((v) => v === null)) pass('normalizeWorkdayJob returns null for a non-job / description-less payload');
+  else fail(`normalizeWorkdayJob nulls => ${JSON.stringify(nulls)}`);
+
+  // The text cap applies to the CXS path too.
+  const wdCapped = normalizeWorkdayJob(
+    { jobPostingInfo: { title: 'X', jobDescription: `<p>${'word '.repeat(5000)}</p>` } },
+    'https://x/1',
+    500,
+  );
+  if (wdCapped && wdCapped.text.length <= 501) pass('normalizeWorkdayJob honors the text cap');
+  else fail(`normalizeWorkdayJob cap => ${wdCapped && wdCapped.text.length}`);
 
   // normalizeListing — resolve relatives, drop nav/short labels, dedup, cap
   const anchors = [

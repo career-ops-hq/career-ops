@@ -18,8 +18,9 @@ import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
   ? join(CAREER_OPS, 'data/applications.md')
   : join(CAREER_OPS, 'applications.md');
@@ -52,6 +53,9 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   // Work-authorization / visa-sponsorship tier from Block A (report + Machine
   // Summary only). Allowlisted so it round-trips; no consumer logic yet.
   'work_auth',
+  // Reporting line stated by the JD, verbatim (report + Machine Summary only).
+  // Allowlisted so it round-trips; no consumer logic yet.
+  'reports_to',
 ]);
 
 // --- CLI args ---

@@ -28,8 +28,9 @@ const TRUSTED_HOST = 'speedrun-talent-network.com';
 const PER_PAGE = 50;
 const DEFAULT_MAX_PAGES = 6; // × PER_PAGE = the 300-job default scan
 // Runaway bound, not a coverage target: iteration already stops at the
-// feed's reported total_pages (or a short page), so on an honest feed the
-// cap costs nothing and full-board sweeps keep working as the board grows.
+// feed's reported total_pages (or, when the feed omits it, a short page), so
+// on an honest feed the cap costs nothing and full-board sweeps keep working
+// as the board grows.
 // It only bites a misbehaving feed or an absurd max_pages entry — so it
 // sits well above plausible board size (~353 pages / ~17.6k jobs as of
 // 2026-08), same policy as workday.mjs's cap.
@@ -175,9 +176,30 @@ export default {
         const normalized = normalizeSpeedrunJob(j, fallbackCompany);
         if (normalized) out.push(normalized);
       }
-      // Stop at the last page: a short page, or past the reported total_pages.
-      if (json.jobs.length < PER_PAGE) break;
-      if (Number.isInteger(json.total_pages) && page + 1 >= json.total_pages) break;
+      // Stop at the last page. Termination priority (#2547):
+      //   1. An empty page always ends iteration — nothing left to read, and
+      //      it bounds a feed that over-reports total_pages instead of burning
+      //      requests up to max_pages.
+      //   2. The feed's own total_pages when present. A page that comes back
+      //      49/50 because a listing was deleted between requests on a board
+      //      that rotates mid-sweep is NOT the last page; treating it as one
+      //      ended the sweep silently, at a clean exit code — the cap warning
+      //      below is gated on max_pages and is never reached from here.
+      //      A non-positive total_pages is not a statement about board size,
+      //      so it counts as absent: a feed reporting 0 alongside 50 real
+      //      rows contradicts itself, and the rows win. Trusting them can
+      //      only cost requests (bounded by rule 1 and max_pages), never jobs.
+      //   3. A short page, only as the fallback for feeds whose total_pages is
+      //      absent or non-positive. Demoting it (rather than merely
+      //      reordering the two checks) is what fixes #2547: a 49-row page
+      //      fails the total_pages test and would still break out on the
+      //      next line.
+      if (json.jobs.length === 0) break;
+      if (Number.isInteger(json.total_pages) && json.total_pages > 0) {
+        if (page + 1 >= json.total_pages) break;
+      } else if (json.jobs.length < PER_PAGE) {
+        break;
+      }
       // Cap warning (same pattern as jibeapply/workday): the feed had more
       // pages than we were allowed to read — surface it, with the fix.
       if (page + 1 >= maxPages && Number.isInteger(json.total_pages) && json.total_pages > maxPages) {

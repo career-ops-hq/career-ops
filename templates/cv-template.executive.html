@@ -278,6 +278,13 @@ version: 1.0.0
     page-break-after: avoid;
   }
 
+  /* Keep a project's tech line attached to the description above it, so a bare
+     "Python | github.com/..." line is never stranded atop the next page. */
+  .project-tech {
+    break-before: avoid;
+    page-break-before: avoid;
+  }
+
   /* === RTL (Arabic) support === */
   html[lang="ar"] body {
     direction: rtl;

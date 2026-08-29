@@ -42,21 +42,46 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, realpathSync, lstatSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute, basename, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
+import { validateFlags, hasFlag, flagValue } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const CONTACTS_PATH = join(CAREER_OPS, 'data/contacts.tsv');
-const DEFAULT_VCF = join(CAREER_OPS, 'output/contacts.vcf');
+const DATA_ROOT = getCareerOpsRoot();
+const CONTACTS_PATH = join(DATA_ROOT, 'data/contacts.tsv');
+const DEFAULT_VCF = join(DATA_ROOT, 'output/contacts.vcf');
 
-const args = process.argv.slice(2);
+
+// --- CLI args ---
+const KNOWN_FLAGS = ['--summary', '--self-test', '--caller-id', '--vcf', '--help', '-h'];
+
+const USAGE = `Usage:
+  node contacts.mjs                     # JSON: contacts + quality + total
+  node contacts.mjs --summary           # human-readable table
+  node contacts.mjs --vcf [path]        # write vCard, default output/contacts.vcf
+  node contacts.mjs --vcf --caller-id   # FN as "Jane Doe (Acme recruiter)"
+  node contacts.mjs --self-test         # run the in-memory test suite
+  node contacts.mjs --help              # print this usage block and exit`;
+
+// Only the CLI has flags. When this module is imported, process.argv belongs to
+// whoever imported it — so parsing it here validated the *host's* flags against
+// this script's, and `import { parseContacts } from './contacts.mjs'` inside a
+// process started with any unrecognized flag died at import with
+// "unrecognized flag(s)". Invisible while the suite ran in its own process;
+// surfaced the moment it moved to tests/ and was imported by test-all (#3306).
+const args = isMainModule(import.meta.url) ? process.argv.slice(2) : [];
+validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: ['--vcf'] });
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 const callerIdMode = args.includes('--caller-id');
-const vcfIdx = args.indexOf('--vcf');
-const vcfMode = vcfIdx !== -1;
-// Optional path argument: the token right after --vcf, unless it is another flag.
-const vcfPathArg = vcfMode && args[vcfIdx + 1] && !args[vcfIdx + 1].startsWith('--') ? args[vcfIdx + 1] : null;
+const vcfMode = hasFlag(args, '--vcf');
+const vcfPathArg = (() => {
+  if (!vcfMode) return null;
+  const val = flagValue(args, '--vcf');
+  return val === undefined || val.startsWith('--') ? null : val || null;
+})();
 
 const VALID_TYPES = new Set(['recruiter', 'hiring-manager', 'peer', 'interviewer', 'other']);
 
@@ -464,6 +489,6 @@ function main() {
   }
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (isMainModule(import.meta.url)) {
   main();
 }

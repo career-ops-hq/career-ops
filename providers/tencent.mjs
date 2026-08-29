@@ -21,7 +21,7 @@ const DEFAULT_KEYWORDS = [''];  // empty keyword = the whole board, no topical b
 const DEFAULT_MAX_PAGES = 20;
 // Every request after the first pays it — across pages and keyword switches
 // (same idiom as avature/workday).
-const INTER_PAGE_DELAY_MS = 150;
+const INTER_PAGE_DELAY_MS = 250;
 
 /** Parse "2026年06月23日" → epoch ms. NaN-safe. */
 function parseCnDate(value) {

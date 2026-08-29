@@ -26,6 +26,11 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { acquireTrackerLock } from './tracker-utils.mjs';
+// The ledger date is the LOCAL calendar day (#2932). Computing the expected
+// value with toISOString() here would compare a local date against a UTC one
+// and fail for the hours of the day where they differ — a test that passes
+// only in part of the UTC day.
+import { localToday } from './lib/local-today.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const NODE = process.execPath;
@@ -807,7 +812,7 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
 
   // real transition → one line, today's date, from/to states, source set-status
   const r1 = runSetStatus(['2', 'Applied', '--json'], sb);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   let log = '';
   try { log = readFileSync(logPath, 'utf-8'); } catch {}
   if (r1.code === 0 && log === `2\t${today}\tEvaluated\tApplied\tset-status\t\n`) {
@@ -1248,7 +1253,7 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
 {
   const sb = makeSandbox(TRACKER_9);
   const logPath = join(sb.dir, 'status-log.tsv');
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
 
   const r = runSetStatus(['2', 'Applied', '--source', 'web', '--json'], sb);
   let log = '';
@@ -1263,7 +1268,7 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
 {
   const sb = makeSandbox(TRACKER_9);
   const logPath = join(sb.dir, 'status-log.tsv');
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   const r = runSetStatus(['2', 'Applied', '--json'], sb);
   let log = '';
   try { log = readFileSync(logPath, 'utf-8'); } catch {}
@@ -1286,6 +1291,126 @@ for (const bad of ['correction', 'backfill', 'cell-edit', 'nonsense']) {
     pass(`--source ${bad}: rejected non-zero and nothing written`);
   } else {
     fail(`--source ${bad}: expected rejection, got code=${r.code} wrote=${wrote}`);
+  }
+}
+
+// ── #2932: "today" is the LOCAL calendar day, never the UTC one ──────────
+{
+  // Auckland is always at or ahead of the UTC day, so for the first hours of
+  // its local day the UTC day is still yesterday. Comparing --on against the
+  // UTC day therefore rejected the user's own today:
+  //   TZ=Pacific/Auckland --on 2026-08-16  ->  "date is in the future"
+  const nzToday = execFileSync(NODE, ['-e',
+    "const d=new Date(),p=n=>String(n).padStart(2,'0');process.stdout.write(`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`)",
+  ], { env: { ...process.env, TZ: 'Pacific/Auckland' }, encoding: 'utf-8' }).trim();
+
+  const sandbox = makeSandbox(TRACKER_9);
+  try {
+    const r = runSetStatus(['Globex', 'Interview', '--on', nzToday, '--dry-run'], sandbox, { TZ: 'Pacific/Auckland' });
+    if (r.code === 0) pass('#2932: --on accepts the local today east of UTC');
+    else fail(`#2932: --on rejected Auckland's own today (${nzToday}): code=${r.code} ${(r.stderr || r.stdout).split('\n')[0]}`);
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+
+  // MUST NOT CHANGE: a genuinely future date is still refused. Without this,
+  // deleting the check entirely would pass the assertion above.
+  const sandbox2 = makeSandbox(TRACKER_9);
+  try {
+    const r = runSetStatus(['Globex', 'Interview', '--on', '2099-01-01', '--dry-run'], sandbox2, { TZ: 'Pacific/Auckland' });
+    if (r.code === 1) pass('#2932: a genuinely future --on is still rejected');
+    else fail(`#2932: future date not rejected (code=${r.code})`);
+  } finally {
+    rmSync(sandbox2.dir, { recursive: true, force: true });
+  }
+
+  // The west-of-UTC half, pinned to an instant so it does not depend on when
+  // the suite runs: at 01:30 UTC it is still the previous day in New York, and
+  // the UTC-day form would write tomorrow into status-log.tsv.
+  const probe = execFileSync(NODE, ['-e',
+    "const {localToday}=await import('./lib/local-today.mjs');" +
+    "const i=new Date('2026-08-16T01:30:00Z');" +
+    "process.stdout.write(localToday(i)+' '+i.toISOString().slice(0,10));",
+    '--input-type=module',
+  ], { cwd: ROOT, env: { ...process.env, TZ: 'America/New_York' }, encoding: 'utf-8' }).trim();
+  if (probe === '2026-08-15 2026-08-16') {
+    pass('#2932: localToday() resolves the local day west of UTC where the UTC day is tomorrow');
+  } else {
+    fail(`#2932: localToday() west-of-UTC probe returned "${probe}", want "2026-08-15 2026-08-16"`);
+  }
+
+  // MUST NOT CHANGE: the round-trip validity check is date PARSING on UTC
+  // midnight and is deliberately untouched, so a malformed date still fails.
+  const sandbox3 = makeSandbox(TRACKER_9);
+  try {
+    const r = runSetStatus(['Globex', 'Interview', '--on', '2026-02-30', '--dry-run'], sandbox3, { TZ: 'Pacific/Auckland' });
+    if (r.code === 1) pass('#2932: an impossible calendar date is still rejected');
+    else fail(`#2932: 2026-02-30 accepted (code=${r.code})`);
+  } finally {
+    rmSync(sandbox3.dir, { recursive: true, force: true });
+  }
+}
+
+// ── #3075: --report resolves a report link kept in Notes ────────────────────
+// merge-tracker learned this layout in 8668ac1 — a customized tracker with no
+// dedicated Report column keeps the link in Notes prose. set-status read only
+// the Report cell, so --report could not find a row merge-tracker linked
+// happily, and the error even advised --row for the wrong reason.
+{
+  const CUSTOM = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | Materials | Apply Link | Follow-up | Notes |
+|---|------|---------|------|-------|--------|-----------|------------|-----------|-------|
+| 7 | 2026-06-01 | Acme | Staff Eng | 4.2/5 | Applied | CV v3 | https://acme.example/jobs/7 | 2026-06-14 | strong fit; report [12](reports/012-acme-2026-06-01.md) |
+`;
+
+  {
+    const sb = makeSandbox(CUSTOM);
+    try {
+      const r = runSetStatus(['--report', '12', 'Interview', '--dry-run'], sb);
+      if (r.code === 0) pass('#3075: --report resolves a report link kept in the Notes cell');
+      else fail(`#3075: --report 12 failed on a custom layout (code=${r.code}) ${(r.stderr || r.stdout).split('\n')[0]}`);
+    } finally { rmSync(sb.dir, { recursive: true, force: true }); }
+  }
+
+  // MUST NOT CHANGE: a report nobody links is still not found. Without this,
+  // making the lookup match anything would pass the assertion above.
+  {
+    const sb = makeSandbox(CUSTOM);
+    try {
+      const r = runSetStatus(['--report', '99', 'Interview', '--dry-run'], sb);
+      if (r.code !== 0) pass('#3075: an unlinked report number is still not found');
+      else fail('#3075: --report 99 resolved a row nothing links');
+    } finally { rmSync(sb.dir, { recursive: true, force: true }); }
+  }
+
+  // MUST NOT CHANGE: Notes is prose, so the fallback is scoped to reports/.
+  // A job-posting URL and an unrelated markdown link both sit in Notes here.
+  {
+    const NOISY = CUSTOM.replace(
+      'strong fit; report [12](reports/012-acme-2026-06-01.md)',
+      'applied via https://acme.example/jobs/9 — see [9](../notes/9-thing.md)',
+    );
+    const sb = makeSandbox(NOISY);
+    try {
+      const r = runSetStatus(['--report', '9', 'Interview', '--dry-run'], sb);
+      if (r.code !== 0) pass('#3075: a non-report link in Notes does not claim a report number');
+      else fail('#3075: --report 9 matched a non-report markdown link in Notes');
+    } finally { rmSync(sb.dir, { recursive: true, force: true }); }
+  }
+
+  // MUST NOT CHANGE: a real Report cell still wins over anything in Notes.
+  {
+    const CONFLICT = TRACKER_9.replace(
+      '| 2 | 2026-06-02 | Globex | Platform Engineer | 4.0/5 | Evaluated | ✅ | [2](../reports/002-globex-2026-06-02.md) | — |',
+      '| 2 | 2026-06-02 | Globex | Platform Engineer | 4.0/5 | Evaluated | ✅ | [2](../reports/002-globex-2026-06-02.md) | also [77](reports/077-other.md) |',
+    );
+    const sb = makeSandbox(CONFLICT);
+    try {
+      const r = runSetStatus(['--report', '77', 'Interview', '--dry-run'], sb);
+      if (r.code !== 0) pass('#3075: Notes is a fallback only — a populated Report cell wins');
+      else fail('#3075: a Notes link overrode a populated Report cell');
+    } finally { rmSync(sb.dir, { recursive: true, force: true }); }
   }
 }
 

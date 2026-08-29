@@ -27,8 +27,8 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { fileURLToPath } from 'url';
 import { canonicalize, extractSkills } from './skill-extract.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -626,6 +626,13 @@ Benefits and Perks (US Only)
   const crlfSkills = extractJdSkills(lineEndingJd.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n'));
   eq('CRLF JD extracts the same skills as the LF JD', crlfSkills, lfSkills);
   eq('CRLF JD extracts a non-zero number of skills', crlfSkills.length > 0, true);
+  const lfClassification = classifySkillGaps(lfSkills, fakeCv);
+  const crlfClassification = classifySkillGaps(crlfSkills, fakeCv);
+  eq(
+    'CRLF JD produces the same classification as the LF JD',
+    JSON.stringify(crlfClassification),
+    JSON.stringify(lfClassification)
+  );
 
   // Regression (#1896): the reported bug. A CV alias and a JD's canonical name
   // must not read as a gap. Before the shared skill-extract canonicalization,
@@ -760,7 +767,7 @@ Maintained the internal Fabrikam-SDK build.
 
 // ── Main ─────────────────────────────────────────────────────────────
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
 if (selfTestMode) {
   runSelfTest();
 } else {
