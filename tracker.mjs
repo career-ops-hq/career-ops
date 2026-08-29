@@ -37,7 +37,7 @@
 import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import { createHash } from 'crypto';
 import { dirname, resolve, join, basename } from 'path';
-import { pathToFileURL } from 'url';
+import { pathToFileURL, fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import * as yaml from 'js-yaml';
 import { resolveColumns } from './tracker-parse.mjs';
@@ -92,7 +92,15 @@ function dbPath() {
   return path;
 }
 
-const STATES_PATH = 'templates/states.yml';
+// templates/states.yml ships with the code, so it is resolved from this module's
+// own directory. It used to be a bare relative path, i.e. resolved against
+// process.cwd(), which made every tracker.mjs command fail from anywhere but the
+// repo root — including the shape the data-root mechanism invites, where you cd
+// to your data directory and run the tool out of the checkout (#3508). Third
+// variant of #3500: that one looked for this file under the data root, this one
+// looked for it under whatever directory the shell happened to be in.
+const CODEBASE_ROOT = dirname(fileURLToPath(import.meta.url));
+const STATES_PATH = join(CODEBASE_ROOT, 'templates/states.yml');
 const HEADER = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |';
 const SEPARATOR = '|---|------|---------|------|-------|--------|-----|--------|-------|';
 
@@ -163,7 +171,9 @@ export function openDb(DatabaseSync) {
 
 function loadStates() {
   if (!existsSync(STATES_PATH)) {
-    console.error(`Error: ${STATES_PATH} not found — cannot validate statuses. Run from the career-ops root.`);
+    // No longer "run from the career-ops root" advice: the path is anchored to
+    // the module, so a miss here is a broken install, not a wrong cwd.
+    console.error(`Error: ${STATES_PATH} not found — cannot validate statuses (broken install: templates/states.yml ships with career-ops).`);
     process.exit(1);
   }
   const doc = yaml.load(readFileSync(STATES_PATH, 'utf-8'));
