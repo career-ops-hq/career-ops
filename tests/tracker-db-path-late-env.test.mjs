@@ -20,7 +20,8 @@
 // var SECOND, then assert on the file that actually appeared on disk.
 import { pass, fail } from './helpers.mjs';
 import { join } from 'path';
-import { mkdtempSync, rmSync, existsSync, readdirSync } from 'fs';
+import { mkdtempSync, rmSync, existsSync, readdirSync, readFileSync } from 'fs';
+import { createHash } from 'crypto';
 import { tmpdir } from 'os';
 
 console.log('\ntracker.mjs — CAREER_OPS_TRACKER_DB honored after import (#3506)');
@@ -39,6 +40,13 @@ const { getCareerOpsRoot, resolveTrackerPath } = await import('../path-resolver.
 const mdPath = resolveTrackerPath(getCareerOpsRoot());
 const fallbackDb = mdPath.endsWith('.md') ? mdPath.slice(0, -3) + '.db' : mdPath + '.db';
 const fallbackExisted = existsSync(fallbackDb);
+// Content, not just existence. On a machine where a real index already sits at
+// the fallback path — a live workspace, exactly where this matters — "did a file
+// appear?" can never fail, so it would prove nothing there. openDb() runs its
+// CREATE TABLE statements against whatever it opens, so compare the bytes.
+const fallbackDigest = () =>
+  existsSync(fallbackDb) ? createHash('sha256').update(readFileSync(fallbackDb)).digest('hex') : null;
+const fallbackBefore = fallbackDigest();
 
 try {
   const { DatabaseSync } = await import('node:sqlite');
@@ -65,18 +73,34 @@ try {
       ? pass('the pinned database carries the index schema (applications, status_events)')
       : fail(`pinned database is missing index tables, got: ${tables.join(', ') || 'none'}`);
 
-    // The fixture is self-contained — one db, nothing else alongside it.
-    const stray = readdirSync(work).filter(f => !f.startsWith('applications.db'));
+    // The fixture is self-contained — the database and the sidecars SQLite may
+    // create beside it, nothing else. Named exactly rather than by prefix: a
+    // prefix match also accepts applications.db.bak and friends, so an
+    // unexpected file could be written and still pass.
+    const ALLOWED = new Set([
+      'applications.db',
+      'applications.db-wal',      // write-ahead log
+      'applications.db-shm',      // shared-memory index for the WAL
+      'applications.db-journal',  // rollback journal, in the non-WAL modes
+    ]);
+    const stray = readdirSync(work).filter(f => !ALLOWED.has(f));
     stray.length === 0
       ? pass('no files written beside the pinned database')
       : fail(`openDb() wrote unexpected files into the fixture: ${stray.join(', ')}`);
 
-    // And nothing was written at the unpinned fallback, which is the whole point:
-    // #3506 was not "the pin is ignored" in the abstract, it was a database
-    // appearing somewhere nobody asked for one.
-    fallbackExisted || !existsSync(fallbackDb)
-      ? pass('no database created at the unpinned fallback path')
-      : fail(`openDb() wrote a database outside the fixture at ${fallbackDb} (#3506)`);
+    // And the unpinned fallback is untouched, which is the whole point: #3506 was
+    // not "the pin is ignored" in the abstract, it was a database appearing —
+    // or being written to — somewhere nobody asked for one.
+    const fallbackAfter = fallbackDigest();
+    if (fallbackAfter === fallbackBefore) {
+      pass(fallbackExisted
+        ? 'the pre-existing database at the unpinned fallback path is byte-identical'
+        : 'no database created at the unpinned fallback path');
+    } else if (!fallbackExisted) {
+      fail(`openDb() wrote a database outside the fixture at ${fallbackDb} (#3506)`);
+    } else {
+      fail(`openDb() modified the pre-existing database at ${fallbackDb} — a real workspace index (#3506)`);
+    }
   } finally {
     db.close();
   }
