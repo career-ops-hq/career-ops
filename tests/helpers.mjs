@@ -680,8 +680,16 @@ export function directoryDenyBinds() {
     return true;
   } finally {
     if (probeDir) {
+      // Cleanup must not escape this function. A throw from `finally` replaces
+      // the value the try block already computed, so a failed rmSync would turn
+      // a decided probe into an exception and take both callers down with it -
+      // the opposite of the fail-toward-running-the-assertion contract above.
+      // Windows makes that reachable: rmSync can answer EPERM for a while after
+      // a child exits (the reason the wrapper retries at all), and this
+      // directory carries a deny ACE. A leaked temp directory is the cheaper
+      // failure.
       try { execFileSync('icacls', [probeDir, '/remove:d', '*S-1-1-0'], { stdio: 'ignore' }); } catch {}
-      rmSync(probeDir, { recursive: true, force: true });
+      try { rmSync(probeDir, { recursive: true, force: true }); } catch {}
     }
   }
 }
