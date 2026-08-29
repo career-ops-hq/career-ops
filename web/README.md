@@ -22,6 +22,9 @@ npm run dev
 Open http://localhost:3000. The app reads the career-ops checkout it lives in
 (the parent directory) — your existing CV, pipeline and reports appear as-is.
 
+The server binds IPv4 loopback, so reach it as `localhost` or `127.0.0.1`;
+`http://[::1]:3000` has nothing listening on it.
+
 ## What works today
 
 - **Pipeline** — your tracker as a sortable, filterable table; status changes
@@ -37,6 +40,10 @@ Open http://localhost:3000. The app reads the career-ops checkout it lives in
 
 - **Local-first:** the local web app runs entirely on your machine — no cloud,
   no account needed. Your CV and data stay in your own files.
+- **Loopback by default:** `npm run dev` and `npm start` bind `127.0.0.1`, so
+  nothing else on your network can reach the dashboard. It has no login — the
+  bind is the access control. Opt out deliberately with
+  `CAREER_OPS_WEB_ALLOWED_HOSTS` ([below](#exposing-it-beyond-this-machine)).
 - **Never auto-submits:** the apply flow drafts and prefills; submitting is
   always a human action.
 - **CV generation never asks the agent to write:** the `pdf` worker tailors your
@@ -74,11 +81,57 @@ from a `chrome-extension://` origin, which Fetch Metadata always reports as
 `cross-site`, so the guard refuses it unless the id is named here. The host
 layer still applies to an allowlisted origin.
 
+Pass one-off flags through npm's `--`: `npm run dev -- -p 4000`.
+
+### Exposing it beyond this machine
+
+`CAREER_OPS_WEB_ALLOWED_HOSTS` is the switch. Unset (or blank) the server binds
+`127.0.0.1`; name a host it cannot already reach on loopback and the server binds
+`0.0.0.0`, with the API guard answering for loopback and the hosts you named:
+
+```bash
+CAREER_OPS_WEB_ALLOWED_HOSTS="192.168.1.50" npm run dev
+```
+
+Naming only loopback (`localhost`, `127.0.0.1`, `::1`) is not an opt-in and
+changes nothing — the guard already answers for those, so widening the socket
+would expose every interface while granting no host that wasn't already allowed.
+
+Set through `CAREER_OPS_WEB_ALLOWED_HOSTS`, neither layer can widen without the
+other — the bind and the allow-list are derived from that one value. They are not
+equivalent, and two things move them apart: the guard also answers for loopback,
+which no bind address changes, and a `-H` of your own moves the bind while the
+allow-list stays as it was (see below).
+
+Understand what you are turning on. The host allow-list covers `/api/*` only
+(`src/proxy.ts`'s matcher), so once the socket is open **every page the
+dashboard renders — your CV, pipeline and reports — is readable by anyone who
+can reach that port**, and there is no login. Two further caveats: a client that
+can reach the port can also supply its own `Host` header, so on a widened bind
+the allow-list filters honest clients rather than hostile ones; and `0.0.0.0` is
+IPv4-only, so an opted-in IPv6 address will pass the filter with nothing
+listening for it.
+
+You can also override the bind directly — `npm run dev -- -H 0.0.0.0` — since
+Next keeps the last value of a repeated option. **Prefer the env var.** An `-H`
+on its own opens the socket while the allow-list stays empty, which is the one
+combination with no honest reading: the guard then refuses LAN clients that
+identify themselves truthfully and admits any that spell `Host: localhost`. The
+launcher says so on startup rather than doing it quietly.
+
+Use it on a network you trust, and prefer an SSH tunnel
+(`ssh -L 3000:127.0.0.1:3000 you@box`) where you can — that needs no env var at
+all and keeps the bind on loopback.
+
 ### Tests
 
 Suites live in `web/tests/`, mirroring the path of what they test under
 `web/src/` — so `src/lib/clean-chips.mjs` is tested by
 `tests/lib/clean-chips.test.mjs`. Name the file `{module}.test.mjs`.
+
+Root-level scripts are the one exception: `server.mjs` is tested by
+`tests/lib/server-launcher.test.mjs`, because `test-all.mjs`'s parity check gates
+only `web/tests/lib/` and a suite outside it would never run in the required check.
 
 `npm test` discovers them with a glob (`tests/**/*.test.mjs`), so a new suite
 needs **no registration** — just add the file. **Requires Node ≥ 22**: earlier
