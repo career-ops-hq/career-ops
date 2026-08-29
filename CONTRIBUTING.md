@@ -87,6 +87,18 @@ Life happens: a PR gets a review, the author moves on, and useful work strands a
 
 **If you're the original author coming back**: the work stays yours to reclaim at any point before someone else finishes it. Just say so on the issue. Any comment or push from you at any ladder step resets the clock completely.
 
+## Someone else's open PR stays theirs
+
+The ladder above is for work that has been **abandoned**. An open PR with an author still around is a different thing, and the line matters.
+
+**Please don't open a PR that re-resolves someone else's conflict.** Pointing out on the thread that a PR has gone into conflict is genuinely useful. Rebasing it onto a branch of your own and opening a replacement is not, however cleanly the merge is done: landing that replacement closes the original, and the author is left with a `closed` PR where their `merged` should have been. That badge is most of what a contributor takes away from a project, and it isn't ours to reassign.
+
+If the conflict came from something **we** merged, the fix is ours. We resolve it on the author's own branch (that is what "Allow edits by maintainers" is for), run the suite, and leave their PR and their authorship untouched. If it came from anywhere else, the author rebases whenever they're ready: nobody is on a clock for that.
+
+This applies to automation as well. A bot opening replacement PRs on other people's branches is doing the same thing at higher volume, and automated triage posted into someone else's thread ("don't merge both", "treat #X as the primary") reads as a project decision to the person who has been waiting on one. Merge calls are the maintainers' to make.
+
+Improvements that go *beyond* resolving the conflict are welcome, just not stapled onto another person's PR: raise them in the thread and let the author decide, or open your own PR once theirs has landed.
+
 ## Scope: the core vs. the shared layer
 
 career-ops core is **local-first and human-in-the-loop** by design — it runs on your machine and drafts applications for *you* to review and submit. Centralized infrastructure — hosted job aggregation, a shared matching service, proxies or Workers the project would operate — is **not part of the core**: it's heavier than a free local tool should carry, and it's where the project is headed as a *separate, opt-in service*. See the direction here: **[Where career-ops is going](https://github.com/santifer/career-ops/discussions/904)**.

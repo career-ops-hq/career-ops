@@ -179,7 +179,8 @@ Levels are additive — they are executed in order, and results are merged and d
    f. If the parser fails, log the error, attempt fallback via the ATS API if it exists, and continue with the other companies (**do not** add to `local_parser_ok`).
    g. If the parser completes successfully (steps c–e without fatal error), add the current company name to `local_parser_ok` and accumulate jobs in candidates.
 
-4. **Level 1 — Playwright Scan** (parallel in batches of 3-5):
+4. **Level 1 — Playwright Scan** (sequential — NEVER parallel Playwright):
+   Browser-backed workers share one browser session, so concurrent `browser_navigate`/`browser_snapshot` calls cross-contaminate and a snapshot can return another company's page (#2551). Batching stays correct for the fetch-based levels below (Level 2 APIs/feeds, Level 3 queries), which open no shared session.
    For each company in `tracked_companies` with `enabled: true`, a defined `careers_url`, and a **name not listed in `local_parser_ok`**:
    a. `browser_navigate` to `careers_url`.
    b. `browser_snapshot` to read all job listings.
