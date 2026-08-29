@@ -44,9 +44,19 @@ const fallbackExisted = existsSync(fallbackDb);
 // the fallback path — a live workspace, exactly where this matters — "did a file
 // appear?" can never fail, so it would prove nothing there. openDb() runs its
 // CREATE TABLE statements against whatever it opens, so compare the bytes.
-const fallbackDigest = () =>
-  existsSync(fallbackDb) ? createHash('sha256').update(readFileSync(fallbackDb)).digest('hex') : null;
-const fallbackBefore = fallbackDigest();
+//
+// Sidecars included, because in WAL mode they ARE where the write lands: a
+// CREATE TABLE goes to fallbackDb-wal and the main file stays byte-identical
+// until a checkpoint. Hashing only the main file would report "unchanged" on a
+// database that had just been written to.
+const FALLBACK_FILES = ['', '-wal', '-shm', '-journal'];
+const fallbackSnapshot = () => FALLBACK_FILES.map((suffix) => {
+  const file = fallbackDb + suffix;
+  return `${suffix || '(db)'}=${existsSync(file)
+    ? createHash('sha256').update(readFileSync(file)).digest('hex')
+    : 'absent'}`;
+}).join(' ');
+const fallbackBefore = fallbackSnapshot();
 
 try {
   const { DatabaseSync } = await import('node:sqlite');
@@ -88,21 +98,26 @@ try {
       ? pass('no files written beside the pinned database')
       : fail(`openDb() wrote unexpected files into the fixture: ${stray.join(', ')}`);
 
-    // And the unpinned fallback is untouched, which is the whole point: #3506 was
-    // not "the pin is ignored" in the abstract, it was a database appearing —
-    // or being written to — somewhere nobody asked for one.
-    const fallbackAfter = fallbackDigest();
-    if (fallbackAfter === fallbackBefore) {
-      pass(fallbackExisted
-        ? 'the pre-existing database at the unpinned fallback path is byte-identical'
-        : 'no database created at the unpinned fallback path');
-    } else if (!fallbackExisted) {
-      fail(`openDb() wrote a database outside the fixture at ${fallbackDb} (#3506)`);
-    } else {
-      fail(`openDb() modified the pre-existing database at ${fallbackDb} — a real workspace index (#3506)`);
-    }
   } finally {
     db.close();
+  }
+
+  // The unpinned fallback is untouched, which is the whole point: #3506 was not
+  // "the pin is ignored" in the abstract, it was a database appearing — or being
+  // written to — somewhere nobody asked for one.
+  //
+  // Checked AFTER the handle is closed. A WAL database can hold the write in its
+  // sidecar and only fold it into the main file on close, so a snapshot taken
+  // while the connection is still open reads an in-between state.
+  const fallbackAfter = fallbackSnapshot();
+  if (fallbackAfter === fallbackBefore) {
+    pass(fallbackExisted
+      ? 'the pre-existing database at the unpinned fallback path is byte-identical'
+      : 'no database created at the unpinned fallback path');
+  } else if (!fallbackExisted) {
+    fail(`openDb() wrote a database outside the fixture at ${fallbackDb} (#3506)`);
+  } else {
+    fail(`openDb() modified the pre-existing database at ${fallbackDb} — a real workspace index (#3506)\n     before: ${fallbackBefore}\n     after:  ${fallbackAfter}`);
   }
 } catch (e) {
   fail(`tracker db-path late-env test crashed: ${e.message}`);
