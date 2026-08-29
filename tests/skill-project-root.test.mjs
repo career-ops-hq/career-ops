@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
-import { dirname, join, resolve } from 'path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { tmpdir } from 'os';
 import { fail, pass, rmSync, ROOT, run } from './helpers.mjs';
 
@@ -39,7 +39,28 @@ function hasRoutingRule(text) {
     text.includes("never against the process's current working directory");
 }
 
+function isRegularFile(filePath) {
+  try {
+    return statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function isInsideRoot(root, target) {
+  const relativeTarget = relative(resolve(root), resolve(target));
+
+  return relativeTarget === '' ||
+    (relativeTarget !== '..' &&
+      !relativeTarget.startsWith(`..${sep}`) &&
+      !isAbsolute(relativeTarget));
+}
+
 function readSkillEntrypoint(skillPath, relativePath, repoRoot = ROOT) {
+  if (!isRegularFile(skillPath)) {
+    return { path: skillPath, text: '' };
+  }
+
   const text = readFileSync(skillPath, 'utf8');
   if (gitIndexMode(relativePath, repoRoot) !== '120000' || hasRoutingRule(text)) {
     return { path: skillPath, text };
@@ -49,13 +70,19 @@ function readSkillEntrypoint(skillPath, relativePath, repoRoot = ROOT) {
   if (!pointer || /\r?\n/.test(pointer)) return { path: skillPath, text };
 
   const target = resolve(dirname(skillPath), pointer);
-  if (!existsSync(target)) return { path: skillPath, text };
+  if (!isInsideRoot(repoRoot, target) || !isRegularFile(target)) {
+    return { path: skillPath, text };
+  }
   return { path: target, text: readFileSync(target, 'utf8') };
 }
 
 const failures = [];
 for (const relativePath of entrypoints) {
   const skillPath = join(ROOT, relativePath);
+  if (!isRegularFile(skillPath)) {
+    failures.push(`${relativePath}: missing entrypoint`);
+    continue;
+  }
   const entrypoint = readSkillEntrypoint(skillPath, relativePath);
   const resolvedRoot = findProjectRoot(entrypoint.path);
 
