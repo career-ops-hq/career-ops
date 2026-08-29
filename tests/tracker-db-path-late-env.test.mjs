@@ -28,6 +28,18 @@ console.log('\ntracker.mjs — CAREER_OPS_TRACKER_DB honored after import (#3506
 const work = mkdtempSync(join(tmpdir(), 'cops-db-late-'));
 const before = process.env.CAREER_OPS_TRACKER_DB;
 
+// The path a frozen DB_PATH would have used — computed the way tracker.mjs
+// computes it, from the ambient env, before this suite changes anything. That is
+// where the pre-fix build writes, and it is outside the fixture by definition, so
+// the suite has to name it: assert nothing appeared there, and clean up if
+// something did. Otherwise a FAILING run of this test leaves behind exactly the
+// stray database the change is meant to prevent — and only ever removes what it
+// created itself, never a real index that was already on disk.
+const { getCareerOpsRoot, resolveTrackerPath } = await import('../path-resolver.mjs');
+const mdPath = resolveTrackerPath(getCareerOpsRoot());
+const fallbackDb = mdPath.endsWith('.md') ? mdPath.slice(0, -3) + '.db' : mdPath + '.db';
+const fallbackExisted = existsSync(fallbackDb);
+
 try {
   const { DatabaseSync } = await import('node:sqlite');
 
@@ -53,11 +65,18 @@ try {
       ? pass('the pinned database carries the index schema (applications, status_events)')
       : fail(`pinned database is missing index tables, got: ${tables.join(', ') || 'none'}`);
 
-    // And that the fixture is self-contained — one db, nothing else alongside it.
+    // The fixture is self-contained — one db, nothing else alongside it.
     const stray = readdirSync(work).filter(f => !f.startsWith('applications.db'));
     stray.length === 0
-      ? pass('no files written outside the pinned database')
+      ? pass('no files written beside the pinned database')
       : fail(`openDb() wrote unexpected files into the fixture: ${stray.join(', ')}`);
+
+    // And nothing was written at the unpinned fallback, which is the whole point:
+    // #3506 was not "the pin is ignored" in the abstract, it was a database
+    // appearing somewhere nobody asked for one.
+    fallbackExisted || !existsSync(fallbackDb)
+      ? pass('no database created at the unpinned fallback path')
+      : fail(`openDb() wrote a database outside the fixture at ${fallbackDb} (#3506)`);
   } finally {
     db.close();
   }
@@ -66,5 +85,10 @@ try {
 } finally {
   if (before === undefined) delete process.env.CAREER_OPS_TRACKER_DB;
   else process.env.CAREER_OPS_TRACKER_DB = before;
+  // Only when this run created it. A pre-existing index belongs to whoever owns
+  // the workspace — a test that tidies away real data is worse than the leak.
+  if (!fallbackExisted && existsSync(fallbackDb)) {
+    rmSync(fallbackDb, { force: true, maxRetries: 10, retryDelay: 100 });
+  }
   rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
