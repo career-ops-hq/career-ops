@@ -46,10 +46,12 @@ import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { validateFlags, hasFlag, flagValue } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const CONTACTS_PATH = join(CAREER_OPS, 'data/contacts.tsv');
-const DEFAULT_VCF = join(CAREER_OPS, 'output/contacts.vcf');
+const DATA_ROOT = getCareerOpsRoot();
+const CONTACTS_PATH = join(DATA_ROOT, 'data/contacts.tsv');
+const DEFAULT_VCF = join(DATA_ROOT, 'output/contacts.vcf');
 
 
 // --- CLI args ---

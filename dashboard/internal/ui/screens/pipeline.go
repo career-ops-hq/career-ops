@@ -603,7 +603,11 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 		}
 
 	case "o":
-		if app, ok := m.CurrentApp(); ok && app.JobURL != "" {
+		if app, ok := m.CurrentApp(); ok {
+			if app.JobURL == "" {
+				m.flash = "No URL found for this application"
+				break
+			}
 			return m, func() tea.Msg {
 				return PipelineOpenURLMsg{URL: app.JobURL}
 			}

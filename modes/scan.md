@@ -177,9 +177,10 @@ Levels are additive — they are executed in order, and results are merged and d
    d. Normalize each job to `{title, url, company, location}`.
    e. Resolve relative URLs against `careers_url`.
    f. If the parser fails, log the error, attempt fallback via the ATS API if it exists, and continue with the other companies (**do not** add to `local_parser_ok`).
-   g. If the parser completes successfully (steps c–e without fatal error), add `entry.name` to `local_parser_ok` and accumulate jobs in candidates.
+   g. If the parser completes successfully (steps c–e without fatal error), add the current company name to `local_parser_ok` and accumulate jobs in candidates.
 
-4. **Level 1 — Playwright Scan** (parallel in batches of 3-5):
+4. **Level 1 — Playwright Scan** (sequential — NEVER parallel Playwright):
+   Browser-backed workers share one browser session, so concurrent `browser_navigate`/`browser_snapshot` calls cross-contaminate and a snapshot can return another company's page (#2551). Batching stays correct for the fetch-based levels below (Level 2 APIs/feeds, Level 3 queries), which open no shared session.
    For each company in `tracked_companies` with `enabled: true`, a defined `careers_url`, and a **name not listed in `local_parser_ok`**:
    a. `browser_navigate` to `careers_url`.
    b. `browser_snapshot` to read all job listings.
@@ -255,7 +256,7 @@ Levels are additive — they are executed in order, and results are merged and d
    d. If expired: record in `scan-history.tsv` with status `skipped_expired` and discard.
    e. If active: continue to step 8.
 
-   **Do not interrupt the entire scan if a single URL fails.** If `browser_navigate` errors (timeout, 403, etc.), mark as `skipped_expired` and continue with the next one.
+   **Do not interrupt the entire scan if a single URL fails.** If `browser_navigate` or parser errors (timeout, 403, crash, etc.), mark as `skipped_error` and continue with the next one.
 
 8. **For each new verified offer that passes filters**:
    a. Add to the `pipeline.md` "Pending" section: `- [ ] {url} | {company} | {title}`
@@ -264,6 +265,7 @@ Levels are additive — they are executed in order, and results are merged and d
 9. **Offers filtered by title**: record in `scan-history.tsv` with status `skipped_title`.
 10. **Duplicate offers**: record with status `skipped_dup`.
 11. **Expired offers (Level 3)**: record with status `skipped_expired`.
+12. **Scan errors / failures**: record in `scan-history.tsv` with status `skipped_error`.
 
 ## Extraction of Title and Company from WebSearch Results
 

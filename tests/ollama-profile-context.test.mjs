@@ -30,6 +30,9 @@ for (const relativePath of [
   // tracker-utils imports the shared lock-contention helpers (#2777 fix):
   // a fixture that carries tracker-utils has to carry its import too.
   'pipeline-lock.mjs',
+  // ollama-eval/reserve-report-num resolve user-layer paths via
+  // path-resolver.mjs (CAREER_OPS_ROOT), so the fixture carries that too.
+  'path-resolver.mjs',
   'lib/context-budget.mjs',
   // reserve-report-num.mjs's main-guard comes from lib/is-main-module.mjs
   // (#3170), so a fixture that carries it has to carry the helper too.

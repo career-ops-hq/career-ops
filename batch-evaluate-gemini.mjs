@@ -19,6 +19,7 @@ import { chromium } from 'playwright';
 import { execFileSync, execFile } from 'child_process';
 import { promisify } from 'util';
 import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 const execFileAsync = promisify(execFile);
 try {
   const { config } = await import('dotenv');
@@ -29,15 +30,16 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 export const PATHS = {
   shared:      join(ROOT, 'modes', '_shared.md'),
   oferta:      join(ROOT, 'modes', 'oferta.md'),
-  cv:          join(ROOT, 'cv.md'),
+  cv:          join(DATA_ROOT, 'cv.md'),
   profile:     join(ROOT, 'modes', '_profile.md'),
-  profileYml:  join(ROOT, 'config', 'profile.yml'),
-  reports:     join(ROOT, 'reports'),
+  profileYml:  join(DATA_ROOT, 'config', 'profile.yml'),
+  reports:     join(DATA_ROOT, 'reports'),
   trackerAdditions: join(ROOT, 'batch', 'tracker-additions'),
-  pipeline:    join(ROOT, 'data', 'pipeline.md')
+  pipeline:    join(DATA_ROOT, 'data', 'pipeline.md')
 };
 
 let apiKey;

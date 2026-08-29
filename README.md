@@ -433,6 +433,27 @@ career-ops/
 └── examples/                    # Sample CV, report, proof points
 ```
 
+## External Data Directory (Optional)
+
+By default, user-layer data (such as `cv.md`, `portals.yml`, and `data/` / `reports/` / `output/` folders) lives inside the project root folder. 
+
+To separate your personal data from the code (making it easier to switch branches, pull updates, or test multiple profiles), you can configure an external data directory using the following precedence:
+
+1. **Environment Variables:** Set the `CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` environment variable:
+   ```bash
+   export CAREER_OPS_ROOT=~/my-career-data
+   ```
+2. **Marker File:** Create a `.career-ops-data` file in the repository root containing the path to your data directory.
+3. **Default:** Defaults to the repository root.
+
+Once resolved, all user files are resolved and written relative to that folder, while prompt files and scripts continue to resolve relative to the repository. 
+
+- **Tracker Override:** You can also set `CAREER_OPS_TRACKER` to override the applications tracker file path directly.
+- **Writes:** All write operations (such as merges) canonically target `{DATA_ROOT}/data/applications.md`.
+
+The Go dashboard TUI, Node.js scripts, and AI agent modes all automatically respect this resolution hierarchy.
+
+
 ## Tech Stack
 
 ![Claude Code](https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white)
