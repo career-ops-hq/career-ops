@@ -188,14 +188,30 @@ html {
   color: var(--muted);
 }
 .report-prose hr { border: none; border-top: 1px solid var(--border); margin: 1.75rem 0; }
-.report-prose table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 1rem 0; }
+/* Wide report tables (e.g. the 8-column STAR+R grid in Block F) scroll
+   horizontally instead of being squeezed until words break mid-syllable.
+   width:max-content sizes to the content; max-width keeps it inside the
+   column until it genuinely needs to scroll. */
+.report-prose table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin: 1rem 0;
+}
 .report-prose thead { border-bottom: 1px solid var(--border); }
 .report-prose th { text-align: left; font-weight: 600; color: var(--fg); padding: 0.5rem 0.75rem; vertical-align: top; }
 .report-prose td {
   padding: 0.55rem 0.75rem;
   vertical-align: top;
   border-top: 1px solid var(--border);
-  word-break: break-word;
+  /* overflow-wrap, not word-break: `word-break: break-word` makes every
+     character a soft-wrap opportunity for min-content sizing, so columns
+     collapsed and words split mid-syllable ("consisten/cy"). overflow-wrap
+     still prevents overflow from long unbreakable tokens (URLs). */
+  overflow-wrap: break-word;
 }
 .report-prose tbody tr:hover { background: color-mix(in srgb, var(--fg) 3%, transparent); }
 .report-prose img { border-radius: 0.5rem; }

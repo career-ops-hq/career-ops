@@ -5,31 +5,28 @@ import remarkGfm from "remark-gfm";
 import type { Application } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { scoreTone, scoreNum, legitimacyTone, parseReport } from "@/lib/format";
+import { cleanHeading, splitSections } from "@/lib/report-sections.mjs";
 import { StatusSelect } from "@/components/status-select";
 import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
 import { GeneratePdfButton } from "@/components/generate-pdf-button";
 import { ApplyButton } from "@/components/apply-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
+import { companyPresentation } from "@/lib/company-presentation.mjs";
 
 // Progressive disclosure of the report. The core writes prose blocks
 // "## F) Verdict (lead)", "## A) Role Summary", "## B) Match with CV", then
-// C–G + machine artifacts (Machine Summary YAML, Application Answers, submit
-// log). A mainstream user deciding "should I apply?" needs the verdict + fit;
-// the rest is depth-on-demand. We lead with the verdict as a callout, keep A/B
-// expanded, collapse C–G as content, and drop machine artifacts to a dimmer
-// "Technical" tier — and strip the bare "F)" author-letters from headings
-// (native <details>, no client JS — this stays a server component).
-
-type Section = { heading: string; letter: string | null; content: string };
-
-function cleanHeading(h: string): string {
-  const stripped = h
-    .replace(/^\s*(?:Block\s+)?[A-G][).:]\s*/i, "")
-    .replace(/\s*\((?:lead|verdict)\)\s*$/i, "")
-    .trim();
-  return stripped || h.trim();
-}
+// the remaining lettered blocks + machine artifacts (Machine Summary YAML,
+// Application Answers, submit log). A mainstream user deciding "should I
+// apply?" needs the verdict + fit; the rest is depth-on-demand. We lead with
+// the verdict as a callout, keep A/B expanded, collapse the other lettered
+// blocks as content, and drop machine artifacts to a dimmer "Technical" tier —
+// and strip the bare "F)" author-letters from headings (native <details>, no
+// client JS — this stays a server component).
+//
+// Splitting and heading cleanup live in lib/report-sections.mjs so the
+// author-letter range has one definition; duplicating it here is what left
+// "H) Draft Application Answers" rendering with its letter attached (#2324).
 
 // Machine artifacts (collapsed because they're for devs, not the mainstream) vs
 // human content C–G (collapsed only for length) — ux's "honest for devs" tier.
@@ -48,27 +45,6 @@ function preview(md: string): string {
     .trim();
   const sentence = text.split(/(?<=[.!?])\s/)[0] ?? text;
   return sentence.length > 96 ? sentence.slice(0, 96).trimEnd() + "…" : sentence;
-}
-
-function splitSections(body: string): { intro: string; sections: Section[] } {
-  const intro: string[] = [];
-  const sections: Section[] = [];
-  let cur: { heading: string; letter: string | null; lines: string[] } | null = null;
-  for (const line of body.split("\n")) {
-    const h = line.match(/^##\s+(.*)$/);
-    if (h) {
-      if (cur) sections.push({ heading: cur.heading, letter: cur.letter, content: cur.lines.join("\n").trim() });
-      const heading = h[1].trim();
-      const letter = heading.match(/^(?:Block\s+)?([A-G])[).:\s]/i)?.[1]?.toUpperCase() ?? null;
-      cur = { heading, letter, lines: [] };
-    } else if (cur) {
-      cur.lines.push(line);
-    } else {
-      intro.push(line);
-    }
-  }
-  if (cur) sections.push({ heading: cur.heading, letter: cur.letter, content: cur.lines.join("\n").trim() });
-  return { intro: intro.join("\n").trim(), sections };
 }
 
 export function ReportView({
@@ -91,6 +67,7 @@ export function ReportView({
   const date = app?.date || field("Date");
   const archetype = field("Archetype");
   const url = field("URL");
+  const company = app ? companyPresentation(app) : null;
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
@@ -104,9 +81,9 @@ export function ReportView({
       <header className="mt-5">
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-faint">#{id}</p>
         <div className="mt-2 flex items-center gap-3">
-          <CompanyLogo name={app?.company ?? meta?.title ?? `Report #${id}`} size={40} />
+          <CompanyLogo name={company?.logoName ?? meta?.title ?? `Report #${id}`} size={40} />
           <h1 className="font-display text-3xl tracking-tight text-landing">
-            {app?.company ?? meta?.title ?? `Report #${id}`}
+            {company?.label ?? meta?.title ?? `Report #${id}`}
           </h1>
         </div>
         {app?.role && <p className="mt-1 text-muted">{app.role}</p>}

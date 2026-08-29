@@ -13,13 +13,16 @@
 
 import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import {
-  openTrackerTransaction, rebuildRow, resolveTrackerPath,
+  openTrackerTransaction, rebuildRow,
+  loadCanonicalStates, resolveCanonicalState,
 } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
 const DRY_RUN = process.argv.includes('--dry-run');
 
@@ -27,6 +30,18 @@ const DRY_RUN = process.argv.includes('--dry-run');
 mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
 
 // Canonical status mapping
+let statesCache = null;
+/** Canonical states from templates/states.yml, read once per CLI run. */
+function canonicalStates() {
+  if (statesCache) return statesCache;
+  try {
+    statesCache = loadCanonicalStates(join(CAREER_OPS, 'templates', 'states.yml'));
+  } catch {
+    statesCache = []; // broken install: fall through to "unknown", never a stale copy
+  }
+  return statesCache;
+}
+
 function normalizeStatus(raw) {
   // Strip markdown bold
   let s = raw.replace(/\*\*/g, '').trim();
@@ -78,15 +93,14 @@ function normalizeStatus(raw) {
     if (lower === c.toLowerCase()) return { status: c };
   }
 
-  // Spanish aliases → English canonicals
-  if (['evaluada'].includes(lower)) return { status: 'Evaluated' };
-  if (['aplicado', 'enviada', 'aplicada', 'applied', 'sent'].includes(lower)) return { status: 'Applied' };
-  if (['respondido'].includes(lower)) return { status: 'Responded' };
-  if (['entrevista'].includes(lower)) return { status: 'Interview' };
-  if (['oferta'].includes(lower)) return { status: 'Offer' };
-  if (['contratado', 'contratada', 'hired', 'accepted', 'accept'].includes(lower)) return { status: 'Hired' };
-  if (['cerrada', 'descartada'].includes(lower)) return { status: 'Discarded' };
-  if (['no aplicar', 'no_aplicar', 'skip'].includes(lower)) return { status: 'SKIP' };
+  // Every remaining alias comes from templates/states.yml, not a list here.
+  // The hand-written list this replaces had drifted: it carried the Spanish
+  // aliases and none of the Turkish ones, so a `Mülakat` row was reported as
+  // an unknown status by the very tool whose job is normalizing statuses
+  // (#2704). test-all already asserted states.yml ⊆ this function; deriving
+  // makes that hold by construction instead of by remembering.
+  const fromStates = resolveCanonicalState(lower, canonicalStates());
+  if (fromStates) return { status: fromStates };
 
   // Unknown — flag it
   return { status: null, unknown: true };
@@ -98,8 +112,7 @@ export { normalizeStatus };
 // run it: the import alone opened a tracker transaction and rewrote applications.md.
 // That is why tests could only scrape this file's source with regexes instead of
 // calling the function, and why the rechazado gap went unnoticed.
-const IS_CLI = process.argv[1]
-  && pathToFileURL(process.argv[1]).href === import.meta.url;
+const IS_CLI = isMainModule(import.meta.url);
 
 if (IS_CLI) {
 // Read applications.md

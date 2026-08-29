@@ -1,71 +1,14 @@
-import { spawn } from "node:child_process";
+import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { getSession } from "@/lib/apply/session";
+import { extractJsonObject } from "@/lib/extract-json-object.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 320;
-
-/**
- * Pull a JSON object out of an LLM's text answer, tolerating code fences,
- * trailing prose, and — crucially — TRUNCATION (the planner getting killed
- * mid-output on a big form). When the object is incomplete we salvage the
- * largest valid prefix so the fields that DID finish still come through.
- */
-function extractJsonObject(text: string): { obj: Record<string, unknown> | null; truncated: boolean } {
-  const s = text.replace(/```(?:json)?/gi, "");
-  const start = s.indexOf("{");
-  if (start === -1) return { obj: null, truncated: false };
-
-  let depth = 0;
-  let inStr = false;
-  let esc = false;
-  let end = -1;
-  for (let i = start; i < s.length; i++) {
-    const c = s[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (c === "\\") esc = true;
-      else if (c === '"') inStr = false;
-    } else if (c === '"') inStr = true;
-    else if (c === "{") depth++;
-    else if (c === "}") {
-      depth--;
-      if (depth === 0) {
-        end = i;
-        break;
-      }
-    }
-  }
-  if (end !== -1) {
-    try {
-      return { obj: JSON.parse(s.slice(start, end + 1)) as Record<string, unknown>, truncated: false };
-    } catch {
-      /* malformed even though balanced — fall through to salvage */
-    }
-  }
-
-  // Truncated / unbalanced: walk back from successive commas, close the JSON,
-  // and parse the largest prefix that is valid.
-  const frag = s.slice(start);
-  const open = (frag.match(/{/g) || []).length;
-  const close = (frag.match(/}/g) || []).length;
-  const pad = "}".repeat(Math.max(0, open - close));
-  for (let tryEnd = frag.length; tryEnd > 1; ) {
-    const cand = frag.slice(0, tryEnd).replace(/,\s*$/, "") + pad;
-    try {
-      return { obj: JSON.parse(cand) as Record<string, unknown>, truncated: true };
-    } catch {
-      const prevComma = frag.lastIndexOf(",", tryEnd - 1);
-      if (prevComma <= start) break;
-      tryEnd = prevComma;
-    }
-  }
-  return { obj: null, truncated: true };
-}
 
 // AI pre-fill (STREAMING NDJSON). The user's BYO CLI (read-only PLANNER — no
 // browser access) drafts an answer per field from cv.md / profile / the job's
@@ -156,8 +99,9 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
       log(`Spawning planner (timeout ${Math.round(killMs / 1000)}s)…`);
 
       const result = await new Promise<{ buf: string; code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-        // stdin = /dev/null so the CLI doesn't wait 3s for piped input.
-        const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+        // spawnHeadlessCli closes stdin right after spawning, so the CLI doesn't
+        // wait on piped input that will never arrive.
+        const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
         let buf = "";
         let firstByteAt = 0;
         const hb = setInterval(() => {

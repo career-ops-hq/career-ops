@@ -742,6 +742,121 @@ process_offer() {
   local jd_file
   jd_file="$(mktemp "${TMPDIR:-/tmp}/batch-jd-${id}.XXXXXX")"
 
+  # Pre-populate $jd_file with a static curl fetch so the worker reads HTML
+  # directly instead of always falling through to WebFetch (#2492). WebFetch is
+  # unreliable on JS-rendered boards (Phenom, Workday, iCIMS) because it hits
+  # the rendered JS shell rather than the actual JD text. curl returns the raw
+  # HTML in a single round-trip; for static boards that is exactly the JD.
+  # For JS-rendered boards the file will be thin (JS shell only), which the
+  # sufficiency check below detects — the file is then truncated to 0 bytes so
+  # the worker's Step-1 WebFetch fallback fires exactly as designed.
+  # If curl is absent or fails, $jd_file stays empty and WebFetch fires too.
+  # Minimum visible word count to treat a fetched page as a real JD rather than
+  # a JS shell. A JS app shell (Workday, Phenom, iCIMS) has near-zero visible
+  # words after HTML stripping; a real JD has hundreds. 80 is a conservative
+  # lower bound — any genuine posting has at least a title, summary, and a few
+  # requirements, which together exceed 80 stripped words.
+  local prefetch_min_words=80
+  local jd_prefetch_words=0
+  if command -v curl >/dev/null 2>&1; then
+    # Reject loopback, link-local, and private-network destinations before curl
+    # connects. --proto/--proto-redir restrict schemes but not destination IPs,
+    # so a malicious offer URL could reach cloud metadata (169.254.169.254) or
+    # internal services without this guard.
+    local _url_safe
+    local current_url="$url"
+    local redirect_count=0
+    local curl_status=0
+    local redirect_headers
+    local redirect_location
+    while :; do
+      _url_safe=$(node -e "
+      try {
+        const u = new URL(process.argv[1]);
+        const h = u.hostname.toLowerCase().replace(/\.\$/, '');
+        const blocked =
+          h === 'localhost' || h === 'localhost.localdomain' ||
+          h.endsWith('.local') || h.endsWith('.internal') ||
+          h.includes(':') ||
+          /^127\./.test(h) || /^169\.254\./.test(h) ||
+          /^10\./.test(h) || /^172\.(1[6-9]|2[0-9]|3[01])\./.test(h) ||
+          /^192\.168\./.test(h) || /^0\./.test(h);
+        process.stdout.write(blocked ? '0' : '1');
+      } catch (e) { process.stdout.write('0'); }
+      " "$current_url" 2>/dev/null)
+      if [[ "$_url_safe" != "1" ]]; then
+        echo "    ℹ️  JD prefetch: blocked — private/loopback destination ($current_url)"
+        : > "$jd_file"
+        break
+      else
+        redirect_headers="$(mktemp "${TMPDIR:-/tmp}/batch-jd-headers.XXXXXX")"
+        curl_status=0
+        curl --silent --show-error --location --max-redirs 0 \
+          --max-time 20 --connect-timeout 5 \
+          --fail --compressed \
+          --proto '=http,https' --proto-redir 'https,http' --max-filesize 5000000 \
+          --user-agent "Mozilla/5.0 (compatible; career-ops/batch)" \
+          --header "Accept: text/html,application/xhtml+xml,*/*;q=0.8" \
+          --dump-header "$redirect_headers" \
+          --output "$jd_file" \
+          -- "$current_url" 2>/dev/null || curl_status=$?
+        redirect_location=""
+        if [[ "$curl_status" -eq 47 ]]; then
+          redirect_location="$(awk 'tolower($0) ~ /^location:[[:space:]]*/ { value=$0; sub(/^[^:]*:[[:space:]]*/, "", value) } END { print value }' "$redirect_headers")"
+        fi
+        rm -f "$redirect_headers"
+        if [[ "$curl_status" -eq 47 && -n "$redirect_location" ]]; then
+          if [[ "$redirect_count" -ge 10 ]]; then
+            : > "$jd_file"
+            echo "    ℹ️  JD prefetch: too many redirects — worker will WebFetch"
+            break
+          fi
+          current_url="$(node -e "
+            try { process.stdout.write(new URL(process.argv[2], process.argv[1]).href); }
+            catch (e) { process.stdout.write(''); }
+          " "$current_url" "$redirect_location" 2>/dev/null)"
+          if [[ -z "$current_url" ]]; then
+            : > "$jd_file"
+            break
+          fi
+          redirect_count=$((redirect_count + 1))
+          continue
+        fi
+        if [[ "$curl_status" -ne 0 ]]; then
+          : > "$jd_file"
+        fi
+        break
+      fi
+    done
+      # Strip HTML tags and count visible words to distinguish a real JD (hundreds
+      # of words) from a JS shell (near zero visible text).
+      jd_prefetch_words=$(node -e "
+        const fs = require('fs');
+        try {
+          const text = fs.readFileSync(process.argv[1], 'utf-8')
+            .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+            .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&(nbsp|#160|#xa0);/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          fs.writeFileSync(process.argv[1], text);
+          process.stdout.write(String(text.split(' ').filter(Boolean).length));
+        } catch (e) { process.stdout.write('0'); }
+      " "$jd_file" 2>/dev/null) || jd_prefetch_words=0
+      # Ensure jd_prefetch_words is always a non-negative integer. A non-integer
+      # (e.g. empty string, "NaN") would cause bash arithmetic to fail or
+      # miscompare. Strip everything that is not a digit and default to 0.
+      jd_prefetch_words="${jd_prefetch_words//[^0-9]/}"
+      jd_prefetch_words="${jd_prefetch_words:-0}"
+      if [[ "$jd_prefetch_words" -lt "$prefetch_min_words" ]]; then
+        : > "$jd_file"
+        echo "    ℹ️  JD prefetch: thin content (${jd_prefetch_words} words) — worker will WebFetch"
+      else
+        echo "    ℹ️  JD prefetch: ${jd_prefetch_words} words written to JD file"
+      fi
+  fi
+
   echo "--- Processing offer #$id: $url (report $report_num, attempt $((retries + 1)))"
 
   # Build the prompt with placeholders replaced
@@ -852,8 +967,8 @@ process_offer() {
     break
   done
 
-  # Cleanup resolved prompt
-  rm -f "$resolved_prompt"
+  # Cleanup resolved prompt and pre-fetched JD file
+  rm -f "$resolved_prompt" "$jd_file"
 
   local completed_at
   completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)

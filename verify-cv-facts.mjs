@@ -14,7 +14,8 @@
 
 import { existsSync, readFileSync } from 'fs';
 import { isAbsolute, join, dirname, basename } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SOURCES = ['cv.md', 'article-digest.md'];
@@ -36,6 +37,20 @@ const METRIC_NOUNS = [
   'commits', 'contributions', 'repositories', 'repos', 'modules', 'tools',
   'servers', 'guides', 'articles', 'datasets', 'examples', 'deployments',
   'services', 'downloads', 'stars', 'lines', 'projects', 'integrations', 'tests',
+  // Headcount outside software. The list above counts users, engineers and
+  // repos, so a CV in operations, facilities, healthcare, education or the
+  // trades produced NO claim for the one number those CVs actually inflate:
+  // how many people were managed. "Managed 45 staff" against a source saying
+  // 20 passed the gate silently, which is the exact fabrication class this
+  // script exists to catch.
+  'staff', 'personnel', 'people', 'technicians', 'operators', 'contractors',
+  'vendors', 'scientists', 'researchers', 'volunteers', 'students', 'patients',
+  'crew',
+  // Physical assets and scale, for the same reason.
+  'facilities', 'sites', 'buildings', 'rooms', 'labs', 'laboratories', 'plants',
+  'machines', 'devices', 'instruments', 'vehicles', 'units', 'locations',
+  'acres', 'hectares', 'shifts', 'rounds', 'inspections', 'audits', 'incidents',
+  'alarms', 'tickets',
 ];
 // How many words may sit between a number and the noun it counts. The same
 // regex parses the generated CV and the sources, so the window is symmetric by
@@ -77,6 +92,10 @@ const NOUN_SYNONYMS = new Map([
   ['cvs', 'resumes'],
   ['certificates', 'certifications'],
   ['articles', 'guides'],
+  // A CV and its source rarely word a headcount identically; "20 personnel"
+  // restating a source's "20 staff" is a paraphrase, not a fabrication.
+  ['personnel', 'staff'],
+  ['labs', 'laboratories'],
 ]);
 const SIMPLE_CLAIM_PATTERNS = [
   /\b\d+(?:\.\d+)?\s?%/g,
@@ -190,11 +209,24 @@ export function stripMarkup(text) {
  *
  * Only a separator followed by EXACTLY three digits is removed, so a decimal
  * comma ("1,2 million") and ordinary prose are left alone.
+ *
+ * The period is in the class for the same reason the comma is, from the other
+ * side of the convention: this repo ships mode sets for markets that group
+ * with a period, so a JD or a portfolio note written "16.181 users" is a
+ * source a CV written "16,181 users" is checked against. Grouping style is not
+ * evidence of a different number, and the gate reported one as invented.
+ *
+ * The three-digit window is what makes this safe to widen: it leaves a genuine
+ * decimal alone at every precision a metric noun realistically carries ("2.5
+ * hours", "99.95 uptime"). It cannot disambiguate a three-place decimal, where
+ * "1.250 million" reads as thousands - an ambiguity the comma branch already
+ * carries in the mirror direction, and one no separator rule can resolve
+ * without knowing the document's locale. allow_metrics covers the rest.
  */
 export function normalizeClaim(claim) {
   return String(claim)
     .toLowerCase()
-    .replace(/(\d)[,\s\u00a0\u202f](?=\d{3}(?!\d))/g, '$1')
+    .replace(/(\d)[,.\s\u00a0\u202f](?=\d{3}(?!\d))/g, '$1')
     .replace(/[,\s]+/g, ' ')
     .trim();
 }
@@ -276,16 +308,156 @@ export function metricClaims(text) {
   return claims;
 }
 
+// A number counting a word, in ANY script — the language-agnostic SHAPE of the
+// claims COUNT_CLAIM_RE recognises only when the noun happens to be English.
+// Used solely to answer "were there count claims this gate could not read?",
+// never to build a claim: it has no lexicon, so it cannot say what was counted.
+const GENERIC_COUNT_RE = new RegExp(
+  String.raw`(?<![\p{L}\p{N}])(\d[\d,.]*)\s*\+?\s*(?:[\p{L}][\p{L}\p{M}-]*[\s]+){0,${MODIFIER_WINDOW}}([\p{L}][\p{L}\p{M}]{2,})`,
+  'giu',
+);
+// A year is not a count. "Led the 2024 migration" is the shape above and none
+// of its meaning, and every CV has several.
+const YEAR_LIKE = /^(?:19|20)\d{2}$/;
+
+/**
+ * Count-shaped spans in `text`, whatever language it is written in.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function countShapedSpans(text) {
+  const clean = stripMarkup(String(text ?? ''));
+
+  // Ranges the language-neutral patterns already own. "$120k and closed a
+  // $90,000 deal" is currency followed by prose, and reads as two counts to a
+  // detector that only knows "digits, then a word" — but those amounts ARE
+  // checked, in every language, so reporting them as unread is a false alarm.
+  // Derived from SIMPLE_CLAIM_PATTERNS rather than re-guessed, so the two
+  // cannot drift.
+  const covered = [];
+  for (const pattern of SIMPLE_CLAIM_PATTERNS) {
+    for (const m of clean.matchAll(pattern)) covered.push([m.index, m.index + m[0].length]);
+  }
+  const alreadyChecked = (i) => covered.some(([from, to]) => i >= from && i < to);
+
+  const out = [];
+  for (const m of clean.matchAll(GENERIC_COUNT_RE)) {
+    if (YEAR_LIKE.test(m[1].replace(/[,.]/g, ''))) continue;
+    // The digits are what a simple pattern would have claimed, so test their
+    // position, not the span's — the span starts at the number either way, but
+    // a currency match starts one character earlier, at the symbol.
+    if (alreadyChecked(m.index) || alreadyChecked(m.index + m[0].indexOf(m[1]))) continue;
+    out.push(m[0].trim());
+  }
+  return out;
+}
+
+/**
+ * Whether this document contains count claims the extractor could not read.
+ *
+ * METRIC_NOUNS is an English word list, and COUNT_CLAIM_RE's modifier window is
+ * `[A-Za-z]`. Percentages, currency and multipliers are language-neutral and
+ * still checked everywhere — but a COUNT is checked only in English, and this
+ * file's own METRIC_NOUNS comment names counts as the class that gets inflated:
+ * "Managed 45 staff against a source saying 20 passed the gate silently, which
+ * is the exact fabrication class this script exists to catch."
+ *
+ * For a CV written in one of the market languages the project ships modes for,
+ * that sentence is true of EVERY count, not only the ones outside the list:
+ *
+ *   ES  "Gestioné 45 empleados en 3 instalaciones."  -> 0 count claims, pass
+ *   DE  "Leitete 45 Mitarbeiter an 3 Standorten."    -> 0 count claims, pass
+ *   JA  "3拠点で45名のスタッフを管理。"                   -> 0 count claims, pass
+ *
+ * AGENTS.md makes non-English output a first-class case (`language.output`
+ * governs "reports, tracker notes, PDFs, cover letters ... any user-visible
+ * prose"), so this is not an edge.
+ *
+ * Reporting it rather than blocking is the same choice jd-skill-gap.mjs's
+ * diagnoseExtraction() and story-provenance-check.mjs's diagnose() make, and
+ * for the reason story-provenance states outright: so "an empty/near-empty
+ * result isn't misread as 'scanned and clean'". Blocking instead would fail
+ * every non-English document, trading a silent gap for a wall.
+ *
+ * DELIBERATELY CONSERVATIVE. It fires only when the document has two or more
+ * count-shaped spans and the extractor produced NO count claim at all — a
+ * document where the lexicon reached something is assumed to be reaching it in
+ * the language it was written in. Under-reporting is the right direction for a
+ * signal added to a gate every generated document already runs.
+ *
+ * TWO KNOWN BLIND SPOTS, stated rather than implied:
+ *
+ *   - Coincidental coverage. French "3 sites" matches the English noun, so one
+ *     recognised count silences the warning for a French CV whose other counts
+ *     are invisible.
+ *   - CJK. This detector needs whitespace: it locates a count by a digit run
+ *     that is not preceded by a letter and is followed by one. Japanese and
+ *     Chinese put digits flush against the surrounding text ("3拠点で45名"),
+ *     so the second number is preceded by a letter and is not seen at all.
+ *     Relaxing the lookbehind to fix that would match digits inside Latin
+ *     identifiers, so it needs script-aware segmentation rather than a looser
+ *     regex — separate work, and the reason this is a partial answer.
+ *
+ * So this closes the silent pass for space-delimited languages (de, es, tr, pt,
+ * it, pl, ru, ...). A ja/zh CV can still reach 'pass' unchecked, which is why
+ * the real answer is a lexicon those languages are in, not a better detector.
+ *
+ * @param {string} targetText
+ * @returns {{reason: string, message: string, spans: string[]}|null}
+ */
+export function diagnoseCoverage(targetText) {
+  const spans = countShapedSpans(targetText);
+  if (spans.length < 2) return null;
+  COUNT_CLAIM_RE.lastIndex = 0;
+  const recognized = [...stripMarkup(String(targetText ?? '')).matchAll(COUNT_CLAIM_RE)];
+  if (recognized.length > 0) return null;
+  return {
+    reason: 'no-count-claims-recognized',
+    message:
+      `${spans.length} count-like claims are present but none matched the metric extractor, whose noun ` +
+      'list is English-only — so no count in this document was checked against your sources. ' +
+      'Percentages, currency and multipliers were still checked. Verify the counts by hand, or add ' +
+      'them to allow_metrics in config/cv-facts.json once confirmed.',
+    spans,
+  };
+}
+
+/**
+ * Build the allow-list a metric claim is checked against.
+ *
+ * Claims extracted from text are folded through NOUN_SYNONYMS; allow_metrics
+ * entries used to be normalized only, so an exception written in the spelling
+ * a human reaches for - `77 repos` - never matched the canonical `77
+ * repositories` the extractor produces. The entry then did nothing at all and
+ * the CV still failed the gate, with no diagnostic pointing at the allow-list
+ * (CodeRabbit, reviewing #2175). A silently inert exception is the same failure
+ * class this script exists to catch.
+ *
+ * Both spellings are added rather than the canonical one alone: metricClaims()
+ * yields nothing for an entry no pattern recognizes (a bare `$900k`, a
+ * percentage), so replacing normalizeClaim outright would drop those exceptions
+ * instead of widening them. The union can only ever allow more, never less.
+ */
+function allowedMetricSet(sourceText, allowMetrics) {
+  const allowed = new Set(metricClaims(sourceText));
+  for (const entry of allowMetrics || []) {
+    allowed.add(normalizeClaim(entry));
+    for (const canonical of metricClaims(String(entry))) allowed.add(canonical);
+  }
+  return allowed;
+}
+
 /** Compare generated metric claims against source text without reading files. */
 export function auditClaims(targetText, sourceText, config = {}) {
-  const allowed = new Set([
-    ...metricClaims(sourceText),
-    ...(config.allow_metrics || []).map(normalizeClaim),
-  ]);
+  const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const invented = [...metricClaims(targetText)].filter(claim => !allowed.has(claim));
+  // Hoisted: stripMarkup re-ran the whole markup pass once per configured
+  // phrase (CodeRabbit, reviewing #2175). Same result, one pass.
+  const targetPlain = stripMarkup(targetText).toLowerCase();
   const forbidden = (config.forbidden_phrases || [])
     .filter(Boolean)
-    .filter(phrase => stripMarkup(targetText).toLowerCase().includes(String(phrase).toLowerCase()));
+    .filter(phrase => targetPlain.includes(String(phrase).toLowerCase()));
   return { invented, forbidden };
 }
 
@@ -326,10 +498,7 @@ export function verifyFacts(targetText, {
 } = {}) {
   const sourceText = sourcePaths.map(path => readIfExists(resolveInputPath(path, cwd))).join('\n');
   const config = loadConfig(resolveInputPath(configPath, cwd));
-  const allowed = new Set([
-    ...metricClaims(sourceText),
-    ...config.allow_metrics.map(normalizeClaim),
-  ]);
+  const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const targetClaims = metricClaims(targetText);
   const invented = [...targetClaims].filter(claim => !allowed.has(claim));
   const sourceNormalized = normalizeFact(stripMarkup(sourceText));
@@ -343,12 +512,18 @@ export function verifyFacts(targetText, {
   const warnings = config.warn_phrases
       .filter(Boolean)
       .filter(phrase => stripMarkup(targetText).toLowerCase().includes(String(phrase).toLowerCase()));
+  // Never downgrades a block and never creates one: a document that fails on
+  // real evidence still fails on that, and a coverage gap only turns a would-be
+  // 'pass' into 'warn' so the caller is told the gate could not read it.
+  const coverage = diagnoseCoverage(targetText);
+  const blocked = invented.length || unsupportedFacts.length || forbidden.length;
   return {
-    verdict: invented.length || unsupportedFacts.length || forbidden.length ? 'block' : warnings.length ? 'warn' : 'pass',
+    verdict: blocked ? 'block' : (warnings.length || coverage) ? 'warn' : 'pass',
     invented,
     unsupportedFacts,
     forbidden,
     warnings,
+    coverage,
   };
 }
 
@@ -438,11 +613,49 @@ function runSelfTest() {
     auditClaims('Reached 94,772 users', source, { allow_metrics: ['94,772 users'] }).invented,
     []
   );
+  // An exception is written in the spelling a human reaches for, which is not
+  // always the canonical noun the extractor emits. Before the allow-list was
+  // folded too, this entry matched nothing and the CV stayed red.
+  equal('a synonym-spelled exception is honoured',
+    auditClaims('Maintained 77 repositories', source, { allow_metrics: ['77 repos'] }).invented, []);
+  equal('the canonical spelling still works',
+    auditClaims('Maintained 77 repositories', source, { allow_metrics: ['77 repositories'] }).invented, []);
+  // and folding the allow-list must not swallow an entry no claim pattern
+  // recognizes, which is what routing it through metricClaims alone would do.
+  equal('a currency exception survives the folding',
+    auditClaims('Managed a $900K budget', source, { allow_metrics: ['$900K'] }).invented, []);
+  equal('an unrelated exception still leaves the claim invented',
+    auditClaims('Maintained 77 repositories', source, { allow_metrics: ['12 repos'] }).invented, ['77 repositories']);
   equal(
     'forbidden phrase',
     auditClaims('A proven track record', source, { forbidden_phrases: ['proven track record'] }).forbidden,
     ['proven track record']
   );
+
+  // Non-software domains. METRIC_NOUNS counted users, engineers and repos but
+  // not staff, facilities or sites, so an operations/facilities/healthcare CV
+  // yielded no claim at all for its headcount — the one number such a CV is
+  // most likely to inflate. The gate reported a pass having checked nothing.
+  const opsSource = [
+    'Managed 20 staff across shift coverage: 8 scientists and 12 support personnel.',
+    'Built out four facilities and ran a research program across 45 hectares.',
+    'Held temperature setpoints across 3 production rooms.',
+  ].join(' ');
+
+  equal('truthful headcount', auditClaims('Managed 20 staff', opsSource).invented, []);
+  equal('inflated headcount is caught', auditClaims('Managed 45 staff', opsSource).invented, ['45 staff']);
+  equal('inflated specialist count is caught',
+    auditClaims('Led 30 scientists', opsSource).invented, ['30 scientists']);
+  equal('headcount paraphrase is not a fabrication',
+    auditClaims('Managed 20 personnel', opsSource).invented, []);
+  equal('inflated site count is caught',
+    auditClaims('Built out 12 facilities', opsSource).invented, ['12 facilities']);
+  equal('truthful area', auditClaims('Ran a program across 45 hectares', opsSource).invented, []);
+  equal('inflated area is caught',
+    auditClaims('Ran a program across 450 hectares', opsSource).invented, ['450 hectares']);
+  equal('truthful room count', auditClaims('Setpoints across 3 rooms', opsSource).invented, []);
+  equal('inflated room count is caught',
+    auditClaims('Setpoints across 30 rooms', opsSource).invented, ['30 rooms']);
 
   // Non-ASCII digits: every claim pattern here is written with ASCII \d, so a
   // CV in ar/hi/ja/zh produced ZERO claims and the gate reported a pass having
@@ -467,6 +680,26 @@ function runSelfTest() {
   // a digit, so the lookbehind passes at each one (CodeRabbit asked).
   equal('a multi-group number folds completely', auditClaims('Reached 1 234 567 users', 'Reached 1234567 active users.').invented, []);
   equal('an eight-digit multi-group number folds too', auditClaims('Reached 12 345 678 users', 'Reached 12345678 active users.').invented, []);
+  // Period grouping is the convention in several of the markets this repo
+  // ships mode sets for, so a period-grouped source and a comma-grouped CV
+  // describe the same number and must compare equal in both directions.
+  equal('a period-grouped CV matches a comma-grouped source',
+    auditClaims('Reached 16.181 users', foldSource).invented, []);
+  equal('a comma-grouped CV matches a period-grouped source',
+    auditClaims('Reached 16,181 users', 'Reached 16.181 active users.').invented, []);
+  equal('a fabricated period-grouped number is still caught',
+    auditClaims('Reached 94.772 users', foldSource).invented, ['94772 users']);
+  // Widening the class must not eat an ordinary decimal, which is what the
+  // exactly-three-digit window is for.
+  equal('a decimal is not read as grouping',
+    auditClaims('Cut build time to 2.5 hours', 'Cut build time to 2.5 hours.').invented, []);
+  // Assert the canonical form directly, not just that the two sides agree:
+  // the case above puts '2.5 hours' on BOTH sides of auditClaims, so a
+  // regression that stripped the period from every claim would keep them
+  // equal and stay green while silently folding 2.5 into 25. Pinning the
+  // output of normalizeClaim is what makes this case able to fail.
+  equal('an ordinary decimal survives normalization',
+    normalizeClaim('2.5 hours'), '2.5 hours');
   // A four-digit left part is a year, not a group: nothing is joined.
   equal('a year is not glued to the next number', auditClaims('Joined in 2026 100 users', foldSource).invented, ['100 users']);
 
@@ -631,6 +864,10 @@ export function runCli(args = process.argv.slice(2)) {
     if (result.verdict === 'warn') {
       console.error(`CV fact check warning: ${basename(targetPath)}`);
       for (const phrase of result.warnings) console.error(`  - advisory phrase: ${phrase}`);
+      if (result.coverage) {
+        console.error(`  - not checked: ${result.coverage.message}`);
+        for (const span of result.coverage.spans.slice(0, 8)) console.error(`      ${span}`);
+      }
       return 0;
     }
     console.error(`CV fact check failed: ${basename(targetPath)}`);
@@ -650,7 +887,7 @@ export function runCli(args = process.argv.slice(2)) {
     return 1;
   } catch (err) {
     if (parsed.json) {
-      console.log(JSON.stringify({ verdict: 'block', invented: [], unsupportedFacts: [], forbidden: [], warnings: [], errors: [err.message] }));
+      console.log(JSON.stringify({ verdict: 'block', invented: [], unsupportedFacts: [], forbidden: [], warnings: [], coverage: null, errors: [err.message] }));
       return 1;
     }
     console.error(`ERROR: ${err.message}`);
@@ -658,6 +895,6 @@ export function runCli(args = process.argv.slice(2)) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   process.exitCode = runCli();
 }

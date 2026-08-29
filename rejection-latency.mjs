@@ -47,21 +47,26 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 
 import { parseActiveInterviews } from './process-quality.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(CAREER_OPS, 'data/active-interviews.md'))
-  ? join(CAREER_OPS, 'data/active-interviews.md')
-  : join(CAREER_OPS, 'active-interviews.md');
-const DEFAULT_TRACKER_PATH = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
-const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS, 'config/profile.yml');
+const DATA_ROOT = getCareerOpsRoot();
+const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(DATA_ROOT, 'data/active-interviews.md'))
+  ? join(DATA_ROOT, 'data/active-interviews.md')
+  : join(DATA_ROOT, 'active-interviews.md');
+const DEFAULT_TRACKER_PATH = existsSync(join(DATA_ROOT, 'data/applications.md'))
+  ? join(DATA_ROOT, 'data/applications.md')
+  : join(DATA_ROOT, 'applications.md');
+const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(DATA_ROOT, 'config/profile.yml');
 
 export const DEFAULT_COURTESY_DAYS = 30;
 
@@ -71,19 +76,54 @@ export const DISCLAIMER =
 
 // --- CLI args ---
 const args = process.argv.slice(2);
+
+const KNOWN_FLAGS = [
+  '--file', '--tracker', '--courtesy-days', '--today',
+  '--summary', '--self-test', '--help', '-h',
+];
+const VALUE_FLAGS = ['--file', '--tracker', '--courtesy-days', '--today'];
+
+const USAGE = `Usage:
+  node rejection-latency.mjs                        # JSON report
+  node rejection-latency.mjs --summary              # human-readable table
+  node rejection-latency.mjs --file <path>          # a different active-interviews.md
+  node rejection-latency.mjs --tracker <path>       # a different applications.md
+  node rejection-latency.mjs --courtesy-days <N>    # override the courtesy threshold (default ${DEFAULT_COURTESY_DAYS})
+  node rejection-latency.mjs --today <YYYY-MM-DD>   # evaluate as of a fixed date
+  node rejection-latency.mjs --self-test            # run the built-in fixtures
+  node rejection-latency.mjs --help                 # show this message
+
+Suggestion-only: nothing is ever written to data/blacklist.md for you.
+${DISCLAIMER}`;
+
+// A mistyped flag used to be ignored, so --traker fell back to
+// DEFAULT_TRACKER_PATH and the tool reported "no post-interview silence
+// exceeded the configured thresholds" at exit 0 — a false all-clear computed
+// from a tracker the caller never named (#2919). Same shape as doctor.mjs's
+// --targe (#2874). Runs before --help so `--help --bogus` still errors.
+validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
-// A flag's value must be present and must not itself look like another flag
-// (e.g. `--today --summary` must not silently set cliToday to '--summary').
+// Shared flagValue so `--tracker=path` is honoured too: the previous
+// indexOf-only lookup returned -1 for the `=` form and silently discarded the
+// value, the defect lib/cli-flags.mjs documents as #2401/#2402.
+//
+// The "value must not itself look like another flag" check is kept — it is
+// stricter than the shared helper, and it is what stops `--today --summary`
+// from setting cliToday to '--summary'.
 const argValue = (flag) => {
-  const idx = args.indexOf(flag);
-  if (idx === -1) return null;
-  const next = args[idx + 1];
-  if (next === undefined || next.startsWith('--')) {
+  // hasFlag before flagValue: flagValue returns undefined for BOTH an absent
+  // flag and one supplied with no value, so testing it alone would turn a
+  // trailing `--tracker` from a usage error into a silent fall back to the
+  // default path. lib/cli-flags.mjs documents pairing the two for exactly this.
+  if (!hasFlag(args, flag)) return null;
+  const value = flagValue(args, flag);
+  if (value === undefined || value === '' || value.startsWith('--')) {
     console.error(`${flag} requires a value.`);
     process.exit(2);
   }
-  return next;
+  return value;
 };
 const ACTIVE_INTERVIEWS_PATH = argValue('--file') || DEFAULT_ACTIVE_INTERVIEWS_PATH;
 const TRACKER_PATH = argValue('--tracker') || DEFAULT_TRACKER_PATH;
@@ -185,9 +225,16 @@ export function buildBlacklistSuggestion(company, todayStr, reason) {
  * @returns {{ flags: object[], warnings: string[], companiesChecked: number }}
  */
 export function computeRejectionLatency(interviewRows, trackerByCompany, opts = {}) {
+  // The default is the LOCAL calendar day at UTC midnight, not `new Date()`.
+  // daysBetween() reduces both operands to their UTC date, so a bare clock read
+  // west of Greenwich counts one extra day all evening: a company crosses the
+  // courtesy threshold a day early and gets a ready-to-copy blacklist row —
+  // stamped, via isoDay(), with tomorrow's date. The UTC-midnight anchor is
+  // what daysBetween expects and is deliberately preserved; only WHICH day it
+  // anchors on moves (#2765 drew the same line).
   const today = opts.today instanceof Date && !Number.isNaN(opts.today.getTime())
     ? opts.today
-    : new Date();
+    : parseDate(localToday());
   const courtesyDays = Number.isFinite(opts.courtesyDays) && opts.courtesyDays > 0
     ? opts.courtesyDays
     : DEFAULT_COURTESY_DAYS;
@@ -517,7 +564,7 @@ function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   if (selfTestMode) {
     runSelfTest();
   }

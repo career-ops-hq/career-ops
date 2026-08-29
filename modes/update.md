@@ -46,6 +46,10 @@ Present to the user as a clear summary:
 >
 > Your personal files (CV, profile, tracker, reports) will NOT be touched.
 
+`changelog` can come back empty, either because the release carries no notes or because the check resolved the version without reading the releases API. Do not render the **Changelog:** line when that happens — a lone `> **Changelog:**` with nothing under it reads as a failure, and nothing failed. Use this in place of those two lines:
+
+> **Changelog:** not available for v{remote}. The release notes are at https://github.com/santifer/career-ops/releases
+
 If the user wants details on specific files, show the actual diff for those files using `git diff HEAD..FETCH_HEAD -- {path}`.
 
 ## Step 3 — Compatibility Check

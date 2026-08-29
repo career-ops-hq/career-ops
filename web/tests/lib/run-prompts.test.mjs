@@ -158,3 +158,132 @@ test("isShellSafeCompanyName: refuses anything that could close the quote", () =
   assert.equal(isShellSafeCompanyName("x".repeat(81)), false);
   assert.equal(isShellSafeCompanyName(undefined), false);
 });
+
+// ── the tracker-additions TSV row (#1298) ───────────────────────────────────
+//
+// The web is a WRITER of batch/tracker-additions/*.tsv, not just a reader of the
+// tracker. merge-tracker accepts 9 fields forever, so a stale template can never
+// go red — it just silently leaves every web-evaluated job out of the URL dedup.
+// Nothing else in this repo can catch that, which is why it is asserted here.
+
+/** The example row the evaluate prompt tells the agent to append. */
+function exampleTsvRow(prompt) {
+  const line = prompt.split("\n").find((l) => l.includes("\t"));
+  assert.ok(line, "the evaluate prompt must contain a literal tab-separated example row");
+  return line.trim().split("\t");
+}
+
+test("buildPrompt: the evaluate prompt's TSV row carries all 10 fields, url last", () => {
+  // Given an evaluate run
+  const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-04" });
+  const fields = exampleTsvRow(prompt);
+
+  // Then the row has the 10 fields merge-tracker reads, with the posting URL last
+  assert.equal(fields.length, 10, `expected 10 tab-separated fields, got ${fields.length}: ${JSON.stringify(fields)}`);
+  assert.match(fields[9], /posting URL/i, "the 10th field must be the posting URL");
+  // ...and the prose agrees, so the agent is not told "9" while shown 10
+  assert.match(prompt, /10 TAB-separated columns/);
+});
+
+test("buildPrompt: the evaluate prompt demands an EMPTY url field, never a placeholder", () => {
+  // Given merge-tracker's parseTsvExtras drops "N/A"/"-" precisely so they can't
+  // be misread as the row's LOCATION, and an unconditional template is one an
+  // agent actually follows
+  const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-04" });
+
+  // Then the instruction says to write all 10 fields and leave the last empty
+  assert.match(prompt, /ALWAYS write all 10 fields/i);
+  assert.match(prompt, /EMPTY if there is no posting URL/i);
+  assert.match(prompt, /never "N\/A"/i);
+});
+
+// ── the posted: segment (#2692) ─────────────────────────────────────────────
+//
+// The dashboard's POSTED column parses this out of the tracker's Notes cell.
+// The date is interpolated by the server from what the scanner recorded, never
+// requested from the agent: modes/oferta.md is explicit that a guessed date is
+// worse than an absent one, because the column renders absent as `—` and would
+// render an invented one as a fresh requisition.
+
+test("buildPrompt: a known posting date becomes its own trailing segment", () => {
+  const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-14", postedAt: "2026-08-07" });
+  const fields = exampleTsvRow(prompt);
+
+  assert.equal(fields.length, 10, "the row must still carry all 10 fields");
+  // Canonical form, from the regex that CONSUMES it: separator-anchored `; `,
+  // label, colon, ISO date. A mid-sentence mention is deliberately not metadata.
+  assert.match(fields[8], /; posted: 2026-08-07$/);
+});
+
+test("buildPrompt: no known date writes NO segment, never a guess", () => {
+  for (const postedAt of [undefined, null, "", "unknown", "7 Aug 2026", "2026-8-7", "1999-01-01"]) {
+    const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-14", postedAt });
+    const fields = exampleTsvRow(prompt);
+    assert.equal(fields.length, 10, `field count changed for ${JSON.stringify(postedAt)}`);
+    assert.ok(!/posted:/.test(fields[8]), `wrote a posted segment for ${JSON.stringify(postedAt)}: ${fields[8]}`);
+  }
+});
+
+test("buildPrompt: the row without a date is byte-identical to before the feature", () => {
+  // The segment is the ONLY difference between the two prompts, so a run with no
+  // recorded date cannot drift from what the CLI has always produced.
+  const withDate = buildPrompt({ kind: "evaluate", input: "u", memory: "", today: "2026-08-14", postedAt: "2026-08-07" });
+  const without = buildPrompt({ kind: "evaluate", input: "u", memory: "", today: "2026-08-14" });
+  assert.equal(withDate.replace("; posted: 2026-08-07", ""), without);
+});
+
+// ── language.modes_dir / language.output ─────────────────────────────────────
+//
+// profile.yml's language settings were WRITE-ONLY on the web path: the settings
+// UI saved language.modes_dir (India → modes/hi) but the evaluate prompt always
+// hardcoded modes/oferta.md, so a web-triggered evaluation silently ignored the
+// configured market. Every assertion below fails without the fix.
+
+const DE = { output: "de", modesDir: "modes/de", evalModeFile: "modes/de/angebot.md" };
+
+test("buildPrompt: evaluate reads the MARKET's evaluation mode, not always oferta.md", () => {
+  const prompt = buildPrompt({ kind: "evaluate", ...ARGS, lang: DE });
+  assert.match(prompt, /Read modes\/de\/angebot\.md and follow it EXACTLY/);
+  assert.doesNotMatch(prompt, /Read modes\/oferta\.md/);
+});
+
+test("buildPrompt: evaluate still reads oferta.md when no market is configured", () => {
+  const prompt = buildPrompt({ kind: "evaluate", ...ARGS });
+  assert.match(prompt, /Read modes\/oferta\.md and follow it EXACTLY/);
+});
+
+test("buildPrompt: the output language is stated explicitly in the prompt", () => {
+  // A headless one-shot prompt cannot read AGENTS.md the way the interactive
+  // CLI does, so the composition rule has to be in the prompt itself.
+  const prompt = buildPrompt({ kind: "evaluate", ...ARGS, lang: DE });
+  assert.match(prompt, /Write all human-facing output in "de"/);
+});
+
+test("buildPrompt: a configured market also points the agent at its _shared.md", () => {
+  const prompt = buildPrompt({ kind: "evaluate", ...ARGS, lang: DE });
+  assert.match(prompt, /modes\/de\/_shared\.md/);
+});
+
+test("buildPrompt: the default configuration adds no market note", () => {
+  // English/global must not be told to read modes/_shared.md for "this
+  // market's vocabulary" — there is no market, and the line would be noise.
+  const prompt = buildPrompt({ kind: "evaluate", ...ARGS });
+  assert.match(prompt, /Write all human-facing output in "en"/);
+  assert.doesNotMatch(prompt, /this market's vocabulary/);
+});
+
+test("buildPrompt: the language directive is not limited to the evaluate prompt", () => {
+  // language.output governs human-facing prose generally, not only the report.
+  //
+  // Scope note: pdf and fix-portal are left out on purpose. pdf's prompt ends on
+  // an "EXACTLY one final line" contract the directive would have to be threaded
+  // around, and fix-portal repairs a YAML entry with no prose for an output
+  // language to govern. Happy to send pdf as a follow-up.
+  for (const kind of ["evaluate", "research"]) {
+    assert.match(
+      buildPrompt({ kind, ...ARGS, lang: DE }),
+      /Write all human-facing output in "de"/,
+      `kind ${kind} lost the language directive`,
+    );
+  }
+});
