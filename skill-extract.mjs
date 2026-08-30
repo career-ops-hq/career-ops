@@ -91,6 +91,75 @@ export const SKILL_TOKENS = [
   //
   // 'SAFe' is NOT here either — it is handled case-sensitively below, for the
   // same reason 'Go' is: 'safe' is an everyday English word.
+
+  // ── Marketing / GTM / revenue operations (added 2026-08-30) ──────────────
+  // The certification block above records that the vocabulary, not the scoring,
+  // was the constraint for delivery and program managers. The same hole ran one
+  // discipline further over: every token above this line is an engineering tool
+  // or a delivery credential, so a marketing-operations candidate was
+  // structurally invisible to the gap map.
+  //
+  // Measured on a real marketing-operations corpus: "ABM" was logged as an
+  // explicit soft_gap in several linked reports — twice flagged in the report
+  // text itself as a recurring gap — and never once reached the output. The
+  // map's top-ranked entry was instead an observability vendor's name, matched
+  // out of the provenance asides inside those very ABM sentences (a report
+  // logging a recurring gap tends to cite the sibling companies where it was
+  // logged before). The same blindness ran on the known-skills side: a
+  // marketing cv.md yielded a known-skills set of FIVE, so almost nothing could
+  // be excluded as already-held.
+  //
+  // Longest-first within each family, matching the 'React Native'-before-'React'
+  // and 'Lean Six Sigma'-before-'Six Sigma' convention above.
+  'Account-Based Marketing', 'Account Based Marketing', 'ABM',
+  'Demand-Side Platform', 'Demand Side Platform', 'DSPs', 'DSP',
+  // Only the MEDIA senses of "programmatic" — see the omission note below.
+  'Programmatic Advertising', 'Programmatic Display', 'Programmatic Media',
+  'Programmatic Buying',
+  'Media Agency Management', 'Media Agencies', 'Media Agency',
+  'Demand Generation', 'Demand Gen',
+  'Marketing Automation', 'Marketing Operations',
+  'Revenue Operations', 'RevOps',
+  'Lifecycle Marketing', 'Growth Marketing', 'Product Marketing',
+  'Partner Marketing', 'Performance Marketing', 'Field Marketing',
+  'Content Marketing', 'Email Marketing',
+  'Paid Media', 'Paid Social', 'Paid Search',
+  'Conversion Rate Optimization',
+  'Marketing Mix Modeling', 'Media Mix Modeling', 'Incrementality',
+  'Lead Scoring', 'Marketing Attribution',
+  // 'SEMrush' precedes 'SEM' by convention; the (?!\w) boundary already stops
+  // 'SEM' from firing inside it, and the ordering keeps that independent of the
+  // boundary rule.
+  'SEMrush', 'SEO', 'SEM', 'PPC',
+  // Platforms a marketing CV actually lists. These earn their place mostly on
+  // the KNOWN side of the comparison: without them the known-skills set built
+  // from a marketing cv.md cannot suppress anything the candidate already has.
+  'HubSpot', 'Marketo', 'Pardot', 'Braze', 'Klaviyo', 'OneSignal', 'Intercom',
+  'Ahrefs', 'Demandbase', '6sense', 'Google Tag Manager', 'Google Analytics',
+  'Google Ads', 'GA4', 'Amplitude', 'Mixpanel', 'n8n', 'Zapier',
+  //
+  // DELIBERATELY OMITTED from this block, on the same asymmetry the 'CSM' note
+  // above sets out — a missing token costs a real skill once, visibly, while a
+  // colliding one mints a phantom gap out of ordinary prose on every posting:
+  //
+  //   'CRO'          — Conversion Rate Optimization in marketing copy, Chief
+  //                    Revenue Officer in the org chart, and GTM postings are
+  //                    full of the second ("reports to the CRO"). The spelled-out
+  //                    'Conversion Rate Optimization' is listed instead.
+  //   'GEO'          — Generative Engine Optimization in AI-search work, and
+  //                    "geography" everywhere else, including the location prose
+  //                    in most postings ("the EMEA geo").
+  //   'Programmatic' — bare, it is an everyday engineering adjective
+  //                    ("programmatic access to the API"). Only the media senses
+  //                    are listed above; each canonicalizes to 'Programmatic',
+  //                    so the display name survives without the collision.
+  //   'Segment'      — the CDP, but "segment" is an everyday noun in exactly the
+  //                    prose this block was added to read.
+  //   'Iterable'     — the ESP, but this module is shared with jd-skill-gap,
+  //                    which runs over full engineering JDs where "iterable" is
+  //                    a language term.
+  //   'MOps'/'MMM'   — abbreviations whose expansions are already listed and
+  //                    whose bare forms read as noise ("mops", "mmm").
 ];
 
 // 'SAFe' cannot join the case-insensitive list — "a safe environment", "safe to
@@ -176,6 +245,42 @@ export const CANONICAL = {
   'prince 2': 'PRINCE2',
   'lean six-sigma': 'Lean Six Sigma',
   'six-sigma': 'Six Sigma',
+  // Marketing / GTM (2026-08-30). Only ALTERNATE spellings need an entry —
+  // DISPLAY already resolves a token to its own casing ('abm' -> 'ABM'), so a
+  // single-spelling token like 'HubSpot' needs nothing here. What must be
+  // aliased is every way the same skill gets written, because the known-skills
+  // set is built from the CV's spelling and the gap map from the report's, and
+  // the two only cancel if both collapse to one display form.
+  'account-based marketing': 'ABM', 'account based marketing': 'ABM',
+  'demand-side platform': 'DSP', 'demand side platform': 'DSP', 'dsps': 'DSP',
+  // Every media sense of "programmatic" lands on one display name, so the gap
+  // map does not split one competency across four rows.
+  'programmatic advertising': 'Programmatic',
+  'programmatic display': 'Programmatic',
+  'programmatic media': 'Programmatic',
+  'programmatic buying': 'Programmatic',
+  // "Lead relationships with media agencies" and "media agency management" are
+  // the same competency in gap prose; splitting them would halve the count of a
+  // gap that is already only named a handful of times.
+  'media agency management': 'Media Agency Management',
+  'media agencies': 'Media Agency Management',
+  'media agency': 'Media Agency Management',
+  'demand gen': 'Demand Generation',
+  'revenue operations': 'RevOps',
+  'marketing mix modeling': 'Media Mix Modeling',
+  //
+  // NOT aliased, deliberately, and the most consequential line in this block:
+  // 'demandbase' does NOT map to 'ABM'. Demandbase is an ABM PLATFORM, and
+  // holding a seat in it is not owning an ABM program — the corpus this block
+  // was built from makes that distinction explicitly, in report after report,
+  // because it is the difference between a defensible CV claim and an
+  // indefensible one.
+  // Aliasing the tool to the discipline would put ABM into the known-skills set
+  // of anyone whose CV lists the tool, suppressing the exact gap this
+  // vocabulary exists to surface — and it would read as "no gap found", which
+  // is strictly worse than the silence being fixed. Same rule as the
+  // no-umbrella-aliases policy above: "cloud" must never count as knowing AWS.
+  //
   // NOTE: no 'safe' entry here, deliberately. canonicalize() lowercases its
   // input before reading this map, so a 'safe' key would make
   // canonicalize('safe') return 'SAFe' — re-opening through the exported

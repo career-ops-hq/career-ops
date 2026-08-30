@@ -86,7 +86,12 @@ function readTextIfExists(path) {
 // older runs non-comparable. The upskill mode's diff-vs-previous section only
 // compares reports with the same schema_version, so a regex change can't
 // masquerade as "gap closed".
-export const SCHEMA_VERSION = 1;
+// v2 (2026-08-30): the marketing/GTM vocabulary block in skill-extract.mjs and
+// the company-name exclusion below both change WHICH skills a report yields, so
+// a v1 gap list and a v2 one are not comparable — a gap "appearing" in v2 may
+// simply be a word the v1 vocabulary could not see, and a gap "closing" may be
+// an employer name that v1 mistook for a skill.
+export const SCHEMA_VERSION = 2;
 
 // Reports below this global score count as "low fit" — the population whose
 // gaps matter most. Matches the apply threshold in Ethical Use (CLAUDE.md).
@@ -306,24 +311,59 @@ export function parseReportGaps(content) {
 }
 
 /**
+ * Normalized lookup key for a company name. Lowercased and whitespace-collapsed
+ * so a tracker cell (`  Snowflake `) matches an extracted skill token
+ * (`Snowflake`).
+ *
+ * @param {string} name
+ * @returns {string}
+ */
+export function companyKey(name) {
+  return String(name ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/**
  * Pure aggregation over parsed reports. Exported for self-testing.
  *
  * @param {Array<{num:number|string, score:number|null, gapText:string}>} reports
  * @param {Set<string>} knownSkills — canonical names already in cv/profile
+ * @param {Set<string>} [companyNames] — normalized names of companies the user
+ *   has evaluated (see companyKey). A skill token that IS one of them is an
+ *   employer being cited, not a skill being demanded.
  */
-export function aggregateGaps(reports, knownSkills) {
+export function aggregateGaps(reports, knownSkills, companyNames = new Set()) {
   const scored = reports.filter(r => Number.isFinite(r.score));
   const lowFit = scored.filter(r => r.score < LOW_FIT_SCORE);
   const totalLowFit = lowFit.length;
 
+  // Accept either an already-normalized set or raw tracker cells.
+  const companyLookup = new Set([...companyNames].map(companyKey).filter(Boolean));
+
   const bySkill = new Map();
   const excludedCounts = new Map();
+  const companyCounts = new Map();
 
   for (const report of reports) {
     const skills = extractSkills(report.gapText);
     for (const skill of skills) {
       if (knownSkills.has(skill)) {
         excludedCounts.set(skill, (excludedCounts.get(skill) || 0) + 1);
+        continue;
+      }
+      // A company from the user's OWN pipeline appearing in gap prose is
+      // almost always provenance, not demand — a report logging a recurring
+      // gap names the sibling companies where it was logged before ("4th
+      // occurrence: <company>, <company>, now here"), and the extractor cannot
+      // tell that from a JD asking for the tool of the same name.
+      //
+      // Checked AFTER known-skills so a company that is also a genuine known
+      // skill stays in the bucket that says "you already have this". Counted
+      // and reported rather than dropped: this module's own history (see the
+      // known-skills header above) is that a silent suppression is
+      // indistinguishable from "never appeared", which is what made the
+      // original bug expensive.
+      if (companyLookup.has(companyKey(skill))) {
+        companyCounts.set(skill, (companyCounts.get(skill) || 0) + 1);
         continue;
       }
       if (!bySkill.has(skill)) {
@@ -358,7 +398,11 @@ export function aggregateGaps(reports, knownSkills) {
     .map(([skill, reports]) => ({ skill, reports }))
     .sort((a, b) => b.reports - a.reports);
 
-  return { gaps, excludedAsKnown, totalLowFit };
+  const excludedAsCompanyName = [...companyCounts.entries()]
+    .map(([skill, reports]) => ({ skill, reports }))
+    .sort((a, b) => b.reports - a.reports);
+
+  return { gaps, excludedAsKnown, excludedAsCompanyName, totalLowFit };
 }
 
 /**
@@ -401,6 +445,13 @@ function analyze(minReports) {
   let reportsRead = 0;
   let reportsWithMachineSummary = 0;
   const parsedReports = [];
+  // Every company the user has evaluated, linked report or not — a row with no
+  // report still names an employer that can turn up in someone else's gap prose.
+  // '?' is the tracker's locale-invariant marker for an unknown end employer
+  // (see AGENTS.md) and names nothing, so it is skipped.
+  const companyNames = new Set(
+    rows.map(r => companyKey(r.company)).filter(name => name && name !== '?')
+  );
 
   for (const row of rows) {
     const linkMatch = (row.report || '').match(/\]\(([^)]+)\)/);
@@ -445,7 +496,8 @@ function analyze(minReports) {
   );
   const knownSkills = extractSkills(knownText);
 
-  const { gaps, excludedAsKnown, totalLowFit } = aggregateGaps(parsedReports, knownSkills);
+  const { gaps, excludedAsKnown, excludedAsCompanyName, totalLowFit } =
+    aggregateGaps(parsedReports, knownSkills, companyNames);
 
   return {
     schema_version: SCHEMA_VERSION,
@@ -457,9 +509,11 @@ function analyze(minReports) {
       lowFitReports: totalLowFit,
       lowFitScoreThreshold: LOW_FIT_SCORE,
       knownSkillCount: knownSkills.size,
+      trackedCompanyCount: companyNames.size,
     },
     gaps,
     excludedAsKnown,
+    excludedAsCompanyName,
     knownSkills: [...knownSkills].sort(),
   };
 }
@@ -485,6 +539,12 @@ function printSummary(result) {
   if (result.excludedAsKnown.length > 0) {
     console.log('');
     console.log(`Excluded (already in cv.md/profile): ${result.excludedAsKnown.map(e => e.skill).join(', ')}`);
+  }
+  // Printed, never silent: if one of these is genuinely a tool the user needs
+  // rather than an employer they cited, this line is how they find out.
+  if (result.excludedAsCompanyName?.length > 0) {
+    console.log('');
+    console.log(`Excluded (company in your tracker, not a skill): ${result.excludedAsCompanyName.map(e => e.skill).join(', ')}`);
   }
 }
 
