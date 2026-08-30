@@ -40,15 +40,26 @@
 //    side (backend/main.py's `scrape()` — confirmed by reading the handler;
 //    `check_rate_limit`/`_get_sem()` are only wired into `/scrape-stream`).
 //    On a cache miss it fires all configured scrapers concurrently through a
-//    shared 6-worker thread pool with no per-request guard. Live testing
-//    against the public instance on 2026-08-30 hit a fast, reproducible
-//    `500 Internal Server Error` on every `/scrape` call tried (including a
-//    documented warmup keyword, "Backend Engineer"/"Ho Chi Minh City"), while
-//    `/health` and `/recent-jobs` both answered normally — so this may be an
-//    existing issue on that route rather than anything specific to a given
-//    query. Either way, this provider treats a 500 as a normal thrown error
-//    (retried twice via fetchJsonWithRetry, then surfaced), never as a
-//    silent empty board.
+//    shared 6-worker thread pool with no per-request guard.
+//
+//    HISTORICAL NOTE, kept because it explains a design choice below: live
+//    testing against the public instance on 2026-08-30 initially hit a fast,
+//    reproducible `500 Internal Server Error` on every `/scrape` call tried
+//    (including a documented warmup keyword), while `/health` and
+//    `/recent-jobs` both answered normally. Root cause, traced in the
+//    goodjobs repo itself: several scrapers write `summary_description:
+//    None` as a "not yet summarized" sentinel, but `Job.summary_description`
+//    was typed as a bare `str`, which Pydantic rejects for an explicit
+//    `None` — and `/scrape` is the only route that validates its response
+//    against that model (`response_model=list[Job]`), so any cached job
+//    still carrying the sentinel crashed the request. Fixed upstream same
+//    day (goodjobs@0748103, widened the field to `str | None`) and verified
+//    live afterward. This provider's error handling was written assuming a
+//    route this thin can still fail server-side for reasons outside
+//    career-ops' control: a 500 is retried twice via fetchJsonWithRetry,
+//    then surfaced as a normal thrown error — never reported as a silent
+//    empty board. That assumption held up in practice and is worth keeping
+//    regardless of any one bug's fix.
 //
 // REQUEST SHAPE. goodjobs' own ScrapeRequest model requires a non-empty
 // `keyword` — there is no board-wide "all jobs" mode the way careerviet/
