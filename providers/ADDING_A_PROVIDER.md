@@ -101,6 +101,7 @@ false alarm instead of an honest "empty". So a malformed item is a
   `fetch()`; `verify-portals` catches it).
 - Dates: `Date.parse` can return `NaN`. Do not write `date || undefined` (it
   breaks a valid epoch `0`) — use a NaN-safe helper:
+
   ```js
   function toEpochMs(value) {
     if (!value) return undefined;
@@ -108,6 +109,7 @@ false alarm instead of an honest "empty". So a malformed item is a
     return Number.isNaN(parsed) ? undefined : parsed;
   }
   ```
+
 - Rows missing a required field (`title`, `url`) — filter them out, don't
   throw.
 
