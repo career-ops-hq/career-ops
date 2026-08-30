@@ -53,9 +53,15 @@ const SHORT_NAME_MAX = 3;
 // removed (CodeRabbit, #3001).
 const NO_WORD_SEPARATOR_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
 
+// \p{M} sits alongside \p{L}/\p{N} in both lookarounds so a combining mark counts
+// as part of a word rather than as a boundary. Without it, "data" matches inside
+// "datá" — the mark belongs to the preceding base letter, so that is the middle
+// of a word, not the end of one. This has to agree with LATIN_WORD_RE: a needle
+// allowed to CONTAIN marks needs boundaries that treat marks as word material,
+// or the two halves of the rule disagree about where a word ends.
 function matchesOnWordBoundary(text, company) {
   const escaped = company.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu').test(text);
+  return new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${escaped}(?![\\p{L}\\p{M}\\p{N}])`, 'iu').test(text);
 }
 
 export function checkCompanyMatch(text, company) {
@@ -113,7 +119,17 @@ const CJK_RE = /[一-鿿㐀-䶿]/;
 // Latin letters and digits only. Anything else keeps the substring test it had
 // before, because "does a word boundary exist here" has no script-independent
 // answer — see the comment at the call site.
-const LATIN_WORD_RE = /^[\p{Script=Latin}\p{N}]+$/u;
+// \p{M} is load-bearing, not defensive. toLowerCase() can introduce a combining
+// mark that is NOT Script=Latin: "İ" (U+0130) becomes "i" + U+0307, and U+0307
+// is \p{M} with Script=Inherited. Without \p{M} here, "İstatistik" fails this
+// gate, falls to the substring path, and matches inside "İstatistikler" — the
+// bug this rule exists to remove, still live for Turkish. The same applies to
+// any NFD-decomposed accented text, so it reaches French, Spanish, Portuguese
+// and Vietnamese too, not just Turkish (CodeRabbit, #3535).
+//
+// It does not widen the gate to other scripts: a Devanagari or Thai word still
+// fails on its base letters, which are not Script=Latin.
+const LATIN_WORD_RE = /^[\p{Script=Latin}\p{M}\p{N}]+$/u;
 
 // Ceiling on the needle handed to matchesOnWordBoundary() from checkRoleMatch().
 //
@@ -205,7 +221,17 @@ export function checkRoleMatch(text, role) {
     // Splitting on [\s_\\/()-]+ leaves attached punctuation behind ("Director,"
     // keeps its comma), which both defeats a boundary anchor and, before this,
     // defeated the substring test outright — "director," is not in the text.
-    const bare = part.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+    // Two forms, deliberately. `stripped` keeps its case and is what reaches the
+    // matcher; `bare` is lowercased and is only ever read by the gates below.
+    //
+    // Lowercasing the needle would be worse than redundant. matchesOnWordBoundary
+    // is already case-insensitive ('iu'), and the two mechanisms disagree:
+    // toLowerCase() applies FULL case mapping, which turns "İ" into "i" + U+0307,
+    // while the regex 'i' flag uses SIMPLE case folding, under which "İ" does not
+    // fold to that pair. Hand it the lowercased form and the needle is decomposed
+    // while the text is composed, so a genuine mention can never match.
+    const stripped = part.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+    const bare = stripped.toLowerCase();
 
     // The whole-word requirement applies to Latin-script parts ONLY, and every
     // other script keeps the substring test it had before — including the gates
@@ -228,7 +254,7 @@ export function checkRoleMatch(text, role) {
     //
     // Restricting the stricter rule to Latin fixes the reported bug and leaves
     // every other script byte-identical to its previous behaviour.
-    if (!LATIN_WORD_RE.test(bare) || bare.length > MAX_BOUNDARY_NEEDLE) {
+    if (!LATIN_WORD_RE.test(bare) || stripped.length > MAX_BOUNDARY_NEEDLE) {
       // Deliberately the raw `part`, mirroring the pre-existing condition
       // exactly. Every word in GENERIC_ROLE_WORDS is pure Latin and would have
       // routed to the branch below, so this can never fire here — it is kept so
@@ -250,7 +276,7 @@ export function checkRoleMatch(text, role) {
     // matches "data" inside "data工程师"; while "_" IS \w, so \b reports none
     // and misses "data_engineer", though "_" is one of the separators the role
     // title itself is split on.
-    if (matchesOnWordBoundary(text, bare)) {
+    if (matchesOnWordBoundary(text, stripped)) {
       return true; // partial match on a significant word
     }
   }

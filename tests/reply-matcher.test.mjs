@@ -165,6 +165,33 @@ test('checkRoleMatch - the generic-word gate runs on the stripped form, not the 
   assert.equal(checkRoleMatch('Our Operations. team will be in touch.', 'People Operations.'), false);
 });
 
+test('checkRoleMatch - a combining mark keeps a Latin word on the whole-word path (#3535)', () => {
+  // toLowerCase() can INTRODUCE a character that is not Script=Latin: "İ"
+  // (U+0130) becomes "i" + U+0307, and U+0307 is \p{M}/Script=Inherited. A Latin
+  // gate without \p{M} therefore drops these words to the substring path and the
+  // bug survives for them.
+  //
+  // Turkish dotted-I, the case that exposed it:
+  assert.equal(checkRoleMatch('Bizim İstatistikler ekibi yanıt verecek.', 'İstatistik Uzmanı'), false);
+  assert.ok(checkRoleMatch('Bizim İstatistik ekibi yanıt verecek.', 'İstatistik Uzmanı'));
+
+  // ...and NFD-decomposed accented text, which is the broader half — it needs no
+  // Turkish at all and reaches French, Spanish, Portuguese and Vietnamese.
+  const nfd = 'Ingénieur';           // e + combining acute, not U+00E9
+  assert.equal(checkRoleMatch(`Notre équipe ${nfd}ie recrute.`, `${nfd} Logiciel`), false);
+  assert.ok(checkRoleMatch(`Notre équipe ${nfd} recrute.`, `${nfd} Logiciel`));
+
+  // A mark belongs to the base letter before it, so a needle sitting next to one
+  // is mid-word, not at a boundary. Both lookarounds need \p{M}, and they fail
+  // independently — hence a case on each side.
+  //
+  // mark AFTER the needle:
+  assert.equal(checkRoleMatch('Our datá pipeline is unrelated.', 'Data Engineer'), false);
+  // mark BEFORE the needle — a decomposed accented word running straight into
+  // it, as happens in slugs, filenames and run-together compounds:
+  assert.equal(checkRoleMatch('Attached: re\u0301sume\u0301data.pdf for review.', 'Data Engineer'), false);
+});
+
 test('checkRoleMatch - a Latin role word containing digits still gets the whole-word rule', () => {
   // The \p{N} in LATIN_WORD_RE is load-bearing. Without it a part carrying a
   // digit — "Web3", "K8s", "Tier2" are all ordinary in job titles — fails the
