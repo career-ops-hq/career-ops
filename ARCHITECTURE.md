@@ -95,5 +95,5 @@ scan ──► data/pipeline.md ──► evaluate (oferta + cv) ──► repor
 
 - The boundary → `DATA_CONTRACT.md`
 - The scoring → `modes/_shared.md` + `modes/oferta.md`
-- Adding a job source → [`providers/README.md`](providers/README.md)
+- Adding a job source → [`providers/ADDING_A_PROVIDER.md`](providers/ADDING_A_PROVIDER.md)
 - The updater → `update-system.mjs`

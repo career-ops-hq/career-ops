@@ -111,4 +111,6 @@ User-Agent string to route around under a different name — even though
 `providers/*.mjs` all identify as `career-ops`, not `ClaudeBot`.
 
 When adding a new provider, add a new non-helper module under `providers/` and
-update this table in the same PR.
+update this table in the same PR — see
+[Adding a provider](../providers/ADDING_A_PROVIDER.md) for the full
+requirements.

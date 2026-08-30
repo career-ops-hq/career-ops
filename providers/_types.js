@@ -7,6 +7,9 @@
 // contract is enforced by scan.mjs (id presence, fetch is a function, fetch
 // returns an array), not by these annotations.
 //
+// Prose companion (checklist, mandatory guards, tests): ADDING_A_PROVIDER.md
+// in this directory.
+//
 // Files prefixed with _ are never loaded as providers by scan.mjs.
 
 /**
