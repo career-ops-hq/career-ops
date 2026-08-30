@@ -86,22 +86,28 @@ try {
     if (hasRoot && usesVars && !circular) pass(`${tpl} declares :root theme defaults and reads them via var() (no circular refs)`);
     else fail(`${tpl}: hasRoot=${hasRoot} usesVars=${usesVars} circular=${circular}`);
   }
-  // Regression: localized CJK body font stacks must honor the profile
-  // --font-family override while keeping their curated fallback stacks.
+  // Regression: localized CJK font stacks must honor the profile
+  // --font-family override while keeping their curated fallbacks active after it.
   {
     const tplSrc = readFileSync(join(ROOT, 'templates/cv-template.html'), 'utf-8');
 
-    const jaBody = /html\[lang="ja"\]\s+body\s*\{[^}]*font-family:\s*var\(--font-family,\s*'Liberation Sans'/s.test(tplSrc);
-    const zhBody = /html\[lang="zh-CN"\]\s+body,\s*html\[lang="zh"\]\s+body\s*\{[^}]*font-family:\s*var\(--font-family,\s*'Liberation Sans'/s.test(tplSrc);
+    const jaBody = tplSrc.match(/html\[lang="ja"\]\s+body\s*\{[^}]*\}/s)?.[0] || '';
+    const jaHeadings = tplSrc.match(/html\[lang="ja"\]\s+\.header h1,[\s\S]*?\{[^}]*\}/)?.[0] || '';
+    const zhBody = tplSrc.match(/html\[lang="zh-CN"\]\s+body,[\s\S]*?\{[^}]*\}/)?.[0] || '';
+    const zhHeadings = tplSrc.match(/html\[lang="zh-CN"\]\s+\.header h1,[\s\S]*?\{[^}]*\}/)?.[0] || '';
+    const hasActiveFallback = (src, firstFace) => src.includes(`font-family: var(--font-family), '${firstFace}'`)
+      && /font-family:[^;]*sans-serif;/.test(src);
 
     const jaBodyCount = (tplSrc.match(/html\[lang="ja"\]\s+body\s*\{/g) || []).length;
     const zhCnBodyCount = (tplSrc.match(/html\[lang="zh-CN"\]\s+body/g) || []).length;
     const zhBodyCount = (tplSrc.match(/html\[lang="zh"\]\s+body/g) || []).length;
 
-    if (jaBody && zhBody && jaBodyCount === 1 && zhCnBodyCount === 1 && zhBodyCount === 1) {
-      pass('CJK body font stacks honor --font-family overrides without duplicate body selectors');
+    if (hasActiveFallback(jaBody, 'Hiragino Sans') && hasActiveFallback(jaHeadings, 'Hiragino Sans')
+        && hasActiveFallback(zhBody, 'PingFang SC') && hasActiveFallback(zhHeadings, 'PingFang SC')
+        && jaBodyCount === 1 && zhCnBodyCount === 1 && zhBodyCount === 1) {
+      pass('Japanese and Simplified Chinese font stacks keep CJK fallbacks after --font-family');
     } else {
-      fail(`CJK body font regression: ja=${jaBody} zh=${zhBody} jaCount=${jaBodyCount} zhCNCount=${zhCnBodyCount} zhCount=${zhBodyCount}`);
+      fail(`CJK font regression: jaBody=${hasActiveFallback(jaBody, 'Hiragino Sans')} jaHeadings=${hasActiveFallback(jaHeadings, 'Hiragino Sans')} zhBody=${hasActiveFallback(zhBody, 'PingFang SC')} zhHeadings=${hasActiveFallback(zhHeadings, 'PingFang SC')} jaCount=${jaBodyCount} zhCNCount=${zhCnBodyCount} zhCount=${zhBodyCount}`);
     }
   }
 
@@ -112,12 +118,13 @@ try {
     const koSrc = readFileSync(join(ROOT, 'templates/cv-template.html'), 'utf-8');
     const koBody = koSrc.match(/html\[lang="ko"\]\s+body\s*\{[^}]*\}/s)?.[0] || '';
     const koHeadings = koSrc.match(/html\[lang="ko"\]\s+\.header h1,[\s\S]*?\{[^}]*\}/)?.[0] || '';
-    const hasProfileFontFallback = (src) => /font-family:\s*var\(--font-family,/.test(src);
+    const hasActiveFallback = (src) => src.includes("font-family: var(--font-family), 'Apple SD Gothic Neo'")
+      && /font-family:[^;]*sans-serif;/.test(src);
     const hasDuplicateBodySelector = /html\[lang="ko"\]\s+body\s*,\s*html\[lang="ko"\]\s+body\s*\{/.test(koSrc);
-    if (hasProfileFontFallback(koBody) && hasProfileFontFallback(koHeadings) && !hasDuplicateBodySelector) {
-      pass('Korean body/headings honor --font-family theme override without duplicate selector');
+    if (hasActiveFallback(koBody) && hasActiveFallback(koHeadings) && !hasDuplicateBodySelector) {
+      pass('Korean font stacks keep CJK fallbacks after --font-family without duplicate selector');
     } else {
-      fail(`Korean theme contract: body=${hasProfileFontFallback(koBody)} headings=${hasProfileFontFallback(koHeadings)} duplicate=${hasDuplicateBodySelector}`);
+      fail(`Korean theme contract: body=${hasActiveFallback(koBody)} headings=${hasActiveFallback(koHeadings)} duplicate=${hasDuplicateBodySelector}`);
     }
   }
 
