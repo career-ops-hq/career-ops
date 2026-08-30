@@ -43,9 +43,11 @@ import {
   existsSync,
   fchmodSync,
   fsyncSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
+  realpathSync,
   renameSync,
   statSync,
   unlinkSync,
@@ -112,24 +114,31 @@ try {
 
 const CONCURRENCY = 10;
 
+export function isIgnorableDirectoryFsyncError(err, platform = process.platform) {
+  return ['EINVAL', 'ENOTSUP', 'ENOSYS'].includes(err?.code)
+    || (platform === 'win32' && ['EACCES', 'EPERM'].includes(err?.code));
+}
+
 export function atomicWriteFile(filePath, text) {
-  const tempPath = `${filePath}.tmp-${process.pid}`;
+  const fileStat = lstatSync(filePath, { throwIfNoEntry: false });
+  const targetPath = fileStat?.isSymbolicLink() ? realpathSync(filePath) : filePath;
+  const tempPath = `${targetPath}.tmp-${process.pid}`;
   let fd = null;
   let directoryFd = null;
   try {
-    const existingMode = existsSync(filePath) ? statSync(filePath).mode & 0o7777 : null;
+    const existingMode = existsSync(targetPath) ? statSync(targetPath).mode & 0o7777 : null;
     fd = openSync(tempPath, 'w');
     if (existingMode !== null) fchmodSync(fd, existingMode);
     writeFileSync(fd, text, 'utf-8');
     fsyncSync(fd);
     closeSync(fd);
     fd = null;
-    renameSync(tempPath, filePath);
+    renameSync(tempPath, targetPath);
     try {
-      directoryFd = openSync(path.dirname(filePath), 'r');
+      directoryFd = openSync(path.dirname(targetPath), 'r');
       fsyncSync(directoryFd);
     } catch (err) {
-      if (!['EINVAL', 'ENOTSUP', 'ENOSYS'].includes(err.code)) throw err;
+      if (!isIgnorableDirectoryFsyncError(err)) throw err;
     } finally {
       if (directoryFd !== null) closeSync(directoryFd);
       directoryFd = null;

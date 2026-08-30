@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-import { atomicWriteFile } from '../scan.mjs';
+import { atomicWriteFile, isIgnorableDirectoryFsyncError } from '../scan.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCAN = join(ROOT, 'scan.mjs');
@@ -49,7 +49,7 @@ test('atomicWriteFile replaces content without leaving a temporary file', () => 
   }
 });
 
-test('atomicWriteFile preserves restrictive destination permissions', () => {
+test('atomicWriteFile preserves restrictive destination permissions', { skip: process.platform === 'win32' }, () => {
   const root = mkdtempSync(join(tmpdir(), 'career-ops-atomic-mode-'));
   try {
     const target = join(root, 'pipeline.md');
@@ -60,6 +60,29 @@ test('atomicWriteFile preserves restrictive destination permissions', () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('atomicWriteFile preserves a destination symlink and replaces its target', { skip: process.platform === 'win32' }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'career-ops-atomic-symlink-'));
+  try {
+    const target = join(root, 'pipeline-target.md');
+    const link = join(root, 'pipeline.md');
+    writeFileSync(target, 'before\n');
+    symlinkSync(target, link);
+    atomicWriteFile(link, 'after\n');
+    assert.equal(lstatSync(link).isSymbolicLink(), true);
+    assert.equal(readFileSync(target, 'utf-8'), 'after\n');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('only unsupported directory fsync errors are ignored on Windows', () => {
+  assert.equal(isIgnorableDirectoryFsyncError({ code: 'EPERM' }, 'win32'), true);
+  assert.equal(isIgnorableDirectoryFsyncError({ code: 'EACCES' }, 'win32'), true);
+  assert.equal(isIgnorableDirectoryFsyncError({ code: 'EINVAL' }, 'linux'), true);
+  assert.equal(isIgnorableDirectoryFsyncError({ code: 'EPERM' }, 'darwin'), false);
+  assert.equal(isIgnorableDirectoryFsyncError({ code: 'ENOSPC' }, 'win32'), false);
 });
 
 test('--json emits exactly one clean successful receipt', () => {
