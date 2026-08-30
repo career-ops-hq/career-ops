@@ -398,9 +398,9 @@ provider whose tuning needs differ from the shared default
       alphabetical position by board name (the table is sorted).
 - [ ] `templates/portals.example.yml` is updated: (1) if `detect()` matches
       a host, a URL-pattern line under "Provider auto-detection"; otherwise
-      an explicit `provider:` in the stanza; (2) under "Built-in provider
-      examples", a commented `Example {Name} Co` stanza (every field at its
-      default) in the group whose header matches — copy a neighbouring
+      an explicit `provider:` in the stanza; (2) in the "Built-in provider
+      examples" block, a commented `Example {Name} Co` stanza (every field
+      at its default) in the group whose header matches — copy a neighbouring
       group's `(→ tracked_companies: …)` / `(→ job_boards: …)` header format
       verbatim — plus the provider id in the roster comment at the top of the
       block; (3) one **live, uncommented** real entry, in the matching
