@@ -190,6 +190,24 @@ try {
     fail(`parseMokaHrJobs() encoded markup description = ${JSON.stringify(encodedMarkup)}`);
   }
 
+  const malformedMarkup = parseMokaHrJobs({
+    data: { jobs: [{
+      id: 'malformed-xss',
+      title: 'Malformed markup',
+      jobDescription: '<p>plain</p><<script>alert(1)</script><b>bold</b>',
+    }] },
+  }, 'X', tenantUrl)[0]?.description || '';
+  if (
+    malformedMarkup.includes('plain') &&
+    malformedMarkup.includes('bold') &&
+    !malformedMarkup.includes('<script') &&
+    !malformedMarkup.includes('<b>')
+  ) {
+    pass('parseMokaHrJobs() removes residual angle brackets from malformed HTML');
+  } else {
+    fail(`parseMokaHrJobs() malformed markup description = ${JSON.stringify(malformedMarkup)}`);
+  }
+
   if (j1 && j1.postedAt === undefined) {
     pass('parseMokaHrJobs() omits timezone-less createdAt values instead of emitting host-dependent epochs');
   } else {

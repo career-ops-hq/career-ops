@@ -196,6 +196,10 @@ function stripHtml(html) {
     .replace(/<\/(p|li|div)>/gi, '\n')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, '')
+    // A payload such as `<<script>` leaves a literal `<script` fragment after
+    // one tag-stripping pass. Drop any residual angle brackets so partially
+    // stripped markup cannot be reassembled by downstream renderers.
+    .replace(/[<>]/g, '')
     // Preserve escaped angle brackets/ampersands as text. Decoding them here
     // can turn attacker-controlled `&lt;script&gt;` back into markup, or turn
     // `&amp;lt;` into a second-stage unescape payload in downstream HTML renderers.
