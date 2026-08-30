@@ -37,7 +37,7 @@
 // bug — the same request succeeds from a residential IP. A browser-like
 // User-Agent is sent to reduce (not eliminate) the friction.
 
-import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, sleep } from './_http.mjs';
 
 const EIGHTFOLD_HOST_RE = /^[a-z0-9-]+\.eightfold\.ai$/i;
 
@@ -73,12 +73,6 @@ function assertEightfoldUrl(url) {
     throw new Error(`eightfold: untrusted hostname "${parsed.hostname}" — must match *.eightfold.ai`);
   }
   return url;
-}
-
-/** @param {number} ms @param {any} ctx */
-function sleep(ms, ctx) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**

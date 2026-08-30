@@ -42,7 +42,7 @@
 // User-Agent is sent to reduce (not eliminate) WAF friction.
 
 import { decodeEntities } from './_html-entities.mjs';
-import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, sleep } from './_http.mjs';
 
 // `oraclecloud(?:[1-9][0-9]?)?` = oraclecloud.com plus oraclecloud1.com …
 // oraclecloud99.com. No leading zero, at most two digits — a bounded family,
@@ -78,11 +78,6 @@ function toEpochMs(value) {
   if (!value) return undefined;
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? undefined : parsed;
-}
-
-function sleep(ms, ctx) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
