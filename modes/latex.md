@@ -109,8 +109,17 @@ Write a JSON file with this structure. `build-cv-latex.mjs` handles template mer
 | `awards[].title` | string | Award name, from cv.md Awards / Honors |
 | `awards[].org` | string | Optional — issuing body, rendered after the title |
 | `awards[].year` | string | Optional — year, right-aligned |
-| `skills[].category` | string | Skill category name (e.g. "Languages", "Frameworks") |
-| `skills[].items` | string | Comma-separated skills in that category |
+| `skills[].category` | string | Optional — skill category name (e.g. "Languages", "Frameworks"). Omitted, the line renders without the bold prefix. |
+| `skills[].items` | string or string[] | **Required** — a non-blank comma-separated string, or a non-empty array of non-blank strings (every element must be text; the builder joins the whole array). |
+
+**The key names above are enforced, not suggestions (#3523).** The payload root must be an object, and before rendering `build-cv-latex.mjs` validates every entry in `education`, `experience`, `projects`, `awards` and `skills`:
+
+- **Missing or blank required field → hard error, non-zero exit, no .tex written.** Required: `institution` + `degree` for education, `company` + `role` for experience, `name` for projects, `title` for awards, `items` for skills (a non-blank string or a non-empty array of them; `category` stays optional).
+- **A key no builder reads → warning on stderr and in the report's `warnings[]`;** the build proceeds and the key is ignored.
+- **A top-level section name the builder does not read → warning**, naming the nearest known key, so `educations` for `education` is visible instead of silently dropping the section.
+- **A section this template has no block for → warning.** The `.tex` template renders no `certifications`, `competencies`, `interests` or `summary` — all four exist on the HTML path only. Passing one drops it entirely, so the warning says what was lost. This is the message you get for those four; an unrecognised key gets the typo-style warning above instead, never both.
+
+**This schema is not the HTML one.** An education entry here is `{institution, degree, dates, coursework}`; in `modes/pdf.md` it is `{title, org, year, description}`, and projects use `context` here but `tech` there. The two payloads are not interchangeable — mixing them used to render an empty block while the report still said `"valid": true`. Each builder now rejects the other's vocabulary by name. The shared contract lives in `lib/cv-payload-schema.mjs`.
 
 ## LaTeX Escaping (handled by the script)
 

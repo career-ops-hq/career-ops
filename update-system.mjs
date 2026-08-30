@@ -167,6 +167,7 @@ const SYSTEM_PATHS = [
   'lib/outcome-dir.mjs',
   'lib/outcome-types.mjs',
   'lib/latex-escape.mjs',
+  'lib/cv-payload-schema.mjs',
   'scan-hn.mjs',
   'scripts/check-syntax.mjs',
   'scripts/export-ats-text.mjs',

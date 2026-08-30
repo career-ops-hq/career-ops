@@ -32,6 +32,7 @@ import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { stripEmptySections } from './cv-sections-core.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { hasRequiredFields, validatePayload } from './lib/cv-payload-schema.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -348,7 +349,7 @@ function buildCompetencies(entries, partial) {
 function buildExperience(entries, partial) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
   if (!partial) {
-    return entries.filter(Boolean).map(e => {
+    return entries.filter(e => hasRequiredFields(e, 'experience', 'html')).map(e => {
       const bullets = Array.isArray(e.bullets)
         ? e.bullets.filter(Boolean).map(b => `        <li>${escapeHtml(b)}</li>`).join('\n')
         : '';
@@ -369,7 +370,7 @@ ${bullets}
   }
 
   const { entryTemplate, blocks } = partial;
-  return entries.filter(Boolean).map(e => {
+  return entries.filter(e => hasRequiredFields(e, 'experience', 'html')).map(e => {
     const bullets = Array.isArray(e.bullets)
       ? e.bullets.filter(Boolean).map(b => `<li>${escapeHtml(b)}</li>`).join('\n    ')
       : '';
@@ -389,7 +390,7 @@ ${bullets}
 function buildProjects(entries, partial) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
   if (!partial) {
-    return entries.filter(Boolean).map(e => {
+    return entries.filter(e => hasRequiredFields(e, 'projects', 'html')).map(e => {
       const badge = e.badge
         ? `<span class="project-badge">${escapeHtml(e.badge)}</span>`
         : '';
@@ -415,7 +416,7 @@ function buildProjects(entries, partial) {
   }
 
   const { entryTemplate, blocks } = partial;
-  return entries.filter(Boolean).map(e => {
+  return entries.filter(e => hasRequiredFields(e, 'projects', 'html')).map(e => {
     const descText = e.description
       || (Array.isArray(e.bullets) ? e.bullets.filter(Boolean).join(' ') : '');
     const blockValues = new Map([
@@ -440,7 +441,7 @@ function buildProjects(entries, partial) {
 function buildEducation(entries, partial) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
   if (!partial) {
-    return entries.filter(Boolean).map(e => {
+    return entries.filter(e => hasRequiredFields(e, 'education', 'html')).map(e => {
       const org = e.org
         ? ` <span class="edu-org">${escapeHtml(e.org)}</span>`
         : '';
@@ -457,7 +458,7 @@ function buildEducation(entries, partial) {
   }
 
   const { entryTemplate, blocks } = partial;
-  return entries.filter(Boolean).map(e => {
+  return entries.filter(e => hasRequiredFields(e, 'education', 'html')).map(e => {
     const blockValues = new Map([
       ['ORG_BLOCK',  { value: escapeHtml(e.org || ''),         present: Boolean(e.org) }],
       ['DESC_BLOCK', { value: escapeHtml(e.description || ''), present: Boolean(e.description) }],
@@ -474,7 +475,7 @@ function buildEducation(entries, partial) {
 function buildCertifications(entries, partial) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
   if (!partial) {
-    return entries.filter(Boolean).map(e => {
+    return entries.filter(e => hasRequiredFields(e, 'certifications', 'html')).map(e => {
       const org = e.org ? `<span class="cert-org">${escapeHtml(e.org)}</span>` : '<span class="cert-org"></span>';
       const year = e.year ? `<span class="cert-year">${escapeHtml(e.year)}</span>` : '<span class="cert-year"></span>';
       return `<div class="cert-item">
@@ -486,7 +487,7 @@ function buildCertifications(entries, partial) {
   }
 
   const { entryTemplate, blocks } = partial;
-  return entries.filter(Boolean).map(e => {
+  return entries.filter(e => hasRequiredFields(e, 'certifications', 'html')).map(e => {
     const blockValues = new Map([
       // An absent field resolves to the partial's _EMPTY fallback, emitting an
       // empty <span> for table-cell alignment rather than being removed.
@@ -508,7 +509,7 @@ function buildCertifications(entries, partial) {
 function buildAwards(entries, partial) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
   if (!partial) {
-    return entries.filter(Boolean).map(e => {
+    return entries.filter(e => hasRequiredFields(e, 'awards', 'html')).map(e => {
       const org = e.org ? `<span class="award-org">${escapeHtml(e.org)}</span>` : '<span class="award-org"></span>';
       const year = e.year ? `<span class="award-year">${escapeHtml(e.year)}</span>` : '<span class="award-year"></span>';
       return `<div class="award-item">
@@ -520,7 +521,7 @@ function buildAwards(entries, partial) {
   }
 
   const { entryTemplate, blocks } = partial;
-  return entries.filter(Boolean).map(e => {
+  return entries.filter(e => hasRequiredFields(e, 'awards', 'html')).map(e => {
     const blockValues = new Map([
       // As with certifications, an absent field resolves to the partial's
       // _EMPTY fallback so the table cells stay aligned across rows.
@@ -552,7 +553,9 @@ function buildInterests(items) {
 function buildSkills(categories, partial) {
   if (!Array.isArray(categories) || categories.length === 0) return '';
   if (!partial) {
-    const items = categories.filter(Boolean).map(c => {
+    const kept = categories.filter(c => hasRequiredFields(c, 'skills', 'html'));
+    if (kept.length === 0) return '';
+    const items = kept.map(c => {
       const cat = c.category
         ? `<span class="skill-category">${escapeHtml(c.category)}:</span> `
         : '';
@@ -562,7 +565,9 @@ function buildSkills(categories, partial) {
   }
 
   const { entryTemplate, blocks } = partial;
-  const items = categories.filter(Boolean).map(c => {
+  const kept = categories.filter(c => hasRequiredFields(c, 'skills', 'html'));
+  if (kept.length === 0) return '';
+  const items = kept.map(c => {
     const blockValues = new Map([
       ['CATEGORY_BLOCK', { value: escapeHtml(c.category || ''), present: Boolean(c.category) }],
     ]);
@@ -676,6 +681,12 @@ function renderHtml(template, payload, templatePath) {
   return html;
 }
 
+// Payload validation lives in lib/cv-payload-schema.mjs, shared with
+// build-cv-latex.mjs: the two formats have different key contracts (this one's
+// education entry is {title, org, year, description}; the LaTeX one is
+// {institution, degree, dates, coursework}), and keeping both tables in one
+// place is what lets each reject the other's vocabulary by name (#3523).
+
 function countBullets(payload) {
   const ex = Array.isArray(payload.experience)
     ? payload.experience.flatMap(e => (Array.isArray(e?.bullets) ? e.bullets : []))
@@ -684,13 +695,14 @@ function countBullets(payload) {
 }
 
 async function writeAndReport(html, absOutput, payload, extra = {}) {
+  const { warnings = [], ...rest } = extra;
   const outDir = dirname(absOutput);
   if (!existsSync(outDir)) await mkdir(outDir, { recursive: true });
   await writeFile(absOutput, html, 'utf-8');
 
   const fileInfo = await stat(absOutput);
   const report = {
-    ...extra,
+    ...rest,
     file: basename(absOutput),
     path: absOutput,
     sizeKB: parseFloat((fileInfo.size / 1024).toFixed(1)),
@@ -704,6 +716,7 @@ async function writeAndReport(html, absOutput, payload, extra = {}) {
       skillCategories: (payload.skills || []).length,
       totalBullets: countBullets(payload),
     },
+    warnings,
     valid: true,
   };
   console.log(JSON.stringify(report, null, 2));
@@ -766,6 +779,15 @@ async function main() {
     process.exit(1);
   }
 
+  const { errors, warnings } = validatePayload(payload, 'html');
+  if (errors.length) {
+    console.error('Invalid CV payload:');
+    for (const message of errors) console.error(`  - ${message}`);
+    console.error(JSON.stringify({ valid: false, errors, warnings }, null, 2));
+    process.exit(1);
+  }
+  for (const message of warnings) console.error(`Warning: ${message}`);
+
   const template = await readFile(templatePath, 'utf-8');
 
   let html;
@@ -776,7 +798,7 @@ async function main() {
     process.exit(1);
   }
 
-  await writeAndReport(html, absOutput, payload, preview ? { status: 'preview-ready' } : {});
+  await writeAndReport(html, absOutput, payload, preview ? { status: 'preview-ready', warnings } : { warnings });
   process.exit(0);
 }
 
@@ -977,6 +999,178 @@ async function runSelfTest() {
   if (orgCount !== 2) {
     console.error('Self-test failed: cert-org empty-block not emitted for table alignment');
     process.exit(1);
+  }
+
+  // Guard the payload key contract (#3523): an education section written with
+  // another tool's key names (institution/degree/dates) renders no education at
+  // all. It must be rejected, not silently dropped, and the empty entry must
+  // never reach the output as a bare .edu-item block.
+  const wrongKeyEducation = [{
+    institution: 'Test University',
+    degree: 'Bachelor of Science in Computer Science',
+    dates: '2024',
+    detail: 'Coursework: Data Structures.',
+  }];
+  const wrongKeys = validatePayload({ ...sample, education: wrongKeyEducation }, 'html');
+  if (wrongKeys.errors.length === 0) {
+    console.error('Self-test failed: education entry with wrong key names was accepted');
+    process.exit(1);
+  }
+  if (!wrongKeys.errors[0].includes('education[0]')
+      || !wrongKeys.errors[0].includes('title')
+      || !wrongKeys.errors[0].includes('institution')) {
+    console.error(`Self-test failed: unhelpful error for wrong education keys: ${wrongKeys.errors[0]}`);
+    process.exit(1);
+  }
+  if (buildEducation(wrongKeyEducation) !== '') {
+    console.error('Self-test failed: buildEducation emitted a block for an entry with no title');
+    process.exit(1);
+  }
+
+  // A valid payload must stay clean: no errors, no warnings.
+  const clean = validatePayload(sample, 'html');
+  if (clean.errors.length || clean.warnings.length) {
+    console.error(`Self-test failed: valid sample payload reported ${JSON.stringify(clean)}`);
+    process.exit(1);
+  }
+
+  // An extra key on an otherwise valid entry warns (it is ignored at render
+  // time) but does not block the build.
+  const extraKey = validatePayload({
+    ...sample,
+    certifications: [{ title: 'CKA', org: 'CNCF', year: '2025', credential_id: 'X-1' }],
+  }, 'html');
+  if (extraKey.errors.length !== 0 || extraKey.warnings.length !== 1
+      || !extraKey.warnings[0].includes('credential_id')) {
+    console.error(`Self-test failed: unrecognised optional key not warned about: ${JSON.stringify(extraKey)}`);
+    process.exit(1);
+  }
+
+  // A payload root that is not an object must be rejected: every named section
+  // reads undefined on an array or null root, so it would otherwise validate clean.
+  for (const badRoot of [[], null, 'x', 42]) {
+    if (validatePayload(badRoot, 'html').errors.length === 0) {
+      console.error(`Self-test failed: payload root ${JSON.stringify(badRoot)} was accepted`);
+      process.exit(1);
+    }
+  }
+
+  // skills[].items is the one required field that is not plain text: a string
+  // or a non-empty array of strings renders; anything else does not.
+  for (const items of ['Python, JavaScript', ['FastAPI', 'React']]) {
+    const ok = validatePayload({ ...sample, skills: [{ category: 'L', items }] }, 'html');
+    if (ok.errors.length || ok.warnings.length) {
+      console.error(`Self-test failed: valid skills items ${JSON.stringify(items)} rejected: ${JSON.stringify(ok)}`);
+      process.exit(1);
+    }
+  }
+  for (const items of [[], ['  '], '', {}, null, undefined]) {
+    if (validatePayload({ ...sample, skills: [{ category: 'L', items }] }, 'html').errors.length === 0) {
+      console.error(`Self-test failed: unrenderable skills items ${JSON.stringify(items)} accepted`);
+      process.exit(1);
+    }
+  }
+  // A skills entry using another vocabulary must fail, not render an empty row.
+  if (validatePayload({ ...sample, skills: [{ label: 'Languages', values: ['JS'] }] }, 'html').errors.length === 0) {
+    console.error('Self-test failed: skills entry with wrong key names was accepted');
+    process.exit(1);
+  }
+  if (buildSkills([{ label: 'Languages', values: ['JS'] }]) !== '') {
+    console.error('Self-test failed: buildSkills emitted markup for an unrenderable entry');
+    process.exit(1);
+  }
+
+  // A mistyped SECTION name is as invisible as a mistyped field name was: the
+  // validator iterates its spec table, so an unknown root key is never visited.
+  const typoSection = validatePayload({ ...sample, educations: sample.education }, 'html');
+  if (!typoSection.warnings.some(w => w.includes('educations') && w.includes('education'))) {
+    console.error(`Self-test failed: mistyped section name not reported: ${JSON.stringify(typoSection.warnings)}`);
+    process.exit(1);
+  }
+  if (typoSection.errors.length !== 0) {
+    console.error('Self-test failed: an unknown root key must warn, not block the build');
+    process.exit(1);
+  }
+  // An unknown key with nothing in it is not worth reporting.
+  for (const empty of [{ educations: [] }, { educations: '' }]) {
+    if (validatePayload({ ...sample, ...empty }, 'html').warnings.some(w => w.includes('educations'))) {
+      console.error(`Self-test failed: empty unknown key ${JSON.stringify(empty)} warned`);
+      process.exit(1);
+    }
+  }
+  // Known root keys the builders read but that carry no section must stay quiet.
+  const cleanRoots = validatePayload(sample, 'html');
+  if (cleanRoots.warnings.length !== 0) {
+    console.error(`Self-test failed: valid sample warned about its own root keys: ${JSON.stringify(cleanRoots.warnings)}`);
+    process.exit(1);
+  }
+
+  // Every element of a skills items array must render — both builders join the
+  // whole array, so one bad element reaches the CV as "[object Object]".
+  if (validatePayload({ ...sample, skills: [{ category: 'L', items: ['JS', {}] }] }, 'html').errors.length === 0) {
+    console.error('Self-test failed: skills items array with a non-text element was accepted');
+    process.exit(1);
+  }
+
+  // A mistyped section arrives in more shapes than an array: an object value
+  // satisfies neither Array.isArray nor hasText, so it slipped through the
+  // first version of this guard.
+  const objectSection = validatePayload({ ...sample, educations: { title: 'BSc' } }, 'html');
+  if (!objectSection.warnings.some(w => w.includes('educations'))) {
+    console.error('Self-test failed: object-valued unknown root key was not reported');
+    process.exit(1);
+  }
+  if (validatePayload({ ...sample, educations: {} }, 'html').warnings.some(w => w.includes('educations'))) {
+    console.error('Self-test failed: an empty object unknown key warned');
+    process.exit(1);
+  }
+
+  // A scalar is the fourth shape a mistyped section arrives in, after array,
+  // object and string. hasText() is string-only by design, so reusing it here
+  // let a number or a boolean pass as "empty".
+  for (const scalar of [2026, 0, true, false]) {
+    if (!validatePayload({ ...sample, educations: scalar }, 'html').warnings.some(w => w.includes('educations'))) {
+      console.error(`Self-test failed: scalar unknown root key ${JSON.stringify(scalar)} was not reported`);
+      process.exit(1);
+    }
+  }
+  // ...but a genuinely empty value still stays quiet.
+  for (const empty of [null, undefined, '', '   ', [], {}]) {
+    if (validatePayload({ ...sample, educations: empty }, 'html').warnings.some(w => w.includes('educations'))) {
+      console.error(`Self-test failed: empty unknown root key ${JSON.stringify(empty)} warned`);
+      process.exit(1);
+    }
+  }
+
+  // Every list section carries the same guard, not just education.
+  for (const [section, bad] of [
+    ['experience', [{ employer: 'Acme', title: 'Engineer' }]],
+    ['projects', [{ project_name: 'Thing' }]],
+    ['education', [{ org: 'Test University', year: '2024' }]],
+    ['certifications', [{ name: 'CKA' }]],
+    ['awards', [{ award: 'Gold Medal' }]],
+  ]) {
+    const result = validatePayload({ ...sample, [section]: bad }, 'html');
+    if (result.errors.length === 0) {
+      console.error(`Self-test failed: ${section} entry with wrong key names was accepted`);
+      process.exit(1);
+    }
+  }
+
+  // A blank required field is as broken as an absent one.
+  if (validatePayload({ ...sample, education: [{ title: '   ', org: 'X' }] }, 'html').errors.length === 0) {
+    console.error('Self-test failed: education entry with a blank title was accepted');
+    process.exit(1);
+  }
+
+  // ...and so is a non-string one: escapeHtml() renders '' for an object or
+  // array, so {"title": {}} would otherwise write the empty block this guard
+  // exists to prevent.
+  for (const badTitle of [{}, [], 0, true, null]) {
+    if (validatePayload({ ...sample, education: [{ title: badTitle, org: 'X' }] }, 'html').errors.length === 0) {
+      console.error(`Self-test failed: education title ${JSON.stringify(badTitle)} was accepted as text`);
+      process.exit(1);
+    }
   }
 
   const absOutput = resolve(join(tmpdir(), 'build-cv-html-test.html'));
