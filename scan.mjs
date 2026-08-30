@@ -41,11 +41,13 @@ import {
   appendFileSync,
   closeSync,
   existsSync,
+  fchmodSync,
   fsyncSync,
   mkdirSync,
   openSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from 'fs';
@@ -113,15 +115,28 @@ const CONCURRENCY = 10;
 export function atomicWriteFile(filePath, text) {
   const tempPath = `${filePath}.tmp-${process.pid}`;
   let fd = null;
+  let directoryFd = null;
   try {
+    const existingMode = existsSync(filePath) ? statSync(filePath).mode & 0o7777 : null;
     fd = openSync(tempPath, 'w');
+    if (existingMode !== null) fchmodSync(fd, existingMode);
     writeFileSync(fd, text, 'utf-8');
     fsyncSync(fd);
     closeSync(fd);
     fd = null;
     renameSync(tempPath, filePath);
+    try {
+      directoryFd = openSync(path.dirname(filePath), 'r');
+      fsyncSync(directoryFd);
+    } catch (err) {
+      if (!['EINVAL', 'ENOTSUP', 'ENOSYS'].includes(err.code)) throw err;
+    } finally {
+      if (directoryFd !== null) closeSync(directoryFd);
+      directoryFd = null;
+    }
   } catch (err) {
     if (fd !== null) closeSync(fd);
+    if (directoryFd !== null) closeSync(directoryFd);
     try { unlinkSync(tempPath); } catch { /* best effort */ }
     throw err;
   }

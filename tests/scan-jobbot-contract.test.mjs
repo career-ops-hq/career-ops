@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,6 +44,19 @@ test('atomicWriteFile replaces content without leaving a temporary file', () => 
     atomicWriteFile(target, 'after\n');
     assert.equal(readFileSync(target, 'utf-8'), 'after\n');
     assert.deepEqual(readdirSync(root), ['pipeline.md']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('atomicWriteFile preserves restrictive destination permissions', () => {
+  const root = mkdtempSync(join(tmpdir(), 'career-ops-atomic-mode-'));
+  try {
+    const target = join(root, 'pipeline.md');
+    writeFileSync(target, 'before\n');
+    chmodSync(target, 0o600);
+    atomicWriteFile(target, 'after\n');
+    assert.equal(statSync(target).mode & 0o777, 0o600);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
