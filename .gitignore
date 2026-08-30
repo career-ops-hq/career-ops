@@ -6,6 +6,14 @@ local/
 # placeholders are tracked (verify with `git ls-files data/`). A blanket rule
 # means a new generated file (e.g. a future log/cache addition) is covered
 # for every user automatically, with no per-filename .gitignore update needed.
+# The SQLite index tracker.mjs builds beside the tracker markdown. Its path is
+# derived from the tracker's own (applications.md -> applications.db), so under
+# data/ it is already covered by the blanket rule below — but the documented
+# root fallback ({DATA_ROOT}/applications.md) puts it here, uncovered. It holds
+# the same personal application data as the markdown, so a stray `git add -A`
+# must never pick it up.
+applications.db
+
 data/*
 !data/.gitkeep
 !data/offers/
