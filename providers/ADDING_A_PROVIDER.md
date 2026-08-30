@@ -396,13 +396,20 @@ provider whose tuning needs differ from the shared default
 - [ ] A row is added to
       [`../docs/SUPPORTED_JOB_BOARDS.md`](../docs/SUPPORTED_JOB_BOARDS.md), in
       alphabetical position by board name (the table is sorted).
-- [ ] `templates/portals.example.yml` is updated with all three: (1) a
-      URL-pattern line under "Provider auto-detection" if `detect()` matches
-      the host, otherwise an explicit `provider:` in the stanza; (2) a
-      commented abstract example stanza (`Example {Name} Co`) in the right
-      group; (3) one live, real example — a single-company provider under
-      `tracked_companies:` in the matching region/topic section, an
-      aggregator / VC board / remote feed under `job_boards:`.
+- [ ] `templates/portals.example.yml` is updated: (1) if `detect()` matches
+      a host, a URL-pattern line under "Provider auto-detection"; otherwise
+      an explicit `provider:` in the stanza; (2) under "Built-in provider
+      examples", a commented `Example {Name} Co` stanza (every field at its
+      default) in the group whose header matches — copy a neighbouring
+      group's `(→ tracked_companies: …)` / `(→ job_boards: …)` header format
+      verbatim — plus the provider id in the roster comment at the top of the
+      block; (3) one **live, uncommented** real entry, in the matching
+      region/topic section, **only when it carries more than the stanza in
+      (2)** — a real `careers_url` / `api`, a resolvable slug or board id, or
+      provider-specific keys (every company ATS, and any slug/URL-bearing
+      board such as Getro). Skip (3) for a bare `provider: {id}` feed with no
+      per-entry URL or config (a regional board, an RSS feed) — there a live
+      entry is byte-identical to (2).
 - [ ] **Editing an existing provider, not adding one?** The
       `SUPPORTED_JOB_BOARDS.md` and `portals.example.yml` items above are
       also "keep in sync on change". If the fix changes observable behavior
