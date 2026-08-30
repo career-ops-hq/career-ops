@@ -190,7 +190,7 @@ try {
   // is config-derived or already charset-checked, not a host-controlled field
   // that could abort a batch. Listed with a reason rather than silently skipped.
   const ALLOWLIST = {
-    'csod.mjs': 'corpName is derived from the operator\'s own careers_url, not the API response',
+    'csod.mjs': 'corpName comes from portals.yml (careers_url), not from the API response',
     '4dayweek.mjs': 'slug is already validated against SLUG_RE, which rejects a surrogate before this line',
   };
 

@@ -40,6 +40,20 @@ try {
   eq('a number is String()-coerced', safeEncodeURIComponent(42), '42');
   eq('null is String()-coerced (not treated as the failure signal)',
     safeEncodeURIComponent(null), 'null');
+
+  // Coercion happens before the try, so a URIError from the value's OWN toString
+  // is a caller bug that propagates — not swallowed as "unencodable → null".
+  {
+    let threw = null;
+    try {
+      safeEncodeURIComponent({ toString() { throw new URIError('from toString'); } });
+    } catch (e) { threw = e; }
+    if (threw instanceof URIError && threw.message === 'from toString') {
+      pass('a URIError thrown by the value\'s own toString propagates, not null');
+    } else {
+      fail(`expected the toString URIError to propagate, got ${threw === null ? 'a null return' : threw}`);
+    }
+  }
 } catch (e) {
   fail(`_safe-url tests crashed: ${e.message}`);
 }

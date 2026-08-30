@@ -34,8 +34,12 @@
  *   URI-encoded. Callers drop the job on null.
  */
 export function safeEncodeURIComponent(value) {
+  // Coerce outside the try: only a URIError from encodeURIComponent itself (a
+  // lone surrogate) becomes null — one thrown by the value's own toString is a
+  // caller bug and must propagate.
+  const str = String(value);
   try {
-    return encodeURIComponent(String(value));
+    return encodeURIComponent(str);
   } catch (err) {
     if (err instanceof URIError) return null;
     throw err;

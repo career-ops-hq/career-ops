@@ -114,15 +114,14 @@ export function parseQuery(json, cfg) {
     if (!id || !title) continue;
     // A lone surrogate in id throws URIError out of encodeURIComponent and
     // aborts this loop; id is also the dedup key. Drop this row on a null.
-    // cfg.locale is a config-set code ("en"/"de"), so its null path is
-    // unreachable in practice; it shares the helper for one consistent call.
     const encodedId = safeEncodeURIComponent(id);
-    const encodedLocale = safeEncodeURIComponent(cfg.locale);
-    if (encodedId === null || encodedLocale === null) continue;
+    if (encodedId === null) continue;
+    // cfg.locale is a trusted config segment ("en"/"de" from portals.yml), like
+    // cfg.origin and the slugified title beside it — not URL-encoded.
     rows.push({
       id,
       title,
-      url: `${cfg.origin}/${encodedLocale}/job/${slugify(title)}/${encodedId}`,
+      url: `${cfg.origin}/${cfg.locale}/job/${slugify(title)}/${encodedId}`,
       location: tkmsLocation(d),
       postedAt: parseTkmsDate(d),
     });
