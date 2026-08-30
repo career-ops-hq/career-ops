@@ -192,14 +192,31 @@ export function parseMokaHrJobs(decrypted, companyName, tenantBaseUrl) {
 
 function stripHtml(html) {
   if (!html) return '';
-  return String(html)
-    .replace(/<\/(p|li|div)>/gi, '\n')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    // A payload such as `<<script>` leaves a literal `<script` fragment after
-    // one tag-stripping pass. Drop any residual angle brackets so partially
-    // stripped markup cannot be reassembled by downstream renderers.
-    .replace(/[<>]/g, '')
+  const input = String(html);
+  let text = '';
+
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i];
+    if (char !== '<') {
+      text += char;
+      continue;
+    }
+
+    const end = input.indexOf('>', i + 1);
+    if (end === -1) {
+      // Drop a dangling angle bracket instead of carrying partial markup into
+      // downstream renderers.
+      continue;
+    }
+
+    const tag = input.slice(i + 1, end).trim().toLowerCase();
+    if (tag === 'br' || tag === 'br/' || /^\/(p|li|div)\b/.test(tag)) {
+      text += '\n';
+    }
+    i = end;
+  }
+
+  return text
     // Preserve escaped angle brackets/ampersands as text. Decoding them here
     // can turn attacker-controlled `&lt;script&gt;` back into markup, or turn
     // `&amp;lt;` into a second-stage unescape payload in downstream HTML renderers.
