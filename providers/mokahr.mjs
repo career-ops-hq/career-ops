@@ -192,18 +192,26 @@ export function parseMokaHrJobs(decrypted, companyName, tenantBaseUrl) {
 
 function stripHtml(html) {
   if (!html) return '';
-  return String(html)
-    .replace(/<\/(p|li|div)>/gi, '\n')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    // Defense-in-depth for malformed tags that do not match the tag regex:
-    // job descriptions are plain text downstream, so no literal angle bracket
-    // is useful enough to keep.
-    .replace(/[<>]/g, '')
+  const input = String(html);
+  let text = '';
+  let inTag = false;
+  for (const char of input) {
+    if (char === '<') {
+      inTag = true;
+      continue;
+    }
+    if (char === '>') {
+      inTag = false;
+      continue;
+    }
+    if (!inTag) text += char;
+  }
+  return text
     // Preserve escaped angle brackets/ampersands as text. Decoding them here
     // can turn attacker-controlled `&lt;script&gt;` back into markup, or turn
     // `&amp;lt;` into a second-stage unescape payload in downstream HTML renderers.
     .replace(/&nbsp;/gi, ' ')
+    .replace(/\s*\n\s*/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
