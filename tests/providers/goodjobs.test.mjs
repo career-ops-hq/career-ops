@@ -30,27 +30,20 @@ try {
   if (goodjobs.id === 'goodjobs') pass('goodjobs.id is "goodjobs"');
   else fail(`goodjobs.id is ${JSON.stringify(goodjobs.id)}`);
 
-  // ── detect(): explicit selection only, like every self-hosted/opt-in provider ──
-  {
-    const hit = goodjobs.detect({ name: 'goodjobs', provider: 'goodjobs', searchKeywords: 'backend' });
-    if (hit && hit.url === 'https://api.goodjobs.io.vn/scrape') {
-      pass('detect() resolves provider:goodjobs → the default instance\'s /scrape URL');
-    } else {
-      fail(`detect() returned ${JSON.stringify(hit)}`);
-    }
-  }
-  if (goodjobs.detect({ name: 'goodjobs', searchKeywords: 'backend' }) === null) {
-    pass('detect() returns null without provider:goodjobs');
+  // ── detect(): always null, like glints.mjs/jobstreet.mjs ──
+  // resolveProvider() in _registry.mjs resolves an explicit `provider:` field
+  // via a direct id→provider map lookup and never calls detect() on that
+  // path — detect() only runs in the auto-detect fallback loop, which only
+  // fires for entries that DON'T set `provider:`. Since `provider: goodjobs`
+  // is the only way to select this provider, a detect() that returned a hit
+  // for `provider: 'goodjobs'` would be dead code, never exercised outside a
+  // direct unit-test call — so it must simply return null, unconditionally.
+  if (goodjobs.detect({ name: 'goodjobs', provider: 'goodjobs', searchKeywords: 'backend' }) === null
+      && goodjobs.detect({ name: 'goodjobs', searchKeywords: 'backend' }) === null
+      && goodjobs.detect({}) === null) {
+    pass('detect() always returns null — explicit provider only, no auto-detection');
   } else {
-    fail('detect() must require provider:goodjobs');
-  }
-  {
-    const hit = goodjobs.detect({ provider: 'goodjobs', api: 'https://my-goodjobs.example.com', searchKeywords: 'backend' });
-    if (hit && hit.url === 'https://my-goodjobs.example.com/scrape') {
-      pass('detect() honours an explicit api: override');
-    } else {
-      fail(`api override drift: ${JSON.stringify(hit)}`);
-    }
+    fail('detect() must return null unconditionally (dead-code hit path removed)');
   }
 
   // ── resolveApiBase(): HTTPS only, default vs. override ──
@@ -225,6 +218,46 @@ try {
     } else {
       fail(`fetch() result drift: ${JSON.stringify(jobs)}`);
     }
+  }
+
+  // fetch() must actually resolve entry.api end-to-end, not just resolveApiBase() in isolation.
+  {
+    /** @type {string[]} */
+    const urls = [];
+    const ctx = {
+      fetchJson: async (url) => { urls.push(url); return []; },
+    };
+    await goodjobs.fetch({ searchKeywords: 'backend', api: 'https://my-goodjobs.example.com' }, ctx);
+    if (urls.length === 1 && urls[0] === 'https://my-goodjobs.example.com/scrape') {
+      pass('fetch() honours an explicit entry.api override end-to-end');
+    } else {
+      fail(`api override drift: ${JSON.stringify(urls)}`);
+    }
+  }
+
+  // fetch() must cap retries at ONE, not the shared default of two — a timeout
+  // on this endpoint is as likely to mean "still genuinely scraping" as
+  // "transient failure", and /scrape has no server-side concurrency guard of
+  // its own to protect (see the file header), so hammering it with the full
+  // default retry budget on every failure isn't free.
+  {
+    let attempts = 0;
+    let slept = 0;
+    const err = new Error('HTTP 500');
+    err.status = 500;
+    const ctx = {
+      fetchJson: async () => { attempts++; throw err; },
+      sleep: async (ms) => { slept += ms; },
+    };
+    let threw = false;
+    try { await goodjobs.fetch({ searchKeywords: 'backend' }, ctx); } catch { threw = true; }
+    if (threw && attempts === 2) {
+      pass('fetch() retries at most once on a retryable failure (2 attempts total)');
+    } else {
+      fail(`retry budget drift: threw=${threw}, attempts=${attempts}`);
+    }
+    if (slept > 0) pass('fetch() backs off between the two attempts');
+    else fail('expected a backoff sleep between attempts');
   }
 
   // fetch() must reject before ever calling the network when searchKeywords

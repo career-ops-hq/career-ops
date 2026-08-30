@@ -12,10 +12,12 @@
 //
 // Wire in via a `job_boards:` entry with `provider: goodjobs`. Unlike
 // per-tenant ATS providers, goodjobs is self-hosted: there is no single fixed
-// host to auto-detect against, so `detect()` is explicit-only (same style as
-// getro.mjs / comeet.mjs). `api` picks which deployment to call; it defaults
-// to the author's own public backend (https://api.goodjobs.io.vn) but any
-// HTTPS deployment works.
+// host, careers_url pattern, or other signal to auto-detect against, so
+// `detect()` always returns null (same style as glints.mjs / jobstreet.mjs)
+// — see its own comment for why a version that matched on `entry.provider`
+// would have been dead code. `api` picks which deployment to call; it
+// defaults to the author's own public backend (https://api.goodjobs.io.vn)
+// but any HTTPS deployment works.
 //
 // NOTE ON THE DEFAULT HOST: the FRONTEND is served from goodjobs.io.vn
 // (GitHub Pages), but the FastAPI backend `/scrape` lives on a different
@@ -92,10 +94,25 @@ const DEFAULT_COUNTRY = 'VN';
 /**
  * Uncached multi-source scrapes (18 boards, some headless-browser-driven) can
  * run well past the 10s repo-wide default — measured slow paths in goodjobs'
- * own README run ~14s even in its faster streaming mode. 30s gives a cached
- * hit plenty of headroom and a cold sweep a real chance to finish.
+ * own README run ~14s even in its faster streaming mode, and a genuine cold
+ * sweep across all 18 sources was measured taking ~33s live. 30s gives a
+ * cached hit plenty of headroom and a cold sweep a real chance to finish.
  */
 const REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Just ONE retry, not the shared default of two. fetchJsonWithRetry's default
+ * policy treats a timeout the same as a 429/5xx, but a timeout on THIS
+ * endpoint is as likely to mean "still genuinely scraping" as "transient
+ * failure" — retrying it doesn't fix that, it only compounds the wait. Worst
+ * case with two retries (three full 30s timeouts plus backoff) is ~90s,
+ * tying up a scan.mjs worker slot for that whole span; one retry caps it
+ * around 60s. It also matters that `/scrape` has no rate limiter or
+ * concurrency guard server-side (see the file header) — hammering it with
+ * the full default retry count on failure adds load to a backend that
+ * already can't shed it on its own.
+ */
+const RETRY_POLICY = { retries: 1 };
 
 /**
  * Resolve which goodjobs deployment to call. Only HTTPS is accepted — this
@@ -185,9 +202,21 @@ export function normalizeJob(item) {
 export default {
   id: 'goodjobs',
 
-  detect(entry) {
-    if (entry?.provider !== 'goodjobs') return null;
-    return { url: `${resolveApiBase(entry)}/scrape` };
+  detect(_entry) {
+    // goodjobs is a self-hosted aggregator, not a company ATS or a board with
+    // a fixed host to key auto-detection off — same class as glints.mjs /
+    // jobstreet.mjs. Auto-detection is intentionally not supported: use
+    // `provider: goodjobs` explicitly in portals.yml.
+    //
+    // A version of this that checked `entry?.provider === 'goodjobs'` and
+    // returned a hit would be dead code, not just unnecessary: resolveProvider()
+    // in _registry.mjs resolves an explicit `provider:` field via a direct
+    // id→provider map lookup and never calls detect() on that path at all —
+    // detect() only runs in the auto-detect fallback loop, which only fires
+    // for entries that *don't* set `provider:`. Since `provider: goodjobs` is
+    // the only way to select this provider, that branch never executes in
+    // production.
+    return null;
   },
 
   async fetch(entry, ctx) {
@@ -200,7 +229,7 @@ export default {
       body: JSON.stringify(body),
       redirect: 'error',
       timeoutMs: REQUEST_TIMEOUT_MS,
-    });
+    }, RETRY_POLICY);
 
     if (!Array.isArray(data)) {
       throw new Error(`goodjobs: unexpected /scrape response — expected a JSON array, got ${data === null ? 'null' : typeof data}`);
