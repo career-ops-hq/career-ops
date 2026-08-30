@@ -135,6 +135,30 @@ try {
     fail(`merge-tracker lost rows while sorting: ${sentinelNums.length} of 5 remain`);
   }
 
+  // A `#` cell with a numeric prefix (`12draft`) sorts as 12, NOT with the
+  // sentinels. This is deliberate and is asserted so it cannot be "tightened"
+  // by accident: parseAppLine and the usedNumbers pass both read that cell with
+  // a bare parseInt, so such a row is #12 to dedup, to number allocation and to
+  // maxNum. Parking it at the bottom would leave a row every other code path
+  // calls #12 sitting where nobody can find it by number — the exact failure
+  // this sort exists to fix. Raised in review on #3529.
+  const prefixed = runMerge({
+    rows: [
+      row(20, 'Zulu'),
+      '| 12draft | 2026-01-07 | Whiskey | Eng | 4.0/5 | Applied | ❌ | — | malformed # cell |',
+      '| N/A | 2026-01-05 | Sierra | Eng | N/A | Applied | ❌ | — | backfilled, no evaluation |',
+    ],
+    additions: {
+      '5-acme.tsv': '5\t2026-02-01\tAcme\tML Eng\tEvaluated\t4.5/5\t❌\t[5](reports/5-acme-2026-02-01.md)\tnew\n',
+    },
+  });
+  const prefixedNums = numColumn(prefixed.tracker);
+  if (prefixedNums.join(' ') === '5 12draft 20 N/A') {
+    pass('merge-tracker sorts a numeric-prefix # cell as its number, matching parseAppLine');
+  } else {
+    fail(`merge-tracker mishandled a numeric-prefix # cell: got [${prefixedNums.join(' ')}], want [5 12draft 20 N/A]`);
+  }
+
   // --dry-run writes nothing, sort included.
   const scrambled = [row(4, 'Delta'), row(1, 'Alfa')];
   const dry = runMerge({

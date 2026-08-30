@@ -831,6 +831,15 @@ function sortTrackerRowsInPlace(lines) {
   while (end < lines.length && lines[end].startsWith('|')) end++;
   const block = lines.slice(sepIdx + 1, end);
   if (block.length < 2) return 0;
+  // Bare parseInt, deliberately — the same reading of the `#` cell that
+  // parseAppLine and the usedNumbers pass use. It accepts a numeric prefix, so
+  // a malformed `12draft` cell reads as 12 here exactly as it does there: that
+  // row is #12 to dedup, to number allocation and to maxNum, so sorting it into
+  // position 12 is what keeps the table consistent with the rest of the script.
+  // A stricter full-cell test would park a row at the bottom that every other
+  // code path still calls #12 — a row you cannot find by its number, which is
+  // the problem this sort exists to solve. The sentinels that matter (`N/A`,
+  // `—`, `-`) are NaN under both readings and land at the end either way.
   const numOf = (line) => {
     const parts = line.split('|').map(s => s.trim());
     const n = parseInt(parts[COLMAP.num], 10);
