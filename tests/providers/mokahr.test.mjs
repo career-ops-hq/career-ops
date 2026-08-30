@@ -171,6 +171,26 @@ try {
     fail(`parseMokaHrJobs() description = ${JSON.stringify(j1 && j1.description)}`);
   }
 
+  const encodedMarkup = parseMokaHrJobs({
+    data: { jobs: [{
+      id: 'encoded-xss',
+      title: 'Encoded markup',
+      jobDescription: '<p>safe&nbsp;text</p>&lt;script&gt;alert(1)&lt;/script&gt;&amp;lt;img src=x onerror=alert(1)&amp;gt;<unclosed',
+    }] },
+  }, 'X', tenantUrl)[0]?.description || '';
+  if (
+    encodedMarkup.includes('safe text') &&
+    !encodedMarkup.includes('<script>') &&
+    !encodedMarkup.includes('<img') &&
+    !encodedMarkup.includes('<unclosed') &&
+    encodedMarkup.includes('&lt;script&gt;') &&
+    encodedMarkup.includes('&amp;lt;img')
+  ) {
+    pass('parseMokaHrJobs() strips real HTML without decoding escaped markup into executable-looking tags');
+  } else {
+    fail(`parseMokaHrJobs() encoded markup description = ${JSON.stringify(encodedMarkup)}`);
+  }
+
   if (j1 && j1.postedAt === undefined) {
     pass('parseMokaHrJobs() omits timezone-less createdAt values instead of emitting host-dependent epochs');
   } else {

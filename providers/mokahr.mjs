@@ -196,10 +196,14 @@ function stripHtml(html) {
     .replace(/<\/(p|li|div)>/gi, '\n')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
+    // Defense-in-depth for malformed tags that do not match the tag regex:
+    // job descriptions are plain text downstream, so no literal angle bracket
+    // is useful enough to keep.
+    .replace(/[<>]/g, '')
+    // Preserve escaped angle brackets/ampersands as text. Decoding them here
+    // can turn attacker-controlled `&lt;script&gt;` back into markup, or turn
+    // `&amp;lt;` into a second-stage unescape payload in downstream HTML renderers.
+    .replace(/&nbsp;/gi, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
