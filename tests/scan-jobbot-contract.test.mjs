@@ -108,6 +108,7 @@ test('--json emits exactly one clean successful receipt', () => {
     const result = runJson(root);
     assert.equal(result.status, 0, result.stderr);
     const receipt = JSON.parse(result.stdout);
+    assert.match(receipt.date, /^\d{4}-\d{2}-\d{2}$/);
     assert.deepEqual(receipt, {
       version: 'careerops.scan.receipt@1',
       date: receipt.date,
