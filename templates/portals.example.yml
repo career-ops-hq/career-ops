@@ -1289,6 +1289,18 @@ search_queries:
 #   searchLocation: Ho Chi Minh           # optional — only Ho Chi Minh's city code is verified live
 #   enabled: true                         # ~50 postings/page; 750ms pacing between pages
 #
+# - name: goodjobs                        # self-hosted aggregator — a thin client, not a scraper
+#   provider: goodjobs                    # POSTs to goodjobs' own /scrape API (18 VN + global boards)
+#   searchKeywords: backend               # REQUIRED — the API 400s on an empty keyword
+#   searchLocation: Ho Chi Minh City      # optional — defaults to goodjobs' own API default
+#   searchCountry: VN                     # optional — VN | US | UK | SG, defaults to VN
+#   # api: https://your-goodjobs-domain   # optional — defaults to the public https://api.goodjobs.io.vn
+#   enabled: true                         # NOTE: the API host is DIFFERENT from the goodjobs.io.vn
+#                                         # frontend. Must be a publicly reachable deployment — career-ops'
+#                                         # SSRF guard blocks a local `docker compose up` instance. /scrape
+#                                         # has no server-side rate limit, but also no concurrency guard —
+#                                         # it fires every scraper at once on a cache miss.
+#
 # - name: Hacker News "Who is hiring?"    # monthly "Ask HN: Who is hiring?" thread
 #   provider: hackernews
 #   enabled: true
