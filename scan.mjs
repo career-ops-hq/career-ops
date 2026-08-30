@@ -53,6 +53,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'fs';
+import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import * as yaml from 'js-yaml';
@@ -122,12 +123,12 @@ export function isIgnorableDirectoryFsyncError(err, platform = process.platform)
 export function atomicWriteFile(filePath, text) {
   const fileStat = lstatSync(filePath, { throwIfNoEntry: false });
   const targetPath = fileStat?.isSymbolicLink() ? realpathSync(filePath) : filePath;
-  const tempPath = `${targetPath}.tmp-${process.pid}`;
+  const tempPath = `${targetPath}.tmp-${process.pid}-${randomUUID()}`;
   let fd = null;
   let directoryFd = null;
   try {
     const existingMode = existsSync(targetPath) ? statSync(targetPath).mode & 0o7777 : null;
-    fd = openSync(tempPath, 'w');
+    fd = openSync(tempPath, 'wx', 0o600);
     if (existingMode !== null) fchmodSync(fd, existingMode);
     writeFileSync(fd, text, 'utf-8');
     fsyncSync(fd);

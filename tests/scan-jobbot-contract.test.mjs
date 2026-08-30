@@ -77,6 +77,23 @@ test('atomicWriteFile preserves a destination symlink and replaces its target', 
   }
 });
 
+test('atomicWriteFile cannot be redirected through the old predictable temporary path', { skip: process.platform === 'win32' }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'career-ops-atomic-temp-link-'));
+  try {
+    const target = join(root, 'pipeline.md');
+    const victim = join(root, 'victim.md');
+    const predictableTemp = `${target}.tmp-${process.pid}`;
+    writeFileSync(victim, 'untouched\n');
+    symlinkSync(victim, predictableTemp);
+    atomicWriteFile(target, 'pipeline\n');
+    assert.equal(readFileSync(target, 'utf-8'), 'pipeline\n');
+    assert.equal(readFileSync(victim, 'utf-8'), 'untouched\n');
+    assert.equal(lstatSync(predictableTemp).isSymbolicLink(), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('only unsupported directory fsync errors are ignored on Windows', () => {
   assert.equal(isIgnorableDirectoryFsyncError({ code: 'EPERM' }, 'win32'), true);
   assert.equal(isIgnorableDirectoryFsyncError({ code: 'EACCES' }, 'win32'), true);
