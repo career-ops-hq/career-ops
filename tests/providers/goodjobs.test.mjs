@@ -152,6 +152,44 @@ try {
       fail(`cross-host link drift: ${JSON.stringify(job)}`);
     }
   }
+  // goodjobs' `description` is HTML (backend _clean_html keeps tags + re-escapes
+  // entities); normalizeJob must decode + strip it, not forward the markup.
+  {
+    const job = normalizeJob({
+      title: 'HTML Desc Job',
+      link: 'https://example.com/x',
+      description: '<p>Build &amp; ship <strong>backend</strong> services.</p><script>x()</script>',
+    });
+    if (job && job.description === 'Build & ship backend services.') {
+      pass('normalizeJob() runs description through the shared HTML→text pipeline');
+    } else {
+      fail(`description normalization drift: ${JSON.stringify(job && job.description)}`);
+    }
+  }
+  // Falls back to summary_description only when description is empty/absent.
+  {
+    const job = normalizeJob({
+      title: 'Summary Fallback Job',
+      link: 'https://example.com/x',
+      description: '',
+      summary_description: 'AI one-liner about the role.',
+    });
+    if (job && job.description === 'AI one-liner about the role.') {
+      pass('normalizeJob() falls back to summary_description when description is empty');
+    } else {
+      fail(`summary fallback drift: ${JSON.stringify(job && job.description)}`);
+    }
+  }
+  // A None/"" sentinel on both fields leaves description omitted, not "".
+  {
+    const job = normalizeJob({ title: 'No Desc Job', link: 'https://example.com/x', description: null, summary_description: null });
+    if (job && !('description' in job)) {
+      pass('normalizeJob() omits description when both fields are empty');
+    } else {
+      fail(`empty-description drift: ${JSON.stringify(job)}`);
+    }
+  }
+
   if (normalizeJob({ title: '', link: 'https://example.com/x' }) === null) {
     pass('normalizeJob() drops an item with no title');
   } else {

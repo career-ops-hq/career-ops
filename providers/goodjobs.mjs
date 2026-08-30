@@ -78,8 +78,18 @@
 // there is no single host to pin an allowlist to (that would defeat the
 // point of an aggregator), so each link is validated only as a well-formed
 // absolute http(s) URL, not against a fixed hostname.
+//
+// `description` is HTML, not plain text: goodjobs' backend/src/utils.py
+// `_clean_html()` only decomposes <script>/<style> and drops noisy
+// attributes, then returns `str(soup)` — real tags stay in and BeautifulSoup
+// re-escapes bare-text entities. normalizeJob() runs it through this repo's
+// shared HTML→text pipeline (_html-to-text.mjs), same as every other
+// JSON-payload provider (greenhouse, smartrecruiters, gem, recruitee,
+// remotli), so scan.mjs's content_filter matches plain words rather than
+// attribute soup and DESCRIPTION_CAP applies.
 
 import { fetchJsonWithRetry } from './_http.mjs';
+import { htmlToText } from './_html-to-text.mjs';
 
 /**
  * The author's own public backend; overridable per entry via `api:`. NOT the
@@ -180,7 +190,10 @@ export function normalizeJob(item) {
 
   const company = String(item.company ?? '').trim();
   const location = String(item.location ?? '').trim();
-  const description = String(item.description ?? '').trim();
+  // goodjobs' `description` carries HTML markup (see the file header); decode +
+  // strip it via the shared pipeline. Fall back to the AI `summary_description`
+  // only when the full description is empty/absent.
+  const description = htmlToText(item.description) || htmlToText(item.summary_description);
 
   // posted_ts is Unix SECONDS (backend/src/models.py); a missing/zero/negative
   // value means "no usable date" rather than epoch itself, so it's omitted
