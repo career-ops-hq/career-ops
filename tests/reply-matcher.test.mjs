@@ -192,6 +192,29 @@ test('checkRoleMatch - a combining mark keeps a Latin word on the whole-word pat
   assert.equal(checkRoleMatch('Attached: re\u0301sume\u0301data.pdf for review.', 'Data Engineer'), false);
 });
 
+test('checkRoleMatch - an NFD word ending in a combining mark keeps it (#3535)', () => {
+  // Escapes, not literals: a source-file "\u00e9" is PRECOMPOSED and does not
+  // exercise this path at all. The bug needs a word whose LAST character is a
+  // combining mark.
+  //
+  // \\p{M} has to be in the stripping class as well as in LATIN_WORD_RE and the
+  // lookarounds. Without it the terminal mark is peeled off as though it were
+  // punctuation — "Charge\u0301" strips to "Charge" — and the boundary test then
+  // correctly refuses that, because the mark still present in the text makes
+  // the position mid-grapheme. The word stops matching itself.
+  const charge = 'Charge\u0301';   // Chargé, mark terminal
+  const cafe   = 'Cafe\u0301';     // Café, mark terminal
+  const disena = 'Disen\u0303ador'; // Diseñador, mark interior
+
+  // Text carries the PART but not the whole role, so checkRoleMatchExact cannot
+  // short-circuit and mask the partial path — which is what hid this at first.
+  assert.ok(checkRoleMatch(`Le poste de ${charge} est ouvert.`, `${charge} de Mission`));
+  assert.ok(checkRoleMatch(`Notre ${cafe} recrute.`, `${cafe} Manager`));
+  assert.ok(checkRoleMatch(`Buscamos un ${disena} para el equipo.`, `${disena} Senior`));
+
+  // ...and the whole-word rule still applies to them.
+  assert.equal(checkRoleMatch(`Le poste de ${charge}s est ouvert.`, `${charge} de Mission`), false);
+});
 test('checkRoleMatch - a Latin role word containing digits still gets the whole-word rule', () => {
   // The \p{N} in LATIN_WORD_RE is load-bearing. Without it a part carrying a
   // digit — "Web3", "K8s", "Tier2" are all ordinary in job titles — fails the

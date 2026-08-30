@@ -230,7 +230,17 @@ export function checkRoleMatch(text, role) {
     // while the regex 'i' flag uses SIMPLE case folding, under which "İ" does not
     // fold to that pair. Hand it the lowercased form and the needle is decomposed
     // while the text is composed, so a genuine mention can never match.
-    const stripped = part.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+    // \p{M} belongs in this class for the same reason it belongs in the gate and
+    // in both lookarounds: a combining mark is word material, not punctuation to
+    // peel off. Without it, an NFD word ENDING in a mark loses it — "Chargé" as
+    // e+U+0301 strips to "Charge" — and the boundary test then correctly refuses
+    // the result, because the mark still sitting in the text makes that position
+    // mid-grapheme. The word stops matching itself.
+    //
+    // Three predicates define "word material" here (this strip, LATIN_WORD_RE,
+    // and matchesOnWordBoundary's lookarounds) and they have to move as a unit.
+    // Updating two of the three is what produced that bug (CodeRabbit, #3535).
+    const stripped = part.replace(/^[^\p{L}\p{M}\p{N}]+|[^\p{L}\p{M}\p{N}]+$/gu, '');
     const bare = stripped.toLowerCase();
 
     // The whole-word requirement applies to Latin-script parts ONLY, and every
