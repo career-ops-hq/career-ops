@@ -1,6 +1,6 @@
-// tests/providers/_http.test.mjs — direct coverage of isRetryableError() and
-// fetchJsonWithRetry(), previously only exercised indirectly through
-// consumer providers' tests.
+// tests/providers/_http.test.mjs — direct coverage of isRetryableError(),
+// fetchJsonWithRetry() and sleep(), previously only exercised indirectly
+// through consumer providers' tests.
 //
 // Main case: a refused redirect (redirect:'error' meeting a 3xx — mandatory
 // on every provider, #1440) surfaces as a bare TypeError with no .status, the
@@ -12,7 +12,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — _http retry helpers');
 
-const { isRetryableError, isRefusedRedirectError, fetchJsonWithRetry, fetchResponse } =
+const { isRetryableError, isRefusedRedirectError, fetchJsonWithRetry, fetchResponse, sleep } =
   await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
 
 // isRetryableError() — status-based classification.
@@ -205,5 +205,40 @@ if (isRefusedRedirectError(transportFailure) === false) {
     fail(`manual-redirect test threw: ${e.message}`);
   } finally {
     globalThis.fetch = realFetch;
+  }
+}
+
+// ── sleep() ─────────────────────────────────────────────────────────────────
+// The ctx-aware delay every provider's inter-page pacing now routes through.
+// Exercised indirectly by each provider's "paces between pages" assertion, but
+// those only see the ctx.sleep branch; the setTimeout fallback and the
+// bad-clock guard have no other coverage.
+{
+  // No ctx at all — the setTimeout fallback path must still resolve.
+  try {
+    await sleep(0);
+    pass('sleep(0) with no ctx resolves via the setTimeout fallback');
+  } catch (e) {
+    fail(`sleep(0) with no ctx threw: ${e.message}`);
+  }
+
+  // A ctx clock is called with exactly the ms value and nothing else.
+  {
+    /** @type {any[]} */
+    let args = null;
+    await sleep(42, { sleep: (...a) => { args = a; return Promise.resolve(); } });
+    if (args && args.length === 1 && args[0] === 42) {
+      pass('sleep(ms, ctx) forwards ms to ctx.sleep and passes no other argument');
+    } else {
+      fail(`sleep() called ctx.sleep with ${JSON.stringify(args)}`);
+    }
+  }
+
+  // A ctx whose `sleep` is not a function is ignored — fall back, don't throw.
+  try {
+    await sleep(0, { sleep: 'not-a-fn' });
+    pass('sleep() ignores a non-function ctx.sleep and takes the fallback');
+  } catch (e) {
+    fail(`sleep() with a non-function ctx.sleep threw: ${e.message}`);
   }
 }
