@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Check, X, Loader2, AlertTriangle } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
+import { isFencingNotice } from "@/lib/cli-fencing.mjs";
 
 // Humanize raw agent tool names into what the user actually cares about, so a
 // multi-minute evaluation reads as progress instead of a cryptic tool dump (#8).
@@ -28,6 +29,19 @@ function isAuthError(job: Job): boolean {
   if (job.status !== "error") return false;
   const hay = `${job.steps[job.steps.length - 1]?.label ?? ""} ${job.text}`.toLowerCase();
   return /auth|login|sign[ -]?in|credential|api[ -]?key|unauthorized|not authenticated|installed and authenticated/.test(hay);
+}
+
+// The unfenced-runtime notice is emitted as the run's FIRST step, before the CLI
+// produces any output — and this card renders only the newest step, so it would be
+// displaced within a second of the run starting. Scan the whole list instead, and
+// render it in the sticky slot below, the same shape isAuthError already uses.
+// Returns the notice ITSELF, not a boolean. There are two shapes — a runtime that
+// cannot be restricted at all, and one only partly restricted — and a card that
+// matched either then printed one hardcoded sentence told a sandboxed Codex run it
+// "ran with its default access", which is false. Rendering what the route emitted
+// keeps one source for the wording and cannot misdescribe a level (#2507).
+function fencingNotice(job: Job): string | undefined {
+  return job.steps.find((s) => isFencingNotice(s.label))?.label;
 }
 
 const fmtElapsed = (ms: number): string => {
@@ -86,6 +100,7 @@ export function WorkerCard({
   const inline = variant === "inline";
   const hasScore = job.result?.score != null;
   const authError = isAuthError(job);
+  const fencing = fencingNotice(job);
   const tokens = job.status === "done" ? job.cost?.tokens ?? 0 : 0;
 
   return (
@@ -129,6 +144,11 @@ export function WorkerCard({
       {authError && (
         <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
           Sign your CLI in from Config, then re-run.
+        </div>
+      )}
+      {fencing && (
+        <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
+          {fencing}
         </div>
       )}
       {tokens > 0 && (
