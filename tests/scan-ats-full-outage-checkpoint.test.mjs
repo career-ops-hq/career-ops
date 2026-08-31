@@ -230,7 +230,10 @@ function sweep(dir, dnsCode, extraArgs = []) {
     const out = sweep(dir, 'ENOTFOUND');
     if (out === null) {
       fail(`dead-board cache failure aborted the sweep${formatRunFailure()}`);
-    } else if (JSON.parse(out).companiesScanned === COMPANIES) {
+    } else if (
+      JSON.parse(out).companiesScanned === COMPANIES
+      && !existsSync(join(dir, 'data', 'dead-boards.tsv'))
+    ) {
       pass('dead-board cache failure is best-effort and does not abort the sweep');
     } else {
       fail(`dead-board cache failure changed the scan count: ${JSON.parse(out).companiesScanned}`);
