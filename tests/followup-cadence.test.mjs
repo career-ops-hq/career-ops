@@ -9,8 +9,11 @@
 
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { pass, fail } from './helpers.mjs';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
+console.log('\nfollowup-cadence.mjs — follow-up cadence');
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_CADENCE_PROFILE = join(ROOT, 'tests', 'fixtures', 'profile-default-cadence.yml');
 const CUSTOM_CADENCE_PROFILE = join(ROOT, 'tests', 'fixtures', 'profile-custom-cadence.yml');
 
@@ -23,7 +26,30 @@ const CUSTOM_CADENCE_PROFILE = join(ROOT, 'tests', 'fixtures', 'profile-custom-c
 // The import below must stay DYNAMIC: ESM hoists static imports above every
 // statement in this file, so a static import would run the module before this
 // assignment and the pin would do nothing.
+//
+// The pin is scoped to the import and restored in a finally, so it is live for
+// exactly the statement that needs it. As a standalone script it died with the
+// process; discovered suites share ONE process, so leaving it set leaked this
+// fixture forward — providers/_profile-keywords.mjs reads CAREER_OPS_PROFILE at
+// module scope, and three provider suites then read this cadence fixture
+// instead of the profile their own tmpdir had just written (#3306).
+//
+// Restoring here rather than at the end of the file is what makes that
+// airtight: a throw anywhere below would skip a trailing restore, and
+// discovery CONTAINS the throw and runs the next suite regardless — so the
+// leak would come back on precisely the run that was already going wrong.
+// Nothing below needs the variable: every later call passes profilePath
+// explicitly.
+const PRIOR_PROFILE_ENV = process.env.CAREER_OPS_PROFILE;
 process.env.CAREER_OPS_PROFILE = DEFAULT_CADENCE_PROFILE;
+
+let cadence;
+try {
+  cadence = await import('../followup-cadence.mjs');
+} finally {
+  if (PRIOR_PROFILE_ENV === undefined) delete process.env.CAREER_OPS_PROFILE;
+  else process.env.CAREER_OPS_PROFILE = PRIOR_PROFILE_ENV;
+}
 
 const {
   computeNextFollowupDate,
@@ -36,24 +62,14 @@ const {
   resolveCadenceConfig,
   loadProfileCadence,
   parseAppliedDaysOverride,
-} = await import('./followup-cadence.mjs');
+} = cadence;
 
-let passed = 0;
-let failed = 0;
-const failures = [];
 
 function eq(label, actual, expected) {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
-  if (a === e) {
-    passed++;
-  } else {
-    failed++;
-    failures.push(label);
-    console.log(`  FAIL: ${label}`);
-    console.log(`    expected: ${e}`);
-    console.log(`    actual:   ${a}`);
-  }
+  if (a === e) pass(label);
+  else fail(`${label} — expected ${e}, got ${a}`);
 }
 
 const APP = '2026-06-30';
@@ -248,8 +264,3 @@ eq(
   DEFAULT_CADENCE.applied_first,
 );
 
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  console.log('Failures:', failures.join(', '));
-  process.exit(1);
-}

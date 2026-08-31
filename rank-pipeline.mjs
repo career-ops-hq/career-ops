@@ -37,10 +37,12 @@ import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { sanitizeMarkdownField } from './scan.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const PIPELINE_PATH = join(CAREER_OPS, 'data', 'pipeline.md');
-const CV_PATH = join(CAREER_OPS, 'cv.md');
+const DATA_ROOT = getCareerOpsRoot();
+const PIPELINE_PATH = join(DATA_ROOT, 'data', 'pipeline.md');
+const CV_PATH = join(DATA_ROOT, 'cv.md');
 
 const DEFAULT_LIMIT = 20;
 // A ceiling the flag cannot raise. The whole reason the core scan is zero-token is

@@ -626,6 +626,13 @@ Benefits and Perks (US Only)
   const crlfSkills = extractJdSkills(lineEndingJd.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n'));
   eq('CRLF JD extracts the same skills as the LF JD', crlfSkills, lfSkills);
   eq('CRLF JD extracts a non-zero number of skills', crlfSkills.length > 0, true);
+  const lfClassification = classifySkillGaps(lfSkills, fakeCv);
+  const crlfClassification = classifySkillGaps(crlfSkills, fakeCv);
+  eq(
+    'CRLF JD produces the same classification as the LF JD',
+    JSON.stringify(crlfClassification),
+    JSON.stringify(lfClassification)
+  );
 
   // Regression (#1896): the reported bug. A CV alias and a JD's canonical name
   // must not read as a gap. Before the shared skill-extract canonicalization,

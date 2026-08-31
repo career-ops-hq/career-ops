@@ -60,21 +60,25 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
-const ROOT = dirname(fileURLToPath(import.meta.url));
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 
 const PATHS = {
   // Primary evaluation logic lives in these two mode files
-  shared:      join(ROOT, 'modes', '_shared.md'),
-  oferta:      join(ROOT, 'modes', 'oferta.md'),
+  shared:      join(CODE_ROOT, 'modes', '_shared.md'),
+  oferta:      join(CODE_ROOT, 'modes', 'oferta.md'),
   // Canonical skill path referenced in Issue #344
-  evaluate:    join(ROOT, '.claude', 'skills', 'career-ops', 'SKILL.md'),
-  cv:          join(ROOT, 'cv.md'),
-  profile:     join(ROOT, 'modes', '_profile.md'),
-  profileYml:  join(ROOT, 'config', 'profile.yml'),
-  reports:     join(ROOT, 'reports'),
-  tracker:     join(ROOT, 'data', 'applications.md'),
-  trackerAdditions: join(ROOT, 'batch', 'tracker-additions'),
+  evaluate:    join(CODE_ROOT, '.claude', 'skills', 'career-ops', 'SKILL.md'),
+  cv:          join(DATA_ROOT, 'cv.md'),
+  profile:     join(DATA_ROOT, 'modes', '_profile.md'),
+  profileYml:  join(DATA_ROOT, 'config', 'profile.yml'),
+  reports:     join(DATA_ROOT, 'reports'),
+  tracker:     resolveTrackerPath(DATA_ROOT),
+  trackerAdditions: join(DATA_ROOT, 'batch', 'tracker-additions'),
 };
+
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing

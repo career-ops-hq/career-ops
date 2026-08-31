@@ -52,7 +52,7 @@ import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-par
 import { normalizeCompany } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
-import { compileKeyword, compilePositiveKeyword, buildTitleFilter } from './title-keywords.mjs';
+import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter } from './title-keywords.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -70,27 +70,32 @@ try {
 const parseYaml = yaml.load;
 
 // ── Config ──────────────────────────────────────────────────────────
+import { getCareerOpsRoot } from './path-resolver.mjs';
+const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 
-const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
-const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || 'config/profile.yml';
+const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
+const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(DATA_ROOT, 'config/profile.yml');
 // Overridable for the same reason the two inputs above are (#2271). A second
 // search lane - a bridge/income track, a career-change track, a partner sharing
 // the checkout - already gets its own portals.yml and profile, but without these
 // two it still writes into the one inbox and the one dedup history. That is not
 // just untidy: scan-history.tsv IS the dedup source, so a posting surfaced in
 // lane A is silently counted as a duplicate in lane B and never shown at all.
-const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || 'data/scan-history.tsv';
-const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || 'data/pipeline.md';
-const APPLICATIONS_PATH = 'data/applications.md';
-const PROVIDERS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'providers');
+const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(DATA_ROOT, 'data/scan-history.tsv');
+const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data/pipeline.md');
+const APPLICATIONS_PATH = path.join(DATA_ROOT, 'data/applications.md');
+const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 
-// Ensure required directories exist (fresh setup). Stays literal: the paths that
-// are NOT overridable still live here. The two that are need no equivalent -
-// scan-history creates its own parent before writing, and the pipeline's parent
-// is created by acquirePipelineLock, which runs before the first pipeline write.
-// tests/scan-output-paths.test.mjs pins that, so an override into a directory
-// that does not exist yet keeps working if either of those changes.
-mkdirSync('data', { recursive: true });
+// Ensure required directories exist (fresh setup). Stays rooted in the user-data
+// directory; override parents are created by their writers before first write.
+const targetDataDir = path.join(DATA_ROOT, 'data');
+try {
+  mkdirSync(targetDataDir, { recursive: true });
+} catch (err) {
+  console.error(`ERROR: Could not create data directory at "${targetDataDir}": ${err.message}`);
+  process.exit(1);
+}
 
 const CONCURRENCY = 10;
 
@@ -100,13 +105,15 @@ const CONCURRENCY = 10;
 
 // ── Title filter ────────────────────────────────────────────────────
 
-// How a title_filter matches a title lives in title-keywords.mjs, because
+// How a keyword matches text lives in title-keywords.mjs, because
 // openrouter-runner.mjs filters titles too and cannot import this file (scan.mjs
 // creates data/ at import time). It called a second, hand-kept copy of this
 // logic until the two drifted; there is now one implementation and this file
 // re-exports it, so existing importers — scan-ats-full.mjs and test-all.mjs's
 // sections 11b and 44 among them — keep resolving it from here.
-export { compileKeyword, compilePositiveKeyword, buildTitleFilter };
+// compileContentKeyword shares the `word:`/`stem:` prefix machinery but skips
+// the title filter's short-acronym auto-anchor (#3274).
+export { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter };
 
 // Compiled-matcher cache for matchedTitleKeywords(), keyed by the
 // `title_filter.positive` array reference. The scan loop calls this once per
@@ -463,6 +470,14 @@ export function buildPostedDateFilter(afterIso, beforeIso) {
 //   - `positive` empty → pass (already cleared negatives)
 //   - `positive` non-empty → at least one keyword must be present
 //
+// A keyword may opt in to boundary-anchored matching with a `word:` or `stem:`
+// prefix (identical to `title_filter` — see title-keywords.mjs). Without a
+// prefix an entry is a plain substring, so a bare negative `java` rejects every
+// posting mentioning "JavaScript" and `ios` rejects "curiosity"; `word:java` /
+// `stem:ios` fix that one entry while leaving the rest of the list untouched
+// (#3274). The substring default is deliberate and unchanged: flipping it would
+// silently narrow every configured install.
+//
 // `content_filter.by_title_keyword` (optional): scopes a stricter positive/
 // negative pair to only the jobs whose title matched a specific
 // `title_filter.positive` keyword, so e.g. an "AI Engineer" title-match can
@@ -473,23 +488,32 @@ export function buildPostedDateFilter(afterIso, beforeIso) {
 // global `positive`/`negative` pair is the fallback for jobs whose matched
 // keyword(s) have no override entry.
 //
-// Provider support: only providers whose list API ships the description for
-// free (no extra per-job request, which would break the zero-token design)
-// populate `job.description`. Lever (`descriptionPlain`) does today; others
-// leave it empty and therefore always pass this filter.
+// Provider support: `job.description` is populated only when the provider's
+// list API returns the description body without a per-job request (the
+// zero-token constraint). Providers that don't supply one leave it empty, and
+// those jobs always pass this filter. The set shifts as providers are updated
+// — check it with `grep -l 'description:' providers/*.mjs`.
+
+// Normalize a keyword list (lowercase/trim/drop-empties) and compile each
+// survivor into a matcher, so a `word:`/`stem:` prefix is honoured and a bare
+// keyword keeps its substring behaviour. The `.length` checks downstream still
+// read as "did the user configure any keyword here".
+function compileContentKeywordList(value) {
+  return normalizeKeywordList(value).map(compileContentKeyword);
+}
 
 export function buildContentFilter(contentFilter) {
   if (!contentFilter) return () => true;
-  const positive = normalizeKeywordList(contentFilter.positive);
-  const negative = normalizeKeywordList(contentFilter.negative);
+  const positive = compileContentKeywordList(contentFilter.positive);
+  const negative = compileContentKeywordList(contentFilter.negative);
 
   const byTitleKeyword = new Map();
   if (contentFilter.by_title_keyword && typeof contentFilter.by_title_keyword === 'object' && !Array.isArray(contentFilter.by_title_keyword)) {
     for (const [kw, rule] of Object.entries(contentFilter.by_title_keyword)) {
       if (typeof kw !== 'string' || !kw.trim()) continue;
       byTitleKeyword.set(kw.trim().toLowerCase(), {
-        positive: normalizeKeywordList(rule?.positive),
-        negative: normalizeKeywordList(rule?.negative),
+        positive: compileContentKeywordList(rule?.positive),
+        negative: compileContentKeywordList(rule?.negative),
       });
     }
   }
@@ -505,15 +529,15 @@ export function buildContentFilter(contentFilter) {
 
     if (overrides.length > 0) {
       return overrides.some(rule => {
-        if (rule.negative.length > 0 && rule.negative.some(k => lower.includes(k))) return false;
+        if (rule.negative.length > 0 && rule.negative.some(m => m(lower))) return false;
         if (rule.positive.length === 0) return true;
-        return rule.positive.some(k => lower.includes(k));
+        return rule.positive.some(m => m(lower));
       });
     }
 
-    if (negative.length > 0 && negative.some(k => lower.includes(k))) return false;
+    if (negative.length > 0 && negative.some(m => m(lower))) return false;
     if (positive.length === 0) return true;
-    return positive.some(k => lower.includes(k));
+    return positive.some(m => m(lower));
   };
 }
 
@@ -593,8 +617,9 @@ export function buildCountryEligibilityFilter(countryEligibilityFilter, candidat
 // Surfaces roles that sponsor a work visa (H-1B / H-1B1 / O-1 for the US, plus
 // the generic "visa sponsorship" wording) and drops roles that explicitly
 // refuse sponsorship. Like content_filter it reads the job DESCRIPTION text, so
-// it only has signal for providers whose list API ships a description (Lever
-// today); jobs without one fall back to the require_mention rule below.
+// it only has signal for providers that populate job.description (see the
+// content_filter header above); jobs without one fall back to the
+// require_mention rule below.
 //
 // Semantics (case-insensitive substring):
 //   - any `negative` keyword present → reject (an explicit "no sponsorship")
@@ -1236,11 +1261,20 @@ export function collectSeenUrls(sources = {}, policy = {}) {
   return { seen, recheckEligible };
 }
 
-export function loadSeenUrls(policy = {}) {
+// Path options mirror mergeIntoPipeline's seam below: the defaults are the
+// CAREER_OPS_ROOT-anchored module constants, and a caller with its own lane
+// (or a test with a fixture) passes explicit paths. Before CAREER_OPS_ROOT the
+// defaults were cwd-relative strings, so callers could retarget them by
+// chdir'ing; an anchored default needs a real parameter instead.
+export function loadSeenUrls(policy = {}, {
+  scanHistoryPath = SCAN_HISTORY_PATH,
+  pipelinePath = PIPELINE_PATH,
+  applicationsPath = APPLICATIONS_PATH,
+} = {}) {
   return collectSeenUrls({
-    scanHistoryText: readIfExists(SCAN_HISTORY_PATH),
-    pipelineText: readIfExists(PIPELINE_PATH),
-    applicationsText: readIfExists(APPLICATIONS_PATH),
+    scanHistoryText: readIfExists(scanHistoryPath),
+    pipelineText: readIfExists(pipelinePath),
+    applicationsText: readIfExists(applicationsPath),
   }, policy);
 }
 
@@ -1843,10 +1877,16 @@ export function loadFingerprintHistory(historyPath = SCAN_HISTORY_PATH) {
  *   Company canonicalizer for the role keys.
  * @returns {{seen: Set<string>, recheckEligible: number, seenCompanyRoles: Set<string>, fingerprintHistory: Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}}
  */
-export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNormalizer) {
-  const scanHistoryText = readIfExists(SCAN_HISTORY_PATH);
-  const pipelineText = readIfExists(PIPELINE_PATH);
-  const applicationsText = readIfExists(APPLICATIONS_PATH);
+// Same path seam as loadSeenUrls/appendToPipeline: anchored defaults, explicit
+// paths for a caller with its own lane or a test with a fixture.
+export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNormalizer, {
+  scanHistoryPath = SCAN_HISTORY_PATH,
+  pipelinePath = PIPELINE_PATH,
+  applicationsPath = APPLICATIONS_PATH,
+} = {}) {
+  const scanHistoryText = readIfExists(scanHistoryPath);
+  const pipelineText = readIfExists(pipelinePath);
+  const applicationsText = readIfExists(applicationsPath);
   const { seen, recheckEligible } = collectSeenUrls({ scanHistoryText, pipelineText, applicationsText }, policy);
   const seenCompanyRoles = collectSeenCompanyRoles({ applicationsText, scanHistoryText, pipelineText }, policy, canonicalize);
   const fingerprintHistory = collectFingerprintHistory(scanHistoryText);
@@ -1872,16 +1912,18 @@ const PROCESSED_MARKERS = ['## Processed', '## Procesadas'];
 // Locked (pipeline-lock.mjs) so scan.mjs, scan-ats-full.mjs, and plugins.mjs
 // (pipeline mode) — the three current callers — can never interleave their
 // read-modify-write and silently drop each other's offers.
-export async function appendToPipeline(offers) {
+// Same seam as loadSeenUrls above: the default is the CAREER_OPS_ROOT-anchored
+// module constant; a caller with its own lane (or a fixture) passes the path.
+export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } = {}) {
   if (offers.length === 0) return;
 
-  await withPipelineLock(PIPELINE_PATH, async () => {
+  await withPipelineLock(pipelinePath, async () => {
     // Auto-create with standard skeleton if missing (fresh-install guard).
-    if (!existsSync(PIPELINE_PATH)) {
-      writeFileSync(PIPELINE_PATH, PIPELINE_SKELETON, 'utf-8');
+    if (!existsSync(pipelinePath)) {
+      writeFileSync(pipelinePath, PIPELINE_SKELETON, 'utf-8');
     }
 
-    let text = readFileSync(PIPELINE_PATH, 'utf-8');
+    let text = readFileSync(pipelinePath, 'utf-8');
 
     const marker = PENDING_MARKERS.find(m => text.includes(m)) ?? null;
     const idx = marker !== null ? text.indexOf(marker) : -1;
@@ -1905,7 +1947,7 @@ export async function appendToPipeline(offers) {
       text = text.slice(0, insertAt) + block + text.slice(insertAt);
     }
 
-    writeFileSync(PIPELINE_PATH, text, 'utf-8');
+    writeFileSync(pipelinePath, text, 'utf-8');
   });
 }
 
