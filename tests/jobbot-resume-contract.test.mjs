@@ -88,11 +88,13 @@ test('render uses existing builder, fact gate, and renderer and emits a path-fre
     return { status: 0, stdout: '', stderr: '' };
   };
   const key = '123e4567-e89b-12d3-a456-426614174000';
-  const receipt = renderResume({ workspace: root, request, tailoring: tailoring(request), outputKey: key, run });
+  const outputRoot = mkdtempSync(join(tmpdir(), 'jobbot-controlled-staging-'));
+  const receipt = renderResume({ workspace: root, request, tailoring: tailoring(request), outputRoot, outputKey: key, run });
   assert.equal(receipt.version, 'careerops.resume.render.receipt@1');
   assert.equal(receipt.artifact_key, `${key}/resume.pdf`);
   assert.equal(receipt.mime_type, 'application/pdf');
   assert.equal(JSON.stringify(receipt).includes(root), false);
+  assert.equal(JSON.stringify(receipt).includes(outputRoot), false);
   assert.equal(calls.some(args => args.includes('--report=7')), false);
 });
 
@@ -100,8 +102,10 @@ test('render refuses changed source bytes before running a command', () => {
   const root = workspace();
   const request = buildResumeRequest({ workspace: root, query: '7' });
   writeFileSync(join(root, 'cv.md'), '# changed');
+  const outputRoot = join(root, 'controlled-staging');
+  mkdirSync(outputRoot, { mode: 0o700 });
   let calls = 0;
-  assert.throws(() => renderResume({ workspace: root, request, tailoring: tailoring(request), outputKey: '123e4567-e89b-12d3-a456-426614174000', run: () => { calls++; } }), /changed/);
+  assert.throws(() => renderResume({ workspace: root, request, tailoring: tailoring(request), outputRoot, outputKey: '123e4567-e89b-12d3-a456-426614174000', run: () => { calls++; } }), /changed/);
   assert.equal(calls, 0);
 });
 
@@ -109,8 +113,10 @@ test('render refuses changed PDF rules before running a command', () => {
   const root = workspace();
   const request = buildResumeRequest({ workspace: root, query: '7' });
   writeFileSync(join(root, 'modes/pdf.md'), '# changed rules');
+  const outputRoot = join(root, 'controlled-staging');
+  mkdirSync(outputRoot, { mode: 0o700 });
   let calls = 0;
-  assert.throws(() => renderResume({ workspace: root, request, tailoring: tailoring(request), outputKey: '123e4567-e89b-12d3-a456-426614174000', run: () => { calls++; } }), /rules changed/);
+  assert.throws(() => renderResume({ workspace: root, request, tailoring: tailoring(request), outputRoot, outputKey: '123e4567-e89b-12d3-a456-426614174000', run: () => { calls++; } }), /rules changed/);
   assert.equal(calls, 0);
 });
 

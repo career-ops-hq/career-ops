@@ -225,7 +225,7 @@ function runCommand(command, args, cwd) {
   return result;
 }
 
-export function renderResume({ workspace = ROOT, request, tailoring, outputKey = randomUUID(), run = runCommand }) {
+export function renderResume({ workspace = ROOT, request, tailoring, outputRoot, outputKey = randomUUID(), run = runCommand }) {
   assertExactKeys(request, ['version', 'rules_version', 'rules_hash', 'opportunity', 'candidate', 'cv', 'role_context', 'render_policy', 'source_hashes', 'manifest_hash'], 'resume request');
   if (request.version !== CONTRACT_VERSION || request.rules_version !== RULES_VERSION) throw new Error('unsupported resume request contract');
   const manifest = { ...request };
@@ -235,8 +235,9 @@ export function renderResume({ workspace = ROOT, request, tailoring, outputKey =
   verifyRequestSources(workspace, request);
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(outputKey)) throw new Error('output key must be an opaque UUID');
   const root = realpathSync(workspace);
-  const outputBase = join(root, 'output', 'jobbot');
-  mkdirSync(outputBase, { recursive: true, mode: 0o700 });
+  if (!outputRoot) throw new Error('caller-controlled output root is required');
+  const outputBase = realpathSync(outputRoot);
+  if (!statSync(outputBase).isDirectory()) throw new Error('output root must be a directory');
   const outputDir = resolve(outputBase, outputKey);
   if (existsSync(outputDir)) throw new Error('output key already exists');
   mkdirSync(outputDir, { mode: 0o700 });
@@ -283,7 +284,7 @@ export function renderResume({ workspace = ROOT, request, tailoring, outputKey =
 }
 
 function usage() {
-  return 'Usage: node jobbot-resume.mjs candidates\n       node jobbot-resume.mjs request (--query <report-or-role>|--report <id>) [--format a4|letter]\n       node jobbot-resume.mjs render --request <json> --tailoring <json> --output-key <uuid>';
+  return 'Usage: node jobbot-resume.mjs candidates\n       node jobbot-resume.mjs request (--query <report-or-role>|--report <id>) [--format a4|letter]\n       node jobbot-resume.mjs render --request <json> --tailoring <json> --output-root <dir> --output-key <uuid>';
 }
 
 function option(args, name) {
@@ -307,11 +308,12 @@ function main(args = process.argv.slice(2)) {
     if (args[0] === 'render') {
       const requestPath = option(args, '--request');
       const tailoringPath = option(args, '--tailoring');
+      const outputRoot = option(args, '--output-root');
       const outputKey = option(args, '--output-key');
-      if (!requestPath || !tailoringPath || !outputKey) throw new Error('--request, --tailoring, and --output-key are required');
+      if (!requestPath || !tailoringPath || !outputRoot || !outputKey) throw new Error('--request, --tailoring, --output-root, and --output-key are required');
       const request = JSON.parse(readFileSync(resolve(requestPath), 'utf8'));
       const tailoring = JSON.parse(readFileSync(resolve(tailoringPath), 'utf8'));
-      console.log(JSON.stringify(renderResume({ request, tailoring, outputKey })));
+      console.log(JSON.stringify(renderResume({ request, tailoring, outputRoot, outputKey })));
       return;
     }
     throw new Error(usage());
