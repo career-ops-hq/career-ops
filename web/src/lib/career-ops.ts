@@ -6,6 +6,11 @@ import { parseApplications } from "@/lib/tracker-table.mjs";
 // One definition of the `{n}-RESERVED.md` convention, shared with
 // run-cli-support.mjs — see report-files.mjs for why it lives there.
 import { isReservedReportFile } from "@/lib/report-files.mjs";
+import { resolvePdfIndexPath } from "@/lib/core/pdf-index";
+// Pure parser, no I/O — shared with the apply flow's CV resolver so the two
+// don't drift into two different definitions of "which report does this
+// index row belong to" (#2599, #2008 review).
+import { pdfIndexEntryForReport } from "@/lib/apply/cv-selection.mjs";
 
 /**
  * Resolve the career-ops "home" — the directory holding the user's sibling
@@ -153,6 +158,76 @@ export function readApplications(): Application[] {
   return parseApplications(md, careerOpsRoot());
 }
 
+/** Resolve the report-number cell in data/pdf-index.tsv for a given report id.
+ *  Digits-only, full-string match — parseInt alone would let "12abc" resolve to
+ *  report 12, matching the wrong index row. Returns null for anything malformed,
+ *  so callers never have to re-validate. */
+function pdfIndexTarget(n: string): number | null {
+  const trimmed = n.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  return Number.parseInt(trimmed, 10);
+}
+
+export async function pdfReadyForReport(n: string): Promise<boolean> {
+  return (await pdfPathForReport(n)) !== null;
+}
+
+export type PdfPathForReportResult =
+  | { status: "found"; path: string }
+  | { status: "not-found" }
+  | { status: "invalid" }
+  | { status: "rejected" };
+
+/** The exact PDF path indexed for this report number, or null if none exists
+ *  (malformed id, no index row, the indexed file is missing on disk, or the
+ *  index resolved outside the workspace). Lets the viewer route serve the
+ *  SPECIFIC report's PDF instead of guessing the newest file for the company —
+ *  two applications at the same company have two different tailored CVs.
+ *
+ *  The manifest path comes from the core's resolvePdfIndexPath (ACL, honors
+ *  CAREER_OPS_PDF_INDEX) rather than a hardcoded "data/pdf-index.tsv" literal
+ *  — the exact class of bug that #2471 fixed in the core, once, for every
+ *  reader. The parsing itself is pdfIndexEntryForReport, a pure function
+ *  shared with the apply flow's own CV resolver (cv-selection.mjs) so there
+ *  is one definition of "which row matches this report", not two. */
+export async function pdfPathStatusForReport(n: string): Promise<PdfPathForReportResult> {
+  const target = pdfIndexTarget(n);
+  if (target === null) return { status: "invalid" };
+  const indexPath = await resolvePdfIndexPath();
+  if (!indexPath) return { status: "not-found" };
+  let tsv: string;
+  try {
+    tsv = fs.readFileSync(indexPath, "utf8");
+  } catch {
+    return { status: "not-found" };
+  }
+  const root = careerOpsRoot();
+  const entry = pdfIndexEntryForReport(tsv, target);
+  if (!entry.found) return { status: "not-found" };
+  if (!entry.path) return { status: "rejected" };
+  // The manifest is a user-layer file (generate-pdf.mjs writes it, but nothing
+  // stops a hand edit) turned into a filesystem read that this route then
+  // serves — the path must be contained BY CONSTRUCTION, not by trusting the
+  // writer. Rows are written relative to the WORKSPACE root (careerOpsRoot()),
+  // not to the manifest's own data/ directory — same base the pre-ACL version
+  // of this function used — and must stay under the project's output/ tree.
+  const abs = path.resolve(root, entry.path);
+  const outputDir = path.resolve(root, "output");
+  if (!abs.startsWith(outputDir + path.sep)) return { status: "rejected" };
+  // Scoped to outputDir, not the broader root: the lexical startsWith check
+  // above only rejects an unresolved path outside output/, but a symlink
+  // PLACED under output/ can still resolve to somewhere else inside root
+  // (e.g. reports/) and pass a root-scoped realpath check — serving a file
+  // this route was never meant to expose.
+  if (!isRegularContainedFile(abs, outputDir)) return { status: "rejected" };
+  return { status: "found", path: abs };
+}
+
+export async function pdfPathForReport(n: string): Promise<string | null> {
+  const result = await pdfPathStatusForReport(n);
+  return result.status === "found" ? result.path : null;
+}
+
 /**
  * Server-side lifecycle of the user's setup — mirrors the prerequisite list that
  * doctor.mjs uses (cv.md, config/profile.yml, modes/_profile.md, portals.yml), by
@@ -274,6 +349,14 @@ function containedRealpath(p: string, root: string): boolean {
     return fs.realpathSync(p).startsWith(fs.realpathSync(root) + path.sep);
   } catch {
     return false; // missing file or unresolvable link — treat as not found
+  }
+}
+
+export function isRegularContainedFile(p: string, root: string): boolean {
+  try {
+    return fs.statSync(p).isFile() && containedRealpath(p, root);
+  } catch {
+    return false;
   }
 }
 
