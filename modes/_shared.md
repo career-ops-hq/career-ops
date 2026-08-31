@@ -32,6 +32,20 @@ See "Untrusted External Content" in `AGENTS.md` / `CLAUDE.md` / `CODEX.md` for t
 **RULE: NEVER claim the user authored a project, repo, library, tool, framework, or open-source artefact unless explicitly attributed to them in cv.md or article-digest.md.** Tool-of-trade conflation (user uses X → user built X) is the most common fabrication pattern and is forbidden.
 **RULE: Keywords get reformulated, never fabricated.** Reorder, reframe, emphasise — but never invent. If a claim isn't backed by an in-scope file, ask the user. If no answer, omit. Silence on a topic beats manufactured detail.
 
+## Data Root & Path Resolution (CRITICAL)
+
+All User Layer files (such as `cv.md`, `config/profile.yml`, `modes/_profile.md`, `data/applications.md` or `applications.md`, `reports/`, `output/`, `interview-prep/`, `portals.yml`, etc.) must be resolved relative to the dynamically resolved **Data Root** (`{DATA_ROOT}`).
+
+### Data Root Resolution Order:
+1. **Environment Variables**: Check if `CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` is set. If set, use its value (resolved relative to the repository root if it is a relative path).
+2. **Marker File**: If no environment variable is set, check for a `.career-ops-data` file in the repository root. If it exists and contains a non-empty path, use its value (resolved relative to the repository root if it is a relative path).
+3. **Repository Default**: If neither is set, fall back to the repository root directory as the Data Root.
+
+### Tracker Path Resolution Order:
+* **Explicit override**: If `CAREER_OPS_TRACKER` is set as an environment variable, use it as the absolute path to the tracker file (resolved relative to the repository root if it is a relative path).
+* **Default**: Otherwise, use `{DATA_ROOT}/data/applications.md` if it exists; if not, use `{DATA_ROOT}/applications.md`.
+* **Writing**: All new/boilerplate writes must target `{DATA_ROOT}/data/applications.md`.
+
 ---
 
 ## Spend Tier (Model Routing)
