@@ -36,9 +36,11 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { flagValue, validateFlags, safeIntFlag } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(CAREER_OPS, 'data/active-interviews.md'))
   ? join(CAREER_OPS, 'data/active-interviews.md')
   : join(CAREER_OPS, 'active-interviews.md');
@@ -57,10 +59,14 @@ const fileFlagValue = flagValue(args, '--file');
 const ACTIVE_INTERVIEWS_PATH = fileFlagValue !== undefined
   ? fileFlagValue
   : DEFAULT_ACTIVE_INTERVIEWS_PATH;
-const minThresholdValue = flagValue(args, '--min-threshold');
-const rawMinThreshold = minThresholdValue !== undefined
-  ? parseInt(minThresholdValue, 10)
-  : 1;
+// safeIntFlag, not parseInt: this file had NO shape check, so unlike
+// detect-reposts it did not even fall back — `--min-threshold
+// 999999999999999999999` was ACCEPTED and reported as `"minThreshold": 1e+21`,
+// the exact "metadata reports a value that is not the one in effect" failure
+// detect-reposts.mjs documents isSafeInteger as existing to prevent (#2982).
+// "abc" and "-5" already fell back to 1 via the clamp below; "3.5" silently
+// became 3. All of them now take the documented fallback.
+const rawMinThreshold = safeIntFlag(flagValue(args, '--min-threshold'), 1);
 // Clamped here (not just inside aggregateProcessQuality) so printSummary's
 // displayed threshold always matches the threshold actually applied.
 const MIN_THRESHOLD = Number.isFinite(rawMinThreshold) && rawMinThreshold >= 0 ? rawMinThreshold : 1;
@@ -354,7 +360,7 @@ const USAGE = `Usage:
   node process-quality.mjs --self-test            # run the built-in fixtures
   node process-quality.mjs --help                 # show this message`;
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   // Inside the main-module guard, not at import time: rejection-latency.mjs
   // imports parseActiveInterviews from here, so a top-level check would judge
   // the IMPORTER's argv and reject its flags as unrecognized (#2919).

@@ -20,11 +20,21 @@ short message; otherwise run the LinkedIn power move below.
 
 ## LinkedIn power move (default)
 
-1. **Identify targets** via WebSearch:
-   - Hiring manager of the team
+1. **Find ONE target** via WebSearch -- search in this order and stop at the first
+   one you can actually confirm:
+   - Hiring manager of the team (usually the strongest primary at this stage)
    - Assigned recruiter
-   - 2-3 team peers (people with similar roles)
-   - Interviewer (if the candidate already has a scheduled interview)
+   - A team peer (someone with a similar role)
+   - Interviewer, if the candidate already has a scheduled interview
+
+   **Three WebSearch calls is a hard ceiling, not a suggestion.** Step 3 selects a
+   single primary target and step 4 writes one message, so every search past the
+   first confirmed hit is paid for and thrown away. One confirmed contact is a
+   complete result, not a partial one -- do not keep searching to round out a
+   roster nobody asked for.
+
+   Best-effort and no login: when a target cannot be confirmed, say so plainly and
+   move to the next one in the order. Never guess a name.
 
 2. **Classify contact type** -- ask the candidate or infer from context:
    - **Recruiter** -- person whose role is talent acquisition, sourcing, or recruiting
@@ -62,7 +72,10 @@ short message; otherwise run the LinkedIn power move below.
    - EN (default)
    - ES (if Spanish company)
 
-6. **Alternative targets** with justification for why they are good second choices
+6. **Alternative targets**, if the search happened to confirm any others: one line
+   each (who they are, and the single reason to try them). Omit this section
+   entirely when there is only one target -- it is a note on what you already
+   found, never a reason to go searching again
 
 7. **Offer to save the contact** -- once the candidate picks a target, ask whether
    to save that person to `data/contacts.tsv` (one line:

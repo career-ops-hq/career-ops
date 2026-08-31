@@ -30,9 +30,11 @@
 import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import * as yaml from 'js-yaml';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 const OBS_PATH = join(CAREER_OPS, 'data/salary-observations.tsv');
 const REPORTS_DIR = join(CAREER_OPS, 'reports');
 
@@ -48,6 +50,57 @@ const TRUST = {
   advertised: { user: 2, 'recruiter-verbal': 1, jd: 0 },
 };
 
+/**
+ * Rewrite a number's separators into a form parseFloat reads correctly.
+ *
+ * #3174 taught this file that a period can be thousands grouping ("35.000" is
+ * 35000, not 35), which is how Spain, Germany, Italy, the Netherlands and
+ * Brazil write a salary. It did that with `.replace(/,/g, '')` first, though,
+ * which silently assumes the comma is ALWAYS grouping — and in every one of
+ * those same markets the comma is the DECIMAL point. So the half of the
+ * convention that carries cents was left folding by 1000:
+ *
+ *   "45.000,00"  -> strip commas -> "45.00000" -> 45      (want 45000)
+ *   "120.000,00" -> strip commas -> "120.00000" -> 120    (want 120000)
+ *
+ * The period rule could not rescue those, because after the comma is deleted
+ * the period is followed by five digits and its "exactly three" lookahead
+ * fails. Which separator means what has to be decided BEFORE either is
+ * touched.
+ *
+ * @param {string} numStr - The numeric run, currency already stripped.
+ * @returns {string} The same number with `.` as its only separator.
+ */
+function canonicalizeSeparators(numStr) {
+  const lastComma = numStr.lastIndexOf(',');
+  const lastDot = numStr.lastIndexOf('.');
+
+  // Both present: the LAST one is the decimal separator and the other is
+  // grouping. True in both conventions, which is what makes it decidable —
+  // "45.000,00" and "123,684.50" are the same shape written two ways, and
+  // nothing else has to be guessed.
+  if (lastComma !== -1 && lastDot !== -1) {
+    const decimal = lastComma > lastDot ? ',' : '.';
+    const grouping = decimal === ',' ? '.' : ',';
+    return numStr.split(grouping).join('').replace(decimal, '.');
+  }
+
+  // Only one separator, so its role is genuinely ambiguous and is inferred
+  // from what follows it: exactly three digits and not a fourth reads as
+  // grouping ("35.000", "123,684"), anything else as a decimal point ("82.5",
+  // "45000,50"). This is #3174's rule, now applied to whichever separator is
+  // present instead of to the period alone — the comma had no rule at all and
+  // was unconditionally deleted, so "45000,50" read as 4500050.
+  //
+  // A three-place decimal ("1.250") stays ambiguous without knowing the
+  // document's locale; reading it as grouped remains the safer default for a
+  // salary field (#3174), and is now the same default in both directions.
+  const sep = lastComma !== -1 ? ',' : lastDot !== -1 ? '.' : null;
+  if (sep === null) return numStr;
+  const grouped = new RegExp(`(\\d)\\${sep}(?=\\d{3}(?!\\d))`, 'g');
+  return numStr.replace(grouped, '$1').replace(sep, '.');
+}
+
 // --- Amount parsing ---
 export function parseAmount(raw) {
   let s = String(raw ?? '').trim();
@@ -60,16 +113,7 @@ export function parseAmount(raw) {
   // its last three letters.
   s = s.replace(/[€$£¥]/g, '').replace(/\s*[A-Za-z]{3}\s*$/, '').trim();
   const toNum = (numStr, kFlag) => {
-    // A period counts as thousands grouping only when it's followed by
-    // exactly three digits and not a fourth ("35.000" -> 35000), so markets
-    // that group with a period (Spain, Germany, Italy, the Netherlands,
-    // Brazil, ...) don't get folded to 1/1000th. Genuine decimals like
-    // "82.5" are untouched since they carry one digit after the point. A
-    // three-place decimal ("1.250") is ambiguous without knowing the
-    // document's locale; reading it as grouped is the safer default for a
-    // salary field (per #3174).
-    const normalized = numStr.replace(/,/g, '').replace(/(\d)\.(?=\d{3}(?!\d))/g, '$1');
-    const n = parseFloat(normalized);
+    const n = parseFloat(canonicalizeSeparators(numStr));
     return Number.isNaN(n) ? null : (kFlag ? n * 1000 : n);
   };
   const range = s.match(/^([\d.,]+)\s*(k)?\s*[-–—]\s*([\d.,]+)\s*(k)?$/i);
@@ -390,6 +434,19 @@ function selfTest() {
   assert(parseAmount('40.000')?.mid === 40000, 'period-grouped single value (#3174)');
   assert(parseAmount('35.000 - 55.000')?.mid === 45000, 'period-grouped range, no currency symbol (#3174)');
 
+  // Decimal comma — the other half of the same convention (#3174 stripped every
+  // comma before deciding, so these folded by 1000).
+  assert(parseAmount('€45.000,00')?.mid === 45000, 'period grouping + comma decimal');
+  assert(parseAmount('120.000,00 EUR')?.mid === 120000, 'period grouping + comma decimal, trailing ISO token');
+  assert(parseAmount('45.000,50')?.mid === 45000.5, 'comma decimal keeps its cents');
+  assert(parseAmount('45000,50')?.mid === 45000.5, 'lone comma with two following digits is a decimal point');
+  assert(parseAmount('82,5k')?.mid === 82500, 'decimal k written with a comma');
+  assert(parseAmount('€1.250.000,75')?.mid === 1250000.75, 'two grouping periods + comma decimal');
+  assert(parseAmount('€40.000,00 - €55.000,00')?.mid === 47500, 'range, both bounds with comma decimals');
+  // ...and the US shape it must not have broken to get there.
+  assert(parseAmount('$123,684.50')?.mid === 123684.5, 'comma grouping + period decimal');
+  assert(parseAmount('1,250')?.mid === 1250, 'lone comma with exactly three following digits stays grouping');
+
   // parseObservations
   const obs = parseObservations(OBS_FIXTURE);
   assert(obs.length === 10, `10 observations, got ${obs.length}`);
@@ -701,6 +758,6 @@ function main() {
   }
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (isMainModule(import.meta.url)) {
   main();
 }

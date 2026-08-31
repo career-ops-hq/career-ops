@@ -146,7 +146,7 @@ const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row':
 // allow-list, so an unrecognized label would be persisted here and then
 // silently dropped there. Rejecting it at the boundary keeps the two ends from
 // disagreeing about what a valid source is.
-const WRITER_SOURCES = new Set(['set-status', 'web']);
+const WRITER_SOURCES = new Set(['set-status', 'web', 'reply-watch']);
 
 for (let i = 0; i < rawArgs.length; i++) {
   const a = rawArgs[i];

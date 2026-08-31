@@ -25,7 +25,13 @@ Settled doctrine ([#918](https://github.com/santifer/career-ops/issues/918)): th
 
 ## Why the flat root
 
-The repo keeps its ~70 scripts at the root deliberately ([#1386](https://github.com/santifer/career-ops/issues/1386)). Path stability is a feature here, not an accident: the updater's `SYSTEM_PATHS` allowlist, community plugins, docs, guides, and the muscle memory of thousands of users (`node scan.mjs`) all reference these paths. A cosmetic reorganization would break forks and plugins for no functional gain. The conventions that keep the flat root navigable: one script = one job, `*.test.mjs` sits next to what it tests, and every script is registered in `SYSTEM_PATHS` (enforced in CI by the coverage guard).
+The repo keeps its ~70 scripts at the root deliberately ([#1386](https://github.com/santifer/career-ops/issues/1386)). Path stability is a feature here, not an accident: the updater's `SYSTEM_PATHS` allowlist, community plugins, docs, guides, and the muscle memory of thousands of users (`node scan.mjs`) all reference these paths. A cosmetic reorganization would break forks and plugins for no functional gain. The conventions that keep the flat root navigable: one script = one job, and every script is registered in `SYSTEM_PATHS` (enforced in CI by the coverage guard).
+
+Tests are the one thing the flat root does not hold. Suites live in `tests/`, named `{module}.test.mjs` for the root script they cover, and `test-all.mjs` discovers `tests/**/*.test.mjs` — no registration list, so a new suite runs the moment it is written and a typo cannot silently turn CI green ([#1440](https://github.com/santifer/career-ops/issues/1440)). Write new ones there; `*.test.mjs` at the repo root is not discovered and will not run.
+
+Discovery imports a suite in-process and shares its counters; a `node:test` suite is child-processed instead, so its results survive ([#2828](https://github.com/santifer/career-ops/issues/2828)). A discovered suite therefore reports through `pass`/`fail` from `tests/helpers.mjs` and never calls `process.exit()` or `finish()`, both of which would forge the run's verdict.
+
+This was three arrangements until recently — `tests/`, a `test/` directory, and suites sitting beside the scripts they covered — with the latter two registered by hand in `test-all.mjs`. Hand registration meant three suites shipped in `SYSTEM_PATHS` to every install while running nowhere ([#3247](https://github.com/santifer/career-ops/issues/3247), [#3303](https://github.com/santifer/career-ops/issues/3303)), which is what consolidated them ([#3306](https://github.com/santifer/career-ops/issues/3306)). No suite is registered by hand any more — `test-all.mjs`'s `SCRIPTS` list holds scripts and their `--self-test` entry points, not test files. Playwright specs are the deliberate exception: `tests/cv-visual/` is named `*.spec.mjs`, which discovery does not match, and runs from `playwright.cv.config.mjs`.
 
 ## Component map
 
