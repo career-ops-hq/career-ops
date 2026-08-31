@@ -188,15 +188,57 @@ html {
   color: var(--muted);
 }
 .report-prose hr { border: none; border-top: 1px solid var(--border); margin: 1.75rem 0; }
-.report-prose table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 1rem 0; }
+/* Wide report tables (e.g. the 8-column STAR+R grid in Block F) scroll
+   horizontally instead of being squeezed until words break mid-syllable.
+   width:max-content sizes to the content; max-width keeps it inside the
+   column until it genuinely needs to scroll. */
+.report-prose table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin: 1rem 0;
+}
 .report-prose thead { border-bottom: 1px solid var(--border); }
 .report-prose th { text-align: left; font-weight: 600; color: var(--fg); padding: 0.5rem 0.75rem; vertical-align: top; }
 .report-prose td {
   padding: 0.55rem 0.75rem;
   vertical-align: top;
   border-top: 1px solid var(--border);
-  word-break: break-word;
+  /* overflow-wrap, not word-break: `word-break: break-word` makes every
+     character a soft-wrap opportunity for min-content sizing, so columns
+     collapsed and words split mid-syllable ("consisten/cy"). overflow-wrap
+     still prevents overflow from long unbreakable tokens (URLs). */
+  overflow-wrap: break-word;
 }
+/* A minimum column width, but only on the wide evaluation grids.
+
+   #3160 removed the cause of the mid-syllable collapse (`word-break` made every
+   character a soft-wrap opportunity) and gave the table its own scroller. What
+   it does not give a wide table is a floor: `max-width: 100%` still squeezes
+   the columns back down to share the reading column, so the eight-column STAR+R
+   grid settles at roughly 1.5 words per line. Readable, but only just, and rows
+   run ~239px tall because every cell wraps that hard.
+
+   The floor is on the CELLS, not the table: a table-level `min-width` has to be
+   sized for the worst case, and then the "Field | Value" tables inherit it and
+   scroll for nothing. A per-cell minimum scales with the column count by itself.
+
+   The `:has()` scope is what keeps it off the narrow tables. An unscoped floor
+   pads short columns too -- a `#` index goes from 9px to the full floor -- which
+   pushed three- and five-column tables into scrolling that they did not need.
+   Restricting it to tables that actually have a sixth column leaves every
+   smaller table byte-identical to today. Where `:has()` is unsupported the rule
+   is simply dropped and the table behaves as it does now.
+
+   Measured on report 047, first STAR+R row, at 390px and 1440px:
+     floor    grid scrollWidth   row height   avg words/line
+     none            965px          239px          1.53
+     200px          1600px          166px          2.48
+   Document scrollWidth stays equal to clientWidth at 390px throughout. */
+.report-prose table:has(tr > *:nth-child(6)) :is(td, th) { min-width: 200px; }
 .report-prose tbody tr:hover { background: color-mix(in srgb, var(--fg) 3%, transparent); }
 .report-prose img { border-radius: 0.5rem; }
 

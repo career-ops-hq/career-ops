@@ -1,6 +1,6 @@
 {
   "name": "@career-ops/web",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "description": "Official web experience for career-ops — local-first.",
   "scripts": {
@@ -19,7 +19,7 @@
     "clsx": "^2.1.1",
     "js-yaml": "^5.0.0",
     "lucide-react": "^1.8.0",
-    "next": "16.3.1",
+    "next": "16.3.3",
     "playwright-core": "^1.61.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
@@ -38,7 +38,7 @@
     "typescript": "^7.0.0"
   },
   "overrides": {
-    "postcss": "^8.5.18",
+    "postcss": "$postcss",
     "sharp": "^0.35.0"
   }
 }

@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.9.0](https://github.com/santifer/career-ops/compare/web-v0.8.1...web-v0.9.0) (2026-08-31)
+
+
+### Features
+
+* **web:** add a global "Back to Top" button ([#2821](https://github.com/santifer/career-ops/issues/2821)) ([e5e786b](https://github.com/santifer/career-ops/commit/e5e786b1116e6c5e4c5bd2020f3bc1f6e5dd2058))
+
+
+### Bug Fixes
+
+* **deps:** refresh web lockfile for Next update ([2ca6c00](https://github.com/santifer/career-ops/commit/2ca6c00fa9d18cb45caef99fea0b97b05971bf55))
+* **web:** honour language.modes_dir and language.output on web-triggered runs ([#3253](https://github.com/santifer/career-ops/issues/3253)) ([316906e](https://github.com/santifer/career-ops/commit/316906e64cc779d7580122b1d345c4c06f503a4b))
+* **web:** ignore nonfatal CLI stderr on clean run exit ([#1974](https://github.com/santifer/career-ops/issues/1974)) ([7f430ee](https://github.com/santifer/career-ops/commit/7f430eeab07b8bd514295fd02aec571c42699d1e))
+* **web:** only surface follow-ups that are actually due ([#2157](https://github.com/santifer/career-ops/issues/2157)) ([82e1055](https://github.com/santifer/career-ops/commit/82e10559beb8c80d8a50bcd456e1a893e8ba76f8))
+* **web:** regenerate the nested web/ lockfile on postcss bumps ([dba2a2e](https://github.com/santifer/career-ops/commit/dba2a2ed7e6317e5962be51c2fe680376221e0de))
+* **web:** show a cause-specific hint on job failure instead of an always-auth prompt ([#2158](https://github.com/santifer/career-ops/issues/2158)) ([d372908](https://github.com/santifer/career-ops/commit/d37290897f15f5284788c34cafcdabd3bd56f5bf))
+* **web:** show Via attribution for confidential employers ([f749939](https://github.com/santifer/career-ops/commit/f7499392ff75bf966693bdae535f785743ad300d))
+* **web:** stop evaluation tables collapsing to one word per line ([#3254](https://github.com/santifer/career-ops/issues/3254)) ([b3c1e12](https://github.com/santifer/career-ops/commit/b3c1e127e02c588aeefb8d02d14759706ecf1fc2))
+* **web:** stop tracing runtime data paths ([0a9d71f](https://github.com/santifer/career-ops/commit/0a9d71fe94286bfe26cdd99e5d7b3d50b27a948a))
+* **web:** tab label spacing and report table word-breaking ([#3160](https://github.com/santifer/career-ops/issues/3160)) ([102560b](https://github.com/santifer/career-ops/commit/102560bb904f5d107338719f8ce3bdce8d9399e5))
+* **web:** use next/link for decision-card report link ([#1931](https://github.com/santifer/career-ops/issues/1931)) ([e7b38b3](https://github.com/santifer/career-ops/commit/e7b38b3e086540060f5f5704afd55ea5fa4a4a3c))
+
+## [0.8.1](https://github.com/santifer/career-ops/compare/web-v0.8.0...web-v0.8.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **web:** classify a tracker-lock filesystem failure as itself, not as contention ([#3138](https://github.com/santifer/career-ops/issues/3138)) ([cf880eb](https://github.com/santifer/career-ops/commit/cf880eb55945019663e1b423499041097cb24ccd))
+* **web:** key company logos with the Unicode-aware normalizer so non-Latin names don't collide ([#3134](https://github.com/santifer/career-ops/issues/3134)) ([7b9f858](https://github.com/santifer/career-ops/commit/7b9f8588f57d3313265c49f37d2055bb533a7d08))
+* **web:** salvage truncated JSON at each prefix's own depth, not one global pad ([#3142](https://github.com/santifer/career-ops/issues/3142)) ([a308bc5](https://github.com/santifer/career-ops/commit/a308bc5cc96197f3ed84ac75493d75c45a770f02))
+* **web:** stop hiding an employer's whole board after one evaluation ([b56cde5](https://github.com/santifer/career-ops/commit/b56cde551d84ad5c28d7ea8b99edcc450a2b8b4c))
+* **web:** stop killing evaluate runs at 285s and misreporting the kill ([#3124](https://github.com/santifer/career-ops/issues/3124)) ([8a245ed](https://github.com/santifer/career-ops/commit/8a245edd677598aa539e74c7565be44b7676e4ab))
+
 ## [0.8.0](https://github.com/santifer/career-ops/compare/web-v0.7.1...web-v0.8.0) (2026-08-25)
 
 
