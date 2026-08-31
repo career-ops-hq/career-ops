@@ -1124,6 +1124,13 @@ search_queries:
 #   provider: beesite
 #   enabled: true
 #
+# - name: Garena                          # single-company; public zero-auth POST API
+#   careers_url: https://careers.garena.com/global   # auto-detects on careers.garena.com
+#   provider: garena                      # optional — careers.garena.com host also auto-detects
+#   garena:
+#     office: global                      # optional — sent as the API office parameter and reused in job URLs
+#   enabled: true
+#
 # -- Job boards / aggregators  (→ job_boards:; set provider: explicitly unless the host auto-detects) --
 #
 # - name: Amazon / AWS                    # global amazon.jobs board
@@ -1240,13 +1247,6 @@ search_queries:
 #   # Division path is required; one of:
 #   # it, engineering, marketing, sales, hr, logistics, finances, other
 #   careers_url: https://solid.jobs/public-api/offers/engineering
-#   enabled: true
-#
-# - name: Garena                          # single-company; public zero-auth POST API
-#   careers_url: https://careers.garena.com/global   # auto-detects on careers.garena.com
-#   provider: garena                      # optional — careers.garena.com host also auto-detects
-#   garena:
-#     office: global                      # optional — cosmetic only (reused in job URLs); doesn't filter results
 #   enabled: true
 #
 # -- Remote-job feeds  (→ job_boards:; set provider: plus any provider-specific fields) --

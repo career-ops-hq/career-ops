@@ -47,6 +47,7 @@ export function parseGarenaResponse(json, entry) {
     if (!j || typeof j.title !== 'string' || j.title.trim() === '') continue;
     const id = j.id != null ? String(j.id).trim() : '';
     if (!id) continue;
+    assertSafePathSegment('id', id);
 
     const locations = Array.isArray(j.tags && j.tags.location)
       ? j.tags.location.filter((l) => typeof l === 'string' && l.trim())
@@ -70,7 +71,19 @@ export function parseGarenaResponse(json, entry) {
 /** @param {{ garena?: { office?: string } }} entry */
 function resolveOffice(entry) {
   const office = entry && entry.garena && entry.garena.office;
-  return typeof office === 'string' && office.trim() ? office.trim() : DEFAULT_OFFICE;
+  const resolved = typeof office === 'string' && office.trim() ? office.trim() : DEFAULT_OFFICE;
+  assertSafePathSegment('office', resolved);
+  return resolved;
+}
+
+/**
+ * @param {string} name
+ * @param {string} value
+ */
+function assertSafePathSegment(name, value) {
+  if (value === '.' || value === '..') {
+    throw new Error(`garena: invalid ${name} path segment: ${JSON.stringify(value)}`);
+  }
 }
 
 /** @type {Provider} */
