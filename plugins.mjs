@@ -199,6 +199,12 @@ function findManifest(id) {
   return discoverPlugins(pluginRoots(ROOT), resolveSuccessorIds(ROOT)).find(m => m.id === id) || null;
 }
 
+function hasNullYamlKey(value) {
+  if (!value || typeof value !== 'object') return false;
+  if (Object.prototype.hasOwnProperty.call(value, 'null')) return true;
+  return Object.values(value).some(hasNullYamlKey);
+}
+
 /**
  * Parse an existing config/plugins.yml into the object setEnabled merges into.
  *
@@ -225,6 +231,7 @@ export function parsePluginConfig(raw, file) {
   // Absent is not unreadable: no file means a first enable, which is the whole
   // point of the function. Only an existing-but-unparseable file is a refusal.
   if (raw == null) return {};
+  if (String(raw).split('\n').every((line) => line.trim() === '' || line.trim().startsWith('#'))) return {};
   let cfg;
   try {
     cfg = yaml.load(raw);
@@ -237,8 +244,8 @@ export function parsePluginConfig(raw, file) {
   if (cfg == null) return {};   // empty file: same as absent
   // A scalar or a list parses cleanly and is still not a config. Spreading one
   // below would discard it just as silently as the empty object did.
-  if (typeof cfg !== 'object' || Array.isArray(cfg)) {
-    throw new Error(`${file} does not contain a YAML mapping — refusing to overwrite it. Nothing was changed.`);
+  if (typeof cfg !== 'object' || Array.isArray(cfg) || hasNullYamlKey(cfg)) {
+    throw new Error(`${file} does not contain a valid YAML mapping — refusing to overwrite it. Nothing was changed.`);
   }
   return cfg;
 }
@@ -343,7 +350,13 @@ function cmdTrust(args) {
 function cmdRemove(args) {
   const id = args[0];
   if (!id) { console.error('Usage: node plugins.mjs remove <id>'); process.exit(1); }
-  const dir = path.join(ROOT, 'plugins.local', id);
+  const localRoot = path.resolve(ROOT, 'plugins.local');
+  const dir = path.resolve(localRoot, id);
+  const rel = path.relative(localRoot, dir);
+  if (path.isAbsolute(id) || rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+    console.error(`Refusing to remove plugin outside plugins.local: ${id}`);
+    process.exit(1);
+  }
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
   removeLockEntry(ROOT, id);
   // The files and the lock entry are already gone, so a config problem must not

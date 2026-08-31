@@ -558,11 +558,26 @@ function checkPipelineFile() {
 // the user had actually switched on, and said nothing about why.
 //
 // Returns the config plus the parse error, so callers can tell the two apart.
+function hasNullYamlKey(value) {
+  if (!value || typeof value !== 'object') return false;
+  if (Object.prototype.hasOwnProperty.call(value, 'null')) return true;
+  return Object.values(value).some(hasNullYamlKey);
+}
+
 function readPluginConfigSync(root) {
   const cfgPath = join(root, 'config', 'plugins.yml');
   if (!existsSync(cfgPath)) return { cfg: {}, error: null };
   try {
-    return { cfg: yaml.load(readFileSync(cfgPath, 'utf8')) || {}, error: null };
+    const raw = readFileSync(cfgPath, 'utf8');
+    if (raw.split('\n').every((line) => line.trim() === '' || line.trim().startsWith('#'))) {
+      return { cfg: {}, error: null };
+    }
+    const cfg = yaml.load(raw);
+    if (cfg == null) return { cfg: {}, error: null };
+    if (typeof cfg !== 'object' || Array.isArray(cfg) || hasNullYamlKey(cfg)) {
+      return { cfg: {}, error: 'config/plugins.yml does not contain a valid YAML mapping' };
+    }
+    return { cfg, error: null };
   } catch (err) {
     return { cfg: {}, error: String(err.message).split('\n')[0] };
   }
@@ -791,11 +806,11 @@ function onboardingState(root) {
 
   let plugins = [];
   let pluginConfigError = null;
+  const { cfg, error } = readPluginConfigSync(root);
+  // Travels in the JSON so a consumer can tell "nothing enabled" from "the
+  // config did not parse" — the two used to be the same empty list.
+  pluginConfigError = error;
   try {
-    const { cfg, error } = readPluginConfigSync(root);
-    // Travels in the JSON so a consumer can tell "nothing enabled" from "the
-    // config did not parse" — the two used to be the same empty list.
-    pluginConfigError = error;
     plugins = discoverPlugins(pluginRoots(root)).map((m) => {
       const s = pluginStatus(m, cfg);
       return { id: m.id, hooks: m.hooks, enabled: s.enabled, missingEnv: s.missingEnv };

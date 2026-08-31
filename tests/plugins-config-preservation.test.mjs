@@ -158,6 +158,31 @@ test('doctor --json distinguishes an unparseable config from an empty one', () =
   }
 });
 
+test('doctor --json reports scalar and list plugin configs as invalid', () => {
+  for (const raw of ['42\n', '- item\n']) {
+    const bad = pluginSandbox(raw);
+    try {
+      const j = doctorJson(bad);
+      assert.ok(j.pluginConfigError, `doctor reported no config error for ${JSON.stringify(raw)}`);
+      assert.match(String(j.pluginConfigError), /mapping/i);
+    } finally {
+      rmSync(bad, { recursive: true, force: true, maxRetries: 10 });
+    }
+  }
+});
+
+test('doctor --json treats empty and comment-only plugin configs as empty', () => {
+  for (const raw of ['', '\n# just a comment\n']) {
+    const empty = pluginSandbox(raw);
+    try {
+      const j = doctorJson(empty);
+      assert.ok(!('pluginConfigError' in j), `comment-only config was reported as broken for ${JSON.stringify(raw)}`);
+    } finally {
+      rmSync(empty, { recursive: true, force: true, maxRetries: 10 });
+    }
+  }
+});
+
 test('and adds no new key on a healthy config', () => {
   // Existing --json consumers must see no change on the ordinary path; the
   // field is the signal that something IS wrong, so its presence has to mean
