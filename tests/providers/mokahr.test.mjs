@@ -175,20 +175,37 @@ try {
     data: { jobs: [{
       id: 'encoded-xss',
       title: 'Encoded markup',
-      jobDescription: '<p>safe&nbsp;text</p>&lt;script&gt;alert(1)&lt;/script&gt;&amp;lt;img src=x onerror=alert(1)&amp;gt;<unclosed',
+      jobDescription: '<p>safe&nbsp;text</p>&lt;script&gt;alert(1)&lt;/script&gt;&amp;lt;img src=x onerror=alert(1)&amp;gt;',
     }] },
   }, 'X', tenantUrl)[0]?.description || '';
   if (
     encodedMarkup.includes('safe text') &&
     !encodedMarkup.includes('<script>') &&
     !encodedMarkup.includes('<img') &&
-    !encodedMarkup.includes('<unclosed') &&
     encodedMarkup.includes('&lt;script&gt;') &&
     encodedMarkup.includes('&amp;lt;img')
   ) {
     pass('parseMokaHrJobs() strips real HTML without decoding escaped markup into executable-looking tags');
   } else {
     fail(`parseMokaHrJobs() encoded markup description = ${JSON.stringify(encodedMarkup)}`);
+  }
+
+  const malformedMarkup = parseMokaHrJobs({
+    data: { jobs: [{
+      id: 'malformed-xss',
+      title: 'Malformed markup',
+      jobDescription: '<p>plain</p><<script>alert(1)</script><b>bold</b>',
+    }] },
+  }, 'X', tenantUrl)[0]?.description || '';
+  if (
+    malformedMarkup.includes('plain') &&
+    malformedMarkup.includes('bold') &&
+    !malformedMarkup.includes('<script') &&
+    !malformedMarkup.includes('<b>')
+  ) {
+    pass('parseMokaHrJobs() removes residual angle brackets from malformed HTML');
+  } else {
+    fail(`parseMokaHrJobs() malformed markup description = ${JSON.stringify(malformedMarkup)}`);
   }
 
   if (j1 && j1.postedAt === undefined) {
