@@ -921,11 +921,16 @@ search_queries:
 # manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent. Examples for every built-in provider are below.
 
 # ── Built-in provider examples ────────────────────────────────────
-# Commented config for each provider in providers/. Copy a stanza into
-# tracked_companies, uncomment, and adjust. Auto-detected providers only
-# need careers_url; the rest need provider: plus any fields shown.
+# One commented stanza per provider in providers/. Uncomment one and adjust.
+# A provider whose host is auto-detected (company ATS or job board) only needs
+# careers_url; the rest need provider: plus any fields shown.
 #
-# -- Auto-detected company ATS (careers_url is enough) --
+# Grouped by which list the stanza belongs in: the "Company ATS" group goes
+# under tracked_companies: (one entry = one employer); the "Job boards /
+# aggregators" and "Remote-job feeds" groups go under job_boards: (one entry =
+# many employers).
+#
+# -- Company ATS  (→ tracked_companies:; careers_url is enough unless noted) --
 #
 # - name: Example BambooHR Co
 #   careers_url: https://exampleco.bamboohr.com/careers   # any *.bamboohr.com host
@@ -1069,12 +1074,6 @@ search_queries:
 #   api: https://jobs.exampleco.com                  # RMK board origin
 #   enabled: true
 #
-# - name: SolidJobs — Engineering
-#   # division path is required; one of:
-#   # it, engineering, marketing, sales, hr, logistics, finances, other
-#   careers_url: https://solid.jobs/public-api/offers/engineering
-#   enabled: true
-#
 # - name: Example join.com Co
 #   # join.com career page. Auto-detects any join.com/companies/<slug> URL and
 #   # parses the __NEXT_DATA__ JSON embedded in the server-rendered HTML — no
@@ -1085,7 +1084,46 @@ search_queries:
 #                            # is logged if the cap truncates real results)
 #   enabled: true
 #
-# -- Job boards / aggregators (no careers_url; set provider: explicitly) --
+# Single-employer career sites on their own dedicated provider. Most auto-detect
+# from the company's own host (provider: optional, shown for clarity); a few need
+# it named. All still go under tracked_companies:.
+#
+# - name: Dassault Systèmes              # single-company; Exalead card_search_api
+#   careers_url: https://www.3ds.com/careers/jobs   # auto-detects on *.3ds.com
+#   provider: dassault                    # optional — 3ds.com host also auto-detects
+#   enabled: true                         # ~445 English postings (zero-token XML)
+#
+# - name: Deutsche Bahn                   # single-company; db.jobs Avature front
+#   careers_url: https://db.jobs          # auto-detects; SSR search, paginated over HTTP
+#   provider: deutschebahn                # optional — db.jobs host also auto-detects
+#   enabled: true
+#
+# - name: Heckler & Koch                  # single-company; SSR Nuxt vacancy list
+#   careers_url: https://www.heckler-koch.com/de/Karriere/Stellenangebote
+#   provider: hecklerkoch                 # optional — heckler-koch.com host also auto-detects
+#   enabled: true
+#
+# - name: Rheinmetall                     # single-company; SSR Nuxt vacancy list
+#   careers_url: https://www.rheinmetall.com/en/career/vacancies
+#   provider: rheinmetall                 # optional — rheinmetall.com host also auto-detects
+#   enabled: true
+#
+# - name: OHB                             # Cornerstone OnDemand (csod) branded site
+#   careers_url: https://career-ohb.csod.com/ux/ats/careersite/4/home?c=career-ohb
+#   provider: csod                        # anonymous-JWT bootstrap, then public search API
+#   enabled: true
+#
+# - name: RENK                            # softgarden hosted job widget
+#   careers_url: https://renk-group.softgarden.io/de/widgets/jobs
+#   provider: softgarden
+#   enabled: true
+#
+# - name: Mercedes-Benz                   # BeeSite (milch & zucker) search backend
+#   careers_url: https://mercedes-benz-beesite-production-gjb.app.beesite.de   # the *.app.beesite.de host, not the branded front (jobs.mercedes-benz.com)
+#   provider: beesite
+#   enabled: true
+#
+# -- Job boards / aggregators  (→ job_boards:; set provider: explicitly unless the host auto-detects) --
 #
 # - name: Amazon / AWS                    # global amazon.jobs board
 #   provider: amazon
@@ -1196,42 +1234,14 @@ search_queries:
 #     categories: ["Software Engineering"]  # optional facet filter
 #   enabled: true
 #
-# - name: Dassault Systèmes              # single-company; Exalead card_search_api
-#   careers_url: https://www.3ds.com/careers/jobs   # auto-detects on *.3ds.com
-#   provider: dassault                    # optional — 3ds.com host also auto-detects
-#   enabled: true                         # ~445 English postings (zero-token XML)
-#
-# - name: Deutsche Bahn                   # single-company; db.jobs Avature front
-#   careers_url: https://db.jobs          # auto-detects; SSR search, paginated over HTTP
-#   provider: deutschebahn                # optional — db.jobs host also auto-detects
+# - name: SolidJobs — Engineering        # Polish multi-division job board
+#   # provider: solidjobs is optional — the solid.jobs host auto-detects.
+#   # Division path is required; one of:
+#   # it, engineering, marketing, sales, hr, logistics, finances, other
+#   careers_url: https://solid.jobs/public-api/offers/engineering
 #   enabled: true
 #
-# - name: Heckler & Koch                  # single-company; SSR Nuxt vacancy list
-#   careers_url: https://www.heckler-koch.com/de/Karriere/Stellenangebote
-#   provider: hecklerkoch                 # optional — heckler-koch.com host also auto-detects
-#   enabled: true
-#
-# - name: Rheinmetall                     # single-company; SSR Nuxt vacancy list
-#   careers_url: https://www.rheinmetall.com/en/career/vacancies
-#   provider: rheinmetall                 # optional — rheinmetall.com host also auto-detects
-#   enabled: true
-#
-# - name: OHB                             # Cornerstone OnDemand (csod) branded site
-#   careers_url: https://career-ohb.csod.com/ux/ats/careersite/4/home?c=career-ohb
-#   provider: csod                        # anonymous-JWT bootstrap, then public search API
-#   enabled: true
-#
-# - name: RENK                            # softgarden hosted job widget
-#   careers_url: https://renk-group.softgarden.io/de/widgets/jobs
-#   provider: softgarden
-#   enabled: true
-#
-# - name: Mercedes-Benz                   # BeeSite (milch & zucker) search backend
-#   careers_url: https://mercedes-benz-beesite-production-gjb.app.beesite.de   # the *.app.beesite.de host, not the branded front (jobs.mercedes-benz.com)
-#   provider: beesite
-#   enabled: true
-#
-# -- Remote-job feeds (no careers_url, no extra fields) --
+# -- Remote-job feeds  (→ job_boards:; set provider: plus any provider-specific fields) --
 # title_filter / location_filter defined above still apply.
 #
 # - name: Himalayas
