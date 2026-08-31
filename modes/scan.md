@@ -260,7 +260,11 @@ Levels are additive — they are executed in order, and results are merged and d
 
 8. **For each new verified offer that passes filters**:
    a. Add to the `pipeline.md` "Pending" section: `- [ ] {url} | {company} | {title}`
-   b. Record in `scan-history.tsv`: `{url}\t{date}\t{query_name}\t{title}\t{company}\tadded`
+   b. Record a row in `scan-history.tsv` with status `added`, in the full
+      12-column format documented under [Scan History](#scan-history) below —
+      the same shape `formatScanHistoryRow` / `appendToScanHistory` in `scan.mjs`
+      emit. Leave a trailing column empty when you have no value for it; never
+      write a short row.
 
 9. **Offers filtered by title**: record in `scan-history.tsv` with status `skipped_title`.
 10. **Duplicate offers**: record with status `skipped_dup`.
@@ -286,7 +290,10 @@ If a non-publicly accessible URL is found:
 
 ## Scan History
 
-`data/scan-history.tsv` tracks ALL seen URLs. Each row has nine tab-separated columns:
+`data/scan-history.tsv` tracks ALL seen URLs. Each row has twelve tab-separated
+columns, in writer order (`formatScanHistoryRow` in `scan.mjs`). Columns 8-12 are
+append-only additions; older rows may carry fewer columns and every reader indexes
+by position and tolerates their absence.
 
 | # | Column | Example | Notes |
 |---|--------|---------|-------|
@@ -294,21 +301,24 @@ If a non-publicly accessible URL is found:
 | 2 | `first_seen` | `2026-02-10` | ISO date the URL was first encountered |
 | 3 | `portal` | `Ashby — AI PM` | Query name from `portals.yml` |
 | 4 | `title` | `PM AI` | Job title as returned by the ATS |
-| 5 | `company` | `Acme` | Company name |
-| 6 | `status` | `added` | `added`, `skipped_dup`, `skipped_title`, `skipped_expired` |
+| 5 | `company` | `Acme` | Company name as returned by the ATS |
+| 6 | `status` | `added` | `added`, `skipped_dup`, `skipped_title`, `skipped_expired`, `skipped_error` |
 | 7 | `location` | `Remote — Europe` | Location string (may be empty); persisted for later auditing |
-| 8 | `jd_fingerprint` | `a3f1c8d2e4b70592` | 64-bit SimHash of the JD text (16 hex chars); empty when no usable body was available |
-| 9 | `postedAt` | `2026-02-08` | ISO date the role was originally posted (as reported by the ATS); empty when not available |
+| 8 | `fingerprint` | `a3f1c8d2e4b70592` | 64-bit SimHash of the JD text (16 hex chars); empty when no usable body was available |
+| 9 | `posted_at` | `2026-02-08` | ISO date the role was originally posted (as reported by the ATS); empty when not available |
+| 10 | `trust_score` | `72` | Posting-legitimacy score (#1743); empty unless the scanner flagged the posting (score < 100) |
+| 11 | `trust_flags` | `no_company_site,reposted` | Comma-joined legitimacy flags; empty when `trust_score` is empty |
+| 12 | `normalized_company` | `acme` | Canonical company key (#2093) — lowercased, punctuation/whitespace folded, legal-entity suffixes stripped — so repost/name matching never has to re-derive it |
 
 ```tsv
-url	first_seen	portal	title	company	status	location	jd_fingerprint	postedAt
-https://...	2026-02-10	Ashby — AI PM	PM AI	Acme	added	Remote	a3f1c8d2e4b70592	2026-02-08
+url	first_seen	portal	title	company	status	location	fingerprint	posted_at	trust_score	trust_flags	normalized_company
+https://...	2026-02-10	Ashby — AI PM	PM AI	Acme	added	Remote	a3f1c8d2e4b70592	2026-02-08			acme
 ```
 
 ### Filtering by posted date
 
 `first_seen` (column 2) is when **our scanner** spotted the URL — not when the
-employer actually posted it. That real posting date is column 9 (`postedAt`).
+employer actually posted it. That real posting date is column 9 (`posted_at`).
 To scope a scan to an absolute posting-date window (e.g. "only postings from
 the 17th to the 20th"), pass `--posted-after`/`--posted-before` on the CLI —
 both optional, both `YYYY-MM-DD`, both inclusive:
@@ -385,7 +395,7 @@ weekly, `--since 10` keeps a margin for a skipped run.
 
 ### Cross-listing detection
 
-The `jd_fingerprint` column exists to catch a specific double-submission hazard: the same role posted by the direct employer **and** by a recruitment agency, often with the employer name stripped from the agency listing. URL dedup and company+role dedup both miss this pair because the URLs and company names are different — but agencies rarely rewrite the requirements text, so a near-identical JD body is a reliable signal.
+The `fingerprint` column (column 8) exists to catch a specific double-submission hazard: the same role posted by the direct employer **and** by a recruitment agency, often with the employer name stripped from the agency listing. URL dedup and company+role dedup both miss this pair because the URLs and company names are different — but agencies rarely rewrite the requirements text, so a near-identical JD body is a reliable signal.
 
 How it works:
 
