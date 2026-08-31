@@ -449,3 +449,55 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
     fail(`#16 threw=${threw} atRisk=${JSON.stringify(atRisk)}`);
   }
 }
+
+// ── 17. A deliberate revert to an older upstream version is a local edit ──
+//    Case 14 filters out content a previous update installed. The bytes a user
+//    checks back out themselves are also bytes upstream published, so a filter
+//    that asks "did upstream ever ship this?" cannot tell the two apart and
+//    drops the revert from atRisk — overwriting it with no warning and no
+//    `.bak`, which is the protection #2337 exists for. Baselining on the last
+//    installed snapshot separates them by origin instead: a revert made after
+//    that snapshot sits between it and HEAD, so the diff still sees it (#3129).
+//
+//    Two updates are needed before the revert has anywhere to go: after a
+//    single update the install still holds v2, so checking v2 back out changes
+//    nothing and the case would pass without exercising anything.
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  replayUpdate(repo, '2');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v3\n');
+  replayUpdate(repo, '3');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v4\n');
+  // The install is on v3 and prefers the v2 wording.
+  writeFileSync(join(repo.dir, 'modes', 'pdf.md'), 'shipped pdf v2\n');
+  repo.g('commit', '-qam', 'prefer the v2 wording of pdf.md');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 1 && atRisk[0] === 'modes/pdf.md') {
+    pass('a committed revert to an older upstream version is reported (#3129)');
+  } else {
+    fail(`#17 expected ['modes/pdf.md'], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 18. ...and uncommitted, which is the sharper edge ──
+//    The detector diffs the worktree, so an uncommitted revert should be caught
+//    the same way — and it matters more: there is no local commit to recover
+//    the content from once the checkout overwrites it.
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  replayUpdate(repo, '2');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v3\n');
+  replayUpdate(repo, '3');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v4\n');
+  writeFileSync(join(repo.dir, 'modes', 'pdf.md'), 'shipped pdf v2\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 1 && atRisk[0] === 'modes/pdf.md') {
+    pass('an uncommitted revert to an older upstream version is reported too (#3129)');
+  } else {
+    fail(`#18 expected ['modes/pdf.md'], got ${JSON.stringify(atRisk)}`);
+  }
+}
