@@ -237,6 +237,10 @@ const EXEMPT = new Map([
   // Asserts that a bash-embedded node snippet reads its input file via ITS OWN
   // argv[1] (injection safety, not a main-guard); the literal lives in strings.
   ['tests/batch-runner-jd-prefetch.test.mjs', 'asserts another script\u2019s argv[1] usage in strings'],
+  // Spawns lib/api.mjs via `node -e` to test it under specific env vars; the
+  // -e script imports the module from ITS OWN argv[1], the URL passed as the
+  // next execFile array element. Not this file's main-guard.
+  ['tests/plugins/h1b-sponsor.test.mjs', 'imports a module via a spawned child\u2019s own argv[1] in -e scripts'],
 ]);
 
 function entryRefViolations(src) {

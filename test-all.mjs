@@ -14632,8 +14632,8 @@ try {
   // Bundled plugins: discovery + import coverage + static deny-list + firewall.
   const bundled = discoverPlugins([join(ROOT, 'plugins')]);
   const ids = bundled.map(p => p.id).sort().join(',');
-  if (ids === 'apify,gmail,notion') pass('all 3 bundled reference plugins discovered (apify, gmail, notion)');
-  else fail(`bundled plugins = "${ids}" (expected apify,gmail,notion)`);
+  if (ids === 'apify,gmail,h1b-sponsor,notion') pass('all 4 bundled plugins discovered (apify, gmail, h1b-sponsor, notion)');
+  else fail(`bundled plugins = "${ids}" (expected apify,gmail,h1b-sponsor,notion)`);
 
   let importOk = bundled.length > 0;
   for (const p of bundled) {
