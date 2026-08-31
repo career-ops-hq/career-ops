@@ -1,5 +1,51 @@
 # Changelog
 
+## [1.31.0](https://github.com/santifer/career-ops/compare/career-ops-v1.30.0...career-ops-v1.31.0) (2026-08-31)
+
+
+### Features
+
+* **application-answers:** read the evaluation's Block H draft answers ([778d5bf](https://github.com/santifer/career-ops/commit/778d5bf15ceccbffab13284b7e5752d68aafd44e))
+* **cv:** add "text" output_format — tailored markdown CV, no PDF ([#3342](https://github.com/santifer/career-ops/issues/3342)) ([13de717](https://github.com/santifer/career-ops/commit/13de7175b176742573f31ca8221fa46acc3a92da))
+* **cv:** ATS-friendliness check — score a generated CV for parseability ([#2064](https://github.com/santifer/career-ops/issues/2064)) ([6d4e4c7](https://github.com/santifer/career-ops/commit/6d4e4c75b1a60a2e907c648e667dea4d4d2b2a9d))
+* external data directory via CAREER_OPS_ROOT ([#524](https://github.com/santifer/career-ops/issues/524)) — lands [#1444](https://github.com/santifer/career-ops/issues/1444) ([9159ec6](https://github.com/santifer/career-ops/commit/9159ec6b34cdd1a3226d03c10d6f34c370175e56))
+* **hired-wall:** a quiet chevron with the exact remainder says the strip continues ([87e3188](https://github.com/santifer/career-ops/commit/87e3188712ff5dda72013bb6ceffd9ca333d5bd7))
+* **hired-wall:** the audit line speaks to the person mid-search ([c74dfc3](https://github.com/santifer/career-ops/commit/c74dfc32a83e1c36aa3e264f887dc97efea6b0be))
+* **hired-wall:** the badge is the title — self-identifying label, own share line, tighter audit line ([7280a48](https://github.com/santifer/career-ops/commit/7280a48731f337563435c756e2ec0754b5115d4c))
+* **portals:** profession-agnostic examples in portals.example.yml ([b8614f8](https://github.com/santifer/career-ops/commit/b8614f802a67bf6e7d2fcc402435c14464e5c005))
+* **providers:** JobsDB Hong Kong via the existing jobstreet provider ([6fa8279](https://github.com/santifer/career-ops/commit/6fa8279797e3b4dc90dfab38dad62359b1d0dc65))
+* **web:** add a global "Back to Top" button ([#2821](https://github.com/santifer/career-ops/issues/2821)) ([e5e786b](https://github.com/santifer/career-ops/commit/e5e786b1116e6c5e4c5bd2020f3bc1f6e5dd2058))
+* wire reply-watch into status-log.tsv ([#1582](https://github.com/santifer/career-ops/issues/1582)) ([f88df83](https://github.com/santifer/career-ops/commit/f88df83934503418d77a8cbce4dc5942c5e18bb8))
+
+
+### Bug Fixes
+
+* **coverage:** exclude the local-paths declaration file so a fork can commit it ([280044e](https://github.com/santifer/career-ops/commit/280044e1fe14e9b25f067324bf7a87ba9828649f))
+* **cv-sync-check:** resolve prompt paths from CODE_ROOT instead of an undefined projectRoot ([d6df7a2](https://github.com/santifer/career-ops/commit/d6df7a290581d186f46f94969c1b52fa1a68f8aa))
+* **cv-sync-check:** stop allowFail from excusing an uncaught crash ([a19da42](https://github.com/santifer/career-ops/commit/a19da42dc6f71c17f52d5b907ea7980429576851))
+* **dashboard:** read job URLs from the tracker before the legacy enrichment tiers ([c124fb6](https://github.com/santifer/career-ops/commit/c124fb668e594f92d78d6ff8d178a48ffa90f908))
+* **deps:** refresh web lockfile for Next update ([2ca6c00](https://github.com/santifer/career-ops/commit/2ca6c00fa9d18cb45caef99fea0b97b05971bf55))
+* **doctor:** survive a null entry in installed_plugins.json ([0a137a1](https://github.com/santifer/career-ops/commit/0a137a14c936d83a81f537661417e04ada2e37a5))
+* **harness:** make the syntax gate recursive, shared with npm run lint ([43f846c](https://github.com/santifer/career-ops/commit/43f846ca49587a8507af2db5c8af76d7a11ba7b5))
+* **hired-share:** suggest outcome.mjs's real syntax in the no-Hired-row error ([4a69583](https://github.com/santifer/career-ops/commit/4a69583146723b5dd753185ae0d0ca029e03534c))
+* **providers/icims:** fill a missing location from the posting's JSON-LD ([20ec88f](https://github.com/santifer/career-ops/commit/20ec88fdacec63a9a3d29ca3b5ed9c07e33dfaea))
+* **scan:** Level 1 runs Playwright sequentially, matching the shared-session rule ([77eebc9](https://github.com/santifer/career-ops/commit/77eebc95877d993fddca4c30aeee7eeff439bc65))
+* **scan:** opt-in word:/stem: anchoring for content_filter keywords ([ce3ac16](https://github.com/santifer/career-ops/commit/ce3ac16bdd2438f5f4eea05ec8f03f8305e7f36c))
+* **tests:** scope the profile pin and move the last hand-registered suites ([0bcd0fa](https://github.com/santifer/career-ops/commit/0bcd0fae30165b8c13d6b7fd6d28eda8e2fe367a))
+* **update-system:** refuse to run when the install is not its own git toplevel ([aecae53](https://github.com/santifer/career-ops/commit/aecae537fe7cf52b1da92ff05aaa5976cf85d18f))
+* **updater:** parse git status with -z so quoted paths and renames match real files ([79152e7](https://github.com/santifer/career-ops/commit/79152e732ecddf587d6f4011903139b9fd06c612))
+* **verify-pipeline:** recover a report number from a link target written with backslashes ([8177808](https://github.com/santifer/career-ops/commit/81778084cff5341a62026a936ccf616821a524de))
+* **web:** honour language.modes_dir and language.output on web-triggered runs ([#3253](https://github.com/santifer/career-ops/issues/3253)) ([316906e](https://github.com/santifer/career-ops/commit/316906e64cc779d7580122b1d345c4c06f503a4b))
+* **web:** ignore nonfatal CLI stderr on clean run exit ([#1974](https://github.com/santifer/career-ops/issues/1974)) ([7f430ee](https://github.com/santifer/career-ops/commit/7f430eeab07b8bd514295fd02aec571c42699d1e))
+* **web:** only surface follow-ups that are actually due ([#2157](https://github.com/santifer/career-ops/issues/2157)) ([82e1055](https://github.com/santifer/career-ops/commit/82e10559beb8c80d8a50bcd456e1a893e8ba76f8))
+* **web:** regenerate the nested web/ lockfile on postcss bumps ([dba2a2e](https://github.com/santifer/career-ops/commit/dba2a2ed7e6317e5962be51c2fe680376221e0de))
+* **web:** show a cause-specific hint on job failure instead of an always-auth prompt ([#2158](https://github.com/santifer/career-ops/issues/2158)) ([d372908](https://github.com/santifer/career-ops/commit/d37290897f15f5284788c34cafcdabd3bd56f5bf))
+* **web:** show Via attribution for confidential employers ([f749939](https://github.com/santifer/career-ops/commit/f7499392ff75bf966693bdae535f785743ad300d))
+* **web:** stop evaluation tables collapsing to one word per line ([#3254](https://github.com/santifer/career-ops/issues/3254)) ([b3c1e12](https://github.com/santifer/career-ops/commit/b3c1e127e02c588aeefb8d02d14759706ecf1fc2))
+* **web:** stop tracing runtime data paths ([0a9d71f](https://github.com/santifer/career-ops/commit/0a9d71fe94286bfe26cdd99e5d7b3d50b27a948a))
+* **web:** tab label spacing and report table word-breaking ([#3160](https://github.com/santifer/career-ops/issues/3160)) ([102560b](https://github.com/santifer/career-ops/commit/102560bb904f5d107338719f8ce3bdce8d9399e5))
+* **web:** use next/link for decision-card report link ([#1931](https://github.com/santifer/career-ops/issues/1931)) ([e7b38b3](https://github.com/santifer/career-ops/commit/e7b38b3e086540060f5f5704afd55ea5fa4a4a3c))
+
 ## [1.30.0](https://github.com/santifer/career-ops/compare/career-ops-v1.29.0...career-ops-v1.30.0) (2026-08-27)
 
 
