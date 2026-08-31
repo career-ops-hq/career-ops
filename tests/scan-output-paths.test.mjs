@@ -254,8 +254,11 @@ function entries(pipelinePath) {
   const dir = mkdtempSync(join(tmpdir(), 'scan-outpaths-import-'));
   try {
     const scanUrl = pathToFileURL(join(ROOT, 'scan.mjs')).href;
+    const childEnv = { ...process.env };
+    for (const name of SCANNER_PATH_VARS) delete childEnv[name];
     execFileSync(NODE, ['--input-type=module', '-e', `import(${JSON.stringify(scanUrl)})`], {
       cwd: dir,
+      env: { ...childEnv, CAREER_OPS_ROOT: dir },
       encoding: 'utf-8',
     });
     if (!existsSync(join(dir, 'data'))) {
