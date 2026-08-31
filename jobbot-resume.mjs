@@ -263,7 +263,7 @@ export function renderResume({ workspace = ROOT, request, tailoring, outputRoot,
   const fact = run(process.execPath, [join(root, 'verify-cv-facts.mjs'), htmlPath, '--json'], root);
   const factResult = JSON.parse(fact.stdout);
   if (!['pass', 'warn'].includes(factResult.verdict)) throw new Error('Career Ops fact gate did not pass');
-  const rendered = run(process.execPath, [join(root, 'generate-pdf.mjs'), htmlPath, pdfPath, `--format=${request.render_policy.page_format}`, '--allow-reorder', `--max-pages=${request.render_policy.max_pages}`], root);
+  const rendered = run(process.execPath, [join(root, 'generate-pdf.mjs'), htmlPath, pdfPath, `--format=${request.render_policy.page_format}`, '--allow-reorder', `--max-pages=${request.render_policy.max_pages}`, `--jobbot-staging-root=${outputBase}`], root);
   const pdf = readFileSync(pdfPath);
   if (!pdf.subarray(0, 5).equals(Buffer.from('%PDF-'))) throw new Error('renderer did not produce a PDF');
   const pageCount = Number(rendered.stdout.match(/Pages:\s*(\d+)/)?.[1]);

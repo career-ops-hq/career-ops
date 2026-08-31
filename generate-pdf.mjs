@@ -1089,7 +1089,7 @@ async function generatePDF() {
   const args = process.argv.slice(2);
 
   // Parse arguments
-  let inputPath, outputPath, format = 'a4', reportNum = '', allowReorder = false;
+  let inputPath, outputPath, format = 'a4', reportNum = '', allowReorder = false, jobbotStagingRoot = '';
   let maxPages = 2, maxPagesInput = '2', strictPages = false, batchManifestPath = null;
 
   for (const arg of args) {
@@ -1106,6 +1106,8 @@ async function generatePDF() {
       allowReorder = true;
     } else if (arg === '--strict-pages') {
       strictPages = true;
+    } else if (arg.startsWith('--jobbot-staging-root=')) {
+      jobbotStagingRoot = arg.slice('--jobbot-staging-root='.length);
     } else if (!inputPath) {
       inputPath = arg;
     } else if (!outputPath) {
@@ -1157,19 +1159,27 @@ async function generatePDF() {
 
   inputPath = resolve(inputPath);
   outputPath = resolve(outputPath);
+  const renderBoundary = jobbotStagingRoot ? resolve(realpathSync(jobbotStagingRoot)) : workspaceRoot;
 
   // Path-traversal guard: keep the PDF write inside the tracker-owned workspace
   // so a crafted output argument cannot escape into another user's directory.
   // Anchored to the workspace root, not process.cwd(): running the script
   // from outside the repo used to falsely refuse in-repo outputs — and, worse,
   // would have allowed writes anywhere under an arbitrary cwd.
-  try {
-    assertInsideWorkspace(inputPath, 'input');
-  } catch (err) {
-    console.error(`Refusing to write the PDF outside the tracker workspace: ${err.message}`);
-    process.exit(1);
+  if (jobbotStagingRoot) {
+    if (!isWorkspaceOutputPath(inputPath, renderBoundary)) {
+      console.error(`Refusing to read HTML outside the JobBot staging root: ${inputPath}`);
+      process.exit(1);
+    }
+  } else {
+    try {
+      assertInsideWorkspace(inputPath, 'input');
+    } catch (err) {
+      console.error(`Refusing to write the PDF outside the tracker workspace: ${err.message}`);
+      process.exit(1);
+    }
   }
-  if (!isWorkspaceOutputPath(outputPath, workspaceRoot)) {
+  if (!isWorkspaceOutputPath(outputPath, renderBoundary)) {
     console.error(`Refusing to write the PDF outside the tracker workspace: ${outputPath}`);
     process.exit(1);
   }
@@ -1220,6 +1230,8 @@ async function generatePDF() {
     inputPath,
     maxPages,
     strictPages,
+    publishManifest: !jobbotStagingRoot,
+    workspaceRoot: renderBoundary,
     styleTokens: readStyleTokens(resolve(workspaceRoot, 'config', 'profile.yml')),
   });
 }
@@ -1476,6 +1488,7 @@ export async function inlineLocalFonts(html) {
  *   workspaceRoot?: string,
  *   maxPages?: number,
  *   strictPages?: boolean,
+ *   publishManifest?: boolean,
  *   launchBrowser?: (options: {headless: boolean}) => Promise<import('playwright').Browser>
  * }} [opts]
  * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
@@ -1627,12 +1640,14 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
     console.log(`📊 Pages: ${pageCount}`);
     console.log(`📦 Size: ${(pdfBuffer.length / 1024).toFixed(1)} KB`);
 
-    try {
-      updatePDFManifest(reportNum, outputPath, inputPath, format);
-      console.log(`🔗 Manifest: data/pdf-index.tsv updated${reportNum ? ` (report ${reportNum})` : ' (no --report given)'}`);
-    } catch (err) {
-      // The PDF itself succeeded — never fail the run over manifest bookkeeping.
-      console.error(`⚠️  Manifest update failed: ${err.message}`);
+    if (opts.publishManifest !== false) {
+      try {
+        updatePDFManifest(reportNum, outputPath, inputPath, format);
+        console.log(`🔗 Manifest: data/pdf-index.tsv updated${reportNum ? ` (report ${reportNum})` : ' (no --report given)'}`);
+      } catch (err) {
+        // The PDF itself succeeded — never fail the run over manifest bookkeeping.
+        console.error(`⚠️  Manifest update failed: ${err.message}`);
+      }
     }
 
     return { outputPath, pageCount, size: pdfBuffer.length };

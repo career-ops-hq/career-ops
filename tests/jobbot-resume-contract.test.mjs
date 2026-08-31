@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtempSync } from 'node:fs';
@@ -96,6 +97,21 @@ test('render uses existing builder, fact gate, and renderer and emits a path-fre
   assert.equal(JSON.stringify(receipt).includes(root), false);
   assert.equal(JSON.stringify(receipt).includes(outputRoot), false);
   assert.equal(calls.some(args => args.includes('--report=7')), false);
+  assert.equal(calls.some(args => args.includes(`--jobbot-staging-root=${realpathSync(outputRoot)}`)), true);
+});
+
+test('checked-in ATS template accepts the JobBot candidate contract', () => {
+  const root = mkdtempSync(join(tmpdir(), 'careerops-ats-template-'));
+  const input = join(root, 'resume-input.json');
+  const output = join(root, 'resume.html');
+  writeFileSync(input, JSON.stringify({
+    lang: 'en', page_format: 'a4',
+    candidate: { name: 'Test Candidate', email: 'test@example.invalid', location: 'Singapore' },
+    summary: 'Verified summary.', competencies: [], experience: [], projects: [], education: [], certifications: [], awards: [], skills: [],
+  }));
+  const result = spawnSync(process.execPath, [join(import.meta.dirname, '..', 'build-cv-html.mjs'), input, output, join(import.meta.dirname, '..', 'templates/ats/cv-template.ats.html')], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(readFileSync(output, 'utf8').includes('{{'), false);
 });
 
 test('render refuses changed source bytes before running a command', () => {
