@@ -17,6 +17,18 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const MAX_CV_BYTES = 128 * 1024;
 const MAX_ROLE_CONTEXT_BYTES = 16 * 1024;
 
+export function listResumeCandidates({ workspace = ROOT } = {}) {
+  const root = realpathSync(workspace);
+  const trackerPath = join(root, 'data', 'applications.md');
+  if (!existsSync(trackerPath)) throw new Error('required Career Ops file is missing: data/applications.md');
+  return {
+    version: 'careerops.resume.candidates@1',
+    candidates: parseTrackerRows(readFileSync(trackerPath, 'utf8'))
+      .filter(row => row.reportPath && row.reportNum)
+      .map(row => ({ report_id: row.reportNum, company: row.company, role: row.role, status: row.status })),
+  };
+}
+
 const sha256 = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`;
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
@@ -80,7 +92,7 @@ function defaultFormat(report) {
   return /\b(united states|usa|u\.s\.|canada|california|new york|texas|washington)\b/.test(location) ? 'letter' : 'a4';
 }
 
-export function buildResumeRequest({ workspace = ROOT, query, pageFormat = null }) {
+export function buildResumeRequest({ workspace = ROOT, query = null, reportId = null, pageFormat = null }) {
   const root = realpathSync(workspace);
   const trackerPath = join(root, 'data', 'applications.md');
   const cvPath = join(root, 'cv.md');
@@ -89,7 +101,10 @@ export function buildResumeRequest({ workspace = ROOT, query, pageFormat = null 
   for (const path of [trackerPath, cvPath, profilePath, rulesPath]) {
     if (!existsSync(path)) throw new Error(`required Career Ops file is missing: ${path.slice(root.length + 1)}`);
   }
-  const matches = findMatches(parseTrackerRows(readFileSync(trackerPath, 'utf8')), query);
+  const rows = parseTrackerRows(readFileSync(trackerPath, 'utf8'));
+  const matches = reportId === null
+    ? findMatches(rows, query)
+    : rows.filter(row => String(row.reportNum) === String(reportId));
   if (matches.length !== 1) throw new Error(matches.length ? 'resume query is ambiguous' : 'resume query matched no evaluated application');
   const selected = matches[0];
   const reportPath = resolveReport(root, selected.reportPath);
@@ -268,7 +283,7 @@ export function renderResume({ workspace = ROOT, request, tailoring, outputKey =
 }
 
 function usage() {
-  return 'Usage: node jobbot-resume.mjs request --query <report-or-role> [--format a4|letter]\n       node jobbot-resume.mjs render --request <json> --tailoring <json> --output-key <uuid>';
+  return 'Usage: node jobbot-resume.mjs candidates\n       node jobbot-resume.mjs request (--query <report-or-role>|--report <id>) [--format a4|letter]\n       node jobbot-resume.mjs render --request <json> --tailoring <json> --output-key <uuid>';
 }
 
 function option(args, name) {
@@ -278,10 +293,15 @@ function option(args, name) {
 
 function main(args = process.argv.slice(2)) {
   try {
+    if (args[0] === 'candidates') {
+      console.log(JSON.stringify(listResumeCandidates()));
+      return;
+    }
     if (args[0] === 'request') {
       const query = option(args, '--query');
-      if (!query) throw new Error('--query is required');
-      console.log(JSON.stringify(buildResumeRequest({ query, pageFormat: option(args, '--format') ?? null })));
+      const reportId = option(args, '--report');
+      if ((query ? 1 : 0) + (reportId ? 1 : 0) !== 1) throw new Error('exactly one of --query or --report is required');
+      console.log(JSON.stringify(buildResumeRequest({ query, reportId, pageFormat: option(args, '--format') ?? null })));
       return;
     }
     if (args[0] === 'render') {

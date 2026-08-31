@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtempSync } from 'node:fs';
 import test from 'node:test';
-import { buildResumeRequest, renderResume, validateTailoringResult } from '../jobbot-resume.mjs';
+import { buildResumeRequest, listResumeCandidates, renderResume, validateTailoringResult } from '../jobbot-resume.mjs';
 
 function workspace() {
   const root = mkdtempSync(join(tmpdir(), 'careerops-resume-'));
@@ -45,6 +45,17 @@ test('request is deterministic, bounded, versioned, and path-free', () => {
   assert.equal(first.role_context.trust, 'external_untrusted');
   assert.equal(first.render_policy.template, 'ats');
   assert.equal(JSON.stringify(first).includes(root), false);
+});
+
+test('candidate list is path-free and exact report selection is deterministic', () => {
+  const root = workspace();
+  const listed = listResumeCandidates({ workspace: root });
+  assert.deepEqual(listed, {
+    version: 'careerops.resume.candidates@1',
+    candidates: [{ report_id: '7', company: 'Example Labs', role: 'Platform Engineer', status: 'EVALUATED' }],
+  });
+  assert.equal(JSON.stringify(listed).includes(root), false);
+  assert.equal(buildResumeRequest({ workspace: root, reportId: '7' }).opportunity.report_id, '7');
 });
 
 test('request refuses an ambiguous or unevaluated identity', () => {
