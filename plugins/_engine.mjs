@@ -346,7 +346,8 @@ export function pluginRoots(root) {
  * @returns {{ enabled: boolean, configured: boolean, missingEnv: string[] }}
  */
 export function pluginStatus(manifest, cfg) {
-  const entry = cfg?.plugins?.[manifest.id];
+  const plugins = (cfg?.plugins && typeof cfg.plugins === 'object' && !Array.isArray(cfg.plugins)) ? cfg.plugins : {};
+  const entry = plugins[manifest.id];
   const configured = entry?.enabled === true;
   const missingEnv = manifest.requiredEnv.filter(name => !process.env[name]);
   return { enabled: configured && missingEnv.length === 0, configured, missingEnv };
@@ -359,7 +360,8 @@ export function pluginStatus(manifest, cfg) {
  * @param {object} cfg
  */
 export function pluginSettings(id, cfg) {
-  const entry = cfg?.plugins?.[id];
+  const plugins = (cfg?.plugins && typeof cfg.plugins === 'object' && !Array.isArray(cfg.plugins)) ? cfg.plugins : {};
+  const entry = plugins[id];
   if (!entry || typeof entry !== 'object') return {};
   const { enabled, ...rest } = entry;
   return rest;

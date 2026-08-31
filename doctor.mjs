@@ -577,6 +577,9 @@ function readPluginConfigSync(root) {
     if (typeof cfg !== 'object' || Array.isArray(cfg) || hasNullYamlKey(cfg)) {
       return { cfg: {}, error: 'config/plugins.yml does not contain a valid YAML mapping' };
     }
+    if (cfg.plugins != null && (typeof cfg.plugins !== 'object' || Array.isArray(cfg.plugins) || hasNullYamlKey(cfg.plugins))) {
+      return { cfg: {}, error: 'config/plugins.yml plugins section must be a YAML mapping' };
+    }
     return { cfg, error: null };
   } catch (err) {
     return { cfg: {}, error: String(err.message).split('\n')[0] };
@@ -586,13 +589,9 @@ function readPluginConfigSync(root) {
 // Plugin layer health: list discovered plugins + whether each enabled one's keys
 // are present. WARN-not-FAIL so a half-configured plugin never blocks setup.
 function checkPlugins(root) {
-  let manifests;
-  try { manifests = discoverPlugins(pluginRoots(root)); } catch { return { pass: true, label: 'Plugins: none' }; }
-  if (manifests.length === 0) return { pass: true, label: 'Plugins: none installed' };
   const { cfg, error: cfgError } = readPluginConfigSync(root);
-  // Reported before the per-plugin lines, because when the config did not parse
-  // every one of those lines is derived from an empty object and says "off"
-  // regardless of what the user configured.
+  // Report before discovery: a broken config is useful doctor output even if
+  // plugin discovery itself fails or finds no manifests.
   if (cfgError) {
     return {
       warn: true,
@@ -600,6 +599,9 @@ function checkPlugins(root) {
       fix: ['Fix the YAML in config/plugins.yml. Until then `plugins.mjs enable/disable` will refuse to write to it.'],
     };
   }
+  let manifests;
+  try { manifests = discoverPlugins(pluginRoots(root)); } catch { return { pass: true, label: 'Plugins: none' }; }
+  if (manifests.length === 0) return { pass: true, label: 'Plugins: none installed' };
   const lines = [];
   const fixes = [];
   for (const m of manifests) {

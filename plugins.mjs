@@ -247,6 +247,9 @@ export function parsePluginConfig(raw, file) {
   if (typeof cfg !== 'object' || Array.isArray(cfg) || hasNullYamlKey(cfg)) {
     throw new Error(`${file} does not contain a valid YAML mapping — refusing to overwrite it. Nothing was changed.`);
   }
+  if (cfg.plugins != null && (typeof cfg.plugins !== 'object' || Array.isArray(cfg.plugins) || hasNullYamlKey(cfg.plugins))) {
+    throw new Error(`${file} plugins section must be a YAML mapping — refusing to overwrite it. Nothing was changed.`);
+  }
   return cfg;
 }
 
@@ -255,7 +258,7 @@ export function parsePluginConfig(raw, file) {
 function setEnabled(id, on, settings) {
   const file = path.join(ROOT, 'config', 'plugins.yml');
   const cfg = parsePluginConfig(existsSync(file) ? readFileSync(file, 'utf8') : null, file);
-  if (!cfg.plugins || typeof cfg.plugins !== 'object') cfg.plugins = {};
+  if (!cfg.plugins || typeof cfg.plugins !== 'object' || Array.isArray(cfg.plugins)) cfg.plugins = {};
   const prev = (cfg.plugins[id] && typeof cfg.plugins[id] === 'object') ? cfg.plugins[id] : {};
   cfg.plugins[id] = { ...prev, ...(settings || {}), enabled: on };
   mkdirSync(path.join(ROOT, 'config'), { recursive: true });

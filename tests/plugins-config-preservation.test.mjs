@@ -97,6 +97,16 @@ test('valid YAML that is not a mapping is refused too', () => {
   }
 });
 
+test('a plugins section that is not a mapping is refused too', () => {
+  for (const raw of ['plugins: []\n', 'plugins: enabled\n', 'plugins:\n  : malformed\n']) {
+    assert.throws(
+      () => parsePluginConfig(raw, FILE),
+      /plugins section.*mapping|valid YAML mapping/i,
+      `a non-mapping plugins section (${JSON.stringify(raw)}) was accepted`,
+    );
+  }
+});
+
 // ── doctor reports it, rather than reading it as "nothing enabled" ──────────
 //
 // The same swallow lived in doctor.mjs's readPluginConfigSync, which returned
@@ -165,6 +175,19 @@ test('doctor --json reports scalar and list plugin configs as invalid', () => {
       const j = doctorJson(bad);
       assert.ok(j.pluginConfigError, `doctor reported no config error for ${JSON.stringify(raw)}`);
       assert.match(String(j.pluginConfigError), /mapping/i);
+    } finally {
+      rmSync(bad, { recursive: true, force: true, maxRetries: 10 });
+    }
+  }
+});
+
+test('doctor --json reports scalar and list plugin sections as invalid', () => {
+  for (const raw of ['plugins: 42\n', 'plugins:\n  - item\n']) {
+    const bad = pluginSandbox(raw);
+    try {
+      const j = doctorJson(bad);
+      assert.ok(j.pluginConfigError, `doctor reported no config error for ${JSON.stringify(raw)}`);
+      assert.match(String(j.pluginConfigError), /plugins section.*mapping/i);
     } finally {
       rmSync(bad, { recursive: true, force: true, maxRetries: 10 });
     }
