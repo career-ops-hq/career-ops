@@ -427,6 +427,7 @@ try {
     // drops them wherever they occur, root included.
     'data',
     'reports',
+    '.update-lock',
     '.career-ops-web',
     '.playwright-mcp',
     '.agents',
