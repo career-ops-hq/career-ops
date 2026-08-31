@@ -1231,6 +1231,16 @@ search_queries:
 #   provider: beesite
 #   enabled: true
 #
+# - name: Example JSON-LD company         # generic schema.org JobPosting reader — NEVER auto-detected,
+#                                          # only activates with an explicit `provider: jsonld` below.
+#                                          # Point careers_url at a page (an https, public host — no IP
+#                                          # literal / localhost / .internal) that still embeds
+#                                          # <script type="application/ld+json"> JobPosting markup for SEO.
+#                                          # One GET, no pagination, no auth.
+#   careers_url: https://example.com/careers
+#   provider: jsonld                      # required — this provider is opt-in only, no host auto-detects it
+#   enabled: true
+#
 # -- Remote-job feeds (no careers_url, no extra fields) --
 # title_filter / location_filter defined above still apply.
 #
