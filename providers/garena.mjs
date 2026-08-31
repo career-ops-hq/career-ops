@@ -55,7 +55,7 @@ export function parseGarenaResponse(json, entry) {
     /** @type {{title: string, url: string, company: string, location: string, description?: string}} */
     const job = {
       title: j.title.trim(),
-      url: `https://${HOST}/${office}/careers/${id}`,
+      url: `https://${HOST}/${encodeURIComponent(office)}/careers/${encodeURIComponent(id)}`,
       company,
       location: locations.join(', '),
     };

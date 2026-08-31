@@ -55,6 +55,10 @@ try {
   if (withOffice[0].url === 'https://careers.garena.com/sg/careers/J02058270') pass('parseGarenaResponse honors entry.garena.office in the job URL');
   else fail(`withOffice[0].url = ${JSON.stringify(withOffice[0]?.url)}`);
 
+  const withUnsafeSegments = parseGarenaResponse({ jobs: [{ id: 'J/7', title: 'Unsafe', tags: {} }] }, { name: 'Garena', garena: { office: 'sg team' } });
+  if (withUnsafeSegments[0].url === 'https://careers.garena.com/sg%20team/careers/J%2F7') pass('parseGarenaResponse URL-encodes office and id path segments');
+  else fail(`withUnsafeSegments[0].url = ${JSON.stringify(withUnsafeSegments[0]?.url)}`);
+
   // Multiple locations join with ", ".
   const multiLoc = parseGarenaResponse({ jobs: [{ id: 'J1', title: 'Multi', tags: { location: ['Singapore', 'Jakarta'] } }] }, {});
   if (multiLoc[0].location === 'Singapore, Jakarta') pass('parseGarenaResponse joins multiple locations with ", "');
