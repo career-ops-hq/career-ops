@@ -38,14 +38,14 @@ Examples:
 
 ---
 
-## Sources of Truth (read before evaluating)
+## Sources of Truth (read before evaluating, except where a block defers the load)
 
 | File | Path | When |
 |------|------|------|
-| CV | `cv.md` | Always |
+| CV | `cv.md` | **Deferred to Block B pass 2** — candidate evidence, never loaded before Block B assigns Importance (see Step 2) |
 | Profile customizations | `modes/_profile.md` if it exists | Always; user-specific archetypes, role-shape rules, location policy, comp targets |
 | Profile config | `config/profile.yml` if it exists | Always; identity, output language, comp range, target roles |
-| Portfolio digest | `article-digest.md` if it exists | Always; proof points and metrics |
+| Portfolio digest | `article-digest.md` if it exists | **Deferred to Block B pass 2**, same reason; proof points and metrics |
 | llms.txt | `llms.txt` if it exists | Always |
 | CV template | `templates/cv-template.html` | For PDF |
 | PDF renderer | `generate-pdf.mjs` | For PDF |
@@ -55,6 +55,7 @@ Rules:
 
 - Never write to `cv.md`, `article-digest.md`, `llms.txt`, or portfolio files.
 - Never hardcode candidate metrics. Read them from `cv.md` and `article-digest.md` at evaluation time.
+- `cv.md` and `article-digest.md` are the only **candidate-evidence** sources here, and they load at Block B pass 2 — not up front. Everything else in the table above is targeting or template context and loads immediately. Reading candidate evidence earlier would anchor Block B's Importance column, which must come from the JD alone.
 - If `article-digest.md` and `cv.md` disagree on a metric, prefer `article-digest.md`.
 - Load `modes/_profile.md` and `config/profile.yml` before scoring. User-specific rules override system defaults.
 
@@ -98,7 +99,11 @@ Run these steps in order.
 
 ### Step 2 — Evaluate A-G
 
-Read `cv.md`, `article-digest.md`, `llms.txt`, `modes/_profile.md`, and `config/profile.yml`. Then complete every block below.
+Read `llms.txt`, `modes/_profile.md`, and `config/profile.yml` now — targeting and archetype context, not candidate evidence.
+
+**Do not read `cv.md` or `article-digest.md` yet.** Block B's first pass assigns Importance from the JD alone, and loading candidate evidence here would make that impossible: this step is the one place that ordering can be silently lost. Block B says when to load them; Step 0 and Block A need neither.
+
+Then complete every block below.
 
 #### Step 0 — Archetype Detection
 
@@ -126,9 +131,15 @@ One table, one row per significant JD requirement, mapped to exact evidence from
 | Requirement | JD signal | Match | Importance | Evidence / gap |
 |---|---|---|---|---|
 
-**Two-pass rule:** fill `Requirement`, `JD signal` and `Importance` from the JD alone, **before reading `cv.md`**; then fill `Match` and `Evidence / gap`. **Importance is never revised afterwards.** Importance measures significance *in this posting*, never the candidate's proficiency — generation order is what enforces that.
+**Two-pass rule — the candidate files are loaded *inside* this block, never before it:**
 
-`Match` is ✅ Strong / ⚠️ Partial / ❌ Missing / ➖ N/A. Include requirements the candidate **meets**, not only gaps. **Sort** importance descending, then unmet before met within a band. **At most 12 rows** — keep the highest-importance rows, never drop a `critical` or `high` one, and note the count dropped.
+1. **Pass 1 — JD only.** Fill `Requirement`, `JD signal` and `Importance` from the JD text alone, **before reading `cv.md`**. Both candidate files are still unread here.
+2. **Load** `cv.md` and `article-digest.md` now — this is the first step of the evaluation that may read them.
+3. **Pass 2 — CV.** Fill `Match` and `Evidence / gap`. **Importance is never revised afterward.**
+
+Importance measures significance *in this posting*, never the candidate's proficiency — generation order is what enforces that.
+
+`Match` is ✅ Strong / ⚠️ Partial / ❌ Missing / ➖ N/A. Include requirements the candidate **meets**, not only gaps. **Sort** importance descending, then unmet before met within a band. **At most 12 rows**, keeping the highest-importance rows and noting the count dropped (`+N lower-importance requirements not listed`). Retaining every `critical` and `high` row wins over the budget: when a JD has more than 12 of them, the table exceeds 12 rows rather than dropping one.
 
 **Importance bands** (never a free-form number): `critical` (explicit must-have, title or core responsibility, required language or work authorization) · `high` (central, likely assessed in interviews) · `meaningful` (real but not obviously decisive) · `preferred` (nice-to-have) · `low_signal` (generic boilerplate).
 

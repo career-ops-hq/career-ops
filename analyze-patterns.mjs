@@ -269,6 +269,16 @@ function extractTechMentions(description) {
   return matches.map(m => TECH_CANONICAL.get(m.toLowerCase()) || m);
 }
 
+/**
+ * Run the in-process self-test for this script's pure helpers.
+ *
+ * Covers the Machine Summary parser (including the MACHINE_SUMMARY_FIELDS
+ * allowlist and the nested `risk_summary` / `requirement_importance` shapes),
+ * ATS vendor detection, and the Via channel analysis. Exits non-zero on the
+ * first batch of failures so CI and `--self-test` fail loudly.
+ *
+ * @returns {void}
+ */
 function runSelfTest() {
   const summary = parseMachineSummary(`
 ## Machine Summary

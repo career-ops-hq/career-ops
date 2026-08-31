@@ -96,14 +96,16 @@ The flag is additive only; ✅ / ➖ / ⚠️ emit no flag line.
 
 ## Block B — Match with CV
 
-One table, one row per significant JD requirement, mapped to exact evidence in `cv.md`. Block B **is** the requirement→evidence mapping for the whole report: never emit a second matrix that re-enumerates the same requirements, because nothing keeps two lists in sync and the first disagreement between them contradicts the report in a way no test can catch.
+One table, one row per significant JD requirement, mapped to exact evidence in the primary files (`cv.md` first, then `article-digest.md`, `config/profile.yml`, `modes/_profile.md`). Block B **is** the requirement→evidence mapping for the whole report: never emit a second matrix that re-enumerates the same requirements, because nothing keeps two lists in sync and the first disagreement between them contradicts the report in a way no test can catch.
 
 Any flag lines from Block A's geo-mismatch and work-authorization checks sit above the table, unchanged.
 
 ### Two-pass rule (generation order is the mechanism)
 
 1. **Pass 1 — JD only.** Fill `Requirement`, `JD signal` and `Importance` from the JD text alone, **before reading `cv.md`**.
-2. **Pass 2 — CV.** Then read `cv.md` and fill `Match` and `Evidence / gap`. **Importance is never revised in pass 2.**
+2. **Pass 2 — CV.** Then read `cv.md` (and the other primary files) and fill `Match` and `Evidence / gap`. **Importance is never revised in pass 2.**
+
+`_shared.md`'s Sources of Truth table marks the primary files `ALWAYS`, which declares **scope** — what may ever back a claim — not read order. Pass 1 is the one point in the evaluation where read order carries meaning, so it is stated here rather than left to that table.
 
 Importance measures how much a requirement matters **in this posting**, never how proficient the candidate is. Order is what enforces that: a model that has just written `✅ Strong` is anchored toward rating that requirement important, and toward discounting what the candidate lacks — which inverts the feature.
 
@@ -116,9 +118,11 @@ Importance measures how much a requirement matters **in this posting**, never ho
 - **JD signal** — the wording the importance rests on: a **verbatim** JD quote for `stated`, a section/structure reference for `structural`, `—` for `inferred` (which is `jd_signal: null` in the Machine Summary).
 - **Match** — ✅ Strong / ⚠️ Partial / ❌ Missing / ➖ N/A. Use `➖ N/A` only where the requirement is not a claim about the candidate's skills at all and the answer is still worth showing — a work-authorization or language gate the candidate already satisfies, for instance. A requirement that simply does not apply is omitted rather than displayed as a shrug.
 - **Importance** — the band plus its evidence tier in parentheses: `critical (stated)`, `high (structural)`, `meaningful (inferred)`.
-- **Evidence / gap** — the exact `cv.md` line backing a ✅, or what is missing.
+- **Evidence / gap** — the exact line backing a ✅, quoted from whichever primary file carries it (`cv.md`, `article-digest.md`, `config/profile.yml`, `modes/_profile.md`) and naming that file when it is not `cv.md`; otherwise what is missing.
 
-**Row budget:** at most **12 rows**. A 30-bullet JD otherwise emits 30 rows on every evaluation, batch and economy tiers included, for a table nobody reads to the end. When the JD yields more, keep the highest-importance rows and, within the band that straddles the cut, unmet before met — then note the count dropped (`+7 lower-importance requirements not listed`). Never drop a `critical` or `high` row to fit the budget.
+**Row budget:** at most **12 rows**. A 30-bullet JD otherwise emits 30 rows on every evaluation, batch and economy tiers included, for a table nobody reads to the end. When the JD yields more, keep the highest-importance rows and, within the band that straddles the cut, unmet before met — then note the count dropped (`+7 lower-importance requirements not listed`).
+
+**Retaining every `critical` and `high` row outranks the budget.** A JD can state more than 12 must-haves, and a report that silently dropped one of them to hit a row count would hide exactly the requirement the reader most needs. In that case the table exceeds 12 rows; the budget only ever trims `meaningful` and below.
 
 **Sort:** importance descending, then **unmet before met** within a band. Strict importance-descending alone puts a `critical / ✅ Strong` row above a `high / ❌ Missing` row, leading with the reader's best news when the point is to surface high-importance gaps first.
 

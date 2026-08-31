@@ -15364,6 +15364,38 @@ try {
     fail(`batch/batch-prompt.md dropped importance gate rule(s): ${brokenBatchPromises.join(', ')} — batch would bypass the gate (#2330)`);
   }
 
+  // 55.4d The two-pass rule is only real if nothing loads candidate evidence
+  // BEFORE Block B's first pass. batch-prompt.md's Step 2 preamble used to open
+  // with "Read `cv.md`, `article-digest.md`, ..." for every block at once, which
+  // made the rule unachievable on the batch path however carefully Block B
+  // worded it — the ordering was lost two sections earlier. Asserted on the
+  // preamble's text because that is where the regression would reappear: any
+  // future edit that hoists the CV read back up to Step 2 silently re-anchors
+  // every batch evaluation's importance column.
+  const step2Preamble = batchPromptSrc.match(/### Step 2 — Evaluate A-G[\s\S]*?\n#### Block B /)?.[0] ?? '';
+  const hoistsCvRead = /Read `cv\.md`/.test(step2Preamble);
+  const defersCvRead = /\*\*Do not read `cv\.md` or `article-digest\.md` yet\.\*\*/.test(step2Preamble);
+  const namesLoadPoint = /\*\*Load\*\* `cv\.md` and `article-digest\.md` now/.test(batchPromptSrc);
+  // The Sources of Truth table is the SECOND place the ordering can be lost:
+  // its "When" column said `cv.md` → "Always" under a heading that reads "read
+  // before evaluating", which contradicts the deferral in Step 2 just as
+  // effectively. Both hoist points are asserted, or fixing one leaves the other.
+  const sourcesTable = batchPromptSrc.match(/## Sources of Truth[\s\S]*?\nRules:/)?.[0] ?? '';
+  const cvRow = sourcesTable.match(/^\| CV \| `cv\.md` \|(.*)\|$/m)?.[1] ?? '';
+  const cvRowDefers = /Deferred to Block B pass 2/.test(cvRow);
+  if (!step2Preamble) {
+    fail('batch/batch-prompt.md Step 2 → Block B region not found — the #2330 two-pass ordering freeze cannot verify');
+  } else if (!cvRow) {
+    fail('batch/batch-prompt.md Sources of Truth has no `cv.md` row — the #2330 two-pass ordering freeze cannot verify');
+  } else if (!hoistsCvRead && defersCvRead && namesLoadPoint && cvRowDefers) {
+    pass('batch/batch-prompt.md defers the CV read until Block B pass 2 at both hoist points, so the two-pass rule is achievable (#2330)');
+  } else {
+    fail(
+      'batch/batch-prompt.md broke the Block B two-pass ordering (#2330): ' +
+      `hoistsCvRead=${hoistsCvRead} defersCvRead=${defersCvRead} namesLoadPoint=${namesLoadPoint} cvRowDefers=${cvRowDefers}`,
+    );
+  }
+
   // 55.5 cross-check: the web parser still speaks the same column names
   const webParserPath = join(ROOT, 'web', 'src', 'lib', 'career-ops.ts');
   if (existsSync(webParserPath)) {
