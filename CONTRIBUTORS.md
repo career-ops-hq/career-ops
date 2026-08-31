@@ -8,7 +8,7 @@ Contributors with sustained technical ownership over specific areas. Full author
 
 - **[@bracketouverte](https://github.com/bracketouverte)** (Michael) — Technical contributor focused on scan mode and ATS research. Running daily support in Discord.
 
-- **[@piscespieces](https://github.com/piscespieces)** (Andres Urdaneta) — Docs architect. Maintains the getting-started guides at [career-ops-docs.vercel.app](https://career-ops-docs.vercel.app). Shipped [PR #286](https://github.com/santifer/career-ops/pull/286) (portals cleanup). Authored the comparative analysis that defines what career-ops is vs. isn't.
+- **[@piscespieces](https://github.com/piscespieces)** (Andres Urdaneta) — Docs architect. Maintains the getting-started guides at [career-ops.org/docs](https://career-ops.org/docs). Shipped [PR #286](https://github.com/santifer/career-ops/pull/286) (portals cleanup). Authored the comparative analysis that defines what career-ops is vs. isn't.
 
 ## Shipping with the project
 
