@@ -229,6 +229,8 @@ function runCommand(command, args, cwd) {
 export function renderResume({ workspace = ROOT, request, tailoring, outputRoot, outputKey = randomUUID(), run = runCommand }) {
   assertExactKeys(request, ['version', 'rules_version', 'rules_hash', 'opportunity', 'candidate', 'cv', 'role_context', 'render_policy', 'source_hashes', 'manifest_hash'], 'resume request');
   if (request.version !== CONTRACT_VERSION || request.rules_version !== RULES_VERSION) throw new Error('unsupported resume request contract');
+  assertExactKeys(request.render_policy, ['template', 'page_format', 'max_pages'], 'resume render policy');
+  if (request.render_policy.template !== 'ats' || !['a4', 'letter'].includes(request.render_policy.page_format) || request.render_policy.max_pages !== 2) throw new Error('resume render policy is invalid');
   const manifest = { ...request };
   delete manifest.manifest_hash;
   if (sha256(canonicalJson(manifest)) !== request.manifest_hash) throw new Error('resume request manifest hash is invalid');

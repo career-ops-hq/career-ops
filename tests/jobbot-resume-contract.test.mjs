@@ -123,6 +123,26 @@ test('render rejects a manifest-bound candidate that differs from the verified p
   assert.equal(calls, 0);
 });
 
+test('render independently rejects a manifest-bound policy above two pages', () => {
+  const root = workspace();
+  const request = buildResumeRequest({ workspace: root, query: '7' });
+  const changed = structuredClone(request);
+  changed.render_policy.max_pages = 3;
+  const manifest = { ...changed };
+  delete manifest.manifest_hash;
+  const canonical = value => {
+    if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+    if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+    return JSON.stringify(value);
+  };
+  changed.manifest_hash = `sha256:${createHash('sha256').update(canonical(manifest)).digest('hex')}`;
+  const outputRoot = join(root, 'controlled-staging');
+  mkdirSync(outputRoot, { mode: 0o700 });
+  let calls = 0;
+  assert.throws(() => renderResume({ workspace: root, request: changed, tailoring: tailoring(request), outputRoot, outputKey: '123e4567-e89b-12d3-a456-426614174000', run: () => { calls++; } }), /render policy/);
+  assert.equal(calls, 0);
+});
+
 test('checked-in ATS template accepts the JobBot candidate contract', () => {
   const root = mkdtempSync(join(tmpdir(), 'careerops-ats-template-'));
   const input = join(root, 'resume-input.json');
