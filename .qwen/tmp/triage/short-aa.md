@@ -1,0 +1,221 @@
+## Worth a look
+- Deepgram — Head of AI Enablement Engineering — head-level AI leadership archetype, USA remote fits  https://jobs.ashbyhq.com/deepgram/c91de352-9f25-479e-8877-fbea9576a52c
+- Arize AI — DevSecOps Engineer (TypeScript & Agentic AI) — DevOps/security analog title with a remote option  https://job-boards.greenhouse.io/arizeai/jobs/5980312004
+- Arize AI — Forward Deployed AI Engineer, East — direct FDE archetype match, US remote  https://job-boards.greenhouse.io/arizeai/jobs/5993755004
+- Arize AI — Forward Deployed AI Engineer, West — direct FDE archetype match, US remote  https://job-boards.greenhouse.io/arizeai/jobs/6030953004
+- ElevenLabs — Forward Deployed Engineer - Software Engineer - Canada — FDE archetype match located in Canada (Toronto)  https://jobs.ashbyhq.com/elevenlabs/a4ccd185-8576-4f69-aa8d-454f323cc024
+- Zapier — Engineer, Applied AI — applied-AI archetype match, North America remote  https://jobs.ashbyhq.com/zapier/38434b88-086c-424b-8d18-8d006e0b71b8
+
+## Maybe
+- Bland AI — Senior Infrastructure Engineer — infra archetype match but San Francisco on-site (relocation flag)  https://jobs.ashbyhq.com/bland/a3a383e0-9c15-4777-a95b-536cb8c1174c
+- Bland AI — Agent Solutions Engineer — customer-facing agent work, partial title match, SF on-site  https://jobs.ashbyhq.com/bland/824f7ebb-6d71-4484-bc7d-a2bcd4441a70
+- Bland AI — Enterprise Solutions Engineer — solutions/consulting partial match, SF or remote  https://jobs.ashbyhq.com/bland/ea532833-f3d8-4dad-b5b2-f9bbeaa1a1a5
+- Vapi — Agent Strategist - SF — agent consulting partial match, US on-site  https://jobs.ashbyhq.com/vapi/adbc573f-7267-491e-8671-4d5470238aae
+- Vapi — Member of Technical Staff, Forward Deployed — FDE match but San Francisco on-site  https://jobs.ashbyhq.com/vapi/854a9bf5-e330-4afa-9c0f-38c3d6084808
+- Vapi — Agent Strategist - NYC — agent consulting partial match, NYC on-site  https://jobs.ashbyhq.com/vapi/72ec9643-39c2-47ae-b04e-cba4e02b0966
+- Vapi — Member of Technical Staff, DevOps — DevOps analog but SF on-site  https://jobs.ashbyhq.com/vapi/2d702840-a588-4273-8b98-49ed815c0c50
+- Vapi — Solutions Engineering Manager — solutions management partial match, SF on-site  https://jobs.ashbyhq.com/vapi/c321a2f2-5678-49e2-ba90-a424971e8b94
+- Vapi — Solutions Engineer - SF — solutions partial match, SF on-site  https://jobs.ashbyhq.com/vapi/e7f4cc7d-1d49-4767-9556-175d8f0069fd
+- Vapi — Solutions Engineer - NY — solutions partial match, NYC on-site  https://jobs.ashbyhq.com/vapi/03532365-7180-4999-b534-24595884aeb9
+- Airtable — Senior Solutions Architect — solutions partial match, US remote fits  https://job-boards.greenhouse.io/airtable/jobs/8498915002
+- Airtable — Senior Solutions Architect- West Coast — solutions partial match, US remote fits  https://job-boards.greenhouse.io/airtable/jobs/8597941002
+- Parloa — Forward Deployed Engineer, DevOps — FDE+DevOps match but New York office on-site  https://job-boards.eu.greenhouse.io/parloa/jobs/4947868101
+- Parloa — Forward Deployed Engineer - US — FDE match but New York office on-site  https://job-boards.eu.greenhouse.io/parloa/jobs/4604587101
+- Parloa — Manager, Forward Deployed Engineering — FDE leadership match, remote limited to Germany/UK  https://job-boards.eu.greenhouse.io/parloa/jobs/4959301101
+- Parloa — Senior Agent Architect — agent architecture partial match, US remote fits  https://job-boards.eu.greenhouse.io/parloa/jobs/4871790101
+- Intercom — Senior AI Deployment Consultant — applied-AI consulting fit, SF on-site (relocation flag)  https://job-boards.greenhouse.io/intercom/jobs/8128393
+- Intercom — Senior Manager, Forward Deployed Engineering — FDE leadership match, SF on-site  https://job-boards.greenhouse.io/intercom/jobs/7763257
+- Intercom — Senior Solutions Engineer — solutions partial match, SF on-site  https://job-boards.greenhouse.io/intercom/jobs/8122767
+- Intercom — Senior Solutions Engineer- LATAM — solutions partial match, Chicago on-site  https://job-boards.greenhouse.io/intercom/jobs/8143139
+- Intercom — Solutions Architect -Spanish Speaking — solutions partial match, NYC remote option  https://job-boards.greenhouse.io/intercom/jobs/8123007
+- Vercel — Director of Forward Deployed Engineering — FDE leadership match, US hybrid (relocation needed)  https://job-boards.greenhouse.io/vercel/jobs/6120051004
+- Vercel — Director, Solutions Architect — solutions leadership partial match, US hybrid  https://job-boards.greenhouse.io/vercel/jobs/6119846004
+- Vercel — Manager, Solutions Architecture — solutions management partial match, US hybrid  https://job-boards.greenhouse.io/vercel/jobs/5806456004
+- Vercel — Member of the Technical Staff, Internal Agent — internal AI-agent building, partial match, US remote  https://job-boards.greenhouse.io/vercel/jobs/6134374004
+- Vercel — Solutions Architect — solutions partial match, US hybrid  https://job-boards.greenhouse.io/vercel/jobs/5806749004
+- Deepgram — Pre-Sales Solutions Engineer (EST or PST) — technical pre-sales partial match, USA remote  https://jobs.ashbyhq.com/deepgram/1395ef4d-883a-4006-85a1-4e7d44623431
+- Deepgram — Solutions Architect (EST or PST) — solutions partial match, USA remote  https://jobs.ashbyhq.com/deepgram/844ec2d9-4256-4be0-a6c6-78ebf1391a78
+- Deepgram — Software Engineer - Applied AI (Senior or Staff Level) — applied-AI flavor but staff SWE, SF/NY on-site  https://jobs.ashbyhq.com/deepgram/68372d7d-b7a9-439e-a0a7-76690576aba4
+- Deepgram — Enterprise AI Strategist, Deepgram for Restaurants — AI strategy/consulting partial match, SF on-site  https://jobs.ashbyhq.com/deepgram/8fd3acd1-31c0-4dad-a249-a8d3d5d79cc9
+- Deepgram — Platform Engineer - AI/ML Infrastructure (Kubernetes & Terraform) — infra-adjacent but K8s/Terraform core (soft flag), USA remote  https://jobs.ashbyhq.com/deepgram/f424ef6a-c27f-4984-9e77-40a1ad16ae28
+- Deepgram — Senior Forward-Deployed Engineer, Federal — FDE match but DC on-site; federal work likely needs US clearance  https://jobs.ashbyhq.com/deepgram/2fc57802-1d2d-4796-aaea-e00586dc6792
+- Deepgram — Solutions Engineer, Enterprise — solutions partial match, NY/SF on-site  https://jobs.ashbyhq.com/deepgram/8884965c-8a55-414c-ba86-a52d527f5dff
+- Deepgram — Senior Forward Deployed Engineer, Enterprise — FDE match but NY/SF on-site  https://jobs.ashbyhq.com/deepgram/a58e4a11-7f98-4686-98e8-2612b52d7bbd
+- Deepgram — Senior Solutions Engineer, Federal — solutions partial match, DC on-site + likely US clearance  https://jobs.ashbyhq.com/deepgram/b10db691-f77c-4a65-8f7c-ff9574f53f1e
+- Deepgram — ML Ops Infrastructure Engineer — AI-ops-adjacent infra role, USA remote  https://jobs.ashbyhq.com/deepgram/7ced4c1f-4126-44fe-9cf1-da427a9e4e3e
+- Deepgram — Systems Architect AI/ML Infrastructure — infrastructure architect adjacent, USA remote  https://jobs.ashbyhq.com/deepgram/ff392127-1eb6-4fc7-838e-a3243923ba76
+- Deepgram — Pre-Sales Solutions Engineer (San Francisco, CA) — pre-sales partial match, SF/remote  https://jobs.ashbyhq.com/deepgram/f904ff60-f5d1-45c7-8fa2-8456c47b4204
+- Deepgram — Solutions Architect (San Francisco, CA) — solutions partial match, SF/remote  https://jobs.ashbyhq.com/deepgram/be9609b4-b48d-4421-90e5-69049ad0d6ce
+- Deepgram — Forward-Deployed Engineer (FDE), Strategic Accounts — FDE match but NY/SF on-site  https://jobs.ashbyhq.com/deepgram/4bfadd29-fa58-4e06-bbf0-7b5dbc41a621
+- Arize AI — AI Application Engineer, APJ — applied-AI partial match, remote limited to Singapore  https://job-boards.greenhouse.io/arizeai/jobs/5989512004
+- Arize AI — AI Solutions Manager, Digital Native — AI solutions consulting partial match, US remote  https://job-boards.greenhouse.io/arizeai/jobs/6030903004
+- Arize AI — AI Solutions Manager, East — AI solutions consulting partial match, US remote  https://job-boards.greenhouse.io/arizeai/jobs/6030902004
+- Arize AI — AI Solutions Manager, SMB — AI solutions consulting partial match, US remote  https://job-boards.greenhouse.io/arizeai/jobs/5987435004
+- Arize AI — AI Solutions Manager, West — AI solutions consulting partial match, US remote  https://job-boards.greenhouse.io/arizeai/jobs/5783026004
+- Arize AI — Forward Deployed Engineer, APJ — FDE match but remote limited to Singapore  https://job-boards.greenhouse.io/arizeai/jobs/5993317004
+- ElevenLabs — Enterprise Solutions Engineer - North America — solutions partial match, US/remote  https://jobs.ashbyhq.com/elevenlabs/275f43d0-b62d-401d-830c-7c1ac0e688aa
+- ElevenLabs — Engineering - Internal AI Transformation — AI transformation partial match, Canada listed among locations  https://jobs.ashbyhq.com/elevenlabs/a3097257-a07a-4a7e-b9fe-b8555c1a0fa7
+- ElevenLabs — Forward Deployed Engineer - Software Engineer - Spain — FDE match but remote limited to Spain  https://jobs.ashbyhq.com/elevenlabs/7664e3c4-2336-4d1a-90cf-91d1268de10d
+- ElevenLabs — Forward Deployed Engineer - Software Engineer - France — FDE match but remote limited to France  https://jobs.ashbyhq.com/elevenlabs/38e0b741-5bfa-4481-891e-e95b503d4aff
+- ElevenLabs — Forward Deployed Engineer - Software Engineer - Singapore — FDE match but remote limited to Singapore/Japan/Taiwan  https://jobs.ashbyhq.com/elevenlabs/36bdb528-004b-482c-8924-33b27b76121f
+- ElevenLabs — Forward Deployed Engineer - Software Engineer - ANZ — FDE match but remote limited to Australia  https://jobs.ashbyhq.com/elevenlabs/5459cb9d-5396-4729-9507-22729582781a
+- ElevenLabs — Infrastructure Security Engineer — infra & security archetype match but remote appears Europe-based  https://jobs.ashbyhq.com/elevenlabs/687394d7-fbf8-49ed-822e-c0690191330c
+- ElevenLabs — Forward Deployed Engineer - Software Engineer - LATAM — FDE match but remote limited to LATAM  https://jobs.ashbyhq.com/elevenlabs/39d438fa-8070-4660-968b-055493860c4c
+- ElevenLabs — Automation Engineer - Influencers — automation partial match (workflow-automation proof point), remote listed  https://jobs.ashbyhq.com/elevenlabs/5bcd3475-8e38-42f1-897a-fa010ee6f9bd
+- ElevenLabs — Forward Deployed Engineer - Software Engineer - Netherlands — FDE match but remote limited to Netherlands  https://jobs.ashbyhq.com/elevenlabs/50d20869-819d-4ae3-be8d-71c3c9bf3394
+- ElevenLabs — Forward Deployed Engineer - Software Engineer - Italy — FDE match but remote limited to Italy  https://jobs.ashbyhq.com/elevenlabs/cd610558-4a8e-4746-81c1-10e3902f5576
+- ElevenLabs — Forward Deployed Engineer - Software Engineer - Sweden — FDE match but remote limited to Sweden  https://jobs.ashbyhq.com/elevenlabs/c6fc071f-c80e-4d3b-921a-3ec02a2ad25d
+- ElevenLabs — Enterprise Solutions Engineer - Canada — solutions partial match, located in Canada (Toronto)  https://jobs.ashbyhq.com/elevenlabs/0d68b2a2-887e-491c-8b9b-56e8354f75fb
+- ElevenLabs — Forward Deployed Engineer - Software Engineer - Poland — FDE match but remote limited to Poland  https://jobs.ashbyhq.com/elevenlabs/29aed1f3-26f8-4d3b-8cc4-7ca7d9342eeb
+- ElevenLabs — Forward Deployed Engineer - Software Engineer - Germany — FDE match but remote limited to Germany  https://jobs.ashbyhq.com/elevenlabs/b1b4fa6b-ad36-4b0d-be89-32f35fcb420a
+- ElevenLabs — Forward Deployed Engineer - Software Engineer - Denmark — FDE match but remote limited to Denmark  https://jobs.ashbyhq.com/elevenlabs/16ed3af9-e4a7-4b59-8767-7771604d9165
+- ElevenLabs — Forward Deployed Software Engineer - UAE — FDE match, UAE-listed remote (verify eligibility)  https://jobs.ashbyhq.com/elevenlabs/fa4fc307-a0fb-47aa-9336-f202f2265440
+- Speechmatics — Forward Deployed Engineer — FDE match but San Francisco on-site  https://job-boards.eu.greenhouse.io/speechmatics/jobs/4792165101
+- Decagon — Senior Solutions Engineer — solutions partial match, SF on-site  https://jobs.ashbyhq.com/decagon/63dd8fb8-8c5b-44e4-8371-5ad453b56eb8
+- Decagon — Solutions Architect - Infrastructure — infra-flavored solutions partial match, SF on-site  https://jobs.ashbyhq.com/decagon/a81a1a50-d497-4dff-8105-c7a890310396
+- Decagon — Agent Strategy Manager — agent strategy partial match, SF on-site  https://jobs.ashbyhq.com/decagon/7ae498c6-750d-43ab-8ad2-ab05b75684eb
+- Decagon — Solutions Architect - Salesforce — solutions partial match, SF on-site  https://jobs.ashbyhq.com/decagon/83267854-2ea8-4322-8ba3-88c2dcb086a5
+- Decagon — Director of Agent Deployment Engineering — FDE-style leadership partial match, SF on-site  https://jobs.ashbyhq.com/decagon/3aa855e4-164b-4246-aaa0-b602339bfe06
+- Decagon — Agent Deployment Engineer — FDE-style deployment partial match, SF on-site  https://jobs.ashbyhq.com/decagon/8c40fb7a-5f25-4112-a1df-f1c22b81042c
+- Decagon — Strategic Solutions Engineer, East — solutions partial match, remote  https://jobs.ashbyhq.com/decagon/6431a6f9-2ebe-4b68-beb6-200b42aeeca8
+- Decagon — Strategic Solutions Engineer, West — solutions partial match, remote  https://jobs.ashbyhq.com/decagon/78745829-74ee-41cb-836c-480ca7bf9edc
+- Decagon — Agent Deployment Engineer - Spanish Speaking — deployment partial match, SF on-site  https://jobs.ashbyhq.com/decagon/78680ef6-798f-4511-98de-d60c8c6d909b
+- Decagon — Agent Education Manager — fits AI-literacy training proof point, SF/NY on-site  https://jobs.ashbyhq.com/decagon/4f705fac-4c33-427e-83d1-960a45947cb6
+- n8n — Sr AI Engineer / Remote - Europe / TS/Vue/NodeJS — AI Engineer archetype match but remote limited to Europe (his automation stack)  https://jobs.ashbyhq.com/n8n/d195a389-6af5-4b95-82e5-2258953c7297
+- n8n — Head of Solutions Engineering — head-level solutions partial match, multi-region incl. remote  https://jobs.ashbyhq.com/n8n/443fd5c2-6501-45cf-b8c8-851fe94d48f9
+- Glean — Lead Site Reliability Engineer — SRE analog but Mountain View on-site  https://job-boards.greenhouse.io/gleanwork/jobs/4654833005
+- Glean — Public Sector Solutions Engineer, SLED — solutions partial match, Washington DC on-site  https://job-boards.greenhouse.io/gleanwork/jobs/4591195005
+- Glean — Strategic Solutions Engineer, SF Bay Area — solutions partial match, SF on-site  https://job-boards.greenhouse.io/gleanwork/jobs/4614349005
+- Glean — Strategic Solutions Engineer, West — solutions partial match, remote with Mountain View HQ  https://job-boards.greenhouse.io/gleanwork/jobs/4722386005
+- PolyAI — Senior Agent Design Engineer — agent design partial match, US location unspecified  https://job-boards.eu.greenhouse.io/polyai/jobs/4891112101
+- Boomi — Director, Enterprise AI Data — AI leadership partial match (data domain), US location unspecified  https://boomi.com/boomi-jobs/?gh_jid=6092682004
+- Boomi — Lead AI Field Architect — customer-facing AI partial match, US location unspecified  https://boomi.com/boomi-jobs/?gh_jid=6001125004
+- Boomi — Senior Presales Solutions Engineer — technical pre-sales partial match, US location unspecified  https://boomi.com/boomi-jobs/?gh_jid=6004434004
+
+## Skip
+- Hume AI — AI Researcher — research role, off-target  https://job-boards.greenhouse.io/humeai/jobs/4775962008
+- Hume AI — Senior/Staff AI Research Engineer — research engineering, off-target  https://job-boards.greenhouse.io/humeai/jobs/4003488008
+- Vapi — Solutions Engineer - EMEA — Amsterdam/EMEA on-site, no remote path  https://jobs.ashbyhq.com/vapi/dce1928f-b432-4d6b-8c2f-b7c63c672310
+- Vapi — Product Designer — AI UX / Product Experience — design role, off-target  https://jobs.ashbyhq.com/vapi/4fbfa699-a543-49da-857c-64a2c990fd06
+- Vapi — Member of Technical Staff, Agentic Developer Experience — staff-level platform SWE  https://jobs.ashbyhq.com/vapi/0d4f1420-2590-4a38-aac4-3efda12eadb0
+- Airtable — Senior Mid Market Account Executive, AI Native — sales role  https://job-boards.greenhouse.io/airtable/jobs/8209823002
+- Parloa — Manager, Agent Architecture — Berlin/London on-site, no remote path  https://job-boards.eu.greenhouse.io/parloa/jobs/4959144101
+- Parloa — Senior Forward Deployed Engineer (France) — France on-site, no remote path  https://job-boards.eu.greenhouse.io/parloa/jobs/4959298101
+- Parloa — Sr Agent Architect (France) — France on-site, no remote path  https://job-boards.eu.greenhouse.io/parloa/jobs/4903164101
+- Parloa — Sr Partner Agent Architect (Germany) — partial title plus Germany-only remote  https://job-boards.eu.greenhouse.io/parloa/jobs/4907496101
+- Intercom — AI Infrastructure Engineer — Dublin on-site, no remote path  https://job-boards.greenhouse.io/intercom/jobs/7820671
+- Intercom — Engineering Manager - AI Helpdesk — SWE management, Dublin on-site  https://job-boards.greenhouse.io/intercom/jobs/5298461
+- Intercom — Engineering Manager, AI Models Infrastructure — Dublin on-site, no remote path  https://job-boards.greenhouse.io/intercom/jobs/7818585
+- Intercom — Forward Deployed Software Engineer — London on-site, no remote path  https://job-boards.greenhouse.io/intercom/jobs/7556413
+- Intercom — Manager, Solutions Engineering — Sydney on-site, no remote path  https://job-boards.greenhouse.io/intercom/jobs/8145718
+- Intercom — Senior Data Scientist - AI Tooling — data science, off-target  https://job-boards.greenhouse.io/intercom/jobs/7314809
+- Intercom — Senior Engineering Manager, Customer Agent — SWE management, London on-site  https://job-boards.greenhouse.io/intercom/jobs/8096347
+- Intercom — Senior Forward Deployed Engineer — Dublin on-site, no remote path  https://job-boards.greenhouse.io/intercom/jobs/7218259
+- Intercom — Senior Manager, Solutions Engineering — London on-site, no remote path  https://job-boards.greenhouse.io/intercom/jobs/8155204
+- Intercom — Senior Product Engineer, AI — staff-level product SWE, Dublin/London  https://job-boards.greenhouse.io/intercom/jobs/6276021
+- Intercom — Solutions Architect — Dublin on-site, no remote path  https://job-boards.greenhouse.io/intercom/jobs/7594453
+- Intercom — Staff AI Product Manager — product management, off-target  https://job-boards.greenhouse.io/intercom/jobs/7377200
+- Intercom — Staff Forward Deployed Engineer — London on-site, no remote path  https://job-boards.greenhouse.io/intercom/jobs/7462110
+- Intercom — Staff Product Engineer, AI — staff-level SWE, Dublin on-site  https://job-boards.greenhouse.io/intercom/jobs/7393950
+- Vercel — DevRel Engineer, Agentic Infrastructure — DevRel/marketing-adjacent, off-target  https://job-boards.greenhouse.io/vercel/jobs/6122437004
+- Vercel — Forward-Deployed Engineer — London/Berlin hybrid, no remote path  https://job-boards.greenhouse.io/vercel/jobs/5778418004
+- Vercel — Growth Marketing Manager, Agent Stack — marketing role  https://job-boards.greenhouse.io/vercel/jobs/6016765004
+- Vercel — Partner Solutions Engineer, EMEA — London/Berlin hybrid, no remote path  https://job-boards.greenhouse.io/vercel/jobs/6132416004
+- Vercel — Senior Financial Systems Administrator — India-only remote, finance domain  https://job-boards.greenhouse.io/vercel/jobs/6134464004
+- Vercel — Senior Manager, Solutions Architect — Australia-only remote  https://job-boards.greenhouse.io/vercel/jobs/5995789004
+- Vercel — Software Engineer, Agent — staff-level SWE, NYC hybrid  https://job-boards.greenhouse.io/vercel/jobs/5704320004
+- Vercel — Software Engineer, AI Gateway — staff-level SWE, US hybrid  https://job-boards.greenhouse.io/vercel/jobs/5798406004
+- Vercel — Software Engineer, AI SDK — staff-level SWE, US hybrid  https://job-boards.greenhouse.io/vercel/jobs/5474915004
+- Deepgram — Research Staff, Voice AI Foundations — research role, off-target  https://jobs.ashbyhq.com/deepgram/7cf277bc-a192-4007-a77a-fafbf8276a5e
+- Deepgram — Senior Pre-Sales Solutions Engineer - Europe — EU-only remote, pre-sales  https://jobs.ashbyhq.com/deepgram/7ac1a5bc-f305-4f2a-a547-394566a549b2
+- Deepgram — Senior Solutions Architect - Europe — EU-only remote  https://jobs.ashbyhq.com/deepgram/9cb09363-9b68-4957-869a-da70b95ad6bd
+- Deepgram — Senior Pre-Sales Solutions Engineer - India — India-only remote  https://jobs.ashbyhq.com/deepgram/1278975c-e0d8-45be-82dd-8d0d1f2774e5
+- Deepgram — Senior Solutions Architect - India — APAC-only remote  https://jobs.ashbyhq.com/deepgram/64895340-1377-4b40-b182-1ec6b9644997
+- Deepgram — Backend Software Engineer - Engine Team (Voice Agent) — staff-level backend SWE  https://jobs.ashbyhq.com/deepgram/7c7064bb-2bf0-4f64-81cc-14afe79a15c1
+- Deepgram — Software Engineer, Voice Agents & AI (Senior or Staff Level) — staff-level SWE  https://jobs.ashbyhq.com/deepgram/4a873ede-8555-42ae-9ddc-ac89afdd7278
+- Deepgram — Solutions Architect - MENA — EMEA-only remote  https://jobs.ashbyhq.com/deepgram/e3c33ed8-c80f-4af6-a904-7da6c413b074
+- Deepgram — Senior Technical Program Manager (Engineering) - AI Tooling & Systems — program management, off-target  https://jobs.ashbyhq.com/deepgram/1c34f6ba-6998-447c-9485-d4cf56db42de
+- Deepgram — Staff Product Manager, Agentic Experiences (Former Engineer) — product management, off-target  https://jobs.ashbyhq.com/deepgram/17f95148-fa1c-4c34-82c8-333589bef789
+- Deepgram — Senior Software Engineer - Model Evaluation & AI Systems — staff-level SWE  https://jobs.ashbyhq.com/deepgram/6f3d761e-4873-43af-a9b1-daeb147661f9
+- Deepgram — Senior Pre-Sales Solutions Engineer (Australia) — Australia-only remote  https://jobs.ashbyhq.com/deepgram/8a9bcce3-858f-4cc0-8459-2fe552b6aaa5
+- Deepgram — Senior Pre-Sales Solutions Engineer (Singapore) — APAC-only remote  https://jobs.ashbyhq.com/deepgram/d28f0a61-4a59-4817-b101-3457077b01b7
+- Deepgram — Senior Product Marketing Manager, Voice Agent — marketing role  https://jobs.ashbyhq.com/deepgram/928303de-61d6-46ec-b10a-08709e1deb4a
+- Arize AI — AI Sales Engineer, EMEA — sales role  https://job-boards.greenhouse.io/arizeai/jobs/5793354004
+- Arize AI — AI Sales Engineer, US — sales role  https://job-boards.greenhouse.io/arizeai/jobs/5792327004
+- Arize AI — Open Source AI Engineer (Typescript) — staff-level TypeScript SDK development  https://job-boards.greenhouse.io/arizeai/jobs/6119757004
+- Arize AI — Senior AI Product Engineer, Backend — staff-level backend SWE  https://job-boards.greenhouse.io/arizeai/jobs/5396396004
+- Arize AI — Senior AI Product Engineer, Fullstack — staff-level fullstack SWE  https://job-boards.greenhouse.io/arizeai/jobs/5396420004
+- Arize AI — Senior AI Product Manager, Observability — product management, off-target  https://job-boards.greenhouse.io/arizeai/jobs/5818115004
+- ElevenLabs — Enterprise Solutions Engineer - Spain — Spain-only remote, solutions partial title  https://jobs.ashbyhq.com/elevenlabs/b081fafb-3659-4bf6-8e87-eb5ccc3ff234
+- ElevenLabs — Enterprise Solutions Engineer - France — France on-site, no remote path  https://jobs.ashbyhq.com/elevenlabs/ce00fe7b-a93a-436b-bd5e-2eff87c48f23
+- ElevenLabs — AI Creative Producer — creative/production role, off-target  https://jobs.ashbyhq.com/elevenlabs/3178581d-ea70-4dee-b018-2ce2d2a18bbe
+- ElevenLabs — Enterprise Solutions Engineer - LATAM — LATAM-only remote  https://jobs.ashbyhq.com/elevenlabs/46bad7dc-c8d7-403d-8b10-a2d71c005384
+- ElevenLabs — Product Marketing - Agents — marketing role  https://jobs.ashbyhq.com/elevenlabs/f2ae7fe0-67da-48ae-b126-b942899ec7e9
+- ElevenLabs — Enterprise Solutions Engineer - India — India-only remote  https://jobs.ashbyhq.com/elevenlabs/fb1fd9cc-bd6d-4895-be29-4bc37d0c31a0
+- ElevenLabs — Enterprise Solutions Engineer - Brazil — Brazil-only remote  https://jobs.ashbyhq.com/elevenlabs/8a88f764-27f5-46d7-8ce0-0ba15401efb1
+- ElevenLabs — Enterprise Solutions Engineer - ANZ — Australia-only remote  https://jobs.ashbyhq.com/elevenlabs/1a9d687d-0030-4732-8160-f1da54844bba
+- ElevenLabs — Enterprise Solutions Engineer - Germany — Germany-only remote  https://jobs.ashbyhq.com/elevenlabs/d46c3fc8-b87b-4b8b-bcc2-759944f77ae5
+- ElevenLabs — Enterprise Solutions Engineer - Singapore — Singapore/APAC-only remote  https://jobs.ashbyhq.com/elevenlabs/85b7489f-5b0c-4f21-9c1c-7b76ed904c44
+- ElevenLabs — Enterprise Solutions Engineer - UAE — UAE on-site, no remote path  https://jobs.ashbyhq.com/elevenlabs/1285b935-1398-4116-8576-70a58896faa8
+- ElevenLabs — Enterprise Solutions Engineer - Netherlands — Netherlands-only remote  https://jobs.ashbyhq.com/elevenlabs/3f10ccc9-56a9-40bf-b5f1-33ab5834ff4a
+- ElevenLabs — Enterprise Solutions Engineer - Belgium — Belgium on-site, no remote path  https://jobs.ashbyhq.com/elevenlabs/07a8552c-4206-4c27-9f0d-d72d3e40d2a1
+- ElevenLabs — Forward Deployed Creative — creative role, off-target  https://jobs.ashbyhq.com/elevenlabs/1f668ed5-49e9-4726-881f-7818733103b1
+- ElevenLabs — Enterprise Solutions Engineer - Italy — Italy on-site, no remote path  https://jobs.ashbyhq.com/elevenlabs/9dc3f256-3c42-4368-8d7e-ba9a3b3505e7
+- ElevenLabs — Forward Deployed Engineer - Software Engineer - Brazil — Brazil on-site, no remote path  https://jobs.ashbyhq.com/elevenlabs/6ce3306e-a546-4e11-83d6-3eaff5dd366b
+- ElevenLabs — Forward Deployed Engineer - Software Engineer - Belgium — Belgium on-site, no remote path  https://jobs.ashbyhq.com/elevenlabs/44c6b5f3-e135-4f3b-b286-7baccf782912
+- ElevenLabs — Enterprise Solutions Engineer - Sweden — Sweden-only remote  https://jobs.ashbyhq.com/elevenlabs/4738893a-de4f-4a06-b104-315c6a4d366c
+- ElevenLabs — Product Marketing - Agents - Government — marketing role  https://jobs.ashbyhq.com/elevenlabs/33bb01d0-993c-47fa-ae91-81c0c84f367e
+- ElevenLabs — Enterprise Solutions Engineer - Poland — Poland-only remote  https://jobs.ashbyhq.com/elevenlabs/49233713-725b-4501-8360-6006b673fd2b
+- ElevenLabs — Enterprise Solutions Engineer - Switzerland — Switzerland on-site, no remote path  https://jobs.ashbyhq.com/elevenlabs/22d14f69-1a8c-4fc0-aa4d-8b10c62ee806
+- ElevenLabs — Enterprise Solutions Engineer - Saudi Arabia — Saudi Arabia on-site, no remote path  https://jobs.ashbyhq.com/elevenlabs/62bd5d49-6122-421a-8f18-3aa65dbdbd1d
+- ElevenLabs — Forward Deployed Engineer - Software Engineer - Saudi Arabia — Saudi Arabia on-site, no remote path  https://jobs.ashbyhq.com/elevenlabs/c8216d65-13c9-4f8c-9b57-e14fd02738b0
+- ElevenLabs — Forward Deployed Engineer - Software Engineer - Switzerland — Switzerland on-site, no remote path  https://jobs.ashbyhq.com/elevenlabs/8e3de98e-0c2e-4999-90ae-3036ee47df05
+- Decagon — Senior Agent Product Manager — product management, off-target  https://jobs.ashbyhq.com/decagon/dcf9b561-f2fb-422b-88a9-33ce76e96608
+- Decagon — Engineering Manager, Agent Orchestration — SWE management, off-target  https://jobs.ashbyhq.com/decagon/b295b323-3d01-4126-94c1-9fc7489ebdf0
+- Decagon — Senior Software Engineer, Agent Product — staff-level SWE, SF on-site  https://jobs.ashbyhq.com/decagon/90c40e13-345e-4855-944e-c8f6b462a78e
+- Decagon — Agent Development Manager — software-engineering management, off-target  https://jobs.ashbyhq.com/decagon/476e3152-3f9a-48ea-89bd-30516bccead7
+- Decagon — Software Engineer, Agents — staff-level SWE, London on-site  https://jobs.ashbyhq.com/decagon/28366d07-ae89-428c-8593-1840591bfc18
+- Decagon — Staff Software Engineer, Agent Platform — staff-level SWE, SF on-site  https://jobs.ashbyhq.com/decagon/7df0a996-5a9f-496f-9f8b-c302983765b2
+- Decagon — Staff Software Engineer, Voice Agent — staff-level SWE, SF on-site  https://jobs.ashbyhq.com/decagon/2351ca53-b7fd-4835-b967-4ae2b976b5b4
+- Decagon — Senior Software Engineer, Agent Platform — staff-level SWE, SF on-site  https://jobs.ashbyhq.com/decagon/75f544ae-7838-4ffa-9e6b-33d7e2b6ea2b
+- Decagon — Senior Software Engineer, AI Developer Experience — staff-level SWE, US on-site  https://jobs.ashbyhq.com/decagon/491d67c4-b877-4ddc-895a-496eed6777ed
+- Decagon — Enterprise Solutions Engineer — Australia on-site, no remote path  https://jobs.ashbyhq.com/decagon/95dadea4-8bd2-421a-bf3f-51c04e102ee2
+- Decagon — Engineering Manager, Agent Product — SWE management, off-target  https://jobs.ashbyhq.com/decagon/2f64e63b-e825-4fdc-89be-978ae22e4ad4
+- Decagon — Senior Agent Product Manager - German Speaking — product management, London on-site  https://jobs.ashbyhq.com/decagon/d53738b5-ca10-4283-be5a-3937aa9e7c59
+- Decagon — Staff Software Engineer, Agent Product — staff-level SWE, SF on-site  https://jobs.ashbyhq.com/decagon/834d9a8b-4f7f-416a-9953-05d93c326a5f
+- Decagon — Agent Strategy Manager - German Speaking — London on-site, no remote path  https://jobs.ashbyhq.com/decagon/e3c895d1-c215-4524-8b38-cad7209291ec
+- Decagon — Director of Solutions Engineering - EMEA Enterprise — London on-site, no remote path  https://jobs.ashbyhq.com/decagon/9686ca93-1073-48f1-bc2a-af241eba83d1
+- Decagon — Director of Solutions Engineering - EMEA Strat — London on-site, no remote path  https://jobs.ashbyhq.com/decagon/ab6a5dac-d63b-4862-bc12-c5c9525b6f8b
+- Decagon — Agent Deployment Engineer - German Speaking — London on-site, no remote path  https://jobs.ashbyhq.com/decagon/2059c9be-8da0-49a5-9849-e45f6f6a14d8
+- Decagon — Agent Deployment Engineer - French Speaking — London on-site, no remote path  https://jobs.ashbyhq.com/decagon/3b52f574-3cc3-4db9-ac2e-2c78389a1377
+- Decagon — Product Manager, Enterprise Agent Platform — product management, off-target  https://jobs.ashbyhq.com/decagon/e27fcbdf-891c-4b2f-9c47-d2bdc26eb2d4
+- Decagon — Senior Agent Product Manager, Healthcare — product management, off-target  https://jobs.ashbyhq.com/decagon/95524337-b5e7-4156-9022-af5c192f174d
+- Decagon — Agent Experience Designer — design role, off-target  https://jobs.ashbyhq.com/decagon/08b34a9e-6e98-40f3-9a81-ee6667bef97b
+- Decagon — Agent Data Scientist — data science, off-target  https://jobs.ashbyhq.com/decagon/5433ff3a-9a7c-406b-9dd8-23094141b907
+- Glean — AI Data Analyst — data analyst, Bangalore on-site  https://job-boards.greenhouse.io/gleanwork/jobs/4724189005
+- Glean — AI Success Manager, Central — customer-success/account management, Nashville on-site  https://job-boards.greenhouse.io/gleanwork/jobs/4661886005
+- Glean — AI Success Manager, East — customer-success/account management, NYC on-site  https://job-boards.greenhouse.io/gleanwork/jobs/4661879005
+- Glean — AI Success Manager (US East Customer Hours) — customer success, Bangalore on-site  https://job-boards.greenhouse.io/gleanwork/jobs/4705011005
+- Glean — AI Success Manager (US West Customer Hours) — customer success, Bangalore on-site  https://job-boards.greenhouse.io/gleanwork/jobs/4705017005
+- Glean — AI Success Manager, West — customer-success/account management, SF on-site  https://job-boards.greenhouse.io/gleanwork/jobs/4694340005
+- Glean — Product Manager, Agent Security & Governance — product management, off-target  https://job-boards.greenhouse.io/gleanwork/jobs/4525297005
+- Glean — Product Manager, AI Quality — product management, off-target  https://job-boards.greenhouse.io/gleanwork/jobs/4525518005
+- Glean — Software Engineer, Agents — staff-level SWE, Bangalore on-site  https://job-boards.greenhouse.io/gleanwork/jobs/4712442005
+- Glean — Software Engineer, Agents Governance — staff-level SWE, Bangalore on-site  https://job-boards.greenhouse.io/gleanwork/jobs/4712434005
+- Glean — Software Engineer, AI & Security — staff-level SWE, Mountain View on-site  https://job-boards.greenhouse.io/gleanwork/jobs/4605446005
+- Glean — Software Engineer, LLM Infrastructure — staff-level SWE, Mountain View on-site  https://job-boards.greenhouse.io/gleanwork/jobs/4501783005
+- Glean — Solutions Engineering Manager, APAC — Bangalore on-site, no remote path  https://job-boards.greenhouse.io/gleanwork/jobs/4676087005
+- Boomi — AI & Business Transformation Lead - EMEA — Netherlands on-site, no remote path  https://boomi.com/boomi-jobs/?gh_jid=6141036004
+- Boomi — Analytics & AI Specialist (Talent Acquisition) — HR/TA domain, off-target  https://boomi.com/boomi-jobs/?gh_jid=6017864004
+- Boomi — Endpoint management and IT Automation - Advisor i7 - IT Infrastructure — India on-site, no remote path  https://boomi.com/boomi-jobs/?gh_jid=6135436004
+- Boomi — Principal, Strategic AI Advisory — Australia on-site, no remote path  https://boomi.com/boomi-jobs/?gh_jid=6098936004
+- Boomi — Principal, Strategic AI Advisory EMEA — UK on-site, no remote path  https://boomi.com/boomi-jobs/?gh_jid=6098938004
+- Boomi — Senior Data Engineer - Agentic AI Engineering — staff-level data engineering  https://boomi.com/boomi-jobs/?gh_jid=5779584004
+- LangChain — Senior Frontend Engineer, AI Observability & Evals Platform — staff-level frontend SWE, US on-site  https://jobs.ashbyhq.com/langchain/afb91b9b-46d5-4c9d-aa84-a4f1a3f74263
+- LangChain — Software Engineering Manager, AI Observability & Evals Platform (New York, NY) — SWE management, NYC on-site  https://jobs.ashbyhq.com/langchain/e1263bfe-b638-4019-b4d5-0aacca93b2b3
+- LangChain — Senior Fullstack Engineer, AI Observability & Evals Platform — staff-level fullstack SWE, US on-site  https://jobs.ashbyhq.com/langchain/a03b3e54-495d-4960-aee7-0194a3cef57d
+- LangChain — FullStack Engineer, AI Observability & Evals Platform (LangSmith) — staff-level fullstack SWE, US on-site  https://jobs.ashbyhq.com/langchain/ddf92275-1cc3-49c0-9f25-e8ded43b07f6
+- LangChain — Frontend Engineer, AI Observability & Evals Platform — staff-level frontend SWE, US on-site  https://jobs.ashbyhq.com/langchain/f7de4819-e7aa-4dfb-9acd-8b81ad8caf2c
+- LangChain — Senior Backend Software Engineer, AI Observability & Evals Platform (LangSmith) — staff-level backend SWE, US on-site  https://jobs.ashbyhq.com/langchain/f07c1416-f126-4925-8606-5dd7c5a90f6f
+- LangChain — Fullstack Software Engineer, Applied AI — staff-level fullstack SWE despite applied-AI tag  https://jobs.ashbyhq.com/langchain/c75915ba-a32b-4e17-873d-19b47564170d
+- LangChain — Deployed Engineer (UK) — FDE-style title but London on-site, no remote path  https://jobs.ashbyhq.com/langchain/5f5f8239-603c-47ca-a1ee-5a7ed34b502d

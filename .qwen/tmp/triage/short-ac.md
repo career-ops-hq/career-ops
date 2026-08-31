@@ -1,0 +1,229 @@
+## Worth a look
+- Pleo — Senior Applied AI Engineer — exact Applied AI archetype match; Remote listed alongside EU hubs (verify country eligibility)  https://jobs.ashbyhq.com/pleo/7d2f446b-bfba-4859-bf30-ce64301b4f9b
+- Pleo — Staff Applied AI Engineer — exact Applied AI archetype match at staff level; Remote listed (verify country eligibility)  https://jobs.ashbyhq.com/pleo/3f30df79-b7b7-4dd2-8ebd-4c1f2bba15e2
+- WorkOS — Infrastructure Engineer — Infrastructure & Security Lead profile fit; fully remote within US & Canada  https://jobs.ashbyhq.com/workos/26a54ffa-9465-4d13-bc5f-db41a2bbe505
+- WorkOS — Applied AI Engineer — exact Applied AI archetype; fully remote within US & Canada  https://jobs.ashbyhq.com/workos/5e650527-d8dd-413a-9cfb-d7d68143274b
+- Hightouch — AI Strategy Consultant — AI consulting archetype fit (Applied AI/IT Consultant family); Remote, North America  https://job-boards.greenhouse.io/hightouch/jobs/5618829004
+
+## Maybe
+- Anthropic — Staff+ Site Reliability Engineer, Safeguards ML Infra — SRE adjacent with infra-heavy ML flavor; remote-friendly but US-hubbed with required travel  https://job-boards.greenhouse.io/anthropic/jobs/5230394008
+- Attio — Forward Deployed Engineer — Forward Deployed archetype fit; needs NYC relocation  https://jobs.ashbyhq.com/attio/cef00929-63ab-4927-8a3c-1ea1d4224606
+- Semios — Senior Site Reliability Engineer — SRE adjacent (brief caps DevOps/SRE unless infra-heavy); Canada-wide location fits  https://apply.workable.com/j/D7FEC6492C
+- PhysicsX — Senior Forward Deployed Software Engineer — forward-deployed family fits archetype 2; needs NYC relocation  https://job-boards.eu.greenhouse.io/physicsx/jobs/4839390101
+- Wayve — Director AI Integration and Applications — director-level applied AI leadership; needs Detroit/Sunnyvale relocation  https://wayve.firststage.co/jobs?gh_jid=8737803002
+- Synthesia — Solutions Architect — client-facing AI solutioning aligns with consulting archetypes; Remote/Austin  https://jobs.ashbyhq.com/synthesia/163816a3-11d0-4f20-b138-6629c73e3886
+- Palantir — Forward Deployed AI Engineer — exact Forward Deployed AI archetype; needs NYC relocation  https://jobs.lever.co/palantir/636fc05c-d348-4a06-be51-597cb9e07488
+- Palantir — Forward Deployed Engineer - Mixed Reality — FDE fit; needs Washington DC relocation  https://jobs.lever.co/palantir/96a0ce26-cf84-4fa8-934b-acc4363620b2
+- Palantir — Forward Deployed Software Engineer - Edge Autonomous Systems — FDE fit, defense-flavored; DC relocation, verify clearance/citizenship  https://jobs.lever.co/palantir/27bf5707-96fa-460e-8a5b-53bc192ca87b
+- Palantir — Forward Deployed Software Engineer - Autonomous Systems C2 — FDE fit, defense C2; Seattle relocation, verify clearance/citizenship  https://jobs.lever.co/palantir/0edf7365-49f0-4263-818a-19409ec4f430
+- Palantir — Forward Deployed Software Engineer - Japan Forward Deployed — FDE fit; DC-based role requires relocation  https://jobs.lever.co/palantir/8aba5995-653d-4805-96e8-24488e6abf37
+- Palantir — Forward Deployed Software Engineer - Korea Forward Deployed — FDE fit; DC-based role requires relocation  https://jobs.lever.co/palantir/a39bf84c-6648-4871-bd07-9b882d401c4c
+- Palantir — Forward Deployed Software Engineer - Tactical Edge — FDE fit, defense-adjacent; DC relocation  https://jobs.lever.co/palantir/3d0d9d92-0321-4459-a17d-fa1a76636a43
+- Palantir — Forward Deployed Software Engineer - Warp Speed — FDE fit; needs NYC relocation  https://jobs.lever.co/palantir/13f99633-43b5-4459-8e84-25073f257c18
+- Palantir — Information Security Engineer - Infrastructure Security — strong Infrastructure & Security match; needs NYC relocation  https://jobs.lever.co/palantir/1e77a5e8-9843-4516-a186-7c24f0ff07a0
+- Qonto — Site Reliability Engineer (Storage) - remote friendly — SRE adjacent, remote-friendly per title; EU entity  https://jobs.lever.co/qonto/43534df4-1d0d-4a85-884d-b367342c06f3
+- Lovable — Solutions Architect, San Francisco — client-facing AI solutioning aligns with consulting archetypes; SF relocation  https://jobs.ashbyhq.com/lovable/ac61dda2-bff0-4f22-adca-a48b0b2f560c
+- Lovable — Forward Deployed Engineer — FDE archetype fit; US hubs listed (also London), relocation needed  https://jobs.ashbyhq.com/lovable/7fe39289-1f7f-47d4-8002-d3aeeaaaabc6
+- Lovable — Forward Deployed Engineering Lead — FDE leadership fit; NYC relocation (Stockholm also listed)  https://jobs.ashbyhq.com/lovable/2bad82d6-3fd0-42a2-afbf-f1e9511057d4
+- Legora — Solutions Engineer — technical solutions role aligns with consulting archetypes; NYC relocation  https://jobs.ashbyhq.com/legora/f3c0712a-f8e2-4dc1-8e83-23da7891a1c2
+- Pigment — AI Deployment Strategist — customer-facing AI deployment reads like applied AI consulting; Toronto, strategy-leaning title  https://jobs.lever.co/pigment/15e7b82c-ebf3-477c-96b5-96a3b25e0663
+- Amplemarket — Spontaneous Application - Infrastructure Engineer — infra profile fits and remote, but generic evergreen pool with EMEA/LATAM timezone focus  https://job-boards.greenhouse.io/amplemarket/jobs/4066888101
+- Perplexity — Member of Technical Staff (AI Infrastructure Engineer) — AI infrastructure title fits; needs SF/Palo Alto relocation  https://jobs.ashbyhq.com/perplexity/598e1f7d-b802-4de2-99ac-90eb2bc33315
+- Perplexity — Forward Deployed Engineer, Perplexity Computer — FDE archetype fit; needs SF relocation  https://jobs.ashbyhq.com/perplexity/4fba58de-a168-4948-9d82-a7d4b38f45f2
+- Clay Labs — IT Operations Engineer — IT operations archetype family; needs NYC relocation  https://jobs.ashbyhq.com/claylabs/8d842974-0bee-4b13-bad5-dcc34848f69c
+- WorkOS — Site Reliability Engineer — SRE adjacent (brief caps unless infra-heavy); US & Canada remote fits  https://jobs.ashbyhq.com/workos/cff5a16f-fd1c-4b64-9b66-8a8321122375
+- WorkOS — Solutions Engineer — technical solutions aligns with consulting archetypes; SF relocation  https://jobs.ashbyhq.com/workos/dc23fd7b-ee4c-4e6a-959a-209b2eab8b17
+- Supabase — Site Reliability Engineer — SRE adjacent; Remote, Global fits  https://jobs.ashbyhq.com/supabase/ed6cedb1-b9bf-4609-ac5c-c75c33b31bf3
+- Supabase — AI Platform Engineer — AI platform/infra-adjacent; Remote, Global fits  https://jobs.ashbyhq.com/supabase/3b5d54ca-741b-45ac-bd3f-31605a0d3541
+- Hightouch — Forward Deployed Analytics Engineer — forward-deployed family, analytics-flavored; Remote North America  https://job-boards.greenhouse.io/hightouch/jobs/6122160004
+- Hightouch — Partner Solutions Engineer — partner-facing technical role aligns with consulting archetypes; Remote North America  https://job-boards.greenhouse.io/hightouch/jobs/6011820004
+
+## Skip
+- Anthropic — Staff Software Engineer, AI Reliability — pure staff-level SWE (hard DQ in brief)  https://job-boards.greenhouse.io/anthropic/jobs/5113224008
+- Anthropic — Staff Software Engineer, AI Reliability Engineering — staff SWE; Dublin on-site only  https://job-boards.greenhouse.io/anthropic/jobs/5101169008
+- Anthropic — Staff+ Software Engineer, Claude Managed Agents — pure staff-level SWE  https://job-boards.greenhouse.io/anthropic/jobs/5395767008
+- Anthropic — Staff+ Software Engineer, Enterprise AI Products — pure staff-level SWE  https://job-boards.greenhouse.io/anthropic/jobs/5368034008
+- Anthropic — Staff Software Engineer, Labs: Applied AI — staff SWE title; US on-site  https://job-boards.greenhouse.io/anthropic/jobs/5304425008
+- Anthropic — Strategy & Operations, Applied AI - AMER — strategy/operations role, off-target  https://job-boards.greenhouse.io/anthropic/jobs/5284500008
+- Anthropic — Tech Lead Manager, Agent Runtime Platform — product engineering management, off-target; US on-site  https://job-boards.greenhouse.io/anthropic/jobs/5316593008
+- Anthropic — Transformative AI Research Economist, Economic Research — research economist, off-target  https://job-boards.greenhouse.io/anthropic/jobs/5149802008
+- Anthropic — Workday Business Systems Analyst, People Systems — HR systems analyst, off-target  https://job-boards.greenhouse.io/anthropic/jobs/5194810008
+- Attio — Solutions Engineer [Pre and Post-Sales] - Mid-Market — sales-labeled solutions role  https://jobs.ashbyhq.com/attio/d48617ff-be9b-41cd-aff7-3ad2f826ca74
+- Attio — Solutions Engineer [Pre and Post-Sales] - SMB — sales-labeled solutions role  https://jobs.ashbyhq.com/attio/ce226be1-8237-41ce-b5ca-97c18d3ca8e6
+- Travelperk — Senior Corporate Travel Agent - GDS — travel agent, off-target  https://jobs.ashbyhq.com/perk/f231f058-e8e5-4970-8a0a-1a504d5be614
+- Travelperk — DevOps Engineer - Boston — adjacent DevOps capped by brief; US relocation  https://jobs.ashbyhq.com/perk/f6929dc9-047e-4694-b686-5da6f97a323b
+- Travelperk — Senior DevOps Engineer — adjacent DevOps; London/Barcelona on-site  https://jobs.ashbyhq.com/perk/9c5c0fce-c6da-4f4b-bcaf-899771f93d92
+- Travelperk — Business Automation Specialist - Customer Care — customer-care ops role; UK on-site  https://jobs.ashbyhq.com/perk/3b70e49f-9e02-46e2-b453-3ac36fd882c0
+- Retool — Staff Product Manager, Automation — product manager, off-target  https://jobs.gem.com/retool/am9icG9zdDqMnm_c28hPzZHxbHKUVuIV
+- Retool — Principal Solutions Architect — London on-site, outside Canada/US  https://jobs.gem.com/retool/am9icG9zdDrwaDd_r97TxV-NGXq2U2qH
+- Retool — Site Reliability Engineer (SRE) — adjacent SRE; SF/NY on-site relocation  https://jobs.gem.com/retool/am9icG9zdDov1g1UQjQKXdoNuSmbN_E5
+- DeepL — Developer Growth / API & Agentic AI Products — developer growth/relations, off-target  https://jobs.ashbyhq.com/DeepL/0f8a70b7-d28a-4db6-be61-5886863c22ea
+- DeepL — Senior Site Reliability Engineer — London on-site only  https://jobs.ashbyhq.com/DeepL/fd837484-2f16-4ffd-b2f1-6920f0f906c5
+- GetYourGuide — Senior Internal Audit Manager — internal audit, off-target; Berlin  https://job-boards.greenhouse.io/getyourguide/jobs/8146892
+- Helsing — AI Research Engineer - 3D Computer Vision — research engineering; EU on-site  https://helsing.ai/jobs/4911999101?gh_jid=4911999101
+- Helsing — AI Research Engineer - AI Safety — research engineering; EU on-site  https://helsing.ai/jobs/4334849101?gh_jid=4334849101
+- Helsing — AI Research Engineer - Computer Vision — research engineering; EU on-site  https://helsing.ai/jobs/4334842101?gh_jid=4334842101
+- Helsing — AI Research Engineer - Foundation Models — research engineering; EU on-site  https://helsing.ai/jobs/4766708101?gh_jid=4766708101
+- Helsing — AI Research Engineer - GPU Simulation — research engineering; EU on-site  https://helsing.ai/jobs/4953387101?gh_jid=4953387101
+- Helsing — AI Research Engineer - ML Engineering — research engineering; EU on-site  https://helsing.ai/jobs/4778869101?gh_jid=4778869101
+- Helsing — AI Research Engineer - ML & Signal Processing — research engineering; EU on-site  https://helsing.ai/jobs/4372802101?gh_jid=4372802101
+- Helsing — AI Research Engineer - Reinforcement Learning — research engineering; EU on-site  https://helsing.ai/jobs/4676357101?gh_jid=4676357101
+- Helsing — AI Research Engineer - Robotics — research engineering; EU on-site  https://helsing.ai/jobs/4423924101?gh_jid=4423924101
+- Helsing — Deployed AI Engineer — title would fit but EU cities on-site only, no remote indication  https://helsing.ai/jobs/4516967101?gh_jid=4516967101
+- Helsing — HPC Systems Administrator — systems admin analog but Munich on-site only  https://helsing.ai/jobs/4879386101?gh_jid=4879386101
+- Helsing — Site Reliability Engineer — EU on-site cities only  https://helsing.ai/jobs/4347030101?gh_jid=4347030101
+- Trade Republic — Front Desk Agent — front desk, off-target  https://traderepublic.com/en-de/about?jobId=7871261003&gh_jid=7871261003
+- N26 — Audit Operations Senior Manager — audit operations, off-target  https://n26.com/en-eu/careers/positions/7758692?gh_jid=7758692
+- N26 — Backend Engineer - Agentic Platform — backend SWE; Barcelona on-site  https://n26.com/en-eu/careers/positions/8108866?gh_jid=8108866
+- N26 — Information Security Controls Manager - Cloud & AI Governance — security title would fit but Berlin on-site only  https://n26.com/en-eu/careers/positions/7992395?gh_jid=7992395
+- N26 — IT Solutions Engineer - Google Cloud — EU on-site cities only  https://n26.com/en-eu/careers/positions/8138757?gh_jid=8138757
+- N26 — Senior AI & Automation Manager — title would fit but Berlin on-site only  https://n26.com/en-eu/careers/positions/7845575?gh_jid=7845575
+- N26 — Senior Business Audit Manager — audit, off-target  https://n26.com/en-eu/careers/positions/8063968?gh_jid=8063968
+- N26 — Senior Product Manager - Operations Automation & Enablement (OAE) — product manager, off-target  https://n26.com/en-eu/careers/positions/7996650?gh_jid=7996650
+- N26 — Senior Site Reliability Engineer - Software Logistics — Barcelona on-site only  https://n26.com/en-eu/careers/positions/8002486?gh_jid=8002486
+- N26 — Site Reliability Engineer - Data Platform — Barcelona on-site only  https://n26.com/en-eu/careers/positions/7866308?gh_jid=7866308
+- SumUp — Agente di commercio / Procacciatore (P. IVA) – Settore pagamenti — sales agent, off-target  https://sumup.com/careers/positions/8644804002?gh_jid=8644804002
+- SumUp — Customer Support Agent — customer support, off-target  https://sumup.com/careers/positions/8580040002?gh_jid=8580040002
+- SumUp — Customer Support Agent- DE — customer support, off-target  https://sumup.com/careers/positions/8340138002?gh_jid=8340138002
+- SumUp — Customer Support Agent- French — customer support, off-target  https://sumup.com/careers/positions/8340156002?gh_jid=8340156002
+- SumUp — Customer Support Agent- IT — customer support, off-target  https://sumup.com/careers/positions/8340130002?gh_jid=8340130002
+- SumUp — Customer Support Agent - Spanish and Portuguese — customer support, off-target  https://sumup.com/careers/positions/8340146002?gh_jid=8340146002
+- SumUp — Engineering Manager - Edge AI — product engineering management; Berlin on-site  https://sumup.com/careers/positions/8530960002?gh_jid=8530960002
+- SumUp — Independent Sales Agents (ISA) -Merchant Services across the US — sales, off-target  https://sumup.com/careers/positions/8066192002?gh_jid=8066192002
+- SumUp — IT Operations Lead EU — title would fit but Barcelona/Berlin on-site only  https://sumup.com/careers/positions/8690965002?gh_jid=8690965002
+- SumUp — KYC Operations Agent with Spanish — compliance ops agent, off-target  https://sumup.com/careers/positions/8705989002?gh_jid=8705989002
+- SumUp — Senior DevOps Engineer — Berlin on-site; adjacent DevOps  https://sumup.com/careers/positions/8726158002?gh_jid=8726158002
+- SumUp — Zelfstandig B2B Sales Agent — sales, off-target  https://sumup.com/careers/positions/8174816002?gh_jid=8174816002
+- Forto — Senior Site Reliability Engineer — Berlin on-site only  https://jobs.ashbyhq.com/forto/e6d3ffb9-56f6-432d-9c66-3376967fc9ef
+- Photoroom — Head of GenAI Platform — leadership GenAI title would fit but Paris on-site only  https://jobs.ashbyhq.com/photoroom/085eaa32-44fe-4928-8826-b48873823bfd
+- Photoroom — Staff Product Manager, Agentic & AI Platform — product manager, off-target  https://jobs.ashbyhq.com/photoroom/e51e28e4-b740-44d6-922a-8a7b00a245a8
+- Isomorphic Labs — Senior Security Engineer (AI Safety), London, Lausanne — security title would fit but Lausanne/London on-site only  https://job-boards.greenhouse.io/isomorphiclabs/jobs/6100340004
+- Isomorphic Labs — Software Engineer (LLM Engineering), London — SWE; London on-site  https://job-boards.greenhouse.io/isomorphiclabs/jobs/6134265004
+- PhysicsX — DevOps Lead — adjacent DevOps; NYC on-site relocation  https://job-boards.eu.greenhouse.io/physicsx/jobs/4907382101
+- PhysicsX — Forward Deployed Software Engineer — London on-site only  https://job-boards.eu.greenhouse.io/physicsx/jobs/4960268101
+- PhysicsX — Principal Machine Learning Infrastructure Engineer — London on-site only  https://job-boards.eu.greenhouse.io/physicsx/jobs/4789202101
+- PhysicsX — Principal Solutions Engineer - Aerospace & Defense — defense solutions role, off-target  https://job-boards.eu.greenhouse.io/physicsx/jobs/4930148101
+- PhysicsX — Senior Machine Learning Infrastructure Engineer, Research — Singapore on-site, outside Canada/US  https://job-boards.eu.greenhouse.io/physicsx/jobs/4944273101
+- Wayve — Customer Integration Engineer — Germany on-site; integration role  https://wayve.firststage.co/jobs?gh_jid=8693131002
+- Wayve — Product Manager, AI Driver — product manager, off-target  https://wayve.firststage.co/jobs?gh_jid=8702742002
+- Wayve — Senior Machine Learning Engineer, AI Performance — ML SWE; London on-site  https://wayve.firststage.co/jobs?gh_jid=8655859002
+- Wayve — Senior Network & Infrastructure Engineer — title would fit but Israel on-site only  https://wayve.firststage.co/jobs?gh_jid=8745604002
+- Wayve — Senior Site Reliability Engineer, Vehicle SW — Germany on-site only  https://wayve.firststage.co/jobs?gh_jid=8615440002
+- Wayve — Senior Software Engineer (Product, AI Portal) — SWE; London on-site  https://wayve.firststage.co/jobs?gh_jid=8610265002
+- Wayve — Senior SRE, AI Infrastructure — London on-site only  https://wayve.firststage.co/jobs?gh_jid=8458272002
+- Wayve — Site Reliability Engineering Manager, Vehicle Software — SRE management; US relocation  https://wayve.firststage.co/jobs?gh_jid=8728803002
+- Wayve — Site Reliability Engineer, Vehicle Software — Sunnyvale on-site; adjacent SRE  https://wayve.firststage.co/jobs?gh_jid=8758604002
+- Wayve — Software Integration Engineer (6 months Contract) — short contract; Detroit on-site  https://wayve.firststage.co/jobs?gh_jid=8422027002
+- Wayve — Solutions Architect — London on-site only  https://wayve.firststage.co/jobs?gh_jid=8624759002
+- Wayve — Staff SRE, AI Infrastructure — London on-site only  https://wayve.firststage.co/jobs?gh_jid=8537458002
+- Wayve — System Integration Engineer — Sunnyvale on-site  https://wayve.firststage.co/jobs?gh_jid=8567734002
+- Wayve — Systems Engineer, AI Validation — validation role; Sunnyvale on-site  https://wayve.firststage.co/jobs?gh_jid=8542296002
+- Wayve — System Test Automation Engineer, HIL — test automation; Germany on-site  https://wayve.firststage.co/jobs?gh_jid=8555774002
+- Wayve — Triage Automation Engineer — QA/test automation; Sunnyvale on-site  https://wayve.firststage.co/jobs?gh_jid=8756182002
+- Synthesia — Product Designer, AI-Native Products (Staff-Level / L6) — designer, off-target  https://jobs.ashbyhq.com/synthesia/4721d2c3-3d94-45d3-b9f7-ea5e1f549ce2
+- Palantir — Deployment Strategist - Japan Forward Deployed — strategy role, off-target; DC on-site  https://jobs.lever.co/palantir/fa93a1f8-dc95-40d0-b5ca-f2aebaab0806
+- Palantir — Deployment Strategist - Korea Forward Deployed — strategy role, off-target; DC on-site  https://jobs.lever.co/palantir/1a53939d-8ffa-4570-b31a-6d0bc53fdb59
+- Palantir — DevOps Engineer — adjacent DevOps; DC relocation  https://jobs.lever.co/palantir/51ea4a3b-7764-4c87-96e4-310e19c856d5
+- Palantir — Edge Infrastructure Engineer — Warsaw on-site, outside Canada/US  https://jobs.lever.co/palantir/3d06b4bc-6a7b-4f73-b5c5-4544354e3d0f
+- Palantir — Forward Deployed Enablement Engineer - Customer Success — London on-site only  https://jobs.lever.co/palantir/00c2c97b-8514-4617-9883-e53e486b6dcd
+- Palantir — Forward Deployed Infrastructure Engineer - UK Government — UK gov clearance barrier; London on-site  https://jobs.lever.co/palantir/72e51928-07f0-4be0-aae5-0ae6956a4846
+- Palantir — Forward Deployed Infrastructure Engineer - US Government — US Government role; US citizenship clearance barrier  https://jobs.lever.co/palantir/0fccbe95-2520-4df3-8600-7897656c06a2
+- Palantir — Forward Deployed Infrastructure Engineer, New Grad - UK Government — new-grad role; UK gov clearance  https://jobs.lever.co/palantir/cadc0eb2-2703-43e4-8e4f-41edf5b071c6
+- Palantir — Forward Deployed Infrastructure Engineer, New Grad - US Government — new-grad role; US gov clearance  https://jobs.lever.co/palantir/33243fb5-6907-40c7-930c-968b25d825d0
+- Palantir — Forward Deployed Reliability Engineer — London on-site only  https://jobs.lever.co/palantir/5a99fe16-1bda-4313-ace2-a11ea6e58f0c
+- Palantir — Forward Deployed Security Engineer - US Government — US Government role; US citizenship clearance barrier  https://jobs.lever.co/palantir/22053072-4c22-49c4-8299-28e107ceeb98
+- Palantir — Forward Deployed Site Reliability Engineer - US Government — US Government role; US citizenship clearance barrier  https://jobs.lever.co/palantir/a194220b-684a-4b4e-b918-1f70154b464c
+- Palantir — Forward Deployed Software Engineer — Seoul on-site, outside Canada/US  https://jobs.lever.co/palantir/1bb19522-3936-4adc-9ced-c3df8b5900b9
+- Palantir — Forward Deployed Software Engineer - AUS Government — Australian government; Sydney on-site  https://jobs.lever.co/palantir/909875b4-1940-41bd-b08d-a269c7235100
+- Palantir — Forward Deployed Software Engineer - Intel — intel community; US clearance barrier  https://jobs.lever.co/palantir/34b3a697-6e22-4751-befd-0b7921abbd5f
+- Palantir — Forward Deployed Software Engineer - Japan Government — foreign government; Tokyo on-site  https://jobs.lever.co/palantir/12e94938-55cb-4ad9-9c05-405ebc9ef430
+- Palantir — Forward Deployed Software Engineer - NATO — NATO clearance; London on-site  https://jobs.lever.co/palantir/73d1a90c-162d-4cb6-9e0c-4c8de9561ad0
+- Palantir — Forward Deployed Software Engineer - Norwegian Government — foreign government; Oslo on-site  https://jobs.lever.co/palantir/0a0d2db2-75a5-48e4-b0a0-81baa6588e36
+- Palantir — Forward Deployed Software Engineer - Spain — Madrid on-site only  https://jobs.lever.co/palantir/53fb4c05-f949-4146-a046-5c063c36a628
+- Palantir — Forward Deployed Software Engineer - UK Government — UK gov clearance; London on-site  https://jobs.lever.co/palantir/57a3f928-e7d3-4037-8196-b38e2f867152
+- Palantir — Forward Deployed Software Engineer - US Government — US Government role; US citizenship clearance barrier  https://jobs.lever.co/palantir/289ad049-7b4e-41e3-8a39-146fbeb6fb64
+- Palantir — Forward Deployed Software Engineer - US Government - Federal Health and Civilian — US Government role; US citizenship clearance barrier  https://jobs.lever.co/palantir/be4ab5cb-9caa-4c2a-97b9-c73805fca4fc
+- Palantir — Forward Deployed Software Engineer, New Grad - Commercial — new-grad role; London on-site  https://jobs.lever.co/palantir/2aa14e4f-d406-486e-9aa8-6ff3358d70a0
+- Palantir — Forward Deployed Software Engineer, New Grad - Intel, US Government — new-grad; US gov/intel clearance  https://jobs.lever.co/palantir/fbca0358-083a-4222-bdbb-3bd729b48382
+- Palantir — Forward Deployed Software Engineer, New Grad - UK Government — new-grad; UK gov clearance  https://jobs.lever.co/palantir/b4aa51a2-bc43-4d67-bf55-12db7feefb3a
+- Palantir — Forward Deployed Software Engineer, New Grad - US Government — new-grad; US gov clearance  https://jobs.lever.co/palantir/cbe90327-3e6e-451c-a54c-1d3cbcef5aeb
+- Palantir — Site Reliability Engineer - US Government — US Government role; US citizenship clearance barrier  https://jobs.lever.co/palantir/211f99dc-269e-4f25-84d3-d73dea782080
+- Palantir — Site Reliability Operations Analyst - Commercial — operations analyst role, off-target  https://jobs.lever.co/palantir/5174e95b-2e0a-46f8-8db7-e2c837a0ac94
+- Palantir — Site Reliability Operations Analyst - US Government — US Government role; analyst off-target  https://jobs.lever.co/palantir/38758e88-5884-4a11-98ac-d23cab51bc7a
+- Palantir — Software Engineer - Edge AI Systems — SWE; Seattle on-site  https://jobs.lever.co/palantir/67110929-adea-41c3-851a-8882e222d9e4
+- Faculty — Senior Research Scientist - AI Safety — research scientist, off-target  https://jobs.ashbyhq.com/faculty/fd99c104-65b4-4fca-b68e-0ab9170da31f
+- Faculty — Head of AI Validation — leadership title but London on-site only  https://jobs.ashbyhq.com/faculty/d2d0ef45-de48-4c48-9781-5c85c9d49f42
+- Faculty — Technical Director of AI Safety — London on-site only  https://jobs.ashbyhq.com/faculty/7e726de6-6327-40cd-a00d-0e9be34e1cb4
+- Faculty — Lead Forward Deployed Engineer — FDE would fit but London on-site only  https://jobs.ashbyhq.com/faculty/e3f544c9-e520-4799-ab4d-c0b3cb050760
+- Faculty — Senior Research Scientist - AI Safety Evaluations — research scientist, off-target  https://jobs.ashbyhq.com/faculty/6c0abf94-8d61-459b-b094-49307a595c60
+- Faculty — Research Scientist - AI Safety — research scientist, off-target  https://jobs.ashbyhq.com/faculty/188ecaba-2f9c-4a15-a86b-dc2f369f03bd
+- Faculty — Forward Deployed Engineer — FDE would fit but London on-site only  https://jobs.ashbyhq.com/faculty/87b95736-0abf-4b18-b628-0083d52ec961
+- Faculty — Senior Forward Deployed Engineer — FDE would fit but London on-site only  https://jobs.ashbyhq.com/faculty/c7d3b4b9-fe50-4ebd-8f55-9c6c014014e8
+- Causaly — Senior Software Engineer - Agentic Workflows — SWE; London on-site  https://jobs.ashbyhq.com/causaly/b197dd4a-dded-4f35-ab09-3bf757b64d2a
+- Causaly — Staff Software Engineer - Agentic Workflows — staff SWE; London on-site  https://jobs.ashbyhq.com/causaly/99f31334-aef3-4e52-a969-1a2a08368016
+- Causaly — Senior AI Engineer — title would fit but London on-site only  https://jobs.ashbyhq.com/causaly/0d240789-10ba-4a84-89fc-76f7e62079c0
+- Qonto — Senior Product Designer - Qonto AI Lab — designer, off-target  https://jobs.lever.co/qonto/ace090d6-0f9c-4d35-81bf-992a6bd41d95
+- Qonto — Staff Machine Learning Engineer for AI Product — ML SWE; EU cities on-site  https://jobs.lever.co/qonto/471e0021-d630-4cd1-81c3-2fb2e9dc253c
+- Lovable — Product Manager (Agents) — product manager, off-target  https://jobs.ashbyhq.com/lovable/1140665c-a426-49d5-bcdd-f78560efe50d
+- Lovable — AI Research Engineer, Post-Training — research SWE; Stockholm/London on-site  https://jobs.ashbyhq.com/lovable/59d85cf1-104b-48cb-956c-bed73ef934c9
+- Lovable — Brand Designer, AI & Ops — designer, off-target  https://jobs.ashbyhq.com/lovable/df79d83b-e366-4998-afdd-694d06183d75
+- Lovable — Data Scientist, Agent — data scientist, off-target  https://jobs.ashbyhq.com/lovable/a1e49a18-7533-450f-b760-cef337f2f9e3
+- Lovable — AI Ops Engineer (People Team) — AI Ops analog but Stockholm on-site only  https://jobs.ashbyhq.com/lovable/8dd92c40-b45d-41b2-ae6b-1680b0a05d92
+- Lovable — Staff / Principal Software Engineer, Infrastructure Security — staff SWE; Stockholm on-site  https://jobs.ashbyhq.com/lovable/522e925e-ede2-4659-8b8b-1122d4ad7ab0
+- Lovable — AI Ops Engineer (FBOS) — AI Ops analog but Stockholm on-site only  https://jobs.ashbyhq.com/lovable/ac86ab57-ff2e-4a49-83f8-51dd6bbc2cbf
+- Lovable — AI Scaled Customer Success Programs — customer success, off-target  https://jobs.ashbyhq.com/lovable/3944f55e-910f-4248-ba28-2c1e6143eb28
+- Legora — Senior Site Reliability Engineer — adjacent SRE; NYC relocation  https://jobs.ashbyhq.com/legora/04f2f382-7760-4f42-a7da-f85ae8de8a62
+- Legora — AI Software Engineer — SWE; Stockholm on-site  https://jobs.ashbyhq.com/legora/f81a4b5e-7ef3-4946-a147-f6c0645e98ca
+- Legora — Site Reliability Engineer — Stockholm/Malmö on-site only  https://jobs.ashbyhq.com/legora/c6d79161-748c-43a4-a762-95826ed8847f
+- Legora — Staff Site Reliability Engineer — adjacent SRE; NYC relocation  https://jobs.ashbyhq.com/legora/c7a8d50e-c7f9-4a65-984d-dfa9239335e7
+- Legora — AI Marketing Engineer — marketing engineering, off-target  https://jobs.ashbyhq.com/legora/6dae34ec-2164-46de-bec7-a877b96a0f7c
+- Legora — AI Enablement Manager — enablement/training would fit but Stockholm on-site only  https://jobs.ashbyhq.com/legora/30a136af-1a4e-44b3-9424-38482821773b
+- Legora — Solutions Engineer, London — London on-site only  https://jobs.ashbyhq.com/legora/3f80dbce-825a-45f9-8180-f3dcfc153086
+- Legora — Director, Cloud & AI Partnerships — partnerships/business development, off-target  https://jobs.ashbyhq.com/legora/d107905d-b2ef-4964-834b-a17d6e93e971
+- Legora — AI Adoption Manager - Communities — community management; London on-site  https://jobs.ashbyhq.com/legora/d1c6f3d2-50d5-4787-ac21-5d8df0a6ddc2
+- Legora — Associate, Applied Behavioural Research, AI Transformation — research associate; London on-site  https://jobs.ashbyhq.com/legora/34c4aecc-a808-480b-a585-61e489b0eac4
+- Legora — Solutions Engineer - Paris — Paris on-site only  https://jobs.ashbyhq.com/legora/42e89f02-54d8-4df8-bda8-4107bbb7bab5
+- Legora — Solutions Engineer - Munich — Munich on-site only  https://jobs.ashbyhq.com/legora/33abe455-786f-4054-b315-140b16f33c1e
+- Legora — Solutions Engineer - Madrid — Madrid on-site only  https://jobs.ashbyhq.com/legora/898c9e9f-74e2-4bb1-8ff2-ef23b8ab9452
+- Legora — Solutions Engineer - Milan — Milan on-site only  https://jobs.ashbyhq.com/legora/5a51ffc6-f780-4c55-b130-5fc9ad51c31f
+- Pigment — AI Product Designer — designer, off-target  https://jobs.lever.co/pigment/a204cd46-bdae-4a7b-8c79-814432fcaf21
+- Pigment — Business Transformation Advisory — UK on-site advisory  https://jobs.lever.co/pigment/b0e6f446-27dd-40d2-a89a-327cf5146314
+- Pigment — Optimisation AI Scientist — AI scientist, off-target  https://jobs.lever.co/pigment/abde6aa1-a569-4700-998b-152187e2721b
+- Pigment — Senior AI Scientist — AI scientist, off-target  https://jobs.lever.co/pigment/01e58869-2094-4757-9315-b0972eb1d5c1
+- Pigment — Senior Back-End Infrastructure Engineer — backend SWE; Paris/London on-site  https://jobs.lever.co/pigment/373b9e9c-59a2-4e0b-91e8-cf1c49db444b
+- Pigment — Senior GenAI Engineer — GenAI analog but France on-site only  https://jobs.lever.co/pigment/39662985-9160-45be-8363-352c69edeeef
+- Pigment — Solutions Architect - UK — London on-site only  https://jobs.lever.co/pigment/fb659c21-bd62-4b67-ade9-1b7f55e7f1cf
+- Corti — Senior Backend Engineer, Agents and Speech Recognition — backend SWE; Copenhagen on-site  https://jobs.ashbyhq.com/corti/3155c7b6-f7cc-424e-8e90-176b579446b7
+- Spotify — Automation (Programmatic) Lead - London — programmatic ads automation; London on-site  https://jobs.lever.co/spotify/9d90d15c-541b-4360-bdaf-c6a5e9479e8a
+- Spotify — Marketing Technology Manager — marketing, off-target  https://jobs.lever.co/spotify/6c591c8a-9aeb-4760-ace1-1942da31aca9
+- Spotify — Multilingual AI Quality Specialist — QA specialist, off-target  https://jobs.lever.co/spotify/331d11c6-6056-45b4-8bd6-d289978b1919
+- Spotify — Senior Machine Learning Engineer, Personalization, Magenta — ML SWE; NYC on-site  https://jobs.lever.co/spotify/3cf07bc7-2b9f-4531-af88-a09cfdf7b3ab
+- Spotify — Senior Product Quality Analyst - AI Voice — QA analyst, off-target  https://jobs.lever.co/spotify/17a75d93-835d-40ce-b31e-0c381b49f40a
+- Spotify — Senior Software Engineer - Enterprise AI — SWE; NYC on-site  https://jobs.lever.co/spotify/c73be71c-1a63-4906-9925-95f2115d1f1d
+- Perplexity — Member of Technical Staff (AI Inference Engineer) — deep ML-systems SWE; US on-site  https://jobs.ashbyhq.com/perplexity/8a976851-9bef-4b07-8d36-567fa9540aef
+- Perplexity — Member of Technical Staff (Backend/Infrastructure Engineer, Search) — Belgrade/London/Berlin on-site  https://jobs.ashbyhq.com/perplexity/dd80ab52-34bd-42af-aa5e-6283b7e6c194
+- Perplexity — Member of Technical Staff (AI Researcher) — research, off-target  https://jobs.ashbyhq.com/perplexity/8fe61c73-0daf-4432-a47d-44714c1ef764
+- Perplexity — Member of Technical Staff (Software Engineer, Applied AI) — SWE title; US on-site  https://jobs.ashbyhq.com/perplexity/3c656963-876a-458d-bca6-916a42a24c1a
+- Perplexity — Member of Technical Staff (Software Engineer, Agent Capabilities) — SWE title; US on-site  https://jobs.ashbyhq.com/perplexity/7f2b3619-5ffa-467b-be6f-7a6b7d487892
+- Perplexity — Technical Recruiter, AI — recruiting, off-target  https://jobs.ashbyhq.com/perplexity/ef269656-94ef-463a-ae0e-6102ca3a94dd
+- Perplexity — Engineering Manager (TLM, Agents) — product engineering management; SF on-site  https://jobs.ashbyhq.com/perplexity/6829d54e-570b-4001-a822-3c1e85a34371
+- Perplexity — AI Strategist, Legal — domain strategist, off-target  https://jobs.ashbyhq.com/perplexity/fb1815de-07d9-4933-8746-979dbcb00870
+- Perplexity — AI Strategist, Financial Services — domain strategist, off-target  https://jobs.ashbyhq.com/perplexity/31dfcb60-a0df-4983-b3a4-d653cdc0aa8f
+- Perplexity — Technical Sourcer, AI — recruiting, off-target  https://jobs.ashbyhq.com/perplexity/3d7ef710-b1f6-4a80-af57-946f9bccd35b
+- Perplexity — Member of Technical Staff (AI Software Engineer, Agents) — SWE title; SF on-site  https://jobs.ashbyhq.com/perplexity/50a2def5-adeb-4f13-99c1-88c32482b772
+- Clay Labs — Software Engineer, Developer Experience (AI) — SWE; NYC/SF on-site  https://jobs.ashbyhq.com/claylabs/9b008b26-189b-45cf-83d8-fee117d32874
+- Clay Labs — GTME Ecosystem - GTME & AI Teacher — go-to-market/sales-adjacent, off-target  https://jobs.ashbyhq.com/claylabs/1b1c004f-0e6a-41b6-bac3-971448b63a07
+- Clay Labs — Software Engineer, Applied AI — SWE title; NYC on-site  https://jobs.ashbyhq.com/claylabs/5e07db20-d96a-4dff-b7d3-3bf1cdde6fc1
+- WorkOS — Account Executive - AI Native — sales, off-target  https://jobs.ashbyhq.com/workos/afdd651f-c97a-4ba2-88af-c790eb9e1a1d
+- WorkOS — Developer & Agent Experience Engineer — developer-experience SWE, off-target  https://jobs.ashbyhq.com/workos/b6c03b24-b4ee-4ee3-ac62-5e5718c502d4
+- Supabase — Pre-Sales Solutions Architect (SA) Leader — pre-sales labeled, off-target  https://jobs.ashbyhq.com/supabase/624d48cc-8d34-4607-bace-e6d045df70b8
+- Hightouch — Engineering Manager, Agents — product engineering management  https://job-boards.greenhouse.io/hightouch/jobs/6020299004
+- Hightouch — Forward Deployed Creative Designer, Ads — designer, off-target  https://job-boards.greenhouse.io/hightouch/jobs/5982446004
+- Hightouch — Forward Deployed Creative Strategist — creative/ads, off-target  https://job-boards.greenhouse.io/hightouch/jobs/6008745004
+- Hightouch — Forward Deployed Marketing Data Scientist — marketing DS, off-target  https://job-boards.greenhouse.io/hightouch/jobs/5718912004
+- Hightouch — Lead Product Manager, Agentic Personalization — product manager, off-target  https://job-boards.greenhouse.io/hightouch/jobs/5834919004
+- Hightouch — Software Engineer, AI Agents — SWE title (hard DQ in brief)  https://job-boards.greenhouse.io/hightouch/jobs/5542602004
+- Hightouch — Software Engineer, Applied AI Research — SWE title (hard DQ in brief)  https://job-boards.greenhouse.io/hightouch/jobs/6174215004
+- Hightouch — Solutions Engineer, Enterprise East (Pre-Sales) — pre-sales labeled; Toronto  https://job-boards.greenhouse.io/hightouch/jobs/6001225004
+- Hightouch — Solutions Engineer, Enterprise (Pre-Sales) - German speaking — Europe on-site; pre-sales labeled  https://job-boards.greenhouse.io/hightouch/jobs/5852695004
+- Hightouch — Solutions Engineer, Enterprise West (Pre-Sales) — pre-sales labeled, off-target  https://job-boards.greenhouse.io/hightouch/jobs/5530769004
