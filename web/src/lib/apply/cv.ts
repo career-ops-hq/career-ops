@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
-import { companySlug, matchesTailoredCv, sortNewestFirst } from "./cv-match.mjs";
+import { companySlug } from "@/lib/company-slug.mjs";
+import { matchesTailoredCv, sortNewestFirst } from "./cv-match.mjs";
 
 /**
  * Locate the tailored CV PDF the real `pdf` mode wrote to output/ for a given
@@ -21,7 +22,15 @@ export function resolveTailoredCv(company?: string): string | null {
   } catch {
     return null;
   }
-  const slug = companySlug(c);
+  // No usable key means this company cannot be identified from a filename, so
+  // find nothing. The old empty-string slug was a substring of every name in
+  // output/, which resolved the newest unrelated CV instead (#2352).
+  const key = companySlug(c);
+  if (!key) return null;
+  const { slug } = key;
+  // `key.first` is deliberately NOT used as a fallback: matching a company by
+  // its first token alone made "Acme" resolve an unrelated "Acme Bank" file,
+  // and matchesTailoredCv already requires the cv- prefix AND a token boundary.
   const matches = files.filter((f) => matchesTailoredCv(f.toLowerCase(), slug));
   if (!matches.length) return null;
   const sorted = sortNewestFirst(dir, matches);

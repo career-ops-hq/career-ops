@@ -2,7 +2,8 @@ import { NextRequest } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
-import { companySlug, matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
+import { companySlug } from "@/lib/company-slug.mjs";
+import { matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +16,11 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const company = (req.nextUrl.searchParams.get("company") ?? "").trim();
   if (!company) return new Response("company required", { status: 400 });
-  const slug = companySlug(company);
+  // Same invariant as the apply lookup: a company with no usable key serves
+  // nothing rather than the newest unrelated CV (#2352).
+  const key = companySlug(company);
+  if (!key) return new Response("no tailored CV found for this offer", { status: 404 });
+  const { slug } = key;
   const dir = path.join(careerOpsRoot(), "output");
 
   let files: string[];

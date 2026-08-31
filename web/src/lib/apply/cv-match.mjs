@@ -17,24 +17,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-/** company name -> lowercase, hyphen-joined slug ("Acme Corp." -> "acme-corp"). */
-export function companySlug(company) {
-  return ((company ?? '').toLowerCase().match(/[a-z0-9]+/g) ?? []).join('-');
-}
-
-/**
- * Does `filenameLower` (already lowercased) look like the tailored CV PDF for
- * `slug`? Two guards, both load-bearing:
- *
- * 1. `cv-` prefix — `cover-…-{slug}-….pdf` contains the same slug, and the
- *    newest-first sort would otherwise attach a cover letter regenerated
- *    after its CV to the CV slot.
- * 2. Token-boundary match on the FULL slug only — bounded by non-alphanumerics
- *    so "meta" doesn't match "metabase", and no loose first-token fallback, so
- *    a multi-word company can't match a file that only shares its first word.
- *    Token-extract instead of replace-then-trim: no `-+$`-style pattern that
- *    backtracks polynomially on adversarial input (CodeQL).
- */
 export function matchesTailoredCv(filenameLower, slug) {
   if (!filenameLower.startsWith('cv-')) return false;
   if (!slug) return false;
