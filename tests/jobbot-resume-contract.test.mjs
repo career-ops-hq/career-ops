@@ -102,6 +102,21 @@ test('render uses existing builder, fact gate, and renderer and emits a path-fre
   assert.equal(calls.some(args => args.includes(`--jobbot-staging-root=${realpathSync(outputRoot)}`)), true);
 });
 
+test('render refuses a failed fact gate before invoking the PDF renderer', () => {
+  const root = workspace();
+  const request = buildResumeRequest({ workspace: root, query: '7' });
+  const calls = [];
+  const run = (_command, args) => {
+    calls.push(args);
+    if (args[0].endsWith('build-cv-html.mjs')) writeFileSync(args[2], '<!doctype html><html><body>Unverified claim</body></html>');
+    if (args[0].endsWith('verify-cv-facts.mjs')) return { status: 0, stdout: '{"verdict":"fail"}', stderr: '' };
+    return { status: 0, stdout: '', stderr: '' };
+  };
+  const outputRoot = mkdtempSync(join(tmpdir(), 'jobbot-controlled-staging-'));
+  assert.throws(() => renderResume({ workspace: root, request, tailoring: tailoring(request), outputRoot, outputKey: '123e4567-e89b-12d3-a456-426614174000', run }), /fact gate/);
+  assert.equal(calls.some(args => args[0].endsWith('generate-pdf.mjs')), false);
+});
+
 test('render rejects a manifest-bound candidate that differs from the verified profile', () => {
   const root = workspace();
   const request = buildResumeRequest({ workspace: root, query: '7' });
