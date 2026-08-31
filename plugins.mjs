@@ -17,7 +17,7 @@
  */
 
 import path from 'path';
-import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, realpathSync } from 'fs';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 
@@ -34,6 +34,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const APPLICATIONS_PATH = path.join(ROOT, 'data', 'applications.md');
 const PIPELINE_PATH = path.join(ROOT, 'data', 'pipeline.md');
+const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 // A misbehaving plugin's stray rejection should be attributed and not silently
 // crash the host (the engine's per-hook try/catch handles the common case; this
@@ -199,10 +200,37 @@ function findManifest(id) {
   return discoverPlugins(pluginRoots(ROOT), resolveSuccessorIds(ROOT)).find(m => m.id === id) || null;
 }
 
-function hasNullYamlKey(value) {
+function isWithinDirectory(rootAbs, candidateAbs) {
+  const rel = path.relative(rootAbs, candidateAbs);
+  return rel === '' || (!rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel));
+}
+
+function hasNullYamlKey(value, seen = new WeakSet()) {
   if (!value || typeof value !== 'object') return false;
+  if (seen.has(value)) return false;
+  seen.add(value);
   if (Object.prototype.hasOwnProperty.call(value, 'null')) return true;
-  return Object.values(value).some(hasNullYamlKey);
+  return Object.values(value).some((child) => hasNullYamlKey(child, seen));
+}
+
+export function resolveLocalPluginDirForRemoval(root, id) {
+  if (!PLUGIN_ID_RE.test(String(id))) {
+    throw new Error(`Refusing to remove plugin outside plugins.local: ${id}`);
+  }
+  const localRoot = path.resolve(root, 'plugins.local');
+  const dir = path.resolve(localRoot, id);
+  const rel = path.relative(localRoot, dir);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`Refusing to remove plugin outside plugins.local: ${id}`);
+  }
+  if (existsSync(dir)) {
+    const realRoot = realpathSync(localRoot);
+    const realDir = realpathSync(dir);
+    if (!isWithinDirectory(realRoot, realDir)) {
+      throw new Error(`Refusing to remove plugin outside plugins.local: ${id}`);
+    }
+  }
+  return dir;
 }
 
 /**
@@ -353,11 +381,11 @@ function cmdTrust(args) {
 function cmdRemove(args) {
   const id = args[0];
   if (!id) { console.error('Usage: node plugins.mjs remove <id>'); process.exit(1); }
-  const localRoot = path.resolve(ROOT, 'plugins.local');
-  const dir = path.resolve(localRoot, id);
-  const rel = path.relative(localRoot, dir);
-  if (path.isAbsolute(id) || rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
-    console.error(`Refusing to remove plugin outside plugins.local: ${id}`);
+  let dir;
+  try {
+    dir = resolveLocalPluginDirForRemoval(ROOT, id);
+  } catch (err) {
+    console.error(err.message);
     process.exit(1);
   }
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });

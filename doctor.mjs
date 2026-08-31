@@ -558,10 +558,12 @@ function checkPipelineFile() {
 // the user had actually switched on, and said nothing about why.
 //
 // Returns the config plus the parse error, so callers can tell the two apart.
-function hasNullYamlKey(value) {
+function hasNullYamlKey(value, seen = new WeakSet()) {
   if (!value || typeof value !== 'object') return false;
+  if (seen.has(value)) return false;
+  seen.add(value);
   if (Object.prototype.hasOwnProperty.call(value, 'null')) return true;
-  return Object.values(value).some(hasNullYamlKey);
+  return Object.values(value).some((child) => hasNullYamlKey(child, seen));
 }
 
 function readPluginConfigSync(root) {

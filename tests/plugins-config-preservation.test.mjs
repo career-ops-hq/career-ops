@@ -26,7 +26,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const { parsePluginConfig } = await import(pathToFileURL(join(ROOT, 'plugins.mjs')).href);
+const { parsePluginConfig, resolveLocalPluginDirForRemoval } = await import(pathToFileURL(join(ROOT, 'plugins.mjs')).href);
 
 const FILE = '/somewhere/config/plugins.yml';
 
@@ -107,6 +107,11 @@ test('a plugins section that is not a mapping is refused too', () => {
   }
 });
 
+test('recursive YAML aliases do not make config validation recurse forever', () => {
+  const cfg = parsePluginConfig('plugins: &plugins\n  apify:\n    enabled: true\n  self: *plugins\n', FILE);
+  assert.equal(cfg.plugins.apify.enabled, true);
+});
+
 // ── doctor reports it, rather than reading it as "nothing enabled" ──────────
 //
 // The same swallow lived in doctor.mjs's readPluginConfigSync, which returned
@@ -116,7 +121,7 @@ test('a plugins section that is not a mapping is refused too', () => {
 // nothing about why.
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 // --target, not CAREER_OPS_ROOT. It is the flag doctor's own existing suite
@@ -215,5 +220,24 @@ test('and adds no new key on a healthy config', () => {
     assert.ok(!('pluginConfigError' in doctorJson(good)), 'the error key appears on a healthy config');
   } finally {
     rmSync(good, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
+test('plugin removal refuses traversal, absolute paths, and symlink escapes', () => {
+  const root = mkdtempSync(join(tmpdir(), 'career-ops-remove-root-'));
+  const outside = mkdtempSync(join(tmpdir(), 'career-ops-remove-outside-'));
+  try {
+    mkdirSync(join(root, 'plugins.local'), { recursive: true });
+    symlinkSync(outside, join(root, 'plugins.local', 'escape'));
+    assert.throws(() => resolveLocalPluginDirForRemoval(root, '../escape'), /outside plugins\.local/);
+    assert.throws(() => resolveLocalPluginDirForRemoval(root, '/tmp/escape'), /outside plugins\.local/);
+    assert.throws(() => resolveLocalPluginDirForRemoval(root, 'nested/id'), /outside plugins\.local/);
+    assert.throws(() => resolveLocalPluginDirForRemoval(root, 'escape'), /outside plugins\.local/);
+    const safe = resolveLocalPluginDirForRemoval(root, 'safe-plugin');
+    assert.equal(safe, join(root, 'plugins.local', 'safe-plugin'));
+    assert.equal(existsSync(outside), true, 'validation must not remove the symlink target');
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 10 });
+    rmSync(outside, { recursive: true, force: true, maxRetries: 10 });
   }
 });
