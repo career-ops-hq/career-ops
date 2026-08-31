@@ -13,7 +13,8 @@
  * VERSION (apply has no version gate; equal-VERSION content drift is normal).
  *
  * Usage:
- *   node upgrade-tests.mjs --pr-gate     # newest old tag -> HEAD, one leg
+ *   node upgrade-tests.mjs --pr-gate     # newest old tag -> HEAD, one leg per
+ *                                        # dismiss-marker state (untracked/tracked)
  *   node upgrade-tests.mjs --canary      # planted user-file clobber must go RED
  *   node upgrade-tests.mjs --local-paths # a declared fork-local path survives (#2421)
  */
@@ -114,7 +115,7 @@ function isAncestor(cwd, tag, sha) {
   try { git(cwd, 'merge-base', '--is-ancestor', tag, sha); return true; } catch { return false; }
 }
 
-export function runLeg({ oldTag, targetSha, label = oldTag, mutateMirror = null }) {
+export function runLeg({ oldTag, targetSha, label = oldTag, mutateMirror = null, dismissMarker = 'untracked' }) {
   const work = realpathSync(mkdtempSync(join(tmpdir(), 'upgrade-leg-')));
   const failures = [];
   const ok = (cond, msg) => { console.log(`  ${cond ? 'PASS' : 'FAIL'} [${label}] ${msg}`); if (!cond) failures.push(msg); };
@@ -149,6 +150,36 @@ export function runLeg({ oldTag, targetSha, label = oldTag, mutateMirror = null 
     const state = fixtureStateFor(oldTag);
     const { manifest } = seedFixture(install, { state });
 
+    // Dismiss an update before applying one — the shape a user reaches by
+    // running `update-system.mjs dismiss` and then `apply`. Both marker states
+    // have to be exercised, because apply() branches on trackedness and each
+    // branch fails differently:
+    //
+    //   'untracked' (every stock install) — the marker is gitignored, so
+    //     staging it after apply() deletes it is a fatal unmatched pathspec and
+    //     the update never commits. Without the guard, `apply exits 0` and the
+    //     oracle-blob assertion below both go RED.
+    //   'tracked' (legacy repos that committed it before it was gitignored) —
+    //     the deletion MUST be staged, or the update commits without it and
+    //     leaves an unstaged deletion behind. Nothing else in the suite covers
+    //     this: dropping the push is invisible to the untracked leg, since that
+    //     leg skips the push anyway.
+    if (dismissMarker) {
+      writeFileSync(join(install, '.update-dismissed'), new Date(0).toISOString());
+      if (dismissMarker === 'tracked') {
+        git(install, 'add', '-f', '--', '.update-dismissed');
+        // Identity must be supplied inline, the way canary() does. Signing is
+        // additionally disabled here, so a contributor's global commit.gpgsign
+        // cannot break the fixture.
+        // The isolated GIT_CONFIG_GLOBAL below is handed to apply() only, and
+        // the upgrade CI job configures no author identity — so relying on
+        // ambient config passes on a developer box and aborts the leg with
+        // "Author identity unknown" on a clean runner, before apply() ever runs.
+        git(install, '-c', 'user.name=upgrade-tests', '-c', 'user.email=upgrade-tests@career-ops.test',
+          '-c', 'commit.gpgsign=false', 'commit', '-qm', 'legacy: track the dismiss marker');
+      }
+    }
+
     // New-path delta for the #1998-class assertion: concrete files in the
     // target's SYSTEM_PATHS that don't exist at the old tag but do at target.
     const newConcrete = targetSystemPaths.filter((p) => !p.endsWith('/'))
@@ -169,6 +200,27 @@ export function runLeg({ oldTag, targetSha, label = oldTag, mutateMirror = null 
     let installOracle = null;
     try { installOracle = git(install, 'rev-parse', `HEAD:${oracle}`); } catch { /* leave null */ }
     ok(installOracle === oracleBlob, `upgrade executed: ${oracle} blob matches target (non-vacuity oracle)`);
+    if (dismissMarker) {
+      // Both legs, because the on-disk check is the only one the untracked leg
+      // can make: an untracked marker never appears in HEAD or in `git status`,
+      // so a regression that left it sitting on disk — and re-suppressed every
+      // later update check — would otherwise pass silently.
+      ok(!existsSync(join(install, '.update-dismissed')),
+        'dismiss marker removed from disk');
+    }
+    if (dismissMarker === 'tracked') {
+      // The marker was committed before the upgrade, so apply() had to stage its
+      // deletion for the update commit to carry it. Two independent oracles,
+      // because dropping that push shows up in two places: the deletion is
+      // missing from the commit, AND it is left behind as an unstaged worktree
+      // deletion (the file is gone from disk but still in the index).
+      let stillInHead = true;
+      try { git(install, 'cat-file', '-e', 'HEAD:.update-dismissed'); } catch { stillInHead = false; }
+      ok(!stillInHead, 'tracked dismiss marker: its deletion reached the update commit');
+
+      const dirty = git(install, 'status', '--porcelain', '--', '.update-dismissed');
+      ok(dirty === '', `tracked dismiss marker: no deletion left behind (git status: ${dirty || 'clean'})`);
+    }
     for (const [f, hash] of Object.entries(manifest)) {
       const p = join(install, f);
       ok(existsSync(p) && sha256(p) === hash, `user file byte-identical: ${f}`);
@@ -238,10 +290,23 @@ function prGate() {
   const newestOld = newestAncestorTag(targetSha);
   if (!newestOld) { console.error('No release tag is an ancestor of HEAD — fetch tags first (CI: fetch-depth: 0)'); process.exit(1); }
   console.log(`PR gate: ${newestOld} -> ${targetSha.slice(0, 8)}`);
-  const { failures, skipped } = runLeg({ oldTag: newestOld, targetSha });
-  // THREE states, never two: a skipped leg qualified nothing, so calling it
-  // GREEN would report a pass that never ran.
-  console.log(skipped ? 'SKIPPED: nothing in the managed set changed — this leg qualified nothing'
+  // Two legs, one per dismiss-marker state. apply() branches on trackedness and
+  // each branch has its own failure mode, so a single leg leaves the other one
+  // ungated — dropping the tracked-marker push is invisible to the untracked
+  // leg, which skips that push anyway.
+  const failures = [];
+  let ranAny = false;
+  for (const dismissMarker of ['untracked', 'tracked']) {
+    const leg = runLeg({ oldTag: newestOld, targetSha, label: `${newestOld} dismiss=${dismissMarker}`, dismissMarker });
+    failures.push(...leg.failures);
+    if (!leg.skipped) ranAny = true;
+  }
+  // THREE states, never two (#2697): a skipped leg qualified nothing, so calling
+  // it GREEN would report a pass that never ran. Decided on whether any leg
+  // actually ran — both legs share one target so in practice they skip
+  // together, but deriving it from `ranAny` keeps that an observation rather
+  // than an assumption a later third leg could quietly break.
+  console.log(!ranAny ? 'SKIPPED: nothing in the managed set changed — this leg qualified nothing'
     : failures.length ? `RED: ${failures.length} failure(s)` : 'GREEN');
   process.exit(failures.length ? 1 : 0);
 }
