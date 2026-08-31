@@ -2441,13 +2441,27 @@ if (
   /^via:/m.test(batchMachineSummary) &&
   /^company_confidential:/m.test(batchMachineSummary) &&
   /^reports_to:/m.test(batchMachineSummary) &&
+  /^requirement_importance:/m.test(batchMachineSummary) &&
   /['"]via['"]/.test(patternsMachineFields) &&
   /['"]company_confidential['"]/.test(patternsMachineFields) &&
-  /['"]reports_to['"]/.test(patternsMachineFields)
+  /['"]reports_to['"]/.test(patternsMachineFields) &&
+  /['"]requirement_importance['"]/.test(patternsMachineFields)
 ) {
   pass('batch Machine Summary fields are preserved by the downstream parser');
 } else {
   fail('batch Machine Summary and downstream parser fields are misaligned');
+}
+
+// batch-prompt.md carries the Machine Summary schema TWICE — the standalone
+// #### Machine Summary section and the report-header template in Step 3. A key
+// added to one fence only produces reports whose shape depends on which fence
+// the worker happened to follow, so both are asserted (same rule the existing
+// two-fence checks enforce).
+const machineSummaryFenceCount = (batchPrompt.match(/^requirement_importance:/gm) ?? []).length;
+if (machineSummaryFenceCount >= 2) {
+  pass('requirement_importance is present in BOTH batch-prompt Machine Summary fences');
+} else {
+  fail(`requirement_importance appears in ${machineSummaryFenceCount} batch-prompt Machine Summary fence(s), expected both`);
 }
 
 // ── 7e. CV SECTION ORDER CHECK IS LANGUAGE-AWARE ────────────────
@@ -15286,6 +15300,68 @@ try {
     pass('modes/oferta.md keeps the A-G report block structure (new blocks may be appended)');
   } else {
     fail(`modes/oferta.md lost report block(s): ${missingBlocks.join(', ')} — BREAKING for the web report view`);
+  }
+
+  // 55.4b Block B's table columns are CONTRACT (#2330). Block B was the last
+  // report block whose columns were unspecified — oferta.md said only "create a
+  // table with each JD requirement mapped to exact lines in the CV" — so the
+  // requirement-importance design is also the moment those columns get pinned
+  // down. They were frozen deliberately on the day they landed: the 18 localized
+  // evaluation modes each describe Block B in their own words, and a rename here
+  // that does not reach them splits the report format silently.
+  const BLOCK_B_COLUMNS = ['Requirement', 'JD signal', 'Match', 'Importance', 'Evidence / gap'];
+  const blockBSection = ofertaSrc.match(/## Block B [\s\S]*?\n## Block C /)?.[0] ?? '';
+  const blockBHeaderRow = blockBSection.match(/^\|\s*Requirement\s*\|.*\|$/m)?.[0] ?? '';
+  const missingBlockBCols = BLOCK_B_COLUMNS.filter(
+    (c) => !blockBHeaderRow.includes(c),
+  );
+  if (blockBHeaderRow && missingBlockBCols.length === 0) {
+    pass('modes/oferta.md Block B keeps its frozen column set (#2330)');
+  } else if (!blockBHeaderRow) {
+    fail('modes/oferta.md Block B has no Requirement-led table header row — the #2330 column freeze cannot verify');
+  } else {
+    fail(`modes/oferta.md Block B lost column(s): ${missingBlockBCols.join(', ')} — columns are contract (#2330)`);
+  }
+
+  // 55.4c The two rules that make the importance column defensible rather than
+  // just more numbers in the report. Frozen at doc level, in the style of the
+  // upskill trust-model promises: both are model-followed instructions with no
+  // runtime to assert against, so the text IS the enforcement surface and its
+  // deletion must fail CI rather than pass quietly.
+  //
+  //   the gate      — importance may only create obligations from JD-stated or
+  //                   JD-structural evidence, never a market-weight guess
+  //   the two-pass  — importance is fixed from the JD BEFORE cv.md is read, so
+  //                   rule            a written "Strong" cannot anchor it
+  const blockBPromises = [
+    ['inferred cap', /can \*\*never\*\* be `critical` or `high`/],
+    ['gate statement', /never from a market-weight guess/],
+    ['hard_stops exclusion', /`inferred` row never contributes to `hard_stops`/],
+    ['two-pass rule', /before reading `cv\.md`/],
+    ['no revision after pass 2', /never revised in pass 2/],
+    ['verbatim quote for stated', /\*\*verbatim\*\* JD quote/],
+    ['score neutrality', /does \*\*not\*\* affect the 1-5 global score/],
+  ];
+  const brokenPromises = blockBPromises.filter(([, re]) => !re.test(blockBSection)).map(([name]) => name);
+  if (brokenPromises.length === 0) {
+    pass('modes/oferta.md Block B keeps the frozen importance-evidence promises (#2330)');
+  } else {
+    fail(`modes/oferta.md Block B dropped importance promise(s): ${brokenPromises.join(', ')} — these ARE the feature (#2330)`);
+  }
+
+  // The gate has to hold for the batch path too, or headless workers become the
+  // hole in it: batch/batch-prompt.md is a second, independent writer of Block B.
+  const batchPromptSrc = readFile('batch/batch-prompt.md');
+  const batchGatePromises = [
+    ['inferred cap', /can \*\*never\*\* be `critical` or `high`/],
+    ['gate statement', /never from a market-weight guess/],
+    ['two-pass rule', /before reading `cv\.md`/],
+  ];
+  const brokenBatchPromises = batchGatePromises.filter(([, re]) => !re.test(batchPromptSrc)).map(([name]) => name);
+  if (brokenBatchPromises.length === 0) {
+    pass('batch workers inherit the Block B importance-evidence gate (#2330)');
+  } else {
+    fail(`batch/batch-prompt.md dropped importance gate rule(s): ${brokenBatchPromises.join(', ')} — batch would bypass the gate (#2330)`);
   }
 
   // 55.5 cross-check: the web parser still speaks the same column names
