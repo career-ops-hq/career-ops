@@ -2,7 +2,7 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as yaml from 'js-yaml';
@@ -83,7 +83,8 @@ function resolveReport(workspace, reportPath) {
   if (!reportPath) throw new Error('selected application has no evaluation report');
   const root = realpathSync(workspace);
   const path = realpathSync(resolve(root, reportPath));
-  if (path !== root && !path.startsWith(`${root}/`)) throw new Error('evaluation report escapes the workspace');
+  const child = relative(root, path);
+  if (child === '..' || child.startsWith(`..${sep}`) || isAbsolute(child)) throw new Error('evaluation report escapes the workspace');
   return path;
 }
 
@@ -233,6 +234,9 @@ export function renderResume({ workspace = ROOT, request, tailoring, outputRoot,
   if (sha256(canonicalJson(manifest)) !== request.manifest_hash) throw new Error('resume request manifest hash is invalid');
   validateTailoringResult(tailoring, request);
   verifyRequestSources(workspace, request);
+  const profile = yaml.load(readFileSync(join(realpathSync(workspace), 'config', 'profile.yml'), 'utf8'));
+  const expectedCandidate = candidateFromProfile(profile);
+  if (canonicalJson(request.candidate) !== canonicalJson(expectedCandidate)) throw new Error('resume candidate no longer matches the verified profile');
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(outputKey)) throw new Error('output key must be an opaque UUID');
   const root = realpathSync(workspace);
   if (!outputRoot) throw new Error('caller-controlled output root is required');
@@ -248,7 +252,7 @@ export function renderResume({ workspace = ROOT, request, tailoring, outputRoot,
   const payload = {
     lang: 'en',
     page_format: request.render_policy.page_format,
-    candidate: Object.fromEntries(Object.entries(request.candidate).filter(([, value]) => value !== undefined)),
+    candidate: Object.fromEntries(Object.entries(expectedCandidate).filter(([, value]) => value !== undefined)),
     summary: tailoring.summary,
     competencies: tailoring.competencies,
     experience: tailoring.experience,
@@ -263,7 +267,7 @@ export function renderResume({ workspace = ROOT, request, tailoring, outputRoot,
   const fact = run(process.execPath, [join(root, 'verify-cv-facts.mjs'), htmlPath, '--json'], root);
   const factResult = JSON.parse(fact.stdout);
   if (!['pass', 'warn'].includes(factResult.verdict)) throw new Error('Career Ops fact gate did not pass');
-  const rendered = run(process.execPath, [join(root, 'generate-pdf.mjs'), htmlPath, pdfPath, `--format=${request.render_policy.page_format}`, '--allow-reorder', `--max-pages=${request.render_policy.max_pages}`, `--jobbot-staging-root=${outputBase}`], root);
+  const rendered = run(process.execPath, [join(root, 'generate-pdf.mjs'), htmlPath, pdfPath, `--format=${request.render_policy.page_format}`, '--allow-reorder', `--max-pages=${request.render_policy.max_pages}`, '--strict-pages', `--jobbot-staging-root=${outputBase}`], root);
   const pdf = readFileSync(pdfPath);
   if (!pdf.subarray(0, 5).equals(Buffer.from('%PDF-'))) throw new Error('renderer did not produce a PDF');
   const pageCount = Number(rendered.stdout.match(/Pages:\s*(\d+)/)?.[1]);
