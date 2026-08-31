@@ -97,6 +97,9 @@ const RESOLVER_FAILURE_LIMIT = 50;
 const CHECKPOINT_PATH = path.join(DATA_ROOT, 'data', 'cache', 'ats-full-checkpoint.json');
 const CHECKPOINT_EVERY = 500;
 
+// Named export for the test suite — verifies data-root anchoring.
+export const _testPaths = Object.freeze({ DATA_ROOT, PORTALS_PATH, PIPELINE_PATH, CACHE_DIR, CHECKPOINT_PATH });
+
 export function loadCheckpoint(file = CHECKPOINT_PATH) {
   if (!existsSync(file)) return null;
   try {
