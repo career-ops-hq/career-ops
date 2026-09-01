@@ -40,6 +40,8 @@
 
 <p align="center"><strong>740+ Stellenanzeigen bewertet · 100+ personalisierte Lebensläufe · 1 Traumrolle bekommen</strong></p>
 
+<p align="center"><sub>Erstellt und gepflegt von <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
+
 <p align="center">
   <a href="https://warpchart.dev/hq">
     <picture>

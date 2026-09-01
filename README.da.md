@@ -36,6 +36,8 @@
 
 <p align="center"><strong>740+ vurderede stillinger · 100+ skræddersyede CV'er · 1 drømmerolle landet</strong></p>
 
+<p align="center"><sub>Skabt og vedligeholdt af <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
+
 <p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Bliv_en_del_af_fællesskabet-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a></p>
 
 <p align="center">

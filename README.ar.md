@@ -47,6 +47,8 @@
 
 <p align="center" dir="rtl"><strong>أكثر من 740 عرض عمل تم تقييمه · أكثر من 100 سيرة ذاتية مخصصة وموجهة · 1 وظيفة أحلام تم الحصول عليها</strong></p>
 
+<p align="center" dir="rtl"><sub>أنشأه ويصونه <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
+
 <p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Join_the_community-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a></p>
 
 ## ما هو هذا المشروع؟ (What Is This)

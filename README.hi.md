@@ -40,6 +40,8 @@
 
 <p align="center"><strong>740+ job listings evaluated · 100+ personalized CVs · 1 dream role landed</strong></p>
 
+<p align="center"><sub><a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>) द्वारा निर्मित और अनुरक्षित</sub></p>
+
 <p align="center">
   <a href="https://warpchart.dev/hq">
     <picture>

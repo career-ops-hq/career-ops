@@ -40,6 +40,8 @@
 
 <p align="center"><strong>740+ ilan değerlendirildi · 100+ kişiselleştirilmiş CV · 1 hayalindeki iş bulundu</strong></p>
 
+<p align="center"><sub><a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>) tarafından oluşturuldu ve sürdürülüyor</sub></p>
+
 <p align="center">
   <a href="https://warpchart.dev/hq">
     <picture>
