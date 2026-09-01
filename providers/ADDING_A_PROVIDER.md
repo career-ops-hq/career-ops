@@ -183,8 +183,10 @@ timeout, only a per-request one). Define your own constant, independent of
 `ctx.maxPages` and `entry.max_pages`:
 
 ```js
-const DEFAULT_MAX_PAGES = 100; // not tied to ctx.maxPages or to what the
-                               // source reports
+const DEFAULT_MAX_PAGES = 100;  // when the entry sets no max_pages
+const MAX_PAGES_CAP = 1500;     // hard ceiling even for a user override
+                               // — neither is tied to ctx.maxPages or to
+                               //   what the source reports
 function resolveMaxPages(entry) {
   const v = entry?.max_pages;
   if (Number.isInteger(v) && v > 0) return Math.min(v, MAX_PAGES_CAP);
@@ -320,15 +322,18 @@ tests cover that. A provider test checks only that *this provider's* output
 went through them. Must cover:
 
 - The provider `id`.
-- `detect()`: positive cases; untrusted host → `null`; non-HTTPS → `null`;
-  malformed URL → `null` (no throw); `null` / non-string / missing
-  `careers_url` → `null`.
+- `detect()` — for a URL-pattern `detect()`: positive cases; untrusted host,
+  non-HTTPS, malformed URL, `null` / non-string / missing `careers_url` all
+  → `null` (no throw). For an explicit-only `detect()`: an `entry.provider`
+  match returns `{ url }` with no `careers_url` / `api` present; anything
+  else → `null`.
 - `fetch()`: normalization of the source's real response shape; rows missing
   a required field are filtered; **`redirect: 'error'` is passed on every
   request** — assert `opts.redirect === 'error'`, not just that the call
   happened; the allowlist guard throws **before** `fetchJson` / `fetchText`
   is called.
-- Malformed / empty response body → `[]`, no throw.
+- Empty or contentless body → `[]`; a body whose shape isn't what the
+  endpoint documents → a descriptive throw. Assert both branches.
 - Pagination (if any): the provider's own `DEFAULT_MAX_PAGES` stops it even
   when the source reports more pages; `ctx.maxPages` stops it earlier.
 - Pagination + transient failure (if any): a 429 / 5xx on page 2 that retry
