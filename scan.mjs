@@ -234,7 +234,13 @@ export function locationHintFromUrl(url) {
   }
   // "Hyderabad-Telangana-India" → "hyderabad telangana india" so multi-word
   // block keywords like "united arab emirates" can still match.
-  return segment.replace(/[-_+]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+  const normalized = segment.replace(/[-_+]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+  // An all-digit segment is an opaque posting id, never a place — Microsoft
+  // (.../job/1970393556874927) and Netflix (.../job/790298014263) both use this
+  // shape. Returning '' says "no hint" instead of "a hint that can never match
+  // any keyword".
+  if (/^[\d ]+$/.test(normalized)) return '';
+  return normalized;
 }
 
 // Some ATSs report the hiring office as the location even when the role is
@@ -293,9 +299,27 @@ export function buildLocationFilter(locationFilter) {
 
   return (location, url, title) => {
     const lower = typeof location === 'string' ? location.trim().toLowerCase() : '';
+    // No structured location → pass, and do NOT consult the URL hint.
+    //
+    // The hint SUPPLEMENTS a location, it never substitutes for one. It exists
+    // to recover the real place behind a rolled-up display string ("5
+    // Locations"), which is by definition non-empty — so restricting it to a
+    // non-empty location keeps every case it was built for.
+    //
+    // Letting it stand in for an absent location inverts the filter's own
+    // "don't penalize missing data" discipline, because the post-`/job/`
+    // segment is only a place on SOME boards. On builtin.com the URL shape is
+    // `/job/{title-slug}/{id}`, so the hint is the JOB TITLE: non-empty, so the
+    // early return never fired, and matching a title against a list of cities
+    // and countries fails, so the row was rejected — a near-total silent drop
+    // for that board, with nothing logged.
+    //
+    // The converse case, an empty location with a genuinely place-like hint,
+    // does not occur: a board that encodes a place in the URL reports one in
+    // the structured field too. So nothing this filter previously rejected on
+    // real evidence starts passing.
+    if (lower === '') return true;
     const hint = locationHintFromUrl(url);
-    // Nothing to judge on either field → pass (don't penalize missing data).
-    if (lower === '' && hint === '') return true;
     const matches = (m) => (lower !== '' && m(lower)) || (hint !== '' && m(hint));
     // `block_hard` is the ONE tier always_allow cannot override. It exists because
     // a European city name can be a whole word inside a non-European location, so

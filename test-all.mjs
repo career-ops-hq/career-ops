@@ -7306,6 +7306,50 @@ try {
     fail(`URL hint normalization wrong: got "${locationHintFromUrl('https://x.wd1.myworkdayjobs.com/c/job/Hyderabad-Telangana-India/Eng_R1')}"`);
   }
 
+  // Case 19b: an EMPTY location is never rejected on a URL hint alone. The hint
+  // supplements a location, it never substitutes for one — the post-`/job/`
+  // segment is only a place on some boards. builtin.com's URL shape is
+  // `/job/{title-slug}/{id}`, so its hint is the job title; before this guard a
+  // non-empty title slug defeated the "no data → pass" early return and every
+  // builtin row without a "remote"-ish title was silently dropped.
+  if (
+    urlFilter('', 'https://builtin.com/job/senior-hpc-platform-engineer/10960569') === true &&
+    urlFilter(undefined, 'https://builtin.com/job/staff-backend-engineer/123') === true
+  ) {
+    pass('an empty location passes regardless of the URL — a title-slug hint can no longer reject it');
+  } else {
+    fail('empty location + a /job/{title-slug}/ URL must pass (hint supplements, never substitutes)');
+  }
+
+  // Case 19c: the same guard is deliberately blind to WHY the location is empty,
+  // so a place-like hint cannot reject an empty location either. This is the
+  // accepted trade-off: a board that encodes a place in its URL reports one in
+  // the structured field too, so the pairing does not arise in practice.
+  if (urlFilter('', 'https://x.wd5.myworkdayjobs.com/c/job/Hyderabad-Telangana-India/Eng_R1') === true) {
+    pass('an empty location passes even when the URL names a blocked place (documented trade-off)');
+  } else {
+    fail('empty location must pass even with a place-like blocked hint');
+  }
+
+  // Case 19d: the rolled-up case the hint was built for is untouched — its
+  // display string is non-empty, which is exactly when the hint still applies.
+  if (urlFilter('5 Locations', 'https://kyndryl.wd5.myworkdayjobs.com/careers/job/Hyderabad-Telangana-India/Network-Engineer_R-65193-1') === false) {
+    pass('the motivating "5 Locations" + India case still rejects (non-empty location keeps the hint live)');
+  } else {
+    fail('the URL-hint feature must keep working for rolled-up display strings');
+  }
+
+  // Case 19e: an all-digit segment is an opaque posting id, not a place.
+  if (
+    locationHintFromUrl('https://apply.careers.microsoft.com/careers/job/1970393556874927') === '' &&
+    locationHintFromUrl('https://explore.jobs.netflix.net/careers/job/790298014263') === '' &&
+    locationHintFromUrl('https://x.wd1.myworkdayjobs.com/c/job/Hyderabad-Telangana-India/Eng_R1') === 'hyderabad telangana india'
+  ) {
+    pass('locationHintFromUrl returns "" for an all-numeric job segment but still reads a real place');
+  } else {
+    fail(`numeric job-id segments should yield no hint: got "${locationHintFromUrl('https://apply.careers.microsoft.com/careers/job/1970393556874927')}"`);
+  }
+
   // Case 20: omitting the url argument preserves the original location-only behaviour
   if (urlFilter('Bengaluru, India') === false && urlFilter('Austin, TX') === true) {
     pass('calling the filter without a url keeps original location-only semantics');
