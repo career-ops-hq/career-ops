@@ -16,6 +16,7 @@ import {
 import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
 import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
 import { isAbortError, isScannerMissing } from "@/lib/explore-error.mjs";
+import { postNdjsonXhr } from "@/lib/post-ndjson-xhr.mjs";
 
 export type Phase =
   | "idle"
@@ -182,99 +183,84 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     let capHitAcc = false; // scan was capped (only a slice of the universe searched)
     let datasetIssueAcc = false; // some ATS dataset was stale/empty/unreachable
     let droppedNoDateAcc = 0; // postings dropped for lacking a publish date
-    try {
-      const r = await fetch("/api/explore", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(f),
-      });
-      // Every non-OK response is decided from the parsed body, not the status.
-      // A failed response never carries a scan stream, so reading one would
-      // parse a JSON error object as scan events and report "no readable
-      // output" instead of the server's actual message.
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        sawScannerMissing = isScannerMissing(d);
-        sawError = d.error || (sawScannerMissing ? "The scanner isn't available." : `Discovery failed (${r.status}).`);
-      } else if (!r.body) {
-        sawError = "No response stream.";
-      } else {
-        const reader = r.body.getReader();
-        const dec = new TextDecoder();
-        let buf = "";
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (value) buf += dec.decode(value, { stream: !done });
-          if (done) buf += "\n";
-          let nl: number;
-          while ((nl = buf.indexOf("\n")) >= 0) {
-            const line = buf.slice(0, nl).trim();
-            buf = buf.slice(nl + 1);
-            if (!line) continue;
-            let ev: ScanEvent;
-            try {
-              ev = JSON.parse(line) as ScanEvent;
-            } catch {
-              continue;
+    const handleEvent = (raw: object) => {
+      const ev = raw as ScanEvent;
+      switch (ev.kind) {
+        case "atsStart":
+          setPhase("scanning");
+          setStatus(`Walking ${ATS_LABEL[ev.ats as AtsSource] ?? ev.ats} — ${ev.companies.toLocaleString()} companies`);
+          setSources((s) => ({ ...s, [ev.ats]: { ...s[ev.ats as AtsSource], state: "active", companies: ev.companies } }));
+          break;
+        case "progress":
+          setMatchCount((m) => Math.max(m, ev.matches));
+          setSources((s) => ({ ...s, [ev.ats]: { ...s[ev.ats as AtsSource], state: "active", done: ev.scanned, total: ev.total } }));
+          break;
+        case "atsDone":
+          setSources((s) => ({ ...s, [ev.ats]: { ...s[ev.ats as AtsSource], state: ev.unreachable > 0 ? "noisy" : "swept", unreachable: ev.unreachable } }));
+          break;
+        case "offer":
+          acc.push(ev.offer);
+          setOffers((o) => [...o, ev.offer]);
+          break;
+        case "done":
+          if (Array.isArray(ev.offers)) {
+            for (const o of ev.offers) {
+              if (!o?.url || acc.some((a) => a.url === o.url)) continue;
+              acc.push(o);
             }
-            switch (ev.kind) {
-              case "atsStart":
-                setPhase("scanning");
-                setStatus(`Walking ${ATS_LABEL[ev.ats as AtsSource] ?? ev.ats} — ${ev.companies.toLocaleString()} companies`);
-                setSources((s) => ({ ...s, [ev.ats]: { ...s[ev.ats as AtsSource], state: "active", companies: ev.companies } }));
-                break;
-              case "progress":
-                // `matches` is the GLOBAL running total (the engine batches the
-                // offer list to the very end), so it drives the live hero counter.
-                setMatchCount((m) => Math.max(m, ev.matches));
-                setSources((s) => ({ ...s, [ev.ats]: { ...s[ev.ats as AtsSource], state: "active", done: ev.scanned, total: ev.total } }));
-                break;
-              case "atsDone":
-                setSources((s) => ({ ...s, [ev.ats]: { ...s[ev.ats as AtsSource], state: ev.unreachable > 0 ? "noisy" : "swept", unreachable: ev.unreachable } }));
-                break;
-              case "offer":
-                acc.push(ev.offer);
-                setOffers((o) => [...o, ev.offer]);
-                break;
-              case "done":
-                if (Array.isArray(ev.offers)) {
-                  for (const o of ev.offers) {
-                    if (!o?.url || acc.some((a) => a.url === o.url)) continue;
-                    acc.push(o);
-                  }
-                  setOffers([...acc]);
-                }
-                break;
-              case "summary": {
-                companiesScannedAcc = ev.companiesScanned;
-                setCompaniesScanned(ev.companiesScanned);
-                if (typeof ev.companiesAvailable === "number") setCompaniesAvailable(ev.companiesAvailable);
-                if (ev.capHit) {
-                  capHitAcc = true;
-                  setCapHit(true);
-                }
-                const datasetIssue = ev.datasetStatus ? Object.values(ev.datasetStatus).some((s) => s !== "ok") : false;
-                if (datasetIssue) datasetIssueAcc = true;
-                if (typeof ev.postingsDroppedNoDate === "number" && ev.postingsDroppedNoDate > 0) {
-                  droppedNoDateAcc = ev.postingsDroppedNoDate;
-                  setDroppedNoDate(ev.postingsDroppedNoDate);
-                }
-                if (ev.unreachable > 0 || datasetIssue) setPartial(true);
-                break;
-              }
-              case "error":
-                sawError = ev.message;
-                break;
-              default:
-                break;
+            setOffers([...acc]);
+            if ((ev.saved ?? 0) > 0) {
+              setAdded(new Set(acc.map((o) => o.url)));
             }
           }
-          if (done) break;
+          break;
+        case "summary": {
+          companiesScannedAcc = ev.companiesScanned;
+          setCompaniesScanned(ev.companiesScanned);
+          if (typeof ev.companiesAvailable === "number") setCompaniesAvailable(ev.companiesAvailable);
+          if (ev.capHit) {
+            capHitAcc = true;
+            setCapHit(true);
+          }
+          const datasetIssue = ev.datasetStatus ? Object.values(ev.datasetStatus).some((s) => s !== "ok") : false;
+          if (datasetIssue) datasetIssueAcc = true;
+          if (typeof ev.postingsDroppedNoDate === "number" && ev.postingsDroppedNoDate > 0) {
+            droppedNoDateAcc = ev.postingsDroppedNoDate;
+            setDroppedNoDate(ev.postingsDroppedNoDate);
+          }
+          if (ev.unreachable > 0 || datasetIssue) setPartial(true);
+          break;
         }
+        case "error":
+          sawError = ev.message;
+          break;
+        default:
+          break;
+      }
+    };
+
+    try {
+      // Next.js patches window.fetch and aborts it on any router/history update.
+      // Discover died in ~100ms with a silent AbortError. XMLHttpRequest is not patched.
+      const { status, errorBody } = await postNdjsonXhr("/api/explore", f, handleEvent);
+      if (status >= 400) {
+        sawScannerMissing = isScannerMissing(errorBody);
+        const msg =
+          errorBody && typeof errorBody === "object" && "error" in errorBody ? errorBody.error : null;
+        sawError =
+          typeof msg === "string" && msg
+            ? msg
+            : sawScannerMissing
+              ? "The scanner isn't available."
+              : `Discovery failed (${status}).`;
       }
     } catch (e) {
       aborted = isAbortError(e);
-      if (!aborted) sawError = e instanceof Error ? e.message : "stream error";
+      sawError = aborted
+        ? "Discover was interrupted before the scan finished. Click Discover again."
+        : e instanceof Error
+          ? e.message
+          : "stream error";
     }
 
     // Mark any still-active sources as swept (stream ended).
@@ -290,9 +276,6 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       setPhase("revealing");
       setStatus(`${acc.length} fresh role${acc.length === 1 ? "" : "s"} found — free.`);
       window.setTimeout(() => setPhase("results"), 850);
-    } else if (aborted) {
-      setPhase("idle");
-      setStatus("");
     } else if (sawError) {
       setError(sawError);
       setScannerMissing(sawScannerMissing);

@@ -26,7 +26,7 @@ test("Discover and AI hunt do not replaceState while the fetch is in flight", ()
 
 test("AbortError is classified, not assigned as sawError", () => {
   assert.match(provider, /isAbortError/);
-  assert.match(provider, /else if \(aborted\)/);
+  assert.match(provider, /postNdjsonXhr/);
   assert.doesNotMatch(
     provider,
     /catch \(e\) \{\s*sawError = e instanceof Error/,
@@ -40,13 +40,16 @@ test("the scanner killer outlives a Workday sweep so --json can flush", () => {
   assert.match(scan, /parseScanJsonStdout/);
 });
 
-test("the explore route outlives the killer and stays dry-run", () => {
+test("the explore route outlives the killer and keeps the scan after the client drops", () => {
   const m = route.match(/export const maxDuration = (\d+)/);
   assert.ok(m, "maxDuration is set");
   assert.ok(Number(m[1]) >= 720, `maxDuration ${m[1]}s must outlive the 12-minute scanner killer`);
-  assert.doesNotMatch(
+  assert.match(route, /from "next\/server"/);
+  assert.match(route, /\bafter\s*\(/);
+  assert.match(
     route,
     /addOffersToPipeline/,
-    "Discover must not silently persist to pipeline.md; add is POST /api/explore/add",
+    "Next.js aborts the HTTP stream on Explore remount; matches must still be written to pipeline.md",
   );
+  assert.match(provider, /XMLHttpRequest|postNdjsonXhr/);
 });
