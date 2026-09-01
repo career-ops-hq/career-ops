@@ -507,6 +507,55 @@ if (!existsSync(FOLLOWUPS_FILE)) {
   }
 }
 
+// --- Check 15: portals.yml entries no provider claims (#3251) ---
+// Coverage rot is invisible from every other check here: an entry with
+// `enabled: true` and a careers_url nothing matches reads as a tracked company
+// in the config and contributes zero postings on every scan. Twelve of those
+// were live on 2026-08-26, one of them a company whose real board existed and
+// was one character off the slug in the file.
+//
+// Only the OFFLINE half of audit-portals.mjs runs here — provider resolution is
+// pure config matching, so this check stays as fast and network-free as the rest
+// of verify-pipeline. The live half (does the board answer, and with whose
+// jobs?) needs 170 fetches and stays a separate command: `node audit-portals.mjs`.
+//
+// portals.yml is user-layer and gitignored, so its absence is not a finding.
+const PORTALS_FILE = process.env.CAREER_OPS_PORTALS || join(CAREER_OPS, 'portals.yml');
+if (!existsSync(PORTALS_FILE)) {
+  ok('No portals.yml yet — nothing to coverage-check');
+} else {
+  try {
+    const { findUnclaimedEntries } = await import('./audit-portals.mjs');
+    const { loadProviders } = await import('./providers/_registry.mjs');
+    const yaml = await import('js-yaml');
+
+    const cfg = yaml.load(readFileSync(PORTALS_FILE, 'utf-8')) || {};
+    // Both sections, because scan.mjs resolves both through the same registry:
+    // an unclaimed aggregator board is exactly as dead as an unclaimed company.
+    const entries = [
+      ...(Array.isArray(cfg.tracked_companies) ? cfg.tracked_companies : []),
+      ...(Array.isArray(cfg.job_boards) ? cfg.job_boards : []),
+    ];
+    const providers = await loadProviders(join(CAREER_OPS, 'providers'));
+    const { silent, handoff, unknownProvider } = findUnclaimedEntries(entries, providers);
+
+    for (const e of unknownProvider) {
+      error(`portals.yml: "${e.name}" sets an unknown provider — ${e.error}. The entry never scans (see providers/ for valid ids)`);
+    }
+    for (const e of silent) {
+      warn(`portals.yml: "${e.name}" is enabled but no provider claims ${e.careers_url || 'its careers_url'} — scan.mjs skips it on every run without naming it (run node audit-portals.mjs)`);
+    }
+    if (silent.length === 0 && unknownProvider.length === 0) {
+      const enabled = entries.filter(e => e && e.enabled !== false).length;
+      ok(handoff.length > 0
+        ? `All ${enabled - handoff.length} scannable portals.yml entries resolve to a provider (${handoff.length} on websearch handoff)`
+        : `All ${enabled} enabled portals.yml entries resolve to a provider`);
+    }
+  } catch (err) {
+    warn(`Portal coverage check could not run: ${err.message}`);
+  }
+}
+
 // --- Summary ---
 console.log('\n' + '='.repeat(50));
 console.log(`📊 Pipeline Health: ${errors} errors, ${warnings} warnings`);
