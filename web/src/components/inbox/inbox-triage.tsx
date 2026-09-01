@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Undo2 } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import type { InboxJob } from "@/lib/career-ops";
@@ -22,7 +23,10 @@ const BATCH = 20;
 // it; only "Score shortlist" spends tokens. 🔴 The shell is agnostic to what makes a
 // role relevant — order is freshness with a single documented plug point.
 export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
+  const router = useRouter();
   const { jobs, startJob } = useJobs();
+  // Serialize skip/undo per URL so a fast Undo cannot lose the race to Skip.
+  const skipChain = useRef(new Map<string, Promise<void>>());
 
   // facets
   const [within, setWithin] = useState<number | null>(null);
@@ -45,13 +49,19 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       const s = localStorage.getItem(SHORTLIST_KEY);
       if (s) setShortlist(JSON.parse(s));
       const h = localStorage.getItem(HIDDEN_KEY);
-      if (h) setHidden(JSON.parse(h));
+      if (h) {
+        const parsed = JSON.parse(h) as unknown;
+        const urls = Array.isArray(parsed) ? parsed.filter((u): u is string => typeof u === "string") : [];
+        const pending = new Set(inbox.map((j) => j.url));
+        setHidden(urls.filter((u) => pending.has(u)));
+      }
       const c = localStorage.getItem(CONFIG_KEY);
       setHasCli(!!(c && JSON.parse(c).cliId));
     } catch {
       /* ignore */
     }
     setLoaded(true);
+    // First SSR inbox only — later refreshes prune via the inbox effect below.
   }, []);
   useEffect(() => {
     if (loaded) try { localStorage.setItem(SHORTLIST_KEY, JSON.stringify(shortlist)); } catch { /* quota */ }
@@ -59,6 +69,15 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   useEffect(() => {
     if (loaded) try { localStorage.setItem(HIDDEN_KEY, JSON.stringify(hidden)); } catch { /* quota */ }
   }, [hidden, loaded]);
+  // After SSR refresh, pipeline.md [x] rows are already gone from `inbox`.
+  // Drop them from the localStorage cache so "N hidden" does not linger.
+  useEffect(() => {
+    const pending = new Set(inbox.map((j) => j.url));
+    setHidden((h) => {
+      const next = h.filter((u) => pending.has(u));
+      return next.length === h.length ? h : next;
+    });
+  }, [inbox]);
   // auto-dismiss the undo toast
   useEffect(() => {
     if (!undo) return;
@@ -135,13 +154,44 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
 
   const isShortlisted = (url: string) => shortlist.some((s) => s.url === url);
 
+  const persistSkip = (url: string, done: boolean) => {
+    const prev = skipChain.current.get(url) ?? Promise.resolve();
+    const next = prev
+      .then(async () => {
+        const res = await fetch("/api/inbox/skip", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url, done }),
+        });
+        if (!res.ok) throw new Error("skip write failed");
+        router.refresh();
+      })
+      .catch(() => {
+        if (done) setHidden((h) => h.filter((u) => u !== url));
+      });
+    skipChain.current.set(url, next);
+    return next;
+  };
+
   const save = (job: InboxJob) => {
     if (isShortlisted(job.url)) return;
     setShortlist((s) => [...s, { url: job.url, company: job.company, role: job.role }]);
   };
   const skip = (job: InboxJob) => {
     setHidden((h) => (h.includes(job.url) ? h : [...h, job.url]));
-    setUndo({ label: `Skipped ${job.company}`, fn: () => setHidden((h) => h.filter((u) => u !== job.url)) });
+    setUndo({
+      label: `Skipped ${job.company}`,
+      fn: () => {
+        setHidden((h) => h.filter((u) => u !== job.url));
+        void persistSkip(job.url, false);
+      },
+    });
+    void persistSkip(job.url, true);
+  };
+  const restoreHidden = () => {
+    const urls = hidden;
+    setHidden([]);
+    for (const url of urls) void persistSkip(url, false);
   };
   const toggleSelect = (url: string) =>
     setSelected((s) => {
@@ -206,7 +256,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
           {capped ? "Fresh — worth a look" : anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : "All roles"}
         </p>
         {hiddenCount > 0 && (
-          <button type="button" onClick={() => setHidden([])} className="text-xs text-faint transition-colors hover:text-foreground">
+          <button type="button" onClick={restoreHidden} className="text-xs text-faint transition-colors hover:text-foreground">
             {hiddenCount} hidden · restore
           </button>
         )}
