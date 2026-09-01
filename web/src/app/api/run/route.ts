@@ -6,12 +6,14 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, readLanguageConfig } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
+import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
+import { persistEvaluation, evaluateRunOutcome } from "@/lib/report-persist.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
@@ -106,7 +108,7 @@ export async function POST(req: Request) {
   // copies a recorded value instead of inviting a guess — and modes/oferta.md is
   // explicit that a guessed date is worse than an absent one (the POSTED column
   // renders absent as `—`, a wrong date as a fresh req). Unknown URL → undefined
-  // → the prompt writes no segment at all.
+  // → report-persist writes no segment at all.
   const postedAt =
     kind === "evaluate"
       ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
@@ -129,23 +131,10 @@ export async function POST(req: Request) {
   // envelope-parsing routes rely on.
   const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt);
 
-  // For write-needing kinds, snapshot reports/ so we can verify the worker
-  // actually persisted (non-Claude CLIs lack Write auth and silently no-op).
-  // Names, not a count: reserving a number writes reports/NNN-RESERVED.md and the
-  // final report REPLACES it, so the `.md` count is unchanged and a count-delta
-  // gate reported "didn't save a report" for an evaluation that saved fine (#2085).
-  const reportsDir = path.join(careerOpsRoot(), "reports");
-  const reportEntries = () => {
-    try {
-      return fs.readdirSync(reportsDir);
-    } catch {
-      return [];
-    }
-  };
-  const persists = kind === "evaluate";
-  const reportsBefore = persists ? reportEntries() : [];
-  // Tracker-mutating runs hold a write token so a row delete can't race their merge
-  // (tracker.mjs delete doesn't yet share a lock with merge-tracker — see run-registry).
+  // Tracker-mutating runs hold a write token so a row delete can't race their
+  // merge (tracker.mjs delete doesn't yet share a lock with merge-tracker —
+  // see run-registry). evaluate's agent no longer writes; the backend persist
+  // path below still merges the tracker, so the token stays.
   const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
 
   // stdin must reach EOF or the CLI waits on piped input that never comes: Codex's
@@ -173,12 +162,12 @@ export async function POST(req: Request) {
   // otherwise a late enqueue onto a closed controller throws uncaught (see #1155).
   let closed = false;
   let killer: ReturnType<typeof setTimeout> | undefined;
-  // pdf-kind's render+mark work (renderPdf, below) keeps running detached even
-  // after the agent child closes — and even after a client disconnect fires
-  // cancel(). Track its promise so cancel() can defer releasing writeToken
-  // until that work actually settles, instead of releasing the tracker-delete
-  // guard while mark-pdf-ready.mjs is still actively writing applications.md.
+  // pdf-kind's render+mark work (renderPdf, below) and evaluate's persist
+  // (persistEval) keep running detached even after the agent child closes —
+  // and even after a client disconnect fires cancel(). Track the promise so
+  // cancel() can defer releasing writeToken until that work actually settles.
   let pdfRenderPromise: Promise<void> | null = null;
+  let evaluatePersistPromise: Promise<void> | null = null;
   let writeTokenReleased = false;
   const releaseWriteTokenOnce = () => {
     if (writeToken !== null && !writeTokenReleased) {
@@ -275,11 +264,11 @@ export async function POST(req: Request) {
           try { controller.close(); } catch { /* */ }
         }
       };
-      // pdf's CV arrives inline in a <<cv-html>> envelope instead of being written
-      // by the agent (#2185). The filter keeps every byte for the backend while
-      // holding the 15-25 KB body out of the run log, which is the agent's
-      // narration — see cv-envelope.mjs.
+      // pdf's CV arrives inline in a <<cv-html>> envelope (#2185); evaluate's
+      // report arrives in a <<report-md>> envelope. The filter keeps every byte
+      // for the backend while holding the body out of the run log.
       const cvFilter = kind === "pdf" ? createCvEnvelopeFilter() : null;
+      const reportFilter = kind === "evaluate" ? createReportEnvelopeFilter() : null;
       // While the agent emits the 15-25 KB <<cv-html>> envelope, cvFilter swallows
       // every byte, so the response stream goes completely silent for as long as
       // the model takes to write the CV — a minute or more. Nothing downstream can
@@ -289,7 +278,8 @@ export async function POST(req: Request) {
       // the stream never idles during the filtered phase. Unknown event types are
       // ignored by the client's switch, so this is safe for older tabs too.
       const sendAgentText = (text: string) => {
-        const visible = cvFilter ? cvFilter.push(text) : text;
+        const filter = cvFilter ?? reportFilter;
+        const visible = filter ? filter.push(text) : text;
         if (visible) send({ type: "text", text: visible });
       };
       /** Surface non-fatal issues in the run log rather than only a server log. */
@@ -369,7 +359,31 @@ export async function POST(req: Request) {
       // interactive approval nobody is present to grant in a headless/web-
       // triggered run (#2172). The tracker is marked ✅ only after a CONFIRMED
       // successful render, not optimistically — same honesty-gate discipline as
-      // the evaluate path below.
+      // persistEval below.
+      const persistEval = async (markdown: string) => {
+        send({ type: "status", label: "Saving report…" });
+        try {
+          const result = await persistEvaluation({
+            spawnFn: spawn,
+            execPath: process.execPath,
+            root: careerOpsRoot(),
+            markdown,
+            url: input,
+            today,
+            postedAt,
+          });
+          if (!result.ok) {
+            send({ type: "error", msg: result.error.slice(0, 200) });
+            return;
+          }
+          sendWarnings(result.warnings);
+          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+        } catch (e) {
+          send({ type: "error", msg: `Evaluation persist crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
+        } finally {
+          close();
+        }
+      };
       const renderPdf = async (paths: PdfPaths, format: "letter" | "a4") => {
         send({ type: "status", label: "Rendering PDF…" });
         // renderAndMarkPdf is designed to resolve, never throw — but this is
@@ -484,17 +498,33 @@ export async function POST(req: Request) {
           return close();
         }
 
-        const wroteReport = hasNewCompletedReport(reportsBefore, reportEntries());
-        // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit,
-        // real output, AND (for evaluations) a report actually written. Anything else
-        // is surfaced — an errored run must never be banked as a confident score.
+        if (kind === "evaluate") {
+          const tail = reportFilter?.flush();
+          if (tail) send({ type: "text", text: tail });
+          const envelope = reportFilter?.result();
+          const outcome = evaluateRunOutcome({
+            envelope,
+            noOutputMessage: noOutputError(),
+            sawError,
+            cleanExit,
+          });
+          if (!outcome.ok) {
+            send({ type: "error", msg: outcome.message });
+          } else if (envelope?.ok !== true) {
+            send({ type: "error", msg: "Internal error: the evaluate run passed its gate with no report to save — please report this." });
+          } else {
+            evaluatePersistPromise = persistEval(envelope.markdown);
+            return;
+          }
+          return close();
+        }
+
+        // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit
+        // and real output. Anything else is surfaced — an errored run must never be
+        // banked as a confident score.
         const baseErr = noOutputError();
         if (baseErr) {
           send({ type: "error", msg: baseErr });
-        } else if (persists && !wroteReport) {
-          // The worker ran but never wrote the report/tracker row (e.g. a CLI
-          // without file-write authorization) — surface it instead of a fake score.
-          send({ type: "error", msg: "This evaluation didn't save a report, so it's not in your tracker. Full evaluation is verified on Claude Code." });
         } else if (!cleanExit || sawError) {
           // Produced output (maybe even a report) but did NOT finish cleanly — flag it
           // instead of recording a confident score off a half-finished run. sawError
@@ -513,11 +543,12 @@ export async function POST(req: Request) {
       closed = true;
       if (killer) clearTimeout(killer);
       try { child.kill("SIGTERM"); } catch { /* ignore */ }
-      if (pdfRenderPromise) {
-        // Render/mark keeps running after this client disconnects — wait for
-        // it to settle before releasing the guard, so a concurrent tracker
-        // delete can't race mark-pdf-ready.mjs's still-in-flight write.
-        pdfRenderPromise.finally(releaseWriteTokenOnce);
+      const followup = pdfRenderPromise ?? evaluatePersistPromise;
+      if (followup) {
+        // Render/mark or evaluate persist keeps running after this client
+        // disconnects — wait for it to settle before releasing the guard, so a
+        // concurrent tracker delete can't race the still-in-flight write.
+        followup.finally(releaseWriteTokenOnce);
       } else {
         releaseWriteTokenOnce();
       }

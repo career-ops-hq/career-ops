@@ -18,6 +18,7 @@ import {
   argValue,
   toolNames,
   KNOWN_KINDS,
+  UNTRUSTED_JD_KINDS,
 } from "../../src/lib/claude-invocation.mjs";
 
 test("toolScopeFor: pdf gets no write-capable tool at all", () => {
@@ -88,18 +89,29 @@ test("toolScopeFor: an unknown kind falls back to the read-only scope", () => {
   assert.equal(scope, TOOL_SCOPES.readOnly);
 });
 
-test("toolScopeFor: evaluate and fix-portal keep Write and Bash on purpose", () => {
-  // Given these kinds genuinely run reserve-report-num.mjs / merge-tracker.mjs /
-  // verify-portals.mjs and persist canonical artifacts
-  for (const kind of ["evaluate", "fix-portal"]) {
-    // When resolving their scope
-    const allowed = toolNames(toolScopeFor(kind).allowed);
-
-    // Then they retain write access — this test exists so removing it is a
-    // deliberate act, not an accident
-    assert.ok(allowed.includes("Write"), `${kind} needs Write`);
-    assert.ok(allowed.includes("Bash"), `${kind} needs Bash`);
+test("toolScopeFor: untrusted-JD kinds get no write-capable tool at all", () => {
+  // Given evaluate/oferta/auto-pipeline ingest a posting (data, never
+  // instructions) and pdf already reads that same posting via the report
+  for (const kind of UNTRUSTED_JD_KINDS) {
+    const scope = toolScopeFor(kind);
+    const allowed = toolNames(scope.allowed);
+    const denied = toolNames(scope.disallowed);
+    for (const tool of WRITE_CAPABLE_TOOLS) {
+      assert.ok(!allowed.includes(tool), `${kind} must not allow ${tool}`);
+      assert.ok(denied.includes(tool), `${kind} must explicitly deny ${tool}`);
+    }
+    assert.equal(grantsWriteCapability(scope), false, `${kind} must not grant write`);
   }
+});
+
+test("toolScopeFor: fix-portal keeps Write and Bash on purpose", () => {
+  // Given this kind genuinely runs verify-portals.mjs and edits portals.yml
+  const allowed = toolNames(toolScopeFor("fix-portal").allowed);
+
+  // Then it retains write access — tracker merge / pdf generation live in the
+  // backend, not this scope; removing fix-portal's grant is a deliberate act
+  assert.ok(allowed.includes("Write"), "fix-portal needs Write");
+  assert.ok(allowed.includes("Bash"), "fix-portal needs Bash");
 });
 
 test("toolScopeFor: every kind blocks sub-agents", () => {
@@ -182,15 +194,26 @@ test("claudeCliArgs: loads no MCP servers", () => {
   assert.ok(!args.includes("--mcp-config"), "no MCP server may be loaded");
 });
 
-test("claudeCliArgs: other kinds keep their MCP servers", () => {
-  // Given #2185 is about pdf. Locking MCP config for every kind would silently stop
-  // a user's configured server (the optional Canva one, say) from loading on an
-  // evaluation — a behaviour change the issue never asked for. #2507 covers the
-  // same gap for the other kinds.
-  for (const kind of ["research", "evaluate", "fix-portal"]) {
+test("claudeCliArgs: untrusted-JD kinds load no MCP servers", () => {
+  // Given MCP tools would appear in neither the allow nor the deny list, so a
+  // write tool arriving from the user's MCP config would be invisible to every
+  // check here. evaluate ingests a posting; locking MCP is the same hole pdf
+  // already closed.
+  for (const kind of UNTRUSTED_JD_KINDS) {
+    const args = claudeCliArgs({ kind, prompt: "x" });
+    assert.ok(args.includes("--strict-mcp-config"), `${kind} argv must pass --strict-mcp-config`);
+    assert.ok(!args.includes("--mcp-config"), `${kind}: no MCP server may be loaded`);
+  }
+});
+
+test("claudeCliArgs: research and fix-portal keep their MCP servers", () => {
+  // research investigates the user's own work; fix-portal edits portals.yml.
+  // Neither ingests a posting, so a configured MCP server (optional Canva)
+  // still loads. Non-Claude CLIs remain unfenced — #2507.
+  for (const kind of ["research", "fix-portal"]) {
     assert.ok(
       !claudeCliArgs({ kind, prompt: "x" }).includes("--strict-mcp-config"),
-      `${kind} must not have its MCP config locked down by a pdf-scoped fix`,
+      `${kind} must not have its MCP config locked down by an evaluate/pdf fix`,
     );
   }
 });
@@ -210,12 +233,17 @@ test("claudeCliArgs: carries the prompt and the streaming flags", () => {
   assert.equal(argValue(args, "--permission-mode"), "acceptEdits");
 });
 
-test("claudeCliArgs: evaluate still ships write access", () => {
-  // Given an evaluation, which genuinely persists report + tracker artifacts
-  const allowed = argValue(claudeCliArgs({ kind: "evaluate", prompt: "x" }), "--allowedTools");
+test("claudeCliArgs: evaluate command line grants no write-capable tool", () => {
+  // Given an evaluation, whose agent only scores and emits the report inline
+  const args = claudeCliArgs({ kind: "evaluate", prompt: "x" });
+  const allowed = argValue(args, "--allowedTools");
+  const disallowed = argValue(args, "--disallowedTools");
 
-  // Then its argv keeps write access — so removing it is a deliberate act
-  assert.equal(grantsWriteCapability({ allowed, disallowed: "" }), true);
+  // Then what actually ships grants no write, and denies each one by name
+  assert.equal(grantsWriteCapability({ allowed, disallowed }), false, `allowed=${allowed}`);
+  for (const tool of WRITE_CAPABLE_TOOLS) {
+    assert.ok(toolNames(disallowed).includes(tool), `evaluate argv must deny ${tool}`);
+  }
 });
 
 test("argValue: absent or dangling flags yield an empty string, not a crash", () => {

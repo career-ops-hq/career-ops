@@ -69,11 +69,17 @@ function scopeFrom(allowed) {
 
 /**
  * The two scopes that exist. `persisting` kinds run the REAL mode and write
- * canonical artifacts (reserve-report-num.mjs / merge-tracker.mjs /
- * verify-portals.mjs), so they need Write + Bash. `readOnly` kinds produce their
- * result through the response stream and need no write tool at all — pdf emits
- * its CV in a `<<cv-html>>` envelope the backend persists (#2185), and research
- * only reports.
+ * canonical artifacts (`verify-portals.mjs` for fix-portal), so they need
+ * Write + Bash. `readOnly` kinds produce their result through the response
+ * stream and need no write tool at all — pdf emits its CV in a `<<cv-html>>`
+ * envelope (#2185) and evaluate emits a `<<report-md>>` envelope; the backend
+ * persists both. research only reports.
+ *
+ * Job postings are data, never instructions (AGENTS.md Untrusted External
+ * Content). evaluate used to share the persisting scope so it could run
+ * reserve-report-num.mjs / merge-tracker.mjs itself; a posting can try to aim
+ * those tools at cv.md. Persistence moved to the backend so evaluate can sit
+ * on the read-only arm with pdf.
  *
  * @type {{persisting: ToolScope, readOnly: ToolScope}}
  */
@@ -82,8 +88,19 @@ export const TOOL_SCOPES = Object.freeze({
   readOnly: scopeFrom("Read,WebFetch,WebSearch,Glob,Grep"),
 });
 
-/** Kinds that legitimately write files. Everything else is read-only. */
-const PERSISTING_KINDS = new Set(["evaluate", "fix-portal"]);
+/**
+ * Kinds that ingest a job posting or URL. They MUST NOT receive Write/Bash:
+ * the JD is untrusted input and `--permission-mode acceptEdits` would
+ * auto-approve an unmentioned write tool. Includes CLI mode names (oferta,
+ * auto-pipeline) so a future /api/run kind of that name cannot quietly inherit
+ * the persisting scope. pdf is here because the report it reads is the same
+ * untrusted posting, already locked down by #2185.
+ */
+export const UNTRUSTED_JD_KINDS = Object.freeze(["pdf", "evaluate", "oferta", "auto-pipeline"]);
+const UNTRUSTED_JD_KIND_SET = new Set(UNTRUSTED_JD_KINDS);
+
+/** Kinds that legitimately write files. Untrusted-JD kinds are excluded even if listed. */
+const PERSISTING_KINDS = new Set(["fix-portal"]);
 
 /**
  * Every kind /api/run dispatches. Exported so guards iterate this rather than a
@@ -96,13 +113,16 @@ export const KNOWN_KINDS = Object.freeze(["pdf", "research", "evaluate", "fix-po
 /**
  * Resolve the tool scope for a worker kind.
  *
- * Unknown kinds get the read-only scope: granting write access to a kind nobody
- * has reviewed is the one unrecoverable default.
+ * Untrusted-JD kinds are always read-only, even if someone later adds them to
+ * PERSISTING_KINDS — granting Write to a kind that ingests a posting is the
+ * hole this module exists to close. Unknown kinds also get read-only: granting
+ * write access to a kind nobody has reviewed is the other unrecoverable default.
  *
  * @param {string} kind - Worker kind ("pdf", "research", "evaluate", …).
  * @returns {ToolScope}
  */
 export function toolScopeFor(kind) {
+  if (UNTRUSTED_JD_KIND_SET.has(kind)) return TOOL_SCOPES.readOnly;
   return PERSISTING_KINDS.has(kind) ? TOOL_SCOPES.persisting : TOOL_SCOPES.readOnly;
 }
 
@@ -138,14 +158,15 @@ export function claudeCliArgs({ kind, prompt }) {
     "--verbose",
     "--include-partial-messages",
     "--permission-mode", "acceptEdits",
-    // pdf only, deliberately. --strict-mcp-config with no --mcp-config loads ZERO
-    // MCP servers, so the tool lists below describe everything the agent can
-    // reach — without it an MCP server from the user's own config could supply a
-    // write tool that appears in neither list. #2185 is about pdf, and applying
-    // this to every kind would silently stop a configured MCP server (e.g. the
-    // optional Canva server) from loading on evaluate/research runs. The same gap
-    // for the other kinds is #2507.
-    ...(kind === "pdf" ? ["--strict-mcp-config"] : []),
+    // Untrusted-JD kinds only. --strict-mcp-config with no --mcp-config loads
+    // ZERO MCP servers, so the tool lists below describe everything the agent
+    // can reach — without it an MCP server from the user's own config could
+    // supply a write tool that appears in neither list. Derived from
+    // UNTRUSTED_JD_KINDS rather than `kind === "pdf"` so evaluate cannot regain
+    // an MCP write path while pdf stays locked. research / fix-portal keep
+    // their MCP access (optional Canva, etc.). Non-Claude CLIs still get no
+    // tool flags from spec.args() — that gap is #2507.
+    ...(UNTRUSTED_JD_KIND_SET.has(kind) ? ["--strict-mcp-config"] : []),
     "--allowedTools", scope.allowed,
     "--disallowedTools", scope.disallowed,
   ];
