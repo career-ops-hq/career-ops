@@ -57,6 +57,7 @@ import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { promoteKnownFragmentIdentity } from './url-key.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -211,17 +212,18 @@ function compileLocationKeywordList(value) {
 // Deliberately narrow: only the post-`/job/` segment is inspected, never the whole
 // URL. Scanning the full URL would match company slugs and ATS subdomains by
 // accident (a "china" or "india" substring inside an unrelated path). Providers
-// without the `/job/{location}/` convention (Greenhouse, Lever, Ashby) yield no
-// hint and keep their previous behaviour exactly.
+// without the Workday hostname convention yield no hint and keep their previous
+// behaviour exactly, even if their own routes also contain `/job/{id}`.
 export function locationHintFromUrl(url) {
   if (typeof url !== 'string' || url.trim() === '') return '';
-  let pathname;
+  let parsed;
   try {
-    pathname = new URL(url).pathname;
+    parsed = new URL(url);
   } catch {
     return '';
   }
-  const segments = pathname.split('/').filter(Boolean);
+  if (!parsed.hostname.toLowerCase().endsWith('.myworkdayjobs.com')) return '';
+  const segments = parsed.pathname.split('/').filter(Boolean);
   const jobIdx = segments.lastIndexOf('job');
   if (jobIdx === -1 || jobIdx === segments.length - 1) return '';
   let segment = segments[jobIdx + 1];
@@ -1089,6 +1091,7 @@ export function normalizeUrlForDedup(url) {
       parsed.searchParams.delete(param);
     }
   }
+  promoteKnownFragmentIdentity(parsed);
   parsed.hash = '';
   parsed.pathname = parsed.pathname.replace(/\/+$/, '').toLowerCase() || '/';
   return parsed.toString();
