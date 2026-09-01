@@ -61,8 +61,9 @@ npx tsc --noEmit     # typecheck
 npm run build        # production build
 ```
 
-Set `CAREER_OPS_ROOT=/path/to/checkout` in `web/.env.local` to point the app at
-a different career-ops directory (useful for testing against sample data).
+Set `CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` in `web/.env.local` to point the
+app at a different career-ops directory (useful for testing against sample data).
+Same pair the CLI honors; `CAREER_OPS_ROOT` wins if both are set.
 
 ### Tests
 

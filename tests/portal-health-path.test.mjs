@@ -1,21 +1,18 @@
 // tests/portal-health-path.test.mjs — appendPortalHealth()/loadPortalHealth()
-// must resolve their default path against process.cwd(), not the directory
-// scan.mjs lives in.
+// must resolve their default path against DATA_ROOT, not cwd and not the
+// directory scan.mjs lives in.
 //
-// Every sibling data path in scan.mjs (SCAN_HISTORY_PATH, PIPELINE_PATH,
-// APPLICATIONS_PATH, BLACKLIST_PATH, SCAN_RUNS_PATH) is a bare cwd-relative
-// string. PORTAL_HEALTH_PATH used to be the one exception, resolved via
-// path.dirname(fileURLToPath(import.meta.url)) -- the script's own directory.
-// Any invocation with a sandboxed cwd (a test run, a temp dir, a CI checkout)
-// still wrote fixture rows straight into the real data/portal-health.tsv of
-// whatever checkout happens to own scan.mjs, polluting real pipeline data with
-// test fixtures.
+// SCAN_HISTORY_PATH / PIPELINE_PATH / APPLICATIONS_PATH already join DATA_ROOT.
+// PORTAL_HEALTH_PATH used to be a bare cwd-relative `data/portal-health.tsv`,
+// so a run with cwd ≠ DATA_ROOT (CAREER_OPS_DATA_DIR) wrote where stats.mjs
+// does not read. Earlier still, it was resolved via import.meta.url — the
+// script's own directory — and sandboxed tests polluted the real checkout.
 //
-// This spawns a real child process with cwd pinned to a temp dir that is NOT
-// the directory scan.mjs lives in, then calls appendPortalHealth() with no
-// filePath argument -- the exact call scan.mjs's own production code path
-// makes. The row must land under the given cwd, and the script's own
-// directory must be provably untouched.
+// This spawns a real child with CAREER_OPS_DATA_DIR pinned to a temp dir and
+// cwd pinned to a *different* temp dir, then calls appendPortalHealth() with
+// no filePath argument — the exact call scan.mjs's own production path makes.
+// The row must land under DATA_ROOT, not cwd, and the script's own directory
+// must be provably untouched.
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
 import { spawnSync } from 'child_process';
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'fs';
@@ -25,10 +22,11 @@ import { pathToFileURL } from 'url';
 import { randomUUID } from 'crypto';
 import { applyScriptDirGuard } from './portal-health-guard.mjs';
 
-console.log('\nscan.mjs — portal-health.tsv resolves against cwd, not script dir');
+console.log('\nscan.mjs — portal-health.tsv resolves against DATA_ROOT, not cwd');
 
 const scanUrl = JSON.stringify(pathToFileURL(join(ROOT, 'scan.mjs')).href);
-const sandboxCwd = mkdtempSync(join(tmpdir(), 'career-ops-portal-health-'));
+const dataRoot = mkdtempSync(join(tmpdir(), 'career-ops-portal-health-root-'));
+const sandboxCwd = mkdtempSync(join(tmpdir(), 'career-ops-portal-health-cwd-'));
 
 // The script's own directory is ROOT in this checkout -- the same directory
 // the pre-fix bug always resolved to regardless of the cwd it was given.
@@ -50,8 +48,14 @@ try {
     await mod.appendPortalHealth([{ timestamp: '2026-01-01T00:00:00.000Z', company: ${JSON.stringify(marker)}, status: 'reachable' }]);
   `;
 
+  const childEnv = { ...process.env };
+  delete childEnv.CAREER_OPS_ROOT;
+  delete childEnv.CAREER_OPS_DATA_DIR;
+  childEnv.CAREER_OPS_DATA_DIR = dataRoot;
+
   const res = spawnSync(NODE, ['--input-type=module', '-e', script], {
     cwd: sandboxCwd,
+    env: childEnv,
     encoding: 'utf-8',
     timeout: 30000,
   });
@@ -59,15 +63,21 @@ try {
   if (res.error || res.status !== 0) {
     fail(`appendPortalHealth() child process failed: ${res.error?.message || res.stderr}`);
   } else {
-    pass('appendPortalHealth() runs cleanly with a sandbox cwd');
+    pass('appendPortalHealth() runs cleanly with cwd ≠ CAREER_OPS_DATA_DIR');
   }
 
-  // 1. The row lands under the cwd the process was given, not the script dir.
-  const sandboxHealthPath = join(sandboxCwd, 'data', 'portal-health.tsv');
-  if (existsSync(sandboxHealthPath) && readFileSync(sandboxHealthPath, 'utf-8').includes(marker)) {
-    pass('the fixture row is written under the sandbox cwd');
+  // 1. The row lands under DATA_ROOT, not the sandbox cwd and not the script dir.
+  const dataRootHealthPath = join(dataRoot, 'data', 'portal-health.tsv');
+  const cwdHealthPath = join(sandboxCwd, 'data', 'portal-health.tsv');
+  if (existsSync(dataRootHealthPath) && readFileSync(dataRootHealthPath, 'utf-8').includes(marker)) {
+    pass('the fixture row is written under DATA_ROOT');
   } else {
-    fail(`expected ${sandboxHealthPath} to contain the fixture row, it does not`);
+    fail(`expected ${dataRootHealthPath} to contain the fixture row, it does not`);
+  }
+  if (!existsSync(cwdHealthPath)) {
+    pass('the fixture row is not written under the sandbox cwd');
+  } else {
+    fail(`portal-health leaked to cwd (${cwdHealthPath}) — DATA_ROOT split-brain regression`);
   }
 
   // 2. The script's own directory -- the real user-layer data dir in a normal
@@ -83,6 +93,7 @@ try {
     fail(`the sandboxed run wrote into the script's own directory (${scriptDirHealthPath}) -- this is the cwd-resolution regression`);
   }
 } finally {
+  rmSync(dataRoot, { recursive: true, force: true });
   rmSync(sandboxCwd, { recursive: true, force: true });
   // Defensive cleanup, matching the pattern in tests/scan-no-targets.test.mjs
   // and tests/intake-mutex.test.mjs -- never observed to trigger once the path

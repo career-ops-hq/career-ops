@@ -1985,7 +1985,7 @@ export async function appendToScanHistory(offers, date, status = 'added') {
 
 // ── Company blacklist (#1742) ───────────────────────────────────────
 
-const BLACKLIST_PATH = 'data/blacklist.md';
+const BLACKLIST_PATH = path.join(DATA_ROOT, 'data/blacklist.md');
 
 /**
  * Parse the user's do-not-apply list (data/blacklist.md, user layer, opt-in).
@@ -2034,7 +2034,7 @@ export function loadBlacklist(filePath = BLACKLIST_PATH) {
 
 // ── Scan-run persistence (#1604) ────────────────────────────────────
 
-const SCAN_RUNS_PATH = 'data/scan-runs.tsv';
+const SCAN_RUNS_PATH = path.join(DATA_ROOT, 'data/scan-runs.tsv');
 
 // One row of run counters per non-dry scan — today these numbers are printed
 // once in the summary and lost when the terminal scrolls. Full ISO timestamp
@@ -2107,7 +2107,7 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
 
 // ── Portal health persistence (#1744) ───────────────────────────────
 
-const PORTAL_HEALTH_PATH = 'data/portal-health.tsv';
+const PORTAL_HEALTH_PATH = path.join(DATA_ROOT, 'data/portal-health.tsv');
 export const PORTAL_HEALTH_HEADER = 'timestamp\tcompany\tstatus\n';
 
 // Locked (portal-health-lock.mjs) so a concurrent read-modify-write of this

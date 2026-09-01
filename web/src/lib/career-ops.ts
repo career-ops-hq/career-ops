@@ -12,18 +12,8 @@ import { resolvePdfIndexPath } from "@/lib/core/pdf-index";
 // index row belong to" (#2599, #2008 review).
 import { pdfIndexEntryForReport } from "@/lib/apply/cv-selection.mjs";
 
-/**
- * Resolve the career-ops "home" — the directory holding the user's sibling
- * files (cv.md, data/, reports/). In production the web/ app lives inside the
- * career-ops checkout, so the home is its parent (..). Dev overrides via
- * CAREER_OPS_ROOT to read the user's real (gitignored) data from a separate
- * checkout — see web/.env.local.
- */
-export function careerOpsRoot(): string {
-  const env = process.env.CAREER_OPS_ROOT?.trim();
-  if (env) return env;
-  return path.resolve(process.cwd(), "..");
-}
+// CAREER_OPS_ROOT || CAREER_OPS_DATA_DIR, else cwd/.. — see career-ops-root.mjs.
+export { careerOpsRoot } from "@/lib/career-ops-root.mjs";
 
 /**
  * Absolute path to a core root script (e.g. doctor, verify-portals). The `.mjs`
