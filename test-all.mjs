@@ -17609,6 +17609,82 @@ try {
   fail(`funding manifest integrity check: ${e.message}`);
 }
 
+console.log('\n73. Gemini evaluator and encoding');
+
+let geminiTmp = null;
+try {
+  geminiTmp = mkdtempSync(join(ROOT, 'co-gemini-'));
+  const configDir = join(geminiTmp, 'config');
+  const modesDir = join(geminiTmp, 'modes', 'tr');
+  mkdirSync(configDir, { recursive: true });
+  mkdirSync(modesDir, { recursive: true });
+
+  // 1. Create a profile.yml setting modes_dir to modes/tr
+  writeFileSync(
+    join(configDir, 'profile.yml'),
+    '\uFEFFlanguage:\n  modes_dir: modes/tr\n', // Starts with a UTF-8 BOM
+    'utf-8'
+  );
+
+  // 2. Create localized dummy files in modes/tr/
+  // is-ilani.md contains Turkish/Czech characters: Türkiye, Čeština
+  writeFileSync(join(modesDir, '_shared.md'), 'Shared Turkish context', 'utf-8');
+  writeFileSync(join(modesDir, 'is-ilani.md'), 'Türkiye Čeština logic', 'utf-8');
+
+  // 3. Create other required files
+  writeFileSync(join(geminiTmp, 'cv.md'), 'My CV', 'utf-8');
+  mkdirSync(join(geminiTmp, 'modes'), { recursive: true });
+  writeFileSync(join(geminiTmp, 'modes', '_profile.md'), 'My Profile', 'utf-8');
+
+  // 4. Create a mock job description file with a BOM and UTF-8 characters
+  const jdPath = join(geminiTmp, 'mock-jd.txt');
+  writeFileSync(jdPath, '\uFEFFJob in Türkiye Čeština with BOM', 'utf-8');
+
+  // Run ROOT/gemini-eval.mjs directly with cwd: geminiTmp.
+  let stdout = '';
+  let stderr = '';
+  try {
+    stdout = execFileSync(NODE, [join(ROOT, 'gemini-eval.mjs'), '--file', jdPath, '--no-save'], {
+      cwd: geminiTmp,
+      env: {
+        ...process.env,
+        GEMINI_API_KEY: 'mock-api-key-12345'
+      },
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 30000
+    });
+  } catch (err) {
+    stdout = err.stdout || '';
+    stderr = err.stderr || '';
+  }
+
+  // Assertions:
+  if (stdout.includes('Loading context files...')) {
+    pass('Gemini evaluator loads files phase started');
+  } else {
+    fail('Gemini evaluator failed to start file loading phase');
+  }
+
+  if (stdout.includes('modes/tr/_shared.md not found') || stdout.includes('modes/tr/is-ilani.md not found')) {
+    fail('Gemini evaluator failed to resolve custom modes directory or filenames');
+  } else {
+    pass('Gemini evaluator resolved custom modes directory (modes/tr/) and localized filenames (is-ilani.md)');
+  }
+
+  if (stderr.includes('API_KEY') || stderr.includes('API key')) {
+    pass('Gemini evaluator reached API phase with mock key');
+  } else {
+    fail(`Gemini evaluator failed before reaching API phase or crashed: ${stderr}`);
+  }
+} catch (e) {
+  fail(`Gemini evaluator test crashed: ${e.message}`);
+} finally {
+  if (geminiTmp && existsSync(geminiTmp)) {
+    rmSync(geminiTmp, { recursive: true, force: true });
+  }
+}
+
 await runDiscovered();
 
 finish();
