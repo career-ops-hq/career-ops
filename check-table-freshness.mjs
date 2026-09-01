@@ -47,7 +47,7 @@
  *      node check-table-freshness.mjs --today 2026-10-02 (deterministic date for tests)
  *      node check-table-freshness.mjs --self-test
  *
- * Issue #2036 — github.com/santifer/career-ops
+ * Issue #2036 — github.com/career-ops-hq/career-ops
  */
 
 import { readFileSync, readdirSync, existsSync } from 'fs';

@@ -28,7 +28,7 @@ import { seedFixture, loadExpectations } from './seed-fixture.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
-const CANONICAL = 'https://github.com/santifer/career-ops.git';
+const CANONICAL = 'https://github.com/career-ops-hq/career-ops.git';
 const TAG_RE = /^career-ops-v(\d+)\.(\d+)\.(\d+)$/;
 
 function git(cwd, ...args) {
