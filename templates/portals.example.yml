@@ -1102,7 +1102,7 @@ search_queries:
 #   careers_url: https://careers.garena.com/global   # auto-detects on careers.garena.com
 #   provider: garena                      # optional — careers.garena.com host also auto-detects
 #   garena:
-#     office: global                      # optional — cosmetic only (reused in job URLs); doesn't filter results
+#     office: global                      # optional — sent as the API office parameter and reused in job URLs; no client-side filtering
 #   enabled: true
 #
 # - name: Heckler & Koch                  # single-company; SSR Nuxt vacancy list

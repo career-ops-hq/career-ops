@@ -39,7 +39,7 @@ export function parseGarenaResponse(json, entry) {
     throw new Error(`garena: unexpected API response — expected jobs[], got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
   }
 
-  const office = resolveOffice(entry);
+  const officeSegment = urlSegment('office', resolveOffice(entry));
   const company = (entry && entry.name) || 'Garena';
 
   const out = [];
@@ -55,7 +55,7 @@ export function parseGarenaResponse(json, entry) {
     /** @type {{title: string, url: string, company: string, location: string, description?: string}} */
     const job = {
       title: j.title.trim(),
-      url: `https://${HOST}/${office}/careers/${id}`,
+      url: `https://${HOST}/${officeSegment}/careers/${urlSegment('id', id)}`,
       company,
       location: locations.join(', '),
     };
@@ -71,6 +71,23 @@ export function parseGarenaResponse(json, entry) {
 function resolveOffice(entry) {
   const office = entry && entry.garena && entry.garena.office;
   return typeof office === 'string' && office.trim() ? office.trim() : DEFAULT_OFFICE;
+}
+
+/**
+ * Escapes an untrusted value before it is interpolated into a Garena URL.
+ * `office` is user config and `id` is remote API data, so neither may widen
+ * the URL we intended: separators (`/`, `?`, `#`, ...) are percent-escaped,
+ * and `.`/`..` are rejected outright because escaping leaves them intact as
+ * traversal segments.
+ * @param {string} name - Field name, for the error message.
+ * @param {string} value
+ * @returns {string}
+ */
+function urlSegment(name, value) {
+  if (value === '.' || value === '..') {
+    throw new Error(`garena: ${name} is not a usable URL segment: ${JSON.stringify(value)}`);
+  }
+  return encodeURIComponent(value);
 }
 
 /** @type {Provider} */
@@ -96,8 +113,7 @@ export default {
    * @returns {Promise<Array<{title: string, url: string, company: string, location: string, description?: string}>>}
    */
   async fetch(entry, ctx) {
-    const office = resolveOffice(entry);
-    const url = `${API_URL}?office=${encodeURIComponent(office)}`;
+    const url = `${API_URL}?office=${urlSegment('office', resolveOffice(entry))}`;
 
     // redirect:'error' is the SSRF guard (a server-side redirect can't be
     // followed to a private address). The empty-object body matches what the

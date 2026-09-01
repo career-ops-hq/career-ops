@@ -55,6 +55,28 @@ try {
   if (withOffice[0].url === 'https://careers.garena.com/sg/careers/J02058270') pass('parseGarenaResponse honors entry.garena.office in the job URL');
   else fail(`withOffice[0].url = ${JSON.stringify(withOffice[0]?.url)}`);
 
+  // office (user config) and id (remote data) are escaped before they reach
+  // the path, so neither can add a segment of its own.
+  const traversal = parseGarenaResponse(
+    { jobs: [{ id: 'J7/../../admin', title: 'Traversal', tags: {} }] },
+    { garena: { office: 'sg/../../evil' } },
+  );
+  if (traversal[0].url === 'https://careers.garena.com/sg%2F..%2F..%2Fevil/careers/J7%2F..%2F..%2Fadmin') pass('parseGarenaResponse escapes separators in office and id');
+  else fail(`traversal[0].url = ${JSON.stringify(traversal[0]?.url)}`);
+
+  // Dot segments survive percent-encoding, so they are rejected instead.
+  for (const bad of ['.', '..']) {
+    let rejected = false;
+    try { parseGarenaResponse({ jobs: [{ id: 'J8', title: 'Dot office', tags: {} }] }, { garena: { office: bad } }); } catch { rejected = true; }
+    if (rejected) pass(`parseGarenaResponse rejects office ${JSON.stringify(bad)}`);
+    else fail(`parseGarenaResponse should reject office ${JSON.stringify(bad)}`);
+
+    let idRejected = false;
+    try { parseGarenaResponse({ jobs: [{ id: bad, title: 'Dot id', tags: {} }] }, {}); } catch { idRejected = true; }
+    if (idRejected) pass(`parseGarenaResponse rejects id ${JSON.stringify(bad)}`);
+    else fail(`parseGarenaResponse should reject id ${JSON.stringify(bad)}`);
+  }
+
   // Multiple locations join with ", ".
   const multiLoc = parseGarenaResponse({ jobs: [{ id: 'J1', title: 'Multi', tags: { location: ['Singapore', 'Jakarta'] } }] }, {});
   if (multiLoc[0].location === 'Singapore, Jakarta') pass('parseGarenaResponse joins multiple locations with ", "');
@@ -130,6 +152,21 @@ try {
 
   if (officeFetched[0]?.url === 'https://careers.garena.com/sg/careers/J6') pass('garena.fetch() forwards a custom office to the job URL');
   else fail(`officeFetched[0].url = ${JSON.stringify(officeFetched[0]?.url)}`);
+
+  // fetch() escapes the office in the query string and refuses a dot segment
+  // before any request goes out.
+  let escapedUrl = null;
+  const escapeCtx = { fetchJson: async (url) => { escapedUrl = url; return { jobs: [] }; } };
+  await garena.fetch({ garena: { office: 'sg team&x=1' } }, escapeCtx);
+  if (escapedUrl === 'https://careers.garena.com/api/job/list?office=sg%20team%26x%3D1') pass('garena.fetch() escapes the office in the API query string');
+  else fail(`garena.fetch() escaped url = ${JSON.stringify(escapedUrl)}`);
+
+  let requested = false, dotRejected = false;
+  try {
+    await garena.fetch({ garena: { office: '..' } }, { fetchJson: async () => { requested = true; return { jobs: [] }; } });
+  } catch { dotRejected = true; }
+  if (dotRejected && !requested) pass('garena.fetch() rejects a dot-segment office before requesting');
+  else fail(`garena.fetch() dot office: rejected=${dotRejected} requested=${requested}`);
 
 } catch (e) {
   fail(`garena provider tests crashed: ${e.message}`);
