@@ -95,10 +95,19 @@ the bad item — and the throw surfaces as a run error, and as `missing` in
 false alarm instead of an honest "empty". So a malformed item is a
 `continue` / `null` + `.filter`, never an exception out of `fetch()`.
 
-- Recoverable shapes (`null`, `{}`, `{jobs: null}`, a non-array where the job
-  list should be): "endpoint alive, no jobs" → return `[]`. "API answered
-  with an error" → throw (`scan.mjs` itself throws on a non-array from
-  `fetch()`; `verify-portals` catches it).
+- An empty or contentless body (`null`, `{}`, `[]`, `{jobs: null}`) —
+  "endpoint alive, nothing matched" → return `[]`.
+- A body whose structure is recognisably *not* what the endpoint documents
+  (expected nested container absent or wrong-typed, keys entirely different)
+  → a descriptive `throw` (name the keys you did get) is allowed and usually
+  better: it surfaces a silent API change instead of a board that quietly
+  returns `0` forever. Reference: `parseIbmResponse` in `providers/ibm.mjs`.
+  `scan.mjs` also throws on a non-array out of `fetch()`; `verify-portals`
+  catches it.
+- Paginating provider whose loop-termination reads the raw page shape
+  (`json.hits.hits.length < PAGE_SIZE`): returning `[]` from the parser is
+  not enough — guard that bound or `throw` deliberately (the "fail loud vs
+  hand back a partial board" call from *Pacing and retry* below).
 - Dates: `Date.parse` can return `NaN`. Do not write `date || undefined` (it
   breaks a valid epoch `0`) — use a NaN-safe helper:
 
@@ -188,6 +197,10 @@ this ceiling, never on its own. Reference: `providers/workday.mjs`
 (`DEFAULT_MAX_PAGES`, `MAX_PAGES_CAP`, `resolveMaxPages()`). When the ceiling
 truncated the list, warn the user (`raise max_pages on this entry`) so a
 partial list is not mistaken for a complete one.
+
+A source-reported `total` can also be plain wrong, not just absent — some
+backends silently clamp it, so a `total`-bounded walk is not proof of
+completeness. Reference: `providers/workday.mjs`'s facet split (#3310).
 
 ### `ctx.maxPages` and the health probe
 
@@ -357,6 +370,7 @@ Dev loop: `node test-all.mjs --only providers/{name}`. Before a PR: the full
 | `job.url` from a host-controlled `id` / `slug` via `safeEncodeURIComponent` | `providers/phenom.mjs`, `providers/bamboohr.mjs` |
 | Retry/backoff via the shared helper, default policy | `providers/a16z-speedrun-talent.mjs`, `providers/getro.mjs` |
 | Retry/backoff via the shared helper, policy override | `providers/workday.mjs`, `providers/oraclecloud.mjs` |
+| Detecting a clamped `total`, recovering it via query fan-out + dedup | `providers/workday.mjs` (facet split) |
 
 `fetchJsonWithRetry` / `fetchTextWithRetry` (`providers/_http.mjs`) take an
 optional 4th argument `policy: { retries, baseDelayMs, maxDelayMs }` for a
@@ -370,9 +384,10 @@ provider whose tuning needs differ from the shared default
       failing.
 - [ ] Every network call passes `redirect: 'error'`; a config-derived URL is
       checked against an allowlist before the request.
-- [ ] `fetch()` returns `[]` on a recoverable shape (`null` / `{}` /
-      `{jobs: null}`); it throws only on a real API error. A single bad row
-      is skipped (`continue` / `null` + `.filter`), not fatal to the target.
+- [ ] `fetch()` returns `[]` on an empty or contentless body (`null` / `{}`
+      / `[]` / `{jobs: null}`); it throws on a real API error or an envelope
+      that isn't the documented shape. A single bad row is skipped
+      (`continue` / `null` + `.filter`), not fatal to the target.
 - [ ] Dates are NaN-safe (`toEpochMs` pattern).
 - [ ] HTML/XML entities go through `providers/_html-entities.mjs`, not a
       local copy.
