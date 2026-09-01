@@ -733,6 +733,12 @@ search_queries:
   #   query: 'site:jobfluent.com Madrid OR Barcelona "Engineer" OR "Manager" OR "Sales" OR "Marketing"'
   #   enabled: true
 
+  # NOTE: Welcome to the Jungle isn't a Spain-only or tech-only board — it
+  # also runs a large France listing and covers non-tech professions. The
+  # name/query below is scoped narrowly to Spain+AI/tech on purpose, to match
+  # this example profile's targeting; broaden the site: query (e.g. drop
+  # "Spain OR Madrid OR Barcelona" for France, or swap the title terms for
+  # your own profession) if you want its wider listings.
   - name: Welcome to the Jungle — Spain tech
     query: 'site:welcometothejungle.com Spain OR Madrid OR Barcelona "AI Engineer" OR "Solutions Architect" OR "DevRel" OR "Forward Deployed"'
     enabled: true
