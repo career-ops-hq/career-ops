@@ -35,10 +35,10 @@ import { join, dirname } from 'path';
 import { randomUUID } from 'crypto';
 
 const DEFAULT_STALE_MS = 30_000;
-// Windows directory mtimes can round/coalesce enough that a lock backdated by
-// only milliseconds may look older than one second. Keep the ownerless floor
-// above that filesystem granularity so a brand-new lock between mkdir() and its
-// owner.json write is never reclaimed by an aggressive staleMs on windows-latest.
+// The windows-latest runner can observe a brand-new ownerless lock as old
+// enough to trip very aggressive staleMs settings while contention and delayed
+// owner.json writes are still settling. Keep the ownerless floor above that
+// runner-level timing window so fresh mkdir() locks are not reclaimed early.
 export const OWNERLESS_GRACE_MS = 5_000;
 const DEFAULT_RETRY_MS = 80;
 const DEFAULT_TIMEOUT_MS = 8_000;
