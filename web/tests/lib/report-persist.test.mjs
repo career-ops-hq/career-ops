@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   evaluateRunOutcome,
@@ -190,7 +190,7 @@ test("persistEvaluation: writes report + TSV, reserves, merges, releases", async
     assert.equal(tsv[8], "; posted: 2026-08-01");
     assert.equal(tsv[9], "https://acme.com/jobs/7");
 
-    const scripts = calls.map((c) => c.args[0].split("/").pop() + (c.args.includes("--release") ? " --release" : ""));
+    const scripts = calls.map((c) => basename(c.args[0]) + (c.args.includes("--release") ? " --release" : ""));
     assert.deepEqual(scripts, ["reserve-report-num.mjs", "merge-tracker.mjs", "reserve-report-num.mjs --release"]);
     assert.ok(calls.every((c) => c.opts.cwd === root));
   } finally {
