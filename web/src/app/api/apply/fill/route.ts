@@ -28,7 +28,7 @@ export async function POST(req: Request) {
   // Resolve the tailored CV server-side (never trust a client path): by the
   // offer's company if known, else best-effort from the form title.
   const session = getSession(sessionId);
-  const cvPath = resolveTailoredCv(company, application) ?? (application ? null : resolveTailoredCv(companyFromTitle(session?.title))) ?? undefined;
+  const cvPath = (await resolveTailoredCv(company, application)) ?? (application ? null : await resolveTailoredCv(companyFromTitle(session?.title))) ?? undefined;
 
   try {
     const result = await fillSession(sessionId, answers, fields, cvPath);

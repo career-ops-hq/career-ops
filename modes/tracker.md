@@ -1,6 +1,6 @@
 # Mode: tracker — Applications Tracker
 
-Read and display `data/applications.md`.
+Read and display the tracker file (resolved relative to the data root, defaulting to `{DATA_ROOT}/data/applications.md` or overridden by `CAREER_OPS_TRACKER`).
 
 **Tracker Format:**
 

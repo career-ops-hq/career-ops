@@ -13,6 +13,50 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.tex');
 const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
 
+// Markdown bold inside bullets — the LaTeX half of #1728, which taught the HTML
+// path to render `**text**` as <strong> (normalizeTextForATS in generate-pdf.mjs).
+// escapeLatex() leaves `*` alone because it is not a LaTeX special character, so
+// the markers reached the .tex verbatim and printed as literal asterisks (#3351).
+//
+// Order is the safety property, and it mirrors the HTML twin: escapeLatex() runs
+// FIRST, so every backslash and brace in the payload is already neutralized
+// (`\` becomes \textbackslash{}, braces become \{ \}). Nothing the candidate wrote
+// can survive as a real control sequence — this pass only reinterprets the `**`
+// markers, which escaping deliberately left untouched. Same regex as the HTML
+// path so the two twins agree on what counts as bold.
+//
+// The gate covers every field this builder emits inside a \resumeItem: experience
+// bullets, project bullets, and the education coursework line. Coursework does not
+// carry the payload key `bullets`, but it renders as a bullet, and a bullet whose
+// emphasis silently prints as `**` is the bug being fixed — the shape of the
+// output decides what goes through the gate, not the name of the payload field.
+const MARKDOWN_BOLD_RE = /\*\*([^*]+?)\*\*/g;
+
+/**
+ * Escape bullet text, then restore markdown bold as \textbf.
+ *
+ * Use this for every value that ends up inside a \resumeItem; use escapeLatex
+ * directly everywhere else, where `**` is meant to stay literal.
+ *
+ * @param {string} text raw payload text, not yet escaped
+ * @returns {string} LaTeX-safe text with `**…**` spans rendered as \textbf{…}
+ */
+function escapeLatexBullet(text) {
+  // Replacer FUNCTION, not a string: escaped text is full of `\$` and `\&`, and a
+  // string replacement would reinterpret `$&` and friends as match references
+  // (same trap the render path documents below).
+  return escapeLatex(text).replace(MARKDOWN_BOLD_RE, (_, inner) => `\\textbf{${inner}}`);
+}
+
+/**
+ * Render the Education section as \resumeSubheading blocks.
+ *
+ * An entry's optional `coursework` becomes a single \resumeItem line, which is
+ * why it goes through escapeLatexBullet rather than escapeLatex.
+ *
+ * @param {Array<object>} entries `education[]` from the payload
+ * @returns {string} LaTeX for the section body, or '' when there is nothing to render
+ */
 function buildEducation(entries) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
   const blocks = [];
@@ -20,7 +64,7 @@ function buildEducation(entries) {
     if (!e) continue;
     let block = `    \\resumeSubheading\n      {${escapeLatex(e.institution)}}{${escapeLatex(e.location)}}\n      {${escapeLatex(e.degree)}}{${escapeLatex(e.dates)}}`;
     if (Array.isArray(e.coursework) && e.coursework.length > 0) {
-      const courses = e.coursework.map(c => escapeLatex(c)).join(', ');
+      const courses = e.coursework.map(c => escapeLatexBullet(c)).join(', ');
       block += `\n        \\resumeItemListStart\n            \\resumeItem{\\textbf{Coursework:} ${courses}}\n        \\resumeItemListEnd`;
     }
     blocks.push(block);
@@ -28,17 +72,32 @@ function buildEducation(entries) {
   return blocks.join('\n\n');
 }
 
+/**
+ * Render the Work Experience section as \resumeSubheading blocks.
+ *
+ * @param {Array<object>} entries `experience[]` from the payload
+ * @returns {string} LaTeX for the section body, or '' when there is nothing to render
+ */
 function buildExperience(entries) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
   const blocks = [];
   for (const e of entries) {
     if (!e) continue;
-    const bullets = Array.isArray(e.bullets) ? e.bullets.map(b => `            \\resumeItem{${escapeLatex(b)}}`).join('\n') : '';
+    const bullets = Array.isArray(e.bullets) ? e.bullets.map(b => `            \\resumeItem{${escapeLatexBullet(b)}}`).join('\n') : '';
     blocks.push(`    \\resumeSubheading\n      {${escapeLatex(e.company)}}{${escapeLatex(e.dates)}}\n      {${escapeLatex(e.role)}}{${escapeLatex(e.location)}}\n      \\resumeItemListStart\n${bullets}\n      \\resumeItemListEnd`);
   }
   return blocks.join('\n\n');
 }
 
+/**
+ * Render the Projects section as \resumeProjectHeading blocks.
+ *
+ * A valid `url` turns the project name into an \href link (#3198); the name
+ * itself stays escaped either way.
+ *
+ * @param {Array<object>} entries `projects[]` from the payload
+ * @returns {string} LaTeX for the section body, or '' when there is nothing to render
+ */
 function buildProjects(entries) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
   const blocks = [];
@@ -49,7 +108,7 @@ function buildProjects(entries) {
     const nameFormatted = url
       ? `\\href{${escapeLatex(url, 'url')}}{\\textbf{${escapeLatex(e.name)}}}`
       : `\\textbf{${escapeLatex(e.name)}}`;
-    const bullets = Array.isArray(e.bullets) ? e.bullets.map(b => `            \\resumeItem{${escapeLatex(b)}}`).join('\n') : '';
+    const bullets = Array.isArray(e.bullets) ? e.bullets.map(b => `            \\resumeItem{${escapeLatexBullet(b)}}`).join('\n') : '';
     blocks.push(`    \\resumeProjectHeading\n      {${nameFormatted}${context}}{${escapeLatex(e.dates || '')}}\n      \\resumeItemListStart\n${bullets}\n      \\resumeItemListEnd`);
   }
   return blocks.join('\n\n');

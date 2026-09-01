@@ -133,6 +133,47 @@ for (const path of timestampedBackupProbes) {
   else fail(`${path}: git check-ignore could not answer — ${stderr}`);
 }
 
+// The tracker's DERIVED SQLite index (tracker.mjs, #918), which carries the
+// same content as the markdown it indexes — company, role, score, status,
+// notes.
+//
+// On the standard layout it lands in data/ and the rules above already cover
+// it. But resolveTrackerPath() falls back to `<root>/applications.md` when
+// data/applications.md is absent, and the index follows the markdown, so on
+// the legacy layout it sits in the repo root instead. That is also every fresh
+// clone: `node test-all.mjs` leaves one there, 36KB, ready for `git add .`.
+//
+// The nested probes are the ones that decide the SHAPE of the rule. A
+// root-anchored `/*.db` covers the repo root and nothing else, and would still
+// pass every root probe below — but getCareerOpsRoot() resolves a RELATIVE
+// CAREER_OPS_ROOT (or .career-ops-data marker) against the codebase directory,
+// so a data root configured as `career-data` puts the tracker, and its index,
+// in a subdirectory of the checkout. `data/applications.db` cannot settle this
+// on its own: it is already covered by the blanket `data/*` rule at the top of
+// the file, so it passes either way.
+//
+// Built as a cross-product rather than hand-listed. tracker.mjs derives every
+// one of these from a single path — DB_PATH is resolveTrackerPath() with .md
+// swapped for .db, and SQLite appends the sidecar suffixes to that — so any
+// directory that can hold the index can hold all three names. Enumerating them
+// by hand is how the -shm sidecar ended up covered in the repo root and missed
+// one directory down.
+const derivedIndexLocations = [
+  'applications',                // legacy layout: tracker markdown in the root
+  'data/applications',           // standard layout
+  'career-data/applications',    // a relative CAREER_OPS_ROOT / .career-ops-data root
+];
+const derivedIndexProbes = derivedIndexLocations.flatMap(
+  (base) => ['.db', '.db-wal', '.db-shm'].map((suffix) => `${base}${suffix}`),
+);
+
+for (const path of derivedIndexProbes) {
+  const { verdict, stderr } = checkIgnore(path);
+  if (verdict === 'ignored') pass(`${path} is git-ignored`);
+  else if (verdict === 'not-ignored') fail(`${path} is NOT git-ignored — the derived index holds the same PII as the tracker`);
+  else fail(`${path}: git check-ignore could not answer — ${stderr}`);
+}
+
 // Not user-layer data, but the same mechanism: this one is about what a
 // reflexive `git add .` can swallow. test-all.mjs builds its script-runner
 // sandbox with mkdtempSync under the repo ROOT, and a suite interrupted

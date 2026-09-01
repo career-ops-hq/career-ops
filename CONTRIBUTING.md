@@ -75,6 +75,30 @@ There's a clear path here — we promote people who show up:
 
 We credit contributors publicly and invite high-signal folks up the ladder. Want to help more? Just say so in an issue.
 
+## Adopting an abandoned PR
+
+Life happens: a PR gets a review, the author moves on, and useful work strands at 80% done. We don't let a bot bury it, and we don't let it rot. Instead it goes through a public, predictable ladder:
+
+1. **Two weeks of silence** after a review round, and a maintainer opts the PR into the ladder (`adoption/track`). You get a friendly ping: still yours, no rush.
+2. **Two more weeks**, a second check-in with the plan spelled out: two further weeks of silence and the work opens up for adoption.
+3. **Only then** a maintainer (never a bot) closes the PR with thanks and opens a companion issue labeled **`adoptable`**, pointing at the branch and listing exactly what's left to do.
+
+**Adopting one** is one of the highest-value first contributions you can make: the diff is mostly done, the review is already written, and the remaining work is scoped. Open a *new* PR that carries the original commits (git preserves the author's credit), or add a `Co-authored-by:` trailer for them. Both of you end up credited: the original author for the work, you for landing it.
+
+**If you're the original author coming back**: the work stays yours to reclaim at any point before someone else finishes it. Just say so on the issue. Any comment or push from you at any ladder step resets the clock completely.
+
+## Someone else's open PR stays theirs
+
+The ladder above is for work that has been **abandoned**. An open PR with an author still around is a different thing, and the line matters.
+
+**Please don't open a PR that re-resolves someone else's conflict.** Pointing out on the thread that a PR has gone into conflict is genuinely useful. Rebasing it onto a branch of your own and opening a replacement is not, however cleanly the merge is done: landing that replacement closes the original, and the author is left with a `closed` PR where their `merged` should have been. That badge is most of what a contributor takes away from a project, and it isn't ours to reassign.
+
+If the conflict came from something **we** merged, the fix is ours. We resolve it on the author's own branch (that is what "Allow edits by maintainers" is for), run the suite, and leave their PR and their authorship untouched. If it came from anywhere else, the author rebases whenever they're ready: nobody is on a clock for that.
+
+This applies to automation as well. A bot opening replacement PRs on other people's branches is doing the same thing at higher volume, and automated triage posted into someone else's thread ("don't merge both", "treat #X as the primary") reads as a project decision to the person who has been waiting on one. Merge calls are the maintainers' to make.
+
+Improvements that go *beyond* resolving the conflict are welcome, just not stapled onto another person's PR: raise them in the thread and let the author decide, or open your own PR once theirs has landed.
+
 ## Scope: the core vs. the shared layer
 
 career-ops core is **local-first and human-in-the-loop** by design — it runs on your machine and drafts applications for *you* to review and submit. Centralized infrastructure — hosted job aggregation, a shared matching service, proxies or Workers the project would operate — is **not part of the core**: it's heavier than a free local tool should carry, and it's where the project is headed as a *separate, opt-in service*. See the direction here: **[Where career-ops is going](https://github.com/santifer/career-ops/discussions/904)**.

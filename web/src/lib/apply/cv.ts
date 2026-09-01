@@ -1,48 +1,26 @@
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot, readApplications } from "@/lib/career-ops";
-import { pdfPathForReport, reportNumberFromCell } from "./cv-selection.mjs";
-
-function containedRealpath(file: string, root: string): boolean {
-  try {
-    return fs.realpathSync(file).startsWith(fs.realpathSync(root) + path.sep);
-  } catch {
-    return false;
-  }
-}
-
-function isRegularContainedFile(file: string, root: string): boolean {
-  try {
-    return fs.statSync(file).isFile() && containedRealpath(file, root);
-  } catch {
-    return false;
-  }
-}
+import { careerOpsRoot, pdfPathStatusForReport, readApplications } from "@/lib/career-ops";
+import { companySlug } from "@/lib/company-slug.mjs";
+import { matchesTailoredCv, sortNewestFirst } from "./cv-match.mjs";
+import { reportNumberFromCell } from "./cv-selection.mjs";
 
 /**
  * Locate the tailored CV PDF for an application. When the tracker application
- * number is known, the report -> PDF manifest is authoritative, so an older
- * role cannot accidentally receive the company's newest CV. Company matching
- * remains as a fallback for manually pasted URLs.
+ * number is known, the report -> PDF manifest (via pdfPathStatusForReport, the
+ * same resolver /api/cv-pdf uses for its own "n" lookups) is authoritative, so
+ * an older role cannot accidentally receive the company's newest CV. Company
+ * matching remains as a fallback for manually pasted URLs. Returns an absolute
+ * path or null.
  */
-export function resolveTailoredCv(company?: string, applicationNumber?: string): string | null {
+export async function resolveTailoredCv(company?: string, applicationNumber?: string): Promise<string | null> {
   const root = careerOpsRoot();
   if (applicationNumber?.trim()) {
     const app = readApplications().find((candidate) => candidate.n === applicationNumber.trim());
     const reportNumber = reportNumberFromCell(app?.report);
     if (!reportNumber) return null;
-    let indexText: string;
-    try {
-      indexText = fs.readFileSync(path.join(root, "data", "pdf-index.tsv"), "utf8");
-    } catch {
-      return null;
-    }
-    const relativePdf = pdfPathForReport(indexText, reportNumber);
-    if (!relativePdf) return null;
-    const file = path.resolve(root, relativePdf);
-    const outputDir = path.resolve(root, "output");
-    if (!file.startsWith(outputDir + path.sep) || !isRegularContainedFile(file, outputDir)) return null;
-    return file;
+    const result = await pdfPathStatusForReport(String(reportNumber));
+    return result.status === "found" ? result.path : null;
   }
 
   const c = (company ?? "").trim();
@@ -54,18 +32,20 @@ export function resolveTailoredCv(company?: string, applicationNumber?: string):
   } catch {
     return null;
   }
-  // Token-extract instead of replace-then-trim: same slug, and no `-+$`-style
-  // pattern that backtracks polynomially on adversarial input (CodeQL).
-  const slug = (c.toLowerCase().match(/[a-z0-9]+/g) ?? []).join("-");
-  const first = slug.split("-")[0];
-  const matches = files.filter((f) => {
-    const l = f.toLowerCase();
-    if (!(l.includes(slug) || (first.length > 2 && l.includes(first)))) return false;
-    return isRegularContainedFile(path.join(dir, f), dir);
-  });
+  // No usable key means this company cannot be identified from a filename, so
+  // find nothing. The old empty-string slug was a substring of every name in
+  // output/, which resolved the newest unrelated CV instead (#2352).
+  const key = companySlug(c);
+  if (!key) return null;
+  const { slug } = key;
+  // `key.first` is deliberately NOT used as a fallback: matching a company by
+  // its first token alone made "Acme" resolve an unrelated "Acme Bank" file,
+  // and matchesTailoredCv already requires the cv- prefix AND a token boundary.
+  const matches = files.filter((f) => matchesTailoredCv(f.toLowerCase(), slug));
   if (!matches.length) return null;
-  matches.sort((a, b) => fs.statSync(path.join(dir, b)).mtimeMs - fs.statSync(path.join(dir, a)).mtimeMs);
-  return path.join(dir, matches[0]);
+  const sorted = sortNewestFirst(dir, matches);
+  if (!sorted.length) return null;
+  return path.join(dir, sorted[0]);
 }
 
 /**

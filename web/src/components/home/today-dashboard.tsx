@@ -12,6 +12,8 @@ import { DiscoveryCard } from "@/components/explore/discovery-card";
 import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
 import { DecisionCard } from "@/components/home/decision-card";
 import { QuickEvaluate } from "@/components/quick-evaluate";
+import { scoreNum } from "@/lib/format";
+import { pickAwaitingDecision } from "@/lib/home/awaiting.mjs";
 
 // The retention "Today": a dual-loop action queue (the maintainer's
 // "N new matches this week · M follow-ups due"). SUPPLY loop = fresh free-scan
@@ -29,6 +31,7 @@ export function TodayDashboard({
 }) {
   const [followups, setFollowups] = useState<FollowUp[]>([]);
   const [overdue, setOverdue] = useState(0);
+  const [nextUpcoming, setNextUpcoming] = useState<FollowUp | null>(null);
   const [fresh, setFresh] = useState<DiscoveredOffer[]>([]);
   const [freshCount, setFreshCount] = useState(0);
   const router = useRouter();
@@ -38,8 +41,13 @@ export function TodayDashboard({
     fetch("/api/followups")
       .then((r) => r.json())
       .then((d) => {
+        // /api/followups already filters to urgency 'urgent'/'overdue' — due
+        // now, never 'waiting'/'cold' (#86). Both count toward "due"; a
+        // missing metadata.overdue must read as 0 due, never as "every entry
+        // is overdue" (the old `?? d.entries?.length` fallback).
         setFollowups(Array.isArray(d.entries) ? d.entries : []);
-        setOverdue(d.metadata?.overdue ?? d.entries?.length ?? 0);
+        setOverdue((d.metadata?.overdue ?? 0) + (d.metadata?.urgent ?? 0));
+        setNextUpcoming(d.nextUpcoming ?? null);
       })
       .catch(() => {});
     fetch("/api/whats-new")
@@ -66,11 +74,10 @@ export function TodayDashboard({
     return () => window.removeEventListener("co-job-done", onDone);
   }, [refetch, router]);
 
-  // Awaiting decision: scored (Evaluated) but no terminal status yet.
-  const awaiting = useMemo(
-    () => applications.filter((a) => /^evaluat/i.test(a.status)).slice(0, 6),
-    [applications],
-  );
+  // Awaiting decision: scored (Evaluated) but no terminal status yet. The
+  // ordering lives in lib/home/awaiting.mjs so it can be tested — see the file
+  // for why "first six in the array" was a bug waiting for #3529.
+  const awaiting = useMemo(() => pickAwaitingDecision(applications, scoreNum), [applications]);
 
   const newThisWeek = freshCount;
   const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0;
@@ -121,14 +128,29 @@ export function TodayDashboard({
       </section>
 
       {/* A. Follow-ups due (demand loop) */}
-      {followups.length > 0 && (
+      {followups.length > 0 ? (
         <Section icon={Bell} title="Follow-ups due" hint="Keep your applications alive — a nudge beats silence">
           <div className="grid gap-2.5">
             {followups.map((f) => (
-              <FollowUpCard key={`${f.num}-${f.company}`} followup={f} onLogged={() => setOverdue((n) => Math.max(0, n - 1))} />
+              // Refetch (not a local decrement) so the parent's followups/nextUpcoming
+              // stay in sync with the server — logging the LAST due item must flip this
+              // section over to "Next follow-up" instead of leaving it empty.
+              <FollowUpCard key={`${f.num}-${f.company}`} followup={f} onLogged={refetch} />
             ))}
           </div>
         </Section>
+      ) : (
+        nextUpcoming && (
+          // Nothing is due — say so honestly instead of an empty "due" block,
+          // but still surface what's next so the queue isn't silent (#86).
+          <Section icon={Bell} title="Next follow-up" hint="Nothing due yet">
+            <p className="text-sm text-muted">
+              <span className="font-medium text-foreground">{nextUpcoming.company}</span>
+              {nextUpcoming.role && <span> · {nextUpcoming.role}</span>}
+              {nextUpcoming.nextFollowupDate && <span className="text-faint"> — upcoming {nextUpcoming.nextFollowupDate}</span>}
+            </p>
+          </Section>
+        )
       )}
 
       {/* B. Awaiting your decision */}

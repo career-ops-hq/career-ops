@@ -59,15 +59,18 @@
 import { readFileSync, existsSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 // Namespace import, not default: js-yaml 5.x drops the default export, and
 // #2656 migrated the rest of the repo for exactly that reason.
 import * as yaml from 'js-yaml';
 
+import { roleFuzzyMatch } from './role-matcher.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
-import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { flagValue, validateFlags, safeIntFlag } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 const SCAN_HISTORY_PATH = join(CAREER_OPS, 'data/scan-history.tsv');
 // Same resolution scan.mjs uses, so a sandboxed run overrides both together.
 const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(CAREER_OPS, 'portals.yml');
@@ -105,35 +108,11 @@ const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 // Both numeric flags read through flagValue, so `--min-span=7` behaves exactly
 // like `--min-span 7` — the defect lib/cli-flags.mjs exists to keep the next
-// script from rediscovering. Anything that is not a plain non-negative integer
-// falls back to the default, which is the behaviour --window already had for an
-// unparseable value.
-//
-// The whole string must match, and it must not be negative. parseInt() alone
-// satisfies neither: it reads "7abc" as 7, and it reads "-5" as -5 — and a
-// negative floor silently disables the very guard --min-span exists to set,
-// reporting concurrent openings as reposts again with no indication that the
-// value was rejected. A negative --window likewise rejects every cluster.
-//
-// Tested against Number()/Number.isInteger() as well: Number('') is 0, so an
-// empty value (`--min-span=`) would read as a deliberate zero and disable the
-// floor. A total regex has no such hole.
-// The regex is not sufficient on its own: it happily accepts a 400-digit run of
-// nines, which Number() turns into Infinity. That reproduces this file's
-// original defect in a new place — an infinite floor rejects every cluster, an
-// infinite window is unbounded, and JSON.stringify writes Infinity as `null`,
-// so metadata reports a value that is not the one in effect. A merely UNSAFE
-// integer is the quiet version of the same thing: 9007199254740993 silently
-// becomes ...992. isSafeInteger rejects both.
-const intFlag = (flag, fallback) => {
-  const raw = flagValue(args, flag);
-  if (raw === undefined) return fallback;
-  const text = String(raw).trim();
-  if (!/^\d+$/.test(text)) return fallback;
-  const parsed = Number(text);
-  if (!Number.isSafeInteger(parsed)) return fallback;
-  return parsed;
-};
+// script from rediscovering. The rules and the reasoning now live in
+// lib/cli-flags.mjs's safeIntFlag() so process-quality.mjs stops being the
+// file that lacks them (#2982); the behaviour here is unchanged, including
+// the deliberate fall back to the default rather than an exit.
+const intFlag = (flag, fallback) => safeIntFlag(flagValue(args, flag), fallback);
 const windowDays = intFlag('--window', DEFAULT_WINDOW_DAYS);
 const minSpanDays = intFlag('--min-span', MIN_REPOST_SPAN_DAYS);
 
@@ -784,7 +763,7 @@ function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   // Replaces a bare --help check that never looked at the other flags, so a
   // mistyped --window was ignored and the scan silently used the 90-day
   // default instead of the window that was asked for (#2919). validateFlags
