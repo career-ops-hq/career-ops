@@ -16,7 +16,7 @@ async function searchIssues(q: string): Promise<SimilarIssue[]> {
   if (cached) return cached;
   try {
     const res = await fetch(
-      `https://api.github.com/search/issues?per_page=4&q=${encodeURIComponent(`repo:santifer/career-ops is:issue is:open ${q}`)}`,
+      `https://api.github.com/search/issues?per_page=4&q=${encodeURIComponent(`repo:career-ops-hq/career-ops is:issue is:open ${q}`)}`,
       { headers: { Accept: "application/vnd.github+json" } },
     );
     if (!res.ok) return [];

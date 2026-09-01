@@ -238,6 +238,57 @@ function locationFromPath(externalPath) {
   return segment.replace(/-/g, ' ');
 }
 
+// A Workday tenant can publish the same requisition under several sites
+// (careers page, Indeed feed, Glassdoor feed, ...) — same tenant/instance
+// host, different `site` path segment, so normalizeUrlForDedup's per-URL
+// comparison never recognizes them as the same posting (#3439). The
+// requisition ID is the authoritative identifier, and it's the last
+// underscore-delimited segment of the URL's last path component: Workday's
+// own title slug uses HYPHENS for spaces ("Staff-Engineer"), never
+// underscores, so the FIRST underscore in that segment is always the
+// title/requisition-ID boundary — everything after it is the requisition ID
+// even when the ID itself contains further underscores (e.g. "JR_2024_00123").
+//
+// Scoped by hostname, not just the tenant subdomain: hostname already
+// encodes both tenant AND instance (tenant.instance.myworkdayjobs.com), and
+// two different tenants/instances coincidentally sharing a requisition ID
+// string must never collapse to the same key.
+//
+// Workday appends its own `-2` / `-3` disambiguator to the requisition tail
+// when the SAME requisition is the one being republished on a second or
+// third site (credit: ronanime-arch, PR #3446 — measured live, one
+// requisition filled 3 of 7 results in a sweep). Left un-stripped, that
+// disambiguator defeats the entire point of this function: the three sites'
+// URLs would each key to a different requisition ID and never collapse.
+export function workdayDedupKey(job) {
+  let parsed;
+  try {
+    parsed = new URL(job?.url);
+  } catch {
+    return null;
+  }
+  // Non-Workday URLs must fall back to normalized-URL dedup, not produce a
+  // bogus workday: key just because their last path segment happens to
+  // contain an underscore (e.g. a Lever/Greenhouse job whose slug does) —
+  // reported by CodeRabbit against this exact function.
+  if (!parsed.hostname.toLowerCase().endsWith('.myworkdayjobs.com')) return null;
+  const segments = parsed.pathname.split('/').filter(Boolean);
+  const lastSegment = segments[segments.length - 1];
+  if (!lastSegment) return null;
+  const underscoreIdx = lastSegment.indexOf('_');
+  if (underscoreIdx === -1) return null; // no title/requisition-ID separator — nothing to key on
+  const raw = lastSegment.slice(underscoreIdx + 1).toLowerCase();
+  // Only treat a trailing "-N" as Workday's cross-site disambiguator when what
+  // precedes it is already requisition-ID-shaped on its own (a leading digit,
+  // 2+ trailing digits, underscores allowed in between) — otherwise the hyphen
+  // digits ARE the requisition ID and must be kept, e.g. Walmart's "R-2593225"
+  // (credit: ronanime-arch, PR #3446).
+  const m = raw.match(/^(.*?)-(\d{1,2})$/);
+  const reqId = m && /^[a-z]*\d[a-z0-9_]*\d{2,}$/.test(m[1]) ? m[1] : raw;
+  if (!reqId) return null;
+  return `workday:${parsed.hostname.toLowerCase()}:${reqId}`;
+}
+
 export function parseWorkdayResponse(json, entry) {
   const ep = resolveEndpoint(entry);
   const jobBase = ep?.jobBase || '';
@@ -265,6 +316,8 @@ export default {
     const ep = resolveEndpoint(entry);
     return ep ? { url: ep.api } : null;
   },
+
+  dedupKey: workdayDedupKey,
 
   /**
    * Fetch all job postings for a Workday-backed entry, paginating through

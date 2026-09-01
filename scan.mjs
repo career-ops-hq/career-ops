@@ -1231,18 +1231,34 @@ function extractPipelineCompanyRole(line) {
  * Build the seen-URL set from already-read source texts. An absent file is
  * passed as '' (the readIfExists convention shared with
  * `collectSeenCompanyRoles`) — every parse below yields nothing on ''.
+ *
+ * `extraTokensFor(url, portal)` (optional) lets a caller add provider-scoped
+ * dedup tokens alongside the plain normalized-URL one — e.g. a Workday
+ * requisition served under several tenant sites (#3439): a historical row
+ * recorded under site A's URL wouldn't otherwise match a fresh job fetched
+ * from site B, since normalizeUrlForDedup compares URLs verbatim. Only
+ * scan-history.tsv rows carry a `portal` column (the pipeline.md/
+ * applications.md sources don't record which scanner/provider produced a
+ * URL), so the hook only fires there. Return a string, an array of strings,
+ * or a falsy value for "nothing extra".
  */
-export function collectSeenUrls(sources = {}, policy = {}) {
+export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = {}) {
   const { scanHistoryText = '', pipelineText = '', applicationsText = '' } = sources;
   const seen = new Set();
   let recheckEligible = 0;
 
   // scan-history.tsv
   for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
-    const [url, firstSeen, , , , status = 'added'] = line.split('\t');
+    const [url, firstSeen, portal, , , status = 'added'] = line.split('\t');
     if (!url) continue;
-    if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) seen.add(normalizeUrlForDedup(url));
-    else recheckEligible++;
+    if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
+      seen.add(normalizeUrlForDedup(url));
+      if (extraTokensFor) {
+        for (const token of [].concat(extraTokensFor(url, portal) || [])) {
+          if (token) seen.add(token);
+        }
+      }
+    } else recheckEligible++;
   }
 
   // pipeline.md — extract URLs from checkbox lines, wherever the URL sits in the
@@ -1270,12 +1286,13 @@ export function loadSeenUrls(policy = {}, {
   scanHistoryPath = SCAN_HISTORY_PATH,
   pipelinePath = PIPELINE_PATH,
   applicationsPath = APPLICATIONS_PATH,
+  extraTokensFor,
 } = {}) {
   return collectSeenUrls({
     scanHistoryText: readIfExists(scanHistoryPath),
     pipelineText: readIfExists(pipelinePath),
     applicationsText: readIfExists(applicationsPath),
-  }, policy);
+  }, policy, { extraTokensFor });
 }
 
 /**
