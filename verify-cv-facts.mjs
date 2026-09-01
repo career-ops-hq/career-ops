@@ -51,6 +51,15 @@ const METRIC_NOUNS = [
   'machines', 'devices', 'instruments', 'vehicles', 'units', 'locations',
   'acres', 'hectares', 'shifts', 'rounds', 'inspections', 'audits', 'incidents',
   'alarms', 'tickets',
+  // Education and training, for the same reason as the headcount block above.
+  // 'students' and 'staff' were already here, but the nouns an education or
+  // L&D CV actually inflates were not: how many people were put through a
+  // program and how many sites it covered. "Trained 900+ candidates across 60
+  // schools" against a source saying 250 and 20 passed the gate in silence.
+  'candidates', 'trainees', 'learners', 'participants', 'attendees',
+  'graduates', 'alumni', 'teachers', 'instructors', 'educators', 'faculty',
+  'schools', 'districts', 'campuses', 'classrooms', 'programs', 'programmes',
+  'workshops', 'assessments', 'exams',
 ];
 // How many words may sit between a number and the noun it counts. The same
 // regex parses the generated CV and the sources, so the window is symmetric by
