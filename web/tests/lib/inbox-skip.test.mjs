@@ -21,6 +21,18 @@ const HAS_LOCK = fs.existsSync(LOCK);
 
 const { postingUrl, applyInboxSkip, setInboxSkip } = await import(pathToFileURL(SRC).href);
 
+const ACME = "https://boards.greenhouse.io/acme/jobs/1";
+const BETA = "https://jobs.lever.co/beta/2";
+const DONE = "https://done.example.com/x";
+
+const ACME_PENDING = `- [ ] ${ACME} | Acme | Staff Engineer | Remote | posted: 2026-08-01`;
+const ACME_SKIPPED = `- [x] ${ACME} | Acme | Staff Engineer | Remote | posted: 2026-08-01`;
+const BETA_PENDING = `- [ ] ${BETA} | Beta | Platform Engineer | NYC`;
+const BETA_SKIPPED = `- [x] ${BETA} | Beta | Platform Engineer | NYC`;
+const OLD_DONE = "- [x] https://ats.example.com/old | OldCo | Already done";
+const DONE_PROCESSED = `- [x] ${DONE} | DoneCo | PM`;
+const BETA_PROCESSED = `- [ ] ${BETA} | Beta | should not flip (processed duplicate)`;
+
 const FIXTURE = [
   "# Pipeline — Pending URLs",
   "",
@@ -28,20 +40,34 @@ const FIXTURE = [
   "",
   "## Pending",
   "",
-  "- [ ] https://boards.greenhouse.io/acme/jobs/1 | Acme | Staff Engineer | Remote | posted: 2026-08-01",
-  "- [ ] https://jobs.lever.co/beta/2 | Beta | Platform Engineer | NYC",
-  "- [x] https://ats.example.com/old | OldCo | Already done",
+  ACME_PENDING,
+  BETA_PENDING,
+  OLD_DONE,
   "",
   "## Processed",
   "",
-  "- [x] https://done.example.com/x | DoneCo | PM",
-  "- [ ] https://jobs.lever.co/beta/2 | Beta | should not flip (processed duplicate)",
+  DONE_PROCESSED,
+  BETA_PROCESSED,
   "",
 ].join("\n");
 
-const ACME = "https://boards.greenhouse.io/acme/jobs/1";
-const BETA = "https://jobs.lever.co/beta/2";
-const DONE = "https://done.example.com/x";
+const SKIPPED_FIXTURE = [
+  "# Pipeline — Pending URLs",
+  "",
+  "Paste job URLs below.",
+  "",
+  "## Pending",
+  "",
+  ACME_PENDING,
+  BETA_SKIPPED,
+  OLD_DONE,
+  "",
+  "## Processed",
+  "",
+  DONE_PROCESSED,
+  BETA_PROCESSED,
+  "",
+].join("\n");
 
 function linesOf(text) {
   return text.split("\n");
@@ -66,16 +92,14 @@ test("skip one URL checks that line and leaves every other line unchanged", () =
   assert.equal(result.ok, true);
   assert.equal(result.matched, 1);
   assert.equal(result.changed, 1);
+  assert.equal(result.text, SKIPPED_FIXTURE);
 
   const before = linesOf(FIXTURE);
   const after = linesOf(result.text);
   assert.equal(after.length, before.length);
   for (let i = 0; i < before.length; i++) {
-    if (before[i].includes(BETA) && before[i].startsWith("- [ ] https://jobs.lever.co/beta/2 | Beta | Platform")) {
-      assert.equal(
-        after[i],
-        "- [x] https://jobs.lever.co/beta/2 | Beta | Platform Engineer | NYC",
-      );
+    if (before[i] === BETA_PENDING) {
+      assert.equal(after[i], BETA_SKIPPED);
     } else {
       assert.equal(after[i], before[i], `line ${i} must stay unchanged`);
     }
@@ -100,8 +124,10 @@ test("already-skipped row is idempotent and does not rewrite neighbors", () => {
 
 test("Processed-section rows are not flipped, even with the same URL", () => {
   const skipped = applyInboxSkip(FIXTURE, BETA, true);
-  const processed = linesOf(skipped.text).find((l) => l.includes("should not flip"));
-  assert.equal(processed, "- [ ] https://jobs.lever.co/beta/2 | Beta | should not flip (processed duplicate)");
+  assert.equal(
+    linesOf(skipped.text).find((l) => l === BETA_PROCESSED),
+    BETA_PROCESSED,
+  );
 });
 
 test("unmatched URL is refused without rewriting the file", () => {
@@ -117,11 +143,20 @@ test("invalid URL never matches", () => {
 
 test("does not invent company/role — only the checkbox character changes", () => {
   const result = applyInboxSkip(FIXTURE, ACME, true);
-  const line = linesOf(result.text).find((l) => l.includes("boards.greenhouse.io/acme"));
   assert.equal(
-    line,
-    "- [x] https://boards.greenhouse.io/acme/jobs/1 | Acme | Staff Engineer | Remote | posted: 2026-08-01",
+    linesOf(result.text).find((l) => l === ACME_SKIPPED),
+    ACME_SKIPPED,
   );
+});
+
+test("a URL that is only a substring of another row's URL cell does not match", () => {
+  const trap = `- [ ] ${new URL("https://evil.example/https://jobs.lever.co/beta/2").href} | Evil | Trap`;
+  const real = BETA_PENDING;
+  const text = ["## Pending", "", trap, real, ""].join("\n");
+  const result = applyInboxSkip(text, BETA, true);
+  assert.equal(result.ok, true);
+  assert.equal(result.matched, 1);
+  assert.equal(result.text, ["## Pending", "", trap, BETA_SKIPPED, ""].join("\n"));
 });
 
 test("a URL that only appears under Processed does not match as inbox Skip", () => {
@@ -138,12 +173,7 @@ test("setInboxSkip writes the fixture file, then undo restores it", { skip: HAS_
     const skipped = await setInboxSkip(file, BETA, true, { lockModule: LOCK, timeoutMs: 5_000 });
     assert.equal(skipped.ok, true);
     const afterSkip = fs.readFileSync(file, "utf8");
-    assert.match(afterSkip, /^- \[x\] https:\/\/jobs\.lever\.co\/beta\/2 \| Beta \| Platform Engineer \| NYC$/m);
-    assert.match(afterSkip, /^- \[ \] https:\/\/boards\.greenhouse\.io\/acme\/jobs\/1 /m);
-    assert.match(afterSkip, /^- \[x\] https:\/\/ats\.example\.com\/old /m);
-    assert.match(afterSkip, /^- \[x\] https:\/\/done\.example\.com\/x /m);
-    assert.match(afterSkip, /should not flip \(processed duplicate\)/);
-    assert.equal(afterSkip.split("\n").length, FIXTURE.split("\n").length);
+    assert.equal(afterSkip, SKIPPED_FIXTURE);
 
     const undone = await setInboxSkip(file, BETA, false, { lockModule: LOCK, timeoutMs: 5_000 });
     assert.equal(undone.ok, true);

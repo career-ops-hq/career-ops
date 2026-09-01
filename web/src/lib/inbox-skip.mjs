@@ -40,17 +40,15 @@ export function postingUrl(raw) {
 }
 
 /**
- * Job URL on a pipeline checkbox line — same first-cell rule as readInbox,
- * with the scan.mjs fallback of "first http(s) URL" for legacy `#NNN | url` rows.
+ * Job URL on a pipeline checkbox line — the first `|` cell, same rule as
+ * readInbox. The whole cell must be an http(s) posting URL; a substring
+ * elsewhere on the line is not a match.
  *
  * @param {string} rest text after `- [ ]` / `- [x]`
  * @returns {string | null}
  */
 export function jobUrlFromRest(rest) {
-  const first = rest.split("|")[0].trim();
-  if (/^https?:\/\//i.test(first)) return first;
-  const m = rest.match(/https?:\/\/[^\s|]+/);
-  return m ? m[0] : null;
+  return postingUrl(rest.split("|")[0]);
 }
 
 function pendingRange(lines) {
