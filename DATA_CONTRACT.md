@@ -13,6 +13,7 @@ These files contain your personal data, customizations, and work product. Update
 | `config/cv-facts.json` | Your CV fact-check allowlist and forbidden phrases |
 | `config/benchmarks.yml` | Your market calibration benchmark overrides (optional; copy `templates/benchmarks.yml` here and edit — read by `funnel-velocity.mjs`) |
 | `config/local-paths.txt` | Files *this clone* owns that upstream does not ship — one repo-relative path per line (optional; copy `config/local-paths.example.txt` here and edit). See [Fork-local paths](#fork-local-paths) below |
+| `config/interview-topics.yml` | Your interview topic taxonomy override (optional; copy `templates/interview-topics.yml` here and edit — whole-file override, no deep merge — read by `interview-readiness.mjs`) |
 | `modes/_profile.md` | Your archetypes, narrative, negotiation scripts |
 | `modes/_custom.md` | Your house rules, custom workflows & output preferences (procedural — survives updates) |
 | `modes/_brief.md` | Your compact profile brief (~1.5–2K tokens) read by the two-pass triage first pass |
@@ -20,6 +21,7 @@ These files contain your personal data, customizations, and work product. Update
 | `article-digest.md` | Your proof points from portfolio |
 | `interview-prep/story-bank.md` | Your accumulated STAR+R stories |
 | `interview-prep/{company}-{role}.md` | Company-specific interview prep reports (written by `/career-ops interview-prep`) |
+| `interview-prep/question-bank.md` | Your accumulated interview questions with status/topic/confidence metadata, seeded by `interview/debrief`/`interview/practice`/`interview/drill` (see `templates/question-bank.template.md` for the entry format; read by `interview-readiness.mjs` and `weekly-digest.mjs`) |
 | `interview-prep/sessions/*.md` | Interview sessions — real transcripts + mock sessions (sensitive: real names/companies; gitignored except scaffold). Drives `patterns` Step 1b targeting signal and `interview-redflag` analysis. Scaffold files (`README.md`, `.gitkeep`) are system-owned. |
 | `documents/*` | Your profile intake sources — master CV, LinkedIn export, diplomas, reference letters (PII — gitignored except scaffold; read locally by `intake.mjs`, see `modes/intake.md`). Scaffold files (`README.md`, `.gitkeep`) are system-owned. |
 | `data/.hired-share-state.json` | Hired Wall ask-state (asked/shared/later/never per hire) — the anti-nag memory; never committed, never read by anything but `hired-share.mjs` |
@@ -156,6 +158,8 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `batch/batch-runner.sh` | Batch orchestrator |
 | `dashboard/*` | Go TUI dashboard |
 | `templates/*` | Base templates |
+| `templates/interview-topics.yml` | System default interview topic taxonomy (copy to `config/interview-topics.yml` to override — whole-file, no deep merge) |
+| `templates/question-bank.template.md` | Documents the `interview-prep/question-bank.md` entry format read by `interview-readiness.mjs` and `weekly-digest.mjs` |
 | `fonts/*` | Self-hosted fonts |
 | `.claude/skills/*` | Skill definitions (Claude Code) |
 | `.cursor/skills/*` | Skill definitions (Cursor) |

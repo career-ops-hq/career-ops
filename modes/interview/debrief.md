@@ -102,7 +102,23 @@ For each question debriefed, update `interview-prep/question-bank.md`:
 - Add gap notes from the debrief
 - Add any new questions that appeared and weren't in the bank yet
 
-If the question bank doesn't exist, create it with the questions from this interview as the seed.
+If the question bank doesn't exist, create it with the questions from this interview as the seed, using the shape in `templates/question-bank.template.md`.
+
+**Write the structured sub-bullets, not just the status.** Use the schema from `templates/question-bank.template.md` under each `- **Q:**` bullet:
+
+```markdown
+- **Q:** [question text] — Status: 🔴 Gap
+  - topic: [domain-id/topic-id from templates/interview-topics.yml, or config/interview-topics.yml if overridden]
+  - round: [screen | hiring-manager | technical | system-design | behavioral | onsite | final]
+  - asked: [YYYY-MM-DD — today, or the actual interview date if known]
+  - confidence: [0-5 self-rating, from the candidate's own read on how it went]
+  - gap: [one line — what specifically went wrong or is missing, from Step 2's assessment]
+  - source: debrief
+```
+
+For a question that already exists in the bank from a prior round, update these fields in place rather than duplicating the entry — bump `asked` to this round's date, refresh `confidence` and `gap`, keep `source: debrief` if this round is what changed its status.
+
+**No `###` sub-headings, ever.** Group all questions for a company under that company's single `##` heading; use the indented metadata sub-bullets above for structure, never a heading. `weekly-digest.mjs`'s gap attribution clears at any non-company heading, so a `###` divider here would silently drop that question's gap from every digest and readiness report.
 
 ---
 

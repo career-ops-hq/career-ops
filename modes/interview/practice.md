@@ -81,6 +81,12 @@ Then open with the first question — no preamble, no "here's question 1". Just 
 
 Keep feedback tight. One or two things to sharpen per answer — not a full rewrite. The goal is improvement on the next attempt, not discouragement.
 
+After giving the status, ask for the candidate's own confidence rating before moving on:
+
+> "How confident did that answer feel to you, from 0 (no idea) to 5 (could teach it)?"
+
+The evaluator status and the candidate's confidence answer are separate signals. Never derive one from the other. If the candidate gives a valid 0–5 rating, record it. If they skip the question, decline to rate themselves, or give no valid number, leave `confidence` unchanged on an existing bank entry and omit it on a new entry. Do not invent a fallback number.
+
 ---
 
 ### Feedback Principles
@@ -245,5 +251,5 @@ Mix in at least 2 situational / forward-looking questions from the set below —
 - **Honest feedback only.** False encouragement is worse than silence — it sends a candidate into a real interview underprepared.
 - **No fabricated claims in suggested answers.** Stronger versions draw only on what the candidate said or what's in `cv.md`, `article-digest.md`, or the story bank — never invented experience or metrics.
 - **Retracted claims are a hard gate.** If a claim appears in `interview-prep/retracted-claims.md`, never use it in a stronger version — even if the candidate said it in their answer. Flag it instead.
-- **Track status.** Update `interview-prep/question-bank.md` after the session if it exists.
+- **Track status explicitly.** Update `interview-prep/question-bank.md` after the session if it exists. For each question answered, update or add the inline `— Status: <emoji> <label>` marker on its `- **Q:**` line using this session's verdict (`✅ Strong`, `🟡 Solid`, or `🔴 Gap`), set `practiced: YYYY-MM-DD` (today), and increment `attempts` by 1. Write `confidence: 0-5` only from the candidate's own answer to the confidence prompt; if they provide no valid rating, preserve an existing confidence value or omit the field on a new entry. Never infer confidence from the three-state evaluator status. Keep `source` as whatever it already was (a question doesn't become `source: practice` just because it was practiced again; `source` records how it first entered the bank).
 - **Stop when asked.** If the candidate says "let's pause" or "that's enough for today," respect it. Don't push for one more question.

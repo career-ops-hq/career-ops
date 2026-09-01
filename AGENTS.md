@@ -149,6 +149,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `hired-share.mjs` | Draft a Hired Wall story from the tracker and open a prefilled GitHub issue the user submits themselves; `--status` lists hires never asked; `--mark` records their answer permanently |
 | `jd-capture.mjs` | Resolves an archived JD in `jds/` by report number, matching padded and unpadded prefixes (`064-`, `64-`, `01-`). Consumed by `outcome.mjs`; written by `archive-posting.mjs --report=N`. Replaces rebuilding a capture's filename from today's date, which stopped resolving the next day |
 | `weekly-digest.mjs` | Rolls up `interview-prep/sessions/*.md` (default: current ISO week) into a per-company round summary, recurring competency-tag counts, and best-effort recurring 🔴 gaps from `question-bank.md` (JSON or `--summary`) |
+| `interview-readiness.mjs` | Zero-LLM interview-topic prioritizer over `interview-prep/question-bank.md` + `templates/interview-topics.yml` — returns separate measured (weakness/staleness/demand/confidence-weighted) and untested (demand-only) topic lists, optionally weighted by a supplied JD (JSON or `--summary`) |
 | `reports/` | Evaluation reports `{###}-{company-slug}-{YYYY-MM-DD}.md` — Blocks A-F + G (Posting Legitimacy) + Risk Summary + `## Machine Summary` YAML; header includes `**Legitimacy:** {tier}` |
 
 ### Plugins (optional)
@@ -320,6 +321,8 @@ Two separate axes:
 | Wants a time-blocked prep plan for an upcoming interview | `interview/plan` |
 | Wants to run practice interview questions with feedback | `interview/practice` |
 | Wants to debrief after a real interview and close gaps | `interview/debrief` |
+| Wants a deep, JD-specific question set with baseline vs. staff-level answers | `interview/drill` |
+| Wants to know what to study next based on real question-bank history | `interview/ready` |
 | Wants to check if a company is safe to join (red-flag analysis) | `interview-redflag` |
 | Wants to generate CV/PDF | `pdf` |
 | Wants to check if a generated CV is ATS-friendly (parseability score + issues) | `ats` |

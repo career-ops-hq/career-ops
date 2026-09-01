@@ -344,6 +344,7 @@ const scripts = [
   { name: 'img-to-pdf.mjs --self-test', expectExit: 0 },
   { name: 'assessment-log.mjs --self-test', expectExit: 0 },
   { name: 'weekly-digest.mjs --self-test', expectExit: 0 },
+  { name: 'interview-readiness.mjs --self-test', expectExit: 0 },
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'story-provenance-check.mjs --self-test', expectExit: 0 },
@@ -14778,6 +14779,129 @@ if (!fileExists('interview-prep/sessions/README.md')) {
     pass('sessions/README documents the competency tag format');
   } else {
     fail('sessions/README missing competency tag format');
+  }
+}
+
+// ── Interview readiness loop — integration and schema contracts ─────
+
+console.log('\n52b. Interview readiness loop integration contracts');
+
+for (const skillPath of ['.claude/skills/career-ops/SKILL.md', '.agents/skills/career-ops/SKILL.md']) {
+  if (!fileExists(skillPath)) {
+    fail(`${skillPath} is missing — cannot verify interview readiness routing`);
+    continue;
+  }
+  const skill = readFile(skillPath);
+  const registrations = ['interview/drill', 'interview/ready'];
+  for (const mode of registrations) {
+    const registered =
+      new RegExp(`argument-hint:[^\\n]*${mode.replace('/', '\\/')}`).test(skill) &&
+      skill.includes(`| \`${mode}\` | \`${mode}\` |`) &&
+      skill.includes(`/career-ops ${mode}`) &&
+      new RegExp(`Standalone modes[\\s\\S]*Applies to:[^\\n]*\`${mode.replace('/', '\\/')}\``).test(skill);
+    if (registered) {
+      pass(`${skillPath} registers ${mode} in routing, discovery, and standalone context loading`);
+    } else {
+      fail(`${skillPath} does not fully register ${mode} in routing, discovery, and standalone context loading`);
+    }
+  }
+}
+
+{
+  const interviewMenu = readFile('modes/interview/README.md');
+  if (interviewMenu.includes('| Deep Question Drill | `drill.md` |') && interviewMenu.includes('| Readiness Check | `ready.md` |')) {
+    pass('interview mode menu exposes drill and readiness workflows');
+  } else {
+    fail('interview mode menu is missing drill or readiness workflow registration');
+  }
+
+  const pkg = JSON.parse(readFile('package.json'));
+  if (pkg.scripts?.['interview:ready'] === 'node interview-readiness.mjs') {
+    pass('package.json exposes the deterministic interview readiness entrypoint');
+  } else {
+    fail('package.json interview:ready script must run node interview-readiness.mjs');
+  }
+}
+
+{
+  const updater = readFile('update-system.mjs');
+  const systemBlock = (updater.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\n\];/) || [, ''])[1];
+  const userBlock = (updater.match(/USER_PATHS\s*=\s*\[([\s\S]*?)\n\];/) || [, ''])[1];
+  const requiredSystemPaths = [
+    'modes/interview/',
+    'templates/interview-topics.yml',
+    'templates/question-bank.template.md',
+    'interview-readiness.mjs',
+    'tests/interview-readiness.test.mjs',
+  ];
+  const requiredUserPaths = ['config/interview-topics.yml', 'interview-prep/'];
+
+  for (const path of requiredSystemPaths) {
+    if (systemBlock.includes(`'${path}'`)) pass(`interview readiness system asset is updater-owned: ${path}`);
+    else fail(`interview readiness system asset missing from SYSTEM_PATHS: ${path}`);
+  }
+  for (const path of requiredUserPaths) {
+    if (userBlock.includes(`'${path}'`)) pass(`interview readiness user data is updater-protected: ${path}`);
+    else fail(`interview readiness user data missing from USER_PATHS: ${path}`);
+  }
+  if (!systemBlock.includes("'config/interview-topics.yml'") && !systemBlock.includes("'interview-prep/question-bank.md'")) {
+    pass('taxonomy override and live question bank are not system-owned');
+  } else {
+    fail('taxonomy override or live question bank leaked into SYSTEM_PATHS');
+  }
+}
+
+{
+  const practiceMode = readFile('modes/interview/practice.md');
+  const debriefMode = readFile('modes/interview/debrief.md');
+  const readyMode = readFile('modes/interview/ready.md');
+  const template = readFile('templates/question-bank.template.md');
+
+  if (
+    practiceMode.includes('— Status: <emoji> <label>') &&
+    practiceMode.includes('0 (no idea) to 5 (could teach it)') &&
+    practiceMode.includes('Never infer confidence from the three-state evaluator status') &&
+    practiceMode.includes('Keep `source` as whatever it already was')
+  ) {
+    pass('interview/practice pins inline status, candidate-owned confidence, honest missing-rating fallback, and source preservation');
+  } else {
+    fail('interview/practice question-bank writeback contract is incomplete');
+  }
+
+  if (
+    debriefMode.includes('- **Q:** [question text] — Status: 🔴 Gap') &&
+    debriefMode.includes('confidence: [0-5 self-rating, from the candidate\'s own read on how it went]') &&
+    debriefMode.includes('source: debrief')
+  ) {
+    pass('interview/debrief retains the inline-status and candidate-confidence question-bank schema');
+  } else {
+    fail('interview/debrief question-bank schema contract is incomplete');
+  }
+
+  if (
+    readyMode.includes('metadata.totalTopics') &&
+    readyMode.includes('metadata.untestedCount') &&
+    readyMode.includes('metadata.orphanTopicCount') &&
+    readyMode.includes('metadata.unscoredEntryCount') &&
+    readyMode.includes('metadata.returnedTopics') &&
+    readyMode.includes('metadata.returnedUntested') &&
+    readyMode.includes('unscoredQuestions') &&
+    readyMode.includes('all four full counts are zero') &&
+    readyMode.includes('observed 🔴/🟡/✅ answer-status history')
+  ) {
+    pass('interview/ready pins full-count cold start, unscored warnings, and non-duplicated confidence semantics');
+  } else {
+    fail('interview/ready cold-start or scoring-explanation contract is incomplete');
+  }
+
+  if (
+    template.includes('— Status: <emoji> <label>') &&
+    template.includes('never convert 🔴/🟡/✅ into a number') &&
+    template.includes('Preserve an existing `source`')
+  ) {
+    pass('question-bank template documents producer status, confidence, and source semantics');
+  } else {
+    fail('question-bank template is missing producer write semantics');
   }
 }
 

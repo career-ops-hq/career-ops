@@ -1,0 +1,61 @@
+# Interview topic taxonomy — system default.
+# Copy to config/interview-topics.yml and edit to make it yours; the config copy
+# wins whole-file (no deep merge), so start from this file rather than a stub.
+version: 1
+domains:
+  - id: algorithms
+    label: Data Structures & Algorithms
+    aliases: [algorithm, data structure, big-o, complexity, leetcode, dynamic programming]
+    topics: [arrays-strings, hashing, trees-graphs, sorting-searching, dp-recursion, complexity-analysis]
+  - id: system-design
+    label: System Design
+    aliases: [system design, scalability, distributed system, architecture, load balancing, high availability]
+    topics: [api-design, load-balancing, caching, sharding-partitioning, queueing, consistency-tradeoffs, capacity-estimation]
+  - id: programming-language
+    label: Programming Language Fundamentals
+    aliases: [python, java, javascript, typescript, go, rust, c++, concurrency]
+    topics: [memory-management, concurrency-model, type-system, error-handling, standard-library, language-idioms]
+  - id: databases
+    label: Databases
+    aliases: [sql, postgres, mysql, nosql, database, query optimization, transactions]
+    topics: [schema-design, indexing-partitioning, query-optimization, transactions-isolation, replication, database-selection]
+  - id: data-engineering
+    label: Data Engineering
+    aliases: [etl, data pipeline, data warehouse, spark, airflow, batch processing, streaming]
+    topics: [pipeline-orchestration, batch-vs-streaming, data-modeling, data-quality, warehouse-lakehouse, workflow-schedulers]
+  - id: ml-fundamentals
+    label: Machine Learning Fundamentals
+    aliases: [machine learning, supervised learning, feature engineering, model evaluation, overfitting, bias-variance]
+    topics: [supervised-unsupervised, feature-engineering, model-evaluation, bias-variance-tradeoff, regularization, classical-algorithms]
+  - id: deep-learning
+    label: Deep Learning
+    aliases: [neural network, deep learning, backpropagation, cnn, rnn, gradient descent]
+    topics: [neural-network-basics, backpropagation, optimization-algorithms, cnn-architectures, rnn-sequence-models, regularization-techniques]
+  - id: llm
+    label: Large Language Models
+    aliases: [llm, large language model, gpt, transformer, tokenization, fine-tuning]
+    topics: [transformer-internals, tokenization, fine-tuning, prompt-engineering, evals-benchmarks, inference-optimization]
+  - id: rag
+    label: Retrieval-Augmented Generation
+    aliases: [rag, retrieval augmented generation, vector database, embeddings, semantic search, chunking]
+    topics: [chunking-strategies, embedding-models, vector-search, retrieval-ranking, grounding-hallucination, rag-evaluation]
+  - id: agents
+    label: AI Agents
+    aliases: [agent, agentic, tool use, function calling, multi-agent, orchestration]
+    topics: [tool-calling, planning-reasoning, memory-context, multi-agent-orchestration, agent-evaluation, guardrails-safety]
+  - id: mlops
+    label: MLOps
+    aliases: [mlops, model deployment, model monitoring, feature store, ci/cd for ml, model registry]
+    topics: [model-deployment, model-monitoring, feature-store, experiment-tracking, ci-cd-for-ml, data-model-versioning]
+  - id: cloud-infra
+    label: Cloud & Infrastructure
+    aliases: [aws, azure, gcp, kubernetes, docker, terraform, infrastructure as code]
+    topics: [containerization, orchestration, infrastructure-as-code, networking-basics, cost-optimization, observability]
+  - id: security-privacy
+    label: Security & Privacy
+    aliases: [security, encryption, authentication, authorization, gdpr, data privacy]
+    topics: [authn-authz, encryption-at-rest-in-transit, threat-modeling, secure-coding, compliance-privacy, incident-response]
+  - id: behavioral-leadership
+    label: Behavioral & Leadership
+    aliases: [behavioral, leadership, conflict, teamwork, star method, stakeholder management]
+    topics: [conflict-resolution, mentoring-growth, project-ownership, stakeholder-communication, failure-and-learning, prioritization-tradeoffs]

@@ -9,6 +9,8 @@ A set of reusable skills for end-to-end interview preparation.
 | Prep Planner | `plan.md` | Given a JD and interview date, build a structured time-blocked prep plan |
 | Practice Interviewer | `practice.md` | Run practice interview questions with structured feedback |
 | Post-Interview Debrief | `debrief.md` | After a real interview, close gaps and update the question bank |
+| Deep Question Drill | `drill.md` | Generate a JD-specific deep question set (baseline vs. staff-level, traps, grounded drills) and seed the question bank |
+| Readiness Check | `ready.md` | Rank what to study next from real question-bank history and hand off into practice |
 
 ## Related Skills (in parent `modes/`)
 
