@@ -32,6 +32,7 @@ import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { buildTitleFilter } from './title-keywords.mjs';
 import { appendToPipeline, appendToScanHistory } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -162,19 +163,30 @@ async function cmdModels() {
 // ---------------------------------------------------------------------------
 // File helpers
 // ---------------------------------------------------------------------------
+// Anchored to the career-ops data root, not to __dirname. scan.mjs resolves
+// every path it touches through getCareerOpsRoot(), so with CAREER_OPS_DATA_DIR
+// set this module was reading a DIFFERENT data/scan-history.tsv than the shared
+// writers it now delegates to — dedup would clear a URL the writer then found
+// present, or skip one it had never seen. The default is unchanged: with no
+// env and no .career-ops-data marker, getCareerOpsRoot() returns the same
+// directory __dirname did.
+const DATA_ROOT = getCareerOpsRoot();
+
 function readFile(relPath) {
-  try { return fs.readFileSync(path.join(__dirname, relPath), 'utf-8'); }
+  try { return fs.readFileSync(path.join(DATA_ROOT, relPath), 'utf-8'); }
   catch { return null; }
 }
 
 function writeFile(relPath, content) {
-  const full = path.join(__dirname, relPath);
+  const full = path.join(DATA_ROOT, relPath);
   fs.mkdirSync(path.dirname(full), { recursive: true });
   fs.writeFileSync(full, content, 'utf-8');
 }
 
 function fileExists(relPath) {
-  return fs.existsSync(path.join(__dirname, relPath));
+  // Same root as readFile() above: a fileExists that disagrees with the reader
+  // is a split-brain waiting to happen under CAREER_OPS_DATA_DIR.
+  return fs.existsSync(path.join(DATA_ROOT, relPath));
 }
 
 // ---------------------------------------------------------------------------
