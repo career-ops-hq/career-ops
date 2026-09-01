@@ -22,7 +22,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -82,8 +82,16 @@ test('the syntax gate reaches past the repository root', () => {
     `gate must cover far more than the root: ${files.length} total vs ${rootOnly.length} at root`);
   assert.ok(files.some((f) => f.startsWith('tests/')), 'tests/ must be inside the gate');
   assert.ok(files.some((f) => f.startsWith('providers/')), 'providers/ must be inside the gate');
-  assert.ok(files.some((f) => f.startsWith('web/')), 'web/ must be inside the gate');
   assert.ok(files.some((f) => f.startsWith('lib/')), 'lib/ must be inside the gate');
+
+  // web/ is the one opt-in subproject in this list (#2360): tests/, providers/
+  // and lib/ ship with every install, but a checkout that never took the web UI
+  // has no web/ on disk. Assert it's inside the gate when it exists; when it
+  // doesn't, the invariant is vacuously true — the same conditional the adjacent
+  // 'web/ test discovery contract' check already uses instead of hardcoding it.
+  if (existsSync(join(ROOT, 'web'))) {
+    assert.ok(files.some((f) => f.startsWith('web/')), 'web/ must be inside the gate when present');
+  }
 });
 
 test('both syntax checkers derive their file list from the shared collector', () => {
