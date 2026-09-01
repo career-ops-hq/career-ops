@@ -123,7 +123,7 @@ const FIXTURE_AVATAR = join(ROOT, 'tests', 'fixtures', 'avatar-8x8.png');
   else fail(`weeks math wrong: ${weeks}`);
 
   const url = buildIssueUrl({ role: 'Data Engineer', story: 'a & b', feature: '', timeToHire: '7 weeks', anonymity: 'role' });
-  if (url.startsWith('https://github.com/santifer/career-ops/issues/new?') &&
+  if (url.startsWith('https://github.com/career-ops-hq/career-ops/issues/new?') &&
       url.includes('template=i-got-hired.yml') &&
       url.includes('anonymity=Role+and+location+only') &&
       url.includes('story=a+%26+b')) {
