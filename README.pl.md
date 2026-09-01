@@ -118,7 +118,7 @@ claude   # lub gemini / codex / qwen / opencode — otwórz tutaj swój AI CLI
 <summary><b>Wolisz skonfigurować ręcznie? (git clone)</b></summary>
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # wymagane tylko do generowania PDF
 claude   # otwórz swój AI CLI — przy pierwszym uruchomieniu przeprowadzi Cię przez onboarding
@@ -294,9 +294,9 @@ Moje portfolio i inne projekty open source → [santifer.io](https://santifer.io
 
 <a href="https://www.star-history.com/?repos=santifer%2Fcareer-ops&type=timeline&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
  </picture>
 </a>
 
@@ -313,11 +313,11 @@ Szczegóły: [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md). Oprogramowanie jest udo
 
 ## Współtwórcy
 
-<a href="https://github.com/santifer/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=santifer/career-ops" alt="Współtwórcy" />
+<a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" alt="Współtwórcy" />
 </a>
 
-Znalazłeś pracę dzięki career-ops? [Podziel się swoją historią!](https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml)
+Znalazłeś pracę dzięki career-ops? [Podziel się swoją historią!](https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml)
 
 ## Licencja i znak towarowy
 

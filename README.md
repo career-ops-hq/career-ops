@@ -22,7 +22,7 @@
   <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20verified&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: verified count"></a>
 </p>
 
-<p align="center"><sub>Landed yours? <a href="https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml">Share it →</a> · your card shows someone mid-search that the way out exists.</sub></p>
+<p align="center"><sub>Landed yours? <a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">Share it →</a> · your card shows someone mid-search that the way out exists.</sub></p>
 
 <p align="center">
   <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="The three most recent hired stories" width="800"></a>
@@ -60,7 +60,7 @@
   <a href="https://warpchart.dev/hq">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://warpchart.dev/api/chart?theme=dark&v=3">
-      <img alt="Live star telemetry of santifer/career-ops" src="https://warpchart.dev/api/chart?theme=light&v=3" loading="lazy">
+      <img alt="Live star telemetry of career-ops-hq/career-ops" src="https://warpchart.dev/api/chart?theme=light&v=3" loading="lazy">
     </picture>
   </a>
 </p>
@@ -70,7 +70,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/santifer/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
 </p>
 
 <p align="center">
@@ -168,7 +168,7 @@ claude   # or codex / qwen / opencode / agy / grok — open your AI CLI here
 <summary><b>Prefer to set it up manually? (git clone)</b></summary>
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # only needed for PDF generation
 
@@ -521,15 +521,15 @@ See [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) for full details. This software i
 
 ## Contributors
 
-<a href="https://github.com/santifer/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=santifer/career-ops" />
+<a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
 </a>
 
 Every person who has shipped code, docs, translations or tests is listed in
 [CONTRIBUTORS.md](CONTRIBUTORS.md) — including non-code contributions, which
 the graph above cannot show.
 
-Got hired using career-ops? [Share your story!](https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml)
+Got hired using career-ops? [Share your story!](https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml)
 
 ## License & Trademark
 
