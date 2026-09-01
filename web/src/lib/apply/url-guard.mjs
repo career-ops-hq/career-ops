@@ -3,8 +3,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 // Apply-session SSRF guard. Reuses liveness-browser.mjs (rejectPrivateOrInvalid +
-// validateUrlSecurity) rather than forking a second allowlist. Loaded dynamically
-// so Next's bundler cannot statically trace the core script as a module import.
+// validateUrlSecurity) rather than forking a second allowlist.
+//
+// Loaded at runtime with turbopackIgnore: a static specifier of
+// ../../../../liveness-browser.mjs sits outside web/'s turbopack.root, and
+// Next 16 cannot resolve that parent path without moving the root (which
+// reintroduces the two-lockfile Windows RAM loop in next.config.mjs).
 
 export const APPLY_URL_REQUIRED_MESSAGE = "A valid application URL (https://…) is required";
 export const APPLY_URL_BLOCKED_MESSAGE = "This application URL is not allowed";
@@ -48,14 +52,18 @@ function coreGuardHref() {
     cwd = parent;
   }
   for (const root of candidates) {
-    const file = join(root, `${script}.mjs`);
-    if (existsSync(file)) return pathToFileURL(file).href;
+    const file = join(/* turbopackIgnore: true */ root, `${script}.mjs`);
+    if (existsSync(/* turbopackIgnore: true */ file)) return pathToFileURL(file).href;
   }
   throw new Error("could not load URL guard");
 }
 
 function loadCoreGuard() {
-  if (!coreGuard) coreGuard = import(coreGuardHref());
+  if (!coreGuard) {
+    // Magic comment: leave this import as a runtime Node ESM load. A fully
+    // dynamic import() without it fails `next build` (Can't resolve <dynamic>).
+    coreGuard = import(/* webpackIgnore: true */ /* turbopackIgnore: true */ coreGuardHref());
+  }
   return coreGuard;
 }
 
