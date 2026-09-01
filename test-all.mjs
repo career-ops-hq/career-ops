@@ -650,9 +650,16 @@ try {
     hiddenScriptMetric,
     '<html><body><script>const claim = "500 users";</script\t\n bar><p>Generated CV</p></body></html>'
   );
+  // The metric must be one NO real cv.md can support. verify-cv-facts.mjs
+  // validates against the LIVE source files, so a plausible fixture number
+  // silently inverts this assertion for any user whose CV happens to contain
+  // it: on a checkout whose cv.md read "~500 active users/month", the old
+  // "500 users" fixture was genuinely SUPPORTED, verify-cv-facts correctly
+  // declined to flag it, and this test reported that correct behaviour as a
+  // miss. The test passed or failed depending on whose CV was checked out.
   writeFileSync(
     visibleMetric,
-    '<html><body><p>Improved onboarding for 500 users.</p></body></html>'
+    '<html><body><p>Improved onboarding for 918273645 users.</p></body></html>'
   );
 
   const hiddenResult = run(NODE, ['verify-cv-facts.mjs', hiddenScriptMetric], {
