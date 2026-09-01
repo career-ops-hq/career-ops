@@ -15,7 +15,7 @@ from typing import List, Optional
 
 from pypdf import PdfReader
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
@@ -172,6 +172,7 @@ def styles(config):
             fontSize=config["name_size"],
             leading=config["name_size"] + 1,
             textColor=NAVY,
+            alignment=TA_CENTER,
             spaceAfter=3,
         ),
         "contact": ParagraphStyle(
@@ -181,6 +182,7 @@ def styles(config):
             fontSize=config["contact_size"],
             leading=config["contact_leading"],
             textColor=DARK,
+            alignment=TA_CENTER,
             spaceAfter=0,
         ),
         "section": ParagraphStyle(
@@ -297,13 +299,7 @@ def add_section(title: str, story: list, s, config):
 
 
 def split_strengths(items: List[str]) -> List[List[str]]:
-    left_count = math.ceil(len(items) / 2)
-    left = items[:left_count]
-    right = items[left_count:]
-    rows = []
-    for idx in range(max(len(left), len(right))):
-        rows.append([left[idx] if idx < len(left) else "", right[idx] if idx < len(right) else ""])
-    return rows
+    return [[item] for item in items]
 
 
 def build_story(data: ResumeData, config) -> list:
@@ -330,7 +326,7 @@ def build_story(data: ResumeData, config) -> list:
             else:
                 cell_row.append(Paragraph("", s["strength"]))
         strength_cells.append(cell_row)
-    strength_table = Table(strength_cells, colWidths=[3.35 * inch, 3.35 * inch], hAlign="LEFT")
+    strength_table = Table(strength_cells, colWidths=[6.7 * inch], hAlign="LEFT")
     strength_table.setStyle(
         TableStyle(
             [
