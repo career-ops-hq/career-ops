@@ -31,10 +31,11 @@ export default {
 
 - `id` — required, unique. On a duplicate the first-loaded provider wins and
   the later file is skipped with a warning.
-- `detect(entry)` — optional; returns `{ url }` or `null`. Providers are
-  tried in alphabetical file order and the first hit wins, but only *after*
-  routing has checked for an explicit `provider: {id}` field on the entry,
-  which bypasses `detect()` entirely. Three valid shapes:
+- `detect(entry)` — optional; returns `{ url }` or `null`. `_registry.mjs`
+  resolves an entry in order: (1) an explicit `provider: {id}` field, which
+  bypasses `detect()` entirely; (2) the `local-parser` provider, when the
+  entry sets `parser.command` + a script; (3) each provider's `detect()` in
+  alphabetical file order, first hit wins. Three valid `detect()` shapes:
   1. **URL-pattern** — match `entry.careers_url` / `entry.api` against a
      known host pattern (`greenhouse.mjs`, `lever.mjs`, `remotli.mjs`).
   2. **Explicit-only** — `return entry?.provider === '{id}' ? { url: FEED_URL } : null`
@@ -81,9 +82,9 @@ file's header comment must name the target list (reference:
   `entry.careers_url`), check the hostname against an allowlist **before**
   any network call. Reference: `assertGreenhouseUrl` in
   `providers/greenhouse.mjs` — parse the URL (throws if malformed), reject a
-  non-`https:` protocol, reject a hostname not in `ALLOWED_HOSTS`. A test
-  must prove the guard runs before `ctx.fetchJson` / `ctx.fetchText` (see
-  section 3).
+  non-`https:` protocol, reject a hostname not in `ALLOWED_GREENHOUSE_HOSTS`.
+  A test must prove the guard runs before `ctx.fetchJson` / `ctx.fetchText`
+  (see section 3).
 - If the whole URL is assembled by the provider from a fixed literal host, no
   allowlist is needed, but `redirect: 'error'` still is.
 
@@ -108,8 +109,10 @@ false alarm instead of an honest "empty". So a malformed item is a
   (`json.hits.hits.length < PAGE_SIZE`): returning `[]` from the parser is
   not enough — guard that bound or `throw` deliberately (the "fail loud vs
   hand back a partial board" call from *Pacing and retry* below).
-- Dates: `Date.parse` can return `NaN`. Do not write `date || undefined` (it
-  breaks a valid epoch `0`) — use a NaN-safe helper:
+- Dates: a date *string* through `Date.parse` can return `NaN`. Don't write
+  `Date.parse(s) || undefined` (it also nulls a valid epoch `0` — a
+  `1970-01-01` timestamp) — use a NaN-safe helper. Its `!value` guard is for
+  the absent/empty field, before parsing:
 
   ```js
   function toEpochMs(value) {
@@ -422,14 +425,16 @@ provider whose tuning needs differ from the shared default
       examples" block, a commented `Example {Name} Co` stanza (every field
       at its default) in the group whose header matches — copy a neighbouring
       group's `(→ tracked_companies: …)` / `(→ job_boards: …)` header format
-      verbatim — plus the provider id in the roster comment at the top of the
-      block; (3) one **live, uncommented** real entry, in the matching
-      region/topic section, **only when it carries more than the stanza in
-      (2)** — a real `careers_url` / `api`, a resolvable slug or board id, or
-      provider-specific keys (every company ATS, and any slug/URL-bearing
-      board such as Getro). Skip (3) for a bare `provider: {id}` feed with no
-      per-entry URL or config (a regional board, an RSS feed) — there a live
-      entry is byte-identical to (2).
+      verbatim — and, for a provider with **no** `detect()`, add its id to
+      the "job boards / aggregators … explicit `provider:`" list at the end
+      of the "Provider auto-detection" section (a URL-pattern `detect()` is
+      already covered by (1)); (3) one **live, uncommented** real entry, in
+      the matching region/topic section, **only when it carries more than the
+      stanza in (2)** — a real `careers_url` / `api`, a resolvable slug or
+      board id, or provider-specific keys (every company ATS, and any
+      slug/URL-bearing board such as Getro). Skip (3) for a bare
+      `provider: {id}` feed with no per-entry URL or config (a regional
+      board, an RSS feed) — there a live entry is byte-identical to (2).
 - [ ] **Editing an existing provider, not adding one?** The
       `SUPPORTED_JOB_BOARDS.md` and `portals.example.yml` items above are
       also "keep in sync on change". If the fix changes observable behavior
