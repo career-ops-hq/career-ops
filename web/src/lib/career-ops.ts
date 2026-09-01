@@ -13,7 +13,8 @@ import { resolvePdfIndexPath } from "@/lib/core/pdf-index";
 import { pdfIndexEntryForReport } from "@/lib/apply/cv-selection.mjs";
 
 // CAREER_OPS_ROOT || CAREER_OPS_DATA_DIR, else cwd/.. — see career-ops-root.mjs.
-export { careerOpsRoot } from "@/lib/career-ops-root.mjs";
+import { careerOpsRoot } from "@/lib/career-ops-root.mjs";
+export { careerOpsRoot };
 
 /**
  * Absolute path to a core root script (e.g. doctor, verify-portals). The `.mjs`
