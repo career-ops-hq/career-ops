@@ -49,7 +49,7 @@
  *      node tracker-sync-check.mjs --interviews-file path/to/active-interviews.md
  *      node tracker-sync-check.mjs --self-test
  *
- * Issue #1504 — github.com/santifer/career-ops
+ * Issue #1504 — github.com/career-ops-hq/career-ops
  */
 
 import { readFileSync, existsSync } from 'fs';

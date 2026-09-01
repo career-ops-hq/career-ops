@@ -23,7 +23,7 @@ A blocking gate whose owner is away is worse than no gate, and it fails invisibl
 Career-ops grows its team in the open. There are three rungs:
 
 ### 1. Contributor
-Anyone who opens a PR or a helpful issue. No permissions needed — just contribute. Good first contributions: a new open-API scanner provider (`providers/`), a translation, a docs fix, or a [good first issue](https://github.com/santifer/career-ops/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22). See [CONTRIBUTING.md](CONTRIBUTING.md).
+Anyone who opens a PR or a helpful issue. No permissions needed — just contribute. Good first contributions: a new open-API scanner provider (`providers/`), a translation, a docs fix, or a [good first issue](https://github.com/career-ops-hq/career-ops/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22). See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### 2. Reviewer
 Trusted contributors who help triage and review incoming PRs. A reviewer is invited after a track record of **several merged, high-quality PRs** across more than one area, plus consistently helpful review comments on others' PRs. Reviewers help label, reproduce, and give first-pass feedback; merges still go through a maintainer.
@@ -54,7 +54,7 @@ Because career-ops handles people's personal career data, access is granted care
 ## Decision-making
 
 - Day-to-day: lowest-friction path — a maintainer reviews and merges.
-- Significant or breaking changes: an [RFC](https://github.com/santifer/career-ops/discussions/categories/rfc) first (see [CONTRIBUTING.md](CONTRIBUTING.md) → "Proposing big changes").
+- Significant or breaking changes: an [RFC](https://github.com/career-ops-hq/career-ops/discussions/categories/rfc) first (see [CONTRIBUTING.md](CONTRIBUTING.md) → "Proposing big changes").
 - Architecture, scoring rules, and the data contract: lead maintainer has final say, informed by RFC discussion.
 
 ## Want to help maintain?

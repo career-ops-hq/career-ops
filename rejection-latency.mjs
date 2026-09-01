@@ -42,7 +42,7 @@
  *      node rejection-latency.mjs --tracker path/to/applications.md
  *      node rejection-latency.mjs --self-test
  *
- * Issue #2013 — github.com/santifer/career-ops
+ * Issue #2013 — github.com/career-ops-hq/career-ops
  */
 
 import { readFileSync, existsSync } from 'fs';

@@ -1,6 +1,6 @@
 // @ts-check
 // {{NAME}} — a career-ops plugin.
-// Guide: https://github.com/santifer/career-ops/blob/main/docs/PLUGINS.md
+// Guide: https://github.com/career-ops-hq/career-ops/blob/main/docs/PLUGINS.md
 //
 // Rules the engine enforces for you:
 //  - Egress ONLY through ctx.fetch / ctx.fetchJson / ctx.fetchText (your manifest

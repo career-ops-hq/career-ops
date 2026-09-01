@@ -30,7 +30,7 @@
  *      node invite-match.mjs --apply [--id N]      (rejection-classified matches only; advances status to Rejected)
  *      node invite-match.mjs --self-test
  *
- * Issue #1495, #2098 — github.com/santifer/career-ops
+ * Issue #1495, #2098 — github.com/career-ops-hq/career-ops
  */
 
 import { readFileSync, existsSync } from 'fs';
