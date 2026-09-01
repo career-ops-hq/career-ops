@@ -157,6 +157,34 @@ try {
     ],
     ([bad, good]) => bad === null && good !== null && good.url.includes('good-1'),
   );
+
+  // feishu-jobs.parseFeishuJobsResponse — for…of over data.job_post_list; id feeds the detail URL.
+  const { parseFeishuJobsResponse } = await load('feishu-jobs.mjs');
+  check(
+    'feishu-jobs.parseFeishuJobsResponse',
+    () => parseFeishuJobsResponse(
+      { data: { count: 2, job_post_list: [
+        { id: `${LONE}bad`, title: 'Bad' },
+        { id: 'g-1', title: 'Good' },
+      ] } },
+      'Acme', 'https://acme.jobs.feishu.cn',
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url.includes('g-1'),
+  );
+
+  // mokahr.parseMokaHrJobs — for…of over data.jobs; id feeds the SPA #/job/ route.
+  const { parseMokaHrJobs } = await load('mokahr.mjs');
+  check(
+    'mokahr.parseMokaHrJobs',
+    () => parseMokaHrJobs(
+      { data: { jobs: [
+        { id: `${LONE}bad`, title: 'Bad' },
+        { id: 'g-1', title: 'Good' },
+      ] } },
+      'Acme', 'https://app.mokahr.com/social-recruitment/acme/123456',
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url.includes('g-1'),
+  );
 } catch (e) {
   fail(`per-provider surrogate tests crashed: ${e.message}`);
 }
@@ -182,8 +210,8 @@ try {
   // import _safe-url.mjs and call safeEncodeURIComponent; dropping either is the
   // regression this list catches.
   const CONVERTED = [
-    'alibaba.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'jibeapply.mjs', 'manfred.mjs',
-    'meituan.mjs', 'phenom.mjs', 'thehub.mjs', 'tkms.mjs', 'vdab.mjs',
+    'alibaba.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'feishu-jobs.mjs', 'jibeapply.mjs',
+    'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'phenom.mjs', 'thehub.mjs', 'tkms.mjs', 'vdab.mjs',
   ];
 
   // Bare `encodeURIComponent` on a url line that is reviewed as safe: the value
@@ -215,7 +243,7 @@ try {
       if (!SHARED_IMPORT.test(src)) regressed.push(`${f} (no longer imports _safe-url.mjs)`);
       else if (!HELPER_USE.test(src)) regressed.push(`${f} (imports _safe-url.mjs but no longer calls safeEncodeURIComponent)`);
     }
-    if (regressed.length === 0) pass('the ten converted providers all still import and use safeEncodeURIComponent');
+    if (regressed.length === 0) pass(`all ${CONVERTED.length} converted providers still import and use safeEncodeURIComponent`);
     else fail(`converted provider regressed: ${regressed.join('; ')}`);
 
     // 2. safeEncodeURIComponent is never referenced without importing it.
