@@ -7,38 +7,44 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"tests/**/*.test.mjs\""
-  },
-  "engines": {
-    "node": ">=22.0.0"
   },
   "dependencies": {
     "@paper-design/shaders-react": "^0.0.80",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "js-yaml": "^5.0.0",
-    "lucide-react": "^1.8.0",
-    "next": "16.3.3",
-    "playwright-core": "^1.61.0",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5",
-    "react-markdown": "^10.0.0",
-    "remark-gfm": "^4.0.0",
-    "tailwind-merge": "^3.5.0"
+    "js-yaml": "^5.4.1",
+    "lucide-react": "^1.38.0",
+    "next": "16.3.4",
+    "playwright-core": "^1.62.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.2.2",
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^25.6.0",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "postcss": "^8.5.18",
-    "tailwindcss": "^4.2.2",
-    "typescript": "^7.0.0"
+    "@types/node": "^26.4.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "oxfmt": "^0.65.0",
+    "oxlint": "^1.80.0",
+    "postcss": "^8.5.26",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2"
   },
   "overrides": {
-    "postcss": "$postcss",
+    "postcss": "^8.5.26",
     "sharp": "^0.35.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
   }
 }
