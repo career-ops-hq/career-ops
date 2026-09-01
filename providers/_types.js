@@ -20,11 +20,13 @@
  * @property {string} location May be empty.
  * @property {string} [description] Job description text, populated ONLY when the
  *                               provider's list payload carries it for free (no
- *                               extra per-job request — the scanner is zero-token).
- *                               Lever supplies it via `descriptionPlain`; most
- *                               providers omit it. Consumed by scan.mjs's
- *                               content_filter; an empty/absent value always
- *                               passes the filter.
+ *                               extra per-job request — the scanner is zero-token),
+ *                               or when a board opts into vdab/smartrecruiters-style
+ *                               `fetchDetails` (bounded per-job enrichment, skipped
+ *                               while probing). Lever/Ashby supply it via
+ *                               `descriptionPlain`; most providers omit it.
+ *                               Consumed by scan.mjs's content_filter; an
+ *                               empty/absent value always passes the filter.
  * @property {number} [postedAt] Epoch ms when the posting was published.
  *                               Omitted when the source doesn't expose a
  *                               usable date. scan.mjs ignores it; consumers
@@ -117,6 +119,12 @@
  * @property {string} id                                                       Unique across all loaded providers.
  * @property {((entry: PortalEntry) => (DetectHit | null))} [detect]           Optional auto-detection.
  * @property {(entry: PortalEntry, ctx: Context) => Promise<Job[]>} fetch      Required.
+ * @property {((job: Job) => (string | null))} [dedupKey]                     Optional. A
+ *   provider-scoped identifier for a job, precise where URL normalization
+ *   isn't — e.g. a Workday requisition ID, so the same posting served under
+ *   several sites of one tenant (different paths/hosts) collapses to one key
+ *   (#3439). Return null when no such key is derivable for a given job;
+ *   callers then fall back to normalizeUrlForDedup(job.url) as before.
  */
 
 export {};

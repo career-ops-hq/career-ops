@@ -9,7 +9,7 @@ import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, w
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { pass, fail, run, lastRunFailure, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, warn, run, lastRunFailure, NODE, ROOT } from './helpers.mjs';
 
 console.log('\nintake.mjs — multi-source profile intake (#1723)');
 
@@ -168,6 +168,13 @@ const intake = await import(pathToFileURL(join(ROOT, 'intake.mjs')).href);
 // Symlinks are followed on purpose (a symlinked master CV is a natural
 // setup), which makes two behaviours worth pinning: a link cycle must not
 // multiply the walk, and a link out of documents/ must keep working.
+//
+// Creating one needs a privilege that Windows does not grant by default:
+// SeCreateSymbolicLinkPrivilege, held by Administrators or by everyone once
+// Developer Mode is on. An ordinary non-elevated shell gets EPERM. These
+// assertions therefore degrade to a warning rather than throwing, the same way
+// the plugin-manifest traversal checks in test-all.mjs already do — CI runs
+// elevated and still exercises every one of them, so nothing is lost there.
 {
   const tmp = mkdtempSync(join(tmpdir(), 'intake-symlink-'));
   const docsDir = join(tmp, 'documents');
@@ -238,6 +245,16 @@ const intake = await import(pathToFileURL(join(ROOT, 'intake.mjs')).href);
       pass('a link nested under an earlier directory still yields to the real path');
     } else {
       fail(`nested alias won over the real path: ${JSON.stringify((deepHits || []).map((s) => s.path))}`);
+    }
+  } catch (e) {
+    // Only the missing privilege is tolerated, and only from symlink() itself.
+    // Anything else — including an EPERM from some other syscall — is a real
+    // failure and must still surface, or this becomes a blanket catch that
+    // quietly turns broken symlink handling into a skipped line.
+    if (e?.code === 'EPERM' && e?.syscall === 'symlink') {
+      warn(`intake symlink tests skipped: no symlink privilege (${e.code}) — enable Developer Mode or run elevated to exercise them`);
+    } else {
+      throw e;
     }
   } finally {
     rmSync(tmp, { recursive: true, force: true });
