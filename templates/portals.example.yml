@@ -1153,6 +1153,18 @@ search_queries:
 #   max_pages: 3          # optional page cap (25 jobs/page, default 3, max 50)
 #   enabled: true
 #
+# - name: Built In                        # US tech aggregator, many employers
+#   provider: builtin                     # no detect() — only reachable via provider:
+#   builtin:
+#     queries: ["platform engineer"]      # REQUIRED: queries and/or categories,
+#     categories: [dev-engineering]       # otherwise there is nothing to scan
+#     host: www.builtinseattle.com        # optional; one of nine market hosts,
+#                                         # default builtin.com. The market host is the
+#                                         # only location scoping this board offers.
+#     scope: remote                       # optional; restricts to /jobs/remote
+#     max_pages: 3                        # optional page cap (25 jobs/page, default 3)
+#   enabled: true
+#
 # - name: The Hub                         # Nordic/EU startup board
 #   provider: thehub
 #   max_pages: 3          # optional page cap (15 jobs/page, default 3, max 67; applies to each pass below)
