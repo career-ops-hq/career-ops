@@ -88,6 +88,10 @@ plugins.lock
 .resolved-prompt-*
 node_modules/
 bun.lock
+
+# Personal machine automation (this user's Drive path, cron cadence, etc.
+# — not a project deliverable, never shipped to other users)
+backup.sh
 # Working copy the test suite makes under the repo root (test-all.mjs
 # `mkdtempSync(join(ROOT, '.tmp-script-test-'))`). A clean run deletes it; a
 # run interrupted mid-way leaves ~650MB of duplicated repo behind, which a
