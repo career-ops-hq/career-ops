@@ -40,11 +40,13 @@
 
 <p align="center"><strong>740+ ilan değerlendirildi · 100+ kişiselleştirilmiş CV · 1 hayalindeki iş bulundu</strong></p>
 
+<p align="center"><sub><a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>) tarafından oluşturuldu ve sürdürülüyor</sub></p>
+
 <p align="center">
   <a href="https://warpchart.dev/hq">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://warpchart.dev/api/chart?theme=dark&v=3">
-      <img alt="Live star telemetry of santifer/career-ops" src="https://warpchart.dev/api/chart?theme=light&v=3" loading="lazy">
+      <img alt="Live star telemetry of career-ops-hq/career-ops" src="https://warpchart.dev/api/chart?theme=light&v=3" loading="lazy">
     </picture>
   </a>
 </p>
@@ -54,7 +56,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/santifer/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
 </p>
 
 <p align="center">
@@ -84,7 +86,7 @@
 
 career-ops ([career-ops.org](https://career-ops.org), diğer adıyla **careerops**), herhangi bir yapay zekâ kodlama CLI'sini eksiksiz bir iş arama komuta merkezine dönüştürür. Başvurularınızı elle bir tabloda takip etmek yerine, şunları yapan yapay zekâ destekli bir hattınız olur:
 
-- **İlanları değerlendirir** -- yapılandırılmış A-F değerlendirmesiyle (bütüncül 1.0-5.0 puana giden beş puanlama boyutu)
+- **İlanları değerlendirir** -- yapılandırılmış A-H değerlendirmesiyle (bütüncül 1-5 puana giden beş puanlama boyutu)
 - **Kişiselleştirilmiş PDF'ler üretir** -- her iş ilanına özel, ATS uyumlu CV'ler
 - **Portalları otomatik tarar** (Greenhouse, Ashby, Lever, şirket sayfaları)
 - **Toplu işler** -- alt-ajanlarla 10+ ilanı paralel değerlendirir
@@ -117,7 +119,7 @@ career-ops, [CareerOps Manifestosu](https://career-ops.org/manifesto?utm_source=
 | **Portal Tarayıcı**       | 45+ önceden yapılandırılmış şirket (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + Ashby, Greenhouse, Lever, Wellfound genelinde özel sorgular |
 | **Toplu İşleme**          | Headless CLI çalışanlarıyla paralel değerlendirme (`claude -p` / `opencode run`)                                                        |
 | **Dashboard TUI**         | Hattınızı gezmek, filtrelemek ve sıralamak için terminal arayüzü                                                                          |
-| **İnsan Onaylı Döngü**    | Yapay zekâ değerlendirir ve önerir, siz karar verir ve harekete geçersiniz. Sistem asla bir başvuru göndermez -- son söz her zaman sizindir |
+| **İnsan Onaylı Döngü**    | Yapay zekâ değerlendirir ve önerir, siz karar verir ve harekete geçersiniz. Sistem asla bir başvuru göndermez -- son söz her zaman sizindir <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. --> |
 | **Hat Bütünlüğü**         | Otomatik birleştirme, tekrar tespiti, durum normalizasyonu, sağlık kontrolleri                                                            |
 | **CV'nin Ötesinde**       | Şirket araştırması ([`deep`](modes/deep.md)) yapay zekâ stratejisini, son hamleleri, mühendislik kültürünü ve profilinizin alması gereken açıyı ortaya çıkarır. Kişi bulma ([`contacto`](modes/contacto.md)) ulaşılmaya değer işe alım uzmanını, recruiter'ı veya ekip üyesini belirler ve her kişi türüne uyarlanmış ≤300 karakterlik bir LinkedIn mesajı taslağı hazırlar. Resmi başvuru e-postası taslakları ([`email`](modes/email.md)) değerlendirilmiş bir raporu veya yapıştırılan iş ilanını -- hiçbir şey göndermeden, iletmeden veya tıklamadan -- bir konu satırına, gövdeye ve ek kontrol listesine dönüştürür. Başvurular sizi kuyruğa sokar; araştırma size bir sohbet kazandırır. |
 
@@ -146,7 +148,7 @@ claude   # veya codex / qwen / opencode / agy / grok — yapay zekâ CLI'nizi bu
 <summary><b>Elle kurmayı mı tercih edersiniz? (git clone)</b></summary>
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # yalnızca PDF üretimi için gerekli
 
@@ -316,7 +318,7 @@ Bir iş ilanı URL'si veya açıklaması yapıştırırsınız
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  A-F             │  Uyum, eksikler, ücret araştırması, STAR hikayeleri
+│  A-H             │  Uyum, eksikler, ücret araştırması, STAR hikayeleri
 │  Değerlendirme   │
 │  (cv.md okur)    │
 └────────┬─────────┘
@@ -463,11 +465,11 @@ Tüm ayrıntılar için bkz. [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md). Bu yaz�
 
 ## Katkıda Bulunanlar
 
-<a href="https://github.com/santifer/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=santifer/career-ops" />
+<a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
 </a>
 
-career-ops kullanarak işe mi girdiniz? [Hikayenizi paylaşın!](https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml)
+career-ops kullanarak işe mi girdiniz? [Hikayenizi paylaşın!](https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml)
 
 ## Lisans ve Ticari Marka
 

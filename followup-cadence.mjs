@@ -13,15 +13,18 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname, relative, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { loadCanonicalStates, foldStatusInput } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
+const CAREER_OPS = getCareerOpsRoot();
+const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+
 const FOLLOWUPS_FILE = join(CAREER_OPS, 'data/follow-ups.md');
 const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS, 'config/profile.yml');
 
@@ -30,8 +33,21 @@ const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS, 'config/
 const args = process.argv.slice(2);
 const summaryMode = args.includes('--summary');
 const overdueOnly = args.includes('--overdue-only');
-const appliedDaysIdx = args.indexOf('--applied-days');
-const appliedDaysOverride = appliedDaysIdx !== -1 ? parseInt(args[appliedDaysIdx + 1], 10) : null;
+// flagValue (not indexOf) so `--applied-days=10` is honored too — indexOf()
+// can't see the `=` form and used to silently discard it, falling back to the
+// default cadence for a value the caller did supply (#2401/#2402 defect class).
+const appliedDaysRaw = flagValue(args, '--applied-days');
+
+// Whole-string match, not a bare parseInt: parseInt('1.5', 10) is 1 and
+// parseInt('10days', 10) is 10 — both truncate a bad value into a plausible
+// one instead of rejecting it, which is the exact silent-wrong-answer shape
+// this file is being fixed to close. Exported so a value's actual numeric
+// effect can be asserted directly, rather than only "the CLI didn't error".
+const APPLIED_DAYS_RE = /^\d+$/;
+export function parseAppliedDaysOverride(raw) {
+  return raw !== undefined && APPLIED_DAYS_RE.test(raw) ? parseInt(raw, 10) : null;
+}
+const appliedDaysOverride = parseAppliedDaysOverride(appliedDaysRaw);
 
 // --- Cadence config ---
 export const DEFAULT_CADENCE = {
@@ -131,7 +147,14 @@ export function normalizeStatus(raw) {
 
 // --- Date helpers ---
 function today() {
-  return new Date(new Date().toISOString().split('T')[0]);
+  // LOCAL calendar day, UTC midnight anchor. toISOString() gives the UTC DAY,
+  // so west of Greenwich an evening run answered "today" with tomorrow and
+  // every daysSinceApp came out one high — the follow-up came due a day early
+  // (#3070). Same fix as followup-seed (#2765) and set-status (#2932).
+  //
+  // The arithmetic below is unchanged: parseDate() still anchors at UTC
+  // midnight, so only WHICH day this is moves.
+  return new Date(localToday());
 }
 
 export function parseDate(dateStr) {
@@ -184,10 +207,146 @@ export function parseDate(dateStr) {
 export function parseAppliedDate(notes, options = {}) {
   if (!notes) return null;
   const validateCalendar = options.requireValidCalendarDate === true;
-  for (const m of String(notes).matchAll(/\bapplied\s+~?(\d{4}-\d{2}-\d{2})(?![\w-])/gi)) {
-    if (!validateCalendar || isRealCalendarDate(m[1])) return m[1];
+  const text = String(notes);
+
+  const matches = [];
+  for (const m of text.matchAll(/\bapplied\s+~?(\d{4}-\d{2}-\d{2})(?![\w-])/gi)) {
+    if (!validateCalendar || isRealCalendarDate(m[1])) matches.push({ date: m[1], index: m.index });
   }
+  if (matches.length === 0) return null;
+
+  // Drop dates that belong to a DIFFERENT row before choosing. Notes routinely
+  // cite a sibling requisition's timeline for context — "#154 is already live
+  // in the same ATS (applied 2026-08-04)" — and that citation reads exactly
+  // like this row's own apply date to a positional scan (#2607).
+  const own = matches.filter(m => !isCrossReferencedMention(text, m.index));
+
+  // First-wins is preserved among a row's OWN dates: a later status date must
+  // not displace the submission date (see the fixture in test-all.mjs).
+  // Cross-reference filtering is orthogonal to that ordering rule.
+  if (own.length > 0) return own[0].date;
+
+  // Every apply-date in the note belongs to another row, so this note does not
+  // state when THIS row was submitted. Returning null is the honest answer —
+  // the alternative is reporting a real but foreign date as
+  // `appDateSource: 'notes'`, i.e. measured, which is precisely the failure the
+  // header comment warns about.
+  //
+  // Both consumers degrade to a LABELLED evaluation-date fallback:
+  // resolveAppliedDate below reports `appDateSource: 'evaluation-date-fallback'`,
+  // and followup-seed.mjs reports `appDateSource: 'evaluation-date'`. That was
+  // not true when this was written — seed fell through to today(), unlabelled,
+  // which made an old application look new and silently reset its follow-up
+  // clock. #2607 changed seed's fallback so the claim below actually holds.
   return null;
+}
+
+// How far back to look for a row reference. Long enough to span a clause like
+// "#154 Sr PM M&A is already live in the same ATS (applied ...)", short enough
+// that an unrelated "#123" earlier in a long note does not reach forward and
+// disqualify a genuine date.
+const CROSS_REF_LOOKBACK = 120;
+
+// A `#NNN` immediately preceded by a req/job/posting/reference label is an ATS
+// identifier for THIS row, not a pointer at another tracker row. Anchored at the
+// end so it only matches a label sitting directly before the `#`, and the
+// separator excludes `.!?` so a sentence boundary cannot be swallowed into it.
+// Same vocabulary as merge-tracker.mjs's REQ_NUMBER_RE, which reads the same
+// Notes column.
+const REQ_LABELLED_HASH_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?)[\s:_-]*$/i;
+
+/**
+ * Whether the apply-date at `index` is being cited ABOUT ANOTHER ROW.
+ *
+ * Heuristic, and deliberately a narrow one: a `#NNN` row reference shortly
+ * before the date, with no sentence boundary between them, means the date is
+ * inside that reference's clause. A sentence break ends the reference's scope,
+ * so "Sibling #140 was slow. Applied 2026-08-06." is correctly read as this
+ * row's own date.
+ *
+ * A SEMICOLON OR PIPE IS A BOUNDARY ONLY ONCE THE REFERENCE HAS ITS OWN DATE.
+ * These are the separators this Notes column actually uses, and they do two
+ * different jobs depending on what came before:
+ *
+ *   "#154 Sr PM (applied 2026-08-04); applied 2026-06-15"
+ *        the citation already carries its date, so the second one is a new
+ *        subject — this row's own. Reading the whole note as #154's discards a
+ *        real measured date, and this is the MORE common shape: two roles live
+ *        at one employer, and the note naming the sibling is usually the same
+ *        note that records this submission.
+ *
+ *   "#154 is already live; applied 2026-08-04"
+ *        the citation has no date yet, so the one after the separator is still
+ *        its own — a semicolon joins independent clauses within a sentence and
+ *        the subject carries across it. Treating it as a break here adopts a
+ *        foreign date and reports it as MEASURED.
+ *
+ * Where the reading is genuinely ambiguous the tie goes to "cross-referenced",
+ * because the two errors are not symmetric — a false positive degrades to a
+ * fallback that is LABELLED as not-measured, while a false negative reports
+ * another row's date as this row's measured one.
+ *
+ * Both failure directions are survivable, which is why a heuristic is
+ * acceptable here: a false positive degrades to the evaluation date, labelled
+ * as a fallback by both consumers (see the note in parseAppliedDate), and a
+ * false negative is just the pre-#2607 behaviour. Neither invents a date.
+ *
+ * @param {string} text
+ * @param {number} index - offset of the "applied" match within `text`
+ * @returns {boolean}
+ */
+function isCrossReferencedMention(text, index) {
+  const window = text.slice(Math.max(0, index - CROSS_REF_LOOKBACK), index);
+  let refEnd = -1;
+  for (const m of window.matchAll(/#\d+\b/g)) {
+    // A `#NNN` tagged as a req/job/posting/reference id is not a row reference:
+    // "Req #1311 - applied 2026-08-06" is this row's own posting id followed by
+    // this row's own date, and reading it as a cross-reference would discard a
+    // genuine date. The label vocabulary is the one merge-tracker.mjs already
+    // recognises in this same Notes column (REQ_NUMBER_RE), kept in sync by
+    // being written the same way rather than imported — merge-tracker's regex
+    // also captures the id itself, which is not wanted here.
+    if (REQ_LABELLED_HASH_RE.test(window.slice(0, m.index))) continue;
+    refEnd = m.index + m[0].length;
+  }
+  if (refEnd === -1) return false;
+
+  const sinceRef = window.slice(refEnd);
+  // A sentence break always ends the reference's scope.
+  if (/[.!?]\s/.test(sinceRef)) return false;
+
+  // A semicolon or pipe ends it too — but only once the reference has already
+  // been GIVEN a date. Those are the separators this Notes column actually uses,
+  // and they do two different jobs depending on what came before:
+  //
+  //   "#154 Sr PM (applied 2026-08-04); applied 2026-06-15"
+  //        the citation already has its date, so the second one is a new
+  //        subject: this row's own. Reading the whole note as #154's loses a
+  //        real measured date, and that is the more common shape — two roles
+  //        live at one employer, and the note naming the sibling is usually the
+  //        same note recording this submission.
+  //
+  //   "#154 is already live; applied 2026-08-04"
+  //        the citation has NO date yet, so the one after the semicolon is
+  //        still its own: a semicolon joins independent clauses within a
+  //        sentence and the subject carries across it. Treating it as a break
+  //        here adopts a foreign date and reports it as MEASURED, which is the
+  //        failure this whole function exists to prevent.
+  //
+  // "Has the reference already been satisfied?" is what separates them, and it
+  // is checked against the text before the LAST separator so a date belonging
+  // to the citation cannot be read as belonging to a later clause.
+  //
+  // No trailing-whitespace requirement, unlike the sentence rule above. A full
+  // stop needs one to avoid firing on "3.5" or "e.g.", but `;` and `|` do not
+  // appear inside numbers or abbreviations, and a hand-typed note writes
+  // ";applied 2026-06-15" as readily as "; applied 2026-06-15".
+  const lastSeparator = [...sinceRef.matchAll(/[;|]/g)].pop();
+  if (lastSeparator) {
+    const beforeSeparator = sinceRef.slice(0, lastSeparator.index);
+    if (/\bapplied\s+~?\d{4}-\d{2}-\d{2}/i.test(beforeSeparator)) return false;
+  }
+  return true;
 }
 
 // True only when YYYY-MM-DD names a day that exists. Round-tripping through a
@@ -398,7 +557,13 @@ export function isRetired(cleared, lastFollowupDate) {
 // Emitted shape is `{ name, email, channel }`. `email` stays first-class (and
 // remains non-null for email contacts) so existing consumers keep working;
 // `channel` is additive.
-const EMAIL_RE = /[\w.-]+@[\w.-]+\.\w+/g;
+// `+` must be in the local part. \w is [A-Za-z0-9_], so the previous class silently TRUNCATED a
+// plus-addressed address at the plus — `mayank+6a88…@reply.cutshort.io` was captured as
+// `6a88…@reply.cutshort.io`, a different mailbox that would bounce. Recruiting platforms route
+// replies through exactly this form (CutShort, Greenhouse, Lever, Workable all use
+// `name+token@reply.domain`), so the addresses most worth capturing were the ones being corrupted
+// — and corrupted into something that still looks like a valid address, so nothing notices.
+const EMAIL_RE = /[\w.+%-]+@[\w.-]+\.\w+/g;
 
 // Name-shaped contacts are gated on an explicit outreach verb or role word, so
 // a capitalized company name ("Acme Corp") can never be mistaken for a person.
@@ -419,7 +584,43 @@ function splitStatements(notes) {
   return String(notes).split(/[;\n]+|\.\s+(?=[A-Z])/).filter(s => s.trim());
 }
 
-export function extractContacts(notes) {
+/**
+ * The candidate's own addresses, so a note that mentions them is not reported as somebody to chase.
+ *
+ * Tracker notes routinely cite your own mailbox while recording where a search ran — e.g. "searched
+ * both accounts (personal + me@work.example) for this thread" written to establish that a reply was
+ * NOT received. extractContacts has no concept of self, so it reads that as a repliable human and
+ * the row advertises a contact that cannot be written to. That is worse than reporting no contact:
+ * it makes an un-chaseable row look actionable.
+ *
+ * Read from config/profile.yml rather than hardcoded, so it stays correct per profile. Fails open —
+ * an absent or unreadable profile yields an empty set, because a missing profile must never start
+ * deleting real contacts.
+ */
+export function loadSelfIdentities(profilePath = PROFILE_FILE) {
+  if (!profilePath || !existsSync(profilePath)) return new Set();
+  let raw;
+  try {
+    raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+  } catch {
+    return new Set();
+  }
+  const out = new Set();
+  const push = (v) => { if (typeof v === 'string' && v.includes('@')) out.add(v.trim().toLowerCase()); };
+  push(raw.candidate?.email);
+  // Only iterate an actual array. A hand-edited profile can reasonably hold a mapping here
+  // (`alternate_emails: { work: me@example.com }`), and `for...of` on an object throws — at module
+  // load, because SELF_IDENTITIES is initialised at import time. That would take followup-cadence
+  // down entirely over a cosmetic config mistake, which is the opposite of the fail-open behaviour
+  // this function promises everywhere else.
+  const alternates = raw.candidate?.alternate_emails;
+  if (Array.isArray(alternates)) for (const alt of alternates) push(alt);
+  return out;
+}
+
+const SELF_IDENTITIES = loadSelfIdentities();
+
+export function extractContacts(notes, selfIdentities = SELF_IDENTITIES) {
   if (!notes) return [];
   const byEmail = new Map();  // normalized email -> contact
   const byName = new Map();   // normalized name  -> contact
@@ -490,7 +691,8 @@ export function extractContacts(notes) {
     for (const name of names) add({ name, email: null, channel });
   }
 
-  return contacts;
+  // A note citing your own mailbox is not a person to follow up with.
+  return contacts.filter((c) => !(c.email && selfIdentities.has(c.email.toLowerCase())));
 }
 
 // The channel a single statement names, when it names one. Null rather than a
@@ -779,6 +981,7 @@ function printSummary(result) {
 // ── CLI flags + help ────────────────────────────────────────────────
 
 const KNOWN_FLAGS = ['--summary', '--overdue-only', '--applied-days', '--help', '-h'];
+const VALUE_FLAGS = ['--applied-days'];
 
 const USAGE = `Usage:
   node followup-cadence.mjs                    # full JSON analysis to stdout
@@ -788,18 +991,30 @@ const USAGE = `Usage:
   node followup-cadence.mjs --help|-h          # print this usage block and exit`;
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-  } else {
-    const result = analyze();
+if (isMainModule(import.meta.url)) {
+  // Must run inside this guard, not at module top level: CADENCE (above) is a
+  // module-level singleton built at import time, and test-all.mjs section 12
+  // dynamic-imports this module in-process to read it — validating the host
+  // process's own argv there would false-positive on the test runner's flags.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
-    if (summaryMode) {
-      printSummary(result);
-    } else {
-      console.log(JSON.stringify(result, null, 2));
-    }
-
-    if (result.error) process.exit(1);
+  // positiveInteger() (used to build CADENCE above) treats a NaN/negative value
+  // as "absent" and silently keeps the default — exactly the wrong-answer-at-
+  // exit-0 shape this fix exists to close. A value that was actually SUPPLIED
+  // must fail loudly instead of being swallowed the same way a bad flag NAME
+  // used to be.
+  if (appliedDaysRaw !== undefined && !(Number.isFinite(appliedDaysOverride) && appliedDaysOverride >= 0)) {
+    console.error(`Error: --applied-days requires a non-negative integer, got "${appliedDaysRaw}"`);
+    process.exit(1);
   }
+
+  const result = analyze();
+
+  if (summaryMode) {
+    printSummary(result);
+  } else {
+    console.log(JSON.stringify(result, null, 2));
+  }
+
+  if (result.error) process.exit(1);
 }

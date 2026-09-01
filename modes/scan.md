@@ -177,9 +177,10 @@ Levels are additive — they are executed in order, and results are merged and d
    d. Normalize each job to `{title, url, company, location}`.
    e. Resolve relative URLs against `careers_url`.
    f. If the parser fails, log the error, attempt fallback via the ATS API if it exists, and continue with the other companies (**do not** add to `local_parser_ok`).
-   g. If the parser completes successfully (steps c–e without fatal error), add `entry.name` to `local_parser_ok` and accumulate jobs in candidates.
+   g. If the parser completes successfully (steps c–e without fatal error), add the current company name to `local_parser_ok` and accumulate jobs in candidates.
 
-4. **Level 1 — Playwright Scan** (parallel in batches of 3-5):
+4. **Level 1 — Playwright Scan** (sequential — NEVER parallel Playwright):
+   Browser-backed workers share one browser session, so concurrent `browser_navigate`/`browser_snapshot` calls cross-contaminate and a snapshot can return another company's page (#2551). Batching stays correct for the fetch-based levels below (Level 2 APIs/feeds, Level 3 queries), which open no shared session.
    For each company in `tracked_companies` with `enabled: true`, a defined `careers_url`, and a **name not listed in `local_parser_ok`**:
    a. `browser_navigate` to `careers_url`.
    b. `browser_snapshot` to read all job listings.
@@ -255,15 +256,16 @@ Levels are additive — they are executed in order, and results are merged and d
    d. If expired: record in `scan-history.tsv` with status `skipped_expired` and discard.
    e. If active: continue to step 8.
 
-   **Do not interrupt the entire scan if a single URL fails.** If `browser_navigate` errors (timeout, 403, etc.), mark as `skipped_expired` and continue with the next one.
+   **Do not interrupt the entire scan if a single URL fails.** If `browser_navigate` or parser errors (timeout, 403, crash, etc.), mark as `skipped_error` and continue with the next one.
 
 8. **For each new verified offer that passes filters**:
    a. Add to the `pipeline.md` "Pending" section: `- [ ] {url} | {company} | {title}`
-   b. Record in `scan-history.tsv`: `{url}\t{date}\t{query_name}\t{title}\t{company}\tadded`
+   b. Record in `scan-history.tsv` with status `added`. Write the row with `formatScanHistoryRow` / `appendToScanHistory` from `scan.mjs` rather than composing the tab-separated line by hand — the column set has grown and will grow again, and a hand-written row is silently short.
 
 9. **Offers filtered by title**: record in `scan-history.tsv` with status `skipped_title`.
 10. **Duplicate offers**: record with status `skipped_dup`.
 11. **Expired offers (Level 3)**: record with status `skipped_expired`.
+12. **Scan errors / failures**: record in `scan-history.tsv` with status `skipped_error`.
 
 ## Extraction of Title and Company from WebSearch Results
 
@@ -284,7 +286,7 @@ If a non-publicly accessible URL is found:
 
 ## Scan History
 
-`data/scan-history.tsv` tracks ALL seen URLs. Each row has nine tab-separated columns:
+`data/scan-history.tsv` tracks ALL seen URLs. Each row has twelve tab-separated columns, in the order `formatScanHistoryRow` emits them (`scan.mjs`):
 
 | # | Column | Example | Notes |
 |---|--------|---------|-------|
@@ -295,18 +297,23 @@ If a non-publicly accessible URL is found:
 | 5 | `company` | `Acme` | Company name |
 | 6 | `status` | `added` | `added`, `skipped_dup`, `skipped_title`, `skipped_expired` |
 | 7 | `location` | `Remote — Europe` | Location string (may be empty); persisted for later auditing |
-| 8 | `jd_fingerprint` | `a3f1c8d2e4b70592` | 64-bit SimHash of the JD text (16 hex chars); empty when no usable body was available |
-| 9 | `postedAt` | `2026-02-08` | ISO date the role was originally posted (as reported by the ATS); empty when not available |
+| 8 | `fingerprint` | `a3f1c8d2e4b70592` | 64-bit SimHash of the JD text (16 hex chars); empty when no usable body was available |
+| 9 | `posted_at` | `2026-02-08` | ISO date the role was originally posted (as reported by the ATS); empty when not available |
+| 10 | `trust_score` | `70` | Trust/legitimacy score, written only when the scanner flagged the posting (score < 100); empty otherwise |
+| 11 | `trust_flags` | `no_company_site,vague_jd` | Comma-joined trust flags, written under the same condition as col 10; empty otherwise |
+| 12 | `normalized_company` | `acme` | Canonical company key (`normalizeCompanyName`) so `Acme Inc.`, `Acme, Inc.` and `ACME  Inc` all match; col 5 stays faithful to what the provider returned |
+
+Columns are append-only: readers index by position, so new columns arrive at the end and older files keep their shorter rows. Never renumber or reorder. The header is written only when the file is created, so an existing file may still carry a shorter header than the rows being appended to it — that is expected, not corruption.
 
 ```tsv
-url	first_seen	portal	title	company	status	location	jd_fingerprint	postedAt
-https://...	2026-02-10	Ashby — AI PM	PM AI	Acme	added	Remote	a3f1c8d2e4b70592	2026-02-08
+url	first_seen	portal	title	company	status	location	fingerprint	posted_at	trust_score	trust_flags	normalized_company
+https://...	2026-02-10	Ashby — AI PM	PM AI	Acme	added	Remote	a3f1c8d2e4b70592	2026-02-08			acme
 ```
 
 ### Filtering by posted date
 
 `first_seen` (column 2) is when **our scanner** spotted the URL — not when the
-employer actually posted it. That real posting date is column 9 (`postedAt`).
+employer actually posted it. That real posting date is column 9 (`posted_at`).
 To scope a scan to an absolute posting-date window (e.g. "only postings from
 the 17th to the 20th"), pass `--posted-after`/`--posted-before` on the CLI —
 both optional, both `YYYY-MM-DD`, both inclusive:
@@ -383,7 +390,7 @@ weekly, `--since 10` keeps a margin for a skipped run.
 
 ### Cross-listing detection
 
-The `jd_fingerprint` column exists to catch a specific double-submission hazard: the same role posted by the direct employer **and** by a recruitment agency, often with the employer name stripped from the agency listing. URL dedup and company+role dedup both miss this pair because the URLs and company names are different — but agencies rarely rewrite the requirements text, so a near-identical JD body is a reliable signal.
+The `fingerprint` column exists to catch a specific double-submission hazard: the same role posted by the direct employer **and** by a recruitment agency, often with the employer name stripped from the agency listing. URL dedup and company+role dedup both miss this pair because the URLs and company names are different — but agencies rarely rewrite the requirements text, so a near-identical JD body is a reliable signal.
 
 How it works:
 
