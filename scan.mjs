@@ -152,7 +152,10 @@ export function matchedTitleKeywords(title, titleFilter) {
 //     override; for country-level terms that are never a false rejection)
 //   - `always_allow` matches → pass (takes precedence over `block` — lets a
 //     multi-location string like "Remote, Belgium or France" through because
-//     the home region is an option, even though "france" is blocked)
+//     the home region is an option, even though "france" is blocked). When
+//     always_allow names the US as a country (united states / usa / u.s. /
+//     u.s.a.), USPS state names and 2-letter codes are additional always_allow
+//     matches, so block: [Dublin] does not drop "Dublin, OH".
 //   - `block` matches → reject
 //   - `allow` empty → pass (already cleared block)
 //   - `allow` non-empty → must match at least one keyword, OR the TITLE carries
@@ -201,6 +204,78 @@ function compileLocationKeyword(keyword) {
 function compileLocationKeywordList(value) {
   return normalizeKeywordList(value).map(compileLocationKeyword);
 }
+
+// Frozen USPS state-name + abbreviation table. Not a world gazetteer: only
+// consulted when always_allow already names the United States as a country,
+// so EU-targeted configs (no US token) keep their previous semantics.
+const US_COUNTRY_ALWAYS_ALLOW = new Set(['united states', 'usa', 'u.s.', 'u.s.a.']);
+const USPS_STATES = Object.freeze([
+  Object.freeze(['alabama', 'al']),
+  Object.freeze(['alaska', 'ak']),
+  Object.freeze(['arizona', 'az']),
+  Object.freeze(['arkansas', 'ar']),
+  Object.freeze(['california', 'ca']),
+  Object.freeze(['colorado', 'co']),
+  Object.freeze(['connecticut', 'ct']),
+  Object.freeze(['delaware', 'de']),
+  Object.freeze(['florida', 'fl']),
+  Object.freeze(['georgia', 'ga']),
+  Object.freeze(['hawaii', 'hi']),
+  Object.freeze(['idaho', 'id']),
+  Object.freeze(['illinois', 'il']),
+  Object.freeze(['indiana', 'in']),
+  Object.freeze(['iowa', 'ia']),
+  Object.freeze(['kansas', 'ks']),
+  Object.freeze(['kentucky', 'ky']),
+  Object.freeze(['louisiana', 'la']),
+  Object.freeze(['maine', 'me']),
+  Object.freeze(['maryland', 'md']),
+  Object.freeze(['massachusetts', 'ma']),
+  Object.freeze(['michigan', 'mi']),
+  Object.freeze(['minnesota', 'mn']),
+  Object.freeze(['mississippi', 'ms']),
+  Object.freeze(['missouri', 'mo']),
+  Object.freeze(['montana', 'mt']),
+  Object.freeze(['nebraska', 'ne']),
+  Object.freeze(['nevada', 'nv']),
+  Object.freeze(['new hampshire', 'nh']),
+  Object.freeze(['new jersey', 'nj']),
+  Object.freeze(['new mexico', 'nm']),
+  Object.freeze(['new york', 'ny']),
+  Object.freeze(['north carolina', 'nc']),
+  Object.freeze(['north dakota', 'nd']),
+  Object.freeze(['ohio', 'oh']),
+  Object.freeze(['oklahoma', 'ok']),
+  Object.freeze(['oregon', 'or']),
+  Object.freeze(['pennsylvania', 'pa']),
+  Object.freeze(['rhode island', 'ri']),
+  Object.freeze(['south carolina', 'sc']),
+  Object.freeze(['south dakota', 'sd']),
+  Object.freeze(['tennessee', 'tn']),
+  Object.freeze(['texas', 'tx']),
+  Object.freeze(['utah', 'ut']),
+  Object.freeze(['vermont', 'vt']),
+  Object.freeze(['virginia', 'va']),
+  Object.freeze(['washington', 'wa']),
+  Object.freeze(['west virginia', 'wv']),
+  Object.freeze(['wisconsin', 'wi']),
+  Object.freeze(['wyoming', 'wy']),
+]);
+
+// 2-letter codes: comma-state (", OH" / ",OH, USA") or a trailing token
+// ("Dublin OH", Workday URL hint "dublin oh"). Not a generic word-boundary —
+// English "in"/"or"/"me" in "Remote, Belgium or France" must not impersonate
+// Indiana/Oregon/Maine. State *names* still use compileLocationKeyword.
+function compileUsStateAbbrev(abbr) {
+  const escaped = abbr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(?:,\\s*${escaped}(?![a-z0-9])|(?:^|[^a-z0-9])${escaped}[^a-z0-9]*$)`);
+  return (lower) => re.test(lower);
+}
+
+const US_STATE_ALWAYS_ALLOW_MATCHERS = USPS_STATES.flatMap(([name, abbr]) => [
+  compileLocationKeyword(name),
+  compileUsStateAbbrev(abbr),
+]);
 
 // Some providers report a rolled-up display string ("5 Locations", "2 Locations")
 // while the canonical URL still names the real primary location. Workday is the
@@ -284,7 +359,15 @@ export function titleSignalsRemote(title) {
 // location-only semantics, which is what the existing unit tests exercise.
 export function buildLocationFilter(locationFilter) {
   if (!locationFilter) return () => true;
-  const alwaysAllow = compileLocationKeywordList(locationFilter.always_allow);
+  const alwaysAllowKeywords = normalizeKeywordList(locationFilter.always_allow);
+  const alwaysAllow = alwaysAllowKeywords.map(compileLocationKeyword);
+  // US-targeted configs list the country in always_allow and foreign cities
+  // in block. "Dublin, OH" does not contain "United States", so without this
+  // expansion block: [Dublin] rejects a real US job. Opt-in on the country
+  // token — configs with no US always_allow entry are unchanged.
+  if (alwaysAllowKeywords.some(k => US_COUNTRY_ALWAYS_ALLOW.has(k))) {
+    alwaysAllow.push(...US_STATE_ALWAYS_ALLOW_MATCHERS);
+  }
   const allow = compileLocationKeywordList(locationFilter.allow);
   const block = compileLocationKeywordList(locationFilter.block);
   const blockHard = compileLocationKeywordList(locationFilter.block_hard);

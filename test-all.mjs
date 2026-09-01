@@ -7201,6 +7201,117 @@ try {
     fail('omitting block_hard must preserve the pre-existing always_allow-wins behaviour');
   }
 
+  // Case 9e: US-targeted always_allow + blocked foreign cities must not drop
+  // US homonym cities ("Dublin, OH" is Ohio, not Ireland). State names and
+  // 2-letter codes both count; the foreign counterpart still rejects.
+  const usHomonymFilter = buildLocationFilter({
+    always_allow: ['United States', 'USA'],
+    allow: [],
+    block: ['Dublin', 'Paris', 'London', 'Berlin', 'Manchester', 'Cambridge'],
+  });
+  const usHomonymPass = [
+    ['Dublin, OH', 'abbrev'],
+    ['Dublin, Ohio', 'state name'],
+    ['Paris, TX', 'Paris TX'],
+    ['London, KY', 'London KY'],
+    ['Berlin, NH', 'Berlin NH'],
+    ['Cambridge, MA', 'Cambridge MA'],
+  ];
+  const usHomonymReject = [
+    ['Dublin, Ireland', 'Dublin Ireland'],
+    ['Paris, France', 'Paris France'],
+    ['London, United Kingdom', 'London UK'],
+    ['Berlin, Germany', 'Berlin Germany'],
+    ['Cambridge, UK', 'Cambridge UK'],
+  ];
+  const usHomonymLeaks = usHomonymPass.filter(([loc]) => usHomonymFilter(loc) !== true);
+  const usHomonymMisses = usHomonymReject.filter(([loc]) => usHomonymFilter(loc) !== false);
+  if (usHomonymLeaks.length === 0) {
+    pass('US always_allow treats City, ST homonyms as US (Dublin OH / Paris TX / London KY)');
+  } else {
+    fail(`US city homonym should pass: ${usHomonymLeaks.map(([l]) => l).join('; ')}`);
+  }
+  if (usHomonymMisses.length === 0) {
+    pass('US always_allow still blocks the foreign counterpart (Dublin Ireland / Paris France)');
+  } else {
+    fail(`foreign counterpart should still reject: ${usHomonymMisses.map(([l]) => l).join('; ')}`);
+  }
+
+  // Case 9f: URL hint "City-ST" (Workday) is the same expansion.
+  if (usHomonymFilter('5 Locations', 'https://x.wd1.myworkdayjobs.com/c/job/Dublin-OH/Eng_R1') === true) {
+    pass('US state expansion applies to the URL location hint (Dublin-OH)');
+  } else {
+    fail('Workday URL hint "Dublin-OH" should pass via the USPS abbrev');
+  }
+
+  // Case 9g: genuine always_allow city still passes; block_hard still wins
+  // over the US expansion (country-level, never a false rejection).
+  const usHomonymWithCity = buildLocationFilter({
+    always_allow: ['united states', 'amsterdam'],
+    allow: [],
+    block: ['Dublin', 'Paris', 'London', 'Berlin'],
+    block_hard: ['ireland', 'brazil', 'usa'],
+  });
+  if (usHomonymWithCity('Amsterdam, Netherlands') === true) {
+    pass('genuine always_allow city (Amsterdam, Netherlands) still passes under US expansion');
+  } else {
+    fail('Amsterdam, Netherlands must still pass via always_allow amsterdam');
+  }
+  if (
+    usHomonymWithCity('Dublin, Ireland') === false &&
+    usHomonymWithCity('USA - New York - Malta') === false &&
+    usHomonymWithCity('Porto Alegre, Rio Grande do Sul, Brazil') === false
+  ) {
+    pass('block_hard still wins over US state expansion (Ireland / USA / Brazil)');
+  } else {
+    fail('block_hard must still reject country-level hits when US expansion is active');
+  }
+
+  // Case 9h: no US country token → expansion is off (EU-targeted installs).
+  const euFilter = buildLocationFilter({
+    always_allow: ['belgium', 'brussels', 'amsterdam'],
+    allow: [],
+    block: ['Dublin', 'Paris', 'London'],
+  });
+  if (
+    euFilter('Dublin, OH') === false &&
+    euFilter('Paris, TX') === false &&
+    euFilter('Amsterdam, Netherlands') === true
+  ) {
+    pass('without a US always_allow token, City, ST homonyms stay blocked (EU config unchanged)');
+  } else {
+    fail('EU-targeted always_allow must not grow USPS state matches');
+  }
+
+  // Case 9j: the other documented US country spellings trigger the same expansion.
+  const usDot = buildLocationFilter({ always_allow: ['U.S.'], block: ['Dublin'] });
+  const usDotA = buildLocationFilter({ always_allow: ['U.S.A.'], block: ['Dublin'] });
+  if (usDot('Dublin, OH') === true && usDotA('Dublin, Ohio') === true) {
+    pass('u.s. / u.s.a. always_allow tokens also expand USPS states');
+  } else {
+    fail('u.s. and u.s.a. must trigger the same US homonym rescue as United States');
+  }
+
+  // Case 9i: 2-letter codes do not match inside other words, and English
+  // "or"/"in" in a multi-location string is not Oregon/Indiana. always_allow
+  // is checked before block, so a leak would rescue these rather than reject.
+  const usAbbrevLeakFilter = buildLocationFilter({
+    always_allow: ['united states'],
+    allow: ['united states', 'usa'],
+    block: ['france', 'belgium', 'dublin', 'india'],
+  });
+  if (
+    usAbbrevLeakFilter('Remote, Belgium or France') === false &&
+    usAbbrevLeakFilter('Hyderabad, India') === false &&
+    usAbbrevLeakFilter('Dublin, India') === false &&
+    usAbbrevLeakFilter('Portland, OR') === true &&
+    usAbbrevLeakFilter('Dublin, IN') === true
+  ) {
+    pass('USPS abbrevs do not match inside India / English or-in conjunctions');
+  } else {
+    fail('state abbrevs leaked: IN/OR must not match India or "Belgium or France"');
+  }
+
   // Case 10: all-null/non-string list → empty after normalization (no false rejects)
   const allBadFilter = buildLocationFilter({ block: [null, 42, undefined], allow: ['remote'] });
   if (allBadFilter('Remote') === true) {
