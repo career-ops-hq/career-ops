@@ -42,6 +42,8 @@
 //     keywords: ["AI", "大模型"]
 //     max_pages: 5
 
+import { MACOS_BROWSER_LIKE_USER_AGENT } from './_http.mjs';
+
 const PAGE_SIZE = 100;
 const DEFAULT_KEYWORDS = [''];  // empty keyword = the whole board, no topical bias
 const DEFAULT_MAX_PAGES = 200;
@@ -50,11 +52,10 @@ const DEFAULT_MAX_PAGES = 200;
 const INTER_PAGE_DELAY_MS = 300;
 // Sent unconditionally: a no-op on tenants without ByteDance's own domain's
 // UA-sniffing rule, required on jobs.bytedance.com itself (see header).
-// NOT the shared BROWSER_LIKE_USER_AGENT from _http.mjs — that one is a
+// NOT the shared Windows BROWSER_LIKE_USER_AGENT from _http.mjs — that one is a
 // Windows Chrome UA, and jobs.bytedance.com's rule rejects it (405, verified
-// live) while accepting this exact macOS Chrome UA string. The distinction
-// is load-bearing, not cosmetic — don't "simplify" this to the shared constant.
-const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+// live) while accepting the shared macOS variant. The distinction is
+// load-bearing, not cosmetic.
 
 /**
  * Keep host validation shared by detect() and fetch(): an explicit provider
@@ -158,7 +159,7 @@ export default {
             headers: {
               'content-type': 'application/json',
               'accept': 'application/json',
-              'user-agent': BROWSER_UA,
+              'user-agent': MACOS_BROWSER_LIKE_USER_AGENT,
               'referer': `${origin}/`,
             },
             body: JSON.stringify(keyword ? { limit: PAGE_SIZE, offset, keyword } : { limit: PAGE_SIZE, offset }),

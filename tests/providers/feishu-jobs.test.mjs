@@ -1,6 +1,6 @@
 // tests/providers/feishu-jobs.test.mjs — Feishu Jobs (飞书招聘) careers
-// provider. Covers ByteDance's own domain and a third-party shared-platform
-// tenant (e.g. MiniMax), the UA header this provider always sends, and the
+// provider. Covers the dedicated host and a fictional shared-platform tenant,
+// the UA header this provider always sends, and the
 // parse/fetch behaviors shared with the other China-market providers.
 import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
@@ -11,19 +11,22 @@ try {
   const modUrl = pathToFileURL(join(ROOT, 'providers/feishu-jobs.mjs')).href;
   const feishu = (await import(modUrl)).default;
   const { parseFeishuJobsResponse } = await import(modUrl);
+  const { MACOS_BROWSER_LIKE_USER_AGENT } = await import(
+    pathToFileURL(join(ROOT, 'providers/_http.mjs')).href
+  );
 
   if (feishu.id === 'feishu-jobs') pass('feishu-jobs.id is "feishu-jobs"');
   else fail(`feishu-jobs.id is ${JSON.stringify(feishu.id)}`);
 
-  const bd = feishu.detect({ name: '字节跳动', careers_url: 'https://jobs.bytedance.com' });
+  const bd = feishu.detect({ name: 'Example Dedicated Host', careers_url: 'https://jobs.bytedance.com' });
   if (bd && bd.url === 'https://jobs.bytedance.com') {
     pass('feishu-jobs.detect() claims jobs.bytedance.com');
   } else {
     fail(`feishu-jobs.detect() on jobs.bytedance.com returned ${JSON.stringify(bd)}`);
   }
 
-  const tenant = feishu.detect({ name: 'MiniMax', careers_url: 'https://vrfi1sk8a0.jobs.feishu.cn' });
-  if (tenant && tenant.url === 'https://vrfi1sk8a0.jobs.feishu.cn') {
+  const tenant = feishu.detect({ name: 'Example Labs', careers_url: 'https://example-labs.jobs.feishu.cn' });
+  if (tenant && tenant.url === 'https://example-labs.jobs.feishu.cn') {
     pass('feishu-jobs.detect() claims any *.jobs.feishu.cn tenant subdomain');
   } else {
     fail(`feishu-jobs.detect() on a shared-platform tenant returned ${JSON.stringify(tenant)}`);
@@ -53,6 +56,12 @@ try {
     fail('feishu-jobs.detect() should return null for a non-string careers_url');
   }
 
+  if (feishu.detect({ name: 'X', careers_url: 'not a url' }) === null) {
+    pass('feishu-jobs.detect() returns null for a malformed URL string');
+  } else {
+    fail('feishu-jobs.detect() should return null for a malformed URL string');
+  }
+
   // parseFeishuJobsResponse
   const sample = {
     code: 0,
@@ -75,7 +84,7 @@ try {
       ],
     },
   };
-  const { jobs, total } = parseFeishuJobsResponse(sample, 'MiniMax', 'https://vrfi1sk8a0.jobs.feishu.cn');
+  const { jobs, total } = parseFeishuJobsResponse(sample, 'Example Labs', 'https://example-labs.jobs.feishu.cn');
 
   if (total === 192) pass('parseFeishuJobsResponse() reads data.count as total');
   else fail(`parseFeishuJobsResponse() total = ${total}`);
@@ -84,13 +93,13 @@ try {
   else fail(`parseFeishuJobsResponse() returned ${jobs.length} jobs, expected 2`);
 
   const j1 = jobs[0];
-  if (j1 && j1.url === 'https://vrfi1sk8a0.jobs.feishu.cn/index/position/7669788190274914586/detail' && j1.location === '上海/北京') {
+  if (j1 && j1.url === 'https://example-labs.jobs.feishu.cn/index/position/7669788190274914586/detail' && j1.location === '上海/北京') {
     pass('parseFeishuJobsResponse() builds the shared-tenant detail URL and joins city_list');
   } else {
     fail(`parseFeishuJobsResponse() job[0] = ${JSON.stringify(j1)}`);
   }
 
-  const byteDanceJob = parseFeishuJobsResponse(sample, '字节跳动', 'https://jobs.bytedance.com').jobs[0];
+  const byteDanceJob = parseFeishuJobsResponse(sample, 'Example Dedicated Host', 'https://jobs.bytedance.com').jobs[0];
   if (byteDanceJob?.url === 'https://jobs.bytedance.com/experienced/position/7669788190274914586/detail') {
     pass('parseFeishuJobsResponse() builds the ByteDance experienced-hire detail URL');
   } else {
@@ -125,7 +134,7 @@ try {
   }
 
   // fetch() — UA/Referer header, pagination, cross-keyword dedup, page caps (mocked ctx)
-  const BD_URL = 'https://jobs.bytedance.com';
+  const TENANT_URL = 'https://example-labs.jobs.feishu.cn';
   const mkJob = (id, title) => ({ id, title, city_list: [{ name: '北京' }] });
   const mkCtx = (impl) => {
     const calls = [];
@@ -137,7 +146,13 @@ try {
         sleep: async (ms) => { sleeps.push(ms); },
         fetchJson: async (_url, opts) => {
           const body = JSON.parse(opts.body);
-          const call = { keyword: body.keyword, offset: body.offset, limit: body.limit, headers: opts.headers };
+          const call = {
+            keyword: body.keyword,
+            offset: body.offset,
+            limit: body.limit,
+            headers: opts.headers,
+            redirect: opts.redirect,
+          };
           calls.push(call);
           return impl(call, calls.length);
         },
@@ -154,7 +169,7 @@ try {
         : Array.from({ length: 50 }, (_, i) => mkJob(String(2000 + i), `岗位B${i}`)),
     },
   }));
-  const pagedJobs = await feishu.fetch({ name: '字节跳动', careers_url: BD_URL, keywords: ['AI'] }, paged.ctx);
+  const pagedJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'] }, paged.ctx);
   if (pagedJobs.length === 150 && paged.calls.length === 2) {
     pass('feishu-jobs.fetch() paginates via offset until count is exhausted (150 posts → 2 requests)');
   } else {
@@ -184,7 +199,7 @@ try {
       ),
     },
   }));
-  const deepInventoryJobs = await feishu.fetch({ name: '字节跳动', careers_url: BD_URL }, deepInventory.ctx);
+  const deepInventoryJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL }, deepInventory.ctx);
   if (deepInventoryJobs.length === inventoryCount && deepInventory.calls.length === 22) {
     pass('feishu-jobs.fetch() default budget covers inventories larger than the old 20-page ceiling');
   } else {
@@ -192,17 +207,23 @@ try {
   }
 
   const h = paged.calls[0].headers || {};
-  if (h['user-agent'] && h['user-agent'].includes('Macintosh') && h.referer === `${BD_URL}/`) {
-    pass('feishu-jobs.fetch() always sends the macOS-Chrome UA + a same-origin Referer');
+  if (h['user-agent'] === MACOS_BROWSER_LIKE_USER_AGENT && h.referer === `${TENANT_URL}/`) {
+    pass('feishu-jobs.fetch() uses the shared macOS browser UA + a same-origin Referer');
   } else {
     fail(`feishu-jobs.fetch() headers = ${JSON.stringify(h)}`);
+  }
+
+  if (paged.calls.every((call) => call.redirect === 'error')) {
+    pass('feishu-jobs.fetch() refuses redirects on every request');
+  } else {
+    fail(`feishu-jobs.fetch() redirect policy = ${JSON.stringify(paged.calls.map(call => call.redirect))}`);
   }
 
   const overlap = mkCtx(() => ({
     code: 0,
     data: { count: 1, job_post_list: [mkJob('42', '重复岗位')] },
   }));
-  const overlapJobs = await feishu.fetch({ name: '字节跳动', careers_url: BD_URL, keywords: ['AI', '大模型'] }, overlap.ctx);
+  const overlapJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI', '大模型'] }, overlap.ctx);
   if (overlapJobs.length === 1 && overlap.calls.length === 2 && overlap.sleeps.length === 1) {
     pass('feishu-jobs.fetch() dedupes across keywords and paces the keyword switch');
   } else {
@@ -217,7 +238,7 @@ try {
   const originalConsoleError = console.error;
   console.error = (...args) => capWarnings.push(args.join(' '));
   try {
-    await feishu.fetch({ name: '字节跳动', careers_url: BD_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx);
+    await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx);
   } finally {
     console.error = originalConsoleError;
   }
@@ -237,7 +258,7 @@ try {
     data: { count: 500, job_post_list: Array.from({ length: 100 }, (_, i) => mkJob(String(6000 + i), `岗位F${i}`)) },
   }));
   probe.ctx.maxPages = 1;
-  const probeJobs = await feishu.fetch({ name: '字节跳动', careers_url: BD_URL }, probe.ctx);
+  const probeJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL }, probe.ctx);
   if (probe.calls.length === 1 && !probe.calls[0].keyword && probeJobs.length === 100) {
     pass('feishu-jobs.fetch() honors the ctx.maxPages probe hint and defaults to a whole-board (no keyword) query');
   } else {
@@ -249,7 +270,7 @@ try {
     data: { count: 1, job_post_list: [mkJob('7001', '默认页数岗位')] },
   }));
   const fractionalEntryJobs = await feishu.fetch(
-    { name: '字节跳动', careers_url: BD_URL, max_pages: 0.5 },
+    { name: 'Example Labs', careers_url: TENANT_URL, max_pages: 0.5 },
     fractionalEntryLimit.ctx,
   );
   if (fractionalEntryLimit.calls.length === 1 && fractionalEntryJobs.length === 1) {
@@ -264,7 +285,7 @@ try {
   }));
   fractionalProbeLimit.ctx.maxPages = 0.5;
   const fractionalProbeJobs = await feishu.fetch(
-    { name: '字节跳动', careers_url: BD_URL },
+    { name: 'Example Labs', careers_url: TENANT_URL },
     fractionalProbeLimit.ctx,
   );
   if (fractionalProbeLimit.calls.length === 1 && fractionalProbeJobs.length === 1) {
@@ -283,7 +304,7 @@ try {
     },
   }));
   const jobsAfterMalformedPage = await feishu.fetch(
-    { name: '字节跳动', careers_url: BD_URL },
+    { name: 'Example Labs', careers_url: TENANT_URL },
     malformedFirstPage.ctx,
   );
   if (malformedFirstPage.calls.length === 2
@@ -301,7 +322,7 @@ try {
   let emptyThenFailThrew = false;
   try {
     await feishu.fetch(
-      { name: '字节跳动', careers_url: BD_URL, keywords: ['空关键词', '失败关键词'] },
+      { name: 'Example Labs', careers_url: TENANT_URL, keywords: ['空关键词', '失败关键词'] },
       emptyThenFail.ctx,
     );
   } catch {
@@ -317,7 +338,7 @@ try {
     if (keyword === '大模型') throw new Error('HTTP 503');
     return { code: 0, data: { count: 1, job_post_list: [mkJob('7', '幸存岗位')] } };
   });
-  const blipJobs = await feishu.fetch({ name: '字节跳动', careers_url: BD_URL, keywords: ['AI', '大模型'] }, blip.ctx);
+  const blipJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI', '大模型'] }, blip.ctx);
   if (blipJobs.length === 1 && blipJobs[0].title === '幸存岗位') {
     pass('feishu-jobs.fetch() keeps already-collected jobs when a later request fails');
   } else {
@@ -327,7 +348,7 @@ try {
   const softFail = mkCtx(({ keyword }) => (keyword === '大模型'
     ? { code: 1, message: 'rate limited' }
     : { code: 0, data: { count: 1, job_post_list: [mkJob('8', '幸存岗位2')] } }));
-  const softFailJobs = await feishu.fetch({ name: '字节跳动', careers_url: BD_URL, keywords: ['AI', '大模型'] }, softFail.ctx);
+  const softFailJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI', '大模型'] }, softFail.ctx);
   if (softFailJobs.length === 1 && softFailJobs[0].title === '幸存岗位2') {
     pass('feishu-jobs.fetch() treats an in-band code!=0 as a blip once jobs are collected');
   } else {
@@ -348,7 +369,7 @@ try {
   let firstFailThrew = false;
   const dead = mkCtx(() => { throw new Error('HTTP 500'); });
   try {
-    await feishu.fetch({ name: '字节跳动', careers_url: BD_URL, keywords: ['AI'] }, dead.ctx);
+    await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'] }, dead.ctx);
   } catch { firstFailThrew = true; }
   if (firstFailThrew) {
     pass('feishu-jobs.fetch() still throws when the very first request fails (dead board reads as failure)');

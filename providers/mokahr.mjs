@@ -53,7 +53,7 @@
 //   - There is no reliable total-count field: `data.jobStats.total` stays 0
 //     even when jobs are clearly present and paginating correctly (verified
 //     across all three tenants) — it is not wired to job count. Pagination
-//     therefore stops the same way lagou.mjs does: when a page returns fewer
+//     therefore stops the same way meituan.mjs does: when a page returns fewer
 //     jobs than requested, not via a total field.
 //   - The list payload's `jobDescription` field already carries the full JD
 //     as HTML — no per-job detail request needed (same idiom as
@@ -74,6 +74,7 @@
 //     keywords: ["AI", "大模型", "Agent"]
 
 import { createDecipheriv } from 'crypto';
+import { htmlToText } from './_html-to-text.mjs';
 
 const API = 'https://app.mokahr.com/api/outer/ats-apply/website/jobs/v2';
 const DETAIL_HOST = 'app.mokahr.com';
@@ -182,26 +183,12 @@ export function parseMokaHrJobs(decrypted, companyName, tenantBaseUrl) {
       description: [
         j.commitment && `类型: ${j.commitment}`,
         j.department?.name && `部门: ${j.department.name}`,
-        stripHtml(j.jobDescription),
+        htmlToText(j.jobDescription),
       ].filter(Boolean).join('\n').slice(0, 4000),
       postedAt: Number.isFinite(ts) ? ts : undefined,
     });
   }
   return jobs;
-}
-
-function stripHtml(html) {
-  if (!html) return '';
-  return String(html)
-    .replace(/<\/(p|li|div)>/gi, '\n')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
 }
 
 /** @type {Provider} */
