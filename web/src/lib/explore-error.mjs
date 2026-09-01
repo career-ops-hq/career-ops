@@ -74,3 +74,14 @@ export function isScannerMissing(body) {
     /** @type {{code?: unknown}} */ (body).code === SCANNER_MISSING_CODE
   );
 }
+
+/**
+ * True for a cancelled fetch (Next.js treats history.replaceState / a tab
+ * change as navigation and aborts in-flight POST /api/explore). AbortError
+ * is not a scan failure — Discover must not paint failed or empty.
+ *
+ * @param {unknown} err
+ */
+export function isAbortError(err) {
+  return !!err && typeof err === "object" && /** @type {{name?: unknown}} */ (err).name === "AbortError";
+}

@@ -7,8 +7,10 @@ import { scannerMissingBody, SCANNER_MISSING_STATUS } from "@/lib/explore-error.
 
 // Discovery is HTTP-bound across many ATS boards; give it room. It is FREE —
 // zero LLM tokens (the scanner only does HTTP + JSON, and --dry-run writes nothing).
+// Must outlive the 12-minute scanner killer in scan.ts so Workday can finish
+// and --json can flush; Next killing the route first left stdout empty.
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 900;
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {

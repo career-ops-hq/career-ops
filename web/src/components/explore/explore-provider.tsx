@@ -5,8 +5,6 @@ import { useRouter } from "next/navigation";
 import {
   DEFAULT_FILTERS,
   ATS_LABEL,
-  filtersToParams,
-  aiToParams,
   isBroadSearch,
   parseExplorePatch,
   type AtsSource,
@@ -17,7 +15,7 @@ import {
 } from "@/lib/explore";
 import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
 import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
-import { isScannerMissing } from "@/lib/explore-error.mjs";
+import { isAbortError, isScannerMissing } from "@/lib/explore-error.mjs";
 
 export type Phase =
   | "idle"
@@ -172,13 +170,13 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     const init: Partial<Record<AtsSource, SourceState>> = {};
     for (const a of f.ats) init[a] = { state: "queued" };
     setSources(init);
-    if (typeof window !== "undefined") {
-      const qs = filtersToParams(f);
-      window.history.replaceState(null, "", `/explore${qs ? `?${qs}` : ""}`);
-    }
+    // Do not write the filter URL here. Next.js patches history.replaceState and
+    // treats it as a navigation, which aborts this fetch — Discover flashed
+    // empty and returned to the form.
 
     const acc: DiscoveredOffer[] = [];
     let sawError = "";
+    let aborted = false;
     let sawScannerMissing = false; // the structured 400 (data-only checkout), not a runtime scan error
     let companiesScannedAcc = 0; // 0 at the end = the directories never downloaded → degraded, not empty
     let capHitAcc = false; // scan was capped (only a slice of the universe searched)
@@ -206,8 +204,8 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         let buf = "";
         for (;;) {
           const { value, done } = await reader.read();
-          if (done) break;
-          buf += dec.decode(value, { stream: true });
+          if (value) buf += dec.decode(value, { stream: !done });
+          if (done) buf += "\n";
           let nl: number;
           while ((nl = buf.indexOf("\n")) >= 0) {
             const line = buf.slice(0, nl).trim();
@@ -238,6 +236,15 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
                 acc.push(ev.offer);
                 setOffers((o) => [...o, ev.offer]);
                 break;
+              case "done":
+                if (Array.isArray(ev.offers)) {
+                  for (const o of ev.offers) {
+                    if (!o?.url || acc.some((a) => a.url === o.url)) continue;
+                    acc.push(o);
+                  }
+                  setOffers([...acc]);
+                }
+                break;
               case "summary": {
                 companiesScannedAcc = ev.companiesScanned;
                 setCompaniesScanned(ev.companiesScanned);
@@ -262,10 +269,12 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
                 break;
             }
           }
+          if (done) break;
         }
       }
     } catch (e) {
-      sawError = e instanceof Error ? e.message : "stream error";
+      aborted = isAbortError(e);
+      if (!aborted) sawError = e instanceof Error ? e.message : "stream error";
     }
 
     // Mark any still-active sources as swept (stream ended).
@@ -281,6 +290,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       setPhase("revealing");
       setStatus(`${acc.length} fresh role${acc.length === 1 ? "" : "s"} found — free.`);
       window.setTimeout(() => setPhase("results"), 850);
+    } else if (aborted) {
+      setPhase("idle");
+      setStatus("");
     } else if (sawError) {
       setError(sawError);
       setScannerMissing(sawScannerMissing);
@@ -428,7 +440,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setError("");
     setScannerMissing(false);
     setStatus("Casting across the open web…");
-    if (typeof window !== "undefined") window.history.replaceState(null, "", `/explore?${aiToParams(intent)}`);
+    // Same as the scan path: do not replaceState while /api/explore/ai is in flight.
 
     let knownUrls = new Set<string>();
     try {
@@ -441,6 +453,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
 
     const acc: DiscoveredOffer[] = [];
     let sawError = "";
+    let aborted = false;
     let sawScannerMissing = false; // the structured 400 (capability absent from this checkout), not a runtime error
     const handle = (chunks: AiTraceChunk[]) => {
       for (const ch of chunks) {
@@ -495,7 +508,8 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         handle(parser.flush());
       }
     } catch (e) {
-      sawError = e instanceof Error ? e.message : "stream error";
+      aborted = isAbortError(e);
+      if (!aborted) sawError = e instanceof Error ? e.message : "stream error";
     }
 
     runningRef.current = false;
@@ -504,6 +518,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       setPhase("revealing");
       setStatus(`${acc.length} candidate${acc.length === 1 ? "" : "s"} found.`);
       window.setTimeout(() => setPhase("results"), 850);
+    } else if (aborted) {
+      setPhase("idle");
+      setStatus("");
     } else if (sawError) {
       setError(sawError);
       setScannerMissing(sawScannerMissing);
