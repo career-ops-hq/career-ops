@@ -62,7 +62,7 @@ function buildMirror(work, targetSha) {
 function writeGitConfig(work, mirror) {
   const cfg = join(work, 'gitconfig');
   const url = pathToFileURL(mirror).href;
-  writeFileSync(cfg, `[user]\n\tname = upgrade-tests\n\temail = upgrade-tests@career-ops.test\n[url "${url}"]\n\tinsteadOf = ${CANONICAL}\n[safe]\n\tdirectory = *\n`);
+  writeFileSync(cfg, `[user]\n\tname = upgrade-tests\n\temail = upgrade-tests@career-ops.test\n[url "${url}"]\n\tinsteadOf = ${CANONICAL}\n\tinsteadOf = https://github.com/career-ops-hq/career-ops.git\n[safe]\n\tdirectory = *\n`);
   return cfg;
 }
 

@@ -2287,7 +2287,8 @@ async function apply() {
       // unstaged edit to a tracked file under a system directory, or an ignored
       // file that an earlier buggy run stranded in the index. Closing that is a
       // separate change to the commit call; this one only closes the add.
-      addPaths(expandToShippedFiles(pathsToStage));
+      const ownedPaths = pathsToStage.filter((spec) => !spec.startsWith(EXCLUDE_PATHSPEC_PREFIX));
+      addPaths(expandToShippedFiles(ownedPaths));
       // Scope the commit to only the staged update paths (#915 bug 2).
       // A bare `git commit` would sweep any unrelated pre-staged files into
       // the update commit. Passing the explicit pathspec list constrains the
@@ -2314,7 +2315,6 @@ async function apply() {
       // claimed by its enclosing owned directory (`providers/` covering
       // `providers/acme.mjs`) — so strip the exclusions out and pass the
       // preserved list separately, where preservation outranks ownership.
-      const ownedPaths = pathsToStage.filter((spec) => !spec.startsWith(EXCLUDE_PATHSPEC_PREFIX));
       const unrelated = stagedPathsOutside(
         [...ownedPaths, ...materializedSkillEntrypoints],
         preservedPaths,
