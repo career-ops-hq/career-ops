@@ -20,7 +20,7 @@ const FIXTURE_AVATAR = join(ROOT, 'tests', 'fixtures', 'avatar-8x8.png');
 
 // ── ledger round-trip ────────────────────────────────────────────────────────
 {
-  const e = { n: 7, level: 'handle', handle: 'someone', role: 'ML Engineer', sector: 'Fintech', geo: 'remote EU', weeks: 6, link: 'https://github.com/santifer/career-ops/issues/9', withdrawn: false };
+  const e = { n: 7, level: 'handle', handle: 'someone', role: 'ML Engineer', sector: 'Fintech', geo: 'remote EU', weeks: 6, link: 'https://github.com/career-ops-hq/career-ops/issues/9', withdrawn: false };
   const parsed = parseLedger(ledgerLine(e))[0];
   if (parsed && parsed.n === 7 && parsed.handle === 'someone' && parsed.weeks === 6 && parsed.role === 'ML Engineer' && parsed.sector === 'Fintech') {
     pass('ledger line round-trips through parseLedger');
@@ -79,7 +79,7 @@ const FIXTURE_AVATAR = join(ROOT, 'tests', 'fixtures', 'avatar-8x8.png');
   execFileSync(process.execPath, [join(ROOT, 'hired-wall-build.mjs'), '--add',
     '--root', dir, '--level', 'role',
     '--role', 'Dev" --> <img onerror=x>', '--story', 'a "quoted" story --> with terminators',
-    '--link', 'https://github.com/santifer/career-ops/issues/99',
+    '--link', 'https://github.com/career-ops-hq/career-ops/issues/99',
     '--avatar-fixture', FIXTURE_AVATAR]);
   const out = readFileSync(join(dir, 'HIRED.md'), 'utf8');
   const entries = parseLedger(out);
@@ -123,7 +123,7 @@ const FIXTURE_AVATAR = join(ROOT, 'tests', 'fixtures', 'avatar-8x8.png');
   else fail(`weeks math wrong: ${weeks}`);
 
   const url = buildIssueUrl({ role: 'Data Engineer', story: 'a & b', feature: '', timeToHire: '7 weeks', anonymity: 'role' });
-  if (url.startsWith('https://github.com/santifer/career-ops/issues/new?') &&
+  if (url.startsWith('https://github.com/career-ops-hq/career-ops/issues/new?') &&
       url.includes('template=i-got-hired.yml') &&
       url.includes('anonymity=Role+and+location+only') &&
       url.includes('story=a+%26+b')) {

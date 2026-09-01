@@ -17,7 +17,7 @@ const { fetchJson } = await import(pathToFileURL(join(ROOT, 'providers/_http.mjs
 // regression this test guards. The trailing /1.0 is a UA-format version
 // (Googlebot/2.1-style), bumped by hand only if this identifier's shape
 // changes — it must never track the release version.
-const EXPECTED_UA = 'Mozilla/5.0 (compatible; career-ops/1.0; +https://github.com/santifer/career-ops)';
+const EXPECTED_UA = 'Mozilla/5.0 (compatible; career-ops/1.0; +https://github.com/career-ops-hq/career-ops)';
 if (DEFAULT_USER_AGENT === EXPECTED_UA) pass('DEFAULT_USER_AGENT matches the pinned literal');
 else fail(`DEFAULT_USER_AGENT drifted from the pinned literal: got ${DEFAULT_USER_AGENT}`);
 
