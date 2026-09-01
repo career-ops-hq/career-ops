@@ -9,6 +9,6 @@
   "hooks": ["provider"],
   "requiredEnv": ["THEIRSTACK_API_KEY"],
   "allowedHosts": ["api.theirstack.com"],
-  "registrationIssue": "https://github.com/santifer/career-ops/issues/1697",
+  "registrationIssue": "https://github.com/career-ops-hq/career-ops/issues/1697",
   "addedAt": "2026-07-07"
 }

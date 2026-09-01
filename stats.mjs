@@ -21,19 +21,22 @@ import { validateFlags } from './lib/cli-flags.mjs';
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeStatus, analyzeFromContent } from './followup-cadence.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
-const APPS_FILE = join(ROOT, 'data', 'applications.md');
-const SCAN_HISTORY_FILE = join(ROOT, 'data', 'scan-history.tsv');
-const FOLLOWUPS_FILE = join(ROOT, 'data', 'follow-ups.md');
-const SCAN_RUNS_FILE = join(ROOT, 'data', 'scan-runs.tsv');
-const STATUS_LOG_FILE = join(ROOT, 'data', 'status-log.tsv');
-const PORTALS_FILE = join(ROOT, 'portals.yml');
-const PORTAL_HEALTH_FILE = join(ROOT, 'data', 'portal-health.tsv');
+const DATA_ROOT = getCareerOpsRoot();
+const APPS_FILE = resolveTrackerPath(DATA_ROOT);
+const SCAN_HISTORY_FILE = join(DATA_ROOT, 'data', 'scan-history.tsv');
+const FOLLOWUPS_FILE = join(DATA_ROOT, 'data', 'follow-ups.md');
+const SCAN_RUNS_FILE = join(DATA_ROOT, 'data', 'scan-runs.tsv');
+const STATUS_LOG_FILE = join(DATA_ROOT, 'data', 'status-log.tsv');
+const PORTALS_FILE = join(DATA_ROOT, 'portals.yml');
+const PORTAL_HEALTH_FILE = join(DATA_ROOT, 'data', 'portal-health.tsv');
 
 const CANONICAL_STATUSES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
 
@@ -195,9 +198,12 @@ export function parseStatusLogStages(content) {
   for (const line of String(content ?? '').replace(/\r/g, '').split('\n')) {
     if (!line.trim()) continue;
     const c = line.split('\t');
-    const num = parseInt(c[0], 10);
-    if (Number.isNaN(num)) continue;
-    out.push({ num, from: (c[2] || '').trim(), to: (c[3] || '').trim() });
+    const rawNum = String(c[0] || '').trim();
+    const date = String(c[1] || '').trim();
+    const from = String(c[2] || '').trim();
+    const to = String(c[3] || '').trim();
+    if (!/^\d+$/.test(rawNum) || !date || !from || !to) continue;
+    out.push({ num: Number(rawNum), from, to });
   }
   return out;
 }
@@ -706,7 +712,7 @@ const USAGE = `Usage:
   node stats.mjs --summary   # human-readable table
   node stats.mjs --help|-h   # print this usage block and exit`;
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
 
   validateFlags(args, KNOWN_FLAGS, USAGE);

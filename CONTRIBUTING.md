@@ -9,7 +9,7 @@ career-ops is a great place to make your **first open-source contribution** — 
 - **You already get it.** This is a job-search tool. If you're job-hunting, you understand the problem better than most — which makes you a better contributor.
 - **A real merged PR, on something people use.** 55K+ stars, shipping most weeks. Your name in the history of a real project, not a toy repo.
 - **We answer fast.** Open an issue or PR and you'll hear back, usually within a day or two. No black holes.
-- **Tiny on-ramps.** Browse [`good first issue`](https://github.com/santifer/career-ops/contribute) — each is scoped small, with a time estimate, the pattern to copy, and a clear "done", so your first PR is a win, not a maze.
+- **Tiny on-ramps.** Browse [`good first issue`](https://github.com/career-ops-hq/career-ops/contribute) — each is scoped small, with a time estimate, the pattern to copy, and a clear "done", so your first PR is a win, not a maze.
 - **Your human work gets a real review.** We read every PR. We don't drown contributors in bot noise, and we don't merge AI-slop — put thought in, get thought back.
 - **A path forward.** Consistent, high-quality contributors get credited publicly and invited into bigger roles (reviewer, then maintainer).
 
@@ -48,7 +48,7 @@ The review process you'll experience here is documented end-to-end in [Agentic m
 - Translate modes to other languages
 - Improve documentation
 - Add example CVs for different roles (in `examples/`)
-- Report bugs via [Issues](https://github.com/santifer/career-ops/issues)
+- Report bugs via [Issues](https://github.com/career-ops-hq/career-ops/issues)
 
 **Bigger contributions:**
 - New evaluation dimensions or scoring logic
@@ -58,10 +58,10 @@ The review process you'll experience here is documented end-to-end in [Agentic m
 
 ### Claiming a good first issue
 
-Comment `/assign` on any [`good first issue`](https://github.com/santifer/career-ops/contribute) and it's yours: no waiting for a maintainer. How it stays fair:
+Comment `/assign` on any [`good first issue`](https://github.com/career-ops-hq/career-ops/contribute) and it's yours: no waiting for a maintainer. How it stays fair:
 
 - **Claims free up on their own.** After 7 quiet days (with a friendly ping at day 3) the issue goes back to the window, so nothing stays stuck. `/extend` restarts the clock, no questions asked; `/unassign` lets go cleanly. An open PR always pauses the clock.
-- **Reserved for newcomers.** Good-first-issues are for contributors with fewer than 3 merged PRs here (`first-timers-only` means exactly that: your very first), one at a time, so a first-time contributor always has a way in. Past that stage? [`help wanted`](https://github.com/santifer/career-ops/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) is your board.
+- **Reserved for newcomers.** Good-first-issues are for contributors with fewer than 3 merged PRs here (`first-timers-only` means exactly that: your very first), one at a time, so a first-time contributor always has a way in. Past that stage? [`help wanted`](https://github.com/career-ops-hq/career-ops/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) is your board.
 - **No claim needed to contribute.** A PR straight onto any unassigned issue is always welcome.
 
 ## The contribution ladder
@@ -87,9 +87,21 @@ Life happens: a PR gets a review, the author moves on, and useful work strands a
 
 **If you're the original author coming back**: the work stays yours to reclaim at any point before someone else finishes it. Just say so on the issue. Any comment or push from you at any ladder step resets the clock completely.
 
+## Someone else's open PR stays theirs
+
+The ladder above is for work that has been **abandoned**. An open PR with an author still around is a different thing, and the line matters.
+
+**Please don't open a PR that re-resolves someone else's conflict.** Pointing out on the thread that a PR has gone into conflict is genuinely useful. Rebasing it onto a branch of your own and opening a replacement is not, however cleanly the merge is done: landing that replacement closes the original, and the author is left with a `closed` PR where their `merged` should have been. That badge is most of what a contributor takes away from a project, and it isn't ours to reassign.
+
+If the conflict came from something **we** merged, the fix is ours. We resolve it on the author's own branch (that is what "Allow edits by maintainers" is for), run the suite, and leave their PR and their authorship untouched. If it came from anywhere else, the author rebases whenever they're ready: nobody is on a clock for that.
+
+This applies to automation as well. A bot opening replacement PRs on other people's branches is doing the same thing at higher volume, and automated triage posted into someone else's thread ("don't merge both", "treat #X as the primary") reads as a project decision to the person who has been waiting on one. Merge calls are the maintainers' to make.
+
+Improvements that go *beyond* resolving the conflict are welcome, just not stapled onto another person's PR: raise them in the thread and let the author decide, or open your own PR once theirs has landed.
+
 ## Scope: the core vs. the shared layer
 
-career-ops core is **local-first and human-in-the-loop** by design — it runs on your machine and drafts applications for *you* to review and submit. Centralized infrastructure — hosted job aggregation, a shared matching service, proxies or Workers the project would operate — is **not part of the core**: it's heavier than a free local tool should carry, and it's where the project is headed as a *separate, opt-in service*. See the direction here: **[Where career-ops is going](https://github.com/santifer/career-ops/discussions/904)**.
+career-ops core is **local-first and human-in-the-loop** by design — it runs on your machine and drafts applications for *you* to review and submit. Centralized infrastructure — hosted job aggregation, a shared matching service, proxies or Workers the project would operate — is **not part of the core**: it's heavier than a free local tool should carry, and it's where the project is headed as a *separate, opt-in service*. See the direction here: **[Where career-ops is going](https://github.com/career-ops-hq/career-ops/discussions/904)**.
 
 Rule of thumb before you build: **provider modules, languages, CLI support, modes on the core path, dashboard, docs and fixes → the core.** Bigger centralized or automation ideas (a hosted layer, auto-apply, scraping infrastructure) → **start in that discussion**, so we can route them together instead of a large PR that can't merge.
 
@@ -120,7 +132,7 @@ career-ops reads job listings from public sources: ATSes, job boards, company ca
 
 To see how the rules have actually been applied, read the [Source Indexing Log](docs/SOURCE_INDEXING_LOG.md): one entry per listed source, with what was checked and how.
 
-To propose a source (yours or anyone's): [open a source proposal](https://github.com/santifer/career-ops/issues/new?template=source-proposal.yml) walking through these five rules. A direct PR with the provider is welcome too: the same five rules apply before merge. Operator declarations are verified out-of-band before listing — a contact reachable at the source's own domain, or equivalent proof of domain control. Operators proposing their own board are welcome — that's what rule-based gates are for.
+To propose a source (yours or anyone's): [open a source proposal](https://github.com/career-ops-hq/career-ops/issues/new?template=source-proposal.yml) walking through these five rules. A direct PR with the provider is welcome too: the same five rules apply before merge. Operator declarations are verified out-of-band before listing — a contact reachable at the source's own domain, or equivalent proof of domain control. Operators proposing their own board are welcome — that's what rule-based gates are for.
 
 ## Guidelines
 
@@ -135,10 +147,10 @@ To propose a source (yours or anyone's): [open a source proposal](https://github
 - **PRs that enable auto-submitting applications** without human review. career-ops is a decision-support tool, not a spam bot.
 - **PRs that add external API dependencies** without prior discussion in an issue.
 - **Feature PRs against bundled plugins** (`plugins/apify`, `plugins/gmail`, `plugins/notion`). Bundled plugins are stable *reference seeds* — to extend one, publish your own `career-ops-plugin-<id>` and we'll register it as the maintained successor that takes precedence once installed (see [docs/PLUGINS.md](docs/PLUGINS.md)). Bundled plugins only take security/compat fixes.
-- **PRs that add centralized or hosted infrastructure to the core** (proxies, aggregation services, shared Workers). That's the separate opt-in service, not the open-core — bring it to the [direction discussion](https://github.com/santifer/career-ops/discussions/904) first.
-- **Universal aggregation indexes as a dependency** — integrating a single third-party service that unifies listings across many sources into one pipe career-ops reads from. Reading individual boards where employers post is exactly what `providers/` is for and stays welcome; the *unified offers-aggregation layer itself* is first-party, the same boundary that keeps the web experience first-party ([#904](https://github.com/santifer/career-ops/discussions/904) / [#156](https://github.com/santifer/career-ops/discussions/156)). This boundary applies to the plugin registry as well as core.
+- **PRs that add centralized or hosted infrastructure to the core** (proxies, aggregation services, shared Workers). That's the separate opt-in service, not the open-core — bring it to the [direction discussion](https://github.com/career-ops-hq/career-ops/discussions/904) first.
+- **Universal aggregation indexes as a dependency** — integrating a single third-party service that unifies listings across many sources into one pipe career-ops reads from. Reading individual boards where employers post is exactly what `providers/` is for and stays welcome; the *unified offers-aggregation layer itself* is first-party, the same boundary that keeps the web experience first-party ([#904](https://github.com/career-ops-hq/career-ops/discussions/904) / [#156](https://github.com/career-ops-hq/career-ops/discussions/156)). This boundary applies to the plugin registry as well as core.
 - **Integrations that send your data to a third-party service** — providers or sync features that require a third-party account or push your CV, pipeline, or notes out to an external service. career-ops is local-first and zero-keys: your job-search data stays on your machine. Reading *public* job-listing APIs locally is welcome (that's how the built-in providers work); routing your personal data through someone else's service is not.
-- **PRs that add third-party hosted entry-points or service badges to the README** — links or embeds that route users' resumes or job data through a service the project doesn't operate. The README stays to assets the project controls, and the official online experience is something we keep first-party (see [The Vision](https://github.com/santifer/career-ops/discussions/156)). Projects built on career-ops are welcome — share them in the [Discord](https://discord.gg/8pRpHETxa4) or Discussions, just not on the front page.
+- **PRs that add third-party hosted entry-points or service badges to the README** — links or embeds that route users' resumes or job data through a service the project doesn't operate. The README stays to assets the project controls, and the official online experience is something we keep first-party (see [The Vision](https://github.com/career-ops-hq/career-ops/discussions/156)). Projects built on career-ops are welcome — share them in the [Discord](https://discord.gg/8pRpHETxa4) or Discussions, just not on the front page.
 - **PRs containing personal data** (real CVs, emails, phone numbers). Use `examples/` with fictional data instead.
 
 ## Development
@@ -195,5 +207,5 @@ trademark policy regarding commercial naming and endorsement claims.
 ## Need Help?
 
 - [Join the Discord](https://discord.gg/8pRpHETxa4) — fastest way to get answers and connect with other contributors
-- [Open an issue](https://github.com/santifer/career-ops/issues)
+- [Open an issue](https://github.com/career-ops-hq/career-ops/issues)
 - [Read the architecture docs](docs/ARCHITECTURE.md)

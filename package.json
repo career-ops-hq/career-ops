@@ -1,6 +1,6 @@
 {
   "name": "career-ops",
-  "version": "1.29.0",
+  "version": "1.31.0",
   "description": "AI-powered job search pipeline — works with any AI coding CLI (Claude Code, Codex, OpenCode, Antigravity, Grok, Qwen, Kimi, Copilot)",
   "private": true,
   "engines": {
@@ -24,6 +24,7 @@
     "img-to-pdf": "node img-to-pdf.mjs",
     "cover-letter": "node generate-cover-letter.mjs --payload",
     "cv:verify-facts": "node verify-cv-facts.mjs",
+    "cv:verify-ats": "node verify-ats.mjs",
     "test:cv-visual": "playwright test --config=playwright.cv.config.mjs",
     "test:cv-visual:update": "playwright test --config=playwright.cv.config.mjs --update-snapshots",
     "sync-check": "node cv-sync-check.mjs",
@@ -89,7 +90,7 @@
   "homepage": "https://santifer.io",
   "repository": {
     "type": "git",
-    "url": "https://github.com/santifer/career-ops"
+    "url": "https://github.com/career-ops-hq/career-ops"
   },
   "license": "MIT",
   "dependencies": {

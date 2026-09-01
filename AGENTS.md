@@ -15,6 +15,17 @@ Two layers — full list in `DATA_CONTRACT.md`:
 
 **THE RULE: When the user asks to customize facts or targeting (archetypes, narrative, negotiation scripts, proof points, location policy, comp targets), ALWAYS write to `modes/_profile.md` or `config/profile.yml`. When they ask for procedural house rules, custom workflows, output preferences, or automations, write to `modes/_custom.md` (copy it from `modes/_custom.template.md` if missing). NEVER edit `modes/_shared.md` for user-specific content.** This ensures system updates don't overwrite their customizations.
 
+**Path Resolution Override & Precedence:**
+The User Layer location (Data Root) is resolved dynamically using the following precedence order:
+1. **Environment Variables:** `CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` overrides the root path (resolved relative to the repository root if it is a relative path).
+2. **Marker File:** If no environment variable is set, a `.career-ops-data` file in the repository root containing an absolute or relative path to the user data directory is used.
+3. **Repository Default:** If neither is present, the repository root directory itself is used.
+
+**Tracker Path & Canonical Writes:**
+- **Explicit override:** `CAREER_OPS_TRACKER` environment variable overrides the applications tracker file path. Relative paths are resolved relative to the repository root directory.
+- **Reading:** If no override is set, reading resolves to `{DATA_ROOT}/data/applications.md` if it exists; otherwise falls back to `{DATA_ROOT}/applications.md`.
+- **Writing:** All write operations (first-run creation or merge operations) target the canonical location `{DATA_ROOT}/data/applications.md` (or the explicit `CAREER_OPS_TRACKER` override).
+
 ## Source-of-Truth Boundary (CRITICAL)
 
 User-facing content (CV, cover letters, application emails, form answers, recruiter outreach) is generated **exclusively** from these files plus statements the user makes directly in the current conversation. The list is tiered by trust level (#2947) — read both tiers before generating content, but treat them differently for quantified claims:
@@ -135,6 +146,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `data/contacts.tsv` | Job-search contact list — recruiters/hiring managers/peers saved from `contacto` (user layer, gitignored third-party PII) |
 | `data/Connections.csv` | LinkedIn connections export (user layer, gitignored third-party PII; read by `linkedin-join.mjs`, safe to delete after use) |
 | `outcome.mjs` | Record application outcome, archive artifacts, and sync tracker (`node outcome.mjs <selector> <type>`) |
+| `hired-share.mjs` | Draft a Hired Wall story from the tracker and open a prefilled GitHub issue the user submits themselves; `--status` lists hires never asked; `--mark` records their answer permanently |
 | `jd-capture.mjs` | Resolves an archived JD in `jds/` by report number, matching padded and unpadded prefixes (`064-`, `64-`, `01-`). Consumed by `outcome.mjs`; written by `archive-posting.mjs --report=N`. Replaces rebuilding a capture's filename from today's date, which stopped resolving the next day |
 | `weekly-digest.mjs` | Rolls up `interview-prep/sessions/*.md` (default: current ISO week) into a per-company round summary, recurring competency-tag counts, and best-effort recurring 🔴 gaps from `question-bank.md` (JSON or `--summary`) |
 | `reports/` | Evaluation reports `{###}-{company-slug}-{YYYY-MM-DD}.md` — Blocks A-F + G (Posting Legitimacy) + Risk Summary + `## Machine Summary` YAML; header includes `**Legitimacy:** {tier}` |
@@ -151,7 +163,13 @@ Some users enable plugins (external integrations). If an enabled plugin ships a 
 node doctor.mjs --json
 ```
 
-Output: `{"onboardingNeeded": <bool>, "missing": [...], "warnings": [...], "autoCopied": [...]}` — `missing` lists whichever of `cv.md`, `config/profile.yml`, `modes/_profile.md`, `portals.yml` are absent; `warnings` is reserved for non-blocking setup signals; `autoCopied` lists customization files (`modes/_profile.md` or `modes/_custom.md`) doctor copied from `modes/_profile.template.md` / `modes/_custom.template.md`.
+Output: `{"onboardingNeeded": <bool>, "missing": [...], "unpersonalized": [...], "warnings": [...], "autoCopied": [...]}` — `missing` lists whichever of `cv.md`, `config/profile.yml`, `modes/_profile.md`, `portals.yml` are absent; `warnings` is reserved for non-blocking setup signals; `autoCopied` lists personalization files doctor copied from their templates on this run — `modes/_profile.md`, `modes/_custom.md` or `modes/_brief.md`, from `modes/_profile.template.md` / `modes/_custom.template.md` / `modes/_brief.template.md`.
+
+**`unpersonalized` — act on this even when `onboardingNeeded` is false.** Entries are `{path, reason, impact}` for a personalization file that exists but still carries template content. Because doctor auto-copies `modes/_profile.md` and `modes/_brief.md`, they always exist — the existence check can never catch this. Left unedited, `_profile.md` feeds the **template author's** archetypes and North Star into every A-F evaluation, so offers get scored against a stranger's targeting; `_brief.md` hands the triage first pass literal `{placeholders}`. It is a warning, not a gate (career-ops works out of the box), but before running `scan`, `pipeline`, or `batch` with a non-empty `unpersonalized`, tell the user:
+
+> "`modes/_profile.md` is still the shipped template, so evaluations would score against the template author's targeting rather than yours. Want me to personalize it from your CV first? (~1 min, and it changes every score.)"
+
+`modes/_custom.md` is deliberately never reported — unedited house rules are a valid end state.
 
 **If `onboardingNeeded` is true, enter onboarding mode.** Do NOT proceed with evaluations, scans, or any other mode until the basics are in place. Guide the user step by step:
 
@@ -304,6 +322,7 @@ Two separate axes:
 | Wants to debrief after a real interview and close gaps | `interview/debrief` |
 | Wants to check if a company is safe to join (red-flag analysis) | `interview-redflag` |
 | Wants to generate CV/PDF | `pdf` |
+| Wants to check if a generated CV is ATS-friendly (parseability score + issues) | `ats` |
 | Wants a hiring-manager's read on a tailored CV before sending | `pdf --hm-audit` — opt-in pass (`modes/pdf/hm-audit.md`), off by default: researches the likely reviewer, dispatches a separate agent role-playing them, and returns a bullet-by-bullet keep/cut/rewrite verdict |
 | Wants the LaTeX/Overleaf CV path | `latex` |
 | Maintains their own hand-tuned `.tex` CV and wants it tailored in place (opt-in; cv.md stays the default) | `latex-tex` |
@@ -407,6 +426,20 @@ Headless worker command per CLI:
 **Prefer `--report=N` when archiving for a tracked row.** A capture named only from the date and the scraped company and role can be found again only by rebuilding that exact string, so it stops resolving the day after it is written — precisely when the posting has gone dead and the capture is the only remaining record. `jd-capture.mjs` looks captures up by report number instead, matching padded and unpadded prefixes (`064-`, `64-`, `01-`), and `outcome.mjs` uses it before falling back to re-archiving a live URL.
 
 A capture is copied into `data/outcomes/` under its own extension (`posting.pdf`, `posting.txt`, `posting.md`), never renamed to `.pdf`.
+
+### Celebrating a hire (the Hired Wall)
+
+When the user records a `hired` or `accepted` outcome, celebrate FIRST — a landed job is the whole point of this tool — and then offer, once:
+
+> That's the whole point of everything we did here. Congratulations! 🎉
+>
+> One optional thing: career-ops keeps a public wall of people who landed jobs with it. If you want yours there, I'll draft it from what we already know (role, weeks, what helped). You'll see the exact text, and nothing leaves this machine unless you submit it yourself on GitHub. Want the draft? If not, I won't bring this one up again.
+
+If they say yes: run `node hired-share.mjs --report N --anonymity <their choice> --story "<their words>" --open` — it prints the exact payload, opens a prefilled GitHub issue, and the user reviews and submits it themselves. Ask their anonymity level explicitly (handle / role-only / count-only); never default to the most exposed. Offer a 2-sentence draft story built only from tracker data, and let them rewrite it. If they say "not now": `node hired-share.mjs --report N --mark later`. If they say no: `--mark never`, and honor it — that hire is never brought up again.
+
+**Cadence rules (hard):** one ask per hire, at outcome time. After an update, `node hired-share.mjs --status` may list hires never asked or marked "later" more than 30 days ago — at most ONE gentle mention, then respect the answer. Never remind on a schedule. Never mention the wall at `offer_received`: an offer can still fall through, and the ask belongs to the signed outcome only.
+
+**Privacy (hard):** salary is never part of a story. Company name only if the user writes it themselves. The share flow reads tracker data locally and writes only `data/.hired-share-state.json`; the only thing that ever leaves the machine is the issue the user submits from their own GitHub account.
 - **RULE: After each batch of evaluations, run `node merge-tracker.mjs`** to merge tracker additions and avoid duplications.
 - **RULE: NEVER create new entries in applications.md if company+role already exists.** Update the existing entry.
 
@@ -429,6 +462,8 @@ One TSV file per evaluation at `batch/tracker-additions/{num}-{company-slug}.tsv
 **Optional posting URL — the deterministic dedup key:** append the posting URL as a trailing field. `merge-tracker.mjs` matches on it FIRST (normalized: tracking params stripped, host lowercased, fragment and trailing slash dropped), and only falls back to the report-number / entry-number / fuzzy company+role tiers for rows that have no URL. A confirmed URL mismatch on both sides is proof the rows are NOT duplicates, the same way a req-number mismatch is (#1524). Detected by its `http(s)://` prefix, so it is order-independent with the optional location field. Additive and backward-compatible: 9-column TSVs and trackers with no `URL` header column behave exactly as before. Backfill existing rows from their reports with `node merge-tracker.mjs --backfill-urls`.
 
 **Report link normalization:** the TSV always carries a root-relative `[num](reports/...)` link; `merge-tracker.mjs` rewrites it relative to the tracker's own directory (`../reports/...` at `data/applications.md`, `reports/...` at root) so links stay clickable. Idempotent; fix an existing tracker with `node merge-tracker.mjs --migrate` (#760).
+
+**Row order (#3515):** `merge-tracker.mjs` writes the table sorted by `#` **ascending** — matching how rows are referred to ("row 42") and how `reports/` is numbered on disk. The sort runs over the whole table on every write, so a tracker left in merge-batch order by an older version is repaired in place on the next merge; no migration flag is needed. Rows whose `#` is a backfill sentinel (`N/A` / `—` / `-`) sort to the end of the table in their existing relative order.
 
 **Req/posting ID in notes disambiguates same-title postings (#1524, #2009):** when a company posts two genuinely different requisitions whose titles fuzzy-match (e.g. a leveled variant and its bare title, or two sibling team roles), put the req/job/posting ID in the **notes** column on both rows. `merge-tracker.mjs` reads it (`REQ_NUMBER_RE`) and treats rows carrying *different* recognizable IDs as distinct openings, overriding fuzzy title matching. Recognized forms are a `job id` / `posting id` / `requisition` / `req` / `jr` / `job` / `posting` / `ref` / `r_` label followed by an alphanumeric ID containing at least one digit — e.g. `req JR-10423`, `job id 88214`, `ref R_2291`. Prefer this whenever the JD exposes an ID; it is the only signal that survives near-identical titles.
 

@@ -6,11 +6,14 @@ import {
   mkdtempSync,
   realpathSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'fs';
-import { join, relative } from 'path';
+import { isAbsolute, join, relative } from 'path';
+import { tmpdir } from 'os';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { pass, fail, linkRepoPackage, ROOT, NODE } from './helpers.mjs';
 
 const outputRoot = join(ROOT, 'output');
@@ -23,6 +26,7 @@ mkdirSync(outputRoot, { recursive: true });
 // then fail against empty output rather than against behaviour (#3165).
 const sandbox = realpathSync(mkdtempSync(join(outputRoot, 'page-budget-test-')));
 const externalOutput = realpathSync(mkdtempSync(join(outputRoot, 'page-budget-external-')));
+const externalInputRoot = mkdtempSync(join(tmpdir(), 'career-ops-pdf-external-input-'));
 const script = join(sandbox, 'generate-pdf.mjs');
 const input = join(sandbox, 'two-pages.html');
 const defaultOverflowInput = join(sandbox, 'three-pages.html');
@@ -43,6 +47,9 @@ copyFileSync(join(ROOT, 'tracker-utils.mjs'), join(sandbox, 'tracker-utils.mjs')
 copyFileSync(join(ROOT, 'tracker-parse.mjs'), join(sandbox, 'tracker-parse.mjs'));
 copyFileSync(join(ROOT, 'tracker-aliases.json'), join(sandbox, 'tracker-aliases.json'));
 copyFileSync(join(ROOT, 'pipeline-lock.mjs'), join(sandbox, 'pipeline-lock.mjs'));
+// ...and generate-pdf resolves user-layer paths via path-resolver.mjs
+// (CAREER_OPS_ROOT), so the fixture carries that too.
+copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs'));
 // generate-pdf.mjs's main-guard lives in lib/is-main-module.mjs (#3170). Without
 // it the copy dies with ERR_MODULE_NOT_FOUND before parsing an argument.
 mkdirSync(join(sandbox, 'lib'), { recursive: true });
@@ -138,6 +145,8 @@ writeFileSync(defaultOverflowInput, `<!doctype html>
   </body>
 </html>
 `, 'utf-8');
+const externalInput = join(externalInputRoot, 'external-source.html');
+copyFileSync(input, externalInput);
 
 function runPdf(args, env = {}) {
   const result = spawnSync(NODE, [script, ...args], {
@@ -307,7 +316,64 @@ try {
   } else {
     fail(`generate-pdf followed an output symlink outside its workspace: ${symlinkEscape.output.trim()}`);
   }
+  // An external input path must not move the renderer's temporary HTML out of
+  // the tracker workspace via the CLI's baseDir derivation.
+  const externalInputPdf = join(sandbox, 'external-input.pdf');
+  const externalInputRun = runPdf([externalInput, externalInputPdf]);
+  const externalTempFiles = readdirSync(externalInputRoot)
+    .filter((name) => name.startsWith('.career-ops-render-'));
+  if (
+    externalInputRun.status !== 0 &&
+    externalInputRun.output.includes('Refusing to write the PDF outside the tracker workspace') &&
+    !existsSync(externalInputPdf) &&
+    externalTempFiles.length === 0
+  ) {
+    pass('generate-pdf rejects external input paths before creating temporary files');
+  } else {
+    fail(`generate-pdf mishandled an external input path: ${externalInputRun.output.trim()}`);
+  }
+
+  // Observe the temporary path before renderer cleanup. The CLI rejects an
+  // external input path, so call the renderer directly to cover its public
+  // baseDir option as well.
+  const { renderHtmlToPdf } = await import(pathToFileURL(script).href);
+  const directPdf = join(sandbox, 'direct-external-base-dir.pdf');
+  let observedTempPath = '';
+  const directResult = await renderHtmlToPdf('<!doctype html><html><body>direct</body></html>', directPdf, {
+    baseDir: externalInputRoot,
+    workspaceRoot: sandbox,
+    inputPath: input,
+    launchBrowser: async () => ({
+      async newPage() {
+        return {
+          async goto(url) { observedTempPath = fileURLToPath(url); },
+          async evaluate() {},
+          async pdf() {
+            return Buffer.from('%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Count 1 >>\nendobj\n%%EOF');
+          },
+        };
+      },
+      async close() {},
+    }),
+  });
+  const tempRelativeToWorkspace = relative(sandbox, observedTempPath);
+  const tempRelativeToExternal = relative(externalInputRoot, observedTempPath);
+  const tempInsideWorkspace = tempRelativeToWorkspace !== ''
+    && !tempRelativeToWorkspace.startsWith('..')
+    && !isAbsolute(tempRelativeToWorkspace);
+  const tempInsideExternal = tempRelativeToExternal === ''
+    || (!tempRelativeToExternal.startsWith('..') && !isAbsolute(tempRelativeToExternal));
+  if (
+    directResult?.outputPath === directPdf &&
+    tempInsideWorkspace &&
+    !tempInsideExternal
+  ) {
+    pass('renderHtmlToPdf keeps an external baseDir temporary file inside the workspace');
+  } else {
+    fail(`renderHtmlToPdf placed its temporary file outside the workspace: ${observedTempPath}`);
+  }
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
   rmSync(externalOutput, { recursive: true, force: true });
+  rmSync(externalInputRoot, { recursive: true, force: true });
 }

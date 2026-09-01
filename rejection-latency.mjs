@@ -42,12 +42,12 @@
  *      node rejection-latency.mjs --tracker path/to/applications.md
  *      node rejection-latency.mjs --self-test
  *
- * Issue #2013 — github.com/santifer/career-ops
+ * Issue #2013 — github.com/career-ops-hq/career-ops
  */
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 
 import { parseActiveInterviews } from './process-quality.mjs';
@@ -55,15 +55,18 @@ import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(CAREER_OPS, 'data/active-interviews.md'))
-  ? join(CAREER_OPS, 'data/active-interviews.md')
-  : join(CAREER_OPS, 'active-interviews.md');
-const DEFAULT_TRACKER_PATH = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
-const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS, 'config/profile.yml');
+const DATA_ROOT = getCareerOpsRoot();
+const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(DATA_ROOT, 'data/active-interviews.md'))
+  ? join(DATA_ROOT, 'data/active-interviews.md')
+  : join(DATA_ROOT, 'active-interviews.md');
+const DEFAULT_TRACKER_PATH = existsSync(join(DATA_ROOT, 'data/applications.md'))
+  ? join(DATA_ROOT, 'data/applications.md')
+  : join(DATA_ROOT, 'applications.md');
+const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(DATA_ROOT, 'config/profile.yml');
 
 export const DEFAULT_COURTESY_DAYS = 30;
 
@@ -561,7 +564,7 @@ function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   if (selfTestMode) {
     runSelfTest();
   }

@@ -48,14 +48,24 @@ if (!existsSync(APPS_FILE)) {
 
 const manifestReports = new Set();
 if (existsSync(PDF_MANIFEST)) {
-  const content = readFileSync(PDF_MANIFEST, 'utf-8');
+  let content;
+  try {
+    content = readFileSync(PDF_MANIFEST, 'utf-8');
+  } catch (err) {
+    if (flags.json) {
+      console.log(JSON.stringify({ error: `Cannot read PDF manifest: ${err.message}`, code: 'manifest-read-error' }));
+    } else {
+      console.error(`❌ Cannot read PDF manifest: ${err.message}`);
+    }
+    process.exit(2);
+  }
   for (const line of content.split('\n')) {
     if (!line.trim() || line.startsWith('#')) continue;
     const parts = line.split('\t');
     const reportVal = parts[0]?.trim();
-    if (reportVal) {
+    if (reportVal && /^\d+$/.test(reportVal)) {
       const norm = parseInt(reportVal, 10);
-      if (!isNaN(norm) && norm > 0) manifestReports.add(norm);
+      if (norm > 0) manifestReports.add(norm);
     }
   }
 }

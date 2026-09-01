@@ -145,3 +145,7 @@ public commit with a stated reason.
 - @chorrell | Christopher Horrell | 2026-08-24 | id:2781 | src:https://github.com/santifer/career-ops/discussions/3275 | n:97
 - @qoodboop | qoodboop | 2026-08-25 | "really good we can focus on something else than doomscrolling hiring contracts" | id:23255979 | src:https://github.com/santifer/career-ops/discussions/3313 | n:98
 - @Nardohsu | 2026-08-25 | "Let's get into the AI world!" | id:25312922 | src:https://github.com/santifer/career-ops/discussions/3336 | n:99
+- @prateeksingh1092 | 2026-08-26 | "A non-bloat, grounded in truth, a true example of leveraging AI as a human counterpart." | id:269049851 | src:https://github.com/santifer/career-ops/discussions/3389 | n:100
+- @nourischw | Nouris Wong | 2026-08-28 | "if you can't beat them join them" | id:8112770 | src:https://github.com/santifer/career-ops/discussions/3490 | n:101
+- @akhil451 | akhil | 2026-08-29 | "akhil451" | id:16731293 | src:https://github.com/santifer/career-ops/discussions/3512 | n:102
+- @jaishankarsurya | 2026-08-31 | "Let’s hope this works" | id:58153836 | src:https://github.com/santifer/career-ops/discussions/3555 | n:103

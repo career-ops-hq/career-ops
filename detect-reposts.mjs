@@ -53,21 +53,24 @@
  *      node detect-reposts.mjs --self-test
  *      node detect-reposts.mjs --help
  *
- * Issue #1205 — github.com/santifer/career-ops
+ * Issue #1205 — github.com/career-ops-hq/career-ops
  */
 
 import { readFileSync, existsSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 // Namespace import, not default: js-yaml 5.x drops the default export, and
 // #2656 migrated the rest of the repo for exactly that reason.
 import * as yaml from 'js-yaml';
 
+import { roleFuzzyMatch } from './role-matcher.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { flagValue, validateFlags, safeIntFlag } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 const SCAN_HISTORY_PATH = join(CAREER_OPS, 'data/scan-history.tsv');
 // Same resolution scan.mjs uses, so a sandboxed run overrides both together.
 const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(CAREER_OPS, 'portals.yml');
@@ -760,7 +763,7 @@ function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   // Replaces a bare --help check that never looked at the other flags, so a
   // mistyped --window was ignored and the scan silently used the 90-day
   // default instead of the window that was asked for (#2919). validateFlags
