@@ -17,7 +17,7 @@ isolated cloud VM; it does not have your machine's files or local configuration.
 
 1. Put career-ops in a **private GitHub repository** that your account can
    access. You can use [GitHub Importer](https://docs.github.com/en/migrations/importing-source-code/using-github-importer/importing-a-repository-with-github-importer)
-   with `https://github.com/santifer/career-ops.git` as the source. A normal
+   with `https://github.com/career-ops-hq/career-ops.git` as the source. A normal
    fork of this public repository is public, so do not use one for personal
    career data.
 2. Open [claude.ai/code](https://claude.ai/code), connect GitHub, and select the
@@ -91,7 +91,7 @@ codex exec "Run career-ops tracker mode and summarize the current statuses."
 <summary>Prefer to clone the repo yourself?</summary>
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops
 npm install
 ```
@@ -110,7 +110,7 @@ The basic workflow is:
 2. Make one focused change and keep personal data such as `cv.md`, `profile.yml`, applications, and reports out of the commit.
 3. Run the relevant checks; for a broad validation, use `node test-all.mjs --quick`.
 4. Commit and push your branch to your fork.
-5. Open a pull request against `santifer/career-ops` and explain what changed and why.
+5. Open a pull request against `career-ops-hq/career-ops` and explain what changed and why.
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full contribution guidelines and examples of good first contributions.
 

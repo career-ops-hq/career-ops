@@ -23,14 +23,14 @@
     "cli"
   ],
   "author": "Santiago Fernández de Valderrama <hi@santifer.io> (https://santifer.io)",
-  "homepage": "https://github.com/santifer/career-ops#readme",
+  "homepage": "https://github.com/career-ops-hq/career-ops#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/santifer/career-ops.git",
+    "url": "git+https://github.com/career-ops-hq/career-ops.git",
     "directory": "scaffolder"
   },
   "bugs": {
-    "url": "https://github.com/santifer/career-ops/issues"
+    "url": "https://github.com/career-ops-hq/career-ops/issues"
   },
   "license": "MIT",
   "dependencies": {}

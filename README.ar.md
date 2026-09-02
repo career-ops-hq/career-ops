@@ -47,6 +47,8 @@
 
 <p align="center" dir="rtl"><strong>أكثر من 740 عرض عمل تم تقييمه · أكثر من 100 سيرة ذاتية مخصصة وموجهة · 1 وظيفة أحلام تم الحصول عليها</strong></p>
 
+<p align="center" dir="rtl"><sub>أنشأه ويصونه <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
+
 <p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Join_the_community-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a></p>
 
 ## ما هو هذا المشروع؟ (What Is This)
@@ -90,7 +92,7 @@
 
 ```bash
 # 1. استنساخ المشروع وتثبيت الاعتماديات
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # مطلوب لتوليد ملفات الـ PDF وسحب البيانات
 
@@ -300,8 +302,8 @@ career-ops يعمل على ويندوز. إذا فشل تحميل المهارا
 
 نرحب بكافة المساهمات والمقترحات لتطوير هذا النظام ودعمه! انضم إلى مجتمعنا على Discord وشارك تجربتك وقصتك معنا.
 
-<a href="https://github.com/santifer/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=santifer/career-ops" alt="Contributors" />
+<a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" alt="Contributors" />
 </a>
 
-هل نجحت في الحصول على وظيفة أحلامك باستخدام هذا النظام؟ [شارك قصتك معنا لتلهم الآخرين!](https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml)
+هل نجحت في الحصول على وظيفة أحلامك باستخدام هذا النظام؟ [شارك قصتك معنا لتلهم الآخرين!](https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml)

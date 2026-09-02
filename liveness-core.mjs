@@ -91,6 +91,11 @@ const APPLY_PATTERNS = [
   /panelu aplikowania/i,
   // Accent-free: apply controls go through normalizeForMatch too ("wyślij" → "wyslij").
   /wyslij (cv|aplikacj)/i,
+  // Chinese MokaHR and Feishu Jobs detail pages use these exact control texts.
+  // Keep them narrow: bare “申请” appears in descriptive prose, while longer
+  // labels containing “投递” can be status/history controls rather than Apply.
+  /^申请职位$/,
+  /^投递$/,
 ];
 
 const MIN_CONTENT_CHARS = 300;

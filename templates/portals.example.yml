@@ -885,6 +885,8 @@ search_queries:
 #   tencent         careers.tencent.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   meituan         zhaopin.meituan.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   alibaba         talent.alibaba.com   (zh-CN board; each keywords: entry queried server-side, results deduped)
+#   feishu-jobs     jobs.bytedance.com or <tenant>.jobs.feishu.cn
+#   mokahr          app.mokahr.com/(social-recruitment|campus-recruitment|apply)/<org>/<siteId>
 #   workday         <tenant>.wd<N>.myworkdayjobs.com[/<locale>]/<board>
 #   avature         <tenant>.avature.net  (branded host → provider: avature + api: the /careers/SearchJobs URL)
 #   amazon          amazon.jobs           (global board; provider: amazon + an amazon: filter block, see below)
@@ -987,6 +989,18 @@ search_queries:
 #   keywords: ["AI", "大模型"]   # each keyword is a separate server-side query, results deduped;
 #                                # omit keywords to pull the whole board
 #   max_pages: 50          # optional per-keyword page cap (100 posts/page, default 50)
+#   enabled: true
+#
+# - name: Example Feishu Jobs Co
+#   careers_url: https://exampleco.jobs.feishu.cn
+#   keywords: ["AI", "大模型"]
+#   max_pages: 20          # optional per-keyword page cap (100 posts/page)
+#   enabled: true
+#
+# - name: Example MokaHR Co
+#   careers_url: https://app.mokahr.com/social-recruitment/exampleco/123456
+#   keywords: ["AI", "大模型"]
+#   max_pages: 10          # optional per-keyword page cap (20 posts/page)
 #   enabled: true
 #
 # - name: Example Workable Co
@@ -1428,6 +1442,16 @@ tracked_companies:
     careers_url: https://openai.com/careers
     scan_method: websearch
     scan_query: 'site:openai.com/careers "Solutions" OR "Forward Deployed" OR "AI Engineer"'
+    enabled: true
+
+  - name: ByteDance
+    careers_url: https://jobs.bytedance.com
+    keywords: ["AI", "大模型", "Agent"]
+    enabled: true
+
+  - name: DeepSeek
+    careers_url: https://app.mokahr.com/social-recruitment/high-flyer/140576
+    keywords: ["AI", "大模型", "Agent"]
     enabled: true
 
   # -- Voice AI & Conversational AI --

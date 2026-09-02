@@ -34,7 +34,7 @@
  * Default range: the current ISO week (Monday–Sunday), matching the
  * `isoWeek` convention already used by `stats.mjs`'s scan-run trends.
  *
- * Issue #2129 — github.com/santifer/career-ops
+ * Issue #2129 — github.com/career-ops-hq/career-ops
  */
 
 import { readFileSync, existsSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'fs';

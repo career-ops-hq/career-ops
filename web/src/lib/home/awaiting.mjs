@@ -1,3 +1,11 @@
+import { canonStatus } from "../status-alias.mjs";
+
+// states.yml forbids a date in the status cell, but real trackers carry one
+// anyway ("Evaluated 2026-08-21") and /^evaluat/i tolerated that. canonStatus()
+// is an exact-match alias table, so the date comes off before folding —
+// otherwise this narrows the very case the existing suite already pins.
+const baseStatus = (s) => String(s ?? "").replace(/\s+\d{4}-\d{2}-\d{2}\s*$/, "").trim();
+
 /**
  * Which scored-but-undecided applications the Today page shows, and in what
  * order.
@@ -38,7 +46,14 @@ export function pickAwaitingDecision(applications, scoreOf, limit = 6) {
     return Number.isNaN(n) ? -1 : n;
   };
   return applications
-    .filter((a) => /^evaluat/i.test(a.status ?? ""))
+    // canonStatus(), not /^evaluat/i: "evaluated" has nine alias forms here
+    // (states.yml plus the web-only `evaluado`) and the prefix test caught
+    // only evaluated/evaluada/evaluar. A Turkish tracker using
+    // `değerlendirildi`, or a Spanish one using `condicional`/`verificar`,
+    // rendered an EMPTY queue — the same silent-hiding failure this module
+    // exists to fix. status-alias.mjs is the single alias table and its test
+    // loads states.yml, so this cannot drift as a literal regex does.
+    .filter((a) => canonStatus(baseStatus(a.status)) === "EVALUATED")
     // A row with no date sorts LAST rather than jumping the queue. "" compares
     // LESS than any real date, and the comparison is descending (b before a),
     // so "least" lands at the end — which is where an undated row belongs in a
