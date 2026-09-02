@@ -2721,8 +2721,11 @@ async function main() {
           totalDupes++;
           continue;
         }
-        const key = companyRoleDedupKey(job.company, job.title, canonicalizeCompany);
-        if (seenCompanyRoles.has(key)) {
+        // An aggregator feed (portals.yml `aggregator: true`) names itself as
+        // the company, so two same-titled posts are two employers' jobs: only
+        // the URL dedups there.
+        const key = company.aggregator === true ? null : companyRoleDedupKey(job.company, job.title, canonicalizeCompany);
+        if (key !== null && seenCompanyRoles.has(key)) {
           totalDupes++;
           continue;
         }
@@ -2737,7 +2740,7 @@ async function main() {
         }
         // Mark as seen to avoid intra-scan dupes
         seenUrls.add(dedupUrl);
-        seenCompanyRoles.add(key);
+        if (key !== null) seenCompanyRoles.add(key);
         // Tag with the company's careers domain so verify can offer a 404/410
         // rediscovery fallback. A null domain (no careers_url) marks the offer
         // as broad-discovery — ineligible for the fallback, per the issue scope.

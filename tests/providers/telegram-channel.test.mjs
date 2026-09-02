@@ -13,7 +13,7 @@ const post = (id, date, textHtml, extraClass = '') => `
 <div class="tgme_widget_message_wrap js-widget_message_wrap">
   <div class="tgme_widget_message text_not_supported_wrap ${extraClass} js-widget_message" data-post="devjobs/${id}" data-view="x">
     <div class="tgme_widget_message_author accent_color"><a class="tgme_widget_message_owner_name" href="https://t.me/devjobs"><span dir="auto">Game Development Jobs</span></a></div>
-    <div class="tgme_widget_message_text js-message_text" dir="auto">${textHtml}</div>
+    ${textHtml === null ? '<a class="tgme_widget_message_photo_wrap" href="https://t.me/devjobs/' + id + '"></a>' : `<div class="tgme_widget_message_text js-message_text" dir="auto">${textHtml}</div>`}
     <span class="tgme_widget_message_meta"><a class="tgme_widget_message_date" href="https://t.me/devjobs/${id}">${date ? `<time datetime="${date}" class="time">16:01</time>` : ''}</a></span>
   </div>
 </div>`;
@@ -28,6 +28,7 @@ const P_OLD = post(977, '2024-01-05T09:00:00+00:00', 'Very old post');
 const P_NO_TIME = post(12507, '', 'Undated post');
 const P_LONG = post(12506, '2026-08-31T10:00:00+00:00', 'word '.repeat(30).trim());
 const SERVICE = post(1, '2024-01-01T00:00:00+00:00', 'Channel created', 'service_message');
+const MEDIA_ONLY = post(12505, '2026-08-31T09:00:00+00:00', null);
 
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'providers/telegram-channel.mjs')).href);
@@ -42,8 +43,8 @@ try {
 
   // --- parser ---------------------------------------------------------------
   const parsed = parseChannelPage(page(P1, P2), 'devjobs');
-  if (parsed.posts.length === 2 && parsed.noPreview === false && parsed.postMarkup === 2) pass('parseChannelPage() finds both posts on a preview page');
-  else fail(`parseChannelPage() → ${parsed.posts.length} posts, noPreview=${parsed.noPreview}, postMarkup=${parsed.postMarkup}`);
+  if (parsed.posts.length === 2 && parsed.noPreview === false && parsed.textPosts === 2) pass('parseChannelPage() finds both posts on a preview page');
+  else fail(`parseChannelPage() → ${parsed.posts.length} posts, noPreview=${parsed.noPreview}, textPosts=${parsed.textPosts}`);
 
   const first = parsed.posts[0];
   if (first?.id === 12509 && first.url === 'https://t.me/devjobs/12509') pass('a post keys on its permalink https://t.me/<channel>/<id>');
@@ -72,11 +73,15 @@ try {
   else fail(`foreign post leaked: ${JSON.stringify(foreign.posts[0])}`);
 
   const service = parseChannelPage(page(SERVICE, P1), 'devjobs');
-  if (service.posts.length === 1 && service.posts[0].id === 12509 && service.postMarkup === 1) pass('service messages ("Channel created") are neither posts nor post markup');
-  else fail(`service page → ${JSON.stringify({ n: service.posts.length, postMarkup: service.postMarkup })}`);
+  if (service.posts.length === 1 && service.posts[0].id === 12509 && service.textPosts === 1) pass('service messages ("Channel created") are neither posts nor text posts');
+  else fail(`service page → ${JSON.stringify({ n: service.posts.length, textPosts: service.textPosts })}`);
+
+  const media = parseChannelPage(page(MEDIA_ONLY), 'devjobs');
+  if (media.posts.length === 0 && media.textPosts === 0) pass('a media-only post (no text) is neither a posting nor a text post');
+  else fail(`media-only page → ${JSON.stringify({ n: media.posts.length, textPosts: media.textPosts })}`);
 
   const stub = parseChannelPage(NO_PREVIEW, 'gophersjob');
-  if (stub.posts.length === 0 && stub.noPreview === true && stub.postMarkup === 0) pass('the "Contact @handle" stub is recognised as no-public-preview');
+  if (stub.posts.length === 0 && stub.noPreview === true && stub.textPosts === 0) pass('the "Contact @handle" stub is recognised as no-public-preview');
   else fail(`stub → ${JSON.stringify(stub)}`);
 
   // --- fetch: redirect guard, mapping, paging ------------------------------
@@ -161,12 +166,24 @@ try {
   let drift = null;
   try { await tg.fetch({ name: 'TG', channel: 'devjobs' }, { ...quiet, fetchText: async () => page(P1, P2).replaceAll('tgme_widget_message_wrap', 'tgme_post_wrap_v2') }); }
   catch (e) { drift = e.message; }
-  if (drift && /markup changed/.test(drift) && /2 posts/.test(drift)) pass('a page with post markup that no longer parses throws "markup changed" (fails closed)');
+  if (drift && /markup changed/.test(drift) && /2 text posts/.test(drift)) pass('a page with post markup that no longer parses throws "markup changed" (fails closed)');
   else fail(`drifted page did not throw as expected: ${JSON.stringify(drift)}`);
 
   const serviceOnly = await tg.fetch({ name: 'TG', channel: 'devjobs' }, { ...quiet, fetchText: async () => page(SERVICE) });
   if (Array.isArray(serviceOnly) && serviceOnly.length === 0) pass('a channel whose only message is "Channel created" is an empty board, not a drift error');
   else fail(`service-only page → ${JSON.stringify(serviceOnly)}`);
+
+  // A renamed data-post attribute is the other drift mode: the wrappers are
+  // still there, the parser just cannot key them.
+  let drift2 = null;
+  try { await tg.fetch({ name: 'TG', channel: 'devjobs' }, { ...quiet, fetchText: async () => page(P1, P2).replaceAll('data-post=', 'data-msg=') }); }
+  catch (e) { drift2 = e.message; }
+  if (drift2 && /markup changed/.test(drift2)) pass('a page whose data-post attribute was renamed also throws "markup changed"');
+  else fail(`data-post drift did not throw: ${JSON.stringify(drift2)}`);
+
+  const mediaOnly = await tg.fetch({ name: 'TG', channel: 'devjobs' }, { ...quiet, fetchText: async () => page(MEDIA_ONLY, MEDIA_ONLY.replace('12505', '12504')) });
+  if (Array.isArray(mediaOnly) && mediaOnly.length === 0) pass('a media-only channel is an empty board, not a drift error');
+  else fail(`media-only page → ${JSON.stringify(mediaOnly)}`);
 
   // A page that does not move back must not append the same posts twice.
   const stalled = await tg.fetch({ name: 'TG', channel: 'devjobs', max_pages: 4, since_days: 36500 }, { ...quiet, fetchText: async () => page(P1, P2) });

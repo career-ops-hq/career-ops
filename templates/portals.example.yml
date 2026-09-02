@@ -1421,9 +1421,10 @@ search_queries:
 # scan-history, an aggregator's clusters are indistinguishable by shape from
 # legitimate ones (both around 2 sightings over 2 dates). See #2703.
 #
-# Scanning is unaffected — the postings are real and worth finding. Only the
-# repost inference over them is meaningless. Companies with no flag are
-# untouched, so leaving this out changes nothing.
+# Scanning keeps every posting: on a flagged entry the intra-scan company+role
+# dedup is skipped (two identical titles under the board's name are two jobs)
+# and only the URL dedups. Companies with no flag are untouched, so leaving
+# this out changes nothing.
 #
 #   - name: SomeBoard
 #     careers_url: https://jobs.lever.co/someboard

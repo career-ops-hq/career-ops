@@ -150,6 +150,13 @@ if (isRetryableError(nonTypeErrorLookalike) === true) {
     }
     if (err && isRetryableError(err) === false) pass('a manual-redirect 3xx is not retried');
     else fail('a manual-redirect 3xx must not be retryable');
+    const { fetchTextWithRetry } = await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
+    let requests = 0;
+    const ctx = { fetchText: async (u, o) => { requests++; return fetchText(u, o); }, sleep: async () => {} };
+    let viaRetry = null;
+    try { await fetchTextWithRetry(ctx, 'https://t.me/s/gophersjob', { redirect: 'manual' }); } catch (e) { viaRetry = e; }
+    if (requests === 1 && viaRetry?.status === 302 && viaRetry.location === 'https://t.me/gophersjob') pass('fetchTextWithRetry makes exactly one request for a 3xx and rethrows it with status + location');
+    else fail(`fetchTextWithRetry on a 3xx: requests=${requests}, err=${JSON.stringify({ status: viaRetry?.status, location: viaRetry?.location })}`);
   } catch (e) {
     fail(`manual-redirect test threw: ${e.message}`);
   } finally {

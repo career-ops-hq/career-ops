@@ -41,10 +41,10 @@ function headline(textHtml) {
  *
  * @param {unknown} html
  * @param {string} channel
- * @returns {{ posts: Array<{ id: number, url: string, title: string, description: string, postedAt: number|undefined }>, noPreview: boolean, postMarkup: number }}
+ * @returns {{ posts: Array<{ id: number, url: string, title: string, description: string, postedAt: number|undefined }>, noPreview: boolean, textPosts: number }}
  */
 export function parseChannelPage(html, channel) {
-  if (typeof html !== 'string' || !html) return { posts: [], noPreview: false, postMarkup: 0 };
+  if (typeof html !== 'string' || !html) return { posts: [], noPreview: false, textPosts: 0 };
   const chunks = html.split(/<div class="tgme_widget_message_wrap/).slice(1);
   const posts = [];
   const seen = new Set();
@@ -71,12 +71,15 @@ export function parseChannelPage(html, channel) {
   }
   // No preview: t.me serves the generic "Telegram: Contact @handle" page instead.
   const noPreview = posts.length === 0 && /<meta property="og:title" content="Telegram: Contact @/i.test(html);
-  // Post-shaped markup counted independently of the split above, so a renamed
+  // How many of the channel's own, text-bearing, non-service posts the page
+  // carries by markup — counted independently of the split above, so a renamed
   // wrapper class or data-post attribute still reads as "posts we failed to
-  // parse" rather than "no posts". Service messages are not posts.
-  const serviceCount = (html.match(/\bservice_message\b/g) || []).length;
-  const postMarkup = Math.max(chunks.length, (html.match(/data-post="/g) || []).length) - serviceCount;
-  return { posts, noPreview, postMarkup };
+  // parse", while a media-only or service-only page stays an empty board.
+  const own = Math.max(chunks.length, (html.match(new RegExp(`data-post="${channel}/`, 'gi')) || []).length);
+  const withText = (html.match(/tgme_widget_message_text/g) || []).length;
+  const service = (html.match(/\bservice_message\b/g) || []).length;
+  const textPosts = Math.max(0, Math.min(own, withText) - service);
+  return { posts, noPreview, textPosts };
 }
 
 /** @param {unknown} raw @param {number} fallback @param {number} cap */
@@ -122,12 +125,12 @@ export default {
         }
         throw err;
       }
-      const { posts, noPreview, postMarkup } = parseChannelPage(html, channel);
+      const { posts, noPreview, textPosts } = parseChannelPage(html, channel);
       if (page === 0 && noPreview) {
         throw new Error(`telegram-channel: @${channel} has no public preview (private channel, or preview switched off) — it cannot be read without an authenticated Telegram integration`);
       }
-      if (page === 0 && posts.length === 0 && postMarkup > 0) {
-        throw new Error(`telegram-channel: @${channel} served ${postMarkup} posts but none parsed — t.me markup changed`);
+      if (page === 0 && posts.length === 0 && textPosts > 0) {
+        throw new Error(`telegram-channel: @${channel} served ${textPosts} text posts but none parsed — t.me markup changed`);
       }
       if (posts.length === 0) break;
       const oldest = Math.min(...posts.map((p) => p.id));
