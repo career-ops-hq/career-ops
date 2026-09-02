@@ -274,14 +274,23 @@ function claudeConfigDir() {
 // offer-liveness verification in AGENTS.md cannot be met (#2752).
 //
 // Only ENABLED plugins count: an installed-but-disabled plugin still ships its
-// manifest on disk, but registers no server. Enumeration is driven by the two
-// manifests rather than by walking plugins/cache, so a large cache costs
-// nothing and disabled plugins are never read.
-function isPlaywrightMcpFromPlugin() {
+// manifest on disk, but registers no server. Claude Code merges enabledPlugins
+// across user config (~/.claude/settings.json), project config
+// (.claude/settings.json), and project-local config
+// (.claude/settings.local.json), with project settings taking precedence over
+// user settings (#3698). Enumeration is driven by the manifests rather than by
+// walking plugins/cache, so a large cache costs nothing and disabled plugins
+// are never read.
+function isPlaywrightMcpFromPlugin(root) {
   const configDir = claudeConfigDir();
 
-  const enabled = readConfigIfPresent(join(configDir, 'settings.json'))?.enabledPlugins;
-  if (!enabled || typeof enabled !== 'object') return false;
+  const enabled = [
+    readConfigIfPresent(join(configDir, 'settings.json'))?.enabledPlugins,
+    root ? readConfigIfPresent(join(root, '.claude', 'settings.json'))?.enabledPlugins : null,
+    root ? readConfigIfPresent(join(root, '.claude', 'settings.local.json'))?.enabledPlugins : null,
+  ].filter((e) => e && typeof e === 'object')
+    .reduce((acc, e) => Object.assign(acc, e), {});
+  if (!Object.keys(enabled).length) return false;
 
   const installed = readConfigIfPresent(join(configDir, 'plugins', 'installed_plugins.json'))?.plugins;
   if (!installed || typeof installed !== 'object') return false;
@@ -314,7 +323,7 @@ function isPlaywrightMcpConfigured(root, activeCli) {
   if (inProject) return true;
   // Gated behind the project scan, so an already-configured project pays no
   // extra I/O and non-plugin CLIs never touch the user config dir.
-  return entry.plugins === true && isPlaywrightMcpFromPlugin();
+  return entry.plugins === true && isPlaywrightMcpFromPlugin(root);
 }
 
 // CLI resolution: --cli flag > $CAREER_OPS_CLI > .env (CAREER_OPS_CLI=...) >
