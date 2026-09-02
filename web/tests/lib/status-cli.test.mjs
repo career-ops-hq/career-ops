@@ -84,3 +84,54 @@ test("a non-string error field is not passed through as one", () => {
   assert.equal(clientErrorMessage({ error: { nested: true } }), "status update failed");
   assert.equal(clientErrorMessage({}), "status update failed");
 });
+
+// ── the shape set-status.mjs actually prints ─────────────────────────────────
+// Every test above feeds a COMPACT object, and the CLI prints none. Its --json
+// path ends in `JSON.stringify(result, null, 2)`, so the document is pretty and
+// its first line is a bare `{`. Reading one line at a time therefore matched
+// nothing on the success path: /api/status answered 500 "status update returned
+// no result" for a tracker row it had just written, and the suite stayed green
+// because no case here had ever been pretty. So these build their document the
+// same way the CLI does rather than hand-writing one.
+
+// set-status.mjs's own `result` object, verbatim in shape, for a real transition.
+const SET_STATUS_RESULT = {
+  changed: true,
+  num: 42,
+  company: "Acme Corp",
+  role: "QA Engineer",
+  oldStatus: "Evaluated",
+  newStatus: "SKIP",
+  statusLogged: true,
+  tracker: "data/applications.md",
+};
+
+test("a pretty-printed document is read, because that is the only shape the CLI prints", () => {
+  const stdout = `${JSON.stringify(SET_STATUS_RESULT, null, 2)}
+`;
+  assert.deepEqual(parseCliJson(stdout), SET_STATUS_RESULT);
+});
+
+test("a diagnostic ahead of a pretty document still does not shadow it", () => {
+  const stdout = `warning: ledger append skipped for row {12} (no notes column)
+${JSON.stringify(SET_STATUS_RESULT, null, 2)}
+`;
+  assert.deepEqual(parseCliJson(stdout), SET_STATUS_RESULT);
+});
+
+test("an object nested in an array does not end the scan before the real document", () => {
+  // A pretty array element opens its own line with `{`, so it is a candidate
+  // slice scanned before the outermost one. It has to fail to parse - trailing
+  // `]`/`}` lines follow it - rather than be returned as the document.
+  const withArray = { changed: false, rows: [{ num: 11 }, { num: 12 }], tracker: "data/applications.md" };
+  const stdout = `${JSON.stringify(withArray, null, 2)}
+`;
+  assert.deepEqual(parseCliJson(stdout), withArray);
+});
+
+test("a pretty document wins over an earlier compact one, same as line-at-a-time did", () => {
+  const stdout = `{"note":"pre-flight"}
+${JSON.stringify(SET_STATUS_RESULT, null, 2)}
+`;
+  assert.deepEqual(parseCliJson(stdout), SET_STATUS_RESULT);
+});

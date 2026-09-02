@@ -13,9 +13,23 @@ const GENERIC_FAILURE = "status update failed";
  * not parse. The route then reports 500 for a write the CLI already committed,
  * losing `changed` and `statusLogged` with it.
  *
- * So the document is read from the end: the last line that parses as a plain
- * object is the result. A diagnostic that happens to be valid JSON cannot shadow
- * it, because the result is printed last.
+ * So the document is read from the end: the LAST line that *opens* a parsable
+ * object, together with every line after it, is the result. A diagnostic that
+ * happens to be valid JSON cannot shadow it, because the result is printed last.
+ *
+ * The document is a slice rather than a single line because the CLIs pretty-print
+ * it. set-status.mjs ends in JSON.stringify(result, null, 2) - as does most of
+ * this repo - so the object spans many lines and its first line is the bare `{`,
+ * which parses as nothing on its own. Matching one line at a time therefore
+ * failed on every successful --json run: the tracker was written, the ledger row
+ * appended, and /api/status still answered 500 "status update returned no result"
+ * because the only shape it could read was a compact object set-status.mjs never
+ * prints. Every test fed it one, which is why the suite stayed green.
+ *
+ * A pretty document's inner braces (an object inside an array) open a candidate
+ * slice of their own, and those slices carry trailing `]`/`}` lines that do not
+ * parse - so scanning on past them to the outermost `{` is the behaviour here,
+ * not a lucky escape.
  *
  * @param {string} stdout
  * @returns {Record<string, unknown> | null}
@@ -23,15 +37,14 @@ const GENERIC_FAILURE = "status update failed";
 export function parseCliJson(stdout) {
   const lines = String(stdout ?? "").split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line.startsWith("{")) continue;
+    if (!lines[i].trimStart().startsWith("{")) continue;
     try {
-      const parsed = JSON.parse(line);
+      const parsed = JSON.parse(lines.slice(i).join("\n"));
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         return /** @type {Record<string, unknown>} */ (parsed);
       }
     } catch {
-      // Not the document line. Keep scanning earlier lines.
+      // Not where the document starts. Keep scanning earlier lines.
     }
   }
   return null;
