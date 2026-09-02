@@ -179,6 +179,81 @@ export function emitJsonReceipt(receipt, exitCode) {
 // the title filter's short-acronym auto-anchor (#3274).
 export { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter };
 
+// ── Title filter overrides (per-company broadened title net) ───────
+// Optional. `title_filter_overrides` in portals.yml lets specific companies
+// (matched by an explicit slug list — the company/tenant slug the scanner
+// already derives from the job-board-aggregator dataset entry, e.g. the
+// Workday tenant "uwaterloo") opt into a WIDER positive keyword net than the
+// global `title_filter.positive`, without loosening the global filter for
+// every other company in the sweep. Distinct from (and composes cleanly
+// with) `content_filter.by_title_keyword`, which scopes a stricter
+// description-level check to specific title keywords — this scopes a
+// broader title-level net to specific companies.
+//
+// Shape:
+//   title_filter_overrides:
+//     - companies: ["uwaterloo", "ubc", "fanshawec"]
+//       positive_extra:
+//         - "Administrator"
+//         - "Coordinator"
+//
+// v1 keeps matching simple and explicit: a literal (case-insensitive) slug
+// list, no fuzzy company-type inference, no domain heuristics.
+export function buildTitleFilterOverrides(overrides) {
+  const map = new Map();
+  if (!Array.isArray(overrides)) return map;
+  for (const entry of overrides) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const companies = Array.isArray(entry.companies) ? entry.companies : [];
+    const extraRaw = Array.isArray(entry.positive_extra) ? entry.positive_extra : [];
+    // compilePositiveKeyword (not compileKeyword) so positive_extra supports
+    // the same AND-groups / `word:`/`stem:` prefixes as title_filter.positive —
+    // it's an additive positive list, so it should behave like one.
+    const matchers = extraRaw
+      .filter(k => typeof k === 'string')
+      .map(k => k.trim().toLowerCase())
+      .filter(k => k.length > 0)
+      .map(compilePositiveKeyword);
+    if (matchers.length === 0) continue; // nothing to add — skip the entry entirely
+    for (const slug of companies) {
+      if (typeof slug !== 'string' || !slug.trim()) continue;
+      const key = slug.trim().toLowerCase();
+      map.set(key, (map.get(key) || []).concat(matchers));
+    }
+  }
+  return map;
+}
+
+// Wraps buildTitleFilter() with per-company overrides from
+// buildTitleFilterOverrides(). Returns (title, companySlug) => boolean:
+//   - if the global title_filter already matches, pass (companySlug unused)
+//   - else, if companySlug has override entries, pass when any of its
+//     positive_extra keywords match AND no global negative keyword matches
+//   - a company with no override entry behaves EXACTLY like the plain
+//     buildTitleFilter(titleFilter) — the mechanism is a strict no-op for
+//     everyone not explicitly listed.
+export function buildTitleFilterWithOverrides(titleFilter, overridesMap) {
+  const base = buildTitleFilter(titleFilter);
+  const overrides = overridesMap instanceof Map ? overridesMap : new Map();
+  if (overrides.size === 0) return (title) => base(title);
+
+  const normalize = (arr) => (Array.isArray(arr) ? arr : [])
+    .filter(k => typeof k === 'string')
+    .map(k => k.trim().toLowerCase())
+    .filter(k => k.length > 0)
+    .map(compileKeyword);
+  const negative = normalize(titleFilter?.negative);
+
+  return (title, companySlug) => {
+    if (base(title)) return true;
+    const extra = overrides.get(String(companySlug ?? '').trim().toLowerCase());
+    if (!extra || extra.length === 0) return false;
+    const lower = String(title ?? '').toLowerCase();
+    if (negative.some(m => m(lower))) return false;
+    return extra.some(m => m(lower));
+  };
+}
+
 // Compiled-matcher cache for matchedTitleKeywords(), keyed by the
 // `title_filter.positive` array reference. The scan loop calls this once per
 // job with the same titleFilter config object, so caching avoids recompiling

@@ -515,6 +515,39 @@ title_filter:
     - "Head"
     - "Director"
 
+# -- Title filter overrides (optional, scan-ats-full.mjs only) --
+# The reverse ATS sweep (scan-ats-full.mjs) applies ONE global title_filter
+# to every company in the public dataset it walks. Some employers legitimately
+# deserve a WIDER title net than everyone else, without loosening the global
+# filter for the rest of the sweep. title_filter_overrides lets specific
+# companies (matched by an explicit slug list) OR extra positive keywords
+# into their own title match, for that scan run only.
+#
+# `companies` matches the company/tenant slug the scanner already derives
+# from the job-board-aggregator dataset entry (e.g. for a Workday tenant at
+# https://uwaterloo.wd3.myworkdayjobs.com/..., the slug is "uwaterloo" — the
+# same value scan-ats-full.mjs logs as the board name on fetch errors).
+# `positive_extra` keywords are ADDITIVE to (never a replacement for)
+# title_filter.positive above, and the global `negative` list still applies.
+#
+# v1 keeps matching simple and explicit: a literal slug list, no
+# company-type inference and no domain heuristics. A company not listed in
+# any entry here is completely unaffected — this is opt-in per company.
+#
+# Example: broaden the net for a few university/college employers so
+# general campus-admin roles surface alongside EdTech/ID-focused titles.
+# Add your own institutions/companies the same way.
+#
+# title_filter_overrides:
+#   - companies: ["uwaterloo", "ubc", "fanshawec"]
+#     positive_extra:
+#       - "Administrator"
+#       - "Coordinator"
+#       - "Assistant"
+#       - "Program Administrator"
+#       - "Registrar"
+#       - "Student Services"
+
 # -- Search queries --
 # Each query triggers a WebSearch. Use site: to filter by portal.
 # The scanner extracts title, URL, and company from results.
