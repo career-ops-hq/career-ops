@@ -212,10 +212,9 @@ export function computeCalibration(rows, journals, opts = {}) {
 
 // --- Filesystem assembly --------------------------------------------------
 
-function loadTrackerRows(appsFile) {
+export function loadTrackerRows(appsFile) {
   const lines = readFileSync(appsFile, 'utf-8').split(/\r?\n/);
-  const headerLine = lines.find((l) => isHeaderRow(l));
-  const colmap = headerLine ? resolveColumns(headerLine) : undefined;
+  const colmap = resolveColumns(lines);
   const rows = [];
   for (const line of lines) {
     if (!line.trim().startsWith('|') || isHeaderRow(line) || isSeparatorRow(line)) continue;
