@@ -150,6 +150,7 @@ To propose a source (yours or anyone's): [open a source proposal](https://github
 - **PRs that add centralized or hosted infrastructure to the core** (proxies, aggregation services, shared Workers). That's the separate opt-in service, not the open-core — bring it to the [direction discussion](https://github.com/career-ops-hq/career-ops/discussions/904) first.
 - **Universal aggregation indexes as a dependency** — integrating a single third-party service that unifies listings across many sources into one pipe career-ops reads from. Reading individual boards where employers post is exactly what `providers/` is for and stays welcome; the *unified offers-aggregation layer itself* is first-party, the same boundary that keeps the web experience first-party ([#904](https://github.com/career-ops-hq/career-ops/discussions/904) / [#156](https://github.com/career-ops-hq/career-ops/discussions/156)). This boundary applies to the plugin registry as well as core.
 - **Integrations that send your data to a third-party service** — providers or sync features that require a third-party account or push your CV, pipeline, or notes out to an external service. career-ops is local-first and zero-keys: your job-search data stays on your machine. Reading *public* job-listing APIs locally is welcome (that's how the built-in providers work); routing your personal data through someone else's service is not.
+- **Integrations whose primary consumer is a third-party product or service** — a module, contract or adapter whose main caller is someone else's product (a bot, a SaaS, an external orchestrator) belongs in a plugin or a separate project, never in core, even when the code itself is generic. The project's own first-party surfaces are the exception: the official web experience and the opt-in shared service described in [#904](https://github.com/career-ops-hq/career-ops/discussions/904) and [#156](https://github.com/career-ops-hq/career-ops/discussions/156) are built and operated by the project itself, are always opt-in, and land in core as first-party changes.
 - **PRs that add third-party hosted entry-points or service badges to the README** — links or embeds that route users' resumes or job data through a service the project doesn't operate. The README stays to assets the project controls, and the official online experience is something we keep first-party (see [The Vision](https://github.com/career-ops-hq/career-ops/discussions/156)). Projects built on career-ops are welcome — share them in the [Discord](https://discord.gg/8pRpHETxa4) or Discussions, just not on the front page.
 - **PRs containing personal data** (real CVs, emails, phone numbers). Use `examples/` with fictional data instead.
 
@@ -171,7 +172,6 @@ node test-all.mjs --quick     # Full suite, skipping the dashboard build
 node test-all.mjs --only providers/themuse   # Run just one provider's test(s)
 ```
 
-**Adding a test for a new scanner provider:** add one file at
 **Any new test belongs in its own file** under `tests/`, not as a numbered
 section inside `test-all.mjs`. Anything matching `tests/**/*.test.mjs` is
 auto-discovered, so there is nothing to register and no section number to pick.
@@ -179,8 +179,10 @@ A new file also collides with nobody: several contributors adding sections to
 `test-all.mjs` at the same time all edit its final lines, and each merge forces
 a rebase on the rest.
 
-`tests/providers/{name}.test.mjs` — it's auto-discovered (`tests/**/*.test.mjs`),
-no registration needed. Do not add a section to `test-all.mjs` for this.
+**Adding a scanner provider?** See
+[`providers/ADDING_A_PROVIDER.md`](providers/ADDING_A_PROVIDER.md) — the full
+contract, the mandatory guards, and what `tests/providers/{name}.test.mjs`
+must cover.
 
 **Adding a test for the web app:** web suites live under `web/tests/`, mirroring
 the tested module's path below `web/src/` (`src/lib/clean-chips.mjs` →

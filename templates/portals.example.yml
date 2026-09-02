@@ -82,7 +82,7 @@
 # location_filter:
 #   # always_allow is checked BEFORE block — keep this list to your home region only
 #   always_allow:
-#     - "United States"   # (replace with your home region)
+#     - "United States"   # also admits City, ST homonyms (Dublin, OH) via USPS states
 #     - "New York"
 #   allow:
 #     - "Remote"
@@ -733,6 +733,12 @@ search_queries:
   #   query: 'site:jobfluent.com Madrid OR Barcelona "Engineer" OR "Manager" OR "Sales" OR "Marketing"'
   #   enabled: true
 
+  # NOTE: Welcome to the Jungle isn't a Spain-only or tech-only board — it
+  # also runs a large France listing and covers non-tech professions. The
+  # name/query below is scoped narrowly to Spain+AI/tech on purpose, to match
+  # this example profile's targeting; broaden the site: query (e.g. drop
+  # "Spain OR Madrid OR Barcelona" for France, or swap the title terms for
+  # your own profession) if you want its wider listings.
   - name: Welcome to the Jungle — Spain tech
     query: 'site:welcometothejungle.com Spain OR Madrid OR Barcelona "AI Engineer" OR "Solutions Architect" OR "DevRel" OR "Forward Deployed"'
     enabled: true
@@ -1112,6 +1118,13 @@ search_queries:
 #   provider: deutschebahn                # optional — db.jobs host also auto-detects
 #   enabled: true
 #
+# - name: Garena                          # single-company; public zero-auth POST API
+#   careers_url: https://careers.garena.com/global   # auto-detects on careers.garena.com
+#   provider: garena                      # optional — careers.garena.com host also auto-detects
+#   garena:
+#     office: global                      # optional — sent as the API office parameter and reused in job URLs; no client-side filtering
+#   enabled: true
+#
 # - name: Heckler & Koch                  # single-company; SSR Nuxt vacancy list
 #   careers_url: https://www.heckler-koch.com/de/Karriere/Stellenangebote
 #   provider: hecklerkoch                 # optional — heckler-koch.com host also auto-detects
@@ -1151,6 +1164,18 @@ search_queries:
 # - name: 4 Day Week                      # 4-day-week / reduced-hours roles
 #   provider: 4dayweek
 #   max_pages: 3          # optional page cap (25 jobs/page, default 3, max 50)
+#   enabled: true
+#
+# - name: Built In                        # US tech aggregator, many employers
+#   provider: builtin                     # no detect() — only reachable via provider:
+#   builtin:
+#     queries: ["platform engineer"]      # REQUIRED: queries and/or categories,
+#     categories: [dev-engineering]       # otherwise there is nothing to scan
+#     host: www.builtinseattle.com        # optional; one of nine market hosts,
+#                                         # default builtin.com. The market host is the
+#                                         # only location scoping this board offers.
+#     scope: remote                       # optional; restricts to /jobs/remote
+#     max_pages: 3                        # optional page cap (25 jobs/page, default 3)
 #   enabled: true
 #
 # - name: The Hub                         # Nordic/EU startup board
@@ -2575,6 +2600,22 @@ job_boards:
     getro_max_pages: 700   # large global board — raise the default page cap to reach deeper pages
     enabled: false
     notes: "VC portfolio board (Getro), collection_id auto-resolved"
+
+  # ── Getro — regional / economic-development "tech ecosystem" boards ─
+  # Getro doesn't only power VC portfolio boards above -- city and regional
+  # economic-development orgs run their own Getro-backed "tech ecosystem" job
+  # board the same way, aggregating openings straight from each local
+  # employer's own ATS. Same provider, same config shape; just a different
+  # kind of network behind the collection. Worth adding one for any city/
+  # region you're targeting locally -- look for "[city] tech jobs" or
+  # "[region] talent network" run by a local innovation hub, chamber of
+  # commerce, or economic-development agency.
+  - name: Invest Ottawa — TechJobFinder  # Ottawa, Canada. Curated local tech-ecosystem board
+                                          # run by the region's economic-development agency.
+    careers_url: https://techjobfinder.investottawa.ca/jobs
+    provider: getro
+    enabled: false
+    notes: "Ottawa tech ecosystem board (Getro), collection_id auto-resolved from careers_url"
 
   # ── Consider (getconsider.com) — VC portfolio boards ───────────────
   # JS board backed by a same-origin JSON API. Set `consider_board` to the

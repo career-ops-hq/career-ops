@@ -63,3 +63,9 @@
 # check runs through, so it keeps the wider review.
 /tests/     @Scott-Emberson
 /dashboard/ @Scott-Emberson
+# Scanner providers and their contract suites are one reviewable unit: the
+# module and its test land together, and the review that matters on a fetch
+# surface (host allowlisting, redirects, SSRF, parsing pinned with concrete
+# assertions) is the one he has been doing on every provider PR (2-sep).
+/providers/       @Scott-Emberson
+/tests/providers/ @Scott-Emberson

@@ -682,28 +682,91 @@ try {
 
   // ── The point of the whole exercise ───────────────────────────────────────
 
-  // A cv.md ordered Skills-before-Education fails the guard against the shipped
-  // template, and passes once the profile declares the same order. This is the
-  // behaviour #2533 asks for; without the reorder the second call throws too.
+  // A cv.md ordered Skills-before-Education fails the guard against a CV
+  // rendered in some other order, and passes once the profile declares the
+  // same order. This is the behaviour #2533 asks for; without the reorder the
+  // second call throws too.
   //
   // Moving Skills up past two sections is a rotation, not a swap: the sections
-  // it displaces are named too, in the order they should end up in. That is the
-  // shape the shipped template needs (`[skills, education, certifications,
-  // awards]`), so the end-to-end case exercises it rather than the 2-cycle.
+  // it displaces are named too, in the order they should end up in. That is
+  // the shape needed to reach cv.md's own order here (`[experience, projects,
+  // skills, education, certifications]`), so the end-to-end case exercises a
+  // real rotation rather than a 2-cycle.
+  //
+  // FIXTURE itself is deliberately NOT used as the "before" input here: its
+  // order (Summary, Experience, Projects, Education, Certifications, Skills)
+  // is exactly the canonical modes/pdf.md tailoring order (#3640), so
+  // validateCvSectionOrder() now accepts it against ANY cv.md — it would no
+  // longer demonstrate a divergence the guard rejects. scrambledHtml instead
+  // hoists Education/Certifications ahead of Experience/Projects, which
+  // matches neither cv.md's order below nor the canonical one, so it still
+  // exercises the "genuinely scrambled, must be rejected" path this guard
+  // exists for (#1646) — the case the cv.sections config feature (#2533)
+  // exists to let a user correct on purpose.
   const cvMarkdown = [
     '# Candidate', '', '## Professional Summary', 'x', '', '## Work Experience', 'x', '',
     '## Projects', 'x', '', '## Skills', 'x', '', '## Education', 'x', '', '## Certifications', 'x', '',
   ].join('\n');
+  const scrambledHtml = `<!DOCTYPE html>
+<html lang="en">
+<head><title>Test</title></head>
+<body>
+<div class="cv">
+  <!-- HEADER -->
+  <div class="header"><h1>Test Candidate</h1></div>
+
+  <!-- PROFESSIONAL SUMMARY -->
+  <div class="section">
+    <div class="section-title">Professional Summary</div>
+    <div class="summary-text">Summary body.</div>
+  </div>
+
+  <!-- EDUCATION -->
+  <div class="section">
+    <div class="section-title">Education</div>
+    <div class="edu-item">E</div>
+  </div>
+
+  <!-- CERTIFICATIONS -->
+  <div class="section">
+    <div class="section-title">Certifications</div>
+    <div class="cert-table">C</div>
+  </div>
+
+  <!-- WORK EXPERIENCE -->
+  <div class="section">
+    <div class="section-title">Work Experience</div>
+    <div class="job"><div class="job-header"><span class="job-company">Acme</span></div><ul><li>Did the thing</li></ul></div>
+  </div>
+
+  <!-- PROJECTS -->
+  <div class="section">
+    <div class="section-title">Projects</div>
+    <div class="project">P</div>
+  </div>
+
+  <!-- SKILLS -->
+  <div class="section">
+    <div class="section-title">Skills</div>
+    <div class="skills-grid">K</div>
+  </div>
+</div>
+</body>
+</html>
+`;
 
   let threwBefore = false;
   try {
-    validateCvSectionOrder(FIXTURE, cvMarkdown);
+    validateCvSectionOrder(scrambledHtml, cvMarkdown);
   } catch {
     threwBefore = true;
   }
   let threwAfter = false;
   try {
-    validateCvSectionOrder(reorderCvSections(FIXTURE, ['skills', 'education', 'certifications']), cvMarkdown);
+    validateCvSectionOrder(
+      reorderCvSections(scrambledHtml, ['experience', 'projects', 'skills', 'education', 'certifications']),
+      cvMarkdown,
+    );
   } catch (e) {
     threwAfter = true;
     fail(`the guard still rejected the reordered CV: ${e.message}`);
@@ -711,7 +774,64 @@ try {
   if (threwBefore && !threwAfter) {
     pass('a cv.md ordered Skills-before-Education fails the guard untouched and passes once cv.sections declares it');
   } else if (!threwBefore) {
-    fail('the fixture no longer diverges from cv.md — the end-to-end assertion proves nothing');
+    fail('the fixture no longer diverges from cv.md and the canonical order — the end-to-end assertion proves nothing');
+  }
+
+  // ── #3640: the documented modes/pdf.md tailoring order is a second accepted
+  //    target, so it stops needing --allow-reorder on every standard render ──
+
+  const titlesToHtml = titles => titles.map(t => `<div class="section-title">${t}</div>`).join('\n');
+
+  // A typical master cv.md: Summary, then Education, then Experience/Projects,
+  // then Skills — the shape the issue's repro used, and a perfectly ordinary
+  // way to write a *master* CV even though it is not how a tailored CV should
+  // read.
+  const typicalCvMd = [
+    '# Candidate', '', '## Summary', 'x', '', '## Education', 'x', '',
+    '## Experience', 'x', '', '## Projects', 'x', '', '## Skills', 'x', '',
+  ].join('\n');
+
+  // FIXTURE renders Summary -> Work Experience -> Projects -> Education ->
+  // Certifications -> Skills: exactly modes/pdf.md's documented "6-second
+  // recruiter scan" order (Education moved after Experience/Projects). Against
+  // typicalCvMd this is the one divergence #3640 exists to stop rejecting.
+  const pdfMdOrderRun = captureWarnings(() => validateCvSectionOrder(FIXTURE, typicalCvMd));
+  if (pdfMdOrderRun.warnings.length === 0) {
+    pass('a CV rendered in the documented modes/pdf.md tailoring order passes with no warning and no --allow-reorder, even though it diverges from a typical cv.md (#3640)');
+  } else {
+    fail(`the canonical modes/pdf.md order should need no warning: ${JSON.stringify(pdfMdOrderRun.warnings)}`);
+  }
+
+  // A genuinely scrambled order — matching neither cv.md's order nor the
+  // canonical modes/pdf.md order — must still be rejected by default. #3640
+  // narrows what the guard accepts; it must not disable the guard (#1646).
+  const trulyScrambled = titlesToHtml(['Skills', 'Professional Summary', 'Projects', 'Education', 'Work Experience']);
+
+  let scrambledThrew = false;
+  try {
+    validateCvSectionOrder(trulyScrambled, typicalCvMd);
+  } catch {
+    scrambledThrew = true;
+  }
+  if (scrambledThrew) {
+    pass('a genuinely scrambled order (matching neither cv.md nor the canonical modes/pdf.md order) still throws by default (#1646 regression check)');
+  } else {
+    fail('a genuinely scrambled order should still be rejected — #3640 must not have disabled the guard entirely');
+  }
+
+  // --allow-reorder remains the escape hatch for exactly this remaining case.
+  const scrambledAllowRun = captureWarnings(() => {
+    try {
+      validateCvSectionOrder(trulyScrambled, typicalCvMd, { allowReorder: true });
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  if (scrambledAllowRun.value === false && scrambledAllowRun.warnings.length > 0) {
+    pass('--allow-reorder still downgrades a genuinely scrambled order from a thrown error to a warning');
+  } else {
+    fail(`--allow-reorder should warn instead of throwing on a genuinely scrambled order: threw=${scrambledAllowRun.value} warnings=${JSON.stringify(scrambledAllowRun.warnings)}`);
   }
 } catch (e) {
   fail(`cv-section-order tests crashed: ${e.message}`);

@@ -140,7 +140,10 @@ function normalizeStatusKey(status) {
 // True legal-entity suffixes, stripped repeatedly (chained) since a name can
 // legitimately carry more than one ("Acme Holdings Inc." → "acme holdings").
 // These are unambiguous enough that removing several in a row is safe.
-const LEGAL_SUFFIXES = [
+// Exported so merge-tracker.mjs can share the vocabulary rather than keep a
+// second copy of it: a private list there is exactly the identity drift #2445
+// set out to remove.
+export const LEGAL_SUFFIXES = [
   'incorporated', 'inc', 'corporation', 'corp', 'company', 'co',
   'limited', 'ltd', 'llc', 'llp', 'lp', 'plc',
 ];
@@ -151,7 +154,7 @@ const LEGAL_SUFFIXES = [
 // chaining their removal risks collapsing two different companies to the
 // same key. Stripped at most once, and only after legal suffixes are gone —
 // never chained with each other or with LEGAL_SUFFIXES.
-const GENERIC_DESCRIPTORS = [
+export const GENERIC_DESCRIPTORS = [
   'group', 'holdings', 'technologies', 'technology', 'solutions',
   'canada', 'international',
 ];
@@ -306,6 +309,40 @@ export function extractDate(text) {
   return null;
 }
 
+// The req branch's optional `id` carries its own leading `\s*` INSIDE the
+// optional group, so exactly one unbounded class follows it.
+//
+// The earlier shape, `\s*(?:id)?[:\s#]*`, let two unbounded quantifiers compete
+// for the same spaces whenever `id` was absent: a run of N spaces can be divided
+// between `\s*` and `[:\s#]*` in N+1 ways, and every division is retried before
+// the match finally fails. That is quadratic on input that never matches —
+// measured on Node 22 with "Requisition " followed by spaces and a non-matching
+// character: 36ms at 8K, 157ms at 16K, 669ms at 32K, ~2.8s at 64K.
+//
+// It is reachable rather than theoretical: analyzeInvite() runs this over whole
+// pasted emails, including `--file` input, so the length is chosen by whoever
+// wrote the message.
+//
+// `(?:\s*id)?[\s:#]*` accepts the same language as `\s*(?:id)?[:\s#]*` — both are
+// "optionally whitespace then `id`, then any run of space/colon/hash", since the
+// id-absent path `\s*[:\s#]*` and a bare `[\s:#]*` accept exactly the same
+// strings — but it has no competing pair: with `id` absent there is a single
+// class scan, and with `id` present the group's `\s*` backtracks against a
+// literal, which is linear. Measured after: 0.25ms at 64K.
+//
+// The `job` branch is upstream's verbatim: `job\s*id[:\s#]*` was never ambiguous
+// (the literal `id` separates its two quantifiers), so it is deliberately left
+// alone. Rewriting it once looked harmless and silently widened what may precede
+// `id` — `job#id 43683` began matching where it had not before.
+//
+// Equivalence was established by differential-testing this against the previous
+// patterns out-of-tree, comparing match index, full match and capture. What is
+// committed here is the distilled result: the guards in the self-test below pin
+// the colon- and hash-before-`id` shapes specifically, because an earlier draft
+// of this fix diverged on exactly those.
+const REQ_ID_LABELLED = /\b(?:req(?:uisition)?\.?(?:\s*id)?[\s:#]*|job\s*id[:\s#]*)([A-Z]{0,3}\d{3,10})\b/i;
+const REQ_ID_PREFIXED = /\b([A-Z]{1,3}\d{5,10})\b/;
+
 /**
  * Best-effort extraction of a req/job-ID-looking token (e.g. "R260013984",
  * "Req 32807", "Job ID: 43683", "JR12352") — present in a minority of
@@ -317,8 +354,7 @@ export function extractDate(text) {
  */
 export function extractReqId(text) {
   if (!text) return null;
-  const m = text.match(/\b(?:req(?:uisition)?\.?\s*(?:id)?[:\s#]*|job\s*id[:\s#]*)([A-Z]{0,3}\d{3,10})\b/i)
-    || text.match(/\b([A-Z]{1,3}\d{5,10})\b/);
+  const m = text.match(REQ_ID_LABELLED) || text.match(REQ_ID_PREFIXED);
   return m ? m[1] : null;
 }
 
@@ -907,6 +943,48 @@ function runSelfTest() {
   check(extractReqId('Req ID: R260013984') === 'R260013984', 'extracts "Req ID:" token');
   check(extractReqId('Job ID: 43683') === '43683', 'extracts "Job ID:" token');
   check(extractReqId('no id here') === null, 'returns null when no req-like token is present');
+  check(extractReqId('requisition 26023019') === '26023019', 'extracts a bare "requisition" label');
+  check(extractReqId('Req 32807') === '32807', 'extracts an abbreviated "Req" label');
+  // Four digits, not five: REQ_ID_PREFIXED needs \d{5,10}, so only the labelled
+  // branch can produce this. "JR12352" would pass on the fallback alone and the
+  // assertion would survive the labelled branch breaking entirely.
+  check(extractReqId('Job Requisition ID: JR1234') === 'JR1234', 'extracts a letter-prefixed token via the labelled branch');
+  check(extractReqId('') === null, 'returns null for empty text');
+  check(extractReqId('your job application on 2026-08-16') === null, 'a date after "job" is not a req id');
+
+  // Equivalence guards for the separator rewrite. A punctuation separator before
+  // the literal `id` is exactly where a rewrite can silently widen the grammar:
+  // `\s*(?:id)?` only ever allows WHITESPACE ahead of `id`, so these must stay
+  // as they were. An earlier draft of this fix moved the class in front of the
+  // optional group; the first three below began matching where they had not,
+  // and the fourth kept matching but its capture changed from `id12345` to
+  // `12345` — so the last one guards the captured value, not match/no-match.
+  check(extractReqId('req:id 12345') === null, 'a colon before "id" does not make a req label');
+  check(extractReqId('req#id 999888') === null, 'a hash before "id" does not make a req label');
+  check(extractReqId('job#id 43683') === null, 'the job branch still requires whitespace before "id"');
+  check(extractReqId('req:id12345') === 'id12345', 'req: followed by id12345 captures the whole token, letters included');
+
+  // The separator rewrite is a performance fix, so the guard has to be a clock.
+  // The previous `\s*(?:id)?[:\s#]*` shape backtracked quadratically on THIS
+  // shape of non-matching input — a label, then a long run the class can eat,
+  // then a character that cannot start the capture — costing 669ms here on Node
+  // 22 and ~2.8s at 64K. (Non-matching text in general is not quadratic; it
+  // takes this shape to trigger it.) analyzeInvite() runs extractReqId over
+  // whole pasted emails, so the length is caller-controlled.
+  //
+  // Date.now() measures wall time, so it counts scheduler pauses on a loaded CI
+  // worker as if they were regex work. The threshold therefore has to absorb
+  // that noise without losing the signal, and the 64K probe separates the two
+  // cases widely enough to do both: the rewritten patterns finish in ~0.2ms
+  // against a 1000ms limit (roughly 5000x of slack for scheduling), while the
+  // ambiguous shape costs ~2.8s and still overshoots by ~2.7x. The narrower
+  // 32K/250ms pairing detected the regression just as well but left only ~250ms
+  // of absolute headroom, which is inside what a contended runner can produce.
+  const redosProbe = `Requisition ${' '.repeat(64000)}x`;
+  const redosStart = Date.now();
+  check(extractReqId(redosProbe) === null, 'a long non-matching run still yields null');
+  const redosMs = Date.now() - redosStart;
+  check(redosMs < 1000, `extractReqId does not backtrack quadratically (64K-space probe took ${redosMs}ms, was ~2.8s)`);
 
   // --- extractPlatform ---
   check(extractPlatform('Join via Zoom: https://us02web.zoom.us/j/1234567890') === 'Zoom', 'detects Zoom from a zoom.us URL');

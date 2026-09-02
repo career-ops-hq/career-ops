@@ -41,14 +41,20 @@ const CV_PATH = 'cv.md';
 // (missing a skill) is recoverable by the user reading the JD themselves;
 // over-extracting noise into "required skills" is not — it would misreport
 // gaps that aren't real.
-
+//
 // Real postings rarely use the word "Requirements". The literal-only list
 // missed the phrasings most modern ATS boards actually ship ("What we're
 // looking for", "Who you are", "You may be a good fit if", "You have"), so a
 // JD could yield zero skills - which reads identically to "no gaps found" and
 // is the more dangerous of the two failure modes this file warns about.
+//
+// CJK characters are \W (non-word), so the s?\b suffix that works for ASCII
+// terms would always fail after a Chinese heading: \b asserts between \w and
+// \W, and after a CJK char the following whitespace / colon / newline is also
+// \W, so no boundary fires. The fix is a separate alternation arm for CJK
+// terms that drops s?\b; both arms share the same ^#{0,6}\s* prefix.
 const REQUIREMENT_HEADER_RE = new RegExp(
-  '^#{0,6}\\s*(?:' + [
+  '^#{0,6}\\s*(?:(?:' + [
     'required', 'requirements', 'qualifications', 'must[- ]have', 'preferred', 'nice[- ]to[- ]have',
     "what\\s+we(?:'|’)?\\s*re\\s+looking\\s+for",
     "what\\s+you(?:(?:'|’)ll|\\s+will)?\\s+bring",
@@ -67,7 +73,21 @@ const REQUIREMENT_HEADER_RE = new RegExp(
     'it\\s+would\\s+be\\s+great\\s+if\\s+you\\s+ha(?:ve|d)',
     'ideal\\s+candidate',
     'skills\\s+(?:and|&)\\s+experience',
-  ].join('|') + ')s?\\b.*$',
+  ].join('|') + ')s?\\b|(?:' + [
+    // zh-TW / zh-CN requirement headers.
+    // 104 / 1111 / CakeResume / Yourator all use variants of these headings.
+    '\u61C9\u5FB5\u689D\u4EF6',   // 應徵條件
+    '\u8CC7\u683C\u689D\u4EF6',   // 資格條件
+    '\u8077\u52D9\u9700\u6C42',   // 職務需求
+    '\u689D\u4EF6\u8981\u6C42',   // 條件要求 (zh-CN)
+    '\u4EFB\u8077\u8CC7\u683C',   // 任職資格 (zh-CN)
+    '\u5FC5\u8981\u689D\u4EF6',   // 必要條件
+    '\u57FA\u672C\u8981\u6C42',   // 基本要求 (zh-CN)
+    '\u8077\u4F4D\u8981\u6C42',   // 職位要求 (zh-CN)
+    // preferred / nice-to-have
+    '\u52A0\u5206\u9805\u76EE',   // 加分項目
+    '\u52A0\u5206\u689D\u4EF6',   // 加分條件
+  ].join('|') + ')).*$',
   'im'
 );
 
@@ -76,7 +96,7 @@ const REQUIREMENT_HEADER_RE = new RegExp(
 // the benefits list into "required skills" - turning perks like "401k",
 // "Equity" and "Carrot" into reported skill gaps.
 const NON_REQUIREMENT_HEADER_RE = new RegExp(
-  '^#{0,6}\\s*(?:' + [
+  '^#{0,6}\\s*(?:(?:' + [
     // Responsibilities. The negative lookahead keeps "You will have" on the
     // requirements side — this list is tested BEFORE REQUIREMENT_HEADER_RE in
     // scanJd(), so without it a "You will have:" heading would close a block
@@ -92,7 +112,19 @@ const NON_REQUIREMENT_HEADER_RE = new RegExp(
     'equal\\s+opportunity', 'eeo', 'diversity',
     'interview\\s+process', 'how\\s+to\\s+apply', 'to\\s+apply',
     'our\\s+(?:stack|process|values|mission)',
-  ].join('|') + ')\\b.*$',
+  ].join('|') + ')\\b|(?:' + [
+    // zh-TW / zh-CN closing headers — drops \b for the same CJK reason.
+    '\u5DE5\u4F5C\u5167\u5BB9',   // 工作內容
+    '\u5DE5\u4F5C\u8077\u8CAC',   // 工作職責
+    '\u8077\u8CAC\u7BC4\u758A',   // 職責範疇
+    '\u798F\u5229',               // 福利
+    '\u85AA\u8CC7',               // 薪資
+    '\u85AA\u916C',               // 薪酬 (zh-CN)
+    '\u516C\u53F8\u4ECB\u7D39',   // 公司介紹
+    '\u95DC\u65BC\u6211\u5011',   // 關於我們
+    '\u61C9\u5FB5\u65B9\u5F0F',   // 應徵方式
+    '\u5982\u4F55\u61C9\u5FB5',   // 如何應徵
+  ].join('|') + ')).*$',
   'im'
 );
 
@@ -753,13 +785,28 @@ Maintained the internal Fabrikam-SDK build.
     'empty-jd'
   );
 
-  // The warning must carry a caller-facing message, not just a code — the agent
-  // following modes/pdf.md Step 4 surfaces this text to the user.
-  eq(
-    'the diagnosis carries a non-empty message',
-    diagnoseExtraction(unreadableJd, []).message.length > 0,
-    true
-  );
+  // Regression (#3601): Chinese headers (zh-TW / zh-CN) like 應徵條件 or 職務需求
+  // must be recognized as requirement section openers, and headers like 工作內容
+  // or 福利 must close the section.
+  const zhJd = `
+# PHP 後端工程師
+
+## 應徵條件
+- 熟悉 PHP、MySQL、Git
+- 具 Linux 基本指令能力
+
+## 工作內容
+- 開發 RESTful API
+- 維護既有 專案
+`;
+  const zhSkills = extractJdSkills(zhJd);
+  eq('Chinese requirement header (應徵條件) extracts skills', zhSkills.includes('PHP'), true);
+  eq('Chinese requirement header extracts MySQL', zhSkills.includes('MySQL'), true);
+  eq('Chinese requirement header extracts Git', zhSkills.includes('Git'), true);
+  eq('Chinese requirement header extracts Linux', zhSkills.includes('Linux'), true);
+  eq('Chinese non-requirement header (工作內容) closes requirement section', zhSkills.includes('RESTful'), false);
+
+  eq('Chinese header diagnosis is conclusive', diagnoseExtraction(zhJd, zhSkills), null);
 
   console.log(`\njd-skill-gap self-test: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);

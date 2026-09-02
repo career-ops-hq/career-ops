@@ -4,13 +4,17 @@
  * fix-slugs.mjs — write verify-portals.mjs's suggested ATS slug fixes back
  * into portals.yml.
  *
- * verify-portals.mjs already probes every tracked company's ATS slug and, for
- * a failing Greenhouse/Ashby/Lever entry, cross-probes slug variants across
- * all three ATSes and attaches `suggested: { ats, slug }` when one resolves
- * (see discoverAlternates() in verify-portals.mjs). That tool is read-only —
- * this script is the write side: it reuses the SAME probe/suggestion logic
- * (no re-implementation, no HTML scraping, no hardcoded company list) and
- * patches the matching `tracked_companies` entry in portals.yml.
+ * verify-portals.mjs already probes every tracked company's ATS slug. Its
+ * "tier 1" fast path is hardcoded to the three ATSes whose board URL carries a
+ * parseable slug — Greenhouse, Ashby, Lever — and for a failing entry it
+ * cross-probes slug variants across those three, attaching
+ * `suggested: { ats, slug }` when one resolves (see discoverAlternates() in
+ * verify-portals.mjs). Any other host is a provider-plugin (tier 2) entry and
+ * never gets a `suggested`, so this script only ever rewrites Greenhouse / Ashby
+ * / Lever slugs. That tool is read-only — this is the write side: it reuses the
+ * SAME probe/suggestion logic (no re-implementation, no HTML scraping, no
+ * hardcoded company list) and patches the matching `tracked_companies` entry in
+ * portals.yml.
  *
  * Only entries verify-portals classifies as `missing` AND carries a
  * `suggested` alternate for are touched. Live/empty entries and genuinely

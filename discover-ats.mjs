@@ -311,8 +311,10 @@ const WORKDAY_SEGMENT_RE = /^[A-Za-z0-9_-]+$/;
 /**
  * Extract Workday coordinates {tenant, instance?, site} from a company's hints.
  * Accepts, in priority order:
- *   1. A full Workday URL in `workday`, `careers_url`, or `website`:
+ *   1. A full Workday URL in `workday`, `careers_url`, or `website`, either as a
+ *      careers page or as the CXS endpoint it resolves to:
  *      https://<tenant>.<instance>.myworkdayjobs.com[/<locale>]/<site>[/...]
+ *      https://<tenant>.<instance>.myworkdayjobs.com/wday/cxs/<tenant>/<site>[/jobs]
  *   2. An explicit object `workday: { tenant, site, instance? }`.
  * Returns null when no Workday coordinates are present. `instance` may be null
  * (caller then auto-probes WORKDAY_INSTANCES). Every returned segment is
@@ -334,13 +336,28 @@ export function parseWorkdayHint(company) {
 
   // 2. URL form — check every field that might carry a Workday link. No
   // substring pre-filter here (CodeQL js/incomplete-url-substring-sanitization):
-  // the anchored regex below is the actual gate and already rejects anything
+  // the anchored regexes below are the actual gate and already reject anything
   // that isn't a well-formed *.myworkdayjobs.com URL.
   const urlCandidates = [company.workday, company.careers_url, company.website]
     .filter((v) => typeof v === 'string');
   for (const raw of urlCandidates) {
-    // Mirrors the tenant regex in providers/workday.mjs resolveEndpoint().
-    const m = raw.match(/https?:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)/);
+    // A CXS endpoint carries the site one level deeper, behind /wday/cxs/{tenant}/.
+    // It also matches the careers-page pattern below, which captures the literal
+    // `wday` as the site — here that lands in a generated portals.yml entry as
+    // `careers_url: https://{tenant}.{instance}.myworkdayjobs.com/wday`, a
+    // plausible-looking line for a board that doesn't exist (#3498). Checked
+    // first, same as providers/workday.mjs resolveEndpoint().
+    // Both patterns are anchored: unanchored, they match a Workday URL embedded
+    // anywhere in the candidate (e.g. `https://evil.example/r?next=https://acme
+    // .wd5.myworkdayjobs.com/Careers`), so a redirect wrapper silently yields
+    // coordinates for whatever tenant it carries. Anchoring is also what the
+    // comment above has always claimed this gate does.
+    const cxs = raw.match(/^https?:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/wday\/cxs\/[\w-]+\/([^/?#]+)(?:\/jobs)?(?:[/?#]|$)/);
+    // The tenant comes from the host, not from the /wday/cxs/{tenant}/ segment:
+    // these coordinates rebuild a careers URL host-first (buildWorkdayCandidates),
+    // and the host is what has to stay reachable.
+    const m = cxs
+      || raw.match(/^https?:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)/);
     if (!m) continue;
     const [, tenant, instance, site] = m;
     if (clean(tenant) && clean(instance) && clean(site)) {

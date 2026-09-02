@@ -307,6 +307,84 @@ console.log('\n🧪 Testing updater staging behavior (ignored + never-tracked pa
   rmSync(dir, { recursive: true, force: true });
 }
 
+// ── 6b. a scoped apply commit uses the target tree's file list ──────────
+//     A directory can still contain a tracked file that the target retired.
+//     Staging the expanded target list leaves that file alone; committing the
+//     original directory pathspec would read its local edit from the worktree.
+{
+  const { dir, g, ctx } = makeRepo();
+  mkdirSync(join(dir, 'docs'));
+  writeFileSync(join(dir, 'docs/README.md'), 'v1');
+  writeFileSync(join(dir, 'docs/RETIRED.md'), 'v1');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+  g('branch', 'target');
+
+  g('checkout', '-q', 'target');
+  writeFileSync(join(dir, 'docs/README.md'), 'v2');
+  g('rm', '-q', '--', 'docs/RETIRED.md');
+  g('add', '--', 'docs/README.md');
+  g('commit', '-qm', 'target update');
+
+  g('checkout', '-q', 'main');
+  writeFileSync(join(dir, 'docs/README.md'), 'v2');
+  writeFileSync(join(dir, 'docs/RETIRED.md'), 'the user\'s local edit');
+
+  const expanded = expandToShippedFiles(['docs/'], 'target', ctx);
+  g('add', '--', ...expanded);
+  g('commit', '-qm', 'scoped apply', '--', ...expanded);
+
+  const committed = g('show', '--name-only', '--format=', 'HEAD').split('\n').filter(Boolean);
+  const status = g('status', '--porcelain');
+  if (expanded.includes('docs/README.md') && !expanded.includes('docs/RETIRED.md')) {
+    pass('apply expansion follows the target tree and omits a retired tracked file');
+  } else {
+    fail(`apply expansion kept the retired file: ${expanded.join(', ')}`);
+  }
+  if (committed.includes('docs/README.md') && !committed.includes('docs/RETIRED.md')
+      && status.includes('docs/RETIRED.md')) {
+    pass('scoped apply commit leaves the retired tracked edit unstaged');
+  } else {
+    fail(`scoped apply commit touched the wrong paths: committed=${committed.join(', ')} status=${status}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 6c. preserved exclusions survive scoped commit expansion ────────────
+//     The positive directory entry expands to every shipped file, while the
+//     `:(exclude)` pathspec must remain so a preserved local file stays out.
+{
+  const { dir, g, ctx } = makeRepo();
+  mkdirSync(join(dir, 'docs'));
+  writeFileSync(join(dir, 'docs/README.md'), 'v1');
+  writeFileSync(join(dir, 'docs/KEEP.md'), 'v1');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+
+  writeFileSync(join(dir, 'docs/README.md'), 'updated');
+  writeFileSync(join(dir, 'docs/KEEP.md'), 'the preserved local edit');
+  const paths = ['docs/', ':(exclude)docs/KEEP.md'];
+  const expanded = expandToShippedFiles(paths, 'HEAD', ctx);
+  g('add', '--', 'docs/README.md');
+  g('commit', '-qm', 'scoped apply with preservation', '--', ...expanded);
+
+  const committed = g('show', '--name-only', '--format=', 'HEAD').split('\n').filter(Boolean);
+  const status = g('status', '--porcelain');
+  if (expanded.includes('docs/README.md') && expanded.includes('docs/KEEP.md')
+      && expanded.includes(':(exclude)docs/KEEP.md')) {
+    pass('scoped commit expansion keeps both shipped files and the preserve exclusion');
+  } else {
+    fail(`preserve exclusion was lost during expansion: ${expanded.join(', ')}`);
+  }
+  if (committed.includes('docs/README.md') && !committed.includes('docs/KEEP.md')
+      && status.includes('docs/KEEP.md')) {
+    pass('scoped commit honors the preserve exclusion');
+  } else {
+    fail(`preserve exclusion failed: committed=${committed.join(', ')} status=${status}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
 // ── 7. the expansion returns files only, and passes non-directories through ──
 //    Pruned deletions and materialized entrypoints arrive as plain filenames and
 //    must survive untouched — a deletion is absent from the target tree, so
@@ -563,6 +641,44 @@ console.log('\n🧪 Testing updater staging behavior (ignored + never-tracked pa
     pass('rollback restores the backup and stages no ignored user file');
   } else {
     fail(`rollback still swept: ${[...staged].join(', ') || threw?.message.split('\n')[0]}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 12a. a scoped rollback commit uses the backup tree's file list ──────
+//      A file added after the backup can remain in the worktree when checkout
+//      restores a directory. The rollback commit must not sweep its edit.
+{
+  const { dir, g, ctx } = makeRepo();
+  mkdirSync(join(dir, 'docs'));
+  writeFileSync(join(dir, 'docs/README.md'), 'backup');
+  g('add', '-A');
+  g('commit', '-qm', 'backup base');
+  g('branch', 'backup-pre-update-1.0.0');
+
+  writeFileSync(join(dir, 'docs/README.md'), 'current');
+  writeFileSync(join(dir, 'docs/LOCAL.md'), 'current');
+  g('add', '-A');
+  g('commit', '-qm', 'current update');
+  writeFileSync(join(dir, 'docs/LOCAL.md'), 'the user\'s local edit');
+
+  g('checkout', 'backup-pre-update-1.0.0', '--', 'docs/');
+  const expanded = expandToShippedFiles(['docs/'], 'backup-pre-update-1.0.0', ctx);
+  g('add', '--', ...expanded);
+  g('commit', '-qm', 'scoped rollback', '--', ...expanded);
+
+  const committed = g('show', '--name-only', '--format=', 'HEAD').split('\n').filter(Boolean);
+  const status = g('status', '--porcelain');
+  if (expanded.includes('docs/README.md') && !expanded.includes('docs/LOCAL.md')) {
+    pass('rollback expansion follows the backup tree and omits a later file');
+  } else {
+    fail(`rollback expansion kept the later file: ${expanded.join(', ')}`);
+  }
+  if (committed.includes('docs/README.md') && !committed.includes('docs/LOCAL.md')
+      && status.includes('docs/LOCAL.md')) {
+    pass('scoped rollback commit leaves the later tracked edit unstaged');
+  } else {
+    fail(`scoped rollback commit touched the wrong paths: committed=${committed.join(', ')} status=${status}`);
   }
   rmSync(dir, { recursive: true, force: true });
 }
