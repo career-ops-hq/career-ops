@@ -26,7 +26,7 @@ import { LEGACY_COLMAP, detectColumns, isHeaderRow, resolveScoreStatus, normaliz
 import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell } from './tracker-utils.mjs';
 // Canonical posting-URL key. Kept in its own module so scan.mjs / scan-history
 // can adopt the same key later without the definitions drifting.
-import { normalizeUrl } from './url-key.mjs';
+import { normalizeUrl, isAggregatorUrl } from './url-key.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 // Support both layouts: data/applications.md (boilerplate) and applications.md
@@ -1146,10 +1146,21 @@ for (const file of tsvFiles) {
   // rows pointing at the same report. Record-linkage practice names this
   // directly — treating missing as disagreement is a known bias, not a safe
   // default.
-  // Two present-and-different keys are PROOF the rows are distinct postings.
+  // Two present-and-different keys are PROOF the rows are distinct postings —
+  // but only while both name an EMPLOYER-CONTROLLED board, where one URL is one
+  // requisition. An aggregator re-lists a requisition the employer hosts
+  // elsewhere, so a single opening routinely carries a LinkedIn URL on the row
+  // it entered by and an Indeed or employer-ATS URL on the row a later sighting
+  // brought in. Those two keys differ because the two BOARDS differ, which is
+  // not information about the posting: it is the same UNKNOWN as an absent key,
+  // and must let the tier decide on company and title instead. The project
+  // already holds this for the mirror-image case — detect-reposts skips
+  // `aggregator: true` companies because "same company + same title" stops
+  // meaning "same opening" there (#2703).
   const urlDiffers = (cand) => {
     const candUrl = normalizeUrl(cand.url);
     if (!candUrl || !addUrl) return false;   // unknown → not evidence
+    if (isAggregatorUrl(cand.url) || isAggregatorUrl(addition.url)) return false;
     return candUrl !== addUrl;
   };
 

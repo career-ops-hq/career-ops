@@ -11,7 +11,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { normalizeUrl } from '../url-key.mjs';
+import { normalizeUrl, isAggregatorUrl } from '../url-key.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MERGE = join(HERE, '..', 'merge-tracker.mjs');
@@ -47,6 +47,36 @@ ok('anything that is not an http(s) posting yields NO key', () => {
   for (const v of ['local:jds/foo.md', 'N/A', 'n/a', 'TBD', '—', '-', 'none', 'see email']) {
     assert.equal(normalizeUrl(v), '', `${JSON.stringify(v)} must yield no key`);
   }
+});
+
+// ───────────────────────── isAggregatorUrl (unit) ─────────────────────────
+console.log('\nisAggregatorUrl()');
+ok('recognizes an aggregator at its apex and on any subdomain', () => {
+  for (const u of [
+    'https://linkedin.com/jobs/view/4001',
+    'https://www.linkedin.com/jobs/view/4001',
+    'https://uk.indeed.com/viewjob?jk=abc',
+    'https://www.glassdoor.com/job-listing/x',
+    'https://www.ziprecruiter.com/c/Acme/Job/Director-of-Marketing',
+  ]) assert.equal(isAggregatorUrl(u), true, `${u} must be recognized`);
+});
+ok('employer-controlled boards are never aggregators', () => {
+  for (const u of [
+    'https://boards.greenhouse.io/acme/jobs/7001',
+    'https://jobs.lever.co/acme/abc-123',
+    'https://jobs.ashbyhq.com/acme/abc',
+    'https://acme.wd1.myworkdayjobs.com/acme/job/Remote/Director_R1',
+    'https://careers.acme.example/jobs/7001',
+  ]) assert.equal(isAggregatorUrl(u), false, `${u} must not be treated as an aggregator`);
+});
+ok('matches on the registrable domain, not a bare substring', () => {
+  // A lookalike host must not pass. `host.includes('linkedin.com')` would.
+  assert.equal(isAggregatorUrl('https://notlinkedin.com.evil.example/jobs/1'), false);
+  assert.equal(isAggregatorUrl('https://linkedin.com.evil.example/jobs/1'), false);
+  assert.equal(isAggregatorUrl('https://myindeed.com/jobs/1'), false);
+});
+ok('anything that is not a URL is not an aggregator', () => {
+  for (const v of ['', null, 'N/A', 'local:jds/foo.md']) assert.equal(isAggregatorUrl(v), false);
 });
 
 // ───────────────────────── merge-tracker (integration) ─────────────────────────
@@ -349,6 +379,53 @@ ok('--backfill-urls resolves a ROOT-relative reports/ link (the P0 regression)',
     runMerge(env, ['--backfill-urls']);
     assert.ok(trackerRows(env)[0].includes('greenhouse.io/figma/jobs/13'), 'root-relative link resolved + url backfilled');
   } finally { cleanup(env); }
+});
+
+// ─────────────── aggregator URLs are not requisition identities ───────────────
+//
+// The four cases below are one controlled contrast: same company, same role
+// title, different row and report numbers, so the fuzzy company+role tier is
+// the ONLY tier that can fire and the URL pair is the single variable. An
+// aggregator re-lists a requisition the employer hosts elsewhere, so a mismatch
+// involving one says nothing about whether the rows are the same opening.
+function mergeTwoWithUrls(existingUrl, additionUrl) {
+  const env = makeEnv();
+  try {
+    writeTracker(env, [
+      `| 1 | 2026-06-01 | Acme | Director of Marketing | 4.0/5 | Evaluated | ❌ | [1](reports/1-acme.md) | n |${existingUrl ? ` ${existingUrl} ` : '  '}|`,
+    ]);
+    const cols = ['2', '2026-06-03', 'Acme', 'Director of Marketing', 'Evaluated', '4.1/5', '❌', '[2](reports/2-acme.md)', 'n'];
+    if (additionUrl) cols.push(additionUrl);
+    addTsv(env, '2-acme.tsv', cols);
+    runMerge(env);
+    return trackerRows(env);
+  } finally { cleanup(env); }
+}
+
+ok('aggregator vs aggregator: one requisition, two boards, stays ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://www.linkedin.com/jobs/view/4001',
+    'https://www.indeed.com/viewjob?jk=abc123');
+  assert.equal(rows.length, 1, `expected the row to be UPDATED, got ${rows.length} rows (duplicate)`);
+});
+
+ok('aggregator vs employer board: same requisition, stays ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://www.linkedin.com/jobs/view/4001',
+    'https://boards.greenhouse.io/acme/jobs/7001');
+  assert.equal(rows.length, 1, `expected the row to be UPDATED, got ${rows.length} rows (duplicate)`);
+});
+
+ok('REGRESSION: two employer-board URLs are still proof of two distinct openings', () => {
+  const rows = mergeTwoWithUrls(
+    'https://boards.greenhouse.io/acme/jobs/7001',
+    'https://boards.greenhouse.io/acme/jobs/7002');
+  assert.equal(rows.length, 2, 'employer-controlled URLs still block the fuzzy tier');
+});
+
+ok('UNCHANGED: an addition with no URL cannot claim a row whose posting is known', () => {
+  const rows = mergeTwoWithUrls('https://www.linkedin.com/jobs/view/4001', '');
+  assert.equal(rows.length, 2, 'an absent key stays UNKNOWN, so the unkeyed addition inserts');
 });
 
 ok('row with `---` in its URL (Workday slug) stays visible to dedup', () => {
