@@ -1,6 +1,6 @@
 {
   "projectName": "career-ops",
-  "projectOwner": "santifer",
+  "projectOwner": "career-ops-hq",
   "repoType": "github",
   "repoHost": "https://github.com",
   "files": [
@@ -2002,6 +2002,16 @@
         "code",
         "test",
         "doc"
+      ]
+    },
+    {
+      "login": "thibmonier",
+      "name": "thibmonier",
+      "avatar_url": "https://avatars.githubusercontent.com/u/413136?v=4",
+      "profile": "https://github.com/thibmonier",
+      "contributions": [
+        "code",
+        "test"
       ]
     }
   ]
