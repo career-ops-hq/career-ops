@@ -42,6 +42,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run cover-letter` | `generate-cover-letter.mjs` | Render a cover-letter JSON payload to PDF |
 | `npm run verify:portals` | `verify-portals.mjs` | Probe ATS endpoints to confirm portals.yml slugs resolve (network) |
 | `node fix-slugs.mjs` | `fix-slugs.mjs` | Write `verify-portals.mjs`'s suggested ATS slug fixes back to portals.yml (dry run by default, `--fix` to write) |
+| `node audit-portals.mjs` | `audit-portals.mjs` | Audit what each portals.yml board actually serves — provider, posting count, sample titles — not just whether it answers (network; `--baseline` diffs against an earlier `--json` run) |
 | `npm run reposts` | `detect-reposts.mjs` | Flag re-listed (ghost) postings from scan history |
 | `node rank-pipeline.mjs` | `rank-pipeline.mjs` | Opt-in LLM relevance re-ranker — annotates pending pipeline rows with a score + reason (off by default) |
 | `npm run gemini:eval` | `gemini-eval.mjs` | Evaluate a JD with Google Gemini (free-tier alternative) |
@@ -206,6 +207,39 @@ node fix-slugs.mjs --file templates/portals.example.yml
 The default path is `portals.yml`, overridable with `--file` or the `CAREER_OPS_PORTALS` environment variable. A missing portals file is reported and treated as nothing to do, not as an error.
 
 **Exit codes:** `0` on every normal run, `1` only if the run itself fails. Unlike `check-table-freshness`, pending fixes in a dry run do **not** fail the run, so this is a maintenance tool rather than a CI gate.
+
+---
+
+## audit-portals
+
+Content audit of `portals.yml`, the companion to `verify-portals.mjs`. `verify-portals` asks "does this endpoint answer with postings?" and is the right gate for a broken slug. It cannot ask the question that actually costs coverage: *whose* postings are these? An entry can rot into uselessness in two ways a reachability check reports as healthy: no provider claims its `careers_url` (so `scan.mjs` skips it silently on every run while it still reads as coverage), or it points at a real, healthy board belonging to the wrong entity (a parent company, a regional subsidiary, an unrelated same-named tenant).
+
+The script fetches each enabled board through the same `providers/` modules `scan.mjs` uses and prints provider, posting count and sample titles/locations per entry next to a verdict, worst first:
+
+| Verdict | Meaning |
+|---------|---------|
+| `no-provider` | enabled, but no provider claims it — `scan.mjs` skips it on every run |
+| `error` | the fetch itself failed |
+| `empty` | answers with zero postings |
+| `small` | answers, but under `--small-threshold` (default 5). Not an error: a quiet board and a wrong board look identical from here, which is why the samples are printed |
+| `ok` | answers with a healthy number of postings |
+
+**Honest limit:** no heuristic reliably detects "right company, wrong entity" — a parent-company board is well-formed and full of real jobs. The tool surfaces count + samples compactly enough for a human or an agent to judge, and with `--baseline` flags the collapse that usually follows an ATS migration (a migrated board drops toward zero rather than 404ing). Treat `small` and a large negative drift as prompts to look, not as verdicts.
+
+```bash
+node audit-portals.mjs                       # audit every enabled company
+node audit-portals.mjs --summary             # one line per company
+node audit-portals.mjs --json                # machine-readable, for --baseline
+node audit-portals.mjs --company Adyen       # audit a single company
+node audit-portals.mjs --file <path>         # use a specific portals file
+node audit-portals.mjs --baseline prev.json  # flag boards that lost ≥50% of their postings
+node audit-portals.mjs --small-threshold 10  # what counts as a small board
+node audit-portals.mjs --strict              # exit 1 on any non-ok verdict
+```
+
+The offline half — *which enabled entries does no provider claim?* — is pure config matching, so `verify-pipeline.mjs` runs it as check 15 at zero network cost: an entry naming an unknown provider is an error (it can never scan), an entry no provider claims is a warning, and an absent `portals.yml` is not a finding. The live half stays here because it needs one fetch per board.
+
+**Exit codes:** `0` on every normal run; `1` if the run itself fails, or under `--strict` when any verdict is not `ok` or any board fell below its `--baseline` count.
 
 ---
 
