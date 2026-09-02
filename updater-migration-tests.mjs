@@ -7,7 +7,10 @@
  * newly introduced system paths without touching user data.
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, rmSync } from 'fs';
+import { execFileSync, spawnSync } from 'child_process';
+import { dirname } from 'path';
+import { createReexecMarker, consumeReexecMarker } from './update-system.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -22,6 +25,11 @@ function fail(message) {
   failed++;
 }
 
+function applyFailure(result) {
+  const stderr = String(result?.stderr ?? '').trim().replace(/\s+/g, ' ');
+  return `status=${String(result?.status)}${stderr ? ` stderr=${stderr.slice(0, 240)}` : ''}`;
+}
+
 let source = '';
 try {
   source = readFileSync('update-system.mjs', 'utf-8');
@@ -29,6 +37,24 @@ try {
 } catch (error) {
   fail(`update-system.mjs is readable: ${error.message}`);
   process.exit(1);
+}
+
+// test-all runs this suite from a throwaway copy nested inside the real
+// checkout. Give that copy its own tiny repository so update-system's
+// production guard can distinguish a valid fixture from an install whose git
+// operations would escape into an enclosing repository.
+try {
+  const cwd = process.cwd();
+  const toplevel = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8' }).trim();
+  if (toplevel !== cwd) {
+    execFileSync('git', ['init', '-q'], { cwd });
+    execFileSync('git', ['config', 'user.email', 'tests@example.invalid'], { cwd });
+    execFileSync('git', ['config', 'user.name', 'career-ops tests'], { cwd });
+    execFileSync('git', ['add', 'update-system.mjs', 'updater-migration-tests.mjs', 'AGENTS.md'], { cwd });
+    execFileSync('git', ['commit', '-qm', 'test fixture'], { cwd });
+  }
+} catch (error) {
+  fail(`migration fixture git setup: ${error.message}`);
 }
 
 function extractArray(name) {
@@ -44,6 +70,120 @@ function extractArray(name) {
 const systemPaths = extractArray('SYSTEM_PATHS');
 const userPaths = extractArray('USER_PATHS');
 const bootstrapPaths = extractArray('BOOTSTRAP_PATHS');
+
+if (/const updateConfirmed = process\.argv\.includes\('--confirm'\)[\s\S]{0,160}isReexec/.test(source) &&
+    /Installation requires explicit confirmation/.test(source) &&
+    /'apply',\s*'--confirm'/.test(source) &&
+    /CAREER_OPS_UPDATE_REEXEC_MARKER/.test(source) &&
+    /function isLegacyReexec/.test(source)) {
+  pass('apply requires explicit confirmation and carries it through authenticated and legacy self-reexec');
+} else {
+  fail('apply does not require explicit confirmation or propagate it safely through self-reexec');
+}
+
+function runApplyWithEnv(env, args = ['apply']) {
+  // The migration suite runs from a throwaway copy, which may inherit a stale
+  // lock from another fixture or an interrupted prior run. Each initial
+  // invocation must start from the same lock-free state so the assertions
+  // below test the child, not test-order residue.
+  rmSync('.update-lock', { force: true, recursive: true });
+  return spawnSync(process.execPath, ['update-system.mjs', ...args], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      CAREER_OPS_UPDATE_CONFIRM: '',
+      CAREER_OPS_UPDATE_FORCE: '',
+      CAREER_OPS_UPDATE_REEXEC: '',
+      CAREER_OPS_UPDATE_BACKUP_BRANCH: '',
+      CAREER_OPS_UPDATE_REEXEC_MARKER: '',
+      CAREER_OPS_UPDATE_REEXEC_TOKEN: '',
+      ...env,
+    },
+  });
+}
+
+const envOnlyConfirmation = runApplyWithEnv({
+  CAREER_OPS_UPDATE_CONFIRM: '1',
+  CAREER_OPS_UPDATE_REEXEC: '',
+});
+if (envOnlyConfirmation.status !== 0 &&
+    /Installation requires explicit confirmation/.test(envOnlyConfirmation.stderr)) {
+  pass('environment-only confirmation cannot authorize initial apply');
+} else {
+  fail(`environment-only confirmation can authorize initial apply (${applyFailure(envOnlyConfirmation)})`);
+}
+
+const envOnlyForce = runApplyWithEnv({
+  CAREER_OPS_UPDATE_FORCE: '1',
+  CAREER_OPS_UPDATE_REEXEC: '',
+});
+if (envOnlyForce.status !== 0 &&
+    /Installation requires explicit confirmation/.test(envOnlyForce.stderr)) {
+  pass('environment-only force cannot authorize initial apply');
+} else {
+  fail(`environment-only force can authorize initial apply (${applyFailure(envOnlyForce)})`);
+}
+
+const forceWithoutConfirmation = runApplyWithEnv({}, ['apply', '--force']);
+if (forceWithoutConfirmation.status !== 0 &&
+    /Installation requires explicit confirmation/.test(forceWithoutConfirmation.stderr)) {
+  pass('force without confirmation cannot authorize initial apply');
+} else {
+  fail(`force without confirmation can authorize initial apply (${applyFailure(forceWithoutConfirmation)})`);
+}
+
+const forgedReexec = runApplyWithEnv({
+  CAREER_OPS_UPDATE_REEXEC_MARKER: '/tmp/career-ops-reexec-forged/marker',
+  CAREER_OPS_UPDATE_REEXEC_TOKEN: 'forged',
+  CAREER_OPS_UPDATE_CONFIRM: '1',
+});
+if (forgedReexec.status !== 0 &&
+    /Installation requires explicit confirmation/.test(forgedReexec.stderr)) {
+  pass('forged reexec marker cannot authorize initial apply');
+} else {
+  fail(`forged reexec marker can authorize initial apply (${applyFailure(forgedReexec)})`);
+}
+
+const legacyBranch = `backup-pre-update-99.99.99-${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}`;
+const createdLegacyBranch = spawnSync('git', ['branch', legacyBranch, 'HEAD'], { encoding: 'utf8' });
+const forgedLegacyReexec = runApplyWithEnv({
+  CAREER_OPS_UPDATE_REEXEC: '1',
+  CAREER_OPS_UPDATE_BACKUP_BRANCH: legacyBranch,
+  CAREER_OPS_UPDATE_CONFIRM: '1',
+});
+if (createdLegacyBranch.status !== 0) {
+  fail(`could not create the matching backup branch fixture: ${createdLegacyBranch.stderr}`);
+} else if (forgedLegacyReexec.status !== 0 &&
+    /Installation requires explicit confirmation/.test(forgedLegacyReexec.stderr)) {
+  pass('legacy reexec with a matching backup branch still needs an active parent lock');
+} else {
+  fail(`legacy reexec with a matching backup branch can authorize initial apply without an active parent lock (${applyFailure(forgedLegacyReexec)})`);
+}
+if (createdLegacyBranch.status === 0) {
+  spawnSync('git', ['branch', '-D', legacyBranch], { encoding: 'utf8' });
+}
+
+const marker = createReexecMarker();
+const previousMarkerPath = process.env.CAREER_OPS_UPDATE_REEXEC_MARKER;
+const previousMarkerToken = process.env.CAREER_OPS_UPDATE_REEXEC_TOKEN;
+try {
+  process.env.CAREER_OPS_UPDATE_REEXEC_MARKER = marker.path;
+  process.env.CAREER_OPS_UPDATE_REEXEC_TOKEN = marker.token;
+  const firstConsume = consumeReexecMarker();
+  const secondConsume = consumeReexecMarker();
+  if (firstConsume && !secondConsume && !existsSync(marker.path)) {
+    pass('created reexec marker authorizes exactly once');
+  } else {
+    fail('created reexec marker does not authorize exactly once');
+  }
+} finally {
+  if (previousMarkerPath === undefined) delete process.env.CAREER_OPS_UPDATE_REEXEC_MARKER;
+  else process.env.CAREER_OPS_UPDATE_REEXEC_MARKER = previousMarkerPath;
+  if (previousMarkerToken === undefined) delete process.env.CAREER_OPS_UPDATE_REEXEC_TOKEN;
+  else process.env.CAREER_OPS_UPDATE_REEXEC_TOKEN = previousMarkerToken;
+  rmSync(dirname(marker.path), { recursive: true, force: true });
+}
 
 // Every concrete (non-directory) manifest entry (SYSTEM_PATHS or
 // BOOTSTRAP_PATHS) must exist in the working tree. A path deleted upstream
@@ -144,7 +284,7 @@ const twoPassManifestChecks = [
   },
   {
     name: 'apply re-execs through the current Node binary',
-    pattern: /execFileSync\(process\.execPath,\s*\[\s*'update-system\.mjs',\s*'apply'\s*\]/,
+    pattern: /execFileSync\(process\.execPath,\s*\[[\s\S]*?'update-system\.mjs',\s*'apply',\s*'--confirm'/,
   },
   {
     name: 'apply carries the original backup branch across re-exec',
@@ -209,7 +349,9 @@ const twoPassManifestChecks = [
   },
   {
     name: 'the local copy is saved as .bak before any overwrite (#2337)',
-    pattern: /copyFileSync\([\s\S]{0,80}?backup\)/,
+    // backupSystemFiles owns the byte copy for both the normal update and the
+    // earlier self-bootstrap overwrite (#3207); pin the normal call site here.
+    pattern: /backupSystemFiles\(atRisk\)/,
   },
   {
     name: 'overwriting a locally edited system file requires --force (#2337)',

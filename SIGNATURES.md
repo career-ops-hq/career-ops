@@ -149,3 +149,7 @@ public commit with a stated reason.
 - @nourischw | Nouris Wong | 2026-08-28 | "if you can't beat them join them" | id:8112770 | src:https://github.com/santifer/career-ops/discussions/3490 | n:101
 - @akhil451 | akhil | 2026-08-29 | "akhil451" | id:16731293 | src:https://github.com/santifer/career-ops/discussions/3512 | n:102
 - @jaishankarsurya | 2026-08-31 | "Let’s hope this works" | id:58153836 | src:https://github.com/santifer/career-ops/discussions/3555 | n:103
+- @fabdull1 | 2026-09-02 | "No time to waste" | id:250269279 | src:https://github.com/career-ops-hq/career-ops/discussions/3630 | n:104
+- @zyxc2024 | 2026-09-02 | id:194247172 | src:https://github.com/career-ops-hq/career-ops/discussions/3625 | n:105
+- @9jaswag | Chuks Opia | 2026-09-02 | id:8125356 | src:https://github.com/career-ops-hq/career-ops/discussions/3663 | n:106
+- @violetsea555 | violet | 2026-08-08 | "If a system rejects you, you have the right to know it was a system." | id:88992496 | src:https://github.com/career-ops-hq/career-ops/pull/2634 | n:107

@@ -37,7 +37,7 @@
 import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import { createHash } from 'crypto';
 import { dirname, resolve, join, basename } from 'path';
-import { pathToFileURL } from 'url';
+import { pathToFileURL, fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import * as yaml from 'js-yaml';
 import { resolveColumns } from './tracker-parse.mjs';
@@ -48,16 +48,59 @@ import { isMainModule } from './lib/is-main-module.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const MD_PATH = resolveTrackerPath(CAREER_OPS);
-const DB_PATH = process.env.CAREER_OPS_TRACKER_DB
-  || (MD_PATH.endsWith('.md') ? MD_PATH.slice(0, -3) + '.db' : MD_PATH + '.db');
 
-// SQLite must never open the source of truth itself (an explicit
-// CAREER_OPS_TRACKER_DB could point both names at the same file).
-if (resolve(MD_PATH) === resolve(DB_PATH)) {
-  console.error(`Error: DB path must differ from the markdown path (${MD_PATH}).`);
-  process.exit(1);
+/**
+ * Where the derived SQLite index lives, resolved at call time.
+ *
+ * This used to be a module-scope `const`, which is the right shape for a CLI —
+ * one process, one invocation, env fixed before node starts — and the wrong one
+ * the moment the module is IMPORTED rather than executed. The first importer in
+ * a process froze the path for every later one, so a subsequent
+ * `process.env.CAREER_OPS_TRACKER_DB = ...` was silently ignored: no error, no
+ * warning, and an assignment that reads as though it took effect.
+ *
+ * That is how the test suite came to create an applications.db outside its own
+ * fixtures (#3506). tests/tracker-busy-timeout.test.mjs pins the variable before
+ * importing this module, but test-all.mjs imports tracker.mjs earlier in the same
+ * process for removeRowByNum, so module scope had already run and openDb() built
+ * its schema at the unpinned path. The test passed either way — busy_timeout
+ * reads back 5000 whichever file was opened — so nothing flagged it.
+ *
+ * Resolving per call costs nothing here (openDb is called once per command) and
+ * makes the documented override mean the same thing to an importer as it does on
+ * the command line.
+ *
+ * MD_PATH stays import-time on purpose: it is the source of truth, every writer
+ * reaches it through openTrackerTransaction(MD_PATH), and a tracker path that
+ * could change underneath an open transaction is a different and worse problem
+ * than the one this solves.
+ *
+ * @returns {string} Absolute or relative path to the derived index.
+ */
+function dbPath() {
+  const path = process.env.CAREER_OPS_TRACKER_DB
+    || (MD_PATH.endsWith('.md') ? MD_PATH.slice(0, -3) + '.db' : MD_PATH + '.db');
+  // SQLite must never open the source of truth itself (an explicit
+  // CAREER_OPS_TRACKER_DB could point both names at the same file). Checked here
+  // rather than at import: a module that exits the process as a side effect of
+  // being imported takes its importer down with it, and the check is only
+  // meaningful at the moment the path is actually used.
+  if (resolve(MD_PATH) === resolve(path)) {
+    console.error(`Error: DB path must differ from the markdown path (${MD_PATH}).`);
+    process.exit(1);
+  }
+  return path;
 }
-const STATES_PATH = 'templates/states.yml';
+
+// templates/states.yml ships with the code, so it is resolved from this module's
+// own directory. It used to be a bare relative path, i.e. resolved against
+// process.cwd(), which made every tracker.mjs command fail from anywhere but the
+// repo root — including the shape the data-root mechanism invites, where you cd
+// to your data directory and run the tool out of the checkout (#3508). Third
+// variant of #3500: that one looked for this file under the data root, this one
+// looked for it under whatever directory the shell happened to be in.
+const CODEBASE_ROOT = dirname(fileURLToPath(import.meta.url));
+const STATES_PATH = join(CODEBASE_ROOT, 'templates/states.yml');
 const HEADER = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |';
 const SEPARATOR = '|---|------|---------|------|-------|--------|-----|--------|-------|';
 
@@ -85,8 +128,9 @@ async function loadSqlite() {
 }
 
 export function openDb(DatabaseSync) {
-  mkdirSync(dirname(DB_PATH) || '.', { recursive: true });
-  const db = new DatabaseSync(DB_PATH);
+  const path = dbPath();
+  mkdirSync(dirname(path) || '.', { recursive: true });
+  const db = new DatabaseSync(path);
   // Wait up to 5s for a lock instead of throwing SQLITE_BUSY on the first
   // contention. The index is read by concurrent callers — a CLI query, a
   // `set-status` write and the Go TUI dashboard can all hit the same db at
@@ -127,7 +171,9 @@ export function openDb(DatabaseSync) {
 
 function loadStates() {
   if (!existsSync(STATES_PATH)) {
-    console.error(`Error: ${STATES_PATH} not found — cannot validate statuses. Run from the career-ops root.`);
+    // No longer "run from the career-ops root" advice: the path is anchored to
+    // the module, so a miss here is a broken install, not a wrong cwd.
+    console.error(`Error: ${STATES_PATH} not found — cannot validate statuses (broken install: templates/states.yml ships with career-ops).`);
     process.exit(1);
   }
   const doc = yaml.load(readFileSync(STATES_PATH, 'utf-8'));
@@ -157,6 +203,13 @@ function normalizeStatus(raw, states) {
 
 const SCORE_RE = /^\*{0,2}(\d+(?:\.\d+)?\/5)\*{0,2}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseApplicationId(raw) {
+  const text = String(raw ?? '').trim();
+  if (!/^\d+$/.test(text)) return null;
+  const id = Number(text);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
 
 // Mojibake left by a UTF-8 → GBK → UTF-8 round trip: an em-dash cell becomes
 // "鈥?" / "鈥�" variants. Only short placeholder cells are repaired — free-text
@@ -262,8 +315,8 @@ function parseTracker(states) {
       status = canonical;
     }
 
-    let id = parseInt(idRaw, 10);
-    if (!Number.isInteger(id) || id <= 0 || usedIds.has(id)) {
+    let id = parseApplicationId(idRaw);
+    if (id === null || usedIds.has(id)) {
       id = 0; // assign after the pass, once maxId is known
       diag.badId++;
     } else {
@@ -296,7 +349,7 @@ function reportDiagnostics(diag) {
   if (diag.mojibake) console.error(`  ${diag.mojibake} mojibake placeholder cell(s)`);
   if (diag.scoreInStatus) console.error(`  ${diag.scoreInStatus} score(s) sitting in the status column`);
   if (diag.unknownStatus) console.error(`  ${diag.unknownStatus} non-canonical status(es), indexed as Evaluated (original kept in notes)`);
-  if (diag.badId) console.error(`  ${diag.badId} missing/duplicate id(s), reassigned in the index`);
+  if (diag.badId) console.error(`  ${diag.badId} missing/malformed/duplicate id(s), reassigned in the index`);
   if (diag.badDate) console.error(`  ${diag.badDate} malformed date(s), kept as-is`);
   if (diag.strayPipes) console.error(`  ${diag.strayPipes} row(s) with stray pipes, folded into notes`);
   console.error('Fix at the source with `node normalize-statuses.mjs` / `node dedup-tracker.mjs`, then re-sync.');
@@ -354,7 +407,7 @@ async function sync(args) {
   const DatabaseSync = await loadSqlite();
   const db = openDb(DatabaseSync);
   const { apps, diag } = syncIndex(db, states);
-  console.error(`Indexed ${apps.length} applications from ${MD_PATH} into ${DB_PATH}`);
+  console.error(`Indexed ${apps.length} applications from ${MD_PATH} into ${dbPath()}`);
   reportDiagnostics(diag);
 }
 
@@ -408,8 +461,12 @@ async function query(args) {
     if (!DATE_RE.test(since)) { console.error('Error: --since must be YYYY-MM-DD'); process.exit(1); }
     where.push('date >= ?'); params.push(since);
   }
-  const id = flagValue(args, '--id');
-  if (id) { where.push('id = ?'); params.push(parseInt(id, 10)); }
+  const idRaw = flagValue(args, '--id');
+  if (args.some(arg => arg === '--id' || arg.startsWith('--id='))) {
+    const id = parseApplicationId(idRaw);
+    if (id === null) { console.error('Error: --id must be a positive integer'); process.exit(1); }
+    where.push('id = ?'); params.push(id);
+  }
 
   let sql = 'SELECT id, date, company, role, score, status, pdf, report, notes FROM applications'
     + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY id DESC';
@@ -431,8 +488,8 @@ async function history(args) {
   const DatabaseSync = await loadSqlite();
   const db = openDb(DatabaseSync);
   ensureFresh(db, loadStates());
-  const id = parseInt(flagValue(args, '--id') || '', 10);
-  if (!Number.isInteger(id)) { console.error('Error: history requires --id N'); process.exit(1); }
+  const id = parseApplicationId(flagValue(args, '--id'));
+  if (id === null) { console.error('Error: history requires --id N (a positive integer)'); process.exit(1); }
   const app = db.prepare('SELECT * FROM applications WHERE id = ?').get(id);
   if (!app) { console.error(`Error: no application with id ${id}`); process.exit(1); }
   console.log(`#${app.id} ${app.company} — ${app.role}`);

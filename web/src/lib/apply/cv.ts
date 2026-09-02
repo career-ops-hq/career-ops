@@ -1,21 +1,31 @@
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { careerOpsRoot, pdfPathStatusForReport, readApplications } from "@/lib/career-ops";
 import { companySlug } from "@/lib/company-slug.mjs";
 import { matchesTailoredCv, sortNewestFirst } from "./cv-match.mjs";
+import { reportNumberFromCell } from "./cv-selection.mjs";
 
 /**
- * Locate the tailored CV PDF the real `pdf` mode wrote to output/ for a given
- * company (newest match wins). STRICT company match — never returns a CV tailored
- * for a different company (we'd rather attach nothing than the wrong CV). Uses
- * the SAME matching contract as /api/cv-pdf (see cv-match.mjs) so the "View
- * tailored CV" link and the apply file-upload always resolve to the SAME file.
- * Returns an absolute path or null.
+ * Locate the tailored CV PDF for an application. When the tracker application
+ * number is known, the report -> PDF manifest (via pdfPathStatusForReport, the
+ * same resolver /api/cv-pdf uses for its own "n" lookups) is authoritative, so
+ * an older role cannot accidentally receive the company's newest CV. Company
+ * matching remains as a fallback for manually pasted URLs. Returns an absolute
+ * path or null.
  */
-export function resolveTailoredCv(company?: string): string | null {
+export async function resolveTailoredCv(company?: string, applicationNumber?: string): Promise<string | null> {
+  const root = careerOpsRoot();
+  if (applicationNumber?.trim()) {
+    const app = readApplications().find((candidate) => candidate.n === applicationNumber.trim());
+    const reportNumber = reportNumberFromCell(app?.report);
+    if (!reportNumber) return null;
+    const result = await pdfPathStatusForReport(String(reportNumber));
+    return result.status === "found" ? result.path : null;
+  }
+
   const c = (company ?? "").trim();
   if (!c) return null;
-  const dir = path.join(careerOpsRoot(), "output");
+  const dir = path.join(root, "output");
   let files: string[];
   try {
     files = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith(".pdf"));

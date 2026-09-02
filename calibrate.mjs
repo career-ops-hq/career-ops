@@ -212,10 +212,18 @@ export function computeCalibration(rows, journals, opts = {}) {
 
 // --- Filesystem assembly --------------------------------------------------
 
-function loadTrackerRows(appsFile) {
+export function loadTrackerRows(appsFile) {
   const lines = readFileSync(appsFile, 'utf-8').split(/\r?\n/);
-  const headerLine = lines.find((l) => isHeaderRow(l));
-  const colmap = headerLine ? resolveColumns(headerLine) : undefined;
+  // resolveColumns() takes the LINE ARRAY and locates the header itself.
+  // Passing it a single header string made detectColumns() iterate that
+  // string character by character, find no header, and fall back to
+  // LEGACY_COLMAP — the 9-column order with no Via column. On a tracker that
+  // HAS Via (#1596), where the column sits between Company and Role, every
+  // field from `role` onward then reads one column to the left: `status`
+  // reads the score cell ("4.5/5"), no status matches, and every row silently
+  // drops out of the population. The report renders 0 resolved / 0 in-flight
+  // and a false "insufficient data" verdict on a tracker full of outcomes.
+  const colmap = resolveColumns(lines);
   const rows = [];
   for (const line of lines) {
     if (!line.trim().startsWith('|') || isHeaderRow(line) || isSeparatorRow(line)) continue;
