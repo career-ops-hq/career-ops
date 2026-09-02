@@ -209,7 +209,9 @@ const twoPassManifestChecks = [
   },
   {
     name: 'the local copy is saved as .bak before any overwrite (#2337)',
-    pattern: /copyFileSync\([\s\S]{0,80}?backup\)/,
+    // backupSystemFiles owns the byte copy for both the normal update and the
+    // earlier self-bootstrap overwrite (#3207); pin the normal call site here.
+    pattern: /backupSystemFiles\(atRisk\)/,
   },
   {
     name: 'overwriting a locally edited system file requires --force (#2337)',

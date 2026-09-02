@@ -2441,13 +2441,27 @@ if (
   /^via:/m.test(batchMachineSummary) &&
   /^company_confidential:/m.test(batchMachineSummary) &&
   /^reports_to:/m.test(batchMachineSummary) &&
+  /^requirement_importance:/m.test(batchMachineSummary) &&
   /['"]via['"]/.test(patternsMachineFields) &&
   /['"]company_confidential['"]/.test(patternsMachineFields) &&
-  /['"]reports_to['"]/.test(patternsMachineFields)
+  /['"]reports_to['"]/.test(patternsMachineFields) &&
+  /['"]requirement_importance['"]/.test(patternsMachineFields)
 ) {
   pass('batch Machine Summary fields are preserved by the downstream parser');
 } else {
   fail('batch Machine Summary and downstream parser fields are misaligned');
+}
+
+// batch-prompt.md carries the Machine Summary schema TWICE — the standalone
+// #### Machine Summary section and the report-header template in Step 3. A key
+// added to one fence only produces reports whose shape depends on which fence
+// the worker happened to follow, so both are asserted (same rule the existing
+// two-fence checks enforce).
+const machineSummaryFenceCount = (batchPrompt.match(/^requirement_importance:/gm) ?? []).length;
+if (machineSummaryFenceCount >= 2) {
+  pass('requirement_importance is present in BOTH batch-prompt Machine Summary fences');
+} else {
+  fail(`requirement_importance appears in ${machineSummaryFenceCount} batch-prompt Machine Summary fence(s), expected both`);
 }
 
 // ── 7e. CV SECTION ORDER CHECK IS LANGUAGE-AWARE ────────────────
@@ -3853,6 +3867,53 @@ if (
   pass('Chinese modes include company-type compensation reliability checks');
 } else {
   fail('Chinese modes missing company-type compensation reliability checks');
+}
+
+// ── Localized oferta.md structural parity (#3669) ──
+// Six localized oferta.md files were frozen at a pre-Block-G shape: no Block G,
+// no Risk Summary, and `## G)` meaning the draft-answers block that is `## H)`
+// in the canonical. A locale WITHOUT an oferta.md falls back to the canonical
+// and gets all of it, so a stale translation is worse than none. This pins the
+// structural contract on EVERY modes/*/oferta.md: the report-format letters
+// A)–H) present, `## Risk Summary` between G) and H), and the header field
+// labels + `## Risk Summary` literal in English (the web viewer maps them by
+// name and silently drops what it does not know). The allowlist below names the
+// files still frozen; a re-synced file MUST be removed from it (the check fails
+// loudly otherwise), so the list can only shrink. Denominator asserted: the
+// locale walk must find the known files, or the whole check is blind.
+{
+  const FROZEN_OFERTA = new Set(['da', 'es', 'pl', 'pt', 'ru', 'ua']);
+  const REQUIRED_HEADINGS = ['## A)', '## B)', '## C)', '## D)', '## E)', '## F)', '## G)', '## Risk Summary', '## H)'];
+  const REQUIRED_LABELS = ['**Date:**', '**URL:**', '**Archetype:**', '**Score:**', '**Legitimacy:**', '**PDF:**'];
+  const withOferta = readdirSync(join(ROOT, 'modes'), { withFileTypes: true })
+    .filter(d => d.isDirectory() && existsSync(join(ROOT, 'modes', d.name, 'oferta.md')))
+    .map(d => d.name).sort();
+  const structuralGaps = (text) => {
+    const gaps = REQUIRED_HEADINGS.filter(h => !text.includes(h)).concat(REQUIRED_LABELS.filter(l => !text.includes(l)));
+    const g = text.lastIndexOf('## G)'), rs = text.lastIndexOf('## Risk Summary'), h = text.lastIndexOf('## H)');
+    if (gaps.length === 0 && !(g < rs && rs < h)) gaps.push('order G) → Risk Summary → H)');
+    return gaps;
+  };
+  if (withOferta.length < 8 || !withOferta.includes('zh') || !withOferta.includes('ru')) {
+    fail(`localized oferta.md walk found ${withOferta.length} files (${withOferta.join(', ')}) — expected ≥8 incl. zh and ru; the parity check would be blind`);
+  } else {
+    const canonicalGaps = structuralGaps(readFile('modes/oferta.md'));
+    const stillFrozen = [], resynced = [], drifted = [];
+    for (const lang of withOferta) {
+      const gaps = structuralGaps(readFile(`modes/${lang}/oferta.md`));
+      if (FROZEN_OFERTA.has(lang)) (gaps.length === 0 ? resynced : stillFrozen).push(lang);
+      else if (gaps.length > 0) drifted.push(`${lang} (${gaps.join(', ')})`);
+    }
+    if (canonicalGaps.length > 0) {
+      fail(`canonical modes/oferta.md lost its own report-format contract: ${canonicalGaps.join(', ')}`);
+    } else if (drifted.length > 0) {
+      fail(`localized oferta.md drifted from the canonical report structure: ${drifted.join('; ')}`);
+    } else if (resynced.length > 0) {
+      fail(`localized oferta.md re-synced but still listed as frozen — remove from FROZEN_OFERTA in test-all.mjs and tick it in #3669: ${resynced.join(', ')}`);
+    } else {
+      pass(`localized oferta.md structural parity: ${withOferta.length - stillFrozen.length} of ${withOferta.length} files carry A)–H) + Risk Summary + English header labels; still frozen (allowlisted, #3669): ${stillFrozen.join(', ') || 'none'}`);
+    }
+  }
 }
 
 const batchPromptDoc = readFile('batch/batch-prompt.md');
@@ -12512,6 +12573,29 @@ if (!sqliteAvailable) {
         fail('sync modified the corrupted markdown (must only diagnose)');
       }
 
+      // A numeric prefix is not a valid application number. parseInt() used to
+      // accept `9junk` as 9, so --check reported the source as clean and the
+      // index could attach this row (and its status history) to the wrong ID.
+      const malformedId = clean +
+        '| 9junk | 2026-01-06 | Prefix Co | PM | 3.5/5 | Applied | ❌ | — | malformed id |\n';
+      writeFileSync(md, malformedId);
+      if (trackerRun(['sync', '--check']) === null) {
+        pass('sync --check rejects an application ID with a numeric prefix');
+      } else {
+        fail('sync --check accepted a numeric-prefix application ID');
+      }
+      const repairedId = JSON.parse(trackerRun(['query', '--company', 'Prefix Co', '--json']) || '[]');
+      if (repairedId.length === 1 && repairedId[0].id === 3) {
+        pass('malformed application ID is reassigned instead of coerced to its numeric prefix');
+      } else {
+        fail(`malformed application ID was not safely reassigned: ${JSON.stringify(repairedId)}`);
+      }
+      if (trackerRun(['query', '--id', '1junk', '--json']) === null && trackerRun(['history', '--id', '1junk']) === null) {
+        pass('query/history reject numeric-prefix --id values');
+      } else {
+        fail('query/history accepted a numeric-prefix --id value');
+      }
+
       // 3. Staleness: query after an md edit must auto-resync (no stale reads).
       writeFileSync(md, clean +
         '| 3 | 2026-01-07 | Delta | Analyst | 4.5/5 | Applied | ✅ | [3](../reports/003-delta-2026-01-07.md) | new |\n');
@@ -15288,6 +15372,117 @@ try {
     pass('modes/oferta.md keeps the A-G report block structure (new blocks may be appended)');
   } else {
     fail(`modes/oferta.md lost report block(s): ${missingBlocks.join(', ')} — BREAKING for the web report view`);
+  }
+
+  // 55.4b Block B's table columns are CONTRACT (#2330). Block B was the last
+  // report block whose columns were unspecified — oferta.md said only "create a
+  // table with each JD requirement mapped to exact lines in the CV" — so the
+  // requirement-importance design is also the moment those columns get pinned
+  // down. They were frozen deliberately on the day they landed: the 18 localized
+  // evaluation modes each describe Block B in their own words, and a rename here
+  // that does not reach them splits the report format silently.
+  const BLOCK_B_COLUMNS = ['Requirement', 'Importance', 'Match', 'JD signal', 'Evidence / gap'];
+  const blockBSection = ofertaSrc.match(/## Block B [\s\S]*?\n## Block C /)?.[0] ?? '';
+  const blockBHeaderRow = blockBSection.match(/^\|\s*Requirement\s*\|.*\|$/m)?.[0] ?? '';
+  const missingBlockBCols = BLOCK_B_COLUMNS.filter(
+    (c) => !blockBHeaderRow.includes(c),
+  );
+  if (blockBHeaderRow && missingBlockBCols.length === 0) {
+    pass('modes/oferta.md Block B keeps its frozen column set (#2330)');
+  } else if (!blockBHeaderRow) {
+    fail('modes/oferta.md Block B has no Requirement-led table header row — the #2330 column freeze cannot verify');
+  } else {
+    fail(`modes/oferta.md Block B lost column(s): ${missingBlockBCols.join(', ')} — columns are contract (#2330)`);
+  }
+  // The ORDER is contract too (2-sep): on a 390px viewport a 5-column table
+  // scrolls horizontally and only the first three columns are visible, so the
+  // decisive trio (Requirement, Importance, Match) must lead. Measured on the
+  // web report view before this freeze: with Importance in 4th place the column
+  // the whole block exists for was off-screen on mobile.
+  const blockBHeaderCells = blockBHeaderRow.split('|').map((c) => c.trim()).filter(Boolean);
+  if (blockBHeaderCells.slice(0, BLOCK_B_COLUMNS.length).join('|') === BLOCK_B_COLUMNS.join('|')) {
+    pass('modes/oferta.md Block B keeps its frozen column ORDER (decisive trio first)');
+  } else {
+    fail(`modes/oferta.md Block B column order drifted: ${blockBHeaderCells.join(' | ')} — expected ${BLOCK_B_COLUMNS.join(' | ')}`);
+  }
+  const batchBlockBRow = readFile('batch/batch-prompt.md').match(/^\|\s*Requirement\s*\|.*\|$/m)?.[0] ?? '';
+  if (batchBlockBRow && batchBlockBRow.split('|').map((c) => c.trim()).filter(Boolean).slice(0, 5).join('|') === BLOCK_B_COLUMNS.join('|')) {
+    pass('batch/batch-prompt.md Block B mirrors the frozen column order');
+  } else {
+    fail(`batch/batch-prompt.md Block B column order diverges from modes/oferta.md: ${batchBlockBRow || '(no header row)'}`);
+  }
+
+  // 55.4c The two rules that make the importance column defensible rather than
+  // just more numbers in the report. Frozen at doc level, in the style of the
+  // upskill trust-model promises: both are model-followed instructions with no
+  // runtime to assert against, so the text IS the enforcement surface and its
+  // deletion must fail CI rather than pass quietly.
+  //
+  //   the gate      — importance may only create obligations from JD-stated or
+  //                   JD-structural evidence, never a market-weight guess
+  //   the two-pass  — importance is fixed from the JD BEFORE cv.md is read, so
+  //                   rule            a written "Strong" cannot anchor it
+  const blockBPromises = [
+    ['inferred cap', /can \*\*never\*\* be `critical` or `high`/],
+    ['gate statement', /never from a market-weight guess/],
+    ['hard_stops exclusion', /`inferred` row never contributes to `hard_stops`/],
+    ['two-pass rule', /before reading `cv\.md`/],
+    ['no revision after pass 2', /never revised in pass 2/],
+    ['verbatim quote for stated', /\*\*verbatim\*\* JD quote/],
+    ['score neutrality', /does \*\*not\*\* affect the 1-5 global score/],
+  ];
+  const brokenPromises = blockBPromises.filter(([, re]) => !re.test(blockBSection)).map(([name]) => name);
+  if (brokenPromises.length === 0) {
+    pass('modes/oferta.md Block B keeps the frozen importance-evidence promises (#2330)');
+  } else {
+    fail(`modes/oferta.md Block B dropped importance promise(s): ${brokenPromises.join(', ')} — these ARE the feature (#2330)`);
+  }
+
+  // The gate has to hold for the batch path too, or headless workers become the
+  // hole in it: batch/batch-prompt.md is a second, independent writer of Block B.
+  const batchPromptSrc = readFile('batch/batch-prompt.md');
+  const batchGatePromises = [
+    ['inferred cap', /can \*\*never\*\* be `critical` or `high`/],
+    ['gate statement', /never from a market-weight guess/],
+    ['two-pass rule', /before reading `cv\.md`/],
+  ];
+  const brokenBatchPromises = batchGatePromises.filter(([, re]) => !re.test(batchPromptSrc)).map(([name]) => name);
+  if (brokenBatchPromises.length === 0) {
+    pass('batch workers inherit the Block B importance-evidence gate (#2330)');
+  } else {
+    fail(`batch/batch-prompt.md dropped importance gate rule(s): ${brokenBatchPromises.join(', ')} — batch would bypass the gate (#2330)`);
+  }
+
+  // 55.4d The two-pass rule is only real if nothing loads candidate evidence
+  // BEFORE Block B's first pass. batch-prompt.md's Step 2 preamble used to open
+  // with "Read `cv.md`, `article-digest.md`, ..." for every block at once, which
+  // made the rule unachievable on the batch path however carefully Block B
+  // worded it — the ordering was lost two sections earlier. Asserted on the
+  // preamble's text because that is where the regression would reappear: any
+  // future edit that hoists the CV read back up to Step 2 silently re-anchors
+  // every batch evaluation's importance column.
+  const step2Preamble = batchPromptSrc.match(/### Step 2 — Evaluate A-G[\s\S]*?\n#### Block B /)?.[0] ?? '';
+  const hoistsCvRead = /Read `cv\.md`/.test(step2Preamble);
+  const defersCvRead = /\*\*Do not read `cv\.md` or `article-digest\.md` yet\.\*\*/.test(step2Preamble);
+  const namesLoadPoint = /\*\*Load\*\* `cv\.md` and `article-digest\.md` now/.test(batchPromptSrc);
+  // The Sources of Truth table is the SECOND place the ordering can be lost:
+  // its "When" column said `cv.md` → "Always" under a heading that reads "read
+  // before evaluating", which contradicts the deferral in Step 2 just as
+  // effectively. Both hoist points are asserted, or fixing one leaves the other.
+  const sourcesTable = batchPromptSrc.match(/## Sources of Truth[\s\S]*?\nRules:/)?.[0] ?? '';
+  const cvRow = sourcesTable.match(/^\| CV \| `cv\.md` \|(.*)\|$/m)?.[1] ?? '';
+  const cvRowDefers = /Deferred to Block B pass 2/.test(cvRow);
+  if (!step2Preamble) {
+    fail('batch/batch-prompt.md Step 2 → Block B region not found — the #2330 two-pass ordering freeze cannot verify');
+  } else if (!cvRow) {
+    fail('batch/batch-prompt.md Sources of Truth has no `cv.md` row — the #2330 two-pass ordering freeze cannot verify');
+  } else if (!hoistsCvRead && defersCvRead && namesLoadPoint && cvRowDefers) {
+    pass('batch/batch-prompt.md defers the CV read until Block B pass 2 at both hoist points, so the two-pass rule is achievable (#2330)');
+  } else {
+    fail(
+      'batch/batch-prompt.md broke the Block B two-pass ordering (#2330): ' +
+      `hoistsCvRead=${hoistsCvRead} defersCvRead=${defersCvRead} namesLoadPoint=${namesLoadPoint} cvRowDefers=${cvRowDefers}`,
+    );
   }
 
   // 55.5 cross-check: the web parser still speaks the same column names

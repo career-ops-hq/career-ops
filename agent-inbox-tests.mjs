@@ -9,6 +9,8 @@
  *   3. `list` shows pending only; `list --all` shows resolved items too.
  *   4. `resolve N` ticks the N-th *pending* item and appends a one-line result,
  *      so `list` then `resolve N` line up.
+ *   4b. resolve holds the same lock as add for its full read/modify/write, so a
+ *       request accepted concurrently cannot be overwritten by a stale view.
  *   5. An empty `add` fails loudly (exit 1) rather than queuing a blank line.
  *   6. On the default path, a first `add` self-heals .gitignore (idempotent) so
  *      the personal queue isn't accidentally tracked.
@@ -145,6 +147,38 @@ console.log('4. resolve ticks the N-th pending item + appends a one-line result'
   check('item marked done', /^- \[x\] .*gamma/m.test(md), md);
   check('result appended', /→ result: scored 4\.3 — report 012/.test(md));
   check('no pending left', (md.match(/^- \[ \]/gm) || []).length === 0);
+}
+
+// ---------------------------------------------------------------------------
+console.log('4b. resolve waits for the queue lock before rewriting');
+{
+  const dir = tmp('inbox-resolve-lock-');
+  const inbox = join(dir, 'agent-inbox.md');
+  writeFileSync(inbox, '# Agent Inbox\n\n- [ ] 2026-01-01 00:00 — alpha\n- [ ] 2026-01-01 00:01 — beta\n');
+  const held = await acquirePipelineLock(inbox, { timeoutMs: 10_000 });
+  const child = spawn(NODE, [CLI, 'resolve', '1', '--result', 'done alpha'], {
+    cwd: ROOT, env: { ...process.env, CAREER_OPS_INBOX: inbox }, stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const closed = new Promise((res) => child.on('close', (code) => res(code)));
+  const whileHeld = await Promise.race([
+    closed.then(() => 'closed'),
+    // A fresh Node process starts in tens of milliseconds on the hosted
+    // runners. Half a second keeps the negative control decisive without
+    // making the suite inherit the lock's 30-second production timeout.
+    new Promise((res) => setTimeout(() => res('waiting'), 500)),
+  ]);
+  check('resolve stays blocked while another writer owns the queue lock', whileHeld === 'waiting', `state=${whileHeld}`);
+  held.release();
+  const exit = await closed;
+  check('resolve exits cleanly after the lock is released', exit === 0, `exit=${exit}, stderr=${stderr.trim()}`);
+  const md = readFileSync(inbox, 'utf8');
+  check('the selected item is resolved from the locked snapshot', /^- \[x\].*alpha.*→ result: done alpha/m.test(md), md);
+  check('the sibling pending item survives the rewrite', /^- \[ \].*beta/m.test(md), md);
+  check('resolve reports the selected item after committing', /Resolved #1: .*alpha/.test(stdout), stdout.trim());
 }
 
 // ---------------------------------------------------------------------------

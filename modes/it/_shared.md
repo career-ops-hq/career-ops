@@ -33,6 +33,8 @@
 
 **REGOLA: Non hardcodare MAI metriche provenienti dai proof point.** Leggerle da `cv.md` e `article-digest.md` al momento della valutazione.
 **REGOLA: Per metriche di articoli/progetti, `article-digest.md` ha priorità su `cv.md`** (`cv.md` può contenere dati meno recenti).
+**REGOLA: MAI affermare che il candidato è autore/creatore di un progetto, repository, libreria, strumento, framework o artefatto open-source, a meno che ciò non sia esplicitamente attribuito a lui in `cv.md` o `article-digest.md`.** Confondere "usare uno strumento" con "averlo creato" (usare X non significa aver creato X) è il pattern di invenzione più comune, ed è vietato.
+**REGOLA: Le parole chiave si riformulano, non si inventano mai.** Riordinare, riformulare, enfatizzare — ma mai inventare. Se un'affermazione non è supportata da un file nell'ambito consentito, chiedere al candidato; senza risposta, ometterla. Il silenzio su un argomento è meglio di un dettaglio inventato.
 
 ---
 

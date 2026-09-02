@@ -1190,6 +1190,31 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
     .sort();
 }
 
+/**
+ * Preserve byte-for-byte copies of system files before an unavoidable
+ * overwrite. The self-bootstrap stage cannot use the normal "keep local"
+ * path: it must load the fetched updater to remain forward-compatible. A
+ * sibling .bak makes that exceptional overwrite recoverable instead.
+ *
+ * @param {string[]} files - Repo-relative files already proven at risk.
+ * @param {{root?: string, copyFile?: Function}} [ctx] - Test seams.
+ * @returns {{file: string, backup: string, error?: string}[]}
+ */
+export function backupSystemFiles(files, ctx = {}) {
+  const root = ctx.root || ROOT;
+  const copyFile = ctx.copyFile || copyFileSync;
+  return files.map((file) => {
+    const source = join(root, ...file.split('/'));
+    const backup = `${source}.bak`;
+    try {
+      copyFile(source, backup);
+      return { file, backup: `${file}.bak` };
+    } catch (err) {
+      return { file, backup: `${file}.bak`, error: err.message };
+    }
+  });
+}
+
 export function revertPaths(paths, protectedPaths = new Set(), ctx = {}) {
   const runGit = ctx.git || git;
   const root = ctx.root || ROOT;
@@ -1877,6 +1902,10 @@ async function apply() {
   // TARGET updater as `update-system.mjs apply` with a fixed argv.
   const updateForce = process.argv.includes('--force') || process.env.CAREER_OPS_UPDATE_FORCE === '1';
   const initialStatusPaths = new Set(gitStatusEntries().map(entry => entry.path));
+  // Backups created by this apply run are expected updater output, not user
+  // files the checkout modified. Record only successful copies so an unrelated
+  // pre-existing .bak can never receive this exemption.
+  const generatedBackupPaths = new Set();
   const isReexec = process.env.CAREER_OPS_UPDATE_REEXEC === '1';
 
   // Check for lock
@@ -1924,6 +1953,20 @@ async function apply() {
         // relative-import closure and check out exactly those files, so a future
         // new top-level import can't reintroduce the self-reexec crash (#1245).
         const reexecFiles = resolveReexecCheckout('FETCH_HEAD', 'update-system.mjs');
+        const bootstrapAtRisk = locallyModifiedSystemFiles(reexecFiles, 'FETCH_HEAD');
+        if (bootstrapAtRisk.length > 0) {
+          console.log('');
+          console.log(`${bootstrapAtRisk.length} self-bootstrap file(s) differ from upstream because THIS install changed them:`);
+          for (const result of backupSystemFiles(bootstrapAtRisk)) {
+            if (result.error) {
+              console.log(`  ${result.file}  (could not write ${result.backup}: ${result.error})`);
+            } else {
+              console.log(`  ${result.file}  (local copy saved: ${result.backup})`);
+            }
+          }
+          console.log('Self-bootstrap must load the upstream versions; the local versions remain in the backups above.');
+          console.log('');
+        }
         git('checkout', 'FETCH_HEAD', '--', ...reexecFiles);
         execFileSync(process.execPath, ['update-system.mjs', 'apply'], {
           cwd: ROOT,
@@ -1973,15 +2016,14 @@ async function apply() {
     if (atRisk.length > 0) {
       console.log('');
       console.log(`${atRisk.length} system file(s) differ from upstream because THIS install changed them:`);
-      for (const file of atRisk) {
-        const backup = `${join(ROOT, ...file.split('/'))}.bak`;
-        try {
-          copyFileSync(join(ROOT, ...file.split('/')), backup);
-          console.log(`  ${file}  (local copy saved: ${file}.bak)`);
-        } catch (err) {
+      for (const result of backupSystemFiles(atRisk)) {
+        if (result.error) {
           // A .bak we could not write is worth saying out loud, but it must not
           // abort the update — the file itself is still listed either way.
-          console.log(`  ${file}  (could not write ${file}.bak: ${err.message})`);
+          console.log(`  ${result.file}  (could not write ${result.backup}: ${result.error})`);
+        } else {
+          generatedBackupPaths.add(result.backup);
+          console.log(`  ${result.file}  (local copy saved: ${result.backup})`);
         }
       }
       if (updateForce) {
@@ -2172,7 +2214,7 @@ async function apply() {
       // (e.g. writing-samples/README.md is system-owned doc inside a user dir).
       const changed = gitStatusEntries()
         .map((entry) => entry.path)
-        .filter((file) => !initialStatusPaths.has(file));
+        .filter((file) => !initialStatusPaths.has(file) && !generatedBackupPaths.has(file));
       for (const file of userLayerViolations(changed, updatePaths, effectiveUserPaths())) {
         console.error(`SAFETY VIOLATION: User file was modified: ${file}`);
         violatedUserPaths.add(file);
