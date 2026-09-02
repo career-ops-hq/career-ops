@@ -969,14 +969,57 @@ function pathMatchesManifest(file, entry) {
   return normalizedFile === normalizedEntry || normalizedFile.startsWith(`${normalizedEntry}/`);
 }
 
-export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths = USER_PATHS) {
+// A user-authored named template variant, per cv-templates.mjs's own naming
+// convention (KINDS.cv.prefix = 'cv-template', KINDS.cover.prefix =
+// 'cover-letter-template'; parseFilename() there recognizes exactly this
+// `<prefix>.<name>.<html|tex>` shape). A file matching this shape lives
+// directly under templates/ next to the real shipped template files, and by
+// construction never exists upstream once it is a personal variant — see the
+// gap this closes (distinct from #3636/#3638, which cover generated
+// per-application CVs, not user-authored template *variants*).
+const TEMPLATE_VARIANT_RE = /^templates\/(cv-template|cover-letter-template)\.([a-z0-9-]+)\.(html|tex)$/;
+const TEMPLATE_VARIANT_KIND = { 'cv-template': 'cv', 'cover-letter-template': 'cover' };
+
+/**
+ * Is `file` a named template variant this install's config/profile.yml has
+ * itself configured as the active default (`cv.template` / `cover_letter.template`
+ * — the same keys cv-templates.mjs's resolveTemplate() reads)?
+ *
+ * A file matching TEMPLATE_VARIANT_RE is ambiguous on name alone: it could be
+ * a real shipped variant (`cv-template.zh-minimal.html`) that upstream still
+ * ships (handled fine by the normal remote-tree comparison — never reaches
+ * this check) or has genuinely been removed upstream (should still prune,
+ * same as before), OR it could be the user's own variant that will NEVER
+ * exist upstream, and whose only signal of intent is that they pointed
+ * config/profile.yml at its name. `configuredVariants` is precomputed by the
+ * caller (apply(), via a lazy `import('./cv-templates.mjs')` — this module
+ * must stay self-loading, see the top-of-file note) so this function itself
+ * stays pure and synchronous, exactly like the SYSTEM_PATHS/USER_PATHS
+ * filters it sits next to, and is trivially unit-testable without touching
+ * the filesystem.
+ *
+ * @param {string} file - repo-relative path.
+ * @param {{cv?: string, cover?: string}} configuredVariants - kebab-case
+ *   variant names read from config/profile.yml's cv.template / cover_letter.template.
+ */
+export function isUserConfiguredTemplateVariant(file, configuredVariants = {}) {
+  const match = normalizeRepoPath(file).match(TEMPLATE_VARIANT_RE);
+  if (!match) return false;
+  const kind = TEMPLATE_VARIANT_KIND[match[1]];
+  const name = match[2];
+  const configured = configuredVariants?.[kind];
+  return Boolean(configured) && configured === name;
+}
+
+export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths = USER_PATHS, configuredVariants = {}) {
   const remote = new Set([...remoteFiles].map(normalizeRepoPath));
   if (remote.size === 0) return [];
   return [...localFiles]
     .map(normalizeRepoPath)
     .filter((file) => !remote.has(file))
     .filter((file) => systemPaths.some((entry) => pathMatchesManifest(file, entry)))
-    .filter((file) => !userPaths.some((entry) => pathMatchesManifest(file, entry)));
+    .filter((file) => !userPaths.some((entry) => pathMatchesManifest(file, entry)))
+    .filter((file) => !isUserConfiguredTemplateVariant(file, configuredVariants));
 }
 
 // A stale-file prune candidate can still be load-bearing for a file this same
@@ -2265,6 +2308,27 @@ async function apply() {
       console.log(`Skipped ${skippedPaths.length} path(s) absent upstream: ${skippedPaths.join(', ')}`);
     }
 
+    // A named template variant the user configured as their active default
+    // (config/profile.yml's cv.template / cover_letter.template) survives the
+    // stale-file prune below even once it stops looking "locally modified"
+    // (see isUserConfiguredTemplateVariant()'s doc comment) — it can never
+    // exist upstream once it is genuinely a personal variant, so the ordinary
+    // absent-from-remote signal alone would eventually delete it. cv-templates.mjs
+    // was just checked out above (it's in SYSTEM_PATHS), so it resolves here
+    // even on a pre-#1245 old→new re-exec; kept as a lazy import, per the
+    // top-of-file self-loading note, rather than a static one.
+    let configuredTemplateVariants = {};
+    try {
+      const { loadProfileDefault, kebab } = await import('./cv-templates.mjs');
+      for (const kind of ['cv', 'cover']) {
+        const configured = loadProfileDefault(kind);
+        if (configured) configuredTemplateVariants[kind] = kebab(configured);
+      }
+    } catch {
+      // cv-templates.mjs absent (very old target) or config/profile.yml
+      // unreadable/unparseable — fall back to no exemption (prior behavior).
+    }
+
     // All tracked system files need the same stale-file treatment. In
     // particular, root-level system files removed upstream (for example an
     // old plugins-registry.json) are not covered by a directory-only prune.
@@ -2287,7 +2351,9 @@ async function apply() {
         // be deleted here as "stale" — the two checks used to run independently,
         // so a preserved file with no upstream counterpart was backed up to
         // .bak by the block above and then unlinked by this one in the same run.
-        const staleCandidates = staleSystemFiles(localFiles, remoteFiles, SYSTEM_PATHS, mergePathLists(USER_PATHS, preservedPaths));
+        const staleCandidates = staleSystemFiles(
+          localFiles, remoteFiles, SYSTEM_PATHS, mergePathLists(USER_PATHS, preservedPaths), configuredTemplateVariants,
+        );
         for (const f of staleCandidates) {
           if (isReferencedByPreservedFile(f, preservedPaths)) {
             console.log(`Kept stale asset still referenced by a preserved file: ${f}`);
