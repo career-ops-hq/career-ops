@@ -20,7 +20,8 @@ const REQUIRED_TOKENS = [
 // The point is that a future fact change forces the PR to either update all 16 files
 // or explicitly touch this token list, so drift is caught in CI.
 const RETIRED_TOKENS = [
-  'A-F'
+  'A-F', // hyphen form (U+002D) — retired, see PR #3487 review
+  'A–F'  // en-dash form (U+2013) — retired, see PR #3487 review
 ];
 
 // Discover all localized README files in the repo root matching README.*.md
