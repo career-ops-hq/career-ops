@@ -515,6 +515,78 @@ title_filter:
     - "Head"
     - "Director"
 
+# -- Domain filter (reverse sweep only, opt-in) --
+# Read ONLY by `scan-ats-full.mjs` (npm run scan:full), the reverse sweep that
+# walks every public ATS board instead of your tracked_companies. Commented out
+# on purpose: absent, the sweep behaves exactly as it always has.
+#
+# Why it exists: `title_filter` runs on the wrong axis out there. It asks the
+# title to answer both "is this the right role" and "is this employer in my
+# industry", and a title cannot answer the second one — "Senior Backend
+# Engineer" is identical at a Solana infrastructure company and at a supermarket
+# chain. scan.mjs never has that problem, because tracked_companies settles the
+# employer before any title is read.
+#
+# So this gates the BOARD before any title is tested: if no posting anywhere on
+# a board matches one of these keywords, the company is not in your industry and
+# the whole board is skipped. One matching posting is enough — that threshold is
+# measured, not cautious: raising it to two kept twelve boards and lost every
+# genuine one, because a repeated false-positive substring is a property of big
+# boards while a real find is one opening at a small company.
+#
+# The payoff is that broad keywords become usable again. Once a board is
+# established as in-domain, "Backend Engineer" on it is a real lead.
+#
+# Write the INDUSTRY half of your filter here, not the role half — the terms
+# that identify what a company does.
+#
+# An entry is matched as a WHOLE WORD by default, which is the opposite of
+# title_filter's plain-substring default, and measured: a plain substring
+# admitted 32 boards on one sweep of which 28 were junk, 25 of them because
+# `defi` sits at the start of "Deficiência", "Defiance", "Software Defined" and
+# "Product Definition". One such match admits that board's entire catalogue,
+# which is why the strict end is the free one here.
+#
+# The cost of that default is real: `blockchain` will not match "Blockchains",
+# `smart contract` will not match "Smart Contracts", and `crypto` will not match
+# "Cryptocurrency". Prefix an entry with `stem:` when a longer form matters, the
+# same prefix title_filter uses — `stem:smart contract` matches "Smart
+# Contracts" and carries no junk risk, since no unrelated word begins with it.
+# `word:` is accepted too and is simply explicit about the default.
+#
+# Known limit: an aggregator board is not one employer. A job aggregator that
+# carries some in-domain roles passes the gate and brings its unrelated
+# postings with it. No threshold fixes that; the gate degrades to the old
+# behaviour there.
+#
+# Skipped boards are counted in the run summary and named by --verbose, so a
+# domain term you forgot shows up as boards declined rather than as silence.
+#
+# The list below is [CUSTOMIZE] and deliberately from ONE vertical (crypto), the
+# same one the numbers above were measured on. Replace it with the industry
+# terms of your own search — and note the gate is worth most to a narrow
+# vertical: a domain list of "AI" and "machine learning" admits most boards in
+# 2026, which is no worse than today but buys less.
+#
+# domain_filter:
+#   # Plain entries: whole-word, no longer form to keep.
+#   - "solana"
+#   - "solidity"
+#   - "web3"
+#   - "defi"
+#   - "onchain"
+#   - "ethereum"
+#   - "evm"
+#   # stem: where the plural or compound is the common spelling.
+#   - "stem:blockchain"       # Blockchain, Blockchains
+#   - "stem:smart contract"   # Smart Contract, Smart Contracts
+#   - "stem:digital asset"    # Digital Asset, Digital Assets
+#   # `stem:crypto` would reach "Cryptocurrency" and also "Cryptography" —
+#   # a board of security roles. Whole-word here, and the one below covers
+#   # the form actually wanted.
+#   - "crypto"
+#   - "cryptocurrency"
+
 # -- Search queries --
 # Each query triggers a WebSearch. Use site: to filter by portal.
 # The scanner extracts title, URL, and company from results.

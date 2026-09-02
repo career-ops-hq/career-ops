@@ -14,6 +14,12 @@
  * list do not have to double as the filter for every public board. Absent,
  * `title_filter` is used exactly as before.
  *
+ * Optional `domain_filter` in portals.yml gates whole BOARDS before any title
+ * is tested (#3105): a board with no domain-bearing posting is not this user's
+ * industry, and is skipped entirely. Absent — the default — every board is
+ * swept exactly as before. Not applied to --seeds: a VC portfolio is already a
+ * curated corpus, so gating it would be redundant.
+ *
  * Company directories come from the public job-board-aggregator dataset
  * (github.com/Feashliaa/job-board-aggregator), cached in data/cache/ for 24h.
  *
@@ -54,6 +60,7 @@ import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { buildDomainFilter } from './title-keywords.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -424,6 +431,43 @@ export function resolveTitleFilterConfig(config) {
   return config?.title_filter_full ?? config?.title_filter;
 }
 
+// The company-level gate (#3105). `title_filter` runs on the wrong axis for a
+// reverse sweep: it asks the TITLE to answer both "is this the right role" and
+// "is this employer in my industry", and a title cannot answer the second one —
+// "Senior Backend Engineer" is character-for-character identical at a Solana
+// infrastructure company and at a supermarket chain. scan.mjs never had that
+// problem because tracked_companies settles the employer before a title is
+// read; the sweep deletes that premise and hands the whole burden to keywords
+// that were never chosen for it.
+//
+// So ask the cheaper question of the board as a whole first, using data already
+// paid for — the board is fully in memory before filtering starts, so this
+// costs one extra pass over an array and no HTTP request at all.
+//
+// THRESHOLD IS ONE, and that is measured rather than cautious. Over 546
+// postings on 249 boards, raising it does not trade recall for precision, it
+// inverts the gate: at two, twelve boards survive and every genuine crypto
+// employer is gone, because ten of the twelve qualify on `defi` appearing
+// repeatedly inside a Portuguese "Deficiência" or an Ohio "Defiance". A
+// repeated false-positive substring is a property of large boards; the real
+// finds are single openings at small companies — conduit, ethereum-foundation,
+// mesh and ing each had exactly one domain-bearing posting, which is precisely
+// the find the sweep exists for.
+//
+// KNOWN LIMIT: the gate assumes one board is one employer, and an aggregator
+// breaks that premise. `jobgether` carried 25 domain-bearing postings among 93
+// and so passes at every threshold under every matcher, admitting 68 unrelated
+// ones on the strength of its crypto listings. No threshold fixes it — the
+// board is simply not an employer. There the gate degrades to today's
+// behaviour, which is a bounded failure and one of the reasons the whole
+// feature is opt-in.
+//
+// A truncated board is judged on the part that was fetched, like every other
+// gate here: the sweep can only read what the provider returned.
+export function boardInDomain(jobs, domainFilter) {
+  return jobs.some(job => job?.title && domainFilter(job.title));
+}
+
 // Title/location/content filter chain for one posting, used by runSeedScan().
 // The main ATS-directory loop below inlines the same three checks (it tracks
 // a droppedContent counter per stage for the run summary), but this shared,
@@ -683,6 +727,12 @@ async function main() {
   // Same content_filter (incl. by_title_keyword scoping) scan.mjs applies —
   // see #1846. Built once here from the same portals.yml config.
   const contentFilter = buildContentFilter(config?.content_filter);
+  // Opt-in, and the opt-in IS the key: `domain_filter` does not exist in any
+  // portals.yml written before this feature, so every existing install keeps
+  // its exact behaviour and nobody loses a board without having asked for the
+  // gate. buildDomainFilter returns null for an absent or empty list, which is
+  // why the summary can tell "off" from "on and nothing was skipped".
+  const domainFilter = buildDomainFilter(config?.domain_filter);
   if (!fullTitleFilterConfig?.positive?.length) {
     const key = config?.title_filter_full ? 'title_filter_full' : 'title_filter';
     console.error(`⚠️  portals.yml has no ${key}.positive — every fresh posting on every board will match. Consider adding keywords.`);
@@ -698,7 +748,7 @@ async function main() {
   const atsSummary = opts.ats.length ? `ats: ${opts.ats.join(', ')}` : '';
   const seedsSummary = opts.seeds.length ? `seeds: ${opts.seeds.join(', ')}` : '';
   const sourcesSummary = [atsSummary, seedsSummary].filter(Boolean).join(' | ');
-  log(`Reverse ATS scan — ${sourcesSummary} | since ${opts.sinceDays}d${opts.limit < Infinity ? ` | limit ${opts.limit}/ats` : ''}${opts.shuffle ? ' | shuffled' : ''}${opts.includeUndated ? ' | +undated' : ''}${opts.liveness ? ' | liveness' : ''}${opts.dryRun ? ' | DRY RUN' : ''}`);
+  log(`Reverse ATS scan — ${sourcesSummary} | since ${opts.sinceDays}d${opts.limit < Infinity ? ` | limit ${opts.limit}/ats` : ''}${opts.shuffle ? ' | shuffled' : ''}${opts.includeUndated ? ' | +undated' : ''}${opts.liveness ? ' | liveness' : ''}${domainFilter ? ' | domain gate' : ''}${opts.dryRun ? ' | DRY RUN' : ''}`);
 
   // extraTokensFor: a historical scan-history.tsv row records the URL it was
   // FIRST seen on, so without this a Workday requisition seen last run under
@@ -768,11 +818,18 @@ async function main() {
   // re-hit the cap — it's reported, not retried, so capped coverage is visible
   // instead of passing for a fully-walked board.
   let cappedBoards = cc.cappedBoards || 0;
+  // Skipped boards are COUNTED, never silent. The gate's real failure mode is a
+  // term missing from the domain list, and a missing term costs a whole board —
+  // so the run has to say how much it declined to look at, and --verbose names
+  // each board so a suspicious skip can be checked by hand.
+  let domainGatedBoards = cc.domainGatedBoards || 0;
+  let domainGatedPostings = cc.domainGatedPostings || 0;
   const datasetStatus = {};
 
   const snapshotCounters = () => ({
     totalCompaniesScanned, totalErrors, droppedNoDate, droppedContent,
     noDateSkipCompanies, noDateSkipJobs, cappedBoards,
+    domainGatedBoards, domainGatedPostings,
   });
   const checkpointBase = () => ({
     version: 1,
@@ -886,6 +943,18 @@ async function main() {
         await withTimeout((async () => {
           const jobs = await source.provider.fetch(entry, ctx);
           consecutiveResolverFailures = 0;
+          // Deliberately ahead of the truncation retry and of processJobs: a
+          // gated board is not merely quieter but CHEAPER, since provider
+          // .enrichDate() issues a per-job detail request for undated providers
+          // (icims) and a board dropped here never pays for one. It also means
+          // a gated board is never queued for the sequential retry — nothing
+          // downstream would have kept its postings anyway.
+          if (domainFilter && !boardInDomain(jobs, domainFilter)) {
+            domainGatedBoards++;
+            domainGatedPostings += jobs.length;
+            if (opts.verbose) console.error(`  ⊘ ${name}/${entry.name}: no domain-bearing posting — board skipped`);
+            return;
+          }
           if (jobs.workdayTruncated) truncated.push(entry);
           if (jobs.icimsTruncated) {
             cappedBoards++;
@@ -1026,6 +1095,12 @@ async function main() {
   log(`Companies scanned:  ${totalCompaniesScanned}${capHit ? ` of ${totalCompaniesAvailable} (capped)` : ''}`);
   log(`Unreachable boards: ${totalErrors}`);
   if (cappedBoards) log(`Page-capped boards: ${cappedBoards} (partial coverage — later postings not scanned)`);
+  // Reported whenever the gate RAN, including when it skipped nothing: a zero
+  // there is the useful reading that the domain list admitted every board, and
+  // silence would be indistinguishable from the gate being off.
+  if (domainFilter) {
+    log(`Domain-gated boards: ${domainGatedBoards} skipped, ${domainGatedPostings} posting${domainGatedPostings === 1 ? '' : 's'} never filtered${domainGatedBoards && !opts.verbose ? ' (--verbose names them)' : ''}`);
+  }
   // A paced sweep is slower on purpose. Say so, or the operator reads the
   // wall-clock time as a hang (#2229).
   const pacing = dnsPacingStats();
@@ -1125,6 +1200,12 @@ async function main() {
       postingsDroppedContent: droppedContent,
       unreachableBoards: totalErrors,
       cappedBoards,
+      // `domainFilterActive` is not derivable from the two counts: zero skipped
+      // boards is equally what an absent domain_filter and a permissive one
+      // produce, and a caller comparing two sweeps needs to know which.
+      domainFilterActive: Boolean(domainFilter),
+      domainGatedBoards,
+      domainGatedPostings,
       dnsPacing: { delayed: pacing.delayed, waitedMs: Math.round(pacing.waitedMs) },
       saved,
       offers: offers.map(o => ({

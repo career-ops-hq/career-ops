@@ -607,6 +607,28 @@ Postings without a usable publish date are skipped — a reverse scan is only us
 
 `data/blacklist.md` is respected here too: blacklisted companies are skipped by default and reported in the summary. Pass `--include-blacklisted` to audit them instead; matching postings flow through annotated (`note: blacklisted: {reason}` in `data/pipeline.md`).
 
+### Domain filter — gating boards on the company (opt-in)
+
+Out here `title_filter` runs on the wrong axis. It asks the title to answer both *is this the right role* and *is this employer in my industry*, and a title cannot answer the second one — "Senior Backend Engineer" is character-for-character identical at a Solana infrastructure company and at a supermarket chain. `scan.mjs` never has that problem, because `tracked_companies` settles the employer before any title is read. The sweep deletes that premise, which leaves a choice with no good branch: keep broad keywords and every board matches, or drop them and go blind to exactly the roles the sweep exists to discover.
+
+An optional `domain_filter` list in `portals.yml` gates the **board** instead. Before any title is filtered, the sweep asks whether *any* posting on that board matches a domain keyword; if none does, the board is skipped whole.
+
+```yaml
+domain_filter:
+  - "solana"
+  - "defi"
+  - "stem:smart contract"
+```
+
+- **Opt-in.** No `domain_filter` key, no gate — every existing `portals.yml` sweeps exactly as before.
+- **Free.** The board is already fully in memory when filtering starts, so the gate costs one pass over an array and no HTTP request. A skipped board is *cheaper* than a scanned one: its postings are never title-filtered and never date-enriched, and undated providers (iCIMS) issue a detail request per surviving job that a gated board never pays for.
+- **The threshold is one matching posting**, and that is measured rather than cautious. Over 546 postings on 249 boards, raising it to two kept twelve boards and lost every genuine one: ten of the twelve qualified on `defi` appearing repeatedly inside a Portuguese "Deficiência" or an Ohio "Defiance". A repeated false-positive substring is a property of big boards, while a real find is one opening at a small company.
+- **Entries are matched as whole words by default** — the opposite of `title_filter`, where a plain keyword is a substring. A plain substring admitted 32 boards on one sweep of which 28 were junk, and one bad match admits a whole catalogue rather than one row. Prefix with `stem:` when the longer form is the common spelling (`stem:smart contract` for "Smart Contracts"); `word:` is accepted and is the default said explicitly. Both prefixes mean what they mean in `title_filter`.
+- **Skipped boards are counted, never silent.** The run summary reports how many boards were skipped and how many postings were never filtered; `--verbose` names each one, and `--json` carries `domainFilterActive`, `domainGatedBoards` and `domainGatedPostings`. The gate's real failure mode is a domain term you forgot, and a missing term costs a board — so keep the list generous and read the count.
+- **Not applied to `--seeds`.** A VC portfolio is already a curated corpus; gating it would be redundant.
+
+**Known limit — aggregators.** The gate assumes one board is one employer. A job aggregator carrying some in-domain roles passes at every threshold under every matcher and brings its unrelated postings with it. No threshold fixes that: the board is simply not an employer, and there the gate degrades to the ungated behaviour.
+
 ### Cross-listing detection
 
 `data/scan-history.tsv` carries a **SimHash fingerprint** of the JD text in its 8th column (`jd_fingerprint`), and the original posting date in its 9th column (`postedAt`). The fingerprint column exists to catch a specific double-submission hazard: the same role posted by the direct employer **and** by a recruitment agency, often with the employer name stripped from the agency listing. URL dedup and company+role dedup both miss this pair because the URLs and company names are different — but agencies rarely rewrite the requirements text, so a near-identical JD body is a reliable signal.
