@@ -3869,6 +3869,53 @@ if (
   fail('Chinese modes missing company-type compensation reliability checks');
 }
 
+// ── Localized oferta.md structural parity (#3669) ──
+// Six localized oferta.md files were frozen at a pre-Block-G shape: no Block G,
+// no Risk Summary, and `## G)` meaning the draft-answers block that is `## H)`
+// in the canonical. A locale WITHOUT an oferta.md falls back to the canonical
+// and gets all of it, so a stale translation is worse than none. This pins the
+// structural contract on EVERY modes/*/oferta.md: the report-format letters
+// A)–H) present, `## Risk Summary` between G) and H), and the header field
+// labels + `## Risk Summary` literal in English (the web viewer maps them by
+// name and silently drops what it does not know). The allowlist below names the
+// files still frozen; a re-synced file MUST be removed from it (the check fails
+// loudly otherwise), so the list can only shrink. Denominator asserted: the
+// locale walk must find the known files, or the whole check is blind.
+{
+  const FROZEN_OFERTA = new Set(['da', 'es', 'pl', 'pt', 'ru', 'ua']);
+  const REQUIRED_HEADINGS = ['## A)', '## B)', '## C)', '## D)', '## E)', '## F)', '## G)', '## Risk Summary', '## H)'];
+  const REQUIRED_LABELS = ['**Date:**', '**URL:**', '**Archetype:**', '**Score:**', '**Legitimacy:**', '**PDF:**'];
+  const withOferta = readdirSync(join(ROOT, 'modes'), { withFileTypes: true })
+    .filter(d => d.isDirectory() && existsSync(join(ROOT, 'modes', d.name, 'oferta.md')))
+    .map(d => d.name).sort();
+  const structuralGaps = (text) => {
+    const gaps = REQUIRED_HEADINGS.filter(h => !text.includes(h)).concat(REQUIRED_LABELS.filter(l => !text.includes(l)));
+    const g = text.lastIndexOf('## G)'), rs = text.lastIndexOf('## Risk Summary'), h = text.lastIndexOf('## H)');
+    if (gaps.length === 0 && !(g < rs && rs < h)) gaps.push('order G) → Risk Summary → H)');
+    return gaps;
+  };
+  if (withOferta.length < 8 || !withOferta.includes('zh') || !withOferta.includes('ru')) {
+    fail(`localized oferta.md walk found ${withOferta.length} files (${withOferta.join(', ')}) — expected ≥8 incl. zh and ru; the parity check would be blind`);
+  } else {
+    const canonicalGaps = structuralGaps(readFile('modes/oferta.md'));
+    const stillFrozen = [], resynced = [], drifted = [];
+    for (const lang of withOferta) {
+      const gaps = structuralGaps(readFile(`modes/${lang}/oferta.md`));
+      if (FROZEN_OFERTA.has(lang)) (gaps.length === 0 ? resynced : stillFrozen).push(lang);
+      else if (gaps.length > 0) drifted.push(`${lang} (${gaps.join(', ')})`);
+    }
+    if (canonicalGaps.length > 0) {
+      fail(`canonical modes/oferta.md lost its own report-format contract: ${canonicalGaps.join(', ')}`);
+    } else if (drifted.length > 0) {
+      fail(`localized oferta.md drifted from the canonical report structure: ${drifted.join('; ')}`);
+    } else if (resynced.length > 0) {
+      fail(`localized oferta.md re-synced but still listed as frozen — remove from FROZEN_OFERTA in test-all.mjs and tick it in #3669: ${resynced.join(', ')}`);
+    } else {
+      pass(`localized oferta.md structural parity: ${withOferta.length - stillFrozen.length} of ${withOferta.length} files carry A)–H) + Risk Summary + English header labels; still frozen (allowlisted, #3669): ${stillFrozen.join(', ') || 'none'}`);
+    }
+  }
+}
+
 const batchPromptDoc = readFile('batch/batch-prompt.md');
 if (
   batchPromptDoc.includes('Company type classification (required)') &&
