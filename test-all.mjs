@@ -17687,6 +17687,50 @@ try {
   }
 }
 
+console.log('\n74. gmail: isCleanUrl() drops page assets');
+try {
+  const { isCleanUrl } = await import(pathToFileURL(join(ROOT, 'plugins', 'gmail', '_helpers.mjs')).href);
+
+  // The bug: job-alert emails embed a company logo per job. These reached the
+  // pipeline as untitled "job leads" because they are https, carry no tracker
+  // keyword, and sit on the board's own domain.
+  const assets = [
+    'https://80000hours.org/wp-content/uploads/2023/11/acme-160x160.jpeg',
+    'https://example.com/logo.svg?v=2',              // cache-buster after the extension
+    'https://example.com/hero.PNG',                  // extension case is not significant
+    'https://cdn.example.com/anything',              // asset subdomain, no extension
+    'https://images.example.com/x',
+    'https://fonts.googleapis.com/css2?family=Inter', // webfont CSS has no extension
+    'https://example.com/wp-includes/js/x',
+  ];
+  const bad = assets.filter(isCleanUrl);
+  if (bad.length === 0) pass('isCleanUrl() rejects logos, webfonts and asset hosts');
+  else fail(`isCleanUrl() let ${bad.length} asset URL(s) through: ${bad.join(', ')}`);
+
+  // Regression guard: real postings must survive. "gh_src=js" and "/static-site/"
+  // are the shapes most likely to trip a naive asset filter.
+  const postings = [
+    'https://boards.greenhouse.io/acme/jobs/4384681009?gh_src=js',
+    'https://jobs.ashbyhq.com/acme/abc-123',
+    'https://jobs.lever.co/acme/b71cd010-d3cf-446c-80fa',
+    'https://careers.example.com/static-site-engineer',
+    'https://example.com/jobs/senior-media-buyer',
+  ];
+  const lost = postings.filter(u => !isCleanUrl(u));
+  if (lost.length === 0) pass('isCleanUrl() still accepts real job postings');
+  else fail(`isCleanUrl() wrongly rejected: ${lost.join(', ')}`);
+
+  // Pre-existing behaviour must not regress.
+  if (!isCleanUrl('http://example.com/jobs/1') && !isCleanUrl('https://example.com/click/track')
+      && !isCleanUrl('not a url')) {
+    pass('isCleanUrl() keeps rejecting http, trackers and malformed input');
+  } else {
+    fail('isCleanUrl() regressed on http / tracker / malformed input');
+  }
+} catch (e) {
+  fail(`gmail isCleanUrl tests crashed: ${e.message}`);
+}
+
 await runDiscovered();
 
 finish();
