@@ -504,16 +504,117 @@ function sourceContainsFact(sourceText, value) {
   return new RegExp(`(?:^|[^\\p{L}\\p{N}+#/-])${escaped}(?=$|[^\\p{L}\\p{N}+#/-])`, 'iu').test(sourceText);
 }
 
+// ── Genericity: catch AI-resume-sameness patterns, not fabrication ─────────
+//
+// The fact gate above answers "is this true?"; this answers a different
+// question: "does this bullet tell a recruiter anything, or would it fit
+// almost any candidate in this role?" Both are documented failure modes of
+// leaning on a first AI draft — filler phrasing that survives every fact
+// check because it makes no checkable claim at all, and a task-listing
+// bullet ("Responsible for X") that never states what changed because of the
+// work. Neither is a lie, so neither ever blocks — both only ever add to
+// `warnings`, the same non-blocking channel `warn_phrases` already uses.
+//
+// Kept to a short, defensible list of full PHRASES rather than individual
+// words ("motivated", "leadership") — those are ordinary vocabulary a
+// specific bullet still needs; it is the interchangeable stock phrase, not
+// the word, that reads as AI sameness.
+const GENERIC_RESUME_PHRASES = [
+  'results-driven professional',
+  'results-oriented professional',
+  'proven track record',
+  'strong team player',
+  'excellent communicator',
+  'excellent communication skills',
+  'proven leader',
+  'hard-working professional',
+  'detail-oriented team player',
+  'highly motivated individual',
+  'dynamic professional',
+  'self-starter with a proven track record',
+  'strong work ethic',
+  'extensive experience in',
+  'proven ability to',
+  'think outside the box',
+  'hit the ground running',
+  'wear many hats',
+  'passionate about delivering',
+];
+
+// Openers that list a responsibility without saying what happened as a
+// result. Narrow on purpose: a bullet starting with one of these AND
+// carrying no digit anywhere (count, %, currency — any of the scope signals
+// the metric/fact checks above already parse) is exactly the shape the
+// article's "too broad" examples share ("Responsible for stakeholder
+// communication and project coordination."). A specific bullet with no
+// opener in this list (e.g. "Migrated the legacy monolith to Kubernetes
+// using a strangler-fig pattern") is never flagged, even with no number in
+// it — this only catches the passive/task-only framing, not the absence of
+// a metric on its own.
+const TASK_ONLY_OPENERS = [
+  'responsible for', 'managed', 'helped with', 'assisted with', 'worked on',
+  'involved in', 'participated in', 'supported', 'handled', 'oversaw',
+  'coordinated', 'contributed to', 'in charge of',
+];
+
+// Bullet/list-item boundaries across the three formats this gate reads
+// (rendered HTML <li>, Markdown -/*/•, LaTeX \item). Matched against the RAW
+// text before stripMarkup, since stripMarkup collapses <li> boundaries into a
+// '. ' sentence break and would erase markdown bullet markers the same way.
+const BULLET_BOUNDARY_RE = /<li\b[^>]*>|^[ \t]*[-*•][ \t]+|\\item\b/gim;
+
+/** Split raw candidate-facing text into individual bullet/list-item strings. */
+function splitBullets(rawText) {
+  const text = String(rawText);
+  const marks = [...text.matchAll(BULLET_BOUNDARY_RE)];
+  const bullets = [];
+  for (let i = 0; i < marks.length; i++) {
+    const start = marks[i].index + marks[i][0].length;
+    const end = i + 1 < marks.length ? marks[i + 1].index : text.length;
+    // Trailing close tags after the bullet's real content (</li>, then
+    // </ul>/</ol> closing the whole list) each become their own '. '
+    // sentence break in stripMarkup, stacking into "content.. ." — collapse
+    // that run back to the single period the source text actually ended with.
+    const bullet = stripMarkup(text.slice(start, end)).replace(/(?:\s*\.){2,}\s*$/, '.').trim();
+    if (bullet) bullets.push(bullet);
+  }
+  return bullets;
+}
+
+/**
+ * Scan candidate-facing text for AI-resume-sameness patterns: stock filler
+ * phrases and task-only bullets with no outcome or scope shown. Read-only —
+ * this never rewrites or drops anything, only reports.
+ *
+ * @param {string} rawText generated candidate-facing HTML/Markdown/LaTeX
+ * @returns {{ buzzwords: string[], taskOnlyBullets: string[] }}
+ */
+export function genericityFindings(rawText) {
+  const plain = stripMarkup(rawText).toLowerCase();
+  const buzzwords = GENERIC_RESUME_PHRASES.filter((phrase) => plain.includes(phrase));
+  const taskOnlyBullets = splitBullets(rawText).filter((bullet) => {
+    const lower = bullet.toLowerCase();
+    return TASK_ONLY_OPENERS.some((opener) => lower.startsWith(opener)) && !/\d/.test(bullet);
+  });
+  return { buzzwords, taskOnlyBullets };
+}
+
 /**
  * @param {string} targetText generated candidate-facing HTML/Markdown/text
- * @param {{ sourcePaths?: string[], configPath?: string, cwd?: string }} options
- * @returns {{ verdict: 'pass'|'warn'|'block', invented: string[], unsupportedFacts: object[], forbidden: string[], warnings: string[] }}
+ * @param {{ sourcePaths?: string[], configPath?: string, cwd?: string, checkGenericity?: boolean }} options
+ * @returns {{ verdict: 'pass'|'warn'|'block', invented: string[], unsupportedFacts: object[], forbidden: string[], warnings: string[], generic: { buzzwords: string[], taskOnlyBullets: string[] } }}
  * @throws when the config is invalid
  */
 export function verifyFacts(targetText, {
   sourcePaths = DEFAULT_SOURCES,
   configPath = DEFAULT_CONFIG,
   cwd = process.cwd(),
+  // Opt-in: existing callers that don't ask for this keep byte-identical
+  // behavior. generate-cover-letter.mjs and the verify-cv-facts.mjs CLI both
+  // turn it on explicitly, since those are the two candidate-facing paths the
+  // AI-resume-sameness pattern actually targets (résumé bullets and cover
+  // letter prose).
+  checkGenericity = false,
 } = {}) {
   const sourceText = sourcePaths.map(path => readIfExists(resolveInputPath(path, cwd))).join('\n');
   const config = loadConfig(resolveInputPath(configPath, cwd));
@@ -528,12 +629,19 @@ export function verifyFacts(targetText, {
   const forbidden = config.forbidden_phrases
       .filter(Boolean)
       .filter(phrase => stripMarkup(targetText).toLowerCase().includes(String(phrase).toLowerCase()));
-  const warnings = config.warn_phrases
+  const generic = checkGenericity ? genericityFindings(targetText) : { buzzwords: [], taskOnlyBullets: [] };
+  const warnings = [
+    ...config.warn_phrases
       .filter(Boolean)
-      .filter(phrase => stripMarkup(targetText).toLowerCase().includes(String(phrase).toLowerCase()));
+      .filter(phrase => stripMarkup(targetText).toLowerCase().includes(String(phrase).toLowerCase())),
+    ...generic.buzzwords.map((phrase) => `generic phrase: "${phrase}"`),
+    ...generic.taskOnlyBullets.map((bullet) =>
+      `task-only bullet, no outcome/scope shown: "${bullet.length > 100 ? bullet.slice(0, 100) + '…' : bullet}"`),
+  ];
   // Never downgrades a block and never creates one: a document that fails on
-  // real evidence still fails on that, and a coverage gap only turns a would-be
-  // 'pass' into 'warn' so the caller is told the gate could not read it.
+  // real evidence still fails on that, and a coverage gap or a genericity
+  // finding only ever turns a would-be 'pass' into 'warn' — both are advisory,
+  // never proof of fabrication.
   const coverage = diagnoseCoverage(targetText);
   const blocked = invented.length || unsupportedFacts.length || forbidden.length;
   return {
@@ -543,6 +651,7 @@ export function verifyFacts(targetText, {
     forbidden,
     warnings,
     coverage,
+    generic,
   };
 }
 
@@ -565,6 +674,10 @@ function parseCliArgs(args) {
   let targetArg = '';
   let configPath = DEFAULT_CONFIG;
   let json = false;
+  // On by default for the CLI path: a human or agent running this file
+  // directly is deliberately gating candidate-facing content, so it should
+  // see the full advisory signal unless it opts out.
+  let checkGenericity = true;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--source' || arg === '--config') {
@@ -575,6 +688,8 @@ function parseCliArgs(args) {
       return { help: true };
     } else if (arg === '--json') {
       json = true;
+    } else if (arg === '--no-genericity') {
+      checkGenericity = false;
     } else if (arg.startsWith('--')) {
       throw new Error(`unknown option: ${arg}`);
     } else if (!targetArg) {
@@ -583,16 +698,19 @@ function parseCliArgs(args) {
       throw new Error(`unexpected extra positional argument: ${arg}`);
     }
   }
-  return { targetArg, sourcePaths, configPath, json, help: false };
+  return { targetArg, sourcePaths, configPath, json, checkGenericity, help: false };
 }
 
 /** Return the command-line usage text. */
 function usage() {
-  return `Usage: node verify-cv-facts.mjs <generated-document> [--source path] [--config path] [--json]
+  return `Usage: node verify-cv-facts.mjs <generated-document> [--source path] [--config path] [--json] [--no-genericity]
        node verify-cv-facts.mjs --self-test
 
 Checks generated candidate-facing text for unsupported metrics and explicitly asserted
-non-metric facts (employers, titles, and tools) absent from source files.
+non-metric facts (employers, titles, and tools) absent from source files, plus (unless
+--no-genericity) advisory AI-resume-sameness signals: stock filler phrases and
+task-only bullets with no outcome or scope shown. The sameness signals never block —
+only invented/unsupported facts and forbidden phrases do.
 Default sources: cv.md, article-digest.md
 Default config:  config/cv-facts.json (optional)`;
 }
@@ -862,6 +980,54 @@ function runSelfTest() {
     ['50 servers']
   );
 
+  // ── genericity: AI-resume-sameness signals ──────────────────────────
+  equal(
+    'a stock filler phrase is flagged',
+    genericityFindings('<p>Results-driven professional with a proven track record.</p>').buzzwords,
+    ['results-driven professional', 'proven track record']
+  );
+  equal(
+    'an HTML task-only bullet with no number is flagged',
+    genericityFindings('<ul><li>Responsible for stakeholder communication and project coordination.</li></ul>').taskOnlyBullets,
+    ['Responsible for stakeholder communication and project coordination.']
+  );
+  equal(
+    'a markdown task-only bullet with no number is flagged',
+    genericityFindings('- Managed the onboarding process for new employees.').taskOnlyBullets,
+    ['Managed the onboarding process for new employees.']
+  );
+  equal(
+    'the same opener with a number attached is not flagged',
+    genericityFindings('<li>Managed a $550K budget across 3 teams.</li>').taskOnlyBullets,
+    []
+  );
+  equal(
+    'a specific bullet with no generic opener is not flagged even without a number',
+    genericityFindings('<li>Migrated the legacy monolith to Kubernetes using a strangler-fig pattern.</li>').taskOnlyBullets,
+    []
+  );
+  equal(
+    'prose with no bullet markers yields no task-only findings',
+    genericityFindings('I improved reliability for 25 users.').taskOnlyBullets,
+    []
+  );
+  equal(
+    'genericity is opt-in: verifyFacts default leaves warnings/verdict unchanged',
+    (() => {
+      const r = verifyFacts('<li>Responsible for onboarding.</li>', { sourcePaths: [] });
+      return { verdict: r.verdict, warnings: r.warnings, generic: r.generic };
+    })(),
+    { verdict: 'pass', warnings: [], generic: { buzzwords: [], taskOnlyBullets: [] } }
+  );
+  equal(
+    'genericity findings surface as warnings, never as a block',
+    (() => {
+      const r = verifyFacts('<li>Responsible for onboarding.</li>', { sourcePaths: [], checkGenericity: true });
+      return { verdict: r.verdict, forbidden: r.forbidden };
+    })(),
+    { verdict: 'warn', forbidden: [] }
+  );
+
   console.log(`verify-cv-facts self-test: ${passed} passed, ${failed} failed`);
   return failed ? 1 : 0;
 }
@@ -889,6 +1055,7 @@ export function runCli(args = process.argv.slice(2)) {
     const result = verifyFacts(readFileSync(targetPath, 'utf-8'), {
       sourcePaths: parsed.sourcePaths.length ? parsed.sourcePaths : DEFAULT_SOURCES,
       configPath: parsed.configPath,
+      checkGenericity: parsed.checkGenericity,
     });
     if (parsed.json) {
       console.log(JSON.stringify(result));
