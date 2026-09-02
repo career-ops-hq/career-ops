@@ -135,6 +135,15 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
   // written row (verified against merge-tracker), so the robust instruction
   // costs nothing. Not "N/A" either — parseTsvExtras drops placeholders
   // precisely so they can't be misread as the row's LOCATION.
+  //
+  // The HEADER row is the same argument one level up (#3517). Headerless files
+  // stay valid forever, so a stale template here would never go red either — it
+  // would just leave every web evaluation on the path where merge-tracker has to
+  // tell score from status by CONTENT, and a discarded, never-scored row (`—` in
+  // both cells) is undecidable there and is skipped. With the header, the field
+  // ORDER below stops being load-bearing at all: merge-tracker resolves each
+  // field by name. The order is kept as-is anyway, so this prompt's row stays
+  // byte-comparable to the CLI's.
   return `You are running the OFFICIAL career-ops job evaluation, HEADLESS, on the user's own machine. Today is ${today}. Run the REAL career-ops evaluation — do NOT improvise your own scoring.
 
 1. Read ${resolvedLang.evalModeFile} and follow it EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary). Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md. Use WebFetch to read the posting (you are headless — Playwright is unavailable, so use WebFetch and mark the report header "Verification: unconfirmed (batch mode)").
@@ -142,7 +151,8 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
 2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
    a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).
    b. Write the full report to reports/{num}-{company-slug}-${today}.md  (company-slug = company lowercased, non-alphanumerics → hyphens).
-   c. Append ONE row of 10 TAB-separated columns to batch/tracker-additions/{num}-{company-slug}.tsv, in THIS exact order (real \\t tabs, status BEFORE score). ALWAYS write all 10 fields — leave the last one EMPTY if there is no posting URL, never "N/A" or "-":
+   c. Write batch/tracker-additions/{num}-{company-slug}.tsv as TWO lines (real \\t tabs): a HEADER row of the 10 column labels, then ONE data row of 10 TAB-separated columns under it. merge-tracker reads the header and resolves every field by NAME, so no value can land in the wrong column. Copy both lines exactly as shown. ALWAYS write all 10 fields on the data row — leave the last one EMPTY if there is no posting URL, never "N/A" or "-":
+      num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
       {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}${postedSegment}\t{posting URL, or empty}
    d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
 

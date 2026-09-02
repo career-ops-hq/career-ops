@@ -21,6 +21,7 @@ import { execFileSync, spawnSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, utimesSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
+import { resolveTsvColumns } from './tracker-parse.mjs';
 import { fileURLToPath } from 'url';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -911,6 +912,59 @@ function mergeOne(tsv, name = '2-globex.tsv') {
     pass('headerless 9-column addition still merges unchanged');
   } else {
     fail(`headerless back-compat — row: ${legacy.row}\n${legacy.merge.stdout}`);
+  }
+}
+
+// ── the web's run prompt is a TSV writer too (#3517) ───────────────────────
+// web/src/lib/run-prompts.mjs dictates the addition row to the agent, so the
+// prompt is an emitter of this format even though it emits no bytes itself. A
+// header it spells differently than tracker-aliases.json knows would not go
+// red anywhere: merge-tracker would read the row as headerless and fall back to
+// content sniffing — the exact path that cannot order a `—` / `—` row. Assert
+// the prompt's own example lines against the real ingest, not against a copy of
+// the labels.
+if (!HAS_WEB) {
+  skipWeb('web run-prompt TSV header matches the ingest contract');
+} else {
+  try {
+    const { buildPrompt } = await import(join(ROOT, 'web', 'src', 'lib', 'run-prompts.mjs'));
+    const prompt = buildPrompt({ kind: 'evaluate', input: 'https://example.com/jobs/2', memory: '', today: '2026-02-02' });
+    const tabLines = prompt.split('\n').filter(l => l.includes('\t'));
+
+    if (tabLines.length !== 2) {
+      fail(`web run prompt shows a header line and one data line — got ${tabLines.length}`);
+    } else {
+      const header = tabLines[0].trim().split('\t');
+      const { missing, duplicates, unknown } = resolveTsvColumns(header);
+      if (!missing.length && !duplicates.length && !unknown.length) {
+        pass('web run prompt: every header label resolves through tracker-aliases.json');
+      } else {
+        fail(`web run prompt header — missing ${JSON.stringify(missing)}, duplicates ${JSON.stringify(duplicates)}, unknown ${JSON.stringify(unknown)}`);
+      }
+
+      // Fill the prompt's own template with real values, by NAME, and merge it.
+      const VALUES = {
+        num: '2', date: '2026-02-02', company: 'Globex', role: 'Manager',
+        status: 'Applied', score: '4.5/5', pdf: '❌', report: '—',
+        notes: 'row as the web dictates it', url: 'https://example.com/jobs/2',
+      };
+      const dataWidth = tabLines[1].trim().split('\t').length;
+      if (dataWidth !== header.length) {
+        fail(`web run prompt: header labels ${header.length} columns but the data row shows ${dataWidth}`);
+      }
+      const row = header.map(h => VALUES[h.trim().toLowerCase()] ?? '').join('\t');
+      const sb = makeSandbox(HEADER_9, { '2-globex.tsv': `${header.join('\t')}\n${row}\n` });
+      const merge = runCaptured('merge-tracker.mjs', sb);
+      const cells = (dataRows(sb.tracker).find(l => l.includes('Globex')) || '').split('|').map(c => c.trim());
+      rmSync(sb.dir, { recursive: true, force: true });
+      if (merge.code === 0 && cells[5] === '4.5/5' && cells[6] === 'Applied') {
+        pass('web run prompt: the row it dictates merges into the right columns');
+      } else {
+        fail(`web run prompt row merge (code ${merge.code}) — cells ${JSON.stringify(cells)}\n${merge.stdout}`);
+      }
+    }
+  } catch (e) {
+    fail(`web run-prompt TSV header test crashed: ${e.message}`);
   }
 }
 
