@@ -111,13 +111,15 @@ Importance measures how much a requirement matters **in this posting**, never ho
 
 ### Table
 
-| Requirement | JD signal | Match | Importance | Evidence / gap |
+| Requirement | Importance | Match | JD signal | Evidence / gap |
 |---|---|---|---|---|
 
+Column order is deliberate: what is asked, how much it weighs, whether the candidate meets it, then the supporting quote and evidence. The three decisive columns come first so they stay visible on narrow screens, where a 5-column table scrolls horizontally and anything past the third column is hidden until the reader discovers the scroll.
+
 - **Requirement** — one JD requirement per row. Include requirements the candidate **meets**, not only gaps: that is what makes Importance readable as "significance in this posting" rather than "list of my problems".
-- **JD signal** — the wording the importance rests on: a **verbatim** JD quote for `stated`, a section/structure reference for `structural`, `—` for `inferred` (which is `jd_signal: null` in the Machine Summary).
-- **Match** — ✅ Strong / ⚠️ Partial / ❌ Missing / ➖ N/A. Use `➖ N/A` only where the requirement is not a claim about the candidate's skills at all and the answer is still worth showing — a work-authorization or language gate the candidate already satisfies, for instance. A requirement that simply does not apply is omitted rather than displayed as a shrug.
 - **Importance** — the band plus its evidence tier in parentheses: `critical (stated)`, `high (structural)`, `meaningful (inferred)`.
+- **Match** — ✅ Strong / ⚠️ Partial / ❌ Missing / ➖ N/A. Use `➖ N/A` only where the requirement is not a claim about the candidate's skills at all and the answer is still worth showing — a work-authorization or language gate the candidate already satisfies, for instance. A requirement that simply does not apply is omitted rather than displayed as a shrug.
+- **JD signal** — the wording the importance rests on: a **verbatim** JD quote for `stated`, a section/structure reference for `structural`, `—` for `inferred` (which is `jd_signal: null` in the Machine Summary).
 - **Evidence / gap** — the exact line backing a ✅, quoted from whichever primary file carries it (`cv.md`, `article-digest.md`, `config/profile.yml`, `modes/_profile.md`) and naming that file when it is not `cv.md`; otherwise what is missing.
 
 **Row budget:** at most **12 rows**. A 30-bullet JD otherwise emits 30 rows on every evaluation, batch and economy tiers included, for a table nobody reads to the end. When the JD yields more, keep the highest-importance rows and, within the band that straddles the cut, unmet before met — then note the count dropped (`+7 lower-importance requirements not listed`).

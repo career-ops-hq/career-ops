@@ -128,7 +128,7 @@ Produce a table with: detected archetype, domain, function, seniority, remote/wo
 
 One table, one row per significant JD requirement, mapped to exact evidence from `cv.md` or `article-digest.md`. Never emit a second matrix re-enumerating the same requirements — Block B *is* the requirement→evidence mapping.
 
-| Requirement | JD signal | Match | Importance | Evidence / gap |
+| Requirement | Importance | Match | JD signal | Evidence / gap |
 |---|---|---|---|---|
 
 **Two-pass rule — the candidate files are loaded *inside* this block, never before it:**

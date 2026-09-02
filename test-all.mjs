@@ -15311,7 +15311,7 @@ try {
   // down. They were frozen deliberately on the day they landed: the 18 localized
   // evaluation modes each describe Block B in their own words, and a rename here
   // that does not reach them splits the report format silently.
-  const BLOCK_B_COLUMNS = ['Requirement', 'JD signal', 'Match', 'Importance', 'Evidence / gap'];
+  const BLOCK_B_COLUMNS = ['Requirement', 'Importance', 'Match', 'JD signal', 'Evidence / gap'];
   const blockBSection = ofertaSrc.match(/## Block B [\s\S]*?\n## Block C /)?.[0] ?? '';
   const blockBHeaderRow = blockBSection.match(/^\|\s*Requirement\s*\|.*\|$/m)?.[0] ?? '';
   const missingBlockBCols = BLOCK_B_COLUMNS.filter(
@@ -15323,6 +15323,23 @@ try {
     fail('modes/oferta.md Block B has no Requirement-led table header row — the #2330 column freeze cannot verify');
   } else {
     fail(`modes/oferta.md Block B lost column(s): ${missingBlockBCols.join(', ')} — columns are contract (#2330)`);
+  }
+  // The ORDER is contract too (2-sep): on a 390px viewport a 5-column table
+  // scrolls horizontally and only the first three columns are visible, so the
+  // decisive trio (Requirement, Importance, Match) must lead. Measured on the
+  // web report view before this freeze: with Importance in 4th place the column
+  // the whole block exists for was off-screen on mobile.
+  const blockBHeaderCells = blockBHeaderRow.split('|').map((c) => c.trim()).filter(Boolean);
+  if (blockBHeaderCells.slice(0, BLOCK_B_COLUMNS.length).join('|') === BLOCK_B_COLUMNS.join('|')) {
+    pass('modes/oferta.md Block B keeps its frozen column ORDER (decisive trio first)');
+  } else {
+    fail(`modes/oferta.md Block B column order drifted: ${blockBHeaderCells.join(' | ')} — expected ${BLOCK_B_COLUMNS.join(' | ')}`);
+  }
+  const batchBlockBRow = readFile('batch/batch-prompt.md').match(/^\|\s*Requirement\s*\|.*\|$/m)?.[0] ?? '';
+  if (batchBlockBRow && batchBlockBRow.split('|').map((c) => c.trim()).filter(Boolean).slice(0, 5).join('|') === BLOCK_B_COLUMNS.join('|')) {
+    pass('batch/batch-prompt.md Block B mirrors the frozen column order');
+  } else {
+    fail(`batch/batch-prompt.md Block B column order diverges from modes/oferta.md: ${batchBlockBRow || '(no header row)'}`);
   }
 
   // 55.4c The two rules that make the importance column defensible rather than
