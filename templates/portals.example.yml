@@ -2405,6 +2405,21 @@ tracked_companies:
 
 job_boards:
 
+  # ── Telegram channels (public) ─────────────────────────────────────
+  # Reads the channel's public web preview at https://t.me/s/<channel> — no
+  # API key, no login. 20 posts per page: max_pages walks back through the
+  # history (capped at 10), since_days stops at older posts. Every post becomes
+  # a posting, so keep title_filter / content_filter meaningful. Public
+  # channels only; a private one is reported, not silently skipped.
+
+  - name: "Telegram @devjobs"
+    provider: telegram-channel
+    channel: devjobs
+    max_pages: 2
+    since_days: 14
+    enabled: false
+    notes: "Game-dev job channel (RU). Handle without the @."
+
   # ── SolidJobs (Polish market) ──────────────────────────────────────
   # Public API — no auth needed. Division in URL path, campaign=career-ops for tracking.
   # Available divisions: it, engineering, marketing, sales, hr, logistics, finances, other
