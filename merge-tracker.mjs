@@ -22,7 +22,11 @@ import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex } from './find.mjs';
-import { LEGACY_COLMAP, detectColumns, isHeaderRow, resolveScoreStatus, normalizeVia, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
+import { LEGACY_COLMAP, detectColumns, isHeaderRow, resolveScoreStatus, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
+// Corporate-form vocabulary, shared with invite-match.mjs rather than copied,
+// for the same reason normalizeCompany lives in tracker-utils: a second private
+// list is how company identity drifts between scripts (#2445, #3665).
+import { LEGAL_SUFFIXES, GENERIC_DESCRIPTORS } from './invite-match.mjs';
 import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell } from './tracker-utils.mjs';
 // Canonical posting-URL key. Kept in its own module so scan.mjs / scan-history
 // can adopt the same key later without the definitions drifting.
@@ -309,6 +313,65 @@ function companiesMatch(a, b) {
   const key = normalizeCompany(String(a));
   if (key !== normalizeCompany(String(b))) return false;
   return key !== '' || String(a).trim() === String(b).trim();
+}
+
+// Words that name a legal form or a generic business descriptor rather than the
+// employer. Both lists come from invite-match.mjs; the union is safe here in a
+// way chaining them there is not, because the prefix rule below never lets two
+// names disagree on a substantive token.
+const CORPORATE_FORM_WORDS = new Set([...LEGAL_SUFFIXES, ...GENERIC_DESCRIPTORS]);
+
+// A one-token stem carries almost no identity, and a two-letter one is usually
+// an initialism that several unrelated employers share. Refusing them costs the
+// duplicate row that exists today; accepting them risks deleting a real one.
+const MIN_STEM_CHARS = 3;
+
+/**
+ * True when two company cells are the same employer written with a different
+ * corporate suffix ("Acme" vs "Acme Technologies Inc.").
+ *
+ * normalizeCompany() folds case, punctuation and width but not corporate
+ * forms, so a suffix variant of one employer never reaches the fuzzy
+ * company+role tier and the same opening is written twice (#3665). This is the
+ * narrow second tier that closes that, used ONLY where the role title already
+ * fuzzy-matches and neither a req-number nor an employer-board URL has proved
+ * the rows distinct. The exact tier above is untouched.
+ *
+ * The rule is a token PREFIX plus a corporate-form tail, not a stripped key.
+ * Stripping suffixes before comparing looks equivalent and is not: it maps
+ * "Acme Solutions" and "Acme Technologies" to the same "acme", which folds two
+ * genuinely different employers and deletes one row. Requiring the shorter name
+ * to be a prefix of the longer makes that structurally impossible, since
+ * neither of those is a prefix of the other. It also means an extra token that
+ * is NOT a corporate form ("Acme Robotics") still reads as a different
+ * employer, which is the conservative direction: over-merging is unrecoverable
+ * here (dedup-tracker.mjs drops the losing line, and applications.md is
+ * gitignored with no backup), while under-merging leaves a duplicate row the
+ * user can already see.
+ *
+ * Tokens come from normalizeTextKey(name, ' ') so this shares the Unicode,
+ * NFKC and Turkish dotted-I handling every other identity key uses (#2445,
+ * #2736) instead of a private strip. Scripts written without spaces produce a
+ * single token and never match here, so CJK corporate forms are unaffected and
+ * remain #2570's subject.
+ *
+ * @param {string} a - Company cell from one side of the comparison.
+ * @param {string} b - Company cell from the other side.
+ * @returns {boolean} True when the two cells name the same employer under a
+ *   different corporate form.
+ */
+function companiesMatchIgnoringCorporateForm(a, b) {
+  const ta = normalizeTextKey(a, ' ').split(' ').filter(Boolean);
+  const tb = normalizeTextKey(b, ' ').split(' ').filter(Boolean);
+  const [stem, full] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
+  // Equal lengths are either the exact tier's business or a genuine
+  // disagreement on a substantive token. An empty stem is the blind-employer
+  // `?` marker and every other punctuation-only cell, which must never match a
+  // named employer.
+  if (stem.length === 0 || stem.length === full.length) return false;
+  if (stem.join('').length < MIN_STEM_CHARS) return false;
+  if (stem.some((token, i) => token !== full[i])) return false;
+  return full.slice(stem.length).every(token => CORPORATE_FORM_WORDS.has(token));
 }
 
 /**
@@ -1211,7 +1274,14 @@ for (const file of tsvFiles) {
       // the #1524 req-number guard, and the tier where an unkeyed addition is
       // also held back from claiming a row whose posting is known.
       if (urlBlocksHeuristic(app)) return false;
-      if (!companiesMatch(app.company, addition.company)) return false;
+      // Corporate-form variants of one employer are accepted HERE and nowhere
+      // else (#3665). The tiers above match on a report or entry number, which
+      // is an identity claim on its own, so a wider company match there would
+      // let sequence drift across two employers write to the wrong row. This
+      // tier already requires a fuzzy role match, and the req-number and URL
+      // guards below and above still get to prove the rows distinct.
+      if (!companiesMatch(app.company, addition.company)
+          && !companiesMatchIgnoringCorporateForm(app.company, addition.company)) return false;
       if (!roleFuzzyMatch(addition.role, app.role)) return false;
       // Cross-channel guard (#1596): unknown-employer rows (`?`) all normalize
       // to the same empty company key, but the same role via two DIFFERENT
