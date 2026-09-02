@@ -920,7 +920,8 @@ search_queries:
 # URL to detect, so they must be selected with an explicit `provider:`
 # field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
 # himalayas, ibm, jobbankca, jobicy, jobstreet, justjoin, landingjobs, mycareersfuture, nofluffjobs, remoteok, remotive, senjob,
-# manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent. Examples for every built-in provider are below.
+# manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent,
+# telegram-channel. Examples for every built-in provider are below.
 
 # ── Built-in provider examples ────────────────────────────────────
 # One commented stanza per provider in providers/. Uncomment one and adjust.
@@ -2406,19 +2407,18 @@ tracked_companies:
 job_boards:
 
   # ── Telegram channels (public) ─────────────────────────────────────
-  # Reads the channel's public web preview at https://t.me/s/<channel> — no
-  # API key, no login. 20 posts per page: max_pages walks back through the
-  # history (capped at 10), since_days stops at older posts. Every post becomes
-  # a posting, so keep title_filter / content_filter meaningful. Public
-  # channels only; a private one is reported, not silently skipped.
+  # Public web preview at https://t.me/s/<channel>: no API key, no login.
+  # 20 posts per page; max_pages walks back through the history (cap 10),
+  # since_days stops at older posts. A private channel is reported, not skipped.
 
   - name: "Telegram @devjobs"
     provider: telegram-channel
-    channel: devjobs
+    channel: devjobs          # handle without the @
     max_pages: 2
     since_days: 14
+    aggregator: true          # one feed, many employers — same title twice is two jobs
     enabled: false
-    notes: "Game-dev job channel (RU). Handle without the @."
+    notes: "Game-dev job channel (RU). title_filter runs on each post's FIRST LINE; content_filter only narrows that set."
 
   # ── SolidJobs (Polish market) ──────────────────────────────────────
   # Public API — no auth needed. Division in URL path, campaign=career-ops for tracking.

@@ -82,7 +82,8 @@ Underscore-prefixed files are shared helpers, never loaded as providers:
 Every provider validates the target host against an allowlist before
 fetching and passes `redirect: 'error'` so a server-side redirect cannot be
 used for SSRF (see `assertGreenhouseUrl` in `greenhouse.mjs` for the
-pattern). A shared regression test enforces this across providers:
+pattern; `jobvite` and `telegram-channel` use `redirect: 'manual'` — the same
+guarantee, plus a readable `Location` on the error). A shared regression test enforces this across providers:
 `tests/providers/ats-ssrf-hardening.test.mjs`.
 
 ## Adding a provider

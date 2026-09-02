@@ -1,30 +1,33 @@
-// tests/providers/telegram-channel.test.mjs — direct provider-contract tests.
-// The t.me/s/<channel> preview is server-rendered HTML; the parser must turn
-// each post into one posting keyed by its permalink, page back with
-// ?before=<id>, stop at the configured age, and fail CLOSED on a channel that
-// has no public preview — a silent zero there would read as an empty board
-// and quietly drop the source from every scan.
+// tests/providers/telegram-channel.test.mjs — provider-contract tests.
+// The t.me/s/<channel> preview is server-rendered HTML: one posting per post,
+// keyed by permalink; pages back with ?before=<id>; stops at the configured
+// age; fails CLOSED on a channel without a public preview and on markup that
+// no longer parses — silence there would read as an empty board.
 import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 console.log('\nProvider — telegram-channel');
 
-const post = (id, date, textHtml) => `
+const post = (id, date, textHtml, extraClass = '') => `
 <div class="tgme_widget_message_wrap js-widget_message_wrap">
-  <div class="tgme_widget_message text_not_supported_wrap js-widget_message" data-post="devjobs/${id}" data-view="x">
+  <div class="tgme_widget_message text_not_supported_wrap ${extraClass} js-widget_message" data-post="devjobs/${id}" data-view="x">
     <div class="tgme_widget_message_author accent_color"><a class="tgme_widget_message_owner_name" href="https://t.me/devjobs"><span dir="auto">Game Development Jobs</span></a></div>
     <div class="tgme_widget_message_text js-message_text" dir="auto">${textHtml}</div>
-    <span class="tgme_widget_message_meta"><a class="tgme_widget_message_date" href="https://t.me/devjobs/${id}"><time datetime="${date}" class="time">16:01</time></a></span>
+    <span class="tgme_widget_message_meta"><a class="tgme_widget_message_date" href="https://t.me/devjobs/${id}">${date ? `<time datetime="${date}" class="time">16:01</time>` : ''}</a></span>
   </div>
 </div>`;
 
 const page = (...posts) => `<html><head><meta property="og:title" content="Game Development Jobs"></head><body>${posts.join('')}</body></html>`;
 const NO_PREVIEW = '<html><head><meta property="og:title" content="Telegram: Contact @gophersjob"></head><body><div class="tgme_page_description">You can contact @gophersjob right away.</div></body></html>';
+const quiet = { sleep: async () => {} };
 
 const P1 = post(12509, '2026-09-01T17:25:26+00:00', 'Senior Unity Developer, remote, $5k<br/>Мы HyperHug &amp; Oxide: Survival Island.<br/>Стек: C#, Unity, <a href="https://example.com">подробнее</a>');
 const P2 = post(12508, '2026-08-30T11:06:18+00:00', 'Backend Go engineer (game services)<br/>Удалённо, ГПХ');
 const P_OLD = post(977, '2024-01-05T09:00:00+00:00', 'Very old post');
+const P_NO_TIME = post(12507, '', 'Undated post');
+const P_LONG = post(12506, '2026-08-31T10:00:00+00:00', 'word '.repeat(30).trim());
+const SERVICE = post(1, '2024-01-01T00:00:00+00:00', 'Channel created', 'service_message');
 
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'providers/telegram-channel.mjs')).href);
@@ -39,8 +42,8 @@ try {
 
   // --- parser ---------------------------------------------------------------
   const parsed = parseChannelPage(page(P1, P2), 'devjobs');
-  if (parsed.posts.length === 2 && parsed.noPreview === false) pass('parseChannelPage() finds both posts on a preview page');
-  else fail(`parseChannelPage() → ${parsed.posts.length} posts, noPreview=${parsed.noPreview}`);
+  if (parsed.posts.length === 2 && parsed.noPreview === false && parsed.postMarkup === 2) pass('parseChannelPage() finds both posts on a preview page');
+  else fail(`parseChannelPage() → ${parsed.posts.length} posts, noPreview=${parsed.noPreview}, postMarkup=${parsed.postMarkup}`);
 
   const first = parsed.posts[0];
   if (first?.id === 12509 && first.url === 'https://t.me/devjobs/12509') pass('a post keys on its permalink https://t.me/<channel>/<id>');
@@ -55,18 +58,31 @@ try {
   if (first?.postedAt === Date.parse('2026-09-01T17:25:26+00:00')) pass('postedAt comes from <time datetime>');
   else fail(`postedAt = ${JSON.stringify(first?.postedAt)}`);
 
+  const long = parseChannelPage(page(P_LONG), 'devjobs').posts[0];
+  if (long && long.title.endsWith('word…') && long.title.length <= 121 && !long.title.includes(' …')) pass('a long first line is cut at a word boundary with an ellipsis');
+  else fail(`long title = ${JSON.stringify(long?.title)}`);
+
+  const undated = parseChannelPage(page(P_NO_TIME), 'devjobs').posts[0];
+  if (undated && undated.postedAt === undefined) pass('a post without <time> parses with postedAt undefined');
+  else fail(`undated post = ${JSON.stringify(undated)}`);
+
   // A post from another channel embedded in the page (forwards) is not ours.
   const foreign = parseChannelPage(page(P1.replace('data-post="devjobs/12509"', 'data-post="otherchan/5"')), 'devjobs');
   if (foreign.posts.length === 0) pass('posts attributed to another channel are ignored');
   else fail(`foreign post leaked: ${JSON.stringify(foreign.posts[0])}`);
 
+  const service = parseChannelPage(page(SERVICE, P1), 'devjobs');
+  if (service.posts.length === 1 && service.posts[0].id === 12509 && service.postMarkup === 1) pass('service messages ("Channel created") are neither posts nor post markup');
+  else fail(`service page → ${JSON.stringify({ n: service.posts.length, postMarkup: service.postMarkup })}`);
+
   const stub = parseChannelPage(NO_PREVIEW, 'gophersjob');
-  if (stub.posts.length === 0 && stub.noPreview === true) pass('the "Contact @handle" stub is recognised as no-public-preview');
+  if (stub.posts.length === 0 && stub.noPreview === true && stub.postMarkup === 0) pass('the "Contact @handle" stub is recognised as no-public-preview');
   else fail(`stub → ${JSON.stringify(stub)}`);
 
   // --- fetch: redirect guard, mapping, paging ------------------------------
   const calls = [];
   const ctx = {
+    ...quiet,
     fetchText: async (url, opts) => {
       calls.push({ url, opts });
       if (url === 'https://t.me/s/devjobs') return page(P1, P2);
@@ -85,29 +101,42 @@ try {
   } else {
     fail(`page urls = ${JSON.stringify(calls.map((c) => c.url))}`);
   }
-  if (jobs.length === 3 && jobs[0].company === '@devjobs' && jobs[0].location === '' && jobs[0].url === 'https://t.me/devjobs/12509' && jobs[2].url === 'https://t.me/devjobs/977') {
-    pass('fetch() maps posts across pages to jobs with company=@channel');
+  if (jobs.length === 3 && jobs[0].company === 'TG devjobs' && jobs[0].location === '' && jobs[0].url === 'https://t.me/devjobs/12509' && jobs[2].url === 'https://t.me/devjobs/977') {
+    pass('fetch() maps posts across pages to jobs with company = entry.name (so aggregator: true binds in detect-reposts)');
   } else {
     fail(`jobs = ${JSON.stringify(jobs.map((j) => [j.url, j.company]))}`);
   }
 
+  const unnamed = await tg.fetch({ channel: 'devjobs', since_days: 36500 }, { ...quiet, fetchText: async () => page(P1) });
+  if (unnamed[0]?.company === '@devjobs') pass('without entry.name the company falls back to @channel');
+  else fail(`unnamed company = ${JSON.stringify(unnamed[0]?.company)}`);
+
+  const dated = await tg.fetch({ channel: 'devjobs' }, { ...quiet, fetchText: async () => page(P_NO_TIME) });
+  if (dated.length === 1 && !('postedAt' in dated[0])) pass('an undated post is kept (no since_days cutoff applies) and carries no postedAt key');
+  else fail(`undated job = ${JSON.stringify(dated)}`);
+
+  // ctx.maxPages (verify-portals passes 1) wins over the entry's max_pages.
+  const capped = [];
+  await tg.fetch({ channel: 'devjobs', max_pages: 3, since_days: 36500 }, { ...quiet, maxPages: 1, fetchText: async (url) => { capped.push(url); return url.includes('before') ? page(P_OLD) : page(P1, P2); } });
+  if (capped.length === 1) pass('ctx.maxPages caps paging below the entry\'s max_pages');
+  else fail(`ctx.maxPages=1 still made ${capped.length} requests`);
+
   // since_days: an old post is dropped and paging stops there.
-  const calls2 = [];
-  const ctx2 = { fetchText: async (url, opts) => { calls2.push(url); return url.includes('before') ? page(P_OLD) : page(P1, P2); } };
+  const ctx2 = { ...quiet, fetchText: async (url) => (url.includes('before') ? page(P_OLD) : page(P1, P2)) };
   const recent = await tg.fetch({ name: 'TG', channel: '@devjobs', max_pages: 5, since_days: 36500 }, ctx2);
-  const cut = await tg.fetch({ name: 'TG', channel: 'devjobs', max_pages: 5 }, { fetchText: async () => page(P_OLD) });
+  const cut = await tg.fetch({ name: 'TG', channel: 'devjobs', max_pages: 5 }, { ...quiet, fetchText: async () => page(P_OLD) });
   if (recent.length === 3 && cut.length === 0) pass('since_days drops posts older than the window (default 30 days) and a leading @ is tolerated');
   else fail(`recent=${recent.length} cut=${cut.length}`);
 
   // --- fail closed ------------------------------------------------------------
-  // Live behaviour (measured 2026-09-02): a private channel, one with the
-  // preview switched off, and a nonexistent handle all answer
-  // 302 → https://t.me/<handle>. Under redirect:'manual' _http.mjs throws an
-  // error carrying status + location; the provider must turn that into a
-  // named failure, not swallow it as an empty board.
+  // Live (2026-09-02): a private channel, one with the preview switched off,
+  // and a nonexistent handle all answer 302 → https://t.me/<handle>. Under
+  // redirect:'manual' _http.mjs throws with status + location; the provider
+  // must turn that into a named failure, not an empty board.
   let threw = null;
   try {
     await tg.fetch({ name: 'TG', channel: 'gophersjob' }, {
+      ...quiet,
       fetchText: async () => { const e = new Error('HTTP 302 Found'); e.status = 302; e.location = 'https://t.me/gophersjob'; throw e; },
     });
   } catch (e) { threw = e.message; }
@@ -116,30 +145,42 @@ try {
 
   // A network fault is not a "no preview" verdict — it must propagate as-is.
   let netErr = null;
-  try { await tg.fetch({ name: 'TG', channel: 'devjobs' }, { fetchText: async () => { throw new Error('fetch failed'); } }); }
+  try { await tg.fetch({ name: 'TG', channel: 'devjobs' }, { ...quiet, fetchText: async () => { throw new Error('fetch failed'); } }); }
   catch (e) { netErr = e.message; }
   if (netErr === 'fetch failed') pass('a network error propagates unchanged (not mislabelled as no-preview)');
   else fail(`network error became: ${JSON.stringify(netErr)}`);
 
   let stubThrew = null;
-  try { await tg.fetch({ name: 'TG', channel: 'gophersjob' }, { fetchText: async () => NO_PREVIEW }); }
+  try { await tg.fetch({ name: 'TG', channel: 'gophersjob' }, { ...quiet, fetchText: async () => NO_PREVIEW }); }
   catch (e) { stubThrew = e.message; }
   if (stubThrew && /no public preview/.test(stubThrew)) pass('the "Contact @handle" stub served with 200 also throws (fails closed)');
   else fail(`stub page did not throw: ${JSON.stringify(stubThrew)}`);
 
+  // Markup drift: the page still carries posts (data-post markers) but the
+  // parser reads none — must be a loud failure, not an empty board.
+  let drift = null;
+  try { await tg.fetch({ name: 'TG', channel: 'devjobs' }, { ...quiet, fetchText: async () => page(P1, P2).replaceAll('tgme_widget_message_wrap', 'tgme_post_wrap_v2') }); }
+  catch (e) { drift = e.message; }
+  if (drift && /markup changed/.test(drift) && /2 posts/.test(drift)) pass('a page with post markup that no longer parses throws "markup changed" (fails closed)');
+  else fail(`drifted page did not throw as expected: ${JSON.stringify(drift)}`);
+
+  const serviceOnly = await tg.fetch({ name: 'TG', channel: 'devjobs' }, { ...quiet, fetchText: async () => page(SERVICE) });
+  if (Array.isArray(serviceOnly) && serviceOnly.length === 0) pass('a channel whose only message is "Channel created" is an empty board, not a drift error');
+  else fail(`service-only page → ${JSON.stringify(serviceOnly)}`);
+
   // A page that does not move back must not append the same posts twice.
-  const stalled = await tg.fetch({ name: 'TG', channel: 'devjobs', max_pages: 4, since_days: 36500 }, { fetchText: async () => page(P1, P2) });
+  const stalled = await tg.fetch({ name: 'TG', channel: 'devjobs', max_pages: 4, since_days: 36500 }, { ...quiet, fetchText: async () => page(P1, P2) });
   if (stalled.length === 2) pass('a stalled page (same posts again) stops paging instead of duplicating posts');
   else fail(`stalled paging produced ${stalled.length} jobs, expected 2`);
 
   let fetched = false;
   let bad = null;
-  try { await tg.fetch({ name: 'TG', channel: 'evil.example/x?y' }, { fetchText: async () => { fetched = true; return ''; } }); }
+  try { await tg.fetch({ name: 'TG', channel: 'evil.example/x?y' }, { ...quiet, fetchText: async () => { fetched = true; return ''; } }); }
   catch (e) { bad = e.message; }
   if (bad && !fetched) pass('an invalid channel handle is rejected before any request is made');
   else fail(`invalid handle: threw=${JSON.stringify(bad)} fetched=${fetched}`);
 
-  const empty = await tg.fetch({ name: 'TG', channel: 'devjobs' }, { fetchText: async () => page() });
+  const empty = await tg.fetch({ name: 'TG', channel: 'devjobs' }, { ...quiet, fetchText: async () => page() });
   if (Array.isArray(empty) && empty.length === 0) pass('a preview page with no posts is an empty board, not an error');
   else fail(`empty page → ${JSON.stringify(empty)}`);
 } catch (e) {
