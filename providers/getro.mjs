@@ -77,7 +77,7 @@ const DEFAULT_MAX_AGE_DAYS = 90;   // pagination bound only; global filter does 
 // between tenants). Getro showed no rate-limit evidence in manual testing,
 // but a large board is still a long burst of same-host requests without some
 // pacing.
-const INTER_PAGE_DELAY_MS = 150;
+const INTER_PAGE_DELAY_MS = 250;
 
 function sleep(ms, ctx) {
   if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);

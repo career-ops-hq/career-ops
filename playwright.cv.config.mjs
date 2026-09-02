@@ -1,7 +1,7 @@
 import { defineConfig } from 'playwright/test';
 
 export default defineConfig({
-  testDir: './test/cv-visual',
+  testDir: './tests/cv-visual',
   testMatch: '**/*.spec.mjs',
   fullyParallel: false,
   workers: 1,

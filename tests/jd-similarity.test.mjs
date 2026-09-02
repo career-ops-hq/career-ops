@@ -1,0 +1,90 @@
+import { hardMismatch, jaccardSimilarity, recommendCvReuse, tokenize } from '../jd-similarity.mjs';
+import { execFileSync } from 'child_process';
+import { fileURLToPath } from 'url';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { pass, fail } from './helpers.mjs';
+
+console.log('\njd-similarity.mjs — JD similarity and CV reuse');
+
+function ok(label, cond) {
+  if (cond) pass(label);
+  else fail(label);
+}
+
+ok('tokenization is case-insensitive', tokenize('React react TypeScript').size === 2);
+ok('tokenization keeps technical punctuation', tokenize('Node.js C++ C# F#').has('node.js'));
+ok('tokenization preserves plus/hash language suffixes', ['c++', 'c#', 'f#'].every(token => tokenize(`Build with ${token}`).has(token)));
+ok('identical text scores 1', jaccardSimilarity('Vue React Node', 'Vue React Node') === 1);
+ok('unrelated text scores 0', jaccardSimilarity('Flutter mobile', '法律 财务') === 0);
+ok('high similarity recommends reuse', recommendCvReuse('Vue React TypeScript Node.js', 'React TypeScript Node.js Vue').decision === 'reuse');
+ok('medium similarity recommends edits', recommendCvReuse('Vue React TypeScript Node.js', 'React TypeScript Python Node.js').decision === 'reuse-with-edits');
+ok('low similarity recommends regeneration', recommendCvReuse('Flutter Android iOS', '法律 财务 审计').decision === 'regenerate');
+ok('level mismatch blocks reuse', hardMismatch('高级 React 工程师', '实习生 React 开发') === true);
+const mismatchedRecommendation = recommendCvReuse('Senior React TypeScript Node.js platform engineer', 'Junior React TypeScript Node.js platform engineer');
+ok('level mismatch overrides a high-similarity reuse recommendation', mismatchedRecommendation.decision === 'regenerate');
+ok('level mismatch reports its exact reason', mismatchedRecommendation.reason === 'level-mismatch');
+ok('level match does not block reuse', hardMismatch('远程 React 实习生', 'Flutter 实习生') === false);
+ok('seniority matching uses whole words', hardMismatch('International React Engineer', 'Intermediate React Engineer') === false);
+ok('leadership does not imply lead seniority', hardMismatch('Leadership platform role', 'Senior platform role') === false);
+
+try {
+  execFileSync(process.execPath, [fileURLToPath(new URL('../jd-similarity.mjs', import.meta.url)), '/tmp/does-not-exist-jd.txt', '/tmp/does-not-exist-cv.txt'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  ok('CLI reports missing files cleanly', false);
+} catch (error) {
+  ok('CLI reports missing files cleanly', /Unable to read input files/.test(error.stderr));
+}
+
+// --- CLI flag parsing ---
+
+const cliPath = fileURLToPath(new URL('../jd-similarity.mjs', import.meta.url));
+const runCli = (...args) =>
+  execFileSync(process.execPath, [cliPath, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+
+try {
+  ok('--help prints usage and exits 0', /Usage:/.test(runCli('--help')));
+} catch {
+  ok('--help prints usage and exits 0', false);
+}
+
+try {
+  runCli('--bogus', 'a.md', 'b.md');
+  ok('unknown flag exits non-zero and names the flag', false);
+} catch (error) {
+  ok('unknown flag exits non-zero and names the flag', /--bogus/.test(String(error.stderr)));
+}
+
+try {
+  runCli('only-one-path.txt');
+  ok('a single positional path exits 1 with the arity error', false);
+} catch (error) {
+  ok('a single positional path exits 1 with the arity error',
+    error.status === 1 && String(error.stderr).includes('Error: expected two file paths.'));
+}
+
+try {
+  runCli('a.md', 'b.md', 'c.md');
+  ok('a third positional path exits 1 with the arity error', false);
+} catch (error) {
+  ok('a third positional path exits 1 with the arity error',
+    error.status === 1 && /expected two file paths/.test(String(error.stderr)));
+}
+
+const tmpDir = mkdtempSync(join(tmpdir(), 'jd-similarity-test-'));
+try {
+  const NEW_JD = 'Senior React TypeScript Node.js platform engineer, distributed systems';
+  const PREVIOUS = 'Senior React TypeScript Node.js platform engineer, Vue, GraphQL';
+  const newJdPath = join(tmpDir, 'new-jd.txt');
+  const previousPath = join(tmpDir, 'previous-cv.txt');
+  writeFileSync(newJdPath, NEW_JD);
+  writeFileSync(previousPath, PREVIOUS);
+
+  ok('two real paths produce the same output as before',
+    runCli(newJdPath, previousPath).trim() === JSON.stringify(recommendCvReuse(NEW_JD, PREVIOUS), null, 2));
+} catch {
+  ok('two real paths produce the same output as before', false);
+} finally {
+  rmSync(tmpDir, { recursive: true, force: true });
+}
+

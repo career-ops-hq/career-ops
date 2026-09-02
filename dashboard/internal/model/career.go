@@ -20,6 +20,7 @@ type CareerApplication struct {
 	PayRange    string  // first $-range found in the notes, e.g. "$140-210K"
 	PayMax      float64 // top of PayRange in dollars (sort key), 0 when unknown
 	PaySource   string  // "POSTED" when the JD listed it, "est" for estimates, "" unknown
+	PostedOn    string  // YYYY-MM-DD from a "posted <date>" note — when the req went live, "" unknown
 	LastContact string  // max YYYY-MM-DD found in notes (falls back to applied date)
 	// Enrichment (lazy loaded from report)
 	Archetype    string
@@ -78,4 +79,46 @@ type ScoreBucket struct {
 type WeekActivity struct {
 	Week  string // e.g., "2026-W14", "2026-W13"
 	Count int
+}
+
+// StatsMetrics holds cross-cutting breakdowns for the stats analytics screen,
+// complementing ProgressMetrics (which is funnel/rate-focused) with
+// dimension-based tables: what kinds of roles convert, where they are, and
+// what they pay.
+type StatsMetrics struct {
+	Archetypes    []ArchetypeStat
+	WorkModes     []LabelCountStat
+	Locations     []LabelCountStat
+	Pay           PayStats
+	PayHistogram  []LabelCountStat
+	ScoreTiers    []LabelCountStat
+	SeniorityMix  []LabelCountStat
+	QualityBarPct float64 // percentage of scored apps with score >= 4.0
+}
+
+// ArchetypeStat aggregates applications by report-derived archetype.
+type ArchetypeStat struct {
+	Label    string
+	Count    int
+	Pct      float64
+	AvgScore float64
+}
+
+// LabelCountStat is a generic label+count(+pct) row used for work-mode and
+// location breakdown tables.
+type LabelCountStat struct {
+	Label string
+	Count int
+	Pct   float64
+}
+
+// PayStats summarizes the PayMax field (top of the posted/estimated pay
+// range, in dollars) across applications that have a parsed pay figure.
+type PayStats struct {
+	Count        int // apps with a known PayMax
+	PostedCount  int // of those, PaySource == "POSTED"
+	EstCount     int // of those, PaySource == "est"
+	AvgPayMax    float64
+	MedianPayMax float64
+	MaxPayMax    float64
 }

@@ -89,20 +89,23 @@ const GOLDEN = {
   ],
 };
 
-// The module-level data/ paths are relative to process.cwd(), so run each call
-// chdir'd into a sandbox (same pattern as the #2065 fixture in test-all.mjs).
+// The module-level data/ paths are anchored to CAREER_OPS_ROOT (frozen at
+// module load), so a chdir can no longer retarget them: each call receives the
+// sandbox's explicit paths through loadDedupSnapshot's path-options seam.
 function inSandbox(files, fn) {
   const dir = mkdtempSync(join(tmpdir(), 'dedup-snapshot-'));
   mkdirSync(join(dir, 'data'), { recursive: true });
   for (const [name, content] of Object.entries(files)) {
     writeFileSync(join(dir, 'data', name), content, 'utf-8');
   }
-  const originalCwd = process.cwd();
-  process.chdir(dir);
+  const paths = {
+    scanHistoryPath: join(dir, 'data', 'scan-history.tsv'),
+    pipelinePath: join(dir, 'data', 'pipeline.md'),
+    applicationsPath: join(dir, 'data', 'applications.md'),
+  };
   try {
-    return fn();
+    return fn(paths);
   } finally {
-    process.chdir(originalCwd);
     rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -115,7 +118,7 @@ function sameArray(actual, expected) {
 {
   const snapshot = inSandbox(
     { 'scan-history.tsv': HISTORY, 'pipeline.md': PIPELINE, 'applications.md': APPLICATIONS },
-    () => loadDedupSnapshot(POLICY),
+    (paths) => loadDedupSnapshot(POLICY, undefined, paths),
   );
 
   if (sameArray([...snapshot.seen].sort(), GOLDEN.seen)) {
@@ -152,7 +155,7 @@ function sameArray(actual, expected) {
 // unmergeable.
 {
   const files = { 'scan-history.tsv': HISTORY, 'pipeline.md': PIPELINE, 'applications.md': APPLICATIONS };
-  const noTtl = inSandbox(files, () => loadDedupSnapshot({ today: '2026-08-07' }));
+  const noTtl = inSandbox(files, (paths) => loadDedupSnapshot({ today: '2026-08-07' }, undefined, paths));
   if (
     noTtl.seen.has('https://jobs.lever.co/beta/2') &&
     noTtl.seenCompanyRoles.has('beta::data engineer') &&
@@ -176,7 +179,7 @@ function sameArray(actual, expected) {
 {
   const files = { 'scan-history.tsv': HISTORY, 'pipeline.md': PIPELINE, 'applications.md': APPLICATIONS };
   const canonicalize = buildCompanyCanonicalizer({ 'Zeta Industries': ['Zeta'] });
-  const snapshot = inSandbox(files, () => loadDedupSnapshot(POLICY, canonicalize));
+  const snapshot = inSandbox(files, (paths) => loadDedupSnapshot(POLICY, canonicalize, paths));
   if (
     snapshot.seenCompanyRoles.has('zeta industries::sre') &&
     !snapshot.seenCompanyRoles.has('zeta::sre') &&
@@ -191,7 +194,7 @@ function sameArray(actual, expected) {
 // ── 4. Fresh install: absent files degrade to empty, never throw ────────────
 {
   try {
-    const snapshot = inSandbox({}, () => loadDedupSnapshot(POLICY));
+    const snapshot = inSandbox({}, (paths) => loadDedupSnapshot(POLICY, undefined, paths));
     if (
       snapshot.seen.size === 0 &&
       snapshot.recheckEligible === 0 &&
@@ -213,7 +216,7 @@ function sameArray(actual, expected) {
 {
   const snapshot = inSandbox(
     { 'scan-history.tsv': '', 'pipeline.md': '', 'applications.md': '' },
-    () => loadDedupSnapshot(POLICY),
+    (paths) => loadDedupSnapshot(POLICY, undefined, paths),
   );
   if (snapshot.seen.size === 0 && snapshot.seenCompanyRoles.size === 0 && snapshot.fingerprintHistory.length === 0) {
     pass('zero-byte dedup sources behave exactly like absent ones');

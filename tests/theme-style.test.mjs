@@ -86,6 +86,40 @@ try {
     if (hasRoot && usesVars && !circular) pass(`${tpl} declares :root theme defaults and reads them via var() (no circular refs)`);
     else fail(`${tpl}: hasRoot=${hasRoot} usesVars=${usesVars} circular=${circular}`);
   }
+  // Regression: localized CJK body font stacks must honor the profile
+  // --font-family override while keeping their curated fallback stacks.
+  {
+    const tplSrc = readFileSync(join(ROOT, 'templates/cv-template.html'), 'utf-8');
+
+    const jaBody = /html\[lang="ja"\]\s+body\s*\{[^}]*font-family:\s*var\(--font-family,\s*'Liberation Sans'/s.test(tplSrc);
+    const zhBody = /html\[lang="zh-CN"\]\s+body,\s*html\[lang="zh"\]\s+body\s*\{[^}]*font-family:\s*var\(--font-family,\s*'Liberation Sans'/s.test(tplSrc);
+
+    const jaBodyCount = (tplSrc.match(/html\[lang="ja"\]\s+body\s*\{/g) || []).length;
+    const zhCnBodyCount = (tplSrc.match(/html\[lang="zh-CN"\]\s+body/g) || []).length;
+    const zhBodyCount = (tplSrc.match(/html\[lang="zh"\]\s+body/g) || []).length;
+
+    if (jaBody && zhBody && jaBodyCount === 1 && zhCnBodyCount === 1 && zhBodyCount === 1) {
+      pass('CJK body font stacks honor --font-family overrides without duplicate body selectors');
+    } else {
+      fail(`CJK body font regression: ja=${jaBody} zh=${zhBody} jaCount=${jaBodyCount} zhCNCount=${zhCnBodyCount} zhCount=${zhBodyCount}`);
+    }
+  }
+
+  // Regression: the Korean locale must honor profile.style.font_family on the
+  // body and the prominent heading/contact surfaces. A duplicate selector or a
+  // fixed-only stack silently defeats the dynamic theme block.
+  {
+    const koSrc = readFileSync(join(ROOT, 'templates/cv-template.html'), 'utf-8');
+    const koBody = koSrc.match(/html\[lang="ko"\]\s+body\s*\{[^}]*\}/s)?.[0] || '';
+    const koHeadings = koSrc.match(/html\[lang="ko"\]\s+\.header h1,[\s\S]*?\{[^}]*\}/)?.[0] || '';
+    const hasProfileFontFallback = (src) => /font-family:\s*var\(--font-family,/.test(src);
+    const hasDuplicateBodySelector = /html\[lang="ko"\]\s+body\s*,\s*html\[lang="ko"\]\s+body\s*\{/.test(koSrc);
+    if (hasProfileFontFallback(koBody) && hasProfileFontFallback(koHeadings) && !hasDuplicateBodySelector) {
+      pass('Korean body/headings honor --font-family theme override without duplicate selector');
+    } else {
+      fail(`Korean theme contract: body=${hasProfileFontFallback(koBody)} headings=${hasProfileFontFallback(koHeadings)} duplicate=${hasDuplicateBodySelector}`);
+    }
+  }
 
   // Regression (post-review, #1837): injectPrintPageCss's @page rule used to
   // hardcode `margin: 0.6in`, which — injected last, right before </head> — won

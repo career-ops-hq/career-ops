@@ -6,6 +6,7 @@
 
 import type { DiscoveredOffer } from "./explore";
 import { pendingOpenerLen } from "./stream-parse.mjs";
+import { normalizeUrl } from "./core/url-key.mjs";
 
 const OPEN = "<<offer:";
 const CLOSE = ">>";
@@ -15,14 +16,19 @@ export type AiTraceChunk =
   | { kind: "narration"; text: string }
   | { kind: "malformed"; raw: string };
 
-/** Normalize a URL for dedup: host+path, lowercased, no query/fragment/trailing slash. */
+/**
+ * Normalize a URL for dedup. Delegates to the parity-tested normalizeUrl
+ * mirror (url-key.mjs) instead of host+pathname — a bare host+path key
+ * discarded the query string unconditionally, so two DIFFERENT postings that
+ * share a path and differ only by a functional query id (e.g. Greenhouse's
+ * `?gh_jid=`) collapsed onto one key and every opening after the first at
+ * that host+path was silently dropped from AI Discover results.
+ *
+ * Can return '' for an unparseable / non-http(s) input — callers must treat
+ * that as NO KEY, never as a value that matches another ''.
+ */
 export function canon(u: string): string {
-  try {
-    const x = new URL(u);
-    return (x.host + x.pathname).toLowerCase().replace(/\/$/, "");
-  } catch {
-    return u.toLowerCase().replace(/[?#].*$/, "").replace(/\/$/, "");
-  }
+  return normalizeUrl(u);
 }
 
 function toOffer(raw: unknown): DiscoveredOffer | null {
@@ -91,8 +97,10 @@ export function makeAiStreamParser(opts?: { knownUrls?: Set<string> }) {
           continue;
         }
         const key = canon(offer.url);
-        if (seen.has(key) || known.has(key)) continue; // intra-run + known dedup
-        seen.add(key);
+        // '' means NO KEY (an unparseable-but-regex-passing url) — never treat
+        // two such offers as duplicates of EACH OTHER just because both are ''.
+        if (key && (seen.has(key) || known.has(key))) continue; // intra-run + known dedup
+        if (key) seen.add(key);
         out.push({ kind: "offer", offer });
       }
       return out;

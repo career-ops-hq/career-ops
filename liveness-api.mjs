@@ -13,7 +13,7 @@
  * anything ambiguous (unknown ATS, redirect, 429/5xx, network/timeout) we return
  * `null` (→ caller falls back to Playwright).
  *
- * Two endpoint shapes:
+ * Three endpoint shapes:
  *   - Per-job (Greenhouse, Lever, Workday): the URL maps to a single-job endpoint,
  *     so a 200 is itself proof the posting is live.
  *   - Org-level (Ashby): the URL maps to the org's whole job board. A 200 only
@@ -21,6 +21,9 @@
  *     and confirms THIS posting is still listed before returning active/expired.
  *     (Ashby pages are JS-rendered, so the browser/static rung sees only nav/footer
  *     and false-reports live postings as expired — this API rung is authoritative.)
+ *   - Per-job HTML (LinkedIn): the guest endpoint returns the rendered posting as
+ *     HTML and answers 200 for closed postings too, so `interpret` reads two
+ *     independent signals out of the body and only concludes when they agree.
  *
  * SSRF-safe by construction: the request URL is built from a FIXED, hard-coded API
  * host plus path segments extracted from the posting URL with a strict charset
@@ -54,8 +57,11 @@ function isSafeValue(v) {
 // `match` returns the extracted path params (or null); `api` builds the FIXED-host URL.
 // Optional per-provider fields:
 //   `timeoutMs`  — override the default fetch timeout (slow/rate-limited APIs).
+//   `throttleMs` — minimum interval between our requests to this provider.
+//   `accept`     — override the Accept header (providers that answer in HTML).
 //   `interpret`  — read the 200 response body to decide liveness (org-level APIs
-//                  where a 200 alone doesn't prove THIS posting is live).
+//                  where a 200 alone doesn't prove THIS posting is live, and
+//                  per-job APIs that answer 200 for a closed posting).
 //   `api404Authoritative` — defaults to true (a 404/410 means gone). Set to
 //                  false when the provider's public API can 404 a posting that
 //                  is still genuinely live elsewhere (see the `lever` entry).
@@ -141,7 +147,118 @@ const ATS_PROVIDERS = [
     api: ({ tenant, shard, site, jobPath }) =>
       `https://${tenant}.${shard}.myworkdayjobs.com/wday/cxs/${tenant}/${site}/job/${jobPath}`,
   },
+  {
+    id: 'linkedin',
+    // linkedin.com/jobs/view/{id} · .../jobs/view/{title-slug}-{id} · any page that
+    // carries the posting in ?currentJobId= (search and collection views).
+    //
+    // LinkedIn had no rung here, so every LinkedIn URL fell through to Playwright —
+    // where /jobs/view/{id} redirects to a generic search page and no verdict can be
+    // trusted. The guest endpoint below returns the rendered posting as HTML with no
+    // auth and no browser, and it answers 200 for closed postings as well as live
+    // ones, so liveness has to come from the body (`interpret`), never from the
+    // status code alone.
+    match(u) {
+      if (!/(^|\.)linkedin\.com$/.test(u.hostname)) return null;
+      const path = u.pathname.match(/^\/jobs\/view\/(?:.*-)?(\d+)\/?$/);
+      if (path) return { id: path[1] };
+      const current = u.searchParams.get('currentJobId');
+      return current && /^\d+$/.test(current) ? { id: current } : null;
+    },
+    api: ({ id }) => `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${id}`,
+    // The endpoint is unauthenticated and rate-limited. Space our calls; the
+    // interval sits on the provider so it holds for every caller rather than only
+    // the loop in check-liveness.mjs.
+    throttleMs: 3_500,
+    // We parse HTML here, so ask for it. The endpoint also serves HTML under an
+    // application/json Accept, but a request that misdescribes what it wants is one
+    // content-negotiation change away from breaking silently.
+    accept: 'text/html',
+    async interpret(res) {
+      let html;
+      try {
+        html = await res.text();
+      } catch {
+        return null; // unreadable body → inconclusive, let the browser decide
+      }
+      return classifyLinkedInPosting(html);
+    },
+  },
 ];
+
+// LinkedIn renders a closed posting with an explicit banner
+// (`<figcaption class="closed-job__flavor--closed">No longer accepting
+// applications</figcaption>`) and drops the apply control. A live posting shows one
+// of two apply controls: the on-site button, or the off-site sign-in modal.
+const LINKEDIN_CLOSED_MARKER = /No longer accepting applications/i;
+const LINKEDIN_APPLY_CONTROL = /public_jobs_apply-link-onsite|job-details-topcard-apply-modal/;
+
+/**
+ * Decide liveness for one LinkedIn posting from its guest-endpoint HTML.
+ * Pure + deterministic (no I/O), mirroring classifyLiveness in liveness-core.mjs.
+ *
+ * The two signals are read independently and must agree before this concludes
+ * anything. A body carrying the closed banner AND an apply control, or neither, is
+ * a page we do not recognise — a layout change, a partial render, an interstitial —
+ * and it returns `uncertain` rather than picking the likelier answer.
+ *
+ * The asymmetry is deliberate and is the whole reason for the two-signal rule, and
+ * it is this module's CONSERVATIVE BY DESIGN rule applied to a body read rather than
+ * a status code: a wrong `expired` costs the user a real job they never see again,
+ * while a wrong `uncertain` costs one re-check on the next sweep.
+ *
+ * @param {any} html - the guest endpoint's response body
+ * @returns {{ result: 'active' | 'expired' | 'uncertain', code: string, reason: string } | null}
+ *   null = nothing to read (empty or non-string body) → caller falls back.
+ */
+export function classifyLinkedInPosting(html) {
+  if (typeof html !== 'string' || html.length === 0) return null;
+  const closed = LINKEDIN_CLOSED_MARKER.test(html);
+  const apply = LINKEDIN_APPLY_CONTROL.test(html);
+  if (closed && !apply) {
+    return {
+      result: 'expired',
+      code: 'linkedin_closed_marker',
+      reason: 'LinkedIn shows "No longer accepting applications" and no apply control',
+    };
+  }
+  if (apply && !closed) {
+    return {
+      result: 'active',
+      code: 'linkedin_apply_control',
+      reason: 'LinkedIn shows an apply control and no closure banner (live)',
+    };
+  }
+  return {
+    result: 'uncertain',
+    code: 'linkedin_signals_disagree',
+    reason: closed
+      ? 'LinkedIn shows both a closure banner and an apply control — unrecognised page'
+      : 'LinkedIn shows neither a closure banner nor an apply control — unrecognised page',
+  };
+}
+
+// Reserved send times per provider, so back-to-back callers queue behind each
+// other instead of all reading the same "last request" timestamp and firing
+// together.
+const nextRequestAt = new Map();
+
+/**
+ * Wait until this provider's next request slot, then reserve the one after it.
+ *
+ * @param {string} providerId
+ * @param {number} [intervalMs] - minimum spacing; falsy means no throttling
+ * @returns {Promise<number>} milliseconds actually waited
+ */
+export async function throttleProviderRequest(providerId, intervalMs) {
+  if (!intervalMs) return 0;
+  const now = Date.now();
+  const earliest = Math.max(now, nextRequestAt.get(providerId) ?? 0);
+  nextRequestAt.set(providerId, earliest + intervalMs);
+  const wait = earliest - now;
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  return wait;
+}
 
 /**
  * Decide liveness for one Ashby posting from its org's job-board API payload.
@@ -171,7 +288,7 @@ export function classifyAshbyBoard(json, jobId) {
  * Map a posting URL to its ATS API URL, or null if it isn't a known ATS posting
  * (or any extracted segment fails the strict charset). Pure + deterministic.
  * @param {string} rawUrl
- * @returns {{ ats: string, apiUrl: string, parts: Record<string, string>, timeoutMs?: number, interpret?: (res: Response, parts: Record<string, string>) => Promise<{ result: 'active' | 'expired', code: string, reason: string } | null>, api404Authoritative: boolean } | null}
+ * @returns {{ ats: string, apiUrl: string, parts: Record<string, string>, timeoutMs?: number, throttleMs?: number, accept?: string, interpret?: (res: Response, parts: Record<string, string>) => Promise<{ result: 'active' | 'expired' | 'uncertain', code: string, reason: string } | null>, api404Authoritative: boolean } | null}
  */
 export function resolveAtsApi(rawUrl) {
   let u;
@@ -193,6 +310,8 @@ export function resolveAtsApi(rawUrl) {
       apiUrl: provider.api(parts),
       parts,
       timeoutMs: provider.timeoutMs,
+      throttleMs: provider.throttleMs,
+      accept: provider.accept,
       interpret: provider.interpret,
       api404Authoritative: provider.api404Authoritative !== false,
     };
@@ -208,13 +327,19 @@ export function isAtsPosting(url) {
 /**
  * Zero-token liveness check via the posting's ATS API.
  * @param {string} url
- * @returns {Promise<{ result: 'active' | 'expired', code: string, reason: string } | null>}
+ * @returns {Promise<{ result: 'active' | 'expired' | 'uncertain', code: string, reason: string } | null>}
  *   null = not a known ATS posting, or inconclusive → caller should fall back to Playwright.
+ *   `uncertain` is a conclusion in its own right: the provider reached the posting
+ *   and could not read it, and no other rung would do better.
  */
 export async function checkLivenessViaApi(url) {
   const resolved = resolveAtsApi(url);
   if (!resolved) return null;
-  const { ats, apiUrl, parts, interpret, timeoutMs, api404Authoritative } = resolved;
+  const { ats, apiUrl, parts, interpret, timeoutMs, throttleMs, accept, api404Authoritative } = resolved;
+
+  // Wait out any provider rate limit BEFORE arming the timeout, so the spacing
+  // does not eat the budget the request itself needs.
+  await throttleProviderRequest(ats, throttleMs);
 
   // The timeout guards the whole classification (fetch + any `interpret` body read),
   // since aborting the shared signal also tears down an in-flight res.json().
@@ -225,7 +350,7 @@ export async function checkLivenessViaApi(url) {
     try {
       res = await fetch(apiUrl, {
         method: 'GET',
-        headers: { 'user-agent': DEFAULT_USER_AGENT, accept: 'application/json' },
+        headers: { 'user-agent': DEFAULT_USER_AGENT, accept: accept || 'application/json' },
         redirect: 'error', // refuse server-side redirects (SSRF + ambiguity guard)
         signal: controller.signal,
       });

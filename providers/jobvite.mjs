@@ -2,6 +2,12 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 
 import { fetchTextWithRetry } from './_http.mjs';
+// Shared decoder, not a private copy. This provider's stricter XML 1.0 §2.2 Char
+// guard was upstreamed into _html-entities.mjs (#2623); keeping the local one
+// only risked the two drifting apart again — which is the drift that module
+// exists to end. The numeric references this feed really carries (`&#8217;`,
+// `&#x2013;`) decode identically there.
+import { decodeEntities } from './_html-entities.mjs';
 
 // Jobvite provider — per-tenant public jobs feed.
 // Used by ~3,000 companies across a wide range of industries.
@@ -353,45 +359,6 @@ function tagText(block, name) {
     value = value.slice('<![CDATA['.length, -']]>'.length).trim();
   }
   return value;
-}
-
-const XML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
-
-/**
- * Decode the XML entities that appear in this feed.
- *
- * Numeric references matter here and are not decorative: Jobvite titles carry
- * typographic punctuation from the source ATS — `&#8217;` (right single quote)
- * and `&#x2013;` (en dash) both appear in real postings. Leaving them raw puts
- * literal `&#8217;` into a job title, which then reaches the tracker and any
- * generated document.
- *
- * @param {string} s
- */
-function decodeEntities(s) {
-  return String(s).replace(/&(#x[0-9a-fA-F]+|#\d+|amp|lt|gt|quot|apos);/g, (match, body) => {
-    if (body[0] === '#') {
-      const code = body[1] === 'x' || body[1] === 'X'
-        ? Number.parseInt(body.slice(2), 16)
-        : Number.parseInt(body.slice(1), 10);
-      // XML 1.0 §2.2 Char — only these ranges are legal, and a bare
-      // `code <= 0x10ffff` bound is not the same test. It admits NUL, the C0
-      // controls and lone surrogates, all of which String.fromCodePoint will
-      // happily emit; an unpaired surrogate then travels into a job title, the
-      // tracker, and every document generated from it. Anything illegal is left
-      // as written rather than decoded — the raw reference is visible and inert,
-      // which is the better failure.
-      const legalXmlChar = code === 0x9 || code === 0xa || code === 0xd
-        || (code >= 0x20 && code <= 0xd7ff)
-        || (code >= 0xe000 && code <= 0xfffd)
-        || (code >= 0x10000 && code <= 0x10ffff);
-      // NaN and Infinity fail every comparison above, so they need no separate
-      // guard, and fromCodePoint cannot throw on what survives.
-      if (!legalXmlChar) return match;
-      return String.fromCodePoint(code);
-    }
-    return XML_ENTITIES[/** @type {keyof typeof XML_ENTITIES} */ (body)] ?? match;
-  });
 }
 
 /**

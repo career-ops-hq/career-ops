@@ -128,6 +128,38 @@ try {
       createdAt: '2026-07-01',
     },
     {},                                                                   // fully empty posting object
+    {
+      // multi-location posting: `location` carries only the primary city,
+      // `allLocations` carries the full set. Both must survive into location.
+      text: 'Technical Lead - Java',
+      hostedUrl: 'https://jobs.lever.co/acme/2222-technical-lead-java',
+      categories: {
+        location: 'Barcelona',
+        allLocations: ['Barcelona', 'Madrid', 'Montevideo (Hybrid)'],
+      },
+    },
+    {
+      // allLocations junk: non-strings, blanks, and a case-variant dupe of the
+      // primary must all be dropped without losing the real extra location.
+      text: 'Cloud Architect',
+      hostedUrl: 'https://jobs.lever.co/acme/3333-cloud-architect',
+      categories: {
+        location: 'Madrid',
+        allLocations: ['  madrid  ', '', null, 42, 'Sao Paulo'],
+      },
+    },
+    {
+      // allLocations present but location absent → still resolves.
+      text: 'DevOps Engineer',
+      hostedUrl: 'https://jobs.lever.co/acme/4444-devops',
+      categories: { allLocations: ['Montevideo'] },
+    },
+    {
+      // allLocations not an array → ignored, primary preserved.
+      text: 'Security Engineer',
+      hostedUrl: 'https://jobs.lever.co/acme/5555-security',
+      categories: { location: 'Lisbon', allLocations: 'Lisbon' },
+    },
   ];
 
   let capturedUrl = null;
@@ -143,9 +175,9 @@ try {
     fail(`lever.fetch() url=${JSON.stringify(capturedUrl)} opts=${JSON.stringify(capturedOpts)}`);
   }
 
-  if (fetched.length === 3)
+  if (fetched.length === 7)
     pass('lever.fetch() returns one normalized row per posting (no silent drops)');
-  else fail(`lever.fetch() returned ${fetched.length} rows (expected 3)`);
+  else fail(`lever.fetch() returned ${fetched.length} rows (expected 7)`);
 
   if (fetched[0]?.title === 'Staff Platform Engineer'
       && fetched[0]?.url === 'https://jobs.lever.co/acme/1111-staff-platform-engineer'
@@ -164,6 +196,26 @@ try {
       && fetched[2]?.company === 'Acme' && fetched[2]?.description === '' && fetched[2]?.postedAt === undefined)
     pass('lever.fetch() maps an empty posting object to empty-string fields without crashing');
   else fail(`lever.fetch() row 2 = ${JSON.stringify(fetched[2])}`);
+
+  // categories.allLocations — the multi-location fix. Lever puts a single
+  // primary city in `location`; reading only that hides every other eligible
+  // location from scan.mjs's location_filter (a Barcelona+Montevideo req looks
+  // Barcelona-only, so a Montevideo-based filter silently drops it).
+  if (fetched[3]?.location === 'Barcelona; Madrid; Montevideo (Hybrid)')
+    pass('lever.fetch() folds categories.allLocations into location (multi-location postings stay visible to location_filter)');
+  else fail(`lever.fetch() row 3 location = ${JSON.stringify(fetched[3]?.location)}`);
+
+  if (fetched[4]?.location === 'Madrid; Sao Paulo')
+    pass('lever.fetch() drops blank/non-string allLocations entries and case-insensitive duplicates of the primary');
+  else fail(`lever.fetch() row 4 location = ${JSON.stringify(fetched[4]?.location)}`);
+
+  if (fetched[5]?.location === 'Montevideo')
+    pass('lever.fetch() resolves allLocations when categories.location is absent');
+  else fail(`lever.fetch() row 5 location = ${JSON.stringify(fetched[5]?.location)}`);
+
+  if (fetched[6]?.location === 'Lisbon')
+    pass('lever.fetch() ignores a non-array allLocations and preserves the primary location');
+  else fail(`lever.fetch() row 6 location = ${JSON.stringify(fetched[6]?.location)}`);
 
   // Non-array response bodies → [], no crash.
   const emptyCases = [null, {}, { postings: [] }, 'nope'];

@@ -21,6 +21,7 @@ import { chromium } from 'playwright';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import * as yaml from 'js-yaml';
 import { appendToPipeline, appendToScanHistory, loadSeenUrls } from './scan.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 // ── Config ───────────────────────────────────────────────────────────
 
@@ -257,7 +258,7 @@ async function main() {
   mkdirSync('data', { recursive: true });
 
   const { seen } = loadSeenUrls();
-  const date = new Date().toISOString().slice(0, 10);
+  const date = localToday();
 
   const lastScanDate = NO_DATE_FILTER ? null : loadLastScanDate();
   if (NO_DATE_FILTER) {

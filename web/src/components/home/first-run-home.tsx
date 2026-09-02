@@ -25,9 +25,12 @@ export function FirstRunHome() {
             Drop your CV. See who&apos;s hiring you in 60 seconds.
           </h1>
           <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-muted">
-            No account. No setup. Your CV is parsed once on your own AI, then we scan the live job market for roles
-            that fit you — <span className="text-foreground">that part&apos;s free</span>. You only spend tokens again
-            when you choose to score a role.
+            No account. Paste text or drop a .md / .txt file to start. A PDF needs an AI CLI in{" "}
+            <a href="/config" className="text-foreground underline-offset-2 hover:underline">
+              Config
+            </a>{" "}
+            first. The market scan is <span className="text-foreground">free</span>. You only spend tokens when you
+            choose to score a role.
           </p>
           <div className="mt-7">
             <CvIngest />

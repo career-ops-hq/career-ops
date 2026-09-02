@@ -55,6 +55,23 @@ try {
     fail('softgarden.parseWidget() should return [] without cards');
   }
 
+  // decodeEntities (exercised via parseWidget) — the private copy this provider
+  // used to carry guarded the fromCodePoint range but NOT lone surrogate halves,
+  // so `&#xD800;` decoded into an ill-formed UTF-16 string that then travelled
+  // into titles. It also matched hex and decimal with one "#x?[0-9a-fA-F]+"
+  // alternative, so `&#1a2;` silently parsed as codepoint 1 and dropped "a2".
+  // Routing through the shared guarded decoder degrades all three to literal
+  // text while still decoding valid entities.
+  {
+    const badTitle = 'Overflow &#99999999; Surrogate &#xD800; Mixed &#1a2; Valid &#252; &amp;';
+    let badRows, badThrew = null;
+    try { badRows = parseWidget('<html>' + sgCard('333', badTitle, ['Berlin']) + '</html>', 'https://renk-group.softgarden.io/de/widgets/jobs'); } catch (e) { badThrew = e; }
+    const expected = 'Overflow &#99999999; Surrogate &#xD800; Mixed &#1a2; Valid ü &';
+    if (badThrew) fail(`softgarden.parseWidget() threw ${badThrew.name} on a malformed numeric entity: ${badThrew.message}`);
+    else if (badRows.length === 1 && badRows[0].title === expected) pass('softgarden.parseWidget() degrades out-of-range / lone-surrogate / mixed-radix entities to literal text while still decoding valid ones');
+    else fail(`softgarden.parseWidget() malformed-entity handling wrong: ${JSON.stringify(badRows?.[0]?.title)}`);
+  }
+
   // fetch — single widget request, jobs normalized.
   const sgCtx = { fetchText: async () => sgHtml };
   const sgJobs = await softgarden.fetch({ name: 'Renk', api: 'https://renk-group.softgarden.io/de/widgets/jobs' }, sgCtx);

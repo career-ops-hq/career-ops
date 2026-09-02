@@ -38,6 +38,8 @@
 
 <p align="center"><strong>740+ вакансій оцінено · 100+ персоналізованих резюме · 1 роботу мрії отримано</strong></p>
 
+<p align="center"><sub>Створено та підтримується: <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
+
 <p align="center">
   <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Приєднатися_до_спільноти-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
   &nbsp;
@@ -69,7 +71,7 @@
 
 career-ops перетворює будь-який AI-кодинг CLI на повноцінний командний центр для пошуку роботи. Замість ручного відстеження заявок у таблиці, ви отримуєте AI-pipeline, який:
 
-- **Оцінює вакансії** за структурованою оцінкою A-F (п'ять параметрів, що формують оцінку 1.0–5.0)
+- **Оцінює вакансії** за структурованою оцінкою A-H (п'ять параметрів, що формують оцінку 1–5)
 - **Генерує персоналізовані PDF** — ATS-оптимізовані резюме під кожен опис вакансії
 - **Сканує портали** автоматично (Greenhouse, Ashby, Lever, сторінки компаній)
 - **Пакетна обробка** — оцінка 10+ вакансій паралельно суб-агентами
@@ -95,7 +97,7 @@ career-ops працює агентно: Claude Code переходить на к
 | **Сканер порталів**           | 45+ попередньо налаштованих компаній (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + кастомні запити через Ashby, Greenhouse, Lever, Wellfound |
 | **Пакетна обробка**           | Паралельна оцінка з `claude -p` воркерами                                                                                                        |
 | **Дашборд TUI**               | Термінальний інтерфейс для перегляду, фільтрації та сортування вашого конвеєра                                                                   |
-| **Human-in-the-Loop**         | AI оцінює та рекомендує, ви вирішуєте та дієте. Система ніколи не подає заявку — остаточне рішення завжди за вами                                |
+| **Human-in-the-Loop**         | AI оцінює та рекомендує, ви вирішуєте та дієте. Система ніколи не подає заявку — остаточне рішення завжди за вами <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->                                |
 | **Цілісність конвеєра**       | Автоматичне злиття, дедуплікація, нормалізація статусів, перевірки стану                                                                         |
 
 ## Швидкий старт
@@ -124,7 +126,7 @@ claude   # or gemini / codex / qwen / opencode — open your AI CLI here
 <summary><b>Бажаєте налаштувати вручну? (git clone)</b></summary>
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # only needed for PDF generation
 claude
@@ -169,7 +171,7 @@ career-ops — це одна слеш-команда з кількома реж�
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  Оцінка A-F      │  Відповідність, прогалини, дослідження компенсації, STAR-історії
+│  Оцінка A-H      │  Відповідність, прогалини, дослідження компенсації, STAR-історії
 │  (читає cv.md)   │
 └────────┬─────────┘
          │
@@ -267,9 +269,9 @@ career-ops/
 
 <a href="https://www.star-history.com/?repos=santifer%2Fcareer-ops&type=timeline&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
-   <img alt="Графік історії зірок" src="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
+   <img alt="Графік історії зірок" src="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
  </picture>
 </a>
 
@@ -286,11 +288,11 @@ career-ops/
 
 ## Контриб'ютори
 
-<a href="https://github.com/santifer/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=santifer/career-ops" alt="Контриб'ютори santifer/career-ops" />
+<a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" alt="Контриб'ютори career-ops-hq/career-ops" />
 </a>
 
-Отримали роботу завдяки career-ops? [Поділіться своєю історією!](https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml)
+Отримали роботу завдяки career-ops? [Поділіться своєю історією!](https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml)
 
 ## Ліцензія
 

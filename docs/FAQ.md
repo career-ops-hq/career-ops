@@ -1,6 +1,6 @@
 # Frequently Asked Questions
 
-Common questions from the community, answered in one place. For setup details see [docs/SETUP.md](SETUP.md). For anything not covered here, ask in [Discord](https://discord.gg/8pRpHETxa4) or open a [GitHub Discussion](https://github.com/santifer/career-ops/discussions).
+Common questions from the community, answered in one place. For setup details see [docs/SETUP.md](SETUP.md). For anything not covered here, ask in [Discord](https://discord.gg/8pRpHETxa4) or open a [GitHub Discussion](https://github.com/career-ops-hq/career-ops/discussions).
 
 ---
 
@@ -47,6 +47,23 @@ it means the job description text of two listings from **different companies** i
 ## 6. Can I use my own CV template?
 
 Yes. Set `cv.template` (and/or `cover_letter.template`) in `config/profile.yml` to the kebab-case name of a template file in `templates/` — a value of `modern` resolves to `templates/cv-template.modern.html` (cover letters use `templates/cover-letter-template.<name>.html`). Leave the field unset and career-ops falls back to the built-in default template (`templates/cv-template.html`). You can also pick a template per generation just by asking (e.g. "use the modern template"). See the commented `cv.template` / `cover_letter.template` fields in `config/profile.example.yml` for the full reference.
+
+## Why does career-ops refuse to use a number from my story bank?
+
+Because a plausible number is not necessarily a verified one. Interview-prep documents are often drafted to match a particular job description, and their phrasing can later be absorbed into `interview-prep/story-bank.md`. Without a provenance check, a figure invented in one prep session can be repeated in the next, gradually turning into an apparent fact.
+
+career-ops therefore uses two trust tiers:
+
+- **Primary, user-authored sources** such as `cv.md`, `article-digest.md`, `config/profile.yml`, `modes/_profile.md`, and `writing-samples/` are the ground truth for factual claims.
+- **Derived, accumulated sources** such as the story bank and company-specific interview prep can supply narrative and phrasing, but a quantified claim must trace back to a primary source or carry a supported marker: `**Provenance:** user-stated YYYY-MM-DD` or `**Provenance:** source: cv.md` counts as verified; `**Provenance:** derived-unverified`, `**Provenance:** user-cannot-confirm`, and arbitrary values do not.
+
+Audit the story bank locally, without an LLM call:
+
+```bash
+node story-provenance-check.mjs --summary
+```
+
+The checker classifies each numeric claim as `existing`, `supportedByResume`, `derived-unverified`, or `user-cannot-confirm`. It is read-only: for a flagged claim, verify it against a primary source, provide the correct figure, remove the number and keep the story as narrative, or say "I don't know." That last answer is intentionally first-class — a `**Provenance:** user-cannot-confirm` marker keeps the number from being treated as verified on a later scan, so an honest unknown is never laundered into a confident fact through repetition.
 
 ## How do I stop a company from showing up in scans?
 

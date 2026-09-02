@@ -21,8 +21,58 @@ export function normalizeChinese(s) {
     .trim();
 }
 
+// A company value that carries no letter and no digit is a PLACEHOLDER, not a
+// name: `?` is the documented marker for an unknown end employer (#1596), and a
+// hand-edited row can hold the tracker's other no-data sentinels (`—`, `-`).
+// Substring-matching those turns punctuation into a company signal — and since
+// replies ask questions, `?` matched almost every mail, scoring 2, corroborating
+// partial role matches, and reaching confidence `high` next to any
+// post-application keyword.
+function isPlaceholderCompany(company) {
+  return !/[\p{L}\p{N}]/u.test(company);
+}
+
+// Short names must land on a word boundary. The normalized check further down
+// has always required more than two characters, but the two substring checks
+// above it had no floor at all, so `HP` matched the word `PHP`. A boundary
+// keeps the short names that are real — HP, 3M, IBM — while refusing the ones
+// that merely occur inside a longer word.
+const SHORT_NAME_MAX = 3;
+
+// ...but only where a word boundary can exist. Chinese and Japanese run without
+// separators, so every neighbour of a name is itself a letter and the boundary
+// NEVER holds — requiring one would refuse `腾讯` inside `我们是腾讯的招聘团队`,
+// and two-character names are the norm in those scripts. They keep the
+// substring path and the normalizeChinese() handling written for them below.
+//
+// Hangul is deliberately NOT here. Korean orthography separates words with
+// spaces (띄어쓰기), so the boundary holds for it exactly as it does for Latin —
+// listing it would have waived the guard for no gain, letting a short Korean
+// name match inside a longer word, which is the very bug this rule exists to
+// stop. Found because the test asked for it never failed when Hangul was
+// removed (CodeRabbit, #3001).
+const NO_WORD_SEPARATOR_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+
+function matchesOnWordBoundary(text, company) {
+  const escaped = company.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu').test(text);
+}
+
 export function checkCompanyMatch(text, company) {
   if (!company || !text) return false;
+  if (isPlaceholderCompany(company)) return false;
+
+  // A short name is decided by the boundary test alone: falling through to the
+  // substring checks below would reinstate the very match it just refused.
+  // Length is counted in CODE POINTS — `String.length` counts UTF-16 units, so a
+  // three-character supplementary-plane name reported 4 and slipped past the
+  // threshold into the substring path its BMP equivalent was refused.
+  const alphanumeric = company.replace(/[^\p{L}\p{N}]/gu, '');
+  const isShortName = Array.from(alphanumeric).length <= SHORT_NAME_MAX;
+  if (isShortName && !NO_WORD_SEPARATOR_RE.test(company)) {
+    return matchesOnWordBoundary(text, company);
+  }
+
   // Exact substring
   if (text.includes(company)) return true;
   

@@ -1,6 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { BROWSER_LIKE_USER_AGENT } from './_http.mjs';
+
 // Consider provider — VC "talent network" portfolio boards on getconsider.com
 // (Founderful, Creandum, Balderton, Lightspeed, Notion Capital, …). The board
 // is a JS app, but its data comes from a same-origin JSON endpoint we can hit
@@ -41,6 +43,9 @@ function toEpochMs(value) {
 
 const ENDPOINT_PATH = '/api-boards/search-jobs';
 const DEFAULT_SIZE = 500;
+// Budget for the anonymous GET that seeds the session cookie and csrfToken.
+// Shorter than the POST budget so a slow board page can't eat the full timeout.
+const HANDSHAKE_TIMEOUT_MS = 8_000;
 
 // SSRF guard. The POST target host is config-driven (built from the portals.yml
 // careers_url), so pin it to a public HTTPS origin before fetching. Consider
@@ -68,6 +73,59 @@ function resolveOrigin(entry) {
   return parsed.origin;
 }
 
+// Perform the anonymous GET /jobs handshake that Consider requires before
+// accepting a POST. Returns { cookie, csrfToken } — either field is null if
+// the server did not supply it. On any network failure the catch returns both
+// null so the caller can still attempt the POST (it will 412, but that is a
+// cleaner signal than a silent skip — and it keeps the same observable
+// behaviour as the pre-fix code for boards that don't enforce CSRF).
+async function acquireCsrfHandshake(origin) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), HANDSHAKE_TIMEOUT_MS);
+  try {
+    // redirect:'error' blocks every redirect unconditionally. A redirect-to-
+    // private-IP (169.254.169.254, ::1, …) would otherwise bypass the host
+    // guard in resolveOrigin() and make a request to an internal target.
+    // redirect:'manual' cannot be used here: the WHATWG opaque-redirect
+    // response (Node ≥18 / undici) returns status 0 and empty headers, so
+    // the Location value is unreadable without implementation-specific APIs.
+    // redirect:'error' gives the same security outcome — zero redirects
+    // followed — and the catch below treats the resulting TypeError as a
+    // degraded handshake (null/null), which is correct.
+    const res = await fetch(`${origin}/jobs`, {
+      headers: { 'user-agent': BROWSER_LIKE_USER_AGENT, accept: 'text/html,*/*' },
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    if (!res.ok) return { cookie: null, csrfToken: null };
+    const html = await res.text();
+
+    // getSetCookie() returns each Set-Cookie header as its own string, avoiding
+    // the comma-folding ambiguity of get('set-cookie') for values that contain
+    // commas. Available since Node 18.14; project minimum is Node 22.
+    const setCookies = typeof res.headers.getSetCookie === 'function'
+      ? res.headers.getSetCookie()
+      : (res.headers.get('set-cookie') ?? '').split(/,(?=\s*\w+=)/).filter(Boolean);
+
+    const cookie = setCookies
+      .map(c => c.split(';')[0].trim())
+      .filter(Boolean)
+      .join('; ') || null;
+
+    // Consider embeds the CSRF token as `"csrfToken":"<value>"` inside a JSON
+    // payload in a <script> tag on the board landing page. The 8-char lower
+    // bound rules out placeholder strings and short error tokens.
+    const m = html.match(/"csrfToken"\s*:\s*"([^"]{8,})"/);
+    const csrfToken = m ? m[1] : null;
+
+    return { cookie, csrfToken };
+  } catch {
+    return { cookie: null, csrfToken: null };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function locationString(job) {
   if (Array.isArray(job.locations) && job.locations.length) {
     return job.locations.filter(l => typeof l === 'string').join(', ');
@@ -93,12 +151,29 @@ export default {
     if (!entry.consider_board) throw new Error(`consider: ${entry.name} needs a 'consider_board' id in portals.yml`);
     const size = Number.isInteger(entry.consider_size) && entry.consider_size > 0 ? entry.consider_size : DEFAULT_SIZE;
 
+    // Perform the CSRF handshake before the POST. ctx._acquireHandshake is a
+    // test seam: set it to a stub in unit tests so no real network call is made.
+    const { cookie, csrfToken } = await (
+      typeof ctx._acquireHandshake === 'function'
+        ? ctx._acquireHandshake(origin)
+        : acquireCsrfHandshake(origin)
+    );
+
+    const csrfHeaders = {};
+    if (cookie) csrfHeaders.cookie = cookie;
+    if (csrfToken) csrfHeaders['x-csrf-token'] = csrfToken;
+
     const json = await ctx.fetchJson(origin + ENDPOINT_PATH, {
       method: 'POST',
       // redirect:'error' so a 3xx from the (config-driven) board host can't be
       // followed to a private/metadata IP — the host guard above pins the first hop.
       redirect: 'error',
-      headers: { 'content-type': 'application/json', accept: 'application/json', referer: origin + '/jobs' },
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+        referer: origin + '/jobs',
+        ...csrfHeaders,
+      },
       body: JSON.stringify({
         meta: { size },
         board: { id: String(entry.consider_board), isParent: true },

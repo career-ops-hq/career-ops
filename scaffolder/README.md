@@ -1,6 +1,6 @@
 # career-ops
 
-One-command installer for [**career-ops**](https://github.com/santifer/career-ops) — the AI-powered job search pipeline built on Claude Code.
+One-command installer for [**career-ops**](https://github.com/career-ops-hq/career-ops) — the AI-powered job search pipeline built on Claude Code.
 
 ```bash
 npx @santifer/career-ops init
@@ -21,7 +21,7 @@ The installer bootstraps CLI skill entrypoints after clone, so new CLIs (e.g. Gr
 npx @santifer/career-ops init [folder]   # default folder: ./career-ops
 ```
 
-Prefer the manual route? `git clone` still works exactly as before — see the [setup guide](https://github.com/santifer/career-ops/blob/main/docs/SETUP.md).
+Prefer the manual route? `git clone` still works exactly as before — see the [setup guide](https://github.com/career-ops-hq/career-ops/blob/main/docs/SETUP.md).
 
 ## Requirements
 

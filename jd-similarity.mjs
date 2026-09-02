@@ -10,7 +10,7 @@
  */
 
 import { readFileSync } from 'fs';
-import { pathToFileURL } from 'url';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const STOP_WORDS = new Set([
   'and', 'the', 'for', 'with', 'from', 'that', 'this', 'have', 'will', 'you',
@@ -166,7 +166,7 @@ function parseArgs(argv) {
   return { newJdPath, previousPath };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const { newJdPath, previousPath } = parseArgs(process.argv);
   try {
     const result = recommendCvReuse(readFileSync(newJdPath, 'utf8'), readFileSync(previousPath, 'utf8'));

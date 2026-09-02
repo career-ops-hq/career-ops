@@ -44,7 +44,11 @@ export default {
 - `url` — required, absolute; used as the dedup key.
 - `company`, `location` — strings, may be empty.
 - `description` — optional; populate ONLY when the list payload carries it
-  for free (no extra per-job request — the scanner is zero-token).
+  for free (no extra per-job request — the scanner is zero-token). The one
+  exception is opt-in, bounded detail enrichment: `fetchDetails: true` plus
+  `detailLimit` in the portals entry (currently vdab and smartrecruiters)
+  fetches per-posting detail JSON to populate `description`, capped at
+  `detailLimit` calls and skipped entirely while a health probe is running.
 - `postedAt` — optional epoch ms; omit when the source has no usable date.
 
 ### Context (`ctx`)
@@ -70,7 +74,8 @@ There is no index file — discovery is filesystem-convention-based
 
 Underscore-prefixed files are shared helpers, never loaded as providers:
 `_types.js` (contract typedefs), `_registry.mjs` (loader/router),
-`_http.mjs` (HTTP transport), `_html-entities.mjs`, `_trust-validator.mjs`.
+`_http.mjs` (HTTP transport), `_html-entities.mjs`, `_html-to-text.mjs`
+(description HTML → plain text), `_config-utils.mjs`, `_trust-validator.mjs`.
 
 ## Security conventions
 

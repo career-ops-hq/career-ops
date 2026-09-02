@@ -34,7 +34,7 @@ jobs:
     concurrency:
       group: gfi-claim-${{ github.event.issue.number }}
     steps:
-      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const cmd = ((context.payload.comment.body || '').trim().split(/\s+/)[0] || '').toLowerCase();
@@ -46,7 +46,11 @@ jobs:
             const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: num });
             const labels = issue.labels.map(l => (l.name || '').toLowerCase());
             const isFto = labels.includes('first-timers-only');
-            if (!labels.includes('good first issue') && !isFto) return;
+            if (!labels.includes('good first issue') && !isFto) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: num,
+                body: "This one isn't in the good-first-issue pool, so I can't assign it automatically. A maintainer will pick it up from here, and it's yours unless someone says otherwise." });
+              return;
+            }
             const user = context.payload.comment.user.login;
             const say = (body) => github.rest.issues.createComment({ owner, repo, issue_number: num, body });
             const FREE = `https://github.com/${owner}/${repo}/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22+no%3Aassignee`;
@@ -99,7 +103,7 @@ jobs:
     concurrency:
       group: gfi-sweep
     steps:
-      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const { owner, repo } = context.repo;

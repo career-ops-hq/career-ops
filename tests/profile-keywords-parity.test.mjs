@@ -22,67 +22,83 @@
 // strings for its caller's cleanChips to handle. The contract under test is
 // "the same keywords", not "the same post-processing".
 
-import { pass, fail, ROOT } from './helpers.mjs';
-import { readFileSync } from 'fs';
+import { pass, fail, warn, ROOT } from './helpers.mjs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { profileTargetKeywords as core } from '../providers/_profile-keywords.mjs';
-import { profileTargetKeywords as web } from '../web/src/lib/profile-keywords.mjs';
 
 console.log('\nprofile-keywords — web mirror vs core helper');
 
-// A true set comparison, not a length check: the core de-dupes and the mirror
-// does not, so a keyword appearing in both `primary` and an archetype name
-// legitimately yields 2 entries on one side and 1 on the other.
-const sameSet = (a, b) => {
-  const A = new Set(a), B = new Set(b);
-  return A.size === B.size && [...A].every((k) => B.has(k));
-};
+// web/ is NOT in update-system.mjs's SYSTEM_PATHS but tests/ is, so this file
+// ships to installs whose checkout has no web/ at all — and a static import
+// cannot be skipped, so it turns a core-only install into a permanent failure
+// (#1675 / #1677). Three branches, as in test-all.mjs's #2666 mirror-parity
+// freeze: an absent web/ is a real absence, but a mirror missing under a
+// present web/ is a move, and a skip is how a parity freeze quietly stops
+// guarding.
+const WEB_MIRROR = join(ROOT, 'web', 'src', 'lib', 'profile-keywords.mjs');
+if (!existsSync(join(ROOT, 'web', 'src'))) {
+  warn('web/ not present in this checkout — skipping the profile-keywords parity check');
+} else if (!existsSync(WEB_MIRROR)) {
+  fail('web/ exists but web/src/lib/profile-keywords.mjs is missing — the parity check cannot verify (moved?)');
+} else {
+  const { profileTargetKeywords: web } = await import(pathToFileURL(WEB_MIRROR).href);
 
-// The shipped example is the shape that actually exists on disk, so it is the
-// case that matters most — and it must not be empty, or parity is vacuous.
-const example = yaml.load(readFileSync(join(ROOT, 'config', 'profile.example.yml'), 'utf-8'));
-const fromExample = web(example);
-if (fromExample.length >= 2) pass(`config/profile.example.yml yields ${fromExample.length} keywords (parity is not vacuous)`);
-else fail(`config/profile.example.yml yielded ${fromExample.length} keywords — the mirror is returning nothing`);
-if (sameSet(fromExample, core(example))) pass('web mirror matches core on config/profile.example.yml');
-else fail(`drift on profile.example.yml: web=${JSON.stringify(fromExample)} core=${JSON.stringify(core(example))}`);
+  // A true set comparison, not a length check: the core de-dupes and the mirror
+  // does not, so a keyword appearing in both `primary` and an archetype name
+  // legitimately yields 2 entries on one side and 1 on the other.
+  const sameSet = (a, b) => {
+    const A = new Set(a), B = new Set(b);
+    return A.size === B.size && [...A].every((k) => B.has(k));
+  };
 
-// Shapes the two have disagreed on, or could. Each is a documented field form,
-// not a synthetic edge case: `primary` as a list is what api/profile/route.ts
-// writes; `archetypes` entries are {name, level, fit} objects.
-const cases = [
-  ['primary as a list', { target_roles: { primary: ['ML Engineer', 'Inference Engineer'] } }],
-  ['archetypes contribute .name', { target_roles: { archetypes: [{ name: 'Edge AI Engineer', level: 'Senior', fit: 'primary' }] } }],
-  ['both together', { target_roles: { primary: ['A'], archetypes: [{ name: 'B' }] } }],
-  ['archetype with no name', { target_roles: { archetypes: [{ level: 'Senior' }] } }],
-  ['primary as a bare scalar', { target_roles: { primary: 'Senior AI Engineer' } }],
-  ['target_roles absent', {}],
-  ['target_roles null', { target_roles: null }],
-  ['target_roles is an array', { target_roles: [] }],
-];
+  // The shipped example is the shape that actually exists on disk, so it is the
+  // case that matters most — and it must not be empty, or parity is vacuous.
+  const example = yaml.load(readFileSync(join(ROOT, 'config', 'profile.example.yml'), 'utf-8'));
+  const fromExample = web(example);
+  if (fromExample.length >= 2) pass(`config/profile.example.yml yields ${fromExample.length} keywords (parity is not vacuous)`);
+  else fail(`config/profile.example.yml yielded ${fromExample.length} keywords — the mirror is returning nothing`);
+  if (sameSet(fromExample, core(example))) pass('web mirror matches core on config/profile.example.yml');
+  else fail(`drift on profile.example.yml: web=${JSON.stringify(fromExample)} core=${JSON.stringify(core(example))}`);
 
-for (const [label, doc] of cases) {
-  let w, c;
-  try {
-    w = web(doc);
-    c = core(doc);
-  } catch (e) {
-    fail(`${label}: threw — ${e.message}`);
-    continue;
+  // Shapes the two have disagreed on, or could. Each is a documented field form,
+  // not a synthetic edge case: `primary` as a list is what api/profile/route.ts
+  // writes; `archetypes` entries are {name, level, fit} objects.
+  const cases = [
+    ['primary as a list', { target_roles: { primary: ['ML Engineer', 'Inference Engineer'] } }],
+    ['archetypes contribute .name', { target_roles: { archetypes: [{ name: 'Edge AI Engineer', level: 'Senior', fit: 'primary' }] } }],
+    ['both together', { target_roles: { primary: ['A'], archetypes: [{ name: 'B' }] } }],
+    ['archetype with no name', { target_roles: { archetypes: [{ level: 'Senior' }] } }],
+    ['primary as a bare scalar', { target_roles: { primary: 'Senior AI Engineer' } }],
+    ['target_roles absent', {}],
+    ['target_roles null', { target_roles: null }],
+    ['target_roles is an array', { target_roles: [] }],
+  ];
+
+  for (const [label, doc] of cases) {
+    let w, c;
+    try {
+      w = web(doc);
+      c = core(doc);
+    } catch (e) {
+      fail(`${label}: threw — ${e.message}`);
+      continue;
+    }
+    if (sameSet(w, c)) pass(`parity: ${label}`);
+    else fail(`parity: ${label} — web=${JSON.stringify(w)} core=${JSON.stringify(c)}`);
   }
-  if (sameSet(w, c)) pass(`parity: ${label}`);
-  else fail(`parity: ${label} — web=${JSON.stringify(w)} core=${JSON.stringify(c)}`);
-}
 
-// Neither side may throw on junk: both are tolerant readers on a seeding path,
-// never validators.
-for (const junk of [null, undefined, 'a string', 42, []]) {
-  try {
-    web(junk);
-    core(junk);
-    pass(`both tolerate ${JSON.stringify(junk) ?? 'undefined'}`);
-  } catch (e) {
-    fail(`threw on ${JSON.stringify(junk) ?? 'undefined'}: ${e.message}`);
+  // Neither side may throw on junk: both are tolerant readers on a seeding path,
+  // never validators.
+  for (const junk of [null, undefined, 'a string', 42, []]) {
+    try {
+      web(junk);
+      core(junk);
+      pass(`both tolerate ${JSON.stringify(junk) ?? 'undefined'}`);
+    } catch (e) {
+      fail(`threw on ${JSON.stringify(junk) ?? 'undefined'}: ${e.message}`);
+    }
   }
 }

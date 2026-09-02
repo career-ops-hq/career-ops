@@ -23,7 +23,9 @@ import path from "node:path";
  *   produce any output at all", or null when it did. That question is about the
  *   transport, not this module, so the route owns the wording and passes it in
  *   rather than both places carrying the same two strings.
- * @property {boolean} sawError - Anything error-shaped on stderr.
+ * @property {boolean} sawError - An authoritative structured-stream error (the
+ *   CLI's own JSONL `error` event) — never a stderr keyword match, which must
+ *   not override a clean exit (#1974).
  * @property {boolean} cleanExit - Exit code 0 (not killed, not non-zero).
  * @property {boolean} hasPaths - The backend resolved its scratch/final paths.
  */

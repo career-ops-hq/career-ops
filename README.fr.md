@@ -40,12 +40,14 @@
 
 <p align="center"><strong>Plus de 740 offres d'emploi évaluées · Plus de 100 CV personnalisés · 1 poste de rêve décroché</strong></p>
 
+<p align="center"><sub>Créé et maintenu par <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
+
 <p align="center">
   <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Rejoindre_la_communauté-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/santifer/career-ops/releases/latest"><img src="https://img.shields.io/badge/release-v1.9.0-2ea44f?style=for-the-badge&labelColor=2b3137" alt="Dernière version"></a>
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/badge/release-v1.9.0-2ea44f?style=for-the-badge&labelColor=2b3137" alt="Dernière version"></a>
 </p>
 
 <p align="center">
@@ -73,7 +75,7 @@
 
 career-ops ([career-ops.org](https://career-ops.org), également connu sous le nom de **careerops**) transforme n'importe quelle interface de ligne de commande (CLI) de codage IA en un véritable centre de commandement pour votre recherche d'emploi. Au lieu de suivre manuellement vos candidatures dans un tableau de bord, vous disposez d'un pipeline alimenté par l'IA qui :
 
-- **Évalue les offres** avec une évaluation structurée de A à F (cinq dimensions alimentant un score de 1,0 à 5,0)
+- **Évalue les offres** avec une évaluation structurée de A à H (cinq dimensions alimentant un score de 1 à 5)
 - **Génère des PDF sur mesure** — des CV optimisés pour les systèmes ATS, personnalisés pour chaque description de poste
 - **Scanne automatiquement les portails** (Greenhouse, Ashby, Lever, pages carrières des entreprises)
 - **Traite en lot** — évalue plus de 10 offres en parallèle avec des sous-agents
@@ -92,14 +94,14 @@ Conçu par quelqu'un qui l'a utilisé pour évaluer plus de 740 offres d'emploi,
 | Fonctionnalité | Description |
 | :--- | :--- |
 | **Pipeline Automatique** | Collez une URL, obtenez une évaluation complète + un CV PDF + une entrée dans le tracker |
-| **Évaluation en 6 Blocs** | Résumé du rôle, correspondance de CV, stratégie de niveau, recherche de salaire, personnalisation, préparation aux entretiens (STAR+R) — avec une vérification de légitimité de l'offre (Bloc G) pour signaler les arnaques et les emplois fantômes |
+| **Évaluation A-H** | Résumé du rôle, correspondance de CV, stratégie de niveau, recherche de salaire, personnalisation, préparation aux entretiens (STAR+R) — avec une vérification de légitimité de l'offre (Bloc G) pour signaler les arnaques et les emplois fantômes |
 | **Banque d'histoires d'entretien** | Accumule les récits STAR+Réflexion à travers les évaluations — 5 à 10 histoires clés pour répondre à n'importe quelle question comportementale |
 | **Scripts de Négociation** | Cadres de négociation de salaire, arguments contre les baisses de salaire géographiques, levier d'offres concurrentes |
 | **Génération de CV ATS** | CV optimisés avec injection de mots-clés, utilisant le design Space Grotesk + DM Sans |
 | **Scanner de Portails** | Plus de 45 entreprises préconfigurées (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + requêtes personnalisées sur Ashby, Greenhouse, Lever, Wellfound |
 | **Traitement en Lot** | Évaluation parallèle avec des processus de travail `claude -p` |
 | **TUI de Tableau de Bord** | Interface terminal pour explorer, filtrer et trier votre pipeline |
-| **Humain dans la Boucle** | L'IA évalue et recommande, vous décidez et agissez. Le système ne soumet jamais de candidature automatiquement — vous avez toujours le dernier mot |
+| **Humain dans la Boucle** | L'IA évalue et recommande, vous décidez et agissez. Le système ne soumet jamais de candidature — vous avez toujours le dernier mot <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. --> |
 | **Intégrité du Pipeline** | Fusion automatisée, déduplication, normalisation des statuts et vérifications de santé |
 
 ## Démarrage rapide
@@ -125,7 +127,7 @@ claude   # ou gemini / codex / qwen / opencode — ouvrez votre CLI d'IA ici
 <summary><b>Vous préférez le configurer manuellement ? (git clone)</b></summary>
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # requis uniquement pour la génération de PDF
 claude   # ouvrez votre CLI d'IA — il vous guidera au premier lancement
@@ -215,7 +217,7 @@ Vous collez l'URL ou la description d'un emploi
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│ Évaluation A-F   │  Correspondance, lacunes, recherche de salaire, récits STAR
+│ Évaluation A-H   │  Correspondance, lacunes, recherche de salaire, récits STAR
 │ (lit cv.md)      │
 └────────┬─────────┘
          │
@@ -317,9 +319,9 @@ Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/
 
 <a href="https://www.star-history.com/?repos=santifer%2Fcareer-ops&type=timeline&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
  </picture>
 </a>
 
@@ -336,11 +338,11 @@ Voir [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) (en anglais) pour tous les déta
 
 ## Contributeurs
 
-<a href="https://github.com/santifer/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=santifer/career-ops" />
+<a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
 </a>
 
-Vous avez été embauché grâce à career-ops ? [Partagez votre histoire ! (en anglais)](https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml)
+Vous avez été embauché grâce à career-ops ? [Partagez votre histoire ! (en anglais)](https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml)
 
 ## Licence et marques déposées
 

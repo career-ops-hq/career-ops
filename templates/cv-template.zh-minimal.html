@@ -426,6 +426,15 @@ version: 1.0.0
     page-break-after: avoid;
   }
 
+  /* Keep a project's tech line attached to the description above it.  A project
+     may still split across pages, but not at the one opportunity that strands a
+     bare "Python | github.com/..." line at the top of the next page with no
+     title or description to identify it. */
+  .project-tech {
+    break-before: avoid;
+    page-break-before: avoid;
+  }
+
   /* === RTL (Arabic) Support === */
   html[lang="ar"] body {
     direction: rtl;

@@ -32,14 +32,17 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { dirname, join } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { sanitizeMarkdownField } from './scan.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const PIPELINE_PATH = join(CAREER_OPS, 'data', 'pipeline.md');
-const CV_PATH = join(CAREER_OPS, 'cv.md');
+const DATA_ROOT = getCareerOpsRoot();
+const PIPELINE_PATH = join(DATA_ROOT, 'data', 'pipeline.md');
+const CV_PATH = join(DATA_ROOT, 'cv.md');
 
 const DEFAULT_LIMIT = 20;
 // A ceiling the flag cannot raise. The whole reason the core scan is zero-token is
@@ -461,7 +464,7 @@ function selfTest() {
   return fail === 0 ? 0 : 1;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   if (args.includes('--self-test')) {
     process.exit(selfTest());

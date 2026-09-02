@@ -27,6 +27,13 @@
 // shape; the branded corporate page goes in careers_url and the csod.com URL in
 // `api:` (same convention as workday/successfactors).
 
+// Titles arrive HTML-escaped, so the tag strip below is not enough on its own:
+// an undecoded "R&amp;D Engineer" fails the user's own title_filter positive
+// "r&d" and is silently dropped, and a negative like "sales & marketing" never
+// vetoes "Sales &amp; Marketing Lead". Shared decoder, same as softgarden and
+// radancy (#2487, #2921).
+import { decodeEntities } from './_html-entities.mjs';
+
 const PAGE_SIZE = 25; // server default; verified OHB serves exactly 25/page
 const MAX_PAGES = 40; // safety cap on request count (40*25 = 1000 postings)
 const MAX_JOBS = 1000; // cap total postings pulled per site
@@ -137,7 +144,7 @@ export function parseRequisitions(json, cfg) {
   for (const r of list) {
     if (!r || typeof r !== 'object') continue;
     const id = r.requisitionId != null ? String(r.requisitionId) : '';
-    const title = String(r.displayJobTitle || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const title = decodeEntities(String(r.displayJobTitle || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
     if (!id || !title) continue;
     out.push({
       id,

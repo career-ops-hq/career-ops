@@ -30,6 +30,13 @@
 //     searchCriteria:
 //       - { CriterionName: PositionLocation.Country, CriterionValue: [329] }
 
+// Titles arrive HTML-escaped, so the tag strip below is not enough on its own:
+// an undecoded "R&amp;D Engineer" fails the user's own title_filter positive
+// "r&d" and is silently dropped, and a negative like "sales & marketing" never
+// vetoes "Sales &amp; Marketing Lead". Shared decoder, same as softgarden and
+// radancy (#2487, #2921).
+import { decodeEntities } from './_html-entities.mjs';
+
 const PAGE_SIZE = 100; // verified: the endpoint happily serves 100+/page
 const MAX_PAGES = 40; // safety cap on request count (40*100 = 4000 postings)
 const MAX_JOBS = 1000; // cap total postings pulled (newest-first sort)
@@ -104,7 +111,7 @@ export function parseSearchResult(json) {
     const d = item?.MatchedObjectDescriptor;
     if (!d) continue;
     const id = item.MatchedObjectId != null ? String(item.MatchedObjectId) : String(d.PositionID || '');
-    const title = String(d.PositionTitle || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const title = decodeEntities(String(d.PositionTitle || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
     const url = String(d.PositionURI || '').trim();
     if (!id || !title || !/^https?:\/\//i.test(url)) continue;
     const locs = Array.isArray(d.PositionLocation) ? d.PositionLocation : [];

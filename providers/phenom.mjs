@@ -2,6 +2,12 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 
 import { fetchJsonWithRetry } from './_http.mjs';
+// Titles arrive HTML-escaped, so the tag strip below is not enough on its own:
+// an undecoded "R&amp;D Engineer" fails the user's own title_filter positive
+// "r&d" and is silently dropped, and a negative like "sales & marketing" never
+// vetoes "Sales &amp; Marketing Lead". Shared decoder, same as softgarden and
+// radancy (#2487, #2921).
+import { decodeEntities } from './_html-entities.mjs';
 
 // Phenom People provider — the "CareerConnect" career sites many large
 // enterprises run (branded domains like careers.exampleco.com). The search
@@ -110,7 +116,7 @@ export function parsePhenomDate(raw) {
 // and collapses whitespace.
 /** @param {any} job @returns {string} */
 export function jobLocation(job) {
-  const direct = String(job?.location || job?.cityStateCountry || job?.cityState || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  const direct = decodeEntities(String(job?.location || job?.cityStateCountry || job?.cityState || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
   if (direct) return direct;
   const parts = [job?.city, job?.state, job?.country].map((p) => String(p || '').trim()).filter(Boolean);
   return [...new Set(parts)].join(', ');
@@ -129,7 +135,7 @@ export function parseRefineSearch(json, cfg) {
   for (const job of list) {
     if (!job || typeof job !== 'object') continue;
     const id = job.jobId != null ? String(job.jobId) : '';
-    const title = String(job.title || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const title = decodeEntities(String(job.title || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
     if (!id || !title) continue;
     rows.push({
       id,

@@ -104,7 +104,15 @@ function normalizeTitle(value) {
   return text
     .toLowerCase()
     .normalize('NFD')
-    .replace(/\p{Mn}/gu, '');
+    // Only marks sitting on an ASCII Latin base. Stripping EVERY \p{Mn} also
+    // reached marks that carry meaning in other scripts: Devanagari matras
+    // (कंपनी and कपनी became one token), Cyrillic breve (Йогурт -> иогурт) and
+    // Japanese dakuten (バックエンド -> ハックエント, voiced kana folded onto
+    // unvoiced). Latin accent-folding — the reason this function exists, per
+    // the Sênior case — is unchanged, because those marks always follow an
+    // ASCII base once the title is lowercased.
+    .replace(/(?<=[a-z])\p{Mn}/gu, '')
+    .normalize('NFC');
 }
 
 /**
@@ -136,7 +144,7 @@ export function roleTokens(role) {
     // tokenized identically to the bare title and got merged over it (#2165).
     // "cicd" / "tcpip" / "uiux" survive as content tokens.
     .replace(/\b([a-z0-9]{1,3})\/([a-z0-9]{1,3})\b/g, '$1$2')
-    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ')
     .split(/\s+/)
     .filter(w => (w.length > 3 || SHORT_SPECIALTY.has(w)) && !ROLE_STOPWORDS.has(w));
 }
@@ -144,7 +152,7 @@ export function roleTokens(role) {
 function extractSeniorities(title) {
   return new Set(
     normalizeTitle(title)
-      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ')
       .split(/\s+/)
       .filter(w => SENIORITY_TOKENS.has(w))
   );

@@ -59,6 +59,26 @@ Inside Claude Code, `/status` reports the active login and shows an API-key row 
 
 `ANTHROPIC_AUTH_TOKEN` and the cloud-provider switches (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`) take precedence too, so check those if a stray key is not the culprit.
 
+### A settings.json helper can bring the key back
+
+Even with the environment clean, `~/.claude/settings.json` can set `apiKeyHelper` — a script Claude Code runs to produce an API key on every request. When it is set, that key wins over your subscription login, so the steps above alone will not fix billing.
+
+Check for it:
+
+```bash
+grep -n "apiKeyHelper" ~/.claude/settings.json 2>/dev/null   # any match means a helper is configured
+```
+
+Remove it then restart Claude Code:
+
+```jsonc
+{
+  "apiKeyHelper": "/path/to/script.sh" // remove this line
+}
+```
+
+Project-level `.claude/settings.json` and `~/.claude/settings.local.json` can set the same key — check those too if it keeps coming back.
+
 ### The batch mode is the exception worth knowing
 
 `batch/batch-runner.sh` drives `claude -p` workers, and the headless path does not use the interactive login. If you want batch runs on your subscription rather than on credits, generate a long-lived token once:

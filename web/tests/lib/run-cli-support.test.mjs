@@ -483,3 +483,23 @@ test("the fallback still catches every real failure it caught before", () => {
     assert.equal(isFatalGenericStderr(line), true, `real failure no longer detected: ${line}`);
   }
 });
+
+// #3124: evaluate runs were killed at 285s (well under the 800s maxDuration) and
+// the kill was then misreported as "didn't save a report", blaming the CLI for a
+// limit the route imposed. These guard the budget and the honest message.
+import { killMsForKind, timeoutMessage, RUN_MAX_DURATION_S } from "../../src/lib/run-cli-support.mjs";
+
+test("evaluate's kill budget gives real headroom, not the old 285s floor (#3124)", () => {
+  const ms = killMsForKind("evaluate");
+  assert.ok(ms > 285_000, `evaluate must exceed the 285s that killed real runs, got ${ms}ms`);
+  assert.ok(ms < RUN_MAX_DURATION_S * 1000, "must stay under maxDuration so the SIGTERM is graceful, not a hard cutoff");
+  assert.equal(killMsForKind("pdf"), 600_000, "pdf keeps its post-agent render headroom");
+  assert.equal(killMsForKind("fix-portal"), killMsForKind("evaluate"), "non-pdf kinds share the evaluate budget");
+});
+
+test("a timed-out run reads as a timeout, never as 'didn't save a report' (#3124)", () => {
+  const msg = timeoutMessage(780_000, "evaluate");
+  assert.match(msg, /780s time limit/, "the message names the limit it hit");
+  assert.match(msg, /re-run|Claude Code/i, "it offers a next step");
+  assert.doesNotMatch(msg, /didn't save a report/i, "a timeout must not be blamed on the CLI's ability to write");
+});

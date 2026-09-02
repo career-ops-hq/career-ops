@@ -165,6 +165,28 @@ try {
   if (hostRejected) pass('jobstreet.fetch() rejects untrusted hostnames');
   else fail('jobstreet.fetch() should reject non-jobstreet hostnames');
 
+  // fetch() — accepts SEEK's Hong Kong host (JobsDB brand, same v5 API)
+  let hkReached = false;
+  const hkJobs = await jobstreet.fetch(
+    {
+      name: 'JobsDB HK',
+      provider: 'jobstreet',
+      api: 'https://hk.jobsdb.com/api/jobsearch/v5/search',
+      siteKey: 'HK-Main',
+      searchKeywords: 'business intelligence',
+    },
+    {
+      transport: 'http',
+      fetchJson: async (url) => {
+        hkReached = String(url).startsWith('https://hk.jobsdb.com/');
+        return { data: [], totalCount: 0 };
+      },
+      fetchText: async () => { throw new Error('should not be called'); },
+    },
+  );
+  if (hkReached && hkJobs.length === 0) pass('jobstreet.fetch() accepts hk.jobsdb.com (HK-Main)');
+  else fail('jobstreet.fetch() should accept hk.jobsdb.com and query it directly');
+
   // fetch() — handles non-array data field
   const badDataCtx = {
     transport: 'http',

@@ -14,7 +14,8 @@ import { createHash } from 'crypto';
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, existsSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, dirname, relative, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(ROOT, 'test-fixtures', 'upgrade');
@@ -101,7 +102,7 @@ function selfTest() {
   process.exit(failed ? 1 : 0);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   if (args[0] === '--self-test') selfTest();
   else if (args[0] && !args[0].startsWith('--')) {

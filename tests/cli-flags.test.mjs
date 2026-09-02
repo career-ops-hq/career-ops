@@ -168,6 +168,76 @@ try {
       fail(`--since=-5 case => status=${r.status} stdout=${r.stdout} stderr=${r.stderr}`);
     }
   }
+  {
+    // CodeRabbit (#2961): with requireOperand, a value-taking flag whose operand
+    // is MISSING is reported instead of --help silently winning. Without it,
+    // `--since --help` prints usage and exits 0.
+    const opts = { valueFlags: ['--since'], requireOperand: true };
+    const r = runValidate(['--since', '--help'], ['--since', '--help', '-h'], 'USAGE-TEXT', opts);
+    if (r.status === 1 && /--since requires a value/.test(r.stderr || '') && !/USAGE-TEXT/.test(r.stdout || '')) {
+      pass('requireOperand: --since --help is a missing operand, not a help request (#2961)');
+    } else {
+      fail(`requireOperand before-help case => status=${r.status} stdout=${r.stdout} stderr=${r.stderr}`);
+    }
+  }
+
+  {
+    const opts = { valueFlags: ['--since'], requireOperand: true };
+    const r = runValidate(['--since'], ['--since', '--help', '-h'], 'USAGE-TEXT', opts);
+    if (r.status === 1 && /--since requires a value/.test(r.stderr || '')) {
+      pass('requireOperand: a value-taking flag ending argv reports its missing operand');
+    } else {
+      fail(`requireOperand end-of-argv case => status=${r.status} stdout=${r.stdout} stderr=${r.stderr}`);
+    }
+  }
+
+  {
+    // The guard that keeps this OPT-IN: without requireOperand the behaviour is
+    // unchanged, so callers with richer validation of their own (scan.mjs tells
+    // a missing value from a zero, a negative, a non-finite and a repeat) keep
+    // reaching it.
+    const r = runValidate(['--since'], ['--since', '--help', '-h'], 'USAGE-TEXT', { valueFlags: ['--since'] });
+    if (r.status === 0 && /REACHED-END/.test(r.stdout || '')) {
+      pass('without requireOperand a missing operand still falls through to the caller');
+    } else {
+      fail(`opt-in guard case => status=${r.status} stdout=${r.stdout} stderr=${r.stderr}`);
+    }
+  }
+
+  {
+    // Guard: plain --help still works when nothing is dangling.
+    const opts = { valueFlags: ['--since'], requireOperand: true };
+    const r = runValidate(['--help'], ['--since', '--help', '-h'], 'USAGE-TEXT', opts);
+    if (r.status === 0 && /USAGE-TEXT/.test(r.stdout || '')) {
+      pass('requireOperand: --help alone still prints usage and exits 0');
+    } else {
+      fail(`requireOperand help-alone case => status=${r.status} stdout=${r.stdout} stderr=${r.stderr}`);
+    }
+  }
+
+  {
+    // Guard: a negative-number operand is an operand, not a missing one — the
+    // shape the adjacency rule exists for.
+    const opts = { valueFlags: ['--since'], requireOperand: true };
+    const r = runValidate(['--since', '-5'], ['--since', '--help', '-h'], 'USAGE-TEXT', opts);
+    if (r.status === 0 && /REACHED-END/.test(r.stdout || '')) {
+      pass('requireOperand: --since -5 passes through, a negative value is an operand');
+    } else {
+      fail(`requireOperand negative case => status=${r.status} stdout=${r.stdout} stderr=${r.stderr}`);
+    }
+  }
+
+  {
+    // Guard: the equals form carries its own operand, even before --help.
+    const opts = { valueFlags: ['--since'], requireOperand: true };
+    const r = runValidate(['--since=7', '--help'], ['--since', '--help', '-h'], 'USAGE-TEXT', opts);
+    if (r.status === 0 && /USAGE-TEXT/.test(r.stdout || '')) {
+      pass('requireOperand: --since=7 --help shows help, the equals form is complete');
+    } else {
+      fail(`requireOperand equals-then-help case => status=${r.status} stdout=${r.stdout} stderr=${r.stderr}`);
+    }
+  }
+
 } catch (e) {
   fail(`cli-flags tests crashed: ${e.message}`);
 }
