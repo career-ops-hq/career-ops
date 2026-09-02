@@ -136,6 +136,25 @@ try {
     fail(`delegated implementation was promoted to direct authorship: ${JSON.stringify({ escalatedClaims, escalated })}`);
   }
 
+  const relativeClauseSource = [
+    'Managed vendor Acme Interactive, which built the WebGL implementation for an in-store kiosk.',
+    'Oversaw contractors who developed the onboarding automation in Node.js.',
+  ].join('\n');
+  const relativeClauseCases = [
+    ['Wrote the WebGL implementation for an in-store kiosk.', 'vendor relative clause is treated as delegated execution'],
+    ['Developed the onboarding automation in Node.js.', 'contractor relative clause is treated as delegated execution'],
+  ];
+  writeFileSync(source, relativeClauseSource);
+  for (const [target, label] of relativeClauseCases) {
+    const claims = delegatedAuthorshipClaims(target, relativeClauseSource);
+    const result = verifyFacts(target, { sourcePaths: [source], configPath: config });
+    if (claims.some(claim => claim.kind === 'authorship') && result.verdict === 'block') {
+      pass(label);
+    } else {
+      fail(`${label} was accepted: ${JSON.stringify({ claims, result })}`);
+    }
+  }
+
   const attributionKept = verifyFacts('Directed vendor Acme Interactive through the WebGL build of an in-store kiosk.', {
     sourcePaths: [source], configPath: config,
   });

@@ -29,6 +29,7 @@ const TOOL_PHRASE_PATTERN = /^(?=.{1,80}$)[\p{L}\p{N}.][\p{L}\p{N}+#./-]*(?:\s+[
 const DELEGATED_PARTY_RE = /\b(?:vendors?|agenc(?:y|ies)|contractors?|consultanc(?:y|ies)|consultants?|external teams?|outsourc(?:ed|ing)|implementation partners?)\b/i;
 const DELEGATION_RE = /\b(?:commissioned|coordinated|directed|engaged|hired|managed|oversaw|partnered with|supervised)\b/i;
 const DIRECT_AUTHORSHIP_SIGNAL_RE = /\b(?:authored|built|coded|developed|engineered|implemented|programmed|wrote)\b/i;
+const THIRD_PARTY_EXECUTION_RE = /\b(?:vendors?|agenc(?:y|ies)|contractors?|consultanc(?:y|ies)|consultants?|external teams?|outsourc(?:ed|ing)|implementation partners?)\b[^.;!?]{0,120}\b(?:which|who|that)\b[^.;!?]{0,120}\b(?:authored|built|coded|developed|engineered|implemented|programmed|wrote)\b/i;
 const DIRECT_AUTHORSHIP_CLAIM_RE = /\b(authored|built|coded|developed|engineered|implemented|programmed|wrote)\b\s+(?:the\s+|an?\s+|my\s+|our\s+)?([^.;!?]{1,160})/giu;
 const ATTRIBUTION_STOP_WORDS = new Set([
   'a', 'an', 'and', 'as', 'at', 'authored', 'build', 'built', 'by', 'coded',
@@ -347,16 +348,21 @@ function attributionTokens(text) {
  * This deliberately does not guess from generic leadership prose. It requires
  * a delegation verb, a named third-party role, and at least two shared content
  * tokens between the source and generated statements. Ambiguous source
- * statements that also contain a direct implementation verb are left alone.
+ * statements that also contain a direct implementation verb are left alone;
+ * an explicit relative clause such as "vendor X, which built Y" is treated as
+ * third-party execution evidence rather than candidate direct-work evidence.
  */
 export function delegatedAuthorshipClaims(targetText, sourceText) {
   const sourceStatements = factStatements(sourceText);
   const directSources = sourceStatements
     .filter(statement => DIRECT_AUTHORSHIP_SIGNAL_RE.test(statement))
+    .filter(statement => !THIRD_PARTY_EXECUTION_RE.test(statement))
     .map(statement => new Set(attributionTokens(statement)));
   const delegatedSources = sourceStatements
     .filter(statement => DELEGATED_PARTY_RE.test(statement) && DELEGATION_RE.test(statement))
-    .filter(statement => !DIRECT_AUTHORSHIP_SIGNAL_RE.test(statement))
+    .filter(statement => (
+      !DIRECT_AUTHORSHIP_SIGNAL_RE.test(statement) || THIRD_PARTY_EXECUTION_RE.test(statement)
+    ))
     .map(statement => ({
       statement,
       tokens: new Set(attributionTokens(statement)),
