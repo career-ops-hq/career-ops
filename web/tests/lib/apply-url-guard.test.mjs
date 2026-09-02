@@ -49,6 +49,20 @@ test("blockedApplyUrlResponse: rejects RFC1918", async () => {
   assertNoLeak(blocked);
 });
 
+test("blockedApplyUrlResponse: rejects IPv6 ULA fd00::/8", async () => {
+  const blocked = await blockedApplyUrlResponse("http://[fd00::1]/");
+  assert.equal(blocked?.status, 400);
+  assert.equal(blocked?.error, APPLY_URL_BLOCKED_MESSAGE);
+  assertNoLeak(blocked);
+});
+
+test("blockedApplyUrlResponse: rejects IPv6 link-local outside fe80:", async () => {
+  const blocked = await blockedApplyUrlResponse("http://[fe90::1]/");
+  assert.equal(blocked?.status, 400);
+  assert.equal(blocked?.error, APPLY_URL_BLOCKED_MESSAGE);
+  assertNoLeak(blocked);
+});
+
 test("blockedApplyUrlResponse: rejects cloud metadata host", async () => {
   const blocked = await blockedApplyUrlResponse("http://169.254.169.254/latest/meta-data/");
   assert.equal(blocked?.status, 400);
@@ -146,6 +160,48 @@ describe("DNS + redirect layer (serial: shared hostResolver seam)", { concurrenc
   test("installApplyEgressGuard: blocks a hostname that resolves to loopback", async () => {
     const { verdict } = await runGuard("http://ssrf-blocked-host.local/sensitive-internal", {
       resolver: async (hostname) => (hostname === "ssrf-blocked-host.local" ? ["127.0.0.1"] : ["93.184.216.34"]),
+    });
+    assert.deepEqual(verdict, { action: "abort", code: "blockedbyclient" });
+  });
+
+  test("assertSafeApplyUrl: a public hostname that resolves to fd00::1 is refused", async () => {
+    const restore = setHostResolver(async (hostname) => (
+      hostname === "ssrf-blocked-host.local" ? ["fd00::1"] : ["93.184.216.34"]
+    ));
+    try {
+      await assert.rejects(
+        () => assertSafeApplyUrl("http://ssrf-blocked-host.local/apply"),
+        UnsafeApplyUrlError,
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  test("assertSafeApplyUrl: a public hostname that resolves to fe90::1 is refused", async () => {
+    const restore = setHostResolver(async (hostname) => (
+      hostname === "ssrf-blocked-host.local" ? ["fe90::1"] : ["93.184.216.34"]
+    ));
+    try {
+      await assert.rejects(
+        () => assertSafeApplyUrl("http://ssrf-blocked-host.local/apply"),
+        UnsafeApplyUrlError,
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  test("installApplyEgressGuard: blocks a hostname that resolves to fd00::1", async () => {
+    const { verdict } = await runGuard("http://ssrf-blocked-host.local/apply", {
+      resolver: async (hostname) => (hostname === "ssrf-blocked-host.local" ? ["fd00::1"] : ["93.184.216.34"]),
+    });
+    assert.deepEqual(verdict, { action: "abort", code: "blockedbyclient" });
+  });
+
+  test("installApplyEgressGuard: blocks a hostname that resolves to fe90::1", async () => {
+    const { verdict } = await runGuard("http://ssrf-blocked-host.local/apply", {
+      resolver: async (hostname) => (hostname === "ssrf-blocked-host.local" ? ["fe90::1"] : ["93.184.216.34"]),
     });
     assert.deepEqual(verdict, { action: "abort", code: "blockedbyclient" });
   });
