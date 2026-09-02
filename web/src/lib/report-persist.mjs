@@ -85,6 +85,13 @@ export function formatScore(raw) {
  * @param {string} markdown
  * @returns {{ok: true, company: string, role: string, score: string, via: string|null} | {ok: false, error: string}}
  */
+const TSV_BREAK = /[\t\r\n]/;
+
+/** Model-derived tracker cells cannot carry TSV control characters. */
+function tsvUnsafe(value) {
+  return typeof value === "string" && TSV_BREAK.test(value);
+}
+
 export function parseReportMeta(markdown) {
   const fence = String(markdown ?? "").match(YAML_FENCE)?.[1] ?? "";
   const title = String(markdown ?? "").match(TITLE_RE);
@@ -97,6 +104,11 @@ export function parseReportMeta(markdown) {
   }
   if (!score) {
     return { ok: false, error: "The report's Machine Summary is missing a numeric score, so the tracker row cannot be built." };
+  }
+  for (const [field, value] of [["company", company], ["role", role], ["score", score], ["via", via]]) {
+    if (tsvUnsafe(value)) {
+      return { ok: false, error: `The report's Machine Summary has a tab or newline in ${field}, so the tracker row cannot be built.` };
+    }
   }
   return { ok: true, company, role, score, via };
 }

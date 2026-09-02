@@ -140,6 +140,20 @@ role: Role
   assert.match(meta.error, /score/i);
 });
 
+test("parseReportMeta: tab in company fails closed", () => {
+  const md = REPORT.replace('company: "Acme AI"', 'company: "Acme\tInjected"');
+  const meta = parseReportMeta(md);
+  assert.equal(meta.ok, false);
+  assert.match(meta.error, /tab or newline in company/i);
+});
+
+test("parseReportMeta: tab in via fails closed", () => {
+  const md = REPORT.replace("via: null", 'via: "Hays\tExtra"');
+  const meta = parseReportMeta(md);
+  assert.equal(meta.ok, false);
+  assert.match(meta.error, /tab or newline in via/i);
+});
+
 test("reportSlug: confidential marker for unknown employer", () => {
   assert.equal(reportSlug("Acme AI", null), "acme-ai");
   assert.equal(reportSlug("?", null), "confidential");
@@ -193,6 +207,28 @@ test("persistEvaluation: writes report + TSV, reserves, merges, releases", async
     const scripts = calls.map((c) => basename(c.args[0]) + (c.args.includes("--release") ? " --release" : ""));
     assert.deepEqual(scripts, ["reserve-report-num.mjs", "merge-tracker.mjs", "reserve-report-num.mjs --release"]);
     assert.ok(calls.every((c) => c.opts.cwd === root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("persistEvaluation: tab in company does not reserve or write a TSV", async () => {
+  const root = mkdtempSync(join(tmpdir(), "co-evalpersist-"));
+  const { spawnFn, calls } = makeRouterSpawn({
+    "reserve-report-num.mjs": { exitCode: 0, stdout: "035\n" },
+    "merge-tracker.mjs": { exitCode: 0 },
+  });
+  const hostile = REPORT.replace('company: "Acme AI"', 'company: "Acme\tInjected"');
+  try {
+    const result = await persistEvaluation({
+      spawnFn, execPath: "node", root, markdown: hostile,
+      url: "https://acme.com/jobs/7", today: "2026-08-04",
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /tab or newline/i);
+    assert.equal(calls.length, 0);
+    assert.equal(existsSync(join(root, "reports")), false);
+    assert.equal(existsSync(join(root, "batch", "tracker-additions")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
