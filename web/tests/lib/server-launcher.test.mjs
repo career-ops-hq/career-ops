@@ -208,11 +208,18 @@ test("the child's exit code is forwarded", () => {
   assert.equal(run.status, 3);
 });
 
-test("a signalled child is distinguishable from a startup failure", () => {
+test("a terminated child returns a non-zero platform-native status", () => {
   // Given a next killed by a signal rather than exiting
   // When the launcher wraps it
   const run = launch({ args: ["dev"], body: "process.kill(process.pid, 'SIGTERM');\n" });
-  // Then the exit code is 128+signal, not the 1 that means "could not start"
+  // Windows has no POSIX signal delivery: Node emulates SIGTERM as forced
+  // termination, so only a non-zero native status is portable there. Unix
+  // reports a real signal, which the launcher converts to 128+signal.
+  if (process.platform === "win32") {
+    assert.equal(run.signal, null, "the launcher exits normally after Windows terminates its child");
+    assert.notEqual(run.status, 0, "a terminated child must not look successful");
+    return;
+  }
   assert.equal(run.status, 128 + os.constants.signals.SIGTERM);
   assert.notEqual(run.status, 1, "a killed server must not look like a failed launch");
 });
