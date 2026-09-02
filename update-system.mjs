@@ -272,6 +272,7 @@ const SYSTEM_PATHS = [
   'openrouter-runner.mjs',
   'jd-similarity.mjs',
   'tests/jd-similarity.test.mjs',
+  'linkedin-apply.mjs',
   'test-all.mjs',
   'tests/detect-reposts.test.mjs',
   'tests/salary-filter.test.mjs',

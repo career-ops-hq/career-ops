@@ -3,6 +3,7 @@ import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
 import { statusBlock, dismissConsent, tryApplyTrigger, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, type ApplyIssue } from "./diagnose";
 import { agentInterpretForm } from "./agent-interpret";
+import { profileConfig, persistentContext, closePersistentContext } from "./profile";
 
 /** The frame with the most interactive controls — where the agentic interpreter
  *  should look when deterministic extraction found nothing usable. */
@@ -110,7 +111,20 @@ async function enrichFromAts(url: string, fields: ApplyField[]): Promise<void> {
 // so we can: extract → (user verifies pre-filled answers) → FILL the real form →
 // bringToFront() for the human to submit it themselves. Headed (channel:chrome) =
 // the user's own Chrome on their residential IP (best ATS success); never submits.
-type Session = { id: string; url: string; title: string; fields: ApplyField[]; context: BrowserContext; page: Page; frame: Frame; createdAt: number; formShot?: string };
+type Session = {
+  id: string;
+  url: string;
+  title: string;
+  fields: ApplyField[];
+  context: BrowserContext;
+  page: Page;
+  frame: Frame;
+  createdAt: number;
+  formShot?: string;
+  /** True when `context` is the SHARED signed-in profile, which several sessions
+   *  use at once. Such a session owns only its page, never the context. */
+  shared: boolean;
+};
 
 declare global {
   // eslint-disable-next-line no-var
@@ -145,6 +159,32 @@ async function headedBrowser(): Promise<Browser> {
   return nb;
 }
 
+/**
+ * A browser context to run one apply session in.
+ *
+ * Two shapes, and the difference matters at close time. The default is a fresh
+ * cookie-less context per session (right for a public ATS form). When the user
+ * has opted into a signed-in profile, every session instead SHARES the one
+ * persistent context that profile directory backs, because a profile can only
+ * back one browser. `shared` records which, so closeSurface knows whether the
+ * context belongs to this session or to all of them.
+ */
+async function applySurface(): Promise<{ context: BrowserContext; shared: boolean }> {
+  if (profileConfig().enabled) {
+    return { context: await persistentContext(), shared: true };
+  }
+  const browser = await headedBrowser();
+  return { context: await browser.newContext({ viewport: { width: 1280, height: 900 } }), shared: false };
+}
+
+/** Release a session's browser resources: its page when the context is shared,
+ *  otherwise the whole context. Closing a shared context here would tear down
+ *  every other live session and drop the user's sign-in. */
+async function closeSurface(s: { context: BrowserContext; page: Page; shared: boolean }): Promise<void> {
+  if (s.shared) await s.page.close().catch(() => {});
+  else await s.context.close().catch(() => {});
+}
+
 /** Close the headed Chrome once no sessions have been active for a while, so we
  *  don't leak a browser process. Re-armed on every prune/close; cancelled on open. */
 function scheduleIdleClose() {
@@ -154,6 +194,9 @@ function scheduleIdleClose() {
       const b = globalThis.__coHeadedBrowser;
       globalThis.__coHeadedBrowser = undefined;
       void b?.close().catch(() => {});
+      // The signed-in profile browser is a separate process from the throwaway
+      // one, so idle cleanup has to release it too or it outlives every session.
+      void closePersistentContext();
     }
   }, 5 * 60_000);
 }
@@ -176,12 +219,11 @@ async function nudgeScroll(page: Page): Promise<void> {
 export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean): Promise<{ id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; needsDrive?: boolean }> {
   prune();
   if (globalThis.__coIdleTimer) clearTimeout(globalThis.__coIdleTimer); // someone's active
-  const browser = await headedBrowser();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const { context, shared } = await applySurface();
   context.setDefaultTimeout(8000); // no single action hangs the whole open/fill
   const page = await context.newPage();
   const abort = async (msg: string): Promise<never> => {
-    await context.close().catch(() => {});
+    await closeSurface({ context, page, shared });
     if (SESSIONS.size === 0) scheduleIdleClose();
     throw new Error(msg);
   };
@@ -262,7 +304,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     if (cliId && why.code === "no-form") {
       const id = `apply-${crypto.randomUUID()}`;
       const title = form.title || (await page.title().catch(() => "")) || "Application";
-      SESSIONS.set(id, { id, url, title, fields: [], context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1] });
+      SESSIONS.set(id, { id, url, title, fields: [], context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1], shared });
       return { id, title, fields: [], shots, issues: [], needsDrive: true };
     }
     return abort(why.message);
@@ -278,7 +320,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   if (unlabeled > 0) issues.push({ level: "warn", code: "unlabeled-fields", message: `${unlabeled} field${unlabeled > 1 ? "s" : ""} couldn't be labelled cleanly — double-check ${unlabeled > 1 ? "them" : "it"} before submitting.` });
 
   const id = `apply-${crypto.randomUUID()}`;
-  SESSIONS.set(id, { id, url, title: form.title, fields: form.fields, context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1] });
+  SESSIONS.set(id, { id, url, title: form.title, fields: form.fields, context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1], shared });
   return { id, title: form.title, fields: form.fields, shots, issues };
 }
 
@@ -288,16 +330,17 @@ export function getSession(id: string): Session | undefined {
 
 /** Open a bare headed page on a URL (for the agentic drive loop / validation),
  *  without the full extract pipeline. Caller must close the context. */
-export async function newDrivePage(url: string): Promise<{ page: Page; context: BrowserContext }> {
+export async function newDrivePage(url: string): Promise<{ page: Page; context: BrowserContext; shared: boolean }> {
   if (globalThis.__coIdleTimer) clearTimeout(globalThis.__coIdleTimer);
-  const browser = await headedBrowser();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  // Same surface rule as a real session: `shared` is returned so the caller
+  // closes the page rather than the context when the profile is shared.
+  const { context, shared } = await applySurface();
   context.setDefaultTimeout(8000);
   const page = await context.newPage();
   await gotoResilient(page, url);
   await dismissConsent(page).catch(() => {});
   await page.waitForTimeout(1000);
-  return { page, context };
+  return { page, context, shared };
 }
 
 /** Extract+enrich the current page (used after the drive loop reaches a form). */
@@ -343,7 +386,7 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
 export async function closeSession(id: string): Promise<void> {
   const s = SESSIONS.get(id);
   SESSIONS.delete(id);
-  await s?.context.close().catch(() => {});
+  if (s) await closeSurface(s);
   if (SESSIONS.size === 0) scheduleIdleClose();
 }
 

@@ -319,3 +319,31 @@ cover_letter:
 #     cross_role_bucket: "all_EM_roles"
 #     applied_to: ["Senior Software Engineer"]
 #     last_apply_date: "2026-01-01"
+
+# ── Apply: signed-in browser profile ───────────────────────────────────────
+#
+# The web Apply flow normally browses SIGNED OUT (a fresh, cookie-less context),
+# which is right for a public ATS form and wrong for a gated one: LinkedIn shows
+# its login wall, so an "Easy Apply" posting (whose form lives on LinkedIn, with
+# no external ATS link to reconstruct) can never be reached.
+#
+# Turning this on makes the apply flow use a DEDICATED browser profile that you
+# sign into once, from Config in the web app. It is not your everyday Chrome
+# profile, so it only ever holds the sites you deliberately add to it, and it
+# never fights a Chrome you already have open. career-ops never sees, types or
+# stores your password: you sign in yourself in a real window.
+#
+#   signed_in_profile: off unless true. Default (key absent): false.
+#   profile_dir:       where that profile lives. Default (key absent):
+#                       .career-ops-web/browser-profile (gitignored).
+#                      Relative to the career-ops folder, and it must stay
+#                      inside it. A path that escapes (for example
+#                      "../../Library/Application Support/Google/Chrome") is
+#                      refused and the default is used, because pointing this
+#                      at your real browser profile is exactly what a dedicated
+#                      profile exists to prevent. The web Config page tells you
+#                      when a value was refused.
+#
+# apply:
+#   signed_in_profile: false
+#   profile_dir: ""

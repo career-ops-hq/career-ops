@@ -120,6 +120,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `scan.mjs` | Zero-token portal scanner (Greenhouse/Ashby/Lever APIs, zero LLM cost) |
 | `scan-ats-full.mjs` | Reverse-ATS keyword-first scanner over full public ATS datasets (Greenhouse/Lever/Ashby/Workday/iCIMS), filtered by portals.yml `title_filter`/`location_filter` — no company list needed; checkpoints every 500 companies, `--resume` continues an interrupted sweep |
 | `scan-interamt.mjs` | Playwright browser scanner for Interamt.de (German public sector portal — Apache Wicket, no REST API) |
+| `linkedin-apply.mjs` | Resolves a LinkedIn posting to the employer's real ATS application URL (LinkedIn's guest endpoint says whether a job applies offsite but not where). Reads company + title from the guest page, finds the board via `discover-ats.mjs`, matches the posting via `jd-similarity.mjs`. Zero tokens, no auth, no browser. Refuses rather than guesses: resolves only on a unique high-confidence title match, a seniority difference disqualifies outright, everything else returns ranked candidates (JSON or `--summary`) |
 | `check-liveness.mjs` / `liveness-core.mjs` | Job posting liveness checker + shared logic (expired signals win over generic Apply text) |
 | `set-status.mjs` | Canonical tracker-row update: `node set-status.mjs <report#\|company> <State> [--note] [--force]` — strict states.yml validation, report-link mismatch guard, shared lock, atomic write |
 | `invite-match.mjs` | Fuzzy-match a pasted interview invite (company, date, req ID) against the tracker, ranking candidates when a company has multiple entries (JSON or `--summary`) |
@@ -472,6 +473,8 @@ One TSV file per evaluation at `batch/tracker-additions/{num}-{company-slug}.tsv
 1. **NEVER edit applications.md to ADD new entries** -- write TSV in `batch/tracker-additions/` and let `merge-tracker.mjs` merge.
 2. **UPDATE status/notes of existing entries via `node set-status.mjs <report#|company> <State> [--note]`** — the canonical (locked, validated, atomic) write path. Do not hand-edit the table.
 3. All reports MUST include `**URL:**` in the header (between Score and PDF), and `**Legitimacy:** {tier}` (see Block G in `modes/oferta.md`).
+   - `**Apply URL:**` is an OPTIONAL extra header line holding the link to the actual application form, for postings where that is not the same page as `**URL:**` (LinkedIn). `**URL:**` keeps its meaning as the canonical link the tracker records; never overwrite it with the apply link. Written by `linkedin-apply.mjs` (only on a confident resolve, or when the user picks/pastes one) and preferred by the web Apply button.
+   - Reaching a LinkedIn **Easy Apply** posting is a different problem: its form lives on LinkedIn, so there is no external URL to reconstruct. That case is served by the opt-in signed-in browser profile (`apply.signed_in_profile` in `config/profile.yml`, toggled from web Config), which runs the apply session in a dedicated browser profile the user signs into themselves. Never the user's everyday Chrome profile, and career-ops never handles the password.
 4. All statuses MUST be canonical (see `templates/states.yml`).
 5. Health check: `node verify-pipeline.mjs` · Normalize statuses: `node normalize-statuses.mjs` · Dedup: `node dedup-tracker.mjs`
 

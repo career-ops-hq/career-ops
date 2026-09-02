@@ -71,6 +71,10 @@ export function ReportView({
   const url = field("URL");
   const pdfReady = (app?.pdf ?? "").includes("✅") || pdfReadyFromIndex;
   const company = app ? companyPresentation(app) : null;
+  // Where the fillable form lives, when it differs from the posting link (LinkedIn).
+  // Recorded by linkedin-apply.mjs once resolved, so the Apply button can skip
+  // resolution on every later visit.
+  const applyUrl = field("Apply URL");
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
@@ -103,7 +107,13 @@ export function ReportView({
           {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{meta.legitimacy}</Badge>}
           {app && <StatusSelect n={id} current={app.status} />}
           <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={pdfReady} />
-          <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} pdfReady={pdfReady} />
+          <ApplyButton
+            n={id}
+            url={url && url.startsWith("http") ? url : undefined}
+            applyUrl={applyUrl && applyUrl.startsWith("http") ? applyUrl : undefined}
+            company={app?.company ?? meta?.title ?? id}
+            pdfReady={pdfReady}
+          />
         </div>
 
         {app && canDelete && (
@@ -124,6 +134,19 @@ export function ReportView({
                 className="inline-flex items-center justify-center gap-1 text-brand hover:underline max-sm:min-h-[44px]"
               >
                 posting <ExternalLink className="size-3" />
+              </a>
+            )}
+            {/* Shown only when it differs from the posting link, which in practice
+                means LinkedIn: the user should be able to see where Apply will
+                actually send them before they click it. */}
+            {applyUrl && applyUrl.startsWith("http") && applyUrl !== url && (
+              <a
+                href={applyUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center gap-1 text-brand hover:underline max-sm:min-h-[44px]"
+              >
+                application form <ExternalLink className="size-3" />
               </a>
             )}
           </div>

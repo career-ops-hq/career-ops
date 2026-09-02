@@ -78,6 +78,10 @@ const FIELD_KEYS: Record<string, string> = {
   date: "Date",
   fecha: "Date",
   url: "URL",
+  // Where the fillable form actually lives, which for a LinkedIn posting is not
+  // the same place as `url` (the canonical link the tracker records). Written by
+  // linkedin-apply.mjs; read by the Apply button, which prefers it over `url`.
+  "apply url": "Apply URL",
   archetype: "Archetype",
   arquetipo: "Archetype",
   score: "Score",
