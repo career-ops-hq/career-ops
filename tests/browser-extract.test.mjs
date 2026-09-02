@@ -16,7 +16,7 @@ try {
     resolveExtractorMode, compactText, normalizeJd, normalizeListing, parseArgs,
     workdayCxsUrl, jdHtmlToText, normalizeWorkdayJob,
     normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob,
-    fetchJdViaKnownApi,
+    fetchJdViaKnownApi, JD_FETCHERS,
   } = mod;
 
   // resolveExtractorMode — default mcp, explicit cli, garbage → mcp, missing → mcp
@@ -231,6 +231,26 @@ try {
     fail(`normalizeAshbyJob => ${JSON.stringify(ashby)}`);
   }
 
+  // workplaceType wins over isRemote whenever it is present: boards ship
+  // `isRemote: true` beside `workplaceType: "Hybrid"` constantly (52 of 60
+  // sampled ramp postings), and trusting isRemote would label those Remote.
+  const ashbyHybrid = normalizeAshbyJob(
+    { jobs: [{ id: 'x', title: 'X', descriptionPlain: 'Body.', workplaceType: 'Hybrid', isRemote: true }] },
+    'x', 'https://x/1',
+  );
+  // ...and isRemote is still the fallback when the board omits workplaceType.
+  const ashbyRemoteOnly = normalizeAshbyJob(
+    { jobs: [{ id: 'x', title: 'X', descriptionPlain: 'Body.', isRemote: true }] },
+    'x', 'https://x/1',
+  );
+  if (ashbyHybrid && ashbyHybrid.text.includes('Work model: Hybrid')
+      && !ashbyHybrid.text.includes('Work model: Remote')
+      && ashbyRemoteOnly && ashbyRemoteOnly.text.includes('Work model: Remote')) {
+    pass('normalizeAshbyJob prefers workplaceType over isRemote, falls back to isRemote');
+  } else {
+    fail(`normalizeAshbyJob work model => ${JSON.stringify([ashbyHybrid, ashbyRemoteOnly])}`);
+  }
+
   // isListed:false is Ashby's "served but delisted" signal, the counterpart of
   // Workday's canApply:false, and must reach the JD text.
   const delisted = normalizeAshbyJob(
@@ -259,21 +279,49 @@ try {
     {
       title: 'Backend Engineer',
       content: '&lt;p&gt;Own the API.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Go&lt;/li&gt;&lt;/ul&gt;',
-      offices: [{ name: 'New York' }, { name: 'Remote' }],
+      location: { name: 'New York' },
+      offices: [{ name: 'New York, NY ' }],
       requisition_id: 'R-4821',
     },
     'https://job-boards.greenhouse.io/acme/jobs/12345',
   );
   if (gh
       && gh.title === 'Backend Engineer'
-      && gh.text.includes('Location: New York | Remote')
+      && gh.text.includes('Location: New York')
+      && !gh.text.includes('New York, NY')
       && gh.text.includes('Req ID: R-4821')
       && gh.text.includes('Own the API.')
       && gh.text.includes('- Go')
       && !gh.text.includes('&lt;')) {
-    pass('normalizeGreenhouseJob decodes entity-escaped content and carries offices + req id');
+    pass('normalizeGreenhouseJob decodes entity-escaped content and reads location.name + req id');
   } else {
     fail(`normalizeGreenhouseJob => ${JSON.stringify(gh)}`);
+  }
+
+  // The regression nikitacometa flagged: reading offices[] alone dropped the
+  // Location line for a job whose offices array is empty. location.name is the
+  // primary field and stands on its own.
+  const ghNoOffices = normalizeGreenhouseJob(
+    { title: 'X', content: '<p>Body.</p>', location: { name: 'Remote' }, offices: [] },
+    'https://x/1',
+  );
+  if (ghNoOffices && ghNoOffices.text.includes('Location: Remote')) {
+    pass('normalizeGreenhouseJob emits location.name when offices[] is empty');
+  } else {
+    fail(`normalizeGreenhouseJob empty offices => ${JSON.stringify(ghNoOffices)}`);
+  }
+
+  // Enrichment fires only for a work-model-only location.name (providers/
+  // greenhouse.mjs:196): the city lives in offices[] and would otherwise be
+  // lost behind the string "Hybrid".
+  const ghWorkModel = normalizeGreenhouseJob(
+    { title: 'X', content: '<p>Body.</p>', location: { name: 'Hybrid' }, offices: [{ name: 'Berlin' }] },
+    'https://x/1',
+  );
+  if (ghWorkModel && ghWorkModel.text.includes('Location: Hybrid · Berlin')) {
+    pass('normalizeGreenhouseJob appends offices[] to a work-model-only location.name');
+  } else {
+    fail(`normalizeGreenhouseJob work-model location => ${JSON.stringify(ghWorkModel)}`);
   }
 
   const ghNulls = [
@@ -294,10 +342,19 @@ try {
         { text: 'Requirements', content: '&lt;li&gt;Linux&lt;/li&gt;&lt;li&gt;Kubernetes&lt;/li&gt;' },
         { text: 'Nice to have', content: '&lt;li&gt;Rust&lt;/li&gt;' },
       ],
+      additionalPlain: 'Our vision is to build a new financial ecosystem',
       categories: { location: 'Austin, TX', team: 'Infrastructure' },
     },
     'https://jobs.lever.co/acme/11111111-2222-3333-4444-555555555555',
   );
+  // Position, not just presence: `.includes()` alone stays green if the three
+  // body pieces are reordered, and the order is the contract — compactText
+  // truncates the TAIL, so a lowered --max-chars has to drop the boilerplate
+  // and keep the requirements, not the other way round. Each ordering compare
+  // is guarded by the matching includes() above it, because indexOf returns
+  // -1 for an absent needle and -1 sorts before every real index.
+  const leverAt = (needle) => (lever ? lever.text.indexOf(needle) : -1);
+
   if (lever
       && lever.title === 'Site Reliability Engineer'
       && lever.text.includes('Location: Austin, TX')
@@ -306,18 +363,19 @@ try {
       && lever.text.includes('Requirements')
       && lever.text.includes('- Kubernetes')
       && lever.text.includes('Nice to have')
-      && lever.text.includes('- Rust')) {
+      && lever.text.includes('- Rust')
+      && leverAt('Keep it up.') < leverAt('Requirements')) {
     pass('normalizeLeverJob appends the labeled lists after the main description');
   } else {
     fail(`normalizeLeverJob => ${JSON.stringify(lever)}`);
   }
 
-  // A closed Lever posting is still SERVED by the API. Returning it would feed
-  // a dead role into evaluation as if it were live.
-  if (normalizeLeverJob({ state: 'closed', text: 'X', descriptionPlain: 'Body' }, 'https://x/1') === null) {
-    pass('normalizeLeverJob rejects a state: closed posting');
+  if (lever
+      && lever.text.includes('Our vision is to build a new financial ecosystem')
+      && leverAt('Nice to have') < leverAt('Our vision is to build a new financial ecosystem')) {
+    pass('normalizeLeverJob appends the additional plain text after the labeled lists.');
   } else {
-    fail('normalizeLeverJob must return null for state: closed');
+    fail(`normalizeLeverJob  => ${JSON.stringify(lever)}`);
   }
 
   const leverNulls = [
@@ -352,6 +410,52 @@ try {
     fail(`fetchJdViaKnownApi non-covered => ${JSON.stringify(notCovered)}`);
   }
 
+  // resolveAtsApi carries a per-ATS timeout for the APIs that need one (Ashby:
+  // 20 s, liveness-api.mjs:113). Both real callers pass an explicit 15 s, so
+  // without this the dispatch silently shortens Ashby to a budget liveness
+  // itself would not accept. Asserted by capturing the abort timer rather than
+  // by waiting: fetch is stubbed to fail fast, so nothing here touches the
+  // network. Both globals are restored in `finally` — a throw in between would
+  // otherwise leave the rest of the suite running against the stubs.
+  const realFetch = globalThis.fetch;
+  const realSetTimeout = globalThis.setTimeout;
+  /** @type {number[]} */
+  let abortDelays = [];
+  /** @type {Record<string, number[]>} */
+  const budgets = {};
+  try {
+    globalThis.setTimeout = (/** @type {any} */ fn, /** @type {any} */ ms, /** @type {any[]} */ ...rest) => {
+      abortDelays.push(ms);
+      return realSetTimeout(fn, ms, ...rest);
+    };
+    globalThis.fetch = async () => /** @type {any} */ ({ ok: false, status: 503 });
+    // Own list rather than ATS_URL_SHAPES: that const is declared further down
+    // and would be in its temporal dead zone here.
+    const TIMEOUT_PROBES = [
+      ['greenhouse', 'https://job-boards.greenhouse.io/acme/jobs/12345'],
+      ['lever', 'https://jobs.lever.co/acme/11111111-2222-3333-4444-555555555555'],
+      ['ashby', 'https://jobs.ashbyhq.com/acme/some-job-id'],
+      ['workday', 'https://acme.wd5.myworkdayjobs.com/External/job/Seattle-WA/Engineer_R1234'],
+    ];
+    for (const [ats, url] of TIMEOUT_PROBES) {
+      abortDelays = [];
+      await fetchJdViaKnownApi(url, 12_000, 15_000);
+      budgets[ats] = abortDelays;
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+    globalThis.setTimeout = realSetTimeout;
+  }
+  if (budgets.ashby?.includes(20_000)
+      && !budgets.ashby?.includes(15_000)
+      && budgets.greenhouse?.includes(15_000)
+      && budgets.lever?.includes(15_000)
+      && budgets.workday?.includes(15_000)) {
+    pass("fetchJdViaKnownApi honors resolveAtsApi's per-ATS timeout (Ashby 20s) over the caller's default");
+  } else {
+    fail(`fetchJdViaKnownApi timeouts => ${JSON.stringify(budgets)}`);
+  }
+
   // Drift guard on the routing table. fetchJdViaKnownApi switches on
   // resolveAtsApi(url).ats, and JD_TEXT_API_ATS is the gate in front of that
   // switch — so the two agree only as long as the ats ids match the ones
@@ -369,8 +473,20 @@ try {
     const resolved = resolveAtsApi(url);
     return { ats, got: resolved && resolved.ats, gated: JD_TEXT_API_ATS.has(ats) };
   });
+  const fetcherIds = Object.keys(JD_FETCHERS).sort().join(',');
+  const gatedIds = [...JD_TEXT_API_ATS].sort().join(',');
+  if (fetcherIds === gatedIds && Object.values(JD_FETCHERS).every((f) => typeof f === 'function')) {
+    pass('JD_FETCHERS covers exactly JD_TEXT_API_ATS (a dropped fetcher cannot go unnoticed)');
+  } else {
+    fail(`JD_FETCHERS keys => ${fetcherIds} vs JD_TEXT_API_ATS => ${gatedIds}`);
+  }
+
   if (routed.every((r) => r.got === r.ats && r.gated)) {
     pass('every JD_TEXT_API_ATS id is the id resolveAtsApi emits for that ATS (routing cannot drift)');
+    // Routing ids agreeing with resolveAtsApi is only half the guarantee: that
+    // check never touches the dispatcher, so losing a fetcher entry leaves it
+    // green. JD_FETCHERS' keys ARE the dispatcher, so comparing the two sets
+    // is what actually reddens on a dropped ATS.
   } else {
     fail(`JD_TEXT_API_ATS routing drift => ${JSON.stringify(routed)}`);
   }
