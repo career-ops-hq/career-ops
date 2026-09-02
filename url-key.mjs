@@ -44,6 +44,38 @@ const TRACKING_PARAMS = [
   /^mc_cid$/i, /^mc_eid$/i, /^igshid$/i, /^_hsenc$/i, /^_hsmi$/i, /^trk$/i, /^trackingid$/i,
 ];
 
+// Multi-employer job boards that re-list requisitions hosted elsewhere. One
+// opening routinely carries a LinkedIn URL, an Indeed URL and the employer's
+// own ATS URL at the same time, so two of these URLs are two spellings of an
+// unknown posting rather than two postings. Registrable domains only; keep the
+// list literal and conservative, for the same reason TRACKING_PARAMS is. Adding
+// an employer-controlled host here would let a fuzzy title collision merge two
+// genuinely distinct requisitions, which is the silent failure direction.
+const AGGREGATOR_DOMAINS = [
+  'adzuna.com', 'builtin.com', 'careerbuilder.com', 'dice.com', 'glassdoor.com',
+  'indeed.com', 'jooble.org', 'linkedin.com', 'monster.com', 'simplyhired.com',
+  'talent.com', 'wellfound.com', 'ziprecruiter.com',
+];
+
+/**
+ * Is this posting URL hosted by a multi-employer aggregator?
+ *
+ * Callers use it to decide whether a URL mismatch is evidence about identity.
+ * Between two employer-controlled boards it is; as soon as an aggregator is on
+ * either side it is not, because the same requisition appears on both.
+ *
+ * @param {string} raw - A posting URL (or any string) from a tracker row / TSV.
+ * @returns {boolean} True only for a parseable URL on a known aggregator.
+ */
+export function isAggregatorUrl(raw) {
+  if (typeof raw !== 'string') return false;
+  let host;
+  try { host = new URL(raw.trim()).hostname.toLowerCase(); } catch { return false; }
+  // Label boundary, never a substring: `linkedin.com.evil.example` and
+  // `myindeed.com` both contain an aggregator domain and are neither.
+  return AGGREGATOR_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`));
+}
+
 /**
  * Promote a known identity-bearing SPA fragment into a functional query key
  * before generic URL normalization drops the fragment. Most fragments are
