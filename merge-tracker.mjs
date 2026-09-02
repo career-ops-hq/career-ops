@@ -3,8 +3,11 @@
  * merge-tracker.mjs — Merge batch tracker additions into applications.md
  *
  * Handles multiple TSV formats:
- * - 9-col: num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes
- * - 8-col: num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport (no notes)
+ * - Headed (preferred): a first row of column LABELS, then one data row. Column
+ *   order is then irrelevant — fields resolve by name through the same alias
+ *   table as the tracker itself (#3517).
+ * - 9-col headerless: num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes
+ * - 8-col headerless: num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport (no notes)
  * - Pipe-delimited (markdown table row): | col | col | ... |
  *
  * Dedup: company normalized + role fuzzy match + report number match
@@ -22,7 +25,7 @@ import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex } from './find.mjs';
-import { LEGACY_COLMAP, detectColumns, isHeaderRow, resolveScoreStatus, normalizeVia, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
+import { LEGACY_COLMAP, detectColumns, isHeaderRow, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, normalizeVia, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
 import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell } from './tracker-utils.mjs';
 // Canonical posting-URL key. Kept in its own module so scan.mjs / scan-history
 // can adopt the same key later without the definitions drifting.
@@ -589,18 +592,30 @@ function parseAppLine(line) {
   };
 }
 
+// A trailing field a generator emits for a value it does not have. By shape
+// these are not the thing the column is for, and an absent value must read as
+// absent rather than as some other column's content — a "N/A" url landing in
+// the untagged bucket would be recorded as the row's LOCATION.
+const PLACEHOLDER_CELL = /^(n\/?a|tbd|none|null|-|—|–)$/i;
+
 /**
- * Parse a TSV file content into a structured addition object.
+ * Split one addition row into cells. Tab-delimited by default; pipe-delimited
+ * (a pasted markdown table row) when the line starts with `|`, in which case the
+ * empty cells either side of the outer pipes are dropped.
  *
- * Handles 9-column TSV, 8-column TSV, and pipe-delimited Markdown rows. The
- * parser also tolerates old score/status column ordering, validates status, and
- * rejects additions without a usable tracker number so malformed batch output
- * cannot corrupt applications.md.
- *
- * @param {string} content - Raw file content from batch/tracker-additions.
- * @param {string} filename - Source filename used in warning messages.
- * @returns {object|null} Parsed tracker addition, or null when malformed.
+ * @param {string} line - One line of an addition file.
+ * @returns {string[]} Trimmed cells.
  */
+function splitAdditionCells(line) {
+  if (line.startsWith('|')) {
+    const parts = line.split('|').map(s => s.trim());
+    if (parts[0] === '') parts.shift();
+    if (parts.length && parts[parts.length - 1] === '') parts.pop();
+    return parts;
+  }
+  return line.split('\t').map(s => s.trim());
+}
+
 /**
  * Resolve the optional trailing TSV fields (index ≥ 9) into { via, location }.
  *
@@ -622,10 +637,9 @@ function parseTsvExtras(parts, filename) {
   // that is not a URL — it would fall into the untagged bucket and be recorded
   // as the row's LOCATION. An absent value must read as absent, not as some
   // other column's content.
-  const PLACEHOLDER = /^(n\/?a|tbd|none|null|-|—|–)$/i;
   const extras = parts.slice(9)
     .map(s => String(s).trim())
-    .filter(s => s !== '' && !PLACEHOLDER.test(s));
+    .filter(s => s !== '' && !PLACEHOLDER_CELL.test(s));
   const viaTags = extras.filter(s => /^via=/i.test(s));
   // Classify trailing fields by SHAPE, not position. A URL is
   // unambiguous (starts with http(s)://), so the posting URL and an older
@@ -644,9 +658,128 @@ function parseTsvExtras(parts, filename) {
   };
 }
 
+/**
+ * Parse a HEADED addition: a row of column labels followed by exactly one data
+ * row. Fields resolve by NAME, so no column order is privileged and the
+ * score/status pair needs no content sniffing.
+ *
+ * This is the form that has no undecidable case. `resolveScoreStatus` cannot
+ * order a discarded, never-scored row (`—` is both a score sentinel and a
+ * status meaning Discarded), so the headerless path refuses it; a header row
+ * answers it outright (#3517).
+ *
+ * @param {string[]} lines - Non-empty lines of the addition file.
+ * @param {string} filename - Source filename used in warning messages.
+ * @returns {object|null} Parsed tracker addition, or null when malformed.
+ */
+function parseHeadedAddition(lines, filename) {
+  const { map, missing, duplicates, unknown } = resolveTsvColumns(splitAdditionCells(lines[0]));
+  if (duplicates.length) {
+    console.warn(`⚠️  Skipping ${filename}: header labels the same column twice (${[...new Set(duplicates)].join(', ')}) — refusing to guess which one carries the value`);
+    return null;
+  }
+  if (missing.length) {
+    console.warn(`⚠️  Skipping ${filename}: header is missing required column(s): ${missing.join(', ')}`);
+    return null;
+  }
+  if (unknown.length) {
+    // Not fatal: an unrecognized label is a column this version has no meaning
+    // for, and dropping it loses nothing the tracker could store anyway. Say so
+    // rather than swallowing it, since the usual cause is a typo'd label.
+    console.warn(`⚠️  ${filename}: ignoring unrecognized header column(s): ${unknown.join(', ')}`);
+  }
+
+  const dataLines = lines.slice(1);
+  if (dataLines.length === 0) {
+    console.warn(`⚠️  Skipping ${filename}: header row with no data row`);
+    return null;
+  }
+  if (dataLines.length > 1) {
+    // One addition per file is the contract every caller assumes (the merge
+    // loop takes one addition per TSV). Rejecting is louder than merging the
+    // first row and dropping the rest, which would lose evaluations silently.
+    console.warn(`⚠️  Skipping ${filename}: ${dataLines.length} data rows — one addition per file`);
+    return null;
+  }
+
+  const parts = splitAdditionCells(dataLines[0]);
+  const maxIdx = Math.max(...Object.values(map));
+  if (parts.length <= maxIdx) {
+    console.warn(`⚠️  Skipping ${filename}: data row has ${parts.length} field(s) but the header labels ${maxIdx + 1}`);
+    return null;
+  }
+
+  const at = (k) => (map[k] != null ? String(parts[map[k]] ?? '').trim() : '');
+  const optional = (k) => {
+    const v = at(k);
+    return PLACEHOLDER_CELL.test(v) ? '' : v;
+  };
+
+  // Write-canonical: the tracker stores scores unbolded (verify-pipeline
+  // rejects bold scores), so strip any markdown bold from the incoming cell.
+  const score = at('score').replace(/\*\*/g, '').trim();
+  if (!looksLikeScoreCell(score)) {
+    // Corroboration, not disambiguation: the header already said which column
+    // this is, so this can no longer pick an order — it only asks whether the
+    // labelled cell holds what the label promises. It stays a hard gate because
+    // the value it catches is an emitter that wrote its VALUES in one order and
+    // its LABELS in another, which is the silent swap in a new costume. The
+    // headerless path already refuses a score cell of this shape (neither cell
+    // score-like → undecidable), so this is the same strictness, not new.
+    console.warn(`⚠️  Skipping ${filename}: the column labelled "score" reads "${score}", which is not a score or a documented sentinel (X.X/5, N/A, —, -) — check the header labels match the value order`);
+    return null;
+  }
+
+  return {
+    num: parseInt(at('num'), 10),
+    date: at('date'),
+    company: at('company'),
+    role: at('role'),
+    status: validateStatus(at('status')),
+    score,
+    pdf: at('pdf'),
+    report: at('report'),
+    notes: optional('notes'),
+    // A `via` COLUMN carries the agency name plainly; tolerate a writer that
+    // also brings the headerless form's `via=` tag along.
+    via: optional('via').replace(/^via=/i, '').trim(),
+    location: optional('location'),
+    url: optional('url'),
+  };
+}
+
+/**
+ * Parse a tracker-addition file into a structured addition object.
+ *
+ * Two forms. A HEADED file (labels row + one data row) resolves fields by name
+ * and is the form writers should emit. A headerless file is the legacy
+ * positional form: 9-column TSV, 8-column TSV, or a pipe-delimited Markdown
+ * row, whose score/status pair is disentangled by content because the two
+ * orders in circulation disagree. Both validate status and reject additions
+ * without a usable tracker number, so malformed batch output cannot corrupt
+ * applications.md.
+ *
+ * @param {string} content - Raw file content from batch/tracker-additions.
+ * @param {string} filename - Source filename used in warning messages.
+ * @returns {object|null} Parsed tracker addition, or null when malformed.
+ */
 function parseTsvContent(content, filename) {
   content = content.trim();
   if (!content) return null;
+
+  // Headed additions resolve by name; everything below is the legacy positional
+  // path, unchanged. Detection reads only the first line, so a headerless file
+  // reaches the old parser byte-for-byte as before.
+  const lines = content.split(/\r?\n/).filter(l => l.trim() !== '');
+  if (looksLikeTsvHeaderRow(splitAdditionCells(lines[0]))) {
+    const headed = parseHeadedAddition(lines, filename);
+    if (!headed) return null;
+    if (isNaN(headed.num) || headed.num === 0) {
+      console.warn(`⚠️  Skipping ${filename}: invalid entry number`);
+      return null;
+    }
+    return headed;
+  }
 
   let parts;
   let addition;
