@@ -2,7 +2,8 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync as _rmSync, symlinkSync } from 'fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync as _rmSync, symlinkSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -520,6 +521,72 @@ export async function captureConsoleErrors(fn) {
   } finally {
     console.error = original;
   }
+}
+
+/**
+ * Build a throwaway git repository for the two updater suites that drive git
+ * through the `gitIn` seam (`updater-add-paths`, `updater-is-tracked`). Only
+ * the first asserts on ignore RESOLUTION; the second writes its own .gitignore
+ * and then asks about index membership, which is a different question.
+ *
+ * The pins below are the reason this is shared rather than copied, but they are
+ * not all load-bearing for both callers, and this docstring should not imply
+ * otherwise. Mutation-tested by dropping each pin under a GIT_CONFIG_GLOBAL it
+ * exists to neutralise:
+ *
+ *   - `commit.gpgsign=false` and `core.hooksPath` → an empty dir. Either one
+ *     inherited from the environment breaks every commit the fixtures make.
+ *     Dropping either reddens BOTH suites.
+ *   - `core.excludesFile` → an empty file. A global ignore rule silently alters
+ *     what is measured (the failure mode reported in #2269). Dropping it reddens
+ *     updater-add-paths only: updater-is-tracked writes its own .gitignore and
+ *     then reads index membership, which a global rule does not move. Kept for
+ *     both as a defensive pin, proven by one.
+ *
+ * Point `core.excludesFile` at an empty file rather than /dev/null: git on
+ * Windows maps that to `nul` and dies with "fatal: cannot use nul as an
+ * exclude file".
+ *
+ * Kept as one body so a pin cannot be dropped from one caller while the other
+ * keeps it — which is the drift CodeRabbit flagged on #2531, where two copies
+ * meant a pin added to one left the other silently unprotected. Note that is a
+ * weaker guarantee than "deleting a pin fails both suites", which the table
+ * above shows is only true for two of the three.
+ *
+ * The two other `makeRepo` fixtures under tests/ are deliberately NOT folded in
+ * here: `updater-local-system-edits` pins line endings instead of excludes and
+ * seeds a base commit plus an `upstream` branch, and `updater-rollback-behavior`
+ * pins nothing. They are different fixtures that share a name, not copies of
+ * this one.
+ *
+ * `gitIn` is injected rather than imported so this module keeps depending on
+ * nothing but Node builtins — 57 of the 62 suites import it, and none of them
+ * should pull in update-system.mjs as a side effect of asking for `pass`/`fail`.
+ *
+ * @param {(dir: string, ...args: string[]) => any} gitIn - Updater's git runner.
+ * @param {object} [options]
+ * @param {string} [options.prefix='co-updater-'] - mkdtemp prefix, so a leftover
+ *   temp dir names the suite that made it.
+ * @param {boolean} [options.includeRoot=false] - Add `root` to the returned ctx.
+ *   `addPaths` resolves paths against it to decide what is a directory; without
+ *   it the guard would lstat the real career-ops checkout instead of the
+ *   fixture. `isTracked` never reads it.
+ * @returns {{dir: string, g: Function, ctx: {git: Function, root?: string}}}
+ */
+export function makeUpdaterRepo(gitIn, { prefix = 'co-updater-', includeRoot = false } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  const g = (...args) => gitIn(dir, ...args);
+  g('init', '-q', '-b', 'main', '.');
+  g('config', 'user.email', 'test@example.com');
+  g('config', 'user.name', 'Test');
+  const emptyExcludes = join(dir, '.git', 'co-empty-excludes');
+  const emptyHooks = join(dir, '.git', 'co-empty-hooks');
+  writeFileSync(emptyExcludes, '');
+  mkdirSync(emptyHooks, { recursive: true });
+  g('config', 'commit.gpgsign', 'false');
+  g('config', 'core.excludesFile', emptyExcludes);
+  g('config', 'core.hooksPath', emptyHooks);
+  return { dir, g, ctx: includeRoot ? { git: g, root: dir } : { git: g } };
 }
 
 /**

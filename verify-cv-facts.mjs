@@ -82,7 +82,26 @@ const MODIFIER_WINDOW = 4;
 // handled by the modifier window) and "50kg users" (k not at a boundary) both keep
 // their existing behaviour and still normalize to "50".
 const COUNT_CLAIM_RE = new RegExp(
-  String.raw`\b(\d[\d,.]*(?:[kKmMbB]\b)?)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}(${METRIC_NOUNS.join('|')})\b`,
+  // LAZY (`{0,N}?`), so the number binds to the NEAREST noun in the window
+  // rather than the farthest. Greedy, the quantifier consumed as many filler
+  // words as the window allowed before looking for a noun, and only backtracked
+  // if that failed — so whenever two METRIC_NOUNS sat within the window it
+  // reported the wrong one (#3414):
+  //
+  //   "15+ years scaling teams and platforms"        -> 15 platforms, not 15 years
+  //   "20+ years leading engineering organizations"  -> 20 organizations, not 20 years
+  //
+  // The same sentence's plainer paraphrase ("15+ years of experience") produced
+  // "15 years", so a truthful line copied verbatim out of cv.md could be flagged
+  // as invented: the CV and the source stated the same fact and the extractor
+  // read two different claims out of them.
+  //
+  // Lazy cannot LOSE a claim. Both directions match exactly when some noun sits
+  // inside the window; only WHICH one is bound differs, and the nearest is the
+  // one a human reads. #2279's wide-window cases are unaffected — "~5 live
+  // Cloud Run deployments" still yields "5 deployments", because there is only
+  // one noun to bind to.
+  String.raw`\b(\d[\d,.]*(?:[kKmMbB]\b)?)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}?(${METRIC_NOUNS.join('|')})\b`,
   'gi'
 );
 const NOUN_SYNONYMS = new Map([
@@ -608,6 +627,24 @@ function runSelfTest() {
   equal('truthful multiplier', auditClaims('Partners earned 2x more', source).invented, []);
   equal('noun synonym', auditClaims('Authored 80 articles', source).invented, []);
   equal('ordinary year is ignored', auditClaims('Joined the team in 2013', source).invented, []);
+
+  // The number binds to the NEAREST noun in the window, not the farthest (#3414).
+  // Greedy, each of these bound the wrong noun while the SAME fact worded plainly
+  // bound the right one — so a truthful line copied verbatim out of cv.md read as
+  // a different claim from its own source, and the gate flagged it as invented.
+  const claimsOf = (text) => [...metricClaims(text)].sort().join(' | ');
+  equal('nearest noun wins over a farther one', claimsOf('15+ years scaling teams and platforms'), '15 years');
+  equal('nearest noun wins across three modifiers', claimsOf('20+ years leading engineering organizations'), '20 years');
+  equal('the plain phrasing of the same fact agrees', claimsOf('I have 15+ years of experience.'), '15 years');
+  // …and the whole point of a truthful restatement passing the gate:
+  equal('a verbatim experience line is not invented',
+    auditClaims('15+ years scaling teams and platforms', '15+ years of experience.').invented, []);
+  // #2279 is why the window is wide: one noun, several modifiers. Lazy must not
+  // shrink the reach, only decide which noun wins when there are two.
+  equal('a 3-modifier single-noun phrase still resolves', claimsOf('~5 live Cloud Run deployments'), '5 deployments');
+  equal('and its 2-modifier paraphrase agrees', claimsOf('~5 Cloud Run deployments'), '5 deployments');
+  // A number is a hard barrier for the chain, so two counts stay separate.
+  equal('two counts in one sentence stay distinct', claimsOf('8 years supporting 40 engineers'), '40 engineers | 8 years');
   equal(
     'allow_metrics override',
     auditClaims('Reached 94,772 users', source, { allow_metrics: ['94,772 users'] }).invented,

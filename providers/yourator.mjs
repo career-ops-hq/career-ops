@@ -9,7 +9,8 @@
 //       salary, lastActiveAt, location, companyId, tags, company: { brand, … },
 //       thirdPartyUrl, externalSource } ], recommendedJobs, trendingKeywords } }
 //
-// Wire in as a tracked_companies entry:
+// Configure via a `job_boards` (or `tracked_companies`) entry with
+// `provider: yourator`:
 //
 //   - name: Yourator (Taiwan startup board)
 //     provider: yourator

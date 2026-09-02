@@ -56,6 +56,11 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   // Reporting line stated by the JD, verbatim (report + Machine Summary only).
   // Allowlisted so it round-trips; no consumer logic yet.
   'reports_to',
+  // Block B's requirement -> importance table, mirrored row by row (evidence
+  // tier, importance band, match). Allowlisted so it round-trips; no consumer
+  // logic yet, deliberately: importance is score-neutral, so nothing that folds
+  // historical scores may start reading it without its own design pass.
+  'requirement_importance',
 ]);
 
 // --- CLI args ---
@@ -264,6 +269,16 @@ function extractTechMentions(description) {
   return matches.map(m => TECH_CANONICAL.get(m.toLowerCase()) || m);
 }
 
+/**
+ * Run the in-process self-test for this script's pure helpers.
+ *
+ * Covers the Machine Summary parser (including the MACHINE_SUMMARY_FIELDS
+ * allowlist and the nested `risk_summary` / `requirement_importance` shapes),
+ * ATS vendor detection, and the Via channel analysis. Exits non-zero on the
+ * first batch of failures so CI and `--self-test` fail loudly.
+ *
+ * @returns {void}
+ */
 function runSelfTest() {
   const summary = parseMachineSummary(`
 ## Machine Summary
@@ -330,6 +345,54 @@ risk_summary:
     if (riskSummary.interview_redflags !== 'not_evaluated') failures.push('risk_summary.interview_redflags was not preserved');
     if (riskSummary.ai_infra !== 'not_evaluated') failures.push('risk_summary.ai_infra was not preserved');
   }
+
+  // requirement_importance preservation: Block B's table is a LIST OF MAPS,
+  // a shape no allowlisted key had before it. The allowlist filters top-level
+  // keys only, so the list must survive with every row's nested fields intact
+  // — including jd_signal: null, which is legal for the structural/inferred
+  // evidence tiers and must not be dropped or coerced.
+  const reqImportance = parseMachineSummary(`
+## Machine Summary
+
+\`\`\`yaml
+company: "Acme"
+role: "Staff AI Engineer"
+score: 4.4
+requirement_importance:
+  - requirement: "Fluent German (C1)"
+    jd_signal: "Verhandlungssicheres Deutsch ist Voraussetzung"
+    evidence: "stated"
+    importance: "critical"
+    match: "missing"
+  - requirement: "Kubernetes in production"
+    jd_signal: null
+    evidence: "inferred"
+    importance: "meaningful"
+    match: "partial"
+\`\`\`
+`)?.requirement_importance;
+  if (!Array.isArray(reqImportance) || reqImportance.length !== 2) {
+    failures.push('requirement_importance list was dropped or not parsed as a list');
+  } else {
+    const [stated, inferred] = reqImportance;
+    if (stated.requirement !== 'Fluent German (C1)') failures.push('requirement_importance[0].requirement was not preserved');
+    if (stated.jd_signal !== 'Verhandlungssicheres Deutsch ist Voraussetzung') failures.push('requirement_importance[0].jd_signal verbatim quote was not preserved');
+    if (stated.evidence !== 'stated') failures.push('requirement_importance[0].evidence was not preserved');
+    if (stated.importance !== 'critical') failures.push('requirement_importance[0].importance was not preserved');
+    if (stated.match !== 'missing') failures.push('requirement_importance[0].match was not preserved');
+    if (inferred.jd_signal !== null) failures.push('requirement_importance[1].jd_signal null was not preserved');
+    if (inferred.evidence !== 'inferred') failures.push('requirement_importance[1].evidence was not preserved');
+    // The Block B gate, asserted on parsed data: an inferred row may never
+    // reach the two bands that create the interview-risk + mitigation
+    // obligation. Enforced in the modes; checked here so a fixture that
+    // violates it can never be introduced as "expected" output.
+    if (inferred.importance === 'critical' || inferred.importance === 'high') {
+      failures.push('requirement_importance fixture violates the inferred cap (evidence: inferred must never be critical/high)');
+    }
+  }
+
+  // Backward compat: summaries without requirement_importance parse as before.
+  if ('requirement_importance' in (summary ?? {})) failures.push('summary without requirement_importance must not gain the key');
 
   // Vendor detection (community ATS only; white-labeled → null)
   const vendorCases = [

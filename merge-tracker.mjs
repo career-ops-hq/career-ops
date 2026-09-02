@@ -800,6 +800,68 @@ if (MIGRATE_VIA) {
   process.exit(0);
 }
 
+// #3515: keep the tracker table ordered by `#` ascending on every write.
+//
+// Rows used to be spliced in immediately after the separator row and never
+// reordered, so the table ended up ordered by *when a batch was merged*: each
+// merge froze its own internal order in place and landed on top of the previous
+// one. Finding row #42 meant reading the whole table — the one thing an ordered
+// `#` column should make unnecessary.
+//
+// Sorting happens at write time over the whole data block, so an existing
+// tracker is repaired in place on the next merge with no separate migration.
+// Ascending matches how rows are referred to ("row 42") and how reports/ is
+// numbered on disk.
+//
+// Rows whose `#` cell is non-numeric — the backfilled `N/A` / `—` / `-`
+// sentinels described in AGENTS.md, or a row too malformed to parse — keep a
+// defined position at the END of the table, in their existing relative order.
+// They are never dropped and never throw the comparator.
+//
+// Only the contiguous run of table rows directly after the separator is
+// touched; any prose or second table further down the file is left alone.
+// Returns the number of rows whose position changed.
+function sortTrackerRowsInPlace(lines) {
+  let sepIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (SEPARATOR_ROW_RE.test(lines[i])) { sepIdx = i; break; }
+  }
+  if (sepIdx < 0) return 0;
+  let end = sepIdx + 1;
+  while (end < lines.length && lines[end].startsWith('|')) end++;
+  const block = lines.slice(sepIdx + 1, end);
+  if (block.length < 2) return 0;
+  // Bare parseInt, deliberately — the same reading of the `#` cell that
+  // parseAppLine and the usedNumbers pass use. It accepts a numeric prefix, so
+  // a malformed `12draft` cell reads as 12 here exactly as it does there: that
+  // row is #12 to dedup, to number allocation and to maxNum, so sorting it into
+  // position 12 is what keeps the table consistent with the rest of the script.
+  // A stricter full-cell test would park a row at the bottom that every other
+  // code path still calls #12 — a row you cannot find by its number, which is
+  // the problem this sort exists to solve. The sentinels that matter (`N/A`,
+  // `—`, `-`) are NaN under both readings and land at the end either way.
+  const numOf = (line) => {
+    const parts = line.split('|').map(s => s.trim());
+    const n = parseInt(parts[COLMAP.num], 10);
+    return Number.isNaN(n) ? null : n;
+  };
+  const decorated = block.map((line, i) => ({ line, i, num: numOf(line) }));
+  decorated.sort((a, b) => {
+    // Sentinel-numbered rows sink to the bottom; ties (and sentinel-vs-sentinel)
+    // fall back to the original index so the sort is fully deterministic.
+    if (a.num === null || b.num === null) {
+      if (a.num === b.num) return a.i - b.i;
+      return a.num === null ? 1 : -1;
+    }
+    return a.num === b.num ? a.i - b.i : a.num - b.num;
+  });
+  const sorted = decorated.map(d => d.line);
+  let moved = 0;
+  for (let i = 0; i < sorted.length; i++) if (sorted[i] !== block[i]) moved++;
+  lines.splice(sepIdx + 1, block.length, ...sorted);
+  return moved;
+}
+
 const appLines = appContent.split('\n');
 // Detect the tracker's column layout via header names so parsing and writing
 // both work whether the table uses the original 9-column layout or a customized
@@ -936,7 +998,12 @@ updated += pdfSynced;
 // Read tracker additions
 if (!existsSync(ADDITIONS_DIR)) {
   console.log('No tracker-additions directory found.');
-  if (pdfSynced > 0 && !DRY_RUN) writeFileAtomic(APPS_FILE, appLines.join('\n'));
+  // Nothing to merge, but an existing tracker left unsorted by earlier versions
+  // is still repaired here (#3515) — that is the whole point of sorting at write
+  // time rather than at insert time.
+  const moved = DRY_RUN ? 0 : sortTrackerRowsInPlace(appLines);
+  if (moved > 0) console.log(`🔢 Sorted tracker by # ascending (${moved} row(s) repositioned).`);
+  if ((pdfSynced > 0 || moved > 0) && !DRY_RUN) writeFileAtomic(APPS_FILE, appLines.join('\n'));
   if (DRY_RUN) console.log('(dry-run — no changes written)');
   trackerLock.release();
   process.exit(0);
@@ -945,7 +1012,12 @@ if (!existsSync(ADDITIONS_DIR)) {
 const tsvFiles = readdirSync(ADDITIONS_DIR).filter(f => f.endsWith('.tsv'));
 if (tsvFiles.length === 0) {
   console.log('✅ No pending additions to merge.');
-  if (pdfSynced > 0 && !DRY_RUN) writeFileAtomic(APPS_FILE, appLines.join('\n'));
+  // Nothing to merge, but an existing tracker left unsorted by earlier versions
+  // is still repaired here (#3515) — that is the whole point of sorting at write
+  // time rather than at insert time.
+  const moved = DRY_RUN ? 0 : sortTrackerRowsInPlace(appLines);
+  if (moved > 0) console.log(`🔢 Sorted tracker by # ascending (${moved} row(s) repositioned).`);
+  if ((pdfSynced > 0 || moved > 0) && !DRY_RUN) writeFileAtomic(APPS_FILE, appLines.join('\n'));
   if (DRY_RUN) console.log('(dry-run — no changes written)');
   trackerLock.release();
   process.exit(0);
@@ -1367,6 +1439,8 @@ if (newLines.length > 0) {
 
 // Write back
 if (!DRY_RUN) {
+  const moved = sortTrackerRowsInPlace(appLines);
+  if (moved > 0) console.log(`\n🔢 Sorted tracker by # ascending (${moved} row(s) repositioned).`);
   writeFileAtomic(APPS_FILE, appLines.join('\n'));
 
   // Move processed files to merged/ — but only the ones actually applied.
