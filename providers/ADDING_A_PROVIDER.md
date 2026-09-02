@@ -12,6 +12,37 @@ is in [`../ARCHITECTURE.md`](../ARCHITECTURE.md) ("Discovery — `scan.mjs` +
 `providers/`"). Mirror an existing module of the same shape — see the table
 in section 4.
 
+## Before the code: is the source eligible?
+
+A working provider is not enough — the source it reads has to clear the
+[Source Indexing Policy](../CONTRIBUTING.md#source-indexing-policy) first, and
+that gate is decided on the source's data, not on how the client is written.
+
+**A single-company ATS adapter** (a new Greenhouse/Workday/Ashby-class
+vendor, or a company on its own careers API) clears this by construction: the
+postings are the employer's own, and the adapter reads exactly one source.
+Nothing to do here — go to section 1.
+
+**A job board, aggregator, or talent network** is where the policy bites.
+In short:
+
+- **Real, employer-attributed listings, free for the candidate.** A source
+  whose postings resolve to identifiable employers and that a candidate can
+  read and apply to without paying or registering. A paywall on listings or
+  applications disqualifies it.
+- **One source per provider (rule 5).** A provider reads its own source.
+  A meta-aggregator that republishes other boards' postings is not a source
+  career-ops indexes — cross-source aggregation lives in core.
+- **Complete inventory, no paid placement (rule 3).** The provider must
+  traverse the source's full inventory, not a promoted or default-filtered
+  view.
+
+If such a source is operator-run, or its eligibility is not obvious, open a
+[source proposal](../.github/ISSUE_TEMPLATE/source-proposal.yml) before
+writing code — a routing decision made on a design doc is cheaper than one
+made on a finished PR. The [Source Indexing Log](../docs/SOURCE_INDEXING_LOG.md)
+records how the rules were applied to sources that went through that process.
+
 ## 1. The contract
 
 A `providers/{name}.mjs` file (not starting with `_` — those are shared
@@ -57,6 +88,15 @@ export default {
   `detailLimit` cap) makes the provider fetch per-posting detail to fill
   `description`, bounded by `detailLimit` and skipped entirely while a health
   probe runs (currently `vdab`, `smartrecruiters`).
+- When the payload exposes **more than one** candidate URL for a posting —
+  typically an aggregator carrying the employer's upstream ATS/application
+  link alongside its own posting page — `Job.url` is the employer's link, per
+  Source Indexing Policy rule 2 ("the shortest verifiable path to the
+  employer"); the source's own page is the fallback, used only when the
+  upstream link is missing or not `https:`. Reference: `resolveYouratorUrl`
+  in `providers/yourator.mjs` and the equivalent in `providers/remotli.mjs`.
+  A single-company ATS adapter has one natural posting URL and nothing to
+  choose — that URL is the canonical one.
 
 ### `tracked_companies:` vs `job_boards:`
 
@@ -387,6 +427,15 @@ provider whose tuning needs differ from the shared default
 
 ## 5. Pre-PR checklist
 
+- [ ] **Board / aggregator / talent network only:** the source clears the
+      [Source Indexing Policy](../CONTRIBUTING.md#source-indexing-policy) —
+      real employer-attributed listings, free for the candidate, one source
+      per provider (not a meta-aggregator of other boards); operator-run or
+      borderline → a [source proposal](../.github/ISSUE_TEMPLATE/source-proposal.yml)
+      was opened first. A single-company ATS adapter skips this line.
+- [ ] If a posting's payload carries both an upstream employer URL and the
+      source's own page, `job.url` is the employer's one (rule 2), the
+      source page the fallback. (A single-source ATS has only the one URL.)
 - [ ] `id` unique; file does not start with `_`.
 - [ ] `detect()` never throws on junk input; returns `null` instead of
       failing.
