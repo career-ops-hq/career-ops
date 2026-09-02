@@ -12,7 +12,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCAN = join(ROOT, 'scan.mjs');
 
 function workspace(portals) {
-  const root = mkdtempSync(join(tmpdir(), 'career-ops-jobbot-'));
+  const root = mkdtempSync(join(tmpdir(), 'career-ops-scan-receipt-'));
   mkdirSync(join(root, 'data'), { recursive: true });
   mkdirSync(join(root, 'config'), { recursive: true });
   writeFileSync(join(root, 'portals.yml'), portals);
