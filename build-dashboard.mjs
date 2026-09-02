@@ -9,6 +9,14 @@
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { validateFlags } from './lib/cli-flags.mjs';
+
+const KNOWN_FLAGS = ['--help', '-h'];
+const USAGE = `Usage:
+  node build-dashboard.mjs           # build the dashboard binary
+  node build-dashboard.mjs --help|-h # print this usage block and exit`;
+
+validateFlags(process.argv.slice(2), KNOWN_FLAGS, USAGE);
 
 const root = dirname(fileURLToPath(import.meta.url));
 const out = process.platform === 'win32' ? 'career-dashboard.exe' : 'career-dashboard';
@@ -32,3 +40,5 @@ if (result.status !== 0) {
 }
 
 console.log(`Built dashboard/${out} — run it with: npm run serve:dashboard (or dashboard/${out} --path .)`);
+
+
