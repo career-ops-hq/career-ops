@@ -40,6 +40,7 @@ import { createHash } from 'crypto';
 import path from 'path';
 import * as yaml from 'js-yaml';
 import { renameSyncWithRetry } from './tracker-utils.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 import { makeHttpCtx, fetchJson } from './providers/_http.mjs';
 import { isResolverFailure, dnsPacingStats } from './providers/_dns-cache.mjs';
@@ -57,9 +58,10 @@ import { isMainModule } from './lib/is-main-module.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
-const PIPELINE_PATH = 'data/pipeline.md';
-const CACHE_DIR = 'data/cache/ats-companies';
+const DATA_ROOT = getCareerOpsRoot();
+const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
+const PIPELINE_PATH = path.join(DATA_ROOT, 'data', 'pipeline.md');
+const CACHE_DIR = path.join(DATA_ROOT, 'data', 'cache', 'ats-companies');
 const CACHE_TTL_HOURS = 24;
 // Tracks `main` deliberately: the dataset's value is freshness (new boards
 // appear weekly), so pinning a commit would defeat the purpose. Integrity rests
@@ -92,8 +94,11 @@ const RESOLVER_FAILURE_LIMIT = 50;
 // Crash insurance for multi-hour directory sweeps: progress + matches are
 // checkpointed every CHECKPOINT_EVERY companies so --resume can continue a
 // dead run (with its ORIGINAL date window) instead of restarting from zero.
-const CHECKPOINT_PATH = 'data/cache/ats-full-checkpoint.json';
+const CHECKPOINT_PATH = path.join(DATA_ROOT, 'data', 'cache', 'ats-full-checkpoint.json');
 const CHECKPOINT_EVERY = 500;
+
+// Named export for the test suite — verifies data-root anchoring.
+export const _testPaths = Object.freeze({ DATA_ROOT, PORTALS_PATH, PIPELINE_PATH, CACHE_DIR, CHECKPOINT_PATH });
 
 export function loadCheckpoint(file = CHECKPOINT_PATH) {
   if (!existsSync(file)) return null;

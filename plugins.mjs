@@ -30,10 +30,12 @@ import { readLock, writeLockEntry, removeLockEntry, hashPluginTree, consentSurfa
 import { installFromRepo, scaffoldNew, parseRepoArg } from './plugin-install.mjs';
 import { appendToPipeline } from './scan.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
-const APPLICATIONS_PATH = path.join(ROOT, 'data', 'applications.md');
-const PIPELINE_PATH = path.join(ROOT, 'data', 'pipeline.md');
+const DATA_ROOT = getCareerOpsRoot();
+const APPLICATIONS_PATH = path.join(DATA_ROOT, 'data', 'applications.md');
+const PIPELINE_PATH = path.join(DATA_ROOT, 'data', 'pipeline.md');
 
 // A misbehaving plugin's stray rejection should be attributed and not silently
 // crash the host (the engine's per-hook try/catch handles the common case; this
@@ -85,8 +87,12 @@ function existingPipelineUrls() {
 function buildSnapshot() {
   const applications = existsSync(APPLICATIONS_PATH)
     ? parseMarkdownTable(readFileSync(APPLICATIONS_PATH, 'utf8')) : [];
+  // pipeline.md uses a checklist format (`- [ ] url`), not a markdown table —
+  // parseMarkdownTable would always return [] here.
   const pipeline = existsSync(PIPELINE_PATH)
-    ? parseMarkdownTable(readFileSync(PIPELINE_PATH, 'utf8')) : [];
+    ? [...readFileSync(PIPELINE_PATH, 'utf8').matchAll(/- \[[ xX]\]\s+(\S+)/g)]
+        .map(m => Object.freeze({ url: m[1] }))
+    : [];
   return Object.freeze({
     applications: Object.freeze(applications),
     pipeline: Object.freeze(pipeline),
@@ -172,11 +178,6 @@ async function cmdRun(args) {
     // Export upserts one-by-one over the network (query + create/update per
     // row), so the default 15s hook timeout only covers a handful of rows.
     // Scale with tracker size so a growing applications.md doesn't age out.
-    // applications.length only: the bundled Notion export hook reads
-    // snapshot.applications exclusively, and snapshot.pipeline is parsed from
-    // data/pipeline.md's `- [ ]` checklist format by a table parser that can
-    // never match it (a pre-existing, separate bug in buildSnapshot() — always
-    // reads as empty), so counting it here would silently do nothing anyway.
     const rowCount = snapshot.applications.length;
     const timeoutMs = Math.min(120_000, Math.max(15_000, rowCount * 3_000));
     const results = filterResultsForId(await runHook('export', snapshot, { root: ROOT, dryRun, timeoutMs, pluginId: id }), id);
@@ -371,6 +372,10 @@ async function main() {
       process.exit(1);
   }
 }
+
+// Named exports for the test suite — not part of the CLI API.
+export const _testPaths = Object.freeze({ APPLICATIONS_PATH, PIPELINE_PATH });
+export { buildSnapshot as _testBuildSnapshot };
 
 if (isMainModule(import.meta.url)) {
   main().catch(err => { console.error('Fatal:', err.message); process.exit(1); });

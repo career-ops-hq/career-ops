@@ -30,6 +30,7 @@ import {
 } from './tracker-parse.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
 import { checkFollowupsSchema } from './stats.mjs';
+import { loadCanonicalStates } from './tracker-utils.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS = getCareerOpsRoot();
@@ -50,22 +51,12 @@ const STATES_FILE = existsSync(join(CODE_ROOT, 'templates/states.yml'))
 mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
 mkdirSync(REPORTS_DIR, { recursive: true });
 
-const CANONICAL_STATUSES = [
-  'evaluated', 'applied', 'responded', 'interview',
-  'offer', 'rejected', 'discarded', 'skip', 'hired',
-];
-
-const ALIASES = {
-  'evaluada': 'evaluated', 'condicional': 'evaluated', 'hold': 'evaluated', 'evaluar': 'evaluated', 'verificar': 'evaluated',
-  'aplicado': 'applied', 'enviada': 'applied', 'aplicada': 'applied', 'applied': 'applied', 'sent': 'applied',
-  'respondido': 'responded',
-  'entrevista': 'interview',
-  'oferta': 'offer',
-  'rechazado': 'rejected', 'rechazada': 'rejected',
-  'descartado': 'discarded', 'descartada': 'discarded', 'cerrada': 'discarded', 'cancelada': 'discarded',
-  'no aplicar': 'skip', 'no_aplicar': 'skip', 'monitor': 'skip', 'geo blocker': 'skip',
-  'contratado': 'hired', 'contratada': 'hired', 'hired': 'hired', 'accepted': 'hired', 'accept': 'hired',
-};
+// Canonical states — loaded from templates/states.yml, the single source of truth.
+const _canonicalStates = loadCanonicalStates(STATES_FILE);
+const CANONICAL_STATUSES = new Set(_canonicalStates.map(s => s.id));
+const ALIASES = Object.fromEntries(
+  _canonicalStates.flatMap(s => s.aliases.map(a => [a.toLowerCase(), s.id]))
+);
 
 let errors = 0;
 let warnings = 0;
@@ -128,7 +119,7 @@ for (const e of entries) {
   // Strip trailing dates
   const statusOnly = clean.replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
 
-  if (!CANONICAL_STATUSES.includes(statusOnly) && !ALIASES[statusOnly]) {
+  if (!CANONICAL_STATUSES.has(statusOnly) && !ALIASES[statusOnly]) {
     error(`#${e.num}: Non-canonical status "${e.status}"`);
     badStatuses++;
   }

@@ -92,7 +92,9 @@ function sweep(dir, dnsCode, extraArgs = []) {
   return run(NODE, [join(dir, 'launch.mjs'), '--ats', 'greenhouse', '--json', ...extraArgs], {
     cwd: dir,
     // Pacing would only add wall-clock time to a run whose every lookup fails.
-    env: { ...process.env, STUB_DNS_CODE: dnsCode, CAREER_OPS_DNS_LOOKUPS_PER_MIN: '0' },
+    // CAREER_OPS_ROOT tells getCareerOpsRoot() to use the sandbox dir so all
+    // data paths (portals.yml, cache, checkpoint) resolve there instead of cwd.
+    env: { ...process.env, STUB_DNS_CODE: dnsCode, CAREER_OPS_DNS_LOOKUPS_PER_MIN: '0', CAREER_OPS_ROOT: dir },
     timeout: 120_000,
   });
 }
