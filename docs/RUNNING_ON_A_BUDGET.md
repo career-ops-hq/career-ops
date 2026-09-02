@@ -263,16 +263,17 @@ For users who want a completely local setup on Apple Silicon, Ollama can be used
 The following setup was verified on an Apple Silicon Mac with 16 GB unified memory.
 
 1. Install Ollama and make sure it is running.
-
 2. Pull the model:
+
    ```bash
    ollama pull command-r7b
    ```
 3. Verify that the model is available:
-    ```bash
-    ollama list
-    ```
+   ```bash
+   ollama list
+   ```
 4. Launch OpenCode with the local model:
+
     ```bash
     ollama launch opencode --model command-r7b
     ```
@@ -286,7 +287,7 @@ The following setup was verified on an Apple Silicon Mac with 16 GB unified memo
 
 Observed result: OpenCode launched successfully with `command-r7b`. A simple prompt completed in approximately 57 seconds. The model produced a reasonable high-level README summary, but it did not reliably read repository files through OpenCode during testing. For complex repository tasks, larger models may provide better accuracy.
 
-Performance and quality note: Smaller local models can be useful on memory-constrained hardware, but they may be less reliable than larger hosted models for complex Career-Ops evaluations, repository analysis, and resume tailoring. Use this setup when local execution and zero API cost are more important than maximum output quality.
+> **Performance and quality note:** Smaller local models can be useful on memory-constrained hardware, but they may be less reliable than larger hosted models for complex Career-Ops evaluations, repository analysis, and resume tailoring. Use this setup when local execution and zero API cost are more important than maximum output quality.
 ---
 
 ## 6. Token-Saving Best Practices
