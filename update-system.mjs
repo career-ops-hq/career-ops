@@ -1039,7 +1039,31 @@ export function isGeneratedTemplateArtifact(file) {
   return GENERATED_CV_ARTIFACT_RE.test(normalized) || GENERATED_COVER_ARTIFACT_RE.test(normalized);
 }
 
-export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths = USER_PATHS) {
+// A user-authored named template variant, per cv-templates.mjs's own naming
+// convention (KINDS.cv.prefix = 'cv-template', KINDS.cover.prefix =
+// 'cover-letter-template'; parseFilename() there recognizes exactly this
+// `<prefix>.<name>.<html|tex>` shape).
+const TEMPLATE_VARIANT_RE = /^templates\/(cv-template|cover-letter-template)\.([a-z0-9-]+)\.(html|tex)$/;
+const TEMPLATE_VARIANT_KIND = { 'cv-template': 'cv', 'cover-letter-template': 'cover' };
+
+/**
+ * Is `file` a named template variant this install's config/profile.yml has
+ * configured as the active default?
+ *
+ * @param {string} file - repo-relative path.
+ * @param {{cv?: string, cover?: string}} configuredVariants - kebab-case
+ *   variant names read from config/profile.yml.
+ */
+export function isUserConfiguredTemplateVariant(file, configuredVariants = {}) {
+  const match = normalizeRepoPath(file).match(TEMPLATE_VARIANT_RE);
+  if (!match) return false;
+  const kind = TEMPLATE_VARIANT_KIND[match[1]];
+  const name = match[2];
+  const configured = configuredVariants?.[kind];
+  return Boolean(configured) && configured === name;
+}
+
+export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths = USER_PATHS, configuredVariants = {}) {
   const remote = new Set([...remoteFiles].map(normalizeRepoPath));
   if (remote.size === 0) return [];
   return [...localFiles]
@@ -1047,7 +1071,8 @@ export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths
     .filter((file) => !remote.has(file))
     .filter((file) => systemPaths.some((entry) => pathMatchesManifest(file, entry)))
     .filter((file) => !userPaths.some((entry) => pathMatchesManifest(file, entry)))
-    .filter((file) => !isGeneratedTemplateArtifact(file));
+    .filter((file) => !isGeneratedTemplateArtifact(file))
+    .filter((file) => !isUserConfiguredTemplateVariant(file, configuredVariants));
 }
 
 // A stale-file prune candidate can still be load-bearing for a file this same
@@ -2846,6 +2871,27 @@ async function apply() {
       console.log(`Skipped ${skippedPaths.length} path(s) absent upstream: ${skippedPaths.join(', ')}`);
     }
 
+    // A named template variant the user configured as their active default
+    // (config/profile.yml's cv.template / cover_letter.template) survives the
+    // stale-file prune below even once it stops looking "locally modified"
+    // (see isUserConfiguredTemplateVariant()'s doc comment) — it can never
+    // exist upstream once it is genuinely a personal variant, so the ordinary
+    // absent-from-remote signal alone would eventually delete it. cv-templates.mjs
+    // was just checked out above (it's in SYSTEM_PATHS), so it resolves here
+    // even on a pre-#1245 old→new re-exec; kept as a lazy import, per the
+    // top-of-file self-loading note, rather than a static one.
+    let configuredTemplateVariants = {};
+    try {
+      const { loadProfileDefault, kebab } = await import('./cv-templates.mjs');
+      for (const kind of ['cv', 'cover']) {
+        const configured = loadProfileDefault(kind);
+        if (configured) configuredTemplateVariants[kind] = kebab(configured);
+      }
+    } catch {
+      // cv-templates.mjs absent (very old target) or config/profile.yml
+      // unreadable/unparseable — fall back to no exemption (prior behavior).
+    }
+
     // All tracked system files need the same stale-file treatment. In
     // particular, root-level system files removed upstream (for example an
     // old plugins-registry.json) are not covered by a directory-only prune.
@@ -2868,7 +2914,9 @@ async function apply() {
         // be deleted here as "stale" — the two checks used to run independently,
         // so a preserved file with no upstream counterpart was backed up to
         // .bak by the block above and then unlinked by this one in the same run.
-        const staleCandidates = staleSystemFiles(localFiles, remoteFiles, SYSTEM_PATHS, mergePathLists(USER_PATHS, preservedPaths));
+        const staleCandidates = staleSystemFiles(
+          localFiles, remoteFiles, SYSTEM_PATHS, mergePathLists(USER_PATHS, preservedPaths), configuredTemplateVariants,
+        );
         for (const f of staleCandidates) {
           if (isReferencedByPreservedFile(f, preservedPaths)) {
             console.log(`Kept stale asset still referenced by a preserved file: ${f}`);
