@@ -11,9 +11,12 @@ console.log('\nbrowser-extract.mjs (config + normalizers)');
 
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'browser-extract.mjs')).href);
+  const { resolveAtsApi, JD_TEXT_API_ATS } = await import(pathToFileURL(join(ROOT, 'liveness-api.mjs')).href);
   const {
     resolveExtractorMode, compactText, normalizeJd, normalizeListing, parseArgs,
     workdayCxsUrl, jdHtmlToText, normalizeWorkdayJob,
+    normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob,
+    fetchJdViaKnownApi,
   } = mod;
 
   // resolveExtractorMode — default mcp, explicit cli, garbage → mcp, missing → mcp
@@ -198,6 +201,204 @@ try {
   );
   if (wdCapped && wdCapped.text.length <= 501) pass('normalizeWorkdayJob honors the text cap');
   else fail(`normalizeWorkdayJob cap => ${wdCapped && wdCapped.text.length}`);
+
+  // normalizeAshbyJob — Ashby's public API is ORG-level, so the job is picked
+  // out of the whole board by a case-insensitive id compare.
+  const ashbyBoard = {
+    jobs: [
+      { id: 'OTHER-1', title: 'Decoy', descriptionPlain: 'Not this one.' },
+      {
+        id: 'ABC-123',
+        title: '  Staff Engineer  ',
+        descriptionPlain: 'Build the platform.',
+        location: 'Remote (US)',
+        secondaryLocations: [{ location: 'Berlin' }, { location: 'London' }],
+        employmentType: 'FullTime',
+      },
+    ],
+  };
+  const ashby = normalizeAshbyJob(ashbyBoard, 'abc-123', 'https://jobs.ashbyhq.com/acme/ABC-123');
+  if (ashby
+      && ashby.url === 'https://jobs.ashbyhq.com/acme/ABC-123'
+      && ashby.title === 'Staff Engineer'
+      && ashby.text.includes('Location: Remote (US)')
+      && ashby.text.includes('Additional locations: Berlin | London')
+      && ashby.text.includes('Type: FullTime')
+      && ashby.text.includes('Build the platform.')
+      && !ashby.text.includes('Not this one.')) {
+    pass('normalizeAshbyJob matches the job case-insensitively and shapes { url, title, text }');
+  } else {
+    fail(`normalizeAshbyJob => ${JSON.stringify(ashby)}`);
+  }
+
+  // isListed:false is Ashby's "served but delisted" signal, the counterpart of
+  // Workday's canApply:false, and must reach the JD text.
+  const delisted = normalizeAshbyJob(
+    { jobs: [{ id: 'x', title: 'X', descriptionPlain: 'Body', isListed: false }] },
+    'x',
+    'https://jobs.ashbyhq.com/acme/x',
+  );
+  if (delisted && delisted.text.includes('Not currently listed (isListed: false)')) {
+    pass('normalizeAshbyJob surfaces isListed: false');
+  } else {
+    fail(`normalizeAshbyJob isListed => ${JSON.stringify(delisted)}`);
+  }
+
+  const ashbyNulls = [
+    normalizeAshbyJob(null, 'x', 'https://x/1'),
+    normalizeAshbyJob({ jobs: [] }, 'x', 'https://x/1'),
+    normalizeAshbyJob({ jobs: [{ id: 'other' }] }, 'x', 'https://x/1'),
+    normalizeAshbyJob({ jobs: [{ id: 'x', descriptionPlain: '   ' }] }, 'x', 'https://x/1'),
+  ];
+  if (ashbyNulls.every((v) => v === null)) pass('normalizeAshbyJob returns null when the job is absent or bodyless');
+  else fail(`normalizeAshbyJob nulls => ${JSON.stringify(ashbyNulls)}`);
+
+  // normalizeGreenhouseJob — `content` is HTML (often entity-escaped), so it
+  // goes through the same jdHtmlToText pass as Workday's jobDescription.
+  const gh = normalizeGreenhouseJob(
+    {
+      title: 'Backend Engineer',
+      content: '&lt;p&gt;Own the API.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Go&lt;/li&gt;&lt;/ul&gt;',
+      offices: [{ name: 'New York' }, { name: 'Remote' }],
+      requisition_id: 'R-4821',
+    },
+    'https://job-boards.greenhouse.io/acme/jobs/12345',
+  );
+  if (gh
+      && gh.title === 'Backend Engineer'
+      && gh.text.includes('Location: New York | Remote')
+      && gh.text.includes('Req ID: R-4821')
+      && gh.text.includes('Own the API.')
+      && gh.text.includes('- Go')
+      && !gh.text.includes('&lt;')) {
+    pass('normalizeGreenhouseJob decodes entity-escaped content and carries offices + req id');
+  } else {
+    fail(`normalizeGreenhouseJob => ${JSON.stringify(gh)}`);
+  }
+
+  const ghNulls = [
+    normalizeGreenhouseJob(null, 'https://x/1'),
+    normalizeGreenhouseJob({}, 'https://x/1'),
+    normalizeGreenhouseJob({ title: 'X', content: '<p> </p>' }, 'https://x/1'),
+  ];
+  if (ghNulls.every((v) => v === null)) pass('normalizeGreenhouseJob returns null without a description body');
+  else fail(`normalizeGreenhouseJob nulls => ${JSON.stringify(ghNulls)}`);
+
+  // normalizeLeverJob — `lists` carries the labeled sections (Requirements,
+  // etc.) as separate HTML blocks; dropping them loses half the JD.
+  const lever = normalizeLeverJob(
+    {
+      text: 'Site Reliability Engineer',
+      descriptionPlain: 'Keep it up.',
+      lists: [
+        { text: 'Requirements', content: '&lt;li&gt;Linux&lt;/li&gt;&lt;li&gt;Kubernetes&lt;/li&gt;' },
+        { text: 'Nice to have', content: '&lt;li&gt;Rust&lt;/li&gt;' },
+      ],
+      categories: { location: 'Austin, TX', team: 'Infrastructure' },
+    },
+    'https://jobs.lever.co/acme/11111111-2222-3333-4444-555555555555',
+  );
+  if (lever
+      && lever.title === 'Site Reliability Engineer'
+      && lever.text.includes('Location: Austin, TX')
+      && lever.text.includes('Team: Infrastructure')
+      && lever.text.includes('Keep it up.')
+      && lever.text.includes('Requirements')
+      && lever.text.includes('- Kubernetes')
+      && lever.text.includes('Nice to have')
+      && lever.text.includes('- Rust')) {
+    pass('normalizeLeverJob appends the labeled lists after the main description');
+  } else {
+    fail(`normalizeLeverJob => ${JSON.stringify(lever)}`);
+  }
+
+  // A closed Lever posting is still SERVED by the API. Returning it would feed
+  // a dead role into evaluation as if it were live.
+  if (normalizeLeverJob({ state: 'closed', text: 'X', descriptionPlain: 'Body' }, 'https://x/1') === null) {
+    pass('normalizeLeverJob rejects a state: closed posting');
+  } else {
+    fail('normalizeLeverJob must return null for state: closed');
+  }
+
+  const leverNulls = [
+    normalizeLeverJob(null, 'https://x/1'),
+    normalizeLeverJob({}, 'https://x/1'),
+    normalizeLeverJob({ text: 'X', descriptionPlain: '  ', lists: [] }, 'https://x/1'),
+  ];
+  if (leverNulls.every((v) => v === null)) pass('normalizeLeverJob returns null without a body or lists');
+  else fail(`normalizeLeverJob nulls => ${JSON.stringify(leverNulls)}`);
+
+  // The text cap applies on every ATS path, not just Workday.
+  const apiCapped = [
+    normalizeAshbyJob({ jobs: [{ id: 'x', title: 'X', descriptionPlain: 'word '.repeat(5000) }] }, 'x', 'https://x/1', 400),
+    normalizeGreenhouseJob({ title: 'X', content: `<p>${'word '.repeat(5000)}</p>` }, 'https://x/1', 400),
+    normalizeLeverJob({ text: 'X', descriptionPlain: 'word '.repeat(5000) }, 'https://x/1', 400),
+  ];
+  if (apiCapped.every((v) => v && v.text.length <= 401)) pass('every ATS normalizer honors the text cap');
+  else fail(`normalizer caps => ${JSON.stringify(apiCapped.map((v) => v && v.text.length))}`);
+
+  // fetchJdViaKnownApi — the dispatch gate is pure: a host outside
+  // JD_TEXT_API_ATS returns null WITHOUT a network call, which is what lets a
+  // caller fall through to the browser path rather than hang on an unknown host.
+  const notCovered = await Promise.all([
+    fetchJdViaKnownApi('https://example.com/careers/1'),
+    fetchJdViaKnownApi('https://www.linkedin.com/jobs/view/4123456789'),
+    fetchJdViaKnownApi('not a url'),
+    fetchJdViaKnownApi(''),
+  ]);
+  if (notCovered.every((v) => v === null)) {
+    pass('fetchJdViaKnownApi returns null for a host with no JD-bearing API');
+  } else {
+    fail(`fetchJdViaKnownApi non-covered => ${JSON.stringify(notCovered)}`);
+  }
+
+  // Drift guard on the routing table. fetchJdViaKnownApi switches on
+  // resolveAtsApi(url).ats, and JD_TEXT_API_ATS is the gate in front of that
+  // switch — so the two agree only as long as the ats ids match the ones
+  // liveness-api actually emits. Rename an id on either side and every posting
+  // for that ATS starts falling through to the browser silently: no error, no
+  // empty JD, just a slow path and a token bill. Nothing else reddens on that,
+  // which is why this is asserted directly.
+  const ATS_URL_SHAPES = [
+    ['greenhouse', 'https://job-boards.greenhouse.io/acme/jobs/12345'],
+    ['lever', 'https://jobs.lever.co/acme/11111111-2222-3333-4444-555555555555'],
+    ['ashby', 'https://jobs.ashbyhq.com/acme/some-job-id'],
+    ['workday', 'https://acme.wd5.myworkdayjobs.com/External/job/Seattle-WA/Engineer_R1234'],
+  ];
+  const routed = ATS_URL_SHAPES.map(([ats, url]) => {
+    const resolved = resolveAtsApi(url);
+    return { ats, got: resolved && resolved.ats, gated: JD_TEXT_API_ATS.has(ats) };
+  });
+  if (routed.every((r) => r.got === r.ats && r.gated)) {
+    pass('every JD_TEXT_API_ATS id is the id resolveAtsApi emits for that ATS (routing cannot drift)');
+  } else {
+    fail(`JD_TEXT_API_ATS routing drift => ${JSON.stringify(routed)}`);
+  }
+
+  // fetchAshbyJd is the one fetcher that needs a field off resolveAtsApi beyond
+  // apiUrl: Ashby's API is org-level, so the posting is picked out of the board
+  // by parts.jobId. If that field is ever renamed or stops being populated the
+  // lookup gets an empty id, matches nothing, and returns null — which reads
+  // as "no JD here" and falls back to the browser, rather than as a bug.
+  const ashbyParts = resolveAtsApi('https://jobs.ashbyhq.com/acme/ABC-123');
+  if (ashbyParts && ashbyParts.parts && ashbyParts.parts.jobId === 'ABC-123') {
+    pass('resolveAtsApi populates parts.jobId for an Ashby posting (fetchAshbyJd selects on it)');
+  } else {
+    fail(`resolveAtsApi ashby parts => ${JSON.stringify(ashbyParts)}`);
+  }
+
+  // A Lever list block with no heading still contributes its content: the
+  // heading is optional in the payload, and dropping the whole block when it is
+  // missing would silently truncate the JD.
+  const headless = normalizeLeverJob(
+    { text: 'X', descriptionPlain: 'Body.', lists: [{ content: '&lt;li&gt;Unlabeled item&lt;/li&gt;' }] },
+    'https://jobs.lever.co/acme/x',
+  );
+  if (headless && headless.text.includes('- Unlabeled item')) {
+    pass('normalizeLeverJob keeps a list block that has no heading');
+  } else {
+    fail(`normalizeLeverJob headless list => ${JSON.stringify(headless)}`);
+  }
 
   // normalizeListing — resolve relatives, drop nav/short labels, dedup, cap
   const anchors = [
