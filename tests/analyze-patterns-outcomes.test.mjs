@@ -17,7 +17,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nanalyze-patterns — outcome classification & conversion denominators');
 
-const { classifyOutcome, newOutcomeCounts, withOutcomeRates } =
+const { classifyOutcome, newOutcomeCounts, withOutcomeRates, OUTCOME_BUCKETS, bestDecidedSegment, worstDecidedSegment, scoreThresholdFrom } =
   await import(pathToFileURL(join(ROOT, 'analyze-patterns.mjs')).href);
 
 // --- classifyOutcome ---------------------------------------------------------
@@ -29,7 +29,7 @@ const OUTCOMES = [
   ['Offer', 'positive', 'offer in hand'],
   ['Hired', 'positive', 'landed the job'],
   ['Rejected', 'negative', 'the employer said no'],
-  ['Discarded', 'negative', 'dropped or the posting died'],
+  ['Discarded', 'discarded', 'withdrawn or the posting died — not an employer decision'],
   ['SKIP', 'self_filtered', 'never sent, by our own choice'],
   ['Evaluated', 'pending', 'scored, not sent'],
 ];
@@ -44,7 +44,7 @@ if (ok) pass('classifyOutcome maps every canonical status to its outcome bucket'
 // Spanish aliases run through the same normalization; 'aplicado' must not be a
 // positive either, or the bug simply reappears for Spanish-language trackers.
 if (classifyOutcome('aplicado') === 'awaiting' && classifyOutcome('enviada') === 'awaiting') {
-  pass("localized 'applied' aliases resolve to 'awaiting', not 'positive'");
+  pass("Spanish 'applied' aliases resolve to 'awaiting', not 'positive'");
 } else {
   fail(`aplicado → '${classifyOutcome('aplicado')}', enviada → '${classifyOutcome('enviada')}'`);
 }
@@ -101,6 +101,49 @@ if (lopsided.decided === 201 && lopsided.decidedRate === 0) pass('decided is exp
 else fail(`lopsided segment → decided ${lopsided.decided}, decidedRate ${lopsided.decidedRate}`);
 
 // --- end to end through analyze() --------------------------------------------
+// --- recommendation selectors ---------------------------------------------
+// Both prescriptions gate on DECIDED outcomes: employer silence is evidence in
+// neither direction, and the list order (largest `total` first) must not decide
+// which segment gets named.
+const seg = (label, positive, negative, awaiting, pending = 0) =>
+  ({ label, ...withOutcomeRates({ total: positive + negative + awaiting + pending, positive, negative, awaiting, discarded: 0, self_filtered: 0, pending }) });
+
+const quietLane = seg('quiet', 3, 1, 10);              // 3 of 4 decided advanced (75%), 21% of everything sent
+const loudLane = seg('loud', 5, 5, 0);                 // 5 of 10 decided advanced (50%), 50% of everything sent
+if (bestDecidedSegment([loudLane, quietLane])?.label === 'quiet') pass('"double down" ranks by decidedRate (75% of 4 beats 50% of 10), not by conversionRate (which would pick the loud lane)');
+else fail(`bestDecidedSegment picked ${JSON.stringify(bestDecidedSegment([loudLane, quietLane]))}`);
+if (bestDecidedSegment([seg('rare', 1, 200, 0)]) === null) pass('"double down" skips a lane whose decided rate rounds to 0% (1 of 201 is not a pattern to lean into)');
+else fail('bestDecidedSegment prescribed a 0% lane');
+const oneDecided = seg('niche', 1, 0, 1);              // 1 positive + 1 awaiting: 100% decided, n=1
+if (bestDecidedSegment([oneDecided]) === null) pass('"double down" needs at least 2 decided outcomes (one employer answer is not a pattern)');
+else fail('bestDecidedSegment prescribed on a single decided outcome');
+
+const bigQuiet = seg('hybrid', 0, 2, 0, 14);           // total 16, decided 2
+const smallLoud = seg('geo', 0, 6, 0);                 // total 6, decided 6
+if (worstDecidedSegment([bigQuiet, smallLoud])?.label === 'geo') pass('"avoid" names the segment with the most decided losses, not the largest total');
+else fail(`worstDecidedSegment picked ${JSON.stringify(worstDecidedSegment([bigQuiet, smallLoud]))}`);
+if (worstDecidedSegment([seg('x', 0, 1, 4)]) === null) pass('"avoid" needs at least 2 decided outcomes (1 rejection + 4 unanswered is not a pattern)');
+else fail('worstDecidedSegment fired on a single rejection');
+if (worstDecidedSegment([seg('y', 1, 200, 0)]) === null) pass('"avoid" reads the positive count, not a rounded 0% rate (1 of 201 advanced)');
+else fail('worstDecidedSegment fired on 1 positive of 201 decided');
+
+// --- score threshold ----------------------------------------------------------
+// The lowest positive score is an observation; it is a threshold only when the
+// sample is big enough AND something decided below it actually failed.
+const thin = scoreThresholdFrom([4.2], [3.8, 3.0]);
+if (thin.recommended === null && thin.observedMinimum === 4.2 && thin.sufficientSample === false) pass('one positive score is an observation, never a threshold');
+else fail(`thin sample → ${JSON.stringify(thin)}`);
+const vacuous = scoreThresholdFrom([4.2, 4.4, 4.6], [4.5, 4.8]);
+if (vacuous.recommended === null && vacuous.sufficientSample === true && vacuous.rejectedBelow === 0 && /no rejected application scored below/.test(vacuous.reasoning)) {
+  pass('three positives with no rejection below the floor stay an observation ("nothing below X advanced" would be vacuous)');
+} else {
+  fail(`vacuous floor → ${JSON.stringify(vacuous)}`);
+}
+const earned = scoreThresholdFrom([4.25, 4.4, 4.6], [3.8, 4.5, 3.0]);
+if (earned.recommended === 4.2 && earned.rejectedBelow === 2 && /2 rejected application\(s\) did/.test(earned.reasoning)) pass('three positives and two rejections below the floor earn a recommended threshold (floored to 0.1)');
+else fail(`earned floor → ${JSON.stringify(earned)}`);
+
+// --- end-to-end over a fixture tracker ---------------------------------------
 // The helpers above can be right while a breakdown still divides by `total`, or
 // while metadata forgets a bucket, or while a recommendation gate reads the
 // rounded rate. Only a real run over a real tracker catches that, so build one.
@@ -112,12 +155,8 @@ const GLOBAL = 'Fully remote, hiring worldwide';
 const GEO = 'US-only remote';
 const HYBRID = 'Hybrid, 3 days a week in the office';
 // [num, status, score, archetype, remote]
-// Bucket sizes are load-bearing: remote-policy rows are sorted by `total`, and
-// only the FIRST bucket that passes the "avoid" gate becomes a recommendation.
-// hybrid/onsite (1 rejection + 4 unanswered) is deliberately the LARGEST
-// bucket, so a gate that wrongly reads its rounded 0% as "none advanced" would
-// pick it ahead of the legitimately-avoidable geo-restricted bucket — and the
-// assertion below can tell the two gates apart.
+// hybrid/onsite = 1 rejection + 4 unanswered + 1 withdrawn: the largest bucket by
+// total, ONE decided outcome — "avoid" must skip it and name geo-restricted (2).
 const ROWS = [
   [1,  'Applied',   '4.0', 'AI Engineer', GLOBAL],
   [2,  'Applied',   '3.5', 'AI Engineer', GLOBAL],
@@ -131,6 +170,7 @@ const ROWS = [
   [10, 'Applied',   '3.3', 'Backend',     HYBRID],
   [11, 'Applied',   '3.1', 'Backend',     HYBRID],
   [12, 'Applied',   '3.7', 'Backend',     HYBRID],
+  [13, 'Discarded', '3.9', 'Backend',     HYBRID],
 ];
 const trackerLines = [
   '# Applications Tracker', '',
@@ -155,28 +195,42 @@ for (const [num, status, score, archetype, remote] of ROWS) {
 writeFileSync(join(work, 'data', 'applications.md'), trackerLines.join('\n') + '\n');
 
 let result = null;
+let summary = '';
+let gated = null;
 try {
-  const stdout = execFileSync(NODE, [join(ROOT, 'analyze-patterns.mjs'), '--min-threshold', '1'], {
+  const run = (...flags) => execFileSync(NODE, [join(ROOT, 'analyze-patterns.mjs'), ...flags], {
     encoding: 'utf-8',
     timeout: 60000,
     env: { ...process.env, CAREER_OPS_ROOT: work },
   });
-  result = JSON.parse(stdout);
+  result = JSON.parse(run('--min-threshold', '1'));
+  summary = run('--min-threshold', '1', '--summary');
+  // Below the floor the script prints its JSON and exits 1.
+  try { run('--min-threshold', '12'); } catch (e) { gated = JSON.parse(e.stdout || 'null'); }
 } catch (e) {
-  fail(`analyze-patterns.mjs did not produce JSON over the fixture tracker: ${(e.stderr || e.message || '').toString().slice(0, 300)}`);
+  fail(`analyze-patterns.mjs did not run over the fixture tracker: ${(e.stderr || e.message || '').toString().slice(0, 300)}`);
 } finally {
   rmSync(work, { recursive: true, force: true });
 }
 
+if (gated && gated.error && gated.current === 11 && gated.threshold === 12) pass('the data floor counts sent applications only (11 of 13 rows: not the Evaluated or Discarded ones)');
+else fail(`--min-threshold 12 over 11 sent rows → ${JSON.stringify(gated)}`);
+
 if (result) {
-  const buckets = ['positive', 'negative', 'self_filtered', 'pending', 'awaiting'];
+  const buckets = OUTCOME_BUCKETS;
   const byOutcome = result.metadata?.byOutcome || {};
-  if (JSON.stringify(Object.keys(byOutcome).sort()) === JSON.stringify([...buckets].sort())) pass('metadata.byOutcome carries exactly the five outcome buckets');
+  if (JSON.stringify(Object.keys(byOutcome)) === JSON.stringify(buckets)) pass('metadata.byOutcome carries exactly the declared outcome buckets, in lifecycle order');
   else fail(`metadata.byOutcome keys = ${Object.keys(byOutcome).join(',')}`);
-  if (byOutcome.awaiting === 7 && byOutcome.positive === 1 && byOutcome.negative === 3 && byOutcome.pending === 1) {
-    pass('seven Applied rows land in awaiting; the one Responded row is the only positive');
+  if (byOutcome.awaiting === 7 && byOutcome.positive === 1 && byOutcome.negative === 3 && byOutcome.discarded === 1 && byOutcome.pending === 1) {
+    pass('seven Applied rows land in awaiting, the Discarded row in discarded; the one Responded row is the only positive');
   } else {
     fail(`byOutcome = ${JSON.stringify(byOutcome)}`);
+  }
+  const rates = result.metadata?.outcomeRates || {};
+  if (rates.submitted === 11 && rates.decided === 4 && rates.conversionRate === 9 && rates.decidedRate === 25) {
+    pass('metadata.outcomeRates quotes the whole tracker through the same denominators (1 of 11 sent, 1 of 4 decided)');
+  } else {
+    fail(`metadata.outcomeRates = ${JSON.stringify(rates)}`);
   }
 
   if (JSON.stringify(Object.keys(result.scoreComparison || {}).sort()) === JSON.stringify([...buckets].sort())
@@ -199,11 +253,17 @@ if (result) {
   const hybrid = (result.remotePolicy || []).find((r) => r.policy === 'hybrid/onsite');
   const globalRow = (result.remotePolicy || []).find((r) => r.policy === 'global remote');
   if (geo && geo.submitted === 3 && geo.decided === 2 && geo.positive === 0 && geo.decidedRate === 0
-      && hybrid && hybrid.submitted === 5 && hybrid.decided === 1 && hybrid.decidedRate === 0
+      && hybrid && hybrid.total === 6 && hybrid.submitted === 5 && hybrid.decided === 1 && hybrid.discarded === 1 && hybrid.decidedRate === 0
       && globalRow && globalRow.submitted === 3 && globalRow.decided === 1 && globalRow.decidedRate === 100) {
-    pass('remote policy rows expose submitted / decided / decidedRate per bucket');
+    pass('remote policy rows expose submitted / decided / decidedRate per bucket, and a Discarded row is neither submitted nor decided');
   } else {
     fail(`remote rows = ${JSON.stringify({ geo, hybrid, globalRow })}`);
+  }
+  const sizes = result.companySizeBreakdown || [];
+  if (sizes.length === 1 && 'size' in sizes[0] && sizes[0].submitted === 11 && sizes[0].decided === 4 && sizes[0].decidedRate === 25) {
+    pass('company-size breakdown uses the same denominators (the fixture has one size bucket)');
+  } else {
+    fail(`companySizeBreakdown = ${JSON.stringify(sizes)}`);
   }
 
   const actions = (result.recommendations || []).map((r) => r.action);
@@ -217,17 +277,27 @@ if (result) {
   else fail('"Avoid" fired for hybrid/onsite on a single decided outcome');
 
   const doubleDown = actions.find((a) => a.startsWith('Double down'));
-  if (doubleDown && /AI Engineer/.test(doubleDown) && /\(25% conversion rate\)/.test(doubleDown)) {
-    pass('"Double down" quotes the submitted-based rate (25%), not the total-based 60%');
+  if (doubleDown && /AI Engineer/.test(doubleDown) && /50% of decided outcomes advanced, 25% of all sent/.test(doubleDown)) {
+    pass('"Double down" names AI Engineer (1 of 2 decided) and quotes both rates, never the total-based 60%');
   } else {
     fail(`Double down recommendation = ${JSON.stringify(doubleDown)}`);
   }
 
   const st = result.scoreThreshold || {};
-  if (st.sampleSize === 1 && st.sufficientSample === false && st.recommended === 4.2
+  if (st.sampleSize === 1 && st.sufficientSample === false && st.recommended === null && st.observedMinimum === 4.2
       && !actions.some((a) => /Set minimum score threshold/.test(a))) {
-    pass('one scored positive outcome is reported as an observation, not turned into a threshold recommendation');
+    pass('one scored positive outcome yields an observedMinimum, a null recommended threshold and no threshold recommendation');
   } else {
     fail(`scoreThreshold = ${JSON.stringify(st)}; actions = ${JSON.stringify(actions)}`);
+  }
+  if (/SCORE OBSERVATION: lowest positive 4.2\/5 \(n=1; not a threshold yet\)/.test(summary) && !/SCORE THRESHOLD/.test(summary)) {
+    pass('--summary withholds the SCORE THRESHOLD headline on a 1-outcome sample and prints it as an observation');
+  } else {
+    fail(`--summary threshold lines = ${JSON.stringify((summary.match(/SCORE [A-Z]+.*/g) || []))}`);
+  }
+  if (/hybrid\/onsite\s+5 sent, 4 awaiting, 0 positive of 1 decided \(0%\)/.test(summary)) {
+    pass('--summary remote row prints sent / awaiting / positive-of-decided per bucket');
+  } else {
+    fail(`--summary remote rows = ${JSON.stringify((summary.match(/^\s+(global remote|geo-restricted|hybrid\/onsite).*/gm) || []))}`);
   }
 }

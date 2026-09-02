@@ -17,7 +17,7 @@ When interview sessions are available, it also reads *what the candidate actuall
 
 ## Minimum Threshold
 
-Before running analysis, check: does `data/applications.md` have at least 5 entries with status beyond "Evaluated" (i.e., Applied, Responded, Interview, Offer, Rejected, Discarded, SKIP)?
+Before running analysis, check: does `data/applications.md` have at least 5 entries that were actually sent (Applied, Responded, Interview, Offer, Hired, Rejected)? SKIP and Discarded rows are not submissions and do not count toward the floor.
 
 If not, tell the user:
 > "Not enough data yet -- {N}/5 applications have progressed beyond evaluation. Keep applying and come back when you have more outcomes to analyze."
@@ -36,20 +36,20 @@ Parse the JSON output. It contains:
 
 | Key | Contents |
 |-----|----------|
-| `metadata` | Total entries, date range, analysis date, counts by outcome |
+| `metadata` | Total entries, date range, analysis date, counts by outcome, and `outcomeRates` — the whole tracker through the same `submitted` / `decided` denominators as every breakdown row |
 | `funnel` | Count per status stage (evaluated, applied, interview, offer, etc.) |
-| `scoreComparison` | Avg/min/max score per outcome group (positive, negative, awaiting, self_filtered, pending) |
-| `archetypeBreakdown` | Per-archetype: total, submitted, positive, negative, awaiting, self_filtered, conversionRate, decidedRate |
+| `scoreComparison` | Avg/min/max score per outcome group (positive, awaiting, negative, discarded, self_filtered, pending) |
+| `archetypeBreakdown` | Per-archetype: total, submitted, decided, positive, awaiting, negative, discarded, self_filtered, conversionRate, decidedRate |
 | `blockerAnalysis` | Most frequent hard blockers: geo-restriction, stack-mismatch, seniority, onsite; each `percentage` is a share of `blockerBase` |
 | `blockerBase` | Entries carrying a non-empty gaps array — the denominator for `blockerAnalysis[].percentage` |
-| `remotePolicy` | Per-policy bucket: total, submitted, positive, negative, awaiting, conversionRate, decidedRate |
+| `remotePolicy` | Per-policy bucket: same columns as `archetypeBreakdown` |
 | `companySizeBreakdown` | Per-size bucket: startup, scaleup, enterprise |
 | `vendorAnalysis` | ATS channel analysis: per-vendor advance rate + coverage (see below) |
 | `viaChannelAnalysis` | Via channel analysis (#1596): per-agency advance rate + agency-vs-direct aggregate (see below) |
-| `scoreThreshold` | Recommended minimum score + reasoning |
-| `techStackGaps` | Most frequent tech gaps in negative outcomes |
+| `scoreThreshold` | `recommended` (null until `sufficientSample`), `observedMinimum`, `sampleSize`, `sufficientSample`, reasoning |
+| `techStackGaps` | Most frequent tech gaps in negative / discarded outcomes |
 | `discardReasonStats` | User-committed skip/discard reasons; each `percentage` is a share of `discardReasonBase` |
-| `discardReasonBase` | Self-filtered or negative entries — the denominator for `discardReasonStats[].percentage` and its recommendation threshold |
+| `discardReasonBase` | Self-filtered, discarded or negative entries — the denominator for `discardReasonStats[].percentage` and its recommendation threshold |
 | `recommendations` | Top 5 actionable items with reasoning and impact level |
 
 If the script returns `error`, display the error message and exit.
@@ -183,10 +183,9 @@ Show each status with count and percentage of total. Use a simple table:
 
 ## Archetype Performance
 
-Table with each archetype, applications **sent** (`submitted`), positive outcomes, `conversionRate` and `decidedRate`.
-Highlight the best-performing archetype and the worst.
+Table with each archetype: `submitted`, `decided`, positive, `decidedRate` (lead with it) and `conversionRate`. Highlight the best-performing archetype and the worst.
 
-Read the two rates as different questions. `conversionRate` = positives over everything sent, so a segment where most applications are still unanswered reads low by construction. `decidedRate` = positives over the applications the employer has actually answered, and is `null` while nothing is decided — report that as "no data yet", never as 0%.
+`conversionRate` = positives over everything sent, so a mostly-unanswered segment reads low by construction. `decidedRate` = positives over the applications with a recorded outcome, and is `null` while nothing is decided — report that as "no data yet", never 0%. Never divide by `metadata.total`: it counts evaluated rows that were never sent; the whole-tracker rates live in `metadata.outcomeRates`.
 
 ## Top Blockers
 
@@ -198,15 +197,15 @@ gap-bearing entries, not the share of all applications.
 
 Table showing conversion rate by remote policy bucket (global, regional, geo-restricted, hybrid/onsite).
 
-**Never call a segment bad on `conversionRate` alone.** A bucket whose applications are all still unanswered shows a low `conversionRate` and a `null` `decidedRate` — that is silence, not rejection, and retiring a lane on it is how a working channel gets dropped. State `0%` as a negative signal only when `positive` is 0 **and** `decided` is at least 2, and name the decided count alongside it.
+**Never call a segment bad on `conversionRate` alone** — an all-awaiting bucket shows a low rate and a `null` `decidedRate`, which is silence, not rejection. Call `0%` negative only when `positive` is 0 and `decided` >= 2, and name the decided count.
 
 ## Tech Stack Gaps
 
-List of most common missing skills in negative/self-filtered outcomes with frequency.
+List of most common missing skills in negative / discarded / self-filtered outcomes with frequency.
 
 ## Recommended Score Threshold
 
-State the data-driven minimum score and reasoning.
+State the data-driven minimum score and reasoning. When `sufficientSample` is false, `recommended` is `null`: report `observedMinimum` as an observation over `sampleSize` outcome(s) and do not offer to persist it.
 
 ## Targeting Signal (interview sessions)
 
@@ -225,7 +224,7 @@ Number the top recommendations (from the script output). For each:
 ## Step 3 — Present Summary
 
 Show the user a condensed version with:
-1. One-line stat summary (X applications, Y% applied, Z% positive outcome)
+1. One-line stat summary from `metadata.outcomeRates` (X sent, Y decided, Z% of decided advanced) — never a share of `metadata.total`
 2. Top 3 findings (most impactful patterns)
 3. Link to full report
 
@@ -245,7 +244,7 @@ Ask the user if they want to act on any recommendations:
 
 > "Want me to apply any of these recommendations? I can:
 > - Update `portals.yml` to filter out geo-restricted roles
-> - Set a score threshold in `_profile.md` for PDF generation
+> - Set a score threshold in `_profile.md` for PDF generation (only when `scoreThreshold.sufficientSample` is true)
 > - Adjust archetype targeting based on what's converting
 > - Realign targeting from the session signal — add the under-targeted archetype X to `modes/_profile.md` and reweight `portals.yml` `title_filter.positive` (if Step 1b ran)
 >
@@ -264,6 +263,7 @@ For reference, outcomes are classified as:
 |--------|---------|
 | Interview, Offer, Responded, Hired | **Positive** (the employer moved it forward) |
 | Applied | **Awaiting** (sent, no answer yet — counts in the conversion denominator, never as a success) |
-| Rejected, Discarded | **Negative** (company said no or offer closed) |
+| Rejected | **Negative** (the employer said no) |
+| Discarded | **Discarded** (you withdrew, or the posting closed — not an employer decision, not a proven submission; counts in neither `submitted` nor `decided`) |
 | SKIP, NO APLICAR | **Self-filtered** (user decided not to apply) |
 | Evaluated | **Pending** (never sent) |
