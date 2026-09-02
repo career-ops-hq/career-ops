@@ -168,6 +168,7 @@ type Catalog struct {
 	SortLocation string
 	SortPay      string
 	SortLast     string
+	SortPosted   string
 	ViewGrouped  string
 	ViewFlat     string
 }
@@ -189,6 +190,8 @@ func (c *Catalog) SortModeLabel(mode string) string {
 		return c.SortPay
 	case "last":
 		return c.SortLast
+	case "posted":
+		return c.SortPosted
 	default:
 		return mode
 	}
@@ -443,6 +446,7 @@ var En = Catalog{
 	SortLocation: "location",
 	SortPay:      "pay",
 	SortLast:     "last",
+	SortPosted:   "posted",
 	ViewGrouped:  "grouped",
 	ViewFlat:     "flat",
 }
@@ -607,6 +611,7 @@ var Tr = Catalog{
 	SortLocation: "konum",
 	SortPay:      "ücret",
 	SortLast:     "son",
+	SortPosted:   "yayın",
 	ViewGrouped:  "gruplu",
 	ViewFlat:     "düz",
 }
@@ -771,6 +776,7 @@ var Es = Catalog{
 	SortLocation: "ubicación",
 	SortPay:      "salario",
 	SortLast:     "último",
+	SortPosted:   "publicado",
 	ViewGrouped:  "agrupado",
 	ViewFlat:     "plano",
 }

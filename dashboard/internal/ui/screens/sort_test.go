@@ -8,7 +8,7 @@ import (
 )
 
 func TestSortCycleIncludesNewColumns(t *testing.T) {
-	want := map[string]bool{sortLocation: false, sortPay: false, sortLast: false}
+	want := map[string]bool{sortLocation: false, sortPay: false, sortLast: false, sortPosted: false}
 	for _, s := range sortCycle {
 		if _, ok := want[s]; ok {
 			want[s] = true
@@ -54,5 +54,27 @@ func TestSortByPayLocationAndLastContact(t *testing.T) {
 	if pm.filtered[0].Company != "HighPay" || pm.filtered[len(pm.filtered)-1].Company != "NoPay" {
 		t.Fatalf("last-contact sort: expected HighPay first and NoPay last, got %s..%s",
 			pm.filtered[0].Company, pm.filtered[len(pm.filtered)-1].Company)
+	}
+}
+
+func TestSortByPosted(t *testing.T) {
+	apps := []model.CareerApplication{
+		{Company: "Old", Status: "Applied", PostedOn: "2026-05-01"},
+		{Company: "NoDate", Status: "Applied", PostedOn: ""},
+		{Company: "Fresh", Status: "Applied", PostedOn: "2026-08-20"},
+		{Company: "Mid", Status: "Applied", PostedOn: "2026-07-10"},
+	}
+
+	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), apps, model.PipelineMetrics{Total: len(apps)}, "..", 120, 40)
+	pm.viewMode = "flat"
+	pm.sortMode = sortPosted
+	pm.applyFilterAndSort()
+
+	// Freshest posting first; rows with no posted date sink to the bottom.
+	wantOrder := []string{"Fresh", "Mid", "Old", "NoDate"}
+	for i, w := range wantOrder {
+		if pm.filtered[i].Company != w {
+			t.Fatalf("posted sort: position %d = %s, want %s", i, pm.filtered[i].Company, w)
+		}
 	}
 }

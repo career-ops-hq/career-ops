@@ -123,6 +123,7 @@ const (
 	sortLocation = "location"
 	sortPay      = "pay"
 	sortLast     = "last"
+	sortPosted   = "posted"
 )
 
 // Filter modes
@@ -157,7 +158,7 @@ func getPipelineTabs() []pipelineTab {
 	}
 }
 
-var sortCycle = []string{sortScore, sortDate, sortCompany, sortStatus, sortLocation, sortPay, sortLast}
+var sortCycle = []string{sortScore, sortDate, sortCompany, sortStatus, sortLocation, sortPay, sortLast, sortPosted}
 
 // ColumnID identifies an optional table column in the pipeline view.
 type ColumnID int
@@ -1214,6 +1215,14 @@ func (m PipelineModel) sortLess() func(a, b model.CareerApplication) bool {
 	case sortLast:
 		// Most recent contact first; empty dates sink to the bottom.
 		return func(a, b model.CareerApplication) bool { return a.LastContact > b.LastContact }
+	case sortPosted:
+		// Freshest requisition first; rows with no posted date sink to the bottom.
+		return func(a, b model.CareerApplication) bool {
+			if (a.PostedOn == "") != (b.PostedOn == "") {
+				return a.PostedOn != ""
+			}
+			return a.PostedOn > b.PostedOn
+		}
 	default: // sortScore
 		return func(a, b model.CareerApplication) bool { return a.Score > b.Score }
 	}
