@@ -6,6 +6,8 @@ import { pass, fail, ROOT } from '../helpers.mjs';
 
 console.log('\nProvider — peoplesoft (PeopleSoft Fluid Candidate Gateway)');
 
+const { makeHttpCtx } = await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
+
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'providers/peoplesoft.mjs')).href);
   const peoplesoft = mod.default;
@@ -50,6 +52,52 @@ try {
       pass('resolveConfig() extracts origin + site from the search-page URL');
     } else {
       fail(`resolveConfig() wrong: ${JSON.stringify(cfg)}`);
+    }
+  }
+
+  {
+    // Regression for the real scan transport: makeHttpCtx().fetchResponse used
+    // to throw on the manual 302 before requestWithSession could inspect it.
+    const realFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls++;
+      if (calls === 1) {
+        return new Response(null, { status: 302, headers: { location: '/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Page=HRS_APP_SCHJOB_FL&Action=U&FOCUS=Applicant&SiteId=1&' } });
+      }
+      return new Response(emptyFixture, { status: 200 });
+    };
+    try {
+      const jobs = await peoplesoft.fetch({ name: 'ExampleU', careers_url: SEARCH_URL }, { ...makeHttpCtx(), sleep: async () => {} });
+      if (Array.isArray(jobs) && jobs.length === 0 && calls === 2) {
+        pass('makeHttpCtx production path follows a validated same-origin manual redirect');
+      } else {
+        fail(`makeHttpCtx same-origin redirect wrong: calls=${calls} jobs=${JSON.stringify(jobs)}`);
+      }
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }
+
+  {
+    const realFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls++;
+      return new Response(null, { status: 302, headers: { location: 'https://evil.example/steal' } });
+    };
+    let caught = null;
+    try {
+      await peoplesoft.fetch({ name: 'ExampleU', careers_url: SEARCH_URL }, { ...makeHttpCtx(), sleep: async () => {} });
+    } catch (error) {
+      caught = error;
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    if (calls === 1 && /untrusted origin/i.test(caught?.message || '')) {
+      pass('makeHttpCtx production path rejects an off-origin manual redirect before following it');
+    } else {
+      fail(`makeHttpCtx off-origin redirect wrong: calls=${calls} error=${caught?.message}`);
     }
   }
 

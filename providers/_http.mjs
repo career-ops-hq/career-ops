@@ -13,7 +13,7 @@ export { BROWSER_LIKE_USER_AGENT, MACOS_BROWSER_LIKE_USER_AGENT };
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
-async function fetchWithTimeout(url, opts = {}, consume) {
+async function fetchWithTimeout(url, opts = {}, consume, allowManualRedirectResponse = false) {
   // Mark this request as provider traffic for the whole of its async life, so
   // the patched dns.lookup validates the addresses it resolves (#3096). The
   // guard is scoped rather than global because _dns-cache.mjs patches
@@ -24,10 +24,10 @@ async function fetchWithTimeout(url, opts = {}, consume) {
   // starts it: the DNS lookup happens inside connect, well after the
   // synchronous part of fetch() has returned, and the context has to still be
   // entered when it does.
-  return providerFetchContext.run({ url: String(url) }, () => fetchInContext(url, opts, consume));
+  return providerFetchContext.run({ url: String(url) }, () => fetchInContext(url, opts, consume, allowManualRedirectResponse));
 }
 
-async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow' } = {}, consume) {
+async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow' } = {}, consume, allowManualRedirectResponse = false) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -38,7 +38,11 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
       redirect,
       signal: controller.signal,
     });
-    if (!res.ok) {
+    const isInspectableManualRedirect = allowManualRedirectResponse
+      && redirect === 'manual'
+      && res.status >= 300
+      && res.status < 400;
+    if (!res.ok && !isInspectableManualRedirect) {
       const responseText = await res.text().catch(() => '');
       // WAF/CDN challenge pages (seen live: Workday 429s) carry no actionable
       // text — HTML markup or a generic interstitial message, not worth
@@ -122,7 +126,10 @@ export async function fetchText(url, opts = {}) {
 // a private IP.
 //
 // The body is read here, inside the timer window, and handed back as an
-// equivalent Response. Two reasons: returning the live Response would let a
+// equivalent Response. Under redirect:'manual', a 3xx is also returned so a
+// stateful provider can inspect and validate Location before following it;
+// fetchText/fetchJson retain their existing structured-error contract. Two
+// reasons the response is reconstructed: returning the live Response would let a
 // server that stalls its body hang the caller forever with the abort timer
 // already cleared (the failure fetchWithTimeout documents above), and this
 // function previously omitted the `consume` argument entirely, so it threw
@@ -134,7 +141,7 @@ export async function fetchResponse(url, opts = {}) {
   return await fetchWithTimeout(url, opts, async (res) => {
     const body = NULL_BODY_STATUSES.has(res.status) ? null : await res.text();
     return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
-  });
+  }, true);
 }
 
 /** Jitter added to a backoff so concurrent retries don't re-collide in lockstep. */
