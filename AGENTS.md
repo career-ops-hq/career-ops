@@ -463,6 +463,8 @@ One TSV file per evaluation at `batch/tracker-additions/{num}-{company-slug}.tsv
 
 **Report link normalization:** the TSV always carries a root-relative `[num](reports/...)` link; `merge-tracker.mjs` rewrites it relative to the tracker's own directory (`../reports/...` at `data/applications.md`, `reports/...` at root) so links stay clickable. Idempotent; fix an existing tracker with `node merge-tracker.mjs --migrate` (#760).
 
+**Row order (#3515):** `merge-tracker.mjs` writes the table sorted by `#` **ascending** — matching how rows are referred to ("row 42") and how `reports/` is numbered on disk. The sort runs over the whole table on every write, so a tracker left in merge-batch order by an older version is repaired in place on the next merge; no migration flag is needed. Rows whose `#` is a backfill sentinel (`N/A` / `—` / `-`) sort to the end of the table in their existing relative order.
+
 **Req/posting ID in notes disambiguates same-title postings (#1524, #2009):** when a company posts two genuinely different requisitions whose titles fuzzy-match (e.g. a leveled variant and its bare title, or two sibling team roles), put the req/job/posting ID in the **notes** column on both rows. `merge-tracker.mjs` reads it (`REQ_NUMBER_RE`) and treats rows carrying *different* recognizable IDs as distinct openings, overriding fuzzy title matching. Recognized forms are a `job id` / `posting id` / `requisition` / `req` / `jr` / `job` / `posting` / `ref` / `r_` label followed by an alphanumeric ID containing at least one digit — e.g. `req JR-10423`, `job id 88214`, `ref R_2291`. Prefer this whenever the JD exposes an ID; it is the only signal that survives near-identical titles.
 
 ### Pipeline Integrity

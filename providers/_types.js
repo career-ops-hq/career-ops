@@ -7,6 +7,9 @@
 // contract is enforced by scan.mjs (id presence, fetch is a function, fetch
 // returns an array), not by these annotations.
 //
+// Prose companion (checklist, mandatory guards, tests): ADDING_A_PROVIDER.md
+// in this directory.
+//
 // Files prefixed with _ are never loaded as providers by scan.mjs.
 
 /**
@@ -49,7 +52,7 @@
  */
 
 /**
- * A single `tracked_companies` entry from `portals.yml`.
+ * A single portal entry from `portals.yml` — `tracked_companies` or `job_boards`.
  *
  * Provider-specific fields are opaque to scan.mjs and validated by the
  * provider itself. Examples in current providers: `api`, `careers_url`.
@@ -119,6 +122,12 @@
  * @property {string} id                                                       Unique across all loaded providers.
  * @property {((entry: PortalEntry) => (DetectHit | null))} [detect]           Optional auto-detection.
  * @property {(entry: PortalEntry, ctx: Context) => Promise<Job[]>} fetch      Required.
+ * @property {((job: Job) => (string | null))} [dedupKey]                     Optional. A
+ *   provider-scoped identifier for a job, precise where URL normalization
+ *   isn't — e.g. a Workday requisition ID, so the same posting served under
+ *   several sites of one tenant (different paths/hosts) collapses to one key
+ *   (#3439). Return null when no such key is derivable for a given job;
+ *   callers then fall back to normalizeUrlForDedup(job.url) as before.
  */
 
 export {};

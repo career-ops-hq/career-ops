@@ -48,18 +48,25 @@ import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
 import workday from './providers/workday.mjs';
 import icims from './providers/icims.mjs';
-import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays } from './scan.mjs';
+import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays, PORTALS_PATH, PIPELINE_PATH } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { boardKey, loadDeadBoards, recordBoardResult, saveDeadBoards, shouldSkipDeadBoard } from './dead-boards.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
-const PIPELINE_PATH = 'data/pipeline.md';
-const CACHE_DIR = 'data/cache/ats-companies';
+// PORTALS_PATH and PIPELINE_PATH are imported from scan.mjs rather than
+// re-derived here (#3510). This file appends results through scan.mjs's
+// appendToPipeline, so its own bare-relative copy meant it could create an empty
+// data/pipeline.md in the cwd and then write the actual matches somewhere else.
+// Its portals fallback had the same split: it honored CAREER_OPS_PORTALS but
+// otherwise looked in the cwd instead of the data root.
+const DATA_ROOT = getCareerOpsRoot();
+const CACHE_DIR = path.join(DATA_ROOT, 'data/cache/ats-companies');
 const CACHE_TTL_HOURS = 24;
 // Tracks `main` deliberately: the dataset's value is freshness (new boards
 // appear weekly), so pinning a commit would defeat the purpose. Integrity rests
@@ -92,8 +99,12 @@ const RESOLVER_FAILURE_LIMIT = 50;
 // Crash insurance for multi-hour directory sweeps: progress + matches are
 // checkpointed every CHECKPOINT_EVERY companies so --resume can continue a
 // dead run (with its ORIGINAL date window) instead of restarting from zero.
-const CHECKPOINT_PATH = 'data/cache/ats-full-checkpoint.json';
+// Anchored too (#3510): a sweep resumed from a different directory found no
+// checkpoint and silently restarted a multi-hour run from zero — the one failure
+// mode --resume exists to prevent.
+const CHECKPOINT_PATH = path.join(DATA_ROOT, 'data/cache/ats-full-checkpoint.json');
 const CHECKPOINT_EVERY = 500;
+const DEAD_BOARDS_PATH = path.join(DATA_ROOT, 'data/dead-boards.tsv');
 
 export function loadCheckpoint(file = CHECKPOINT_PATH) {
   if (!existsSync(file)) return null;
@@ -143,6 +154,19 @@ function writeCheckpoint(cp) {
     return true;
   } catch (err) {
     console.error(`\n⚠ checkpoint write failed (${err.message}) — sweep continues, --resume unavailable`);
+    return false;
+  }
+}
+
+// Dead-board memory is useful resumability metadata, but a cache write must
+// never discard the matches from a long-running sweep. Keep it best-effort,
+// just like the main checkpoint write above.
+function saveDeadBoardsBestEffort(rows) {
+  try {
+    saveDeadBoards(DEAD_BOARDS_PATH, rows);
+    return true;
+  } catch (err) {
+    console.error(`\n⚠ dead-board cache write failed (${err.message}) — sweep continues`);
     return false;
   }
 }
@@ -440,6 +464,27 @@ export function passesFilters(job, { titleFilter, locationFilter, contentFilter,
   return true;
 }
 
+// Prefer a provider's own scoped dedup key over URL normalization when the
+// provider can derive one — e.g. workday.mjs's requisition ID, which
+// collapses the same posting served under several sites of one tenant
+// (different paths, sometimes different hosts) that normalizeUrlForDedup
+// can't recognize as duplicates (#3439). `provider` is optional so this stays
+// safe to call for seed-pass offers, which carry no SOURCES entry to look one
+// up from. Falls back to the pre-#3439 behavior whenever no key is derived.
+export function dedupTokenFor(job, provider) {
+  return provider?.dedupKey?.(job) || normalizeUrlForDedup(job.url);
+}
+
+// Resolve an offer's provider from its recorded `source` string — shared by
+// the checkpoint-resume reseed below and by loadSeenUrls' extraTokensFor
+// hook. `source` is "{sourcesKey}-full" for the main sweep and
+// "{seedId}-seed" for seed offers; SOURCES has no seed entries, so a seed
+// offer's lookup misses and callers fall back to URL-only dedup, unchanged
+// from before #3439.
+export function providerForSource(source) {
+  return SOURCES[String(source || '').replace(/-full$/, '')]?.provider;
+}
+
 // Cap-aware company sampling. Default: the dataset's natural (alphabetical)
 // prefix. With --shuffle: a random sample of `limit` companies, so a capped
 // scan isn't always biased to the same alphabetical-first slice. Pure; returns
@@ -532,9 +577,13 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
         contentFilter: opts.contentFilter,
         titleFilterConfig: opts.titleFilterConfig,
       })) continue;
-      const dedupUrl = normalizeUrlForDedup(job.url);
-      if (seenUrls.has(dedupUrl)) continue;
-      seenUrls.add(dedupUrl);
+      // provider is always one of SEED_PROVIDERS (greenhouse/lever/ashby) here —
+      // none currently define dedupKey, so this is the same normalizeUrlForDedup
+      // behavior as before; kept via the shared helper so the two dedup sites
+      // in this file can't quietly drift apart (#3439).
+      const dedupToken = dedupTokenFor(job, provider);
+      if (seenUrls.has(dedupToken)) continue;
+      seenUrls.add(dedupToken);
       offers.push({ ...job, source: sourceName, dateStatus: job.postedAt ? 'dated' : 'unknown' });
     }
   });
@@ -640,7 +689,12 @@ async function main() {
   // In --json mode, stdout is reserved for the single machine-readable result,
   // so every human-facing line goes to stderr instead.
   const log = opts.json ? (...a) => console.error(...a) : (...a) => console.log(...a);
-  const progress = (s) => { if (!opts.json) process.stdout.write(s); };
+  // Same rule as `log` above: under --json the counter goes to stderr rather
+  // than being dropped. Suppressing it left a sweep with no progress signal on
+  // either stream, and `--dry-run --json` has no checkpoint to fall back on
+  // (dry runs write no state), so a long run was indistinguishable from a hung
+  // one.
+  const progress = (s) => { if (opts.json) process.stderr.write(s); else process.stdout.write(s); };
 
   if (!existsSync(PORTALS_PATH)) {
     console.error('Error: portals.yml not found. Run onboarding first — the reverse scan reuses its title_filter/location_filter.');
@@ -670,7 +724,17 @@ async function main() {
   const sourcesSummary = [atsSummary, seedsSummary].filter(Boolean).join(' | ');
   log(`Reverse ATS scan — ${sourcesSummary} | since ${opts.sinceDays}d${opts.limit < Infinity ? ` | limit ${opts.limit}/ats` : ''}${opts.shuffle ? ' | shuffled' : ''}${opts.includeUndated ? ' | +undated' : ''}${opts.liveness ? ' | liveness' : ''}${opts.dryRun ? ' | DRY RUN' : ''}`);
 
-  const { seen: seenUrls } = loadSeenUrls();
+  // extraTokensFor: a historical scan-history.tsv row records the URL it was
+  // FIRST seen on, so without this a Workday requisition seen last run under
+  // site A's URL wouldn't be recognized when this run only sees it under
+  // site B — the plain normalizeUrlForDedup comparison never matches across
+  // sites, and only fresh-run offers were reseeded with the provider key
+  // (#3439). `portal` here is scan-history.tsv's recorded `offer.source`, so
+  // providerForSource resolves it the same way the checkpoint reseed above
+  // does.
+  const { seen: seenUrls } = loadSeenUrls({}, {
+    extraTokensFor: (url, portal) => providerForSource(portal)?.dedupKey?.({ url }),
+  });
   const blacklist = loadBlacklist();
   // sinceMs and includeUndated let providers (currently only workday.mjs)
   // stop paginating a tenant early instead of always walking to max_pages:
@@ -697,12 +761,24 @@ async function main() {
   const newOffers = checkpoint?.offers || [];
   // Checkpointed matches were already deduped once — without re-seeding, a
   // resumed run re-scanning the in-flight overlap would duplicate them.
-  for (const o of newOffers) seenUrls.add(normalizeUrlForDedup(o.url));
+  // Reseed with the SAME token a fresh dedup check would produce (provider
+  // key when the source's provider has one, URL otherwise, matching
+  // processJobs below) — reseeding by URL alone would miss a Workday
+  // requisition's key, letting the other of its two sites' offers back in
+  // after a resume even though the pre-checkpoint sweep had already
+  // collapsed them (#3439). o.source is "{sourcesKey}-full" for the main
+  // sweep and "{seedId}-seed" for seed offers; SOURCES has no seed entries,
+  // so a seed offer's lookup misses and falls back to URL — its unchanged,
+  // pre-#3439 behavior.
+  for (const o of newOffers) {
+    seenUrls.add(dedupTokenFor(o, providerForSource(o.source)));
+  }
   const completedSources = new Set(checkpoint?.completedSources || []);
   const cc = checkpoint?.counters || {};
   let totalCompaniesScanned = cc.totalCompaniesScanned || 0;
   let totalCompaniesAvailable = 0;
   let totalErrors = cc.totalErrors || 0;
+  let totalRetiredBoardsSkipped = cc.totalRetiredBoardsSkipped || 0;
   let droppedNoDate = cc.droppedNoDate || 0;
   let droppedContent = cc.droppedContent || 0;
   let capHit = false;
@@ -720,7 +796,8 @@ async function main() {
   const datasetStatus = {};
 
   const snapshotCounters = () => ({
-    totalCompaniesScanned, totalErrors, droppedNoDate, droppedContent,
+    totalCompaniesScanned, totalErrors, totalRetiredBoardsSkipped,
+    droppedNoDate, droppedContent,
     noDateSkipCompanies, noDateSkipJobs, cappedBoards,
   });
   const checkpointBase = () => ({
@@ -770,9 +847,9 @@ async function main() {
       // job.title so a title-stated remote role survives a city-only location.
       if (!locationFilter(job.location, job.url, job.title)) continue;
       if (!contentFilter(job.description, matchedTitleKeywords(job.title, fullTitleFilterConfig))) { droppedContent++; continue; }
-      const dedupUrl = normalizeUrlForDedup(job.url);
-      if (seenUrls.has(dedupUrl)) continue;
-      seenUrls.add(dedupUrl); // intra-scan dedup
+      const dedupToken = dedupTokenFor(job, provider);
+      if (seenUrls.has(dedupToken)) continue;
+      seenUrls.add(dedupToken); // intra-scan dedup
       newOffers.push({ ...job, source: `${sourceName}-full`, dateStatus: job.postedAt ? 'dated' : 'unknown' });
     }
   };
@@ -815,6 +892,8 @@ async function main() {
     log(`\n⚙  ${name} — ${entriesAll.length} companies${status !== 'ok' ? ` (dataset: ${status})` : ''}${startAt ? ` — resuming at ${startAt}` : ''}`);
 
     let errors = 0;
+    let deadBoardsSkipped = 0;
+    const deadBoards = loadDeadBoards(DEAD_BOARDS_PATH);
     let consecutiveResolverFailures = 0;
     let resolverOutage = false;
     // The board whose failure tripped the breaker. `name` is only the ATS
@@ -828,12 +907,18 @@ async function main() {
     let lastResumeAt = 0;
     const truncated = [];
     await parallelEach(entries, source.concurrency ?? CONCURRENCY, async (entry) => {
+      const deadBoard = boardKey(entry);
+      if (shouldSkipDeadBoard(deadBoards, name, deadBoard)) {
+        deadBoardsSkipped++;
+        return;
+      }
       try {
         // The whole per-company unit — fetch AND processJobs (which may issue
         // per-job detail-page requests via provider.enrichDate) — runs inside
         // one watchdog, so enrichment latency can't blow past COMPANY_TIMEOUT_MS.
         await withTimeout((async () => {
           const jobs = await source.provider.fetch(entry, ctx);
+          recordBoardResult(deadBoards, name, deadBoard, 200);
           consecutiveResolverFailures = 0;
           if (jobs.workdayTruncated) truncated.push(entry);
           if (jobs.icimsTruncated) {
@@ -847,6 +932,7 @@ async function main() {
         // Mostly defunct boards in the public dataset — expected noise, so the
         // default stays quiet; --verbose surfaces per-board failures.
         errors++;
+        recordBoardResult(deadBoards, name, deadBoard, err?.status);
         // A dead board and a dead resolver look identical one at a time; only
         // the *consecutive* run tells them apart, so any non-resolver outcome
         // resets the count (#2229).
@@ -870,21 +956,28 @@ async function main() {
         progress(`  ${done}/${entries.length} scanned, ${newOffers.length} total matches\r`);
       }
       if (done % CHECKPOINT_EVERY === 0 && !opts.dryRun) {
+        saveDeadBoardsBestEffort(deadBoards);
         writeCheckpoint({
           ...checkpointBase(),
           current: { name, resumeAt: startAt + resumeAt, datasetLen: list.length, datasetHash },
           counters: {
             ...snapshotCounters(),
+            totalRetiredBoardsSkipped: totalRetiredBoardsSkipped + deadBoardsSkipped,
             // totalCompaniesScanned was bumped by the FULL entries.length up
             // front; a checkpoint must store only work actually attempted, or
             // a resumed run (which re-adds its own slice) double-counts the
-            // completed portion in the final summary.
-            totalCompaniesScanned: totalCompaniesScanned - (entries.length - done),
+            // completed portion in the final summary. Retired boards were not
+            // attempted and must not be counted as scanned either.
+            totalCompaniesScanned: totalCompaniesScanned - (entries.length - done) - deadBoardsSkipped,
             totalErrors: totalErrors + errors,
           },
         });
       }
     }, () => resolverOutage);
+    // parallelEach reports a completed callback even when a retired board was
+    // skipped, so remove those entries from the live scan total after the
+    // source pass. The retired count remains visible separately.
+    totalCompaniesScanned -= deadBoardsSkipped;
     // Second chance for boards the parallel sweep truncated: retry alone on a
     // quiet line. Re-processing the full board is safe — seenUrls already
     // holds every match from the partial first pass.
@@ -896,6 +989,7 @@ async function main() {
         try {
           await withTimeout((async () => {
             const jobs = await source.provider.fetch(entry, ctx);
+            recordBoardResult(deadBoards, name, boardKey(entry), 200);
             await processJobs(jobs, name, source.provider);
             if (jobs.workdayTruncated) {
               errors++; // still truncated on a quiet line — genuine board problem, move on
@@ -904,11 +998,14 @@ async function main() {
           })(), COMPANY_TIMEOUT_MS, `${name}/${entry.name} (retry)`);
         } catch (err) {
           errors++;
+          recordBoardResult(deadBoards, name, boardKey(entry), err?.status);
           if (opts.verbose) console.error(`  ✗ ${name}/${entry.name} (retry): ${err.message}`);
         }
       }
     }
     totalErrors += errors;
+    totalRetiredBoardsSkipped += deadBoardsSkipped;
+    if (!opts.dryRun) saveDeadBoardsBestEffort(deadBoards);
     if (resolverOutage) {
       // Deliberately before completedSources/checkpoint: this source did NOT
       // finish, and marking it done would make --resume skip the rest of it.
@@ -948,7 +1045,7 @@ async function main() {
     if (!opts.dryRun) {
       writeCheckpoint({ ...checkpointBase(), current: null, counters: snapshotCounters() });
     }
-    log(`\n  done (${errors} unreachable boards skipped)`);
+    log(`\n  done (${errors} unreachable boards, ${deadBoardsSkipped} retired boards skipped)`);
   }
 
   // ── VC portfolio seed sources (--seeds flag) ───────────────────────
@@ -1073,6 +1170,7 @@ async function main() {
       postingsAnnotatedBlacklisted: blacklistResult.annotatedBlacklisted,
       postingsDroppedContent: droppedContent,
       unreachableBoards: totalErrors,
+      retiredBoardsSkipped: totalRetiredBoardsSkipped,
       cappedBoards,
       dnsPacing: { delayed: pacing.delayed, waitedMs: Math.round(pacing.waitedMs) },
       saved,

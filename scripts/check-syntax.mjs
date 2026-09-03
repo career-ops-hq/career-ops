@@ -7,29 +7,18 @@
  * clean checkout and useful locally before dependencies are installed.
  */
 
-import { readdirSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { collectMjsFiles } from '../lib/mjs-files.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SKIP_DIRS = new Set(['.git', 'node_modules', 'output', 'data', 'coverage', 'test-results']);
 
-function collect(dir) {
-  const files = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (SKIP_DIRS.has(entry.name)) continue;
-    const full = join(dir, entry.name);
-    // Symlinked directories can point outside the checkout or back into it;
-    // neither should make a local lint run recurse unpredictably.
-    if (entry.isSymbolicLink()) continue;
-    if (entry.isDirectory()) files.push(...collect(full));
-    else if (entry.name.endsWith('.mjs')) files.push(full);
-  }
-  return files;
-}
-
-const files = collect(root).sort();
+// The walk (and the list of directories it skips) lives in lib/mjs-files.mjs
+// so that this linter and test-all.mjs's syntax gate cannot disagree about
+// which files exist — see that module's header for what happened when they
+// did (#3419).
+const files = collectMjsFiles(root);
 let failed = 0;
 
 for (const file of files) {

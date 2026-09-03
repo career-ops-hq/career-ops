@@ -26,6 +26,18 @@ const TOOL_PROSE_WORDS = new Set([
   'team', 'the', 'to', 'using', 'with',
 ]);
 const TOOL_PHRASE_PATTERN = /^(?=.{1,80}$)[\p{L}\p{N}.][\p{L}\p{N}+#./-]*(?:\s+[\p{L}\p{N}.][\p{L}\p{N}+#./-]*){0,2}$/u;
+const DELEGATED_PARTY_RE = /\b(?:vendors?|agenc(?:y|ies)|contractors?|consultanc(?:y|ies)|consultants?|external teams?|outsourc(?:ed|ing)|implementation partners?)\b/i;
+const DELEGATION_RE = /\b(?:commissioned|coordinated|directed|engaged|hired|managed|oversaw|partnered with|supervised)\b/i;
+const DIRECT_AUTHORSHIP_SIGNAL_RE = /\b(?:authored|built|coded|developed|engineered|implemented|programmed|wrote)\b/i;
+const THIRD_PARTY_EXECUTION_RE = /\b(?:vendors?|agenc(?:y|ies)|contractors?|consultanc(?:y|ies)|consultants?|external teams?|outsourc(?:ed|ing)|implementation partners?)\b[^.;!?]{0,120}\b(?:which|who|that)\b[^.;!?]{0,120}\b(?:authored|built|coded|developed|engineered|implemented|programmed|wrote)\b/i;
+const DIRECT_AUTHORSHIP_CLAIM_RE = /\b(authored|built|coded|developed|engineered|implemented|programmed|wrote)\b\s+(?:the\s+|an?\s+|my\s+|our\s+)?([^.;!?]{1,160})/giu;
+const ATTRIBUTION_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'as', 'at', 'authored', 'build', 'built', 'by', 'coded',
+  'commissioned', 'coordinated', 'created', 'developed', 'directed', 'engineered',
+  'engaged', 'for', 'from', 'hired', 'implemented', 'in', 'managed', 'my', 'of',
+  'on', 'our', 'oversaw', 'partnered', 'programmed', 'supervised', 'the', 'through',
+  'to', 'vendor', 'vendors', 'with', 'wrote',
+]);
 const METRIC_NOUNS = [
   'users', 'customers', 'clients', 'employees', 'engineers', 'teams', 'companies',
   'partners', 'organizations', 'organisations', 'brands', 'countries',
@@ -51,6 +63,15 @@ const METRIC_NOUNS = [
   'machines', 'devices', 'instruments', 'vehicles', 'units', 'locations',
   'acres', 'hectares', 'shifts', 'rounds', 'inspections', 'audits', 'incidents',
   'alarms', 'tickets',
+  // Education and training, for the same reason as the headcount block above.
+  // 'students' and 'staff' were already here, but the nouns an education or
+  // L&D CV actually inflates were not: how many people were put through a
+  // program and how many sites it covered. "Trained 900+ candidates across 60
+  // schools" against a source saying 250 and 20 passed the gate in silence.
+  'candidates', 'trainees', 'learners', 'participants', 'attendees',
+  'graduates', 'alumni', 'teachers', 'instructors', 'educators', 'faculty',
+  'schools', 'districts', 'campuses', 'classrooms', 'programs', 'programmes',
+  'workshops', 'assessments', 'exams',
 ];
 // How many words may sit between a number and the noun it counts. The same
 // regex parses the generated CV and the sources, so the window is symmetric by
@@ -82,7 +103,26 @@ const MODIFIER_WINDOW = 4;
 // handled by the modifier window) and "50kg users" (k not at a boundary) both keep
 // their existing behaviour and still normalize to "50".
 const COUNT_CLAIM_RE = new RegExp(
-  String.raw`\b(\d[\d,.]*(?:[kKmMbB]\b)?)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}(${METRIC_NOUNS.join('|')})\b`,
+  // LAZY (`{0,N}?`), so the number binds to the NEAREST noun in the window
+  // rather than the farthest. Greedy, the quantifier consumed as many filler
+  // words as the window allowed before looking for a noun, and only backtracked
+  // if that failed — so whenever two METRIC_NOUNS sat within the window it
+  // reported the wrong one (#3414):
+  //
+  //   "15+ years scaling teams and platforms"        -> 15 platforms, not 15 years
+  //   "20+ years leading engineering organizations"  -> 20 organizations, not 20 years
+  //
+  // The same sentence's plainer paraphrase ("15+ years of experience") produced
+  // "15 years", so a truthful line copied verbatim out of cv.md could be flagged
+  // as invented: the CV and the source stated the same fact and the extractor
+  // read two different claims out of them.
+  //
+  // Lazy cannot LOSE a claim. Both directions match exactly when some noun sits
+  // inside the window; only WHICH one is bound differs, and the nearest is the
+  // one a human reads. #2279's wide-window cases are unaffected — "~5 live
+  // Cloud Run deployments" still yields "5 deployments", because there is only
+  // one noun to bind to.
+  String.raw`\b(\d[\d,.]*(?:[kKmMbB]\b)?)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}?(${METRIC_NOUNS.join('|')})\b`,
   'gi'
 );
 const NOUN_SYNONYMS = new Map([
@@ -291,6 +331,78 @@ export function factClaims(text) {
     }
   }
   return claims;
+}
+
+/** Split generated/source documents into bounded statements for attribution checks. */
+function factStatements(text) {
+  const withLineBoundaries = String(text ?? '').replace(/\r?\n+/g, '. ');
+  return stripMarkup(withLineBoundaries)
+    .split(/(?:[.!?]\s+|[.!?]$)/u)
+    .map(statement => statement.trim())
+    .filter(Boolean);
+}
+
+/** Return conservative content tokens used only to link a rewrite to its source statement. */
+function attributionTokens(text) {
+  return normalizeFact(text)
+    .split(/[^\p{L}\p{N}+#./-]+/u)
+    .filter(token => token.length >= 3 && !ATTRIBUTION_STOP_WORDS.has(token));
+}
+
+/**
+ * Detect a narrow authorship escalation: a source explicitly attributes
+ * execution to a third party, while the generated rewrite claims direct
+ * implementation and drops that attribution.
+ *
+ * This deliberately does not guess from generic leadership prose. It requires
+ * a delegation verb, a named third-party role, and at least two shared content
+ * tokens between the source and generated statements. Ambiguous source
+ * statements that also contain a direct implementation verb are left alone;
+ * an explicit relative clause such as "vendor X, which built Y" is treated as
+ * third-party execution evidence rather than candidate direct-work evidence.
+ */
+export function delegatedAuthorshipClaims(targetText, sourceText) {
+  const sourceStatements = factStatements(sourceText);
+  const directSources = sourceStatements
+    .filter(statement => DIRECT_AUTHORSHIP_SIGNAL_RE.test(statement))
+    .filter(statement => !THIRD_PARTY_EXECUTION_RE.test(statement))
+    .map(statement => new Set(attributionTokens(statement)));
+  const delegatedSources = sourceStatements
+    .filter(statement => DELEGATED_PARTY_RE.test(statement) && DELEGATION_RE.test(statement))
+    .filter(statement => (
+      !DIRECT_AUTHORSHIP_SIGNAL_RE.test(statement) || THIRD_PARTY_EXECUTION_RE.test(statement)
+    ))
+    .map(statement => ({
+      statement,
+      tokens: new Set(attributionTokens(statement)),
+    }));
+  if (!delegatedSources.length) return [];
+
+  const claims = [];
+  for (const statement of factStatements(targetText)) {
+    // Keeping the third-party attribution is not an authorship escalation.
+    if (DELEGATED_PARTY_RE.test(statement)) continue;
+    DIRECT_AUTHORSHIP_CLAIM_RE.lastIndex = 0;
+    for (const match of statement.matchAll(DIRECT_AUTHORSHIP_CLAIM_RE)) {
+      const value = normalizeFact(`${match[1]} ${match[2]}`);
+      const tokens = [...new Set(attributionTokens(match[2]))];
+      if (tokens.length < 2) continue;
+      // Explicit direct-work evidence wins over a nearby delegated project
+      // that happens to use the same technology or artifact vocabulary.
+      if (directSources.some(source => tokens.filter(token => source.has(token)).length >= 2)) {
+        continue;
+      }
+      const delegatedSource = delegatedSources.find(source => (
+        tokens.filter(token => source.tokens.has(token)).length >= 2
+      ));
+      if (delegatedSource) {
+        claims.push({ kind: 'authorship', value });
+      }
+    }
+  }
+  return claims.filter((claim, index, all) => (
+    all.findIndex(other => other.value === claim.value) === index
+  ));
 }
 
 /** Extract metric-like claims that require source evidence. */
@@ -503,7 +615,7 @@ export function verifyFacts(targetText, {
   const invented = [...targetClaims].filter(claim => !allowed.has(claim));
   const sourceNormalized = normalizeFact(stripMarkup(sourceText));
   const allowedFacts = new Set(config.allow_facts.map(normalizeFact));
-  const unsupportedFacts = factClaims(targetText)
+  const unsupportedFacts = [...factClaims(targetText), ...delegatedAuthorshipClaims(targetText, sourceText)]
     .filter(({ value }) => !sourceContainsFact(sourceNormalized, value) && !allowedFacts.has(value))
     .filter((claim, index, claims) => claims.findIndex(other => other.kind === claim.kind && other.value === claim.value) === index);
   const forbidden = config.forbidden_phrases
@@ -573,7 +685,8 @@ function usage() {
        node verify-cv-facts.mjs --self-test
 
 Checks generated candidate-facing text for unsupported metrics and explicitly asserted
-non-metric facts (employers, titles, and tools) absent from source files.
+non-metric facts (employers, titles, tools, and delegated-work authorship) absent
+from source files.
 Default sources: cv.md, article-digest.md
 Default config:  config/cv-facts.json (optional)`;
 }
@@ -608,6 +721,24 @@ function runSelfTest() {
   equal('truthful multiplier', auditClaims('Partners earned 2x more', source).invented, []);
   equal('noun synonym', auditClaims('Authored 80 articles', source).invented, []);
   equal('ordinary year is ignored', auditClaims('Joined the team in 2013', source).invented, []);
+
+  // The number binds to the NEAREST noun in the window, not the farthest (#3414).
+  // Greedy, each of these bound the wrong noun while the SAME fact worded plainly
+  // bound the right one — so a truthful line copied verbatim out of cv.md read as
+  // a different claim from its own source, and the gate flagged it as invented.
+  const claimsOf = (text) => [...metricClaims(text)].sort().join(' | ');
+  equal('nearest noun wins over a farther one', claimsOf('15+ years scaling teams and platforms'), '15 years');
+  equal('nearest noun wins across three modifiers', claimsOf('20+ years leading engineering organizations'), '20 years');
+  equal('the plain phrasing of the same fact agrees', claimsOf('I have 15+ years of experience.'), '15 years');
+  // …and the whole point of a truthful restatement passing the gate:
+  equal('a verbatim experience line is not invented',
+    auditClaims('15+ years scaling teams and platforms', '15+ years of experience.').invented, []);
+  // #2279 is why the window is wide: one noun, several modifiers. Lazy must not
+  // shrink the reach, only decide which noun wins when there are two.
+  equal('a 3-modifier single-noun phrase still resolves', claimsOf('~5 live Cloud Run deployments'), '5 deployments');
+  equal('and its 2-modifier paraphrase agrees', claimsOf('~5 Cloud Run deployments'), '5 deployments');
+  // A number is a hard barrier for the chain, so two counts stay separate.
+  equal('two counts in one sentence stay distinct', claimsOf('8 years supporting 40 engineers'), '40 engineers | 8 years');
   equal(
     'allow_metrics override',
     auditClaims('Reached 94,772 users', source, { allow_metrics: ['94,772 users'] }).invented,

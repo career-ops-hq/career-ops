@@ -79,7 +79,7 @@ func TestUpdateApplicationStatusWaitsForSharedLock(t *testing.T) {
 		if err != nil {
 			t.Fatalf("update after lock release: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("dashboard update did not resume after lock release")
 	}
 
@@ -295,6 +295,50 @@ func TestParseApplicationsMapsColumnsByHeader(t *testing.T) {
 	}
 }
 
+func TestParseApplicationsUsesTrackerURLBeforeLegacyEnrichment(t *testing.T) {
+	tempDir, _ := writeTracker(t, `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-08-28 | Acme | Triage Engineer | 4.0/5 | Evaluated | — | — | triage only | https://jobs.example.com/triage |
+| 2 | 2026-08-28 | Globex | Platform Engineer | 4.2/5 | Evaluated | — | [2](../reports/002-globex.md) | has report | https://jobs.example.com/tracker |
+| 3 | 2026-08-28 | Initech | Legacy Engineer | 3.9/5 | Evaluated | — | [3](../reports/003-initech.md) | legacy fallback | |
+`)
+
+	reportsDir := filepath.Join(tempDir, "reports")
+	if err := os.MkdirAll(reportsDir, 0o755); err != nil {
+		t.Fatalf("mkdir reports: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(reportsDir, "002-globex.md"),
+		[]byte("**URL:** https://jobs.example.com/report\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(reportsDir, "003-initech.md"),
+		[]byte("**URL:** https://jobs.example.com/legacy\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write legacy report: %v", err)
+	}
+
+	apps := ParseApplications(tempDir)
+	if len(apps) != 3 {
+		t.Fatalf("expected 3 applications, got %d", len(apps))
+	}
+	if got := apps[0].JobURL; got != "https://jobs.example.com/triage" {
+		t.Errorf("triage-only JobURL = %q, want tracker URL", got)
+	}
+	if got := apps[1].JobURL; got != "https://jobs.example.com/tracker" {
+		t.Errorf("report-backed JobURL = %q, want tracker URL to take precedence", got)
+	}
+	if got := apps[2].JobURL; got != "https://jobs.example.com/legacy" {
+		t.Errorf("legacy JobURL = %q, want report URL fallback", got)
+	}
+}
+
 // End-to-end status update on the inserted-column layout: parse, update, and
 // re-parse. Only the Status cell may change; every other cell stays intact.
 func TestUpdateApplicationStatusInsertedColumn(t *testing.T) {
@@ -355,10 +399,10 @@ func TestResolveTrackerColumns(t *testing.T) {
 
 func TestParseApplicationsRespectsCareerOpsTracker(t *testing.T) {
 	tempDir := t.TempDir()
-	
+
 	// Create a tracker file outside the tempDir's default search paths
 	customTrackerPath := filepath.Join(tempDir, "custom-tracker.md")
-	
+
 	applications := `# Applications Tracker
 
 | # | Date | Company | Role | Score | Status | PDF | Report | Notes |

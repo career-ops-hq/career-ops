@@ -38,6 +38,8 @@
 
 <p align="center"><strong>740+ вакансий оценено · 100+ персонализированных резюме · 1 позиция мечты получена</strong></p>
 
+<p align="center"><sub>Создано и поддерживается: <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
+
 <p align="center">
   <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Присоединиться_к_сообществу-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
   &nbsp;
@@ -69,7 +71,7 @@
 
 career-ops превращает любой AI-CLI в полноценный командный центр для поиска работы. Вместо ручного ведения таблиц с откликами вы получаете ИИ-пайплайн, который:
 
-- **Оценивает вакансии** по структурированной системе A–H (пять параметров, формирующих оценку 1–5)
+- **Оценивает вакансии** по структурированной системе A-H (пять параметров, формирующих оценку 1–5)
 - **Генерирует персонализированные PDF-резюме** — оптимизированные под ATS, адаптированные под каждую вакансию
 - **Сканирует порталы** автоматически (Greenhouse, Ashby, Lever и др.; российские площадки настраиваются в `portals.yml`)
 - **Пакетная обработка** — оценка 10+ вакансий параллельно через суб-агентов
@@ -117,7 +119,7 @@ claude   # или gemini / codex / qwen / opencode — открой здесь �
 <summary><b>Предпочитаешь настроить вручную? (git clone)</b></summary>
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # нужно только для генерации PDF
 claude   # открой свой AI-CLI — он проведёт онбординг при первом запуске
@@ -158,7 +160,7 @@ career-ops — одна slash-команда с множеством режим�
 └────────┬─────────┘
          │
 ┌────────┼─────────┐
-│  Оценка A–H      │  Совпадение, пробелы, исследование компенсации, STAR-истории
+│  Оценка A-H      │  Совпадение, пробелы, исследование компенсации, STAR-истории
 │  (читает cv.md)  │
 └────────┬─────────┘
          │

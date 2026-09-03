@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Thanks for proposing a source! This form walks the five rules of the
-        [Source Indexing Policy](https://github.com/santifer/career-ops/blob/main/CONTRIBUTING.md#source-indexing-policy).
+        [Source Indexing Policy](https://github.com/career-ops-hq/career-ops/blob/main/CONTRIBUTING.md#source-indexing-policy).
         Operators proposing their own board are welcome — that's what rule-based gates are for.
         You don't need code to propose a source; if you already have a provider PR, link it below.
   - type: input

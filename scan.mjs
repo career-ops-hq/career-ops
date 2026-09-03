@@ -37,7 +37,23 @@
  *   node scan.mjs --help                       # print this usage block and exit
  */
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  fchmodSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'fs';
+import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import * as yaml from 'js-yaml';
@@ -57,6 +73,7 @@ import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { promoteKnownFragmentIdentity } from './url-key.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -74,7 +91,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
 
-const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
+export const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
 const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(DATA_ROOT, 'config/profile.yml');
 // Overridable for the same reason the two inputs above are (#2271). A second
 // search lane - a bridge/income track, a career-change track, a partner sharing
@@ -82,8 +99,13 @@ const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(DATA_ROOT, 'con
 // two it still writes into the one inbox and the one dedup history. That is not
 // just untidy: scan-history.tsv IS the dedup source, so a posting surfaced in
 // lane A is silently counted as a duplicate in lane B and never shown at all.
-const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(DATA_ROOT, 'data/scan-history.tsv');
-const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data/pipeline.md');
+// Exported because scan-ats-full.mjs, scan-interamt.mjs and scan-hn.mjs write to
+// these same files through appendToPipeline/appendToScanHistory. They each used
+// to carry their own bare-relative copy, so a sibling could check existence and
+// create data/pipeline.md in the cwd, then append the actual results to the
+// anchored one (#3510). One resolution, imported, cannot drift.
+export const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(DATA_ROOT, 'data/scan-history.tsv');
+export const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data/pipeline.md');
 const APPLICATIONS_PATH = path.join(DATA_ROOT, 'data/applications.md');
 const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 
@@ -98,6 +120,48 @@ try {
 }
 
 const CONCURRENCY = 10;
+
+export function isIgnorableDirectoryFsyncError(err, platform = process.platform) {
+  return ['EINVAL', 'ENOTSUP', 'ENOSYS'].includes(err?.code)
+    || (platform === 'win32' && ['EACCES', 'EPERM'].includes(err?.code));
+}
+
+export function atomicWriteFile(filePath, text) {
+  const fileStat = lstatSync(filePath, { throwIfNoEntry: false });
+  const targetPath = fileStat?.isSymbolicLink() ? realpathSync(filePath) : filePath;
+  const tempPath = `${targetPath}.tmp-${process.pid}-${randomUUID()}`;
+  let fd = null;
+  let directoryFd = null;
+  try {
+    const existingMode = existsSync(targetPath) ? statSync(targetPath).mode & 0o7777 : null;
+    fd = openSync(tempPath, 'wx', 0o600);
+    if (existingMode !== null) fchmodSync(fd, existingMode);
+    writeFileSync(fd, text, 'utf-8');
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = null;
+    renameSync(tempPath, targetPath);
+    try {
+      directoryFd = openSync(path.dirname(targetPath), 'r');
+      fsyncSync(directoryFd);
+    } catch (err) {
+      if (!isIgnorableDirectoryFsyncError(err)) throw err;
+    } finally {
+      if (directoryFd !== null) closeSync(directoryFd);
+      directoryFd = null;
+    }
+  } catch (err) {
+    if (fd !== null) closeSync(fd);
+    if (directoryFd !== null) closeSync(directoryFd);
+    try { unlinkSync(tempPath); } catch { /* best effort */ }
+    throw err;
+  }
+}
+
+export function emitJsonReceipt(receipt, exitCode) {
+  process.stdout.write(`${JSON.stringify(receipt)}\n`);
+  process.exitCode = exitCode;
+}
 
 // Provider loading + routing live in providers/_registry.mjs so the portal
 // health check (verify-portals.mjs) can reuse the exact same layer without
@@ -152,7 +216,10 @@ export function matchedTitleKeywords(title, titleFilter) {
 //     override; for country-level terms that are never a false rejection)
 //   - `always_allow` matches → pass (takes precedence over `block` — lets a
 //     multi-location string like "Remote, Belgium or France" through because
-//     the home region is an option, even though "france" is blocked)
+//     the home region is an option, even though "france" is blocked). When
+//     always_allow names the US as a country (united states / usa / u.s. /
+//     u.s.a.), USPS state names and 2-letter codes are additional always_allow
+//     matches, so block: [Dublin] does not drop "Dublin, OH".
 //   - `block` matches → reject
 //   - `allow` empty → pass (already cleared block)
 //   - `allow` non-empty → must match at least one keyword, OR the TITLE carries
@@ -202,6 +269,78 @@ function compileLocationKeywordList(value) {
   return normalizeKeywordList(value).map(compileLocationKeyword);
 }
 
+// Frozen USPS state-name + abbreviation table. Not a world gazetteer: only
+// consulted when always_allow already names the United States as a country,
+// so EU-targeted configs (no US token) keep their previous semantics.
+const US_COUNTRY_ALWAYS_ALLOW = new Set(['united states', 'usa', 'u.s.', 'u.s.a.']);
+const USPS_STATES = Object.freeze([
+  Object.freeze(['alabama', 'al']),
+  Object.freeze(['alaska', 'ak']),
+  Object.freeze(['arizona', 'az']),
+  Object.freeze(['arkansas', 'ar']),
+  Object.freeze(['california', 'ca']),
+  Object.freeze(['colorado', 'co']),
+  Object.freeze(['connecticut', 'ct']),
+  Object.freeze(['delaware', 'de']),
+  Object.freeze(['florida', 'fl']),
+  Object.freeze(['georgia', 'ga']),
+  Object.freeze(['hawaii', 'hi']),
+  Object.freeze(['idaho', 'id']),
+  Object.freeze(['illinois', 'il']),
+  Object.freeze(['indiana', 'in']),
+  Object.freeze(['iowa', 'ia']),
+  Object.freeze(['kansas', 'ks']),
+  Object.freeze(['kentucky', 'ky']),
+  Object.freeze(['louisiana', 'la']),
+  Object.freeze(['maine', 'me']),
+  Object.freeze(['maryland', 'md']),
+  Object.freeze(['massachusetts', 'ma']),
+  Object.freeze(['michigan', 'mi']),
+  Object.freeze(['minnesota', 'mn']),
+  Object.freeze(['mississippi', 'ms']),
+  Object.freeze(['missouri', 'mo']),
+  Object.freeze(['montana', 'mt']),
+  Object.freeze(['nebraska', 'ne']),
+  Object.freeze(['nevada', 'nv']),
+  Object.freeze(['new hampshire', 'nh']),
+  Object.freeze(['new jersey', 'nj']),
+  Object.freeze(['new mexico', 'nm']),
+  Object.freeze(['new york', 'ny']),
+  Object.freeze(['north carolina', 'nc']),
+  Object.freeze(['north dakota', 'nd']),
+  Object.freeze(['ohio', 'oh']),
+  Object.freeze(['oklahoma', 'ok']),
+  Object.freeze(['oregon', 'or']),
+  Object.freeze(['pennsylvania', 'pa']),
+  Object.freeze(['rhode island', 'ri']),
+  Object.freeze(['south carolina', 'sc']),
+  Object.freeze(['south dakota', 'sd']),
+  Object.freeze(['tennessee', 'tn']),
+  Object.freeze(['texas', 'tx']),
+  Object.freeze(['utah', 'ut']),
+  Object.freeze(['vermont', 'vt']),
+  Object.freeze(['virginia', 'va']),
+  Object.freeze(['washington', 'wa']),
+  Object.freeze(['west virginia', 'wv']),
+  Object.freeze(['wisconsin', 'wi']),
+  Object.freeze(['wyoming', 'wy']),
+]);
+
+// 2-letter codes: comma-state (", OH" / ",OH, USA") or a trailing token
+// ("Dublin OH", Workday URL hint "dublin oh"). Not a generic word-boundary —
+// English "in"/"or"/"me" in "Remote, Belgium or France" must not impersonate
+// Indiana/Oregon/Maine. State *names* still use compileLocationKeyword.
+function compileUsStateAbbrev(abbr) {
+  const escaped = abbr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(?:,\\s*${escaped}(?![a-z0-9])|(?:^|[^a-z0-9])${escaped}[^a-z0-9]*$)`);
+  return (lower) => re.test(lower);
+}
+
+const US_STATE_ALWAYS_ALLOW_MATCHERS = USPS_STATES.flatMap(([name, abbr]) => [
+  compileLocationKeyword(name),
+  compileUsStateAbbrev(abbr),
+]);
+
 // Some providers report a rolled-up display string ("5 Locations", "2 Locations")
 // while the canonical URL still names the real primary location. Workday is the
 // common case: .../job/Hyderabad-Telangana-India/Network-Engineer_R-65193-1 shows
@@ -211,17 +350,18 @@ function compileLocationKeywordList(value) {
 // Deliberately narrow: only the post-`/job/` segment is inspected, never the whole
 // URL. Scanning the full URL would match company slugs and ATS subdomains by
 // accident (a "china" or "india" substring inside an unrelated path). Providers
-// without the `/job/{location}/` convention (Greenhouse, Lever, Ashby) yield no
-// hint and keep their previous behaviour exactly.
+// without the Workday hostname convention yield no hint and keep their previous
+// behaviour exactly, even if their own routes also contain `/job/{id}`.
 export function locationHintFromUrl(url) {
   if (typeof url !== 'string' || url.trim() === '') return '';
-  let pathname;
+  let parsed;
   try {
-    pathname = new URL(url).pathname;
+    parsed = new URL(url);
   } catch {
     return '';
   }
-  const segments = pathname.split('/').filter(Boolean);
+  if (!parsed.hostname.toLowerCase().endsWith('.myworkdayjobs.com')) return '';
+  const segments = parsed.pathname.split('/').filter(Boolean);
   const jobIdx = segments.lastIndexOf('job');
   if (jobIdx === -1 || jobIdx === segments.length - 1) return '';
   let segment = segments[jobIdx + 1];
@@ -284,7 +424,15 @@ export function titleSignalsRemote(title) {
 // location-only semantics, which is what the existing unit tests exercise.
 export function buildLocationFilter(locationFilter) {
   if (!locationFilter) return () => true;
-  const alwaysAllow = compileLocationKeywordList(locationFilter.always_allow);
+  const alwaysAllowKeywords = normalizeKeywordList(locationFilter.always_allow);
+  const alwaysAllow = alwaysAllowKeywords.map(compileLocationKeyword);
+  // US-targeted configs list the country in always_allow and foreign cities
+  // in block. "Dublin, OH" does not contain "United States", so without this
+  // expansion block: [Dublin] rejects a real US job. Opt-in on the country
+  // token — configs with no US always_allow entry are unchanged.
+  if (alwaysAllowKeywords.some(k => US_COUNTRY_ALWAYS_ALLOW.has(k))) {
+    alwaysAllow.push(...US_STATE_ALWAYS_ALLOW_MATCHERS);
+  }
   const allow = compileLocationKeywordList(locationFilter.allow);
   const block = compileLocationKeywordList(locationFilter.block);
   const blockHard = compileLocationKeywordList(locationFilter.block_hard);
@@ -1089,6 +1237,7 @@ export function normalizeUrlForDedup(url) {
       parsed.searchParams.delete(param);
     }
   }
+  promoteKnownFragmentIdentity(parsed);
   parsed.hash = '';
   parsed.pathname = parsed.pathname.replace(/\/+$/, '').toLowerCase() || '/';
   return parsed.toString();
@@ -1231,18 +1380,34 @@ function extractPipelineCompanyRole(line) {
  * Build the seen-URL set from already-read source texts. An absent file is
  * passed as '' (the readIfExists convention shared with
  * `collectSeenCompanyRoles`) — every parse below yields nothing on ''.
+ *
+ * `extraTokensFor(url, portal)` (optional) lets a caller add provider-scoped
+ * dedup tokens alongside the plain normalized-URL one — e.g. a Workday
+ * requisition served under several tenant sites (#3439): a historical row
+ * recorded under site A's URL wouldn't otherwise match a fresh job fetched
+ * from site B, since normalizeUrlForDedup compares URLs verbatim. Only
+ * scan-history.tsv rows carry a `portal` column (the pipeline.md/
+ * applications.md sources don't record which scanner/provider produced a
+ * URL), so the hook only fires there. Return a string, an array of strings,
+ * or a falsy value for "nothing extra".
  */
-export function collectSeenUrls(sources = {}, policy = {}) {
+export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = {}) {
   const { scanHistoryText = '', pipelineText = '', applicationsText = '' } = sources;
   const seen = new Set();
   let recheckEligible = 0;
 
   // scan-history.tsv
   for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
-    const [url, firstSeen, , , , status = 'added'] = line.split('\t');
+    const [url, firstSeen, portal, , , status = 'added'] = line.split('\t');
     if (!url) continue;
-    if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) seen.add(normalizeUrlForDedup(url));
-    else recheckEligible++;
+    if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
+      seen.add(normalizeUrlForDedup(url));
+      if (extraTokensFor) {
+        for (const token of [].concat(extraTokensFor(url, portal) || [])) {
+          if (token) seen.add(token);
+        }
+      }
+    } else recheckEligible++;
   }
 
   // pipeline.md — extract URLs from checkbox lines, wherever the URL sits in the
@@ -1270,12 +1435,13 @@ export function loadSeenUrls(policy = {}, {
   scanHistoryPath = SCAN_HISTORY_PATH,
   pipelinePath = PIPELINE_PATH,
   applicationsPath = APPLICATIONS_PATH,
+  extraTokensFor,
 } = {}) {
   return collectSeenUrls({
     scanHistoryText: readIfExists(scanHistoryPath),
     pipelineText: readIfExists(pipelinePath),
     applicationsText: readIfExists(applicationsPath),
-  }, policy);
+  }, policy, { extraTokensFor });
 }
 
 /**
@@ -1919,11 +2085,9 @@ export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } 
 
   await withPipelineLock(pipelinePath, async () => {
     // Auto-create with standard skeleton if missing (fresh-install guard).
-    if (!existsSync(pipelinePath)) {
-      writeFileSync(pipelinePath, PIPELINE_SKELETON, 'utf-8');
-    }
-
-    let text = readFileSync(pipelinePath, 'utf-8');
+    let text = existsSync(pipelinePath)
+      ? readFileSync(pipelinePath, 'utf-8')
+      : PIPELINE_SKELETON;
 
     const marker = PENDING_MARKERS.find(m => text.includes(m)) ?? null;
     const idx = marker !== null ? text.indexOf(marker) : -1;
@@ -1947,7 +2111,7 @@ export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } 
       text = text.slice(0, insertAt) + block + text.slice(insertAt);
     }
 
-    writeFileSync(pipelinePath, text, 'utf-8');
+    atomicWriteFile(pipelinePath, text);
   });
 }
 
@@ -1974,7 +2138,7 @@ export async function appendToScanHistory(offers, date, status = 'added') {
     // outcomes (`skipped_expired`, etc.) without the legacy `(expired)` suffix.
     if (!existsSync(SCAN_HISTORY_PATH)) {
       mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
-      writeFileSync(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\n', 'utf-8');
+      atomicWriteFile(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\n');
     }
 
     const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
@@ -1985,7 +2149,12 @@ export async function appendToScanHistory(offers, date, status = 'added') {
 
 // ── Company blacklist (#1742) ───────────────────────────────────────
 
-const BLACKLIST_PATH = 'data/blacklist.md';
+// User Layer, so it follows the data root like every other input this file reads
+// (#3510). It was a bare relative string, i.e. resolved against process.cwd(),
+// which meant a user with a data root configured got whatever blacklist happened
+// to sit in the directory they ran from — usually none, so their do-not-apply
+// list was silently empty while the run reported no filtering at all.
+const BLACKLIST_PATH = path.join(DATA_ROOT, 'data/blacklist.md');
 
 /**
  * Parse the user's do-not-apply list (data/blacklist.md, user layer, opt-in).
@@ -2034,7 +2203,11 @@ export function loadBlacklist(filePath = BLACKLIST_PATH) {
 
 // ── Scan-run persistence (#1604) ────────────────────────────────────
 
-const SCAN_RUNS_PATH = 'data/scan-runs.tsv';
+// Anchored for the same reason (#3510), and with a reader to agree with:
+// stats.mjs:36 reads join(DATA_ROOT, 'data', 'scan-runs.tsv'). While this was
+// cwd-relative the writer and the reader could name different files, and the
+// trend stats simply under-reported whatever landed elsewhere.
+const SCAN_RUNS_PATH = path.join(DATA_ROOT, 'data/scan-runs.tsv');
 
 // One row of run counters per non-dry scan — today these numbers are printed
 // once in the summary and lost when the terminal scrolls. Full ISO timestamp
@@ -2076,7 +2249,7 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
   // neighbouring counter. Surface the mismatch here rather than papering over it — rewriting the
   // header in place would misalign every historical row instead.
   if (!existsSync(filePath)) {
-    writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
+    atomicWriteFile(filePath, SCAN_RUNS_HEADER);
   } else {
     const onDisk = (readFileSync(filePath, 'utf-8').split('\n', 1)[0] || '') + '\n';
     if (onDisk !== SCAN_RUNS_HEADER) {
@@ -2107,7 +2280,18 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
 
 // ── Portal health persistence (#1744) ───────────────────────────────
 
-const PORTAL_HEALTH_PATH = 'data/portal-health.tsv';
+// Anchored to the data root (#3510), read by stats.mjs:39 at the same anchor.
+//
+// This path has moved twice. It was dirname(fileURLToPath(import.meta.url)) —
+// the script's own directory — until 96c578b made it cwd-relative, because a
+// sandboxed run was writing fixture rows into the live data/portal-health.tsv of
+// whatever checkout owned scan.mjs. That problem was real; the mechanism traded
+// one unanchored path for another, and left this file with two different rules
+// for where user data lives. Isolation now comes from CAREER_OPS_ROOT, which is
+// how the rest of the suite already sandboxes writes — see
+// tests/portal-health-path.test.mjs, which still asserts the checkout's own data
+// directory is never touched.
+const PORTAL_HEALTH_PATH = path.join(DATA_ROOT, 'data/portal-health.tsv');
 export const PORTAL_HEALTH_HEADER = 'timestamp\tcompany\tstatus\n';
 
 // Locked (portal-health-lock.mjs) so a concurrent read-modify-write of this
@@ -2116,7 +2300,7 @@ export const PORTAL_HEALTH_HEADER = 'timestamp\tcompany\tstatus\n';
 export async function appendPortalHealth(healthRecords, filePath = PORTAL_HEALTH_PATH) {
   await withPortalHealthLock(filePath, async () => {
     mkdirSync(path.dirname(filePath), { recursive: true });
-    if (!existsSync(filePath)) writeFileSync(filePath, PORTAL_HEALTH_HEADER, 'utf-8');
+    if (!existsSync(filePath)) atomicWriteFile(filePath, PORTAL_HEALTH_HEADER);
     let lines = '';
     for (const r of healthRecords) {
       lines += [r.timestamp, r.company, r.status].join('\t') + '\n';
@@ -2306,7 +2490,7 @@ function guardStatusFor(code) {
 const KNOWN_FLAGS = [
   '--dry-run', '--verify', '--headed-fallback', '--throttle', '--rediscover-404',
   '--include-blacklisted', '--company', '--posted-after', '--posted-before',
-  '--since', '--quiet', '--help', '-h',
+  '--since', '--quiet', '--json', '--help', '-h',
 ];
 
 // Flags whose space-separated value is the NEXT argv token (the `--flag=value`
@@ -2328,6 +2512,7 @@ const USAGE = `Usage:
   node scan.mjs --since 7                    # postings from the last 7 days
   node scan.mjs --posted-after 2026-07-01    # absolute lower bound on posting date
   node scan.mjs --posted-before 2026-08-01   # absolute upper bound on posting date
+  node scan.mjs --json                       # emit one machine-readable receipt on stdout
   node scan.mjs --quiet                      # suppress the manifesto footer
   node scan.mjs --help                       # print this usage block and exit`;
 
@@ -2335,6 +2520,8 @@ async function main() {
   const args = process.argv.slice(2);
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   const dryRun = args.includes('--dry-run');
+  const jsonMode = args.includes('--json');
+  if (jsonMode) console.log = console.error.bind(console);
   const verify = args.includes('--verify');
   // Opt-in: on an anti-bot challenge (e.g. pracuj.pl Cloudflare wall), retry the
   // URL in a headed browser. Off by default — headed Chromium needs a display, so
@@ -3034,6 +3221,26 @@ async function main() {
   console.log(`\n→ Run /career-ops pipeline to evaluate new offers.`);
   console.log('→ Share results and get help: https://discord.gg/8pRpHETxa4');
 
+  if (jsonMode) {
+    const filtered = totalFilteredTitle + totalFilteredTier + totalFilteredLocation
+      + totalFilteredPostingAge + totalFilteredPostedDate + totalFilteredSalary
+      + totalFilteredContent + totalFilteredCountryEligibility + totalFilteredBlacklist
+      + totalFilteredVisa + totalFilteredCooldown;
+    emitJsonReceipt({
+      version: 'careerops.scan.receipt@1',
+      date,
+      scanned: targets.length,
+      skipped: skippedCount,
+      found: totalFound,
+      filtered,
+      duplicates: totalDupes,
+      added: verifiedOffers.length,
+      added_urls: verifiedOffers.map(offer => offer.url),
+      errors: errors.map(({ company, error }) => ({ company, error })),
+      dry_run: dryRun,
+    }, errors.length > 0 ? 2 : 0);
+  }
+
   // One-time-ever manifesto note: first successful REAL run only. The state
   // file keeps it from ever repeating; --dry-run must leave no trace, and a
   // piped/quiet run is not the moment for it.
@@ -3058,6 +3265,6 @@ if (isMainModule(import.meta.url)) {
   main().catch(err => {
     console.error('Fatal:', err.message);
     writeRunFailureRow('failed');
-    process.exit(1);
+    process.exitCode = 1;
   });
 }

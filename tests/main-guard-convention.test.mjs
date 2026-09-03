@@ -29,6 +29,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isMainModule } from '../lib/is-main-module.mjs';
+import { isNestedCheckout } from '../lib/mjs-files.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -212,6 +213,14 @@ function walk(dir, out = []) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       if (SKIP_DIRS.has(entry.name)) continue;
+      // A linked worktree is a second checkout of this repo at some other
+      // commit, and `.git` in SKIP_DIRS does not catch one — it marks itself
+      // with a `.git` FILE (#3499). The dot-prefix skip above happens to cover
+      // Claude Code's default `.claude/worktrees/`, but nothing keeps a
+      // worktree there; one at `wt/` would put a stale copy of every entrypoint
+      // under enforcement, and this gate would grade source the branch does not
+      // contain — passing or failing on the age of somebody's worktree.
+      if (isNestedCheckout(full)) continue;
       walk(full, out);
     } else if (entry.name.endsWith('.mjs')) {
       out.push(full);
@@ -237,6 +246,10 @@ const EXEMPT = new Map([
   // Asserts that a bash-embedded node snippet reads its input file via ITS OWN
   // argv[1] (injection safety, not a main-guard); the literal lives in strings.
   ['tests/batch-runner-jd-prefetch.test.mjs', 'asserts another script\u2019s argv[1] usage in strings'],
+  // Spawns lib/api.mjs via `node -e` to test it under specific env vars; the
+  // -e script imports the module from ITS OWN argv[1], the URL passed as the
+  // next execFile array element. Not this file's main-guard.
+  ['tests/plugins/h1b-sponsor.test.mjs', 'imports a module via a spawned child\u2019s own argv[1] in -e scripts'],
 ]);
 
 function entryRefViolations(src) {

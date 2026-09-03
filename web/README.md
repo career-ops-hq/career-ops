@@ -6,8 +6,8 @@ the exact same files the CLI reads and writes (`data/pipeline.md`,
 database, no server. If you never run it, nothing about your CLI workflow changes.
 
 > **Status: alpha.** Expect rough edges. Feedback →
-> [Discussion #1142](https://github.com/santifer/career-ops/discussions/1142) ·
-> roadmap context → [Discussion #156](https://github.com/santifer/career-ops/discussions/156).
+> [Discussion #1142](https://github.com/career-ops-hq/career-ops/discussions/1142) ·
+> roadmap context → [Discussion #156](https://github.com/career-ops-hq/career-ops/discussions/156).
 
 ## Quick start
 
@@ -27,7 +27,7 @@ Open http://localhost:3000. The app reads the career-ops checkout it lives in
 - **Pipeline** — your tracker as a sortable, filterable table; status changes
   write back through the core's own scripts.
 - **Explore** — the free reverse-ATS scan with an honest partial-dataset
-  indicator, plus AI-assisted discovery (bring your own CLI/keys).
+  indicator, plus AI-assisted discovery (bring your own CLI/keys, including Grok Build CLI).
 - **Apply** — assisted form prefill with a hard rule inherited from the core:
   **it never submits for you** — you always press the button.
 - **Today / Analytics / CV / Config** — action queue, funnel, CV editing with
@@ -89,10 +89,10 @@ Three constraints follow from all this:
 - **Web suites use `node:test`; core suites don't.** Here you write
   `import { test } from "node:test"` with `node:assert/strict`. The root
   `tests/` suite deliberately uses neither — it has its own `pass`/`fail`
-  helpers, because [#1440](https://github.com/santifer/career-ops/issues/1440)
+  helpers, because [#1440](https://github.com/career-ops-hq/career-ops/issues/1440)
   requires the core suite to run on a bare clone with "no framework, not even
   `node:test`". Don't carry either style across the boundary.
 
 `tests/web-test-layout.test.mjs` in the **root** suite enforces all of the above
 on every PR, including that `npm test` never goes back to listing suites by name
-([#2360](https://github.com/santifer/career-ops/issues/2360)).
+([#2360](https://github.com/career-ops-hq/career-ops/issues/2360)).

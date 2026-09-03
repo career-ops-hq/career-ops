@@ -24,9 +24,12 @@ Supported inputs:
 1. `/career-ops email {report-number-or-slug}`
    - Load the matching `reports/{NNN}-*.md`.
    - Use the report header, score, archetype, PDF status, and evaluation content.
-   - If `data/pdf-index.tsv` contains a PDF for that report, mention it as the CV
-     attachment candidate. If no PDF is indexed, say that the CV should be
-     generated first via `/career-ops pdf {slug}` or attached manually.
+   - If `data/pdf-index.tsv` contains a row for that report, use that same row's
+     HTML companion to align the fit points with the tailored CV and mention its
+     PDF as the attachment candidate. If no usable tailored HTML is indexed,
+     select fit points from `cv.md`. If no PDF is indexed, say that the CV
+     should be generated first via `/career-ops pdf {slug}` or attached
+     manually.
 
 2. `/career-ops email {pasted JD}`
    - Use the pasted JD directly.
@@ -88,6 +91,28 @@ user's own rules.
 attachment checklist, subject/body structure, the draft-only rule — is set here
 and is not affected by it.
 
+### Tailored CV alignment source
+
+For an invocation resolved to a report, normalize the report number when
+matching `data/pdf-index.tsv` (`008` and `8` are the same report). Ignore blank
+and comment rows. The manifest writer keeps one current row per report; if a
+hand-edited manifest contains duplicates, use the last matching row.
+
+Resolve the row's workspace-relative `pdf` and `html` columns against the
+workspace root (the directory that contains `data/`), matching the base used by
+the manifest writer. Use the HTML companion, never the PDF, as the readable
+representation of the attached CV. It is usable only when the resolved HTML
+path exists and is a file. Do not guess a similarly named file or silently use
+an artifact belonging to the same company but a different report.
+
+The tailored HTML is an **alignment guide, not a new source of truth**. It may
+control which supported bullets are selected and how they are ordered or
+framed, but every fact in the email must still be verified against the primary
+source-of-truth files above. If the row is absent, malformed, or its HTML file
+is unavailable, fall back explicitly to `cv.md` for fit-point selection. The
+PDF path may still be shown in the attachment checklist when that file exists,
+but never claim the body was aligned to it without a readable HTML companion.
+
 ### Profile fields
 
 Use these optional fields when present:
@@ -144,7 +169,13 @@ and follow the dedicated sections below instead of the Step 5 structures.
 
 ## Step 3 — Extract Fit Points
 
-From the report/JD and source-of-truth files, select 2-3 fit points:
+From the report/JD and source-of-truth files, select 2-3 fit points. When the
+Tailored CV alignment source resolved a usable HTML companion, prefer the
+proof points and emphasis present in that artifact so the body describes the
+CV being attached. Otherwise, use `cv.md` as the selection source and say that
+HTML alignment was unavailable and `cv.md` was used before presenting the
+draft. A missing HTML alignment source does not by itself mean the tailored PDF
+is missing.
 
 - One role-to-profile match: stack, domain, workflow, product type, or delivery
   style.
@@ -176,6 +207,11 @@ Attachments to include:
 Rules:
 - If `application_email.include_attachment_checklist` is `false`, omit this
   checklist.
+- For a report-based invocation, keep the PDF candidate from the selected
+  manifest row. When that row has a usable HTML companion, let it guide Step 3.
+  When it does not, use `cv.md` for Step 3 as described above, but still show
+  that row's PDF when the resolved PDF path exists. Do not select the prose
+  source and attachment from different rows.
 - Mention only files that exist or are indexed. Do not claim a cover letter
   exists unless it does.
 - Do not attach files or send anything.

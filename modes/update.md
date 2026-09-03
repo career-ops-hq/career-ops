@@ -16,7 +16,7 @@ Run `node update-system.mjs check` and parse the JSON output.
 Show the user what will change. Run:
 
 ```bash
-git fetch https://github.com/santifer/career-ops.git main || {
+git fetch https://github.com/career-ops-hq/career-ops.git main || {
   echo "Failed to fetch latest changes. Cannot generate an accurate diff preview."
   exit 1
 }
@@ -42,13 +42,13 @@ Present to the user as a clear summary:
 > - Other: {N} files changed
 >
 > **Changelog:**
-> {changelog from update-system.mjs check output}
+> [Render in {language.output}: {changelog from update-system.mjs check output}]
 >
 > Your personal files (CV, profile, tracker, reports) will NOT be touched.
 
 `changelog` can come back empty, either because the release carries no notes or because the check resolved the version without reading the releases API. Do not render the **Changelog:** line when that happens — a lone `> **Changelog:**` with nothing under it reads as a failure, and nothing failed. Use this in place of those two lines:
 
-> **Changelog:** not available for v{remote}. The release notes are at https://github.com/santifer/career-ops/releases
+> **Changelog:** not available for v{remote}. The release notes are at https://github.com/career-ops-hq/career-ops/releases
 
 If the user wants details on specific files, show the actual diff for those files using `git diff HEAD..FETCH_HEAD -- {path}`.
 
@@ -73,7 +73,7 @@ Ask the user for confirmation:
 If yes:
 1. Capture the current commit as a run-specific pre-update baseline before apply runs, e.g. `PRE_UPDATE_REF=$(git rev-parse HEAD)`. Don't rely on `backup-pre-update-{local}` alone — `update-system.mjs apply` reuses that branch if it already exists, so it may point at an older snapshot.
 2. **Save local CLAUDE.md additions.** `update-system.mjs apply` treats CLAUDE.md as a system file and resets it to the two-line template (`@AGENTS.md` + the local-additions comment). Before applying, read the current CLAUDE.md and save everything after that two-line header — it will need to be restored in step 4 below. If CLAUDE.md has nothing beyond the two-line header, note that there is nothing to restore.
-3. Run `node update-system.mjs apply`, capturing its exit code without stopping on failure yet — the restore in step 4 must run either way.
+3. Run `node update-system.mjs apply --confirm`, capturing its exit code without stopping on failure yet — the restore in step 4 must run either way. The `--confirm` flag is required so scheduled checks can never install files silently.
 4. **Restore local CLAUDE.md additions**, regardless of whether step 3 succeeded or failed. `apply` resets CLAUDE.md before it can fail partway through, so a failed apply still leaves CLAUDE.md at the blank two-line template. Re-read CLAUDE.md and append the content saved in step 2 after the two-line header.
 5. Now check the exit code captured in step 3:
    - If non-zero, treat apply as failed. Show the captured output and offer:

@@ -1,5 +1,5 @@
 /**
- * discover-ats.test.mjs — Systematic test suite for discover-ats.mjs
+ * tests/discover-ats.test.mjs — Systematic test suite for discover-ats.mjs
  *
  * Tests the pure, network-free functions with inline fixtures:
  * - deriveSlug (lowercasing, punctuation, edge cases)
@@ -13,9 +13,12 @@
  * - CLI behavior (--self-test, default preview never writes, --write opt-in,
  *   unknown --vendors, --help) via execFileSync — no live network.
  *
- * Run: node discover-ats.test.mjs
+ * Run: node test-all.mjs --only discover-ats
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
  *
- * Issue #1864 — github.com/santifer/career-ops
+ * Issue #1864 — github.com/career-ops-hq/career-ops
  */
 
 import {
@@ -284,6 +287,44 @@ eq('parseWorkdayHint object form keeps underscores in site', wh3?.site, 'Externa
 
 const wh4 = parseWorkdayHint({ name: 'Nvidia', website: 'https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite' });
 eq('parseWorkdayHint reads from website field', wh4?.tenant, 'nvidia');
+
+// A CXS endpoint pasted as the hint carries the site behind /wday/cxs/{tenant}/.
+// Parsed as a careers page it yields site `wday`, and the generated entry then
+// pins `careers_url: .../wday` — a plausible-looking line for a board that does
+// not exist (#3498). Coordinates must match what the careers-page form gives.
+const whCxs = parseWorkdayHint({ name: 'CrowdStrike', workday: 'https://crowdstrike.wd5.myworkdayjobs.com/wday/cxs/crowdstrike/crowdstrikecareers/jobs' });
+const whPlain = parseWorkdayHint({ name: 'CrowdStrike', workday: 'https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers' });
+eq('parseWorkdayHint CXS URL site', whCxs?.site, 'crowdstrikecareers');
+eq('parseWorkdayHint CXS URL tenant', whCxs?.tenant, 'crowdstrike');
+eq('parseWorkdayHint CXS URL instance', whCxs?.instance, 'wd5');
+eq('parseWorkdayHint CXS URL === careers-page URL', JSON.stringify(whCxs), JSON.stringify(whPlain));
+
+const whCxsBare = parseWorkdayHint({ name: 'CrowdStrike', careers_url: 'https://crowdstrike.wd5.myworkdayjobs.com/wday/cxs/crowdstrike/crowdstrikecareers' });
+eq('parseWorkdayHint CXS URL without trailing /jobs', whCxsBare?.site, 'crowdstrikecareers');
+
+const whCxsJob = parseWorkdayHint({ name: 'Acme', website: 'https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/job/Toronto-ON/Eng_R1' });
+eq('parseWorkdayHint per-job CXS URL keeps the site', whCxsJob?.site, 'External');
+
+// The whole point of the coordinates: they rebuild a careers_url that resolves.
+eq(
+  'buildWorkdayCandidates from a CXS hint yields the real board URL',
+  buildWorkdayCandidates(whCxs)[0].careers_url,
+  'https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers',
+);
+
+// Both URL patterns are anchored, so a Workday URL embedded in a wrapper (a
+// redirect's next=, a tracking link) is not a hint. Unanchored, such a value
+// silently produces coordinates for whatever tenant it carries.
+eq(
+  'parseWorkdayHint ignores a careers URL embedded in a redirect wrapper',
+  parseWorkdayHint({ name: 'X', website: 'https://evil.example/r?next=https://acme.wd5.myworkdayjobs.com/Careers' }),
+  null,
+);
+eq(
+  'parseWorkdayHint ignores a CXS URL embedded in a redirect wrapper',
+  parseWorkdayHint({ name: 'X', website: 'https://evil.example/r?next=https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/External/jobs' }),
+  null,
+);
 
 eq('parseWorkdayHint returns null without any hint', parseWorkdayHint({ name: 'Adyen', careers_url: 'https://adyen.com' }), null);
 eq('parseWorkdayHint rejects unsafe tenant', parseWorkdayHint({ name: 'X', workday: { tenant: 'a/b', site: 'S' } }), null);

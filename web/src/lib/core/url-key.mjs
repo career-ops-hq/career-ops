@@ -36,6 +36,22 @@ const TRACKING_PARAMS = [
 ];
 
 /**
+ * Promote the one known identity-bearing SPA fragment before normalization
+ * drops fragments. MokaHR tenant pages share one path and identify postings
+ * only through `#/job/{id}`.
+ *
+ * @param {URL} url
+ */
+export function promoteKnownFragmentIdentity(url) {
+  if (url.hostname.toLowerCase() !== "app.mokahr.com") return;
+  const match = /^#\/job\/([^/?#]+)(?:\?[^#]*)?$/.exec(url.hash);
+  if (!match) return;
+  let jobId;
+  try { jobId = decodeURIComponent(match[1]); } catch { return; }
+  if (jobId) url.searchParams.set("mokahr_job_id", jobId);
+}
+
+/**
  * Reduce a posting URL to a stable comparison key.
  *
  * @param {string} raw - A posting URL (or any string).
@@ -59,6 +75,7 @@ export function normalizeUrl(raw) {
 
   u.protocol = "https:";
   u.hostname = u.hostname.toLowerCase();
+  promoteKnownFragmentIdentity(u);
   u.hash = "";
 
   const keep = [];

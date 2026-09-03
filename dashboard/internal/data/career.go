@@ -131,6 +131,7 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 			Date:    at("date"),
 			Company: at("company"),
 			Role:    at("role"),
+			JobURL:  at("url"),
 			Status:  at("status"),
 			HasPDF:  strings.Contains(at("pdf"), "\u2705"),
 		}
@@ -161,7 +162,9 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 		apps = append(apps, app)
 	}
 
-	// Enrich with job URLs using 5-tier strategy:
+	// Enrich with job URLs using the tracker URL as tier zero, followed by the
+	// legacy 5-tier strategy for trackers that predate the URL column:
+	// 0. URL column in the tracker
 	// 1. **URL:** field in report header (newest reports)
 	// 2. **Batch ID:** in report -> batch-input.tsv URL lookup
 	// 3. report_num -> batch-state completed mapping (legacy)
@@ -171,6 +174,9 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 	reportNumURLs := loadJobURLs(careerOpsPath)
 
 	for i := range apps {
+		if apps[i].JobURL != "" {
+			continue
+		}
 		if apps[i].ReportPath == "" {
 			continue
 		}
@@ -629,7 +635,7 @@ var trackerHeaderAliases = map[string]string{
 	"company": "company", "empresa": "company",
 	"via": "via", "role": "role", "puesto": "role",
 	"location": "location", "score": "score", "status": "status",
-	"pdf": "pdf", "report": "report", "notes": "notes",
+	"pdf": "pdf", "report": "report", "notes": "notes", "url": "url",
 }
 
 // legacyTrackerColumns is the original fixed layout in splitTrackerRow field

@@ -53,7 +53,7 @@
  *      node detect-reposts.mjs --self-test
  *      node detect-reposts.mjs --help
  *
- * Issue #1205 — github.com/santifer/career-ops
+ * Issue #1205 — github.com/career-ops-hq/career-ops
  */
 
 import { readFileSync, existsSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
