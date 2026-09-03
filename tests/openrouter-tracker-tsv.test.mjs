@@ -121,6 +121,21 @@ try {
     try { rmSync(work2, { recursive: true, force: true }); } catch { /* best effort */ }
   }
 
+  // Inverse case: prove the oracle above actually DISCRIMINATES, rather than
+  // being satisfied by any row carrying both literals. Built as two row strings
+  // — one correct, one transposed — so it is deterministic and needs no injected
+  // bug in merge-tracker to demonstrate. If landedInOwnColumns() is ever
+  // loosened back toward substring presence, this reddens on the spot, which is
+  // what keeps the two legs above from quietly going vacuous again.
+  const correctRow = `| 35 | ${today} | Acme Corp | (see report) | 4.0/5 | Evaluated | ❌ | ${link} |  |`;
+  const transposedRow = `| 35 | ${today} | Acme Corp | (see report) | Evaluated | 4.0/5 | ❌ | ${link} |  |`;
+  const cellsFor = (line) => line.split('|').map((c) => c.trim());
+  if (landedInOwnColumns(cellsFor(correctRow)) && !landedInOwnColumns(cellsFor(transposedRow))) {
+    pass('the column assertion accepts the correct row and rejects the transposed one');
+  } else {
+    fail('the column assertion does not discriminate a transposed row — the legs above are vacuous');
+  }
+
   // Guard: the source must WRITE the header, from the shared constant. The old
   // guard searched for the literal `num\tdate\tcompany\trole\tstatus` in the
   // source and would now pass vacuously either way, since the labels live in
