@@ -288,6 +288,19 @@ try {
     if (!/alert\(/i.test(html) && html.includes('<p>text</p>')) pass('sanitizeHtml() strips HTML comments (conditional-comment payloads included)');
     else fail(`sanitizeHtml() comment stripping wrong: ${html}`);
   }
+  {
+    const html = sanitizeHtml('<scr<script>ipt>alert(1)</scr</script>ipt><p>safe</p>');
+    if (!/<script/i.test(html) && html.includes('<p>safe</p>')) {
+      pass('sanitizeHtml() cannot reconstitute a script tag from text around a removed tag');
+    } else {
+      fail(`sanitizeHtml() leaked a reconstituted script payload: ${html}`);
+    }
+  }
+  {
+    const html = sanitizeHtml('<p>before</p><script>alert(1)<p>inside</p>');
+    if (html === '<p>before</p>') pass('sanitizeHtml() discards the remainder owned by an unterminated script element');
+    else fail(`sanitizeHtml() kept content from an unterminated script element: ${html}`);
+  }
 
   // ── parseJobDetail() ──────────────────────────────────────────────────
 
