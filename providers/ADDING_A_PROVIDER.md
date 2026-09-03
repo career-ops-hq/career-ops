@@ -76,6 +76,13 @@ export default {
   A branded/unrecognizable domain must **not** be matched by a URL-pattern
   `detect()` — use shape 2 or 3 instead, so the provider never claims an
   entry the user did not point at it.
+  For a host the pattern *does* match, claim the URL a real entry point
+  hands the user — a link off the company careers page, an aggregator, a
+  search hit — which is usually the ATS landing/root URL. Where a source
+  serves its listing at more than one path, accept the shallowest;
+  requiring a deeper canonical path the user would have to construct by
+  hand defeats the point of a URL-pattern `detect()`, and the entry
+  silently lands in `verify-portals` `skipped`.
 - `fetch(entry, ctx)` — required. Use `ctx.fetchJson` / `ctx.fetchText`
   (never bare `fetch`); `ctx.fetchResponse` returns the raw `Response` when
   you need headers. Optional `ctx.maxPages` and `ctx.sleep(ms)`. Returns a
@@ -109,6 +116,26 @@ shape from either list. A single-company provider is documented and tested
 against `tracked_companies:`, an aggregator/feed against `job_boards:`. The
 file's header comment must name the target list (reference:
 `providers/remotli.mjs`, `providers/yourator.mjs`).
+
+### The `enrichDate` hook (optional, rarely needed)
+
+An optional `async enrichDate(job, ctx)` fetches one posting's detail page
+to fill `postedAt` (and opportunistically `location`) for a source whose
+list page carries no date (`icims`). It is **not** in the core contract,
+and `_registry.mjs` never calls it. Its only caller is `scan-ats-full.mjs`,
+the reverse-ATS sweep, and only for a job that passed the title/location
+filters but came back undated — so the undated-drop policy has a date to
+judge.
+
+`scan-ats-full.mjs` imports a **fixed** set of modules (`greenhouse`,
+`lever`, `ashby`, `workday`, `icims`) with no registry lookup — a provider
+it does not import can define `enrichDate` and nothing will ever call it.
+The hook also overlaps the `fetchDetails` opt-in above, which already
+fetches the detail page on the normal `scan.mjs` path. Pick one:
+`fetchDetails` for a provider reached through `portals.yml`; `enrichDate`
+only when the provider is (or is being) wired into `scan-ats-full.mjs`.
+Don't ship both. If you add it, test it and say in the header comment that
+it is inert until the provider is added there.
 
 ## 2. Mandatory guards
 
@@ -145,6 +172,14 @@ false alarm instead of an honest "empty". So a malformed item is a
   returns `0` forever. Reference: `parseIbmResponse` in `providers/ibm.mjs`.
   `scan.mjs` also throws on a non-array out of `fetch()`; `verify-portals`
   catches it.
+- Same call for an **HTML / SSR-JSON scraper**: the card selector or the
+  embedded blob (`__NEXT_DATA__`, a JSON-LD script) matching *nothing at
+  all* is a markup change → `throw`. An empty list inside an otherwise
+  well-formed payload is the empty-board case → `[]`. Reference:
+  `providers/join.mjs` — `!Array.isArray(items)` throws, `items.length
+  === 0` returns `[]`. `icims.mjs` does not draw this line (zero cards on
+  a page is read as "past the last page"); don't carry that into a new
+  scraper.
 - Paginating provider whose loop-termination reads the raw page shape
   (`json.hits.hits.length < PAGE_SIZE`): returning `[]` from the parser is
   not enough — guard that bound or `throw` deliberately (the "fail loud vs
@@ -287,7 +322,8 @@ or a probe-budget cut-off.
 
 A full walk of a large board is 100+ sequential requests (`workday`,
 `radancy`), and several sources sit behind a WAF that rate-limits in bursts.
-Two mechanisms, both expected once a provider paginates:
+Two mechanisms, both expected once a provider paginates — or fans out
+per-posting detail fetches:
 
 - **Inter-page delay.** A module constant applied only to pages past the
   first: `if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx)`. Import
@@ -306,6 +342,11 @@ Two mechanisms, both expected once a provider paginates:
   `{ retries: 2, baseDelayMs: 500, maxDelayMs: 8_000 }`; pass a `policy` 4th
   argument for a different cadence (`workday.mjs`, `oraclecloud.mjs` use
   `{ retries: 3 }` because their API is WAF-fronted).
+- **A `fetchDetails` loop counts too.** A provider that does not paginate
+  but issues up to `detailLimit` sequential detail fetches under
+  `fetchDetails: true` is the same burst against the same WAF — pace it
+  with the same inter-request `sleep`, and wrap each detail fetch in
+  `fetchTextWithRetry` / `fetchJsonWithRetry`.
 
 **Exhaustion is your call, not the helper's.** `withRetry` rethrows; the
 error carries `.attempts` (the real request count). Decide per provider: keep
@@ -374,7 +415,10 @@ went through them. Must cover:
   a required field are filtered; **`redirect: 'error'` is passed on every
   request** — assert `opts.redirect === 'error'`, not just that the call
   happened; the allowlist guard throws **before** `fetchJson` / `fetchText`
-  is called.
+  is called — a stub that only throws does not prove this (it passes
+  whether the guard fired or a fetch was wrongly attempted), so assert the
+  fetch stub was never entered (call count `0`, or a stub that fails the
+  test on entry).
 - Empty or contentless body → `[]`; a body whose shape isn't what the
   endpoint documents → a descriptive throw. Assert both branches.
 - Pagination (if any): the provider's own `DEFAULT_MAX_PAGES` stops it even
@@ -414,6 +458,7 @@ Dev loop: `node test-all.mjs --only providers/{name}`. Before a PR: the full
 | Pagination honoring `ctx.maxPages` | `providers/workday.mjs` |
 | HTML scraping with the shared `decodeEntities` | `providers/icims.mjs` |
 | SSR JSON inside HTML (`__NEXT_DATA__`) | `providers/join.mjs` |
+| Empty board vs a broken selector, told apart | `providers/join.mjs` |
 | RSS parsed in-process | `providers/larajobs.mjs` |
 | `job.url` from a host-controlled `id` / `slug` via `safeEncodeURIComponent` | `providers/phenom.mjs`, `providers/bamboohr.mjs` |
 | Retry/backoff via the shared helper, default policy | `providers/a16z-speedrun-talent.mjs`, `providers/getro.mjs` |
@@ -438,13 +483,15 @@ provider whose tuning needs differ from the shared default
       source page the fallback. (A single-source ATS has only the one URL.)
 - [ ] `id` unique; file does not start with `_`.
 - [ ] `detect()` never throws on junk input; returns `null` instead of
-      failing.
+      failing. It claims the landing URL a user actually has (careers-page
+      link, aggregator, search hit), not only a hand-built canonical path.
 - [ ] Every network call passes `redirect: 'error'`; a config-derived URL is
       checked against an allowlist before the request.
 - [ ] `fetch()` returns `[]` on an empty or contentless body (`null` / `{}`
       / `[]` / `{jobs: null}`); it throws on a real API error or an envelope
-      that isn't the documented shape. A single bad row is skipped
-      (`continue` / `null` + `.filter`), not fatal to the target.
+      that isn't the documented shape — for a scraper, a selector or
+      embedded blob that matches nothing at all. A single bad row is
+      skipped (`continue` / `null` + `.filter`), not fatal to the target.
 - [ ] Dates are NaN-safe (`toEpochMs` pattern).
 - [ ] HTML/XML entities go through `providers/_html-entities.mjs`, not a
       local copy.
@@ -463,6 +510,10 @@ provider whose tuning needs differ from the shared default
       first only); page fetches wrapped in `fetchJsonWithRetry` /
       `fetchTextWithRetry`; a stated exhaustion policy (keep-partial + warn,
       or fail loud) that doesn't misfire the "raise `max_pages`" warning.
+- [ ] A `fetchDetails` detail-fetch loop is paced and retry-wrapped the
+      same way, even when the provider does not paginate.
+- [ ] No `enrichDate` unless the provider is (being) wired into
+      `scan-ats-full.mjs`; not shipped alongside the `fetchDetails` opt-in.
 - [ ] `tests/providers/{name}.test.mjs` covers everything in section 3.
 - [ ] `node test-all.mjs` — the full suite is green (not just `--only`).
 - [ ] A row is added to
