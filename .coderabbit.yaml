@@ -135,6 +135,10 @@ reviews:
         instructions: "Compare the language mode files this PR touches under modes/<lang>/ against their canonical English counterpart under modes/, and bring the translated file up to date: same block structure, same headings order, same placeholders. Translate new prose into the target language; never translate file names, flags, code fences, or the block letters A to H. Do not change the canonical English file. Change nothing else."
 
   pre_merge_checks:
+    # These checks carry repository policy (the user layer boundary, personal
+    # data, the updater manifest), so the author of a PR should not be the one
+    # who waves them through: only a requested reviewer can.
+    override_requested_reviewers_only: true
     docstrings: { mode: off }
     title:
       mode: warning
@@ -228,6 +232,8 @@ code_generation:
         instructions: "Put the suite in tests/<subject>.test.mjs. test-all.mjs discovers that directory automatically, so no registration is needed. Do not use node:test, jest, vitest or any other framework and do not add a dependency: import pass, fail and the run helper from ./helpers.mjs, print a one-line header with console.log, and never call process.exit. Keep every test hermetic: no network, and no writes outside a temporary directory. Never read or write a user-layer path as defined in DATA_CONTRACT.md (cv.md, config/profile.yml, data/, reports/, output/, modes/_profile.md, modes/_custom.md); use a fixture instead."
       - path: "dashboard/**/*.go"
         instructions: "Standard library table-driven tests in the same package, _test.go suffix, no external test framework, no network."
+      - path: "web/**"
+        instructions: "Use Node's built-in test runner. Import test from node:test and assert from node:assert/strict; no vitest, jest, chai or any external framework, and no describe blocks. Place tests at web/tests/lib/<subject>.test.mjs and import the subject as a relative path (../../src/lib/x.mjs): the @/ alias does not resolve under node --test, which is why testable logic lives in plain .mjs. Prefer assert.deepEqual on a whole returned value over several assert.equal on its parts. Each test name must state the property being asserted, not the function being called. Cover the negative case: what must NOT happen, and the value that would be wrong. When a test pins a past bug, say which one and what it cost in a comment above it."
   docstrings:
     path_instructions:
       - path: "**/*.mjs"
