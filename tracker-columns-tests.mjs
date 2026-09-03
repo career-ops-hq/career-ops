@@ -958,15 +958,85 @@ function mergeOne(tsv, name = '2-globex.tsv') {
 
   // The width rule is not the shift defense, so prove the shift is still
   // caught: omit an INTERIOR cell (role) and every later value slides one
-  // column left, which the score corroboration sees by content.
+  // column left, which the score corroboration sees by content. No `url` label
+  // here, so the misplaced-URL guard below cannot be what catches it — this
+  // pins the score check specifically.
   const shifted = mergeOne(
-    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
-    '2\t2026-02-02\tGlobex\tEvaluated\t4.0/5\t❌\t[2](reports/2.md)\tnote\thttps://example.com/jobs/2\n',
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n' +
+    '2\t2026-02-02\tGlobex\tEvaluated\t4.0/5\t❌\t[2](reports/2.md)\tnote\n',
   );
   if (!shifted.row && /labelled "score"/.test(shifted.merge.stdout)) {
     pass('headed row with an omitted interior cell is caught by content, not width');
   } else {
     fail(`interior-omission row refused — row: ${shifted.row}\n${shifted.merge.stdout}`);
+  }
+}
+
+// ── what the optional-cell leniency must NOT wave through (#3517 review) ───
+// Accepting a short row (absent optional cells read as empty) buys two new
+// ambiguities, and both corrupt exactly the mapping the header protects.
+{
+  // A blank REQUIRED cell is not "none": every required field has a documented
+  // value, and the no-data cases have sentinels. Left through, an empty status
+  // reaches validateStatus(''), which returns "Evaluated" — a real evaluation
+  // state the row never claimed.
+  const blankStatus = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n' +
+    '2\t2026-02-02\tGlobex\tManager\t\t4.0/5\t❌\t[2](reports/2.md)\tnote\n',
+  );
+  if (!blankStatus.row && /required cell\(s\) present but empty: status/.test(blankStatus.merge.stdout)) {
+    pass('headed row with a blank required cell is refused, not defaulted');
+  } else {
+    fail(`blank-required-cell row — row: ${blankStatus.row}\n${blankStatus.merge.stdout}`);
+  }
+
+  // "notes omitted, url written" and "notes written, url omitted" are both one
+  // cell short, so position cannot tell them apart. The typed column is the
+  // corroboration: a cell that IS a URL under a non-url label, while `url` has
+  // no cell, means every optional value sits one column left of its label.
+  const shiftedTail = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+    '2\t2026-02-02\tGlobex\tManager\tApplied\t4.5/5\t❌\t[2](reports/2.md)\thttps://example.com/jobs/2\n',
+  );
+  if (!shiftedTail.row && /a URL sits under "notes"/.test(shiftedTail.merge.stdout)) {
+    pass('headed row whose optional tail is shifted (URL in notes) is refused');
+  } else {
+    fail(`shifted-optional-tail row — row: ${shiftedTail.row}\n${shiftedTail.merge.stdout}`);
+  }
+
+  // ...and the shapes that are NOT ambiguous still merge. Written placeholder
+  // for the omitted note:
+  const placeheld = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+    '2\t2026-02-02\tGlobex\tManager\tApplied\t4.1/5\t❌\t[2](reports/2.md)\t\thttps://example.com/jobs/2\n',
+  );
+  if (placeheld.cells[5] === '4.1/5' && placeheld.cells[6] === 'Applied') {
+    pass('headed row with an empty placeholder before a supplied URL merges');
+  } else {
+    fail(`placeholder-then-url row — row: ${placeheld.row}\n${placeheld.merge.stdout}`);
+  }
+
+  // Both optional cells simply absent — nothing is shifted, nothing is lost:
+  const bothAbsent = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+    '2\t2026-02-02\tGlobex\tManager\tApplied\t4.2/5\t❌\t[2](reports/2.md)\n',
+  );
+  if (bothAbsent.cells[5] === '4.2/5' && bothAbsent.cells[6] === 'Applied') {
+    pass('headed row omitting every optional cell merges');
+  } else {
+    fail(`both-optionals-absent row — row: ${bothAbsent.row}\n${bothAbsent.merge.stdout}`);
+  }
+
+  // A note that MENTIONS a url in prose is a note. The guard is anchored to the
+  // whole cell, so only a cell that IS a URL trips it.
+  const urlInProse = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+    '2\t2026-02-02\tGlobex\tManager\tApplied\t4.3/5\t❌\t[2](reports/2.md)\tsee https://example.com/jobs/2 for the req\n',
+  );
+  if (urlInProse.cells[5] === '4.3/5' && /for the req/.test(urlInProse.row ?? '')) {
+    pass('a note that merely mentions a URL is not read as a shifted cell');
+  } else {
+    fail(`url-in-prose note — row: ${urlInProse.row}\n${urlInProse.merge.stdout}`);
   }
 }
 

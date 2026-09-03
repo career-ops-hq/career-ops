@@ -790,6 +790,36 @@ function parseHeadedAddition(lines, filename) {
     return PLACEHOLDER_CELL.test(v) ? '' : v;
   };
 
+  // A required cell that is PRESENT but blank is a writer that did not supply
+  // the value, and blank is never the way to say "none" here: every required
+  // field has a documented value, and the "no data" cases have sentinels
+  // (`—` / `N/A` for score, `—` for report, `❌` for pdf). Left unchecked, an
+  // empty status reaches validateStatus(''), which warns and returns
+  // "Evaluated" — recording a real evaluation state the row never claimed.
+  const blankRequiredCells = TSV_REQUIRED_FIELDS.filter(k => at(k) === '');
+  if (blankRequiredCells.length) {
+    console.warn(`⚠️  Skipping ${filename}: required cell(s) present but empty: ${blankRequiredCells.join(', ')} — use the documented sentinel (— / N/A) rather than a blank cell`);
+    return null;
+  }
+
+  // The optional tail can only be trusted when a short row's missing cells are
+  // genuinely its LAST ones. Position cannot tell "notes omitted, url written"
+  // from "notes written, url omitted" — both are one cell short — so the one
+  // TYPED optional column is the corroboration. A cell that IS a URL, sitting
+  // under a label that is not `url` while the `url` label has no cell at all,
+  // means every optional value is one column left of its label. Merging that
+  // stores the posting URL as the row's NOTES and leaves the dedup key empty,
+  // which is precisely the mapping the header exists to protect.
+  if (map.url != null && shortLabels.includes('url')) {
+    const misplacedUrl = Object.entries(map)
+      .filter(([k, i]) => k !== 'url' && i < parts.length && /^https?:\/\/\S*$/i.test(String(parts[i] ?? '').trim()))
+      .map(([k]) => k);
+    if (misplacedUrl.length) {
+      console.warn(`⚠️  Skipping ${filename}: a URL sits under "${misplacedUrl.join('", "')}" while the "url" cell is absent — the optional cells are shifted; write an empty cell for each optional value you omit`);
+      return null;
+    }
+  }
+
   // Write-canonical: the tracker stores scores unbolded (verify-pipeline
   // rejects bold scores), so strip any markdown bold from the incoming cell.
   const score = at('score').replace(/\*\*/g, '').trim();
