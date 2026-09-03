@@ -12,7 +12,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — _http retry helpers');
 
-const { isRetryableError, isRefusedRedirectError, fetchJsonWithRetry, fetchResponse, fetchResponseWithRetry } =
+const { isRetryableError, isRefusedRedirectError, fetchJsonWithRetry, fetchResponse, fetchResponseWithRetry, makeHttpCtx } =
   await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
 
 // isRetryableError() — status-based classification.
@@ -168,6 +168,17 @@ if (isRefusedRedirectError(transportFailure) === false) {
     const empty = await fetchResponse('https://example.com/empty');
     if (empty.status === 204) pass('fetchResponse() handles null-body statuses (204) without throwing');
     else fail(`fetchResponse() 204 wrong: status=${empty.status}`);
+
+    // Stateful providers must be able to inspect a manual redirect and
+    // validate Location themselves. This exercises the production makeHttpCtx
+    // path rather than a provider-local fake that returns 302 directly.
+    stub(null, { status: 302, headers: { location: '/session/bootstrap', 'set-cookie': 'PSJSESSIONID=abc' } });
+    const redirected = await makeHttpCtx().fetchResponse('https://example.com/start', { redirect: 'manual' });
+    if (redirected.status === 302 && redirected.headers.get('location') === '/session/bootstrap') {
+      pass("makeHttpCtx().fetchResponse exposes redirect:'manual' responses for validated provider hop handling");
+    } else {
+      fail(`makeHttpCtx().fetchResponse manual redirect wrong: status=${redirected.status} location=${redirected.headers.get('location')}`);
+    }
   } catch (e) {
     fail(`fetchResponse() threw: ${e.message}`);
   } finally {
