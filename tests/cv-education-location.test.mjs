@@ -7,8 +7,8 @@
 // End-to-end through the real builder because build-cv-html.mjs exports nothing.
 // Covers both render paths: the shipped section partial (templates/sections/) and
 // the built-in builder (a template copy with no sections/ dir beside it).
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, cpSync } from 'fs';
-import { join, dirname } from 'path';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, cpSync } from 'fs';
+import { join } from 'path';
 import { tmpdir } from 'os';
 import { pass, fail, run, NODE, ROOT, lastRunFailure } from './helpers.mjs';
 import { ENTRY_FIELD_SPECS } from '../lib/cv-payload-schema.mjs';
@@ -56,6 +56,7 @@ function build(label, payload, templateArg) {
 // loadSectionPartials() finds nothing and the built-in builder runs.
 function templateWithoutPartials() {
   const noPartialDir = join(dir, 'no-partials');
+  mkdirSync(noPartialDir, { recursive: true });
   const dest = join(noPartialDir, 'cv-template.html');
   cpSync(join(ROOT, 'templates', 'cv-template.html'), dest, { recursive: false });
   return dest;
