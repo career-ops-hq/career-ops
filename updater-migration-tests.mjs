@@ -315,8 +315,12 @@ const twoPassManifestChecks = [
     pattern: /git\('commit',\s*'-m',[^)]+'--',\s*\.\.\.expandedPathsToStage\)/,
   },
   {
+    // --literal-pathspecs (CodeRabbit follow-up on #3782, CWE-22): a
+    // FETCH_HEAD-sourced target-manifest entry could carry Git pathspec
+    // magic (e.g. `:(top,glob)**`) that passes isSafeManifestPath()'s
+    // filesystem-safety checks while still being reinterpreted by Git.
     name: 'rollback commit is scoped to expanded backup files, not directories (#3504)',
-    pattern: /git\('commit',\s*'-m',[^)]+'--',\s*\.\.\.expandedRollbackPaths\)/,
+    pattern: /git\('--literal-pathspecs',\s*'commit',\s*'-m',[^)]+'--',\s*\.\.\.expandedRollbackPaths\)/,
   },
   {
     name: 'apply captures uncommitted work via git stash create before branching (#915)',
