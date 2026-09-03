@@ -245,9 +245,13 @@ entries rendered out of cv.md's chronological order, and a company descriptor
 ("· Series B healthcare automation") silently dropped from an entry's location.
 Default source: cv.md
 
-This is a warning, not a hard gate: it always exits 0. A finding means review
-the payload against cv.md and decide whether the loss was intentional — the
-check does not stop the pipeline either way.
+This is a warning, not a hard gate: a structural pass, warn, or unverified
+result always exits 0 — a finding means review the payload against cv.md and
+decide whether the loss was intentional, but the check never stops the
+pipeline over one. CLI usage errors, a missing/unreadable payload or source
+file, invalid JSON, or a malformed payload shape (a non-object payload, or a
+non-array/non-object payload.experience) exit 1 instead: those mean the
+check itself could not run, not that it found something to review.
 
 Only understands cv.md Experience headers of the exact shape
 "### Company — Location[ · descriptor]" (em dash). A cv.md written any other
