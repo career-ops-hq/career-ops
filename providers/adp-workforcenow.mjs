@@ -74,8 +74,6 @@ const RETRY_POLICY = { retries: 2, baseDelayMs: 500, maxDelayMs: 8_000 };
 // enough to paginate past page 1.
 const INTER_PAGE_DELAY_MS = 250;
 
-const DETAIL_BATCH = 1; // sequential — see fetchDetails below for why.
-
 /**
  * A careers/recruitment page:
  * `https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=...&ccId=...`
@@ -149,7 +147,6 @@ function encodeSegment(s) {
 }
 
 /**
- * @param {string} host
  * @param {string} url
  */
 function assertAdpUrl(url) {
@@ -191,7 +188,8 @@ export function extractExternalJobId(customFieldGroup) {
 /** @param {unknown} value */
 function toEpochMs(value) {
   if (!value) return undefined;
-  const parsed = Date.parse(value);
+  if (typeof value !== 'string' && typeof value !== 'number') return undefined;
+  const parsed = Date.parse(String(value));
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
@@ -301,10 +299,16 @@ export function buildPostingUrl(cid, ccId, itemId, externalJobId) {
  *
  * @param {any} json
  * @param {{ cid: string, ccId: string, companyName: string }} cfg
- * @returns {{ jobs: Array<{title: string, url: string, company: string, location: string, postedAt?: number}>, total: number | null, raw: any[] }}
+ * @returns {{ jobs: Array<{title: string, url: string, company: string, location: string, postedAt?: number, salary?: {min: number | null, max: number | null, currency: string}, employmentType?: string}>, total: number | null, raw: any[] }}
  */
 export function parseListPage(json, cfg) {
-  const raw = Array.isArray(json?.jobRequisitions) ? json.jobRequisitions : [];
+  if (!json || typeof json !== 'object' || Array.isArray(json)) {
+    throw new Error('adp-workforcenow: unrecognized job-requisitions response');
+  }
+  if (!Array.isArray(json.jobRequisitions) && (!json.meta || typeof json.meta !== 'object' || Array.isArray(json.meta))) {
+    throw new Error('adp-workforcenow: unrecognized job-requisitions response');
+  }
+  const raw = Array.isArray(json.jobRequisitions) ? json.jobRequisitions : [];
   const total = typeof json?.meta?.totalNumber === 'number' ? json.meta.totalNumber : null;
   const jobs = [];
   for (const job of raw) {
@@ -315,7 +319,7 @@ export function parseListPage(json, cfg) {
     const externalJobId = extractExternalJobId(job.customFieldGroup);
     const url = buildPostingUrl(cfg.cid, cfg.ccId, itemId, externalJobId);
     if (!url) continue; // a lone-surrogate id — drop just this one posting
-    /** @type {{title: string, url: string, company: string, location: string, postedAt?: number}} */
+    /** @type {{title: string, url: string, company: string, location: string, postedAt?: number, salary?: {min: number | null, max: number | null, currency: string}, employmentType?: string}} */
     const row = {
       title,
       url,
@@ -423,8 +427,8 @@ export default {
       // observed empirically but not fully characterized" per the source
       // issue, so this stays as conservative as the spec's own
       // "1 per tenant" starting suggestion until real data says otherwise.
-      for (let i = 0; i < targets.length; i += DETAIL_BATCH) {
-        const job = /** @type {any} */ (targets[i]);
+      for (const target of targets) {
+        const job = /** @type {any} */ (target);
         await sleep(INTER_PAGE_DELAY_MS, ctx);
         try {
           const detailUrl = assertAdpUrl(buildDetailUrl(job._itemId, cid, ccId));
