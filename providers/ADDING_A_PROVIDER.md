@@ -184,7 +184,16 @@ it is inert until the provider is added there.
   past a bootstrap 3xx, target the settled URL directly
   (`providers/deutschebahn.mjs` — a portal that 302s into its own results
   endpoint) or rewrite a known static 3xx up front (`providers/builtin.mjs` —
-  bare hosts that 301 to `www`).
+  bare hosts that 301 to `www`). The one case that needs an actual follow is
+  a session-establishing bootstrap 3xx whose target is not knowable ahead of
+  time — a portal that bounces through a session or theme-negotiation hop
+  carrying a per-session token in the `Location`, so neither "target the
+  settled URL" nor "rewrite a static redirect" applies. Follow it manually:
+  re-validate **every** hop's `Location` against the tenant origin (the same
+  allowlist check that guards the first request) before following it, bail
+  the instant a hop points off-origin, and bound the chain with a small hop
+  cap. That is stricter than a single up-front check — it also catches a
+  later hop in the chain redirecting away — not a relaxation of the guard.
 
 ### Defensive parsing
 
@@ -446,7 +455,12 @@ unrecognised page — as one value, and drive both the warning and the marker's
 `reason` from it, so a consumer can tell "truncated a healthy board" from
 "the board broke". Reference: `workday.mjs`'s `stopReason`
 (`complete` / `cap` / `fetch-error` / …); `providers/phenom.mjs` is the
-compact version.
+compact version. Keep that reason independent of whether the source ever
+reported a `total`: a walk that hits its own ceiling — or breaks on a fetch
+error — with no `total` in hand still has to carry the stop reason and still
+warn. Deriving the incomplete marker and the warning only from a
+`total`-based "did we reach the count" check drops the signal on exactly the
+tenants that omit the count.
 
 ### Health-check coverage (`verify-portals`)
 
