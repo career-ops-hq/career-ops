@@ -31,6 +31,37 @@ const TRACKER_HEADER = [
   '',
 ].join('\n');
 
+// Assert PLACEMENT, not presence. `/Evaluated/.test(row) && /4\.0\/5/.test(row)`
+// passes on a transposed merge too — both literals are still somewhere in the
+// row string — so those regexes could not tell a by-name merge from the exact
+// positional swap this file exists to guard (verified by injecting the swap:
+// the old assertions stayed green). The addition writes status BEFORE score
+// while the tracker shows score BEFORE status, which is the whole trap, so the
+// cells have to be compared one by one.
+//
+// Indices are read from the fixture's own header rather than hard-coded, so
+// editing TRACKER_HEADER cannot silently unbind the assertions from it.
+const HEADER_CELLS = TRACKER_HEADER.split('\n').find((l) => l.startsWith('|')).split('|').map((c) => c.trim());
+const SCORE_COL = HEADER_CELLS.indexOf('Score');
+const STATUS_COL = HEADER_CELLS.indexOf('Status');
+
+/** The merged row for #35, split into trimmed cells. */
+function mergedRow(markdown) {
+  const row = markdown.split('\n').find((l) => /^\|\s*35\s*\|/.test(l));
+  return { row, cells: row ? row.split('|').map((c) => c.trim()) : [] };
+}
+
+/** True when score and status each sit in their OWN tracker column. */
+function landedInOwnColumns(cells) {
+  return cells[SCORE_COL] === '4.0/5' && cells[STATUS_COL] === 'Evaluated';
+}
+
+if (SCORE_COL > 0 && STATUS_COL > 0) {
+  pass('fixture header exposes the Score and Status columns the assertions bind to');
+} else {
+  fail(`fixture header lost its Score/Status labels (score=${SCORE_COL}, status=${STATUS_COL}) — the column assertions below would be vacuous`);
+}
+
 // The exact shape openrouter-runner writes (openrouter-runner.mjs `tsvLine`):
 // num, date, company, "(see report)", status, score, pdf, report-link, notes.
 const num = 35, today = '2026-08-09', slug = 'acme-corp';
@@ -56,12 +87,11 @@ try {
     output = String(e.stdout ?? '') + String(e.stderr ?? '');
   }
 
-  const merged = readFileSync(tracker, 'utf-8');
-  const row = merged.split('\n').find((l) => /^\|\s*35\s*\|/.test(l));
-  if (row && /Acme Corp/.test(row) && /Evaluated/.test(row) && /4\.0\/5/.test(row)) {
-    pass('openrouter TSV row merged into the tracker with score + status intact');
+  const { row, cells } = mergedRow(readFileSync(tracker, 'utf-8'));
+  if (row && /Acme Corp/.test(row) && landedInOwnColumns(cells)) {
+    pass('headerless TSV row merges with score and status in their own columns');
   } else {
-    fail(`row not merged. output: ${output.trim().split('\n').pop()} | tracker row: ${row ?? '(none)'}`);
+    fail(`headerless row not merged correctly. score cell="${cells[SCORE_COL]}" status cell="${cells[STATUS_COL]}" | output: ${output.trim().split('\n').pop()} | tracker row: ${row ?? '(none)'}`);
   }
 
   // The headed form — the one openrouter writes now — merges, by name (#3517).
@@ -81,12 +111,11 @@ try {
         env: { ...process.env, CAREER_OPS_TRACKER: t2, CAREER_OPS_ADDITIONS: a2 },
       });
     } catch (e) { out2 = String(e.stdout ?? '') + String(e.stderr ?? ''); }
-    const merged2 = readFileSync(t2, 'utf-8');
-    const row2 = merged2.split('\n').find((l) => /^\|\s*35\s*\|/.test(l));
-    if (row2 && /Acme Corp/.test(row2) && /Evaluated/.test(row2) && /4\.0\/5/.test(row2)) {
-      pass('headed TSV merges with score + status resolved by label');
+    const { row: row2, cells: cells2 } = mergedRow(readFileSync(t2, 'utf-8'));
+    if (row2 && /Acme Corp/.test(row2) && landedInOwnColumns(cells2)) {
+      pass('headed TSV merges with score and status resolved by label into their own columns');
     } else {
-      fail(`headed TSV did not merge. output: ${out2.trim().split('\n').pop()} | tracker row: ${row2 ?? '(none)'}`);
+      fail(`headed TSV did not merge correctly. score cell="${cells2[SCORE_COL]}" status cell="${cells2[STATUS_COL]}" | output: ${out2.trim().split('\n').pop()} | tracker row: ${row2 ?? '(none)'}`);
     }
   } finally {
     try { rmSync(work2, { recursive: true, force: true }); } catch { /* best effort */ }
