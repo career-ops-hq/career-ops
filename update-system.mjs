@@ -2178,6 +2178,40 @@ async function apply() {
 
 // ── ROLLBACK ────────────────────────────────────────────────────
 
+/**
+ * The paths rollback() considers for restore/removal: the CURRENTLY
+ * installed SYSTEM_PATHS plus the TARGET release's own SYSTEM_PATHS (read
+ * from FETCH_HEAD's update-system.mjs — the update this rollback is
+ * undoing) plus BOOTSTRAP_PATHS. Same target-manifest mechanism apply()
+ * already uses (#983/#1998).
+ *
+ * FETCH_HEAD still points at the update being undone — nothing else fetches
+ * between a failed apply() and running rollback() — so this closes the gap
+ * where apply() failed before it got as far as checking out its own
+ * update-system.mjs: the on-disk SYSTEM_PATHS constant still describes the
+ * OLD release, and a file the target release newly added would otherwise be
+ * invisible to rollback() entirely, left behind as an untracked orphan
+ * (#3780). Degrades to SYSTEM_PATHS + BOOTSTRAP_PATHS alone if FETCH_HEAD is
+ * missing (consumed by a later fetch) or predates update-system.mjs itself —
+ * the property `locallyModifiedSystemFiles` and `pathFullyPreserved` already
+ * follow: a manifest lookup this system cannot compute degrades the result,
+ * never the operation.
+ *
+ * @param {{git?: Function}} [ctx] - injection point for tests; defaults to git.
+ * @returns {string[]}
+ */
+export function rollbackSystemPaths(ctx = {}) {
+  const runGit = ctx.git || git;
+  let targetSystemPaths = [];
+  try {
+    const targetUpdaterSource = runGit('show', 'FETCH_HEAD:update-system.mjs');
+    targetSystemPaths = extractArrayFromSource(targetUpdaterSource, 'SYSTEM_PATHS');
+  } catch {
+    // No FETCH_HEAD, or a target predating update-system.mjs.
+  }
+  return mergePathLists(SYSTEM_PATHS, targetSystemPaths, BOOTSTRAP_PATHS);
+}
+
 function rollback() {
   // Same precondition as apply(): a nested .git-less install would look its
   // backup branches up — and check files out — in the enclosing repo (#3334).
@@ -2193,6 +2227,8 @@ function rollback() {
     }
 
     console.log(`Rolling back to: ${latest}`);
+
+    const systemPathsToRestore = rollbackSystemPaths();
 
     // Checkout system files from backup branch.
     //
@@ -2211,7 +2247,7 @@ function rollback() {
     // that but is a larger change; tracked separately if it ever bites.
     const restored = [];
     const removed = [];
-    for (const path of SYSTEM_PATHS) {
+    for (const path of systemPathsToRestore) {
       try {
         git('checkout', latest, '--', path);
         restored.push(path);
