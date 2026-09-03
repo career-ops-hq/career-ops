@@ -73,6 +73,25 @@
 #   - was: "Datenanalyst"
 #   - was: "Systemadministrator"
 
+# -- Dayforce (Ceridian) Recruiting boards (optional) --
+# Read by scan-dayforce.mjs (`npm run scan:dayforce`), a separate Playwright
+# scanner for Dayforce career sites (jobs.dayforcehcm.com). Dayforce's job
+# search API sits behind Cloudflare + a NextAuth CSRF token, so it isn't
+# reachable through the tracked_companies providers above (bare HTTP gets a
+# hard 403); scan-dayforce.mjs drives a real browser session instead.
+#
+# Each entry is one tenant's board. `board` (jobBoardCode) defaults to
+# CANDIDATEPORTAL and `culture` defaults to en-US if omitted. `jobBoardId` is
+# a separate small integer the detail endpoint needs (distinct from `board`);
+# it defaults to 1, which held for the tenants confirmed this session — if a
+# tenant's detail fetches all come back 404, set it explicitly here.
+#
+# dayforce_boards:
+#   - tenant: gnghcm            # Give & Go Prepared Foods
+#   - tenant: roots             # Roots Canada
+#   - tenant: firstnational     # First National Financial
+#   - tenant: lifelabs          # LifeLabs
+
 # -- Location filter (optional) --
 # Filter scanned jobs by location. Applied AFTER title filter, BEFORE dedup.
 # If this entire block is absent, all locations pass (current default behavior).
