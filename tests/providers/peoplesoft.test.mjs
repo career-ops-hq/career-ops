@@ -294,6 +294,13 @@ try {
   }
 
   {
+    const unquoted = `<form name="win0"><li id=HRS_AGNT_RSLT_I$0_row_7><a id="SCH_JOB_TITLE$7">Unquoted Row</a><span id="HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID$7">J7</span></li></form>`;
+    const page = parseSearchPage(unquoted, CONFIG);
+    if (page.valid && page.rows.length === 1 && page.rows[0].jobId === 'J7') pass('parseSearchPage() accepts an unquoted PeopleSoft row id');
+    else fail(`parseSearchPage() unquoted row id failed: ${JSON.stringify(page)}`);
+  }
+
+  {
     const page = parseSearchPage(emptyFixture, CONFIG);
     if (page.valid === true && page.rows.length === 0 && page.reportedTotal === 0) {
       pass('parseSearchPage() treats a genuinely empty (but well-formed) result as valid:true, rows:[]');
@@ -545,12 +552,12 @@ try {
     const jobs = await peoplesoft.fetch({ name: 'ExampleU', careers_url: SEARCH_URL }, ctx);
     if (jobs.length === 1) pass('fetch() stops when a "load more" page returns no new rows (never loops forever)');
     else fail(`fetch() stuck-page case wrong: ${jobs.length} jobs after ${calls} calls`);
-    if (jobs.peoplesoftIncomplete && jobs.peoplesoftIncomplete.complete === false && jobs.peoplesoftIncomplete.reason === 'provider-result-cap-or-pagination-incomplete') {
+    if (jobs.peoplesoftIncomplete && jobs.peoplesoftIncomplete.complete === false && jobs.peoplesoftIncomplete.reason === 'load-more-no-progress') {
       pass('fetch() marks the result explicitly incomplete when parsed count < reported total (never silently "those postings closed")');
     } else {
       fail(`fetch() should mark incomplete: ${JSON.stringify(jobs.peoplesoftIncomplete)}`);
     }
-    if (jobs.peoplesoftIncomplete.collected === 1 && jobs.peoplesoftIncomplete.reportedTotal === 100) {
+    if (jobs.peoplesoftIncomplete?.collected === 1 && jobs.peoplesoftIncomplete?.reportedTotal === 100) {
       pass('fetch() incomplete marker reports the actual collected/reportedTotal numbers');
     } else {
       fail(`fetch() incomplete marker numbers wrong: ${JSON.stringify(jobs.peoplesoftIncomplete)}`);
