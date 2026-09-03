@@ -2472,6 +2472,13 @@ const batchStepLines = batchTrackerStep.split('\n');
 const batchTsvLines = batchStepLines.filter(l => l.includes('\\t'));
 const batchTsvLabels = (batchTsvLines[0] ?? '').trim().split('\\t').map(s => s.trim());
 const batchLabelsMissing = REQUIRED_TSV_LABELS.filter(f => !batchTsvLabels.includes(f));
+// Width parity, NOT width == REQUIRED_TSV_LABELS.length: the prompt carries the
+// optional `notes` and `url` columns on purpose (url is the deterministic dedup
+// key #1298 added here), so pinning the count to the required set would forbid
+// them. What must hold is that the two lines describe the SAME row — a header
+// with an extra label over a short data row is a template that teaches a
+// shifted row.
+const batchDataFields = (batchTsvLines[1] ?? '').trim().split('\\t');
 // Structure, not prose: the labels line must be immediately followed by the
 // data row, so the section shows ONE headed block rather than two examples that
 // happen to sit in the same step. The instruction sentence is matched exactly
@@ -2483,13 +2490,14 @@ const batchRowFollowsHeader = batchHeaderIdx >= 0
 if (
   batchTsvLines.length === 2 &&
   batchLabelsMissing.length === 0 &&
+  batchDataFields.length === batchTsvLabels.length &&
   batchRowFollowsHeader &&
   /batch\/tracker-additions\//.test(batchTrackerStep) &&
   /Write exactly two TSV lines/.test(batchTrackerStep)
 ) {
   pass('batch Step 5 specifies the headed tracker-addition format (labels, one data row, path)');
 } else {
-  fail(`batch Step 5 no longer specifies the headed TSV format — tab lines: ${batchTsvLines.length}, missing labels: ${batchLabelsMissing.join(', ') || 'none'}, data row follows header: ${batchRowFollowsHeader}`);
+  fail(`batch Step 5 no longer specifies the headed TSV format — tab lines: ${batchTsvLines.length}, missing labels: ${batchLabelsMissing.join(', ') || 'none'}, labels/fields: ${batchTsvLabels.length}/${batchDataFields.length}, data row follows header: ${batchRowFollowsHeader}`);
 }
 
 const batchMachineSummary = batchPrompt.match(/#### Machine Summary[\s\S]*?### Step 3 \u2014 Save the Report/)?.[0] ?? '';
