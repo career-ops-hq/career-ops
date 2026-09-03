@@ -67,3 +67,31 @@ test('the title is the only thing that varies between scanners', () => {
     assert.equal(lines[3], `${title} — 2026-09-03`);
   }
 });
+
+// The module can be perfect and the marker still absent from a run: what makes
+// the boundary usable is that every scanner actually emits it. Assert the
+// wiring per scanner, so a refactor that drops one call fails here instead of
+// silently returning a consumer to banner-matching.
+//
+// Deliberately narrow: this looks for the helper call and the banner title it
+// is given, not for the rule characters. A test that grepped for
+// `'━'.repeat(45)` would also match stats.mjs and weekly-digest.mjs, which
+// build the same rule for unrelated tables, and would fail the day either of
+// those is touched.
+test('every scanner imports the module and prints the header', async () => {
+  const { readFileSync } = await import('node:fs');
+  const scanners = [
+    ['scan.mjs', 'Portal Scan'],
+    ['scan-ats-full.mjs', 'Reverse ATS Scan'],
+    ['scan-interamt.mjs', 'Interamt Scan'],
+    ['scan-hn.mjs', 'HN Scan'],
+  ];
+  for (const [file, title] of scanners) {
+    const src = readFileSync(new URL(`../${file}`, import.meta.url), 'utf-8');
+    assert.match(src, /from '\.\/lib\/scan-summary-marker\.mjs'/, `${file} imports the module`);
+    assert.ok(
+      src.includes(`printScanSummaryHeader('${title}'`),
+      `${file} prints the summary header with the banner title "${title}"`,
+    );
+  }
+});
