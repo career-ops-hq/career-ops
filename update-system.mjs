@@ -2201,7 +2201,20 @@ export function isSafeManifestPath(path, userPaths = effectiveUserPaths()) {
   if (normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) return false; // absolute (POSIX or Windows drive)
   const segments = normalized.split('/').filter(Boolean);
   if (segments.length === 0 || segments.some((s) => s === '..' || s === '.git')) return false;
-  if (userPaths.some((userPath) => (userPath.endsWith('/') ? normalized.startsWith(userPath) : normalized === userPath))) {
+  // Trailing-slash-insensitive on both sides: a manifest entry could add or
+  // drop a trailing slash to dodge either match shape below (CodeRabbit
+  // follow-up on #3782) — a bare `data` must still be caught by the
+  // directory root `data/` (rollback()'s own delete step strips a trailing
+  // slash right before touching the filesystem, so `data` and `data/` are
+  // the same target once it gets there), and `cv.md/` must still be caught
+  // by the exact file entry `cv.md`.
+  const withoutTrailingSlash = normalized.replace(/\/+$/, '');
+  if (userPaths.some((userPath) => {
+    if (userPath.endsWith('/')) {
+      return withoutTrailingSlash === userPath.slice(0, -1) || normalized.startsWith(userPath);
+    }
+    return withoutTrailingSlash === userPath;
+  })) {
     return false;
   }
   return true;

@@ -202,3 +202,60 @@ const fakeTargetSource = (paths) =>
     fail(`#12 got ${JSON.stringify(paths)}`);
   }
 }
+
+// ── 13. A directory root WITHOUT its trailing slash is still caught ──
+//    CodeRabbit follow-up: 'data' didn't startsWith('data/'), so the bare
+//    directory name slipped past the original check — and rollback()'s own
+//    delete step strips a trailing slash right before touching the
+//    filesystem, so 'data' and 'data/' are the same target once it gets
+//    there. The exact case the review asked for.
+{
+  const result = isSafeManifestPath('data', ['data/']);
+  if (result === false) {
+    pass('isSafeManifestPath rejects a protected directory root missing its trailing slash (#3782 follow-up)');
+  } else {
+    fail(`#13 expected false, got ${result}`);
+  }
+}
+
+// ── 14. An exact-file entry WITH a spurious trailing slash is still caught ──
+//    The mirror-image bypass: 'cv.md/' !== 'cv.md' under a bare exact-match
+//    comparison. The exact case the review asked for.
+{
+  const result = isSafeManifestPath('cv.md/', ['cv.md']);
+  if (result === false) {
+    pass('isSafeManifestPath rejects an exact user-layer file with a spurious trailing slash (#3782 follow-up)');
+  } else {
+    fail(`#14 expected false, got ${result}`);
+  }
+}
+
+// ── 15. Multiple trailing slashes are normalized too, not just one ──
+{
+  const result = isSafeManifestPath('data///', ['data/']);
+  if (result === false) {
+    pass('isSafeManifestPath rejects a directory root with multiple trailing slashes');
+  } else {
+    fail(`#15 expected false, got ${result}`);
+  }
+}
+
+// ── 16. rollbackSystemPaths integration: a bare 'data' target-manifest
+//    entry never reaches the merged result ──
+{
+  const ctx = {
+    git: (...args) => {
+      if (args[0] === 'show' && args[1] === 'FETCH_HEAD:update-system.mjs') {
+        return fakeTargetSource(['AGENTS.md', 'data']);
+      }
+      throw new Error(`unexpected git call: ${args.join(' ')}`);
+    },
+  };
+
+  const paths = rollbackSystemPaths(ctx);
+  if (!paths.includes('data')) {
+    pass('a bare directory-root entry (no trailing slash) is dropped before it reaches rollback\'s loop');
+  } else {
+    fail(`#16 'data' leaked into the rollback candidate list: ${JSON.stringify(paths)}`);
+  }
+}
