@@ -259,3 +259,58 @@ const fakeTargetSource = (paths) =>
     fail(`#16 'data' leaked into the rollback candidate list: ${JSON.stringify(paths)}`);
   }
 }
+
+// ── 17. A leading "./" alias for an exact user-layer file is still caught ──
+//    CodeRabbit follow-up: path.join(ROOT, './cv.md') resolves to the exact
+//    same file as path.join(ROOT, 'cv.md') once rollback() actually touches
+//    the filesystem, but a raw string comparison saw them as different.
+{
+  const result = isSafeManifestPath('./cv.md', ['cv.md']);
+  if (result === false) {
+    pass('isSafeManifestPath rejects a "./" alias for an exact user-layer file (#3782 follow-up)');
+  } else {
+    fail(`#17 expected false, got ${result}`);
+  }
+}
+
+// ── 18. A doubled internal slash alias for a user-layer file is still caught ──
+{
+  const result = isSafeManifestPath('modes//_profile.md', ['modes/_profile.md']);
+  if (result === false) {
+    pass('isSafeManifestPath rejects a doubled-internal-slash alias for a user-layer file (#3782 follow-up)');
+  } else {
+    fail(`#18 expected false, got ${result}`);
+  }
+}
+
+// ── 19. A "./" alias for a protected directory root is still caught ──
+{
+  const result = isSafeManifestPath('./data/applications.md', ['data/']);
+  if (result === false) {
+    pass('isSafeManifestPath rejects a "./" alias for a path under a protected directory');
+  } else {
+    fail(`#19 expected false, got ${result}`);
+  }
+}
+
+// ── 20. rollbackSystemPaths integration: a "./cv.md" target-manifest entry
+//    never reaches the merged result, using the REAL effectiveUserPaths()
+//    (no explicit userPaths override) — the exact end-to-end path
+//    rollback() itself would take ──
+{
+  const ctx = {
+    git: (...args) => {
+      if (args[0] === 'show' && args[1] === 'FETCH_HEAD:update-system.mjs') {
+        return fakeTargetSource(['AGENTS.md', './cv.md', 'modes//_profile.md']);
+      }
+      throw new Error(`unexpected git call: ${args.join(' ')}`);
+    },
+  };
+
+  const paths = rollbackSystemPaths(ctx);
+  if (!paths.includes('./cv.md') && !paths.includes('modes//_profile.md')) {
+    pass('"./cv.md" and "modes//_profile.md" target-manifest entries never reach the merged result');
+  } else {
+    fail(`#20 an alias leaked into the rollback candidate list: ${JSON.stringify(paths)}`);
+  }
+}

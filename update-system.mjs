@@ -2179,6 +2179,19 @@ async function apply() {
 // ── ROLLBACK ────────────────────────────────────────────────────
 
 /**
+ * A path's meaningful segments: forward-slash-normalized, empty segments
+ * dropped (collapses `//`), and lone `.` segments dropped (`./x` means the
+ * same thing as `x`). Deliberately keeps `..` segments — callers that care
+ * about traversal check for those explicitly against this same list.
+ *
+ * @param {string} path
+ * @returns {string[]}
+ */
+function pathSegments(path) {
+  return String(path).replace(/\\/g, '/').split('/').filter((s) => s !== '' && s !== '.');
+}
+
+/**
  * True when a target-manifest entry is safe to hand to rollback()'s
  * checkout/delete loop. That loop's delete-fallback (rmSync) operates on the
  * raw filesystem path regardless of git tracking state, so an entry read
@@ -2191,6 +2204,14 @@ async function apply() {
  * ...) could be deleted outright if it happens to be absent from the backup
  * branch.
  *
+ * Compares on segment arrays, not raw strings (CodeRabbit follow-up on
+ * #3782): `path.join(ROOT, pathspec)` normalizes away a leading `./`, a
+ * trailing `/`, and doubled internal `//` before rollback() ever touches the
+ * filesystem, so a manifest entry spelling the same real file a different
+ * way (`./cv.md`, `modes//_profile.md`, `data`) must be judged on the same
+ * canonical form it resolves to, not the literal string a raw `===` or
+ * `startsWith` would compare.
+ *
  * @param {string} path
  * @param {string[]} [userPaths] - defaults to effectiveUserPaths().
  * @returns {boolean}
@@ -2199,21 +2220,16 @@ export function isSafeManifestPath(path, userPaths = effectiveUserPaths()) {
   if (!path || typeof path !== 'string') return false;
   const normalized = path.replace(/\\/g, '/');
   if (normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) return false; // absolute (POSIX or Windows drive)
-  const segments = normalized.split('/').filter(Boolean);
+  const segments = pathSegments(path);
   if (segments.length === 0 || segments.some((s) => s === '..' || s === '.git')) return false;
-  // Trailing-slash-insensitive on both sides: a manifest entry could add or
-  // drop a trailing slash to dodge either match shape below (CodeRabbit
-  // follow-up on #3782) — a bare `data` must still be caught by the
-  // directory root `data/` (rollback()'s own delete step strips a trailing
-  // slash right before touching the filesystem, so `data` and `data/` are
-  // the same target once it gets there), and `cv.md/` must still be caught
-  // by the exact file entry `cv.md`.
-  const withoutTrailingSlash = normalized.replace(/\/+$/, '');
   if (userPaths.some((userPath) => {
+    const userSegments = pathSegments(userPath);
     if (userPath.endsWith('/')) {
-      return withoutTrailingSlash === userPath.slice(0, -1) || normalized.startsWith(userPath);
+      return segments.length >= userSegments.length
+        && userSegments.every((seg, i) => segments[i] === seg);
     }
-    return withoutTrailingSlash === userPath;
+    return segments.length === userSegments.length
+      && userSegments.every((seg, i) => segments[i] === seg);
   })) {
     return false;
   }
