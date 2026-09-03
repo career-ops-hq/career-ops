@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * set-status-tests.mjs — regression tests for the set-status.mjs CLI (#1428).
+ * tests/set-status.test.mjs — regression tests for the set-status.mjs CLI (#1428).
  *
  * set-status.mjs is the canonical write path for tracker status updates, so
  * these tests pin down the full CLI contract: row resolution (by number, by
@@ -11,7 +11,7 @@
  *
  * Tests provision a throwaway tracker via the CAREER_OPS_TRACKER /
  * CAREER_OPS_TRACKER_LOCK env overrides (same sandbox pattern as
- * tracker-columns-tests.mjs).
+ * tests/tracker-columns.test.mjs).
  *
  * Exit-code contract under test:
  *   0 — success (including no-op re-runs)
@@ -22,26 +22,21 @@
 
 import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, chmodSync, utimesSync } from 'fs';
-import { join, dirname } from 'path';
+import { join } from 'path';
 import { tmpdir } from 'os';
-import { fileURLToPath } from 'url';
-import { acquireTrackerLock } from './tracker-utils.mjs';
+import { acquireTrackerLock } from '../tracker-utils.mjs';
 // The ledger date is the LOCAL calendar day (#2932). Computing the expected
 // value with toISOString() here would compare a local date against a UTC one
 // and fail for the hours of the day where they differ — a test that passes
 // only in part of the UTC day.
-import { localToday } from './lib/local-today.mjs';
-// Shared with tests/mark-pdf-ready.test.mjs so the two write-failure setups
-// cannot drift apart again (#3423).
-import { directoryDenyBinds } from './tests/helpers.mjs';
+import { localToday } from '../lib/local-today.mjs';
+// directoryDenyBinds is shared with tests/mark-pdf-ready.test.mjs so the two
+// write-failure setups cannot drift apart again (#3423).
+import { pass, fail, ROOT, directoryDenyBinds } from './helpers.mjs';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
+console.log('\nset-status.mjs — canonical tracker status writes');
 const NODE = process.execPath;
 
-let passed = 0;
-let failed = 0;
-function pass(m) { console.log(`PASS ${m}`); passed++; }
-function fail(m) { console.error(`FAIL ${m}`); failed++; }
 
 // Run set-status.mjs with the tracker redirected to a sandbox. Returns
 // { code, stdout, stderr }.
@@ -1422,5 +1417,3 @@ for (const bad of ['correction', 'backfill', 'cell-edit', 'nonsense']) {
   }
 }
 
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed > 0 ? 1 : 0);

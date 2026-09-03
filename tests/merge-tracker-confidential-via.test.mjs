@@ -125,7 +125,7 @@ test('a LEGACY tracker with no Via column keeps its existing behaviour', () => {
   // tag is cleared on purpose, so empty-vs-empty is the NORMAL state for a
   // genuine same-agency re-blast rather than a missing signal. Requiring a
   // value there would turn every legacy re-blast into a duplicate row —
-  // tracker-columns-tests.mjs §12b asserts exactly that case, and caught this
+  // tests/tracker-columns.test.mjs §12b asserts exactly that case, and caught this
   // when the first version of the fix was not gated.
   //
   // So #3410 is closed for a migrated tracker and unchanged for a legacy one,

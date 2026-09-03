@@ -225,7 +225,7 @@ const requiredSystemPaths = [
   '.antigravitycli/skills/',
   '.grok/skills/',
   '.cursor/skills/',
-  'tracker-columns-tests.mjs',
+  'tests/',
   'updater-migration-tests.mjs',
   'README.ar.md',
   'README.de.md',
@@ -252,7 +252,7 @@ const requiredBootstrapPaths = [
   'tracker-utils.mjs',
   'tracker-parse.mjs',
   'updater-migration-tests.mjs',
-  'tracker-columns-tests.mjs',
+  'tests/tracker-columns.test.mjs',
 ];
 
 for (const path of requiredSystemPaths) {

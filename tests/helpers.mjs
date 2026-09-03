@@ -243,7 +243,7 @@ export function lastRunFailure() {
  * later a case was added, the more certain it is to be truncated away, which
  * is exactly backwards for something read only when a run goes red.
  *
- * That is not hypothetical: `agent-inbox-tests.mjs` grew past this cap, and a
+ * That is not hypothetical: `tests/agent-inbox.test.mjs` grew past this cap, and a
  * windows-latest failure of its §7 cut off mid-word one assertion short of §8's
  * verdict — the assertion added specifically to attribute that failure (#3035).
  *
