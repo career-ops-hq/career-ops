@@ -424,7 +424,8 @@ went through them. Must cover:
   else → `null`.
 - `fetch()`: normalization of the source's real response shape; rows missing
   a required field are filtered; **`redirect: 'error'` is passed on every
-  request** — assert `opts.redirect === 'error'`, not just that the call
+  request the provider issues** — list, pagination, and detail-enrichment
+  fetches alike — assert `opts.redirect === 'error'`, not just that the call
   happened; the allowlist guard throws **before** `fetchJson` / `fetchText`
   is called — a stub that only throws does not prove this (it passes
   whether the guard fired or a fetch was wrongly attempted), so assert the
