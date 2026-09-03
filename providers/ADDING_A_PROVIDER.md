@@ -94,7 +94,14 @@ export default {
   is opt-in enrichment: an entry with `fetchDetails: true` (plus an optional
   `detailLimit` cap) makes the provider fetch per-posting detail to fill
   `description`, bounded by `detailLimit` and skipped entirely while a health
-  probe runs (currently `vdab`, `smartrecruiters`).
+  probe runs (currently `vdab`, `smartrecruiters`). That enrichment is
+  opt-in *only*: gate the whole detail loop on the entry config asking for
+  it **and** on not being in a probe — `smartrecruiters.mjs`
+  (`if (fetchDetails && !probing)`), `vdab.mjs`
+  (`if (fetchDetails && byId.size && !probing)`). A provider that fetches
+  per-posting detail on every scan, with no config switch, defeats the
+  opt-in and puts the per-posting request fan-out back on the default path;
+  `detailLimit` is the cap on that loop, never the thing that turns it on.
 - When the payload exposes **more than one** candidate URL for a posting —
   typically an aggregator carrying the employer's upstream ATS/application
   link alongside its own posting page — `Job.url` is the employer's link, per
@@ -360,7 +367,12 @@ per-posting detail fetches:
 - **Inter-page delay.** A module constant applied only to pages past the
   first: `if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx)`. Import
   `sleep` from [`_http.mjs`](_http.mjs) (it honours a ctx-supplied test
-  clock) — don't hand-roll a local copy. 150–250 ms is the norm; raise it
+  clock) — don't hand-roll a local copy, and don't call `ctx.sleep(ms)`
+  directly either: `ctx.sleep` is `Optional` in the §1 contract, so a ctx
+  that carries no clock turns a bare `ctx.sleep(...)` into a `TypeError` out
+  of `fetch()` — the whole target lost. The imported `sleep(ms, ctx)` uses
+  the ctx clock when there is one and a real timer otherwise. 150–250 ms is
+  the norm; raise it
   only where throttling was actually observed (`careerviet`, `itviec` at
   750 ms) or a published rate limit dictates it (`agentic-jobs` at 2100 ms
   for 30 req/60 s). Don't gold-plate a feed that never complained.
@@ -577,7 +589,9 @@ provider whose tuning needs differ from the shared default
 - [ ] `node test-all.mjs` — the full suite is green (not just `--only`).
 - [ ] A row is added to
       [`../docs/SUPPORTED_JOB_BOARDS.md`](../docs/SUPPORTED_JOB_BOARDS.md), in
-      alphabetical position by board name (the table is sorted).
+      case-insensitive alphabetical position by board name (the table is
+      sorted — a lowercase name like `softgarden` sorts among the `S…` rows,
+      not after `Z`).
 - [ ] `templates/portals.example.yml` is updated: (1) if `detect()` matches
       a host, a URL-pattern line under "Provider auto-detection"; otherwise
       an explicit `provider:` in the stanza; (2) in the "Built-in provider
