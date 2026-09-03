@@ -13,13 +13,31 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
-import { isAbsolute, join, dirname, basename } from 'path';
-import { fileURLToPath } from 'url';
+import { isAbsolute, join, basename } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_SOURCES = ['cv.md', 'article-digest.md'];
-const DEFAULT_CONFIG = join(ROOT, 'config', 'cv-facts.json');
+const DEFAULT_SOURCE_NAMES = ['cv.md', 'article-digest.md'];
+const DEFAULT_CONFIG_NAME = join('config', 'cv-facts.json');
+
+/**
+ * Default sources and config live in the career-ops DATA ROOT (CAREER_OPS_ROOT
+ * / CAREER_OPS_DATA_DIR / the .career-ops-data marker / this directory), not in
+ * the shell's cwd and not next to this script. cv.md, article-digest.md and
+ * config/cv-facts.json are user-layer files: from a git worktree that carries a
+ * marker they exist only in the data root, so a cwd-relative default read an
+ * empty source and failed every real number in a generated CV as "absent from
+ * sources". Resolved per call rather than at import so an override set later
+ * in the same process is honoured (the frozen-const class of #3162). Explicit
+ * --source/--config paths keep their cwd-relative meaning.
+ */
+function defaultSourcePaths() {
+  const root = getCareerOpsRoot();
+  return DEFAULT_SOURCE_NAMES.map(name => join(root, name));
+}
+function defaultConfigPath() {
+  return join(getCareerOpsRoot(), DEFAULT_CONFIG_NAME);
+}
 const TOOL_PROSE_WORDS = new Set([
   'a', 'an', 'and', 'at', 'built', 'by', 'containerized', 'deployment',
   'deployments', 'for', 'from', 'in', 'of', 'on', 'production', 'project',
@@ -492,8 +510,8 @@ function sourceContainsFact(sourceText, value) {
  * @throws when the config is invalid
  */
 export function verifyFacts(targetText, {
-  sourcePaths = DEFAULT_SOURCES,
-  configPath = DEFAULT_CONFIG,
+  sourcePaths = defaultSourcePaths(),
+  configPath = defaultConfigPath(),
   cwd = process.cwd(),
 } = {}) {
   const sourceText = sourcePaths.map(path => readIfExists(resolveInputPath(path, cwd))).join('\n');
@@ -544,7 +562,7 @@ export function assertFacts(targetText, options = {}) {
 function parseCliArgs(args) {
   const sourcePaths = [];
   let targetArg = '';
-  let configPath = DEFAULT_CONFIG;
+  let configPath = defaultConfigPath();
   let json = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -574,8 +592,8 @@ function usage() {
 
 Checks generated candidate-facing text for unsupported metrics and explicitly asserted
 non-metric facts (employers, titles, and tools) absent from source files.
-Default sources: cv.md, article-digest.md
-Default config:  config/cv-facts.json (optional)`;
+Default sources: cv.md, article-digest.md (in the career-ops data root)
+Default config:  config/cv-facts.json (optional, in the career-ops data root)`;
 }
 
 /** Exercise the metric extraction regressions that the shared gate depends on. */
@@ -850,7 +868,7 @@ export function runCli(args = process.argv.slice(2)) {
   }
   try {
     const result = verifyFacts(readFileSync(targetPath, 'utf-8'), {
-      sourcePaths: parsed.sourcePaths.length ? parsed.sourcePaths : DEFAULT_SOURCES,
+      sourcePaths: parsed.sourcePaths.length ? parsed.sourcePaths : defaultSourcePaths(),
       configPath: parsed.configPath,
     });
     if (parsed.json) {

@@ -63,13 +63,25 @@ const PDF_PAGE_MARGIN = '0.6in';
 // refused to write, intermittently and only under the full suite. Memoized on
 // the variable's own value: same cost as the const while nothing changes, and
 // self-correcting the moment it does. Same defect class as #3159.
+//
+// Derived from the DATA ROOT, exactly like the import-time constant above. The
+// re-derivation used to pass this script's own directory straight in as the
+// root, which skipped getCareerOpsRoot() and with it CAREER_OPS_ROOT,
+// CAREER_OPS_DATA_DIR and the .career-ops-data marker. From a git worktree
+// whose marker points at the real data directory, `workspaceRoot` resolved
+// that directory while this guard resolved the worktree — so every
+// DATA_ROOT-relative input and batch manifest was refused as an escape, and
+// only an explicit CAREER_OPS_TRACKER (the one variable the key did read)
+// could get a PDF written. The data root is part of the cache key, so a change
+// to any of the three variables or to the marker is picked up on the next call.
 let __rootCache = { key: null, root: null, canonical: null };
 function refreshRootCache() {
-  const key = process.env.CAREER_OPS_TRACKER || '';
+  const dataRoot = getCareerOpsRoot();
+  const key = `${dataRoot}\0${process.env.CAREER_OPS_TRACKER || ''}`;
   if (__rootCache.key !== key) {
     // Always re-derive: falling back to the import-time const when the variable
     // is unset would hand back the very value the poisoned import froze.
-    const root = resolveWorkspaceRoot(resolveTrackerPath(__dirname));
+    const root = resolveWorkspaceRoot(resolveTrackerPath(dataRoot));
     __rootCache = { key, root, canonical: realpathSync(root) };
   }
   return __rootCache;
