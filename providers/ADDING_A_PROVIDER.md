@@ -174,9 +174,9 @@ it is inert until the provider is added there.
   accepts `evilvendordomain.com`).
 - If the whole URL is assembled by the provider from a fixed literal host, no
   allowlist is needed, but `redirect: 'error'` still is.
-- **Redirects are never followed** — `redirect: 'error'` is the default and
-  stays it even when the source's own bootstrap issues a legitimate
-  same-origin 3xx. A provider that needs to *inspect* a redirect without
+- **Redirects are never followed automatically** — `redirect: 'error'` is the
+  default and stays it even when the source's own bootstrap issues a
+  legitimate same-origin 3xx. A provider that needs to *inspect* a redirect without
   following it (e.g. to tell an empty-board redirect from a dead-tenant one)
   passes `redirect: 'manual'`: `ctx.fetch*` then throws a structured error
   carrying `.status` and `.location` (see `_http.mjs`; `providers/jobvite.mjs`
@@ -530,8 +530,9 @@ went through them. Must cover:
   the fetch stub was never entered (call count `0`, or a stub that fails the
   test on entry); a fixed-literal-host provider has no allowlist and skips
   this assertion.
-- Empty or contentless body → `[]`; a body whose shape isn't what the
-  endpoint documents → a descriptive throw. Assert both branches — for a
+- The empty-vs-broken split from §2: a *present-and-empty* documented
+  container → `[]`; a bare non-object, a contentless body, or one missing the
+  documented envelope → a descriptive throw. Assert both branches — for a
   scraper that means a fixture whose card selector / embedded blob matches
   nothing throws, while a well-formed page carrying an empty list still
   returns `[]` (`join.mjs`).
@@ -611,8 +612,12 @@ provider whose tuning needs differ from the shared default
 - [ ] `detect()` never throws on junk input; returns `null` instead of
       failing. It claims the landing URL a user actually has (careers-page
       link, aggregator, search hit), not only a hand-built canonical path.
-- [ ] Every network call passes `redirect: 'error'`; a config-derived URL is
-      checked against an allowlist before the request.
+- [ ] Every network call passes `redirect: 'error'` — the sole exception is a
+      deliberate `redirect: 'manual'` inspection request, or a
+      session-bootstrap follow that re-validates every hop's `Location`
+      against the same allowlist, bails on the first off-origin hop, and caps
+      the hop count. A config-derived URL is checked against an allowlist
+      before the request.
 - [ ] `fetch()` returns `[]` only when the documented array container is
       present and empty (`[]` / `{jobs: []}`); it throws — naming the keys
       or type it got — on a real API error, a bare non-object, or an
