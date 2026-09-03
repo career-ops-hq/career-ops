@@ -170,7 +170,20 @@ test('the private repo walkers consult the shared predicate, not their own rule'
   // than the collector — but a fourth hand-rolled `.git` rule is the drift.
   for (const caller of ['tests/local-today-gates.test.mjs', 'tests/main-guard-convention.test.mjs', 'test-all.mjs']) {
     const src = readFileSync(join(ROOT, caller), 'utf-8');
-    assert.match(src, /isNestedCheckout\(/, `${caller} must skip nested checkouts via lib/mjs-files.mjs (#3499)`);
+
+    // The IMPORT is the assertion, not the call. Matching `isNestedCheckout(`
+    // anywhere in the file is satisfied by a local `const isNestedCheckout =
+    // () => false` — a hand-rolled re-implementation wearing the shared name,
+    // which is precisely the drift this test exists to catch, passing as proof
+    // against itself. Pinning the import binds the name to the one definition.
+    assert.match(
+      src,
+      /import\s*\{[^}]*\bisNestedCheckout\b[^}]*\}\s*from\s*'\.{1,2}\/lib\/mjs-files\.mjs'/,
+      `${caller} must import isNestedCheckout FROM lib/mjs-files.mjs, not re-implement it (#3499)`,
+    );
+    // ...and still use it: an unused import satisfies the check above while the
+    // walk descends into every nested checkout exactly as before.
+    assert.match(src, /isNestedCheckout\(/, `${caller} must actually call isNestedCheckout (#3499)`);
   }
 });
 
