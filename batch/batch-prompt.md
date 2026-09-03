@@ -506,9 +506,9 @@ Design rules:
 - White background, 0.6in margins.
 - Keep the output readable and ATS-safe.
 
-### Step 5 — Tracker TSV Line
+### Step 5 — Tracker TSV Row
 
-Write exactly one TSV line to:
+Write exactly two TSV lines — a header row, then one data row — to:
 
 ```text
 batch/tracker-additions/{{ID}}.tsv
