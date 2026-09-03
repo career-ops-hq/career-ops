@@ -2688,12 +2688,25 @@ function rollback() {
     const removed = [];
     for (const path of systemPathsToRestore) {
       try {
-        git('checkout', latest, '--', path);
+        // --literal-pathspecs: `path` can come from the FETCH_HEAD-sourced
+        // target manifest (rollbackSystemPaths), not just the hardcoded
+        // SYSTEM_PATHS/BOOTSTRAP_PATHS constants — isSafeManifestPath()
+        // validates filesystem safety (no absolute path, no `..`, no `.git`,
+        // no declared user-layer path) but a string like `:(top,glob)**`
+        // passes all of those checks while still being valid Git pathspec
+        // magic. Without this flag, `--` ends OPTION parsing but does not
+        // stop Git from reinterpreting the pathspec itself, so that entry
+        // would expand into "everything in the tree" instead of the one
+        // validated path (CodeRabbit follow-up on #3782, CWE-22).
+        git('--literal-pathspecs', 'checkout', latest, '--', path);
         restored.push(path);
       } catch (err) {
         const pathspec = path.endsWith('/') ? path.slice(0, -1) : path;
         let existedInBackup = true;
         try {
+          // No --literal-pathspecs needed here: `<rev>:<path>` is Git's
+          // extended-SHA1 object-lookup syntax, not a pathspec, so it is
+          // never subject to pathspec magic expansion in the first place.
           git('cat-file', '-e', `${latest}:${pathspec}`);
         } catch {
           existedInBackup = false;
@@ -2706,7 +2719,8 @@ function rollback() {
         // for tracked files; `rmSync` cleans up the untracked-but-
         // on-disk case (e.g. an apply() that crashed between checkout
         // and commit, leaving the path untracked locally).
-        git('rm', '-r', '-f', '--ignore-unmatch', '--', pathspec);
+        // --literal-pathspecs: same reasoning as the checkout above.
+        git('--literal-pathspecs', 'rm', '-r', '-f', '--ignore-unmatch', '--', pathspec);
         try {
           rmSync(join(ROOT, pathspec), { recursive: true, force: true });
         } catch {
@@ -2730,8 +2744,13 @@ function rollback() {
     try {
       // Scope the commit to the rollback paths (#915 bug 2). A bare
       // `git commit` would sweep unrelated staged files into the rollback.
+      // --literal-pathspecs: expandToShippedFiles only expands entries that
+      // end in `/` through `ls-tree` — a non-directory manifest string (the
+      // same `:(top,glob)**`-style magic pathspec the checkout/rm calls
+      // above guard against) passes through here unexpanded and would
+      // otherwise still be open to pathspec-magic reinterpretation.
       if (expandedRollbackPaths.length > 0) {
-        git('commit', '-m', `chore: rollback system files from ${latest}`, '--', ...expandedRollbackPaths);
+        git('--literal-pathspecs', 'commit', '-m', `chore: rollback system files from ${latest}`, '--', ...expandedRollbackPaths);
       }
     } catch {
       // Tolerate any commit failure here — the common case is the

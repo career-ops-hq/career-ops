@@ -30,6 +30,7 @@ const fakeTargetSource = (paths) =>
       }
       throw new Error(`unexpected git call: ${args.join(' ')}`);
     },
+    userPaths: ['cv.md', 'data/'],
   };
 
   const paths = rollbackSystemPaths(ctx);
@@ -86,6 +87,7 @@ const fakeTargetSource = (paths) =>
       }
       throw new Error(`unexpected git call: ${args.join(' ')}`);
     },
+    userPaths: ['cv.md', 'data/'],
   };
 
   const paths = rollbackSystemPaths(ctx);
@@ -173,6 +175,7 @@ const fakeTargetSource = (paths) =>
       }
       throw new Error(`unexpected git call: ${args.join(' ')}`);
     },
+    userPaths: ['cv.md', 'data/'],
   };
 
   const paths = rollbackSystemPaths(ctx);
@@ -193,6 +196,7 @@ const fakeTargetSource = (paths) =>
       }
       throw new Error(`unexpected git call: ${args.join(' ')}`);
     },
+    userPaths: ['cv.md', 'data/'],
   };
 
   const paths = rollbackSystemPaths(ctx);
@@ -250,6 +254,7 @@ const fakeTargetSource = (paths) =>
       }
       throw new Error(`unexpected git call: ${args.join(' ')}`);
     },
+    userPaths: ['cv.md', 'data/'],
   };
 
   const paths = rollbackSystemPaths(ctx);
