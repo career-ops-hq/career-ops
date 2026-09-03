@@ -909,6 +909,7 @@ search_queries:
 #   gem             jobs.gem.com/<boardId>
 #   join            join.com/companies/<slug>  (SSR __NEXT_DATA__ parse, no separate API)
 #   icims           careers-<tenant>.icims.com / *.icims.com
+#   adp-workforcenow  workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=...&ccId=...
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -1011,6 +1012,14 @@ search_queries:
 #
 # - name: Example Workable Co
 #   careers_url: https://apply.workable.com/exampleco   # any apply.workable.com/<slug> host
+#   enabled: true
+#
+# - name: Example ADP Workforce Now Co
+#   careers_url: https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=00000000-0000-0000-0000-000000000000&ccId=19000101_000001
+#   max_pages: 100          # optional page cap (20 jobs/page, default 100, max 1500)
+#   adpWorkforcenow:
+#     fetchDetails: true    # optional: fetch each posting's detail JSON for a description (off by default — the list payload carries no JD text)
+#     detailLimit: 25       # optional: max detail calls per sweep when fetchDetails is true
 #   enabled: true
 #
 # - name: Example Workday Co
