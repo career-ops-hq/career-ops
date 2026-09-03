@@ -658,10 +658,10 @@ provider whose tuning needs differ from the shared default
       examples" block, a commented `Example {Name} Co` stanza (every field
       at its default) in the group whose header matches — copy a neighbouring
       group's `(→ tracked_companies: …)` / `(→ job_boards: …)` header format
-      verbatim — and, for a provider with **no** `detect()`, add its id to
-      the "job boards / aggregators … explicit `provider:`" list at the end
-      of the "Provider auto-detection" section (a URL-pattern `detect()` is
-      already covered by (1)); (3) one **live, uncommented** real entry, in
+      verbatim — a provider with **no** `detect()` is covered by the
+      `provider:` line in that stanza, which is what the "Provider
+      auto-detection" section points at (there is no separate name list to
+      append to); (3) one **live, uncommented** real entry, in
       the matching region/topic section, **only when it carries more than the
       stanza in (2)** — a real `careers_url` / `api`, a resolvable slug or
       board id, or provider-specific keys (every company ATS, and any

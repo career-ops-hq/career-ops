@@ -924,9 +924,10 @@ search_queries:
 #
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
-# field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
-# himalayas, ibm, jobbankca, jobicy, jobstreet, justjoin, landingjobs, mycareersfuture, nofluffjobs, remoteok, remotive, senjob,
-# manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent. Examples for every built-in provider are below.
+# field. Those are the provider modules that omit detect(); the commented
+# stanzas below are the authoritative list of them — each one carries its
+# own `provider:` line. (A provider with a URL-pattern detect() is
+# auto-claimed from its host instead, per the table above.)
 
 # ── Built-in provider examples ────────────────────────────────────
 # One commented stanza per provider in providers/. Uncomment one and adjust.
