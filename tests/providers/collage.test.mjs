@@ -26,7 +26,7 @@ try {
   if (mod.parseCollageResponse({ positions: [] }, 'X').length === 0 && mod.parseCollageResponse({}, 'X').length === 0) pass('empty/malformed payloads return []'); else fail('empty payload handling failed');
   let fetchedUrl = ''; let fetchedOpts;
   const fetched = await p.fetch({ name: 'PheedLoop', api: 'https://api.collage.co/v1/positions/pheedloop' }, { fetchJson: async (url, opts) => { fetchedUrl = url; fetchedOpts = opts; return sample; } });
-  if (fetchedUrl.endsWith('/pheedloop') && fetchedOpts?.redirect === 'error' && fetched.length === 1) pass('fetch pins API host and uses redirect:error'); else fail(`fetch=${fetchedUrl} ${JSON.stringify(fetchedOpts)}`);
+  if (fetchedUrl === 'https://api.collage.co/v1/positions/pheedloop' && fetchedOpts?.redirect === 'error' && fetched.length === 1) pass('fetch pins API host and uses redirect:error'); else fail(`fetch=${fetchedUrl} ${JSON.stringify(fetchedOpts)}`);
   let calls = 0;
   for (const bad of ['https://evil.example/v1/positions/acme', 'http://api.collage.co/v1/positions/acme']) {
     let rejected = false;
