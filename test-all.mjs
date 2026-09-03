@@ -57,7 +57,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
-import { collectMjsFiles } from './lib/mjs-files.mjs';
+import { collectMjsFiles, isNestedCheckout } from './lib/mjs-files.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -413,6 +413,14 @@ try {
     if (dirname(src) === ROOT && exclude.includes(name)) return;
     const stat = statSync(src);
     if (stat.isDirectory()) {
+      // A linked worktree is a whole second checkout of this repo and carries a
+      // `.git` FILE, not a directory, so the name-based exclusion above never
+      // fires on one (#3499). Copying it doubles this section's copy cost and
+      // seeds the throwaway tree with a stale duplicate of every script.
+      // Skipped below the root ONLY: `src === ROOT` on the first call, and
+      // ROOT's own `.git` is legitimately a file when the suite is being run
+      // FROM a worktree — testing it there would copy nothing at all.
+      if (src !== ROOT && isNestedCheckout(src)) return;
       mkdirSync(dest, { recursive: true });
       for (const entry of readdirSync(src)) {
         copyDirSync(join(src, entry), join(dest, entry), exclude);
