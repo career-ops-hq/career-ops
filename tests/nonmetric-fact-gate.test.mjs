@@ -283,6 +283,80 @@ try {
   } else {
     fail(`explicit direct-work evidence was ignored: ${JSON.stringify(directlySupported)}`);
   }
+
+  // Scope-verb inflation and unsourced adoption claims (#3685), end to end
+  // through verifyFacts and its real source files. Both cases below were passed
+  // by the gate in a real run and had to be caught by hand.
+  const scopeSource = join(tmp, 'scope-cv.md');
+  writeFileSync(scopeSource, [
+    'Contributed to the migration to a service architecture.',
+    'Implemented the ingest pipeline for the analytics team.',
+  ].join('\n'));
+
+  const inflatedScope = verifyFacts('Led the migration to a service architecture.', {
+    sourcePaths: [scopeSource], configPath: config,
+  });
+  const scopeClaim = inflatedScope.unsupportedFacts.find(claim => claim.kind === 'scope');
+  // Which line was picked is the assertion, not its exact punctuation:
+  // factStatements keeps a statement's own trailing period when a line break
+  // supplied the delimiter, so pinning the full string would be brittle for a
+  // reason unrelated to this check.
+  if (inflatedScope.verdict === 'block'
+      && scopeClaim
+      && scopeClaim.sourceLine.includes('Contributed to the migration')
+      && !scopeClaim.sourceLine.includes('ingest')) {
+    pass('an upgraded scope verb blocks and names the source line');
+  } else {
+    fail(`scope inflation was not blocked: ${JSON.stringify(inflatedScope)}`);
+  }
+
+  const truthfulScope = verifyFacts('Implemented the ingest pipeline for the analytics team.', {
+    sourcePaths: [scopeSource], configPath: config,
+  });
+  if (truthfulScope.verdict === 'pass'
+      && !truthfulScope.unsupportedFacts.some(claim => claim.kind === 'scope')) {
+    pass('a bullet whose source carries the same verb passes');
+  } else {
+    fail(`a truthful scope claim was blocked: ${JSON.stringify(truthfulScope)}`);
+  }
+
+  const unsourcedAdoption = verifyFacts('Built internal tooling used daily across the engineering org.', {
+    sourcePaths: [scopeSource], configPath: config,
+  });
+  if (unsourcedAdoption.verdict === 'block'
+      && unsourcedAdoption.unsupportedFacts.some(claim => claim.kind === 'adoption' && claim.value === 'used daily')) {
+    pass('an adoption claim absent from every source blocks');
+  } else {
+    fail(`an unsourced adoption claim was accepted: ${JSON.stringify(unsourcedAdoption)}`);
+  }
+
+  const sourcedAdoption = join(tmp, 'adoption-cv.md');
+  writeFileSync(sourcedAdoption, 'Implemented the ingest pipeline, used daily by the analytics team.');
+  const adoptionAllowed = verifyFacts('Implemented the ingest pipeline, used daily by the analytics team.', {
+    sourcePaths: [sourcedAdoption], configPath: config,
+  });
+  if (adoptionAllowed.verdict === 'pass'
+      && !adoptionAllowed.unsupportedFacts.some(claim => claim.kind === 'adoption')) {
+    pass('a source-backed adoption claim passes');
+  } else {
+    fail(`a source-backed adoption claim was blocked: ${JSON.stringify(adoptionAllowed)}`);
+  }
+
+  // allow_facts is the existing escape hatch for a verified exception, and it
+  // has to reach the new kinds too or the only way past a false positive is to
+  // reword the CV.
+  const allowConfig = join(tmp, 'cv-facts-allow.json');
+  writeFileSync(allowConfig, JSON.stringify({
+    allow_metrics: [], allow_facts: ['led the migration to a service architecture'], forbidden_phrases: [],
+  }));
+  const allowed = verifyFacts('Led the migration to a service architecture.', {
+    sourcePaths: [scopeSource], configPath: allowConfig,
+  });
+  if (!allowed.unsupportedFacts.some(claim => claim.kind === 'scope')) {
+    pass('allow_facts exempts a verified scope claim');
+  } else {
+    fail(`allow_facts did not reach the scope check: ${JSON.stringify(allowed)}`);
+  }
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }

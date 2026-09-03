@@ -546,6 +546,189 @@ function countMatches(clean) {
   });
 }
 
+// Scope-of-ownership verbs, ranked. A CV that upgrades the verb without
+// upgrading the evidence reads as a fact and is not one: "led the migration"
+// against a source that says "contributed to the migration" is the case that
+// prompted #3685, and the numeric gate above cannot see it because no number
+// changed.
+//
+// The three tiers are the ones #3685 fixes. Inflections are listed because the
+// tier of a claim is a property of the verb, not of its conjugation, and a
+// table that only knew `led` would be bypassed by `leads` or `leading`.
+const SCOPE_VERB_TIERS = new Map([
+  // Tier 1 — participation. Someone else owned the outcome.
+  ['contribute', 1], ['contributed', 1], ['contributes', 1], ['contributing', 1],
+  ['help', 1], ['helped', 1], ['helps', 1], ['helping', 1],
+  ['support', 1], ['supported', 1], ['supports', 1], ['supporting', 1],
+  // Tier 2 — execution. Did the work, without claiming the mandate.
+  ['build', 2], ['built', 2], ['builds', 2], ['building', 2],
+  ['implement', 2], ['implemented', 2], ['implements', 2], ['implementing', 2],
+  ['design', 2], ['designed', 2], ['designs', 2], ['designing', 2],
+  // Tier 3 — ownership. Claims the mandate as well as the work.
+  ['lead', 3], ['led', 3], ['leads', 3], ['leading', 3],
+  ['own', 3], ['owned', 3], ['owns', 3], ['owning', 3],
+  ['architect', 3], ['architected', 3], ['architects', 3], ['architecting', 3],
+  ['drive', 3], ['drove', 3], ['drives', 3], ['driving', 3], ['driven', 3],
+]);
+
+// Bullet glyphs and list markers survive stripMarkup. They have to come off
+// before the "opens with" test can see the verb, and before a claim value is
+// built: an allow_facts entry a user would actually write ("led the migration")
+// can never match a value that still carries its "- " prefix, which would leave
+// the documented escape hatch unusable on any real bulleted CV.
+const LIST_MARKER_RE = /^[\s•‣◦⁃∙*+-]+/u;
+
+/** Drop a leading list marker so a bullet and a plain sentence read the same. */
+function stripListMarker(statement) {
+  return String(statement ?? '').replace(LIST_MARKER_RE, '').trim();
+}
+
+/** The opening verb of a statement, with its tier, or null when it opens with neither. */
+function openingScopeVerb(statement) {
+  const opening = stripListMarker(statement).match(/^([\p{L}]+)/u);
+  if (!opening) return null;
+  const verb = opening[1].toLowerCase();
+  const tier = SCOPE_VERB_TIERS.get(verb);
+  return tier ? { verb, tier } : null;
+}
+
+/** The strongest scope tier asserted anywhere in a statement, or 0 when it asserts none. */
+function strongestScopeTier(statement) {
+  let strongest = 0;
+  for (const word of String(statement ?? '').toLowerCase().match(/[\p{L}]+/gu) ?? []) {
+    strongest = Math.max(strongest, SCOPE_VERB_TIERS.get(word) ?? 0);
+  }
+  return strongest;
+}
+
+/** Content tokens of a statement, with scope verbs removed so a tier word cannot link two entries. */
+function scopeObjectTokens(text) {
+  return attributionTokens(text).filter(token => !SCOPE_VERB_TIERS.has(token));
+}
+
+/**
+ * Detect scope-verb inflation: the generated document opens a bullet with a
+ * stronger ownership verb than the source evidence for the same entry carries.
+ *
+ * Entries are linked by shared content tokens rather than by heading, the same
+ * mechanism `delegatedAuthorshipClaims` uses. `stripMarkup` removes headings
+ * before any check sees the text, so a heading-based match would need a second
+ * segmentation path for each of md/html/tex.
+ *
+ * Deliberately one-directional. A claim is reported only on positive evidence
+ * that the source is weaker: if any linked source statement carries an equal or
+ * stronger verb, or if nothing links at all, the bullet is left alone. An
+ * unsourced bullet is a different defect and belongs to the checks above.
+ */
+export function scopeInflationClaims(targetText, sourceText) {
+  // Only statements that assert a scope of their own are comparable. A source
+  // bullet with no scope verb ("Worked on the billing migration") neither
+  // supports nor contradicts a stronger claim, and treating its absence of a
+  // verb as tier 0 reported every sourced-but-differently-worded bullet as
+  // inflation. A bullet with no scope evidence at all is an unsourced bullet,
+  // which is the named-fact checks' business, not this one's.
+  const sourceStatements = factStatements(sourceText)
+    .map(stripListMarker)
+    .map(statement => ({
+      statement,
+      tier: strongestScopeTier(statement),
+      tokens: new Set(scopeObjectTokens(statement)),
+    }))
+    .filter(source => source.tokens.size && source.tier >= 1);
+  if (!sourceStatements.length) return [];
+
+  const claims = [];
+  for (const raw of factStatements(targetText)) {
+    const statement = stripListMarker(raw);
+    const opening = openingScopeVerb(statement);
+    // Tier 1 is participation, so it cannot be an escalation of anything: the
+    // check is for bullets that claim execution or ownership.
+    if (!opening || opening.tier < 2) continue;
+    const tokens = scopeObjectTokens(statement);
+    if (!tokens.length) continue;
+
+    const linked = sourceStatements
+      .map(source => ({
+        source,
+        overlap: tokens.filter(token => source.tokens.has(token)).length,
+      }))
+      .filter(({ overlap }) => overlap > 0);
+    if (!linked.length) continue;
+    // Benefit of the doubt: one linked statement carrying the claimed scope is
+    // enough, wherever it sits. Sources restate the same entry across several
+    // sentences, and the mandate is often in a different one from the work.
+    if (linked.some(({ source }) => source.tier >= opening.tier)) continue;
+
+    const closest = linked.reduce((best, next) => (next.overlap > best.overlap ? next : best));
+    claims.push({
+      kind: 'scope',
+      value: normalizeFact(statement),
+      line: statement,
+      sourceLine: closest.source.statement,
+    });
+  }
+  return claims.filter((claim, index, all) => (
+    all.findIndex(other => other.value === claim.value) === index
+  ));
+}
+
+// Adoption and reach assertions, which read as measured facts while naming no
+// number the metric gate could check. The list is #3685's, kept short on
+// purpose: every entry states that other people depend on the work, which is
+// exactly the claim a reader would try to verify with a reference.
+//
+// `across the ... org` carries a small window because the real phrasing names
+// the org ("across the engineering org"), and a literal `across the org` would
+// have missed the case the issue was filed for.
+const ADOPTION_PATTERNS = [
+  /\bused\s+daily\b/giu,
+  /\bacross\s+the\s+(?:[\p{L}-]+\s+){0,2}org(?:ani[sz]ations?)?\b/giu,
+  /\bcompany[-\s]?wide\b/giu,
+  /\borg[-\s]?wide\b/giu,
+  /\badopted\s+by\b/giu,
+  /\bstandard\s+across\b/giu,
+];
+
+/**
+ * Detect adoption or reach claims the sources never make.
+ *
+ * Matched per pattern rather than per exact phrase, so a source that states
+ * adoption in its own words still supports the generated wording. Checked
+ * against the whole source text rather than the linked entry: entry-level
+ * scoping would need the heading segmentation noted above, and the looser test
+ * only ever reports fewer claims, which is the safe direction for a gate that
+ * blocks generation.
+ */
+export function adoptionClaims(targetText, sourceText) {
+  const target = stripMarkup(targetText);
+  const source = stripMarkup(sourceText);
+  // Statement splitting is only needed to quote the offending line back, so it
+  // is deferred until something actually matches: a clean document is the
+  // common case, and stripMarkup over the whole target is the expensive part.
+  let statements = null;
+  const lineFor = (phrase) => {
+    statements ??= factStatements(targetText).map(stripListMarker);
+    return statements.find(statement => statement.toLowerCase().includes(phrase.toLowerCase())) ?? null;
+  };
+  const claims = [];
+  for (const pattern of ADOPTION_PATTERNS) {
+    pattern.lastIndex = 0;
+    if (pattern.test(source)) continue;
+    pattern.lastIndex = 0;
+    for (const match of target.matchAll(pattern)) {
+      claims.push({
+        kind: 'adoption',
+        value: normalizeFact(match[0]),
+        line: lineFor(match[0]),
+        sourceLine: null,
+      });
+    }
+  }
+  return claims.filter((claim, index, all) => (
+    all.findIndex(other => other.value === claim.value) === index
+  ));
+}
+
 /** Extract metric-like claims that require source evidence. */
 export function metricClaims(text) {
   const clean = stripMarkup(text, { keepLineBreaks: true });
@@ -760,8 +943,19 @@ export function verifyFacts(targetText, {
   const invented = [...targetClaims].filter(claim => !allowed.has(claim));
   const sourceNormalized = normalizeFact(stripMarkup(sourceText));
   const allowedFacts = new Set(config.allow_facts.map(normalizeFact));
-  const unsupportedFacts = [...factClaims(targetText, sourceNormalized), ...delegatedAuthorshipClaims(targetText, sourceText)]
-    .filter(({ value }) => !sourceContainsFact(sourceNormalized, value) && !allowedFacts.has(value))
+  const namedFacts = [...factClaims(targetText, sourceNormalized), ...delegatedAuthorshipClaims(targetText, sourceText)]
+    .filter(({ value }) => !sourceContainsFact(sourceNormalized, value) && !allowedFacts.has(value));
+  // Scope and adoption claims resolve their own source evidence — a verb-tier
+  // comparison and a phrase lookup — so they must not be re-filtered by
+  // sourceContainsFact. That test asks whether the claim's own wording appears
+  // in the sources, which is a different question: an inflated bullet whose
+  // words happen to occur elsewhere in cv.md would be dropped, and the whole
+  // finding is that the source says something WEAKER about the same entry.
+  const comparedFacts = [
+    ...scopeInflationClaims(targetText, sourceText),
+    ...adoptionClaims(targetText, sourceText),
+  ].filter(({ value }) => !allowedFacts.has(value));
+  const unsupportedFacts = [...namedFacts, ...comparedFacts]
     .filter((claim, index, claims) => claims.findIndex(other => other.kind === claim.kind && other.value === claim.value) === index);
   const forbidden = config.forbidden_phrases
       .filter(Boolean)
@@ -790,7 +984,9 @@ export function assertFacts(targetText, options = {}) {
   if (result.verdict === 'block') {
     const details = [];
     if (result.invented.length) details.push(`metric-like claims absent from sources: ${result.invented.join(', ')}`);
-    if (result.unsupportedFacts.length) details.push(`non-metric facts absent from sources: ${result.unsupportedFacts.map(({ kind, value }) => `${kind}=${value}`).join(', ')}`);
+    if (result.unsupportedFacts.length) details.push(`non-metric facts absent from sources: ${result.unsupportedFacts.map(({ kind, value, sourceLine }) => (
+      sourceLine ? `${kind}=${value} (source says: ${sourceLine})` : `${kind}=${value}`
+    )).join(', ')}`);
     if (result.forbidden.length) details.push(`forbidden phrases found: ${result.forbidden.join(', ')}`);
     throw new Error(`Fact check failed${options.label ? ` for ${options.label}` : ''}: ${details.join('; ')}`);
   }
@@ -830,8 +1026,8 @@ function usage() {
        node verify-cv-facts.mjs --self-test
 
 Checks generated candidate-facing text for unsupported metrics and explicitly asserted
-non-metric facts (employers, titles, tools, and delegated-work authorship) absent
-from source files.
+non-metric facts (employers, titles, tools, delegated-work authorship, scope-verb
+inflation, and unsourced adoption claims) absent from source files.
 Default sources: cv.md, article-digest.md
 Default config:  config/cv-facts.json (optional)`;
 }
@@ -1160,6 +1356,73 @@ function runSelfTest() {
     ['50 servers']
   );
 
+  // Scope-verb inflation (#3685). Neither of the two cases below changes a
+  // number, so every check above passes them: "led" where the source says
+  // "contributed" is a fact to a reader and invisible to a metric gate.
+  const scopeOf = (target, source) => scopeInflationClaims(target, source).map(claim => claim.value);
+  const scopeSource = 'Contributed to the migration to a service architecture. Implemented the ingest pipeline.';
+
+  equal('an upgraded scope verb is caught',
+    scopeOf('Led the migration to a service architecture', scopeSource),
+    ['led the migration to a service architecture']);
+  equal('the bare phrasing of the same escalation is caught',
+    scopeOf('Led the migration', 'Contributed to the migration'), ['led the migration']);
+  equal('tier 3 over tier 2 is caught',
+    scopeOf('Architected the ingest pipeline', scopeSource), ['architected the ingest pipeline']);
+  // The gate must report the source line, not just the offending bullet: the
+  // user fixes this in cv.md, and "which line" is the whole question.
+  equal('the closest source line is reported',
+    scopeInflationClaims('Led the migration to a service architecture', scopeSource)
+      .map(claim => claim.sourceLine),
+    ['Contributed to the migration to a service architecture']);
+
+  // …and the four ways this must stay silent. A fact gate that blocks a
+  // truthful CV is the failure mode this file's history is mostly about.
+  equal('an equal verb is not an escalation',
+    scopeOf('Implemented the ingest pipeline', scopeSource), []);
+  equal('a stronger source is not an escalation',
+    scopeOf('Implemented the ingest pipeline', 'Architected the ingest pipeline.'), []);
+  equal('a bullet with no matching source entry is left alone',
+    scopeOf('Led the quarterly hiring committee', scopeSource), []);
+  equal('a source stating the mandate in another sentence is respected',
+    scopeOf('Led the payments rewrite',
+      'Contributed to the payments rewrite. I led that payments effort end to end.'), []);
+  // A source bullet that asserts no scope at all cannot be the weaker side of
+  // a comparison. Before source statements were required to carry a verb, this
+  // reported every sourced bullet whose source simply worded it differently.
+  equal('a source with no scope verb is not evidence of inflation',
+    scopeOf('Built the billing migration', 'Worked on the billing migration.'), []);
+  // Tier 1 claims participation, so it can never be an escalation.
+  equal('a participation verb is never flagged',
+    scopeOf('Supported the billing migration', 'Worked on the billing migration.'), []);
+  // A real CV is a bullet list, and the marker survives stripMarkup. Left on,
+  // it prefixed the claim value ("- led the migration"), which no allow_facts
+  // entry a user would write can match — the escape hatch was unusable on
+  // exactly the input this check exists for.
+  equal('a bulleted CV yields the same claim as a plain sentence',
+    scopeOf('- Led the migration', '- Contributed to the migration'), ['led the migration']);
+  equal('a bulleted source is still matched',
+    scopeInflationClaims('* Led the migration', '• Contributed to the migration')
+      .map(claim => claim.sourceLine),
+    ['Contributed to the migration']);
+
+  // Unsourced adoption and reach claims (#3685), the other class that reads as
+  // a fact while naming no number.
+  const adoptionOf = (target, source) => adoptionClaims(target, source).map(claim => claim.value).sort();
+
+  equal('an unsourced adoption claim is caught',
+    adoptionOf('Internal tooling used daily across the engineering org', scopeSource),
+    ['across the engineering org', 'used daily']);
+  equal('company-wide reach with no source is caught',
+    adoptionOf('Rolled the linter out company-wide', scopeSource), ['company-wide']);
+  equal('a sourced adoption claim passes',
+    adoptionOf('Used daily by the team', 'The tool is used daily by the platform team.'), []);
+  // Matched per pattern, not per exact phrase, so a source wording its own
+  // adoption differently still supports the generated line.
+  equal('a differently worded source adoption claim still supports it',
+    adoptionOf('Used daily across the engineering org',
+      'Used daily by six teams across the wider org.'), []);
+
   console.log(`verify-cv-facts self-test: ${passed} passed, ${failed} failed`);
   return failed ? 1 : 0;
 }
@@ -1212,7 +1475,11 @@ export function runCli(args = process.argv.slice(2)) {
     }
     if (result.unsupportedFacts.length) {
       console.error('\nNon-metric facts absent from sources:');
-      for (const { kind, value } of result.unsupportedFacts) console.error(`  - ${kind}: ${value}`);
+      for (const { kind, value, line, sourceLine } of result.unsupportedFacts) {
+        console.error(`  - ${kind}: ${value}`);
+        if (line && line !== value) console.error(`      CV:     ${line}`);
+        if (sourceLine) console.error(`      source: ${sourceLine}`);
+      }
     }
     if (result.forbidden.length) {
       console.error('\nForbidden phrases found:');
