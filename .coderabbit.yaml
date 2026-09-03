@@ -160,13 +160,13 @@ reviews:
 
 chat:
   auto_reply: true
-  allow_non_org_members: true
+  allow_non_org_members: true   # contributors trigger reviews and ask questions on their own PRs; that is the on-ramp
   art: false
 
 knowledge_base:
   opt_out: false
   web_search: { enabled: true }
-  learnings: { scope: auto, approval_delay: 0 }
+  learnings: { scope: auto, approval_delay: 7 }   # a week for a maintainer to reject a learning before it sticks
   issues: { scope: auto }
   pull_requests: { scope: auto }
   code_guidelines:
