@@ -131,6 +131,28 @@ try {
     fail(`buildPostingUrl() fallback wrong: ${JSON.stringify(urlFallback)}`);
   }
 
+  const urlWithReservedChars = buildPostingUrl(CID, CCID, 'item/1?part=2', 'REQ/2026 & hiring');
+  if (urlWithReservedChars) {
+    const parsed = new URL(urlWithReservedChars);
+    if (
+      parsed.searchParams.get('jobId') === 'REQ/2026 & hiring' &&
+      parsed.searchParams.get('jwId') === 'item/1?part=2' &&
+      !urlWithReservedChars.includes('%252F')
+    ) {
+      pass('buildPostingUrl() encodes reserved query characters exactly once');
+    } else {
+      fail(`buildPostingUrl() double-encoded reserved query characters: ${urlWithReservedChars}`);
+    }
+  } else {
+    fail('buildPostingUrl() rejected valid IDs containing reserved query characters');
+  }
+
+  if (buildPostingUrl(CID, CCID, 'item-1', '\uD800') === null && buildPostingUrl(CID, CCID, '\uD800', null) === null) {
+    pass('buildPostingUrl() keeps the malformed-surrogate fail-safe for query values');
+  } else {
+    fail('buildPostingUrl() should return null for malformed-surrogate query values');
+  }
+
   // ── extractPostedAt ──────────────────────────────────────────────────────
 
   if (extractPostedAt({ postDate: '2026-07-01' }) === Date.parse('2026-07-01')) {

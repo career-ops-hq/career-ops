@@ -276,16 +276,18 @@ export function extractSalary(job) {
  * @param {string} cid @param {string} ccId @param {string} itemId @param {string | null} externalJobId
  */
 export function buildPostingUrl(cid, ccId, itemId, externalJobId) {
-  const jobId = encodeSegment(externalJobId || itemId);
-  const jwId = encodeSegment(itemId);
-  if (jobId === null || jwId === null) return null;
+  const jobId = externalJobId || itemId;
+  // URLSearchParams performs the query-component encoding. Probe the values
+  // with encodeSegment only to retain the lone-surrogate fail-safe; passing
+  // its encoded output to URLSearchParams would double-encode `%`.
+  if (encodeSegment(jobId) === null || encodeSegment(itemId) === null) return null;
   const u = new URL(`https://${ADP_HOST}/mascsr/default/mdf/recruitment/recruitment.html`);
   u.searchParams.set('cid', cid);
   u.searchParams.set('ccId', ccId);
   u.searchParams.set('lang', 'en_US');
   u.searchParams.set('type', 'JS');
   u.searchParams.set('jobId', jobId);
-  u.searchParams.set('jwId', jwId);
+  u.searchParams.set('jwId', itemId);
   return u.href;
 }
 
