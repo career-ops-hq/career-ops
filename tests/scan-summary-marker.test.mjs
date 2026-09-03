@@ -22,6 +22,15 @@ import { SCAN_SUMMARY_MARKER, scanSummaryHeaderLines, printScanSummaryHeader } f
 
 const RULE = '━'.repeat(45);
 
+// The token itself is the interface, so it is pinned as a literal here and not
+// only compared against the imported constant: renaming or re-spelling
+// SCAN_SUMMARY_MARKER would otherwise leave every assertion green while every
+// consumer downstream breaks.
+test('the marker token is exactly this string', () => {
+  assert.equal(SCAN_SUMMARY_MARKER, '::career-ops:scan-summary::');
+  assert.equal(scanSummaryHeaderLines('Portal Scan', '2026-09-03')[1], '::career-ops:scan-summary::');
+});
+
 test('the marker is a whole line of its own, immediately above the banner', () => {
   const lines = scanSummaryHeaderLines('Portal Scan', '2026-09-03');
   assert.deepEqual(lines, ['', SCAN_SUMMARY_MARKER, RULE, 'Portal Scan — 2026-09-03', RULE]);
