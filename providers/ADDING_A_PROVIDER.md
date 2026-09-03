@@ -121,8 +121,10 @@ contract** (`name` / `careers_url` / `api` / `provider` / `parser`), the same
 `detect()`, and the same registry. `detect(entry)` gets the same `entry`
 shape from either list. A single-company provider is documented and tested
 against `tracked_companies:`, an aggregator/feed against `job_boards:`. The
-file's header comment must name the target list (reference:
-`providers/remotli.mjs`, `providers/yourator.mjs`).
+file's header comment must name the target list — reference
+`providers/ibm.mjs` and `providers/dassault.mjs` for a single-company
+`tracked_companies:` adapter, `providers/remotli.mjs` and
+`providers/yourator.mjs` for a `job_boards:` aggregator/feed.
 
 ### The `enrichDate` hook (optional, rarely needed)
 
@@ -192,19 +194,37 @@ the bad item — and the throw surfaces as a run error, and as `missing` in
 false alarm instead of an honest "empty". So a malformed item is a
 `continue` / `null` + `.filter`, never an exception out of `fetch()`.
 
-- An empty or contentless body (`null`, `{}`, `[]`, `{jobs: null}`) —
-  "endpoint alive, nothing matched" → return `[]`.
-- A body whose structure is recognisably *not* what the endpoint documents
-  (expected nested container absent or wrong-typed, keys entirely different)
-  → a descriptive `throw` (name the keys you did get) is allowed and usually
-  better: it surfaces a silent API change instead of a board that quietly
-  returns `0` forever. Reference: `parseIbmResponse` in `providers/ibm.mjs`.
-  `scan.mjs` also throws on a non-array out of `fetch()`; `verify-portals`
-  catches it. Watch the guard shape: `if (json && typeof json === 'object' &&
-  …wrong-key checks…) throw` only fires for objects, so a bare string /
-  number / `true` where an object is documented slips past it into the
-  empty-board path — reject a non-object payload up front too (`null` / `{}`
-  / `[]` still return `[]`).
+The line between "empty" and "broken" is where a silent API change has to
+surface instead of reading as `0` jobs forever. Three outcomes:
+
+- **`[]` — endpoint alive, nothing matched.** The documented array container
+  is *present and empty*: `[]`, `{jobs: []}`, `{hits: {hits: []}}`. Nothing
+  else — a blank 200 and a genuinely empty board both arrive in that shape.
+- **Descriptive `throw` — the envelope is not the documented shape.** The
+  container is absent (`{}`, `{jobs: null}`, `{results: […]}` under a
+  different key), present but wrong-typed (`{jobs: {}}`, `{jobs: "…"}`), or
+  the body is a bare non-object (`""`, a number, `true`) where an object is
+  documented. One guard covers all of these — a truthy-array test with a
+  single fall-through `throw`, before any row loop — and that is what
+  `parseIbmResponse` in `providers/ibm.mjs` is built around:
+
+  ```js
+  const rows = json && Array.isArray(json.jobs) ? json.jobs : null;
+  if (!rows) {
+    const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : typeof json;
+    throw new Error(`acme: unexpected response — expected jobs[], got: [${got}]`);
+  }
+  ```
+
+  Name the keys (or the type) you did get. Returning `[]` here instead is a
+  defensible "a partial/empty board beats a run error" call — but make it
+  deliberately, not through an enumeration gap. `scan.mjs` separately throws
+  on a non-array *return value* out of `fetch()`; `verify-portals` catches
+  that.
+- **`continue` / `.filter` — one row is malformed.** Never an exception out
+  of `fetch()` (see the paragraph above this list). A row missing `title` /
+  `url`, or one whose `id` won't encode, is dropped and the rest of the
+  board stands.
 - Same call for an **HTML / SSR-JSON scraper**: the card selector or the
   embedded blob (`__NEXT_DATA__`, a JSON-LD script) matching *nothing at
   all* is a markup change → `throw`. An empty list inside an otherwise
@@ -558,11 +578,13 @@ provider whose tuning needs differ from the shared default
       link, aggregator, search hit), not only a hand-built canonical path.
 - [ ] Every network call passes `redirect: 'error'`; a config-derived URL is
       checked against an allowlist before the request.
-- [ ] `fetch()` returns `[]` on an empty or contentless body (`null` / `{}`
-      / `[]` / `{jobs: null}`); it throws on a real API error or an envelope
-      that isn't the documented shape — for a scraper, a selector or
-      embedded blob that matches nothing at all. A single bad row is
-      skipped (`continue` / `null` + `.filter`), not fatal to the target.
+- [ ] `fetch()` returns `[]` only when the documented array container is
+      present and empty (`[]` / `{jobs: []}`); it throws — naming the keys
+      or type it got — on a real API error, a bare non-object, or an
+      envelope that isn't the documented shape (`{}`, `{jobs: null}`, a
+      different container key), and for a scraper a selector or embedded
+      blob that matches nothing at all. A single bad row is skipped
+      (`continue` / `null` + `.filter`), not fatal to the target.
 - [ ] Dates are NaN-safe (`toEpochMs` pattern).
 - [ ] HTML/XML entities go through `providers/_html-entities.mjs`, not a
       local copy.
