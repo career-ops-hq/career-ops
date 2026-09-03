@@ -292,11 +292,21 @@ UTF-8, and where the encoded value is also the dedup key (`arbeitsagentur`,
 wired providers in `tests/providers/url-encoding-surrogate.test.mjs`
 (`alibaba`, `bamboohr`, `phenom`, …).
 
-Scope is exactly this case — a host-controlled API field becoming a URL path
-segment in a loop. Config-derived values (a company slug from `portals.yml`,
-a keyword, a locale), calls already inside their own try/catch, and values
-already checked against a slug charset are left alone; dropping a real
-posting over a bad character in config is the wrong trade.
+Scope is exactly this case — a **host-controlled** API field becoming a URL
+path segment in a loop. A **config-derived** segment (a company slug from
+`portals.yml`, a locale) is handled the other way: not through
+`safeEncodeURIComponent` + drop — dropping real postings over a typo in
+config is the wrong trade — but still `encodeURIComponent`'d, and computed
+**once outside the row loop**. A structural `/`, `?` or `#` then stays
+escaped so the URL is well-formed, and a genuinely broken value (a lone
+surrogate) throws there, as the loud config error it is, instead of
+silently once per posting. `garena.mjs` splits the two explicitly —
+`urlSegment()` throws for the config `office`, `idUrlSegment()` drops for
+the response `id`; `tkms.mjs`'s `parseQuery` hoists its locale
+`encodeURIComponent` out of the loop for the same reason. A value a regex
+has already restricted to safe characters (`4dayweek.mjs`'s slug `SLUG_RE`,
+which rejects a surrogate before this line) or encoded inside its own
+try/catch needs nothing further.
 
 The mirror case on decode: `decodeURIComponent` on a scraped href segment
 also throws `URIError` on a malformed percent-escape (`%ZZ`) — wrap it in
@@ -604,6 +614,9 @@ provider whose tuning needs differ from the shared default
       no bare `encodeURIComponent` on a `url:` line. A scraped href segment
       passed to `decodeURIComponent` is wrapped in try/catch with a
       raw-segment fallback.
+- [ ] A config-derived URL segment (`locale`, `office`) is
+      `encodeURIComponent`'d once outside the row loop — escaped, and loud
+      (throws) on a broken value — not `safeEncodeURIComponent` + drop.
 - [ ] Pagination has its own `DEFAULT_MAX_PAGES` — the page count is never
       decided by the source alone (`pageCount` / `total`).
 - [ ] Pagination honors `ctx.maxPages` when present, skips `fetchDetails`
