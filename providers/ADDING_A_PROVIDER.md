@@ -450,7 +450,10 @@ went through them. Must cover:
   test on entry); a fixed-literal-host provider has no allowlist and skips
   this assertion.
 - Empty or contentless body → `[]`; a body whose shape isn't what the
-  endpoint documents → a descriptive throw. Assert both branches.
+  endpoint documents → a descriptive throw. Assert both branches — for a
+  scraper that means a fixture whose card selector / embedded blob matches
+  nothing throws, while a well-formed page carrying an empty list still
+  returns `[]` (`join.mjs`).
 - Pagination (if any): the provider's own `DEFAULT_MAX_PAGES` stops it even
   when the source reports more pages; `ctx.maxPages` stops it earlier.
 - Pagination + transient failure (if any): a 429 / 5xx on page 2 that retry
