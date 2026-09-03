@@ -241,10 +241,22 @@ try {
   if (emptyPage.jobs.length === 0 && emptyPage.total === 0) pass('parseListPage() treats an empty jobRequisitions array as a valid empty result');
   else fail(`parseListPage() empty case wrong: ${JSON.stringify(emptyPage)}`);
 
-  let primitiveThrew = false;
-  try { parseListPage(null, cfg); } catch { primitiveThrew = true; }
-  if (primitiveThrew) pass('parseListPage() rejects primitive or null response payloads');
-  else fail('parseListPage() should reject a primitive or null response payload');
+  const invalidPayloads = [null, 'not-json-object', 42, true, []];
+  let primitiveThrew = true;
+  for (const payload of invalidPayloads) {
+    try {
+      parseListPage(payload, cfg);
+      primitiveThrew = false;
+      break;
+    } catch (error) {
+      if (error?.message !== 'adp-workforcenow: unrecognized job-requisitions response') {
+        primitiveThrew = false;
+        break;
+      }
+    }
+  }
+  if (primitiveThrew) pass('parseListPage() rejects null, primitive, and array response payloads');
+  else fail('parseListPage() should reject every non-object response payload with the unrecognized-response error');
 
   const mkJob = (itemId, title, externalId) => ({
     itemID: itemId,
