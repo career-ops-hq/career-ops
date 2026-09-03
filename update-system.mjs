@@ -2181,20 +2181,28 @@ async function apply() {
 /**
  * A path's meaningful segments: forward-slash-normalized, empty segments
  * dropped (collapses `//`), lone `.` segments dropped (`./x` means the same
- * thing as `x`), and case-folded (`.toLowerCase()`, not `.toLocaleLowerCase()`
- * — these paths are never meant to be locale-sensitive, and folding under a
- * Turkish-style locale can map `I`/`i` unexpectedly). Deliberately keeps `..`
- * segments — callers that care about traversal check for those explicitly
- * against this same list; `..` has no case variant, so folding doesn't touch it.
+ * thing as `x`), Unicode-normalized to NFC, and case-folded (`.toLowerCase()`,
+ * not `.toLocaleLowerCase()` — these paths are never meant to be
+ * locale-sensitive, and folding under a Turkish-style locale can map `I`/`i`
+ * unexpectedly). Deliberately keeps `..` segments — callers that care about
+ * traversal check for those explicitly against this same list; `..` has no
+ * case or normalization variant, so neither step touches it.
  *
- * Case folding matters because the checkout/delete loop this feeds operates
- * at the OS filesystem level (CodeRabbit follow-up on #3782): macOS (APFS
- * default) and Windows (NTFS default) are case-insensitive, so `.GIT/` and
- * `.git/`, or `CV.md` and `cv.md`, resolve to the exact same file there even
- * though a case-sensitive `===` sees them as different strings. This is the
- * single point both `isSafeManifestPath()` comparisons (the `.git` segment
- * check and the user-layer-path check) read from, so folding here closes
- * both instead of patching each comparison site separately.
+ * Case folding and Unicode normalization both matter because the
+ * checkout/delete loop this feeds operates at the OS filesystem level
+ * (CodeRabbit follow-up on #3782): macOS (APFS default) and Windows (NTFS
+ * default) are case-insensitive, so `.GIT/` and `.git/`, or `CV.md` and
+ * `cv.md`, resolve to the exact same file there even though a case-sensitive
+ * `===` sees different strings — and on top of that, a single visual
+ * character can have more than one valid Unicode encoding (an accented
+ * letter as one precomposed codepoint, NFC, versus the base letter plus a
+ * combining mark, NFD); some filesystems normalize on write while a
+ * comparison over raw code units treats the two spellings as different
+ * strings even though they resolve to the same file on disk. Normalizing to
+ * NFC before lowercasing closes that gap the same way case folding does.
+ * This is the single point both `isSafeManifestPath()` comparisons (the
+ * `.git` segment check and the user-layer-path check) read from, so both
+ * fixes live here instead of patching each comparison site separately.
  *
  * @param {string} path
  * @returns {string[]}
@@ -2202,7 +2210,7 @@ async function apply() {
 function pathSegments(path) {
   return String(path).replace(/\\/g, '/').split('/')
     .filter((s) => s !== '' && s !== '.')
-    .map((s) => s.toLowerCase());
+    .map((s) => s.normalize('NFC').toLowerCase());
 }
 
 /**

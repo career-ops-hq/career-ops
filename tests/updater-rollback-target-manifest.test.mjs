@@ -377,3 +377,65 @@ const fakeTargetSource = (paths) =>
     fail(`#24 'CV.MD' leaked into the rollback candidate list: ${JSON.stringify(paths)}`);
   }
 }
+
+// ── isSafeManifestPath: Unicode normalization coverage (CodeRabbit follow-up
+//    on #3782) — a single visual character can have more than one valid
+//    Unicode spelling: an accented letter as one precomposed codepoint (NFC)
+//    versus the base letter plus a combining mark (NFD). Some filesystems
+//    normalize on write, so a manifest entry spelled one way can resolve to
+//    the exact same file as a protected path spelled the other way, even
+//    though a raw code-unit comparison sees different strings.
+//    pathSegments() now normalizes to NFC before lowercasing, so both
+//    directions collapse to the same segment. ──
+
+// Built from explicit code points, not typed accented characters, so the two
+// spellings are guaranteed byte-distinct regardless of editor/source encoding.
+const nfc = `caf${String.fromCodePoint(0xe9)}.md`;             // precomposed 'e-acute' (U+00E9)
+const nfd = `caf${String.fromCodePoint(0x65, 0x301)}.md`;      // 'e' (U+0065) + combining acute accent (U+0301)
+if (nfc === nfd || nfc.normalize('NFC') !== nfd.normalize('NFC')) {
+  fail(`Unicode test fixtures are wrong: nfc=${JSON.stringify(nfc)} nfd=${JSON.stringify(nfd)}`);
+}
+
+// ── 25. An NFD-spelled candidate is rejected against an NFC-declared user path ──
+{
+  const result = isSafeManifestPath(nfd, [nfc]);
+  if (result === false) {
+    pass('isSafeManifestPath rejects an NFD-spelled path matching an NFC-declared user-layer path');
+  } else {
+    fail(`#25 expected false, got ${result}`);
+  }
+}
+
+// ── 26. An NFC-spelled candidate is rejected against an NFD-declared user path ──
+//    The mirror direction — either side of the comparison could be the one
+//    spelled differently, since the declaration and the target manifest are
+//    independent sources.
+{
+  const result = isSafeManifestPath(nfc, [nfd]);
+  if (result === false) {
+    pass('isSafeManifestPath rejects an NFC-spelled path matching an NFD-declared user-layer path');
+  } else {
+    fail(`#26 expected false, got ${result}`);
+  }
+}
+
+// ── 27. rollbackSystemPaths integration: an NFD-spelled target-manifest
+//    entry matching an NFC-declared user path never reaches the merged result ──
+{
+  const ctx = {
+    git: (...args) => {
+      if (args[0] === 'show' && args[1] === 'FETCH_HEAD:update-system.mjs') {
+        return fakeTargetSource(['AGENTS.md', nfd]);
+      }
+      throw new Error(`unexpected git call: ${args.join(' ')}`);
+    },
+    userPaths: [nfc, 'data/'],
+  };
+
+  const paths = rollbackSystemPaths(ctx);
+  if (!paths.includes(nfd)) {
+    pass('an NFD-spelled target-manifest entry is dropped before it reaches rollback\'s loop (NFC-declared user path)');
+  } else {
+    fail(`#27 an NFD/NFC alias leaked into the rollback candidate list: ${JSON.stringify(paths)}`);
+  }
+}
