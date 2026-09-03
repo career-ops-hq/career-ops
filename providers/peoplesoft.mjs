@@ -408,9 +408,9 @@ export function parseSearchPage(html, config) {
   const reportedTotal = parseReportedTotal(extractTextById(str, 'win0divHRS_AGNT_RSLT_Irowcnt$0'));
 
   const rowIndices = [];
-  const rowRe = /id=["']HRS_AGNT_RSLT_I\$0_row_(\d+)["']/g;
+  const rowRe = /\bid=(?:["']HRS_AGNT_RSLT_I\$0_row_(\d+)["']|HRS_AGNT_RSLT_I\$0_row_(\d+)(?=[\s>]))/g;
   let rm;
-  while ((rm = rowRe.exec(str))) rowIndices.push(rm[1]);
+  while ((rm = rowRe.exec(str))) rowIndices.push(rm[1] ?? rm[2]);
 
   const rows = [];
   for (const idx of rowIndices) {
@@ -849,6 +849,8 @@ export default {
 
     let currentState = firstPage;
     let loadMoreCount = 0;
+    let stopCause = null;
+    let stopDetail = '';
     while (loadMoreCount < maxLoadMore) {
       if (reportedTotal !== null && byId.size >= reportedTotal) break;
       await sleep(INTER_REQUEST_DELAY_MS, ctx);
@@ -859,12 +861,13 @@ export default {
         // Probe budget cut-off / any fetch rejection must propagate UNWRAPPED
         // while probing (ADDING_A_PROVIDER.md); a real scan keeps what it has.
         if (probing) throw err;
-        console.error(`⚠️  peoplesoft: ${entry.name} — load-more request failed, keeping ${byId.size} postings collected so far: ${err.message}`);
+        stopCause = 'load-more-fetch-failed';
+        stopDetail = err.message;
         break;
       }
       loadMoreCount++;
       if (!next.valid) {
-        console.error(`⚠️  peoplesoft: ${entry.name} — a "load more" response was not recognizable, keeping ${byId.size} postings collected so far`);
+        stopCause = 'load-more-response-unrecognized';
         break;
       }
       if (next.reportedTotal !== null) reportedTotal = next.reportedTotal;
@@ -875,17 +878,27 @@ export default {
         fresh++;
       }
       currentState = next;
-      if (fresh === 0) break; // server stopped returning new rows — real end or a loop; either way, stop
+      if (fresh === 0) {
+        stopCause = 'load-more-no-progress';
+        break; // server stopped returning new rows — real end or a loop; either way, stop
+      }
     }
 
     // Completeness is meaningless during a probe (it only ever fetches page
     // one on purpose) — skip the marker/warning there entirely.
     const complete = probing || reportedTotal === null || byId.size >= reportedTotal;
     if (!probing && !complete) {
-      console.error(
-        `⚠️  peoplesoft: ${entry.name} — parsed ${byId.size} of ${reportedTotal} reported postings; ` +
-          'raise max_pages on this entry, or this may be PeopleSoft\'s own ~100-result anonymous-session cap.',
-      );
+      if (!stopCause) stopCause = 'pagination-ceiling-reached';
+      const prefix = `⚠️  peoplesoft: ${entry.name} — parsed ${byId.size} of ${reportedTotal} reported postings; `;
+      if (stopCause === 'load-more-fetch-failed') {
+        console.error(`${prefix}load-more request failed${stopDetail ? `: ${stopDetail}` : ''}.`);
+      } else if (stopCause === 'load-more-response-unrecognized') {
+        console.error(`${prefix}a load-more response was not recognizable.`);
+      } else if (stopCause === 'load-more-no-progress') {
+        console.error(`${prefix}the load-more response contained no new postings.`);
+      } else {
+        console.error(`${prefix}raise max_pages on this entry, or this may be PeopleSoft's own ~100-result anonymous-session cap.`);
+      }
     }
 
     const jobs = [];
@@ -934,7 +947,7 @@ export default {
     if (!probing && !complete) {
       out.peoplesoftIncomplete = {
         complete: false,
-        reason: 'provider-result-cap-or-pagination-incomplete',
+        reason: stopCause,
         collected: byId.size,
         reportedTotal,
       };
