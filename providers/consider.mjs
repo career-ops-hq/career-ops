@@ -86,9 +86,11 @@ async function acquireCsrfHandshake(origin) {
     // redirect:'error' blocks every redirect unconditionally. A redirect-to-
     // private-IP (169.254.169.254, ::1, …) would otherwise bypass the host
     // guard in resolveOrigin() and make a request to an internal target.
-    // redirect:'manual' cannot be used here: the WHATWG opaque-redirect
-    // response (Node ≥18 / undici) returns status 0 and empty headers, so
-    // the Location value is unreadable without implementation-specific APIs.
+    // redirect:'manual' cannot be used here: this is a raw `fetch()`, not the
+    // `ctx.fetch*` path (there `_http.mjs` surfaces a manual 3xx as a throw
+    // carrying `.location`, which `jobvite.mjs` reads). On a raw manual
+    // redirect undici returns the WHATWG opaque response — status 0, empty
+    // headers, no readable Location.
     // redirect:'error' gives the same security outcome — zero redirects
     // followed — and the catch below treats the resulting TypeError as a
     // degraded handshake (null/null), which is correct.
