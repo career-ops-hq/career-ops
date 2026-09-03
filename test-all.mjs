@@ -2459,6 +2459,29 @@ if (/\{\{REPORT_NUM\}\}\\t\{\{DATE\}\}/.test(batchTrackerStep) && !/Compute `\{n
   fail('batch workers still compute tracker numbers independently');
 }
 
+// ...and Step 5 must still describe the FORMAT it writes. The assertion above
+// cannot see that: a prompt that dropped the header row, the additions path, or
+// the one-data-row rule would still carry `{{REPORT_NUM}}\t{{DATE}}` and pass,
+// while telling workers to emit the headerless form — the one where score and
+// status are told apart by content, with a case that has no answer (#3517).
+// The labels come from tracker-parse rather than a list here, so this follows
+// the format instead of restating it and drifting.
+const { TSV_REQUIRED_FIELDS: REQUIRED_TSV_LABELS } = await import(pathToFileURL(join(ROOT, 'tracker-parse.mjs')).href);
+// The prompt writes tabs as the literal two-character escape, not real tabs.
+const batchTsvLines = batchTrackerStep.split('\n').filter(l => l.includes('\\t'));
+const batchTsvLabels = (batchTsvLines[0] ?? '').trim().split('\\t').map(s => s.trim());
+const batchLabelsMissing = REQUIRED_TSV_LABELS.filter(f => !batchTsvLabels.includes(f));
+if (
+  batchTsvLines.length === 2 &&
+  batchLabelsMissing.length === 0 &&
+  /batch\/tracker-additions\//.test(batchTrackerStep) &&
+  /two TSV lines/i.test(batchTrackerStep)
+) {
+  pass('batch Step 5 specifies the headed tracker-addition format (labels, one data row, path)');
+} else {
+  fail(`batch Step 5 no longer specifies the headed TSV format — tab lines: ${batchTsvLines.length}, missing labels: ${batchLabelsMissing.join(', ') || 'none'}`);
+}
+
 const batchMachineSummary = batchPrompt.match(/#### Machine Summary[\s\S]*?### Step 3 \u2014 Save the Report/)?.[0] ?? '';
 const patternsMachineFields = readFile('analyze-patterns.mjs').match(/const MACHINE_SUMMARY_FIELDS = new Set\(\[([\s\S]*?)\]\);/)?.[1] ?? '';
 if (
