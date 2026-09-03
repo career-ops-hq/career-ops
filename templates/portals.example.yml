@@ -903,6 +903,7 @@ search_queries:
 #                   auto-derived from the URL, override with provider: oraclecloud + siteNumber: / optional locationId:.
 #                   Newer tenants are issued a NUMBERED apex, e.g. <tenant>.fa.ocs.oraclecloud26.com — same shapes,
 #                   same provider; just use whichever host the employer's careers link actually points at.)
+#   taleo           <tenant>.taleo.net/careersection/<section>/jobsearch.ftl (Taleo Enterprise Edition public sections)
 #   eightfold       <tenant>.eightfold.ai  (Eightfold AI talent-acquisition boards; a branded CNAME like
 #                   careers.<company>.com is NOT matched — point at the eightfold.ai host. Optional domain:
 #                   for multi-brand tenants. Page size is server-capped at 10, so bound big boards with max_pages)
@@ -1037,6 +1038,11 @@ search_queries:
 #   siteNumber: CX_1002    # the site number after /sites/ (JPMC's external site)
 #   # locationId: 300000000123456   # optional — some tenants (BNY, Amex) need it to scope results
 #   max_pages: 25
+#   enabled: true
+#
+# - name: Example Taleo Co
+#   careers_url: https://example.taleo.net/careersection/demo/jobsearch.ftl
+#   max_pages: 100         # optional page cap (25 jobs/page, default 100, max 1000)
 #   enabled: true
 #
 # - name: Example Eightfold Co
