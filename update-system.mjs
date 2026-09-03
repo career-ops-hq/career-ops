@@ -2180,15 +2180,29 @@ async function apply() {
 
 /**
  * A path's meaningful segments: forward-slash-normalized, empty segments
- * dropped (collapses `//`), and lone `.` segments dropped (`./x` means the
- * same thing as `x`). Deliberately keeps `..` segments — callers that care
- * about traversal check for those explicitly against this same list.
+ * dropped (collapses `//`), lone `.` segments dropped (`./x` means the same
+ * thing as `x`), and case-folded (`.toLowerCase()`, not `.toLocaleLowerCase()`
+ * — these paths are never meant to be locale-sensitive, and folding under a
+ * Turkish-style locale can map `I`/`i` unexpectedly). Deliberately keeps `..`
+ * segments — callers that care about traversal check for those explicitly
+ * against this same list; `..` has no case variant, so folding doesn't touch it.
+ *
+ * Case folding matters because the checkout/delete loop this feeds operates
+ * at the OS filesystem level (CodeRabbit follow-up on #3782): macOS (APFS
+ * default) and Windows (NTFS default) are case-insensitive, so `.GIT/` and
+ * `.git/`, or `CV.md` and `cv.md`, resolve to the exact same file there even
+ * though a case-sensitive `===` sees them as different strings. This is the
+ * single point both `isSafeManifestPath()` comparisons (the `.git` segment
+ * check and the user-layer-path check) read from, so folding here closes
+ * both instead of patching each comparison site separately.
  *
  * @param {string} path
  * @returns {string[]}
  */
 function pathSegments(path) {
-  return String(path).replace(/\\/g, '/').split('/').filter((s) => s !== '' && s !== '.');
+  return String(path).replace(/\\/g, '/').split('/')
+    .filter((s) => s !== '' && s !== '.')
+    .map((s) => s.toLowerCase());
 }
 
 /**
@@ -2255,7 +2269,11 @@ export function isSafeManifestPath(path, userPaths = effectiveUserPaths()) {
  * follow: a manifest lookup this system cannot compute degrades the result,
  * never the operation.
  *
- * @param {{git?: Function}} [ctx] - injection point for tests; defaults to git.
+ * @param {{git?: Function, userPaths?: string[]}} [ctx] - injection points for
+ *   tests: `git` defaults to the real `git()`; `userPaths` defaults to
+ *   `isSafeManifestPath()`'s own default (`effectiveUserPaths()`, which reads
+ *   the developer's real `config/local-paths.txt`) — pass a fixed fixture to
+ *   keep a test hermetic instead of depending on local dev state.
  * @returns {string[]}
  */
 export function rollbackSystemPaths(ctx = {}) {
@@ -2264,7 +2282,7 @@ export function rollbackSystemPaths(ctx = {}) {
   try {
     const targetUpdaterSource = runGit('show', 'FETCH_HEAD:update-system.mjs');
     targetSystemPaths = extractArrayFromSource(targetUpdaterSource, 'SYSTEM_PATHS')
-      .filter((path) => isSafeManifestPath(path));
+      .filter((path) => isSafeManifestPath(path, ctx.userPaths));
   } catch {
     // No FETCH_HEAD, or a target predating update-system.mjs.
   }

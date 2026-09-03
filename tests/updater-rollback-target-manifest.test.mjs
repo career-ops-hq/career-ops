@@ -294,9 +294,11 @@ const fakeTargetSource = (paths) =>
 }
 
 // ── 20. rollbackSystemPaths integration: a "./cv.md" target-manifest entry
-//    never reaches the merged result, using the REAL effectiveUserPaths()
-//    (no explicit userPaths override) — the exact end-to-end path
-//    rollback() itself would take ──
+//    never reaches the merged result — a fixed userPaths fixture is injected
+//    via ctx so the test doesn't depend on the developer's real
+//    config/local-paths.txt (CodeRabbit follow-up: the default
+//    effectiveUserPaths() read here made this test's outcome depend on
+//    local, developer-specific state unrelated to the code under test) ──
 {
   const ctx = {
     git: (...args) => {
@@ -305,6 +307,7 @@ const fakeTargetSource = (paths) =>
       }
       throw new Error(`unexpected git call: ${args.join(' ')}`);
     },
+    userPaths: ['cv.md', 'modes/_profile.md', 'data/'],
   };
 
   const paths = rollbackSystemPaths(ctx);
@@ -312,5 +315,65 @@ const fakeTargetSource = (paths) =>
     pass('"./cv.md" and "modes//_profile.md" target-manifest entries never reach the merged result');
   } else {
     fail(`#20 an alias leaked into the rollback candidate list: ${JSON.stringify(paths)}`);
+  }
+}
+
+// ── isSafeManifestPath: case-insensitivity coverage (CodeRabbit follow-up on
+//    #3782) — macOS (APFS default) and Windows (NTFS default) are
+//    case-insensitive filesystems, so a manifest entry differing only in
+//    case resolves to the exact same file the checkout/delete loop would
+//    touch, even though a case-sensitive comparison sees a different string.
+//    pathSegments() folds case once at the point segments are produced, so
+//    both the .git check and the user-path check inherit the fix from a
+//    single change. ──
+
+// ── 21. A case-variant .git path is rejected ──
+{
+  const result = isSafeManifestPath('.GIT/hooks/pre-commit', []);
+  if (result === false) {
+    pass('isSafeManifestPath rejects a case-variant .git path (.GIT/)');
+  } else {
+    fail(`#21 expected false, got ${result}`);
+  }
+}
+
+// ── 22. A case-variant exact user-layer path is rejected ──
+{
+  const result = isSafeManifestPath('CV.md', ['cv.md']);
+  if (result === false) {
+    pass('isSafeManifestPath rejects a case-variant exact user-layer path (CV.md)');
+  } else {
+    fail(`#22 expected false, got ${result}`);
+  }
+}
+
+// ── 23. A case-variant protected directory root is rejected ──
+{
+  const result = isSafeManifestPath('DATA/applications.md', ['data/']);
+  if (result === false) {
+    pass('isSafeManifestPath rejects a path nested under a case-variant protected directory (DATA/)');
+  } else {
+    fail(`#23 expected false, got ${result}`);
+  }
+}
+
+// ── 24. rollbackSystemPaths integration: a case-variant target-manifest
+//    entry (CV.MD) never reaches the merged result ──
+{
+  const ctx = {
+    git: (...args) => {
+      if (args[0] === 'show' && args[1] === 'FETCH_HEAD:update-system.mjs') {
+        return fakeTargetSource(['AGENTS.md', 'CV.MD']);
+      }
+      throw new Error(`unexpected git call: ${args.join(' ')}`);
+    },
+    userPaths: ['cv.md', 'data/'],
+  };
+
+  const paths = rollbackSystemPaths(ctx);
+  if (!paths.includes('CV.MD')) {
+    pass('a case-variant target-manifest entry (CV.MD) is dropped before it reaches rollback\'s loop');
+  } else {
+    fail(`#24 'CV.MD' leaked into the rollback candidate list: ${JSON.stringify(paths)}`);
   }
 }
