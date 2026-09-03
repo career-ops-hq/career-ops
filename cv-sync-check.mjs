@@ -50,10 +50,14 @@ if (!existsSync(profilePath)) {
 }
 
 // 3. Check for hardcoded metrics in prompt files
+// CODE_ROOT, not DATA_ROOT: these three are SYSTEM-layer files that ship with
+// the checkout, and this check exists to catch the template author's own
+// metrics surviving into them. Resolving them against the user's data root
+// would look for system prompts inside the user layer, where they never live.
 const filesToCheck = [
-  { path: join(projectRoot, 'modes', '_shared.md'), name: '_shared.md' },
-  { path: join(projectRoot, 'modes', '_writing.md'), name: '_writing.md' },
-  { path: join(projectRoot, 'batch', 'batch-prompt.md'), name: 'batch-prompt.md' },
+  { path: join(CODE_ROOT, 'modes', '_shared.md'), name: '_shared.md' },
+  { path: join(CODE_ROOT, 'modes', '_writing.md'), name: '_writing.md' },
+  { path: join(CODE_ROOT, 'batch', 'batch-prompt.md'), name: 'batch-prompt.md' },
 ];
 
 // Pattern: numbers that look like hardcoded metrics (e.g., "170+ hours", "90% self-service")
