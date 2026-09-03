@@ -311,12 +311,12 @@ const twoPassManifestChecks = [
     pattern: /\b(?:git|runGit)\('checkout',\s*'HEAD',\s*'--'/,
   },
   {
-    name: 'apply commit is scoped to update paths, not bare commit (#915)',
-    pattern: /git\('commit',\s*'-m',[^)]+'--',\s*\.\.\.pathsToStage\)/,
+    name: 'apply commit is scoped to expanded update files, not directories (#3504)',
+    pattern: /git\('commit',\s*'-m',[^)]+'--',\s*\.\.\.expandedPathsToStage\)/,
   },
   {
-    name: 'rollback commit is scoped to rollback paths, not bare commit (#915)',
-    pattern: /git\('commit',\s*'-m',[^)]+'--',\s*\.\.\.rollbackPaths\)/,
+    name: 'rollback commit is scoped to expanded backup files, not directories (#3504)',
+    pattern: /git\('commit',\s*'-m',[^)]+'--',\s*\.\.\.expandedRollbackPaths\)/,
   },
   {
     name: 'apply captures uncommitted work via git stash create before branching (#915)',

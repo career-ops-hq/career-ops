@@ -2071,7 +2071,18 @@ if (generatePdfScript.includes('--allow-reorder')) {
 try {
   const { validateCvSectionOrder } = await import(pathToFileURL(join(ROOT, 'generate-pdf.mjs')).href);
   const cvMarkdown = '# Education\ntext\n# Work Experience\ntext\n# Projects\ntext';
-  const reorderedHtml = '<div class="section-title">Projects</div><div class="section-title">Education</div>';
+  // Education first, then Projects, then Experience last: diverges from cv.md
+  // (which puts Education before Experience before Projects) AND from the
+  // canonical modes/pdf.md tailoring order (#3640, which puts Experience
+  // before Projects before Education) — genuinely scrambled rather than the
+  // one documented reorder pdf.md always produces, which #3640 makes this
+  // guard stop rejecting. `<div class="section-title">Projects</div><div
+  // class="section-title">Education</div>` used to stand in for "reordered",
+  // but Projects-before-Education IS that documented reorder, so it no
+  // longer exercises the "genuinely scrambled" path this test is named for.
+  const reorderedHtml = '<div class="section-title">Education</div>'
+    + '<div class="section-title">Projects</div>'
+    + '<div class="section-title">Experience</div>';
 
   let threw = false;
   try {
@@ -2080,9 +2091,9 @@ try {
     threw = true;
   }
   if (threw) {
-    pass('validateCvSectionOrder throws on a reordered CV by default (--allow-reorder unset)');
+    pass('validateCvSectionOrder throws on a genuinely scrambled CV by default (--allow-reorder unset)');
   } else {
-    fail('validateCvSectionOrder should throw by default when section order diverges from cv.md');
+    fail('validateCvSectionOrder should throw by default when section order diverges from cv.md AND the canonical modes/pdf.md order');
   }
 
   const originalWarn = console.warn;
@@ -7261,6 +7272,117 @@ try {
     pass('without block_hard, always_allow still wins over block (unchanged semantics)');
   } else {
     fail('omitting block_hard must preserve the pre-existing always_allow-wins behaviour');
+  }
+
+  // Case 9e: US-targeted always_allow + blocked foreign cities must not drop
+  // US homonym cities ("Dublin, OH" is Ohio, not Ireland). State names and
+  // 2-letter codes both count; the foreign counterpart still rejects.
+  const usHomonymFilter = buildLocationFilter({
+    always_allow: ['United States', 'USA'],
+    allow: [],
+    block: ['Dublin', 'Paris', 'London', 'Berlin', 'Manchester', 'Cambridge'],
+  });
+  const usHomonymPass = [
+    ['Dublin, OH', 'abbrev'],
+    ['Dublin, Ohio', 'state name'],
+    ['Paris, TX', 'Paris TX'],
+    ['London, KY', 'London KY'],
+    ['Berlin, NH', 'Berlin NH'],
+    ['Cambridge, MA', 'Cambridge MA'],
+  ];
+  const usHomonymReject = [
+    ['Dublin, Ireland', 'Dublin Ireland'],
+    ['Paris, France', 'Paris France'],
+    ['London, United Kingdom', 'London UK'],
+    ['Berlin, Germany', 'Berlin Germany'],
+    ['Cambridge, UK', 'Cambridge UK'],
+  ];
+  const usHomonymLeaks = usHomonymPass.filter(([loc]) => usHomonymFilter(loc) !== true);
+  const usHomonymMisses = usHomonymReject.filter(([loc]) => usHomonymFilter(loc) !== false);
+  if (usHomonymLeaks.length === 0) {
+    pass('US always_allow treats City, ST homonyms as US (Dublin OH / Paris TX / London KY)');
+  } else {
+    fail(`US city homonym should pass: ${usHomonymLeaks.map(([l]) => l).join('; ')}`);
+  }
+  if (usHomonymMisses.length === 0) {
+    pass('US always_allow still blocks the foreign counterpart (Dublin Ireland / Paris France)');
+  } else {
+    fail(`foreign counterpart should still reject: ${usHomonymMisses.map(([l]) => l).join('; ')}`);
+  }
+
+  // Case 9f: URL hint "City-ST" (Workday) is the same expansion.
+  if (usHomonymFilter('5 Locations', 'https://x.wd1.myworkdayjobs.com/c/job/Dublin-OH/Eng_R1') === true) {
+    pass('US state expansion applies to the URL location hint (Dublin-OH)');
+  } else {
+    fail('Workday URL hint "Dublin-OH" should pass via the USPS abbrev');
+  }
+
+  // Case 9g: genuine always_allow city still passes; block_hard still wins
+  // over the US expansion (country-level, never a false rejection).
+  const usHomonymWithCity = buildLocationFilter({
+    always_allow: ['united states', 'amsterdam'],
+    allow: [],
+    block: ['Dublin', 'Paris', 'London', 'Berlin'],
+    block_hard: ['ireland', 'brazil', 'usa'],
+  });
+  if (usHomonymWithCity('Amsterdam, Netherlands') === true) {
+    pass('genuine always_allow city (Amsterdam, Netherlands) still passes under US expansion');
+  } else {
+    fail('Amsterdam, Netherlands must still pass via always_allow amsterdam');
+  }
+  if (
+    usHomonymWithCity('Dublin, Ireland') === false &&
+    usHomonymWithCity('USA - New York - Malta') === false &&
+    usHomonymWithCity('Porto Alegre, Rio Grande do Sul, Brazil') === false
+  ) {
+    pass('block_hard still wins over US state expansion (Ireland / USA / Brazil)');
+  } else {
+    fail('block_hard must still reject country-level hits when US expansion is active');
+  }
+
+  // Case 9h: no US country token → expansion is off (EU-targeted installs).
+  const euFilter = buildLocationFilter({
+    always_allow: ['belgium', 'brussels', 'amsterdam'],
+    allow: [],
+    block: ['Dublin', 'Paris', 'London'],
+  });
+  if (
+    euFilter('Dublin, OH') === false &&
+    euFilter('Paris, TX') === false &&
+    euFilter('Amsterdam, Netherlands') === true
+  ) {
+    pass('without a US always_allow token, City, ST homonyms stay blocked (EU config unchanged)');
+  } else {
+    fail('EU-targeted always_allow must not grow USPS state matches');
+  }
+
+  // Case 9j: the other documented US country spellings trigger the same expansion.
+  const usDot = buildLocationFilter({ always_allow: ['U.S.'], block: ['Dublin'] });
+  const usDotA = buildLocationFilter({ always_allow: ['U.S.A.'], block: ['Dublin'] });
+  if (usDot('Dublin, OH') === true && usDotA('Dublin, Ohio') === true) {
+    pass('u.s. / u.s.a. always_allow tokens also expand USPS states');
+  } else {
+    fail('u.s. and u.s.a. must trigger the same US homonym rescue as United States');
+  }
+
+  // Case 9i: 2-letter codes do not match inside other words, and English
+  // "or"/"in" in a multi-location string is not Oregon/Indiana. always_allow
+  // is checked before block, so a leak would rescue these rather than reject.
+  const usAbbrevLeakFilter = buildLocationFilter({
+    always_allow: ['united states'],
+    allow: ['united states', 'usa'],
+    block: ['france', 'belgium', 'dublin', 'india'],
+  });
+  if (
+    usAbbrevLeakFilter('Remote, Belgium or France') === false &&
+    usAbbrevLeakFilter('Hyderabad, India') === false &&
+    usAbbrevLeakFilter('Dublin, India') === false &&
+    usAbbrevLeakFilter('Portland, OR') === true &&
+    usAbbrevLeakFilter('Dublin, IN') === true
+  ) {
+    pass('USPS abbrevs do not match inside India / English or-in conjunctions');
+  } else {
+    fail('state abbrevs leaked: IN/OR must not match India or "Belgium or France"');
   }
 
   // Case 10: all-null/non-string list → empty after normalization (no false rejects)
@@ -13458,7 +13580,9 @@ try {
     fail('section-count check did not flag a CV with too few sections');
   }
 
-  // CJK content must be rejected with actionable guidance.
+  // CJK content must be rejected with actionable guidance when no CJK-capable
+  // engine/template is in play (pdflatex-only, or no engine resolved at all —
+  // whatever this CI box actually has on PATH).
   const cjk = latexValidate(baseTex('職務経歴'));
   if (cjk && cjk.issues.some((i) => /CJK/.test(i)) && cjk.valid === false) {
     pass('CJK content is rejected with guidance to use pdf mode');
@@ -13467,6 +13591,129 @@ try {
   }
 } catch (e) {
   fail(`LaTeX validator i18n test crashed: ${e.message}`);
+}
+
+// ── 20a. LATEX CJK TEMPLATE (tectonic path, #3553) ──────────────
+// This drives validateLatexContent() directly with a forced `engine` value
+// so the tectonic-vs-pdflatex branch is deterministic regardless of what
+// LaTeX engine (if any) is actually installed on the machine running the
+// suite — see generate-latex.mjs's resolveLatexEngine()/CJK_PACKAGE_RE.
+
+console.log('\n20a. LaTeX CJK template (tectonic engine path)');
+
+try {
+  const { validateLatexContent } = await import(pathToFileURL(join(ROOT, 'generate-latex.mjs')).href);
+
+  const cjkTemplatePath = join(ROOT, 'templates', 'cv-template.cjk.tex');
+  if (fileExists(join('templates', 'cv-template.cjk.tex'))) {
+    pass('templates/cv-template.cjk.tex exists');
+  } else {
+    fail('templates/cv-template.cjk.tex is missing');
+  }
+  const cjkTemplateSrc = existsSync(cjkTemplatePath) ? readFileSync(cjkTemplatePath, 'utf-8') : '';
+  if (/\\usepackage\{fontspec\}/.test(cjkTemplateSrc) && /\\usepackage\{xeCJK\}/.test(cjkTemplateSrc) && /\\setCJKmainfont\{/.test(cjkTemplateSrc)) {
+    pass('cv-template.cjk.tex loads fontspec + xeCJK + a CJK main font');
+  } else {
+    fail('cv-template.cjk.tex is missing fontspec/xeCJK/\\setCJKmainfont');
+  }
+  // Same required commands/placeholders as the base template — it must stay
+  // a drop-in variant, not a divergent structure.
+  const requiredTokens = ['\\resumeSubheading', '\\resumeItem', '\\resumeProjectHeading', '{{NAME}}', '{{EDUCATION}}', '{{EXPERIENCE}}', '{{PROJECTS}}', '{{AWARDS}}', '{{SKILLS}}'];
+  const missingTokens = requiredTokens.filter((t) => !cjkTemplateSrc.includes(t));
+  if (cjkTemplateSrc && missingTokens.length === 0) {
+    pass('cv-template.cjk.tex keeps the same required commands/placeholders as the base template');
+  } else {
+    fail(`cv-template.cjk.tex is missing tokens: ${JSON.stringify(missingTokens)}`);
+  }
+
+  const cjkFilledTemplate = () => cjkTemplateSrc
+    .replace(/\{\{NAME\}\}/g, 'Test Candidate')
+    .replace(/\{\{CONTACT_LINE\}\}/g, 'Toronto, ON')
+    .replace(/\{\{EMAIL_URL\}\}/g, 'test@example.com')
+    .replace(/\{\{EMAIL_DISPLAY\}\}/g, 'test@example.com')
+    .replace(/\{\{LINKEDIN_URL\}\}/g, 'https://linkedin.com/in/test')
+    .replace(/\{\{LINKEDIN_DISPLAY\}\}/g, 'linkedin.com/in/test')
+    .replace(/\{\{GITHUB_URL\}\}/g, 'https://github.com/test')
+    .replace(/\{\{GITHUB_DISPLAY\}\}/g, 'github.com/test')
+    .replace(/\{\{EDUCATION\}\}/g, '    \\resumeSubheading\n      {示例大学}{Toronto, ON}\n      {计算机科学硕士学位}{2023 - 2025}')
+    .replace(/\{\{EXPERIENCE\}\}/g, '    \\resumeSubheading\n      {示例公司}{2022 - Present}\n      {软件工程师}{Remote}\n      \\resumeItemListStart\n            \\resumeItem{设计并交付了多个内部工具}\n      \\resumeItemListEnd')
+    .replace(/\{\{PROJECTS\}\}/g, '    \\resumeProjectHeading\n      {\\textbf{示例项目}}{2024}\n      \\resumeItemListStart\n            \\resumeItem{构建了一个交互式数据分析平台}\n      \\resumeItemListEnd')
+    .replace(/\{\{AWARDS\}\}/g, '    \\resumeProjectHeading\n      {\\textbf{优秀毕业生奖}}{2024}')
+    .replace(/\{\{SKILLS\}\}/g, '        \\textbf{语言}{: 中文，英语} \\\\');
+
+  // A CJK-filled cv-template.cjk.tex, resolved to tectonic, must NOT be
+  // blocked — the whole point of #3553 is that this path now compiles.
+  const filled = cjkFilledTemplate();
+  const tectonicCjk = validateLatexContent(filled, false, 'tectonic');
+  if (tectonicCjk.issues.length === 0) {
+    pass('CJK content + xeCJK template + tectonic engine validates clean (no CJK block)');
+  } else {
+    fail(`CJK content + xeCJK template + tectonic engine was unexpectedly blocked: ${JSON.stringify(tectonicCjk.issues)}`);
+  }
+
+  // CJK content on tectonic WITHOUT the CJK package loaded (e.g. someone
+  // pastes CJK text into the base cv-template.tex) must still be blocked,
+  // but with guidance pointing at --template=cjk instead of only "use pdf mode".
+  const baseTemplateWithCjk = baseTex('職務経歴');
+  const tectonicNoPackage = validateLatexContent(baseTemplateWithCjk, false, 'tectonic');
+  if (tectonicNoPackage.issues.some((i) => /CJK/.test(i) && /--template=cjk/.test(i))) {
+    pass('CJK content on tectonic without xeCJK/ctex loaded is blocked with --template=cjk guidance');
+  } else {
+    fail(`CJK content on tectonic without CJK package was not blocked with the expected guidance: ${JSON.stringify(tectonicNoPackage.issues)}`);
+  }
+
+  // The pdflatex-only guard must not regress: even the CJK-aware template
+  // (xeCJK loaded) stays blocked when the resolved engine is pdflatex, since
+  // pdflatex has no Unicode/CJK font support regardless of packages loaded.
+  const pdflatexCjk = validateLatexContent(filled, false, 'pdflatex');
+  if (pdflatexCjk.issues.some((i) => /CJK/.test(i))) {
+    pass('CJK content stays blocked on pdflatex even with the CJK template (pdflatex cannot render CJK)');
+  } else {
+    fail(`CJK content should stay blocked on pdflatex: ${JSON.stringify(pdflatexCjk.issues)}`);
+  }
+
+  // No engine resolved at all (engine=null) — same as the pre-#3553 default.
+  const noEngineCjk = validateLatexContent(filled, false, null);
+  if (noEngineCjk.issues.some((i) => /CJK/.test(i))) {
+    pass('CJK content stays blocked when no LaTeX engine is resolved');
+  } else {
+    fail(`CJK content should stay blocked with no engine resolved: ${JSON.stringify(noEngineCjk.issues)}`);
+  }
+
+  // Supplementary-plane ideographs (CJK Unified Ideographs Extension B and
+  // later, e.g. U+20000) must be caught too, not just the BMP ranges — a
+  // codepoint-range regex without the `u` flag only ever sees lone UTF-16
+  // surrogate halves for these and silently misses them (CodeRabbit finding).
+  const supplementaryChar = String.fromCodePoint(0x20000);
+  const supplementaryCjk = validateLatexContent(baseTex(supplementaryChar), false, null);
+  if (supplementaryCjk.issues.some((i) => /CJK/.test(i))) {
+    pass('supplementary-plane CJK ideograph (U+20000) is detected, not just BMP CJK');
+  } else {
+    fail(`supplementary-plane CJK ideograph (U+20000) was not detected: ${JSON.stringify(supplementaryCjk.issues)}`);
+  }
+
+  // CJK_PACKAGE_RE must recognize xeCJK/ctex as part of a comma-separated
+  // \usepackage list, not only as the package's sole argument.
+  const listFormTex = baseTex('職務経歴').replace('\\documentclass{article}', '\\documentclass{article}\n\\usepackage{fontspec,xeCJK}');
+  const listFormResult = validateLatexContent(listFormTex, false, 'tectonic');
+  if (listFormResult.issues.length === 0) {
+    pass('\\usepackage{fontspec,xeCJK} (comma-separated list) is recognized as loading xeCJK');
+  } else {
+    fail(`comma-separated \\usepackage list with xeCJK was not recognized: ${JSON.stringify(listFormResult.issues)}`);
+  }
+
+  // CJK_PACKAGE_RE must also recognize the ctex bundle's own document classes
+  // (ctexart/ctexrep/ctexbook), which auto-configure CJK support without a
+  // separate \usepackage{xeCJK} line.
+  const ctexClassTex = baseTex('職務経歴').replace('\\documentclass{article}', '\\documentclass[fontset=windows]{ctexart}');
+  const ctexClassResult = validateLatexContent(ctexClassTex, false, 'tectonic');
+  if (ctexClassResult.issues.length === 0) {
+    pass('\\documentclass{ctexart} (ctex document class) is recognized as CJK-capable');
+  } else {
+    fail(`ctex document class was not recognized as CJK-capable: ${JSON.stringify(ctexClassResult.issues)}`);
+  }
+} catch (e) {
+  fail(`LaTeX CJK template test crashed: ${e.message}`);
 }
 
 // ── 20b. LATEX-TEX IN-PLACE TAILORING ───────────────────────────

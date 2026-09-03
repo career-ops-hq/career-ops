@@ -154,3 +154,5 @@ public commit with a stated reason.
 - @9jaswag | Chuks Opia | 2026-09-02 | id:8125356 | src:https://github.com/career-ops-hq/career-ops/discussions/3663 | n:106
 - @violetsea555 | violet | 2026-08-08 | "If a system rejects you, you have the right to know it was a system." | id:88992496 | src:https://github.com/career-ops-hq/career-ops/pull/2634 | n:107
 - @PKDT-93 | Peter Tran | 2026-09-02 | "A first step to landing on my feet after being laid off" | id:75346912 | src:https://github.com/career-ops-hq/career-ops/discussions/3694 | n:108
+- @brianmgray | Brian Gray | 2026-09-03 | "People-first" | id:638937 | src:https://github.com/career-ops-hq/career-ops/discussions/3730 | n:109
+- @ivan1velasquez | ivan1velasquezzz | 2026-09-03 | "La definición de IA como herramienta" | id:147756951 | src:https://github.com/career-ops-hq/career-ops/discussions/3746 | n:110

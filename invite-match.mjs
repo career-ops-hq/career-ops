@@ -140,7 +140,10 @@ function normalizeStatusKey(status) {
 // True legal-entity suffixes, stripped repeatedly (chained) since a name can
 // legitimately carry more than one ("Acme Holdings Inc." → "acme holdings").
 // These are unambiguous enough that removing several in a row is safe.
-const LEGAL_SUFFIXES = [
+// Exported so merge-tracker.mjs can share the vocabulary rather than keep a
+// second copy of it: a private list there is exactly the identity drift #2445
+// set out to remove.
+export const LEGAL_SUFFIXES = [
   'incorporated', 'inc', 'corporation', 'corp', 'company', 'co',
   'limited', 'ltd', 'llc', 'llp', 'lp', 'plc',
 ];
@@ -151,7 +154,7 @@ const LEGAL_SUFFIXES = [
 // chaining their removal risks collapsing two different companies to the
 // same key. Stripped at most once, and only after legal suffixes are gone —
 // never chained with each other or with LEGAL_SUFFIXES.
-const GENERIC_DESCRIPTORS = [
+export const GENERIC_DESCRIPTORS = [
   'group', 'holdings', 'technologies', 'technology', 'solutions',
   'canada', 'international',
 ];

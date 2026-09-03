@@ -172,7 +172,6 @@ node test-all.mjs --quick     # Full suite, skipping the dashboard build
 node test-all.mjs --only providers/themuse   # Run just one provider's test(s)
 ```
 
-**Adding a test for a new scanner provider:** add one file at
 **Any new test belongs in its own file** under `tests/`, not as a numbered
 section inside `test-all.mjs`. Anything matching `tests/**/*.test.mjs` is
 auto-discovered, so there is nothing to register and no section number to pick.
@@ -180,8 +179,10 @@ A new file also collides with nobody: several contributors adding sections to
 `test-all.mjs` at the same time all edit its final lines, and each merge forces
 a rebase on the rest.
 
-`tests/providers/{name}.test.mjs` — it's auto-discovered (`tests/**/*.test.mjs`),
-no registration needed. Do not add a section to `test-all.mjs` for this.
+**Adding a scanner provider?** See
+[`providers/ADDING_A_PROVIDER.md`](providers/ADDING_A_PROVIDER.md) — the full
+contract, the mandatory guards, and what `tests/providers/{name}.test.mjs`
+must cover.
 
 **Adding a test for the web app:** web suites live under `web/tests/`, mirroring
 the tested module's path below `web/src/` (`src/lib/clean-chips.mjs` →

@@ -335,6 +335,46 @@ function extractSourceSectionOrder(markdown) {
 }
 
 /**
+ * The section order `modes/pdf.md` documents under "Section order (optimized
+ * '6-second recruiter scan')" — Header, Professional Summary, Core
+ * Competencies, Work Experience, Projects, Education & Certifications,
+ * Skills — mapped through sectionKey()/SECTION_ALIASES the same way a
+ * rendered heading or a cv.md heading is. "Education & Certifications" is
+ * that document's own heading text and already folds to 'education' via the
+ * alias table (line above: `['education & certifications', 'education']`),
+ * so no separate normalization is needed for it. `certifications`, `awards`
+ * and `interests` are not named by modes/pdf.md's list — they are optional
+ * sections the shipped template (templates/cv-template.html) renders between
+ * Education and Skills — so they are included here in that template's own
+ * position to keep a real generated CV (which renders Education and
+ * Certifications as separate section-title elements) fully comparable
+ * against this order rather than only against the six pdf.md names it
+ * explicitly lists. See #3640.
+ */
+const CANONICAL_TAILORED_ORDER = [
+  'summary', 'competencies', 'experience', 'projects',
+  'education', 'certifications', 'awards', 'interests', 'skills',
+];
+const CANONICAL_TAILORED_POSITIONS = new Map(
+  CANONICAL_TAILORED_ORDER.map((key, index) => [key, index]),
+);
+
+/**
+ * First index in `comparableSections` whose key sits earlier in `positions`
+ * than the section right before it — i.e. the first place the rendered order
+ * violates the relative order `positions` encodes. -1 if no such index exists
+ * (the rendered order is consistent with `positions`).
+ */
+function findOrderDivergence(comparableSections, positions) {
+  for (let i = 1; i < comparableSections.length; i++) {
+    const previous = comparableSections[i - 1];
+    const current = comparableSections[i];
+    if (positions.get(current.key) < positions.get(previous.key)) return i;
+  }
+  return -1;
+}
+
+/**
  * @param {string} html
  * @param {string} cvMarkdown
  * @param {{ allowReorder?: boolean }} [options] - `allowReorder` downgrades a
@@ -342,6 +382,14 @@ function extractSourceSectionOrder(markdown) {
  *   where the section order was deliberately tailored (e.g. Projects moved
  *   ahead of Education for a technical-heavy role) rather than accidentally
  *   scrambled by an agent. See #1646.
+ *
+ *   A rendered order is accepted whenever it preserves the relative order of
+ *   EITHER cv.md's own headings OR the canonical modes/pdf.md tailoring order
+ *   above — the documented default workflow always moves Education after
+ *   Experience/Projects, which diverges from a typical cv.md on every
+ *   standard-compliant generation, so cv.md's order alone can't be the only
+ *   accepted target without making `allowReorder` mandatory rather than an
+ *   opt-in for genuine edge cases. See #3640.
  */
 export function validateCvSectionOrder(html, cvMarkdown, { allowReorder = false } = {}) {
   const rendered = extractRenderedSectionOrder(html);
@@ -352,23 +400,28 @@ export function validateCvSectionOrder(html, cvMarkdown, { allowReorder = false 
   const renderedComparable = rendered.filter(section => sourcePositions.has(section.key));
   if (renderedComparable.length < 2) return;
 
-  for (let i = 1; i < renderedComparable.length; i++) {
-    const previous = renderedComparable[i - 1];
-    const current = renderedComparable[i];
-    if (sourcePositions.get(current.key) < sourcePositions.get(previous.key)) {
-      const renderedOrder = renderedComparable.map(section => section.title).join(' -> ');
-      const sourceOrder = source
-        .filter(section => renderedComparable.some(renderedSection => renderedSection.key === section.key))
-        .map(section => section.title)
-        .join(' -> ');
-      const message = `CV section order diverges from cv.md: rendered ${renderedOrder}; cv.md ${sourceOrder}`;
-      if (allowReorder) {
-        console.warn(`⚠️  ${message} (proceeding — --allow-reorder set)`);
-        return;
-      }
-      throw new Error(message);
-    }
+  if (findOrderDivergence(renderedComparable, sourcePositions) === -1) return;
+
+  // Diverges from cv.md — but that alone isn't damning: it's also what every
+  // CV tailored per modes/pdf.md's documented order looks like. Only treat it
+  // as a real problem if it ALSO fails to match that canonical order.
+  const canonicalComparable = rendered.filter(section => CANONICAL_TAILORED_POSITIONS.has(section.key));
+  if (canonicalComparable.length >= 2
+      && findOrderDivergence(canonicalComparable, CANONICAL_TAILORED_POSITIONS) === -1) {
+    return;
   }
+
+  const renderedOrder = renderedComparable.map(section => section.title).join(' -> ');
+  const sourceOrder = source
+    .filter(section => renderedComparable.some(renderedSection => renderedSection.key === section.key))
+    .map(section => section.title)
+    .join(' -> ');
+  const message = `CV section order diverges from cv.md: rendered ${renderedOrder}; cv.md ${sourceOrder}`;
+  if (allowReorder) {
+    console.warn(`⚠️  ${message} (proceeding — --allow-reorder set)`);
+    return;
+  }
+  throw new Error(message);
 }
 
 /**

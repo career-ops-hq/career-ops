@@ -209,9 +209,17 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | `education[]` | object | `title` (degree), `org` (institution), `year`, `description` (optional). |
 | `certifications[]` | object | `title`, `org`, `year`. |
 | `awards[]` | object | `title` (award name), `org` (issuing body, optional), `year` (optional). Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Use it for competitive or academic distinctions (olympiad medals, hackathon wins, dean's list) that carry more signal than a thin experience section. |
-| `skills[]` | object | `category` + `items` (comma-separated string or string array). |
+| `skills[]` | object | `items` (**required**): a non-blank comma-separated string, or a non-empty array of non-blank strings — every element must be text, since the builder joins the whole array. `category` (optional): omitted, the line renders without its prefix. |
 
 `build-cv-html.mjs` errors out (non-zero exit) if any template placeholder is left unresolved, so a malformed payload fails loudly instead of shipping a broken CV. Run `node build-cv-html.mjs --test` for a self-test render.
+
+**The key names above are enforced, not suggestions (#3523).** Every list section (`experience`, `projects`, `education`, `certifications`, `awards`, `skills`) is rendered from exactly the keys listed in this table. The payload root must be an object. Before rendering, `build-cv-html.mjs` validates each entry:
+
+- **Missing or blank required field → hard error, non-zero exit, no HTML written.** Required: `company` + `role` for experience, `name` for projects, `title` for education, certifications and awards, `items` for skills (a non-blank string or a non-empty array of them; `category` stays optional).
+- **A key no builder reads → warning on stderr and in the report's `warnings[]`;** the build proceeds and the key is ignored.
+- **A top-level section name the builder does not read → warning**, naming the nearest known key. A payload with `educations` instead of `education` used to validate clean and drop the section silently; it now says so.
+
+Do **not** substitute the LaTeX builder's vocabulary — `institution`/`degree`/`dates`/`coursework` is the `modes/latex.md` education schema, **not** this one — nor `employer` for a company or `name` for a certification. Such an entry used to render as an empty block while the report still said `"valid": true`, and CVs went out with no education section at all. It is now rejected by name. When in doubt, check `counts.educationEntries` (and its siblings) in the JSON report: a zero there means the section is empty in the PDF.
 
 ### Markdown bold
 

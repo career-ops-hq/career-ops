@@ -1,5 +1,5 @@
 import { pass, fail } from './helpers.mjs';
-import { factClaims, verifyFacts } from '../verify-cv-facts.mjs';
+import { delegatedAuthorshipClaims, factClaims, verifyFacts } from '../verify-cv-facts.mjs';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -115,6 +115,86 @@ try {
     pass('fact matching does not accept embedded substrings');
   } else {
     fail(`fact matching accepted an embedded substring: ${JSON.stringify(boundary)}`);
+  }
+
+  const delegatedSource = [
+    'Sourced and directed vendor Acme Interactive through the WebGL build of an in-store kiosk.',
+    'Built the internal deployment pipeline using Node.js.',
+  ].join('\n');
+  writeFileSync(source, delegatedSource);
+
+  const escalatedText = 'Designed the interaction model and wrote the WebGL implementation for an in-store kiosk.';
+  const escalatedClaims = delegatedAuthorshipClaims(escalatedText, delegatedSource);
+  const escalated = verifyFacts(escalatedText, {
+    sourcePaths: [source], configPath: config,
+  });
+  if (escalated.verdict === 'block'
+      && escalatedClaims.some(claim => claim.kind === 'authorship' && claim.value.includes('wrote webgl implementation'))
+      && escalated.unsupportedFacts.some(claim => claim.kind === 'authorship')) {
+    pass('third-party implementation rewritten as direct authorship blocks');
+  } else {
+    fail(`delegated implementation was promoted to direct authorship: ${JSON.stringify({ escalatedClaims, escalated })}`);
+  }
+
+  const relativeClauseSource = [
+    'Managed vendor Acme Interactive, which built the WebGL implementation for an in-store kiosk.',
+    'Oversaw contractors who developed the onboarding automation in Node.js.',
+  ].join('\n');
+  const relativeClauseCases = [
+    ['Wrote the WebGL implementation for an in-store kiosk.', 'vendor relative clause is treated as delegated execution'],
+    ['Developed the onboarding automation in Node.js.', 'contractor relative clause is treated as delegated execution'],
+  ];
+  writeFileSync(source, relativeClauseSource);
+  for (const [target, label] of relativeClauseCases) {
+    const claims = delegatedAuthorshipClaims(target, relativeClauseSource);
+    const result = verifyFacts(target, { sourcePaths: [source], configPath: config });
+    if (claims.some(claim => claim.kind === 'authorship') && result.verdict === 'block') {
+      pass(label);
+    } else {
+      fail(`${label} was accepted: ${JSON.stringify({ claims, result })}`);
+    }
+  }
+
+  const attributionKept = verifyFacts('Directed vendor Acme Interactive through the WebGL build of an in-store kiosk.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (attributionKept.verdict === 'pass'
+      && !attributionKept.unsupportedFacts.some(claim => claim.kind === 'authorship')) {
+    pass('a rewrite that keeps third-party attribution passes');
+  } else {
+    fail(`preserved vendor attribution was blocked: ${JSON.stringify(attributionKept)}`);
+  }
+
+  const unrelatedDirectWork = verifyFacts('Built the internal deployment pipeline using Node.js.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (unrelatedDirectWork.verdict === 'pass'
+      && !unrelatedDirectWork.unsupportedFacts.some(claim => claim.kind === 'authorship')) {
+    pass('unrelated source-backed direct work is not matched to delegated work');
+  } else {
+    fail(`source-backed direct work was blocked: ${JSON.stringify(unrelatedDirectWork)}`);
+  }
+
+  const ambiguousSource = 'Directed vendor Acme Interactive through the WebGL build and wrote the kiosk integration layer.';
+  const ambiguous = delegatedAuthorshipClaims('Wrote the kiosk integration layer.', ambiguousSource);
+  if (ambiguous.length === 0) {
+    pass('mixed direct and delegated source statements fail open');
+  } else {
+    fail(`ambiguous mixed-authorship source was blocked: ${JSON.stringify(ambiguous)}`);
+  }
+
+  const separateDirectEvidence = [
+    'Directed vendor Acme Interactive through the WebGL build of an in-store kiosk.',
+    'Wrote the WebGL implementation for an in-store kiosk prototype.',
+  ].join('\n');
+  const directlySupported = delegatedAuthorshipClaims(
+    'Wrote the WebGL implementation for an in-store kiosk prototype.',
+    separateDirectEvidence,
+  );
+  if (directlySupported.length === 0) {
+    pass('separate direct-work evidence wins over overlapping delegated work');
+  } else {
+    fail(`explicit direct-work evidence was ignored: ${JSON.stringify(directlySupported)}`);
   }
 } finally {
   rmSync(tmp, { recursive: true, force: true });

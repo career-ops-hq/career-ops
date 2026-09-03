@@ -26,6 +26,18 @@ const TOOL_PROSE_WORDS = new Set([
   'team', 'the', 'to', 'using', 'with',
 ]);
 const TOOL_PHRASE_PATTERN = /^(?=.{1,80}$)[\p{L}\p{N}.][\p{L}\p{N}+#./-]*(?:\s+[\p{L}\p{N}.][\p{L}\p{N}+#./-]*){0,2}$/u;
+const DELEGATED_PARTY_RE = /\b(?:vendors?|agenc(?:y|ies)|contractors?|consultanc(?:y|ies)|consultants?|external teams?|outsourc(?:ed|ing)|implementation partners?)\b/i;
+const DELEGATION_RE = /\b(?:commissioned|coordinated|directed|engaged|hired|managed|oversaw|partnered with|supervised)\b/i;
+const DIRECT_AUTHORSHIP_SIGNAL_RE = /\b(?:authored|built|coded|developed|engineered|implemented|programmed|wrote)\b/i;
+const THIRD_PARTY_EXECUTION_RE = /\b(?:vendors?|agenc(?:y|ies)|contractors?|consultanc(?:y|ies)|consultants?|external teams?|outsourc(?:ed|ing)|implementation partners?)\b[^.;!?]{0,120}\b(?:which|who|that)\b[^.;!?]{0,120}\b(?:authored|built|coded|developed|engineered|implemented|programmed|wrote)\b/i;
+const DIRECT_AUTHORSHIP_CLAIM_RE = /\b(authored|built|coded|developed|engineered|implemented|programmed|wrote)\b\s+(?:the\s+|an?\s+|my\s+|our\s+)?([^.;!?]{1,160})/giu;
+const ATTRIBUTION_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'as', 'at', 'authored', 'build', 'built', 'by', 'coded',
+  'commissioned', 'coordinated', 'created', 'developed', 'directed', 'engineered',
+  'engaged', 'for', 'from', 'hired', 'implemented', 'in', 'managed', 'my', 'of',
+  'on', 'our', 'oversaw', 'partnered', 'programmed', 'supervised', 'the', 'through',
+  'to', 'vendor', 'vendors', 'with', 'wrote',
+]);
 const METRIC_NOUNS = [
   'users', 'customers', 'clients', 'employees', 'engineers', 'teams', 'companies',
   'partners', 'organizations', 'organisations', 'brands', 'countries',
@@ -321,6 +333,78 @@ export function factClaims(text) {
   return claims;
 }
 
+/** Split generated/source documents into bounded statements for attribution checks. */
+function factStatements(text) {
+  const withLineBoundaries = String(text ?? '').replace(/\r?\n+/g, '. ');
+  return stripMarkup(withLineBoundaries)
+    .split(/(?:[.!?]\s+|[.!?]$)/u)
+    .map(statement => statement.trim())
+    .filter(Boolean);
+}
+
+/** Return conservative content tokens used only to link a rewrite to its source statement. */
+function attributionTokens(text) {
+  return normalizeFact(text)
+    .split(/[^\p{L}\p{N}+#./-]+/u)
+    .filter(token => token.length >= 3 && !ATTRIBUTION_STOP_WORDS.has(token));
+}
+
+/**
+ * Detect a narrow authorship escalation: a source explicitly attributes
+ * execution to a third party, while the generated rewrite claims direct
+ * implementation and drops that attribution.
+ *
+ * This deliberately does not guess from generic leadership prose. It requires
+ * a delegation verb, a named third-party role, and at least two shared content
+ * tokens between the source and generated statements. Ambiguous source
+ * statements that also contain a direct implementation verb are left alone;
+ * an explicit relative clause such as "vendor X, which built Y" is treated as
+ * third-party execution evidence rather than candidate direct-work evidence.
+ */
+export function delegatedAuthorshipClaims(targetText, sourceText) {
+  const sourceStatements = factStatements(sourceText);
+  const directSources = sourceStatements
+    .filter(statement => DIRECT_AUTHORSHIP_SIGNAL_RE.test(statement))
+    .filter(statement => !THIRD_PARTY_EXECUTION_RE.test(statement))
+    .map(statement => new Set(attributionTokens(statement)));
+  const delegatedSources = sourceStatements
+    .filter(statement => DELEGATED_PARTY_RE.test(statement) && DELEGATION_RE.test(statement))
+    .filter(statement => (
+      !DIRECT_AUTHORSHIP_SIGNAL_RE.test(statement) || THIRD_PARTY_EXECUTION_RE.test(statement)
+    ))
+    .map(statement => ({
+      statement,
+      tokens: new Set(attributionTokens(statement)),
+    }));
+  if (!delegatedSources.length) return [];
+
+  const claims = [];
+  for (const statement of factStatements(targetText)) {
+    // Keeping the third-party attribution is not an authorship escalation.
+    if (DELEGATED_PARTY_RE.test(statement)) continue;
+    DIRECT_AUTHORSHIP_CLAIM_RE.lastIndex = 0;
+    for (const match of statement.matchAll(DIRECT_AUTHORSHIP_CLAIM_RE)) {
+      const value = normalizeFact(`${match[1]} ${match[2]}`);
+      const tokens = [...new Set(attributionTokens(match[2]))];
+      if (tokens.length < 2) continue;
+      // Explicit direct-work evidence wins over a nearby delegated project
+      // that happens to use the same technology or artifact vocabulary.
+      if (directSources.some(source => tokens.filter(token => source.has(token)).length >= 2)) {
+        continue;
+      }
+      const delegatedSource = delegatedSources.find(source => (
+        tokens.filter(token => source.tokens.has(token)).length >= 2
+      ));
+      if (delegatedSource) {
+        claims.push({ kind: 'authorship', value });
+      }
+    }
+  }
+  return claims.filter((claim, index, all) => (
+    all.findIndex(other => other.value === claim.value) === index
+  ));
+}
+
 /** Extract metric-like claims that require source evidence. */
 export function metricClaims(text) {
   const clean = stripMarkup(text);
@@ -531,7 +615,7 @@ export function verifyFacts(targetText, {
   const invented = [...targetClaims].filter(claim => !allowed.has(claim));
   const sourceNormalized = normalizeFact(stripMarkup(sourceText));
   const allowedFacts = new Set(config.allow_facts.map(normalizeFact));
-  const unsupportedFacts = factClaims(targetText)
+  const unsupportedFacts = [...factClaims(targetText), ...delegatedAuthorshipClaims(targetText, sourceText)]
     .filter(({ value }) => !sourceContainsFact(sourceNormalized, value) && !allowedFacts.has(value))
     .filter((claim, index, claims) => claims.findIndex(other => other.kind === claim.kind && other.value === claim.value) === index);
   const forbidden = config.forbidden_phrases
@@ -601,7 +685,8 @@ function usage() {
        node verify-cv-facts.mjs --self-test
 
 Checks generated candidate-facing text for unsupported metrics and explicitly asserted
-non-metric facts (employers, titles, and tools) absent from source files.
+non-metric facts (employers, titles, tools, and delegated-work authorship) absent
+from source files.
 Default sources: cv.md, article-digest.md
 Default config:  config/cv-facts.json (optional)`;
 }

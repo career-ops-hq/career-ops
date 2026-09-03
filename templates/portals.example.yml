@@ -82,7 +82,7 @@
 # location_filter:
 #   # always_allow is checked BEFORE block — keep this list to your home region only
 #   always_allow:
-#     - "United States"   # (replace with your home region)
+#     - "United States"   # also admits City, ST homonyms (Dublin, OH) via USPS states
 #     - "New York"
 #   allow:
 #     - "Remote"
@@ -1118,6 +1118,13 @@ search_queries:
 #   provider: deutschebahn                # optional — db.jobs host also auto-detects
 #   enabled: true
 #
+# - name: Garena                          # single-company; public zero-auth POST API
+#   careers_url: https://careers.garena.com/global   # auto-detects on careers.garena.com
+#   provider: garena                      # optional — careers.garena.com host also auto-detects
+#   garena:
+#     office: global                      # optional — sent as the API office parameter and reused in job URLs; no client-side filtering
+#   enabled: true
+#
 # - name: Heckler & Koch                  # single-company; SSR Nuxt vacancy list
 #   careers_url: https://www.heckler-koch.com/de/Karriere/Stellenangebote
 #   provider: hecklerkoch                 # optional — heckler-koch.com host also auto-detects
@@ -1157,6 +1164,18 @@ search_queries:
 # - name: 4 Day Week                      # 4-day-week / reduced-hours roles
 #   provider: 4dayweek
 #   max_pages: 3          # optional page cap (25 jobs/page, default 3, max 50)
+#   enabled: true
+#
+# - name: Built In                        # US tech aggregator, many employers
+#   provider: builtin                     # no detect() — only reachable via provider:
+#   builtin:
+#     queries: ["platform engineer"]      # REQUIRED: queries and/or categories,
+#     categories: [dev-engineering]       # otherwise there is nothing to scan
+#     host: www.builtinseattle.com        # optional; one of nine market hosts,
+#                                         # default builtin.com. The market host is the
+#                                         # only location scoping this board offers.
+#     scope: remote                       # optional; restricts to /jobs/remote
+#     max_pages: 3                        # optional page cap (25 jobs/page, default 3)
 #   enabled: true
 #
 # - name: The Hub                         # Nordic/EU startup board

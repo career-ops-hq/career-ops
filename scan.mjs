@@ -37,7 +37,23 @@
  *   node scan.mjs --help                       # print this usage block and exit
  */
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  fchmodSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'fs';
+import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import * as yaml from 'js-yaml';
@@ -105,6 +121,48 @@ try {
 
 const CONCURRENCY = 10;
 
+export function isIgnorableDirectoryFsyncError(err, platform = process.platform) {
+  return ['EINVAL', 'ENOTSUP', 'ENOSYS'].includes(err?.code)
+    || (platform === 'win32' && ['EACCES', 'EPERM'].includes(err?.code));
+}
+
+export function atomicWriteFile(filePath, text) {
+  const fileStat = lstatSync(filePath, { throwIfNoEntry: false });
+  const targetPath = fileStat?.isSymbolicLink() ? realpathSync(filePath) : filePath;
+  const tempPath = `${targetPath}.tmp-${process.pid}-${randomUUID()}`;
+  let fd = null;
+  let directoryFd = null;
+  try {
+    const existingMode = existsSync(targetPath) ? statSync(targetPath).mode & 0o7777 : null;
+    fd = openSync(tempPath, 'wx', 0o600);
+    if (existingMode !== null) fchmodSync(fd, existingMode);
+    writeFileSync(fd, text, 'utf-8');
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = null;
+    renameSync(tempPath, targetPath);
+    try {
+      directoryFd = openSync(path.dirname(targetPath), 'r');
+      fsyncSync(directoryFd);
+    } catch (err) {
+      if (!isIgnorableDirectoryFsyncError(err)) throw err;
+    } finally {
+      if (directoryFd !== null) closeSync(directoryFd);
+      directoryFd = null;
+    }
+  } catch (err) {
+    if (fd !== null) closeSync(fd);
+    if (directoryFd !== null) closeSync(directoryFd);
+    try { unlinkSync(tempPath); } catch { /* best effort */ }
+    throw err;
+  }
+}
+
+export function emitJsonReceipt(receipt, exitCode) {
+  process.stdout.write(`${JSON.stringify(receipt)}\n`);
+  process.exitCode = exitCode;
+}
+
 // Provider loading + routing live in providers/_registry.mjs so the portal
 // health check (verify-portals.mjs) can reuse the exact same layer without
 // importing this module.
@@ -158,7 +216,10 @@ export function matchedTitleKeywords(title, titleFilter) {
 //     override; for country-level terms that are never a false rejection)
 //   - `always_allow` matches → pass (takes precedence over `block` — lets a
 //     multi-location string like "Remote, Belgium or France" through because
-//     the home region is an option, even though "france" is blocked)
+//     the home region is an option, even though "france" is blocked). When
+//     always_allow names the US as a country (united states / usa / u.s. /
+//     u.s.a.), USPS state names and 2-letter codes are additional always_allow
+//     matches, so block: [Dublin] does not drop "Dublin, OH".
 //   - `block` matches → reject
 //   - `allow` empty → pass (already cleared block)
 //   - `allow` non-empty → must match at least one keyword, OR the TITLE carries
@@ -207,6 +268,78 @@ function compileLocationKeyword(keyword) {
 function compileLocationKeywordList(value) {
   return normalizeKeywordList(value).map(compileLocationKeyword);
 }
+
+// Frozen USPS state-name + abbreviation table. Not a world gazetteer: only
+// consulted when always_allow already names the United States as a country,
+// so EU-targeted configs (no US token) keep their previous semantics.
+const US_COUNTRY_ALWAYS_ALLOW = new Set(['united states', 'usa', 'u.s.', 'u.s.a.']);
+const USPS_STATES = Object.freeze([
+  Object.freeze(['alabama', 'al']),
+  Object.freeze(['alaska', 'ak']),
+  Object.freeze(['arizona', 'az']),
+  Object.freeze(['arkansas', 'ar']),
+  Object.freeze(['california', 'ca']),
+  Object.freeze(['colorado', 'co']),
+  Object.freeze(['connecticut', 'ct']),
+  Object.freeze(['delaware', 'de']),
+  Object.freeze(['florida', 'fl']),
+  Object.freeze(['georgia', 'ga']),
+  Object.freeze(['hawaii', 'hi']),
+  Object.freeze(['idaho', 'id']),
+  Object.freeze(['illinois', 'il']),
+  Object.freeze(['indiana', 'in']),
+  Object.freeze(['iowa', 'ia']),
+  Object.freeze(['kansas', 'ks']),
+  Object.freeze(['kentucky', 'ky']),
+  Object.freeze(['louisiana', 'la']),
+  Object.freeze(['maine', 'me']),
+  Object.freeze(['maryland', 'md']),
+  Object.freeze(['massachusetts', 'ma']),
+  Object.freeze(['michigan', 'mi']),
+  Object.freeze(['minnesota', 'mn']),
+  Object.freeze(['mississippi', 'ms']),
+  Object.freeze(['missouri', 'mo']),
+  Object.freeze(['montana', 'mt']),
+  Object.freeze(['nebraska', 'ne']),
+  Object.freeze(['nevada', 'nv']),
+  Object.freeze(['new hampshire', 'nh']),
+  Object.freeze(['new jersey', 'nj']),
+  Object.freeze(['new mexico', 'nm']),
+  Object.freeze(['new york', 'ny']),
+  Object.freeze(['north carolina', 'nc']),
+  Object.freeze(['north dakota', 'nd']),
+  Object.freeze(['ohio', 'oh']),
+  Object.freeze(['oklahoma', 'ok']),
+  Object.freeze(['oregon', 'or']),
+  Object.freeze(['pennsylvania', 'pa']),
+  Object.freeze(['rhode island', 'ri']),
+  Object.freeze(['south carolina', 'sc']),
+  Object.freeze(['south dakota', 'sd']),
+  Object.freeze(['tennessee', 'tn']),
+  Object.freeze(['texas', 'tx']),
+  Object.freeze(['utah', 'ut']),
+  Object.freeze(['vermont', 'vt']),
+  Object.freeze(['virginia', 'va']),
+  Object.freeze(['washington', 'wa']),
+  Object.freeze(['west virginia', 'wv']),
+  Object.freeze(['wisconsin', 'wi']),
+  Object.freeze(['wyoming', 'wy']),
+]);
+
+// 2-letter codes: comma-state (", OH" / ",OH, USA") or a trailing token
+// ("Dublin OH", Workday URL hint "dublin oh"). Not a generic word-boundary —
+// English "in"/"or"/"me" in "Remote, Belgium or France" must not impersonate
+// Indiana/Oregon/Maine. State *names* still use compileLocationKeyword.
+function compileUsStateAbbrev(abbr) {
+  const escaped = abbr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(?:,\\s*${escaped}(?![a-z0-9])|(?:^|[^a-z0-9])${escaped}[^a-z0-9]*$)`);
+  return (lower) => re.test(lower);
+}
+
+const US_STATE_ALWAYS_ALLOW_MATCHERS = USPS_STATES.flatMap(([name, abbr]) => [
+  compileLocationKeyword(name),
+  compileUsStateAbbrev(abbr),
+]);
 
 // Some providers report a rolled-up display string ("5 Locations", "2 Locations")
 // while the canonical URL still names the real primary location. Workday is the
@@ -291,7 +424,15 @@ export function titleSignalsRemote(title) {
 // location-only semantics, which is what the existing unit tests exercise.
 export function buildLocationFilter(locationFilter) {
   if (!locationFilter) return () => true;
-  const alwaysAllow = compileLocationKeywordList(locationFilter.always_allow);
+  const alwaysAllowKeywords = normalizeKeywordList(locationFilter.always_allow);
+  const alwaysAllow = alwaysAllowKeywords.map(compileLocationKeyword);
+  // US-targeted configs list the country in always_allow and foreign cities
+  // in block. "Dublin, OH" does not contain "United States", so without this
+  // expansion block: [Dublin] rejects a real US job. Opt-in on the country
+  // token — configs with no US always_allow entry are unchanged.
+  if (alwaysAllowKeywords.some(k => US_COUNTRY_ALWAYS_ALLOW.has(k))) {
+    alwaysAllow.push(...US_STATE_ALWAYS_ALLOW_MATCHERS);
+  }
   const allow = compileLocationKeywordList(locationFilter.allow);
   const block = compileLocationKeywordList(locationFilter.block);
   const blockHard = compileLocationKeywordList(locationFilter.block_hard);
@@ -1944,11 +2085,9 @@ export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } 
 
   await withPipelineLock(pipelinePath, async () => {
     // Auto-create with standard skeleton if missing (fresh-install guard).
-    if (!existsSync(pipelinePath)) {
-      writeFileSync(pipelinePath, PIPELINE_SKELETON, 'utf-8');
-    }
-
-    let text = readFileSync(pipelinePath, 'utf-8');
+    let text = existsSync(pipelinePath)
+      ? readFileSync(pipelinePath, 'utf-8')
+      : PIPELINE_SKELETON;
 
     const marker = PENDING_MARKERS.find(m => text.includes(m)) ?? null;
     const idx = marker !== null ? text.indexOf(marker) : -1;
@@ -1972,7 +2111,7 @@ export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } 
       text = text.slice(0, insertAt) + block + text.slice(insertAt);
     }
 
-    writeFileSync(pipelinePath, text, 'utf-8');
+    atomicWriteFile(pipelinePath, text);
   });
 }
 
@@ -1999,7 +2138,7 @@ export async function appendToScanHistory(offers, date, status = 'added') {
     // outcomes (`skipped_expired`, etc.) without the legacy `(expired)` suffix.
     if (!existsSync(SCAN_HISTORY_PATH)) {
       mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
-      writeFileSync(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\n', 'utf-8');
+      atomicWriteFile(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\n');
     }
 
     const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
@@ -2110,7 +2249,7 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
   // neighbouring counter. Surface the mismatch here rather than papering over it — rewriting the
   // header in place would misalign every historical row instead.
   if (!existsSync(filePath)) {
-    writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
+    atomicWriteFile(filePath, SCAN_RUNS_HEADER);
   } else {
     const onDisk = (readFileSync(filePath, 'utf-8').split('\n', 1)[0] || '') + '\n';
     if (onDisk !== SCAN_RUNS_HEADER) {
@@ -2161,7 +2300,7 @@ export const PORTAL_HEALTH_HEADER = 'timestamp\tcompany\tstatus\n';
 export async function appendPortalHealth(healthRecords, filePath = PORTAL_HEALTH_PATH) {
   await withPortalHealthLock(filePath, async () => {
     mkdirSync(path.dirname(filePath), { recursive: true });
-    if (!existsSync(filePath)) writeFileSync(filePath, PORTAL_HEALTH_HEADER, 'utf-8');
+    if (!existsSync(filePath)) atomicWriteFile(filePath, PORTAL_HEALTH_HEADER);
     let lines = '';
     for (const r of healthRecords) {
       lines += [r.timestamp, r.company, r.status].join('\t') + '\n';
@@ -2351,7 +2490,7 @@ function guardStatusFor(code) {
 const KNOWN_FLAGS = [
   '--dry-run', '--verify', '--headed-fallback', '--throttle', '--rediscover-404',
   '--include-blacklisted', '--company', '--posted-after', '--posted-before',
-  '--since', '--quiet', '--help', '-h',
+  '--since', '--quiet', '--json', '--help', '-h',
 ];
 
 // Flags whose space-separated value is the NEXT argv token (the `--flag=value`
@@ -2373,6 +2512,7 @@ const USAGE = `Usage:
   node scan.mjs --since 7                    # postings from the last 7 days
   node scan.mjs --posted-after 2026-07-01    # absolute lower bound on posting date
   node scan.mjs --posted-before 2026-08-01   # absolute upper bound on posting date
+  node scan.mjs --json                       # emit one machine-readable receipt on stdout
   node scan.mjs --quiet                      # suppress the manifesto footer
   node scan.mjs --help                       # print this usage block and exit`;
 
@@ -2380,6 +2520,8 @@ async function main() {
   const args = process.argv.slice(2);
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   const dryRun = args.includes('--dry-run');
+  const jsonMode = args.includes('--json');
+  if (jsonMode) console.log = console.error.bind(console);
   const verify = args.includes('--verify');
   // Opt-in: on an anti-bot challenge (e.g. pracuj.pl Cloudflare wall), retry the
   // URL in a headed browser. Off by default — headed Chromium needs a display, so
@@ -3079,6 +3221,26 @@ async function main() {
   console.log(`\n→ Run /career-ops pipeline to evaluate new offers.`);
   console.log('→ Share results and get help: https://discord.gg/8pRpHETxa4');
 
+  if (jsonMode) {
+    const filtered = totalFilteredTitle + totalFilteredTier + totalFilteredLocation
+      + totalFilteredPostingAge + totalFilteredPostedDate + totalFilteredSalary
+      + totalFilteredContent + totalFilteredCountryEligibility + totalFilteredBlacklist
+      + totalFilteredVisa + totalFilteredCooldown;
+    emitJsonReceipt({
+      version: 'careerops.scan.receipt@1',
+      date,
+      scanned: targets.length,
+      skipped: skippedCount,
+      found: totalFound,
+      filtered,
+      duplicates: totalDupes,
+      added: verifiedOffers.length,
+      added_urls: verifiedOffers.map(offer => offer.url),
+      errors: errors.map(({ company, error }) => ({ company, error })),
+      dry_run: dryRun,
+    }, errors.length > 0 ? 2 : 0);
+  }
+
   // One-time-ever manifesto note: first successful REAL run only. The state
   // file keeps it from ever repeating; --dry-run must leave no trace, and a
   // piped/quiet run is not the moment for it.
@@ -3103,6 +3265,6 @@ if (isMainModule(import.meta.url)) {
   main().catch(err => {
     console.error('Fatal:', err.message);
     writeRunFailureRow('failed');
-    process.exit(1);
+    process.exitCode = 1;
   });
 }

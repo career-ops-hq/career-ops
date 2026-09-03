@@ -130,7 +130,7 @@ Processed TSVs are moved to `batch/tracker-additions/merged/`.
 
 Validates `portals.yml` before running the scanner. The validator is offline: it reads YAML, loads local provider IDs from `providers/*.mjs`, and checks common configuration mistakes without fetching any job boards.
 
-It reports errors for invalid YAML shape, unknown explicit providers, malformed URLs, empty filter keywords, and invalid local parser blocks. Duplicate enabled company names are warnings because they may be intentional during migrations, but they are worth reviewing.
+It reports errors for invalid YAML shape, unknown explicit providers, malformed URLs, empty filter keywords, and invalid local parser blocks. `tracked_companies` and `job_boards` entries are checked against the same schema, and their names share one namespace: a duplicate enabled name — within either list or across the two — is a warning (it may be intentional during a migration, but is worth reviewing).
 
 ```bash
 npm run validate:portals
@@ -798,10 +798,14 @@ node generate-cover-letter.mjs --payload payload.json --out output/slug-cover.pd
 
 ## verify:portals
 
-Online ATS-slug validator — complements the offline `validate:portals`. A
-wrong slug in `careers_url` 404s silently on every future scan, so this
-probes the public Greenhouse / Ashby / Lever endpoints to confirm each slug
-actually resolves.
+Online ATS-slug validator — complements the offline `validate:portals`. A wrong
+slug or a dead board 404s silently on every future scan, so this probes each
+portals entry to confirm it still resolves: Greenhouse / Ashby / Lever slugs
+directly, every other host through the same provider plugins the scanner uses.
+Both `tracked_companies` and `job_boards` entries are swept — a job board
+going dark is as invisible on the next scan as a company board 404ing. An entry
+that no provider claims (no `provider:` field and no plugin `detect()` match) is
+reported `skipped`, not confirmed — those are a coverage gap, not a pass.
 
 ```bash
 npm run verify:portals
