@@ -248,11 +248,13 @@ const SECTION_ALIASES = new Map([
   ['work experience', 'experience'],
   ['professional experience', 'experience'],
   ['projects', 'projects'],
+  ['key projects', 'projects'],
   ['selected projects', 'projects'],
   ['personal projects', 'projects'],
   ['education', 'education'],
   ['education & certifications', 'education'],
   ['certifications', 'certifications'],
+  ['professional development', 'certifications'],
   ['awards', 'awards'],
   ['honors', 'awards'],
   ['honours', 'awards'],
@@ -263,6 +265,8 @@ const SECTION_ALIASES = new Map([
   ['skills', 'skills'],
   ['technical skills', 'skills'],
   ['interests', 'interests'],
+  ['languages', 'interests'],
+  ['jezyki', 'interests'],
   // Polish — the vocabulary documented in modes/pl/README.md, plus the word-order
   // variants that turn up in practice (both "Kompetencje kluczowe" and
   // "Kluczowe kompetencje" are used for the same section).
@@ -359,6 +363,14 @@ const CANONICAL_TAILORED_POSITIONS = new Map(
   CANONICAL_TAILORED_ORDER.map((key, index) => [key, index]),
 );
 
+const CANONICAL_SKILLS_FIRST_ORDER = [
+  'summary', 'skills', 'competencies', 'experience', 'projects',
+  'education', 'certifications', 'awards', 'interests',
+];
+const CANONICAL_SKILLS_FIRST_POSITIONS = new Map(
+  CANONICAL_SKILLS_FIRST_ORDER.map((key, index) => [key, index]),
+);
+
 /**
  * First index in `comparableSections` whose key sits earlier in `positions`
  * than the section right before it — i.e. the first place the rendered order
@@ -407,7 +419,8 @@ export function validateCvSectionOrder(html, cvMarkdown, { allowReorder = false 
   // as a real problem if it ALSO fails to match that canonical order.
   const canonicalComparable = rendered.filter(section => CANONICAL_TAILORED_POSITIONS.has(section.key));
   if (canonicalComparable.length >= 2
-      && findOrderDivergence(canonicalComparable, CANONICAL_TAILORED_POSITIONS) === -1) {
+      && (findOrderDivergence(canonicalComparable, CANONICAL_TAILORED_POSITIONS) === -1
+          || findOrderDivergence(canonicalComparable, CANONICAL_SKILLS_FIRST_POSITIONS) === -1)) {
     return;
   }
 

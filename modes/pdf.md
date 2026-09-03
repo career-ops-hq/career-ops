@@ -80,24 +80,26 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 
 ## PDF Design
 
-- **Fonts**: Space Grotesk (headings, 600-700) + DM Sans (body, 400-500)
-- **Fonts self-hosted**: `fonts/`
-- **Header**: name in Space Grotesk 24px bold + gradient line `linear-gradient(to right, hsl(187,74%,32%), hsl(270,70%,45%))` 2px + contact row
-- **Section headers**: Space Grotesk 13px, uppercase, letter-spacing 0.05em, color cyan primary
-- **Body**: DM Sans 11px, line-height 1.5
-- **Company names**: accent purple color `hsl(270,70%,45%)`
+- **Fonts**: Standard ATS-safe static system sans-serif ("Liberation Sans", Arial, Helvetica, sans-serif)
+- **Header**: Large bold name (20px), target role/headline, clean 1px dark navy divider line, selectable contact row with `|` separators. No photo.
+- **Section headers**: Bold, uppercase, letter-spacing 0.05em, color conservative dark navy (`#17365D`), clean 1px divider
+- **Body**: Clean dark text (`#111111` / `#222222`), line-height 1.45
+- **Company names**: Bold black (`#111111`, no purple accents)
+- **Technical Skills**: Grouped plain text categories near the top; no pills, badges, cards, or tags
 - **Margins**: 0.6in
-- **Background**: pure white
+- **Background**: Pure white (high contrast in print and grayscale)
+- **Page Budget**: Exactly 2 pages target
 
-## Section order (optimized "6-second recruiter scan")
+## Section order (optimized ATS & recruiter scan)
 
-1. Header (large name, gradient, contact, portfolio link)
-2. Professional Summary (3-4 lines, keyword-dense)
-3. Core Competencies (6-8 keyword phrases in flex-grid)
-4. Work Experience (reverse chronological)
-5. Projects (top 3-4 most relevant)
-6. Education & Certifications
-7. Skills (languages + technical)
+1. Header (name, target title, contacts, location)
+2. Professional Summary (3-5 lines, keyword-dense)
+3. Technical Skills (grouped plain text categories)
+4. Work Experience (reverse chronological, black company names)
+5. Projects (top 3 most relevant)
+6. Education
+7. Professional Development / Courses
+8. Languages (fluent/native proficiency)
 
 ## Keyword injection strategy (ethical, truth-based)
 

@@ -630,6 +630,7 @@ function renderReport(payload, partials) {
     LANG: escapeHtml(payload.lang || 'en'),
     PAGE_WIDTH: pageWidth,
     NAME: escapeHtml(candidate.name || ''),
+    HEADLINE: escapeHtml(candidate.headline || candidate.title || ''),
     SECTION_SUMMARY: escapeHtml(sectionTitles.summary),
     SUMMARY_TEXT: escapeHtml(payload.summary || ''),
     SECTION_COMPETENCIES: escapeHtml(sectionTitles.competencies),
@@ -796,6 +797,17 @@ async function main() {
   } catch (err) {
     console.error(err.message);
     process.exit(1);
+  }
+
+  try {
+    const { reorderCvSections } = await import('./generate-pdf.mjs');
+    const { readCvSectionOrder } = await import('./theme-style.mjs');
+    const order = payload.sections_order || payload.section_order || readCvSectionOrder(resolve(__dirname, 'config', 'profile.yml'));
+    if (Array.isArray(order) && order.length > 0) {
+      html = reorderCvSections(html, order);
+    }
+  } catch (err) {
+    console.error('Warning: section reordering skipped:', err.message);
   }
 
   await writeAndReport(html, absOutput, payload, preview ? { status: 'preview-ready', warnings } : { warnings });

@@ -9,9 +9,9 @@
      the PDF pipeline injects as a later :root block. Defaults below reproduce the
      original hardcoded values, so a profile without a `style:` block is unchanged. */
   :root {
-    --accent-color: hsl(187 74% 32%);
-    --font-family: "Liberation Sans", 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
-    --font-size: 11px;
+    --accent-color: #17365D;
+    --font-family: "Liberation Sans", Arial, Helvetica, 'DejaVu Sans', sans-serif;
+    --font-size: 9.5px;
     /* Matches generate-pdf.mjs's PDF_PAGE_MARGIN — the actual PDF page margin
        comes from the later @page rule injectPrintPageCss appends (which reads
        this same variable), so this default must match it exactly. */
@@ -51,8 +51,8 @@
   body {
     font-family: var(--font-family);
     font-size: var(--font-size);
-    line-height: 1.5;
-    color: #1a1a2e;
+    line-height: 1.45;
+    color: #111111;
     background: #ffffff;
     padding: 0;
     margin: 0;
@@ -65,48 +65,65 @@
     width: 100%;
     max-width: {{PAGE_WIDTH}};
     margin: 0 auto;
-    padding: 2px 0;
+    padding: 0;
   }
 
   /* === HEADER === */
   .header {
-    margin-bottom: 20px;
+    margin-bottom: 10px;
   }
 
   .header h1 {
     font-family: var(--font-family);
-    font-size: 28px;
+    font-size: 20px;
     font-weight: 700;
-    color: #1a1a2e;
-    letter-spacing: -0.02em;
-    margin-bottom: 6px;
-    line-height: 1.1;
+    color: #111111;
+    letter-spacing: -0.01em;
+    margin-bottom: 2px;
+    line-height: 1.15;
   }
 
-  .header-gradient {
-    height: 2px;
-    background: linear-gradient(to right, var(--accent-color), hsl(270, 70%, 45%));
-    border-radius: 1px;
-    margin-bottom: 10px;
+  .header-headline {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: #17365D;
+    margin-bottom: 4px;
+    line-height: 1.3;
+  }
+
+  .header-headline:empty {
+    display: none;
+  }
+
+  .header-gradient,
+  .header-divider {
+    height: 1px;
+    background: #17365D;
+    margin-bottom: 6px;
   }
 
   .contact-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px 14px;
+    gap: 3px 8px;
     font-family: var(--font-family);
-    font-size: 10.5px;
-    line-height: 1.4;
-    color: #555;
+    font-size: 9.5px;
+    line-height: 1.35;
+    color: #333333;
   }
 
   .contact-row a {
-    color: #555;
+    color: #17365D;
     text-decoration: none;
+    font-weight: 500;
+  }
+
+  .contact-row a:hover {
+    text-decoration: underline;
   }
 
   .contact-row .separator {
-    color: #ccc;
+    color: #888888;
   }
 
   /* === OPTIONAL PROFILE PHOTO (opt-in, DACH/European markets — #264) ===
@@ -131,32 +148,32 @@
 
   /* === SECTIONS === */
   .section {
-    margin-bottom: 18px;
+    margin-bottom: 11px;
   }
 
   .section-title {
     font-family: var(--font-family);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.05em;
     color: var(--accent-color);
-    border-bottom: 1.5px solid #e2e2e2;
-    padding-bottom: 4px;
-    margin-bottom: 10px;
+    border-bottom: 1px solid var(--accent-color);
+    padding-bottom: 2px;
+    margin-bottom: 6px;
     line-height: 1.2;
   }
 
   /* === PROFESSIONAL SUMMARY === */
   .summary-text {
     font-size: var(--font-size);
-    line-height: 1.7;
-    color: #2f2f2f;
+    line-height: 1.48;
+    color: #222222;
   }
 
   .summary-text strong {
     font-weight: 700;
-    color: #1a1a1a;
+    color: #111111;
   }
 
   /* Links must never break across lines */
@@ -168,88 +185,90 @@
   .competencies-grid {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 4px;
   }
 
   .competency-tag {
     font-family: var(--font-family);
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 500;
-    color: hsl(187, 74%, 28%);
-    background: hsl(187, 40%, 95%);
-    padding: 4px 10px;
-    border-radius: 3px;
-    border: 1px solid hsl(187, 40%, 88%);
+    color: #111111;
+    background: #f4f5f7;
+    padding: 2px 6px;
+    border-radius: 2px;
+    border: 1px solid #d0d5dd;
   }
 
   /* === WORK EXPERIENCE === */
   .job {
-    margin-bottom: 14px;
+    margin-bottom: 9px;
   }
 
   .job-header {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    gap: 12px;
-    margin-bottom: 4px;
+    gap: 10px;
+    margin-bottom: 1.5px;
   }
 
   .job-company {
     font-family: var(--font-family);
-    font-size: 12.5px;
-    font-weight: 600;
-    color: hsl(270, 70%, 45%);
+    font-size: 11px;
+    font-weight: 700;
+    color: #111111;
   }
 
   .job-period {
-    font-size: 10.5px;
-    color: #777;
+    font-size: 9.5px;
+    color: #444444;
+    font-weight: 500;
     white-space: nowrap;
   }
 
   .job-role {
-    font-size: var(--font-size);
+    font-size: 10px;
     font-weight: 600;
-    color: #333;
-    margin-bottom: 6px;
+    color: #222222;
+    margin-bottom: 2.5px;
   }
 
   .job-location {
-    font-size: 10px;
-    color: #888;
+    font-size: 9px;
+    color: #555555;
   }
 
   .job ul {
-    padding-left: 18px;
-    margin-top: 6px;
+    padding-left: 14px;
+    margin-top: 2.5px;
   }
 
   .job li {
-    font-size: 10.5px;
-    line-height: 1.6;
-    color: #333;
-    margin-bottom: 4px;
+    font-size: 9.5px;
+    line-height: 1.42;
+    color: #222222;
+    margin-bottom: 2px;
   }
 
   .job li strong {
     font-weight: 600;
+    color: #111111;
   }
 
   /* === PROJECTS === */
   .project {
-    margin-bottom: 12px;
+    margin-bottom: 7px;
   }
 
   .project-title {
     font-family: var(--font-family);
-    font-size: 11.5px;
-    font-weight: 600;
-    color: hsl(270, 70%, 45%);
+    font-size: 10.5px;
+    font-weight: 700;
+    color: #111111;
   }
 
   .project-title a {
-    color: inherit;
+    color: #17365D;
     text-decoration: none;
   }
 
@@ -258,31 +277,26 @@
   }
 
   .project-badge {
-    font-size: 9px;
-    font-weight: 500;
-    color: var(--accent-color);
-    background: hsl(187, 40%, 95%);
-    padding: 1px 6px;
-    border-radius: 2px;
-    margin-left: 6px;
+    display: none;
   }
 
   .project-desc {
-    font-size: 10.5px;
-    color: #444;
-    margin-top: 3px;
-    line-height: 1.55;
+    font-size: 9.5px;
+    color: #222222;
+    margin-top: 1.5px;
+    line-height: 1.42;
   }
 
   .project-tech {
-    font-size: 9.5px;
-    color: #888;
-    margin-top: 3px;
+    font-size: 9px;
+    color: #444444;
+    margin-top: 1.5px;
+    font-style: italic;
   }
 
   /* === EDUCATION === */
   .edu-item {
-    margin-bottom: 8px;
+    margin-bottom: 5px;
   }
 
   .edu-header {
@@ -293,27 +307,28 @@
   }
 
   .edu-title {
-    font-weight: 600;
-    font-size: var(--font-size);
-    color: #333;
+    font-weight: 700;
+    font-size: 10px;
+    color: #111111;
   }
 
   .edu-org {
-    color: hsl(270, 70%, 45%);
+    color: #333333;
     font-weight: 500;
+    font-size: 9.5px;
   }
 
   .edu-year {
-    font-size: 10px;
-    color: #777;
+    font-size: 9.5px;
+    color: #444444;
     white-space: nowrap;
   }
 
   .edu-desc {
-    font-size: 10px;
-    color: #666;
-    margin-top: 2px;
-    line-height: 1.5;
+    font-size: 9px;
+    color: #555555;
+    margin-top: 1px;
+    line-height: 1.4;
   }
 
   /* === CERTIFICATIONS === */
@@ -329,23 +344,24 @@
   .cert-item > * {
     display: table-cell;
     vertical-align: baseline;
-    padding-bottom: 6px;
+    padding-bottom: 3.5px;
   }
 
   .cert-title {
-    font-size: 10.5px;
-    font-weight: 500;
-    color: #333;
+    font-size: 9.5px;
+    font-weight: 600;
+    color: #222222;
   }
 
   .cert-org {
-    color: hsl(270, 70%, 45%);
+    color: #444444;
+    font-size: 9.5px;
     white-space: nowrap;
   }
 
   .cert-year {
-    font-size: 10px;
-    color: #777;
+    font-size: 9px;
+    color: #444444;
     white-space: nowrap;
     text-align: right;
     width: 44px;
@@ -367,23 +383,24 @@
   .award-item > * {
     display: table-cell;
     vertical-align: baseline;
-    padding-bottom: 6px;
+    padding-bottom: 3.5px;
   }
 
   .award-title {
-    font-size: 10.5px;
-    font-weight: 500;
-    color: #333;
+    font-size: 9.5px;
+    font-weight: 600;
+    color: #222222;
   }
 
   .award-org {
-    color: hsl(270, 70%, 45%);
+    color: #444444;
+    font-size: 9.5px;
     white-space: nowrap;
   }
 
   .award-year {
-    font-size: 10px;
-    color: #777;
+    font-size: 9px;
+    color: #444444;
     white-space: nowrap;
     text-align: right;
     width: 44px;
@@ -391,26 +408,28 @@
 
   /* === INTERESTS === */
   .interests-line {
-    font-size: 10.5px;
-    color: #444;
+    font-size: 9.5px;
+    line-height: 1.42;
+    color: #222222;
   }
 
   /* === SKILLS === */
   .skills-grid {
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px 14px;
+    flex-direction: column;
+    gap: 3.5px;
   }
 
   .skill-item {
-    font-size: 10.5px;
-    color: #444;
+    font-size: 9.5px;
+    line-height: 1.42;
+    color: #222222;
   }
 
   .skill-category {
-    font-weight: 600;
-    color: #333;
-    font-size: 10.5px;
+    font-weight: 700;
+    color: #111111;
+    font-size: 9.5px;
   }
 
   /* === PRINT === */
@@ -440,6 +459,7 @@
   .header,
   .edu-item,
   .cert-item,
+  .award-item,
   .competency-tag,
   .skill-item {
     break-inside: avoid;
@@ -449,12 +469,16 @@
   /* Keep a heading attached to the content that follows it, so headings are not
      orphaned at the bottom of a page. */
   .section-title,
-  .job-company,
+  .job-header,
   .job-role,
-  .job-location,
   .project-title {
     break-after: avoid;
     page-break-after: avoid;
+  }
+
+  .job li {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   /* Keep a project's tech line attached to the description above it.  A project
@@ -483,7 +507,7 @@
   }
 
   html[lang="ar"] .header-gradient {
-    background: linear-gradient(to left, var(--accent-color), hsl(270, 70%, 45%));
+    background: var(--accent-color);
   }
 
   html[lang="ar"] .job ul {
@@ -645,7 +669,8 @@
   <!-- HEADER -->
   <div class="header">
     <h1>{{NAME}}</h1>
-    <div class="header-gradient"></div>
+    <div class="header-headline">{{HEADLINE}}</div>
+    <div class="header-divider"></div>
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
       <span class="separator">|</span>
