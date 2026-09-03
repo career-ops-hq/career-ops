@@ -6,7 +6,12 @@ tone_instructions: "Be specific and brief. Cite file:line. Use colons, not dashe
 
 reviews:
   profile: assertive
-  request_changes_workflow: false   # humans decide; the review is a signal
+  # Humans decide: the review is a signal. Before ever flipping this to true, or
+  # adding a CodeRabbit check to the branch protection required checks, give
+  # /web/ a second code owner. Its only owner cannot request a reviewer other
+  # than themselves, and override_requested_reviewers_only means a failing
+  # policy check would then have nobody able to clear it.
+  request_changes_workflow: false
   high_level_summary: true
   high_level_summary_instructions: "Explain what changes from the user's point of view (what they can do, what breaks). Name which system files are touched: AGENTS.md, modes/, update-system.mjs, DATA_CONTRACT.md, providers/, .github/."
   poem: false
