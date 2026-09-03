@@ -37,7 +37,8 @@
  *
  * Reads `dayforce_boards` from portals.yml:
  *   dayforce_boards:
- *     - tenant: gnghcm
+ *     - name: Give & Go Prepared Foods
+ *       tenant: gnghcm
  *       board: CANDIDATEPORTAL   # jobBoardCode; optional, default CANDIDATEPORTAL
  *       culture: en-US           # optional, default en-US
  *       jobBoardId: 1            # optional, default 1 — see NOTE below
@@ -67,6 +68,11 @@ import {
   normalizeUrlForDedup,
   buildTitleFilter,
   buildLocationFilter,
+  buildContentFilter,
+  buildCountryEligibilityFilter,
+  buildVisaFilter,
+  loadCandidateCountry,
+  matchedTitleKeywords,
   PORTALS_PATH,
 } from './scan.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -129,10 +135,11 @@ export function validateJobPostingId(v) {
  * abort the whole scan — the caller logs and skips it.
  *
  * @param {any} entry
- * @returns {{ tenant: string, board: string, culture: string, jobBoardId: string } | null}
+ * @returns {{ name: string, tenant: string, board: string, culture: string, jobBoardId: string } | null}
  */
 export function normalizeBoardEntry(entry) {
   if (!entry || typeof entry !== 'object') return null;
+  const name = typeof entry.name === 'string' ? entry.name.trim() : '';
   const tenant = entry.tenant;
   const board = entry.board || entry.jobBoardCode || DEFAULT_BOARD_CODE;
   const culture = entry.culture || DEFAULT_CULTURE;
@@ -140,12 +147,13 @@ export function normalizeBoardEntry(entry) {
     ? String(entry.jobBoardId)
     : DEFAULT_JOB_BOARD_ID;
 
+  if (!name) return null;
   if (!validateTenant(tenant)) return null;
   if (!validateBoardCode(board)) return null;
   if (!validateCulture(culture)) return null;
   if (!validateJobBoardId(jobBoardId)) return null;
 
-  return { tenant, board, culture, jobBoardId };
+  return { name, tenant, board, culture, jobBoardId };
 }
 
 /**
@@ -287,6 +295,21 @@ const invalidCount = rawBoards.length - rawBoards.map(normalizeBoardEntry).filte
 
 const titleFilter = buildTitleFilter(config.title_filter);
 const locationFilter = buildLocationFilter(config.location_filter);
+const contentFilter = buildContentFilter(config.content_filter);
+const countryEligibilityFilter = buildCountryEligibilityFilter(
+  config.country_eligibility_filter,
+  loadCandidateCountry(),
+);
+const visaFilter = buildVisaFilter(config.visa_filter);
+
+const defaultFilters = {
+  titleFilter,
+  locationFilter,
+  contentFilter,
+  countryEligibilityFilter,
+  visaFilter,
+  matchedTitleKeywords: (title) => matchedTitleKeywords(title, config.title_filter),
+};
 
 // ── Fetch helpers (all run through page.request — same context, same cookies) ──
 
@@ -352,9 +375,10 @@ async function fetchDetail(page, boardCfg, jobPostingId) {
 
 /**
  * @param {import('playwright').Page} page
- * @param {{ tenant: string, board: string, culture: string, jobBoardId: string }} boardCfg
+ * @param {{ name: string, tenant: string, board: string, culture: string, jobBoardId: string }} boardCfg
+ * @param {{ titleFilter: Function, locationFilter: Function, contentFilter: Function, countryEligibilityFilter: Function, visaFilter: Function, matchedTitleKeywords: Function }} [filters]
  */
-async function scanBoard(page, boardCfg) {
+export async function scanBoard(page, boardCfg, filters = defaultFilters) {
   const found = [];
   const boardUrl = buildBoardUrl(boardCfg.culture, boardCfg.tenant, boardCfg.board);
 
@@ -392,6 +416,9 @@ async function scanBoard(page, boardCfg) {
   const shortlisted = [];
   const titleSkipped = [];
   const locationSkipped = [];
+  const contentSkipped = [];
+  const countryEligibilitySkipped = [];
+  const visaSkipped = [];
 
   for (const row of listRows) {
     // Titles arrive HTML-entity-escaped (e.g. "Strategy &amp; Acquisition") —
@@ -404,8 +431,12 @@ async function scanBoard(page, boardCfg) {
     const listDescription = htmlToText(row.jobDescription || '');
     const url = buildJobUrl(boardCfg.culture, boardCfg.tenant, boardCfg.board, jobPostingId);
 
-    if (!titleFilter(title)) { titleSkipped.push({ title, url, location: listLocation }); continue; }
-    if (!locationFilter(listLocation, url, title)) { locationSkipped.push({ title, url, location: listLocation }); continue; }
+    const skipped = { title, url, location: listLocation };
+    if (!filters.titleFilter(title)) { titleSkipped.push(skipped); continue; }
+    if (!filters.locationFilter(listLocation, url, title)) { locationSkipped.push(skipped); continue; }
+    if (!filters.contentFilter(listDescription, filters.matchedTitleKeywords(title))) { contentSkipped.push(skipped); continue; }
+    if (!filters.countryEligibilityFilter(listDescription)) { countryEligibilitySkipped.push(skipped); continue; }
+    if (!filters.visaFilter(listDescription)) { visaSkipped.push(skipped); continue; }
 
     shortlisted.push({ jobPostingId, title, listLocation, listDescription, url });
   }
@@ -421,7 +452,7 @@ async function scanBoard(page, boardCfg) {
 
     found.push({
       url: item.url,
-      company: boardCfg.tenant,
+      company: boardCfg.name,
       title: decodeEntities(String(detail.jobTitle || item.title)),
       location,
       source: 'dayforce',
@@ -430,7 +461,15 @@ async function scanBoard(page, boardCfg) {
     });
   }
 
-  return { found, titleSkipped, locationSkipped, totalFound: listRows.length };
+  return {
+    found,
+    titleSkipped,
+    locationSkipped,
+    contentSkipped,
+    countryEligibilitySkipped,
+    visaSkipped,
+    totalFound: listRows.length,
+  };
 }
 
 // ── Main ─────────────────────────────────────────────────────────────
@@ -454,6 +493,9 @@ async function main() {
   const newOffers = [];
   const titleSkipped = [];
   const locationSkipped = [];
+  const contentSkipped = [];
+  const countryEligibilitySkipped = [];
+  const visaSkipped = [];
   const dupeSkipped = [];
   const errors = [];
 
@@ -491,8 +533,11 @@ async function main() {
     totalFound += result.totalFound;
     process.stdout.write(`${result.totalFound} found, ${result.found.length} passed filters\n`);
 
-    for (const skip of result.titleSkipped) { seen.add(normalizeUrlForDedup(skip.url)); titleSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.tenant }); }
-    for (const skip of result.locationSkipped) { seen.add(normalizeUrlForDedup(skip.url)); locationSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.tenant }); }
+    for (const skip of result.titleSkipped) { seen.add(normalizeUrlForDedup(skip.url)); titleSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
+    for (const skip of result.locationSkipped) { seen.add(normalizeUrlForDedup(skip.url)); locationSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
+    for (const skip of result.contentSkipped) { seen.add(normalizeUrlForDedup(skip.url)); contentSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
+    for (const skip of result.countryEligibilitySkipped) { seen.add(normalizeUrlForDedup(skip.url)); countryEligibilitySkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
+    for (const skip of result.visaSkipped) { seen.add(normalizeUrlForDedup(skip.url)); visaSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
 
     for (const offer of result.found) {
       const key = normalizeUrlForDedup(offer.url);
@@ -507,6 +552,9 @@ async function main() {
     if (newOffers.length > 0) await appendToScanHistory(newOffers, date, 'added');
     if (titleSkipped.length > 0) await appendToScanHistory(titleSkipped, date, 'skipped_title');
     if (locationSkipped.length > 0) await appendToScanHistory(locationSkipped, date, 'skipped_location');
+    if (contentSkipped.length > 0) await appendToScanHistory(contentSkipped, date, 'skipped_content');
+    if (countryEligibilitySkipped.length > 0) await appendToScanHistory(countryEligibilitySkipped, date, 'skipped_country_eligibility');
+    if (visaSkipped.length > 0) await appendToScanHistory(visaSkipped, date, 'skipped_visa');
     if (dupeSkipped.length > 0) await appendToScanHistory(dupeSkipped, date, 'skipped_dup');
   }
 
@@ -517,6 +565,9 @@ async function main() {
   console.log(`Total found:        ${totalFound}`);
   console.log(`Filtered by title:  ${titleSkipped.length}`);
   console.log(`Filtered location:  ${locationSkipped.length}`);
+  console.log(`Filtered content:   ${contentSkipped.length}`);
+  console.log(`Country ineligible: ${countryEligibilitySkipped.length}`);
+  console.log(`Filtered by visa:   ${visaSkipped.length}`);
   console.log(`Duplicates:         ${dupeSkipped.length}`);
   console.log(`New offers:         ${newOffers.length}`);
 

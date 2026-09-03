@@ -26,6 +26,7 @@ import {
   nextPaginationStart,
   joinLocations,
   buildJobDescriptionText,
+  scanBoard,
   ALLOWED_HOST,
 } from '../scan-dayforce.mjs';
 import { decodeEntities } from '../providers/_html-entities.mjs';
@@ -70,18 +71,66 @@ test('validateJobBoardId/validateJobPostingId — decimal integers only', () => 
 
 test('normalizeBoardEntry — fills defaults, rejects malformed entries without throwing', () => {
   assert.deepStrictEqual(
-    normalizeBoardEntry({ tenant: 'gnghcm' }),
-    { tenant: 'gnghcm', board: 'CANDIDATEPORTAL', culture: 'en-US', jobBoardId: '1' }
+    normalizeBoardEntry({ name: 'Give & Go Prepared Foods', tenant: 'gnghcm' }),
+    { name: 'Give & Go Prepared Foods', tenant: 'gnghcm', board: 'CANDIDATEPORTAL', culture: 'en-US', jobBoardId: '1' }
   );
   assert.deepStrictEqual(
-    normalizeBoardEntry({ tenant: 'roots', board: 'CAREERS', culture: 'en-CA', jobBoardId: 2 }),
-    { tenant: 'roots', board: 'CAREERS', culture: 'en-CA', jobBoardId: '2' }
+    normalizeBoardEntry({ name: 'Roots Canada', tenant: 'roots', board: 'CAREERS', culture: 'en-CA', jobBoardId: 2 }),
+    { name: 'Roots Canada', tenant: 'roots', board: 'CAREERS', culture: 'en-CA', jobBoardId: '2' }
   );
-  assert.strictEqual(normalizeBoardEntry({ tenant: 'bad tenant' }), null);
-  assert.strictEqual(normalizeBoardEntry({ tenant: 'ok', culture: 'not-a-culture' }), null);
+  assert.strictEqual(normalizeBoardEntry({ tenant: 'gnghcm' }), null);
+  assert.strictEqual(normalizeBoardEntry({ name: 'Company', tenant: 'bad tenant' }), null);
+  assert.strictEqual(normalizeBoardEntry({ name: 'Company', tenant: 'ok', culture: 'not-a-culture' }), null);
   assert.strictEqual(normalizeBoardEntry({}), null);
   assert.strictEqual(normalizeBoardEntry(null), null);
   assert.strictEqual(normalizeBoardEntry('gnghcm'), null);
+});
+
+test('scanBoard applies all list-level description gates before detail fetch and emits the human company name', async () => {
+  const rows = [
+    { jobPostingId: 1, jobTitle: 'Keep', jobDescription: 'keep', postingLocations: [{ formattedAddress: 'Toronto, ON' }] },
+    { jobPostingId: 2, jobTitle: 'Content blocked', jobDescription: 'blocked-content', postingLocations: [{ formattedAddress: 'Toronto, ON' }] },
+    { jobPostingId: 3, jobTitle: 'Country blocked', jobDescription: 'blocked-country', postingLocations: [{ formattedAddress: 'Toronto, ON' }] },
+    { jobPostingId: 4, jobTitle: 'Visa blocked', jobDescription: 'blocked-visa', postingLocations: [{ formattedAddress: 'Toronto, ON' }] },
+  ];
+  const detailIds = [];
+  const response = (json, status = 200) => ({
+    ok: () => status >= 200 && status < 300,
+    status: () => status,
+    json: async () => json,
+  });
+  const page = {
+    goto: async () => {},
+    url: () => 'https://jobs.dayforcehcm.com/en-US/tenant/CANDIDATEPORTAL',
+    request: {
+      post: async () => response({ jobPostings: rows, offset: 0, count: rows.length, maxCount: rows.length }),
+      get: async (url) => {
+        if (String(url).endsWith('/api/auth/csrf')) return response({ csrfToken: 'token' });
+        const id = String(url).split('/').at(-1);
+        detailIds.push(id);
+        return response({ jobTitle: 'Kept detail', jobPostingContent: { jobDescription: 'full detail' } });
+      },
+    },
+  };
+  const result = await scanBoard(
+    page,
+    { name: 'Human Company', tenant: 'tenant', board: 'CANDIDATEPORTAL', culture: 'en-US', jobBoardId: '1' },
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      contentFilter: (description) => description !== 'blocked-content',
+      countryEligibilityFilter: (description) => description !== 'blocked-country',
+      visaFilter: (description) => description !== 'blocked-visa',
+      matchedTitleKeywords: () => [],
+    },
+  );
+
+  assert.deepStrictEqual(detailIds, ['1']);
+  assert.strictEqual(result.found.length, 1);
+  assert.strictEqual(result.found[0].company, 'Human Company');
+  assert.strictEqual(result.contentSkipped.length, 1);
+  assert.strictEqual(result.countryEligibilitySkipped.length, 1);
+  assert.strictEqual(result.visaSkipped.length, 1);
 });
 
 test('assertDayforceUrl — pins to https://jobs.dayforcehcm.com exactly', () => {
