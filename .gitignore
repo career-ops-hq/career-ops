@@ -58,6 +58,7 @@ writing-samples/*
 config/profile.yml
 config/cv-facts.json
 config/benchmarks.yml
+config/ai.yml
 # Fork-local path declarations — this checkout's own files, read by
 # update-system.mjs. Gitignored on purpose: it describes THIS clone, not the
 # project, and must survive the sync that overwrites update-system.mjs (#2421).

@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["headline", "summary", "skills", "experience", "projects", "tailoring_diff"],
+  "properties": {
+    "headline": { "type": "string" },
+    "summary": { "type": "string" },
+    "skills": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["category", "items"], "properties": { "category": { "type": "string" }, "items": { "type": "string" } } } },
+    "experience": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["company", "role", "location", "dates", "bullets"], "properties": { "company": { "type": "string" }, "role": { "type": "string" }, "location": { "type": "string" }, "dates": { "type": "string" }, "bullets": { "type": "array", "items": { "type": "string" } } } } },
+    "projects": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["name", "tech", "description"], "properties": { "name": { "type": "string" }, "tech": { "type": "string" }, "description": { "type": "string" } } } },
+    "tailoring_diff": {
+      "type": "object", "additionalProperties": false,
+      "required": ["summary_focus", "skills_promoted", "skills_omitted", "projects_selected", "jd_keywords_matched", "experience_emphasis"],
+      "properties": {
+        "summary_focus": { "type": "string" },
+        "skills_promoted": { "type": "array", "items": { "type": "string" } },
+        "skills_omitted": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["domain", "reason"], "properties": { "domain": { "type": "string" }, "reason": { "type": "string" } } } },
+        "projects_selected": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["name", "reason"], "properties": { "name": { "type": "string" }, "reason": { "type": "string" } } } },
+        "jd_keywords_matched": { "type": "array", "items": { "type": "string" } },
+        "experience_emphasis": { "type": "string" }
+      }
+    }
+  }
+}
