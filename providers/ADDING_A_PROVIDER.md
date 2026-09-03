@@ -193,7 +193,11 @@ false alarm instead of an honest "empty". So a malformed item is a
   better: it surfaces a silent API change instead of a board that quietly
   returns `0` forever. Reference: `parseIbmResponse` in `providers/ibm.mjs`.
   `scan.mjs` also throws on a non-array out of `fetch()`; `verify-portals`
-  catches it.
+  catches it. Watch the guard shape: `if (json && typeof json === 'object' &&
+  …wrong-key checks…) throw` only fires for objects, so a bare string /
+  number / `true` where an object is documented slips past it into the
+  empty-board path — reject a non-object payload up front too (`null` / `{}`
+  / `[]` still return `[]`).
 - Same call for an **HTML / SSR-JSON scraper**: the card selector or the
   embedded blob (`__NEXT_DATA__`, a JSON-LD script) matching *nothing at
   all* is a markup change → `throw`. An empty list inside an otherwise
@@ -206,6 +210,12 @@ false alarm instead of an honest "empty". So a malformed item is a
   (`json.hits.hits.length < PAGE_SIZE`): returning `[]` from the parser is
   not enough — guard that bound or `throw` deliberately (the "fail loud vs
   hand back a partial board" call from *Pacing and retry* below).
+- The short-page stop compares the row count the **source** returned for that
+  page, never the count left after dropping malformed rows. Comparing the
+  filtered count ends the walk one row short the moment a full page carries
+  one bad row, even when later pages still have jobs. Reference:
+  `providers/oraclecloud.mjs` (`item.requisitionList.length`),
+  `providers/jobbankca.mjs` (`rawEntryCount`).
 - Dates: a date *string* through `Date.parse` can return `NaN`. Don't write
   `Date.parse(s) || undefined` (it also nulls a valid epoch `0` — a
   `1970-01-01` timestamp) — use a NaN-safe helper. Its `!value` guard is for
@@ -381,6 +391,14 @@ way, the "raise `max_pages`" warning must **not** fire when pagination
 stopped on a fetch error — that message means the ceiling truncated a
 healthy board, not that the board broke.
 
+The same distinction carries to any incomplete marker a provider puts on the
+returned array: track *why* the walk stopped — ceiling, fetch error,
+unrecognised page — as one value, and drive both the warning and the marker's
+`reason` from it, so a consumer can tell "truncated a healthy board" from
+"the board broke". Reference: `workday.mjs`'s `stopReason`
+(`complete` / `cap` / `fetch-error` / …); `providers/phenom.mjs` is the
+compact version.
+
 ### Health-check coverage (`verify-portals`)
 
 `npm run verify:portals` and `node validate-portals.mjs` (and `doctor.mjs
@@ -464,6 +482,9 @@ went through them. Must cover:
   exhausts retry is caught, the listing row comes back intact, and the sweep
   finishes — enrichment failure is never fatal to the target
   (reference: `smartrecruiters.mjs`).
+- `detailLimit` (if `fetchDetails`): a test caps the detail-fetch count at
+  `detailLimit` however many postings match — `smartrecruiters.test.mjs`
+  runs 40 postings at `detailLimit: 10` and asserts exactly 10 detail calls.
 - Probe cooperation (if paginating): with `ctx.maxPages: 1`, exactly one list
   request and no `fetchDetails` / enrichment calls; and a `ctx.fetch*`
   rejection *while `ctx.maxPages` is set* propagates unwrapped — not swallowed
