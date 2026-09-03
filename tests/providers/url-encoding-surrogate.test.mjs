@@ -185,6 +185,20 @@ try {
     ),
     (jobs) => jobs.length === 1 && jobs[0].url.includes('g-1'),
   );
+
+  // garena.parseGarenaResponse — for…of over json.jobs; id feeds the /careers/ URL.
+  const { parseGarenaResponse } = await load('garena.mjs');
+  check(
+    'garena.parseGarenaResponse',
+    () => parseGarenaResponse(
+      { jobs: [
+        { id: `${LONE}bad`, title: 'Bad' },
+        { id: 'g-1', title: 'Good' },
+      ] },
+      { name: 'Garena' },
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url.includes('g-1'),
+  );
 } catch (e) {
   fail(`per-provider surrogate tests crashed: ${e.message}`);
 }
@@ -210,7 +224,7 @@ try {
   // import _safe-url.mjs and call safeEncodeURIComponent; dropping either is the
   // regression this list catches.
   const CONVERTED = [
-    'alibaba.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'feishu-jobs.mjs', 'jibeapply.mjs',
+    'alibaba.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
     'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'phenom.mjs', 'thehub.mjs', 'tkms.mjs', 'vdab.mjs',
   ];
 
