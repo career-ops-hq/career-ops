@@ -280,36 +280,36 @@ const SINGLE_TENANT = tenantIdx !== -1 ? args[tenantIdx + 1] : null;
 
 // ── Load portals.yml ─────────────────────────────────────────────────
 
-let config = {};
-if (existsSync(PORTALS_PATH)) {
-  config = yaml.load(readFileSync(PORTALS_PATH, 'utf-8')) || {};
+/**
+ * Read user configuration only when the CLI actually runs. Keeping this out
+ * of module initialization makes the exported pure helpers safe to import in
+ * tests and from other tooling, regardless of the caller's user-layer files.
+ *
+ * @param {string} [portalsPath]
+ */
+export function loadConfig(portalsPath = PORTALS_PATH) {
+  let config = {};
+  if (existsSync(portalsPath)) {
+    config = yaml.load(readFileSync(portalsPath, 'utf-8')) || {};
+  }
+
+  const rawBoards = Array.isArray(config.dayforce_boards) ? config.dayforce_boards : [];
+  const validBoards = rawBoards.map(normalizeBoardEntry).filter(Boolean);
+  const boards = validBoards.filter(b => !SINGLE_TENANT || b.tenant === SINGLE_TENANT);
+  const filters = {
+    titleFilter: buildTitleFilter(config.title_filter),
+    locationFilter: buildLocationFilter(config.location_filter),
+    contentFilter: buildContentFilter(config.content_filter),
+    countryEligibilityFilter: buildCountryEligibilityFilter(
+      config.country_eligibility_filter,
+      loadCandidateCountry(),
+    ),
+    visaFilter: buildVisaFilter(config.visa_filter),
+    matchedTitleKeywords: (title) => matchedTitleKeywords(title, config.title_filter),
+  };
+
+  return { boards, invalidCount: rawBoards.length - validBoards.length, filters };
 }
-
-const rawBoards = Array.isArray(config.dayforce_boards) ? config.dayforce_boards : [];
-const boards = rawBoards
-  .map(normalizeBoardEntry)
-  .filter(Boolean)
-  .filter(b => !SINGLE_TENANT || b.tenant === SINGLE_TENANT);
-
-const invalidCount = rawBoards.length - rawBoards.map(normalizeBoardEntry).filter(Boolean).length;
-
-const titleFilter = buildTitleFilter(config.title_filter);
-const locationFilter = buildLocationFilter(config.location_filter);
-const contentFilter = buildContentFilter(config.content_filter);
-const countryEligibilityFilter = buildCountryEligibilityFilter(
-  config.country_eligibility_filter,
-  loadCandidateCountry(),
-);
-const visaFilter = buildVisaFilter(config.visa_filter);
-
-const defaultFilters = {
-  titleFilter,
-  locationFilter,
-  contentFilter,
-  countryEligibilityFilter,
-  visaFilter,
-  matchedTitleKeywords: (title) => matchedTitleKeywords(title, config.title_filter),
-};
 
 // ── Fetch helpers (all run through page.request — same context, same cookies) ──
 
@@ -378,7 +378,7 @@ async function fetchDetail(page, boardCfg, jobPostingId) {
  * @param {{ name: string, tenant: string, board: string, culture: string, jobBoardId: string }} boardCfg
  * @param {{ titleFilter: Function, locationFilter: Function, contentFilter: Function, countryEligibilityFilter: Function, visaFilter: Function, matchedTitleKeywords: Function }} [filters]
  */
-export async function scanBoard(page, boardCfg, filters = defaultFilters) {
+export async function scanBoard(page, boardCfg, filters) {
   const found = [];
   const boardUrl = buildBoardUrl(boardCfg.culture, boardCfg.tenant, boardCfg.board);
 
@@ -476,6 +476,7 @@ export async function scanBoard(page, boardCfg, filters = defaultFilters) {
 
 async function main() {
   mkdirSync(join(DATA_ROOT, 'data'), { recursive: true });
+  const { boards, invalidCount, filters } = loadConfig();
 
   if (invalidCount > 0) {
     console.log(`  Skipping ${invalidCount} malformed dayforce_boards entr${invalidCount === 1 ? 'y' : 'ies'} (bad tenant/board/culture/jobBoardId)`);
@@ -510,7 +511,7 @@ async function main() {
       const context = await browser.newContext();
       const page = await context.newPage();
       try {
-        result = await scanBoard(page, boardCfg);
+        result = await scanBoard(page, boardCfg, filters);
       } catch (err) {
         // @ts-ignore
         if (err && err.retriable && attempt < 2) {
@@ -518,6 +519,7 @@ async function main() {
           await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
         } else {
           errors.push({ tenant: boardCfg.tenant, error: err.message });
+          break;
         }
       } finally {
         await context.close();
