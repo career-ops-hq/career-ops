@@ -457,6 +457,10 @@ went through them. Must cover:
   can't clear either keeps pages 1..N and warns, or fails loud — whichever
   your provider chose — and the "raise `max_pages`" warning does *not* fire
   on that fetch-error stop.
+- `fetchDetails` + a failed detail fetch (if any): a detail fetch that
+  exhausts retry is caught, the listing row comes back intact, and the sweep
+  finishes — enrichment failure is never fatal to the target
+  (reference: `smartrecruiters.mjs`).
 - Probe cooperation (if paginating): with `ctx.maxPages: 1`, exactly one list
   request and no `fetchDetails` / enrichment calls; and a `ctx.fetch*`
   rejection *while `ctx.maxPages` is set* propagates unwrapped — not swallowed
