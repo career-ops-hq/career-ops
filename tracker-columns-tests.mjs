@@ -927,7 +927,10 @@ if (!HAS_WEB) {
   skipWeb('web run-prompt TSV header matches the ingest contract');
 } else {
   try {
-    const { buildPrompt } = await import(join(ROOT, 'web', 'src', 'lib', 'run-prompts.mjs'));
+    // Relative specifier, like the other web imports in this file: an absolute
+    // path is not a valid ESM specifier on Windows (`D:\...` reads as a URL
+    // scheme), which is how this test passed on ubuntu/macos and failed there.
+    const { buildPrompt } = await import('./web/src/lib/run-prompts.mjs');
     const prompt = buildPrompt({ kind: 'evaluate', input: 'https://example.com/jobs/2', memory: '', today: '2026-02-02' });
     const tabLines = prompt.split('\n').filter(l => l.includes('\t'));
 
