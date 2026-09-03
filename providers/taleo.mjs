@@ -5,10 +5,14 @@ import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, fetchTextWithRetry } from 
 import { htmlToText } from './_html-to-text.mjs';
 
 const TALEO_HOST_RE = /^[a-z0-9-]+\.taleo\.net$/i;
+const TALEO_BUSINESS_EDITION_HOST = 'tre.taleo.net';
 const SECTION_RE = /^\/careersection\/([a-z0-9._-]+)\/(?:jobsearch|joblist|jobdetail)\.ftl$/i;
 const DEFAULT_MAX_PAGES = 100;
 const MAX_PAGES_CAP = 1000;
 const PAGE_SIZE = 25;
+const DEFAULT_DETAIL_LIMIT = 25;
+const MAX_DETAIL_LIMIT = 100;
+const INTER_PAGE_DELAY_MS = 200;
 const RETRY_POLICY = { retries: 2 };
 
 function safeEncode(value) {
@@ -23,7 +27,7 @@ function parseUrl(raw) {
   if (typeof raw !== 'string' || !raw.trim()) return null;
   try {
     const url = new URL(raw.trim());
-    if (url.protocol !== 'https:' || !TALEO_HOST_RE.test(url.hostname)) return null;
+    if (url.protocol !== 'https:' || url.hostname.toLowerCase() === TALEO_BUSINESS_EDITION_HOST || !TALEO_HOST_RE.test(url.hostname)) return null;
     const match = url.pathname.match(SECTION_RE);
     if (!match) return null;
     return { url, section: match[1] };
@@ -74,10 +78,12 @@ function extractLang(url) {
 }
 
 function extractHeadings(html) {
+  const jobsTable = html.match(/<table\b[^>]*id=["']jobs["'][^>]*>[\s\S]*?<thead\b[^>]*>([\s\S]*?)<\/thead>/i);
+  const source = jobsTable ? jobsTable[1] : html;
   const labels = [];
-  for (const m of html.matchAll(/<(?:th|label)[^>]*>([\s\S]*?)<\/(?:th|label)>/gi)) {
+  for (const m of source.matchAll(/<(?:th|label)[^>]*>([\s\S]*?)<\/(?:th|label)>/gi)) {
     const value = htmlToText(m[1]);
-    if (value) labels.push(value);
+    if (value && !/^(?:icons?|actions?)$/i.test(value)) labels.push(value);
   }
   return labels;
 }
@@ -112,7 +118,7 @@ export function parseTaleoResponse(json, board, headings, company) {
   const out = [];
   for (const row of rows) {
     if (!row || typeof row !== 'object') continue;
-    const id = row.jobId ?? row.contestNo;
+    const id = row.contestNo ?? row.jobId;
     if (id == null || String(id).trim() === '') continue;
     const parsed = parseColumns(row, headings);
     if (!parsed.title) continue;
@@ -125,6 +131,50 @@ export function parseTaleoResponse(json, board, headings, company) {
     out.push(job);
   }
   return out;
+}
+
+function detailLimit(entry) {
+  const value = Number(entry.detailLimit);
+  return Number.isInteger(value) && value > 0
+    ? Math.min(value, MAX_DETAIL_LIMIT)
+    : DEFAULT_DETAIL_LIMIT;
+}
+
+function decodeDetail(value) {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  let decoded = value;
+  if (/%[0-9a-f]{2}/i.test(decoded)) {
+    try { decoded = decodeURIComponent(decoded); } catch { /* keep the original text */ }
+  }
+  return htmlToText(decoded);
+}
+
+function findJobPosting(node) {
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = findJobPosting(item);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (!node || typeof node !== 'object') return null;
+  const type = node['@type'];
+  if (type === 'JobPosting' || (Array.isArray(type) && type.includes('JobPosting'))) return node;
+  if (node['@graph']) return findJobPosting(node['@graph']);
+  return null;
+}
+
+/** Extract the public JobPosting description embedded in Taleo detail HTML. */
+export function parseTaleoDetail(html) {
+  if (typeof html !== 'string') return '';
+  for (const match of html.matchAll(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      const posting = findJobPosting(JSON.parse(match[1]));
+      const description = decodeDetail(posting?.description);
+      if (description) return description;
+    } catch { /* another JSON-LD block may still be usable */ }
+  }
+  return '';
 }
 
 function buildSearchUrl(board, portal) {
@@ -166,6 +216,7 @@ export default {
     assertTaleoUrl(shellUrl.href);
     const all = [];
     for (let page = 1; page <= maxPages; page++) {
+      if (page > 1) await ctx.sleep(INTER_PAGE_DELAY_MS);
       const json = await fetchJsonWithRetry(ctx, apiUrl, {
         method: 'POST',
         redirect: 'error',
@@ -174,10 +225,24 @@ export default {
       }, RETRY_POLICY);
       const jobs = parseTaleoResponse(json, board, headings, entry.name);
       all.push(...jobs);
+      const rawCount = Array.isArray(json?.requisitionList) ? json.requisitionList.length : 0;
       const paging = json?.pagingData || {};
       const total = Number(paging.totalCount);
       const size = Number(paging.pageSize) || PAGE_SIZE;
-      if (!jobs.length || (Number.isFinite(total) && page * size >= total) || jobs.length < size) break;
+      if (!rawCount || (Number.isFinite(total) && page * size >= total) || rawCount < size) break;
+    }
+
+    // Health probes are deliberately list-only. Normal scans enrich a bounded
+    // prefix so a very large board cannot trigger an unbounded request fanout.
+    const probing = Number.isInteger(ctx.maxPages) && ctx.maxPages > 0;
+    if (!probing) {
+      const jobs = all.slice(0, detailLimit(entry));
+      for (let i = 0; i < jobs.length; i++) {
+        if (i > 0) await ctx.sleep(INTER_PAGE_DELAY_MS);
+        const detailHtml = await fetchTextWithRetry(ctx, jobs[i].url, { redirect: 'error' }, RETRY_POLICY);
+        const description = parseTaleoDetail(detailHtml);
+        if (description) jobs[i].description = description;
+      }
     }
     return all;
   },
