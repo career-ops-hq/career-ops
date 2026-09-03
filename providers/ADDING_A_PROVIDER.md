@@ -238,11 +238,18 @@ surface instead of reading as `0` jobs forever. Three outcomes:
   not enough — guard that bound or `throw` deliberately (the "fail loud vs
   hand back a partial board" call from *Pacing and retry* below).
 - The short-page stop compares the row count the **source** returned for that
-  page, never the count left after dropping malformed rows. Comparing the
-  filtered count ends the walk one row short the moment a full page carries
-  one bad row, even when later pages still have jobs. Reference:
-  `providers/oraclecloud.mjs` (`item.requisitionList.length`),
-  `providers/jobbankca.mjs` (`rawEntryCount`).
+  page — never a count the provider already narrowed, whether by dropping
+  malformed rows or by de-duping against postings an earlier page or an
+  earlier query/category pass already yielded. The filtered-count version
+  ends the walk one row short the moment a full page carries one bad row. The
+  post-dedup version is worse for a provider that fans out over several
+  query/category passes against one board behind a single shared `seen` set:
+  an earlier pass can cover a later pass's *first* page while that pass's
+  deeper pages still hold unique postings, so a "nothing new on this page"
+  stop ends the pass one or more pages early. Keep the shared set for output
+  de-dup, but key each pass's stop off the source's own page shape (an empty
+  page, or a count `< PAGE_SIZE`). Reference: `providers/oraclecloud.mjs`
+  (`item.requisitionList.length`), `providers/jobbankca.mjs` (`rawEntryCount`).
 - Dates: a date *string* through `Date.parse` can return `NaN`. Don't write
   `Date.parse(s) || undefined` (it also nulls a valid epoch `0` — a
   `1970-01-01` timestamp) — use a NaN-safe helper. Its `!value` guard is for
@@ -505,7 +512,11 @@ went through them. Must cover:
   nothing throws, while a well-formed page carrying an empty list still
   returns `[]` (`join.mjs`).
 - Pagination (if any): the provider's own `DEFAULT_MAX_PAGES` stops it even
-  when the source reports more pages; `ctx.maxPages` stops it earlier.
+  when the source reports more pages; `ctx.maxPages` stops it earlier. For a
+  provider that fans out over several query/category passes behind one shared
+  `seen` set: a pass whose first page fully overlaps an earlier pass still
+  walks its deeper pages and returns their unique postings — a
+  "nothing new, stop" shortcut would drop them.
 - Pagination + transient failure (if any): a 429 / 5xx on page 2 that retry
   can't clear either keeps pages 1..N and warns, or fails loud — whichever
   your provider chose — and the "raise `max_pages`" warning does *not* fire
