@@ -80,6 +80,15 @@ try {
     else fail(`parseGarenaResponse should drop id ${JSON.stringify(bad)} without throwing (threw=${threw}, out=${JSON.stringify(out)})`);
   }
 
+  // A lone surrogate in `office` (config) throws URIError out of urlSegment's
+  // encodeURIComponent — a malformed config value fails loudly, the same as a
+  // `.`/`..` segment and unlike a bad per-posting `id`, which drops just that
+  // posting.
+  let surrogateOfficeThrew = false;
+  try { parseGarenaResponse({ jobs: [{ id: 'J8', title: 'Surrogate office', tags: {} }] }, { garena: { office: 'sg\uD800' } }); } catch { surrogateOfficeThrew = true; }
+  if (surrogateOfficeThrew) pass('parseGarenaResponse throws on a lone-surrogate office');
+  else fail('parseGarenaResponse should throw on a lone-surrogate office');
+
   // Multiple locations join with ", ".
   const multiLoc = parseGarenaResponse({ jobs: [{ id: 'J1', title: 'Multi', tags: { location: ['Singapore', 'Jakarta'] } }] }, {});
   if (multiLoc[0].location === 'Singapore, Jakarta') pass('parseGarenaResponse joins multiple locations with ", "');

@@ -106,6 +106,14 @@ export function parseQuery(json, cfg) {
   const nextPage = typeof json?.nextPage === 'number' ? json.nextPage : null;
   const list = Array.isArray(json?.jobs) ? json.jobs : [];
   const rows = [];
+  // cfg.locale is a trusted config segment (portals.yml `tkms.locale`, the only
+  // attested value being the default "en"). encodeURIComponent here, not
+  // safeEncodeURIComponent + drop: a structural char (`/`, `?`, `#`) is escaped
+  // so the URL stays well-formed, and a lone surrogate — a genuine config error
+  // — throws out of parseQuery loudly rather than silently dropping every
+  // posting one at a time. Hoisted out of the row loop so that throw lands
+  // before any row work. Same call as garena's config-derived path.
+  const localeSeg = encodeURIComponent(cfg.locale);
   for (const item of list) {
     const d = item?.data;
     if (!d) continue;
@@ -116,12 +124,10 @@ export function parseQuery(json, cfg) {
     // aborts this loop; id is also the dedup key. Drop this row on a null.
     const encodedId = safeEncodeURIComponent(id);
     if (encodedId === null) continue;
-    // cfg.locale is a trusted config segment ("en"/"de" from portals.yml), like
-    // cfg.origin and the slugified title beside it — not URL-encoded.
     rows.push({
       id,
       title,
-      url: `${cfg.origin}/${cfg.locale}/job/${slugify(title)}/${encodedId}`,
+      url: `${cfg.origin}/${localeSeg}/job/${slugify(title)}/${encodedId}`,
       location: tkmsLocation(d),
       postedAt: parseTkmsDate(d),
     });
