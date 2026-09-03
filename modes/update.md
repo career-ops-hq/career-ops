@@ -78,9 +78,9 @@ If yes:
 5. Now check the exit code captured in step 3:
    - If non-zero, treat apply as failed. Show the captured output and offer:
      > "⚠️ Update apply failed. Want me to show the full error, or try `/career-ops update rollback`?"
-   - Stop the flow here if apply failed — do not run doctor or reconciliation on a partially-applied update.
-6. Run `node doctor.mjs` to validate the installation
-   - If the command exits with a non-zero code, treat validation as failed. Show the captured output and offer:
+   - Stop the flow here if apply failed — do not run doctor, verify-pipeline, or reconciliation on a partially-applied update.
+6. Run `node doctor.mjs` to validate the installation, then `node verify-pipeline.mjs` to validate the data layer. They check different things: doctor confirms the setup files exist and are personalized, not that existing data still matches what the updated code expects — a release that changes a data file's expected shape can pass doctor cleanly while breaking every downstream reader of that file silently (e.g. a tracker/log schema change that makes existing rows fail to parse, so stats and cadence tools report zero instead of erroring).
+   - If either command exits with a non-zero code, treat validation as failed. Show the captured output and offer:
      > "⚠️ Validation failed after update. Want me to show the full error, or roll back with `/career-ops update rollback`?"
    - Stop the flow here if validation failed — do not run reconciliation or show the success message.
 7. If Step 3 flagged archetype/scoring changes, reconcile `modes/_profile.md` against the new `modes/_shared.md`:
@@ -97,7 +97,7 @@ If yes:
      - For removals:
        > "Your _profile.md references archetype '{old_name}' which was removed in the new _shared.md. Want me to delete the reference or replace it with another archetype?"
 8. Show final status:
-   > "✅ Updated to v{version}. Run `node doctor.mjs` anytime to verify setup."
+   > "✅ Updated to v{version}. Run `node doctor.mjs` anytime to verify setup, or `node verify-pipeline.mjs` to check your data."
 
    If the updater's output ended with its note about the CareerOps Manifesto, relay it once (do not drop it when summarizing):
    > "One more thing: this project ships with the CareerOps Manifesto — a new way of job searching is taking shape, and you are already practicing it. Run `npm run manifesto` to read it and sign it if you want to help. No action needed."
