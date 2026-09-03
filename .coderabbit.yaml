@@ -129,7 +129,7 @@ reviews:
         instructions: "For every new top-level file this PR adds that users must receive through the updater (a .mjs script, a template, a config sample or a doc that ships), add it to the SYSTEM_PATHS list in update-system.mjs, in the section that matches its kind, keeping the existing order and formatting. Do not add user-layer files as defined in DATA_CONTRACT.md. Change nothing else."
       - name: provider-test-scaffold
         enabled: true
-        instructions: "For every file this PR adds or changes under providers/, create or extend tests/providers/<name>.test.mjs following the existing files in that directory: no test framework, import pass and fail from ../helpers.mjs, never call process.exit, no network access in the test itself. Cover at minimum: the provider is registered, its host allowlist and timeout are set, and a malformed API response does not throw. Change nothing else."
+        instructions: "For every provider implementation this PR adds or changes under providers/ (a .mjs file that is not _types.js, so never README.md or ADDING_A_PROVIDER.md), create or extend tests/providers/<name>.test.mjs following the existing files in that directory: no test framework, import pass and fail from ../helpers.mjs, never call process.exit, no network access in the test itself. Cover at minimum: the provider is registered, its host allowlist and timeout are set, and a malformed API response does not throw. Change nothing else."
       - name: sync-language-mode
         enabled: true
         instructions: "Compare the language mode files this PR touches under modes/<lang>/ against their canonical English counterpart under modes/, and bring the translated file up to date: same block structure, same headings order, same placeholders. Translate new prose into the target language; never translate file names, flags, code fences, or the block letters A to H. Do not change the canonical English file. Change nothing else."
@@ -155,7 +155,7 @@ reviews:
         instructions: "Warn if the PR adds a new top-level .mjs, .md, template or config file that users should receive through the updater but SYSTEM_PATHS in update-system.mjs was not updated in the same PR."
       - name: "Provider contract"
         mode: warning
-        instructions: "Warn if the PR adds or changes a file under providers/ without a matching tests/providers/<name>.test.mjs, or without host allowlisting and timeouts."
+        instructions: "Warn if the PR adds or changes a provider implementation under providers/ (a .mjs file other than _types.js; documentation such as README.md or ADDING_A_PROVIDER.md does not count) without a matching tests/providers/<name>.test.mjs, or without host allowlisting and timeouts."
       - name: "Agent-operated PR disclosure"
         mode: warning
         instructions: "If the PR author is a coding agent (branch copilot/* or author app/copilot-swe-agent), warn unless the description contains the sections '## AI assistance' and '## Human review' and the PR carries the label agent-generated."
