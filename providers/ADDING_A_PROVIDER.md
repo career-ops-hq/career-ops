@@ -368,7 +368,10 @@ per-posting detail fetches:
   but issues up to `detailLimit` sequential detail fetches under
   `fetchDetails: true` is the same burst against the same WAF — pace it
   with the same inter-request `sleep`, and wrap each detail fetch in
-  `fetchTextWithRetry` / `fetchJsonWithRetry`.
+  `fetchTextWithRetry` / `fetchJsonWithRetry`. Detail enrichment is
+  best-effort: a detail fetch that exhausts retry is caught, the listing row
+  kept as-is, and the sweep moves on — it never fails the run
+  (`smartrecruiters.mjs`, `vdab.mjs`).
 
 **Exhaustion is your call, not the helper's.** `withRetry` rethrows; the
 error carries `.attempts` (the real request count). Decide per provider: keep
@@ -437,11 +440,15 @@ went through them. Must cover:
   a required field are filtered; **`redirect: 'error'` is passed on every
   request the provider issues** — list, pagination, and detail-enrichment
   fetches alike — assert `opts.redirect === 'error'`, not just that the call
-  happened; the allowlist guard throws **before** `fetchJson` / `fetchText`
-  is called — a stub that only throws does not prove this (it passes
-  whether the guard fired or a fetch was wrongly attempted), so assert the
-  fetch stub was never entered (call count `0`, or a stub that fails the
-  test on entry).
+  happened; the sole exception is a deliberate redirect-*inspection* request
+  (`redirect: 'manual'`, to read `.location` off the thrown 3xx without
+  following it — `jobvite.mjs`), and `redirect: 'follow'` is never used. For
+  a config-derived URL, the allowlist guard throws **before** `fetchJson` /
+  `fetchText` is called — a stub that only throws does not prove this (it
+  passes whether the guard fired or a fetch was wrongly attempted), so assert
+  the fetch stub was never entered (call count `0`, or a stub that fails the
+  test on entry); a fixed-literal-host provider has no allowlist and skips
+  this assertion.
 - Empty or contentless body → `[]`; a body whose shape isn't what the
   endpoint documents → a descriptive throw. Assert both branches.
 - Pagination (if any): the provider's own `DEFAULT_MAX_PAGES` stops it even
