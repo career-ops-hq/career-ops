@@ -152,6 +152,17 @@ it is inert until the provider is added there.
   non-`https:` protocol, reject a hostname not in `ALLOWED_GREENHOUSE_HOSTS`.
   A test must prove the guard runs before `ctx.fetchJson` / `ctx.fetchText`
   (see section 3).
+- A **wildcard-tenant** ATS (`<tenant>.<vendor-domain>`, e.g.
+  `*.myworkdayjobs.com`) can't enumerate a `Set` — match the hostname with an
+  anchored full-host test instead. Two idioms in the tree: an anchored regex
+  over the whole hostname (`/^[a-z0-9-]+\.vendordomain\.com$/` —
+  `providers/bamboohr.mjs`, `providers/breezy.mjs`), or
+  `hostname.endsWith('.vendordomain.com')` (`providers/workday.mjs`,
+  `providers/icims.mjs`). Get the anchoring right or the guard is a no-op:
+  keep the trailing `$` (without it `tenant.vendordomain.com.evil.example`
+  passes), escape the dots (`\.`, or `.` also matches `vendordomainXcom`), and
+  keep the leading dot on a suffix test (`endsWith('vendordomain.com')` also
+  accepts `evilvendordomain.com`).
 - If the whole URL is assembled by the provider from a fixed literal host, no
   allowlist is needed, but `redirect: 'error'` still is.
 
@@ -459,6 +470,7 @@ Dev loop: `node test-all.mjs --only providers/{name}`. Before a PR: the full
 | HTML scraping with the shared `decodeEntities` | `providers/icims.mjs` |
 | SSR JSON inside HTML (`__NEXT_DATA__`) | `providers/join.mjs` |
 | Empty board vs a broken selector, told apart | `providers/join.mjs` |
+| Wildcard-tenant host allowlisting (anchored, not a `Set`) | `providers/bamboohr.mjs`, `providers/workday.mjs` |
 | RSS parsed in-process | `providers/larajobs.mjs` |
 | `job.url` from a host-controlled `id` / `slug` via `safeEncodeURIComponent` | `providers/phenom.mjs`, `providers/bamboohr.mjs` |
 | Retry/backoff via the shared helper, default policy | `providers/a16z-speedrun-talent.mjs`, `providers/getro.mjs` |
