@@ -619,16 +619,72 @@ function sanitizeAttrs(tag, attrString) {
  * @param {string} html
  */
 export function sanitizeHtml(html) {
-  let out = String(html);
-  out = out.replace(/<!--[\s\S]*?-->/g, ''); // comments (can hide conditional-comment payloads)
-  out = out.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ''); // remove WITH content
-  out = out.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)\b([^>]*)>/g, (full, rawTag, attrs) => {
-    const tag = rawTag.toLowerCase();
-    const closing = full.startsWith('</');
-    if (!ALLOWED_TAGS.has(tag)) return ''; // drop the tag, its text content survives around this replace
-    if (closing) return `</${tag}>`;
-    return `<${tag}${sanitizeAttrs(tag, attrs)}>`;
-  });
+  const input = String(html);
+  let out = '';
+  let cursor = 0;
+
+  while (cursor < input.length) {
+    const tagStart = input.indexOf('<', cursor);
+    if (tagStart === -1) {
+      out += input.slice(cursor);
+      break;
+    }
+    out += input.slice(cursor, tagStart);
+
+    if (input.startsWith('<!--', tagStart)) {
+      const commentEnd = input.indexOf('-->', tagStart + 4);
+      if (commentEnd === -1) break; // unterminated comment: discard the ambiguous remainder
+      cursor = commentEnd + 3;
+      continue;
+    }
+
+    // Find the tag end without treating a `>` inside a quoted attribute as
+    // the terminator. If this is not a complete tag, encode its opening `<`
+    // so it can never combine with a later removal into executable markup.
+    let quote = null;
+    let tagEnd = -1;
+    for (let i = tagStart + 1; i < input.length; i++) {
+      const ch = input[i];
+      if (quote) {
+        if (ch === quote) quote = null;
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+      } else if (ch === '>') {
+        tagEnd = i;
+        break;
+      }
+    }
+    if (tagEnd === -1) {
+      out += '&lt;';
+      cursor = tagStart + 1;
+      continue;
+    }
+
+    const token = input.slice(tagStart, tagEnd + 1);
+    const match = token.match(/^<\s*(\/?)\s*([a-zA-Z][a-zA-Z0-9]*)\b([\s\S]*?)>$/);
+    if (!match) {
+      out += '&lt;';
+      cursor = tagStart + 1;
+      continue;
+    }
+
+    const closing = match[1] === '/';
+    const tag = match[2].toLowerCase();
+    if (!closing && (tag === 'script' || tag === 'style')) {
+      const closeRe = new RegExp(`<\\/\\s*${tag}\\s*>`, 'ig');
+      closeRe.lastIndex = tagEnd + 1;
+      const close = closeRe.exec(input);
+      if (!close) break; // an unterminated raw-text element owns the remainder
+      cursor = close.index + close[0].length;
+      continue;
+    }
+
+    if (ALLOWED_TAGS.has(tag)) {
+      out += closing ? `</${tag}>` : `<${tag}${sanitizeAttrs(tag, match[3])}>`;
+    }
+    cursor = tagEnd + 1;
+  }
+
   return out.trim();
 }
 
