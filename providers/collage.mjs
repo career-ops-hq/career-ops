@@ -53,13 +53,27 @@ function toEpochMs(value) {
 
 function text(value) { return typeof value === 'string' ? value.trim() : ''; }
 
+/** @param {unknown} value */
+function absoluteHttpsUrl(value) {
+  const raw = text(value);
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'https:' || !parsed.hostname || parsed.username || parsed.password) return '';
+    return parsed.href;
+  } catch {
+    return '';
+  }
+}
+
 /** @param {any} json @param {string} companyName */
 export function parseCollageResponse(json, companyName) {
   const rows = Array.isArray(json) ? json :
     (Array.isArray(json?.positions) ? json.positions :
       (Array.isArray(json?.data) ? json.data : Array.isArray(json?.results) ? json.results : []));
-  return rows.filter(j => j && text(j.title) && (text(j.hostedUrl) || text(j.url) || text(j.applyUrl))).map(j => {
-    const url = text(j.hostedUrl) || text(j.url) || text(j.applyUrl);
+  return rows.filter(j => j && text(j.title)).map(j => {
+    const url = absoluteHttpsUrl(j.hostedUrl) || absoluteHttpsUrl(j.url) || absoluteHttpsUrl(j.applyUrl);
+    if (!url) return null;
     const location = Array.isArray(j.location) ? j.location.map(text).filter(Boolean).join('; ') : text(j.location);
     const metadata = [
       text(j.department) && `Department: ${text(j.department)}`,
@@ -72,7 +86,7 @@ export function parseCollageResponse(json, companyName) {
       location, description,
       postedAt: toEpochMs(j.createdDate ?? j.createdAt ?? j.publishedAt),
     };
-  });
+  }).filter(Boolean);
 }
 
 /** @type {Provider} */
@@ -88,4 +102,3 @@ export default {
     return parseCollageResponse(json, entry.name);
   },
 };
-
