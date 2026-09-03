@@ -1,17 +1,21 @@
 /**
- * updater-rollback-target-manifest.test.mjs — BEHAVIORAL coverage for #3780.
+ * updater-rollback-target-manifest.test.mjs — BEHAVIORAL coverage for #3780
+ * and the CodeRabbit CWE-22 review of #3782.
  *
  * rollback() is ROOT-bound with heavy side effects, so the path list it
  * restores/removes is extracted into rollbackSystemPaths() and driven here,
  * same shape as updater-local-system-edits.test.mjs's pathFullyPreserved
- * cases. What is verified: a file the TARGET release added is not invisible
- * to rollback() just because apply() failed before checking out its own
- * update-system.mjs, which is what left the on-disk SYSTEM_PATHS constant
- * still describing the OLD release.
+ * cases. Two properties are verified: a file the TARGET release added is not
+ * invisible to rollback() just because apply() failed before checking out
+ * its own update-system.mjs (#3780); and an unsafe entry in that same
+ * remote-controlled target manifest — a declared user-layer path, an
+ * absolute path, a `..` traversal segment, or a `.git` path — never reaches
+ * rollback()'s checkout/delete loop, whose delete-fallback operates on the
+ * raw filesystem path regardless of git tracking state (#3782 review).
  */
 
 import { pass, fail } from './helpers.mjs';
-import { rollbackSystemPaths } from '../update-system.mjs';
+import { rollbackSystemPaths, isSafeManifestPath } from '../update-system.mjs';
 
 const fakeTargetSource = (paths) =>
   `const SYSTEM_PATHS = [\n${paths.map((p) => `  '${p}',`).join('\n')}\n];\n`;
@@ -90,5 +94,111 @@ const fakeTargetSource = (paths) =>
     pass('an entry present in both the current and target manifest appears exactly once');
   } else {
     fail(`#4 expected AGENTS.md exactly once, appeared ${agentsMdCount} times`);
+  }
+}
+
+// ── isSafeManifestPath: unit coverage (explicit userPaths, hermetic) ──
+
+// ── 5. A declared user-layer path is rejected ──
+{
+  const result = isSafeManifestPath('cv.md', ['cv.md', 'data/']);
+  if (result === false) {
+    pass('isSafeManifestPath rejects an exact user-layer path (cv.md)');
+  } else {
+    fail(`#5 expected false, got ${result}`);
+  }
+}
+
+// ── 6. A path nested under a declared user-layer directory is rejected ──
+{
+  const result = isSafeManifestPath('data/applications.md', ['cv.md', 'data/']);
+  if (result === false) {
+    pass('isSafeManifestPath rejects a path nested under a declared user-layer directory');
+  } else {
+    fail(`#6 expected false, got ${result}`);
+  }
+}
+
+// ── 7. An absolute path is rejected ──
+{
+  const result = isSafeManifestPath('/etc/passwd', []);
+  if (result === false) {
+    pass('isSafeManifestPath rejects an absolute POSIX path');
+  } else {
+    fail(`#7 expected false, got ${result}`);
+  }
+}
+
+// ── 8. A traversal segment is rejected ──
+{
+  const result = isSafeManifestPath('modes/../../../etc/passwd', []);
+  if (result === false) {
+    pass('isSafeManifestPath rejects a path containing a ".." segment');
+  } else {
+    fail(`#8 expected false, got ${result}`);
+  }
+}
+
+// ── 9. A .git path is rejected ──
+{
+  const result = isSafeManifestPath('.git/hooks/pre-commit', []);
+  if (result === false) {
+    pass('isSafeManifestPath rejects a .git path');
+  } else {
+    fail(`#9 expected false, got ${result}`);
+  }
+}
+
+// ── 10. A normal system path is accepted ──
+{
+  const result = isSafeManifestPath('modes/pdf.md', ['cv.md', 'data/']);
+  if (result === true) {
+    pass('isSafeManifestPath accepts an ordinary system-layer path');
+  } else {
+    fail(`#10 expected true, got ${result}`);
+  }
+}
+
+// ── rollbackSystemPaths: integration — an unsafe target-manifest entry
+//    never survives the merge, even though it enters via the FETCH_HEAD
+//    seam like any legitimate new file would ──
+
+// ── 11. cv.md in the target manifest never reaches the merged result ──
+//    The exact regression the CodeRabbit review asked for.
+{
+  const ctx = {
+    git: (...args) => {
+      if (args[0] === 'show' && args[1] === 'FETCH_HEAD:update-system.mjs') {
+        return fakeTargetSource(['AGENTS.md', 'cv.md']);
+      }
+      throw new Error(`unexpected git call: ${args.join(' ')}`);
+    },
+  };
+
+  const paths = rollbackSystemPaths(ctx);
+  if (!paths.includes('cv.md')) {
+    pass('cv.md in the target manifest is dropped before it reaches rollback\'s loop (#3782 review)');
+  } else {
+    fail(`#11 cv.md leaked into the rollback candidate list: ${JSON.stringify(paths)}`);
+  }
+}
+
+// ── 12. A traversal entry is dropped; a legitimate sibling entry survives ──
+{
+  const legitFile = 'plugins/h1b-sponsor/index.mjs';
+  const ctx = {
+    git: (...args) => {
+      if (args[0] === 'show' && args[1] === 'FETCH_HEAD:update-system.mjs') {
+        return fakeTargetSource(['AGENTS.md', '../../etc/passwd', legitFile]);
+      }
+      throw new Error(`unexpected git call: ${args.join(' ')}`);
+    },
+  };
+
+  const paths = rollbackSystemPaths(ctx);
+  if (!paths.includes('../../etc/passwd') && paths.includes(legitFile)) {
+    pass('a traversal entry is dropped while a legitimate sibling entry from the same manifest survives');
+  } else {
+    fail(`#12 got ${JSON.stringify(paths)}`);
   }
 }

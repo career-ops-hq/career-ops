@@ -2179,6 +2179,35 @@ async function apply() {
 // ── ROLLBACK ────────────────────────────────────────────────────
 
 /**
+ * True when a target-manifest entry is safe to hand to rollback()'s
+ * checkout/delete loop. That loop's delete-fallback (rmSync) operates on the
+ * raw filesystem path regardless of git tracking state, so an entry read
+ * from FETCH_HEAD's SYSTEM_PATHS — a remote-controlled source, unlike the
+ * hardcoded SYSTEM_PATHS/BOOTSTRAP_PATHS constants this process is already
+ * running — must never reach it unvalidated (CodeRabbit review of #3782,
+ * CWE-22): an absolute path or a `..` segment could resolve outside the
+ * repository entirely once joined onto ROOT, a `.git` segment could corrupt
+ * the repository itself, and a declared user-layer path (`cv.md`, `data/`,
+ * ...) could be deleted outright if it happens to be absent from the backup
+ * branch.
+ *
+ * @param {string} path
+ * @param {string[]} [userPaths] - defaults to effectiveUserPaths().
+ * @returns {boolean}
+ */
+export function isSafeManifestPath(path, userPaths = effectiveUserPaths()) {
+  if (!path || typeof path !== 'string') return false;
+  const normalized = path.replace(/\\/g, '/');
+  if (normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) return false; // absolute (POSIX or Windows drive)
+  const segments = normalized.split('/').filter(Boolean);
+  if (segments.length === 0 || segments.some((s) => s === '..' || s === '.git')) return false;
+  if (userPaths.some((userPath) => (userPath.endsWith('/') ? normalized.startsWith(userPath) : normalized === userPath))) {
+    return false;
+  }
+  return true;
+}
+
+/**
  * The paths rollback() considers for restore/removal: the CURRENTLY
  * installed SYSTEM_PATHS plus the TARGET release's own SYSTEM_PATHS (read
  * from FETCH_HEAD's update-system.mjs — the update this rollback is
@@ -2205,7 +2234,8 @@ export function rollbackSystemPaths(ctx = {}) {
   let targetSystemPaths = [];
   try {
     const targetUpdaterSource = runGit('show', 'FETCH_HEAD:update-system.mjs');
-    targetSystemPaths = extractArrayFromSource(targetUpdaterSource, 'SYSTEM_PATHS');
+    targetSystemPaths = extractArrayFromSource(targetUpdaterSource, 'SYSTEM_PATHS')
+      .filter((path) => isSafeManifestPath(path));
   } catch {
     // No FETCH_HEAD, or a target predating update-system.mjs.
   }
