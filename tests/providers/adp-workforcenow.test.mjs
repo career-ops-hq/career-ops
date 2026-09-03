@@ -241,6 +241,11 @@ try {
   if (emptyPage.jobs.length === 0 && emptyPage.total === 0) pass('parseListPage() treats an empty jobRequisitions array as a valid empty result');
   else fail(`parseListPage() empty case wrong: ${JSON.stringify(emptyPage)}`);
 
+  let primitiveThrew = false;
+  try { parseListPage(null, cfg); } catch { primitiveThrew = true; }
+  if (primitiveThrew) pass('parseListPage() rejects primitive or null response payloads');
+  else fail('parseListPage() should reject a primitive or null response payload');
+
   const mkJob = (itemId, title, externalId) => ({
     itemID: itemId,
     requisitionTitle: title,
@@ -314,6 +319,22 @@ try {
     } else {
       fail('adp-workforcenow.fetch() leaked _itemId into a Job row');
     }
+  }
+
+  {
+    // The provider's own page ceiling must apply even when the feed never
+    // becomes empty and reports more rows than the ceiling can cover.
+    let calls = 0;
+    const mockCtx = {
+      sleep: async () => {},
+      fetchJson: async () => {
+        calls++;
+        return { jobRequisitions: fullPage(calls * 20 + 1), meta: { totalNumber: 999999 } };
+      },
+    };
+    await adp.fetch({ name: 'X', careers_url: CAREERS_URL, max_pages: 1501 }, mockCtx);
+    if (calls === 1500) pass('adp-workforcenow.fetch() caps max_pages at MAX_PAGES_CAP');
+    else fail(`adp-workforcenow.fetch() made ${calls} calls above MAX_PAGES_CAP, expected 1500`);
   }
 
   // A page that comes back empty (not just short) stops pagination — the
@@ -496,6 +517,35 @@ try {
     await adp.fetch({ name: 'ExampleCo', careers_url: CAREERS_URL, adpWorkforcenow: { fetchDetails: true } }, probeCtx);
     if (detailCalls === 0) pass('adp-workforcenow.fetch() skips fetchDetails enrichment while a health probe (ctx.maxPages) is running');
     else fail(`adp-workforcenow.fetch() made ${detailCalls} detail calls during a probe, expected 0`);
+  }
+
+  {
+    let listCalls = 0;
+    let detailCalls = 0;
+    const listCtx = {
+      sleep: async () => {},
+      fetchJson: async (url) => {
+        if (String(url).includes('/job-requisitions/')) {
+          detailCalls++;
+          return { requisitionDescription: `Description ${detailCalls}` };
+        }
+        listCalls++;
+        return { jobRequisitions: [
+          mkJob('item-1', 'Role 1', 'ext-1'),
+          mkJob('item-2', 'Role 2', 'ext-2'),
+          mkJob('item-3', 'Role 3', 'ext-3'),
+        ], meta: { totalNumber: 3 } };
+      },
+    };
+    const jobs = await adp.fetch(
+      { name: 'ExampleCo', careers_url: CAREERS_URL, adpWorkforcenow: { fetchDetails: true, detailLimit: 2 } },
+      listCtx,
+    );
+    if (listCalls === 1 && detailCalls === 2 && jobs.length === 3) {
+      pass('adp-workforcenow.fetch() limits detail enrichment to detailLimit across listings');
+    } else {
+      fail(`adp-workforcenow.fetch() detailLimit wrong: ${listCalls} list calls, ${detailCalls} detail calls, ${jobs.length} jobs`);
+    }
   }
 
   {
