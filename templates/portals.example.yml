@@ -48,6 +48,10 @@
 # pipeline entry) still match every city, so a role you already applied to never
 # comes back city by city.
 #
+# A posting that names SEVERAL cities in one location field is compared as the
+# set of those cities, so a board that re-orders its own list ("London | Dublin"
+# becoming "Dublin | London") does not re-add a posting you already have.
+#
 # scan_history:
 #   dedup_include_location: true
 

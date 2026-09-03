@@ -1744,19 +1744,63 @@ export function normalizeRoleForDedup(role) {
 }
 
 /**
+ * The separators a provider or a board uses to pack SEVERAL places into the one
+ * free-text location field.
+ *
+ * The field is not reliably a single place, and the packing is not done one way.
+ * Sampled across live Greenhouse boards, a multi-location value uses `;`, the
+ * word `or`, `|` or `/`, and a single value mixes two of them — Anthropic ships
+ * `"Boston, MA; Remote-Friendly (Travel-Required) | San Francisco, CA | Seattle,
+ * WA | New York City, NY; Washington, DC"`. The scanner's own providers add a
+ * fifth: greenhouse/ashby/eightfold/gem/ibm/echojobs all fold a multi-site role's
+ * extra cities into the string themselves, `' · '`-joined, in whatever order the
+ * upstream array happened to arrive in.
+ *
+ * `,` is deliberately NOT a separator. It is the city/region delimiter INSIDE a
+ * place ("London, UK"), so splitting on it would shatter every ordinary location
+ * into fragments and make "London, UK" and "Dublin, UK" share the fragment `uk`.
+ *
+ * Used only by {@link normalizeLocationForDedup}; nothing else parses the field.
+ */
+const LOCATION_LIST_SEPARATOR_RE = /\s*(?:[;|\u00b7/]|\bor\b)\s*/iu;
+
+/**
  * Normalize a posting location into a dedupe-key component.
  *
- * Same rule as the role key (`normalizeTextKey`, space-separated) so "London,
- * UK" and "London  UK" are one city and no second private strip has to exist.
- * A missing, blank or non-string location yields '' — see
- * {@link companyRoleDedupKey} for what that means.
+ * Each place is keyed by the same rule as the role (`normalizeTextKey`,
+ * space-separated) so "London, UK" and "London  UK" are one city and no second
+ * private strip has to exist. A missing, blank or non-string location yields ''
+ * — see {@link companyRoleDedupKey} for what that means.
+ *
+ * A value carrying several places is reduced to the SET of them, sorted, rather
+ * than keyed as the verbatim string. Keying the string verbatim is stable only
+ * while the employer lists the cities in a constant order, and nothing holds
+ * that order still: the value is free text on the board's side, and on ours the
+ * providers listed above build it from an upstream array. Re-order the list and
+ * the verbatim key changes, so a posting already in scan-history reads as new
+ * and re-enters the pipeline — the same duplicate-per-scan failure the location
+ * key exists to avoid, arriving from the other direction. Sorting the set makes
+ * the key depend on WHICH places a posting names and not on the order it names
+ * them in, and deduplicating it absorbs the boards that repeat a city.
+ *
+ * A single-place value is unaffected: it splits into one segment and joins back
+ * to exactly the string this function returned before, so keys already seeded
+ * from single-place rows keep matching.
  *
  * @param {unknown} location - Raw location label from a provider or a data file.
  * @returns {string} Normalized location key, or '' when unknown.
  */
 export function normalizeLocationForDedup(location) {
   if (typeof location !== 'string') return '';
-  return normalizeTextKey(location, ' ');
+  const places = new Set();
+  for (const segment of location.split(LOCATION_LIST_SEPARATOR_RE)) {
+    const place = normalizeTextKey(segment, ' ');
+    if (place) places.add(place);
+  }
+  // `+` cannot appear inside a component: normalizeTextKey keeps only letters,
+  // marks and digits, so the join is unambiguous and two different sets can
+  // never render as one string.
+  return [...places].sort().join('+');
 }
 
 /**
@@ -1778,20 +1822,24 @@ export function normalizeLocationForDedup(location) {
  * has to keep matching every city. Losing that would let a role the user has
  * already applied to resurface once per city the moment the flag went on.
  *
+ * The location component is the canonical SET of the places the posting names
+ * (see {@link normalizeLocationForDedup}), not the provider's display string, so
+ * a board that re-orders a multi-city list does not turn one posting into two.
+ *
  * @param {unknown} company - Raw company label.
  * @param {unknown} role - Raw role title.
  * @param {(name: unknown) => string} [canonicalize] - Company canonicalizer.
  * @param {unknown} [location] - Optional posting location. Blank/absent/non-string
  *   → the bare two-component key.
- * @returns {string} Stable dedupe key: `company::role`, or `company::role@@location`.
+ * @returns {string} Stable dedupe key: `company::role`, or `company::role@@places`.
  */
 export function companyRoleDedupKey(company, role, canonicalize = defaultCompanyNormalizer, location = undefined) {
   const base = `${canonicalize(company)}::${normalizeRoleForDedup(role)}`;
-  const place = normalizeLocationForDedup(location);
+  const places = normalizeLocationForDedup(location);
   // `@@` and not a third `::`: normalizeTextKey strips punctuation, so neither
   // the role nor the location component can ever contain the separator, and a
   // company alias carrying one cannot forge a located key out of a bare one.
-  return place ? `${base}@@${place}` : base;
+  return places ? `${base}@@${places}` : base;
 }
 
 /**

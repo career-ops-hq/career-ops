@@ -22,12 +22,18 @@
 // the 9 Anthropic rows in data/scan-history.tsv was London and none was Dublin
 // — the city he cannot legally work in survived, the one he can was dropped.
 //
-// The two halves this file gates:
+// The halves this file gates:
 //   - flag OFF (absent config) → byte-identical keys and identical collapse.
 //   - flag ON  → the location joins the key, and a source that records NO
 //     location still seeds the bare key, which matches every city. That
 //     asymmetry is what keeps an applied role (applications.md usually has no
 //     Location column) from resurfacing city by city.
+//   - the location component is a canonical SET of places, not the provider's
+//     display string (review finding on #3750). That field is free text, it
+//     frequently packs several places into one value with inconsistent
+//     separators, and nothing pins their order — so a verbatim key turns a
+//     re-ordered list into a "new" posting. Sections 3b/3c and the 8b e2e pair
+//     gate that, including the control that a real second city is still added.
 import { pass, fail, ROOT, NODE, rmSync } from './helpers.mjs';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
@@ -86,6 +92,98 @@ const BARE = companyRoleDedupKey(CO, ROLE);
   const wrong = blanks.filter(v => companyRoleDedupKey(CO, ROLE, undefined, v) !== BARE);
   if (wrong.length === 0) pass('empty/malformed location degrades to the bare key (wildcard)');
   else fail(`these locations did not degrade to the bare key: ${JSON.stringify(wrong)}`);
+}
+
+// ── 3b. A value naming SEVERAL places is keyed as a canonical set ──────────
+// Review finding on #3750: the provider location field is free text and is not
+// reliably one place. On live Greenhouse boards a multi-location value packs
+// them with `;`, the word `or`, `|` or `/`, and a single value mixes two of
+// them. Our own providers add a fifth separator — greenhouse, ashby, eightfold,
+// gem, ibm and echojobs all fold a multi-site role's extra cities into the
+// string themselves, `' · '`-joined, in whatever order the upstream array came.
+//
+// Keying that string verbatim is stable only while the order holds, and nothing
+// holds it. Re-ordered, the key changes, the posting reads as new, and it
+// re-enters the pipeline on a scan that should have deduped it — the duplicate
+// the location key exists to prevent, arriving from the other side.
+{
+  const key = loc => companyRoleDedupKey(CO, ROLE, undefined, loc);
+
+  // Order independence, one case per separator seen in the wild.
+  const ORDERED = [
+    ['London, UK; Dublin, IE', 'Dublin, IE; London, UK', 'semicolon'],
+    ['London, UK | Dublin, IE', 'Dublin, IE | London, UK', 'pipe'],
+    ['London, UK / Dublin, IE', 'Dublin, IE / London, UK', 'slash'],
+    ['London, UK or Dublin, IE', 'Dublin, IE or London, UK', 'the word "or"'],
+    ['London, UK · Dublin, IE', 'Dublin, IE · London, UK', '" · " (our own providers\' join)'],
+  ];
+  for (const [a, b, label] of ORDERED) {
+    if (key(a) === key(b)) pass(`multi-place value keyed order-independently — ${label}`);
+    else fail(`${label}: re-ordering changed the key (${key(a)} vs ${key(b)})`);
+  }
+
+  // Mixed separators in one value — the shape that makes verbatim keying
+  // hopeless. This exact string is live on Anthropic's board.
+  const MESSY = 'Boston, MA; Remote-Friendly (Travel-Required) | San Francisco, CA | Seattle, WA | New York City, NY; Washington, DC';
+  const SHUFFLED = 'Washington, DC | Seattle, WA; San Francisco, CA / New York City, NY · Boston, MA; Remote-Friendly (Travel-Required)';
+  if (key(MESSY) === key(SHUFFLED)) {
+    pass('a value mixing ";" and "|" reduces to the same set however it is written');
+  } else {
+    fail(`mixed-separator value is order-dependent:\n  ${key(MESSY)}\n  ${key(SHUFFLED)}`);
+  }
+
+  // …and it is still a *set of places*, not a blob: every place is present and
+  // separately addressable, and a repeat collapses.
+  const places = key(MESSY).split('@@')[1].split('+');
+  const wantPlaces = ['boston ma', 'new york city ny', 'remote friendly travel required', 'san francisco ca', 'seattle wa', 'washington dc'];
+  if (JSON.stringify(places) === JSON.stringify(wantPlaces)) pass('the location component is the sorted set of the places named');
+  else fail(`location component = ${JSON.stringify(places)}`);
+
+  if (key('Dublin, IE; Dublin, IE; London, UK') === key('London, UK; Dublin, IE')) {
+    pass('a repeated place collapses (boards that list a city twice key the same)');
+  } else {
+    fail('a repeated place did not collapse');
+  }
+
+  // A DIFFERENT set must still key differently — the collapse above must not
+  // have been bought by throwing the places away.
+  if (key('London, UK; Dublin, IE') !== key('London, UK') && key('London, UK') !== key('Dublin, IE')) {
+    pass('a two-city posting, a London posting and a Dublin posting are three keys');
+  } else {
+    fail('distinct place sets collapsed to one key');
+  }
+
+  // "," is the delimiter INSIDE a place, never between two. Splitting on it
+  // would shatter every ordinary location and make "London, UK" and
+  // "Dublin, UK" share the fragment `uk`.
+  if (key('London, UK') !== key('Dublin, UK') && key('London, UK') === 'anthropic::staff software engineer inference@@london uk') {
+    pass('"," is not treated as a separator — an ordinary "City, Country" stays one place');
+  } else {
+    fail(`comma handling wrong: ${key('London, UK')} / ${key('Dublin, UK')}`);
+  }
+}
+
+// ── 3c. Round trip: a re-ordered history row still dedupes ─────────────────
+// The seed side and the scan side share normalizeLocationForDedup, so the
+// property above has to survive the file boundary: a scan-history row written
+// when the board listed "London | Dublin" must still suppress the same posting
+// after the board starts saying "Dublin | London".
+{
+  const WRITTEN = 'London, UK | Dublin, IE';
+  const NOW_SAYS = 'Dublin, IE | London, UK';
+  const history = `${HISTORY_HEADER}\nhttps://ex.com/a/1\t2026-07-18\tgreenhouse\t${ROLE}\t${CO}\tadded\t${WRITTEN}\n`;
+  const seen = collectSeenCompanyRoles({ scanHistoryText: history }, {}, undefined, { includeLocation: true });
+  if (seen.has(companyRoleDedupKey(CO, ROLE, undefined, NOW_SAYS))) {
+    pass('a scan-history row survives the board re-ordering its city list (no duplicate on the next scan)');
+  } else {
+    fail(`re-ordered location missed its own history row — seeded [${[...seen].join(', ')}]`);
+  }
+  // And a genuinely different city set is still NOT suppressed by it.
+  if (!seen.has(companyRoleDedupKey(CO, ROLE, undefined, 'Dublin, IE'))) {
+    pass('the Dublin-only twin is still eligible against a "London | Dublin" history row');
+  } else {
+    fail('a two-city history row wrongly suppressed the single-city twin');
+  }
 }
 
 // ── 4. collectSeenCompanyRoles: default is byte-identical ───────────────────
@@ -221,6 +319,88 @@ tracked_companies:
     }
   } catch (err) {
     fail(`e2e scan run (flag on) failed: ${err.message}`);
+  }
+}
+
+// 8b. END-TO-END: a re-listed posting whose cities were re-ordered ─────────
+// The unit checks in 3b/3c prove the key is a set. This proves the whole scan
+// behaves that way: the board re-lists ONE role at a NEW url (so url dedupe
+// cannot help) with the SAME two cities written the other way round. Nothing
+// about the posting changed, so nothing may be added.
+//
+// The control in the same harness is the point — a genuinely different city at
+// the new url MUST still be added, or "no duplicate" was bought by deduping
+// everything, which is the bug this flag exists to fix.
+//
+// Provider-agnostic on purpose: this runs through local-parser, not Greenhouse.
+// The location field is free text for every provider, and several of ours build
+// a multi-city string from an upstream array, so the property cannot live in
+// one provider.
+function runScanRelist(relistMode) {
+  const dir = mkdtempSync(join(tmpdir(), 'scan-relist-e2e-'));
+  try {
+    mkdirSync(join(dir, 'data'), { recursive: true });
+    writeFileSync(join(dir, 'data', 'applications.md'), EMPTY_TRACKER);
+    writeFileSync(join(dir, 'data', 'pipeline.md'), '# Pipeline\n\n');
+
+    const portals = join(dir, 'portals.yml');
+    writeFileSync(portals, `scan_history:
+  dedup_include_location: true
+title_filter:
+  positive:
+    - "Strategic Finance"
+tracked_companies:
+  - name: Fixture Defense
+    careers_url: https://boards.example.com/fixture
+    parser:
+      command: node
+      script: tests/fixtures/reordering-multi-city-board.mjs
+`);
+
+    const scan = (relist) => execFileSync(NODE, [join(ROOT, 'scan.mjs')], {
+      cwd: dir,
+      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_PORTALS: portals, FIXTURE_RELIST: relist },
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const entries = () => {
+      const f = join(dir, 'data', 'pipeline.md');
+      if (!existsSync(f)) return [];
+      return readFileSync(f, 'utf-8').split('\n').filter(l => /^- \[[ x]\]\s+https?:\/\//.test(l));
+    };
+
+    scan('');
+    const afterFirst = entries().length;
+    scan(relistMode);
+    return { afterFirst, afterSecond: entries().length };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+{
+  try {
+    const { afterFirst, afterSecond } = runScanRelist('reordered');
+    if (afterFirst === 1 && afterSecond === 1) {
+      pass('a re-listed posting with its cities re-ordered is not re-added (set-valued location key)');
+    } else {
+      fail(`re-ordered re-list leaked: ${afterFirst} entries after run 1, ${afterSecond} after run 2 (want 1 and 1)`);
+    }
+  } catch (err) {
+    fail(`e2e re-list scan (reordered) failed: ${err.message}`);
+  }
+}
+
+{
+  try {
+    const { afterFirst, afterSecond } = runScanRelist('different');
+    if (afterFirst === 1 && afterSecond === 2) {
+      pass('control: a genuinely different city at a new url IS still added');
+    } else {
+      fail(`control wrong: ${afterFirst} entries after run 1, ${afterSecond} after run 2 (want 1 and 2)`);
+    }
+  } catch (err) {
+    fail(`e2e re-list scan (different) failed: ${err.message}`);
   }
 }
 
