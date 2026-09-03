@@ -236,6 +236,17 @@ const BARE = companyRoleDedupKey(CO, ROLE);
 // first). A report-led processed entry puts the SCORE there, and a labeled
 // `posted:` segment lands there when the offer had no location and no comp —
 // keying on either would invent a city and resurface a processed role.
+//
+// Which cells count as labeled is an ALLOW-LIST of the four labels the two
+// writers actually emit (`posted:`/`trust:`/`note:` from formatPipelineOffer,
+// `rank:` from rank-pipeline.mjs's appendRankAnnotation), not the shape
+// "any word, then a colon" (#3751 review). Locations are free text and
+// routinely take that shape — the `Remote: …` rows below are copied from live
+// Neo4j postings in the reporter's own data/pipeline.md, where the broad
+// pattern mis-read 5 of them. A mis-read location falls back to the bare
+// wildcard key, which then suppresses every city-specific variant of that
+// role: the exact collapse this flag exists to prevent, arriving through the
+// parser instead of the key. Both directions are gated here.
 {
   const CASES = [
     ['- [ ] https://ex.com/p/1 | Acme Corp | Staff Engineer | Dublin, IE',
@@ -248,6 +259,20 @@ const BARE = companyRoleDedupKey(CO, ROLE);
       null, 'labeled `posted:` segment in the 4th cell is not a location'],
     ['- [ ] https://ex.com/p/5 | Acme Corp | Backend Engineer |  | 120000 EUR',
       null, 'empty location cell forced by a compensation column is not a location'],
+    // The other three emitted labels — each must still be rejected.
+    ['- [ ] https://ex.com/p/6 | Acme Corp | Site Reliability Engineer | trust: 60 missing_apply_url,suspicious_domain',
+      null, 'labeled `trust:` segment in the 4th cell is not a location'],
+    ['- [ ] https://ex.com/p/7 | Acme Corp | Product Designer | note: curated list',
+      null, 'labeled `note:` segment in the 4th cell is not a location'],
+    ['- [ ] https://ex.com/p/8 | Acme Corp | ML Engineer | rank: 4.2/5 — Strong match',
+      null, 'labeled `rank:` segment (rank-pipeline.mjs) in the 4th cell is not a location'],
+    // …and the live shapes the broad pattern swallowed. These ARE locations.
+    ['- [ ] https://ex.com/p/9 | Acme Corp | Graph Data Scientist | Remote: EMEA',
+      'Remote: EMEA', 'a `Remote: EMEA` cell is a location, not metadata'],
+    ['- [ ] https://ex.com/p/10 | Acme Corp | Field Engineer | Remote: Southeast US',
+      'Remote: Southeast US', 'a `Remote: Southeast US` cell is a location, not metadata'],
+    ['- [ ] https://ex.com/p/11 | Acme Corp | Cloud Architect | Remote: San Mateo area',
+      'Remote: San Mateo area', 'a `Remote: San Mateo area` cell is a location, not metadata'],
   ];
 
   for (const [line, location, label] of CASES) {
@@ -256,6 +281,65 @@ const BARE = companyRoleDedupKey(CO, ROLE);
     const want = companyRoleDedupKey(company ?? 'Acme Corp', role ?? '', undefined, location ?? undefined);
     if (seen.has(want) && seen.size === 1) pass(`pipeline.md: ${label}`);
     else fail(`pipeline.md: ${label} — wanted [${want}], got [${[...seen].join(', ')}]`);
+  }
+}
+
+// ── 7b. The reverse-wildcard index (#3751 review) ───────────────────────────
+// A bare key is a wildcard, and a wildcard has to work in BOTH directions.
+// `seen.has(baseKey)` covers seed-bare → candidate-located. The reverse —
+// history holds `company::role@@london`, a provider now returns the same role
+// with an empty location, so the candidate's own key IS the bare key — matches
+// no stored entry at all, and the role is re-added.
+//
+// collectSeenCompanyRoles answers it by recording, as it builds each key, the
+// bare key of every row that seeded a located one. That is O(1) per candidate
+// at lookup time; scanning the key set for a `${baseKey}@@` prefix instead
+// would walk every historical posting for every candidate on every run.
+{
+  const history = [
+    HISTORY_HEADER,
+    `https://ex.com/j/1\t2026-07-01\tgreenhouse\t${ROLE}\t${CO}\tadded\tLondon, UK`,
+  ].join('\n');
+
+  const locatedBases = new Set();
+  const seen = collectSeenCompanyRoles(
+    { scanHistoryText: history }, {}, undefined, { includeLocation: true, locatedBases },
+  );
+
+  // The seeded key is located, so the bare key is NOT in the key set…
+  if (!seen.has(BARE)) pass('a located seed does not put the bare key in the key set');
+  else fail('a located seed leaked a bare key into the key set');
+
+  // …and the companion index is what makes it resolvable anyway.
+  if (locatedBases.has(BARE)) {
+    pass('a located seed records its bare key in the reverse index');
+  } else {
+    fail(`reverse index missing the bare key: [${[...locatedBases].join(', ')}]`);
+  }
+
+  // The index keys on the BARE form, so a different role at the same company
+  // does not borrow it.
+  if (!locatedBases.has(companyRoleDedupKey(CO, 'Staff Software Engineer, AI Reliability'))) {
+    pass('the reverse index does not collapse two distinct roles at one company');
+  } else {
+    fail('the reverse index matched an unrelated role');
+  }
+}
+
+// The index must stay EMPTY with the flag off, or the extra lookup in main()
+// could change the default path — the one thing this feature may never do.
+{
+  const history = [
+    HISTORY_HEADER,
+    `https://ex.com/j/1\t2026-07-01\tgreenhouse\t${ROLE}\t${CO}\tadded\tLondon, UK`,
+  ].join('\n');
+
+  const locatedBases = new Set();
+  collectSeenCompanyRoles({ scanHistoryText: history }, {}, undefined, { locatedBases });
+  if (locatedBases.size === 0) {
+    pass('flag off — the reverse index stays empty, so the extra lookup is inert');
+  } else {
+    fail(`flag off — reverse index was populated: [${[...locatedBases].join(', ')}]`);
   }
 }
 
@@ -336,7 +420,7 @@ tracked_companies:
 // The location field is free text for every provider, and several of ours build
 // a multi-city string from an upstream array, so the property cannot live in
 // one provider.
-function runScanRelist(relistMode) {
+function runScanRelist(relistMode, script = 'tests/fixtures/reordering-multi-city-board.mjs') {
   const dir = mkdtempSync(join(tmpdir(), 'scan-relist-e2e-'));
   try {
     mkdirSync(join(dir, 'data'), { recursive: true });
@@ -354,7 +438,7 @@ tracked_companies:
     careers_url: https://boards.example.com/fixture
     parser:
       command: node
-      script: tests/fixtures/reordering-multi-city-board.mjs
+      script: ${script}
 `);
 
     const scan = (relist) => execFileSync(NODE, [join(ROOT, 'scan.mjs')], {
@@ -401,6 +485,43 @@ tracked_companies:
     }
   } catch (err) {
     fail(`e2e re-list scan (different) failed: ${err.message}`);
+  }
+}
+
+// 8c. END-TO-END: the reverse wildcard direction (#3751 review) ─────────────
+// Run 1 seeds the role in London. Run 2 re-lists the SAME role at a NEW url
+// (url dedupe cannot help) with NO location, so the candidate's own key is the
+// bare wildcard and matches neither the located seed nor any bare seed. Before
+// the reverse index it was added — an already-surfaced role coming back a
+// second time, which is precisely what the wildcard exists to stop.
+//
+// Its control is the run below it: a real second city at the same new url must
+// STILL be added, or the symmetry was bought by deduping everything.
+const LOCATIONLESS_BOARD = 'tests/fixtures/locationless-relist-board.mjs';
+
+{
+  try {
+    const { afterFirst, afterSecond } = runScanRelist('locationless', LOCATIONLESS_BOARD);
+    if (afterFirst === 1 && afterSecond === 1) {
+      pass('a located seed suppresses a later locationless re-list (wildcard holds in both directions)');
+    } else {
+      fail(`reverse wildcard leaked: ${afterFirst} entries after run 1, ${afterSecond} after run 2 (want 1 and 1)`);
+    }
+  } catch (err) {
+    fail(`e2e locationless re-list scan failed: ${err.message}`);
+  }
+}
+
+{
+  try {
+    const { afterFirst, afterSecond } = runScanRelist('different', LOCATIONLESS_BOARD);
+    if (afterFirst === 1 && afterSecond === 2) {
+      pass('control: two located candidates in different cities are still kept separate');
+    } else {
+      fail(`distinct-city control wrong: ${afterFirst} entries after run 1, ${afterSecond} after run 2 (want 1 and 2)`);
+    }
+  } catch (err) {
+    fail(`e2e locationless-board control scan failed: ${err.message}`);
   }
 }
 
