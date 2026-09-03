@@ -28,7 +28,15 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number];
 
-const SORT_KEYS = ["company", "role", "score", "status", "date"] as const;
+const SORT_COLUMNS = [
+  { key: "company", label: "company" },
+  { key: "role", label: "role" },
+  { key: "score", label: "score" },
+  { key: "status", label: "status" },
+  { key: "date", label: "eval date" },
+  { key: "appliedDate", label: "applied date" },
+] as const;
+const SORT_KEYS = SORT_COLUMNS.map((column) => column.key);
 type SortKey = (typeof SORT_KEYS)[number];
 
 export function PipelineView({
@@ -200,17 +208,17 @@ export function PipelineView({
            of being silently cut off. min-w keeps the columns readable rather
            than letting w-full crush them on a phone. */
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-          <table className="w-full min-w-[44rem] text-sm">
+          <table className="w-full min-w-[52rem] text-sm">
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr>
-                {SORT_KEYS.map((k) => (
+                {SORT_COLUMNS.map(({ key, label }) => (
                   <th
-                    key={k}
+                    key={key}
                     className="cursor-pointer select-none whitespace-nowrap px-4 py-2.5 font-medium hover:text-foreground"
-                    onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
+                    onClick={() => setParams({ sort: key, dir: sort.key === key ? sort.dir * -1 : -1 })}
                   >
                     <span className="inline-flex items-center gap-1">
-                      {k}
+                      {label}
                       <ChevronsUpDown className="size-3" />
                     </span>
                   </th>
@@ -241,6 +249,7 @@ export function PipelineView({
                     </span>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-faint tabular-nums">{r.date}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-faint tabular-nums">{r.appliedDate || "—"}</td>
                   </tr>
                 );
               })}
