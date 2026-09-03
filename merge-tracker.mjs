@@ -25,7 +25,7 @@ import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex } from './find.mjs';
-import { LEGACY_COLMAP, detectColumns, isHeaderRow, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
+import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
 // Corporate-form vocabulary, shared with invite-match.mjs rather than copied,
 // for the same reason normalizeCompany lives in tracker-utils: a second private
 // list is how company identity drifts between scripts (#2445, #3665).
@@ -766,9 +766,21 @@ function parseHeadedAddition(lines, filename) {
   }
 
   const parts = splitAdditionCells(dataLines[0]);
-  const maxIdx = Math.max(...Object.values(map));
-  if (parts.length <= maxIdx) {
-    console.warn(`⚠️  Skipping ${filename}: data row has ${parts.length} field(s) but the header labels ${maxIdx + 1}`);
+  // Only the REQUIRED cells must actually be there. A row whose trailing
+  // optional value is empty is routinely written without its final tab —
+  // openrouter-runner emits `…\treport\t\n` for an absent note, and an LLM
+  // writer asked for "leave the last field empty" often just stops — so
+  // demanding a cell for every label would reject canonical rows. Absent and
+  // empty read the same here, which is what the batch and web prompts already
+  // promise their writers.
+  //
+  // This is not the defense against a SHIFTED row: an omitted interior cell
+  // slides every later value one column left, which the score corroboration
+  // below catches by content regardless of the row's width.
+  const shortLabels = Object.entries(map).filter(([, i]) => i >= parts.length).map(([k]) => k);
+  const missingRequiredCells = shortLabels.filter(k => TSV_REQUIRED_FIELDS.includes(k));
+  if (missingRequiredCells.length) {
+    console.warn(`⚠️  Skipping ${filename}: data row has ${parts.length} field(s), missing the required cell(s): ${missingRequiredCells.join(', ')}`);
     return null;
   }
 
@@ -827,15 +839,19 @@ function parseHeadedAddition(lines, filename) {
  * @returns {object|null} Parsed tracker addition, or null when malformed.
  */
 function parseTsvContent(content, filename) {
-  content = content.trim();
+  // Split the RAW content: trimming the whole file strips the data row's
+  // trailing tab, and that tab IS the final empty cell (`…\tnotes\t` for an
+  // absent url). Trimming first made a row's last column disappear, so the
+  // width check then read the row as one cell short of its own header.
+  const rawLines = String(content ?? '').split(/\r?\n/).filter(l => l.trim() !== '');
+  content = String(content ?? '').trim();
   if (!content) return null;
 
   // Headed additions resolve by name; everything below is the legacy positional
-  // path, unchanged. Detection reads only the first line, so a headerless file
-  // reaches the old parser byte-for-byte as before.
-  const lines = content.split(/\r?\n/).filter(l => l.trim() !== '');
-  if (looksLikeTsvHeaderRow(splitAdditionCells(lines[0]))) {
-    const headed = parseHeadedAddition(lines, filename);
+  // path, unchanged — it keeps parsing the trimmed content, byte-for-byte as
+  // before. Detection reads only the first line.
+  if (looksLikeTsvHeaderRow(splitAdditionCells(rawLines[0]))) {
+    const headed = parseHeadedAddition(rawLines, filename);
     if (!headed) return null;
     if (isNaN(headed.num) || headed.num === 0) {
       console.warn(`⚠️  Skipping ${filename}: invalid entry number`);
@@ -1263,7 +1279,9 @@ function replaceTrackerLine(oldLine, updatedLine) {
 }
 
 for (const file of tsvFiles) {
-  const content = readFileSync(join(ADDITIONS_DIR, file), 'utf-8').trim();
+  // NOT trimmed here: a trailing tab is the row's final empty cell, and
+  // parseTsvContent needs to see it. It trims internally for the legacy path.
+  const content = readFileSync(join(ADDITIONS_DIR, file), 'utf-8');
   const addition = parseTsvContent(content, file);
   if (!addition) { skipped++; continue; }
 

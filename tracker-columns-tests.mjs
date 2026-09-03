@@ -915,6 +915,61 @@ function mergeOne(tsv, name = '2-globex.tsv') {
   }
 }
 
+// ── an empty trailing cell is not a missing cell (#3517 review) ────────────
+// A writer whose last value is empty routinely stops at the last tab —
+// openrouter-runner emits `…\treport\t\n` for an absent note — and the whole
+// file used to be trimmed before parsing, so that tab (which IS the final
+// empty cell) was gone and the row read as one cell short of its own header.
+// These are the exact bytes the converted writers emit.
+{
+  const trailingTab = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n' +
+    '2\t2026-02-02\tGlobex\t(see report)\tEvaluated\t4.5/5\t❌\t[2](reports/2.md)\t\n',
+  );
+  if (trailingTab.cells[5] === '4.5/5' && trailingTab.cells[6] === 'Evaluated') {
+    pass('headed row ending in an empty cell (trailing tab) merges');
+  } else {
+    fail(`trailing-empty-cell row — row: ${trailingTab.row}\n${trailingTab.merge.stdout}`);
+  }
+
+  // Absent and empty must read the same, which is what the batch and web
+  // prompts already promise: "leave the last field empty".
+  const noTrailingTab = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n' +
+    '2\t2026-02-02\tGlobex\tManager\tEvaluated\t4.5/5\t❌\t[2](reports/2.md)\n',
+  );
+  if (noTrailingTab.cells[5] === '4.5/5' && noTrailingTab.cells[6] === 'Evaluated') {
+    pass('headed row omitting its empty trailing cell merges the same way');
+  } else {
+    fail(`omitted-trailing-cell row — row: ${noTrailingTab.row}\n${noTrailingTab.merge.stdout}`);
+  }
+
+  // Only OPTIONAL cells may be absent. A row short of a required one is still
+  // refused, and says which.
+  const shortRequired = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n' +
+    '2\t2026-02-02\tGlobex\tManager\tEvaluated\t4.0/5\n',
+  );
+  if (!shortRequired.row && /missing the required cell\(s\): pdf, report/.test(shortRequired.merge.stdout)) {
+    pass('headed row missing required cells is refused, naming them');
+  } else {
+    fail(`short-required row refused — row: ${shortRequired.row}\n${shortRequired.merge.stdout}`);
+  }
+
+  // The width rule is not the shift defense, so prove the shift is still
+  // caught: omit an INTERIOR cell (role) and every later value slides one
+  // column left, which the score corroboration sees by content.
+  const shifted = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+    '2\t2026-02-02\tGlobex\tEvaluated\t4.0/5\t❌\t[2](reports/2.md)\tnote\thttps://example.com/jobs/2\n',
+  );
+  if (!shifted.row && /labelled "score"/.test(shifted.merge.stdout)) {
+    pass('headed row with an omitted interior cell is caught by content, not width');
+  } else {
+    fail(`interior-omission row refused — row: ${shifted.row}\n${shifted.merge.stdout}`);
+  }
+}
+
 // ── the web's run prompt is a TSV writer too (#3517) ───────────────────────
 // web/src/lib/run-prompts.mjs dictates the addition row to the agent, so the
 // prompt is an emitter of this format even though it emits no bytes itself. A
