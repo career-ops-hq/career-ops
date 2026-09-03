@@ -35,6 +35,19 @@
  *                               usable date. scan.mjs ignores it; consumers
  *                               like scan-ats-full.mjs use it for recency
  *                               filtering.
+ * @property {{min: number, max: number, currency?: string}} [salary]
+ *                               Annualized compensation, attached ONLY when the
+ *                               source exposes real figures — never inferred
+ *                               (`ashby.mjs` is the reference shape; most
+ *                               providers omit it). `min` and `max` are both
+ *                               present — a one-sided range fills the missing
+ *                               bound from the other.
+ *                               `currency` is an ISO code when the source gives
+ *                               one, and `''` or absent otherwise. Consumed by
+ *                               scan.mjs's salary_filter and rendered into
+ *                               pipeline.md's compensation column via
+ *                               formatCompensation(); an empty/absent value
+ *                               always passes the filter.
  * @property {number} [trustScore] 0-100 trust score from _trust-validator.mjs.
  * @property {string[]} [trustFlags] Flags raised by trust validation (e.g.
  *                                   'invalid_url', 'suspicious_domain').
