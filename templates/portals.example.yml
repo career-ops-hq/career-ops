@@ -909,6 +909,7 @@ search_queries:
 #   gem             jobs.gem.com/<boardId>
 #   join            join.com/companies/<slug>  (SSR __NEXT_DATA__ parse, no separate API)
 #   icims           careers-<tenant>.icims.com / *.icims.com
+#   jazzhr          <tenant>.applytojob.com/apply (JazzHR-hosted public career pages; Humi may use this surface)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -1081,6 +1082,13 @@ search_queries:
 #   # iCIMS hosted-portal board. Auto-detects any *.icims.com host from
 #   # careers_url/api.
 #   careers_url: https://careers-exampleco.icims.com/jobs/search?ss=1
+#   enabled: true
+#
+# - name: Example JazzHR Co
+#   careers_url: https://exampleco.applytojob.com/apply
+#   # jazzhr:
+#   #   fetchDetails: true
+#   #   detailLimit: 25
 #   enabled: true
 #
 # - name: Example SuccessFactors Co
