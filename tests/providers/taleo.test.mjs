@@ -29,4 +29,39 @@ try {
   let guarded = false;
   try { await provider.fetch({ name: 'X', careers_url: 'https://evil.example/careersection/demo/jobsearch.ftl' }, ctx); } catch { guarded = calls.length === 2; }
   if (guarded) pass('SSRF guard rejects untrusted host before fetch'); else fail('SSRF guard failed');
+
+  // A public board with no postings is a valid empty result, while a shell
+  // without the portal id is a private/unavailable board and must be loud.
+  const emptyCtx = { fetchText: async () => shell, fetchJson: async () => ({ requisitionList: [], pagingData: { totalCount: 0, pageSize: 25 } }) };
+  const empty = await provider.fetch({ name: 'EmptyCo', careers_url: url }, emptyCtx);
+  if (empty.length === 0) pass('valid public zero-result board returns []'); else fail('zero-result board should be empty');
+  let unavailable = false;
+  try { await provider.fetch({ name: 'PrivateCo', careers_url: url }, { fetchText: async () => '<html><title>Sign in</title></html>', fetchJson: async () => response }); } catch (e) { unavailable = /portal id|private|unavailable/i.test(e.message); }
+  if (unavailable) pass('private/unavailable shell without portal id throws descriptively'); else fail('private shell should not look like zero jobs');
+
+  // Pagination is bounded independently from the source total and cooperates
+  // with verify-portals probes through ctx.maxPages.
+  const pageOne = { requisitionList: [{ jobId: '1', column: ['One', 'Toronto', '2026-09-01'] }], pagingData: { totalCount: 2, pageSize: 1 } };
+  const pageTwo = { requisitionList: [{ jobId: '2', column: ['Two', 'London', '2026-09-02'] }], pagingData: { totalCount: 2, pageSize: 1 } };
+  const pageCalls = [];
+  const pagedCtx = { fetchText: async () => shell, fetchJson: async (u, o) => { const p = JSON.parse(o.body).pageNo; pageCalls.push(p); return p === 1 ? pageOne : pageTwo; }, sleep: async () => {} };
+  const paged = await provider.fetch({ name: 'PagedCo', careers_url: url }, pagedCtx);
+  if (paged.length === 2 && pageCalls.join(',') === '1,2') pass('fetches a second JSON page when pagingData reports more rows'); else fail(`pagination failed: ${pageCalls.join(',')} / ${paged.length}`);
+  pageCalls.length = 0;
+  const probed = await provider.fetch({ name: 'PagedCo', careers_url: url, max_pages: 100 }, { ...pagedCtx, maxPages: 1 });
+  if (probed.length === 1 && pageCalls.join(',') === '1') pass('ctx.maxPages: 1 limits probe to exactly one list request'); else fail('probe page budget was ignored');
+
+  // Retryable transport failures use the shared retry helper; a probe error is
+  // allowed to propagate so callers retain their page-budget identity.
+  let attempts = 0;
+  const retried = await provider.fetch({ name: 'RetryCo', careers_url: url }, {
+    fetchText: async () => shell,
+    fetchJson: async () => { attempts++; if (attempts === 1) { const e = new Error('temporary'); e.status = 503; throw e; } return response; },
+    sleep: async () => {},
+  });
+  if (retried.length === 2 && attempts === 2) pass('retries transient 503 once and returns parsed jobs'); else fail(`retry path failed: attempts=${attempts}`);
+  const probeError = new Error('ProbePageBudgetReached');
+  let sameError = false;
+  try { await provider.fetch({ name: 'ProbeErrorCo', careers_url: url }, { maxPages: 1, fetchText: async () => shell, fetchJson: async () => { throw probeError; } }); } catch (e) { sameError = e === probeError; }
+  if (sameError) pass('probe fetch errors propagate with original identity'); else fail('probe error was swallowed or wrapped');
 } catch (e) { fail(`taleo provider tests crashed: ${e.message}`); }
