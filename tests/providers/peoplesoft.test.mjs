@@ -564,6 +564,86 @@ try {
     }
   }
 
+  // ── fetch() — load-more failure reasons are exposed to callers ─────────
+
+  {
+    const firstPage = `<form name="win0" action="/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL">
+      <span id="win0divHRS_AGNT_RSLT_Irowcnt$0">1-1 of 3 Results</span>
+      <li id="HRS_AGNT_RSLT_I$0_row_0"><a id="SCH_JOB_TITLE$0">Only Role</a><span id="HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID$0">ONLY</span><span id="LOCATION$0">Remote</span></li>
+      </form>`;
+    const secondPage = `<form name="win0" action="/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL">
+      <span id="win0divHRS_AGNT_RSLT_Irowcnt$0">2-2 of 3 Results</span>
+      <li id="HRS_AGNT_RSLT_I$0_row_0"><a id="SCH_JOB_TITLE$0">Second Role</a><span id="HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID$0">SECOND</span><span id="LOCATION$0">Remote</span></li>
+      </form>`;
+    let calls = 0;
+    const ctx = {
+      sleep: async () => {},
+      fetchResponse: async () => {
+        calls++;
+        if (calls === 1) return new Response(firstPage, { status: 200 });
+        const error = new Error('HTTP 403 Forbidden');
+        error.status = 403;
+        throw error;
+      },
+    };
+    const jobs = await peoplesoft.fetch({ name: 'ExampleU', careers_url: SEARCH_URL }, ctx);
+    if (jobs.peoplesoftIncomplete?.reason === 'load-more-fetch-failed') {
+      pass('fetch() reports load-more-fetch-failed when pagination cannot fetch the next page');
+    } else {
+      fail(`fetch() load-more failure reason wrong: ${JSON.stringify(jobs.peoplesoftIncomplete)}`);
+    }
+  }
+
+  {
+    const firstPage = `<form name="win0" action="/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL">
+      <span id="win0divHRS_AGNT_RSLT_Irowcnt$0">1-1 of 3 Results</span>
+      <li id="HRS_AGNT_RSLT_I$0_row_0"><a id="SCH_JOB_TITLE$0">Only Role</a><span id="HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID$0">ONLY</span><span id="LOCATION$0">Remote</span></li>
+      </form>`;
+    const secondPage = `<form name="win0" action="/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL">
+      <span id="win0divHRS_AGNT_RSLT_Irowcnt$0">2-2 of 3 Results</span>
+      <li id="HRS_AGNT_RSLT_I$0_row_0"><a id="SCH_JOB_TITLE$0">Second Role</a><span id="HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID$0">SECOND</span><span id="LOCATION$0">Remote</span></li>
+      </form>`;
+    let calls = 0;
+    const ctx = {
+      sleep: async () => {},
+      fetchResponse: async () => {
+        calls++;
+        return new Response(calls === 1 ? firstPage : loginFixture, { status: 200 });
+      },
+    };
+    const jobs = await peoplesoft.fetch({ name: 'ExampleU', careers_url: SEARCH_URL }, ctx);
+    if (jobs.peoplesoftIncomplete?.reason === 'load-more-response-unrecognized') {
+      pass('fetch() reports load-more-response-unrecognized for an invalid pagination response');
+    } else {
+      fail(`fetch() unrecognized load-more reason wrong: ${JSON.stringify(jobs.peoplesoftIncomplete)}`);
+    }
+  }
+
+  {
+    const firstPage = `<form name="win0" action="/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL">
+      <span id="win0divHRS_AGNT_RSLT_Irowcnt$0">1-1 of 3 Results</span>
+      <li id="HRS_AGNT_RSLT_I$0_row_0"><a id="SCH_JOB_TITLE$0">Only Role</a><span id="HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID$0">ONLY</span><span id="LOCATION$0">Remote</span></li>
+      </form>`;
+    const secondPage = `<form name="win0" action="/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL">
+      <span id="win0divHRS_AGNT_RSLT_Irowcnt$0">2-2 of 3 Results</span>
+      <li id="HRS_AGNT_RSLT_I$0_row_0"><a id="SCH_JOB_TITLE$0">Second Role</a><span id="HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID$0">SECOND</span><span id="LOCATION$0">Remote</span></li>
+      </form>`;
+    let calls = 0;
+    const ctx = {
+      sleep: async () => {},
+      fetchResponse: async () => {
+        calls++;
+        return new Response(calls === 1 ? firstPage : secondPage, { status: 200 });
+      },
+    };
+    const jobs = await peoplesoft.fetch({ name: 'ExampleU', careers_url: SEARCH_URL, max_pages: 1 }, ctx);
+    if (jobs.peoplesoftIncomplete?.reason === 'pagination-ceiling-reached') {
+      pass('fetch() reports pagination-ceiling-reached when max_pages stops an incomplete sweep');
+    } else {
+      fail(`fetch() pagination ceiling reason wrong: ${JSON.stringify(jobs.peoplesoftIncomplete)}`);
+    }
+  }
+
   // ── fetch() — login/session-expired page is an error, never "0 jobs" ────
 
   {
