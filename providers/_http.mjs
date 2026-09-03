@@ -319,6 +319,23 @@ export async function fetchTextWithRetry(ctx, url, opts = {}, policy = {}) {
   return withRetry(() => ctx.fetchText(url, opts), ctx, policy);
 }
 
+/**
+ * Fetch a raw Response (headers included — e.g. Set-Cookie) with bounded
+ * retry on transient failures. Same policy as fetchJsonWithRetry /
+ * fetchTextWithRetry; exists for providers that need response headers on a
+ * retried request (a stateful multi-hop scrape carrying a session cookie
+ * across GET/POST steps, e.g. peoplesoft.mjs) instead of just the body.
+ *
+ * @param {{fetchResponse: Function, sleep?: Function}} ctx - Transport context.
+ * @param {string} url - Absolute URL.
+ * @param {object} [opts] - Passed through to ctx.fetchResponse.
+ * @param {{retries?: number, baseDelayMs?: number, maxDelayMs?: number}} [policy]
+ * @returns {Promise<Response>}
+ */
+export async function fetchResponseWithRetry(ctx, url, opts = {}, policy = {}) {
+  return withRetry(() => ctx.fetchResponse(url, opts), ctx, policy);
+}
+
 export function makeHttpCtx() {
   return {
     transport: 'http',
