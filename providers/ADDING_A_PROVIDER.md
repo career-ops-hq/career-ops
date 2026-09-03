@@ -36,6 +36,16 @@ In short:
 - **Complete inventory, no paid placement (rule 3).** The provider must
   traverse the source's full inventory, not a promoted or default-filtered
   view.
+- **`robots.txt`, per path (rule 6).** Check the source's `robots.txt`
+  before writing code. A `Disallow` under `User-agent: *` (or a group
+  matching the scanner) that covers the listing paths the provider reads is
+  a stop (precedent: Lagou); a `Disallow` on routes the parser never touches
+  — `/api`, `/data`, a subscribe form — is not (ITviec, CareerViet route
+  around theirs). A rule that only names an AI/agent crawler (`ClaudeBot`,
+  `anthropic-ai`) doesn't name the scanner — a distinct, bounded
+  `career-ops` fetcher — but a scan can still feed a later model-driven
+  `pipeline` step, so honouring it is a maintainer call on a source
+  proposal, not an automatic no.
 
 If such a source is operator-run, or its eligibility is not obvious, open a
 [source proposal](../.github/ISSUE_TEMPLATE/source-proposal.yml) before
