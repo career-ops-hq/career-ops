@@ -87,10 +87,14 @@
 # tenant's detail fetches all come back 404, set it explicitly here.
 #
 # dayforce_boards:
-#   - tenant: gnghcm            # Give & Go Prepared Foods
-#   - tenant: roots             # Roots Canada
-#   - tenant: firstnational     # First National Financial
-#   - tenant: lifelabs          # LifeLabs
+#   - name: Give & Go Prepared Foods
+#     tenant: gnghcm
+#   - name: Roots Canada
+#     tenant: roots
+#   - name: First National Financial
+#     tenant: firstnational
+#   - name: LifeLabs
+#     tenant: lifelabs
 
 # -- Location filter (optional) --
 # Filter scanned jobs by location. Applied AFTER title filter, BEFORE dedup.
