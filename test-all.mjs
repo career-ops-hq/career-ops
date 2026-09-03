@@ -2485,8 +2485,14 @@ const batchDataFields = (batchTsvLines[1] ?? '').trim().split('\\t');
 // rather than by keyword — `/two TSV lines/i` also matches "do NOT write two
 // TSV lines", which is the polarity trap that lets a reversed instruction pass.
 const batchHeaderIdx = batchStepLines.findIndex(l => l.includes('\\t'));
+// Identity, not just "the next line mentions the placeholder": a prose line
+// carrying {{REPORT_NUM}} between the two fence lines would satisfy a contains
+// check while batchDataFields went on reading the real data row further down —
+// adjacency and width would then be describing different lines, and a prompt
+// that split the block would pass.
 const batchRowFollowsHeader = batchHeaderIdx >= 0
-  && (batchStepLines[batchHeaderIdx + 1] ?? '').includes('{{REPORT_NUM}}');
+  && batchStepLines[batchHeaderIdx + 1] === batchTsvLines[1]
+  && (batchTsvLines[1] ?? '').includes('{{REPORT_NUM}}');
 if (
   batchTsvLines.length === 2 &&
   batchLabelsMissing.length === 0 &&
