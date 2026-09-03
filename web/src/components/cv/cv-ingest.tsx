@@ -10,16 +10,9 @@ import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import { cvReadiness, parseCvStream, type CvSeed } from "@/lib/cv/quality";
 import { DEFAULT_FILTERS, filtersToParams } from "@/lib/explore";
+import { resolveCliId } from "@/lib/saved-cli";
 
 type Phase = "input" | "parsing" | "review" | "saving" | "error";
-
-function cliId(): string | null {
-  try {
-    return JSON.parse(localStorage.getItem("career-ops:config") || "{}").cliId || null;
-  } catch {
-    return null;
-  }
-}
 
 const STYLE = `
 .co-cvdrop{position:relative;border:1.5px dashed color-mix(in srgb, var(--fg) 22%, transparent);border-radius:1rem;transition:border-color .2s,background .2s}
@@ -89,7 +82,10 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
     }
   }, []);
 
-  const ingestText = (text: string) => {
+  // resolveCliId falls back to the default installed CLI (and persists it) when
+  // Config was never opened — the saved key alone used to be the only source,
+  // so a first-run user with a CLI right there was told to connect one.
+  const ingestText = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) {
       setErr("That looks empty — paste your CV instead.");
@@ -98,7 +94,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
     }
     // Pasted text is already readable. Same path as a .md/.txt drop — no CLI.
     // (PDF/DOCX still need a CLI below.)
-    const id = cliId();
+    const id = await resolveCliId();
     if (!id) {
       setSeed(null);
       setMd(trimmed);
@@ -108,7 +104,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
     void runStream({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: trimmed, cliId: id }) });
   };
 
-  const ingestFile = (file: File) => {
+  const ingestFile = async (file: File) => {
     // .md/.txt/.markdown fast path — plain text, NO CLI needed, instant.
     if (/\.(md|markdown|txt)$/i.test(file.name)) {
       file
@@ -130,7 +126,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
       return;
     }
     // PDF/other → the user's CLI parses it. Needs a configured CLI.
-    const id = cliId();
+    const id = await resolveCliId();
     if (!id) {
       setErr("needs-cli");
       setPhase("error");
@@ -192,14 +188,14 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
             e.preventDefault();
             setOver(false);
             const f = e.dataTransfer.files?.[0];
-            if (f) ingestFile(f);
+            if (f) void ingestFile(f);
           }}
         >
           <textarea
             value={paste}
             onChange={(e) => setPaste(e.target.value)}
             onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && paste.trim()) ingestText(paste.trim());
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && paste.trim()) void ingestText(paste.trim());
             }}
             placeholder="Paste your CV here — or drop a PDF / .md file below. Even a rough paste works; we'll clean it up."
             className="h-32 w-full resize-none bg-transparent text-[14px] leading-relaxed outline-none placeholder:text-faint"
@@ -212,14 +208,14 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
             >
               <Upload className="size-3.5" /> Upload PDF / file
             </button>
-            <input ref={fileRef} type="file" accept=".pdf,.md,.markdown,.txt,.docx" hidden onChange={(e) => e.target.files?.[0] && ingestFile(e.target.files[0])} />
+            <input ref={fileRef} type="file" accept=".pdf,.md,.markdown,.txt,.docx" hidden onChange={(e) => e.target.files?.[0] && void ingestFile(e.target.files[0])} />
             <span className="inline-flex items-center gap-1 text-[11px] text-faint">
               <Lock className="size-3" /> Stays on your machine. Parsed by your own AI.
             </span>
             <button
               type="button"
               disabled={!paste.trim()}
-              onClick={() => ingestText(paste.trim())}
+              onClick={() => void ingestText(paste.trim())}
               className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground shadow-sm transition hover:brightness-110 disabled:opacity-50 max-sm:min-h-[44px]"
             >
               Read my CV <ArrowRight className="size-4" />

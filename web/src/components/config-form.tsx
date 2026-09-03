@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
-import { persistCliId, readSavedCliId } from "@/lib/saved-cli";
+import { persistCliId, pickDefaultCli, readSavedCliId } from "@/lib/saved-cli";
 
 type Cli = {
   id: string;
@@ -68,14 +68,21 @@ export function ConfigForm() {
       .then((d) => {
         const list: Cli[] = d.clis ?? [];
         setClis(list);
-        // Highlight + persist the only installed CLI when Config was never saved.
-        // Highlight-only used to look configured while jobs still read empty localStorage.
+        // Highlight + persist the default CLI when Config was never saved.
+        //
+        // These two must never diverge. Highlight-only used to look configured
+        // while jobs still read empty localStorage; that was fixed for a single
+        // installed CLI but not for several, so a machine with (say) Claude Code
+        // + Codex + Gemini rendered Claude selected, wrote nothing, and failed
+        // every CLI-backed job with "connect your CLI". Persist whatever we
+        // show — pickDefaultCli explains why "first installed" is safety-ordered
+        // rather than arbitrary.
         setCliId((prev) => {
           if (prev) return prev;
-          const only = list.filter((c) => c.installed);
-          if (only.length !== 1) return list.find((c) => c.installed)?.id || "";
-          if (!readSavedCliId()) persistCliId(only[0].id);
-          return only[0].id;
+          const fallback = pickDefaultCli(list);
+          if (!fallback) return "";
+          if (!readSavedCliId()) persistCliId(fallback);
+          return fallback;
         });
       })
       .catch(() => setClis([]));
