@@ -165,6 +165,17 @@ it is inert until the provider is added there.
   accepts `evilvendordomain.com`).
 - If the whole URL is assembled by the provider from a fixed literal host, no
   allowlist is needed, but `redirect: 'error'` still is.
+- **Redirects are never followed** — `redirect: 'error'` is the default and
+  stays it even when the source's own bootstrap issues a legitimate
+  same-origin 3xx. A provider that needs to *inspect* a redirect without
+  following it (e.g. to tell an empty-board redirect from a dead-tenant one)
+  passes `redirect: 'manual'`: `ctx.fetch*` then throws a structured error
+  carrying `.status` and `.location` (see `_http.mjs`; `providers/jobvite.mjs`
+  uses it). Actually following a hop is out — if a source only serves content
+  past a bootstrap 3xx, target the settled URL directly
+  (`providers/deutschebahn.mjs` — a portal that 302s into its own results
+  endpoint) or rewrite a known static 3xx up front (`providers/builtin.mjs` —
+  bare hosts that 301 to `www`).
 
 ### Defensive parsing
 
