@@ -21,8 +21,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
-          cache: npm
       - uses: actions/setup-go@v7
         with:
           go-version: '1.26'
-      - run: npm ci --ignore-scripts
+      - run: npm install --ignore-scripts

@@ -8,7 +8,7 @@ This repository is two things at once, and which one you are working on depends 
 
 ## Setup, build and validate
 
-- Install: `npm ci --ignore-scripts`. Never run `npm install` without `--ignore-scripts`, never add or upgrade dependencies.
+- Install: `npm install --ignore-scripts` (there is no lock file in the repo). Never install without `--ignore-scripts`, never add or upgrade dependencies.
 - Full suite: `node test-all.mjs --quick` (skips the dashboard build). Run it before you finish, every time.
 - One area: `node test-all.mjs --only <substring>` (for example `--only providers/themuse`).
 - Syntax: `npm run lint`.
