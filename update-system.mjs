@@ -232,6 +232,7 @@ const SYSTEM_PATHS = [
   'lib/cli-flags.mjs',
   'lib/gemini-node-floor.mjs',
   'lib/local-today.mjs',
+  'lib/scan-summary-marker.mjs',
   'lib/is-main-module.mjs',
   'lib/mjs-files.mjs',
   'lib/outcome-dir.mjs',
