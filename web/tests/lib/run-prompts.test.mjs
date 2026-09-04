@@ -320,6 +320,17 @@ test("buildPrompt: two declared markets both get a _shared.md pointer", () => {
   assert.match(prompt, /modes\/zh\/_shared\.md/);
 });
 
+test("buildPrompt: the default modes directory is retained in a multi-market declaration", () => {
+  const prompt = buildPrompt({
+    kind: "evaluate",
+    ...ARGS,
+    lang: { ...DE_ZH, modesDir: "modes", modesDirs: ["modes", "modes/zh"] },
+  });
+  assert.match(prompt, /modes\/_shared\.md/);
+  assert.match(prompt, /modes\/zh\/_shared\.md/);
+  assert.match(prompt, /MARKET signals/);
+});
+
 test("buildPrompt: multiple declared markets tell the agent to judge by market signal, not JD language", () => {
   const prompt = buildPrompt({ kind: "evaluate", ...ARGS, lang: DE_ZH });
   assert.match(prompt, /MARKET signals/);

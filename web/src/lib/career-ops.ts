@@ -544,11 +544,25 @@ export function readLanguageConfig(): LanguageConfig {
         // or fully-invalid list falls back to the ["modes"] default.
         const rawModesDir = l.modes_dir;
         const rawCandidates = Array.isArray(rawModesDir) ? rawModesDir : [rawModesDir];
-        const resolved = rawCandidates
-          .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
-          .map((v) => v.trim().replace(/\/+$/, ""))
-          .filter((v) => MODES_DIR_RE.test(v));
-        if (resolved.length) modesDirs = resolved;
+        const resolveDeclaredDir = (value: unknown): string | null => {
+          if (typeof value !== "string" || !value.trim()) return null;
+          const candidate = value.trim().replace(/\/+$/, "");
+          if (!MODES_DIR_RE.test(candidate)) return null;
+          return fs.existsSync(path.join(root, candidate)) ? candidate : null;
+        };
+        // The first declared entry is primary. Do not filter it away and
+        // silently promote a later market into the evaluation slot. This
+        // mirrors gemini-eval.mjs: invalid primary -> default modes, while
+        // valid secondary markets remain available as shared context.
+        const primary = resolveDeclaredDir(rawCandidates[0]);
+        const extras = rawCandidates.slice(1).map(resolveDeclaredDir).filter(
+          (value): value is string => value !== null,
+        );
+        if (primary) {
+          modesDirs = [primary, ...extras];
+        } else if (extras.length) {
+          modesDirs = ["modes", ...extras.filter((dir) => dir !== "modes")];
+        }
       }
     }
   } catch {

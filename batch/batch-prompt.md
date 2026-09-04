@@ -27,13 +27,14 @@ Before writing any user-visible prose, read `config/profile.yml` if it exists.
 
 - Resolve `language.output`; default to `en` when the key is absent.
 - `language.output` controls all human-facing output: report prose, report headings, tracker notes, PDF text, cover/application text if any, and final user-facing summaries.
-- `language.modes_dir`, when present, supplies market vocabulary and local evaluation rules only. It must not force the prose language.
+- `language.modes_dir`, when present, supplies market vocabulary and local evaluation rules only. It must not force the prose language. It may be a string or an ordered list of declared candidate markets; the first entry is primary for evaluation rules, while every declared market contributes shared context.
 
 **Write all human-facing output in `language.output`, regardless of the language of this prompt or the job description.** Keep machine-readable field names exactly as specified. Keep market-specific terms from `language.modes_dir` when relevant, but explain them in `language.output` when needed.
 
 Examples:
 
 - `language.output: en` + `language.modes_dir: modes/de` → write the report in English, using DACH market concepts where relevant.
+- `language.output: en` + `language.modes_dir: [modes, modes/zh]` → keep English prose, load both shared contexts, and choose market concepts from the JD's jurisdiction, currency, benefits, and legal signals — not language alone.
 - Missing `language.output` → write in English.
 
 ---

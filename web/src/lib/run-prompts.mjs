@@ -67,9 +67,13 @@ export function buildPrompt({ kind, input, memory, today, postedAt, lang }) {
   // once). `modesDirs` carries every declared market (primary first);
   // `modesDir` alone (older callers, e.g. tests that only set that field)
   // means exactly one declared market.
-  const declaredMarkets = (resolvedLang.modesDirs ?? [resolvedLang.modesDir]).filter(
-    (dir) => dir && dir !== "modes",
-  );
+  const allDeclaredMarkets = resolvedLang.modesDirs ?? [resolvedLang.modesDir];
+  // Keep the default `modes` entry when it is part of a multi-market
+  // declaration (for example [modes, modes/zh]); only suppress it for the
+  // unconfigured single-market default or when it is merely a path pointer.
+  const declaredMarkets = allDeclaredMarkets.length > 1
+    ? allDeclaredMarkets.filter(Boolean)
+    : allDeclaredMarkets.filter((dir) => dir && dir !== "modes");
   const marketNote = declaredMarkets.length
     ? ` Also read ${declaredMarkets.map((dir) => `${dir}/_shared.md`).join(" and ")} for ${
         declaredMarkets.length > 1 ? "these markets'" : "this market's"
@@ -207,4 +211,3 @@ VERDICT: {score}/5 — {reason in 12 words or fewer}
 
 Posting URL: ${input}`;
 }
-

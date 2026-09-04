@@ -156,7 +156,10 @@ if (existsSync(PATHS.profileYml)) {
         if (primaryDir) {
           console.warn(`⚠️   No matching evaluation file found in ${primaryDir}; using default modes/oferta.md`);
         }
-        modesDirs = ['modes', ...extras.filter((dir) => dir !== 'modes')];
+        // The primary may still have useful _shared.md context even when its
+        // evaluation file is missing. Keep it after the default evaluation
+        // directory, then append valid secondary markets.
+        modesDirs = ['modes', ...(primaryDir && primaryDir !== 'modes' ? [primaryDir] : []), ...extras.filter((dir) => dir !== 'modes' && dir !== primaryDir)];
       }
       // else: resolveModesDirCandidate(primaryRaw) already warned why the
       // primary itself could not be resolved; falling through to the default
@@ -199,6 +202,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
                      used as the tracker's dedup key
     --no-save        Do not save report to reports/ directory
     --no-compress    Skip token budget compression (full context injection)
+    --context-only   Print the resolved context/token budget and exit — never calls Gemini. Deterministic; used by automated tests to verify modes_dir resolution without live API calls.
     --help           Show this help
 
   SETUP
@@ -210,6 +214,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     node gemini-eval.mjs "We are looking for a Senior AI Engineer..."
     node gemini-eval.mjs --file ./jds/openai-swe.txt
     node gemini-eval.mjs --posting-url https://acme.com/jobs/42 --file ./jds/openai-swe.txt
+    node gemini-eval.mjs --context-only --file ./jds/openai-swe.txt  # print context budget without calling Gemini
 `);
   process.exit(0);
 }
