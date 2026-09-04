@@ -107,6 +107,29 @@ function isUnscopedLinkLocalV6(host) {
 }
 
 /**
+ * An IP literal that cannot identify one TCP listener interface.
+ *
+ * IPv4 multicast is 224.0.0.0/4, IPv6 multicast is ff00::/8, and
+ * 255.255.255.255 is the IPv4 limited-broadcast address. A subnet-directed
+ * broadcast such as 192.168.1.255 cannot be classified from the address alone:
+ * it depends on the machine's interface prefix, which this pure planner does
+ * not inspect.
+ *
+ * Assumes the normalized, lower-case spelling returned by parseAllowedHosts.
+ *
+ * @param {string} host
+ * @returns {boolean}
+ */
+function isNonUnicastAddress(host) {
+  const version = isIP(host);
+  if (version === 4) {
+    const firstOctet = Number(host.slice(0, host.indexOf(".")));
+    return (firstOctet >= 224 && firstOctet <= 239) || host === "255.255.255.255";
+  }
+  return version === 6 && host.startsWith("ff");
+}
+
+/**
  * Is this a host someone could plausibly have meant?
  *
  * @param {string} host  a single entry, already lowercased and port-stripped
@@ -163,6 +186,15 @@ export function validateAllowedHosts(envValue) {
           `CAREER_OPS_WEB_ALLOWED_HOSTS contains the link-local address "${host}", which is ambiguous\n` +
           "across interfaces and cannot be bound without a zone index. Use a routable address or a\n" +
           "hostname instead.",
+      };
+    }
+    if (isNonUnicastAddress(host)) {
+      return {
+        ok: false,
+        error:
+          `CAREER_OPS_WEB_ALLOWED_HOSTS contains "${host}", which is not a unicast address and\n` +
+          "cannot identify one interface for a TCP listener. Use a unicast address or a hostname\n" +
+          "instead.",
       };
     }
     if (URL_SCHEMES.has(host)) {

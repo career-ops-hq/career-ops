@@ -101,6 +101,21 @@ test("an unscoped link-local address is refused", () => {
   assert.equal(validateAllowedHosts("fe80::1%en0").ok, false);
 });
 
+test("multicast and limited-broadcast addresses are refused before planning a bind", () => {
+  // Given address classes that are valid IP syntax but cannot identify one TCP
+  // listener interface. Accepting one would make next fail during listen()
+  // instead of returning the launcher's structured configuration error.
+  for (const envValue of ["224.0.0.1", "239.255.255.250", "255.255.255.255", "ff02::1", "ff0e::dead:beef"]) {
+    // When the value is validated directly and through the public planner
+    const validation = validateAllowedHosts(envValue);
+    const plan = planNextRun({ command: "dev", envValue });
+    // Then neither path produces a bind target
+    assert.equal(validation.ok, false, `${envValue} must be refused`);
+    assert.match(validation.error, /not a unicast address/);
+    assert.deepEqual(plan, validation, `${envValue} must fail before argv is built`);
+  }
+});
+
 test("every spelling of every-interface is recognised as a wildcard", () => {
   // Given the wildcards, and the specific addresses they must not be confused
   // with. `loopbackUnreachable` is derived from this rather than from equality
