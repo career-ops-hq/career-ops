@@ -55,6 +55,50 @@ function isSymlink(rel) {
   }
 }
 
+/**
+ * The outermost symlink on the way down to `rel`, if any.
+ *
+ * git stops at the FIRST symlink it meets walking a pathspec, so that entry --
+ * not the leaf -- is the one it can still answer for. Returns the repo-relative
+ * path of that ancestor (or `rel` itself when the leaf is the symlink), else null.
+ *
+ * @param {string} rel - Repo-relative path.
+ * @returns {string|null}
+ */
+function symlinkedAncestor(rel) {
+  const parts = rel.split('/').filter(Boolean);
+  for (let i = 1; i <= parts.length; i += 1) {
+    const prefix = parts.slice(0, i).join('/');
+    if (isSymlink(prefix)) return prefix;
+  }
+  return null;
+}
+
+/**
+ * checkIgnore, but able to answer for probes that cross a user-layer symlink.
+ *
+ * The loop over the AGENTS.md paths below has resolved this since #3165: when
+ * git refuses a pathspec, ask about the symlinked entry instead, because that
+ * entry is what actually governs whether `git add .` can stage anything through
+ * it -- the contents live outside the repository. That fallback was written
+ * inline, so the derived-index probe list added later did not inherit it and
+ * went permanently red on the symlinked layout. Keeping it in one helper is
+ * what lets the next probe list opt in with one call instead of rediscovering
+ * exit 128 the hard way.
+ *
+ * @param {string} probe - Repo-relative path to test.
+ * @returns {{verdict: 'ignored'|'not-ignored'|'unanswerable', stderr: string, via: string|null}}
+ */
+function checkIgnoreThroughSymlinks(probe) {
+  const direct = checkIgnore(probe);
+  if (direct.verdict !== 'unanswerable') return { ...direct, via: null };
+
+  const ancestor = symlinkedAncestor(probe);
+  if (!ancestor) return { ...direct, via: null };
+
+  return { ...checkIgnore(ancestor), via: ancestor };
+}
+
 console.log('\n🔒 user-layer files are git-ignored');
 
 // Pull the declared user-layer paths straight out of AGENTS.md so the test tracks
@@ -168,10 +212,19 @@ const derivedIndexProbes = derivedIndexLocations.flatMap(
 );
 
 for (const path of derivedIndexProbes) {
-  const { verdict, stderr } = checkIgnore(path);
-  if (verdict === 'ignored') pass(`${path} is git-ignored`);
-  else if (verdict === 'not-ignored') fail(`${path} is NOT git-ignored — the derived index holds the same PII as the tracker`);
-  else fail(`${path}: git check-ignore could not answer — ${stderr}`);
+  const { verdict, stderr, via } = checkIgnoreThroughSymlinks(path);
+  if (verdict === 'ignored') {
+    pass(via ? `${path} is git-ignored (reached through the ${via} symlink; checked that entry)` : `${path} is git-ignored`);
+  } else if (verdict === 'not-ignored' && via) {
+    // Same call as the user-layer loop above: the index lives outside the repo,
+    // so staging the link commits its target path, not the tracker's contents.
+    warn(`${path} sits behind the ${via} symlink and that entry is NOT ignored — `
+      + `\`git add .\` would commit the link, not the index. Add a rule matching the entry itself, e.g. \`/${via}\`.`);
+  } else if (verdict === 'not-ignored') {
+    fail(`${path} is NOT git-ignored — the derived index holds the same PII as the tracker`);
+  } else {
+    fail(`${path}: git check-ignore could not answer — ${stderr}`);
+  }
 }
 
 // Not user-layer data, but the same mechanism: this one is about what a

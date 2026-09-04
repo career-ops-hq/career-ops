@@ -1,5 +1,5 @@
 /**
- * discover-ats.test.mjs — Systematic test suite for discover-ats.mjs
+ * tests/discover-ats.test.mjs — Systematic test suite for discover-ats.mjs
  *
  * Tests the pure, network-free functions with inline fixtures:
  * - deriveSlug (lowercasing, punctuation, edge cases)
@@ -13,7 +13,10 @@
  * - CLI behavior (--self-test, default preview never writes, --write opt-in,
  *   unknown --vendors, --help) via execFileSync — no live network.
  *
- * Run: node discover-ats.test.mjs
+ * Run: node test-all.mjs --only discover-ats
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
  *
  * Issue #1864 — github.com/career-ops-hq/career-ops
  */

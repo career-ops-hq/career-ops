@@ -23,6 +23,34 @@ export const SUB_BASELINE_SENIORITY = new Set([
   'associate', 'junior', 'entry', 'intern',
 ]);
 
+// A stated level — "Insurance Specialist II", "Registered Nurse 3", "Data
+// Engineer Level 2" — is the employer's own statement that this requisition is
+// not its sibling: a different pay band, scope and req number under one base
+// title. The tokenizer cannot see it. `w.length > 3` drops every roman numeral
+// up to VIII and every single digit, so "Insurance Specialist I" and
+// "Insurance Specialist II" tokenize identically and score a perfect Jaccard
+// ratio; merge-tracker then folds the second requisition into the first, keeps
+// the first's title, and the second stops existing. Measured on a real
+// 316-posting corpus: 15 titles (1 in 20) carry a level, and none of those
+// postings stated a requisition number the Notes-column guard (#1524) could
+// have caught instead.
+//
+// Roman and arabic forms fold onto one number so "Nurse II" and "Nurse 2" are
+// the same statement. Bounded at six: beyond that the roman forms start to
+// collide with real words and abbreviations, and no title needs them.
+export const LEVEL_TOKENS = new Map([
+  ['i', 1], ['ii', 2], ['iii', 3], ['iv', 4], ['v', 5], ['vi', 6],
+  ['1', 1], ['2', 2], ['3', 3], ['4', 4], ['5', 5], ['6', 6],
+]);
+
+// A level token standing as its own word, optionally introduced by "level" /
+// "grade" / "tier". The lookahead is what keeps "5G", "3.0" and "Web3" out —
+// a digit glued to a letter or a point is not a level — and the boundary
+// classes are what let "II (Remote)", "II, Days" and "II/III" read as levels
+// despite the suffix. A slash bounds both sides, so a posting hiring at either
+// of two levels states both.
+const LEVEL_RE = /(?:^|[\s,(\/\-\u2013\u2014])(?:level|lvl|grade|tier)?\s*(i{1,3}|iv|vi?|[1-6])(?=$|[\s,)\/\-\u2013\u2014])/giu;
+
 // Tokens that almost every role shares must not count as strong matching
 // signal. This set covers seniority, work mode, contract shape, locations, and
 // other words that frequently appear in titles without identifying the opening.
@@ -149,6 +177,21 @@ export function roleTokens(role) {
     .filter(w => (w.length > 3 || SHORT_SPECIALTY.has(w)) && !ROLE_STOPWORDS.has(w));
 }
 
+/**
+ * The levels a title states, as numbers, so roman and arabic forms compare equal.
+ *
+ * @param {string} title - Raw role title.
+ * @returns {Set<number>} Empty when the title states no level.
+ */
+export function extractLevels(title) {
+  const levels = new Set();
+  for (const m of normalizeTitle(title).matchAll(LEVEL_RE)) {
+    const level = LEVEL_TOKENS.get(m[1]);
+    if (level !== undefined) levels.add(level);
+  }
+  return levels;
+}
+
 function extractSeniorities(title) {
   return new Set(
     normalizeTitle(title)
@@ -199,6 +242,15 @@ export function roleFuzzyMatch(a, b) {
     const lone = senA.size > 0 ? senA : senB;
     if ([...lone].some(s => SUB_BASELINE_SENIORITY.has(s))) return false;
   }
+
+  // A level stated on BOTH sides must agree, on the same terms as seniority
+  // above: "Specialist I" vs "Specialist II" is two openings, while a level on
+  // one side alone is a loose rewrite of one opening ("Engineer" vs "Senior
+  // Engineer"), not evidence of two. Compared as sets, so a title that states
+  // two levels ("Engineer II/III") still matches either of them.
+  const lvlA = extractLevels(a);
+  const lvlB = extractLevels(b);
+  if (lvlA.size > 0 && lvlB.size > 0 && ![...lvlA].some(l => lvlB.has(l))) return false;
 
   const wordsA = [...new Set(roleTokens(a))];
   const wordsB = [...new Set(roleTokens(b))];

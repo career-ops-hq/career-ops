@@ -517,9 +517,9 @@
      browser's per-glyph fallback picks the first installed CJK face for kana
      and kanji. Mirrors the lang="ar" precedent above. */
   html[lang="ja"] body {
-    font-family: var(--font-family, 'Liberation Sans', 'Helvetica Neue', Arial, 'Hiragino Sans',
+    font-family: var(--font-family), 'Hiragino Sans',
       'Hiragino Kaku Gothic ProN', 'Yu Gothic', 'YuGothic', 'Noto Sans CJK JP',
-      'Noto Sans JP', Meiryo, 'MS PGothic', sans-serif);
+      'Noto Sans JP', Meiryo, 'MS PGothic', sans-serif;
   }
 
   html[lang="ja"] .header h1,
@@ -528,9 +528,9 @@
   html[lang="ja"] .project-title,
   html[lang="ja"] .competency-tag,
   html[lang="ja"] .skill-category {
-   font-family: var(--font-family, 'Liberation Sans', 'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
+   font-family: var(--font-family), 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
       'Yu Gothic', 'YuGothic', 'Noto Sans CJK JP', 'Noto Sans JP',
-      Meiryo, 'MS PGothic', sans-serif);
+      Meiryo, 'MS PGothic', sans-serif;
   }
 
   /* === Simplified Chinese typography ===
@@ -540,9 +540,9 @@
      punctuation from producing clipped or awkward PDF lines. */
   html[lang="zh-CN"] body,
   html[lang="zh"] body {
-    font-family: var(--font-family, 'Liberation Sans', 'Helvetica Neue', Arial, 'PingFang SC',
+    font-family: var(--font-family), 'PingFang SC',
       'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC',
-      'Noto Sans SC', 'Source Han Sans SC', sans-serif);
+      'Noto Sans SC', 'Source Han Sans SC', sans-serif;
     line-break: strict;
     word-break: normal;
     overflow-wrap: break-word;
@@ -562,9 +562,9 @@
   html[lang="zh"] .contact-row,
   html[lang="zh"] .competency-tag,
   html[lang="zh"] .skill-category {
-    font-family: var(--font-family, 'Liberation Sans', 'Helvetica Neue', Arial, 'PingFang SC',
+    font-family: var(--font-family), 'PingFang SC',
       'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC',
-      'Noto Sans SC', 'Source Han Sans SC', sans-serif);
+      'Noto Sans SC', 'Source Han Sans SC', sans-serif;
   }
 
   /* === Korean typography ===
@@ -574,9 +574,9 @@
      zh blocks above: Latin-capable faces first for stable ATS extraction, then
      platform-native and open-source Korean faces for Hangul glyphs. */
   html[lang="ko"] body {
-    font-family: var(--font-family, 'Liberation Sans', 'Helvetica Neue', Arial, 'Apple SD Gothic Neo',
+    font-family: var(--font-family), 'Apple SD Gothic Neo',
       'Malgun Gothic', 'Noto Sans CJK KR',
-      'Noto Sans KR', 'Nanum Gothic', sans-serif);
+      'Noto Sans KR', 'Nanum Gothic', sans-serif;
     line-break: strict;
     word-break: normal;
     overflow-wrap: break-word;
@@ -588,20 +588,24 @@
   html[lang="ko"] .project-title,
   html[lang="ko"] .contact-row,
   html[lang="ko"] .competency-tag,
-  html[lang="ko"] .skill-category,
   html[lang="ko"] .skill-category {
-    font-family: var(--font-family, 'Liberation Sans', 'Helvetica Neue', Arial, 'Apple SD Gothic Neo',
+    font-family: var(--font-family), 'Apple SD Gothic Neo',
       'Malgun Gothic', 'Noto Sans CJK KR',
-      'Noto Sans KR', 'Nanum Gothic', sans-serif);
+      'Noto Sans KR', 'Nanum Gothic', sans-serif;
   }
 
   /* === Traditional Chinese typography ===
      modes/zh-TW/ ships as a supported locale. html[lang="zh"] does not match
      lang="zh-TW", so it needs its own rule — and it must use TC faces, not the
-     Simplified stack above, which substitutes the wrong glyph forms. */
-  html[lang="zh-TW"] body,
+     Simplified stack above, which substitutes the wrong glyph forms.
+     var(--font-family) leads (profile override / Latin :root default), then the
+     TC faces sit in the font list itself — NOT in var()'s fallback slot, which
+     is dead because :root always defines --font-family. Same shape as
+     templates/ats/cv-template.ats.html. (The ja/zh-CN/ko blocks above still use
+     the older `var(--font-family, …)` form and have the same dead-slot bug —
+     out of scope here, tracked separately.) */
   html[lang="zh-TW"] body {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'PingFang TC',
+    font-family: var(--font-family), 'PingFang TC',
       'Microsoft JhengHei', 'Noto Sans CJK TC',
       'Noto Sans TC', 'Source Han Sans TC', sans-serif;
     line-break: strict;
@@ -615,9 +619,8 @@
   html[lang="zh-TW"] .project-title,
   html[lang="zh-TW"] .contact-row,
   html[lang="zh-TW"] .competency-tag,
-  html[lang="zh-TW"] .skill-category,
   html[lang="zh-TW"] .skill-category {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'PingFang TC',
+    font-family: var(--font-family), 'PingFang TC',
       'Microsoft JhengHei', 'Noto Sans CJK TC',
       'Noto Sans TC', 'Source Han Sans TC', sans-serif;
   }
