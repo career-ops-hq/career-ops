@@ -17,8 +17,8 @@
 //
 // Why this is a second guard and not a widening of no-root-suites.test.mjs:
 // that file asks "is there a root suite at all?", and the answer for
-// *-tests.mjs is a permanent yes. Three of the eight have concrete reasons to
-// stay (a flag-driven CI harness, a suite that asserts on its own filename, and
+// *-tests.mjs is a permanent yes. Three of them have concrete reasons to stay
+// (a flag-driven CI harness, a suite that asserts on its own filename, and
 // one carrying a per-script timeout the discovery path cannot express), so a
 // pattern widened to `-tests.mjs` would redden on files that are fine — the
 // precise failure that file's own header rejects. The property here is not
@@ -40,31 +40,43 @@
 // The MATCH RULE DIFFERS PER SURFACE, because the surfaces differ
 // syntactically and a single rule would be wrong on one of them:
 //
-//   - test-all.mjs: the name must appear QUOTED in non-comment code. Every real
-//     registration is `{ name: 'x-tests.mjs', ... }`; no prose mention is
-//     quoted. Both narrowings — comments stripped, quotes required — are the
-//     deleted tests/root-suite-registration.test.mjs verbatim, and they come
-//     from the CodeRabbit finding on #3303/#3305: a filename surviving in a
-//     comment after its invocation is gone must not read as registered. That
-//     is not hypothetical here. Reviewing #3735, a plain `grep -q` over each
-//     filename reported eight of eight registered; the eighth was
-//     test-all.mjs:6549, a comment.
+//   - test-all.mjs: the name must appear as a STRING LITERAL in the source.
+//     Every real registration is `{ name: 'x-tests.mjs', ... }`; a prose
+//     mention is not a literal. The question this answers is "is this name a
+//     value in the code?", and a comment holds no values by construction.
+//     The requirement comes from the CodeRabbit finding on #3303/#3305: a
+//     filename surviving in a comment after its invocation is gone must not
+//     read as registered. Not hypothetical — reviewing #3735, a plain
+//     `grep -q` over each filename reported eight of eight registered; the
+//     eighth was test-all.mjs:6549, a comment.
 //
-//   - workflows: the name must appear as the argument of a `node` invocation.
-//     In YAML it is a bare shell token (`run: node upgrade-tests.mjs
-//     --pr-gate`), so the quoted rule would match nothing at all and every
-//     workflow-run suite would read as unreachable. Requiring the `node` verb
-//     is also TIGHTER than quoting rather than looser: a trailing
-//     `# see upgrade-tests.mjs` cannot satisfy it, so the mention-vs-invocation
-//     narrowing survives without quote-aware YAML comment stripping, which was
-//     the cost the review flagged for this surface.
+//   - workflows: the name must be the FIRST COMMAND of a `run:` script. In
+//     YAML it is a bare shell token (`run: node upgrade-tests.mjs --pr-gate`),
+//     so the literal rule would match nothing and every workflow-run suite
+//     would read as unreachable.
 //
-// Known limitation, stated rather than papered over: an INDIRECT invocation —
+// The workflow rule was once "a `node` command anywhere at a command
+// position", which required knowing which text in a `run:` script was DATA.
+// Five consecutive review rounds each found a shell construct it got wrong
+// (#3765) — quoted spans, heredoc bodies, comments after control operators,
+// `<<\\EOF`, `<<1`, and `<<EOF-1` recorded as `EOF` so masking stopped at a
+// bare `EOF` line inside the body. Every one was a false GREEN, the exact bug
+// this file exists to prevent. The masking apparatus is gone: the first
+// command line is the one position that cannot be shell data, because a
+// heredoc body needs an earlier `<<` and a quoted span needs an earlier quote.
+// A rule that cannot be wrong about shell quoting beats one that is accurate
+// only once someone has finished writing a shell lexer inside a test.
+//
+// Known limitations, stated rather than papered over. An INDIRECT invocation —
 // an npm script, a composite action, a shell wrapper — matches neither rule and
-// reports as unreachable. That is the safe direction. A false red is read and
-// resolved by whoever added it; a false green is the bug this file prevents.
+// reports as unreachable, and so does a `node` call that is not the first
+// command of its step (`npm ci && node x-tests.mjs`, or a second line of a
+// block scalar). Both are the safe direction: a false red is read and resolved
+// by whoever wrote the workflow, and the remedy is a step of its own. A false
+// green is the bug this file prevents.
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
+import * as yaml from 'js-yaml';
 import { pass, fail, ROOT } from './helpers.mjs';
 
 console.log('\ntest-all.mjs — root -tests.mjs suites are reachable');
@@ -124,20 +136,12 @@ if (rootOk) {
     // mechanism in this file — that list, an inline run(), a future glob —
     // names the file, and the question is "does anything run this", not "which
     // section does".
-    const code = readFileSync(join(ROOT, 'test-all.mjs'), 'utf-8')
-      .replace(/\/\*[\s\S]*?\*\//g, ' ') // block comments
-      .replace(/^\s*\/\/.*$/gm, ' '); // whole-line comments
+    const literals = stringLiterals(readFileSync(join(ROOT, 'test-all.mjs'), 'utf-8'));
 
-    const QUOTES = new Set(["'", '"', '`']);
-    /** True when `name` appears quoted in executable code, optionally behind a path. */
-    const registeredInHarness = (name) => {
-      for (let i = code.indexOf(name); i !== -1; i = code.indexOf(name, i + 1)) {
-        const before = code[i - 1];
-        const after = code[i + name.length];
-        if (QUOTES.has(after) && (QUOTES.has(before) || before === '/')) return true;
-      }
-      return false;
-    };
+    // `'x-tests.mjs'`, `'./x-tests.mjs'`, and `'x-tests.mjs --flag'` all count;
+    // the scripts list splits its own entries on whitespace.
+    const registeredInHarness = (name) =>
+      literals.some((v) => v === name || v.startsWith(`${name} `) || v.endsWith(`/${name}`));
 
     // ── Surface 2: node invocations in the workflows ─────────────────────────
     // .github/ ships to installs (SYSTEM_PATHS, update-system.mjs:432), so this
@@ -146,14 +150,22 @@ if (rootOk) {
     // for the wrong reason and send the reader looking for a missing
     // registration that was never missing.
     const WORKFLOWS = join(ROOT, '.github', 'workflows');
-    let workflowText = '';
+    const runScripts = [];
     let workflowsRead = 0;
     let workflowErr = null;
     try {
       for (const entry of readdirSync(WORKFLOWS, { withFileTypes: true })) {
         if (!entry.isFile() && !entry.isSymbolicLink()) continue;
         if (!/\.ya?ml$/.test(entry.name)) continue;
-        workflowText += readFileSync(join(WORKFLOWS, entry.name), 'utf-8') + '\n';
+        const text = readFileSync(join(WORKFLOWS, entry.name), 'utf-8');
+        // Parsed, not string-scanned: the parser drops `#` comments for free,
+        // and `run:` is the only key that actually executes anything.
+        try {
+          runScripts.push(...runCommands(yaml.load(text)));
+        } catch (err) {
+          workflowErr = `${entry.name}: ${err.message}`;
+          break;
+        }
         workflowsRead++;
       }
     } catch (err) {
@@ -163,18 +175,14 @@ if (rootOk) {
     if (workflowErr) {
       warnOrFailWorkflows(workflowErr);
     } else {
-      pass(`${workflowsRead} workflow file(s) read as the second run surface`);
+      pass(`${workflowsRead} workflow file(s) read as the second run surface (${runScripts.length} run: scripts)`);
     }
 
-    /** True when `name` is the target of a `node` invocation in any workflow. */
-    const invokedByWorkflow = (name) => {
-      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      return new RegExp(`node\\s+(?:\\.[\\\\/])?${escaped}(?=\\s|$)`, 'm').test(workflowText);
-    };
+    const invokedByWorkflow = (name) => invokesNode(runScripts, name);
 
     const unreachable = suites.filter((n) => !registeredInHarness(n) && !invokedByWorkflow(n));
     if (unreachable.length === 0) {
-      pass(`every root-level *-tests.mjs is reachable — quoted in test-all.mjs, or invoked by a workflow (${suites.length} checked)`);
+      pass(`every root-level *-tests.mjs is reachable — a string literal in test-all.mjs, or a node invocation in a workflow (${suites.length} checked)`);
     } else {
       fail(
         `${unreachable.length} root-level suite(s) are never run — nothing in test-all.mjs or .github/workflows names them:\n` +
@@ -192,4 +200,222 @@ function warnOrFailWorkflows(code) {
     `.github/workflows is unreadable (${code}) — the second run surface was not checked, so a workflow-run suite ` +
       'would be reported unreachable for the wrong reason',
   );
+}
+
+/**
+ * String literals in `src`, in source order.
+ *
+ * A scanner, not a regex strip. The first version removed whole-line and block
+ * comments and then required quote characters around the name, which still
+ * accepted a TRAILING `// registered 'foo-tests.mjs'` (CodeRabbit, #3765).
+ * Regex literals are skipped explicitly: test-all.mjs contains
+ * `/from ['"]node:test['"]/`, and treating that `'` as a string opener would
+ * swallow real code and change the answer.
+ */
+export function stringLiterals(src) {
+  const out = [];
+  let i = 0;
+  // A `/` starts a regex only where a value cannot already have ended; after
+  // an identifier, literal or `)`/`]` it is division.
+  let prev = '';
+  const regexPos = () => prev === '' || '([{,;:=!&|?+-*%~^<>'.includes(prev);
+  while (i < src.length) {
+    const c = src[i];
+    if (c === '/' && src[i + 1] === '/') {
+      while (i < src.length && src[i] !== '\n') i++;
+      continue;
+    }
+    if (c === '/' && src[i + 1] === '*') {
+      i += 2;
+      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) i++;
+      i += 2;
+      continue;
+    }
+    if (c === '/' && regexPos()) {
+      i++;
+      let inClass = false;
+      while (i < src.length) {
+        const d = src[i];
+        if (d === '\\') { i += 2; continue; }
+        if (d === '\n') break;
+        if (d === '[') inClass = true;
+        else if (d === ']') inClass = false;
+        else if (d === '/' && !inClass) { i++; break; }
+        i++;
+      }
+      prev = 'x';
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') {
+      i++;
+      let buf = '';
+      while (i < src.length && src[i] !== c) {
+        if (src[i] === '\\') { buf += src[i + 1] ?? ''; i += 2; continue; }
+        buf += src[i];
+        i++;
+      }
+      i++;
+      out.push(buf);
+      prev = 'x';
+      continue;
+    }
+    if (!/\s/.test(c)) prev = c;
+    i++;
+  }
+  return out;
+}
+
+/**
+ * The `run:` scripts of a parsed workflow: `jobs.<id>.steps[].run`, and only
+ * that.
+ *
+ * The first version walked the whole document for any key named `run`, which
+ * also collected `steps[].with.run` — an action INPUT that happens to be named
+ * `run` and executes nothing (CodeRabbit, #3765). Treating one as a command is
+ * a false green: the suite reads as reachable while nothing runs it.
+ * `defaults.run` escaped only because it is a mapping rather than a string,
+ * which is luck, not a rule. This walks the one path that executes.
+ */
+export function runCommands(doc) {
+  const out = [];
+  const jobs = doc && typeof doc === 'object' ? doc.jobs : null;
+  if (!jobs || typeof jobs !== 'object') return out;
+  for (const job of Object.values(jobs)) {
+    const steps = job && typeof job === 'object' ? job.steps : null;
+    if (!Array.isArray(steps)) continue;
+    for (const step of steps) {
+      if (step && typeof step === 'object' && typeof step.run === 'string') out.push(step.run);
+    }
+  }
+  return out;
+}
+
+/**
+ * The first COMMAND line of a shell script: the first line that is neither
+ * blank nor a whole-line comment.
+ *
+ * Line 1 is the one position in a script that cannot be shell data. A heredoc
+ * body needs a `<<` on an earlier line; a multi-line quoted span needs an
+ * earlier opening quote. So reading only the first command needs no shell
+ * lexing at all, and the whole class of bugs that comes with approximating one
+ * disappears with it.
+ */
+export function firstCommandLine(script) {
+  for (const line of String(script).split('\n')) {
+    const t = line.trim();
+    if (t === '' || t.startsWith('#')) continue;
+    return line;
+  }
+  return null;
+}
+
+/**
+ * True when `name` is the first command of any of `scripts`.
+ *
+ * DELIBERATELY STRICTER THAN THE SHELL. `npm ci && node x-tests.mjs` and a
+ * `node` call on the second line of a block scalar are real invocations that
+ * this reports as unreachable.
+ *
+ * That trade is the point. The previous version matched a `node` command
+ * anywhere at a command position, which meant it had to know which text in a
+ * `run:` script was data — and five consecutive review rounds each found a
+ * shell construct it got wrong (#3765): quoted spans, heredoc bodies, comments
+ * after control operators, `<<\\EOF`, `<<1`, and `<<EOF-1` recorded as `EOF`,
+ * which stopped masking at a bare `EOF` line inside the body and exposed
+ * everything after it. Every one of those was a false GREEN — a suite reading
+ * as reachable while nothing ran it, which is the exact bug this file exists to
+ * prevent. A rule that cannot be wrong about shell quoting beats a rule that is
+ * accurate once someone has finished writing a shell lexer in a test.
+ *
+ * The cost is false REDS, and this file already takes that direction for
+ * indirect invocations: a false red is read and resolved by whoever wrote the
+ * workflow, and the fix is to put the invocation in its own step. All three
+ * upgrade-tests.mjs steps are already `run: node upgrade-tests.mjs --<flag>`.
+ */
+export function invokesNode(scripts, name) {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(String.raw`^\s*node\s+(?:\.[\\/])?${esc}(?=[\s;)&|]|$)`);
+  return scripts.some((sc) => {
+    const first = firstCommandLine(sc);
+    return first !== null && re.test(first);
+  });
+}
+
+// ── Fixtures for the two match rules ────────────────────────────────────────
+// The rules ARE the guard: one that silently loosens turns this file into the
+// false green it exists to prevent. Both directions are pinned — the shapes
+// that must NOT count, and the accepted false reds, so that narrowing the
+// workflow rule to the first command stays a deliberate choice on the record
+// rather than something a later edit quietly undoes.
+const HARNESS_CASES = [
+  ["{ name: 'x-tests.mjs', expectExit: 0 },", true, 'a real registration'],
+  ["run(NODE, ['./x-tests.mjs']);", true, 'a path-qualified invocation'],
+  ["{ name: 'x-tests.mjs --pr-gate' },", true, 'a registration carrying flags'],
+  ['// see x-tests.mjs for the sandbox pattern', false, 'a whole-line comment'],
+  ["const a = 1; // replaced by 'x-tests.mjs'", false, 'a TRAILING comment (#3765)'],
+  ['/* x-tests.mjs used to live here */', false, 'a block comment'],
+  ['fail(`x-tests.mjs is gone`);', true, 'a template literal is still a literal'],
+];
+const WORKFLOW_CASES = [
+  ['node x-tests.mjs --pr-gate', true, 'the first command'],
+  ['  node x-tests.mjs', true, 'indented'],
+  ['node ./x-tests.mjs', true, 'path-qualified'],
+  ['node x-tests.mjs; echo ok', true, 'a trailing separator is a word terminator'],
+  ['\n\nnode x-tests.mjs', true, 'leading blank lines are skipped'],
+  ['# set the gate\nnode x-tests.mjs', true, 'a leading comment line is skipped'],
+  ['echo node x-tests.mjs', false, 'an echo argument is not a command'],
+  ['# node x-tests.mjs', false, 'a commented-out invocation'],
+  ['node xx-tests.mjs', false, 'a longer sibling name'],
+  ['cat <<EOF\nnode x-tests.mjs\nEOF', false, 'a heredoc body cannot be the first line'],
+  ['cat <<1\nnode x-tests.mjs\n1', false, 'nor can a numeric-delimiter heredoc body'],
+  // The sharpest case the masking version got wrong: it recorded `EOF` as the
+  // delimiter of `<<EOF-1`, stopped at the bare `EOF` INSIDE the body, and
+  // exposed everything after it. Kept as a fixture because it is the one that
+  // would bite hardest if the matching strategy ever widens again.
+  ['cat <<EOF-1\nEOF\nnode x-tests.mjs\nEOF-1', false, 'a partial delimiter match cannot expose a body line'],
+  ['MSG="note\nnode x-tests.mjs --flag"', false, 'nor a quoted span opened earlier'],
+  // Accepted false REDS. Each is a real invocation the strict rule declines to
+  // see; the remedy is a step of its own, and the alternative is a shell lexer.
+  ['npm ci && node x-tests.mjs', false, 'chained after another command (accepted false red)'],
+  ['npm ci\nnode x-tests.mjs', false, 'on a later line (accepted false red)'],
+];
+// runCommands must read only the one path that executes. `with.run` is an
+// action input; `defaults.run` is a mapping of shell settings.
+const WORKFLOW_DOC = {
+  defaults: { run: { shell: 'bash' } },
+  jobs: {
+    build: {
+      steps: [
+        { run: 'node x-tests.mjs --pr-gate' },
+        { uses: 'actions/setup-node@v4', with: { run: 'node y-tests.mjs' } },
+      ],
+    },
+  },
+};
+
+let ruleFailures = [];
+for (const [src, want, label] of HARNESS_CASES) {
+  const lits = stringLiterals(src);
+  const got = lits.some((v) => v === 'x-tests.mjs' || v.startsWith('x-tests.mjs ') || v.endsWith('/x-tests.mjs'));
+  if (got !== want) ruleFailures.push(`harness rule: ${label} → ${got}, want ${want}`);
+}
+for (const [src, want, label] of WORKFLOW_CASES) {
+  const got = invokesNode([src], 'x-tests.mjs');
+  if (got !== want) ruleFailures.push(`workflow rule: ${label} → ${got}, want ${want}`);
+}
+// A regex literal containing quotes must not derail the scanner — test-all.mjs
+// has exactly this shape and it decides every harness answer below it.
+if (stringLiterals(`const re = /from ['"]node:test['"]/; const n = 'x-tests.mjs';`).includes('x-tests.mjs') !== true) {
+  ruleFailures.push('harness rule: a regex literal containing quotes swallowed the code after it');
+}
+
+const collected = runCommands(WORKFLOW_DOC);
+if (collected.length !== 1 || collected[0] !== 'node x-tests.mjs --pr-gate') {
+  ruleFailures.push(`runCommands read ${JSON.stringify(collected)} — expected only the steps[].run command (with.run and defaults.run are not commands)`);
+}
+
+if (ruleFailures.length === 0) {
+  pass(`both match rules hold against ${HARNESS_CASES.length + WORKFLOW_CASES.length + 2} fixtures (comments, echo args, heredoc bodies and with.run do NOT count as reachable)`);
+} else {
+  fail(`${ruleFailures.length} match-rule fixture(s) failed:\n` + ruleFailures.map((f) => `    ${f}`).join('\n'));
 }
