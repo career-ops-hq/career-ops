@@ -43,7 +43,10 @@ const fakeTargetSource = (paths) =>
 
 // ── 2. FETCH_HEAD unreadable degrades to the current manifest, never throws ──
 {
-  const ctx = { git: () => { throw new Error('no FETCH_HEAD (consumed by a later fetch)'); } };
+  const ctx = {
+    git: () => { throw new Error('no FETCH_HEAD (consumed by a later fetch)'); },
+    warn: () => {},
+  };
 
   let threw = false;
   let paths = null;
@@ -59,6 +62,47 @@ const fakeTargetSource = (paths) =>
   }
 }
 
+// ── 2b. …and says so, instead of degrading silently into a "Rollback
+//    complete" that looks identical to a clean run (#3782 review) ──
+{
+  const warnings = [];
+  const ctx = {
+    git: () => { throw new Error('unable to read tree (corrupt object store)'); },
+    warn: (msg) => warnings.push(String(msg)),
+  };
+
+  rollbackSystemPaths(ctx);
+  const notice = warnings.find((w) => w.includes('FETCH_HEAD'));
+  if (warnings.length === 1 && notice && /left behind|leftover/i.test(notice)
+      && notice.includes('corrupt object store')) {
+    pass('the degraded path warns once, naming the underlying git failure and the risk of leftovers');
+  } else {
+    fail(`#2b expected one warning naming the git failure, got ${JSON.stringify(warnings)}`);
+  }
+}
+
+// ── 2c. The healthy path stays silent — the notice must mean something ──
+{
+  const warnings = [];
+  const ctx = {
+    git: (...args) => {
+      if (args[0] === 'show' && args[1] === 'FETCH_HEAD:update-system.mjs') {
+        return fakeTargetSource(['AGENTS.md']);
+      }
+      throw new Error(`unexpected git call: ${args.join(' ')}`);
+    },
+    warn: (msg) => warnings.push(String(msg)),
+    userPaths: ['cv.md', 'data/'],
+  };
+
+  rollbackSystemPaths(ctx);
+  if (warnings.length === 0) {
+    pass('a readable target manifest warns about nothing');
+  } else {
+    fail(`#2c expected no warnings on the healthy path, got ${JSON.stringify(warnings)}`);
+  }
+}
+
 // ── 3. A target predating update-system.mjs (empty SYSTEM_PATHS match) also degrades ──
 {
   const ctx = {
@@ -68,6 +112,7 @@ const fakeTargetSource = (paths) =>
       }
       throw new Error(`unexpected git call: ${args.join(' ')}`);
     },
+    warn: () => {},
   };
 
   const paths = rollbackSystemPaths(ctx);

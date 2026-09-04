@@ -2631,22 +2631,35 @@ export function isSafeManifestPath(path, userPaths = effectiveUserPaths()) {
  * follow: a manifest lookup this system cannot compute degrades the result,
  * never the operation.
  *
- * @param {{git?: Function, userPaths?: string[]}} [ctx] - injection points for
- *   tests: `git` defaults to the real `git()`; `userPaths` defaults to
- *   `isSafeManifestPath()`'s own default (`effectiveUserPaths()`, which reads
- *   the developer's real `config/local-paths.txt`) — pass a fixed fixture to
- *   keep a test hermetic instead of depending on local dev state.
+ * @param {{git?: Function, userPaths?: string[], warn?: Function}} [ctx] -
+ *   injection points for tests: `git` defaults to the real `git()`;
+ *   `userPaths` defaults to `isSafeManifestPath()`'s own default
+ *   (`effectiveUserPaths()`, which reads the developer's real
+ *   `config/local-paths.txt`) — pass a fixed fixture to keep a test hermetic
+ *   instead of depending on local dev state; `warn` defaults to
+ *   `console.warn` and receives the one degraded-path notice.
  * @returns {string[]}
  */
 export function rollbackSystemPaths(ctx = {}) {
   const runGit = ctx.git || git;
+  const warn = ctx.warn || console.warn;
   let targetSystemPaths = [];
   try {
     const targetUpdaterSource = runGit('show', 'FETCH_HEAD:update-system.mjs');
     targetSystemPaths = extractArrayFromSource(targetUpdaterSource, 'SYSTEM_PATHS')
       .filter((path) => isSafeManifestPath(path, ctx.userPaths));
-  } catch {
-    // No FETCH_HEAD, or a target predating update-system.mjs.
+  } catch (err) {
+    // Degraded — and nothing downstream can tell WHY. A consumed FETCH_HEAD is
+    // expected and harmless; a git timeout or a corrupt object store is not,
+    // and both land here identically. Rollback continues either way on
+    // SYSTEM_PATHS + BOOTSTRAP_PATHS alone and then prints "Rollback complete",
+    // so without this line the one case where a file the failed update added
+    // is knowingly left behind looks exactly like a clean run (#3782 review).
+    warn(
+      `Note: could not read the target manifest from FETCH_HEAD (${err.message}). `
+      + 'Continuing with the current manifest only — a file the failed update '
+      + 'added may be left behind; check `git status` for untracked leftovers.',
+    );
   }
   return mergePathLists(SYSTEM_PATHS, targetSystemPaths, BOOTSTRAP_PATHS);
 }
