@@ -360,6 +360,27 @@ try {
   }
 
   {
+    // Regression (#3739 review): secRe used to only match a QUOTED
+    // win0divHRS_SCH_PSTDSC_row$N id, unlike parseSearchPage()'s rowRe (and
+    // this file's own header note) which already tolerate PeopleSoft's
+    // observed unquoted-id markup. On a tenant rendering the section
+    // container id unquoted, sectionIndices stayed empty and descriptionText
+    // silently came back '' — valid:true, no error, just no description.
+    const unquotedSectionHtml = `<div id="HRS_SCH_WRK2_HRS_JOB_OPENING_ID">JR00012345</div>
+      <span id="HRS_SCH_WRK2_POSTING_TITLE">Instructional Designer</span>
+      <div id=win0divHRS_SCH_PSTDSC_row$0>
+        <span id="HRS_SCH_WRK_DESCR100$0lbl">Description</span>
+        <div id="HRS_SCH_PSTDSC_DESCRLONG$0"><p>Unquoted section body text</p></div>
+      </div>`;
+    const detail = parseJobDetail(unquotedSectionHtml, 'JR00012345');
+    if (detail.valid && detail.sections.length === 1 && detail.descriptionText.includes('Unquoted section body text')) {
+      pass('parseJobDetail() extracts a description from an unquoted win0divHRS_SCH_PSTDSC_row$N section id');
+    } else {
+      fail(`parseJobDetail() unquoted section id failed: ${JSON.stringify(detail)}`);
+    }
+  }
+
+  {
     // Same fixture, wrong expected id — must reject, not misattribute content.
     const detail = parseJobDetail(detailFixture, 'JR00099999');
     if (detail.valid === false && detail.reason === 'job-id-mismatch' && detail.jobId === 'JR00012345') {
@@ -610,6 +631,35 @@ try {
       pass('fetch() reports pagination-ceiling-reached when max_pages stops an incomplete sweep');
     } else {
       fail(`fetch() pagination ceiling reason wrong: ${JSON.stringify(jobs.peoplesoftIncomplete)}`);
+    }
+  }
+
+  {
+    // Regression (#3739 review): max_pages is documented and named as a
+    // TOTAL page count (same field, same meaning, as every other paginating
+    // provider), but fetch() always performs the initial GET first — so
+    // max_pages: 1 must mean exactly 1 page total: the initial GET only,
+    // zero "load more" POSTs. resolveMaxLoadMore() used to pass max_pages
+    // straight through as the ADDITIONAL-request count, so max_pages: 1
+    // actually allowed one extra POST (2 pages fetched) — an off-by-one
+    // between the field's name/semantics and what it did.
+    const firstPage = `<form name="win0" action="/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL">
+      <span id="win0divHRS_AGNT_RSLT_Irowcnt$0">1-1 of 3 Results</span>
+      <li id="HRS_AGNT_RSLT_I$0_row_0"><a id="SCH_JOB_TITLE$0">Only Role</a><span id="HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID$0">ONLY</span><span id="LOCATION$0">Remote</span></li>
+      </form>`;
+    let calls = 0;
+    const ctx = {
+      sleep: async () => {},
+      fetchResponse: async () => {
+        calls++;
+        return new Response(firstPage, { status: 200 }); // a 2nd call would be a bug either way
+      },
+    };
+    const jobs = await peoplesoft.fetch({ name: 'ExampleU', careers_url: SEARCH_URL, max_pages: 1 }, ctx);
+    if (calls === 1 && jobs.length === 1) {
+      pass('fetch() treats max_pages:1 as 1 page TOTAL — the initial GET only, zero load-more requests');
+    } else {
+      fail(`fetch() max_pages:1 should make exactly 1 request and return 1 job: calls=${calls} jobs=${jobs.length}`);
     }
   }
 
