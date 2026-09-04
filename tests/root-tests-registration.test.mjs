@@ -137,12 +137,12 @@ if (rootOk) {
     // mechanism in this file — that list, an inline run(), a future glob —
     // names the file, and the question is "does anything run this", not "which
     // section does".
-    const literals = stringLiterals(readFileSync(join(ROOT, 'test-all.mjs'), 'utf-8'));
+    const harnessSrc = readFileSync(join(ROOT, 'test-all.mjs'), 'utf-8');
 
     // harnessMatches is defined once, below, and used by BOTH the live check
     // and the fixtures — see the note there for why a second copy is worse
     // than useless.
-    const registeredInHarness = (name) => harnessMatches(literals, name);
+    const registeredInHarness = (name) => harnessMatches(registeredNames(harnessSrc), name);
 
     // ── Surface 2: node invocations in the workflows ─────────────────────────
     // .github/ ships to installs (SYSTEM_PATHS, update-system.mjs:432), so this
@@ -183,7 +183,7 @@ if (rootOk) {
 
     const unreachable = suites.filter((n) => !registeredInHarness(n) && !invokedByWorkflow(n));
     if (unreachable.length === 0) {
-      pass(`every root-level *-tests.mjs is reachable — a string literal in test-all.mjs, or a node invocation in a workflow (${suites.length} checked)`);
+      pass(`every root-level *-tests.mjs is reachable — a scripts registration in test-all.mjs, or a node invocation in a workflow (${suites.length} checked)`);
     } else {
       fail(
         `${unreachable.length} root-level suite(s) are never run — nothing in test-all.mjs or .github/workflows names them:\n` +
@@ -343,24 +343,42 @@ export function invokesNode(scripts, name) {
 }
 
 /**
- * Whether `name` is registered among `literals` — the string literals of
- * test-all.mjs. `'x-tests.mjs'`, `'./x-tests.mjs'` and `'x-tests.mjs --flag'`
- * all count; the scripts list splits its own entries on whitespace.
+ * Whether `name` is REGISTERED in `src` — the source of test-all.mjs.
  *
- * ONE definition, used by the live check and by the fixtures below. A second
- * copy in the fixture loop is worse than no fixtures at all: it keeps passing
- * while the rule it claims to pin drifts away from it. Measured on this branch
- * by @artemtrofymenko — dropping the `endsWith` clause from the live rule left
- * all 24 fixtures green, including the path-qualified case that exists to
- * cover exactly that clause, because nothing registered today is
- * path-qualified. The fixtures were reporting on a rule that had stopped being
- * the rule.
+ * A registration is the `name:` value of a `scripts` entry:
+ *
+ *     { name: 'updater-migration-tests.mjs', expectExit: 0 },
+ *     { name: 'contacts.mjs --self-test', expectExit: 0 },
+ *
+ * so the value may carry flags after the filename. Nothing else counts.
+ *
+ * This used to accept ANY string literal containing the name, on the reasoning
+ * that a suite reached by any mechanism at all names the file, and the question
+ * is "does anything run this" rather than "which section does". That is a nice
+ * property and it is not worth what it costs: a filename in an error message,
+ * a log line or a doc string is a literal too, so
+ * `fail(\`x-tests.mjs is gone\`)` read as a registration (CodeRabbit, #3765) —
+ * a suite named only where it is reported MISSING counted as evidence it runs.
+ * Latent rather than live at the time (test-all.mjs builds those messages by
+ * interpolating `${name}`, so no such literal existed), but it is the same
+ * false-GREEN class as the comment mention this file already rejects, and the
+ * whole point here is that a mention is not an invocation.
+ *
+ * So the rule is narrowed the same way the workflow rule was: read the one
+ * mechanism that actually registers something. A suite wired up some future
+ * way reports unreachable, which is a false RED — read and resolved by whoever
+ * wired it, and the safe direction. Comments cannot satisfy it either: a
+ * commented-out entry is not parsed as a property here because the literal
+ * scanner skips comments before this looks at anything.
  */
-// A hoisted `function`, deliberately, not `const`: the live check above runs
-// at module top level BEFORE this line is reached, and a const would be in the
-// temporal dead zone there (ReferenceError, contained as a suite failure).
 export function harnessMatches(literals, name) {
-  return literals.some((v) => v === name || v.startsWith(`${name} `) || v.endsWith(`/${name}`));
+  return literals.some((v) => v === name || v.startsWith(`${name} `));
+}
+
+/** The `name:` values of every scripts entry in test-all.mjs source. */
+export function registeredNames(src) {
+  const scan = src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1 ');
+  return Array.from(scan.matchAll(/\bname:\s*(['"`])([^'"`]+)\1/g), (m) => m[2]);
 }
 
 // ── Fixtures for the two match rules ────────────────────────────────────────
@@ -371,14 +389,15 @@ export function harnessMatches(literals, name) {
 // rather than something a later edit quietly undoes.
 const HARNESS_CASES = [
   ["{ name: 'x-tests.mjs', expectExit: 0 },", true, 'a real registration'],
-  ["run(NODE, ['./x-tests.mjs']);", true, 'a path-qualified invocation'],
   ["{ name: 'x-tests.mjs --pr-gate' },", true, 'a registration carrying flags'],
-  ['// see x-tests.mjs for the sandbox pattern', false, 'a whole-line comment'],
-  ["const a = 1; // replaced by 'x-tests.mjs'", false, 'a TRAILING comment (#3765)'],
-  ['/* x-tests.mjs used to live here */', false, 'a block comment'],
-  ['fail(`x-tests.mjs is gone`);', true, 'a template literal is still a literal'],
-];
-const WORKFLOW_CASES = [
+  ['{ name: "x-tests.mjs" },', true, 'a double-quoted registration'],
+  ["  { name:'x-tests.mjs' },", true, 'no space after the colon'],
+  ['// { name: \'x-tests.mjs\' },', false, 'a commented-out registration'],
+  ["fail(`x-tests.mjs is gone`);", false, 'a name in an error message (#3765)'],
+  ["console.log('ran x-tests.mjs');", false, 'a name in a log line'],
+  ["run(NODE, ['./x-tests.mjs']);", false, 'an invocation that is not a scripts entry (accepted false red)'],
+  ["{ name: 'xx-tests.mjs' },", false, 'a longer sibling name'],
+];const WORKFLOW_CASES = [
   ['node x-tests.mjs --pr-gate', true, 'the first command'],
   ['  node x-tests.mjs', true, 'indented'],
   ['node ./x-tests.mjs', true, 'path-qualified'],
@@ -417,7 +436,7 @@ const WORKFLOW_DOC = {
 
 let ruleFailures = [];
 for (const [src, want, label] of HARNESS_CASES) {
-  const got = harnessMatches(stringLiterals(src), 'x-tests.mjs');
+  const got = harnessMatches(registeredNames(src), 'x-tests.mjs');
   if (got !== want) ruleFailures.push(`harness rule: ${label} → ${got}, want ${want}`);
 }
 for (const [src, want, label] of WORKFLOW_CASES) {
@@ -436,7 +455,7 @@ if (collected.length !== 1 || collected[0] !== 'node x-tests.mjs --pr-gate') {
 }
 
 if (ruleFailures.length === 0) {
-  pass(`both match rules hold against ${HARNESS_CASES.length + WORKFLOW_CASES.length + 2} fixtures (comments, echo args, heredoc bodies and with.run do NOT count as reachable)`);
+  pass(`both match rules hold against ${HARNESS_CASES.length + WORKFLOW_CASES.length + 2} fixtures (comments, log lines, echo args, heredoc bodies and with.run do NOT count as reachable)`);
 } else {
   fail(`${ruleFailures.length} match-rule fixture(s) failed:\n` + ruleFailures.map((f) => `    ${f}`).join('\n'));
 }
