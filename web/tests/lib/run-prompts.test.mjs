@@ -11,6 +11,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildPrompt, isShellSafeCompanyName } from "../../src/lib/run-prompts.mjs";
 import { OPEN_MARK, CLOSE_MARK } from "../../src/lib/cv-envelope.mjs";
+import { OPEN_MARK as REPORT_OPEN, CLOSE_MARK as REPORT_CLOSE } from "../../src/lib/report-envelope.mjs";
 import { grantsWriteCapability, toolScopeFor } from "../../src/lib/claude-invocation.mjs";
 
 const ARGS = { input: "018", memory: "", today: "2026-08-04" };
@@ -159,77 +160,41 @@ test("isShellSafeCompanyName: refuses anything that could close the quote", () =
   assert.equal(isShellSafeCompanyName(undefined), false);
 });
 
-// ── the tracker-additions TSV row (#1298) ───────────────────────────────────
-//
-// The web is a WRITER of batch/tracker-additions/*.tsv, not just a reader of the
-// tracker. merge-tracker accepts 9 fields forever, so a stale template can never
-// go red — it just silently leaves every web-evaluated job out of the URL dedup.
-// Nothing else in this repo can catch that, which is why it is asserted here.
-
-/** The example row the evaluate prompt tells the agent to append. */
-function exampleTsvRow(prompt) {
-  const line = prompt.split("\n").find((l) => l.includes("\t"));
-  assert.ok(line, "the evaluate prompt must contain a literal tab-separated example row");
-  return line.trim().split("\t");
-}
-
-test("buildPrompt: the evaluate prompt's TSV row carries all 10 fields, url last", () => {
-  // Given an evaluate run
-  const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-04" });
-  const fields = exampleTsvRow(prompt);
-
-  // Then the row has the 10 fields merge-tracker reads, with the posting URL last
-  assert.equal(fields.length, 10, `expected 10 tab-separated fields, got ${fields.length}: ${JSON.stringify(fields)}`);
-  assert.match(fields[9], /posting URL/i, "the 10th field must be the posting URL");
-  // ...and the prose agrees, so the agent is not told "9" while shown 10
-  assert.match(prompt, /10 TAB-separated columns/);
-});
-
-test("buildPrompt: the evaluate prompt demands an EMPTY url field, never a placeholder", () => {
-  // Given merge-tracker's parseTsvExtras drops "N/A"/"-" precisely so they can't
-  // be misread as the row's LOCATION, and an unconditional template is one an
-  // agent actually follows
+test("buildPrompt: the evaluate prompt asks for the envelope and forbids saving", () => {
   const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-04" });
 
-  // Then the instruction says to write all 10 fields and leave the last empty
-  assert.match(prompt, /ALWAYS write all 10 fields/i);
-  assert.match(prompt, /EMPTY if there is no posting URL/i);
-  assert.match(prompt, /never "N\/A"/i);
+  assert.ok(prompt.includes(REPORT_OPEN), "evaluate prompt must name the opening marker");
+  assert.ok(prompt.includes(REPORT_CLOSE), "evaluate prompt must name the closing marker");
+  assert.match(prompt, /Do NOT save or edit any file/i);
 });
 
-// ── the posted: segment (#2692) ─────────────────────────────────────────────
-//
-// The dashboard's POSTED column parses this out of the tracker's Notes cell.
-// The date is interpolated by the server from what the scanner recorded, never
-// requested from the agent: modes/oferta.md is explicit that a guessed date is
-// worse than an absent one, because the column renders absent as `—` and would
-// render an invented one as a fresh requisition.
+test("buildPrompt: the evaluate prompt does not claim the agent has no write tools", () => {
+  const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-04" });
 
-test("buildPrompt: a known posting date becomes its own trailing segment", () => {
-  const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-14", postedAt: "2026-08-07" });
-  const fields = exampleTsvRow(prompt);
-
-  assert.equal(fields.length, 10, "the row must still carry all 10 fields");
-  // Canonical form, from the regex that CONSUMES it: separator-anchored `; `,
-  // label, colon, ISO date. A mid-sentence mention is deliberately not metadata.
-  assert.match(fields[8], /; posted: 2026-08-07$/);
+  assert.ok(!/no file-writing tools/i.test(prompt), "must not assert a capability the agent may have");
+  assert.ok(!/you have no .*tools/i.test(prompt), "must not assert a capability the agent may have");
 });
 
-test("buildPrompt: no known date writes NO segment, never a guess", () => {
-  for (const postedAt of [undefined, null, "", "unknown", "7 Aug 2026", "2026-8-7", "1999-01-01"]) {
-    const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-14", postedAt });
-    const fields = exampleTsvRow(prompt);
-    assert.equal(fields.length, 10, `field count changed for ${JSON.stringify(postedAt)}`);
-    assert.ok(!/posted:/.test(fields[8]), `wrote a posted segment for ${JSON.stringify(postedAt)}: ${fields[8]}`);
-  }
+test("buildPrompt: the evaluate prompt never tells the agent to persist files", () => {
+  const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-04" });
+
+  assert.ok(!/node reserve-report-num/.test(prompt), "evaluate prompt must not ask the agent to reserve a number");
+  assert.ok(!/node merge-tracker/.test(prompt), "evaluate prompt must not ask the agent to merge the tracker");
+  assert.ok(!/Write the full report to/.test(prompt), "evaluate prompt must not ask for a report file write");
+  assert.ok(!prompt.includes("\t"), "evaluate prompt must not carry a TSV template the agent would write");
 });
 
-test("buildPrompt: the row without a date is byte-identical to before the feature", () => {
-  // The segment is the ONLY difference between the two prompts, so a run with no
-  // recorded date cannot drift from what the CLI has always produced.
+test("buildPrompt: evaluate is read-only by tools as well as by instruction", () => {
+  assert.equal(grantsWriteCapability(toolScopeFor("evaluate")), false);
+  assert.match(buildPrompt({ kind: "evaluate", ...ARGS }), /Do NOT save or edit any file/i);
+});
+
+test("buildPrompt: postedAt does not change the evaluate prompt", () => {
+  // The scanner date is owned by report-persist.mjs. Putting it in the prompt
+  // would re-invite the agent to write a TSV row it no longer writes.
   const withDate = buildPrompt({ kind: "evaluate", input: "u", memory: "", today: "2026-08-14", postedAt: "2026-08-07" });
   const without = buildPrompt({ kind: "evaluate", input: "u", memory: "", today: "2026-08-14" });
-  assert.equal(withDate.replace("; posted: 2026-08-07", ""), without);
+  assert.equal(withDate, without);
 });
 
 // ── language.modes_dir / language.output ─────────────────────────────────────
