@@ -36,7 +36,11 @@
  *             value?: string, name?: string }} ElementFacts
  */
 
-const clean = (s) => (s || "").replace(/\s+/g, " ").trim().slice(0, 80);
+// Whitespace-collapsed, uncapped: what the guard classifies on.
+const collapse = (s) => (s || "").replace(/\s+/g, " ").trim();
+// The 80-char cap is for the snapshot line the planner reads, never for the
+// decision: a submit term past the cap must still be seen by the guard.
+const clean = (s) => collapse(s).slice(0, 80);
 
 /**
  * The label the planner is shown for an element, and therefore a string the
@@ -45,8 +49,10 @@ const clean = (s) => (s || "").replace(/\s+/g, " ").trim().slice(0, 80);
  * @param {ElementFacts} [facts]
  */
 export function snapshotLabel(facts = {}) {
-  return clean(facts.aria || facts.placeholder || facts.text || facts.value || facts.name);
+  return clean(labelSource(facts));
 }
+
+const labelSource = (facts) => facts.aria || facts.placeholder || facts.text || facts.value || facts.name;
 
 // Words that name the final action on a job application, in the languages the
 // portals we drive actually ship. Deliberately bounded: every entry here costs
@@ -100,11 +106,16 @@ export function isSubmitControl(facts = {}) {
   const type = (facts.type || "").toLowerCase();
   if (tag === "input" && (type === "submit" || type === "image")) return true;
   if (tag === "button" && (type === "submit" || (!facts.explicitType && facts.inForm))) return true;
-  const label = snapshotLabel(facts);
+  // Classified on the full label, not the 80-char snapshot line: a scripted
+  // control whose submit wording sits past the display cap still submits.
+  const label = collapse(labelSource(facts));
   // The visible text is tested even when an aria-label outranks it: markup that
   // labels a button reading "Submit application" as "Continue" would otherwise
   // hide the wording from the guard while still showing it to the user.
-  if (SUBMIT_RX.test(label) || SUBMIT_RX.test(clean(facts.text))) return true;
-  if (!label && tag === "button" && facts.inForm) return true;
+  if (SUBMIT_RX.test(label) || SUBMIT_RX.test(collapse(facts.text))) return true;
+  // No wording at all inside a form: an icon-only <button>, or an
+  // <input type="button"> that submits through its handler. Refused rather
+  // than guessed at.
+  if (!label && facts.inForm && (tag === "button" || (tag === "input" && type === "button"))) return true;
   return false;
 }

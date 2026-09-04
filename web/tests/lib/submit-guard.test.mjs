@@ -148,6 +148,31 @@ test("isSubmitControl: outside a form, an unlabelled button is allowed", () => {
   assert.equal(isSubmitControl(facts), false);
 });
 
+test("isSubmitControl: a submit term past the 80-char snapshot cap is still refused", () => {
+  // Given a scripted icon button whose only wording is a long aria-label that
+  // ends in the submit term, past the 80 chars the snapshot line keeps
+  const facts = { tag: "button", type: "button", explicitType: true, inForm: true,
+    aria: "By continuing you confirm the details above are accurate and complete and you agree to submit application" };
+
+  // When the guard classifies it
+  const refused = isSubmitControl(facts);
+
+  // Then the decision saw the whole label, even though the snapshot line is capped
+  assert.equal(refused, true);
+  assert.ok(snapshotLabel(facts).length <= 80);
+});
+
+test("isSubmitControl: an unlabelled input button inside a form is refused", () => {
+  // Given <input type="button"> with no text of its own, inside a form
+  const facts = { tag: "input", type: "button", explicitType: true, inForm: true };
+
+  // When the guard classifies it
+  const refused = isSubmitControl(facts);
+
+  // Then it is refused like an unlabelled <button>: its handler can submit
+  assert.equal(refused, true);
+});
+
 test("isSubmitControl: survives missing facts", () => {
   // Given a call with nothing to read (a page that changed under us)
 
