@@ -20,6 +20,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -64,23 +65,34 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   'requirement_importance',
 ]);
 
-// --- CLI args ---
 const args = process.argv.slice(2);
-const summaryMode = args.includes('--summary');
-const minThresholdIdx = args.indexOf('--min-threshold');
-const MIN_THRESHOLD = minThresholdIdx !== -1 && args[minThresholdIdx + 1] !== undefined
-  ? (Number.isNaN(parseInt(args[minThresholdIdx + 1])) ? 5 : parseInt(args[minThresholdIdx + 1]))
-  : 5;
 
-// Minimum per-vendor sample before a channel-yield recommendation fires. Kept
-// modest (small trackers) but high enough that one unlucky bucket isn't a claim.
-const minVendorNIdx = args.indexOf('--min-vendor-n');
+const KNOWN_FLAGS = ['--min-threshold', '--min-vendor-n', '--self-test', '--summary', '--help', '-h'];
+const VALUE_FLAGS = ['--min-threshold', '--min-vendor-n'];
+const USAGE = `Usage:
+  node analyze-patterns.mjs                       # analyze application patterns as JSON
+  node analyze-patterns.mjs --summary             # print a human-readable summary
+  node analyze-patterns.mjs --min-threshold <n>   # minimum submitted applications required (default: 5)
+  node analyze-patterns.mjs --min-vendor-n <n>    # minimum sample per vendor/channel (default: 8)
+  node analyze-patterns.mjs --self-test           # run the built-in consistency checks
+  node analyze-patterns.mjs --help                # show this message`;
+
+// --- CLI args ---
+const summaryMode = args.includes('--summary');
+const MIN_THRESHOLD = (() => {
+  const raw = flagValue(args, '--min-threshold');
+  if (raw === undefined) return 5;
+
+  const value = parseInt(raw, 10);
+  return Number.isNaN(value) ? 5 : value;
+})();
+
 const MIN_VENDOR_N = (() => {
-  if (minVendorNIdx === -1 || args[minVendorNIdx + 1] === undefined) return 8;
-  const n = parseInt(args[minVendorNIdx + 1], 10);
-  // Reject 0/negative: a floor of 0 makes sufficientSample always true and
-  // silently defeats the "don't claim on noise" guard the whole feature rests on.
-  return Number.isNaN(n) || n < 1 ? 8 : n;
+  const raw = flagValue(args, '--min-vendor-n');
+  if (raw === undefined) return 8;
+
+  const value = parseInt(raw, 10);
+  return Number.isNaN(value) || value < 1 ? 8 : value;
 })();
 
 // --- Status normalization (mirrors verify-pipeline.mjs) ---
@@ -1550,6 +1562,11 @@ function printSummary(result) {
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
 if (isMainModule(import.meta.url)) {
+  validateFlags(args, KNOWN_FLAGS, USAGE, {
+    valueFlags: VALUE_FLAGS,
+    requireOperand: true,
+  });
+
   if (args.includes('--self-test')) {
     runSelfTest();
   }
