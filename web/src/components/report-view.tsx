@@ -152,7 +152,8 @@ export function ReportView({
             // Identified by the heading, never by the letter: reading "whatever is
             // lettered F" as the verdict rendered the Interview Plan table into a
             // callout built for one sentence — in the canonical mode and in all
-            // eight localized `oferta.md` files alike (#3416). No mode writes a Verdict block today, so today there is
+            // eighteen localized modes alike (#3416). No mode writes a Verdict
+            // block today, so today there is
             // simply no callout and every block renders below.
             const verdict = sections.find((s) => isVerdictHeading(s.heading));
             const rest = sections.filter((s) => s !== verdict);

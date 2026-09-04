@@ -139,8 +139,8 @@ test("the Interview Plan at F is not a verdict", () => {
 });
 
 test("no localized mode heading is mistaken for a verdict", () => {
-  // All eight localized `oferta.md` files write Interview Plan at F, so this was
-  // never an English-only slip. A letter-based rule is wrong in every language at once.
+  // All eighteen localized modes write Interview Plan at F, so this was never an
+  // English-only slip. A letter-based rule is wrong in every language at once.
   for (const heading of [
     "F) Plan rozmów kwalifikacyjnych",
     "F) План співбесід",

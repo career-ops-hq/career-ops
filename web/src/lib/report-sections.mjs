@@ -82,9 +82,13 @@ export function authorLetter(heading) {
  * lettered F" as the verdict, but no mode has ever written a Verdict block:
  * the callout landed in #1535 when `modes/oferta.md` already read
  * `## F) Interview Plan`, so every report has rendered the Interview Plan
- * table into a callout built for one sentence (#3416). All eight localized
- * `oferta.md` files write Interview Plan at F too, so this was never an
- * English-only slip.
+ * table into a callout built for one sentence (#3416). All eighteen localized
+ * modes write Interview Plan at F too, so this was never an English-only slip.
+ * Counted by the property rather than the filename — `grep -rlE "^## F\\)" modes/`
+ * returns 19 (18 localized + canonical). Only eight of those are named
+ * `oferta.md`; the rest are `fursah.md`, `angebot.md`, `offre.md`, `naukri.md`,
+ * `lowongan.md`, `annuncio.md`, `kyujin.md`, `gonggo.md`, `vacature.md`,
+ * `is-ilani.md`. A sweep by expected filename misses exactly those.
  *
  * The marker is what the core actually promises: `cleanHeading` has always
  * stripped a trailing `(lead)` / `(verdict)`, which is a deliberate authoring
