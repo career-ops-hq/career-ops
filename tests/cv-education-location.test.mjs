@@ -104,6 +104,23 @@ try {
         pass(`${label}: no edu-location div when no entry has a location`);
       }
     }
+
+    // The location value must reach the page as text, never as markup — the
+    // builder routes it through escapeHtml() in both paths, and only this
+    // assertion keeps a future refactor from dropping that call for this field.
+    const injected = build(`${label}-escape`, {
+      ...BASE,
+      education: [{ title: 'B.S. Computer Science', org: 'State University', location: '<script>alert(1)</script>', year: '2020' }],
+    }, templateArg);
+    if (injected) {
+      if (injected.html.includes('<script>alert(1)</script>')) {
+        fail(`${label}: education location reached the output as raw markup`);
+      } else if (injected.html.includes('&lt;script&gt;alert(1)&lt;/script&gt;')) {
+        pass(`${label}: education location is HTML-escaped in the output`);
+      } else {
+        fail(`${label}: education location neither escaped nor raw in the output — check the render`);
+      }
+    }
   }
 } finally {
   try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
