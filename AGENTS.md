@@ -149,7 +149,8 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `hired-share.mjs` | Draft a Hired Wall story from the tracker and open a prefilled GitHub issue the user submits themselves; `--status` lists hires never asked; `--mark` records their answer permanently |
 | `jd-capture.mjs` | Resolves an archived JD in `jds/` by report number, matching padded and unpadded prefixes (`064-`, `64-`, `01-`). Consumed by `outcome.mjs`; written by `archive-posting.mjs --report=N`. Replaces rebuilding a capture's filename from today's date, which stopped resolving the next day |
 | `weekly-digest.mjs` | Rolls up `interview-prep/sessions/*.md` (default: current ISO week) into a per-company round summary, recurring competency-tag counts, and best-effort recurring 🔴 gaps from `question-bank.md` (JSON or `--summary`) |
-| `reports/` | Evaluation reports `{###}-{company-slug}-{YYYY-MM-DD}.md` — Blocks A-F + G (Posting Legitimacy) + Risk Summary + `## Machine Summary` YAML; header includes `**Legitimacy:** {tier}` |
+| `reports/` | Evaluation reports `{###}-{company-slug}-{YYYY-MM-DD}.md` — Blocks A-F + G (Posting Legitimacy) + Risk Summary + `## Machine Summary` YAML; header includes `**Legitimacy:** {tier}`; **REQUIRED:** a `## Job Description (archived verbatim)` section with the JD's verbatim text, or an equivalent `jds/` capture (#2789) |
+| `check-jd-archive.mjs` | Validates every `reports/*.md` has an archived JD — an embedded `## Job Description` section with substantive content, or a matching `jds/` capture resolved by report number via `jd-capture.mjs`; flags `missing-jd-archive`; read-only (JSON or `--summary` table output) |
 
 ### Plugins (optional)
 
@@ -440,26 +441,35 @@ If they say yes: run `node hired-share.mjs --report N --anonymity <their choice>
 **Cadence rules (hard):** one ask per hire, at outcome time. After an update, `node hired-share.mjs --status` may list hires never asked or marked "later" more than 30 days ago — at most ONE gentle mention, then respect the answer. Never remind on a schedule. Never mention the wall at `offer_received`: an offer can still fall through, and the ask belongs to the signed outcome only.
 
 **Privacy (hard):** salary is never part of a story. Company name only if the user writes it themselves. The share flow reads tracker data locally and writes only `data/.hired-share-state.json`; the only thing that ever leaves the machine is the issue the user submits from their own GitHub account.
+**JD archival is REQUIRED, not optional (#2789).** A report's `**URL:**` header is a live pointer, not an archive — it rots once a posting closes. Every report `oferta`/`pdf` writes MUST carry the JD's verbatim text in a `## Job Description (archived verbatim)` section (the primary mechanism — the report is the one artifact guaranteed to get written and tracked); a `jds/` capture named with `--report=N` is an acceptable alternative for a very long JD or a standalone `jd-skill-gap.mjs` run outside a full evaluation. `check-jd-archive.mjs` validates every `reports/*.md` has one or the other and is wired into `test-all.mjs`.
 - **RULE: After each batch of evaluations, run `node merge-tracker.mjs`** to merge tracker additions and avoid duplications.
 - **RULE: NEVER create new entries in applications.md if company+role already exists.** Update the existing entry.
 
 ### TSV Format for Tracker Additions
 
-One TSV file per evaluation at `batch/tracker-additions/{num}-{company-slug}.tsv`. Single line, 9 tab-separated columns plus an optional trailing `url`:
+One TSV file per evaluation at `batch/tracker-additions/{num}-{company-slug}.tsv`: a **header row of column labels**, then exactly one data row.
 
 ```
+num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
 {num}\t{date}\t{company}\t{role}\t{status}\t{score}/5\t{pdf_emoji}\t[{num}](reports/{num}-{slug}-{date}.md)\t{note}\t{url}
 ```
 
-**Column order (IMPORTANT -- status BEFORE score):** 1 `num` (integer) · 2 `date` (YYYY-MM-DD) · 3 `company` · 4 `role` · 5 `status` (canonical) · 6 `score` (`X.X/5`) · 7 `pdf` (`✅`/`❌`) · 8 `report` (markdown link, always **root-relative**: `[num](reports/...)`) · 9 `notes` (one line).
+**Always write the header (#3517).** With it, `merge-tracker.mjs` resolves every field by NAME through the same alias table as the tracker itself (`tracker-aliases.json`), so **column order carries no meaning** — write the fields in whatever order you like, as long as the labels sit above the values. Field meanings: `num` (integer) · `date` (YYYY-MM-DD) · `company` · `role` · `status` (canonical) · `score` (`X.X/5`) · `pdf` (`✅`/`❌`) · `report` (markdown link, always **root-relative**: `[num](reports/...)`) · `notes` (one line) · optional `via`, `location`, `url`.
 
-**Note:** In applications.md, score comes BEFORE status; `merge-tracker.mjs` handles the swap automatically.
+**Header rules** — each violation skips that file loudly rather than merging a shifted row:
 
-**Backfilled entries with no evaluation (#1799):** a row added retroactively without an evaluation must carry one of the recognized score sentinels — `N/A`, `—` (em dash), or `-` (hyphen) — never blank, never another placeholder. The column-swap guard (`looksLikeScoreCell` in `tracker-parse.mjs`, #1427) identifies the score column by content pattern (`X.X/5` or one of these sentinels); an unrecognized placeholder makes the row ambiguous and it is skipped with a warning.
+- Required labels: `num`, `date`, `company`, `role`, `score`, `status`, `pdf`, `report`. Optional: `notes`, `via`, `location`, `url`. Unrecognized labels are ignored with a warning.
+- Exactly one data row per file (one addition per file is what the merge loop assumes).
+- No label twice.
+- The value under `score` must still read as a score (`X.X/5`, or a sentinel `N/A` / `—` / `-`). This is corroboration, not disambiguation: values written in one order under labels written in another is the transposition bug wearing a header, so it is refused.
 
-**Optional Via field (#1596):** applications through an agency/recruiter append a **tagged** extra field `via={Agency}` (e.g. `via=Hays`) after notes — never positional; the tag is mandatory. A single untagged extra keeps its legacy meaning (location). Unknown end employer → `?` as company (locale-invariant marker, never "Confidential") + a descriptor in notes. `merge-tracker.mjs` rejects ambiguous extras loudly; `--migrate-via` adds the column to an existing tracker.
+**Headerless (legacy, still accepted):** 9 positional fields in the order `num date company role status score pdf report notes`, plus optional trailing fields. Note the transposition: `applications.md` shows **score before status**, the headerless TSV writes **status before score**, and `merge-tracker.mjs` reconciles them by identifying the score cell by content (`looksLikeScoreCell`, #1427). That has an undecidable case — `—` is both a score sentinel (#1799) and a status meaning Discarded (`normalize-statuses.mjs`), so a discarded, never-scored row carries `—` in both cells and is refused rather than guessed at. The header form has no such case, which is why it is the form to emit.
 
-**Optional posting URL — the deterministic dedup key:** append the posting URL as a trailing field. `merge-tracker.mjs` matches on it FIRST (normalized: tracking params stripped, host lowercased, fragment and trailing slash dropped), and only falls back to the report-number / entry-number / fuzzy company+role tiers for rows that have no URL. A confirmed URL mismatch on both sides is proof the rows are NOT duplicates, the same way a req-number mismatch is (#1524). Detected by its `http(s)://` prefix, so it is order-independent with the optional location field. Additive and backward-compatible: 9-column TSVs and trackers with no `URL` header column behave exactly as before. Backfill existing rows from their reports with `node merge-tracker.mjs --backfill-urls`.
+**Backfilled entries with no evaluation (#1799):** a row added retroactively without an evaluation must carry one of the recognized score sentinels — `N/A`, `—` (em dash), or `-` (hyphen) — never blank, never another placeholder. This holds for headed rows too: the sentinel is the tracker's own "no score" convention, not merely an aid to the headerless column-swap guard (`looksLikeScoreCell` in `tracker-parse.mjs`, #1427). In a headerless row an unrecognized placeholder makes score-vs-status ambiguous and the row is skipped with a warning.
+
+**Optional Via field (#1596):** with a header, `via` is an ordinary column carrying the agency name (`Hays`). Headerless, applications through an agency/recruiter append a **tagged** extra field `via={Agency}` (e.g. `via=Hays`) after notes — never positional; the tag is mandatory. A single untagged extra keeps its legacy meaning (location). Unknown end employer → `?` as company (locale-invariant marker, never "Confidential") + a descriptor in notes. `merge-tracker.mjs` rejects ambiguous extras loudly; `--migrate-via` adds the column to an existing tracker.
+
+**Optional posting URL — the deterministic dedup key:** label it `url` in the header, or (headerless) append it as a trailing field. `merge-tracker.mjs` matches on it FIRST (normalized: tracking params stripped, host lowercased, fragment and trailing slash dropped), and only falls back to the report-number / entry-number / fuzzy company+role tiers for rows that have no URL. A confirmed URL mismatch on both sides is proof the rows are NOT duplicates, the same way a req-number mismatch is (#1524). Detected by its `http(s)://` prefix, so it is order-independent with the optional location field. Additive and backward-compatible: 9-column headerless TSVs and trackers with no `URL` header column behave exactly as before. Backfill existing rows from their reports with `node merge-tracker.mjs --backfill-urls`.
 
 **Report link normalization:** the TSV always carries a root-relative `[num](reports/...)` link; `merge-tracker.mjs` rewrites it relative to the tracker's own directory (`../reports/...` at `data/applications.md`, `reports/...` at root) so links stay clickable. Idempotent; fix an existing tracker with `node merge-tracker.mjs --migrate` (#760).
 

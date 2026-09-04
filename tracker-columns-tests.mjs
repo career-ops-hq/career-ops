@@ -17,10 +17,11 @@
  *   3. The original 9-column layout still works unchanged (back-compat).
  */
 
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, utimesSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
+import { resolveTsvColumns } from './tracker-parse.mjs';
 import { fileURLToPath } from 'url';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -699,6 +700,399 @@ if (!HAS_WEB) {
     pass('web reader: row without a trailing pipe keeps its last cell');
   } else {
     fail(`web reader: dropped the last cell — web "${tailWeb && tailWeb.notes}" vs core "${tailCore && tailCore.notes}"`);
+  }
+}
+
+// ── Headed tracker additions (#3517) ───────────────────────────────────────
+// The TSV ingest format wrote status BEFORE score while applications.md shows
+// score BEFORE status, and the two were reconciled by identifying the score
+// cell by CONTENT (`looksLikeScoreCell`). That discriminator has an
+// undecidable case in this repo's own conventions: `—` is a score sentinel
+// (#1799) AND a status meaning Discarded (normalize-statuses.mjs), so a
+// discarded, never-scored row carries `—` in both cells and no content rule can
+// order them. Additions may now carry a HEADER row, after which columns resolve
+// by NAME through the same alias table as the tracker, and no order is
+// privileged. Headerless files keep the legacy positional path untouched.
+const HEADED_SCORE_FIRST_DASHES =
+  'num\tdate\tcompany\trole\tscore\tstatus\tpdf\treport\tnotes\n' +
+  '2\t2026-02-02\tGlobex\tManager\t—\t—\t❌\t—\tdiscarded, never scored\n';
+const HEADED_STATUS_FIRST_DASHES =
+  'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n' +
+  '2\t2026-02-02\tGlobex\tManager\t—\t—\t❌\t—\tdiscarded, never scored\n';
+const HEADERLESS_DASHES =
+  '2\t2026-02-02\tGlobex\tManager\t—\t—\t❌\t—\tdiscarded, never scored\n';
+
+// Like runScript, but merges stderr into the captured output. merge-tracker
+// exits 0 when it SKIPS a malformed addition (other files in the run still
+// merge), and every refusal message is a console.warn — so the assertions below
+// would see nothing at all on the path they exist to check.
+function runCaptured(script, sandbox) {
+  const r = spawnSync(NODE, [join(ROOT, script)], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      CAREER_OPS_TRACKER: sandbox.tracker,
+      CAREER_OPS_ADDITIONS: sandbox.additions,
+      CAREER_OPS_TRACKER_LOCK: sandbox.lock,
+      ...(sandbox.reports ? { CAREER_OPS_REPORTS: sandbox.reports } : {}),
+    },
+    encoding: 'utf-8',
+    timeout: 30000,
+  });
+  return { code: r.status ?? 1, stdout: `${r.stdout || ''}${r.stderr || ''}` };
+}
+
+// Merge one addition into a 9-column tracker and return { merge, row, cells }.
+// cells: ['', num, date, company, role, score, status, pdf, report, notes, '']
+function mergeOne(tsv, name = '2-globex.tsv') {
+  const sb = makeSandbox(HEADER_9, { [name]: tsv });
+  const merge = runCaptured('merge-tracker.mjs', sb);
+  const row = dataRows(sb.tracker).find(l => l.includes('Globex')) || null;
+  const cells = row ? row.split('|').map(s => s.trim()) : [];
+  rmSync(sb.dir, { recursive: true, force: true });
+  return { merge, row, cells };
+}
+
+// The exact case the maintainer named: `—` / `—` in BOTH orders. Both merge
+// under a header; neither is decidable without one.
+{
+  const scoreFirst = mergeOne(HEADED_SCORE_FIRST_DASHES);
+  if (scoreFirst.merge.code === 0 && scoreFirst.row) {
+    pass('headed addition, score-first, — / — in both cells merges');
+  } else {
+    fail(`headed score-first — / — merges (code ${scoreFirst.merge.code})\n${scoreFirst.merge.stdout}`);
+  }
+
+  const statusFirst = mergeOne(HEADED_STATUS_FIRST_DASHES);
+  if (statusFirst.merge.code === 0 && statusFirst.row) {
+    pass('headed addition, status-first, — / — in both cells merges');
+  } else {
+    fail(`headed status-first — / — merges (code ${statusFirst.merge.code})\n${statusFirst.merge.stdout}`);
+  }
+
+  // Same bytes without the header: still refused, loudly. This is the
+  // regression the header form exists to remove — pinned so the headerless
+  // path is never "fixed" by guessing an order.
+  const headerless = mergeOne(HEADERLESS_DASHES);
+  if (!headerless.row && /cannot tell score from status/.test(headerless.merge.stdout)) {
+    pass('headerless — / — is still refused, not guessed');
+  } else {
+    fail(`headerless — / — refused — row: ${headerless.row}\n${headerless.merge.stdout}`);
+  }
+}
+
+// Distinguishable values, both header orders: the header alone decides which
+// tracker column each value lands in.
+{
+  const scoreFirst = mergeOne(
+    'num\tdate\tcompany\trole\tscore\tstatus\tpdf\treport\tnotes\n' +
+    '2\t2026-02-02\tGlobex\tManager\t4.5/5\tApplied\t❌\t—\tscore-first\n',
+  );
+  if (scoreFirst.cells[5] === '4.5/5' && scoreFirst.cells[6] === 'Applied') {
+    pass('headed score-first: Score and Status land in their own columns');
+  } else {
+    fail(`headed score-first landing — row: ${scoreFirst.row}\n${scoreFirst.merge.stdout}`);
+  }
+
+  const statusFirst = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n' +
+    '2\t2026-02-02\tGlobex\tManager\tApplied\t4.5/5\t❌\t—\tstatus-first\n',
+  );
+  if (statusFirst.cells[5] === '4.5/5' && statusFirst.cells[6] === 'Applied') {
+    pass('headed status-first: Score and Status land in their own columns');
+  } else {
+    fail(`headed status-first landing — row: ${statusFirst.row}\n${statusFirst.merge.stdout}`);
+  }
+}
+
+// An emitter whose LABELS and VALUES disagree is the silent swap in a new
+// costume. The header is authoritative, so the row is refused rather than
+// quietly un-swapped by content — the same answer the headerless path gives.
+{
+  const swapped = mergeOne(
+    'num\tdate\tcompany\trole\tscore\tstatus\tpdf\treport\tnotes\n' +
+    '2\t2026-02-02\tGlobex\tManager\tApplied\t4.5/5\t❌\t—\tlabels and values disagree\n',
+  );
+  if (!swapped.row && /labelled "score"/.test(swapped.merge.stdout)) {
+    pass('headed addition whose values contradict its labels is refused');
+  } else {
+    fail(`labels-vs-values mismatch refused — row: ${swapped.row}\n${swapped.merge.stdout}`);
+  }
+}
+
+// Malformed headers report at the header instead of merging a shifted row.
+{
+  const missing = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tpdf\treport\tnotes\n' +
+    '2\t2026-02-02\tGlobex\tManager\tApplied\t❌\t—\tno score column\n',
+  );
+  if (!missing.row && /missing required column\(s\): score/.test(missing.merge.stdout)) {
+    pass('headed addition missing a required column is refused at the header');
+  } else {
+    fail(`missing-column header refused — row: ${missing.row}\n${missing.merge.stdout}`);
+  }
+
+  const duplicated = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tscore\n' +
+    '2\t2026-02-02\tGlobex\tManager\tApplied\t4.5/5\t❌\t—\t4.0/5\n',
+  );
+  if (!duplicated.row && /same column twice/.test(duplicated.merge.stdout)) {
+    pass('headed addition labelling one field twice is refused');
+  } else {
+    fail(`duplicate-label header refused — row: ${duplicated.row}\n${duplicated.merge.stdout}`);
+  }
+
+  const twoRows = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n' +
+    '2\t2026-02-02\tGlobex\tManager\tApplied\t4.5/5\t❌\t—\tfirst\n' +
+    '3\t2026-02-03\tInitech\tArchitect\tApplied\t4.0/5\t❌\t—\tsecond\n',
+  );
+  if (!twoRows.row && /one addition per file/.test(twoRows.merge.stdout)) {
+    pass('headed addition with two data rows is refused, not silently truncated');
+  } else {
+    fail(`two-data-row file refused — row: ${twoRows.row}\n${twoRows.merge.stdout}`);
+  }
+}
+
+// Optional columns resolve by name too: no positional trailing-field rules, and
+// a placeholder in an optional column reads as absent rather than as content.
+{
+  const sb = makeSandbox(
+    `# Applications Tracker
+
+| # | Date | Company | Via | Role | Location | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|-----|------|----------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Acme | — | Engineer | Remote | 4.0/5 | Applied | ✅ | — | seed row | — |
+`,
+    {
+      '2-globex.tsv':
+        'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\tvia\tlocation\turl\n' +
+        '2\t2026-02-02\tGlobex\tManager\tApplied\t4.5/5\t❌\t—\tvia a header\tHays\tSingapore\thttps://example.com/jobs/2\n',
+      '3-initech.tsv':
+        'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\tvia\turl\n' +
+        '3\t2026-02-03\tInitech\tArchitect\tApplied\t4.0/5\t❌\t—\tno agency\tN/A\tTBD\n',
+    },
+  );
+  const merge = runCaptured('merge-tracker.mjs', sb);
+  const rows = dataRows(sb.tracker);
+  const globex = (rows.find(l => l.includes('Globex')) || '').split('|').map(s => s.trim());
+  const initech = (rows.find(l => l.includes('Initech')) || '').split('|').map(s => s.trim());
+  // cells: ['', num, date, company, via, role, location, score, status, pdf, report, notes, url, '']
+  if (merge.code === 0 && globex[4] === 'Hays' && globex[6] === 'Singapore' && globex[7] === '4.5/5' && globex[8] === 'Applied' && globex[12] === 'https://example.com/jobs/2') {
+    pass('headed addition fills Via / Location / URL by name');
+  } else {
+    fail(`headed optional columns — row: ${globex.join(' | ')}\n${merge.stdout}`);
+  }
+  // Via fills with '—'; the URL column's documented empty form is a blank cell.
+  if (initech[4] === '—' && initech[12] === '') {
+    pass('placeholder values in optional headed columns read as absent');
+  } else {
+    fail(`headed placeholder handling — row: ${initech.join(' | ')}\n${merge.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// A pasted markdown table row may carry a header too — same resolution.
+{
+  const piped = mergeOne(
+    '| # | Date | Company | Role | Status | Score | PDF | Report | Notes |\n' +
+    '| 2 | 2026-02-02 | Globex | Manager | Applied | 4.5/5 | ❌ | — | pipe-delimited header |\n',
+  );
+  if (piped.cells[5] === '4.5/5' && piped.cells[6] === 'Applied') {
+    pass('pipe-delimited addition with a header resolves by name');
+  } else {
+    fail(`pipe-delimited headed addition — row: ${piped.row}\n${piped.merge.stdout}`);
+  }
+}
+
+// Back-compat: the documented headerless 9-column form is untouched.
+{
+  const legacy = mergeOne(TSV_NO_LOCATION);
+  if (legacy.cells[5] === 'N/A' && legacy.cells[6] === 'Applied') {
+    pass('headerless 9-column addition still merges unchanged');
+  } else {
+    fail(`headerless back-compat — row: ${legacy.row}\n${legacy.merge.stdout}`);
+  }
+}
+
+// ── an empty trailing cell is not a missing cell (#3517 review) ────────────
+// A writer whose last value is empty routinely stops at the last tab —
+// openrouter-runner emits `…\treport\t\n` for an absent note — and the whole
+// file used to be trimmed before parsing, so that tab (which IS the final
+// empty cell) was gone and the row read as one cell short of its own header.
+// These are the exact bytes the converted writers emit.
+{
+  const trailingTab = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n' +
+    '2\t2026-02-02\tGlobex\t(see report)\tEvaluated\t4.5/5\t❌\t[2](reports/2.md)\t\n',
+  );
+  if (trailingTab.cells[5] === '4.5/5' && trailingTab.cells[6] === 'Evaluated') {
+    pass('headed row ending in an empty cell (trailing tab) merges');
+  } else {
+    fail(`trailing-empty-cell row — row: ${trailingTab.row}\n${trailingTab.merge.stdout}`);
+  }
+
+  // Absent and empty must read the same, which is what the batch and web
+  // prompts already promise: "leave the last field empty".
+  const noTrailingTab = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n' +
+    '2\t2026-02-02\tGlobex\tManager\tEvaluated\t4.5/5\t❌\t[2](reports/2.md)\n',
+  );
+  if (noTrailingTab.cells[5] === '4.5/5' && noTrailingTab.cells[6] === 'Evaluated') {
+    pass('headed row omitting its empty trailing cell merges the same way');
+  } else {
+    fail(`omitted-trailing-cell row — row: ${noTrailingTab.row}\n${noTrailingTab.merge.stdout}`);
+  }
+
+  // Only OPTIONAL cells may be absent. A row short of a required one is still
+  // refused, and says which.
+  const shortRequired = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n' +
+    '2\t2026-02-02\tGlobex\tManager\tEvaluated\t4.0/5\n',
+  );
+  if (!shortRequired.row && /missing the required cell\(s\): pdf, report/.test(shortRequired.merge.stdout)) {
+    pass('headed row missing required cells is refused, naming them');
+  } else {
+    fail(`short-required row refused — row: ${shortRequired.row}\n${shortRequired.merge.stdout}`);
+  }
+
+  // The width rule is not the shift defense, so prove the shift is still
+  // caught: omit an INTERIOR cell (role) and every later value slides one
+  // column left, which the score corroboration sees by content. No `url` label
+  // here, so the misplaced-URL guard below cannot be what catches it — this
+  // pins the score check specifically.
+  const shifted = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n' +
+    '2\t2026-02-02\tGlobex\tEvaluated\t4.0/5\t❌\t[2](reports/2.md)\tnote\n',
+  );
+  if (!shifted.row && /labelled "score"/.test(shifted.merge.stdout)) {
+    pass('headed row with an omitted interior cell is caught by content, not width');
+  } else {
+    fail(`interior-omission row refused — row: ${shifted.row}\n${shifted.merge.stdout}`);
+  }
+}
+
+// ── what the optional-cell leniency must NOT wave through (#3517 review) ───
+// Accepting a short row (absent optional cells read as empty) buys two new
+// ambiguities, and both corrupt exactly the mapping the header protects.
+{
+  // A blank REQUIRED cell is not "none": every required field has a documented
+  // value, and the no-data cases have sentinels. Left through, an empty status
+  // reaches validateStatus(''), which returns "Evaluated" — a real evaluation
+  // state the row never claimed.
+  const blankStatus = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n' +
+    '2\t2026-02-02\tGlobex\tManager\t\t4.0/5\t❌\t[2](reports/2.md)\tnote\n',
+  );
+  if (!blankStatus.row && /required cell\(s\) present but empty: status/.test(blankStatus.merge.stdout)) {
+    pass('headed row with a blank required cell is refused, not defaulted');
+  } else {
+    fail(`blank-required-cell row — row: ${blankStatus.row}\n${blankStatus.merge.stdout}`);
+  }
+
+  // "notes omitted, url written" and "notes written, url omitted" are both one
+  // cell short, so position cannot tell them apart. The typed column is the
+  // corroboration: a cell that IS a URL under a non-url label, while `url` has
+  // no cell, means every optional value sits one column left of its label.
+  const shiftedTail = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+    '2\t2026-02-02\tGlobex\tManager\tApplied\t4.5/5\t❌\t[2](reports/2.md)\thttps://example.com/jobs/2\n',
+  );
+  if (!shiftedTail.row && /a URL sits under "notes"/.test(shiftedTail.merge.stdout)) {
+    pass('headed row whose optional tail is shifted (URL in notes) is refused');
+  } else {
+    fail(`shifted-optional-tail row — row: ${shiftedTail.row}\n${shiftedTail.merge.stdout}`);
+  }
+
+  // ...and the shapes that are NOT ambiguous still merge. Written placeholder
+  // for the omitted note:
+  const placeheld = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+    '2\t2026-02-02\tGlobex\tManager\tApplied\t4.1/5\t❌\t[2](reports/2.md)\t\thttps://example.com/jobs/2\n',
+  );
+  if (placeheld.cells[5] === '4.1/5' && placeheld.cells[6] === 'Applied') {
+    pass('headed row with an empty placeholder before a supplied URL merges');
+  } else {
+    fail(`placeholder-then-url row — row: ${placeheld.row}\n${placeheld.merge.stdout}`);
+  }
+
+  // Both optional cells simply absent — nothing is shifted, nothing is lost:
+  const bothAbsent = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+    '2\t2026-02-02\tGlobex\tManager\tApplied\t4.2/5\t❌\t[2](reports/2.md)\n',
+  );
+  if (bothAbsent.cells[5] === '4.2/5' && bothAbsent.cells[6] === 'Applied') {
+    pass('headed row omitting every optional cell merges');
+  } else {
+    fail(`both-optionals-absent row — row: ${bothAbsent.row}\n${bothAbsent.merge.stdout}`);
+  }
+
+  // A note that MENTIONS a url in prose is a note. The guard is anchored to the
+  // whole cell, so only a cell that IS a URL trips it.
+  const urlInProse = mergeOne(
+    'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+    '2\t2026-02-02\tGlobex\tManager\tApplied\t4.3/5\t❌\t[2](reports/2.md)\tsee https://example.com/jobs/2 for the req\n',
+  );
+  if (urlInProse.cells[5] === '4.3/5' && /for the req/.test(urlInProse.row ?? '')) {
+    pass('a note that merely mentions a URL is not read as a shifted cell');
+  } else {
+    fail(`url-in-prose note — row: ${urlInProse.row}\n${urlInProse.merge.stdout}`);
+  }
+}
+
+// ── the web's run prompt is a TSV writer too (#3517) ───────────────────────
+// web/src/lib/run-prompts.mjs dictates the addition row to the agent, so the
+// prompt is an emitter of this format even though it emits no bytes itself. A
+// header it spells differently than tracker-aliases.json knows would not go
+// red anywhere: merge-tracker would read the row as headerless and fall back to
+// content sniffing — the exact path that cannot order a `—` / `—` row. Assert
+// the prompt's own example lines against the real ingest, not against a copy of
+// the labels.
+if (!HAS_WEB) {
+  skipWeb('web run-prompt TSV header matches the ingest contract');
+} else {
+  try {
+    // Relative specifier, like the other web imports in this file: an absolute
+    // path is not a valid ESM specifier on Windows (`D:\...` reads as a URL
+    // scheme), which is how this test passed on ubuntu/macos and failed there.
+    const { buildPrompt } = await import('./web/src/lib/run-prompts.mjs');
+    const prompt = buildPrompt({ kind: 'evaluate', input: 'https://example.com/jobs/2', memory: '', today: '2026-02-02' });
+    const tabLines = prompt.split('\n').filter(l => l.includes('\t'));
+
+    if (tabLines.length !== 2) {
+      fail(`web run prompt shows a header line and one data line — got ${tabLines.length}`);
+    } else {
+      const header = tabLines[0].trim().split('\t');
+      const { missing, duplicates, unknown } = resolveTsvColumns(header);
+      if (!missing.length && !duplicates.length && !unknown.length) {
+        pass('web run prompt: every header label resolves through tracker-aliases.json');
+      } else {
+        fail(`web run prompt header — missing ${JSON.stringify(missing)}, duplicates ${JSON.stringify(duplicates)}, unknown ${JSON.stringify(unknown)}`);
+      }
+
+      // Fill the prompt's own template with real values, by NAME, and merge it.
+      const VALUES = {
+        num: '2', date: '2026-02-02', company: 'Globex', role: 'Manager',
+        status: 'Applied', score: '4.5/5', pdf: '❌', report: '—',
+        notes: 'row as the web dictates it', url: 'https://example.com/jobs/2',
+      };
+      const dataWidth = tabLines[1].trim().split('\t').length;
+      if (dataWidth !== header.length) {
+        fail(`web run prompt: header labels ${header.length} columns but the data row shows ${dataWidth}`);
+      }
+      const row = header.map(h => VALUES[h.trim().toLowerCase()] ?? '').join('\t');
+      const sb = makeSandbox(HEADER_9, { '2-globex.tsv': `${header.join('\t')}\n${row}\n` });
+      const merge = runCaptured('merge-tracker.mjs', sb);
+      const cells = (dataRows(sb.tracker).find(l => l.includes('Globex')) || '').split('|').map(c => c.trim());
+      rmSync(sb.dir, { recursive: true, force: true });
+      if (merge.code === 0 && cells[5] === '4.5/5' && cells[6] === 'Applied') {
+        pass('web run prompt: the row it dictates merges into the right columns');
+      } else {
+        fail(`web run prompt row merge (code ${merge.code}) — cells ${JSON.stringify(cells)}\n${merge.stdout}`);
+      }
+    }
+  } catch (e) {
+    fail(`web run-prompt TSV header test crashed: ${e.message}`);
   }
 }
 
