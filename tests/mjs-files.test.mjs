@@ -346,25 +346,42 @@ function bodySpan(code, head) {
  * behavioural fixture below puts its stale suite at the fixture's top level.
  *
  * Two accepted shapes:
- *   - the argument is not the walk's own first parameter (`full`, `p`,
- *     `join(dir, e.name)`) — the child path, tested before descending;
+ *   - the argument is a CHILD PATH: an expression built from the walk's own
+ *     parameter (`join(dir, e.name)`), or a variable assigned from one
+ *     (`const full = join(dir, entry.name)`);
  *   - the argument IS that parameter, but the call comes BEFORE the first
  *     directory read in the body: a guard at function entry, which the
  *     recursion applies to every child as it enters (`copyDirSync`).
  *
- * @param {{head: number, body: string}} fn - A declaration record.
+ * Anything else — `isNestedCheckout(ROOT)`, an unrelated directory, a value
+ * from somewhere the walk does not descend into — is a call, not a guard.
+ * "Not the parameter" was the earlier rule and it accepted all of those.
+ *
+ * @param {{params: string, body: string}} fn - A declaration record.
  * @returns {boolean}
  */
 function guardsAChild(fn) {
   const firstParam = /^\s*\(?\s*([A-Za-z_$][\w$]*)/.exec(fn.params)?.[1];
+  if (!firstParam) return false;   // no parameter to build a child path from
+  const mentionsParam = new RegExp(`\\b${firstParam}\\b`);
+  // Locals assigned from an expression involving the walked directory. One
+  // level is enough for every shape in this repository (`const full = join(dir,
+  // entry.name)`); a longer chain would need real dataflow, and the honest
+  // instrument for that is the behavioural test, not this.
+  const derived = new Set(
+    [...fn.body.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]+)/g)]
+      .filter((m) => mentionsParam.test(m[2]))
+      .map((m) => m[1]),
+  );
   const read = fn.body.search(/\breaddirSync\s*\(/);
-  for (const m of fn.body.matchAll(/\bisNestedCheckout\s*\(\s*([^)]*)\)/g)) {
+  for (const m of fn.body.matchAll(/\bisNestedCheckout\s*\(\s*([^)]*(?:\([^)]*\))?[^)]*)\)/g)) {
     const arg = m[1].trim();
-    if (firstParam && arg === firstParam) {
+    if (arg === firstParam) {
       if (read === -1 || m.index < read) return true;   // entry guard
       continue;                                         // tests the dir being read
     }
-    if (arg) return true;
+    if (derived.has(arg)) return true;
+    if (mentionsParam.test(arg)) return true;           // built inline from it
   }
   return false;
 }
@@ -507,7 +524,7 @@ test('the walker detector recognizes every shape it claims to, and only real rec
         const tpl = '}}}';                 // }
         const re = /[{}]}/;                /* } } } */
         for (const e of readdirSync(dir, { withFileTypes: true })) {
-          if (e.isDirectory()) { if (isNestedCheckout(e.name)) continue; walk(e.name); }
+          if (e.isDirectory()) { const full = join(dir, e.name); if (isNestedCheckout(full)) continue; walk(full); }
         }
         return tpl + re;
       }
@@ -520,7 +537,7 @@ test('the walker detector recognizes every shape it claims to, and only real rec
         if (depth > 9) return /[{}]/.test(dir);
         const skip = (name) => /}{/.test(name);
         for (const e of readdirSync(dir, { withFileTypes: true })) {
-          if (e.isDirectory()) { if (isNestedCheckout(e.name) || skip(e.name)) continue; walk(e.name, depth + 1); }
+          if (e.isDirectory()) { const full = join(dir, e.name); if (isNestedCheckout(full) || skip(e.name)) continue; walk(full, depth + 1); }
         }
         return true;
       }
@@ -576,6 +593,17 @@ test('the walker detector recognizes every shape it claims to, and only real rec
         for (const name of readdirSync(src)) copyDir(join(src, name), join(dest, name));
       };
     `),
+    // Calls the predicate on a directory it never descends into. A call is not
+    // a guard: this walks every nested checkout exactly as if the line were
+    // absent, and "not the walk's own parameter" used to be enough to pass.
+    f('guards-elsewhere.mjs', `
+      function walk(dir) {
+        if (isNestedCheckout(ROOT)) return;
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          if (e.isDirectory()) walk(join(dir, e.name));
+        }
+      }
+    `),
     // The guard named ONLY in a comment. Documented as guarded, descends into
     // every checkout it finds.
     f('comment-only.mjs', `
@@ -603,6 +631,7 @@ test('the walker detector recognizes every shape it claims to, and only real rec
       'comment-only.mjs:walk',
       'duplicate-names.mjs:walk#2',
       'entry-guard.mjs:copyDir [guarded]',
+      'guards-elsewhere.mjs:walk',
       'guards-parent.mjs:walk',
       'method.mjs:walk',
       'mutual.mjs:collect',
@@ -610,7 +639,7 @@ test('the walker detector recognizes every shape it claims to, and only real rec
       'regex-after-keyword.mjs:walk [guarded]',
       'wrapper-read.mjs:walk',
     ],
-    'the detector must see method, brace-less-arrow, unparenthesized-parameter arrow, mutually recursive, same-named and wrapper-reading walkers, must reject a guard that tests the directory being read rather than the child (while accepting one at function entry), must not truncate a body at braces inside a literal or a keyword-position regex, must not count a guard written in a comment, and must ignore a non-recursive read',
+    'the detector must see method, brace-less-arrow, unparenthesized-parameter arrow, mutually recursive, same-named and wrapper-reading walkers, must reject a guard that tests the directory being read, or an unrelated directory, rather than the child path (while accepting one at function entry), must not truncate a body at braces inside a literal or a keyword-position regex, must not count a guard written in a comment, and must ignore a non-recursive read',
   );
 });
 
