@@ -1022,10 +1022,6 @@ search_queries:
 #     detailLimit: 25       # optional: max detail calls per sweep when fetchDetails is true
 #   enabled: true
 
-- name: Ivey Business School
-  careers_url: https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=ffe28c5e-dcff-41b8-b801-1ae1a70edb00&ccId=19000101_000001
-  provider: adp-workforcenow
-  enabled: false
 #
 # - name: Example Workday Co
 #   careers_url: https://exampleco.wd5.myworkdayjobs.com/en-US/exampleco-careers  # any <tenant>.wd<N>.myworkdayjobs.com
@@ -1469,6 +1465,11 @@ search_queries:
 #     aggregator: true
 
 tracked_companies:
+
+  - name: Ivey Business School
+    careers_url: https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=ffe28c5e-dcff-41b8-b801-1ae1a70edb00&ccId=19000101_000001
+    provider: adp-workforcenow
+    enabled: false
 
   # -- AI Labs & LLM providers --
 
