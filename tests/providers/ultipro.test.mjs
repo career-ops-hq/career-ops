@@ -65,6 +65,29 @@ try {
     }
   }
 
+  // fetch() on an off-allowlist host must throw BEFORE any network call —
+  // resolveTenant() returning null is not enough on its own; a stub that
+  // only throws on any call would pass whether the guard fired first or a
+  // fetch was wrongly attempted and then threw. Assert the call count too.
+  {
+    let calls = 0;
+    const mockCtx = {
+      sleep: async () => {},
+      fetchJson: async () => { calls++; throw new Error('fetchJson should never be called for an off-allowlist host'); },
+    };
+    let threw = false;
+    try {
+      await ultipro.fetch({ name: 'X', careers_url: 'https://evil.com/recruiting.ultipro.com/T/JobBoard/B/' }, mockCtx);
+    } catch {
+      threw = true;
+    }
+    if (threw && calls === 0) {
+      pass('ultipro.fetch() throws on an off-allowlist host with zero fetch calls made');
+    } else {
+      fail(`ultipro.fetch() host-guard wrong: threw=${threw}, fetchJson calls=${calls}`);
+    }
+  }
+
   // Missing JobBoard segment / boardId → null, not a throw.
   if (ultipro.detect({ name: 'X', careers_url: `https://recruiting.ultipro.com/${TENANT}/` }) === null) {
     pass('ultipro.detect() returns null when the path has no /JobBoard/{id} segment');
@@ -374,6 +397,35 @@ try {
       pass("ultipro.fetch() passes redirect:'error' on every list request");
     } else {
       fail(`ultipro.fetch() redirect option wrong: ${JSON.stringify(seenOpts)}`);
+    }
+  }
+
+  {
+    // Same guard, but exercised on the detail-fetch path (fetchDetails: true
+    // with a matching posting) — the test above uses an empty list page, so
+    // no OpportunityDetail request is ever made and the detail loop's own
+    // redirect:'error' option was unverified.
+    const seenOpts = [];
+    const detailHtml = `<html><body><script>var x = new US.Opportunity.CandidateOpportunityDetail(${JSON.stringify({ Id: 'opp-1', Title: 'Instructional Designer', Description: 'x' })});</script></body></html>`;
+    const mockCtx = {
+      sleep: async () => {},
+      fetchJson: async (url, opts) => {
+        seenOpts.push(opts);
+        return { opportunities: [mkOpp('opp-1', 'Instructional Designer')], totalCount: 1 };
+      },
+      fetchText: async (url, opts) => {
+        seenOpts.push(opts);
+        return detailHtml;
+      },
+    };
+    await ultipro.fetch(
+      { name: 'ExampleCo', careers_url: `https://recruiting.ultipro.ca/${TENANT}/JobBoard/${BOARD_ID}/`, ultipro: { fetchDetails: true } },
+      mockCtx,
+    );
+    if (seenOpts.length === 2 && seenOpts.every((o) => o.redirect === 'error')) {
+      pass("ultipro.fetch() passes redirect:'error' on the detail request too");
+    } else {
+      fail(`ultipro.fetch() detail-request redirect option wrong: ${JSON.stringify(seenOpts)}`);
     }
   }
 

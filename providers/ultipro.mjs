@@ -2,7 +2,8 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // UKG Pro / UltiPro Recruiting provider — hits the public, no-auth "JobBoard"
-// search API behind a tenant's public job board.
+// search API behind a tenant's public job board. A single-company ATS
+// adapter: configure it as a `tracked_companies:` entry, one per tenant.
 // Auto-detects from careers_url pattern
 // `https://{host}/{tenant}/JobBoard/{boardId}/...`
 // where {host} is one of several UKG-owned recruiting hosts a tenant's board
@@ -45,7 +46,7 @@
 // callers must NOT treat as "zero-content but successful".
 //
 // The list payload does not carry the full JD (only a brief description), so
-// — mirroring adp-workforcenow.mjs/smartrecruiters.mjs/vdab.mjs — full-JD
+// — mirroring smartrecruiters.mjs/vdab.mjs — full-JD
 // enrichment is opt-in per tracked_companies entry:
 //
 //   ultipro:
@@ -81,8 +82,11 @@ const MAX_PAGES_CAP = 1500; // hard ceiling even for an explicit override
 
 // Retry policy for transient list/detail failures (429, 5xx, timeouts/aborts).
 // No rate-limit behavior has been characterized for this API beyond what's in
-// the issue, so this stays at the shared default rather than inventing tuning
-// with no evidence behind it (same reasoning adp-workforcenow.mjs used).
+// the issue — the default shared policy (2 retries) is conservative enough
+// without inventing tuning this provider has no evidence for (same reasoning
+// getro.mjs used). Values below are identical to withRetry's own default and
+// passed explicitly on purpose, as documentation of that choice — not a
+// different cadence like workday.mjs/oraclecloud.mjs's WAF-fronted override.
 const RETRY_POLICY = { retries: 2, baseDelayMs: 500, maxDelayMs: 8_000 };
 
 // Delay between successive LIST pages within one tenant's pagination loop,
@@ -93,7 +97,7 @@ const INTER_PAGE_DELAY_MS = 250;
 
 /**
  * Resolve {origin, tenant, boardId} from an entry, honouring an explicit
- * `api:` URL over `careers_url` (mirrors greenhouse/workday/adp-workforcenow).
+ * `api:` URL over `careers_url` (mirrors greenhouse/workday).
  * `origin` is built from the URL's OWN hostname — never normalized to a
  * canonical host — so the tenant keeps whichever recruiting host it actually
  * uses.
@@ -143,7 +147,7 @@ function assertUltiproUrl(url) {
  * shared `_safe-url.mjs` helper (documented in ADDING_A_PROVIDER.md) isn't
  * present in this checkout, so the same fail-safe behavior — return null,
  * drop just that one job/detail-fetch, never throw out of a loop — is
- * reproduced locally (same approach adp-workforcenow.mjs uses).
+ * reproduced locally.
  * @param {string} s
  * @returns {string | null}
  */
@@ -201,12 +205,12 @@ function toEpochMs(value) {
  * verified live (several YMCA of Greater Toronto postings, 2026-09):
  * `{ LocalizedName, Address: { City, State: { Code }, Country: { Code } } }`.
  * Prefers "City, StateCode" (matches the convention other providers use —
- * workday.mjs/adp-workforcenow.mjs — for a filterable location string) and
+ * workday.mjs — for a filterable location string) and
  * falls back to `LocalizedName` (a site/branch name, not a city) only when
  * the structured address is absent — some tenants may omit it. A bare string
  * element is also accepted defensively, since nothing in the spec rules it
  * out for every tenant. Deduped and joined with " / ", same convention as
- * adp-workforcenow.mjs / csod.mjs / successfactors.mjs.
+ * csod.mjs / successfactors.mjs.
  * @param {any} locations
  */
 export function extractLocations(locations) {
@@ -369,7 +373,7 @@ export default {
 
     const maxPages = resolveMaxPages(entry);
     // verify-portals' liveness probe sets ctx.maxPages — cooperate the same
-    // way workday.mjs/adp-workforcenow.mjs do, so the probe costs one request.
+    // way workday.mjs does, so the probe costs one request.
     const ctxCap = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0 ? ctx.maxPages : Infinity;
     const pageLimit = Math.min(maxPages, ctxCap);
 
@@ -436,14 +440,14 @@ export default {
 
     // Detail enrichment answers "what does this job say", not "is this
     // endpoint alive" — skip it entirely while a health probe is running
-    // (ctx.maxPages set), same rule as adp-workforcenow.mjs/smartrecruiters.mjs/vdab.mjs.
+    // (ctx.maxPages set), same rule as smartrecruiters.mjs/vdab.mjs.
     const { fetchDetails, detailLimit } = parseUltiproConfig(entry);
     const probing = ctxCap !== Infinity;
     if (fetchDetails && !probing) {
       const targets = jobs.slice(0, detailLimit);
       // Sequential, not batched/concurrent — no rate-limit behavior has been
       // characterized for this API, so this stays as conservative as
-      // adp-workforcenow.mjs's detail loop until real data says otherwise.
+      // vdab.mjs's/smartrecruiters.mjs's detail loop until real data says otherwise.
       for (const job of /** @type {any[]} */ (targets)) {
         await sleep(INTER_PAGE_DELAY_MS, ctx);
         try {
@@ -460,13 +464,13 @@ export default {
           if (description) job.description = description;
         } catch {
           // Detail fetch is an enrichment only — keep the listing result
-          // (same fail-open contract as adp-workforcenow.mjs/smartrecruiters.mjs).
+          // (same fail-open contract as vdab.mjs/smartrecruiters.mjs).
         }
       }
     }
 
     // _id drove dedup/detail lookups above; it's internal plumbing and must
-    // not leak into the pipeline's Job rows (mirrors adp-workforcenow.mjs).
+    // not leak into the pipeline's Job rows (mirrors vdab.mjs).
     const result = jobs.map(({ _id, ...job }) => job);
     // The tag lives on the returned array (mirrors workday.mjs's
     // workdayTruncated / workdayNoDateSkip pattern) — re-applied here because
