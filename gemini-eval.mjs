@@ -280,23 +280,28 @@ function tsvSafe(value) {
 /**
  * Normalize a model-reported score into the tracker's score cell.
  *
- * Parses rather than concatenates. `extract('SCORE')` returns the whole rest of
- * the SCORE line, while `validateReport` only checks its numeric prefix -- so
- * `SCORE: 4.2 (strong fit)` passes validation and arrives here intact. Appending
- * `/5` to that produced `4.2 (strong fit)/5`, which `looksLikeScoreCell` does not
- * recognize (`SCORE_CELL_RE` is anchored, and the cell is no sentinel either), so
- * merge-tracker refused the whole addition as an ambiguous row.
- *
- * Anything with no number in it becomes the documented `N/A` sentinel rather than
- * a made-up cell -- an unrecognized placeholder gets the row skipped (#1799).
+ * `extract('SCORE')` returns the whole rest of the SCORE line, while
+ * `validateEvaluationShape` only checks its numeric prefix -- so
+ * `SCORE: 4.2 (strong fit)` passes validation and arrives here intact.
  *
  * @param {string} value - Score as extracted from the model's summary block.
- * @returns {string} `X.X/5` or `N/A`.
+ * @returns {string} `X.X/5`, or the documented `N/A` sentinel (#1799).
  */
 function normalizedTrackerScore(value) {
   const clean = tsvSafe(value);
-  if (!clean || clean === '?' || /n\/?a/i.test(clean) || isNaN(parseFloat(clean))) return 'N/A';
-  return /\/5$/i.test(clean) ? clean : `${parseFloat(clean)}/5`;
+  // Parse, do not pattern-match the string. Two bugs lived in the old guard:
+  // `/n\/?a/i` was unanchored with an optional slash, so bare `na` matched and a
+  // real score with trailing prose -- `4.2 (final)`, `4.2 (internal)`,
+  // `4.5 - strong signal` -- was recorded as `N/A`; and the `/5` early return kept
+  // the whole string, so `4.2/10` became `4.2/5` and merged as a genuine score.
+  // Trailing prose is tolerated because models produce it; a denominator that is
+  // not 5, or a value outside 0..5, is refused rather than reinterpreted.
+  const parsed = clean.match(/^(\d+(?:\.\d+)?)\s*(?:\/\s*(\d+(?:\.\d+)?))?/);
+  if (!parsed) return 'N/A';
+  const score = parseFloat(parsed[1]);
+  const denominator = parsed[2] === undefined ? 5 : parseFloat(parsed[2]);
+  if (!Number.isFinite(score) || denominator !== 5 || score < 0 || score > 5) return 'N/A';
+  return `${score}/5`;
 }
 
 // Lazy import — only used when saving

@@ -110,8 +110,19 @@ function tsvSafe(value) {
 
 function normalizedTrackerScore(value) {
   const clean = tsvSafe(value);
-  if (!clean || clean === '?' || /n\/?a/i.test(clean) || isNaN(parseFloat(clean))) return 'N/A';
-  return /\/5$/i.test(clean) ? clean : parseFloat(clean) + '/5';
+  // Parse, do not pattern-match the string. Two bugs lived in the old guard:
+  // `/n\/?a/i` was unanchored with an optional slash, so bare `na` matched and a
+  // real score with trailing prose -- `4.2 (final)`, `4.2 (internal)`,
+  // `4.5 - strong signal` -- was recorded as `N/A`; and the `/5` early return kept
+  // the whole string, so `4.2/10` became `4.2/5` and merged as a genuine score.
+  // Trailing prose is tolerated because models produce it; a denominator that is
+  // not 5, or a value outside 0..5, is refused rather than reinterpreted.
+  const parsed = clean.match(/^(\d+(?:\.\d+)?)\s*(?:\/\s*(\d+(?:\.\d+)?))?/);
+  if (!parsed) return 'N/A';
+  const score = parseFloat(parsed[1]);
+  const denominator = parsed[2] === undefined ? 5 : parseFloat(parsed[2]);
+  if (!Number.isFinite(score) || denominator !== 5 || score < 0 || score > 5) return 'N/A';
+  return `${score}/5`;
 }
 
 let systemPromptTemplate;
