@@ -103,7 +103,10 @@ test('scanBoard applies all list-level description gates before detail fetch and
     goto: async () => {},
     url: () => 'https://jobs.dayforcehcm.com/en-US/tenant/CANDIDATEPORTAL',
     request: {
-      post: async () => response({ jobPostings: rows, offset: 0, count: rows.length, maxCount: rows.length }),
+      post: async (url, options) => {
+        assert.strictEqual(options.maxRedirects, 0);
+        return response({ jobPostings: rows, offset: 0, count: rows.length, maxCount: rows.length });
+      },
       get: async (url) => {
         if (String(url).endsWith('/api/auth/csrf')) return response({ csrfToken: 'token' });
         const id = String(url).split('/').at(-1);
