@@ -3,6 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { scoreTone } from "@/lib/format";
 import { readSavedCliId, resolveCliId } from "@/lib/saved-cli";
+import { normalizeJobUrl, companyFromJobUrl } from "@/lib/job-url.mjs";
+import { isJdRef } from "@/lib/jd-source.mjs";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
 export type JobResult = { score: number | null; summary: string; tone: "good" | "warn" | "bad" | "muted" };
@@ -26,9 +28,15 @@ export type Job = {
 
 type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string };
 
+// Every kind:"evaluate" launch site takes a raw pasted/scanned URL, not a canonical
+// one — title is optional (defaults from the company parsed out of the URL) since
+// that "Evaluate · {company}" expression used to be written out at each call site.
+type StartEvaluateOpts = { url: string; title?: string; subtitle?: string; page?: string; batchId?: string };
+
 type Ctx = {
   jobs: Job[];
   startJob: (opts: StartOpts) => string | null;
+  startEvaluate: (opts: StartEvaluateOpts) => string | null;
   removeJob: (id: string) => void;
   clearFinished: () => void;
 };
@@ -211,8 +219,80 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     [patch],
   );
 
+  // The single entry point for kind:"evaluate" — every launch site (paste dialog,
+  // quick-evaluate bar, inbox shortlist, discovery card, assistant actions) hands
+  // it a raw URL and gets back a job whose `input` is ALWAYS normalizeJobUrl's
+  // canonical url, so job.input never splits between "canonical for some jobs,
+  // raw for others" again. Title default lives here only.
+  //
+  // The RECORD form, not postingKey: this string is what the run sends to
+  // /api/run and what the report header and tracker row end up carrying, so it
+  // has to stay a link a human can click. postingKey is the identity key derived
+  // FROM it, and every comparison against job.input applies postingKey to both
+  // sides — see job-url.mjs's header for why the two are separate.
+  const startEvaluate = useCallback(
+    (opts: StartEvaluateOpts): string | null => {
+      // A `local:jds/…` reference identifies a JD the user pasted or uploaded
+      // rather than a live posting (see jd-source.mjs). It is already canonical,
+      // so it skips normalization entirely — passing it through normalizeJobUrl
+      // would fail it as "not a URL" and error the job before it started, which
+      // is what happens to every inbox row written from a pasted JD as well as
+      // to the Add job dialog's own launches.
+      if (isJdRef(opts.url)) {
+        return startJob({
+          title: opts.title || "Evaluate · pasted job description",
+          subtitle: opts.subtitle,
+          kind: "evaluate",
+          input: opts.url,
+          page: opts.page,
+          batchId: opts.batchId,
+        });
+      }
+
+      const normalized = normalizeJobUrl(opts.url);
+
+      if (!normalized.ok) {
+        // Same pattern startJob uses for a missing cliId: create the job, then
+        // immediately mark it errored with the reason, rather than a silent
+        // no-op. Callers need no error handling of their own.
+        const id = `job-${Date.now()}-${seq.current++}`;
+        const job: Job = {
+          id,
+          title: opts.title || `Evaluate · ${companyFromJobUrl(opts.url) || "pasted link"}`,
+          subtitle: opts.subtitle,
+          page: opts.page,
+          input: opts.url,
+          kind: "evaluate",
+          batchId: opts.batchId,
+          status: "running",
+          steps: [{ kind: "status", label: "Starting…", ts: Date.now() }],
+          text: "",
+          startedAt: Date.now(),
+        };
+        setJobs((js) => [job, ...js]);
+        patch(id, (j) => ({
+          ...j,
+          status: "error",
+          endedAt: Date.now(),
+          steps: [...j.steps, { kind: "status", label: normalized.error, ts: Date.now() }],
+        }));
+        return id;
+      }
+
+      return startJob({
+        title: opts.title || `Evaluate · ${companyFromJobUrl(normalized.url) || "pasted link"}`,
+        subtitle: opts.subtitle,
+        kind: "evaluate",
+        input: normalized.url,
+        page: opts.page,
+        batchId: opts.batchId,
+      });
+    },
+    [startJob, patch],
+  );
+
   const removeJob = useCallback((id: string) => setJobs((js) => js.filter((j) => j.id !== id)), []);
   const clearFinished = useCallback(() => setJobs((js) => js.filter((j) => j.status === "running")), []);
 
-  return <JobsContext.Provider value={{ jobs, startJob, removeJob, clearFinished }}>{children}</JobsContext.Provider>;
+  return <JobsContext.Provider value={{ jobs, startJob, startEvaluate, removeJob, clearFinished }}>{children}</JobsContext.Provider>;
 }

@@ -7,6 +7,7 @@ import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_SOURCES } from "@/lib/explore";
 import { daysSince, seniorityFromTitle, sourceFromUrl, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
+import { postingKey } from "@/lib/job-url.mjs";
 import { FacetChips } from "./facet-chips";
 import { TriageRow, type RowScore } from "./triage-row";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
@@ -22,7 +23,7 @@ const BATCH = 20;
 // it; only "Score shortlist" spends tokens. 🔴 The shell is agnostic to what makes a
 // role relevant — order is freshness with a single documented plug point.
 export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
-  const { jobs, startJob } = useJobs();
+  const { jobs, startEvaluate } = useJobs();
 
   // facets
   const [within, setWithin] = useState<number | null>(null);
@@ -83,12 +84,17 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   }, [inbox, now]);
 
   // EVALUADA lookup: the latest evaluate worker per posting URL (running → badge).
+  // Keyed on postingKey rather than the raw job.input: a pipeline row can carry
+  // tracking noise (e.g. LinkedIn's "?trk=...") a freshly-launched worker's
+  // canonical input already stripped, so a raw-string key would silently miss
+  // the match and leave the row stuck without its Scoring…/score badge.
   const scoreByUrl = useMemo(() => {
     const best = new Map<string, (typeof jobs)[number]>();
     for (const j of jobs) {
       if (!j.input || j.kind !== "evaluate") continue;
-      const ex = best.get(j.input);
-      if (!ex || j.startedAt > ex.startedAt) best.set(j.input, j);
+      const key = postingKey(j.input);
+      const ex = best.get(key);
+      if (!ex || j.startedAt > ex.startedAt) best.set(key, j);
     }
     const m = new Map<string, RowScore>();
     for (const [url, j] of best) {
@@ -170,7 +176,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const scoreShortlist = () => {
     const batchId = `shortlist-${Date.now()}`;
     for (const it of shortlist) {
-      startJob({ title: `Score · ${it.company}`, subtitle: it.role, kind: "evaluate", input: it.url, page: "/pipeline", batchId });
+      startEvaluate({ title: `Score · ${it.company}`, subtitle: it.role, url: it.url, page: "/pipeline", batchId });
     }
     setShortlist([]); // sent — the rows flip to Scoring… → badge via scoreByUrl
   };
@@ -233,7 +239,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
               job={e.job}
               source={e.source}
               age={e.age}
-              scored={scoreByUrl.get(e.job.url)}
+              scored={scoreByUrl.get(postingKey(e.job.url))}
               selected={selected.has(e.job.url)}
               shortlisted={isShortlisted(e.job.url)}
               onToggleSelect={() => toggleSelect(e.job.url)}

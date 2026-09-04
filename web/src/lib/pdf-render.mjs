@@ -42,6 +42,10 @@ import path from "node:path";
  * and "emitted no envelope" are different bugs and the user can act on the
  * difference.
  *
+ * Sibling gate for the non-pdf kinds: evaluateRunOutcome in run-outcome.mjs. The
+ * two share the noOutputMessage contract (the route owns that wording) and are
+ * meant to be read together.
+ *
  * @param {PdfRunSignals} signals
  * @returns {{ok: true} | {ok: false, message: string}}
  */

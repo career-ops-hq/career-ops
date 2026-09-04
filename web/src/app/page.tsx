@@ -18,7 +18,7 @@ export default function Home() {
   return (
     <>
       {onboardingNeeded && <OnboardingBanner />}
-      <TodayDashboard applications={applications} inbox={inbox} inBetween={phase === "in-between"} />
+      <TodayDashboard applications={applications} inbox={inbox} />
     </>
   );
 }

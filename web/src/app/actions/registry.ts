@@ -11,6 +11,7 @@
 import type { Application, InboxJob } from "@/lib/career-ops";
 import type { Job } from "@/components/jobs/job-store";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
+import { postingKey } from "@/lib/job-url.mjs";
 
 export const AUTO_FIRE_MAX = 3; // fire ≤3 evaluations silently; confirm above that
 export const BATCH_CAP = 12; // hard ceiling on a single fan-out
@@ -32,10 +33,22 @@ export type StartJobInput = {
   batchId?: string;
 };
 
+// Same shape job-store.tsx's startEvaluate takes — a raw URL in, normalizeJobUrl's
+// canonical url out as the job's `input`. See its header for why this exists, and
+// job-url.mjs's for why that canonical url is not the same thing as postingKey.
+export type StartEvaluateInput = {
+  url: string;
+  title?: string;
+  subtitle?: string;
+  page?: string;
+  batchId?: string;
+};
+
 export type ActionCtx = {
   push: (path: string) => void; // router.push — section/detail change
   replace: (path: string) => void; // router.replace — incremental filter tweak
   startJob: (opts: StartJobInput) => string | null;
+  startEvaluate: (opts: StartEvaluateInput) => string | null;
   inbox: InboxJob[];
   applications: Application[]; // tracker snapshot — resolve #n → company/role for confirms
   jobForUrl: (url: string) => Job | undefined; // skip-if-done / retry logic
@@ -143,14 +156,20 @@ const ACTIONS: Record<string, ActionDef> = {
     sideEffect: "spend",
     run: (raw, ctx) => {
       const url = raw.url;
-      if (!isStr(url) || !/^https?:\/\//i.test(url)) return { status: "ignored", note: "invalid url" };
-      const ex = ctx.jobForUrl(url);
+      // The ad-hoc http(s) sniff used to live here; postingKey (via startEvaluate)
+      // now owns URL validity, so a malformed url surfaces as an errored job in
+      // the Workers tray instead of being silently ignored pre-dispatch.
+      if (!isStr(url)) return { status: "ignored", note: "invalid url" };
+      // jobForUrl compares against job.input, which is always canonical now that
+      // every launch site routes through startEvaluate — so the lookup key must
+      // be canonical too, or a pipeline URL still carrying tracking noise would
+      // never match the worker already running on it.
+      const ex = ctx.jobForUrl(postingKey(url));
       if (ex && ex.status !== "error" && !raw.rerun) return { status: "ignored", note: "already evaluated" };
-      const id = ctx.startJob({
-        title: isStr(raw.title) ? String(raw.title) : "Evaluate",
+      const id = ctx.startEvaluate({
+        title: isStr(raw.title) ? String(raw.title) : undefined,
         subtitle: isStr(raw.subtitle) ? String(raw.subtitle) : undefined,
-        kind: "evaluate",
-        input: url,
+        url,
         page: "/pipeline",
       });
       return { status: "done", jobIds: id ? [id] : [] };
@@ -175,7 +194,8 @@ const ACTIONS: Record<string, ActionDef> = {
       const pending = matches
         .filter((j) => {
           if (rerun) return true;
-          const ex = ctx.jobForUrl(j.url);
+          // Same canonical-key reasoning as the `evaluate` action above.
+          const ex = ctx.jobForUrl(postingKey(j.url));
           return !ex || ex.status === "error";
         })
         .slice(0, cap);
@@ -191,11 +211,10 @@ const ACTIONS: Record<string, ActionDef> = {
         const batchId = pending.length > 1 ? genBatchId() : undefined;
         const ids = pending
           .map((j) =>
-            ctx.startJob({
+            ctx.startEvaluate({
               title: `Evaluate · ${j.company}`,
               subtitle: j.role,
-              kind: "evaluate",
-              input: j.url,
+              url: j.url,
               page: "/pipeline",
               batchId,
             }),
@@ -351,8 +370,12 @@ export function actionExists(id: string): boolean {
 }
 
 export function dispatch(id: string, rawArgs: Record<string, unknown>, ctx: ActionCtx): DispatchResult {
+  // actionExists, not a bare ACTIONS[id] truthiness check: `id` is model-emitted
+  // text from an <<act:ID>> envelope, so "constructor" or "toString" would resolve
+  // off Object.prototype and reach `def.run(...)`. The catch below would absorb the
+  // TypeError, but being safe by accident is not the same as being safe.
+  if (!actionExists(id)) return { status: "ignored", note: `unknown action: ${id}` };
   const def = ACTIONS[id];
-  if (!def) return { status: "ignored", note: `unknown action: ${id}` };
   try {
     return def.run(rawArgs ?? {}, ctx);
   } catch {
