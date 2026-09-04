@@ -186,7 +186,8 @@ test('isNestedCheckout detects the marker, of either type, and nothing else', ()
 function blankNonCode(src) {
   const out = src.split('');
   const blank = (i) => { if (src[i] !== '\n') out[i] = ' '; };
-  let prev = '';   // last significant code character, for the regex/division split
+  let prev = '';       // last significant code character, for the regex/division split
+  let prevWord = '';   // ...and the identifier it belongs to, when it is one
   let i = 0;
   while (i < src.length) {
     const c = src[i], d = src[i + 1];
@@ -208,13 +209,21 @@ function blankNonCode(src) {
       }
       if (i < src.length) blank(i++);
       prev = 'x';   // a literal is a value, so a following `/` is division
+      prevWord = '';
       continue;
     }
     // `/` opens a regex only where a value cannot precede it; after an
     // identifier, `)` or `]` it is division. Getting this wrong in the safe
     // direction (treating division as a regex) blanks code, so the rule is
     // deliberately conservative.
-    if (c === '/' && (prev === '' || '(,=:[!&|?{};+-*%~^'.includes(prev))) {
+    //
+    // A KEYWORD is an operand position too, and `prev` cannot see it: after
+    // `return` the last significant character is a letter, so `return
+    // /[{}]/.test(s)` read as division leaves those braces counted, `bodySpan`
+    // ends the body early, and a real `isNestedCheckout(` call falls outside
+    // it — the false failure this helper exists to prevent. `>` covers the
+    // arrow body `=> /}/`.
+    if (c === '/' && (prev === '' || '(,=:[!&|?{};+-*%~^>'.includes(prev) || KEYWORD_BEFORE_REGEX.test(prevWord))) {
       blank(i++);
       let inClass = false;
       while (i < src.length && src[i] !== '\n' && (inClass || src[i] !== '/')) {
@@ -225,13 +234,22 @@ function blankNonCode(src) {
       }
       if (i < src.length && src[i] === '/') blank(i++);
       prev = 'x';
+      prevWord = '';
       continue;
     }
-    if (!/\s/.test(c)) prev = c;
+    if (!/\s/.test(c)) {
+      prev = c;
+      prevWord = /\w/.test(c) ? prevWord + c : '';
+    }
     i++;
   }
   return out.join('');
 }
+
+// Keywords after which a `/` opens a regex literal rather than dividing:
+// each expects an operand next. Hoisted so the scanner does not rebuild it per
+// character.
+const KEYWORD_BEFORE_REGEX = /(?:^|\b)(?:return|case|typeof|instanceof|in|of|new|delete|void|do|else|yield|await)$/;
 
 // Statement keywords that take a parenthesized head followed by a block, which
 // the method-shorthand pattern below is otherwise shaped exactly like.
@@ -322,14 +340,32 @@ function findRecursiveWalkers(entries) {
   const walkers = [];
   for (const { rel, src } of entries) {
     const code = blankNonCode(src);
+    // Keyed per DECLARATION, not per name. Keeping only the first `walk` in a
+    // file drops the second — and a file whose first `walk` is a flat listing
+    // would hide a recursive one below it, which is this issue's own failure
+    // shape (a walker nothing enumerates). Duplicate names are common here:
+    // 19 files declare one, including this test's own fixtures.
     const fns = new Map();
+    const seenNames = new Map();
     for (const { name, paren } of declarations(code)) {
       const span = bodySpan(code, paren);
-      if (!span || fns.has(name)) continue;   // first declaration of a name wins
-      fns.set(name, { name, paren, body: code.slice(span[0], span[1]) });
+      if (!span) continue;
+      const n = (seenNames.get(name) ?? 0) + 1;
+      seenNames.set(name, n);
+      // The first declaration keeps the bare `file:name` id, so an EXEMPT entry
+      // stays stable when an unrelated same-named function is added later.
+      fns.set(n === 1 ? name : `${name}#${n}`, { name, paren, body: code.slice(span[0], span[1]) });
     }
+    // A call resolves BY NAME, so with duplicates it reaches every declaration
+    // wearing that name. Deliberately over-approximate: the wrong direction to
+    // err in is the one that drops an edge, because that hides a walker
+    // silently, while a spurious edge at worst asks for a guard on a function
+    // that turns out not to need one — loudly, in a failure someone reads.
     const callsOf = new Map(
-      [...fns.values()].map((fn) => [fn.name, [...fns.keys()].filter((n) => new RegExp(`\\b${n}\\s*\\(`).test(fn.body))]),
+      [...fns.entries()].map(([key, fn]) => [
+        key,
+        [...fns.entries()].filter(([, other]) => new RegExp(`\\b${other.name}\\s*\\(`).test(fn.body)).map(([k]) => k),
+      ]),
     );
     const reaches = (from, target) => {
       const seen = new Set();
@@ -343,20 +379,20 @@ function findRecursiveWalkers(entries) {
       }
       return false;
     };
-    for (const fn of fns.values()) {
+    for (const [key, fn] of fns) {
       if (!fn.body.includes('readdirSync(')) continue;
-      if (!reaches(fn.name, fn.name)) continue;
+      if (!reaches(key, key)) continue;
       // The recursion cycle: everything fn reaches that reaches fn back. The
       // guard may sit in either half of a mutually recursive pair, and nowhere
       // else counts — a mention in some unrelated function it happens to call
       // is not this walker being guarded.
-      const cycle = [fn.name, ...[...fns.keys()].filter((n) => n !== fn.name && reaches(fn.name, n) && reaches(n, fn.name))];
+      const cycle = [key, ...[...fns.keys()].filter((k) => k !== key && reaches(key, k) && reaches(k, key))];
       walkers.push({
-        id: `${rel}:${fn.name}`,
+        id: `${rel}:${key}`,
         file: rel,
-        name: fn.name,
+        name: key,
         line: src.slice(0, fn.paren).split('\n').length,
-        guarded: cycle.some((n) => fns.get(n).body.includes('isNestedCheckout(')),
+        guarded: cycle.some((k) => fns.get(k).body.includes('isNestedCheckout(')),
       });
     }
   }
@@ -404,6 +440,32 @@ test('the walker detector recognizes every shape it claims to, and only real rec
         return tpl + re;
       }
     `),
+    // Guarded, with a regex literal in a KEYWORD position before the guard.
+    // Read as division, `/[{}]/` leaves its braces counted and the body ends
+    // before the guard — a false failure against a correct walker.
+    f('regex-after-keyword.mjs', `
+      function walk(dir, depth) {
+        if (depth > 9) return /[{}]/.test(dir);
+        const skip = (name) => /}{/.test(name);
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          if (e.isDirectory()) { if (isNestedCheckout(e.name) || skip(e.name)) continue; walk(e.name, depth + 1); }
+        }
+        return true;
+      }
+    `),
+    // Two declarations of one name: a flat listing first, an unguarded walker
+    // second. Keeping only the first hid the second entirely.
+    f('duplicate-names.mjs', `
+      function walk(dir) { return readdirSync(dir).length; }
+      export function scan(root) {
+        function walk(dir) {
+          for (const e of readdirSync(dir, { withFileTypes: true })) {
+            if (e.isDirectory()) walk(join(dir, e.name));
+          }
+        }
+        return walk(root);
+      }
+    `),
     // The guard named ONLY in a comment. Documented as guarded, descends into
     // every checkout it finds.
     f('comment-only.mjs', `
@@ -428,10 +490,12 @@ test('the walker detector recognizes every shape it claims to, and only real rec
       'arrowless.mjs:walk',
       'braces-in-literals.mjs:walk [guarded]',
       'comment-only.mjs:walk',
+      'duplicate-names.mjs:walk#2',
       'method.mjs:walk',
       'mutual.mjs:collect',
+      'regex-after-keyword.mjs:walk [guarded]',
     ],
-    'the detector must see method, brace-less-arrow and mutually recursive walkers, must not count a guard written in a comment, and must ignore a non-recursive read',
+    'the detector must see method, brace-less-arrow, mutually recursive and same-named walkers, must not truncate a body at braces inside a literal or a keyword-position regex, must not count a guard written in a comment, and must ignore a non-recursive read',
   );
 });
 
