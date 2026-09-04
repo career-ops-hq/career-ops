@@ -17,7 +17,7 @@
 // cannot wander into untracked scratch.
 
 import { pass, fail, ROOT } from './helpers.mjs';
-import { readFileSync } from 'fs';
+import { lstatSync, readFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { join, relative } from 'path';
 import * as yaml from 'js-yaml';
@@ -82,6 +82,15 @@ const { files, error: discoveryError } = yamlFiles();
 for (const file of files) {
   let text;
   try {
+    // lstat before read, and reject anything that is not a regular file.
+    // git ls-files lists tracked symlinks too, and readFileSync follows them:
+    // a symlink to /dev/zero reads unboundedly, a FIFO blocks — neither ever
+    // reaches the catch below. A non-regular entry has to be turned away
+    // before the read, and into unreadable (a hard failure), never skipped.
+    if (!lstatSync(file).isFile()) {
+      unreadable.push(`${relative(ROOT, file)} (not a regular file)`);
+      continue;
+    }
     text = readFileSync(file, 'utf-8');
   } catch (err) {
     unreadable.push(`${relative(ROOT, file)} (${err.code || err.message})`);
