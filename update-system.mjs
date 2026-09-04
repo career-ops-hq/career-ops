@@ -2078,6 +2078,37 @@ export function reconcileGitignore(localText, upstreamText) {
 
 // ── APPLY ───────────────────────────────────────────────────────
 
+/**
+ * Whether apply() should trust CAREER_OPS_UPDATE_TARGET_REF from the
+ * environment for this invocation, rather than resolving a fresh ref via
+ * resolveTargetRef(). True only when reexec status was actually PROVEN: a
+ * cryptographically authenticated marker (consumeReexecMarker()) or the more
+ * heavily guarded legacy path (isLegacyReexec(): a real lock file plus a
+ * really-existing, correctly-named backup branch).
+ *
+ * Deliberately narrower than isReexec as a whole: isReexec's own third,
+ * unauthenticated disjunct (`--confirm` in argv plus a bare
+ * CAREER_OPS_UPDATE_REEXEC=1 in env — no marker, no lock, no backup branch)
+ * proves nothing and is satisfiable from a clean state with one stray env
+ * var. Letting THAT alone reach this fallback would skip resolveTargetRef()
+ * entirely on what looks like a fresh invocation, silently reverting to
+ * 'main' regardless of channel — the exact bug this file exists to close.
+ *
+ * Extracted as its own function (rather than inlined in apply()'s targetRef
+ * ternary) so the decision is unit-testable without spawning apply() itself:
+ * apply() has real git/network side effects and no ctx-injection seam, so a
+ * subprocess-level test needing this gate's THREE inputs to differ (marker,
+ * lock file, backup branch) is disproportionately heavy machinery for what
+ * is, underneath, one boolean expression.
+ *
+ * @param {boolean} authenticatedReexec - consumeReexecMarker()'s result.
+ * @param {boolean} legacyReexec - isLegacyReexec()'s result.
+ * @returns {boolean}
+ */
+export function trustsEnvTargetRef(authenticatedReexec, legacyReexec) {
+  return authenticatedReexec || legacyReexec;
+}
+
 async function apply() {
   assertOwnGitToplevel();
   const local = localVersion();
@@ -2111,15 +2142,8 @@ async function apply() {
   // land on the exact same content; resolving independently in each process
   // would leave a window where a new release lands between the two fetches.
   //
-  // Deliberately gated on (authenticatedReexec || legacyReexec), NOT the
-  // broader isReexec: isReexec's third disjunct (`--confirm` + a bare
-  // CAREER_OPS_UPDATE_REEXEC=1, no marker, no lock, no backup branch) proves
-  // nothing — it's satisfiable from a clean state with one stray env var,
-  // which would otherwise let a non-reexec invocation skip resolveTargetRef()
-  // and silently fetch 'main' regardless of channel. Only a cryptographically
-  // authenticated reexec or the more-guarded legacy path (lock file + a real,
-  // correctly-named backup branch, see isLegacyReexec()) may inherit a target
-  // ref from the environment at all.
+  // See trustsEnvTargetRef()'s doc comment for why this is gated on that
+  // function rather than the broader isReexec.
   //
   // A legacy parent (pre-dating this env var) leaves it unset — falling back
   // to 'main' there matches what that parent itself did, since it never
@@ -2127,7 +2151,7 @@ async function apply() {
   // shouldn't happen in practice (this process always sets it when it spawns
   // one), but the same fallback covers it as a safety net rather than crashing
   // mid-update.
-  const targetRef = (authenticatedReexec || legacyReexec)
+  const targetRef = trustsEnvTargetRef(authenticatedReexec, legacyReexec)
     ? (process.env.CAREER_OPS_UPDATE_TARGET_REF || 'main')
     : await resolveTargetRef(process.argv, process.env);
 

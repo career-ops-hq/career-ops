@@ -9,130 +9,101 @@
  * targetRef ternary trusted that alone to skip resolveTargetRef() entirely
  * and fall through to CAREER_OPS_UPDATE_TARGET_REF ?? 'main' — silently
  * reverting to the exact unpinned-main behavior this PR exists to close,
- * with nothing but one stray env var and no --channel flag. Manually
- * reproduced against the pre-fix code before writing this test: the process
- * actually fetched real upstream `main` and updated a throwaway install,
- * with no network call to RELEASES_API at all.
+ * with nothing but one stray env var and no --channel flag.
  *
- * The fix gates the targetRef fallback on (authenticatedReexec ||
- * legacyReexec) instead of the broader isReexec, so only a cryptographically
- * authenticated reexec (consumeReexecMarker()) or the more heavily guarded
- * legacy path (isLegacyReexec(): a real lock file + a really-existing,
- * correctly-named backup branch) may skip resolveTargetRef().
+ * The fix extracts the gate as its own pure function, trustsEnvTargetRef()
+ * (true only for an authenticated marker or the more heavily guarded legacy
+ * path — never the bare third disjunct alone), and apply()'s targetRef
+ * ternary calls it instead of the broader isReexec.
  *
- * apply() isn't structured for the ctx-injection seam used elsewhere in this
- * suite (it reads process.argv/process.env directly and has real git/network
- * side effects), so this drives the real CLI entrypoint as a subprocess
- * against a disposable git fixture — the smallest faithful way to observe
- * its behavior. A stub `curl` shadowing the real one on PATH makes the
- * release lookup fail deterministically (no real network needed, no
- * dependency on live connectivity in CI): if resolveTargetRef() runs, it
- * fails loudly naming RELEASES_API and --channel main, BEFORE apply() ever
- * reaches its git fetch step. If resolveTargetRef() is skipped instead, the
- * process moves on to `git fetch` — a materially different outcome, easy to
- * tell apart from the assertions below.
+ * ── Why this file no longer drives apply() as a subprocess ──────────────
  *
- * Scoped to exactly this bypass, per the CodeRabbit finding. The companion
- * property — a GENUINE authenticated reexec still correctly honors
- * CAREER_OPS_UPDATE_TARGET_REF without calling resolveTargetRef() at all —
- * was verified manually (a real marker via createReexecMarker(), a real git
- * fetch of the env-supplied ref, zero curl invocations) but isn't encoded
- * here: proving it end-to-end needs a local CANONICAL_REPO mirror
- * (upgrade-tests.mjs's insteadOf trick) to avoid a live-network dependency,
- * which is more machinery than this specific regression calls for.
+ * The first version of this test spawned the real `apply()` CLI against a
+ * disposable git fixture, shadowing `curl` on PATH with a stub that always
+ * failed, to observe from the outside whether resolveTargetRef() actually
+ * ran. That approach reached Windows CI and failed all 3 of its assertions:
+ * the stub was a POSIX-shebang script with a POSIX exec bit, neither of
+ * which Windows' PATHEXT-based executable resolution recognizes, so Windows
+ * silently fell through to the REAL curl and ran a REAL update against the
+ * real upstream repo instead of hitting the intended blocked failure.
+ *
+ * The next idea — reliably block curl by removing every PATH entry that
+ * contains a curl-named binary, instead of shadowing it with a stub file —
+ * was verified BEFORE being adopted, not assumed safe, and it also failed:
+ * on this very development machine, `which git` and `which curl` both
+ * resolve to /usr/bin, so removing curl's directory removes git's too.
+ * That's not a POSIX-vs-Windows split; it's a per-machine/packaging fact
+ * that can differ across POSIX systems as well, which makes any PATH-surgery
+ * approach fundamentally unsound as a portable test mechanism, not merely
+ * one bug away from working.
+ *
+ * resolveTargetRef() already has a real, proven-portable seam for exactly
+ * this — ctx.curlGet dependency injection, used throughout
+ * updater-channel-resolution.test.mjs with zero subprocess, zero PATH, zero
+ * filesystem executable concerns. trustsEnvTargetRef() is even simpler: a
+ * pure two-argument boolean function needing no injection seam at all. This
+ * file now tests that function directly, plus a cheap source-pattern check
+ * that apply() still actually calls it — so the property that mattered
+ * (a bare CAREER_OPS_UPDATE_REEXEC=1 cannot skip resolveTargetRef()) is
+ * pinned with no OS-specific surface left to get wrong.
  */
 
-import { execFileSync } from 'child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, copyFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { pass, fail, rmSync } from './helpers.mjs';
+import { pass, fail } from './helpers.mjs';
+import { trustsEnvTargetRef } from '../update-system.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const UPDATE_SYSTEM_SRC = join(__dirname, '..', 'update-system.mjs');
-
-/** A disposable git repo containing its own copy of update-system.mjs —
- *  apply()'s ROOT is the script's own directory, so this IS the install. */
-function makeFixtureInstall() {
-  const dir = mkdtempSync(join(tmpdir(), 'co-reexec-bypass-'));
-  const g = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
-  g('init', '-q', '-b', 'main', '.');
-  g('config', 'user.email', 'test@example.com');
-  g('config', 'user.name', 'Test');
-  g('config', 'commit.gpgsign', 'false');
-  copyFileSync(UPDATE_SYSTEM_SRC, join(dir, 'update-system.mjs'));
-  writeFileSync(join(dir, 'VERSION'), '1.0.0\n');
-  g('add', '-A');
-  g('commit', '-qm', 'base');
-  return dir;
-}
-
-/** A `curl` that always fails, shadowing the real one so resolveTargetRef()'s
- *  release lookup fails deterministically — no live network dependency. */
-function makeCurlStubBin() {
-  const dir = mkdtempSync(join(tmpdir(), 'co-reexec-bypass-bin-'));
-  const stub = join(dir, 'curl');
-  writeFileSync(stub, '#!/bin/sh\nexit 7\n');
-  chmodSync(stub, 0o755);
-  return dir;
-}
-
-/** Run `apply --confirm` in the fixture with the given extra env, stubbed
- *  curl shadowing the real one. Returns {status, stdout, stderr} either way
- *  — apply() is expected to exit non-zero here, which execFileSync throws on. */
-function runApply(dir, stubBin, extraEnv) {
-  try {
-    const stdout = execFileSync(process.execPath, ['update-system.mjs', 'apply', '--confirm'], {
-      cwd: dir,
-      encoding: 'utf-8',
-      timeout: 30000,
-      env: { ...process.env, PATH: `${stubBin}:${process.env.PATH}`, ...extraEnv },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    return { status: 0, stdout, stderr: '' };
-  } catch (err) {
-    return { status: err.status ?? null, stdout: err.stdout ?? '', stderr: err.stderr ?? '' };
-  }
-}
+const UPDATE_SYSTEM_SRC = readFileSync(join(__dirname, '..', 'update-system.mjs'), 'utf-8');
 
 console.log('\n🧪 Testing that CAREER_OPS_UPDATE_REEXEC=1 alone cannot bypass channel resolution...');
 
-const install = makeFixtureInstall();
-const stubBin = makeCurlStubBin();
-try {
-  // ── Control: a normal (non-reexec) invocation must call resolveTargetRef()
-  // and fail loudly when the release lookup is blocked — this proves the
-  // fixture and curl stub are actually exercising the code path in question,
-  // not passing for an unrelated reason.
-  const control = runApply(install, stubBin, {});
-  const controlCallsResolve = control.status !== 0 &&
-    /releases\/latest/.test(control.stderr) &&
-    /--channel main/.test(control.stderr);
-  if (controlCallsResolve) {
-    pass('control: a normal invocation calls resolveTargetRef() and fails loudly when it cannot reach GitHub');
+// ── The exact bypass scenario: neither an authenticated marker nor the
+// guarded legacy path — i.e. isReexec's bare third disjunct alone — must
+// NOT trust an env-supplied target ref.
+{
+  const trusted = trustsEnvTargetRef(false, false);
+  if (trusted === false) {
+    pass('neither authenticated nor legacy reexec proven -> does NOT trust the env target ref (resolveTargetRef() runs instead)');
   } else {
-    fail(`control: expected a resolveTargetRef failure naming RELEASES_API and --channel main; got status=${control.status} stderr=${control.stderr.slice(0, 300)}`);
+    fail(`trustsEnvTargetRef(false, false) = ${trusted}, expected false — the bypass would be open again`);
   }
+}
 
-  // ── The actual regression: CAREER_OPS_UPDATE_REEXEC=1 alone, --confirm,
-  // clean state (no lock file, no marker, no backup branch) must behave
-  // IDENTICALLY to the control above — not silently skip to a bare `main`
-  // fetch.
-  const bypassAttempt = runApply(install, stubBin, { CAREER_OPS_UPDATE_REEXEC: '1' });
-  const stillCallsResolve = bypassAttempt.status !== 0 &&
-    /releases\/latest/.test(bypassAttempt.stderr) &&
-    /--channel main/.test(bypassAttempt.stderr);
-  const neverReachedFetch = !/Fetching .* from upstream/.test(bypassAttempt.stdout);
-  if (stillCallsResolve && neverReachedFetch) {
-    pass('CAREER_OPS_UPDATE_REEXEC=1 alone does NOT skip resolveTargetRef() or silently resolve to main');
+// ── A genuine authenticated reexec (consumeReexecMarker() validated the
+// marker) legitimately inherits the parent's resolved ref.
+{
+  const trusted = trustsEnvTargetRef(true, false);
+  if (trusted === true) {
+    pass('authenticated reexec (consumeReexecMarker) -> trusts the env target ref');
   } else {
-    fail(
-      `bare CAREER_OPS_UPDATE_REEXEC=1 changed apply()'s behavior — status=${bypassAttempt.status}, ` +
-      `stdout=${bypassAttempt.stdout.slice(0, 300)}, stderr=${bypassAttempt.stderr.slice(0, 300)}`,
-    );
+    fail(`trustsEnvTargetRef(true, false) = ${trusted}, expected true`);
   }
-} finally {
-  rmSync(install, { recursive: true, force: true });
-  rmSync(stubBin, { recursive: true, force: true });
+}
+
+// ── The more heavily guarded legacy path (isLegacyReexec(): a real lock
+// file + a really-existing, correctly-named backup branch) also legitimately
+// inherits it, for a pre-dating-this-env-var parent.
+{
+  const trusted = trustsEnvTargetRef(false, true);
+  if (trusted === true) {
+    pass('legacy reexec (isLegacyReexec) -> trusts the env target ref');
+  } else {
+    fail(`trustsEnvTargetRef(false, true) = ${trusted}, expected true`);
+  }
+}
+
+// ── Wiring: apply()'s targetRef ternary must actually call this function
+// with these two inputs, or the unit tests above pin a function nothing
+// calls. A source-pattern check, not a behavioral one — matches this repo's
+// own convention (see e.g. the batch-runner curl-prefetch tests) for pinning
+// that a specific call site exists without re-running apply() itself.
+{
+  const wired = /trustsEnvTargetRef\(authenticatedReexec,\s*legacyReexec\)/.test(UPDATE_SYSTEM_SRC);
+  if (wired) {
+    pass("apply()'s targetRef ternary calls trustsEnvTargetRef(authenticatedReexec, legacyReexec)");
+  } else {
+    fail("apply() no longer calls trustsEnvTargetRef(authenticatedReexec, legacyReexec) — the unit tests above are pinning a function nothing uses");
+  }
 }
