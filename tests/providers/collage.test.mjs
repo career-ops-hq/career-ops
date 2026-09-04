@@ -7,14 +7,14 @@ try {
   const mod = await import(pathToFileURL(join(ROOT, 'providers/collage.mjs')).href);
   const p = mod.default;
   if (p.id === 'collage') pass('collage.id is "collage"'); else fail('wrong provider id');
-  const hit = p.detect({ name: 'PheedLoop', api: 'https://api.collage.co/v1/positions/pheedloop' });
-  if (hit?.url === 'https://api.collage.co/v1/positions/pheedloop') pass('detect accepts explicit API URL'); else fail(`detect=${JSON.stringify(hit)}`);
-  const careers = p.detect({ name: 'PheedLoop', careers_url: 'https://jobs.collage.co/pheedloop' });
-  if (careers?.url === 'https://api.collage.co/v1/positions/pheedloop') pass('detect derives address from explicit Collage careers URL'); else fail(`careers=${JSON.stringify(careers)}`);
+  const hit = p.detect({ name: 'Example Collage Co', api: 'https://api.collage.co/v1/positions/exampleco' });
+  if (hit?.url === 'https://api.collage.co/v1/positions/exampleco') pass('detect accepts explicit API URL'); else fail(`detect=${JSON.stringify(hit)}`);
+  const careers = p.detect({ name: 'Example Collage Co', careers_url: 'https://secure.collage.co/jobs/exampleco' });
+  if (careers?.url === 'https://api.collage.co/v1/positions/exampleco') pass('detect derives address from explicit Collage careers URL'); else fail(`careers=${JSON.stringify(careers)}`);
   if (p.detect({ name: 'Spoof', careers_url: 'https://evil.example/pheedloop' }) === null) pass('detect rejects non-Collage URL'); else fail('accepted spoofed careers URL');
   if (p.detect({ name: 'Bad', api: 'https://evil.example/v1/positions/acme' }) === null) pass('detect rejects untrusted API host'); else fail('accepted untrusted API host');
   const sample = { positions: [
-    { title: 'Learning Designer', location: 'Toronto, ON', department: 'People', commitment: 'Full-time', employmentType: 'Permanent', descriptionPlain: 'Build learning.', createdDate: '2026-09-01T12:00:00Z', hostedUrl: 'https://jobs.collage.co/pheedloop/1', applyUrl: 'https://apply.example/1' },
+    { title: 'Learning Designer', location: 'Toronto, ON', department: 'People', commitment: 'Full-time', employmentType: 'Permanent', descriptionPlain: 'Build learning.', createdDate: '2026-09-01T12:00:00Z', hostedUrl: 'https://secure.collage.co/jobs/exampleco/1', applyUrl: 'https://apply.example/1' },
     { title: 'No URL' },
   ] };
   const jobs = mod.parseCollageResponse(sample, 'PheedLoop');
@@ -23,10 +23,11 @@ try {
   if (jobs[0]?.postedAt === Date.parse('2026-09-01T12:00:00Z')) pass('parser converts createdDate'); else fail(`postedAt=${jobs[0]?.postedAt}`);
   const relative = mod.parseCollageResponse({ positions: [{ title: 'Relative URL', hostedUrl: '/jobs/1', applyUrl: 'jobs/1' }] }, 'X');
   if (relative.length === 0) pass('parser drops relative job URLs'); else fail('parser accepted a relative job URL');
-  if (mod.parseCollageResponse({ positions: [] }, 'X').length === 0 && mod.parseCollageResponse({}, 'X').length === 0) pass('empty/malformed payloads return []'); else fail('empty payload handling failed');
+  try { if (mod.parseCollageResponse({ positions: [] }, 'X').length === 0) pass('empty positions envelope returns []'); else fail('empty positions envelope failed'); } catch { fail('empty positions envelope should be valid'); }
+  try { mod.parseCollageResponse({}, 'X'); fail('unknown envelope should throw'); } catch { pass('unknown response envelope throws descriptively'); }
   let fetchedUrl = ''; let fetchedOpts;
-  const fetched = await p.fetch({ name: 'PheedLoop', api: 'https://api.collage.co/v1/positions/pheedloop' }, { fetchJson: async (url, opts) => { fetchedUrl = url; fetchedOpts = opts; return sample; } });
-  if (fetchedUrl === 'https://api.collage.co/v1/positions/pheedloop' && fetchedOpts?.redirect === 'error' && fetched.length === 1) pass('fetch pins API host and uses redirect:error'); else fail(`fetch=${fetchedUrl} ${JSON.stringify(fetchedOpts)}`);
+  const fetched = await p.fetch({ name: 'Example Collage Co', api: 'https://api.collage.co/v1/positions/exampleco' }, { fetchJson: async (url, opts) => { fetchedUrl = url; fetchedOpts = opts; return sample; } });
+  if (fetchedUrl === 'https://api.collage.co/v1/positions/exampleco' && fetchedOpts?.redirect === 'error' && fetched.length === 1) pass('fetch pins API host and uses redirect:error'); else fail(`fetch=${fetchedUrl} ${JSON.stringify(fetchedOpts)}`);
   let calls = 0;
   for (const bad of ['https://evil.example/v1/positions/acme', 'http://api.collage.co/v1/positions/acme']) {
     let rejected = false;

@@ -8,7 +8,7 @@
 
 const API_ORIGIN = 'https://api.collage.co';
 const COLLAGE_API_HOST = 'api.collage.co';
-const COLLAGE_SITE_HOST_RE = /^(?:jobs|careers)\.collage\.co$/;
+const COLLAGE_SITE_HOST_RE = /^secure\.collage\.co$/;
 
 /** @param {string} url */
 function assertCollageApiUrl(url) {
@@ -34,17 +34,19 @@ function resolveApiUrl(entry) {
   let parsed;
   try { parsed = new URL(raw); } catch { return null; }
   if (parsed.protocol !== 'https:' || !COLLAGE_SITE_HOST_RE.test(parsed.hostname)) return null;
+  if (!/^\/jobs\/[^/]+(?:\/)?$/.test(parsed.pathname)) return null;
   const parts = parsed.pathname.split('/').filter(Boolean);
   const site = parts.at(-1);
   if (!site || site.includes('.')) return null;
-  return assertCollageApiUrl(`${API_ORIGIN}/v1/positions/${encodeURIComponent(site)}`);
+  let decoded;
+  try { decoded = decodeURIComponent(site); } catch { decoded = site; }
+  if (!decoded || decoded.includes('/')) return null;
+  return assertCollageApiUrl(`${API_ORIGIN}/v1/positions/${encodeURIComponent(decoded)}`);
 }
 
 function toEpochMs(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value < 1e12 ? value * 1000 : value;
   if (typeof value === 'string' && value.trim()) {
-    const n = Number(value);
-    if (Number.isFinite(n)) return n < 1e12 ? n * 1000 : n;
     const parsed = Date.parse(value);
     if (!Number.isNaN(parsed)) return parsed;
   }
@@ -68,9 +70,8 @@ function absoluteHttpsUrl(value) {
 
 /** @param {any} json @param {string} companyName */
 export function parseCollageResponse(json, companyName) {
-  const rows = Array.isArray(json) ? json :
-    (Array.isArray(json?.positions) ? json.positions :
-      (Array.isArray(json?.data) ? json.data : Array.isArray(json?.results) ? json.results : []));
+  const rows = Array.isArray(json) ? json : Array.isArray(json?.positions) ? json.positions : null;
+  if (!rows) throw new Error('collage: unrecognized response envelope (expected a positions array)');
   return rows.filter(j => j && text(j.title)).map(j => {
     const url = absoluteHttpsUrl(j.hostedUrl) || absoluteHttpsUrl(j.url) || absoluteHttpsUrl(j.applyUrl);
     if (!url) return null;

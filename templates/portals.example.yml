@@ -945,7 +945,7 @@ search_queries:
 #   enabled: true
 #
 # - name: Example Collage HR Co
-#   careers_url: https://jobs.collage.co/exampleco             # explicit job-site address
+#   careers_url: https://secure.collage.co/jobs/exampleco      # explicit job-site address
 #   # Or pin the API directly: api: https://api.collage.co/v1/positions/exampleco
 #   enabled: true
 #
