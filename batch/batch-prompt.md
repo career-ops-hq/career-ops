@@ -37,6 +37,8 @@ Examples:
 - `language.output: en` + `language.modes_dir: [modes, modes/zh]` → keep English prose, load both shared contexts, and choose market concepts from the JD's jurisdiction, currency, benefits, and legal signals — not language alone.
 - Missing `language.output` → write in English.
 
+If the declared markets remain genuinely ambiguous after reviewing the JD, stop before writing or merging the report or tracker entry, ask the candidate to select the market, and do not guess.
+
 ---
 
 ## Sources of Truth (read before evaluating, except where a block defers the load)
