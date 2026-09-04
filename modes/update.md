@@ -79,10 +79,13 @@ If yes:
    - If non-zero, treat apply as failed. Show the captured output and offer:
      > "⚠️ Update apply failed. Want me to show the full error, or try `/career-ops update rollback`?"
    - Stop the flow here if apply failed — do not run doctor, verify-pipeline, or reconciliation on a partially-applied update.
-6. Run `node doctor.mjs` to validate the installation, then `node verify-pipeline.mjs` to validate the data layer. They check different things: doctor confirms the setup files exist and are personalized, not that existing data still matches what the updated code expects — a release that changes a data file's expected shape can pass doctor cleanly while breaking every downstream reader of that file silently (e.g. a tracker/log schema change that makes existing rows fail to parse, so stats and cadence tools report zero instead of erroring).
-   - If either command exits with a non-zero code, treat validation as failed. Show the captured output and offer:
+6. Run `node doctor.mjs` to validate the installation.
+   - If it exits with a non-zero code, treat validation as failed. Show the captured output and offer:
      > "⚠️ Validation failed after update. Want me to show the full error, or roll back with `/career-ops update rollback`?"
-   - Stop the flow here if validation failed — do not run reconciliation or show the success message.
+   - Stop the flow here if validation failed — do not run verify-pipeline, reconciliation, or show the success message.
+   - Then run `node verify-pipeline.mjs` to check the data layer. Show its output, but treat it as informational only — never as a gate, and never with a rollback offer.
+     Reason: unlike doctor, verify-pipeline also fails on pre-existing tracker issues that have nothing to do with this update (a non-canonical status, a moved report file, a duplicate row number) — rolling back the release fixes none of those.
+     If it reports errors, note them separately (e.g. "verify-pipeline also flagged N pre-existing data issue(s) — unrelated to this update, worth a look separately") and continue to Step 7 regardless of its exit code.
 7. If Step 3 flagged archetype/scoring changes, reconcile `modes/_profile.md` against the new `modes/_shared.md`:
    - Read both the pre-update version (`git show $PRE_UPDATE_REF:modes/_shared.md`) and the post-update version of `modes/_shared.md`.
    - Extract the canonical archetype identifiers from each version (archetype headings/definitions, plus any slug/alias fields).
