@@ -206,6 +206,11 @@
 #
 # trust_filter:
 #   enabled: true
+
+- name: YMCA of Greater Toronto
+  careers_url: https://recruiting.ultipro.ca/YMC5001YMGT/JobBoard/7fde8f3e-7920-4d9d-8394-87bd44cc2330/
+  provider: ultipro
+  enabled: false
 #   suspicious_domains:
 #     - "bit.ly"
 #     - "tinyurl.com"

@@ -8,7 +8,7 @@ console.log('\nProvider — ultipro (UKG Pro / UltiPro Recruiting)');
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'providers/ultipro.mjs')).href);
   const ultipro = mod.default;
-  const { parseListPage, extractLocations, extractCandidateOpportunityDetail } = mod;
+  const { parseListPage, assertUltiproUrl, extractLocations, extractCandidateOpportunityDetail } = mod;
 
   // Fictional fixture tenant/board — GUID-shaped boardId, alphanumeric tenant,
   // matching the real observed shape without a real company.
@@ -63,6 +63,13 @@ try {
     } else {
       fail(`ultipro.detect() should reject: ${url}`);
     }
+  }
+
+  try {
+    assertUltiproUrl('https://evil.com/T/JobBoard/B/');
+    fail('assertUltiproUrl() should reject an off-allowlist host directly');
+  } catch {
+    pass('assertUltiproUrl() rejects an off-allowlist host directly');
   }
 
   // fetch() on an off-allowlist host must throw BEFORE any network call —
@@ -265,7 +272,7 @@ try {
       fail(`ultipro.fetch() Skip sequence wrong: ${JSON.stringify(seenSkips)}`);
     }
     if (jobs.length === 70) {
-      pass('ultipro.fetch() stops once Skip + count reaches totalCount, returning every posting');
+      pass('ultipro.fetch() walks through full pages and returns every posting');
     } else {
       fail(`ultipro.fetch() returned ${jobs.length} jobs, expected 70`);
     }
@@ -336,7 +343,7 @@ try {
         calls++;
         // Every page is a full 50-row page and totalCount is far beyond what
         // max_pages will ever reach — pagination can only stop by hitting the cap.
-        return { opportunities: mkPageOpps(1, 50), totalCount: 999999 };
+        return { opportunities: mkPageOpps((calls - 1) * 50 + 1, 50), totalCount: 999999 };
       },
     };
     const jobs = await ultipro.fetch({ name: 'ExampleCo', careers_url: `https://recruiting.ultipro.ca/${TENANT}/JobBoard/${BOARD_ID}/`, max_pages: 3 }, mockCtx);
@@ -347,16 +354,16 @@ try {
     }
   }
 
-  // A tenant that finishes exactly at the cap (totalCount reached) is NOT
-  // tagged truncated — the cap and "genuinely done" must not be conflated.
+  // A full page at the cap is potentially incomplete even when a source
+  // reported total claims it is complete; only a short page proves the end.
   {
     const mockCtx = {
       sleep: async () => {},
       fetchJson: async () => ({ opportunities: mkPageOpps(1, 50), totalCount: 50 }),
     };
     const jobs = await ultipro.fetch({ name: 'ExampleCo', careers_url: `https://recruiting.ultipro.ca/${TENANT}/JobBoard/${BOARD_ID}/`, max_pages: 1 }, mockCtx);
-    if (jobs.ultiproTruncated === undefined) pass('ultipro.fetch() does not tag truncated when the board finished exactly at the cap');
-    else fail('ultipro.fetch() should not tag truncated when totalCount was actually reached');
+    if (jobs.ultiproTruncated === true) pass('ultipro.fetch() tags a full page at the cap as potentially truncated');
+    else fail('ultipro.fetch() should tag a full page at the cap as potentially truncated');
   }
 
   // ── malformed / error responses are NOT silently treated as zero jobs ──
