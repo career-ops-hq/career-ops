@@ -239,7 +239,7 @@ node audit-portals.mjs --strict              # exit 1 on any non-ok verdict
 
 The offline half — *which enabled entries does no provider claim?* — is pure config matching, so `verify-pipeline.mjs` runs it as check 15 at zero network cost: an entry naming an unknown provider is an error (it can never scan), an entry no provider claims is a warning, and an absent `portals.yml` is not a finding. The live half stays here because it needs one fetch per board.
 
-**Exit codes:** `0` on every normal run; `1` if the run itself fails, or under `--strict` when any verdict is not `ok` or any board fell below its `--baseline` count.
+**Exit codes:** `0` on every normal run; `1` if the run itself fails, or under `--strict` when any verdict is not `ok` or any board lost ≥50% of its `--baseline` count.
 
 ---
 

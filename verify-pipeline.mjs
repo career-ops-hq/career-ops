@@ -539,13 +539,24 @@ if (!existsSync(PORTALS_FILE)) {
     const providers = await loadProviders(join(CAREER_OPS, 'providers'));
     const { silent, handoff, unknownProvider } = findUnclaimedEntries(entries, providers);
 
+    // findUnclaimedEntries silently skips an entry with no (or blank) `name` —
+    // it can't report what it can't label. Without this, that entry vanishes
+    // from silent/handoff/unknownProvider entirely, and the enabled count
+    // below (which doesn't share the same eligibility rule) would still
+    // include it — so a malformed entry never gets a provider check AND the
+    // "All N entries resolve" success line claims it as resolved anyway.
+    const malformed = entries.filter(e => e && e.enabled !== false && (typeof e.name !== 'string' || !e.name.trim()));
+    for (const e of malformed) {
+      warn(`portals.yml: an enabled entry has no name (careers_url: ${e.careers_url || 'none'}) — it cannot be provider-checked; give it a name`);
+    }
+
     for (const e of unknownProvider) {
       error(`portals.yml: "${e.name}" sets an unknown provider — ${e.error}. The entry never scans (see providers/ for valid ids)`);
     }
     for (const e of silent) {
       warn(`portals.yml: "${e.name}" is enabled but no provider claims ${e.careers_url || 'its careers_url'} — scan.mjs skips it on every run without naming it (run node audit-portals.mjs)`);
     }
-    if (silent.length === 0 && unknownProvider.length === 0) {
+    if (silent.length === 0 && unknownProvider.length === 0 && malformed.length === 0) {
       const enabled = entries.filter(e => e && e.enabled !== false).length;
       ok(handoff.length > 0
         ? `All ${enabled - handoff.length} scannable portals.yml entries resolve to a provider (${handoff.length} on websearch handoff)`

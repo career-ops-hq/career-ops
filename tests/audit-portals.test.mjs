@@ -181,6 +181,7 @@ try {
     { name: 'Handoff Co', careers_url: 'https://nobody.example.com', scan_method: 'websearch', enabled: true },
     { name: 'Typo Co', careers_url: 'https://x.example.com', provider: 'greenhosue', enabled: true },
     { name: 'Off Co', careers_url: 'https://nobody.example.com', enabled: false },
+    { careers_url: 'https://nameless.example.com', enabled: true },
   ], reg);
 
   if (unclaimed.silent.length === 1 && unclaimed.silent[0].name === 'Silent Co') {
@@ -201,6 +202,14 @@ try {
   const allNames = [...unclaimed.silent, ...unclaimed.handoff, ...unclaimed.unknownProvider].map((e) => e.name);
   if (!allNames.includes('Off Co')) pass('a disabled entry is never reported as unclaimed');
   else fail('disabled entry leaked into the unclaimed buckets');
+  // An enabled entry with no `name` can't be labeled in any bucket, so
+  // findUnclaimedEntries skips it silently — verify-pipeline.mjs's Check 15
+  // must count it separately (as malformed) rather than as a resolved entry.
+  if (unclaimed.silent.length === 1 && unclaimed.handoff.length === 1 && unclaimed.unknownProvider.length === 1) {
+    pass('an enabled entry with no name is skipped, not added to any bucket');
+  } else {
+    fail(`nameless entry leaked into a bucket: silent=${unclaimed.silent.length} handoff=${unclaimed.handoff.length} unknownProvider=${unclaimed.unknownProvider.length}`);
+  }
 
   // scan.mjs DOES claim a local-parser entry, so excluding local-parser here —
   // the way auditCompanies() must, since it refuses to run the command — would
