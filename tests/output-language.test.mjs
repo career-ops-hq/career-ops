@@ -6,7 +6,7 @@
 // mid-run and forge its exit code (see the guard in test-all's runDiscovered).
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { pass, fail, ROOT, NODE, rmSync } from './helpers.mjs';
 import {
   outputLanguageInstruction,
@@ -85,6 +85,13 @@ check(
 // translated, per AGENTS.md) rather than fabricating fake ones; only
 // config/profile.yml, cv.md and modes/_profile.md need to live in the sandbox,
 // via CAREER_OPS_ROOT (getCareerOpsRoot() in path-resolver.mjs honors it).
+// execFileSync only returns stdout — it captures stderr on the object it
+// throws (a failed exit), but on a SUCCESSFUL run stderr is simply discarded.
+// gemini-eval.mjs's missing-file warnings go through console.warn (stderr),
+// and every path exercised below reaches the mocked-API-key failure, which
+// exits non-zero — so this happened to work only by accident. spawnSync
+// always returns both streams regardless of exit status, so use that instead
+// (CodeRabbit, PR #3798).
 function runGeminiEval(modesDirYaml) {
   const tmp = mkdtempSync(join(ROOT, 'co-modes-dir-'));
   try {
@@ -97,20 +104,14 @@ function runGeminiEval(modesDirYaml) {
     const jdPath = join(tmp, 'mock-jd.txt');
     writeFileSync(jdPath, 'Job description text', 'utf-8');
 
-    let stdout = '';
-    let stderr = '';
-    try {
-      stdout = execFileSync(NODE, [join(ROOT, 'gemini-eval.mjs'), '--file', jdPath, '--no-save'], {
-        cwd: tmp,
-        env: { ...process.env, GEMINI_API_KEY: 'mock-api-key-12345', CAREER_OPS_ROOT: tmp },
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 30000,
-      });
-    } catch (err) {
-      stdout = err.stdout || '';
-      stderr = err.stderr || '';
-    }
+    const result = spawnSync(NODE, [join(ROOT, 'gemini-eval.mjs'), '--file', jdPath, '--no-save'], {
+      cwd: tmp,
+      env: { ...process.env, GEMINI_API_KEY: 'mock-api-key-12345', CAREER_OPS_ROOT: tmp },
+      encoding: 'utf-8',
+      timeout: 30000,
+    });
+    const stdout = result.stdout || '';
+    const stderr = result.stderr || '';
     const tokenBudget = Number(stdout.match(/Token budget: (\d+) tokens/)?.[1] ?? NaN);
     return { stdout, stderr, tokenBudget };
   } finally {
@@ -120,16 +121,17 @@ function runGeminiEval(modesDirYaml) {
 
 // Array input with two declared markets (modes/de, modes/zh): neither
 // _shared.md nor the primary market's evaluation-mode file (angebot.md) logs
-// a "not found" warning, and the token budget is strictly larger than the
-// single-market run below — proof the SECOND market's _shared.md content was
-// actually folded into context, not merely that the run didn't crash.
+// a "not found" warning (console.warn → stderr), and the token budget is
+// strictly larger than the single-market run below — proof the SECOND
+// market's _shared.md content was actually folded into context, not merely
+// that the run didn't crash.
 const twoMarket = runGeminiEval('  modes_dir:\n    - modes/de\n    - modes/zh');
 check(
-  !twoMarket.stdout.includes('modes/de/_shared.md not found') && !twoMarket.stdout.includes('modes/de/angebot.md not found'),
+  !twoMarket.stderr.includes('modes/de/_shared.md not found') && !twoMarket.stderr.includes('modes/de/angebot.md not found'),
   'gemini-eval.mjs resolves the primary market in a 2-market modes_dir array',
 );
 check(
-  !twoMarket.stdout.includes('modes/zh/_shared.md not found'),
+  !twoMarket.stderr.includes('modes/zh/_shared.md not found'),
   "gemini-eval.mjs also resolves the secondary market's _shared.md in a 2-market array",
 );
 
@@ -137,7 +139,7 @@ check(
 // shape: the same primary-market resolution, no missing-file warnings.
 const oneMarketArray = runGeminiEval('  modes_dir:\n    - modes/de');
 check(
-  !oneMarketArray.stdout.includes('modes/de/_shared.md not found') && !oneMarketArray.stdout.includes('modes/de/angebot.md not found'),
+  !oneMarketArray.stderr.includes('modes/de/_shared.md not found') && !oneMarketArray.stderr.includes('modes/de/angebot.md not found'),
   'gemini-eval.mjs treats a one-element modes_dir array like a plain string',
 );
 check(
@@ -160,4 +162,36 @@ const noMarket = runGeminiEval('  output: en');
 check(
   Number.isFinite(noMarket.tokenBudget) && noMarket.tokenBudget !== oneMarketArray.tokenBudget,
   'gemini-eval.mjs falls back to modes/ (oferta.md) when modes_dir is absent, unchanged from before #3793',
+);
+
+// Regression (CodeRabbit, PR #3798): the FIRST declared market is primary.
+// When it cannot be resolved at all (its directory does not exist), the
+// evaluation must fall back to the DEFAULT mode (modes/oferta.md) — it must
+// NEVER silently promote the second declared market (modes/de, perfectly
+// valid here) into the primary slot. Promoting it would evaluate the JD
+// against modes/de's A-F rules without anyone having asked for that.
+const missingPrimary = runGeminiEval('  modes_dir:\n    - modes/does-not-exist-anywhere\n    - modes/de');
+check(
+  missingPrimary.stderr.includes('modes_dir "modes/does-not-exist-anywhere" not found'),
+  'gemini-eval.mjs reports why the primary market could not be resolved',
+);
+// Not an exact equality: config/profile.yml's own text is part of the prompt
+// context (it differs by a few bytes between the "no modes_dir" and "invalid
+// modes_dir" fixtures — different YAML), so a few tokens of drift is
+// expected and fine. What matters is the ORDER of magnitude: falling back to
+// the default (modes/, ~24.2K tokens here) is nothing like promoting modes/de
+// (~5.3K tokens here — an entirely different, much smaller pair of files).
+// A tight tolerance here would still catch an accidental promotion; a
+// same-order-of-magnitude gap would not.
+check(
+  Number.isFinite(missingPrimary.tokenBudget)
+    && Number.isFinite(noMarket.tokenBudget)
+    && Math.abs(missingPrimary.tokenBudget - noMarket.tokenBudget) < 100,
+  'an unresolvable primary market falls back to the DEFAULT evaluation mode (same context, modulo a few bytes of profile.yml text, as no modes_dir at all)',
+);
+check(
+  Number.isFinite(missingPrimary.tokenBudget)
+    && Number.isFinite(oneMarketArray.tokenBudget)
+    && Math.abs(missingPrimary.tokenBudget - oneMarketArray.tokenBudget) > 1000,
+  'the second declared market (modes/de) is NOT silently promoted to primary when the first cannot be resolved',
 );

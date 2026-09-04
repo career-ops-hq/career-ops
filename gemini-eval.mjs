@@ -132,20 +132,32 @@ if (existsSync(PATHS.profileYml)) {
     const rawModesDir = profile && profile.language && profile.language.modes_dir;
     if (rawModesDir) {
       const candidates = Array.isArray(rawModesDir) ? rawModesDir : [rawModesDir];
-      const resolved = candidates.map(resolveModesDirCandidate).filter(Boolean);
-      if (resolved.length) {
-        const primaryDir = resolved[0];
-        const candidateFiles = ['oferta.md', 'angebot.md', 'offre.md', 'kyujin.md', 'is-ilani.md', 'naukri.md'];
-        const found = candidateFiles.find((file) => existsSync(join(CODE_ROOT, primaryDir, file)));
-        if (found) {
-          modesDirs = resolved;
-          evalFilename = found;
-        } else {
-          console.warn(`⚠️   No matching evaluation file found in ${primaryDir}; using default modes/oferta.md`);
-        }
-      } else {
-        console.warn('⚠️   No usable modes_dir entries found; using default modes/');
+      // AGENTS.md "Output Language vs Market Modes": the FIRST declared entry
+      // is always primary. Resolve IT first, before touching the rest — an
+      // unusable primary falls back to the DEFAULT evaluation mode, and must
+      // NEVER silently promote a later declared market into the primary slot
+      // (that would evaluate against the wrong market's A-F rules without
+      // anyone asking for it).
+      const primaryRaw = candidates[0];
+      const primaryDir = resolveModesDirCandidate(primaryRaw);
+      const candidateFiles = ['oferta.md', 'angebot.md', 'offre.md', 'kyujin.md', 'is-ilani.md', 'naukri.md'];
+      const primaryEvalFile = primaryDir && candidateFiles.find((file) => existsSync(join(CODE_ROOT, primaryDir, file)));
+      if (primaryDir && primaryEvalFile) {
+        // Primary resolved. Any further declared markets only need to exist —
+        // they contribute _shared.md context (below), never an evaluation
+        // mode file of their own.
+        const extras = candidates.slice(1).map(resolveModesDirCandidate).filter(Boolean);
+        modesDirs = [primaryDir, ...extras];
+        evalFilename = primaryEvalFile;
+      } else if (primaryDir) {
+        // Primary directory exists but has no recognizable evaluation-mode
+        // file in it — fall back to the default (modes/oferta.md), not to
+        // any secondary declared market.
+        console.warn(`⚠️   No matching evaluation file found in ${primaryDir}; using default modes/oferta.md`);
       }
+      // else: resolveModesDirCandidate(primaryRaw) already warned why the
+      // primary itself could not be resolved; falling through to the default
+      // modes/oferta.md below.
     }
   } catch (err) {
     console.warn(`⚠️   Could not parse config/profile.yml: ${err.message}`);
