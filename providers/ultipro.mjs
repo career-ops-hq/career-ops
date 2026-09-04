@@ -125,7 +125,7 @@ function resolveTenant(entry) {
 }
 
 /** @param {string} url */
-function assertUltiproUrl(url) {
+export function assertUltiproUrl(url) {
   let parsed;
   try {
     parsed = new URL(url);
@@ -430,18 +430,26 @@ export default {
       // response that never advances would otherwise loop until pageLimit.
       if (raw.length === 0) break;
 
+      let fresh = 0;
       for (const job of pageJobs) {
         const { _id, ...clean } = /** @type {any} */ (job);
         if (seen.has(_id)) continue;
         seen.add(_id);
+        fresh++;
         jobs.push(Object.assign(clean, { _id }));
       }
 
       const shortPage = raw.length < PAGE_SIZE;
-      const reachedTotal = total !== null && skip + raw.length >= total;
-      if (shortPage || reachedTotal) break;
+      if (fresh === 0) {
+        if (!shortPage && ctxCap === Infinity) {
+          cappedIncomplete = true;
+          console.error(`⚠️  ultipro: ${entry.name} pagination made no progress on a full page; results may be incomplete`);
+        }
+        break;
+      }
+      if (shortPage) break;
 
-      skip += PAGE_SIZE;
+      skip += raw.length;
 
       // This was the last iteration the for-loop will run — if the board
       // still has more (or an unknown amount) left, the cap truncated it.
