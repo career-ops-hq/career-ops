@@ -82,8 +82,9 @@ export function authorLetter(heading) {
  * lettered F" as the verdict, but no mode has ever written a Verdict block:
  * the callout landed in #1535 when `modes/oferta.md` already read
  * `## F) Interview Plan`, so every report has rendered the Interview Plan
- * table into a callout built for one sentence (#3416). All 19 localized modes
- * write Interview Plan at F too, so this was never an English-only slip.
+ * table into a callout built for one sentence (#3416). All eight localized
+ * `oferta.md` files write Interview Plan at F too, so this was never an
+ * English-only slip.
  *
  * The marker is what the core actually promises: `cleanHeading` has always
  * stripped a trailing `(lead)` / `(verdict)`, which is a deliberate authoring
