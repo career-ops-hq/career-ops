@@ -135,9 +135,33 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
   // written row (verified against merge-tracker), so the robust instruction
   // costs nothing. Not "N/A" either — parseTsvExtras drops placeholders
   // precisely so they can't be misread as the row's LOCATION.
+
+  // Two things this prompt deliberately does NOT do.
+  //
+  // It does not ENUMERATE the report's sections. It used to say "blocks A–F, G
+  // posting-legitimacy, and the Machine Summary", which was a hand-kept copy of
+  // a list that lives in modes/oferta.md — and it had already drifted: the
+  // template also requires Risk Summary, H) Draft Application Answers and
+  // Keywords extracted. The `EXACTLY` carried the real instruction, so nothing
+  // broke, which is precisely why the drift was invisible. The mode file is the
+  // one source of truth for which sections exist; naming a subset here can only
+  // ever go stale, never help.
+  //
+  // And it does not let a failed fetch become a scored report. WebFetch returns
+  // 200 with a login wall, an expired-ad page or a bot challenge, and none of
+  // that announces itself as an error. An agent handed that text will happily
+  // grade it: the output is a confident A–F evaluation of a login screen, shaped
+  // exactly like a real one. This is the write-that-lies case — a run reporting
+  // success for something that did not happen is worse than one that fails
+  // loudly, because nobody goes back to check it. Refusing is the correct
+  // outcome, so the prompt has to say so in step 1, where the fetch happens.
   return `You are running the OFFICIAL career-ops job evaluation, HEADLESS, on the user's own machine. Today is ${today}. Run the REAL career-ops evaluation — do NOT improvise your own scoring.
 
-1. Read ${resolvedLang.evalModeFile} and follow it EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary). Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md. Use WebFetch to read the posting (you are headless — Playwright is unavailable, so use WebFetch and mark the report header "Verification: unconfirmed (batch mode)").
+1. Read ${resolvedLang.evalModeFile} and follow it EXACTLY — EVERY section its report template specifies, in its order, including the Machine Summary. Do not treat any list of sections in THIS prompt as the set to produce; that file is the only source of truth for which sections exist. Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md.
+
+   Use WebFetch to read the posting (you are headless — Playwright is unavailable), and mark the report header "Verification: unconfirmed (batch mode)".
+
+   **If WebFetch does not return the posting itself — a login/consent wall, a 404 or expired ad, a paywall, a bot challenge, or a page whose text is not this job — STOP and report that.** Do not evaluate the page you got instead: a scored report about a login screen looks exactly like a scored report about the job. Say plainly which URL you fetched, what came back, and that no evaluation was produced. A run that says it could not read the posting is a correct outcome; a confident report over a wall is not.
 
 2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
    a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).

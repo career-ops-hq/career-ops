@@ -287,3 +287,35 @@ test("buildPrompt: the language directive is not limited to the evaluate prompt"
     );
   }
 });
+
+// ── the evaluate prompt must not out-source its own honesty (#2789) ──────────
+// WebFetch answers 200 with a login wall, an expired ad or a bot challenge, and
+// none of those announce themselves. Handed that text, an agent grades it: the
+// result is a confident A–F report about a login screen, indistinguishable in
+// shape from a real one. Nothing downstream can catch it either — a JD-archive
+// validator that measures LENGTH accepts a wall's text, and comparing the
+// archive against the report's own keywords compares two outputs the same agent
+// wrote from the same bad page. So the refusal has to be instructed here.
+
+test("buildPrompt: evaluate refuses to score a page that is not the posting", () => {
+  const prompt = buildPrompt({ kind: "evaluate", input: "https://example.com/jobs/9", memory: "", today: "2026-09-04" });
+  for (const wall of ["login", "404", "paywall", "bot challenge"]) {
+    assert.ok(
+      prompt.toLowerCase().includes(wall),
+      `the evaluate prompt must name "${wall}" as a case to stop on, or the agent grades whatever came back`,
+    );
+  }
+  assert.ok(/STOP and report that/i.test(prompt), "the instruction must be to stop, not merely to note it");
+});
+
+test("buildPrompt: evaluate does not enumerate the report's sections", () => {
+  // The section list lives in modes/oferta.md. A copy of it here cannot help —
+  // `follow it EXACTLY` already carries the instruction — and can only go stale,
+  // which it had: the old text named "blocks A–F, G posting-legitimacy, and the
+  // Machine Summary" while the template also requires Risk Summary, H) Draft
+  // Application Answers and Keywords extracted. Nothing failed, which is why it
+  // survived. This pins that the subset does not come back.
+  const prompt = buildPrompt({ kind: "evaluate", input: "https://example.com/jobs/9", memory: "", today: "2026-09-04" });
+  assert.ok(!/blocks?\s+A[–-]F/i.test(prompt), "the prompt must not name a subset of the mode file's sections");
+  assert.ok(/EVERY section its report template specifies/i.test(prompt), "it must defer to the mode file for the section set");
+});
