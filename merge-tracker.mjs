@@ -3,8 +3,11 @@
  * merge-tracker.mjs — Merge batch tracker additions into applications.md
  *
  * Handles multiple TSV formats:
- * - 9-col: num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes
- * - 8-col: num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport (no notes)
+ * - Headed (preferred): a first row of column LABELS, then one data row. Column
+ *   order is then irrelevant — fields resolve by name through the same alias
+ *   table as the tracker itself (#3517).
+ * - 9-col headerless: num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes
+ * - 8-col headerless: num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport (no notes)
  * - Pipe-delimited (markdown table row): | col | col | ... |
  *
  * Dedup: company normalized + role fuzzy match + report number match
@@ -22,7 +25,7 @@ import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex } from './find.mjs';
-import { LEGACY_COLMAP, detectColumns, isHeaderRow, resolveScoreStatus, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
+import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
 // Corporate-form vocabulary, shared with invite-match.mjs rather than copied,
 // for the same reason normalizeCompany lives in tracker-utils: a second private
 // list is how company identity drifts between scripts (#2445, #3665).
@@ -652,18 +655,30 @@ function parseAppLine(line) {
   };
 }
 
+// A trailing field a generator emits for a value it does not have. By shape
+// these are not the thing the column is for, and an absent value must read as
+// absent rather than as some other column's content — a "N/A" url landing in
+// the untagged bucket would be recorded as the row's LOCATION.
+const PLACEHOLDER_CELL = /^(n\/?a|tbd|none|null|-|—|–)$/i;
+
 /**
- * Parse a TSV file content into a structured addition object.
+ * Split one addition row into cells. Tab-delimited by default; pipe-delimited
+ * (a pasted markdown table row) when the line starts with `|`, in which case the
+ * empty cells either side of the outer pipes are dropped.
  *
- * Handles 9-column TSV, 8-column TSV, and pipe-delimited Markdown rows. The
- * parser also tolerates old score/status column ordering, validates status, and
- * rejects additions without a usable tracker number so malformed batch output
- * cannot corrupt applications.md.
- *
- * @param {string} content - Raw file content from batch/tracker-additions.
- * @param {string} filename - Source filename used in warning messages.
- * @returns {object|null} Parsed tracker addition, or null when malformed.
+ * @param {string} line - One line of an addition file.
+ * @returns {string[]} Trimmed cells.
  */
+function splitAdditionCells(line) {
+  if (line.startsWith('|')) {
+    const parts = line.split('|').map(s => s.trim());
+    if (parts[0] === '') parts.shift();
+    if (parts.length && parts[parts.length - 1] === '') parts.pop();
+    return parts;
+  }
+  return line.split('\t').map(s => s.trim());
+}
+
 /**
  * Resolve the optional trailing TSV fields (index ≥ 9) into { via, location }.
  *
@@ -685,10 +700,9 @@ function parseTsvExtras(parts, filename) {
   // that is not a URL — it would fall into the untagged bucket and be recorded
   // as the row's LOCATION. An absent value must read as absent, not as some
   // other column's content.
-  const PLACEHOLDER = /^(n\/?a|tbd|none|null|-|—|–)$/i;
   const extras = parts.slice(9)
     .map(s => String(s).trim())
-    .filter(s => s !== '' && !PLACEHOLDER.test(s));
+    .filter(s => s !== '' && !PLACEHOLDER_CELL.test(s));
   const viaTags = extras.filter(s => /^via=/i.test(s));
   // Classify trailing fields by SHAPE, not position. A URL is
   // unambiguous (starts with http(s)://), so the posting URL and an older
@@ -707,9 +721,202 @@ function parseTsvExtras(parts, filename) {
   };
 }
 
+/**
+ * Parse an addition's tracker number, rejecting anything that is not a whole
+ * positive integer.
+ *
+ * `parseInt` is the wrong tool: it stops at the first character that cannot
+ * continue a number, so `17oops` and `17.5` both become 17 and the row merges
+ * under a tracker number the file never claimed. The guards downstream cannot
+ * see it — by then the damage is a perfectly valid-looking number.
+ *
+ * Leading zeros are DELIBERATELY allowed, and this is the reason the obvious
+ * `/^[1-9]\d*$/` would be wrong here: `reserve-report-num.mjs` returns a
+ * zero-padded 3-digit string (`padStart(3, '0')`), and both the batch prompt
+ * and `web/src/lib/run-prompts.mjs` hand that value straight to the `num` cell.
+ * So `035` is the canonical shape of every report under 100, not a malformed
+ * row, and rejecting it would drop those evaluations on the floor.
+ *
+ * @param {string} text - Raw cell contents.
+ * @returns {number|null} The tracker number, or null when the cell is not one.
+ */
+function parseTrackerNum(text) {
+  const t = String(text ?? '').trim();
+  if (!/^0*[1-9]\d*$/.test(t)) return null;
+  const n = Number(t);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+/**
+ * Parse a HEADED addition: a row of column labels followed by exactly one data
+ * row. Fields resolve by NAME, so no column order is privileged and the
+ * score/status pair needs no content sniffing.
+ *
+ * This is the form that has no undecidable case. `resolveScoreStatus` cannot
+ * order a discarded, never-scored row (`—` is both a score sentinel and a
+ * status meaning Discarded), so the headerless path refuses it; a header row
+ * answers it outright (#3517).
+ *
+ * @param {string[]} lines - Non-empty lines of the addition file.
+ * @param {string} filename - Source filename used in warning messages.
+ * @returns {object|null} Parsed tracker addition, or null when malformed.
+ */
+function parseHeadedAddition(lines, filename) {
+  const { map, missing, duplicates, unknown } = resolveTsvColumns(splitAdditionCells(lines[0]));
+  if (duplicates.length) {
+    console.warn(`⚠️  Skipping ${filename}: header labels the same column twice (${[...new Set(duplicates)].join(', ')}) — refusing to guess which one carries the value`);
+    return null;
+  }
+  if (missing.length) {
+    console.warn(`⚠️  Skipping ${filename}: header is missing required column(s): ${missing.join(', ')}`);
+    return null;
+  }
+  if (unknown.length) {
+    // Not fatal: an unrecognized label is a column this version has no meaning
+    // for, and dropping it loses nothing the tracker could store anyway. Say so
+    // rather than swallowing it, since the usual cause is a typo'd label.
+    console.warn(`⚠️  ${filename}: ignoring unrecognized header column(s): ${unknown.join(', ')}`);
+  }
+
+  const dataLines = lines.slice(1);
+  if (dataLines.length === 0) {
+    console.warn(`⚠️  Skipping ${filename}: header row with no data row`);
+    return null;
+  }
+  if (dataLines.length > 1) {
+    // One addition per file is the contract every caller assumes (the merge
+    // loop takes one addition per TSV). Rejecting is louder than merging the
+    // first row and dropping the rest, which would lose evaluations silently.
+    console.warn(`⚠️  Skipping ${filename}: ${dataLines.length} data rows — one addition per file`);
+    return null;
+  }
+
+  const parts = splitAdditionCells(dataLines[0]);
+  // Only the REQUIRED cells must actually be there. A row whose trailing
+  // optional value is empty is routinely written without its final tab —
+  // openrouter-runner emits `…\treport\t\n` for an absent note, and an LLM
+  // writer asked for "leave the last field empty" often just stops — so
+  // demanding a cell for every label would reject canonical rows. Absent and
+  // empty read the same here, which is what the batch and web prompts already
+  // promise their writers.
+  //
+  // This is not the defense against a SHIFTED row: an omitted interior cell
+  // slides every later value one column left, which the score corroboration
+  // below catches by content regardless of the row's width.
+  const shortLabels = Object.entries(map).filter(([, i]) => i >= parts.length).map(([k]) => k);
+  const missingRequiredCells = shortLabels.filter(k => TSV_REQUIRED_FIELDS.includes(k));
+  if (missingRequiredCells.length) {
+    console.warn(`⚠️  Skipping ${filename}: data row has ${parts.length} field(s), missing the required cell(s): ${missingRequiredCells.join(', ')}`);
+    return null;
+  }
+
+  const at = (k) => (map[k] != null ? String(parts[map[k]] ?? '').trim() : '');
+  const optional = (k) => {
+    const v = at(k);
+    return PLACEHOLDER_CELL.test(v) ? '' : v;
+  };
+
+  // A required cell that is PRESENT but blank is a writer that did not supply
+  // the value, and blank is never the way to say "none" here: every required
+  // field has a documented value, and the "no data" cases have sentinels
+  // (`—` / `N/A` for score, `—` for report, `❌` for pdf). Left unchecked, an
+  // empty status reaches validateStatus(''), which warns and returns
+  // "Evaluated" — recording a real evaluation state the row never claimed.
+  const blankRequiredCells = TSV_REQUIRED_FIELDS.filter(k => at(k) === '');
+  if (blankRequiredCells.length) {
+    console.warn(`⚠️  Skipping ${filename}: required cell(s) present but empty: ${blankRequiredCells.join(', ')} — use the documented sentinel (— / N/A) rather than a blank cell`);
+    return null;
+  }
+
+  // The optional tail can only be trusted when a short row's missing cells are
+  // genuinely its LAST ones. Position cannot tell "notes omitted, url written"
+  // from "notes written, url omitted" — both are one cell short — so the one
+  // TYPED optional column is the corroboration. A cell that IS a URL, sitting
+  // under a label that is not `url` while the `url` label has no cell at all,
+  // means every optional value is one column left of its label. Merging that
+  // stores the posting URL as the row's NOTES and leaves the dedup key empty,
+  // which is precisely the mapping the header exists to protect.
+  if (map.url != null && shortLabels.includes('url')) {
+    const misplacedUrl = Object.entries(map)
+      .filter(([k, i]) => k !== 'url' && i < parts.length && /^https?:\/\/\S*$/i.test(String(parts[i] ?? '').trim()))
+      .map(([k]) => k);
+    if (misplacedUrl.length) {
+      console.warn(`⚠️  Skipping ${filename}: a URL sits under "${misplacedUrl.join('", "')}" while the "url" cell is absent — the optional cells are shifted; write an empty cell for each optional value you omit`);
+      return null;
+    }
+  }
+
+  // Write-canonical: the tracker stores scores unbolded (verify-pipeline
+  // rejects bold scores), so strip any markdown bold from the incoming cell.
+  const score = at('score').replace(/\*\*/g, '').trim();
+  if (!looksLikeScoreCell(score)) {
+    // Corroboration, not disambiguation: the header already said which column
+    // this is, so this can no longer pick an order — it only asks whether the
+    // labelled cell holds what the label promises. It stays a hard gate because
+    // the value it catches is an emitter that wrote its VALUES in one order and
+    // its LABELS in another, which is the silent swap in a new costume. The
+    // headerless path already refuses a score cell of this shape (neither cell
+    // score-like → undecidable), so this is the same strictness, not new.
+    console.warn(`⚠️  Skipping ${filename}: the column labelled "score" reads "${score}", which is not a score or a documented sentinel (X.X/5, N/A, —, -) — check the header labels match the value order`);
+    return null;
+  }
+
+  return {
+    num: parseTrackerNum(at('num')),
+    date: at('date'),
+    company: at('company'),
+    role: at('role'),
+    status: validateStatus(at('status')),
+    score,
+    pdf: at('pdf'),
+    report: at('report'),
+    notes: optional('notes'),
+    // A `via` COLUMN carries the agency name plainly; tolerate a writer that
+    // also brings the headerless form's `via=` tag along.
+    via: optional('via').replace(/^via=/i, '').trim(),
+    location: optional('location'),
+    url: optional('url'),
+  };
+}
+
+/**
+ * Parse a tracker-addition file into a structured addition object.
+ *
+ * Two forms. A HEADED file (labels row + one data row) resolves fields by name
+ * and is the form writers should emit. A headerless file is the legacy
+ * positional form: 9-column TSV, 8-column TSV, or a pipe-delimited Markdown
+ * row, whose score/status pair is disentangled by content because the two
+ * orders in circulation disagree. Both validate status and reject additions
+ * without a usable tracker number, so malformed batch output cannot corrupt
+ * applications.md.
+ *
+ * @param {string} content - Raw file content from batch/tracker-additions.
+ * @param {string} filename - Source filename used in warning messages.
+ * @returns {object|null} Parsed tracker addition, or null when malformed.
+ */
 function parseTsvContent(content, filename) {
-  content = content.trim();
+  // Split the RAW content: trimming the whole file strips the data row's
+  // trailing tab, and that tab IS the final empty cell (`…\tnotes\t` for an
+  // absent url). Trimming first made a row's last column disappear, so the
+  // width check then read the row as one cell short of its own header.
+  const rawLines = String(content ?? '').split(/\r?\n/).filter(l => l.trim() !== '');
+  content = String(content ?? '').trim();
   if (!content) return null;
+
+  // Headed additions resolve by name; everything below is the legacy positional
+  // path, unchanged — it keeps parsing the trimmed content, byte-for-byte as
+  // before. Detection reads only the first line.
+  if (looksLikeTsvHeaderRow(splitAdditionCells(rawLines[0]))) {
+    const headed = parseHeadedAddition(rawLines, filename);
+    if (!headed) return null;
+    // Number.isSafeInteger rather than isNaN: parseTrackerNum returns null for a
+    // cell that is not a whole positive integer, and isNaN(null) is false.
+    if (!Number.isSafeInteger(headed.num) || headed.num <= 0) {
+      console.warn(`⚠️  Skipping ${filename}: invalid entry number`);
+      return null;
+    }
+    return headed;
+  }
 
   let parts;
   let addition;
@@ -732,7 +939,7 @@ function parseTsvContent(content, filename) {
       return null;
     }
     addition = {
-      num: parseInt(parts[0]),
+      num: parseTrackerNum(parts[0]),
       date: parts[1],
       company: parts[2],
       role: parts[3],
@@ -766,7 +973,7 @@ function parseTsvContent(content, filename) {
     }
 
     addition = {
-      num: parseInt(parts[0]),
+      num: parseTrackerNum(parts[0]),
       date: parts[1],
       company: parts[2],
       role: parts[3],
@@ -783,7 +990,8 @@ function parseTsvContent(content, filename) {
     Object.assign(addition, extras);
   }
 
-  if (isNaN(addition.num) || addition.num === 0) {
+  // See the headed guard above: null must be rejected, and isNaN(null) is false.
+  if (!Number.isSafeInteger(addition.num) || addition.num <= 0) {
     console.warn(`⚠️  Skipping ${filename}: invalid entry number`);
     return null;
   }
@@ -1130,7 +1338,9 @@ function replaceTrackerLine(oldLine, updatedLine) {
 }
 
 for (const file of tsvFiles) {
-  const content = readFileSync(join(ADDITIONS_DIR, file), 'utf-8').trim();
+  // NOT trimmed here: a trailing tab is the row's final empty cell, and
+  // parseTsvContent needs to see it. It trims internally for the legacy path.
+  const content = readFileSync(join(ADDITIONS_DIR, file), 'utf-8');
   const addition = parseTsvContent(content, file);
   if (!addition) { skipped++; continue; }
 

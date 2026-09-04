@@ -73,6 +73,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 // Paths
 // ---------------------------------------------------------------------------
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -501,7 +502,9 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
         `[${num}](reports/${filename})`,
         'Gemini evaluation',
       ];
-      writeFileSync(trackerPath, `${trackerFields.join('\t')}\n`, 'utf-8');
+      // Header row first: merge-tracker resolves the fields by name, so this
+      // row cannot be ingested into the wrong columns (#3517).
+      writeFileSync(trackerPath, `${TSV_ADDITION_HEADER}\n${trackerFields.join('\t')}\n`, 'utf-8');
       console.log(`\n✅  Report saved: reports/${filename}`);
       console.log(`📊  Tracker addition saved: batch/tracker-additions/${num}-${companySlug}.tsv`);
       reportSaved = true;
