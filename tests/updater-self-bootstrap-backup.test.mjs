@@ -33,9 +33,12 @@ try {
   }
 
   const source = readFileSync(join(root, 'update-system.mjs'), 'utf8');
-  const detectAt = source.indexOf("locallyModifiedSystemFiles(reexecFiles, 'FETCH_HEAD')");
+  // apply() pins FETCH_HEAD to an immutable SHA once per run and addresses that
+  // SHA everywhere afterwards (#3052), so this ordering check follows the pinned
+  // ref rather than the pseudo-ref it replaced.
+  const detectAt = source.indexOf('locallyModifiedSystemFiles(reexecFiles, targetRef)');
   const backUpAt = source.indexOf('backupSystemFiles(bootstrapAtRisk)', detectAt);
-  const checkoutAt = source.indexOf("git('checkout', 'FETCH_HEAD', '--', ...reexecFiles)", detectAt);
+  const checkoutAt = source.indexOf("git('checkout', targetRef, '--', ...reexecFiles)", detectAt);
   if (detectAt !== -1 && backUpAt > detectAt && checkoutAt > backUpAt) {
     pass('apply detects and backs up bootstrap edits before checkout');
   } else {
