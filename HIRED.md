@@ -15,6 +15,13 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=8 level=role role="Senior Product Manager" sector="Big tech" geo="Miami, FL" weeks=8 link="https://github.com/career-ops-hq/career-ops/issues/3760" -->
+### Hire #8
+
+> I was contacted directly on LinkedIn by a recruiting firm about the Simpro opportunity. I initially thought Career Ops would mainly help me improve my resume and identify the right
+
+**Senior Product Manager** · Big tech · Miami, FL · 8 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/3760)
+
 <!-- hire n=7 level=handle handle=logumani2112 role="Backend Developer (.NET)" sector="IT Services Company" weeks=4 link="https://github.com/career-ops-hq/career-ops/issues/440" -->
 ### Hire #7
 
