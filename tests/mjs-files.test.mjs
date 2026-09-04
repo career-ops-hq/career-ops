@@ -345,43 +345,62 @@ function bodySpan(code, head) {
  * collected — the mutation that passed the earlier gate, and the reason the
  * behavioural fixture below puts its stale suite at the fixture's top level.
  *
- * Two accepted shapes:
- *   - the argument is a CHILD PATH: an expression built from the walk's own
- *     parameter (`join(dir, e.name)`), or a variable assigned from one
- *     (`const full = join(dir, entry.name)`);
- *   - the argument IS that parameter, but the call comes BEFORE the first
- *     directory read in the body: a guard at function entry, which the
- *     recursion applies to every child as it enters (`copyDirSync`).
+ * Three things must hold, because each was a way past the last rule:
+ *   - the ARGUMENT is a child path — an expression COMBINING the walk's own
+ *     parameter with the current entry (`join(dir, e.name)`), or a variable
+ *     assigned from one. Merely mentioning the parameter is not enough:
+ *     `const full = dir` and `resolve(dir)` both name it and both test the
+ *     parent. The combination — a second operand — is what makes it a child.
+ *     The one exception is the argument that IS the parameter, accepted only
+ *     when the call comes BEFORE the first directory read: a guard at function
+ *     entry, which the recursion applies to every child as it enters
+ *     (`copyDirSync`).
+ *   - the RESULT controls the flow. `isNestedCheckout(full);` on its own line
+ *     computes a boolean and drops it, and `walk(full)` runs regardless.
+ *   - the call comes BEFORE the recursion it is supposed to prevent.
  *
- * Anything else — `isNestedCheckout(ROOT)`, an unrelated directory, a value
- * from somewhere the walk does not descend into — is a call, not a guard.
- * "Not the parameter" was the earlier rule and it accepted all of those.
+ * Anything else — `isNestedCheckout(ROOT)`, an unrelated directory, an alias of
+ * the parent, a result nobody reads — is a call, not a guard.
  *
  * @param {{params: string, body: string}} fn - A declaration record.
+ * @param {string[]} recursiveNames - Names whose call is the recursion.
  * @returns {boolean}
  */
-function guardsAChild(fn) {
+function guardsAChild(fn, recursiveNames) {
   const firstParam = /^\s*\(?\s*([A-Za-z_$][\w$]*)/.exec(fn.params)?.[1];
   if (!firstParam) return false;   // no parameter to build a child path from
   const mentionsParam = new RegExp(`\\b${firstParam}\\b`);
-  // Locals assigned from an expression involving the walked directory. One
-  // level is enough for every shape in this repository (`const full = join(dir,
-  // entry.name)`); a longer chain would need real dataflow, and the honest
-  // instrument for that is the behavioural test, not this.
+  // An expression that COMBINES the parameter with something else: a second
+  // argument, a concatenation, an interpolation. `join(dir, e.name)` qualifies;
+  // `dir`, `resolve(dir)` and `dirname(dir)` do not.
+  const combinesWithEntry = (expr) => mentionsParam.test(expr) && /[,+`]/.test(expr);
+  // Locals assigned from such an expression. One level is enough for every
+  // shape in this repository (`const full = join(dir, entry.name)`); a longer
+  // chain would need real dataflow, and the honest instrument for that is the
+  // behavioural test, not this.
   const derived = new Set(
     [...fn.body.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]+)/g)]
-      .filter((m) => mentionsParam.test(m[2]))
+      .filter((m) => combinesWithEntry(m[2]))
       .map((m) => m[1]),
   );
   const read = fn.body.search(/\breaddirSync\s*\(/);
+  // Where the recursion happens, so a guard placed after it can be rejected.
+  const recursionAt = recursiveNames
+    .map((n) => fn.body.search(new RegExp(`\\b${n.split('#')[0]}\\s*\\(`)))
+    .filter((i) => i !== -1);
+  const lastRecursion = recursionAt.length ? Math.max(...recursionAt) : Infinity;
   for (const m of fn.body.matchAll(/\bisNestedCheckout\s*\(\s*([^)]*(?:\([^)]*\))?[^)]*)\)/g)) {
     const arg = m[1].trim();
+    // The result must reach a branch: an `if`, a negation, a boolean operator,
+    // a ternary, a returned expression. A bare statement drops it.
+    const before = fn.body.slice(Math.max(0, m.index - 60), m.index);
+    if (!/(?:if\s*\(|&&|\|\||!|\?|:|return\s|=>\s*|\breturn\b[^;]*)\s*$/.test(before)) continue;
+    if (m.index > lastRecursion) continue;   // guards nothing that follows it
     if (arg === firstParam) {
       if (read === -1 || m.index < read) return true;   // entry guard
       continue;                                         // tests the dir being read
     }
-    if (derived.has(arg)) return true;
-    if (mentionsParam.test(arg)) return true;           // built inline from it
+    if (derived.has(arg) || combinesWithEntry(arg)) return true;
   }
   return false;
 }
@@ -481,7 +500,7 @@ function findRecursiveWalkers(entries) {
         file: rel,
         name: key,
         line: src.slice(0, fn.head).split('\n').length,
-        guarded: cycle.some((k) => guardsAChild(fns.get(k))),
+        guarded: cycle.some((k) => guardsAChild(fns.get(k), cycle)),
       });
     }
   }
@@ -604,6 +623,45 @@ test('the walker detector recognizes every shape it claims to, and only real rec
         }
       }
     `),
+    // An ALIAS of the parent wearing a child's name. It mentions `dir`, which
+    // used to be enough, and tests the directory already being read.
+    f('guards-alias.mjs', `
+      function walk(dir) {
+        const full = dir;
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          if (e.isDirectory()) { if (isNestedCheckout(full)) continue; walk(join(dir, e.name)); }
+        }
+      }
+    `),
+    // The parent again, normalized inline. One operand, so nothing about the
+    // current entry reaches the predicate.
+    f('guards-normalized-parent.mjs', `
+      function walk(dir) {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          if (e.isDirectory()) { if (isNestedCheckout(resolve(dir))) continue; walk(join(dir, e.name)); }
+        }
+      }
+    `),
+    // Right argument, result thrown away: the boolean is computed and the walk
+    // descends anyway.
+    f('guards-ignored-result.mjs', `
+      function walk(dir) {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, e.name);
+          if (e.isDirectory()) { isNestedCheckout(full); walk(full); }
+        }
+      }
+    `),
+    // Right argument, right branch, but AFTER the recursion it should have
+    // prevented.
+    f('guards-too-late.mjs', `
+      function walk(dir, out) {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, e.name);
+          if (e.isDirectory()) { walk(full, out); if (isNestedCheckout(full)) out.push(full); }
+        }
+      }
+    `),
     // The guard named ONLY in a comment. Documented as guarded, descends into
     // every checkout it finds.
     f('comment-only.mjs', `
@@ -631,15 +689,19 @@ test('the walker detector recognizes every shape it claims to, and only real rec
       'comment-only.mjs:walk',
       'duplicate-names.mjs:walk#2',
       'entry-guard.mjs:copyDir [guarded]',
+      'guards-alias.mjs:walk',
       'guards-elsewhere.mjs:walk',
+      'guards-ignored-result.mjs:walk',
+      'guards-normalized-parent.mjs:walk',
       'guards-parent.mjs:walk',
+      'guards-too-late.mjs:walk',
       'method.mjs:walk',
       'mutual.mjs:collect',
       'mutual.mjs:descend',
       'regex-after-keyword.mjs:walk [guarded]',
       'wrapper-read.mjs:walk',
     ],
-    'the detector must see method, brace-less-arrow, unparenthesized-parameter arrow, mutually recursive, same-named and wrapper-reading walkers, must reject a guard that tests the directory being read, or an unrelated directory, rather than the child path (while accepting one at function entry), must not truncate a body at braces inside a literal or a keyword-position regex, must not count a guard written in a comment, and must ignore a non-recursive read',
+    'the detector must see method, brace-less-arrow, unparenthesized-parameter arrow, mutually recursive, same-named and wrapper-reading walkers, must reject a guard that tests the directory being read, an alias or normalization of it, or an unrelated directory rather than the child path (while accepting one at function entry), must reject a predicate result that is dropped or consulted after the recursion, must not truncate a body at braces inside a literal or a keyword-position regex, must not count a guard written in a comment, and must ignore a non-recursive read',
   );
 });
 
