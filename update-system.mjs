@@ -291,6 +291,36 @@ const SYSTEM_PATHS = [
   'providers/',
   'seeds/',
   'tests/',
+
+  // ── Retired paths ─────────────────────────────────────────────────────────
+  // These files no longer exist upstream: #3765 moved them into tests/. They
+  // stay in the manifest anyway, because SYSTEM_PATHS is what `apply()` prunes
+  // AGAINST — `staleSystemFiles` (see pathMatchesManifest) only deletes a local
+  // file that is gone from the remote tree AND matches an entry here. Drop the
+  // entry and an upgrading install keeps its copy of the old root file forever,
+  // where tests/root-tests-registration.test.mjs then reports it as an
+  // unregistered suite and turns `node test-all.mjs` red on a healthy install.
+  //
+  // Probe on this list vs. the pre-#3765 one, with a local tree holding the
+  // five and a remote tree without them: without these entries the prune
+  // returns nothing at all; with them it returns all five.
+  //
+  // NB: keep square brackets out of every comment in this array. Several
+  // assertions in test-all.mjs extract the manifest with a NON-GREEDY regex
+  // that ends at the first closing bracket, so one inside a comment truncates
+  // the parsed list and every entry below it reads as missing. That is not
+  // hypothetical: the first draft of this block wrote the probe result as an
+  // empty-array literal and turned the check-table-freshness assertion red.
+  //
+  // They are therefore expected to be ABSENT from the working tree, which is
+  // why updater-migration-tests.mjs lists them in ALLOWED_MISSING_ENTRIES.
+  // Safe to delete once no supported install can still be carrying them.
+  'agent-inbox-tests.mjs',
+  'followup-seed-tests.mjs',
+  'paste-reply-tests.mjs',
+  'set-status-tests.mjs',
+  'tracker-columns-tests.mjs',
+  // ── end retired paths ─────────────────────────────────────────────────────
   'user-agent.mjs',
   'doctor.mjs',
   'jsonc-parse.mjs',
