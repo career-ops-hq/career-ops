@@ -1,0 +1,14 @@
+{
+  "id": "jobspipe",
+  "name": "career-ops-plugin-jobspipe",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "JobsPipe API provider — normalized job postings deduplicated across 30+ ATS and job-board sources, with title/skill/country/seniority/remote filters.",
+  "repo": "https://github.com/jobspipe/career-ops-plugin-jobspipe",
+  "sha": "e87ab945277e53f29e63ef079f3cbb8da71c51ba",
+  "hooks": ["provider"],
+  "requiredEnv": ["JOBSPIPE_API_KEY"],
+  "allowedHosts": ["api.jobspipe.dev"],
+  "registrationIssue": "https://github.com/career-ops-hq/career-ops/issues/3840",
+  "addedAt": "2026-09-04"
+}
