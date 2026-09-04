@@ -2426,8 +2426,15 @@ async function apply() {
       prepareMaterializedSkillEntrypointsForStage(materializedSkillEntrypoints);
       // Stage per filename, never per directory. pathsToStage is the manifest,
       // so it carries directory entries, and `-f` on one of those sweeps every
-      // ignored file underneath into the commit.
-      addPaths(expandedPathsToStage);
+      // ignored file underneath into the commit. addPaths' own contract is
+      // "callers must pass files, not directory pathspecs" — it runs every
+      // entry through `git --literal-pathspecs add -f`, which takes an
+      // `:(exclude)` entry as a literal (nonexistent) filename and fails the
+      // whole batch with "pathspec did not match any files". Exclusions are
+      // meaningful to the scoped commit below, never to staging: omitting a
+      // path from the add list IS excluding it, so strip them here rather
+      // than teach addPaths a second pathspec dialect.
+      addPaths(expandedPathsToStage.filter((spec) => !spec.startsWith(EXCLUDE_PATHSPEC_PREFIX)));
       // Scope the commit to only the staged update paths (#915 bug 2).
       // A bare `git commit` would sweep any unrelated pre-staged files into
       // the update commit. Passing the explicit pathspec list constrains the

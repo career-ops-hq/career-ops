@@ -1,9 +1,9 @@
 /**
  * updater-add-paths.test.mjs — BEHAVIORAL staging tests for apply()'s commit step.
  *
- * apply() stages its checked-out system paths and commits them. Two ways that
- * `git add` call could fail leave the update half-done — files on disk, nothing
- * committed — and the user is told to finish it by hand:
+ * apply() stages its checked-out system paths and commits them. Three ways
+ * that `git add` call could fail leave the update half-done — files on disk,
+ * nothing committed — and the user is told to finish it by hand:
  *
  *   1. A tracked system file shadowed by a local DIRECTORY-level ignore rule.
  *      `git add` refuses explicitly-named ignored paths (exit 1). .gitignore is
@@ -16,6 +16,14 @@
  *      never in the index, so staging it after deletion is a fatal unmatched
  *      pathspec (exit 128) that -f does NOT rescue. Reproduces in a stock
  *      checkout with no customization: dismiss an update, then apply one.
+ *   3. A preserve exclusion in the staging list. `addPaths` always runs under
+ *      --literal-pathspecs, so a `:(exclude)<path>` entry is taken as a literal
+ *      (nonexistent) filename and fails the WHOLE batch with "pathspec did not
+ *      match any files" (exit 128) -- with ANY local system-file edit still
+ *      present, on EVERY future update, since `preservedPaths` is never empty
+ *      until the edit either reverts or matches upstream. `expandedPathsToStage`
+ *      keeps exclusions (test 6c) for the scoped commit that reads it after
+ *      staging; addPaths must never see them.
  *
  * Follows updater-rollback-behavior.test.mjs: drive the real exports against a
  * throwaway repo through the git-runner seam, so the property is verified rather
@@ -381,6 +389,67 @@ console.log('\n🧪 Testing updater staging behavior (ignored + never-tracked pa
     pass('scoped commit honors the preserve exclusion');
   } else {
     fail(`preserve exclusion failed: committed=${committed.join(', ')} status=${status}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 6d. addPaths must never see the exclusion 6c just proved the commit needs ──
+//    Reproduces the production crash directly: apply() hands addPaths the same
+//    `expandedPathsToStage` that 6c fed to the scoped commit, exclusions
+//    included, whenever locallyModifiedSystemFiles() finds even one preserved
+//    file. --literal-pathspecs takes `:(exclude)modes/update.md` as a literal
+//    filename that doesn't exist, and the whole batch -- every real file in
+//    it, AGENTS.md here, entirely unrelated to the preserved file -- fails to
+//    stage alongside it. Fixture deliberately mirrors the real SYSTEM_PATHS
+//    shape: the preserved file (modes/update.md) is a standalone file-level
+//    manifest entry, never a member of some OTHER directory entry that's also
+//    being expanded -- unlike 6c's docs/, where docs/KEEP.md is independently
+//    reachable via `docs/`'s own expansion. That would need addPaths to catch
+//    a plain-filename duplicate of a preserved path, a different, currently
+//    unreachable failure mode this fix does not attempt to cover.
+{
+  const { dir, g, ctx } = makeRepo();
+  mkdirSync(join(dir, 'modes'));
+  writeFileSync(join(dir, 'AGENTS.md'), 'v1');
+  writeFileSync(join(dir, 'modes/update.md'), 'v1');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+
+  writeFileSync(join(dir, 'AGENTS.md'), 'updated by this release');
+  writeFileSync(join(dir, 'modes/update.md'), 'the user\'s preserved local edit');
+  const expanded = expandToShippedFiles(['AGENTS.md', ':(exclude)modes/update.md'], 'HEAD', ctx);
+
+  let rawThrew = null;
+  try {
+    addPaths(expanded, ctx);
+  } catch (err) {
+    rawThrew = err;
+  }
+  if (rawThrew && /pathspec.*did not match/i.test(rawThrew.message)) {
+    pass('addPaths on the unfiltered list reproduces the production crash');
+  } else if (!rawThrew) {
+    fail('addPaths accepted an exclusion pathspec -- the underlying git behavior changed, revisit the fix');
+  } else {
+    fail(`addPaths threw for an unexpected reason: ${rawThrew.message.split('\n')[0]}`);
+  }
+  if (stagedPaths(g).size === 0) {
+    pass('the failed batch left nothing staged, matching the "half-done update" it produces live');
+  } else {
+    fail(`unexpected partial staging after the failed batch: ${[...stagedPaths(g)].join(', ')}`);
+  }
+
+  const filtered = expanded.filter((spec) => !spec.startsWith(':(exclude)'));
+  let filteredThrew = null;
+  try {
+    addPaths(filtered, ctx);
+  } catch (err) {
+    filteredThrew = err;
+  }
+  const staged = stagedPaths(g);
+  if (!filteredThrew && staged.has('AGENTS.md') && !staged.has('modes/update.md')) {
+    pass('stripping exclusions before addPaths stages the real file and leaves the preserved one alone');
+  } else {
+    fail(`filtered staging failed: threw=${filteredThrew?.message.split('\n')[0] ?? 'no'} staged=${[...staged].join(', ')}`);
   }
   rmSync(dir, { recursive: true, force: true });
 }
