@@ -142,8 +142,19 @@ check(
   !oneMarketArray.stderr.includes('modes/de/_shared.md not found') && !oneMarketArray.stderr.includes('modes/de/angebot.md not found'),
   'gemini-eval.mjs treats a one-element modes_dir array like a plain string',
 );
+// A bare `>` here would pass even if the fold silently broke: the two-market
+// fixture's config/profile.yml has an extra `- modes/zh` line, and profile.yml
+// is itself a counted context file, so the two-market budget is strictly
+// larger by that config line alone (~3 tokens), independent of whether zh's
+// _shared.md (~2000 tokens) was ever actually read. Require a margin well
+// past that confound — same pattern as the "not silently promoted" check
+// below — so a regression to first-entry-only folding actually reddens this
+// (Scott-Emberson, PR #3798 review, mutation-tested: gutting the fold still
+// passed a bare `>` at two(de,zh)=5322 vs one(de)=5319).
 check(
-  Number.isFinite(twoMarket.tokenBudget) && Number.isFinite(oneMarketArray.tokenBudget) && twoMarket.tokenBudget > oneMarketArray.tokenBudget,
+  Number.isFinite(twoMarket.tokenBudget)
+    && Number.isFinite(oneMarketArray.tokenBudget)
+    && twoMarket.tokenBudget - oneMarketArray.tokenBudget > 1000,
   "a 2nd declared market's _shared.md is actually folded into context (token budget grows vs. a single market)",
 );
 
