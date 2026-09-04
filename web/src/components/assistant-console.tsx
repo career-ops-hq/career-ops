@@ -281,6 +281,15 @@ export function AssistantConsole() {
       writePortals: (roles, location) => {
         fetch("/api/portals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roles, location }) }).catch(() => {});
       },
+      writePersonalization: (patch) => {
+        fetch("/api/personalization", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) })
+          .then(() => {
+            router.refresh();
+            // The onboarding panel listens for this to refetch section state.
+            window.dispatchEvent(new CustomEvent("co-onboarding-changed"));
+          })
+          .catch(() => {});
+      },
     };
   }
 

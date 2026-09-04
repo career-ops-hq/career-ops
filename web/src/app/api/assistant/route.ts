@@ -1,6 +1,21 @@
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { resolveCli } from "@/lib/clis";
+import fs from "node:fs";
+import path from "node:path";
 import { careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
+import { sectionState } from "@/lib/personalization.mjs";
+
+/** Human labels of the modes/_profile.md sections still identical to the template. */
+function personalizationGeneric(): string[] {
+  const root = careerOpsRoot();
+  const read = (p: string) => { try { return fs.readFileSync(p, "utf8"); } catch { return ""; } };
+  const user = read(path.join(root, "modes", "_profile.md"));
+  const tpl = read(path.join(root, "modes", "_profile.template.md"));
+  if (!tpl) return [];
+  return sectionState(user, tpl)
+    .filter((s: { state: string }) => s.state !== "filled")
+    .map((s: { heading: string }) => s.heading.replace(/^## Your /, "").toLowerCase());
+}
 
 export const runtime = "nodejs"; // child_process (spawn) requires the Node runtime
 export const dynamic = "force-dynamic";
@@ -29,6 +44,7 @@ ACTIONS:
 - remember {"fact":"the concise fact"} — durably remember a preference/fact about the user (carries across sessions and across whichever CLI runs).
 - setProfile {"name":"…","email":"…","location":"…","roles":["AI Engineer","ML Engineer"],"compMin":70000,"compMax":95000,"currency":"EUR","remote":"Remote (EU)","seniority":"Senior"} — PROPOSE the user's profile; the app shows a confirm card and ONLY on their OK writes config/profile.yml (merge-safe — it never clobbers their other fields) AND seeds the free scanner from the roles. Emit only fields you're confident about (most come from their CV). NEVER write a profile they didn't approve.
 - setPortals {"roles":["AI Engineer","ML Engineer"]} — seed the free scanner from target roles (writes portals.yml title_filter). Usually unnecessary — setProfile already does this.
+- setPersonalization {"targetRoles":[{"archetype":"AI Platform Engineer","axes":"evals, observability, pipelines","buys":"someone who ships AI to production with metrics"}],"adaptiveFraming":[{"role":"Platform / LLMOps","emphasize":"production systems, evals","proof":"cv.md"}],"exitNarrative":"…","crossCuttingAdvantage":"…","compTargets":"…","negotiationScripts":["…"],"locationPolicy":["…"],"portfolio":{"url":"https://…","description":"…","whenToShare":"…"}} — PROPOSE the user's personalization (the archetypes, framing, exit story, comp and location policy that every evaluation scores against). The app shows a confirm card and ONLY on their OK writes the matching sections of their personalization file, leaving everything else untouched. Emit only sections you have real material for (from the CV + conversation); you may emit it in several passes, one or two sections at a time. NEVER write personalization they didn't approve.
 
 RULES: prefer evaluateCompany over guessing URLs; NEVER invent URLs. Spending actions (evaluate/evaluateCompany/research) run on the user's own AI and cost tokens — fire them when asked or clearly useful, not gratuitously. NEVER auto-submit a job application. (Back-compat: <<go:/path>> and <<remember:fact>> still work.)
 
@@ -37,6 +53,7 @@ ONBOARDING — your job is to get this person to their first SCORED job FAST. Th
 2. WOW #1 — DISCOVER, FREE. The moment you have a CV, infer their target roles + location FROM the CV and immediately run a FREE discovery: explore {"positive":["…roles from the CV…"],"run":true}. Say "Before we set anything up — here are live roles that fit you, free." A job THEY didn't have to define is the aha trigger.
 3. Then DEEPEN, value-interleaved. Now that they've seen matches, confirm targeting so results sharpen: ask for roles, then comp, then location — one or two at a time, ~2–3 minutes, encouraging.
 4. PROPOSE, don't impose. When you have name/email (from the CV) + roles + comp + location, emit setProfile. NEVER write a profile they didn't see + approve — the confirm card is required.
+4b. PERSONALIZE, like a recruiter building their brief. Right after the profile is saved (or whenever SETUP STATE lists personalization sections still on the template), work through them conversationally, one or two at a time: which 3–6 role ARCHETYPES they are really competing for and what each buyer wants; how to FRAME them per archetype with proof from the CV; their EXIT NARRATIVE (why they are moving, in their words); their CROSS-CUTTING ADVANTAGE; comp targets and location policy. Reflect each answer back in one line, then emit setPersonalization for just those sections — the confirm card is required every time. Skip any section already marked filled.
 5. WOW #2 is theirs to pick: invite them to open any discovered role and you'll score it A–F with the why ("you're a strong match because…"). That first scored-job-with-explanation is the north star.
 Their REAL CV never leaves their machine — reassure them if they hesitate. Never reveal internal file names or YAML unless asked.
 
@@ -79,9 +96,17 @@ export async function POST(req: Request) {
   // the home was correctly nudging for the missing PROFILE while the assistant,
   // given no state, restarted its onboarding script and asked for the CV again.
   const { hasCv, onboardingNeeded, missing } = doctorState();
-  const setupLine = onboardingNeeded
-    ? `\n\nSETUP STATE (authoritative — the SAME signal the home screen uses; trust it over guessing, and do NOT re-ask for anything already on file):\n- CV on file (cv.md): ${hasCv ? "YES — do NOT ask for it again; read it to be concrete" : "NO — this is the first thing to collect"}\n- Still missing: ${missing.length ? missing.join(", ") : "nothing"}\nWhen onboarding, START at the first item actually missing. If the CV is already on file, SKIP step 1 entirely and go straight to the next missing prerequisite (usually the profile — target roles, comp, location).`
-    : `\n\nSETUP STATE: this user is fully set up (CV + profile + scanner all on file). Do NOT run onboarding or ask for a CV — just help them with what they actually asked.`;
+  // Personalization sections still on the shipped template: the fourth
+  // prerequisite is "present" the moment doctor auto-copies the template, so
+  // doctorState alone would call a generic file "done". Section state is what
+  // tells the assistant which parts of the brief are still not this person's.
+  const generic = personalizationGeneric();
+  const personalizationLine = generic.length
+    ? `\n- Personalization still on the template (ask about these, then setPersonalization): ${generic.join(", ")}`
+    : "\n- Personalization: filled";
+  const setupLine = onboardingNeeded || generic.length
+    ? `\n\nSETUP STATE (authoritative — the SAME signal the home screen uses; trust it over guessing, and do NOT re-ask for anything already on file):\n- CV on file (cv.md): ${hasCv ? "YES — do NOT ask for it again; read it to be concrete" : "NO — this is the first thing to collect"}\n- Still missing: ${missing.length ? missing.join(", ") : "nothing"}${personalizationLine}\nWhen onboarding, START at the first item actually missing. If the CV is already on file, SKIP step 1 entirely and go straight to the next missing prerequisite (usually the profile — target roles, comp, location), then the personalization sections still on the template.`
+    : `\n\nSETUP STATE: this user is fully set up (CV + profile + scanner + personalization all on file). Do NOT run onboarding or ask for a CV — just help them with what they actually asked.`;
   const prompt = `${SYSTEM_PREAMBLE}${setupLine}${memoryLine}${pageLine}\n\n--- Conversation ---\n${convo}\nUser: ${message}\nAssistant:`;
 
   // Claude Code streams token-level deltas via stream-json + partial messages.
