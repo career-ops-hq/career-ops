@@ -424,7 +424,6 @@ const SYSTEM_PATHS = [
   'cv-sections-core.mjs',
   'cv-templates.mjs',
   'playwright.cv.config.mjs',
-  'templates/cv-template.zh-minimal.html',
   'scaffolder/',
   'Dockerfile',
   'docker-compose.yml',
