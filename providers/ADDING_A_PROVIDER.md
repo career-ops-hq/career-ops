@@ -184,6 +184,20 @@ it is inert until the provider is added there.
   accepts `evilvendordomain.com`).
 - If the whole URL is assembled by the provider from a fixed literal host, no
   allowlist is needed, but `redirect: 'error'` still is.
+- Some providers are the inverse of a fixed vendor domain: the scanning
+  target is an arbitrary **customer-branded** host taken straight from
+  `entry.api` / `entry.careers_url`, with no vendor-domain pattern to
+  allowlist against and no `detect()` auto-claim — the provider is wired
+  explicitly per `portals.yml` entry instead. Reference: `providers/phenom.mjs`.
+  For this shape a per-provider host allowlist isn't constructible (there is
+  no stable vendor string to match — every tenant's hostname is different and
+  unrelated to the others), and the real SSRF protection is the central
+  DNS/IP-layer guard (`_ip-guard.mjs`, #3096), already wrapped around every
+  `ctx.fetchJson` / `ctx.fetchText` call regardless of provider. Don't add an
+  allowlist just because a reviewer expects the Greenhouse-style pattern —
+  a config-derived URL with no vendor host to check against is a valid,
+  working state for this provider shape, not a gap. `redirect: 'error'` is
+  still mandatory here, same as everywhere else.
 - **Redirects are never followed automatically** — `redirect: 'error'` is the
   default and stays it even when the source's own bootstrap issues a
   legitimate same-origin 3xx. A provider that needs to *inspect* a redirect without
@@ -387,6 +401,18 @@ A source-reported `total` can also be plain wrong, not just absent — some
 backends silently clamp it, so a `total`-bounded walk is not proof of
 completeness. Reference: `providers/workday.mjs`'s facet split (#3310).
 
+The reverse direction happens too, and independently of the clamp case above:
+a source-reported **results count** can just as easily *overstate* what its
+own pagination will ever actually serve — observed live, on the same query,
+across every transport a source exposed. A source's **page count**, by
+contrast, is a different number computed a different way, and held up as
+reliable in the same live checks — it tracked the walk's own natural end (an
+empty or short final page) even on the tenant whose results count was wrong.
+So bound the walk by the page count when a source gives you one, same as
+before, but never treat either number — pages or results — as *proof* the
+walk is complete. Only the walk's own natural end is that proof, independent
+of what any source-reported count claims in either direction.
+
 ### `ctx.maxPages` and the health probe
 
 When `ctx.maxPages` is set, `verify-portals` is running a liveness probe
@@ -500,6 +526,20 @@ too. Gating the incomplete marker on the page index alone
 truncated. Reference: `eightfold.mjs` ("a short page has to win");
 `jobbankca.mjs` keys the stop off `rawEntryCount`, the feed's own
 `<entry>` count.
+
+A paginating JSON API can also hit a hard, source-side result-window
+ceiling that looks nothing like a short page: every page up to some round
+number (frequently a multiple of the page size — 100 pages of 100 is a
+signature worth recognizing) comes back full, and every page past it
+answers with a clean, well-formed, structurally EMPTY response instead of
+an error or a partial page. That shape is the default max-result-window on
+an Elasticsearch/Solr-style backend, not a bug in the walk, and — unlike
+the clamped-`total` case above, which a facet-style query split can
+sometimes recover — a hard result-window ceiling generally has no
+client-side workaround unless the source exposes a documented alternate
+access path. Treat it exactly like any other natural stop (an empty page
+ends the walk, stop reason `complete`) and don't let `max_pages` /
+`max_jobs` take the blame for a ceiling that was never local.
 
 ### Health-check coverage (`verify-portals`)
 
