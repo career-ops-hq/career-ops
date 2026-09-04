@@ -71,8 +71,8 @@ npm run build        # production build
 Set `CAREER_OPS_ROOT=/path/to/checkout` in `web/.env.local` to point the app at
 a different career-ops directory (useful for testing against sample data).
 
-`/api` is gated by the same-origin + loopback guard in `src/lib/origin-guard.mjs`.
-Two opt-ins widen it, both unset by default and both in `web/.env.local`:
+Every route but build assets is gated by the same-origin + loopback guard in
+`src/lib/origin-guard.mjs`. Two opt-ins widen it, both unset by default and both in `web/.env.local`:
 `CAREER_OPS_WEB_ALLOWED_HOSTS` names extra non-loopback hosts the dashboard may
 answer on, and `CAREER_OPS_ALLOWED_ORIGINS` names origins allowed to call the
 API from outside the app — a comma- or space-separated list, no trailing slash.
@@ -103,14 +103,19 @@ equivalent, and two things move them apart: the guard also answers for loopback,
 which no bind address changes, and a `-H` of your own moves the bind while the
 allow-list stays as it was (see below).
 
-Understand what you are turning on. The host allow-list covers `/api/*` only
-(`src/proxy.ts`'s matcher), so once the socket is open **every page the
-dashboard renders — your CV, pipeline and reports — is readable by anyone who
-can reach that port**, and there is no login. Two further caveats: a client that
-can reach the port can also supply its own `Host` header, so on a widened bind
-the allow-list filters honest clients rather than hostile ones; and `0.0.0.0` is
-IPv4-only, so an opted-in IPv6 address will pass the filter with nothing
-listening for it.
+Understand what you are turning on. Once the socket is open, **everything the
+dashboard serves — your CV, pipeline and reports — is reachable by anyone who can
+both reach that port and satisfy the host filter**, and there is no login. Two
+further caveats: a client that can reach the port can also supply its own `Host`
+header, so on a widened bind the allow-list filters honest clients rather than
+hostile ones; and a `0.0.0.0` bind is IPv4-only, so an opted-in IPv6 address will
+pass the filter with nothing listening for it.
+
+The guard covers page routes as well as `/api/*` (`src/proxy.ts`'s matcher spans
+everything but build assets). That is not about the bind: a page you visit can
+re-resolve its own domain to `127.0.0.1` and read the dashboard from your own
+browser as same-origin, which a loopback bind does nothing to stop. The `Host`
+header on that request carries the attacker's domain, which is what refuses it.
 
 You can also override the bind directly — `npm run dev -- -H 0.0.0.0` — since
 Next keeps the last value of a repeated option. **Prefer the env var.** An `-H`

@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   normalizeHost,
   isLoopbackHost,
@@ -8,6 +11,8 @@ import {
   normalizeOrigin,
   checkRequest,
 } from "../../src/lib/origin-guard.mjs";
+
+const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 // --- normalizeHost --------------------------------------------------------
 
@@ -57,6 +62,35 @@ test("parseAllowedHosts returns an empty set for blank/undefined", () => {
 
 // The bind decision that reads this module's parseAllowedHosts lives in
 // bind-host.mjs and is covered by tests/lib/bind-host.test.mjs.
+
+// --- where the guard runs -------------------------------------------------
+
+// A decision this module cannot make about itself: proxy.ts's matcher chooses
+// which requests reach checkRequest at all, and a guard that never runs is
+// indistinguishable from one that always allows. The matcher is a plain regex
+// path, so it is extracted and exercised rather than pattern-matched as text.
+test("the guard runs on page routes, not only on /api", () => {
+  // Given the matcher proxy.ts exports
+  const source = readFileSync(join(WEB_ROOT, "src", "proxy.ts"), "utf8");
+  const matcher = /matcher:\s*"([^"]+)"/.exec(source)?.[1];
+  assert.ok(matcher, "proxy.ts should export a single string matcher");
+  const matches = (path) => new RegExp(`^${matcher}$`).test(path);
+
+  // When the paths that carry the user's data are tested against it
+  // Then they are gated. Scoping this to /api left every page ungated, which a
+  // loopback bind does not cover: a DNS-rebinding page reads /pipeline from the
+  // user's own browser as same-origin, and force-dynamic pages read the tracker
+  // off disk on each request.
+  assert.equal(matches("/"), true, "the dashboard root renders user data");
+  assert.equal(matches("/pipeline"), true, "page routes must be gated");
+  assert.equal(matches("/cv"), true);
+  assert.equal(matches("/api/run"), true, "the API must stay gated");
+
+  // And build assets stay out: they carry no user data, and a 403 on them would
+  // break the very error page that explains the 403.
+  assert.equal(matches("/_next/static/chunks/main.js"), false);
+  assert.equal(matches("/favicon.ico"), false);
+});
 
 // --- checkRequest: the app's own same-origin traffic passes ---------------
 

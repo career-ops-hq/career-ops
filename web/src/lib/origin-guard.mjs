@@ -9,6 +9,14 @@
 //   F2 — LAN: a server bound to every interface answers anyone on the same
 //        network directly — no browser, no user, no page visit involved.
 //
+// F1 covers more than the API. A page that re-resolves its own domain to
+// 127.0.0.1 (DNS rebinding) reaches the dashboard from the user's own browser as
+// same-origin, so the page routes — which render the CV, pipeline and reports —
+// are as sensitive as /api and are gated too; see src/proxy.ts's matcher. A
+// loopback bind does not close that, because the browser making the request is
+// already on the machine. What closes it is the Host filter below: the rebound
+// request still carries the attacker's domain in Host.
+//
 // This module is the pure decision logic behind `src/proxy.ts` (Next 16's
 // name for what used to be middleware.ts). It is kept free of node/next
 // imports so it runs on the edge runtime and is unit testable in isolation.
@@ -26,10 +34,13 @@
 //     is NOT derived from that variable.
 //
 // Nothing here closes F2, and nothing here can: Host is chosen by the client,
-// so a LAN request spelling `Host: localhost` satisfies the filter above. Only
-// the interface the server listens on decides who can open the connection at
-// all — see bind-host.mjs, which reads the same env value through the same
-// parseAllowedHosts so the two cannot disagree about what is exposed.
+// so a direct LAN request spelling `Host: localhost` satisfies the filter above.
+// Only the interface the server listens on decides who can open the connection
+// at all — see bind-host.mjs, which reads the same env value through the same
+// parseAllowedHosts so the two cannot disagree about what is exposed. The
+// division is by attacker, not by route: the bind answers callers who connect
+// directly, this module answers callers who arrive through a browser the user
+// already trusts.
 
 /** Lowercase a Host/authority, drop the port, unwrap a bracketed IPv6 literal. */
 export function normalizeHost(hostHeader) {
