@@ -183,3 +183,22 @@ console.log('\n🧪 Testing updater channel resolution (release tag vs. main)...
     fail(`expected the guard to pass a career-ops-v* tag through, got '${ref}'`);
   }
 }
+
+// ── 10. A right-prefix, malformed-version tag is rejected too ──────────────
+// The prefix check alone would let 'career-ops-vnot-a-version' through —
+// same prefix, no real version. SEMVER_RE (shared with the VERSION/tag
+// parsing elsewhere in this file) is the same bar a genuine tag must clear.
+{
+  const fakeCurlGet = async () => JSON.stringify({ tag_name: 'career-ops-vnot-a-version' });
+  let threw = null;
+  try {
+    await resolveTargetRef([], {}, { curlGet: fakeCurlGet });
+  } catch (err) {
+    threw = err;
+  }
+  if (threw && /career-ops-vnot-a-version/.test(threw.message) && /--channel main/.test(threw.message)) {
+    pass('a right-prefix but non-semver tag is rejected, not silently fetched');
+  } else {
+    fail(threw ? `threw, but without naming the rejected tag: ${threw.message}` : 'a malformed tag resolved instead of throwing');
+  }
+}

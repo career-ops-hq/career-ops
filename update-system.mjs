@@ -1733,8 +1733,9 @@ const RELEASE_TAG_PREFIX = 'career-ops-v';
  * correct only because release.yml's "Keep the career-ops release marked
  * as Latest" step re-asserts it on every push. If that step ever silently
  * stopped running, this would otherwise fetch and install a `web` tag
- * without complaint; TAG_PREFIX makes that fail loudly and diagnosably
- * instead, naming the unexpected tag rather than silently installing it.
+ * without complaint; the RELEASE_TAG_PREFIX + SEMVER_RE check makes that
+ * fail loudly and diagnosably instead, naming the unexpected tag rather
+ * than silently installing it or fetching a ref that doesn't exist.
  *
  * @param {string[]} argv - process.argv (or a test double).
  * @param {NodeJS.ProcessEnv} env - process.env (or a test double).
@@ -1771,14 +1772,19 @@ export async function resolveTargetRef(argv, env, ctx = {}) {
       'Retry, or run with --channel main to update from the latest commit on main instead.',
     );
   }
-  if (!tagName.startsWith(RELEASE_TAG_PREFIX)) {
+  // Prefix AND shape: 'career-ops-vnot-a-version' passes a prefix-only check
+  // but isn't a real release tag either — SEMVER_RE (shared with the VERSION
+  // and release-tag parsing above) is the same bar a genuine tag must clear.
+  if (!tagName.startsWith(RELEASE_TAG_PREFIX) || !SEMVER_RE.test(tagName)) {
     // Almost certainly the sibling `web` component's tag surfacing because
-    // release.yml's Latest-reassignment step didn't run — see the doc
-    // comment above. Fetching it anyway would silently install an unrelated
-    // release; naming it here turns that into an actionable report instead.
+    // release.yml's Latest-reassignment step didn't run (wrong prefix) — see
+    // the doc comment above — or a malformed tag (right prefix, no valid
+    // version). Fetching either anyway would silently install the wrong
+    // content or crash on a nonexistent ref; naming it here turns that into
+    // an actionable report instead.
     throw new Error(
-      `${RELEASES_API} returned '${tagName}', which is not a ${RELEASE_TAG_PREFIX}* tag — ` +
-      `likely the sibling 'web' component's release surfacing instead of career-ops's. ` +
+      `${RELEASES_API} returned '${tagName}', which is not a valid ${RELEASE_TAG_PREFIX}X.Y.Z release tag — ` +
+      `likely the sibling 'web' component's release surfacing instead of career-ops's, or a malformed tag. ` +
       'Retry, or run with --channel main to update from the latest commit on main instead.',
     );
   }
@@ -2077,8 +2083,9 @@ async function apply() {
   const local = localVersion();
   // Environment variables are a private one-use channel for the self-reexec;
   // they must not authorize the initial invocation (#2866).
+  const authenticatedReexec = consumeReexecMarker();
   const legacyReexec = isLegacyReexec();
-  const isReexec = consumeReexecMarker() || legacyReexec ||
+  const isReexec = authenticatedReexec || legacyReexec ||
     (process.argv.includes('--confirm') && process.env.CAREER_OPS_UPDATE_REEXEC === '1');
   const updateForce = process.argv.includes('--force') ||
     (isReexec && process.env.CAREER_OPS_UPDATE_FORCE === '1');
@@ -2103,10 +2110,24 @@ async function apply() {
   // CAREER_OPS_UPDATE_TARGET_REF below, so both fetches in a self-reexec pair
   // land on the exact same content; resolving independently in each process
   // would leave a window where a new release lands between the two fetches.
-  // A legacy parent (pre-dating this env var, see isLegacyReexec()) leaves it
-  // unset — falling back to 'main' there matches what that parent itself did,
-  // since it never resolved a channel either.
-  const targetRef = isReexec
+  //
+  // Deliberately gated on (authenticatedReexec || legacyReexec), NOT the
+  // broader isReexec: isReexec's third disjunct (`--confirm` + a bare
+  // CAREER_OPS_UPDATE_REEXEC=1, no marker, no lock, no backup branch) proves
+  // nothing — it's satisfiable from a clean state with one stray env var,
+  // which would otherwise let a non-reexec invocation skip resolveTargetRef()
+  // and silently fetch 'main' regardless of channel. Only a cryptographically
+  // authenticated reexec or the more-guarded legacy path (lock file + a real,
+  // correctly-named backup branch, see isLegacyReexec()) may inherit a target
+  // ref from the environment at all.
+  //
+  // A legacy parent (pre-dating this env var) leaves it unset — falling back
+  // to 'main' there matches what that parent itself did, since it never
+  // resolved a channel either. An authenticated reexec missing the env var
+  // shouldn't happen in practice (this process always sets it when it spawns
+  // one), but the same fallback covers it as a safety net rather than crashing
+  // mid-update.
+  const targetRef = (authenticatedReexec || legacyReexec)
     ? (process.env.CAREER_OPS_UPDATE_TARGET_REF || 'main')
     : await resolveTargetRef(process.argv, process.env);
 
