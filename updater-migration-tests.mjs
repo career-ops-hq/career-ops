@@ -418,6 +418,22 @@ const twoPassManifestChecks = [
     name: 'rollback deletes the worktree copy only after a successful git rm (#2015)',
     pattern: /removed = true;[\s\S]{0,400}?if \(removed\) \{[\s\S]{0,80}?rmSync/,
   },
+  {
+    // cat-file -e throws identically for "absent from the backup" and "the
+    // lookup itself failed", and the catch-all collapsed both to absent —
+    // which DELETES a path rollback should have restored. ls-tree returns an
+    // empty but successful result for an absent path, keeping them apart.
+    name: 'rollback probes backup existence with ls-tree, not cat-file -e (#3781 review)',
+    pattern: /existedInBackup = gitQuiet\('--literal-pathspecs',\s*'ls-tree',\s*latest,\s*'--',\s*pathspec\)\.length > 0/,
+  },
+  {
+    // That probe runs INSIDE the checkout's catch, so an escaping throw would
+    // end rollback mid-restore with paths checked out and nothing committed,
+    // and would report the lookup failure instead of the checkout error that
+    // started it. Wrapped, and the original error chained as `cause`.
+    name: 'rollback backup probe cannot throw out of the catch, and chains the original error (#3781 review)',
+    pattern: /catch \(lookupErr\)[\s\S]{0,900}?throw new Error\([\s\S]{0,220}?\{ cause: err \}/,
+  },
 ];
 
 for (const check of twoPassManifestChecks) {

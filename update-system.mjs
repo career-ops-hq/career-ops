@@ -2698,18 +2698,39 @@ function rollback() {
         // stop Git from reinterpreting the pathspec itself, so that entry
         // would expand into "everything in the tree" instead of the one
         // validated path (CodeRabbit follow-up on #3782, CWE-22).
-        git('--literal-pathspecs', 'checkout', latest, '--', path);
+        // gitQuiet, not git: failure mode (a) below is an EXPECTED, handled
+        // outcome (the path simply didn't exist in the backup), and printing
+        // git's raw "pathspec did not match" stderr for it reads as a
+        // rollback failure even though the catch handles it correctly — the
+        // same misleading-stderr class #1998 already fixed for apply()'s
+        // analogous checkout.
+        gitQuiet('--literal-pathspecs', 'checkout', latest, '--', path);
         restored.push(path);
       } catch (err) {
         const pathspec = path.endsWith('/') ? path.slice(0, -1) : path;
-        let existedInBackup = true;
+        // ls-tree, not cat-file -e: cat-file -e throws identically whether
+        // the path is genuinely absent from the backup OR the lookup itself
+        // failed (a timeout, a corrupt object, an unreadable ref). The
+        // catch-all collapsed both to "absent", which then DELETES a path
+        // rollback should have restored. ls-tree returns an empty but
+        // SUCCESSFUL result for a path absent from the tree, and only throws
+        // on a genuine lookup failure, so the two cases stay distinguishable.
+        let existedInBackup;
         try {
-          // No --literal-pathspecs needed here: `<rev>:<path>` is Git's
-          // extended-SHA1 object-lookup syntax, not a pathspec, so it is
-          // never subject to pathspec magic expansion in the first place.
-          git('cat-file', '-e', `${latest}:${pathspec}`);
-        } catch {
-          existedInBackup = false;
+          existedInBackup = gitQuiet('--literal-pathspecs', 'ls-tree', latest, '--', pathspec).length > 0;
+        } catch (lookupErr) {
+          // Wrapped deliberately: this runs INSIDE the catch, so an escaping
+          // throw would end rollback() mid-restore with paths already checked
+          // out and nothing committed, reporting the lookup failure instead of
+          // the checkout error that actually started this (review of #3781).
+          // The state is indeterminate — "absent from the backup" (safe to
+          // remove) is indistinguishable from "lookup failed" (must NOT
+          // remove) — so fail loudly, naming the path, and chain the original
+          // checkout error so neither half is lost.
+          throw new Error(
+            `rollback could not determine whether "${pathspec}" exists in ${latest}: ${lookupErr.message}`,
+            { cause: err },
+          );
         }
         if (existedInBackup) {
           throw err;
