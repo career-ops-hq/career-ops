@@ -197,6 +197,48 @@ try {
     fail(`parseListPage() row 0 fields wrong: ${JSON.stringify(parsed.jobs[0])}`);
   }
 
+  // ── parseListPage envelope validation — null/scalar/array/no-opportunities
+  //    bodies must throw, never silently map to raw = [] (CodeRabbit finding
+  //    on PR #3733, comment 3932063380) ─────────────────────────────────────
+
+  {
+    const badEnvelopes = [null, 'not-json-object', 42, true, [], { unexpectedShape: true }, { totalCount: 5 }];
+    let allThrew = true;
+    for (const bad of badEnvelopes) {
+      try {
+        parseListPage(bad, cfg);
+        allThrew = false;
+        break;
+      } catch {
+        // expected
+      }
+    }
+    if (allThrew) {
+      pass('parseListPage() throws on null, scalar, array, and object-without-opportunities-array response bodies');
+    } else {
+      fail('parseListPage() should throw on every malformed envelope, including {totalCount} with no opportunities array');
+    }
+  }
+
+  // A lone UTF-16 surrogate in an Id must drop just that one posting, not
+  // throw out of the batch — sibling valid rows survive (ADDING_A_PROVIDER.md
+  // "surrogate URL values" coverage; CodeRabbit finding, comment 3932063388).
+  {
+    const surrogateSample = {
+      opportunities: [
+        mkOpp('opp-\uD800', 'Lone Surrogate Role'),
+        mkOpp('opp-2', 'Clean Role'),
+      ],
+      totalCount: 2,
+    };
+    const result = parseListPage(surrogateSample, cfg);
+    if (result.jobs.length === 1 && result.jobs[0].title === 'Clean Role') {
+      pass('parseListPage() drops a posting whose Id contains a lone UTF-16 surrogate, keeps the clean sibling');
+    } else {
+      fail(`parseListPage() surrogate-id handling wrong: ${JSON.stringify(result.jobs)}`);
+    }
+  }
+
   // ── fetch() — Top/Skip pagination, dedup, stop conditions ──────────────
 
   const mkPageOpps = (startId, count) => Array.from({ length: count }, (_, i) => mkOpp(`opp-${startId + i}`, `Job ${startId + i}`));

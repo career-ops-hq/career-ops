@@ -245,8 +245,24 @@ export function extractLocations(locations) {
  * @returns {{ jobs: Array<{title: string, url: string, company: string, location: string, postedAt?: number, description?: string}>, total: number | null, raw: any[] }}
  */
 export function parseListPage(json, cfg) {
-  const raw = Array.isArray(json?.opportunities) ? json.opportunities : [];
-  const total = typeof json?.totalCount === 'number' ? json.totalCount : null;
+  // A non-null object with an actual `opportunities` array is the documented
+  // shape. null, a scalar body, a top-level array, and an object that has
+  // `totalCount` but no `opportunities` array are NOT "zero postings" — they
+  // are a shape this endpoint doesn't document, and mapping any of them to
+  // raw = [] would report a silently-empty board instead of surfacing the
+  // unrecognized response (mirrors adp-workforcenow.mjs's parseListPage
+  // guard). fetch()'s own pre-parse check catches most object-shaped cases
+  // with a friendlier "keys: ..." message; this is the safety net for
+  // everything else that reaches here directly (including callers of
+  // parseListPage() itself, which is exported and unit-tested standalone).
+  if (!json || typeof json !== 'object' || Array.isArray(json) || !Array.isArray(json.opportunities)) {
+    const shape = json && typeof json === 'object' && !Array.isArray(json)
+      ? `keys: ${Object.keys(json).join(', ') || '(none)'}`
+      : `type: ${Array.isArray(json) ? 'array' : typeof json}`;
+    throw new Error(`ultipro: unrecognized LoadSearchResults response for ${cfg.companyName} — ${shape}`);
+  }
+  const raw = json.opportunities;
+  const total = typeof json.totalCount === 'number' ? json.totalCount : null;
   const jobs = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
