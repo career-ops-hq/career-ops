@@ -375,9 +375,23 @@ export function harnessMatches(literals, name) {
   return literals.some((v) => v === name || v.startsWith(`${name} `));
 }
 
-/** The `name:` values of every scripts entry in test-all.mjs source. */
+/**
+ * The `name:` values of the entries in test-all.mjs's `scripts` list.
+ *
+ * Scoped to that array, not to the whole file. `name:` is an ordinary property
+ * key — test-all.mjs carries 64 of them and only 45 are registrations; the
+ * rest are test titles, fixture names and plugin ids ("Jane Doe",
+ * "career-ops-plugin-gmail", "filterPipeline tab enum"). None of those happens
+ * to be a root suite filename today, but "a property named `name` anywhere in
+ * the file" is not what registration means, and the whole point of this rule
+ * is that resemblance is not evidence (CodeRabbit, #3765).
+ *
+ * Comments are stripped first, so a commented-out entry does not register.
+ */
 export function registeredNames(src) {
-  const scan = src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1 ');
+  const block = src.match(/const scripts\s*=\s*\[([\s\S]*?)\n\];/);
+  if (!block) return [];
+  const scan = block[1].replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1 ');
   return Array.from(scan.matchAll(/\bname:\s*(['"`])([^'"`]+)\1/g), (m) => m[2]);
 }
 
@@ -387,17 +401,22 @@ export function registeredNames(src) {
 // that must NOT count, and the accepted false reds, so that narrowing the
 // workflow rule to the first command stays a deliberate choice on the record
 // rather than something a later edit quietly undoes.
+const wrap = (entry) => `const scripts = [\n${entry}\n];`;
 const HARNESS_CASES = [
-  ["{ name: 'x-tests.mjs', expectExit: 0 },", true, 'a real registration'],
-  ["{ name: 'x-tests.mjs --pr-gate' },", true, 'a registration carrying flags'],
-  ['{ name: "x-tests.mjs" },', true, 'a double-quoted registration'],
-  ["  { name:'x-tests.mjs' },", true, 'no space after the colon'],
-  ['// { name: \'x-tests.mjs\' },', false, 'a commented-out registration'],
-  ["fail(`x-tests.mjs is gone`);", false, 'a name in an error message (#3765)'],
+  [wrap("  { name: 'x-tests.mjs', expectExit: 0 },"), true, 'a real registration'],
+  [wrap("  { name: 'x-tests.mjs --pr-gate' },"), true, 'a registration carrying flags'],
+  [wrap('  { name: "x-tests.mjs" },'), true, 'a double-quoted registration'],
+  [wrap("  { name:'x-tests.mjs' },"), true, 'no space after the colon'],
+  [wrap("  // { name: 'x-tests.mjs' },"), false, 'a commented-out registration'],
+  ["const cases = [{ name: 'x-tests.mjs' }];", false, 'a name: in an unrelated object (#3765)'],
+  ['fail("expected { name: \'x-tests.mjs\' }");', false, 'a name: inside a string (#3765)'],
+  [wrap("  { name: 'a.mjs' },") + '\nfail("expected { name: \'x-tests.mjs\' }");', false, 'a name: string AFTER a real scripts list'],
+  ["fail(`x-tests.mjs is gone`);", false, 'a name in an error message'],
   ["console.log('ran x-tests.mjs');", false, 'a name in a log line'],
-  ["run(NODE, ['./x-tests.mjs']);", false, 'an invocation that is not a scripts entry (accepted false red)'],
-  ["{ name: 'xx-tests.mjs' },", false, 'a longer sibling name'],
-];const WORKFLOW_CASES = [
+  [wrap("  { name: 'xx-tests.mjs' },"), false, 'a longer sibling name'],
+];
+
+const WORKFLOW_CASES = [
   ['node x-tests.mjs --pr-gate', true, 'the first command'],
   ['  node x-tests.mjs', true, 'indented'],
   ['node ./x-tests.mjs', true, 'path-qualified'],
