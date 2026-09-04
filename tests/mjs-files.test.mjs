@@ -22,6 +22,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -162,28 +163,142 @@ test('isNestedCheckout detects the marker, of either type, and nothing else', ()
   }
 });
 
-test('the private repo walkers consult the shared predicate, not their own rule', () => {
-  // lib/mjs-files.mjs exists so two walkers cannot drift about what "every
-  // file" means; the same reasoning applies to what "not our source" means.
-  // These three suites keep private walkers because each filters differently
-  // (.test.mjs, dot-dirs, SKIP_DIRS sets), so they import the predicate rather
-  // than the collector — but a fourth hand-rolled `.git` rule is the drift.
-  for (const caller of ['tests/local-today-gates.test.mjs', 'tests/main-guard-convention.test.mjs', 'test-all.mjs']) {
-    const src = readFileSync(join(ROOT, caller), 'utf-8');
+test('every recursive walker over this checkout consults the shared predicate', () => {
+  // The previous form of this test pinned three callers BY NAME, and a fourth
+  // walker — `test-all.mjs`'s `discoverTests`, the one that hands what it finds
+  // to the RUNNER — was omitted precisely because nothing enumerated it: a
+  // worktree under `tests/` executed its own stale suites and the run printed
+  // "safe to push/merge" for them (#3762). A list cannot catch the walker
+  // nobody remembered to add to the list, so this asserts the property instead:
+  // every self-recursive `readdirSync` walk in this repository either consults
+  // `isNestedCheckout` or is a named, reasoned exemption below.
+  //
+  // Walkers keep their own recursion rather than calling `collectMjsFiles`
+  // because each filters differently (.test.mjs, dot-dirs, per-caller skip
+  // sets) — but a hand-rolled `.git` rule is the drift, so they share the
+  // predicate.
 
-    // The IMPORT is the assertion, not the call. Matching `isNestedCheckout(`
-    // anywhere in the file is satisfied by a local `const isNestedCheckout =
-    // () => false` — a hand-rolled re-implementation wearing the shared name,
-    // which is precisely the drift this test exists to catch, passing as proof
-    // against itself. Pinning the import binds the name to the one definition.
+  // Anchored at a THIRD-PARTY plugin directory, not at this checkout, so
+  // "somebody else's source tree" is exactly what they are meant to be reading.
+  // For the lock hasher this is load-bearing: skipping a directory that carries
+  // a `.git` marker would let a plugin park executable code inside one and drop
+  // it out of the integrity hash — the rug-pull that file exists to prevent.
+  const EXEMPT = new Map([
+    ['plugins/_lock.mjs:walk', 'hashes a plugin tree; skipping a marked dir would be an integrity blind spot'],
+    ['plugin-audit.mjs:walk', 'audits a plugin tree, which is not this repository’s source'],
+  ]);
+
+  // A function is a walker when its body reads a directory and calls ITSELF.
+  // Non-recursive `readdirSync` (a single-level filter, a listing) is not this
+  // bug: a nested checkout is a directory, and only descending into one is how
+  // its contents get graded.
+  const DECL = /^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(|^\s*(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\(/;
+  const walkers = [];
+  for (const file of collectMjsFiles(ROOT)) {
+    const rel = file.slice(ROOT.length + 1).replace(/\\/g, '/');
+    const lines = readFileSync(file, 'utf-8').split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const m = DECL.exec(lines[i]);
+      if (!m) continue;
+      const name = m[1] ?? m[2];
+      // Body span by brace balance from the declaration line.
+      let depth = 0, opened = false, end = -1;
+      for (let j = i; j < lines.length; j++) {
+        for (const ch of lines[j]) {
+          if (ch === '{') { depth++; opened = true; }
+          else if (ch === '}') depth--;
+        }
+        if (opened && depth <= 0) { end = j; break; }
+      }
+      if (end < 0) continue;
+      const body = lines.slice(i, end + 1).join('\n');
+      const inner = lines.slice(i + 1, end + 1).join('\n');
+      const selfCall = new RegExp(`\\b${name}\\s*\\(`);
+      if (!body.includes('readdirSync(') || !selfCall.test(inner)) continue;
+      walkers.push({ id: `${rel}:${name}`, file: rel, line: i + 1, body });
+    }
+  }
+
+  // A detector that silently stops matching would turn this into a green test
+  // of nothing — the exact failure shape lib/mjs-files.mjs exists to remove
+  // (#3419). The floor is well below today's count, so it survives a walker
+  // being deleted but not the parser breaking.
+  assert.ok(
+    walkers.length >= 8,
+    `found only ${walkers.length} recursive walkers — the detector has stopped matching, not the repo stopped walking`,
+  );
+
+  const unguarded = walkers
+    .filter((w) => !EXEMPT.has(w.id) && !/isNestedCheckout\(/.test(w.body))
+    .map((w) => `${w.file}:${w.line} (${w.id.split(':')[1]})`);
+  assert.deepEqual(
+    unguarded,
+    [],
+    `recursive walker(s) descend into a nested checkout unguarded: ${unguarded.join(', ')} — ` +
+    'call isNestedCheckout() on child directories, or add a reasoned entry to EXEMPT (#3499, #3762)',
+  );
+
+  // An exemption for a walker that no longer exists is a stale claim about the
+  // code, and the next reader would take it for a reviewed decision.
+  for (const id of EXEMPT.keys()) {
+    assert.ok(walkers.some((w) => w.id === id), `EXEMPT lists ${id}, which is no longer a recursive walker`);
+  }
+
+  // The IMPORT is a separate assertion from the call. Matching
+  // `isNestedCheckout(` anywhere is satisfied by a local
+  // `const isNestedCheckout = () => false` — a hand-rolled re-implementation
+  // wearing the shared name, which is precisely the drift this test exists to
+  // catch, passing as proof against itself. Pinning the import binds the name
+  // to the one definition. Derived from the guarded walkers, never listed.
+  const guardedFiles = [...new Set(walkers.filter((w) => !EXEMPT.has(w.id)).map((w) => w.file))];
+  for (const caller of guardedFiles) {
+    if (caller === 'lib/mjs-files.mjs') continue;   // the definition itself
+    const src = readFileSync(join(ROOT, caller), 'utf-8');
     assert.match(
       src,
       /import\s*\{[^}]*\bisNestedCheckout\b[^}]*\}\s*from\s*'\.{1,2}\/lib\/mjs-files\.mjs'/,
       `${caller} must import isNestedCheckout FROM lib/mjs-files.mjs, not re-implement it (#3499)`,
     );
-    // ...and still use it: an unused import satisfies the check above while the
-    // walk descends into every nested checkout exactly as before.
-    assert.match(src, /isNestedCheckout\(/, `${caller} must actually call isNestedCheckout (#3499)`);
+  }
+});
+
+test('a checkout under tests/ does not get its suites EXECUTED by the runner', () => {
+  // The end of the #3762 chain, asserted where it bites. Every other walker in
+  // this repository READS what it finds; `discoverTests` feeds `node:test`, so
+  // a worktree under `tests/` ran a stale checkout's suites against the current
+  // tree and `test-all.mjs` printed "🟢 All tests passed — safe to push/merge"
+  // for them. The marker is what the predicate keys on, so a plain file named
+  // `.git` reproduces it exactly as `git worktree add tests/x` does, without
+  // needing git.
+  const fixture = join(ROOT, 'tests', 'nested-checkout-fixture-3762');
+  rmSync(fixture, { recursive: true, force: true });
+  try {
+    mkdirSync(join(fixture, 'tests'), { recursive: true });
+    writeFileSync(join(fixture, '.git'), 'gitdir: /nowhere\n');
+    writeFileSync(
+      join(fixture, 'tests', 'stale.test.mjs'),
+      "import test from 'node:test';\ntest('a stale checkout suite must never run', () => {});\n",
+    );
+
+    let status = 0;
+    let output = '';
+    try {
+      output = execFileSync(process.execPath, ['test-all.mjs', '--only', 'nested-checkout-fixture-3762'], {
+        cwd: ROOT, encoding: 'utf-8', timeout: 120000,
+      });
+    } catch (err) {
+      status = err.status;
+      output = `${err.stdout ?? ''}${err.stderr ?? ''}`;
+    }
+
+    // `--only` exits 1 on an empty match precisely so a path typo cannot turn
+    // CI green; here that same exit is the pass condition — the stale suite was
+    // not discovered, so there was nothing to run.
+    assert.equal(status, 1, `the runner discovered suites inside a nested checkout:\n${output}`);
+    assert.match(output, /no test files matched/, output);
+    assert.doesNotMatch(output, /stale\.test\.mjs/, output);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
   }
 });
 
