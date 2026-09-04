@@ -336,6 +336,8 @@ test("buildPrompt: multiple declared markets tell the agent to judge by market s
   assert.match(prompt, /MARKET signals/);
   assert.match(prompt, /Never infer the market from the JD's language alone/);
   assert.match(prompt, /ambiguous/i);
+  assert.match(prompt, /STOP BEFORE WRITING OR MERGING/i);
+  assert.match(prompt, /ask the candidate to select the market/i);
 });
 
 test("buildPrompt: the primary declared market still drives the evaluation-mode file with multiple markets configured", () => {

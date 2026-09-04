@@ -307,12 +307,12 @@ Two separate axes:
 
 **When NOT to switch market modes:** If the user applies to English-language roles, even at companies from those markets, use the default English market modes — *unless* the user has explicitly requested another market mode in this conversation, or `language.modes_dir` is set in `config/profile.yml` (the explicit user preference always wins over JD-language detection). This does not override `language.output`; prose still follows `language.output`.
 
-**Multiple simultaneous target markets (#3793).** `language.modes_dir` may also be a **list** of declared candidate markets, for a candidate genuinely running parallel campaigns — not switching sequentially — e.g. an immigrant applying in both Canada and China at once:
+**Multiple simultaneous target markets (#3793).** `language.modes_dir` may also be a **list** of declared candidate markets, for a candidate genuinely running parallel campaigns — not switching sequentially — e.g. a candidate applying in both the DACH region and China at once:
 
 ```yaml
 language:
   output: en
-  modes_dir: [modes/de, modes/zh]
+  modes_dir: [modes/de, modes/zh] # DACH and China
 ```
 
 Declared, not inferred: the user states which markets they are actually running campaigns in. When two or more are declared:

@@ -79,7 +79,7 @@ export function buildPrompt({ kind, input, memory, today, postedAt, lang }) {
         declaredMarkets.length > 1 ? "these markets'" : "this market's"
       } vocabulary, benefits and legal concepts, and keep those terms (explained in the output language) where relevant.${
         declaredMarkets.length > 1
-          ? ` These are multiple DECLARED candidate markets — per posting, judge which one actually applies from the JD's own MARKET signals (hiring-entity jurisdiction, currency, benefits/legal vocabulary), reusing the same judgment Block G posting-legitimacy checks already use. Never infer the market from the JD's language alone (a French-language Quebec/federal-Canada posting needs Canada's concepts, not modes/fr's France/Belgium/Switzerland/Luxembourg ones). If genuinely ambiguous between the declared candidates, say so instead of guessing.`
+          ? ` These are multiple DECLARED candidate markets — per posting, judge which one actually applies from the JD's own MARKET signals (hiring-entity jurisdiction, currency, benefits/legal vocabulary), reusing the same judgment Block G posting-legitimacy checks already use. Never infer the market from the JD's language alone (a French-language Quebec/federal-Canada posting needs Canada's concepts, not modes/fr's France/Belgium/Switzerland/Luxembourg ones). If genuinely ambiguous between the declared candidates, STOP BEFORE WRITING OR MERGING any report or tracker entry, ask the candidate to select the market, and do not guess.`
           : ""
       }`
     : "";
@@ -204,7 +204,7 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
       {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}${postedSegment}\t{posting URL, or empty}
    d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
 
-3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
+3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY. If the declared market remains genuinely ambiguous after reading the JD, stop before writing or merging any report or tracker entry, ask the candidate to select the market, and do not guess.${mem}
 
 After everything above is written and merged, output EXACTLY one final line, nothing after it:
 VERDICT: {score}/5 — {reason in 12 words or fewer}
