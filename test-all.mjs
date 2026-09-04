@@ -331,6 +331,7 @@ const scripts = [
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
   { name: 'calibrate.mjs --self-test', expectExit: 0 },
   { name: 'check-table-freshness.mjs --self-test', expectExit: 0 },
+  { name: 'check-jd-archive.mjs --self-test', expectExit: 0 },
   { name: 'upskill.mjs --self-test', expectExit: 0 },
   { name: 'detect-reposts.mjs --self-test', expectExit: 0 },
   { name: 'rank-pipeline.mjs --self-test', expectExit: 0 },
@@ -658,9 +659,16 @@ try {
     hiddenScriptMetric,
     '<html><body><script>const claim = "500 users";</script\t\n bar><p>Generated CV</p></body></html>'
   );
+  // The metric must be one NO real cv.md can support. verify-cv-facts.mjs
+  // validates against the LIVE source files, so a plausible fixture number
+  // silently inverts this assertion for any user whose CV happens to contain
+  // it: on a checkout whose cv.md read "~500 active users/month", the old
+  // "500 users" fixture was genuinely SUPPORTED, verify-cv-facts correctly
+  // declined to flag it, and this test reported that correct behaviour as a
+  // miss. The test passed or failed depending on whose CV was checked out.
   writeFileSync(
     visibleMetric,
-    '<html><body><p>Improved onboarding for 500 users.</p></body></html>'
+    '<html><body><p>Improved onboarding for 918273645 users.</p></body></html>'
   );
 
   const hiddenResult = run(NODE, ['verify-cv-facts.mjs', hiddenScriptMetric], {
@@ -2448,11 +2456,62 @@ if (
   fail('batch final JSON does not require typed, escaped serialization');
 }
 
-const batchTrackerStep = batchPrompt.match(/### Step 5 \u2014 Tracker TSV Line[\s\S]*?### Step 6 \u2014 Final JSON/)?.[0] ?? '';
+// Anchored on the step NUMBER, not the section's wording: the title used to be
+// matched verbatim, so rewording it ("TSV Line" → "TSV Row" when the format
+// gained a header row, #3517) left this matching nothing and failing on the
+// empty string rather than on the thing it asserts.
+const batchTrackerStep = batchPrompt.match(/### Step 5 \u2014 [^\n]*[\s\S]*?### Step 6 \u2014 Final JSON/)?.[0] ?? '';
 if (/\{\{REPORT_NUM\}\}\\t\{\{DATE\}\}/.test(batchTrackerStep) && !/Compute `\{next_num\}`/.test(batchTrackerStep)) {
   pass('batch workers use the coordinator-reserved tracker number');
 } else {
   fail('batch workers still compute tracker numbers independently');
+}
+
+// ...and Step 5 must still describe the FORMAT it writes. The assertion above
+// cannot see that: a prompt that dropped the header row, the additions path, or
+// the one-data-row rule would still carry `{{REPORT_NUM}}\t{{DATE}}` and pass,
+// while telling workers to emit the headerless form — the one where score and
+// status are told apart by content, with a case that has no answer (#3517).
+// The labels come from tracker-parse rather than a list here, so this follows
+// the format instead of restating it and drifting.
+const { TSV_REQUIRED_FIELDS: REQUIRED_TSV_LABELS } = await import(pathToFileURL(join(ROOT, 'tracker-parse.mjs')).href);
+// The prompt writes tabs as the literal two-character escape, not real tabs.
+const batchStepLines = batchTrackerStep.split('\n');
+const batchTsvLines = batchStepLines.filter(l => l.includes('\\t'));
+const batchTsvLabels = (batchTsvLines[0] ?? '').trim().split('\\t').map(s => s.trim());
+const batchLabelsMissing = REQUIRED_TSV_LABELS.filter(f => !batchTsvLabels.includes(f));
+// Width parity, NOT width == REQUIRED_TSV_LABELS.length: the prompt carries the
+// optional `notes` and `url` columns on purpose (url is the deterministic dedup
+// key #1298 added here), so pinning the count to the required set would forbid
+// them. What must hold is that the two lines describe the SAME row — a header
+// with an extra label over a short data row is a template that teaches a
+// shifted row.
+const batchDataFields = (batchTsvLines[1] ?? '').trim().split('\\t');
+// Structure, not prose: the labels line must be immediately followed by the
+// data row, so the section shows ONE headed block rather than two examples that
+// happen to sit in the same step. The instruction sentence is matched exactly
+// rather than by keyword — `/two TSV lines/i` also matches "do NOT write two
+// TSV lines", which is the polarity trap that lets a reversed instruction pass.
+const batchHeaderIdx = batchStepLines.findIndex(l => l.includes('\\t'));
+// Identity, not just "the next line mentions the placeholder": a prose line
+// carrying {{REPORT_NUM}} between the two fence lines would satisfy a contains
+// check while batchDataFields went on reading the real data row further down —
+// adjacency and width would then be describing different lines, and a prompt
+// that split the block would pass.
+const batchRowFollowsHeader = batchHeaderIdx >= 0
+  && batchStepLines[batchHeaderIdx + 1] === batchTsvLines[1]
+  && (batchTsvLines[1] ?? '').includes('{{REPORT_NUM}}');
+if (
+  batchTsvLines.length === 2 &&
+  batchLabelsMissing.length === 0 &&
+  batchDataFields.length === batchTsvLabels.length &&
+  batchRowFollowsHeader &&
+  /batch\/tracker-additions\//.test(batchTrackerStep) &&
+  /Write exactly two TSV lines/.test(batchTrackerStep)
+) {
+  pass('batch Step 5 specifies the headed tracker-addition format (labels, one data row, path)');
+} else {
+  fail(`batch Step 5 no longer specifies the headed TSV format — tab lines: ${batchTsvLines.length}, missing labels: ${batchLabelsMissing.join(', ') || 'none'}, labels/fields: ${batchTsvLabels.length}/${batchDataFields.length}, data row follows header: ${batchRowFollowsHeader}`);
 }
 
 const batchMachineSummary = batchPrompt.match(/#### Machine Summary[\s\S]*?### Step 3 \u2014 Save the Report/)?.[0] ?? '';
@@ -18180,6 +18239,143 @@ try {
   }
 } catch (e) {
   fail(`gmail isCleanUrl tests crashed: ${e.message}`);
+}
+
+// check-jd-archive.mjs's own --self-test (invoked above via the CLI-check
+// table) covers the finding logic on synthetic fixtures. This section pins
+// the wiring: the script ships, updates, is documented, the mode files state
+// the archival step as required (not conditional), and the checker stays
+// strictly read-only — it reports missing archives; it must never be able to
+// "fix" one itself by writing a report or a jds/ file.
+
+console.log('\n75. JD-archive validator wiring + read-only boundary (#2789)');
+
+try {
+  const jdArchiveSrc = readFile('check-jd-archive.mjs');
+
+  const updaterSrc = readFile('update-system.mjs');
+  const jdArchiveSysBlock = (updaterSrc.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
+  if (jdArchiveSysBlock.includes("'check-jd-archive.mjs'")) {
+    pass('check-jd-archive.mjs is in update-system.mjs SYSTEM_PATHS (shipped + updatable)');
+  } else {
+    fail('check-jd-archive.mjs is NOT in SYSTEM_PATHS — updates would never deliver it');
+  }
+
+  const pkg = JSON.parse(readFile('package.json'));
+  if (pkg.scripts && pkg.scripts['jd-archive'] === 'node check-jd-archive.mjs') {
+    pass('package.json exposes npm run jd-archive');
+  } else {
+    fail('package.json missing the jd-archive script entry');
+  }
+
+  const scriptsDoc = readFile('docs/SCRIPTS.md');
+  if (scriptsDoc.includes('## check-jd-archive') && scriptsDoc.includes('missing-jd-archive')) {
+    pass('docs/SCRIPTS.md documents check-jd-archive (section + finding type)');
+  } else {
+    fail('docs/SCRIPTS.md missing the check-jd-archive section');
+  }
+
+  const agentsDoc = readFile('AGENTS.md');
+  if (agentsDoc.includes('`check-jd-archive.mjs`')) {
+    pass('AGENTS.md Main Files table lists check-jd-archive.mjs');
+  } else {
+    fail('AGENTS.md Main Files table missing check-jd-archive.mjs');
+  }
+  if (/REQUIRED.*Job Description \(archived verbatim\)|Job Description \(archived verbatim\).*REQUIRED/.test(agentsDoc)) {
+    pass('AGENTS.md states the JD-archive section as required, not conditional');
+  } else {
+    fail('AGENTS.md does not state the JD-archive section as required');
+  }
+
+  const ofertaDoc = readFile('modes/oferta.md');
+  if (ofertaDoc.includes('## Job Description (archived verbatim)')) {
+    pass('modes/oferta.md report template carries a Job Description (archived verbatim) section');
+  } else {
+    fail('modes/oferta.md report template missing the Job Description (archived verbatim) section');
+  }
+  if (/JD archival \(required, #2789\)/.test(ofertaDoc)) {
+    pass('modes/oferta.md states JD archival as required (matches the Machine Summary "required" phrasing style)');
+  } else {
+    fail('modes/oferta.md does not state JD archival as a required step');
+  }
+
+  const pdfDoc = readFile('modes/pdf.md');
+  if (!/write the JD to a scratch file[\s\S]{0,20}if it isn't already one/.test(pdfDoc)) {
+    pass('modes/pdf.md no longer phrases JD archival as conditional ("if it isn\'t already one")');
+  } else {
+    fail('modes/pdf.md still phrases JD archival as conditional, not required');
+  }
+  if (pdfDoc.includes('JD archival (required, #2789)')) {
+    pass('modes/pdf.md states JD archival as a required step');
+  } else {
+    fail('modes/pdf.md does not state JD archival as a required step');
+  }
+
+  // Read-only import boundary: the ONLY fs capabilities check-jd-archive.mjs
+  // may hold for scanning reports/jds are readFileSync/readdirSync/existsSync.
+  // It also imports mkdtempSync/mkdirSync/writeFileSync/rmSync — but ONLY for
+  // building its own self-test fixtures in a temp dir, never for reports/ or
+  // jds/. The boundary check below allows the self-test-fixture write APIs by
+  // name but asserts they never appear outside the self-test function body.
+  const SELF_TEST_ONLY_FS = new Set(['mkdtempSync', 'mkdirSync', 'writeFileSync', 'rmSync']);
+  const READ_ONLY_FS = new Set(['readFileSync', 'readdirSync', 'existsSync']);
+  const fsImportMatch = jdArchiveSrc.match(/import\s*\{([^}]*)\}\s*from\s*['"](?:node:)?fs['"]/);
+  const fsNames = fsImportMatch ? fsImportMatch[1].split(',').map(s => s.trim()).filter(Boolean) : [];
+  const unexpected = fsNames.filter(n => !READ_ONLY_FS.has(n) && !SELF_TEST_ONLY_FS.has(n));
+  if (fsNames.length > 0 && unexpected.length === 0) {
+    pass('check-jd-archive.mjs fs imports are limited to read-only scanning APIs plus self-test-fixture builders');
+  } else {
+    fail(`check-jd-archive.mjs fs import boundary violated: ${unexpected.join(', ') || 'no fs import matched'}`);
+  }
+
+  // The self-test-only write APIs must never be called from checkJdArchive,
+  // hasEmbeddedJdArchive, or parseReportFilename — only from runSelfTest.
+  // Extracting that function's body needs brace-counting, not a greedy
+  // regex: `[\s\S]*` backtracks to the LAST `\n}` in the whole file (e.g. the
+  // CLI-invocation block at the end), so `.replace(selfTestBody, '')` could
+  // strip out everything from runSelfTest onward — including real code after
+  // it — and a stray write call there would never get scanned, silently
+  // passing the very boundary check this is meant to enforce (CodeRabbit,
+  // PR #2791). Walk brace depth from the opening `{` instead, so nested
+  // blocks/arrow functions inside runSelfTest don't end the match early
+  // either.
+  const runSelfTestStart = jdArchiveSrc.indexOf('function runSelfTest()');
+  let selfTestBody = '';
+  if (runSelfTestStart !== -1) {
+    const openBrace = jdArchiveSrc.indexOf('{', runSelfTestStart);
+    let depth = 0;
+    let i = openBrace;
+    for (; i < jdArchiveSrc.length; i += 1) {
+      if (jdArchiveSrc[i] === '{') depth += 1;
+      else if (jdArchiveSrc[i] === '}') {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    selfTestBody = jdArchiveSrc.slice(openBrace, i + 1);
+  }
+  const outsideSelfTest = jdArchiveSrc
+    .replace(selfTestBody, '')
+    .split('\n')
+    .filter(line => [...SELF_TEST_ONLY_FS].some(fn => line.includes(`${fn}(`)) && !/^\s*import\b/.test(line));
+  if (outsideSelfTest.length === 0) {
+    pass('check-jd-archive.mjs never calls a write-capable fs API outside its own self-test fixtures');
+  } else {
+    fail(`check-jd-archive.mjs calls a write-capable fs API outside runSelfTest: ${outsideSelfTest.join(' | ')}`);
+  }
+
+  if (!/from\s*['"](?:node:)?fs\/promises['"]/.test(jdArchiveSrc)) {
+    pass('check-jd-archive.mjs does not import fs/promises');
+  } else {
+    fail('check-jd-archive.mjs imports fs/promises — write-capable API surface');
+  }
+  if (!/\brequire\s*\(/.test(jdArchiveSrc)) {
+    pass('check-jd-archive.mjs has no require() escape hatch');
+  } else {
+    fail('check-jd-archive.mjs uses require() — bypasses the import whitelist');
+  }
+} catch (e) {
+  fail(`jd-archive wiring check: ${e.message}`);
 }
 
 await runDiscovered();
