@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
 import { sectionState } from "@/lib/personalization.mjs";
+import { buildConversationContext } from "@/lib/chats.mjs";
 
 /** Human labels of the modes/_profile.md sections still identical to the template. */
 function personalizationGeneric(): string[] {
@@ -62,13 +63,17 @@ Keep replies short, warm, and useful. Don't dump raw files or narrate internal d
 type Msg = { role: "user" | "assistant"; content: string };
 
 export async function POST(req: Request) {
-  let body: { message?: string; cliId?: string; history?: Msg[]; pageContext?: string };
+  let body: { message?: string; cliId?: string; history?: Msg[]; pageContext?: string; resumeId?: string | null };
   try {
     body = await req.json();
   } catch {
     return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   }
   const { message, cliId, pageContext } = body;
+  // A Claude session to continue (`--resume`), as reported by an earlier turn's
+  // <<session:…>> marker. Validated to the shape Claude emits; anything else is
+  // ignored and the turn starts fresh.
+  const resumeId = typeof body.resumeId === "string" && /^[A-Za-z0-9._-]{4,128}$/.test(body.resumeId) ? body.resumeId : null;
   if (!message || !cliId) {
     return new Response(JSON.stringify({ error: "message and cliId required" }), { status: 400 });
   }
@@ -82,8 +87,10 @@ export async function POST(req: Request) {
   }
   const { spec, binPath } = resolved;
 
-  const history = (body.history ?? []).slice(-8);
-  const convo = history.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`).join("\n");
+  // Fresh turn: the last 12 turns verbatim plus a digest of older user turns,
+  // instead of a hard cut at 8 — a long onboarding conversation keeps its thread.
+  // (A resumed Claude turn carries its own transcript and skips this entirely.)
+  const { digest, convo } = buildConversationContext(body.history ?? []);
   const pageLine = pageContext
     ? `\n\nCURRENT PAGE (the user is looking at this right now): ${pageContext}\nWhen the user's message is ambiguous ("this", "it", "apply", "evaluate this", "draft it"), assume it refers to what's on the current page.`
     : "";
@@ -107,7 +114,11 @@ export async function POST(req: Request) {
   const setupLine = onboardingNeeded || generic.length
     ? `\n\nSETUP STATE (authoritative — the SAME signal the home screen uses; trust it over guessing, and do NOT re-ask for anything already on file):\n- CV on file (cv.md): ${hasCv ? "YES — do NOT ask for it again; read it to be concrete" : "NO — this is the first thing to collect"}\n- Still missing: ${missing.length ? missing.join(", ") : "nothing"}${personalizationLine}\nWhen onboarding, START at the first item actually missing. If the CV is already on file, SKIP step 1 entirely and go straight to the next missing prerequisite (usually the profile — target roles, comp, location), then the personalization sections still on the template.`
     : `\n\nSETUP STATE: this user is fully set up (CV + profile + scanner + personalization all on file). Do NOT run onboarding or ask for a CV — just help them with what they actually asked.`;
-  const prompt = `${SYSTEM_PREAMBLE}${setupLine}${memoryLine}${pageLine}\n\n--- Conversation ---\n${convo}\nUser: ${message}\nAssistant:`;
+  const freshPrompt = `${SYSTEM_PREAMBLE}${setupLine}${memoryLine}${pageLine}\n\n--- Conversation ---\n${digest}${convo}\nUser: ${message}\nAssistant:`;
+  // On a resumed Claude session the preamble, memory and the conversation so far
+  // are already in Claude's own transcript; only send what changed since the
+  // last turn (setup state can flip when a file gets written) plus the message.
+  const resumePrompt = `STATE UPDATE (authoritative, may have changed since your last turn):${setupLine.replace(/^\n\n/, "\n")}${pageLine}\n\nUser: ${message}\nAssistant:`;
 
   // Claude Code streams token-level deltas via stream-json + partial messages.
   // Other CLIs: pass their stdout through raw.
@@ -117,24 +128,25 @@ export async function POST(req: Request) {
   const isClaude = cliId === "claude";
   // allowedTools must be COMMA-separated; disallowedTools is the hard guardrail
   // so the advisor can read (and WebFetch) but never blind-writes or shells out.
-  const args = isClaude
-    ? [
-        "-p",
-        prompt,
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--include-partial-messages",
-        "--permission-mode",
-        "acceptEdits",
-        "--allowedTools",
-        "Read,WebFetch,Glob,Grep",
-        "--disallowedTools",
-        "Bash,Write,Edit,NotebookEdit,Task",
-      ]
-    : spec.args(prompt);
+  const claudeArgs = (prompt: string, resume: string | null) => [
+    "-p",
+    ...(resume ? ["--resume", resume] : []),
+    prompt,
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "acceptEdits",
+    "--allowedTools",
+    "Read,WebFetch,Glob,Grep",
+    "--disallowedTools",
+    "Bash,Write,Edit,NotebookEdit,Task",
+  ];
+  const useResume = isClaude && !!resumeId;
+  const args = isClaude ? claudeArgs(useResume ? resumePrompt : freshPrompt, useResume ? resumeId : null) : spec.args(freshPrompt);
 
-  const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  let child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
 
   const encoder = new TextEncoder();
   // `closed` + kill timer in the OUTER scope so cancel() can flip `closed` before
@@ -177,53 +189,84 @@ export async function POST(req: Request) {
       const emit = (s: string) => {
         if (safeEnqueue(s)) emitted = true;
       };
+      // Claude reports its session id on the init and result events. Forward it
+      // once as a <<session:…>> marker; the client strips it from the text,
+      // stores it on the conversation and sends it back as resumeId next turn.
+      let sessionSent = false;
+      let sawResumeError = false;
+      let resumed = useResume;
 
-      child.stdout.on("data", (d: Buffer) => {
-        if (closed) return;
-        if (!isClaude) {
-          emit(d.toString());
-          return;
-        }
-        // line-buffered NDJSON → emit only assistant text deltas
-        buf += d.toString();
-        let nl: number;
-        while ((nl = buf.indexOf("\n")) !== -1) {
-          const line = buf.slice(0, nl).trim();
-          buf = buf.slice(nl + 1);
-          if (!line) continue;
-          try {
-            const obj = JSON.parse(line);
-            if (obj.type === "stream_event" && obj.event?.type === "content_block_delta") {
-              const text = obj.event.delta?.text;
-              if (typeof text === "string") emit(text);
-            }
-          } catch {
-            /* partial / non-json line — skip */
+      const wire = (proc: typeof child) => {
+        proc.stdout.on("data", (d: Buffer) => {
+          if (closed) return;
+          if (!isClaude) {
+            emit(d.toString());
+            return;
           }
-        }
-      });
-      child.stderr.on("data", (d: Buffer) => {
-        const s = d.toString();
-        if (/error|not found|denied|fatal/i.test(s)) {
-          safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`);
-        }
-      });
-      child.on("error", (e) => {
-        safeEnqueue(`\n[error launching ${spec.name}: ${e.message}]`);
-        safeClose();
-      });
-      child.on("close", () => {
-        if (!emitted) {
-          safeEnqueue("_(no output — is the CLI authenticated?)_");
-        }
-        safeClose();
-      });
+          // line-buffered NDJSON → emit only assistant text deltas
+          buf += d.toString();
+          let nl: number;
+          while ((nl = buf.indexOf("\n")) !== -1) {
+            const line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            if (!line) continue;
+            try {
+              const obj = JSON.parse(line);
+              if (!sessionSent && typeof obj.session_id === "string" && /^[A-Za-z0-9._-]{4,128}$/.test(obj.session_id)) {
+                sessionSent = true;
+                safeEnqueue(`<<session:${obj.session_id}>>`);
+              }
+              if (obj.type === "stream_event" && obj.event?.type === "content_block_delta") {
+                const text = obj.event.delta?.text;
+                if (typeof text === "string") emit(text);
+              }
+            } catch {
+              /* partial / non-json line — skip */
+            }
+          }
+        });
+        proc.stderr.on("data", (d: Buffer) => {
+          const s = d.toString();
+          // A stale/unknown session is not the user's problem: note it and let
+          // close() fall back to a fresh turn instead of surfacing the error.
+          if (resumed && /no conversation found|session.*not found|invalid session|unknown session/i.test(s)) {
+            sawResumeError = true;
+            return;
+          }
+          if (/error|not found|denied|fatal/i.test(s)) {
+            safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`);
+          }
+        });
+        proc.on("error", (e) => {
+          safeEnqueue(`\n[error launching ${spec.name}: ${e.message}]`);
+          safeClose();
+        });
+        proc.on("close", () => {
+          if (closed) return;
+          // Resume produced nothing (expired/unknown session, or Claude refused
+          // it): run the turn again from scratch with the full prompt + history.
+          if (resumed && !emitted && !closed) {
+            resumed = false;
+            buf = "";
+            sessionSent = false;
+            sawResumeError = false;
+            child = spawnHeadlessCli(binPath, claudeArgs(freshPrompt, null), { cwd: careerOpsRoot(), env: process.env });
+            wire(child);
+            return;
+          }
+          if (!emitted) {
+            safeEnqueue("_(no output — is the CLI authenticated?)_");
+          }
+          safeClose();
+        });
+      };
+      wire(child);
     },
     cancel() {
       closed = true;
       if (killer) clearTimeout(killer);
       try {
-        child.kill("SIGTERM");
+        child.kill("SIGTERM"); // `child` may have been replaced by the resume fallback
       } catch {
         /* ignore */
       }
