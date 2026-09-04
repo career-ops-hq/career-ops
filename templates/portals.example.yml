@@ -1368,6 +1368,24 @@ search_queries:
 #   provider: agentic-jobs
 #   enabled: true
 #
+# - name: Torre                           # pan-LatAm talent marketplace (torre.ai)
+#   provider: torre
+#   search: engineering manager           # optional but strongly recommended — an
+#                                         # unfiltered query returns the whole ~300k board
+#   experience: 1-plus-year               # required companion to search; one of
+#                                         # potential-to-develop / 1-plus-year / 2-plus-years /
+#                                         # 3-plus-years / 5-plus-years
+#   remote_only: true                     # optional
+#   enabled: true
+#   # Capped at 20 results/query, no paging — use several entries with
+#   # different search terms for breadth.
+#
+# - name: Yourator                        # Taiwanese startup/digital-roles board
+#   provider: yourator
+#   careers_url: https://www.yourator.co/jobs
+#   max_pages: 120                        # optional page cap (default 120, max 500)
+#   enabled: true
+#
 # Comeet needs the full careers-api URL (it carries a per-tenant token that a
 # branded careers page does not expose), so set it via the api: field — e.g.:
 #
