@@ -254,6 +254,7 @@ export function extractSalary(job) {
   const salaryRange = findCustomField(job?.customFieldGroup, 'stringFields', 'SalaryRange')?.stringValue;
   const symbolOrCode = findCustomField(job?.customFieldGroup, 'stringFields', 'CurrencySymbolOrCode')?.stringValue;
   if (typeof salaryRange === 'string' && salaryRange.trim()) {
+    if (/\bhour(?:ly)?\b|\bper\s+hour\b/i.test(salaryRange)) return null;
     const nums = (salaryRange.match(/[\d,]+(?:\.\d+)?/g) || [])
       .map((n) => Number(n.replace(/,/g, '')))
       .filter((n) => Number.isFinite(n));
@@ -261,7 +262,9 @@ export function extractSalary(job) {
       return {
         min: Math.min(...nums),
         max: Math.max(...nums),
-        currency: typeof symbolOrCode === 'string' ? symbolOrCode.trim() : '',
+        currency: typeof symbolOrCode === 'string' && /^[A-Z]{3}$/.test(symbolOrCode.trim())
+          ? symbolOrCode.trim()
+          : '',
       };
     }
   }
@@ -308,6 +311,11 @@ export function parseListPage(json, cfg) {
   }
   if (!Array.isArray(json.jobRequisitions) && (!json.meta || typeof json.meta !== 'object' || Array.isArray(json.meta))) {
     throw new Error('adp-workforcenow: unrecognized job-requisitions response');
+  }
+  if (json.meta && typeof json.meta === 'object' && !Array.isArray(json.meta)
+    && typeof json.meta.totalNumber === 'number' && json.meta.totalNumber > 0
+    && !Array.isArray(json.jobRequisitions)) {
+    throw new Error('adp-workforcenow: response has a positive totalNumber but no jobRequisitions array');
   }
   const raw = Array.isArray(json.jobRequisitions) ? json.jobRequisitions : [];
   const total = typeof json?.meta?.totalNumber === 'number' ? json.meta.totalNumber : null;
@@ -420,8 +428,6 @@ export default {
       if (fresh === 0) break;
 
       skip += raw.length; // advance by rows actually returned, never PAGE_SIZE
-      if (total !== null && jobs.length >= total) break;
-
       // This was the last iteration the for-loop will run — if the board
       // still has more (or an unknown amount, when meta.totalNumber was
       // never present) left, the cap truncated it. A short page (fewer rows
@@ -429,7 +435,8 @@ export default {
       // without that guard, a tenant with no meta.totalNumber whose last
       // reachable page just happens to be short would be wrongly tagged
       // truncated even though there was nothing left to fetch.
-      if (page === pageLimit - 1 && raw.length >= PAGE_SIZE) cappedIncomplete = true;
+      if (raw.length < PAGE_SIZE) break;
+      if (page === pageLimit - 1) cappedIncomplete = true;
     }
 
     const truncated = cappedIncomplete && ctxCap === Infinity;
@@ -468,8 +475,8 @@ export default {
     // must not leak into the pipeline's Job rows (mirrors smartrecruiters.mjs).
     const result = jobs.map(({ _itemId, ...job }) => job);
     // The tag lives on the returned array (mirrors workday.mjs's
-    // workdayTruncated / workdayNoDateSkip pattern, and ultipro.mjs's
-    // ultiproTruncated) — re-applied here because .map() above produces a
+    // workdayTruncated / workdayNoDateSkip pattern) — re-applied here because
+    // .map() above produces a
     // fresh array that wouldn't otherwise carry it.
     if (truncated) /** @type {any} */ (result).adpTruncated = true;
     return result;

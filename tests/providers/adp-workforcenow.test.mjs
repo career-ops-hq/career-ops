@@ -232,6 +232,12 @@ try {
 
   if (extractSalary({}) === null) pass('extractSalary() returns null when no salary data is present (never invents one)');
   else fail(`extractSalary() should return null for no data, got ${JSON.stringify(extractSalary({}))}`);
+  const hourly = extractSalary({ customFieldGroup: { stringFields: [
+    { nameCode: { codeValue: 'SalaryRange' }, stringValue: 'Hourly Rate: $25.00 - $30.00' },
+    { nameCode: { codeValue: 'CurrencySymbolOrCode' }, stringValue: '$' },
+  ] } });
+  if (hourly === null) pass('extractSalary() skips hourly free-text rates and non-ISO currency symbols');
+  else fail(`extractSalary() should skip hourly rates, got ${JSON.stringify(hourly)}`);
 
   // ── parseListPage ────────────────────────────────────────────────────────
 
@@ -257,6 +263,13 @@ try {
   }
   if (primitiveThrew) pass('parseListPage() rejects null, primitive, and array response payloads');
   else fail('parseListPage() should reject every non-object response payload with the unrecognized-response error');
+  try {
+    parseListPage({ meta: { totalNumber: 30 } }, cfg);
+    fail('parseListPage() should reject a positive totalNumber without jobRequisitions');
+  } catch (error) {
+    if (/positive totalNumber/.test(error?.message)) pass('parseListPage() rejects a positive totalNumber without jobRequisitions');
+    else fail(`parseListPage() wrong missing-array error: ${error?.message}`);
+  }
 
   const mkJob = (itemId, title, externalId) => ({
     itemID: itemId,
@@ -296,7 +309,7 @@ try {
     fail(`parseListPage() row 0 fields wrong: ${JSON.stringify(parsed.jobs[0])}`);
   }
 
-  // ── fetch() — pagination, $skip advancing by rows returned, dedup, totals ─
+  // ── fetch() — pagination, $skip advancing by rows returned, dedup ────────
 
   const fullPage = (start) => Array.from({ length: 20 }, (_, i) => mkJob(`item-${start + i}`, `Job ${start + i}`, `ext-${start + i}`));
   {
@@ -322,7 +335,7 @@ try {
       fail(`adp-workforcenow.fetch() $skip sequence wrong: ${JSON.stringify(seenSkips)}`);
     }
     if (jobs.length === 25) {
-      pass('adp-workforcenow.fetch() stops once the running count reaches meta.totalNumber, deduping the overlapping itemID');
+      pass('adp-workforcenow.fetch() walks to a short page and dedupes the overlapping itemID');
     } else {
       fail(`adp-workforcenow.fetch() returned ${jobs.length} jobs, expected 25 (deduped)`);
     }
@@ -409,16 +422,16 @@ try {
     }
   }
 
-  // A tenant that finishes exactly at the cap (meta.totalNumber reached) is
-  // NOT tagged truncated — the cap and "genuinely done" must not be conflated.
+  // A full page at the cap is incomplete even if a source-reported total says
+  // it is complete; only a short or empty page proves that the board ended.
   {
     const mockCtx = {
       sleep: async () => {},
       fetchJson: async () => ({ jobRequisitions: fullPage(1), meta: { totalNumber: 20 } }),
     };
     const jobs = await adp.fetch({ name: 'ExampleCo', careers_url: CAREERS_URL, max_pages: 1 }, mockCtx);
-    if (jobs.adpTruncated === undefined) pass('adp-workforcenow.fetch() does not tag adpTruncated when the board finished exactly at the cap');
-    else fail('adp-workforcenow.fetch() should not tag adpTruncated when meta.totalNumber was actually reached');
+    if (jobs.adpTruncated === true) pass('adp-workforcenow.fetch() tags a full page at the cap as potentially truncated');
+    else fail('adp-workforcenow.fetch() should tag a full page at the cap as potentially truncated');
   }
 
   // A short final page (fewer rows than PAGE_SIZE) landing exactly on the
