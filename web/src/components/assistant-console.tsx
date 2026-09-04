@@ -5,7 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Send, X, Loader2, Settings, RotateCcw, ArrowUpRight, Sparkles } from "lucide-react";
+import { Send, X, Loader2, Settings, RotateCcw, ArrowUpRight, Sparkles, Maximize2, Minimize2 } from "lucide-react";
 import { CoMark } from "@/components/co-mark";
 import { useJobs } from "@/components/jobs/job-store";
 import { usePipeline } from "@/components/pipeline/pipeline-provider";
@@ -30,6 +30,23 @@ type Msg = { role: "user" | "assistant"; parts: Part[] };
 
 const CONFIG_KEY = "career-ops:config";
 const CHAT_KEY = "career-ops:chat";
+const SIZE_KEY = "career-ops:assistant-size";
+
+// Panel size. The 400×600 default is fine for a question; an onboarding
+// conversation or a long evaluation debrief is not a 400px-wide affair. Three
+// fixed steps rather than free drag: predictable on touch and small screens,
+// one click to cycle, remembered per browser.
+type PanelSize = "compact" | "wide" | "full";
+const SIZE_ORDER: PanelSize[] = ["compact", "wide", "full"];
+const PANEL_CLASS: Record<PanelSize, string> = {
+  compact: "bottom-5 right-5 h-[600px] max-h-[80vh] w-[400px] max-w-[calc(100vw-2.5rem)]",
+  wide: "bottom-5 right-5 h-[85vh] w-[720px] max-w-[calc(100vw-2.5rem)]",
+  full: "inset-4 h-auto w-auto",
+};
+// The composer grows with its content (a pasted CV, a long answer) up to a cap
+// that scales with the panel, instead of staying a one-line box that scrolls.
+const INPUT_MAX_PX: Record<PanelSize, number> = { compact: 128, wide: 240, full: 360 };
+const SIZE_LABEL: Record<PanelSize, string> = { compact: "Wider", wide: "Full screen", full: "Compact" };
 // back-compat shims — the old directives still work, mapped onto the registry
 const NAV_RE = /<<\s*go:\s*(\/[a-z0-9/_-]*)\s*>>/gi;
 const REMEMBER_RE = /<<\s*remember:\s*([^>]+?)\s*>>/gi;
@@ -158,6 +175,39 @@ export function AssistantConsole() {
   exploreRef.current = explore;
   const handledRef = useRef<Set<string>>(new Set());
   const confirmRuns = useRef<Map<string, () => DoneInfo>>(new Map());
+
+  // panel size: restored on mount (client-only, so SSR markup never mismatches),
+  // persisted on change
+  const [size, setSize] = useState<PanelSize>("compact");
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SIZE_KEY) as PanelSize | null;
+      if (raw && SIZE_ORDER.includes(raw)) setSize(raw);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  function cycleSize() {
+    const next = SIZE_ORDER[(SIZE_ORDER.indexOf(size) + 1) % SIZE_ORDER.length];
+    setSize(next);
+    try {
+      localStorage.setItem(SIZE_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // composer auto-grow: height follows content up to the per-size cap; clearing
+  // the input (after send) shrinks it back to one line. Done in an effect, AFTER
+  // React has applied the style prop — an imperative height set inside onChange
+  // is wiped by the very next render.
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    if (input) el.style.height = `${Math.min(el.scrollHeight, INPUT_MAX_PX[size])}px`;
+  }, [input, size, open]);
 
   // selected CLI from Config (reacts to changes in other tabs)
   useEffect(() => {
@@ -499,13 +549,16 @@ export function AssistantConsole() {
       )}
 
       {open && (
-        <div className="fixed bottom-5 right-5 z-50 flex h-[600px] max-h-[80vh] w-[400px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
+        <div className={cn("fixed z-50 flex flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl", PANEL_CLASS[size])}>
           <header className="flex items-center gap-2.5 border-b border-border px-4 py-3">
             <CoMark size={26} />
             <div className="flex-1">
               <div className="text-sm font-semibold tracking-tight">Assistant</div>
               <div className="text-xs text-faint">{cliId ? `via ${cliId}` : "no CLI configured"}</div>
             </div>
+            <Button variant="ghost" size="icon" onClick={cycleSize} className="text-muted" aria-label={SIZE_LABEL[size]} title={SIZE_LABEL[size]}>
+              {size === "full" ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            </Button>
             <Button variant="ghost" size="icon" onClick={resetChat} className="text-muted" aria-label="New chat" title="New chat">
               <RotateCcw className="size-4" />
             </Button>
@@ -572,6 +625,7 @@ export function AssistantConsole() {
           <div className="border-t border-border p-3">
             <div className="flex items-end gap-2">
               <textarea
+                ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -583,7 +637,8 @@ export function AssistantConsole() {
                 placeholder={cliId ? "Ask anything…" : "Configure a CLI first"}
                 rows={1}
                 disabled={!cliId}
-                className="max-h-32 flex-1 resize-none rounded-xl border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 disabled:opacity-50"
+                style={{ maxHeight: INPUT_MAX_PX[size] }}
+                className="flex-1 resize-none rounded-xl border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 disabled:opacity-50"
               />
               <button
                 onClick={() => send()}
