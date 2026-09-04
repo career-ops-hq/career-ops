@@ -421,6 +421,40 @@ try {
     else fail('adp-workforcenow.fetch() should not tag adpTruncated when meta.totalNumber was actually reached');
   }
 
+  // A short final page (fewer rows than PAGE_SIZE) landing exactly on the
+  // last allowed iteration is itself evidence the board ended naturally —
+  // even with no meta.totalNumber to compare against, it must NOT be tagged
+  // adpTruncated (CodeRabbit finding on PR #3729, comment 3931965648).
+  {
+    let calls = 0;
+    const mockCtx = {
+      sleep: async () => {},
+      fetchJson: async () => {
+        calls++;
+        // Page 1 is a full page; page 2 (the last allowed, max_pages: 2) is
+        // short — the board legitimately ended there, not the cap cutting
+        // it off. No meta at all, so the old total-based signal couldn't
+        // have caught this either.
+        if (calls === 1) return { jobRequisitions: fullPage(1) };
+        return { jobRequisitions: fullPage(21).slice(0, 5) };
+      },
+    };
+    let warnings = [];
+    const origError = console.error;
+    console.error = (m) => warnings.push(m);
+    let jobs;
+    try {
+      jobs = await adp.fetch({ name: 'ExampleCo', careers_url: CAREERS_URL, max_pages: 2 }, mockCtx);
+    } finally {
+      console.error = origError;
+    }
+    if (calls === 2 && jobs.adpTruncated === undefined && jobs.length === 25 && warnings.length === 0) {
+      pass('adp-workforcenow.fetch() does not tag adpTruncated when the last allowed page is short (board ended naturally, cap did not cut it off)');
+    } else {
+      fail(`adp-workforcenow.fetch() short-final-page handling wrong: calls=${calls}, adpTruncated=${jobs.adpTruncated}, jobs=${jobs.length}, warnings=${JSON.stringify(warnings)}`);
+    }
+  }
+
   // A page that comes back empty (not just short) stops pagination — the
   // infinite-loop guard for a malformed/empty response, independent of totals.
   {

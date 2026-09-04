@@ -424,8 +424,12 @@ export default {
 
       // This was the last iteration the for-loop will run — if the board
       // still has more (or an unknown amount, when meta.totalNumber was
-      // never present) left, the cap truncated it.
-      if (page === pageLimit - 1) cappedIncomplete = true;
+      // never present) left, the cap truncated it. A short page (fewer rows
+      // than PAGE_SIZE) is itself evidence the board ended naturally here —
+      // without that guard, a tenant with no meta.totalNumber whose last
+      // reachable page just happens to be short would be wrongly tagged
+      // truncated even though there was nothing left to fetch.
+      if (page === pageLimit - 1 && raw.length >= PAGE_SIZE) cappedIncomplete = true;
     }
 
     const truncated = cappedIncomplete && ctxCap === Infinity;
