@@ -472,6 +472,19 @@ warn. Deriving the incomplete marker and the warning only from a
 `total`-based "did we reach the count" check drops the signal on exactly the
 tenants that omit the count.
 
+A short final page wins over the ceiling. "Hit the ceiling" means the loop
+ran out of page budget *and* the last page it fetched was full: count the
+rows the **source** returned for that page (the raw count from the
+short-page stop above, before malformed rows are dropped), and if it is
+below the page size the board ended on its own — stop reason `complete`,
+not `cap`, and nothing warns. Only a full page at the cap boundary is a
+`cap` stop; a source-reported `total` disambiguates a full boundary page
+too. Gating the incomplete marker on the page index alone
+(`page === lastAllowedPage`) tags a naturally-short final page as
+truncated. Reference: `eightfold.mjs` ("a short page has to win");
+`jobbankca.mjs` keys the stop off `rawEntryCount`, the feed's own
+`<entry>` count.
+
 ### Health-check coverage (`verify-portals`)
 
 `npm run verify:portals` and `node validate-portals.mjs` (and `doctor.mjs
