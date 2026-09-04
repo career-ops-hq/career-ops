@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
 import { useJobs } from "@/components/jobs/job-store";
+import { postingKey } from "@/lib/job-url.mjs";
 import { useExplore } from "./explore-provider";
 
 function freshness(postedAt: string): string {
@@ -40,13 +41,18 @@ const WORKER_LABEL: Record<string, string> = { evaluate: "Evaluating…", pdf: "
 
 export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: DiscoveredOffer; inPipeline: boolean; evaluatedN?: string }) {
   const { added, adding, addToPipeline } = useExplore();
-  const { jobs, startJob } = useJobs();
+  const { jobs, startEvaluate } = useJobs();
 
   // GLOBAL worker awareness: any worker acting on this URL drives the CTA, here
   // and on every other surface that renders this offer (the jobs store is global).
+  // Matched on postingKey, not the raw string: a discovered offer's URL and a
+  // worker's job.input can each carry different tracking noise for the same
+  // posting (a LinkedIn "?trk=..." link vs. the canonical one), which used to
+  // make this card miss a worker that was already running or done on it.
+  const offerKey = postingKey(offer.url);
   const job = useMemo(
-    () => jobs.filter((j) => j.input === offer.url).sort((a, b) => b.startedAt - a.startedAt)[0],
-    [jobs, offer.url],
+    () => jobs.filter((j) => j.input && postingKey(j.input) === offerKey).sort((a, b) => b.startedAt - a.startedAt)[0],
+    [jobs, offerKey],
   );
   const working = job?.status === "running";
   const doneEval = job?.status === "done" && job.kind === "evaluate";
@@ -59,7 +65,7 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
 
   const evaluate = () => {
     addToPipeline([offer]); // evaluating implies it's in the pipeline — record it
-    startJob({ title: `Evaluate · ${offer.company}`, subtitle: offer.title, kind: "evaluate", input: offer.url, page: "/explore" });
+    startEvaluate({ title: `Evaluate · ${offer.company}`, subtitle: offer.title, url: offer.url, page: "/explore" });
   };
 
   return (

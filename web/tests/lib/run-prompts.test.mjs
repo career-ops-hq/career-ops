@@ -287,3 +287,39 @@ test("buildPrompt: the language directive is not limited to the evaluate prompt"
     );
   }
 });
+
+test("buildPrompt: without fetchUrl the evaluate prompt is byte-identical", () => {
+  // Given the #2185 freeze asserts on this exact string, an added parameter must
+  // change nothing for every existing caller.
+  const base = buildPrompt({ kind: "evaluate", ...ARGS });
+
+  assert.equal(buildPrompt({ kind: "evaluate", ...ARGS, fetchUrl: undefined }), base);
+  // ...including the ordinary case where the posting is read from its own URL
+  assert.equal(buildPrompt({ kind: "evaluate", ...ARGS, fetchUrl: ARGS.input }), base);
+});
+
+test("buildPrompt: a differing fetchUrl names both URLs and pins which one is recorded", () => {
+  // Given a LinkedIn evaluation, where the agent must read the guest mirror but
+  // record the clickable link
+  const prompt = buildPrompt({
+    kind: "evaluate",
+    input: "https://www.linkedin.com/jobs/view/4434693435/",
+    fetchUrl: "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/4434693435",
+    memory: "",
+    today: "2026-08-11",
+  });
+
+  // Then both appear. Asserted with a regex rather than .includes(): CodeQL reads a
+  // substring test against a URL literal as an incomplete-sanitization check
+  // (js/incomplete-url-substring-sanitization) and fails the run. Nothing is being
+  // sanitized here, but a regex says the same thing and keeps CI honest about the
+  // alerts that DO matter.
+  assert.match(prompt, /https:\/\/www\.linkedin\.com\/jobs-guest\/jobs\/api\/jobPosting\/4434693435/);
+  assert.match(prompt, /https:\/\/www\.linkedin\.com\/jobs\/view\/4434693435\//);
+  // ...and the report/tracker URL is pinned to the canonical one, which is the whole
+  // point: a tracker full of guest-API links would be useless to click.
+  assert.match(prompt, /record[^\n]*https:\/\/www\.linkedin\.com\/jobs\/view\/4434693435\//i);
+  // And the freeze invariants still hold for this variant
+  assert.equal((prompt.match(/VERDICT:/g) ?? []).length, 1);
+  assert.match(prompt, /NEVER submit an application/);
+});

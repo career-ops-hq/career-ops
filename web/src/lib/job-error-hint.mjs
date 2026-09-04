@@ -10,8 +10,8 @@
 //   Real not-configured / auth failure -> "auth":
 //     "No CLI configured — open Config"                                   (job-store.tsx, no cliId)
 //     raw CLI stderr matched for auth keywords                            (api/run/route.ts stderr handler)
-//     "The CLI exited with an error — is it installed and authenticated?"
-//     "The CLI produced no output — is it installed and authenticated? (...)"
+//     "The CLI exited with an error. Is it installed and authenticated?"
+//     "The CLI produced no output. Is it installed and authenticated? (...)"
 //   Connection dropped mid-stream, CLI never got a chance to fail -> "connection":
 //     "Connection error"                                                  (job-store.tsx)
 //   Page reload orphaned a running job -> "interrupted":

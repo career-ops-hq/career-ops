@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { cleanPipelineOffers } from "./clean-pipeline-offers.mjs";
 import type { DiscoveredOffer } from "./scan";
 
 /**
@@ -20,18 +21,13 @@ import type { DiscoveredOffer } from "./scan";
 export type AddResult = { added: number; error?: string };
 
 export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResult> {
-  const clean = offers
-    .filter((o) => o && typeof o.url === "string" && /^https?:\/\//i.test(o.url))
-    .map((o) => ({
-      url: o.url,
-      company: o.company || "",
-      title: o.title || "",
-      location: o.location || "",
-      source: o.source || o.ats || "explorer",
-      // Preserve the optional per-offer signal so it survives to pipeline.md.
-      // The core writer treats an empty note as absent (byte-identical output).
-      note: o.note || "",
-    }));
+  // Canonicalized here, not just validated: this writes data/pipeline.md, the
+  // durable user-layer file every future inbox row and dedupe key is read from,
+  // so whatever URL a client handed us (tracking params and all) must not reach
+  // disk verbatim. cleanPipelineOffers applies the same normalizer /api/run uses
+  // for an ephemeral evaluate request; an offer that fails to normalize is
+  // dropped rather than written raw.
+  const clean = cleanPipelineOffers(offers);
   if (clean.length === 0) return Promise.resolve({ added: 0 });
 
   // Data-only / pre-scan-ats checkout has no scan.mjs writers → fail with an

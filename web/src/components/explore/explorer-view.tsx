@@ -7,6 +7,7 @@ import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
+import { postingKey } from "@/lib/job-url.mjs";
 import { paramsToFilters, paramsToAi, type ExploreFilters } from "@/lib/explore";
 import { FilterBuilder } from "./filter-builder";
 import { DiscoveringState } from "./discovering-state";
@@ -88,11 +89,15 @@ export function ExplorerView({
     }
   }, [seed.filters, initFilters, setMode, setAiIntent, discover, loadFresh]);
 
-  const inboxUrls = useMemo(() => new Set(inboxSnapshot.map((j) => j.url)), [inboxSnapshot]);
+  // Keyed on postingKey: pipeline.md is written canonically now, so a raw offer URL
+  // that normalization rewrites at all would miss its own row and keep showing "Add".
+  // appendToPipeline is append-only with no dedupe, so a second click writes a
+  // duplicate line into the user's file.
+  const inboxUrls = useMemo(() => new Set(inboxSnapshot.map((j) => postingKey(j.url))), [inboxSnapshot]);
   const enriched: EnrichedOffer[] = useMemo(
     () =>
       offers.map((o) => {
-        const inPipeline = inboxUrls.has(o.url);
+        const inPipeline = inboxUrls.has(postingKey(o.url));
         const c = norm(o.company);
         const t = norm(o.title);
         const ev = appsSnapshot.find((a) => {

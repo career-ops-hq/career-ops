@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ChevronsUpDown, X, Compass, ArrowRight } from "lucide-react";
+import { Search, ChevronsUpDown, X, Compass, ArrowRight, Plus } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { canonStatus, scoreNum, scoreTone, statusDot } from "@/lib/format";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
+import { AddJobDialog } from "@/components/pipeline/add-job-dialog";
 import { cn } from "@/lib/cn";
 import { companyPresentation, companySearchText } from "@/lib/company-presentation.mjs";
 
@@ -56,6 +57,7 @@ export function PipelineView({
   // Search stays LOCAL for snappy typing; seeded from the URL and re-synced only
   // when the URL's q changes (i.e. the assistant set it) — never per keystroke.
   const [q, setQ] = useState(params.get("q") ?? "");
+  const [addOpen, setAddOpen] = useState(false);
   const lastUrlQ = useRef(params.get("q") ?? "");
   useEffect(() => {
     const urlQ = params.get("q") ?? "";
@@ -129,18 +131,27 @@ export function PipelineView({
             <span className="tabular-nums">{applications.length}</span> tracked
           </p>
         </div>
-        {/* the tracker has its own search; the inbox brings its own facet filters */}
-        {tab !== "INBOX" && (
-          <div className="relative w-64 max-w-[40vw]">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search company or role…"
-              className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
-            />
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {/* the tracker has its own search; the inbox brings its own facet filters */}
+          {tab !== "INBOX" && (
+            <div className="relative w-64 max-w-[40vw]">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search company or role…"
+                className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
+              />
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setAddOpen(true)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+          >
+            <Plus className="size-4" /> Add job URL
+          </button>
+        </div>
       </div>
 
       {/* tabs */}
@@ -191,7 +202,7 @@ export function PipelineView({
         pendingInbox.length > 0 ? (
           <InboxTriage inbox={pendingInbox} />
         ) : (
-          <InboxEmpty count={0} filtered={false} />
+          <InboxEmpty count={0} filtered={false} onAdd={() => setAddOpen(true)} />
         )
       ) : filtered.length > 0 ? (
         /* ── Tracker table ──
@@ -253,13 +264,15 @@ export function PipelineView({
           <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Try a different tab or clear the search.</p>
         </div>
       )}
+
+      {addOpen && <AddJobDialog inboxUrls={inbox.map((j) => j.url)} onClose={() => setAddOpen(false)} />}
     </div>
   );
 }
 
 // Empty inbox. Self-sufficient for the mainstream user (a primary in-web action),
 // honest for devs (the CLI/file path stays, demoted to progressive transparency).
-function InboxEmpty({ count, filtered }: { count: number; filtered: boolean }) {
+function InboxEmpty({ count, filtered, onAdd }: { count: number; filtered: boolean; onAdd: () => void }) {
   if (filtered) {
     return (
       <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
@@ -284,7 +297,7 @@ function InboxEmpty({ count, filtered }: { count: number; filtered: boolean }) {
           <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Nothing pending right now.</p>
         ) : (
           <>
-            <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Find roles that match your CV — free, no tokens spent.</p>
+            <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Find roles that match your CV. Free, no tokens spent.</p>
             <Link
               href="/explore?run=1"
               className="mt-5 inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-sm transition-all duration-200 hover:bg-brand-200 hover:-translate-y-0.5 hover:shadow-md"
@@ -292,6 +305,12 @@ function InboxEmpty({ count, filtered }: { count: number; filtered: boolean }) {
               <Compass className="size-4" /> Run your first free scan <ArrowRight className="size-4" />
             </Link>
             <p className="mx-auto mt-4 max-w-sm text-xs text-muted">
+              Already have a link?{" "}
+              <button type="button" onClick={onAdd} className="font-medium text-brand underline-offset-2 hover:underline">
+                Add a job URL
+              </button>
+            </p>
+            <p className="mx-auto mt-2 max-w-sm text-xs text-faint">
               Prefer the terminal? Run <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">career-ops scan</code>, or add job URLs to{" "}
               <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">data/pipeline.md</code>.
             </p>

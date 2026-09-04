@@ -4,11 +4,14 @@
 // buckets so the cheap facet filters can narrow the firehose with zero tokens.
 
 import type { AtsSource } from "@/lib/explore";
+import { atsSourceFromHost } from "@/lib/job-url.mjs";
 
 /** Which ATS a posting lives on, derived from its URL host (0 tokens, no network).
- *  Matches on the registrable domain anchored at a dot boundary (host === base OR
- *  host ends with ".base") — never a bare substring, so "greenhouse.io.evil.com"
- *  or "notlever.co" can't be misread as that ATS. */
+ *  Delegates the host list and the dot-boundary matching rule (host === base OR
+ *  host ends with ".base" — never a bare substring, so "greenhouse.io.evil.com" or
+ *  "notlever.co" can't be misread as that ATS) to job-url.mjs's ATS_HOSTS, the same
+ *  table companyFromJobUrl reads, so the two can never disagree about what counts
+ *  as an ATS (#F6). */
 export function sourceFromUrl(url: string): AtsSource | null {
   let host = "";
   try {
@@ -16,12 +19,7 @@ export function sourceFromUrl(url: string): AtsSource | null {
   } catch {
     return null;
   }
-  const domainIs = (base: string) => host === base || host.endsWith(`.${base}`);
-  if (domainIs("greenhouse.io")) return "greenhouse";
-  if (domainIs("lever.co")) return "lever";
-  if (domainIs("ashbyhq.com")) return "ashby";
-  if (domainIs("myworkdayjobs.com") || domainIs("workday.com")) return "workday";
-  return null;
+  return atsSourceFromHost(host);
 }
 
 // Coarse seniority buckets, detected from the title. Ordered senior→junior so the

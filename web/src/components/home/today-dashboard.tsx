@@ -14,6 +14,7 @@ import { DecisionCard } from "@/components/home/decision-card";
 import { QuickEvaluate } from "@/components/quick-evaluate";
 import { scoreNum } from "@/lib/format";
 import { pickAwaitingDecision } from "@/lib/home/awaiting.mjs";
+import { postingKey } from "@/lib/job-url.mjs";
 
 // The retention "Today": a dual-loop action queue (the maintainer's
 // "N new matches this week · M follow-ups due"). SUPPLY loop = fresh free-scan
@@ -23,11 +24,9 @@ import { pickAwaitingDecision } from "@/lib/home/awaiting.mjs";
 export function TodayDashboard({
   applications,
   inbox,
-  inBetween,
 }: {
   applications: Application[];
   inbox: InboxJob[];
-  inBetween: boolean;
 }) {
   const [followups, setFollowups] = useState<FollowUp[]>([]);
   const [overdue, setOverdue] = useState(0);
@@ -81,7 +80,9 @@ export function TodayDashboard({
 
   const newThisWeek = freshCount;
   const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0;
-  const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
+  // postingKey on both sides: pipeline.md is canonical now, so a raw offer URL that
+  // normalization rewrites would miss its own row and let a second add duplicate it.
+  const inboxUrls = useMemo(() => new Set(inbox.map((j) => postingKey(j.url))), [inbox]);
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10 max-sm:pb-24">
@@ -123,7 +124,7 @@ export function TodayDashboard({
               Open pipeline
             </Link>
           </div>
-          {inBetween && <QuickEvaluate />}
+          <QuickEvaluate />
         </div>
       </section>
 
@@ -169,7 +170,7 @@ export function TodayDashboard({
         <Section icon={Sparkles} title="Fresh matches this week" hint="Found by your free scans · 0 tokens">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {fresh.slice(0, 6).map((o) => (
-              <DiscoveryCard key={o.url} offer={o} inPipeline={inboxUrls.has(o.url)} />
+              <DiscoveryCard key={o.url} offer={o} inPipeline={inboxUrls.has(postingKey(o.url))} />
             ))}
           </div>
           {fresh.length > 6 && (

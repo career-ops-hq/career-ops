@@ -436,7 +436,7 @@ test("pdfRunOutcome: the route's no-output verdict wins over the generic message
   const outcome = pdfRunOutcome({
     ...GOOD,
     envelope: undefined,
-    noOutputMessage: "The CLI produced no output — is it installed and authenticated?",
+    noOutputMessage: "The CLI produced no output. Is it installed and authenticated?",
   });
 
   // Then that message is surfaced verbatim, not replaced by "didn't produce a CV",

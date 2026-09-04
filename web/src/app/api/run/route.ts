@@ -11,14 +11,118 @@ import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, readLanguageConfig } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
+import { evaluateRunOutcome } from "@/lib/run-outcome.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
+import { normalizeJobUrl } from "@/lib/job-url.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailoring + render is heavy and multi-step
+
+/**
+ * What a kind's prepare() hands back to the request when it succeeds.
+ *
+ * Every field is optional and only the kind that produces one sets it: evaluate
+ * returns the normalized posting URL (plus the mirror to actually fetch from),
+ * pdf returns its resolved paths, and the rest return neither. The optionality
+ * is real rather than defaulted — this replaced `let evalUrl = input; let
+ * fetchUrl: string | undefined;`, two mutable bindings whose value for three of
+ * the four kinds was a silent fallback nobody read.
+ */
+type PrepareResult =
+  | { ok: true; input?: string; fetchUrl?: string; pdfPaths?: PdfPaths }
+  | { ok: false; error: string };
+
+/** What the prepare steps need from the request, injected so they stay small. */
+type PrepareContext = { root: string; today: string };
+
+/**
+ * Everything /api/run needs to know about a worker kind, in one row per kind.
+ *
+ * This table is the whole of the route's kind-awareness. It grew out of what
+ * used to be nine scattered `kind === "..."` conditionals, three of which spelled
+ * the same `evaluate || pdf` pair for three unrelated reasons — a shape where the
+ * only way to answer "what does pdf actually do differently?" was to read the
+ * whole file. `kind` itself still reaches buildPrompt and claudeCliArgs verbatim;
+ * the tool scope is theirs to decide, never this table's (#2185).
+ */
+type KindSpec = {
+  /** Core file this kind actually runs — absent from a data-only CAREER_OPS_ROOT. */
+  script?: string;
+  /** Needs cv.md: an A-F score or a tailored CV is meaningless without one. */
+  needsCv?: boolean;
+  /** Mutates the tracker, so it holds a write token for the whole run. */
+  holdsTrackerWrite?: boolean;
+  /** Writes a report file, so the route can verify one actually landed. */
+  persistsReport?: boolean;
+  /** Agent emits its CV inline in a `<<cv-html>>` envelope the backend renders (#2185). */
+  emitsCvEnvelope?: boolean;
+  /** Per-kind input validation/normalization; a failure becomes the route's 400. */
+  prepare?: (input: string, ctx: PrepareContext) => PrepareResult;
+};
+
+/**
+ * "evaluate" is the only kind whose input is a posting URL — pdf takes a report
+ * number and fix-portal a company name, so neither is normalized. LinkedIn's
+ * /jobs/view page is an authwall for a headless agent, so the agent reads a
+ * public mirror while the report and tracker record the canonical link.
+ */
+function prepareEvaluate(input: string): PrepareResult {
+  const normalized = normalizeJobUrl(input);
+  if (!normalized.ok) return { ok: false, error: normalized.error };
+  return { ok: true, input: normalized.url, fetchUrl: normalized.fetchUrl };
+}
+
+/**
+ * Precompute deterministic scratch + final paths so the agent never chooses its
+ * own filenames — the backend owns naming, writing (#2185) and rendering (#2172).
+ * Nothing is cleared first: writeCvHtml rewrites the HTML from this run's freshly
+ * parsed envelope before any render, and the agent is no longer told these paths,
+ * so a stale file cannot survive into a render.
+ */
+function preparePdf(input: string, ctx: PrepareContext): PrepareResult {
+  const pathsResult = resolvePdfPaths(input, ctx.today, ctx.root, findReportFile);
+  if (!pathsResult.ok) return { ok: false, error: pathsResult.error };
+  return { ok: true, pdfPaths: pathsResult.paths };
+}
+
+/**
+ * fix-portal's prompt puts the company name straight into a shell command the
+ * agent runs, and a company name can arrive from a public ATS listing rather than
+ * the user's own typing. Refuse rather than sanitize: a silently rewritten name
+ * would repair the wrong portal.
+ */
+function prepareFixPortal(input: string): PrepareResult {
+  if (isShellSafeCompanyName(input)) return { ok: true };
+  return {
+    ok: false,
+    error: "That company name has characters I can't safely pass to the portal checker. Rename it in portals.yml first.",
+  };
+}
+
+// The agent-child timer is deliberately NOT a column here: killMsForKind() in
+// run-cli-support.mjs owns it, states each kind's reason, and is asserted on
+// there. A second copy in this table would be a second source of truth.
+const KINDS: Record<string, KindSpec> = {
+  evaluate: { script: "modes/oferta.md", needsCv: true, holdsTrackerWrite: true, persistsReport: true, prepare: prepareEvaluate },
+  pdf: { script: "generate-pdf.mjs", needsCv: true, holdsTrackerWrite: true, emitsCvEnvelope: true, prepare: preparePdf },
+  "fix-portal": { script: "verify-portals.mjs", prepare: prepareFixPortal },
+  research: {},
+};
+
+/**
+ * A kind none of the tables know about.
+ *
+ * buildPrompt deliberately falls through to the evaluate prompt for an unknown
+ * kind and toolScopeFor hands it the read-only scope, so the route tolerates one
+ * rather than rejecting it. This row keeps that tolerance and gives it the
+ * conservative profile it already had: no script requirement, no CV gate, no
+ * prepare step, no write token and no report check.
+ */
+const UNKNOWN_KIND: KindSpec = {};
 
 export async function POST(req: Request) {
   let body: { kind?: string; input?: string; cliId?: string };
@@ -40,66 +144,44 @@ export async function POST(req: Request) {
   }
   const { spec, binPath } = resolved;
 
+  // hasOwn, not `KINDS[kind] ?? UNKNOWN_KIND`: `kind` is client-supplied, and a
+  // plain object literal answers `KINDS["constructor"]` with a function rather
+  // than undefined — which would slip past `??` and read every flag off it.
+  const k = Object.hasOwn(KINDS, kind) ? KINDS[kind] : UNKNOWN_KIND;
+  /** Every per-kind gate below rejects the same way; only the reason differs. */
+  const reject = (error: string) =>
+    new Response(JSON.stringify({ error }), { status: 400, headers: { "Content-Type": "application/json" } });
+
   // These run the REAL core (modes/scripts), not just data — fail clearly if the
   // root is incomplete instead of faking it.
+  //
   // The precondition must check the file the prompt will actually read. Pinning
-  // it to modes/oferta.md meant a configured market passed a check on a file the
-  // run never opens, and would have missed a market dir with no evaluation mode.
+  // evaluate to the table's modes/oferta.md meant a configured market
+  // (language.modes_dir) passed a check on a file the run never opens, and would
+  // have missed a market dir with no evaluation mode. The row still names the
+  // default; the configured market replaces it here, where the config is read.
   const lang = readLanguageConfig();
-  const needsScript: Record<string, string> = { evaluate: lang.evalModeFile, "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs" };
-  const required = needsScript[kind];
+  const requiredScript = kind === "evaluate" ? lang.evalModeFile : k.script;
   // CAREER_OPS_ROOT is runtime user data, not a build input. Tracing this
   // dynamic path would copy the whole web project into every server bundle.
-  const requiredPath = required
-    ? path.join(/* turbopackIgnore: true */ careerOpsRoot(), required)
-    : "";
-  if (required && !fs.existsSync(/* turbopackIgnore: true */ requiredPath)) {
-    return new Response(
-      JSON.stringify({
-        error: `This needs a complete career-ops checkout (${required}). CAREER_OPS_ROOT has data only — point it at a full checkout.`,
-      }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
-    );
-  }
-
-  // fix-portal's prompt puts this straight into a shell command the agent runs, and
-  // a company name can arrive from a public ATS listing rather than the user's own
-  // typing. Refuse rather than sanitize: a silently rewritten name would repair the
-  // wrong portal.
-  if (kind === "fix-portal" && !isShellSafeCompanyName(input)) {
-    return new Response(
-      JSON.stringify({ error: "That company name has characters I can't safely pass to the portal checker — rename it in portals.yml first." }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
-    );
+  if (requiredScript && !fs.existsSync(/* turbopackIgnore: true */ path.join(/* turbopackIgnore: true */ careerOpsRoot(), requiredScript))) {
+    return reject(`This needs a complete career-ops checkout (${requiredScript}). CAREER_OPS_ROOT has data only. Point it at a full checkout.`);
   }
 
   // An A–F score is meaningless without a CV to score against — the CLI would
   // hallucinate a fit narrative and still emit a VERDICT. Require cv.md first.
-  if ((kind === "evaluate" || kind === "pdf") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
-    return new Response(
-      JSON.stringify({ error: "Add your CV first so I can score this against you — drop it on the home page." }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
-    );
+  if (k.needsCv && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
+    return reject("Add your CV first so I can score this against you. Drop it on the home page.");
   }
 
   const today = new Date().toISOString().slice(0, 10);
 
-  // Precompute deterministic scratch + final paths so the agent never chooses
-  // its own filenames — the backend owns naming, writing (#2185) and rendering
-  // (#2172). Nothing is cleared first: writeCvHtml rewrites the HTML
-  // from this run's freshly parsed envelope before any render, and the agent is
-  // no longer told these paths, so a stale file cannot survive into a render.
-  let pdfPaths: PdfPaths | undefined;
-  if (kind === "pdf") {
-    const pathsResult = resolvePdfPaths(input, today, careerOpsRoot(), findReportFile);
-    if (!pathsResult.ok) {
-      return new Response(JSON.stringify({ error: pathsResult.error }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-    pdfPaths = pathsResult.paths;
-  }
+  // The one per-kind input gate: shell-safety for fix-portal, path resolution for
+  // pdf, URL normalization for evaluate, nothing for research. See each prepare
+  // function above for why its kind needs what it needs.
+  const prepared: PrepareResult = k.prepare ? k.prepare(input, { root: careerOpsRoot(), today }) : { ok: true };
+  if (!prepared.ok) return reject(prepared.error);
+  const { pdfPaths, fetchUrl } = prepared;
 
   // Resolve the posting date HERE rather than asking the agent for it. The
   // scanner already wrote it from the provider's own `offer.postedAt`, so this
@@ -107,11 +189,17 @@ export async function POST(req: Request) {
   // explicit that a guessed date is worse than an absent one (the POSTED column
   // renders absent as `—`, a wrong date as a fresh req). Unknown URL → undefined
   // → the prompt writes no segment at all.
+  //
+  // Looked up by the URL the CLIENT sent, not by prepare()'s rewrite: the inbox
+  // and the scan-date map are both keyed by the canonical posting URL, which is
+  // exactly what a mirror rewrite replaces.
   const postedAt =
     kind === "evaluate"
       ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
       : undefined;
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, lang });
+  // prepare() only returns an input when it rewrote one (evaluate); every other
+  // kind sends what the client typed, untouched.
+  const prompt = buildPrompt({ kind, input: prepared.input ?? input, memory: readMemory(), today, postedAt, fetchUrl, lang });
 
   const isClaude = cliId === "claude";
   // Which tools each kind gets, and the whole claude argv, live in
@@ -142,11 +230,13 @@ export async function POST(req: Request) {
       return [];
     }
   };
-  const persists = kind === "evaluate";
+  // Registry-driven rather than `kind === "evaluate"`: same set today, but a
+  // second persisting kind declares itself instead of editing this line.
+  const persists = k.persistsReport === true;
   const reportsBefore = persists ? reportEntries() : [];
   // Tracker-mutating runs hold a write token so a row delete can't race their merge
   // (tracker.mjs delete doesn't yet share a lock with merge-tracker — see run-registry).
-  const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
+  const writeToken = k.holdsTrackerWrite ? acquireTrackerWrite() : null;
 
   // stdin must reach EOF or the CLI waits on piped input that never comes: Codex's
   // `exec` blocks reading stdin for additional context, hangs until the kill timer,
@@ -279,7 +369,7 @@ export async function POST(req: Request) {
       // by the agent (#2185). The filter keeps every byte for the backend while
       // holding the 15-25 KB body out of the run log, which is the agent's
       // narration — see cv-envelope.mjs.
-      const cvFilter = kind === "pdf" ? createCvEnvelopeFilter() : null;
+      const cvFilter = k.emitsCvEnvelope ? createCvEnvelopeFilter() : null;
       // While the agent emits the 15-25 KB <<cv-html>> envelope, cvFilter swallows
       // every byte, so the response stream goes completely silent for as long as
       // the model takes to write the CV — a minute or more. Nothing downstream can
@@ -441,13 +531,13 @@ export async function POST(req: Request) {
         const noOutputError = (): string | null => {
           if (!emittedText && !sawError && !cleanExit) {
             const detail = stderrErrorSnippet ? ` (${stderrErrorSnippet})` : "";
-            return `The CLI exited with an error — is it installed and authenticated?${detail}`;
+            return `The CLI exited with an error. Is it installed and authenticated?${detail}`;
           }
-          if (!emittedText && !sawError) return "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)";
+          if (!emittedText && !sawError) return "The CLI produced no output. Is it installed and authenticated? (career-ops is best on Claude Code.)";
           return null;
         };
 
-        if (kind === "pdf") {
+        if (k.emitsCvEnvelope) {
           // Release any text the filter was still holding, so the log keeps the
           // agent's closing narration and its VERDICT line.
           const tail = cvFilter?.flush();
@@ -470,7 +560,7 @@ export async function POST(req: Request) {
             // Kept for narrowing, but it must REPORT rather than fall through to a
             // bare close() — a stream that ends with neither error nor done is the
             // one outcome this handler exists to prevent.
-            send({ type: "error", msg: "Internal error: the pdf run passed its gate with no CV to save — please report this." });
+            send({ type: "error", msg: "Internal error: the pdf run passed its gate with no CV to save. Please report this." });
           } else {
             sendWarnings(envelope.warnings);
             if (saveCv(pdfPaths, envelope)) {
@@ -487,22 +577,24 @@ export async function POST(req: Request) {
         const wroteReport = hasNewCompletedReport(reportsBefore, reportEntries());
         // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit,
         // real output, AND (for evaluations) a report actually written. Anything else
-        // is surfaced — an errored run must never be banked as a confident score.
-        const baseErr = noOutputError();
-        if (baseErr) {
-          send({ type: "error", msg: baseErr });
-        } else if (persists && !wroteReport) {
-          // The worker ran but never wrote the report/tracker row (e.g. a CLI
-          // without file-write authorization) — surface it instead of a fake score.
-          send({ type: "error", msg: "This evaluation didn't save a report, so it's not in your tracker. Full evaluation is verified on Claude Code." });
-        } else if (!cleanExit || sawError) {
-          // Produced output (maybe even a report) but did NOT finish cleanly — flag it
-          // instead of recording a confident score off a half-finished run. sawError
-          // here means an authoritative structured error already sent its own
-          // message above; a bare non-clean exit gets the stderr snippet instead,
-          // when the heuristic classifier found one.
-          const detail = !sawError && stderrErrorSnippet ? ` (${stderrErrorSnippet})` : "";
-          send({ type: "error", msg: `This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify.${detail}`.slice(0, 200) });
+        // is surfaced — an errored run must never be banked as a confident score. The
+        // five arms and the reason for each live in run-outcome.mjs, unit-tested
+        // beside pdfRunOutcome's suite rather than buried in this transport closure.
+        //
+        // stderrSnippet only ever reaches the "hit an error before finishing" arm,
+        // and only when no structured error already sent its own message: sawError
+        // means the CLI was authoritative about the failure, so the heuristic
+        // classifier's guess would be noise on top of it.
+        const outcome = evaluateRunOutcome({
+          noOutputMessage: noOutputError(),
+          persists,
+          wroteReport,
+          cleanExit,
+          sawError,
+          stderrSnippet: stderrErrorSnippet ?? undefined,
+        });
+        if (!outcome.ok) {
+          send({ type: "error", msg: outcome.message });
         } else {
           send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
         }
