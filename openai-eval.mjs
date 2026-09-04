@@ -161,11 +161,13 @@ if (!jdText) {
 }
 
 // A posting URL is the tracker's deterministic dedup key, so it is taken only in
-// a form that can actually become one. normalizeUrl yields no key for anything
-// else, and a placeholder written into the column would hand every such row the
-// same key.
-if (postingUrl && !/^https?:\/\//i.test(postingUrl)) {
-  console.error(`❌  --posting-url must be an http(s) URL: "${postingUrl}"`);
+// a form that can actually become one. Parsed, not prefix-matched: `https://`
+// satisfies a prefix test and merge-tracker.mjs:697 would then classify it as
+// the URL extra, but normalizeUrl yields no key for it -- so it would sit in the
+// URL column looking like a key while deduping nothing. A placeholder written
+// there would be worse still, handing every such row the same key.
+if (postingUrl && !isPostingUrl(postingUrl)) {
+  console.error(`❌  --posting-url must be a complete http(s) URL: "${postingUrl}"`);
   process.exit(1);
 }
 
@@ -234,6 +236,20 @@ function readFile(path, label) {
 // ---------------------------------------------------------------------------
 // Tracker-addition helpers
 // ---------------------------------------------------------------------------
+/**
+ * Whether a value is a complete http(s) URL, and so can become a dedup key.
+ * @param {string} value - Candidate posting URL.
+ * @returns {boolean} True only for a parseable http/https URL with a host.
+ */
+function isPostingUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname !== '';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Slugify a company name for report/addition filenames.
  * @param {string} value - Raw company name.
