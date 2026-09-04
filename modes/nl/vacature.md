@@ -159,9 +159,13 @@ Sla de volledige evaluatie op in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 - PDF: nee (of ja als de auto-pipeline een PDF heeft gegenereerd)
 - Rapport: relatieve link naar het rapportbestand (bijvoorbeeld: `[001](reports/001-company-2026-01-01.md)`)
 - Notities: optioneel
+- URL: de URL van de vacature. Dit is de **deterministische dedup-sleutel**: `merge-tracker.mjs` vergelijkt rijen eerst hierop en valt alleen terug op de vage bedrijf+rol-match wanneer een rij er geen heeft. Is er geen URL, laat de cel dan **leeg** — nooit `N/A` of `-`, want die placeholders worden weggegooid en de rij blijft zonder sleutel achter.
 
-**TSV-formaat (door tabs gescheiden):**
+**TSV-formaat (door tabs gescheiden):** schrijf **twee** regels — eerst de regel met de kolomnamen, daaronder precies één regel met de waarden:
 
 ```tsv
-num	date	company	role	status	score	pdf	report	notes
+num	date	company	role	status	score	pdf	report	notes	url
+{num}	{datum}	{bedrijf}	{rol}	{status}	{score}	{pdf_emoji}	[{num}](reports/{num}-{slug}-{datum}.md)	{notitie}	{url}
 ```
+
+Schrijf de kolomnamen **in het Engels, exact zoals hierboven** — `merge-tracker.mjs` herleidt elk veld op NAAM, dus de kolomvolgorde doet er niet toe en geen waarde kan in de verkeerde kolom belanden.

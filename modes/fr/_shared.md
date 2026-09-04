@@ -203,7 +203,7 @@ Dans les offres et negociations francophones, certains termes n'existent pas sur
 7. Etre direct et concret -- pas de blabla
 8. Francais tech naturel pour les textes generes. Phrases courtes, verbes d'action, eviter le passif. Ne pas traduire de force les termes techniques (stack, pipeline, deployment, embedding)
 8b. **URLs de case studies dans le Professional Summary du PDF :** Si le PDF mentionne des case studies ou demos, les URLs DOIVENT apparaitre dans le premier paragraphe (Professional Summary). Les recruteurs ne lisent souvent que le summary. Toutes les URLs en HTML avec `white-space: nowrap`
-9. **Entrees tracker en TSV** -- NE JAMAIS editer applications.md directement pour de nouveaux ajouts. Ecrire le TSV dans `batch/tracker-additions/`, `merge-tracker.mjs` gere la fusion
+9. **Entrees tracker en TSV** -- NE JAMAIS editer applications.md directement pour de nouveaux ajouts. Ecrire le TSV dans `batch/tracker-additions/`, `merge-tracker.mjs` gere la fusion. Ecrire d'abord une ligne de **noms de colonnes**, puis exactement une ligne de donnees en dessous (voir AGENTS.md, « TSV Format for Tracker Additions »). C'est cette ligne de noms qui permet a `merge-tracker.mjs` de resoudre les champs par NOM au lieu de deviner quelle colonne est score et laquelle est status
 10. **`**URL:**` dans chaque en-tete de report** -- entre Score et PDF
 
 ### Outils

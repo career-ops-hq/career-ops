@@ -154,17 +154,21 @@ Değerlendirmenin tamamını `reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` olara
 
 ### 2. Takipçiye Kaydet
 
-**Yeni** kayıt için `data/applications.md`'yi doğrudan düzenleme. Bunun yerine `batch/tracker-additions/{num}-{sirket-slug}.tsv` dosyasına tek satır TSV yaz (8 veya 9 sekme ile ayrılmış sütun):
+**Yeni** kayıt için `data/applications.md`'yi doğrudan düzenleme. Bunun yerine `batch/tracker-additions/{num}-{sirket-slug}.tsv` dosyasına sekmeyle ayrılmış **iki** satır yaz: önce **sütun adları** satırı, hemen altına tam olarak bir veri satırı.
 
 ```tsv
-{num}\t{date}\t{company}\t{role}\t{status}\t{score}\t{pdf_emoji}\t[{num}](reports/{num}-{slug}-{date}.md)\t{note}
+num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
+{num}\t{date}\t{company}\t{role}\t{status}\t{score}\t{pdf_emoji}\t[{num}](reports/{num}-{slug}-{date}.md)\t{note}\t{url}
 ```
+
+Sütun adlarını **İngilizce ve tam olarak yukarıdaki gibi** yaz — `merge-tracker.mjs` alanları ADA göre çözer; bu yüzden sütun sırası önemsizdir ve hiçbir değer yanlış sütuna düşemez.
 
 - `{num}` = sıradaki numara (tam sayı, `reports/` klasöründen hesapla)
 - `{status}` = `Evaluated`
 - `{score}` = `X.X/5` formatı (örn. `4.2/5`)
 - `{pdf_emoji}` = `✅` veya `❌`
-- `{note}` = kısa not (isteğe bağlı, sütun atlanabilir)
+- `{note}` = kısa not (hücre boş bırakılabilir)
+- `{url}` = ilanın URL'si. Bu **belirleyici yinelenen-kayıt anahtarıdır**: `merge-tracker.mjs` satırları önce buna göre eşler, yalnızca URL yoksa şirket+rol bulanık eşleşmesine düşer. URL yoksa hücreyi **boş** bırak — asla `N/A` veya `-` yazma; bu yer tutucular atılır ve satır anahtarsız kalır.
 
 Ardından `node merge-tracker.mjs` çalıştır.
 

@@ -245,7 +245,7 @@ Türkçe iş ilanlarında ve sözleşme müzakerelerinde, yabancı piyasalarda k
 7. Doğrudan ve eyleme dönük ol — gereksiz ayrıntı yazma
 8. Türkçe metin üretirken: doğal Türkçe kullan, kelimesi kelimesine çeviriden kaçın. Kısa cümleler, aktif fiiller. Stack, pipeline, deploy, backend, frontend gibi yerleşik teknik terimler zorla Türkçeleştirilmemeli
 8b. **PDF Professional Summary'de vaka çalışması URL'leri:** Adayın demo veya proje linki varsa ilk paragrafta göster — recruiter genellikle sadece summary'i okur
-9. **Takipçi eklemeleri TSV olarak** — `applications.md`'ye doğrudan yeni satır ekleme. TSV'yi `batch/tracker-additions/` klasörüne yaz, `merge-tracker.mjs` halleder
+9. **Takipçi eklemeleri TSV olarak** — `applications.md`'ye doğrudan yeni satır ekleme. TSV'yi `batch/tracker-additions/` klasörüne yaz, `merge-tracker.mjs` halleder. Önce **sütun adları** satırını, hemen altına tam olarak bir veri satırını yaz (bkz. AGENTS.md, "TSV Format for Tracker Additions"). Alanları ADA göre çözmesini `merge-tracker.mjs`'ye sağlayan şey bu ad satırıdır; hangi sütunun score hangisinin status olduğunu tahmin etmesi gerekmez
 10. Her rapor başlığına `**URL:**` alanını ekle — Puan ile PDF arasına
 
 ### Araçlar

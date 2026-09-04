@@ -151,14 +151,17 @@ WebSearch를 사용합니다.
 
 ### 2. tracker 추가 항목 작성
 
-새 tracker row를 위해 `data/applications.md`를 직접 수정하지 않습니다. 평가마다 `batch/tracker-additions/{num}-{company-slug}.tsv`에 TSV 한 줄을 쓰고, 이후 `node merge-tracker.mjs`로 병합합니다.
+새 tracker row를 위해 `data/applications.md`를 직접 수정하지 않습니다. 평가마다 `batch/tracker-additions/{num}-{company-slug}.tsv`에 탭으로 구분된 **두 줄** — 먼저 **컬럼 이름 줄**, 그 아래 데이터 줄 정확히 하나 — 을 쓰고, 이후 `node merge-tracker.mjs`로 병합합니다.
 
-**TSV format (status before score):**
+**TSV format:**
 
 ```text
-{num}\t{date}\t{company}\t{role}\tEvaluated\t{score}/5\t{pdf}\t[{num}](reports/{num}-{company-slug}-{date}.md)\t{note}
+num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
+{num}\t{date}\t{company}\t{role}\tEvaluated\t{score}/5\t{pdf}\t[{num}](reports/{num}-{company-slug}-{date}.md)\t{note}\t{url}
 ```
 
+- 컬럼 이름 줄은 **영어로, 위와 똑같이** 씁니다. `merge-tracker.mjs`가 필드를 이름으로 해석하므로 컬럼 순서는 의미가 없고, 값이 엉뚱한 컬럼에 들어갈 수 없습니다.
 - `pdf`는 PDF가 생성되면 `✅`, 아니면 `❌`
 - report 링크는 root-relative로 작성합니다: `[001](reports/001-company-2026-01-01.md)`
+- `url`은 공고 URL이며 **중복 판정의 결정적 키**입니다. `merge-tracker.mjs`는 이 값을 가장 먼저 대조하고, 없을 때만 company+role 유사 매칭으로 넘어갑니다. URL이 없으면 셀을 **비워 둡니다** — `N/A`나 `-`는 절대 쓰지 않습니다. 이런 placeholder는 버려지고 row는 키 없이 남습니다.
 - 이미 같은 company + role이 있으면 새 row를 만들지 말고 기존 entry 업데이트 흐름을 따릅니다.
