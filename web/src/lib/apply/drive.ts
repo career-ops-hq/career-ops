@@ -3,6 +3,7 @@ import type { Page, Frame } from "playwright-core";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { dropNewTabs } from "./diagnose";
+import { isSubmitControl, snapshotLabel } from "./submit-guard.mjs";
 import type { DriveStep } from "./issue";
 
 export type { DriveStep };
@@ -12,8 +13,9 @@ export type { DriveStep };
 // observe (ref-tagged snapshot) → the LLM picks ONE action → WE execute it on OUR
 // headed session → observe again → adapt. We orchestrate the loop (CLI-agnostic in
 // principle; Claude-first via --resume) and execute every action ourselves, so:
-//   • NEVER-SUBMIT is by CONSTRUCTION — the action vocabulary has no "submit", and
-//     we refuse to click any submit/apply-final control. The human submits.
+//   • NEVER-SUBMIT is by CONSTRUCTION — the action vocabulary has no "submit", a
+//     submit/apply-final control is listed with no ref so it cannot be named, and
+//     we re-check the element before every action that names one. The human submits.
 //   • everything stays in OUR session (screenshots, handoff, the streamed UI).
 // HYBRID = drive only until a fillable application form is reached, then hand back
 // to deterministic fill+verify. FULL = keep driving (fill the fields too).
@@ -21,37 +23,92 @@ export type { DriveStep };
 
 export type DriveResult = { reached: boolean; turns: number; reason: string; steps: DriveStep[] };
 
-const SUBMIT_RX = /\b(submit|send application|finish( application)?|complete application|apply (and|&) submit|enviar|finalizar)\b/i;
+/** What the guard decides on, read from the live DOM. See submit-guard.mjs. */
+type ElementFacts = {
+  ref: string;
+  tag: string;
+  type: string;
+  explicitType: boolean;
+  role: string;
+  inForm: boolean;
+  aria: string;
+  placeholder: string;
+  text: string;
+  value: string;
+  name: string;
+};
 
-/** Ref-tagged snapshot of the interactive page (a browser_snapshot-style view the
- *  LLM reasons over). Tags data-co-ref on each element so actions are unambiguous. */
-async function snapshot(frame: Frame): Promise<{ text: string; n: number }> {
-  return frame.evaluate(() => {
-    const clean = (s: string | null | undefined) => (s || "").replace(/\s+/g, " ").trim().slice(0, 80);
+/** Read element facts in the page. With no ref this is the snapshot pass: it tags
+ *  every visible candidate with data-co-ref and returns them all. With a ref it
+ *  re-reads that one element for the action guard. One extractor for both on
+ *  purpose — two would eventually disagree, and the disagreement is the bug. */
+async function readFacts(frame: Frame, ref: string | null): Promise<ElementFacts[]> {
+  return frame.evaluate((targetRef) => {
+    const facts = (el: Element, r: string) => {
+      const tag = el.tagName.toLowerCase();
+      const field = el as HTMLInputElement;
+      const type = (el.getAttribute("type") || "").toLowerCase();
+      return {
+        ref: r,
+        tag,
+        type,
+        // A <button> honours only these; anything else submits by default.
+        explicitType: tag === "button" ? ["submit", "reset", "button"].includes(type) : type !== "",
+        role: el.getAttribute("role") || (tag === "a" ? "link" : tag),
+        // `.form` also covers a control placed outside its form by form="id".
+        inForm: Boolean(field.form) || el.closest("form") !== null,
+        aria: el.getAttribute("aria-label") || "",
+        placeholder: field.placeholder || "",
+        // Capped here, not in Node: a [role="button"] can wrap a whole section,
+        // and 70 of those would cross the wire in full every turn. Well above
+        // the 80 chars snapshotLabel keeps, so the cap decides nothing.
+        text: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 200),
+        value: field.value || "",
+        name: field.name || "",
+      };
+    };
+    if (targetRef !== null) {
+      const el = document.querySelector(`[data-co-ref="${targetRef}"]`);
+      return el ? [facts(el, targetRef)] : [];
+    }
     const vis = (el: Element) => {
       const r = (el as HTMLElement).getBoundingClientRect();
       return (el as HTMLElement).offsetParent !== null && r.width > 2 && r.height > 2;
     };
     const sel = 'a, button, input, textarea, select, [role="button"], [role="link"], [role="combobox"], [role="checkbox"], [role="radio"], [contenteditable="true"]';
     const els = Array.from(document.querySelectorAll(sel)).filter(vis);
-    const lines: string[] = [];
+    const out = [];
     let n = 0;
     for (const el of els.slice(0, 70)) {
-      const tag = el.tagName.toLowerCase();
-      const itype = ((el as HTMLInputElement).type || "").toLowerCase();
-      if (tag === "input" && ["hidden", "submit", "button", "image", "reset"].includes(itype)) {
-        // surface submit buttons in the snapshot as read-only context (not actionable)
-      }
-      const ref = `e${n}`;
+      const ref = `e${n++}`;
       el.setAttribute("data-co-ref", ref);
-      const role = el.getAttribute("role") || (tag === "a" ? "link" : tag);
-      const label = clean(el.getAttribute("aria-label") || (el as HTMLInputElement).placeholder || el.textContent || (el as HTMLInputElement).value || (el as HTMLInputElement).name);
-      const kind = tag === "input" ? itype || "text" : tag === "a" ? "link" : tag === "select" ? "select" : tag === "textarea" ? "textarea" : role;
-      lines.push(`[${ref}] ${kind} "${label}"`);
-      n++;
+      out.push(facts(el, ref));
     }
-    return { text: lines.join("\n"), n };
-  });
+    return out;
+  }, ref);
+}
+
+/** Ref-tagged snapshot of the interactive page (a browser_snapshot-style view the
+ *  LLM reasons over). Tags data-co-ref on each element so actions are unambiguous.
+ *  A submit control is listed WITHOUT a ref: the planner can see that it exists
+ *  and stop, but it has no name for it, so no action can address it. `actionable`
+ *  is the set of refs it may use, which every ref-bearing action is held to. */
+async function snapshot(frame: Frame): Promise<{ text: string; n: number; actionable: Set<string> }> {
+  const els = await readFacts(frame, null);
+  const lines: string[] = [];
+  const actionable = new Set<string>();
+  for (const el of els) {
+    if (el.tag === "input" && el.type === "hidden") continue;
+    const label = snapshotLabel(el);
+    if (isSubmitControl(el)) {
+      lines.push(`[--] submit "${label}" (not actionable, the human submits)`);
+      continue;
+    }
+    actionable.add(el.ref);
+    const kind = el.tag === "input" ? el.type || "text" : el.tag === "a" ? "link" : el.tag === "select" ? "select" : el.tag === "textarea" ? "textarea" : el.role;
+    lines.push(`[${el.ref}] ${kind} "${label}"`);
+  }
+  return { text: lines.join("\n"), n: actionable.size, actionable };
 }
 
 /** One planner turn (Claude-first: --resume keeps the loop's context cheaply). */
@@ -141,7 +198,7 @@ ${answersBlock || "(no answers provided — just reach/observe)"}`;
     if (goal === "reach" && (await isFormReady().catch(() => false))) return { reached: true, turns: turn - 1, reason: "form-reached", steps };
     await dropNewTabs(page); // any "Apply" link/popup navigates in OUR tab, not a new one
     const frame = page.mainFrame();
-    const snap = await snapshot(frame).catch(() => ({ text: "", n: 0 }));
+    const snap = await snapshot(frame).catch(() => ({ text: "", n: 0, actionable: new Set<string>() }));
     const prompt =
       turn === 1
         ? `You are an agent driving a real web browser for a job seeker (we execute your actions; the human submits at the end). ${goalText}
@@ -187,17 +244,23 @@ Reply ONE action JSON.`;
     let detail = "";
     let note = "";
     try {
-      const loc = act.ref ? frame.locator(`[data-co-ref="${act.ref}"]`).first() : null;
-      if (act.action === "click" && loc) {
-        const txt = (await loc.innerText().catch(() => "")) || (await loc.getAttribute("value").catch(() => "")) || "";
-        if (SUBMIT_RX.test(txt)) {
-          note = "refused to click a submit control (the human submits)";
-          detail = `blocked submit "${txt.slice(0, 40)}"`;
-        } else {
-          detail = `click "${txt.slice(0, 40)}"`;
-          await loc.scrollIntoViewIfNeeded().catch(() => {});
-          await Promise.all([page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {}), loc.click({ timeout: 6000 })]);
-        }
+      // Every action naming a ref is cleared before it gets a locator, not just
+      // click: a withheld submit control still carries its data-co-ref in the
+      // page, and `fill()` on a button throws into a fallback that clicks. The
+      // element is re-read here because the DOM can change between the snapshot
+      // and now, and being unreadable counts as refused — an element we cannot
+      // describe is one we cannot clear.
+      const ref = act.ref !== undefined && snap.actionable.has(act.ref) ? act.ref : null;
+      const [now] = ref !== null ? await readFacts(frame, ref).catch(() => []) : [];
+      const label = now ? snapshotLabel(now) : "";
+      const loc = ref !== null && now && !isSubmitControl(now) ? frame.locator(`[data-co-ref="${ref}"]`).first() : null;
+      if (act.ref !== undefined && !loc) {
+        note = "refused to click a submit control (the human submits)";
+        detail = ref === null ? `blocked ref ${act.ref} (not offered)` : now ? `blocked submit "${label.slice(0, 40)}"` : `blocked ref ${act.ref} (gone)`;
+      } else if (act.action === "click" && loc) {
+        detail = `click "${label.slice(0, 40)}"`;
+        await loc.scrollIntoViewIfNeeded().catch(() => {});
+        await Promise.all([page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {}), loc.click({ timeout: 6000 })]);
       } else if (act.action === "type" && loc) {
         detail = `type into ${act.ref}`;
         await loc.fill(act.text || "").catch(async () => {
