@@ -21,17 +21,31 @@ try {
   const jobs = mod.parseTaleoResponse(response, { url: new URL(url), section: 'demo' }, mod.extractHeadings(shell), 'Example');
   if (jobs.length === 2 && jobs[0].title === 'Learning Designer' && jobs[0].location === 'Toronto' && jobs[0].postedAt) pass('parses dynamic columns, IDs, location, and date'); else fail(`unexpected parsed jobs ${JSON.stringify(jobs)}`);
   if (jobs[0].url.includes('/jobdetail.ftl?job=R-1') && jobs[1].title === '& Engineer') pass('builds canonical contestNo detail URLs and decodes HTML entities'); else fail('detail URL/entity parsing failed');
-  if (mod.parseTaleoResponse({}, { url: new URL(url), section: 'demo' }, [], 'X').length === 0) pass('malformed/empty response → []'); else fail('malformed response not empty');
+  if (mod.parseTaleoResponse({}, { url: new URL(url), section: 'demo' }, [], 'X').length === 0 && mod.parseTaleoResponse(null, { url: new URL(url), section: 'demo' }, [], 'X').length === 0 && mod.parseTaleoResponse([], { url: new URL(url), section: 'demo' }, [], 'X').length === 0) pass('null/empty response → []'); else fail('empty response not empty');
+  let malformedThrew = false;
+  try { mod.parseTaleoResponse({ requisitionList: {} }, { url: new URL(url), section: 'demo' }, [], 'X'); } catch (e) { malformedThrew = /requisitionList|unexpected API response/.test(e.message); }
+  if (malformedThrew) pass('wrong response envelope throws descriptively'); else fail('wrong response envelope was treated as empty');
+  const positional = mod.parseTaleoResponse({ requisitionList: [{ jobId: '2603', column: ['Positional title', 'Vancouver', '2026-09-02'] }] }, { url: new URL(url), section: 'demo' }, [], 'X');
+  if (positional.length === 1 && positional[0].title === 'Positional title' && positional[0].location === 'Vancouver') pass('uses positional columns when the shell has no headings'); else fail('positional column fallback failed');
   const detailHtml = '<script type="application/ld+json">{"@type":"JobPosting","description":"%3Cp%3EBuild%20R%26amp%3BD%20systems.%3C%2Fp%3E"}</script>';
   if (mod.parseTaleoDetail(detailHtml) === 'Build R&D systems.') pass('decodes URL-encoded HTML from public detail JSON-LD'); else fail('detail description parsing failed');
   let calls = [];
+  let sleepCalls = 0;
   const ctx = {
     fetchText: async (u, o) => { calls.push(['text', u, o]); return u === url ? shell : detailHtml; },
     fetchJson: async (u, o) => { calls.push(['json', u, o]); return response; },
-    sleep: async () => {},
+    sleep: async () => { sleepCalls++; },
   };
-  const fetched = await provider.fetch({ name: 'Example', careers_url: url }, ctx);
+  const fetched = await provider.fetch({ name: 'Example', careers_url: url, fetchDetails: true }, ctx);
   if (fetched.length === 2 && fetched.every((job) => job.description === 'Build R&D systems.') && calls.length === 4 && calls[0][1] === url && calls[0][2].redirect === 'error' && calls[1][2].redirect === 'error' && calls.slice(2).every((call) => call[2].redirect === 'error') && JSON.parse(calls[1][2].body).pageNo === 1) pass('fetches shell + search + bounded public details with redirect:error'); else fail(`fetch contract failed ${JSON.stringify(calls)}`);
+  if (sleepCalls === 1) pass('paces detail requests through the shared clock'); else fail(`unexpected detail pacing calls: ${sleepCalls}`);
+  let noDetailCalls = 0;
+  const noDetails = await provider.fetch({ name: 'NoOptIn', careers_url: url }, {
+    fetchText: async (u) => { if (u !== url) noDetailCalls++; return u === url ? shell : detailHtml; },
+    fetchJson: async () => response,
+    sleep: async () => {},
+  });
+  if (noDetails.length === 2 && noDetailCalls === 0) pass('does not fetch details without explicit fetchDetails opt-in'); else fail(`detail opt-in failed: ${noDetailCalls}`);
   let guarded = false;
   let guardCalls = 0;
   const guardCtx = { fetchText: async () => { guardCalls++; throw new Error('must not fetch'); }, fetchJson: async () => { guardCalls++; throw new Error('must not fetch'); } };
@@ -55,9 +69,17 @@ try {
   const pagedCtx = { fetchText: async () => shell, fetchJson: async (u, o) => { const p = JSON.parse(o.body).pageNo; pageCalls.push(p); return p === 1 ? pageOne : pageTwo; }, sleep: async () => {} };
   const paged = await provider.fetch({ name: 'PagedCo', careers_url: url }, pagedCtx);
   if (paged.length === 2 && pageCalls.join(',') === '1,2') pass('fetches a second JSON page when pagingData reports more rows'); else fail(`pagination failed: ${pageCalls.join(',')} / ${paged.length}`);
+  const noClockPages = [];
+  const noClock = await provider.fetch({ name: 'NoClockCo', careers_url: url }, { fetchText: async () => shell, fetchJson: async (u, o) => { const p = JSON.parse(o.body).pageNo; noClockPages.push(p); return p === 1 ? pageOne : pageTwo; } });
+  if (noClock.length === 2 && noClockPages.join(',') === '1,2') pass('pagination uses shared sleep fallback when ctx.sleep is absent'); else fail(`sleep fallback failed: ${noClockPages} / ${noClock.length}`);
   pageCalls.length = 0;
-  const probed = await provider.fetch({ name: 'PagedCo', careers_url: url, max_pages: 100 }, { ...pagedCtx, maxPages: 1 });
-  if (probed.length === 1 && pageCalls.join(',') === '1') pass('ctx.maxPages: 1 limits probe to exactly one list request'); else fail('probe page budget was ignored');
+  let probeDetailCalls = 0;
+  const probed = await provider.fetch({ name: 'PagedCo', careers_url: url, max_pages: 100, fetchDetails: true }, {
+    ...pagedCtx,
+    fetchText: async (u) => { if (u !== url) probeDetailCalls++; return shell; },
+    maxPages: 1,
+  });
+  if (probed.length === 1 && pageCalls.join(',') === '1' && probeDetailCalls === 0) pass('ctx.maxPages: 1 limits probe to one list request and skips details'); else fail(`probe page budget/details failed: ${pageCalls} / ${probeDetailCalls}`);
 
   // A malformed row must not make a full raw page look short and hide a
   // valid job on the following page.
@@ -76,12 +98,23 @@ try {
   if (survived.length === 2 && malformedCalls.join(',') === '1,2') pass('raw page length, not normalized rows, controls short-page termination'); else fail(`malformed-row pagination failed: ${malformedCalls} / ${survived.length}`);
 
   let boundedDetails = 0;
-  const bounded = await provider.fetch({ name: 'BoundedCo', careers_url: url, detailLimit: 1 }, {
+  const bounded = await provider.fetch({ name: 'BoundedCo', careers_url: url, fetchDetails: true, detailLimit: 1 }, {
     fetchText: async (u) => { if (u === url) return shell; boundedDetails++; return detailHtml; },
     fetchJson: async () => response,
     sleep: async () => {},
   });
   if (boundedDetails === 1 && bounded[0].description && !bounded[1].description) pass('normal detail enrichment honors detailLimit'); else fail(`detail limit failed: ${boundedDetails}`);
+
+  const failedDetail = await provider.fetch({ name: 'FailedDetailCo', careers_url: url, fetchDetails: true }, {
+    fetchText: async (u) => {
+      if (u === url) return shell;
+      if (u.includes('R-1')) { const e = new Error('not found'); e.status = 404; throw e; }
+      return detailHtml;
+    },
+    fetchJson: async () => response,
+    sleep: async () => {},
+  });
+  if (failedDetail.length === 2 && !failedDetail[0].description && failedDetail[1].description === 'Build R&D systems.') pass('failed detail enrichment keeps the listing and continues'); else fail(`failed detail was fatal or lost later descriptions: ${JSON.stringify(failedDetail)}`);
 
   // Retryable transport failures use the shared retry helper; a probe error is
   // allowed to propagate so callers retain their page-budget identity.

@@ -1043,6 +1043,8 @@ search_queries:
 # - name: Example Taleo Co
 #   careers_url: https://example.taleo.net/careersection/demo/jobsearch.ftl
 #   max_pages: 100         # optional page cap (25 jobs/page, default 100, max 1000)
+#   fetchDetails: false    # optional opt-in for public JobPosting descriptions
+#   detailLimit: 25        # optional detail cap when fetchDetails is true (max 100)
 #   enabled: true
 #
 # - name: Example Eightfold Co
