@@ -1281,6 +1281,13 @@ search_queries:
 #   careers_url: https://solid.jobs/public-api/offers/engineering
 #   enabled: true
 #
+# - name: Telegram @ai_rabota             # public Telegram channel, read via its t.me/s/ web preview
+#   provider: telegram-channel            # no detect() — only reachable via provider:
+#   channel: ai_rabota    # handle without the @ (5-32 letters, digits, underscores)
+#   since_days: 30        # optional window; pages are walked back until it (default 30)
+#   max_pages: 10         # optional page cap (20 posts/page, default 10, max 10)
+#   enabled: true
+#
 # -- Remote-job feeds  (→ job_boards:; set provider: plus any provider-specific fields) --
 # title_filter / location_filter defined above still apply.
 #

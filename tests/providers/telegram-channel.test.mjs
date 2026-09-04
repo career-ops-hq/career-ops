@@ -366,6 +366,35 @@ try {
   const empty = await tg.fetch({ name: 'TG', channel: 'devjobs' }, { ...quiet, fetchText: async () => page() });
   if (Array.isArray(empty) && empty.length === 0) pass('a preview page with no posts is an empty board, not an error');
   else fail(`empty page → ${JSON.stringify(empty)}`);
+
+  // A page-2 failure that retry cannot clear fails loud (no silent partial
+  // board), and the "raise max_pages" warning stays quiet: that message means
+  // the cap truncated a healthy board, not that the board broke.
+  {
+    const errs = [];
+    const origErr = console.error;
+    console.error = (...a) => errs.push(a.join(' '));
+    let thrown = null;
+    let calls = 0;
+    try {
+      await tg.fetch({ name: 'TG', channel: 'devjobs', max_pages: 3, since_days: 36500 }, { ...quiet, fetchText: async (url) => { calls++; if (url.includes('before')) { const e = new Error('503'); e.status = 503; throw e; } return page(P_LABEL, P_AT); } });
+    } catch (e) { thrown = e; } finally { console.error = origErr; }
+    if (thrown && thrown.status === 503 && calls > 2 && errs.length === 0) pass('a 5xx on page 2 that retry cannot clear fails loud, and the "raise max_pages" warning does not fire');
+    else fail(`page-2 5xx: thrown=${thrown && thrown.message} calls=${calls} warnings=${JSON.stringify(errs)}`);
+  }
+
+  // Probe cooperation: a ctx.fetchText rejection while ctx.maxPages is set
+  // reaches verify-portals as the same object (ProbePageBudgetReached is
+  // recognised by identity), neither swallowed to [] nor rewrapped.
+  {
+    class BudgetReached extends Error {}
+    const budget = new BudgetReached('probe budget');
+    let got = null;
+    try { await tg.fetch({ name: 'TG', channel: 'devjobs' }, { ...quiet, maxPages: 1, fetchText: async () => { throw budget; } }); }
+    catch (e) { got = e; }
+    if (got === budget) pass('a ctx.fetchText rejection under ctx.maxPages propagates unwrapped (the probe error keeps its identity)');
+    else fail(`probe rejection came back as ${got && got.constructor.name}: ${got && got.message}`);
+  }
 } catch (e) {
   fail(`telegram-channel provider tests crashed: ${e.message}\n${e.stack}`);
 }
