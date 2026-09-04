@@ -15008,12 +15008,13 @@ try {
   const walkMjs = (d) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const fp = join(d, e.name);
-      if (e.isDirectory()) {
-        // A checkout under plugins/ is somebody else's source; its files are
-        // not bundled plugins and must not be graded as such (#3762).
-        if (isNestedCheckout(fp)) continue;
-        walkMjs(fp);
-      } else if (e.name.endsWith('.mjs')) allPluginMjs.push(fp);
+      // NO nested-checkout guard here, deliberately — see the EXEMPT map in
+      // tests/mjs-files.test.mjs. This is a security scan over third-party
+      // code, so skipping a directory that carries a `.git` marker would let a
+      // plugin drop a `.git` file beside its sources and opt straight out of
+      // the deny-list. Same reasoning as plugins/_lock.mjs (#3762).
+      if (e.isDirectory()) walkMjs(fp);
+      else if (e.name.endsWith('.mjs')) allPluginMjs.push(fp);
     }
   };
   walkMjs(join(ROOT, 'plugins'));

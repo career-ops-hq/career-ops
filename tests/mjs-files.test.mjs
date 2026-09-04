@@ -163,74 +163,327 @@ test('isNestedCheckout detects the marker, of either type, and nothing else', ()
   }
 });
 
+// ── Recursive-walker detection ───────────────────────────────────────────
+// Used by the two tests below. A helper rather than an inline scan because a
+// detector that silently stops matching turns its test into a green check of
+// nothing — the failure shape lib/mjs-files.mjs exists to remove (#3419) — so
+// the shapes it claims to recognize are themselves covered by fixtures.
+
+/**
+ * Blank every comment, string, template literal and regex literal, preserving
+ * length and line structure.
+ *
+ * Two things depend on this. Brace counting: a `}` inside a string or a comment
+ * ends the body early, the extracted body is truncated, and a real
+ * `isNestedCheckout(` call falls outside it — a FALSE FAILURE naming a walker
+ * that is correctly guarded. And guard detection: `isNestedCheckout(` written
+ * in a comment would otherwise satisfy the gate, so a walker could be
+ * documented as guarded while descending into every checkout it finds.
+ *
+ * @param {string} src - Source text.
+ * @returns {string} Same length, with non-code spans replaced by spaces.
+ */
+function blankNonCode(src) {
+  const out = src.split('');
+  const blank = (i) => { if (src[i] !== '\n') out[i] = ' '; };
+  let prev = '';   // last significant code character, for the regex/division split
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i], d = src[i + 1];
+    if (c === '/' && d === '/') {
+      while (i < src.length && src[i] !== '\n') blank(i++);
+      continue;
+    }
+    if (c === '/' && d === '*') {
+      blank(i++); blank(i++);
+      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) blank(i++);
+      if (i < src.length) { blank(i++); blank(i++); }
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') {
+      blank(i++);
+      while (i < src.length && src[i] !== c) {
+        if (src[i] === '\\') { blank(i++); if (i < src.length) blank(i++); continue; }
+        blank(i++);
+      }
+      if (i < src.length) blank(i++);
+      prev = 'x';   // a literal is a value, so a following `/` is division
+      continue;
+    }
+    // `/` opens a regex only where a value cannot precede it; after an
+    // identifier, `)` or `]` it is division. Getting this wrong in the safe
+    // direction (treating division as a regex) blanks code, so the rule is
+    // deliberately conservative.
+    if (c === '/' && (prev === '' || '(,=:[!&|?{};+-*%~^'.includes(prev))) {
+      blank(i++);
+      let inClass = false;
+      while (i < src.length && src[i] !== '\n' && (inClass || src[i] !== '/')) {
+        if (src[i] === '\\') { blank(i++); if (i < src.length) blank(i++); continue; }
+        if (src[i] === '[') inClass = true;
+        else if (src[i] === ']') inClass = false;
+        blank(i++);
+      }
+      if (i < src.length && src[i] === '/') blank(i++);
+      prev = 'x';
+      continue;
+    }
+    if (!/\s/.test(c)) prev = c;
+    i++;
+  }
+  return out.join('');
+}
+
+// Statement keywords that take a parenthesized head followed by a block, which
+// the method-shorthand pattern below is otherwise shaped exactly like.
+const NOT_A_DECLARATION = new Set([
+  'if', 'for', 'while', 'switch', 'catch', 'do', 'else', 'with', 'return', 'function', 'typeof', 'await', 'yield',
+]);
+
+/**
+ * Every function declaration in `code`, as {name, paren} where `paren` indexes
+ * the `(` opening its parameter list.
+ *
+ * Three shapes, because a walker written in any of them recurses just the same:
+ * `function walk(...)`, `const walk = (...) =>` / `= function (...)`, and the
+ * method shorthand `walk(...) {` of a class body or object literal.
+ */
+function declarations(code) {
+  const found = [];
+  const push = (name, paren) => { if (!NOT_A_DECLARATION.has(name)) found.push({ name, paren }); };
+  for (const m of code.matchAll(/(?:^|[\n;{}(,])\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*(\w+)\s*\(/g)) {
+    push(m[1], m.index + m[0].length - 1);
+  }
+  for (const m of code.matchAll(/(?:^|[\n;{}])\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?(?:function\s*\*?\s*\w*\s*)?\(/g)) {
+    push(m[1], m.index + m[0].length - 1);
+  }
+  // Params without nested parens keeps this from matching a call whose argument
+  // list contains one (`test('x', () => {`), which is not a declaration.
+  for (const m of code.matchAll(/(?:^|[\n{,])\s*(?:static\s+|async\s+|get\s+|set\s+)?(\w+)\s*\([^()]*\)\s*\{/g)) {
+    push(m[1], m.index + m[0].indexOf('('));
+  }
+  return found;
+}
+
+/**
+ * The body span of the declaration whose parameter list opens at `paren`.
+ *
+ * Handles the braced body and the brace-less arrow (`const walk = (d) =>
+ * readdirSync(d).flatMap(...)`) — an earlier version required a `{`, so a
+ * brace-less walker was silently dropped rather than audited.
+ *
+ * @returns {[number, number]|null} Half-open [start, end) into `code`.
+ */
+function bodySpan(code, paren) {
+  let depth = 0, i = paren;
+  for (; i < code.length; i++) {
+    if (code[i] === '(') depth++;
+    else if (code[i] === ')') { depth--; if (depth === 0) { i++; break; } }
+  }
+  const arrow = /^\s*=>/.exec(code.slice(i));
+  let j = i + (arrow ? arrow[0].length : 0);
+  while (j < code.length && /\s/.test(code[j])) j++;
+  if (code[j] === '{') {
+    let d = 0;
+    for (let k = j; k < code.length; k++) {
+      if (code[k] === '{') d++;
+      else if (code[k] === '}' && --d === 0) return [j, k + 1];
+    }
+    return null;
+  }
+  if (!arrow) return null;   // a bare declaration with no body (e.g. a call)
+  // Brace-less arrow: the expression runs to its terminating `;` or to the
+  // closer of whatever encloses it, whichever comes first.
+  let d = 0;
+  for (let k = j; k < code.length; k++) {
+    const c = code[k];
+    if ('([{'.includes(c)) d++;
+    else if (')]}'.includes(c)) { if (d === 0) return [j, k]; d--; }
+    else if (c === ';' && d === 0) return [j, k];
+  }
+  return [j, code.length];
+}
+
+/**
+ * Every recursive directory walker in `entries`.
+ *
+ * A walker reads a directory and reaches itself through the file's own call
+ * graph — which covers mutual recursion (`a` calls `b` calls `a`), where no
+ * single body contains a call to itself. Non-recursive `readdirSync` is not
+ * this bug: a nested checkout is a directory, and only descending into one
+ * gets its contents graded.
+ *
+ * `guarded` is reported over the whole recursion cycle, not one body: in a
+ * mutually recursive pair, either half may hold the guard.
+ *
+ * @param {{rel: string, src: string}[]} entries
+ * @returns {{id: string, file: string, name: string, line: number, guarded: boolean}[]}
+ */
+function findRecursiveWalkers(entries) {
+  const walkers = [];
+  for (const { rel, src } of entries) {
+    const code = blankNonCode(src);
+    const fns = new Map();
+    for (const { name, paren } of declarations(code)) {
+      const span = bodySpan(code, paren);
+      if (!span || fns.has(name)) continue;   // first declaration of a name wins
+      fns.set(name, { name, paren, body: code.slice(span[0], span[1]) });
+    }
+    const callsOf = new Map(
+      [...fns.values()].map((fn) => [fn.name, [...fns.keys()].filter((n) => new RegExp(`\\b${n}\\s*\\(`).test(fn.body))]),
+    );
+    const reaches = (from, target) => {
+      const seen = new Set();
+      const queue = [...(callsOf.get(from) ?? [])];
+      while (queue.length) {
+        const n = queue.shift();
+        if (n === target) return true;
+        if (seen.has(n)) continue;
+        seen.add(n);
+        queue.push(...(callsOf.get(n) ?? []));
+      }
+      return false;
+    };
+    for (const fn of fns.values()) {
+      if (!fn.body.includes('readdirSync(')) continue;
+      if (!reaches(fn.name, fn.name)) continue;
+      // The recursion cycle: everything fn reaches that reaches fn back. The
+      // guard may sit in either half of a mutually recursive pair, and nowhere
+      // else counts — a mention in some unrelated function it happens to call
+      // is not this walker being guarded.
+      const cycle = [fn.name, ...[...fns.keys()].filter((n) => n !== fn.name && reaches(fn.name, n) && reaches(n, fn.name))];
+      walkers.push({
+        id: `${rel}:${fn.name}`,
+        file: rel,
+        name: fn.name,
+        line: src.slice(0, fn.paren).split('\n').length,
+        guarded: cycle.some((n) => fns.get(n).body.includes('isNestedCheckout(')),
+      });
+    }
+  }
+  return walkers;
+}
+test('the walker detector recognizes every shape it claims to, and only real recursion', () => {
+  // Fixtures, not repository files: the detector's limits must fail a test
+  // rather than pass silently, and the three shapes below are exactly the ones
+  // an earlier version missed — each would have let an unguarded walker through
+  // while the repo-wide test opposite stayed green (#3762 review).
+  const f = (rel, src) => ({ rel, src });
+  const found = findRecursiveWalkers([
+    // A method walker in an object literal or class body.
+    f('method.mjs', `
+      const scanner = {
+        walk(dir) {
+          for (const e of readdirSync(dir, { withFileTypes: true })) {
+            if (e.isDirectory()) this.walk(join(dir, e.name));
+          }
+        },
+      };
+    `),
+    // A brace-less arrow walker: no body braces at all.
+    f('arrowless.mjs', `
+      const walk = (d) => readdirSync(d, { withFileTypes: true })
+        .flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
+    `),
+    // Mutual recursion: neither body calls itself.
+    f('mutual.mjs', `
+      function descend(dir) { return collect(join(dir, 'x')); }
+      function collect(dir) {
+        for (const e of readdirSync(dir)) descend(join(dir, e));
+      }
+    `),
+    // Guarded, with braces inside a string, a comment and a regex. Counting
+    // those would truncate the body and drop the guard out of it — a false
+    // failure against a walker that is correct.
+    f('braces-in-literals.mjs', `
+      function walk(dir) {
+        const tpl = '}}}';                 // }
+        const re = /[{}]}/;                /* } } } */
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          if (e.isDirectory()) { if (isNestedCheckout(e.name)) continue; walk(e.name); }
+        }
+        return tpl + re;
+      }
+    `),
+    // The guard named ONLY in a comment. Documented as guarded, descends into
+    // every checkout it finds.
+    f('comment-only.mjs', `
+      function walk(dir) {
+        // isNestedCheckout(full) — TODO
+        for (const e of readdirSync(dir)) walk(e);
+      }
+    `),
+    // Reads a directory, never recurses: a single-level listing is not this bug.
+    f('flat.mjs', `
+      function listStates(dir) { return readdirSync(dir).filter(Boolean); }
+    `),
+    // Recurses, never reads a directory.
+    f('no-readdir.mjs', `
+      function deepen(n) { return n <= 0 ? 0 : deepen(n - 1); }
+    `),
+  ]);
+
+  assert.deepEqual(
+    found.map((w) => `${w.id}${w.guarded ? ' [guarded]' : ''}`).sort(),
+    [
+      'arrowless.mjs:walk',
+      'braces-in-literals.mjs:walk [guarded]',
+      'comment-only.mjs:walk',
+      'method.mjs:walk',
+      'mutual.mjs:collect',
+    ],
+    'the detector must see method, brace-less-arrow and mutually recursive walkers, must not count a guard written in a comment, and must ignore a non-recursive read',
+  );
+});
+
 test('every recursive walker over this checkout consults the shared predicate', () => {
   // The previous form of this test pinned three callers BY NAME, and a fourth
   // walker — `test-all.mjs`'s `discoverTests`, the one that hands what it finds
   // to the RUNNER — was omitted precisely because nothing enumerated it: a
   // worktree under `tests/` executed its own stale suites and the run printed
-  // "safe to push/merge" for them (#3762). A list cannot catch the walker
-  // nobody remembered to add to the list, so this asserts the property instead:
-  // every self-recursive `readdirSync` walk in this repository either consults
-  // `isNestedCheckout` or is a named, reasoned exemption below.
+  // "safe to push/merge" for them (#3762). Worse, that list-shaped test PASSED
+  // the whole time, because `test-all.mjs` imports and calls the predicate
+  // elsewhere in the file. A list cannot catch the walker nobody added to it,
+  // and a per-file assertion cannot catch the walker inside a file that already
+  // complies — so this asserts the property over every walker in the repository.
   //
   // Walkers keep their own recursion rather than calling `collectMjsFiles`
   // because each filters differently (.test.mjs, dot-dirs, per-caller skip
   // sets) — but a hand-rolled `.git` rule is the drift, so they share the
   // predicate.
 
-  // Anchored at a THIRD-PARTY plugin directory, not at this checkout, so
-  // "somebody else's source tree" is exactly what they are meant to be reading.
-  // For the lock hasher this is load-bearing: skipping a directory that carries
-  // a `.git` marker would let a plugin park executable code inside one and drop
-  // it out of the integrity hash — the rug-pull that file exists to prevent.
+  // Anchored at a THIRD-PARTY plugin directory rather than at this checkout, so
+  // "somebody else's source tree" is exactly what they are meant to be reading,
+  // and both are security scans over it. Guarding them would INVERT their
+  // purpose: a plugin could drop a `.git` file beside its sources and opt out
+  // of the deny-list scan, or park executable code inside a marked directory
+  // and have it drop out of the integrity hash — the rug-pull `_lock.mjs`
+  // exists to prevent.
   const EXEMPT = new Map([
     ['plugins/_lock.mjs:walk', 'hashes a plugin tree; skipping a marked dir would be an integrity blind spot'],
     ['plugin-audit.mjs:walk', 'audits a plugin tree, which is not this repository’s source'],
+    ['test-all.mjs:walkMjs', 'deny-list security scan over plugins/; a marked dir must not be able to opt out'],
   ]);
 
-  // A function is a walker when its body reads a directory and calls ITSELF.
-  // Non-recursive `readdirSync` (a single-level filter, a listing) is not this
-  // bug: a nested checkout is a directory, and only descending into one is how
-  // its contents get graded.
-  const DECL = /^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(|^\s*(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\(/;
-  const walkers = [];
-  for (const file of collectMjsFiles(ROOT)) {
-    const rel = file.slice(ROOT.length + 1).replace(/\\/g, '/');
-    const lines = readFileSync(file, 'utf-8').split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const m = DECL.exec(lines[i]);
-      if (!m) continue;
-      const name = m[1] ?? m[2];
-      // Body span by brace balance from the declaration line.
-      let depth = 0, opened = false, end = -1;
-      for (let j = i; j < lines.length; j++) {
-        for (const ch of lines[j]) {
-          if (ch === '{') { depth++; opened = true; }
-          else if (ch === '}') depth--;
-        }
-        if (opened && depth <= 0) { end = j; break; }
-      }
-      if (end < 0) continue;
-      const body = lines.slice(i, end + 1).join('\n');
-      const inner = lines.slice(i + 1, end + 1).join('\n');
-      const selfCall = new RegExp(`\\b${name}\\s*\\(`);
-      if (!body.includes('readdirSync(') || !selfCall.test(inner)) continue;
-      walkers.push({ id: `${rel}:${name}`, file: rel, line: i + 1, body });
-    }
-  }
+  const walkers = findRecursiveWalkers(
+    collectMjsFiles(ROOT).map((file) => ({
+      rel: file.slice(ROOT.length + 1).replace(/\\/g, '/'),
+      src: readFileSync(file, 'utf-8'),
+    })),
+  );
 
   // A detector that silently stops matching would turn this into a green test
   // of nothing — the exact failure shape lib/mjs-files.mjs exists to remove
   // (#3419). The floor is well below today's count, so it survives a walker
-  // being deleted but not the parser breaking.
+  // being deleted but not the parser breaking. The test above is the finer
+  // instrument; this is the backstop.
   assert.ok(
     walkers.length >= 8,
     `found only ${walkers.length} recursive walkers — the detector has stopped matching, not the repo stopped walking`,
   );
 
   const unguarded = walkers
-    .filter((w) => !EXEMPT.has(w.id) && !/isNestedCheckout\(/.test(w.body))
-    .map((w) => `${w.file}:${w.line} (${w.id.split(':')[1]})`);
+    .filter((w) => !EXEMPT.has(w.id) && !w.guarded)
+    .map((w) => `${w.file}:${w.line} (${w.name})`);
   assert.deepEqual(
     unguarded,
     [],
@@ -249,14 +502,17 @@ test('every recursive walker over this checkout consults the shared predicate', 
   // `const isNestedCheckout = () => false` — a hand-rolled re-implementation
   // wearing the shared name, which is precisely the drift this test exists to
   // catch, passing as proof against itself. Pinning the import binds the name
-  // to the one definition. Derived from the guarded walkers, never listed.
+  // to the one definition. Derived from the guarded walkers, never listed, and
+  // accepting any relative depth: a walker can live at any depth under ROOT, so
+  // a depth-limited pattern would accuse a correctly guarded nested file of
+  // re-implementing the predicate.
   const guardedFiles = [...new Set(walkers.filter((w) => !EXEMPT.has(w.id)).map((w) => w.file))];
   for (const caller of guardedFiles) {
     if (caller === 'lib/mjs-files.mjs') continue;   // the definition itself
     const src = readFileSync(join(ROOT, caller), 'utf-8');
     assert.match(
       src,
-      /import\s*\{[^}]*\bisNestedCheckout\b[^}]*\}\s*from\s*'\.{1,2}\/lib\/mjs-files\.mjs'/,
+      /import\s*\{[^}]*\bisNestedCheckout\b[^}]*\}\s*from\s*['"](?:\.{1,2}\/)+lib\/mjs-files\.mjs['"]/,
       `${caller} must import isNestedCheckout FROM lib/mjs-files.mjs, not re-implement it (#3499)`,
     );
   }
