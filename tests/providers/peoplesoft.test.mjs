@@ -28,7 +28,6 @@ try {
     fetchSearchPage,
     fetchAdditionalResults,
     parseJobDetail,
-    sanitizeHtml,
   } = mod;
 
   const fx = (name) => readFileSync(join(ROOT, 'tests/fixtures', name), 'utf-8');
@@ -320,73 +319,43 @@ try {
     }
   }
 
-  // ── sanitizeHtml() — no script/event-handler injection survives ─────────
-
-  {
-    const clean = sanitizeHtml('<p onclick="alert(1)">safe text</p><script>alert(2)</script><img src=x onerror="alert(3)"><a href="javascript:alert(4)">bad link</a><a href="https://example.com/apply">good link</a>');
-    if (!/onclick|onerror|alert\(/i.test(clean)) pass('sanitizeHtml() strips event handlers and inline script content entirely');
-    else fail(`sanitizeHtml() leaked dangerous content: ${clean}`);
-    if (!/<script/i.test(clean)) pass('sanitizeHtml() removes <script> tags');
-    else fail(`sanitizeHtml() left a <script> tag: ${clean}`);
-    if (!/javascript:/i.test(clean)) pass('sanitizeHtml() drops a javascript: href');
-    else fail(`sanitizeHtml() kept a javascript: href: ${clean}`);
-    if (clean.includes('safe text') && clean.includes('good link') && clean.includes('href="https://example.com/apply"')) {
-      pass('sanitizeHtml() preserves safe text and a validated https href');
-    } else {
-      fail(`sanitizeHtml() dropped legitimate content: ${clean}`);
-    }
-    if (!/<img/i.test(clean)) pass('sanitizeHtml() drops a non-allowlisted tag (img) entirely');
-    else fail(`sanitizeHtml() kept a non-allowlisted tag: ${clean}`);
-  }
-  {
-    const html = sanitizeHtml('<!--[if IE]><script>alert(1)</script><![endif]--><p>text</p>');
-    if (!/alert\(/i.test(html) && html.includes('<p>text</p>')) pass('sanitizeHtml() strips HTML comments (conditional-comment payloads included)');
-    else fail(`sanitizeHtml() comment stripping wrong: ${html}`);
-  }
-  {
-    const html = sanitizeHtml('<scr<script>ipt>alert(1)</scr</script>ipt><p>safe</p>');
-    if (!/<script/i.test(html) && html.includes('<p>safe</p>')) {
-      pass('sanitizeHtml() cannot reconstitute a script tag from text around a removed tag');
-    } else {
-      fail(`sanitizeHtml() leaked a reconstituted script payload: ${html}`);
-    }
-  }
-  {
-    const html = sanitizeHtml('<p>before</p><script>alert(1)<p>inside</p>');
-    if (html === '<p>before</p>') pass('sanitizeHtml() discards the remainder owned by an unterminated script element');
-    else fail(`sanitizeHtml() kept content from an unterminated script element: ${html}`);
-  }
-
   // ── parseJobDetail() ──────────────────────────────────────────────────
+  // No dedicated sanitizeHtml() suite here: an earlier revision built a
+  // sanitized-HTML description form (plus a raw-section debug array)
+  // alongside the plain-text one, neither of which is a Job field
+  // (_types.js) or read by anything downstream. Both were dropped — taking
+  // the hand-rolled sanitizer, and the two CodeQL "incomplete
+  // multi-character sanitization" alerts on it, with them (review round on
+  // #3724/#3739). descriptionText below is still exercised end-to-end.
 
   {
     const detail = parseJobDetail(detailFixture, 'JR00012345');
     if (detail.valid === true && detail.jobId === 'JR00012345') pass('parseJobDetail() accepts a matching job id');
     else fail(`parseJobDetail() valid case wrong: ${JSON.stringify({ valid: detail.valid, jobId: detail.jobId })}`);
-    if (detail.title === 'Instructional Designer' && detail.location === 'London, ON, Canada' && detail.employmentType === 'Full-Time') {
-      pass('parseJobDetail() extracts title/location/employmentType');
+    if (detail.title === 'Instructional Designer' && detail.location === 'London, ON, Canada') {
+      pass('parseJobDetail() extracts title/location');
     } else {
-      fail(`parseJobDetail() header fields wrong: ${JSON.stringify({ title: detail.title, location: detail.location, employmentType: detail.employmentType })}`);
+      fail(`parseJobDetail() header fields wrong: ${JSON.stringify({ title: detail.title, location: detail.location })}`);
     }
     if (detail.sections.length === 2 && detail.sections[0].label === 'Description' && detail.sections[1].label === 'Qualifications') {
       pass('parseJobDetail() concatenates JD sections in DOM order');
     } else {
       fail(`parseJobDetail() sections wrong: ${JSON.stringify(detail.sections.map((s) => s.label))}`);
     }
+    if (detail.sections.every((s) => !('html' in s))) {
+      pass('parseJobDetail() sections carry only {label, text} — no sanitized-HTML form (dropped, unused by Job)');
+    } else {
+      fail(`parseJobDetail() sections should not carry an html field: ${JSON.stringify(detail.sections)}`);
+    }
     if (detail.descriptionText.includes('Instructional Designer') && detail.descriptionText.includes("Master's degree")) {
       pass('parseJobDetail() descriptionText concatenates all sections as plain text');
     } else {
       fail(`parseJobDetail() descriptionText wrong: ${JSON.stringify(detail.descriptionText)}`);
     }
-    if (!/onclick|onerror|<script|javascript:/i.test(detail.descriptionHtml)) {
-      pass('parseJobDetail() descriptionHtml has no surviving script/event-handler injection from the second section');
+    if (!('descriptionHtml' in detail) && !('employmentType' in detail)) {
+      pass('parseJobDetail() does not return descriptionHtml/employmentType — neither is a Job field, dropped per review');
     } else {
-      fail(`parseJobDetail() descriptionHtml leaked dangerous markup: ${detail.descriptionHtml}`);
-    }
-    if (detail.descriptionHtml.includes('href="https://example.com/apply"')) {
-      pass('parseJobDetail() descriptionHtml preserves a safe href');
-    } else {
-      fail('parseJobDetail() should keep the safe https href in descriptionHtml');
+      fail(`parseJobDetail() should not return descriptionHtml/employmentType: ${JSON.stringify(Object.keys(detail))}`);
     }
   }
 
@@ -900,6 +869,121 @@ try {
       pass('fetch() never fetches job detail unless peoplesoft.fetchDetails:true is set (zero-token default)');
     } else {
       fail(`fetch() made ${detailCalls} unsolicited detail calls`);
+    }
+  }
+
+  // ── fetch() — detailLimit caps the detail-fetch burst (ADDING_A_PROVIDER.md §3) ─
+
+  {
+    // 40 matching postings, detailLimit:10 — mirrors smartrecruiters.test.mjs's
+    // 40-postings/detailLimit:10 shape. Nothing in the existing suite ran more
+    // matching postings than detailLimit, so nothing proved the cap actually
+    // bounds the detail-fetch burst.
+    const rows = Array.from({ length: 40 }, (_, i) =>
+      `<li id="HRS_AGNT_RSLT_I$0_row_${i}"><a id="SCH_JOB_TITLE$${i}">Role ${i}</a><span id="HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID$${i}">J${i}</span><span id="LOCATION$${i}">Remote</span></li>`,
+    ).join('\n');
+    const bigListPage = `<form name="win0" action="/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL">
+      <span id="win0divHRS_AGNT_RSLT_Irowcnt$0">1-40 of 40 Results</span>
+      ${rows}
+      </form>`;
+    let detailCalls = 0;
+    const ctx = {
+      sleep: async () => {},
+      fetchResponse: async (url) => {
+        const u = String(url);
+        if (u.includes('Page=HRS_APP_JBPST_FL')) {
+          detailCalls++;
+          const jobId = new URL(u).searchParams.get('JobOpeningId');
+          // Matching job id, PostingSeq=1 succeeds first try — isolates the
+          // detailLimit assertion from the separate PostingSeq-retry path.
+          return new Response(`<div id="HRS_SCH_WRK2_HRS_JOB_OPENING_ID">${jobId}</div>`, { status: 200 });
+        }
+        return new Response(bigListPage, { status: 200 });
+      },
+    };
+    const jobs = await peoplesoft.fetch(
+      { name: 'BigU', careers_url: SEARCH_URL, peoplesoft: { fetchDetails: true, detailLimit: 10 } },
+      ctx,
+    );
+    if (jobs.length === 40 && detailCalls === 10) {
+      pass('fetch() caps detail calls at peoplesoft.detailLimit regardless of how many postings matched (40 postings -> 10 details)');
+    } else {
+      fail(`fetch() detailLimit cap wrong: expected 40 jobs / 10 detail calls, saw ${jobs.length} jobs / ${detailCalls} detail calls`);
+    }
+  }
+
+  // ── fetch() — a null reportedTotal must not silently mean "complete" ────
+  // Regression for the review-round gap: `complete` used to be
+  // `probing || reportedTotal === null || byId.size >= reportedTotal`, so a
+  // tenant whose win0divHRS_AGNT_RSLT_Irowcnt$0 element is absent/unparseable
+  // (parseReportedTotal() -> null, a shape the code is supposed to handle)
+  // looked byte-identical to a clean, complete sweep no matter how the
+  // load-more walk actually stopped — no warning, no marker, no reason.
+
+  {
+    // reportedTotal stays null for the whole walk, and the walk stops on a
+    // fetch failure mid-walk (not a genuine exhaustion) — must be incomplete.
+    const firstPageNoTotal = `<form name="win0" action="/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL">
+      <li id="HRS_AGNT_RSLT_I$0_row_0"><a id="SCH_JOB_TITLE$0">Only Role</a><span id="HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID$0">ONLY</span><span id="LOCATION$0">Remote</span></li>
+      </form>`;
+    let calls = 0;
+    const ctx = {
+      sleep: async () => {},
+      fetchResponse: async () => {
+        calls++;
+        if (calls === 1) return new Response(firstPageNoTotal, { status: 200 });
+        const error = new Error('HTTP 403 Forbidden');
+        error.status = 403;
+        throw error;
+      },
+    };
+    const jobs = await peoplesoft.fetch({ name: 'ExampleU', careers_url: SEARCH_URL }, ctx);
+    if (jobs.peoplesoftIncomplete?.reason === 'load-more-fetch-failed' && jobs.peoplesoftIncomplete?.reportedTotal === null) {
+      pass('fetch() marks incomplete on load-more-fetch-failed even when reportedTotal was never reported (null) — the previously-silent gap');
+    } else {
+      fail(`fetch() should mark incomplete when reportedTotal stays null and load-more fails: ${JSON.stringify(jobs.peoplesoftIncomplete)}`);
+    }
+  }
+
+  {
+    // reportedTotal stays null, and every load-more page keeps returning a
+    // genuinely NEW row (never stabilizes) — the walk runs out to
+    // DEFAULT_MAX_LOAD_MORE with no natural stop, so this must also be
+    // incomplete, not silently "done" just because no total was ever seen.
+    let call = 0;
+    const ctx = {
+      sleep: async () => {},
+      fetchResponse: async () => {
+        call++;
+        const html = `<form name="win0" action="/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL">
+          <li id="HRS_AGNT_RSLT_I$0_row_0"><a id="SCH_JOB_TITLE$0">Role ${call}</a><span id="HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID$0">J${call}</span><span id="LOCATION$0">Remote</span></li>
+          </form>`;
+        return new Response(html, { status: 200 });
+      },
+    };
+    const jobs = await peoplesoft.fetch({ name: 'ExampleU', careers_url: SEARCH_URL }, ctx);
+    if (jobs.peoplesoftIncomplete?.reason === 'pagination-ceiling-reached' && jobs.peoplesoftIncomplete?.reportedTotal === null) {
+      pass('fetch() marks incomplete when reportedTotal never reports and the walk runs out to the load-more ceiling');
+    } else {
+      fail(`fetch() should hit pagination-ceiling-reached with a null reportedTotal: ${JSON.stringify(jobs.peoplesoftIncomplete)}`);
+    }
+  }
+
+  {
+    // Companion control (proves the fix isn't just "always incomplete when
+    // reportedTotal is null"): reportedTotal stays null, but the load-more
+    // walk genuinely runs out of new rows (load-more-no-progress) — the one
+    // clean-exhaustion signal available without a total. That IS a complete
+    // sweep, so no incomplete marker.
+    const firstPageNoTotal = `<form name="win0" action="/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL">
+      <li id="HRS_AGNT_RSLT_I$0_row_0"><a id="SCH_JOB_TITLE$0">Only Role</a><span id="HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID$0">ONLY</span><span id="LOCATION$0">Remote</span></li>
+      </form>`;
+    const ctx = { sleep: async () => {}, fetchResponse: async () => new Response(firstPageNoTotal, { status: 200 }) };
+    const jobs = await peoplesoft.fetch({ name: 'ExampleU', careers_url: SEARCH_URL }, ctx);
+    if (jobs.peoplesoftIncomplete === undefined) {
+      pass('fetch() does NOT mark incomplete when reportedTotal is null but the load-more walk genuinely exhausts (load-more-no-progress)');
+    } else {
+      fail(`fetch() should not mark a genuinely exhausted null-total sweep incomplete: ${JSON.stringify(jobs.peoplesoftIncomplete)}`);
     }
   }
 } catch (e) {
