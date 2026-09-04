@@ -312,12 +312,20 @@ function parseMarkdownRows(text, diag) {
   // joining the export back with '\n' silently rewrote a CRLF tracker to LF
   // (PR #3794 review). Remember the dominant ending and restore it on export.
   const eol = /\r\n/.test(text) ? '\r\n' : '\n';
-  // ONE trimmed view, used by every consumer below. resolveColumns needs
-  // `startsWith('|')` and detectLayout used to trim on its own, so an indented
-  // table gave the legacy map on READ and the real map on WRITE — cells landed
-  // a column off (Berlin in Role, Applied in PDF) on a layout the reader had
-  // never accepted in the first place.
-  const lines = text.split('\n').map(l => l.replace(/\r$/, '').trim());
+  // TWO views of the same file, and the split is deliberate.
+  //
+  // `lines` is trimmed and drives DETECTION and parsing: resolveColumns needs a
+  // line that starts with '|' and detectLayout used to trim on its own, so an
+  // indented table gave the legacy map on READ and the real map on WRITE —
+  // cells landed a column off (Berlin in Role, Applied in PDF) on a layout the
+  // reader had never accepted in the first place.
+  //
+  // `raw` keeps the file's own whitespace and drives what is REPLAYED. The
+  // prologue and epilogue are prose the export copies rather than renders, so
+  // trimming them dropped a user's indentation and trailing spaces — a quiet
+  // edit, since nothing in the loss list could see it (PR #3794 review).
+  const raw = text.split('\n').map(l => l.replace(/\r$/, ''));
+  const lines = raw.map(l => l.trim());
   // Map columns by header name (tracker-parse.mjs, #954) so a customized layout
   // (e.g. an inserted Location column) can't shift Score into Status. Falls back
   // to the legacy fixed 9-column layout when no header row is found.
@@ -341,11 +349,24 @@ function parseMarkdownRows(text, diag) {
     consumed.add(layout.headerIndex);
     if (layout.separatorIndex !== null) consumed.add(layout.separatorIndex);
   }
+  // Where a SECOND table begins. Markdown cannot start one without a fresh
+  // separator row, so that (or a second header row) is the precise signal —
+  // blank lines and prose between rows do not change the columns and must not
+  // trip it. Rows below that point were indexed against the FIRST table's
+  // header, so a forced export re-emitted an archived row under the active
+  // table's columns, inventing an empty URL cell for it (PR #3794 review).
+  // They stay in the index; they are reported rather than rebuilt.
+  let secondaryFrom = null;
   for (let index = 0; index < lines.length; index++) {
     const t = lines[index];
     if (!t.startsWith('|')) continue;
     let parts = t.split('|').map(c => c.trim());
     if (parts.length < 3) continue; // needs at least one real cell
+    const isStructure = index === layout?.headerIndex || isHeaderRow(t) || isSeparatorRow(t);
+    if (isStructure && layout && index > (layout.separatorIndex ?? layout.headerIndex)
+        && secondaryFrom === null) {
+      secondaryFrom = rows.length;
+    }
     if (index === layout?.headerIndex) continue;
     if ((parts[colmap.num] ?? '') === '#' || isHeaderRow(t) || /^[-: ]*$/.test(parts.join(''))) continue; // header / separator
     if (parts.length > width && colmap.notes === width - 2) {
@@ -368,7 +389,10 @@ function parseMarkdownRows(text, diag) {
       extras,
     });
   }
-  return { rows, layout: layout && { ...layout, ...collectStructure(lines, consumed), eol } };
+  return {
+    rows,
+    layout: layout && { ...layout, ...collectStructure(raw, consumed), eol, secondaryFrom },
+  };
 }
 
 /**
@@ -388,7 +412,8 @@ function parseMarkdownRows(text, diag) {
  * belong to (the second table's rows are indexed against the FIRST table's
  * columns, so re-emitting its structure would frame a shifted row as intact).
  *
- * @param {string[]} lines - Trimmed lines of the tracker.
+ * @param {string[]} lines - RAW lines of the tracker (whitespace intact): these
+ *   are replayed verbatim, not re-rendered.
  * @param {Set<number>} consumed - Line indices the rebuilt table reproduces.
  * @returns {{prologue: string[], epilogue: string[], interior: string[]}}
  */
@@ -559,6 +584,9 @@ function syncIndex(db, states) {
     setMeta.run('md_epilogue', JSON.stringify(layout?.epilogue ?? []));
     setMeta.run('md_interior', JSON.stringify(layout?.interior ?? []));
     setMeta.run('md_eol', layout?.eol ?? '\n');
+    // pos of the first indexed row that belongs to a LATER table, or '' when
+    // every row belongs to the one export rebuilds.
+    setMeta.run('md_secondary_from', layout?.secondaryFrom == null ? '' : String(layout.secondaryFrom));
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');
@@ -745,6 +773,7 @@ function readLayout(meta) {
     epilogue: list(meta.md_epilogue, ['']),
     interior: list(meta.md_interior, []),
     eol: meta.md_eol === '\r\n' ? '\r\n' : '\n',
+    secondaryFrom: /^\d+$/.test(meta.md_secondary_from ?? '') ? Number(meta.md_secondary_from) : null,
   };
 }
 
@@ -763,6 +792,7 @@ function renderTable(rows, layout) {
 
   const width = labels.length;
   const unplaceable = new Set();
+  const sanitized = [];
   const body = rows.map((r) => {
     const extras = parseExtras(r.extras);
     for (const key of Object.keys(extras)) {
@@ -771,7 +801,16 @@ function renderTable(rows, layout) {
     const cells = [];
     for (let i = 1; i <= width; i++) {
       const field = fieldAt.get(i);
-      cells.push(cleanCell(field ? r[field] : extras[i] ?? ''));
+      const value = field ? r[field] : extras[i] ?? '';
+      const rendered = cleanCell(value);
+      // A cell that had to be rewritten to survive as a table cell — a stray
+      // pipe folded into notes comes back as '│'. The VALUE changed, so a
+      // silent `--out` would edit the tracker; it belongs in the loss list
+      // like any other thing export cannot reproduce (PR #3794 review).
+      if (rendered !== String(value ?? '')) {
+        sanitized.push(`row #${r.id}, column ${i}${labels[i - 1] ? ` (${labels[i - 1]})` : ''}: "${value}" → "${rendered}"`);
+      }
+      cells.push(rendered);
     }
     return `| ${cells.join(' | ')} |`;
   });
@@ -781,8 +820,11 @@ function renderTable(rows, layout) {
       ? `|${labels.map(l => '-'.repeat(Math.max(3, l.length + 2))).join('|')}|`
       : SEPARATOR);
 
-  const dropped = [...unplaceable].sort((a, b) => a - b)
-    .map(i => `column ${i}${labels[i - 1] ? ` (${labels[i - 1]})` : ''}`);
+  const dropped = [
+    ...[...unplaceable].sort((a, b) => a - b)
+      .map(i => `column ${i}${labels[i - 1] ? ` (${labels[i - 1]})` : ''}`),
+    ...sanitized,
+  ];
   return { header, separator, body, dropped };
 }
 
@@ -810,7 +852,12 @@ async function exportMd(args) {
     const meta = db.prepare('SELECT key, value FROM meta').all()
       .reduce((acc, m) => Object.assign(acc, { [m.key]: m.value }), {});
     const layout = readLayout(meta);
-    const { header, separator, body, dropped } = renderTable(rows, layout);
+    // Rows below a second table's header were indexed against the FIRST
+    // table's columns, so rebuilding them here would move archived data into
+    // the active table under a header it never had. They are named instead.
+    const primary = layout.secondaryFrom == null ? rows : rows.slice(0, layout.secondaryFrom);
+    const secondary = layout.secondaryFrom == null ? [] : rows.slice(layout.secondaryFrom);
+    const { header, separator, body, dropped } = renderTable(primary, layout);
     // The lines around the table are replayed verbatim; the ones inside it that
     // no single rebuilt table can hold are reported instead, never invented.
     const out = [...layout.prologue, header, separator, ...body, ...layout.epilogue]
@@ -819,6 +866,7 @@ async function exportMd(args) {
     const losses = [
       ...dropped,
       ...layout.interior.map(line => `line between table rows: ${line === '' ? '(blank)' : `"${line}"`}`),
+      ...secondary.map(r => `row #${r.id} (${r.company} — ${r.role}) belongs to a later table; the rebuilt one has no place for it`),
     ];
     // Never lose anything quietly. Worth reporting even though the rebuild above
     // leaves `losses` empty for every file career-ops itself produces: it is
@@ -853,7 +901,7 @@ async function exportMd(args) {
     }
     if (trackerTransaction) trackerTransaction.replace(out);
     else writeFileAtomic(outPath, out);
-    console.error(`Exported ${rows.length} applications to ${outPath}`);
+    console.error(`Exported ${body.length} applications to ${outPath}`);
   } finally {
     trackerTransaction?.close();
   }

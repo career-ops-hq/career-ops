@@ -951,6 +951,81 @@ Last reviewed 2026-09-01.
   } else {
     fail(`tracker.mjs export --out: expected refusal (code ${refused.code})\n${refused.stdout}`);
   }
+  // The archived row was indexed against the FIRST table's header, so emitting
+  // it under the active table invents an empty URL cell for it. Naming it as a
+  // loss is the only honest option; forcing must not move it (PR #3794 review).
+  if (/row #9 \(Oldco/.test(exported.stderr)) {
+    pass('tracker.mjs export: the later table\'s row is named as a loss');
+  } else {
+    fail(`tracker.mjs export: expected row #9 in the loss list\n${exported.stderr}`);
+  }
+  const forced = runTracker(['export', '--out', sb.tracker, '--force'], sb);
+  const after = readFileSync(sb.tracker, 'utf-8');
+  if (forced.code === 0 && !/Oldco/.test(after)) {
+    pass('tracker.mjs export --force: the archived row is NOT re-emitted under the active table');
+  } else {
+    fail(`tracker.mjs export --force moved the archive row into the active table:\n${after}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── Test 27: prologue/epilogue whitespace is replayed, not re-rendered ──────
+// The lines around the table are prose the export COPIES. Trimming them edited
+// a user's indentation and trailing spaces with nothing in the loss list able
+// to see it (PR #3794 review).
+{
+  const INDENTED_PROSE = [
+    '# Applications Tracker',
+    '',
+    '  > Indented note with trailing spaces   ',
+    '',
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|------|---------|------|-------|--------|-----|--------|-------|',
+    '| 1 | 2026-01-01 | Acme | Engineer | 4.2/5 | Applied | ❌ | — | note |',
+    '',
+    '    trailing indented line',
+    '',
+  ].join('\n');
+  const sb = makeSandbox(INDENTED_PROSE);
+  runTracker(['sync'], sb);
+  const exported = runTracker(['export'], sb);
+  if (exported.code === 0 && exported.stdout === INDENTED_PROSE) {
+    pass('tracker.mjs export: prologue/epilogue whitespace survives verbatim');
+  } else {
+    fail(`tracker.mjs export: prose whitespace\n--- got ---\n${JSON.stringify(exported.stdout)}\n--- want ---\n${JSON.stringify(INDENTED_PROSE)}`);
+  }
+  // Nothing was lost, so the gate must not fire — a false refusal is its own bug.
+  const written = runTracker(['export', '--out', sb.tracker], sb);
+  if (written.code === 0) pass('tracker.mjs export --out: no false refusal when nothing is lost');
+  else fail(`tracker.mjs export --out: unexpected refusal\n${written.stdout}`);
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── Test 28: a cell the render had to rewrite is a reported loss ────────────
+// A stray pipe is folded into Notes at sync time and comes back as '│' — the
+// VALUE changed, so a silent `--out` edits the tracker (PR #3794 review).
+{
+  const STRAY = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-01-01 | Acme | Engineer | 4.2/5 | Applied | ❌ | — | note | extra |
+`;
+  const sb = makeSandbox(STRAY);
+  runTracker(['sync'], sb);
+  const exported = runTracker(['export'], sb);
+  if (/note \| extra.*note │ extra/.test(exported.stderr)) {
+    pass('tracker.mjs export: a sanitized cell is named with its before/after');
+  } else {
+    fail(`tracker.mjs export: expected the sanitized cell in the loss list\n${exported.stderr}`);
+  }
+  const before = readFileSync(sb.tracker, 'utf-8');
+  const refused = runTracker(['export', '--out', sb.tracker], sb);
+  if (refused.code === 1 && readFileSync(sb.tracker, 'utf-8') === before) {
+    pass('tracker.mjs export --out: refuses when a cell value would change');
+  } else {
+    fail(`tracker.mjs export --out: expected refusal on a sanitized cell (code ${refused.code})`);
+  }
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
