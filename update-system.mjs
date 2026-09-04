@@ -356,6 +356,7 @@ const SYSTEM_PATHS = [
   'verify-portals.mjs',
   'audit-portals.mjs',
   'tests/audit-portals.test.mjs',
+  'tests/verify-pipeline-check15.test.mjs',
   'fix-slugs.mjs',
   'updater-migration-tests.mjs',
   'validate-system-paths-coverage.mjs',
