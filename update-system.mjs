@@ -267,7 +267,6 @@ const SYSTEM_PATHS = [
   'tracker-parse.mjs',
   'tracker-aliases.json',
   'set-status.mjs',
-  'set-status-tests.mjs',
   'mark-pdf-ready.mjs',
   'normalize-statuses.mjs',
   'cv-sync-check.mjs',
@@ -292,6 +291,36 @@ const SYSTEM_PATHS = [
   'providers/',
   'seeds/',
   'tests/',
+
+  // ── Retired paths ─────────────────────────────────────────────────────────
+  // These files no longer exist upstream: #3765 moved them into tests/. They
+  // stay in the manifest anyway, because SYSTEM_PATHS is what `apply()` prunes
+  // AGAINST — `staleSystemFiles` (see pathMatchesManifest) only deletes a local
+  // file that is gone from the remote tree AND matches an entry here. Drop the
+  // entry and an upgrading install keeps its copy of the old root file forever,
+  // where tests/root-tests-registration.test.mjs then reports it as an
+  // unregistered suite and turns `node test-all.mjs` red on a healthy install.
+  //
+  // Probe on this list vs. the pre-#3765 one, with a local tree holding the
+  // five and a remote tree without them: without these entries the prune
+  // returns nothing at all; with them it returns all five.
+  //
+  // NB: keep square brackets out of every comment in this array. Several
+  // assertions in test-all.mjs extract the manifest with a NON-GREEDY regex
+  // that ends at the first closing bracket, so one inside a comment truncates
+  // the parsed list and every entry below it reads as missing. That is not
+  // hypothetical: the first draft of this block wrote the probe result as an
+  // empty-array literal and turned the check-table-freshness assertion red.
+  //
+  // They are therefore expected to be ABSENT from the working tree, which is
+  // why updater-migration-tests.mjs lists them in ALLOWED_MISSING_ENTRIES.
+  // Safe to delete once no supported install can still be carrying them.
+  'agent-inbox-tests.mjs',
+  'followup-seed-tests.mjs',
+  'paste-reply-tests.mjs',
+  'set-status-tests.mjs',
+  'tracker-columns-tests.mjs',
+  // ── end retired paths ─────────────────────────────────────────────────────
   'user-agent.mjs',
   'doctor.mjs',
   'jsonc-parse.mjs',
@@ -333,7 +362,6 @@ const SYSTEM_PATHS = [
   'tests/invite-match.test.mjs',
   'agent-inbox.mjs',
   'followup-seed.mjs',
-  'followup-seed-tests.mjs',
   'profile-language.mjs',
   'title-keywords.mjs',
   'gemini-eval.mjs',
@@ -349,9 +377,7 @@ const SYSTEM_PATHS = [
   'tests/detect-reposts.test.mjs',
   'tests/salary-filter.test.mjs',
   'tests/trust-validator.test.mjs',
-  'tracker-columns-tests.mjs',
   'tracker-writer-lock-tests.mjs',
-  'agent-inbox-tests.mjs',
   'validate-portals.mjs',
   'verify-portals.mjs',
   'fix-slugs.mjs',
@@ -362,7 +388,6 @@ const SYSTEM_PATHS = [
   'tests/reply-matcher.test.mjs',
   'reply-watch.mjs',
   'paste-reply.mjs',
-  'paste-reply-tests.mjs',
   'outcome.mjs',
   'tests/outcome.test.mjs',
   'batch/batch-prompt.md',
@@ -481,7 +506,7 @@ const BOOTSTRAP_PATHS = [
   'reserve-report-num.mjs',
   'updater-migration-tests.mjs',
   'validate-portals.mjs',
-  'tracker-columns-tests.mjs',
+  'tests/tracker-columns.test.mjs',
   'plugins/',
   'plugins.mjs',
   'plugins-registry/',
@@ -490,7 +515,7 @@ const BOOTSTRAP_PATHS = [
   'validate-plugin-registry.mjs',
   'config/plugins.example.yml',
   'agent-inbox.mjs',
-  'agent-inbox-tests.mjs',
+  'tests/agent-inbox.test.mjs',
 ];
 
 // User layer paths — NEVER touch these (safety check)

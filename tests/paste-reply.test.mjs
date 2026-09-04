@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * paste-reply-tests.mjs — regression tests for paste-reply.mjs (#1802).
+ * tests/paste-reply.test.mjs — regression tests for paste-reply.mjs (#1802).
  *
  * Locks in the manual/no-Gmail input path into reply-watch.mjs's classification
  * pipeline:
@@ -21,19 +21,19 @@
 
 import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, mkdtempSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { join } from 'path';
 import { tmpdir } from 'os';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { pathToFileURL } from 'url';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
+import { pass, fail, ROOT } from './helpers.mjs';
+
+console.log('\npaste-reply.mjs — manual reply input without Gmail');
 const NODE = process.execPath;
 const CLI = join(ROOT, 'paste-reply.mjs');
 
-let passed = 0;
-let failed = 0;
 function check(name, cond, detail = '') {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else { failed++; console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ''}`); }
+  if (cond) pass(name);
+  else fail(`${name}${detail ? ` — ${detail}` : ''}`);
 }
 
 function tmp(prefix) {
@@ -205,5 +205,3 @@ console.log('8. interactive (stdin) mode — no --file flag');
   check('interactive: CLI reports success', out.includes('Appended a new reply candidate'), out);
 }
 
-console.log(`\nResults: ${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);

@@ -192,7 +192,18 @@ try {
 // exempt: git checkout of a directory pathspec tolerates content drift
 // inside it. Add an entry to ALLOWED_MISSING_ENTRIES only with a comment
 // justifying why it may legitimately be absent.
-const ALLOWED_MISSING_ENTRIES = new Set([]);
+const ALLOWED_MISSING_ENTRIES = new Set([
+  // Retired by #3765, which moved these five suites into tests/. They are kept
+  // in SYSTEM_PATHS deliberately so `staleSystemFiles` can still prune an
+  // upgrading install's leftover copies (see the "Retired paths" block in
+  // update-system.mjs); a retired path is only useful to the prune while it is
+  // still listed, and by definition it is no longer on disk here.
+  'agent-inbox-tests.mjs',
+  'followup-seed-tests.mjs',
+  'paste-reply-tests.mjs',
+  'set-status-tests.mjs',
+  'tracker-columns-tests.mjs',
+]);
 for (const [listName, entries] of [['SYSTEM_PATHS', systemPaths], ['BOOTSTRAP_PATHS', bootstrapPaths]]) {
   for (const entry of entries) {
     if (entry.endsWith('/')) continue;
@@ -225,7 +236,7 @@ const requiredSystemPaths = [
   '.antigravitycli/skills/',
   '.grok/skills/',
   '.cursor/skills/',
-  'tracker-columns-tests.mjs',
+  'tests/',
   'updater-migration-tests.mjs',
   'README.ar.md',
   'README.de.md',
@@ -252,7 +263,7 @@ const requiredBootstrapPaths = [
   'tracker-utils.mjs',
   'tracker-parse.mjs',
   'updater-migration-tests.mjs',
-  'tracker-columns-tests.mjs',
+  'tests/tracker-columns.test.mjs',
 ];
 
 for (const path of requiredSystemPaths) {

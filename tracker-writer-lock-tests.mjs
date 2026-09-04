@@ -30,7 +30,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // How long the HARNESS waits for a spawned Node process to start, print, or
 // exit. This is not a value under test: it encodes only how fast the machine
 // is, and every other suite that spawns a child budgets 30s for the same work
-// (followup-seed-tests.mjs, set-status-tests.mjs, run() in tests/helpers.mjs).
+// (tests/followup-seed.test.mjs, tests/set-status.test.mjs, run() in tests/helpers.mjs).
 // A Windows CI runner under load routinely needs more than the 2s this file
 // used to allow, which made a correctness test fail for want of a faster host.
 //
@@ -318,7 +318,7 @@ await runWhileLocked({
 
 // set-status.mjs is the writer CLAUDE.md names as canonical — the one every
 // mode calls to move a row — so it is the single most important entry in this
-// matrix, and it was the one missing. set-status-tests.mjs already covers the
+// matrix, and it was the one missing. tests/set-status.test.mjs already covers the
 // lock TIMEOUT (exit 4) and a non-retryable lock error, but both prove only
 // that it contends; neither can tell a writer that re-reads under the lock
 // apart from one that reads first and writes a stale snapshot back. Hoisting
