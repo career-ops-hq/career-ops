@@ -373,6 +373,16 @@ this ceiling, never on its own. Reference: `providers/workday.mjs`
 truncated the list, warn the user (`raise max_pages on this entry`) so a
 partial list is not mistaken for a complete one.
 
+`max_pages` and `ctx.maxPages` count **pages of results**. A one-shot
+bootstrap that carries no listings — a token/cookie primer, a board-id
+lookup — is free and sits outside the count (`providers/csod.mjs`: a
+home-page GET for the anonymous token, then a `for page = 1..maxPages`
+search loop). But a first request that *does* return the first batch of
+postings is page one: when it is issued before the pagination loop, the
+loop bound is `maxPages - 1` (floored at 0), and `ctx.maxPages: 1` then
+means that first request and nothing else — the "exactly one list request"
+probe assertion in section 3 depends on it.
+
 A source-reported `total` can also be plain wrong, not just absent — some
 backends silently clamp it, so a `total`-bounded walk is not proof of
 completeness. Reference: `providers/workday.mjs`'s facet split (#3310).
