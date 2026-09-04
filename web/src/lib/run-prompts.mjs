@@ -148,20 +148,27 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
   // ever go stale, never help.
   //
   // And it does not let a failed fetch become a scored report. WebFetch returns
-  // 200 with a login wall, an expired-ad page or a bot challenge, and none of
-  // that announces itself as an error. An agent handed that text will happily
-  // grade it: the output is a confident A–F evaluation of a login screen, shaped
-  // exactly like a real one. This is the write-that-lies case — a run reporting
-  // success for something that did not happen is worse than one that fails
-  // loudly, because nobody goes back to check it. Refusing is the correct
-  // outcome, so the prompt has to say so in step 1, where the fetch happens.
+  // 200 with a login wall, a lazy-loaded shell carrying no description (#2619),
+  // an expired-ad page or a bot challenge, and none of that announces itself as
+  // an error. An agent handed that text will happily grade it: the output is a
+  // confident A–F evaluation of a login screen, shaped exactly like a real one.
+  // Reported by a user against LinkedIn URLs in #2995.
+  //
+  // The REFUSAL IS NOT THIS PROMPT'S POLICY, and saying so matters: the web is a
+  // view over the core's modes, never a parallel engine. modes/oferta.md step 3
+  // already rules that a posting which "appears closed" stops before Block A with
+  // no evaluation, report or CV, and modes/pipeline.md's LinkedIn note already
+  // says never to treat a login wall or partial shell as a verified JD. Both were
+  // written for the interactive path; headless just never had the case spelled
+  // out. So this points AT those rules rather than inventing a third one — if the
+  // core changes its mind, this follows instead of contradicting it.
   return `You are running the OFFICIAL career-ops job evaluation, HEADLESS, on the user's own machine. Today is ${today}. Run the REAL career-ops evaluation — do NOT improvise your own scoring.
 
 1. Read ${resolvedLang.evalModeFile} and follow it EXACTLY — EVERY section its report template specifies, in its order, including the Machine Summary. Do not treat any list of sections in THIS prompt as the set to produce; that file is the only source of truth for which sections exist. Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md.
 
    Use WebFetch to read the posting (you are headless — Playwright is unavailable), and mark the report header "Verification: unconfirmed (batch mode)".
 
-   **If WebFetch does not return the posting itself — a login/consent wall, a 404 or expired ad, a paywall, a bot challenge, or a page whose text is not this job — STOP and report that.** Do not evaluate the page you got instead: a scored report about a login screen looks exactly like a scored report about the job. Say plainly which URL you fetched, what came back, and that no evaluation was produced. A run that says it could not read the posting is a correct outcome; a confident report over a wall is not.
+   **If WebFetch does not return the posting itself — a login/consent wall, a partial page shell with no job description, a 404 or expired ad, a paywall, a bot challenge, or a page whose text is not this job — this is the mode file's "posting appears closed" case: STOP BEFORE BLOCK A and do not generate an evaluation, a report or a CV.** That rule is the mode's, not this prompt's; modes/pipeline.md states the same thing for extraction — never treat a login wall or partial shell as a verified JD. Instead, say which URL you fetched and what came back, so the user can paste the job text themselves. A scored report about a login screen looks exactly like a scored report about the job, and a run that reports it could not read the posting is a correct outcome.
 
 2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
    a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).

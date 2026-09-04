@@ -305,7 +305,18 @@ test("buildPrompt: evaluate refuses to score a page that is not the posting", ()
       `the evaluate prompt must name "${wall}" as a case to stop on, or the agent grades whatever came back`,
     );
   }
-  assert.ok(/STOP and report that/i.test(prompt), "the instruction must be to stop, not merely to note it");
+  // The refusal must POINT AT the core's rule, not restate a rule of its own —
+  // the web is a view over the modes, and a second policy here would be the
+  // thing that drifts. modes/oferta.md step 3 owns "stop before Block A".
+  assert.ok(/STOP BEFORE BLOCK A/i.test(prompt), "the instruction must be to stop, not merely to note it");
+  assert.ok(
+    /posting appears closed/i.test(prompt),
+    "it must invoke the mode file's existing rule by name rather than inventing a parallel one",
+  );
+  assert.ok(
+    /do not generate an evaluation, a report or a CV/i.test(prompt),
+    "the consequence must match modes/oferta.md step 3, not a softer web-only version",
+  );
 });
 
 test("buildPrompt: evaluate does not enumerate the report's sections", () => {
