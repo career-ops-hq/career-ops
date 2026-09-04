@@ -9605,16 +9605,31 @@ try {
   // 8 cells against a 9-column tracker, which every reader's width guard drops
   // as a non-data line, so the pasted evaluation vanished and verify-pipeline
   // still reported the tracker clean.
+  //
+  // Each evaluator names its own path and content variables, so the write sink is
+  // declared per file rather than sniffed. The table is checked against
+  // evaluatorSources below: a fifth evaluator, or a rename, fails here rather
+  // than quietly dropping out of coverage. Presence of the string
+  // "tracker-additions" is deliberately NOT the test -- a comment satisfies that.
+  const writeSinks = {
+    'ollama-eval.mjs':          /writeFileSync\(\s*join\(PATHS\.trackerAdditions,[^)]+\),\s*`\$\{trackerFields\.join\('\\t'\)\}/,
+    'openai-eval.mjs':          /writeFileSync\(\s*join\(PATHS\.trackerAdditions,[^)]+\),\s*`\$\{trackerFields\.join\('\\t'\)\}/,
+    'gemini-eval.mjs':          /writeFileSync\(\s*trackerPath,\s*`\$\{trackerFields\.join\('\\t'\)\}/,
+    'openrouter-runner.mjs':    /writeFile\(\s*tsvFile,\s*tsvLine\s*\)/,
+  };
+  const uncovered = evaluatorSources.map(([name]) => name).filter(name => !writeSinks[name]);
+  const orphaned  = Object.keys(writeSinks).filter(name => !evaluatorSources.some(([n]) => n === name));
   const pastedRowRe = /Tracker entry \(add to|console\.log\(`[^`]*\|\s*\$\{num\}\s*\|/;
   const unpersistedEvaluators = evaluatorSources
-    .filter(([, source]) => !/tracker-additions/.test(source) || pastedRowRe.test(source))
+    .filter(([name, source]) => !writeSinks[name]?.test(source) || pastedRowRe.test(source))
     .map(([name]) => name);
-  if (unpersistedEvaluators.length === 0) {
-    pass('all headless evaluators persist through batch/tracker-additions, none dictates a hand-pasted row');
+  if (uncovered.length > 0 || orphaned.length > 0) {
+    fail(`write-sink table out of step with the evaluator family: uncovered=${uncovered.join(', ') || 'none'} orphaned=${orphaned.join(', ') || 'none'}`);
+  } else if (unpersistedEvaluators.length === 0) {
+    pass('all headless evaluators write their addition to disk, none dictates a hand-pasted row');
   } else {
     fail(`headless evaluators bypass the tracker-addition path: ${unpersistedEvaluators.join(', ')}`);
   }
-
   // The addition itself must carry all nine columns in the TSV contract's order
   // (status BEFORE score) -- the two evaluators converted in #3707 build the row
   // from a literal, so pin the field list rather than only the directory.
@@ -9631,19 +9646,14 @@ try {
     'tsvSafe\\(`[^`]*\\$\\{modelName\\}[^`]*`\\),',
     '\\];',
   ].join('\\s*'));
-  // ...and the field list has to reach the disk. Pinning only the literal would
-  // let a source that builds trackerFields and never writes it -- or writes
-  // something else -- pass both checks, which is a failure wearing a pass.
-  const writeSinkRe = /writeFileSync\(\s*join\(PATHS\.trackerAdditions,[^)]+\),\s*`\$\{trackerFields\.join\('\\t'\)\}/;
   const wrongShape = ['openai-eval.mjs', 'ollama-eval.mjs']
-    .map(name => [name, readFile(name)])
-    .filter(([, src]) => !nineFieldRe.test(src) || !writeSinkRe.test(src))
-    .map(([name]) => name);
+    .filter(name => !nineFieldRe.test(readFile(name)));
   if (wrongShape.length === 0) {
-    pass('openai-eval and ollama-eval write the nine-column addition, status before score, through writeFileSync');
+    pass('openai-eval and ollama-eval build the nine-column addition with status before score');
   } else {
-    fail(`tracker addition fields wrong, reordered, or never written in: ${wrongShape.join(', ')}`);
+    fail(`tracker addition fields wrong or reordered in: ${wrongShape.join(', ')}`);
   }
+
 
   // --count N: contiguous range from an empty dir.
   const rangeTmp = mkdtempSync(join(tmpdir(), 'career-ops-reserve-range-'));

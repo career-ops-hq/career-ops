@@ -59,7 +59,12 @@ const PATHS = {
   cv:        join(DATA_ROOT, 'cv.md'),
   profileYml: join(DATA_ROOT, 'config', 'profile.yml'),
   reports:    join(DATA_ROOT, 'reports'),
-  trackerAdditions: join(DATA_ROOT, 'batch', 'tracker-additions'),
+  // CAREER_OPS_ADDITIONS mirrors merge-tracker.mjs:43. Writing under DATA_ROOT
+  // regardless would drop the addition somewhere the merge it instructs never
+  // looks, so the evaluation would sit there unread.
+  trackerAdditions: process.env.CAREER_OPS_ADDITIONS
+    ? process.env.CAREER_OPS_ADDITIONS
+    : join(DATA_ROOT, 'batch', 'tracker-additions'),
 };
 
 // ---------------------------------------------------------------------------
@@ -86,6 +91,8 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     --url <base>     OpenAI-compatible base URL, including any /v1
                      (env OPENAI_BASE_URL, default https://api.openai.com/v1)
     --key <key>      API key             (env OPENAI_API_KEY)
+    --posting-url <url>  Posting URL, recorded in the report header and
+                     used as the tracker's dedup key
     --no-save        Do not save report to reports/ directory
     --no-compress    Skip token budget compression (full context injection)
     --help           Show this help
@@ -110,6 +117,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
 // Parse flags
 let jdText     = '';
+let postingUrl = '';
 let modelName  = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 let baseUrl    = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
 let apiKey     = process.env.OPENAI_API_KEY || '';
@@ -136,6 +144,8 @@ for (let i = 0; i < args.length; i++) {
     baseUrl = args[++i].replace(/\/$/, '');
   } else if (args[i] === '--key' && args[i + 1]) {
     apiKey = args[++i];
+  } else if (args[i] === '--posting-url' && args[i + 1]) {
+    postingUrl = args[++i];
   } else if (args[i] === '--no-save') {
     saveReport = false;
   } else if (args[i] === '--no-compress') {
@@ -147,6 +157,15 @@ for (let i = 0; i < args.length; i++) {
 
 if (!jdText) {
   console.error('❌  No Job Description provided. Run with --help for usage.');
+  process.exit(1);
+}
+
+// A posting URL is the tracker's deterministic dedup key, so it is taken only in
+// a form that can actually become one. normalizeUrl yields no key for anything
+// else, and a placeholder written into the column would hand every such row the
+// same key.
+if (postingUrl && !/^https?:\/\//i.test(postingUrl)) {
+  console.error(`❌  --posting-url must be an http(s) URL: "${postingUrl}"`);
   process.exit(1);
 }
 
@@ -254,7 +273,8 @@ function normalizedTrackerScore(value) {
   // is not 5 is refused rather than reinterpreted: parseFloat alone read `8/10`
   // as 8 and wrote `8/5`, which satisfies SCORE_CELL_RE and merges as a genuine
   // score. Nothing else range-checks this -- unlike gemini-eval, these two have
-  // no validateReport -- so an out-of-range value would reach stats.mjs averages
+  // no validateEvaluationShape (gemini-eval.mjs:228) -- an out-of-range value
+  // would reach stats.mjs averages
   // and score gates as fact. N/A is the honest cell for anything unreadable.
   const parsed = clean.match(/^(\d+(?:\.\d+)?)\s*(?:\/\s*(\d+(?:\.\d+)?))?/);
   if (!parsed) return 'N/A';
@@ -491,6 +511,7 @@ if (saveReport) {
 **Date:** ${today}
 **Archetype:** ${archetype}
 **Score:** ${score}/5
+**URL:** ${postingUrl || '(pasted)'}
 **Legitimacy:** ${legitimacy}
 **PDF:** pending
 **Tool:** OpenAI-compatible (${modelName} @ ${endpointHost})
@@ -522,6 +543,10 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
       `[${num}](reports/${filename})`,
       tsvSafe(`OpenAI-compatible evaluation (${modelName})`),
     ];
+    // Optional tenth field. merge-tracker.mjs:697 detects it by its http(s)
+    // prefix, so it stays order-independent with the optional location field,
+    // and Pass 0 can match on it instead of waiting for --backfill-urls.
+    if (postingUrl) trackerFields.push(tsvSafe(postingUrl));
     mkdirSync(PATHS.trackerAdditions, { recursive: true });
     writeFileSync(join(PATHS.trackerAdditions, additionName), `${trackerFields.join('\t')}\n`, 'utf-8');
     console.log(`\n📊  Tracker addition saved: batch/tracker-additions/${additionName}`);
