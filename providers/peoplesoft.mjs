@@ -655,9 +655,17 @@ export function parseJobDetail(html, expectedJobId) {
   // Section containers appear in DOM order — collecting indices via a single
   // forward regex scan preserves that order without needing real tree walk.
   const sectionIndices = [];
-  const secRe = /id=["']win0divHRS_SCH_PSTDSC_row\$(\d+)["']/g;
+  // Same quoted/unquoted-id tolerance as parseSearchPage()'s rowRe above —
+  // PeopleSoft's own generated markup was observed live emitting at least one
+  // id attribute unquoted (see extractById()'s header note), and this scan
+  // used to only match the quoted form: on a tenant rendering
+  // win0divHRS_SCH_PSTDSC_row$N unquoted, sectionIndices stayed empty,
+  // descriptionText silently came back '', and fetch() (an empty string is
+  // falsy) attached no description and never retried PostingSeq=2 — a silent
+  // per-tenant description loss, not a parse error (#3739 review).
+  const secRe = /\bid=(?:["']win0divHRS_SCH_PSTDSC_row\$(\d+)["']|win0divHRS_SCH_PSTDSC_row\$(\d+)(?=[\s>]))/g;
   let sm;
-  while ((sm = secRe.exec(str))) sectionIndices.push(sm[1]);
+  while ((sm = secRe.exec(str))) sectionIndices.push(sm[1] ?? sm[2]);
 
   // Sections are collected as plain text only — descriptionText (via the
   // shared htmlToText) is the only description form this provider exposes on
@@ -723,7 +731,18 @@ async function fetchJobDetail(config, session, jobId) {
 
 function resolveMaxLoadMore(entry) {
   const v = entry?.max_pages;
-  if (Number.isInteger(v) && v > 0) return Math.min(v, MAX_LOAD_MORE_CAP);
+  // entry.max_pages is documented (and named) as a TOTAL page count, matching
+  // every other paginating provider's max_pages field — but fetch() always
+  // performs the initial GET first, then this value bounds only the
+  // ADDITIONAL "load more" requests. Passing v straight through used to be an
+  // off-by-one: max_pages: 1 allowed one extra POST beyond the initial GET
+  // (2 pages fetched), when "1" should mean exactly 1 page total, i.e. zero
+  // load-more requests. `v - 1` converts total-page semantics to the
+  // additional-request count this function actually returns (mirrors the
+  // probing branch just above fetch()'s call site, which already does
+  // `ctxMaxPages - 1` for the same reason). Invalid/absent max_pages is
+  // unaffected — still DEFAULT_MAX_LOAD_MORE.
+  if (Number.isInteger(v) && v > 0) return Math.min(v - 1, MAX_LOAD_MORE_CAP);
   return DEFAULT_MAX_LOAD_MORE;
 }
 
