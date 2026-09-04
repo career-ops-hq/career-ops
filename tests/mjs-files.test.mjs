@@ -337,6 +337,76 @@ function bodySpan(code, head) {
 }
 
 /**
+ * Does the branch `guard` controls EXCLUDE the descent at `descentIndex`?
+ *
+ * Order, argument and a controlling position are still not enough:
+ * `if (isNestedCheckout(full)) walk(full);` has all three and steps straight
+ * into the checkout, because the branch it controls is the one that descends.
+ * Polarity decides which side must hold the descent — a positive test has to
+ * skip (`continue` / `return` / `break`) with the descent outside it, a negated
+ * one has to wrap the descent.
+ *
+ * @param {string} body - The function body.
+ * @param {{index: number, negated: boolean}} guard - A predicate call in it.
+ * @param {number} descentIndex - Offset of the recursive call.
+ * @returns {boolean}
+ */
+function branchExcludesDescent(body, guard, descentIndex) {
+  // The span of `{...}` or `stmt;` starting at `from`.
+  const consequentSpan = (from) => {
+    let i = from;
+    while (i < body.length && /\s/.test(body[i])) i++;
+    if (body[i] === '{') {
+      let depth = 0;
+      for (let k = i; k < body.length; k++) {
+        if (body[k] === '{') depth++;
+        else if (body[k] === '}' && --depth === 0) return [i, k + 1];
+      }
+      return null;
+    }
+    const end = body.indexOf(';', i);
+    return end === -1 ? null : [i, end + 1];
+  };
+  const matching = (open, chars) => {
+    let depth = 0;
+    for (let k = open; k < body.length; k++) {
+      if (chars[0].includes(body[k])) depth++;
+      else if (chars[1].includes(body[k]) && --depth === 0) return k;
+    }
+    return -1;
+  };
+
+  // `if (...)` whose condition contains the guard.
+  const ifs = [...body.matchAll(/\bif\s*\(/g)].filter((m) => m.index < guard.index);
+  const nearestIf = ifs[ifs.length - 1];
+  if (nearestIf) {
+    const condOpen = nearestIf.index + nearestIf[0].length - 1;
+    const condClose = matching(condOpen, ['(', ')']);
+    if (condClose > guard.index) {
+      const span = consequentSpan(condClose + 1);
+      if (!span) return false;
+      const inside = descentIndex >= span[0] && descentIndex < span[1];
+      if (guard.negated) return inside;
+      return !inside && /\b(?:continue|return|break)\b/.test(body.slice(span[0], span[1]));
+    }
+  }
+
+  // `cond ? a : b` — the descent must sit on the side the predicate allows.
+  const callClose = matching(body.indexOf('(', guard.index), ['([{', ')]}']);
+  const rest = body.slice(callClose + 1);
+  const q = rest.search(/\?/);
+  const semi = rest.search(/;/);
+  if (q !== -1 && (semi === -1 || q < semi)) {
+    const colon = rest.indexOf(':', q);
+    if (colon === -1) return false;
+    const trueSide = [callClose + 1 + q, callClose + 1 + colon];
+    const inTrue = descentIndex > trueSide[0] && descentIndex < trueSide[1];
+    return guard.negated ? inTrue : !inTrue && descentIndex > trueSide[1];
+  }
+  return false;
+}
+
+/**
  * Is every recursive descent in `fn` preceded by a guard on THAT descent's own
  * argument?
  *
@@ -350,7 +420,10 @@ function bodySpan(code, head) {
  *     descends into;
  *   - `isNestedCheckout(full);` as a statement computes a boolean and drops it;
  *   - a guard after the recursion prevents nothing, and a guard before the
- *     SECOND of two descents leaves the first unguarded.
+ *     SECOND of two descents leaves the first unguarded;
+ *   - `if (isNestedCheckout(full)) walk(full);` has the right argument in the
+ *     right order under a real branch, and steps into the checkout, because
+ *     the branch it controls is the descending one.
  *
  * Matching the guard's argument to the descent's argument answers all of them
  * at once: the guarded path is the path being entered, or it is not a guard.
@@ -385,18 +458,32 @@ function guardsEveryDescent(fn, recursiveNames) {
 
   // A guard is a call whose RESULT reaches a branch. A bare statement drops it.
   const guards = [...fn.body.matchAll(/\bisNestedCheckout\s*\(/g)]
-    .filter((m) => /(?:if\s*\(|&&|\|\||!|\?|:|return\s|=>\s*)\s*$/.test(fn.body.slice(Math.max(0, m.index - 60), m.index)))
-    .map((m) => ({ index: m.index, arg: norm(firstArg(m.index + m[0].length - 1)) }));
+    .map((m) => ({ m, before: fn.body.slice(Math.max(0, m.index - 60), m.index) }))
+    .filter(({ before }) => /(?:if\s*\(|&&|\|\||!|\?|:|return\s|=>\s*)\s*$/.test(before))
+    .map(({ m, before }) => ({
+      index: m.index,
+      arg: norm(firstArg(m.index + m[0].length - 1)),
+      negated: /!\s*$/.test(before),
+    }));
 
-  const read = fn.body.search(/\breaddirSync\s*\(/);
-  if (guards.some((g) => g.arg === firstParam && (read === -1 || g.index < read))) return true;
+  // Covering a descent takes all four: the guard comes first, names the same
+  // path, and the branch it controls is the one that does NOT descend.
+  const covers = (g, descentIndex) =>
+    g.index < descentIndex && branchExcludesDescent(fn.body, g, descentIndex);
 
   const descents = recursiveNames.flatMap((name) =>
     [...fn.body.matchAll(new RegExp(`\\b${name.split('#')[0]}\\s*\\(`, 'g'))]
       .map((m) => ({ index: m.index, arg: norm(firstArg(m.index + m[0].length - 1)) })),
   );
   if (descents.length === 0) return false;
-  return descents.every((d) => guards.some((g) => g.index < d.index && g.arg === d.arg && g.arg !== ''));
+
+  // The entry guard covers every descent at once — the recursion re-enters
+  // through it — so it is checked against all of them, not one.
+  const read = fn.body.search(/\breaddirSync\s*\(/);
+  if (guards.some((g) => g.arg === firstParam && (read === -1 || g.index < read)
+      && descents.every((d) => covers(g, d.index)))) return true;
+
+  return descents.every((d) => guards.some((g) => g.arg === d.arg && g.arg !== '' && covers(g, d.index)));
 }
 
 /**
@@ -681,6 +768,27 @@ test('the walker detector recognizes every shape it claims to, and only real rec
         }
       }
     `),
+    // Right argument, right order, real branch — and the branch it controls is
+    // the one that descends. Polarity is the whole difference.
+    f('guards-wrong-polarity.mjs', `
+      function walk(dir) {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, e.name);
+          if (e.isDirectory()) { if (isNestedCheckout(full)) walk(full); }
+        }
+      }
+    `),
+    // The same test written the other way round: NOT nested, so the descent
+    // belongs inside the branch. This is intake.mjs's shape and must stay
+    // guarded — rejecting it would be the opposite mistake.
+    f('guards-negated.mjs', `
+      function walk(dir) {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, e.name);
+          if (e.isDirectory() && !isNestedCheckout(full)) walk(full);
+        }
+      }
+    `),
     // The guard named ONLY in a comment. Documented as guarded, descends into
     // every checkout it finds.
     f('comment-only.mjs', `
@@ -711,18 +819,20 @@ test('the walker detector recognizes every shape it claims to, and only real rec
       'guards-alias.mjs:walk',
       'guards-elsewhere.mjs:walk',
       'guards-ignored-result.mjs:walk',
+      'guards-negated.mjs:walk [guarded]',
       'guards-normalized-parent.mjs:walk',
       'guards-other-child.mjs:walk',
       'guards-parent.mjs:walk',
       'guards-second-descent-only.mjs:walk',
       'guards-too-late.mjs:walk',
+      'guards-wrong-polarity.mjs:walk',
       'method.mjs:walk',
       'mutual.mjs:collect',
       'mutual.mjs:descend',
       'regex-after-keyword.mjs:walk [guarded]',
       'wrapper-read.mjs:walk',
     ],
-    'the detector must see method, brace-less-arrow, unparenthesized-parameter arrow, mutually recursive, same-named and wrapper-reading walkers, must reject a guard that names anything other than the path being descended into — the directory being read, an alias or normalization of it, an unrelated directory, another child — while accepting one at function entry, must reject a predicate result that is dropped, consulted after the recursion, or missing before an earlier descent, must not truncate a body at braces inside a literal or a keyword-position regex, must not count a guard written in a comment, and must ignore a non-recursive read',
+    'the detector must see method, brace-less-arrow, unparenthesized-parameter arrow, mutually recursive, same-named and wrapper-reading walkers, must reject a guard that names anything other than the path being descended into — the directory being read, an alias or normalization of it, an unrelated directory, another child — while accepting one at function entry, must reject a predicate result that is dropped, consulted after the recursion, missing before an earlier descent, or controlling the branch that descends rather than the one that skips (while accepting the negated form that wraps the descent), must not truncate a body at braces inside a literal or a keyword-position regex, must not count a guard written in a comment, and must ignore a non-recursive read',
   );
 });
 
