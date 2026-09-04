@@ -9597,6 +9597,48 @@ try {
     fail(`headless evaluators still carry private max+1 allocators: ${unmigratedEvaluators.join(', ')}`);
   }
 
+  // Same family, second contract (#3707): every headless evaluator persists its
+  // evaluation as a TSV in batch/tracker-additions, so merge-tracker.mjs applies
+  // dedup, status validation, report-link normalization and the tracker lock
+  // (AGENTS.md Pipeline Integrity rule 1). openai-eval/ollama-eval used to print
+  // a markdown row for the user to paste into data/applications.md instead --
+  // 8 cells against a 9-column tracker, which every reader's width guard drops
+  // as a non-data line, so the pasted evaluation vanished and verify-pipeline
+  // still reported the tracker clean.
+  const pastedRowRe = /Tracker entry \(add to|console\.log\(`[^`]*\|\s*\$\{num\}\s*\|/;
+  const unpersistedEvaluators = evaluatorSources
+    .filter(([, source]) => !/tracker-additions/.test(source) || pastedRowRe.test(source))
+    .map(([name]) => name);
+  if (unpersistedEvaluators.length === 0) {
+    pass('all headless evaluators persist through batch/tracker-additions, none dictates a hand-pasted row');
+  } else {
+    fail(`headless evaluators bypass the tracker-addition path: ${unpersistedEvaluators.join(', ')}`);
+  }
+
+  // The addition itself must carry all nine columns in the TSV contract's order
+  // (status BEFORE score) -- the two evaluators converted in #3707 build the row
+  // from a literal, so pin the field list rather than only the directory.
+  const nineFieldRe = new RegExp([
+    'const trackerFields = \\[',
+    "String\\(parseInt\\(num, 10\\)\\),",
+    'today,',
+    'tsvSafe\\(company\\),',
+    'tsvSafe\\(role\\),',
+    "'Evaluated',",
+    'normalizedTrackerScore\\(score\\),',
+    "'❌',",
+    '`\\[\\$\\{num\\}\\]\\(reports/\\$\\{filename\\}\\)`,',
+    'tsvSafe\\(`[^`]*\\$\\{modelName\\}[^`]*`\\),',
+    '\\];',
+  ].join('\\s*'));
+  const wrongShape = ['openai-eval.mjs', 'ollama-eval.mjs']
+    .filter(name => !nineFieldRe.test(readFile(name)));
+  if (wrongShape.length === 0) {
+    pass('openai-eval and ollama-eval write the nine-column addition with status before score');
+  } else {
+    fail(`tracker addition fields wrong or reordered in: ${wrongShape.join(', ')}`);
+  }
+
   // --count N: contiguous range from an empty dir.
   const rangeTmp = mkdtempSync(join(tmpdir(), 'career-ops-reserve-range-'));
   const range = reserveRun(['--count', '3'], rangeTmp);

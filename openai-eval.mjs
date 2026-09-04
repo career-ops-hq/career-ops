@@ -59,6 +59,7 @@ const PATHS = {
   cv:        join(DATA_ROOT, 'cv.md'),
   profileYml: join(DATA_ROOT, 'config', 'profile.yml'),
   reports:    join(DATA_ROOT, 'reports'),
+  trackerAdditions: join(DATA_ROOT, 'batch', 'tracker-additions'),
 };
 
 // ---------------------------------------------------------------------------
@@ -209,6 +210,47 @@ function readFile(path, label) {
     return `[${label} not found — skipping]`;
   }
   return readFileSync(path, 'utf-8').trim();
+}
+
+// ---------------------------------------------------------------------------
+// Tracker-addition helpers
+// ---------------------------------------------------------------------------
+/**
+ * Slugify a company name for report/addition filenames.
+ * @param {string} value - Raw company name.
+ * @returns {string} Lowercase dash slug, or "unknown" when nothing survives.
+ */
+function slugifyCompany(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '') || 'unknown';
+}
+
+/**
+ * Flatten a value into a single TSV cell (tabs and newlines would shift columns).
+ * @param {*} value - Raw cell value.
+ * @returns {string} Single-line, trimmed cell.
+ */
+function tsvSafe(value) {
+  return String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
+}
+
+/**
+ * Normalize a model-reported score into the tracker's score cell.
+ *
+ * A missing or unparseable score becomes the documented `N/A` sentinel rather
+ * than an empty cell — `looksLikeScoreCell` in tracker-parse.mjs recognizes
+ * `N/A`, and a blank or unrecognized placeholder makes the row ambiguous and
+ * gets it skipped with a warning (#1799).
+ *
+ * @param {string} value - Score as extracted from the model's summary block.
+ * @returns {string} `X.X/5` or `N/A`.
+ */
+function normalizedTrackerScore(value) {
+  const clean = tsvSafe(value);
+  if (!clean || clean === '?' || /n\/?a/i.test(clean) || isNaN(parseFloat(clean))) return 'N/A';
+  return /\/5$/i.test(clean) ? clean : `${parseFloat(clean)}/5`;
 }
 
 // ---------------------------------------------------------------------------
@@ -429,7 +471,7 @@ if (saveReport) {
     reservedNumbers   = await reserveReportNumbers(1, { rootDir: ROOT, reportsDir: PATHS.reports });
     const num         = formatReportNumber(reservedNumbers[0]);
     const today       = new Date().toISOString().split('T')[0];
-    const companySlug = company.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const companySlug = slugifyCompany(company);
     const filename    = `${num}-${companySlug}-${today}.md`;
     const reportPath  = join(PATHS.reports, filename);
 
@@ -450,8 +492,29 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
     writeFileSync(reportPath, reportContent, 'utf-8');
     console.log(`\n✅  Report saved: reports/${filename}`);
 
-    console.log(`\n📊  Tracker entry (add to data/applications.md):`);
-    console.log(`    | ${num} | ${today} | ${company} | ${role} | ${score}/5 | Evaluated | ❌ | [${num}](reports/${filename}) |`);
+    // AGENTS.md Pipeline Integrity rule 1: never hand the user a row to paste
+    // into data/applications.md. Evaluations persist as a tracker addition and
+    // merge-tracker.mjs applies dedup, status validation, report-link
+    // normalization and the tracker lock. A pasted literal skipped all of that,
+    // and at 8 cells it was also silently dropped by every reader's width guard.
+    // Field order is the TSV contract's -- status BEFORE score; merge-tracker
+    // swaps them into the tracker's own column order, resolved by name.
+    const additionName = `${num}-${companySlug}.tsv`;
+    const trackerFields = [
+      String(parseInt(num, 10)),
+      today,
+      tsvSafe(company),
+      tsvSafe(role),
+      'Evaluated',
+      normalizedTrackerScore(score),
+      '❌',
+      `[${num}](reports/${filename})`,
+      tsvSafe(`OpenAI-compatible evaluation (${modelName})`),
+    ];
+    mkdirSync(PATHS.trackerAdditions, { recursive: true });
+    writeFileSync(join(PATHS.trackerAdditions, additionName), `${trackerFields.join('\t')}\n`, 'utf-8');
+    console.log(`\n📊  Tracker addition saved: batch/tracker-additions/${additionName}`);
+    console.log('    Run `node merge-tracker.mjs` to merge it into the tracker.');
   } catch (err) {
     console.warn(`⚠️   Could not save report: ${err.message}`);
   } finally {
