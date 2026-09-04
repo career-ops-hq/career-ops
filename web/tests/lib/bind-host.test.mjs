@@ -24,6 +24,7 @@ import {
   validateAllowedHosts,
   resolveBindHost,
   isWidenedBind,
+  isWildcardAddress,
   hasHostFlag,
   planNextRun,
 } from "../../src/lib/bind-host.mjs";
@@ -57,6 +58,59 @@ test("a token that is not a hostname or an address is refused", () => {
   }
 });
 
+test("an every-interface address is refused as an allowed host", () => {
+  // Given the wildcards, in each spelling. Accepting one was the worst state the
+  // module can reach: the socket opens on every interface while the guard still
+  // matches Host literally, so an honest LAN client gets 403 and only a client
+  // spelling `Host: 0.0.0.0` is admitted — and grantsNoNewHost, which flags that
+  // shape elsewhere, reads false because the list does name a non-loopback host.
+  for (const envValue of ["0.0.0.0", "::", "0::0", "0:0:0:0:0:0:0:0"]) {
+    // When the value is validated
+    const result = validateAllowedHosts(envValue);
+    // Then it is refused: a bind target is not a host identity
+    assert.equal(result.ok, false, `${JSON.stringify(envValue)} must be refused`);
+    assert.match(result.error, /every interface/);
+  }
+});
+
+test("an unscoped link-local address is refused", () => {
+  // Given a link-local address, which is ambiguous across interfaces and cannot
+  // be bound without a zone index — listen() would fail on it
+  for (const envValue of ["fe80::1", "febf::dead:beef"]) {
+    // When the value is validated
+    // Then it is refused rather than accepted as a bindable address
+    assert.equal(validateAllowedHosts(envValue).ok, false, `${envValue} must be refused`);
+  }
+  // And the scoped spelling is refused too, as `%` is not a host character
+  assert.equal(validateAllowedHosts("fe80::1%en0").ok, false);
+});
+
+test("every spelling of every-interface is recognised as a wildcard", () => {
+  // Given the wildcards, and the specific addresses they must not be confused
+  // with. `loopbackUnreachable` is derived from this rather than from equality
+  // with the 0.0.0.0 literal: `::` is the IPv6 wildcard and serves loopback just
+  // as 0.0.0.0 does, so a literal comparison would have the launcher announce
+  // that localhost stops answering while it answers fine.
+  for (const host of [ALL_INTERFACES_BIND, "::", "0::0", "0:0:0:0:0:0:0:0"]) {
+    // When each is classified
+    assert.equal(isWildcardAddress(host), true, `${host} is every interface`);
+  }
+  // Then a real address is not swept up with them
+  for (const host of ["192.168.1.50", "2001:db8::5", LOOPBACK_BIND, "::1", "10.0.0.4"]) {
+    assert.equal(isWildcardAddress(host), false, `${host} is one interface`);
+  }
+});
+
+test("a wildcard bind is never reported as costing loopback", () => {
+  // Given the wildcard bind an opt-in can still produce, via a hostname
+  const plan = planNextRun({ command: "dev", envValue: "nas.local, 10.0.0.4" });
+  // When the run is planned
+  // Then it widens but does not claim localhost stops answering
+  assert.equal(plan.bindHost, ALL_INTERFACES_BIND);
+  assert.equal(plan.widened, true);
+  assert.equal(plan.loopbackUnreachable, false, "a wildcard bind still answers on loopback");
+});
+
 test("a URL written where a host belongs is refused", () => {
   // Given a URL. Host-header normalization cuts at the first colon, so this
   // arrives as the bare name `http` — valid, non-loopback, and would have opened
@@ -70,7 +124,7 @@ test("a URL written where a host belongs is refused", () => {
 
 test("real hosts and addresses are accepted", () => {
   // Given the spellings the README tells users to write
-  for (const envValue of ["192.168.1.50", "nas.local", "dev-box", "fe80::1", "nas.local.", "a.b, 10.0.0.4"]) {
+  for (const envValue of ["192.168.1.50", "nas.local", "dev-box", "2001:db8::5", "nas.local.", "a.b, 10.0.0.4"]) {
     // When the value is validated
     // Then it is accepted, so a legitimate opt-in is never blocked by the guard
     assert.equal(validateAllowedHosts(envValue).ok, true, `${JSON.stringify(envValue)} must be accepted`);
@@ -119,7 +173,7 @@ test("naming one address binds that address, not every interface", () => {
   // tunnel or a phone hotspot that was never opted in to.
   assert.equal(resolveBindHost("192.168.1.50"), "192.168.1.50");
   assert.equal(resolveBindHost("192.168.1.50:3000"), "192.168.1.50", "a port is not part of the address");
-  assert.equal(resolveBindHost("fe80::1"), "fe80::1", "an IPv6 literal binds too — 0.0.0.0 could not serve it");
+  assert.equal(resolveBindHost("2001:db8::5"), "2001:db8::5", "an IPv6 literal binds too — 0.0.0.0 could not serve it");
 });
 
 test("naming a loopback host alongside an address opts back into every interface", () => {

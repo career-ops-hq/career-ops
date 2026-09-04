@@ -100,8 +100,20 @@ socket to the whole network for someone typing the word for "closed". They are
 refused, as is anything else that cannot be read as a hostname or an IP address.
 To stay on loopback, unset the variable.
 
+`0.0.0.0` and `::` are refused too. They name every interface, which is a bind
+target rather than a host anyone is addressed by: accepting one would open the
+socket while the guard went on matching `Host` literally, so honest clients on
+your network would get `403` and only a client spelling `Host: 0.0.0.0` would be
+let in. To open it up, name the hosts that should reach it.
+
 **How the bind is chosen.** Name a single IP address and the socket binds exactly
-that address — `192.168.1.50` and nothing else. Binding `0.0.0.0` for it would
+that address — `192.168.1.50` and nothing else. It has to be an address *this*
+machine holds: naming the address of the laptop that should reach the dev box
+makes the server fail to start with `EADDRNOTAVAIL`, since you can only listen on
+your own interfaces. Name that laptop's *hostname* instead, or use a hostname for
+the box, and the bind falls back to every interface. Link-local addresses
+(`fe80::…`) are refused: they are ambiguous across interfaces and cannot be bound
+without a zone index. Binding `0.0.0.0` for a single address would
 also publish the dashboard on every other interface the machine has, a VPN tunnel
 or a phone hotspot included, none of which you asked for. One socket carries one
 address, so `http://localhost:3000` stops answering; open it at the address you
@@ -136,8 +148,11 @@ browser as same-origin, which a loopback bind does nothing to stop. The `Host`
 header on that request carries the attacker's domain, which is what refuses it.
 
 **In a container** the bind has to be `0.0.0.0` — loopback inside a network
-namespace is not reachable from the host — so name a non-loopback host to open
-it. A forwarded port (`-p 3000:3000`) still arrives with `Host: localhost`, which
+namespace is not reachable from the host. Since `0.0.0.0` itself is refused as an
+allowed host, get there by naming a *hostname* (the container's own name is the
+obvious one): a hostname needs a resolver the launcher does not have, so the bind
+falls back to every interface, which is what a namespace needs. A forwarded port
+(`-p 3000:3000`) still arrives with `Host: localhost`, which
 the guard admits, so the port publication is the whole of the access control
 there: publish it on `127.0.0.1:3000:3000`, not `0.0.0.0`.
 

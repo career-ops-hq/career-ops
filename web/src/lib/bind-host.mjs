@@ -83,6 +83,40 @@ function isIPLiteral(host) {
 }
 
 /**
+ * Is this address "every interface" rather than one of them?
+ *
+ * Covers `0.0.0.0` and every spelling of the IPv6 wildcard (`::`, `0::0`,
+ * `0:0:0:0:0:0:0:0`). Both are bind targets, never identities a client can be
+ * addressed by, so they mean something different in a bind than in a host list.
+ *
+ * Exported because it guards two unrelated decisions — refusing a wildcard in
+ * the allow-list, and refusing to claim loopback is lost on a wildcard bind —
+ * and validation makes the second unreachable through planNextRun. Tested
+ * directly so that guard stays falsifiable rather than becoming decoration.
+ *
+ * @param {string} host
+ * @returns {boolean}
+ */
+export function isWildcardAddress(host) {
+  return host === ALL_INTERFACES_BIND || (host.includes(":") && /^[0:]+$/.test(host));
+}
+
+/**
+ * An IPv6 link-local address (fe80::/10) with no zone index.
+ *
+ * A link-local address is ambiguous across interfaces, so binding one requires
+ * a zone (`fe80::1%en0`) — without it listen() fails. The scoped spelling is
+ * refused earlier as a hostname, since `%` is not a host character, so this
+ * only has to catch the bare form.
+ *
+ * @param {string} host
+ * @returns {boolean}
+ */
+function isUnscopedLinkLocalV6(host) {
+  return /^fe[89ab][0-9a-f]:/.test(host);
+}
+
+/**
  * Is this a host someone could plausibly have meant?
  *
  * @param {string} host  a single entry, already lowercased and port-stripped
@@ -119,6 +153,26 @@ export function validateAllowedHosts(envValue) {
           `CAREER_OPS_WEB_ALLOWED_HOSTS="${host}" is not a switch — it is the list of hosts allowed to\n` +
           "reach the dashboard, and any name in it opens the socket beyond this machine.\n" +
           "Unset the variable to stay on loopback, or name the hosts that should reach it.",
+      };
+    }
+    if (isWildcardAddress(host)) {
+      return {
+        ok: false,
+        error:
+          `CAREER_OPS_WEB_ALLOWED_HOSTS="${host}" names every interface, which is a bind target and\n` +
+          "not a host any client is addressed by. Accepting it opens the socket while the request\n" +
+          "guard still matches Host literally, so honest clients on your network get 403 and only a\n" +
+          `client that spells "Host: ${host}" is let in.\n` +
+          'Name the hosts that should reach it, e.g. CAREER_OPS_WEB_ALLOWED_HOSTS="192.168.1.50".',
+      };
+    }
+    if (isUnscopedLinkLocalV6(host)) {
+      return {
+        ok: false,
+        error:
+          `CAREER_OPS_WEB_ALLOWED_HOSTS contains the link-local address "${host}", which is ambiguous\n` +
+          "across interfaces and cannot be bound without a zone index. Use a routable address or a\n" +
+          "hostname instead.",
       };
     }
     if (URL_SCHEMES.has(host)) {
@@ -272,6 +326,11 @@ export function planNextRun({ command, extra = [], envValue }) {
     // A single named address carries the whole socket, so http://localhost:PORT
     // stops answering. Worth saying out loud: the symptom otherwise looks like a
     // server that failed to start.
-    loopbackUnreachable: !hostFlagSupplied && widened && bindHost !== ALL_INTERFACES_BIND,
+    // Asked of the address rather than compared against the 0.0.0.0 literal: the
+    // IPv6 wildcard is also every interface, loopback included, so comparing to
+    // one spelling would have the launcher announce that localhost stops
+    // answering while it answers fine — a false claim about its own bind, which
+    // is the failure this module exists to prevent.
+    loopbackUnreachable: !hostFlagSupplied && widened && !isWildcardAddress(bindHost),
   };
 }
