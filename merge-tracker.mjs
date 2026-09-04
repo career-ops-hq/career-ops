@@ -722,6 +722,32 @@ function parseTsvExtras(parts, filename) {
 }
 
 /**
+ * Parse an addition's tracker number, rejecting anything that is not a whole
+ * positive integer.
+ *
+ * `parseInt` is the wrong tool: it stops at the first character that cannot
+ * continue a number, so `17oops` and `17.5` both become 17 and the row merges
+ * under a tracker number the file never claimed. The guards downstream cannot
+ * see it — by then the damage is a perfectly valid-looking number.
+ *
+ * Leading zeros are DELIBERATELY allowed, and this is the reason the obvious
+ * `/^[1-9]\d*$/` would be wrong here: `reserve-report-num.mjs` returns a
+ * zero-padded 3-digit string (`padStart(3, '0')`), and both the batch prompt
+ * and `web/src/lib/run-prompts.mjs` hand that value straight to the `num` cell.
+ * So `035` is the canonical shape of every report under 100, not a malformed
+ * row, and rejecting it would drop those evaluations on the floor.
+ *
+ * @param {string} text - Raw cell contents.
+ * @returns {number|null} The tracker number, or null when the cell is not one.
+ */
+function parseTrackerNum(text) {
+  const t = String(text ?? '').trim();
+  if (!/^0*[1-9]\d*$/.test(t)) return null;
+  const n = Number(t);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+/**
  * Parse a HEADED addition: a row of column labels followed by exactly one data
  * row. Fields resolve by NAME, so no column order is privileged and the
  * score/status pair needs no content sniffing.
@@ -836,7 +862,7 @@ function parseHeadedAddition(lines, filename) {
   }
 
   return {
-    num: parseInt(at('num'), 10),
+    num: parseTrackerNum(at('num')),
     date: at('date'),
     company: at('company'),
     role: at('role'),
@@ -883,7 +909,9 @@ function parseTsvContent(content, filename) {
   if (looksLikeTsvHeaderRow(splitAdditionCells(rawLines[0]))) {
     const headed = parseHeadedAddition(rawLines, filename);
     if (!headed) return null;
-    if (isNaN(headed.num) || headed.num === 0) {
+    // Number.isSafeInteger rather than isNaN: parseTrackerNum returns null for a
+    // cell that is not a whole positive integer, and isNaN(null) is false.
+    if (!Number.isSafeInteger(headed.num) || headed.num <= 0) {
       console.warn(`⚠️  Skipping ${filename}: invalid entry number`);
       return null;
     }
@@ -911,7 +939,7 @@ function parseTsvContent(content, filename) {
       return null;
     }
     addition = {
-      num: parseInt(parts[0]),
+      num: parseTrackerNum(parts[0]),
       date: parts[1],
       company: parts[2],
       role: parts[3],
@@ -945,7 +973,7 @@ function parseTsvContent(content, filename) {
     }
 
     addition = {
-      num: parseInt(parts[0]),
+      num: parseTrackerNum(parts[0]),
       date: parts[1],
       company: parts[2],
       role: parts[3],
@@ -962,7 +990,8 @@ function parseTsvContent(content, filename) {
     Object.assign(addition, extras);
   }
 
-  if (isNaN(addition.num) || addition.num === 0) {
+  // See the headed guard above: null must be rejected, and isNaN(null) is false.
+  if (!Number.isSafeInteger(addition.num) || addition.num <= 0) {
     console.warn(`⚠️  Skipping ${filename}: invalid entry number`);
     return null;
   }
