@@ -51,26 +51,30 @@
 //     `grep -q` over each filename reported eight of eight registered; the
 //     eighth was test-all.mjs:6549, a comment.
 //
-//   - workflows: the name must be the argument of a `node` invocation in a
-//     `run:` script, AT A COMMAND POSITION. In YAML it is a bare shell token
-//     (`run: node upgrade-tests.mjs --pr-gate`), so the literal rule would
-//     match nothing and every workflow-run suite would read as unreachable.
+//   - workflows: the name must be the FIRST COMMAND of a `run:` script. In
+//     YAML it is a bare shell token (`run: node upgrade-tests.mjs --pr-gate`),
+//     so the literal rule would match nothing and every workflow-run suite
+//     would read as unreachable.
 //
-// Both rules were LOOSER than this in the first version, and CodeRabbit caught
-// both on #3765. The harness rule stripped whole-line and block comments with a
-// regex and then required quotes, which still accepted a trailing
-// `// registered 'foo-tests.mjs'`. The workflow rule scanned raw YAML text, so
-// a commented-out `# node foo-tests.mjs` matched — and so did `echo node
-// foo-tests.mjs`, which names the file without running it. Both are false-GREEN
-// paths, the exact failure this file exists to prevent, so neither is a nit:
-// the harness surface now collects string literals with a scanner that skips
-// comments and regex literals, and the workflow surface parses the YAML and
-// reads only `run:` values, matching `node` only at the start of a command.
+// The workflow rule was once "a `node` command anywhere at a command
+// position", which required knowing which text in a `run:` script was DATA.
+// Five consecutive review rounds each found a shell construct it got wrong
+// (#3765) — quoted spans, heredoc bodies, comments after control operators,
+// `<<\\EOF`, `<<1`, and `<<EOF-1` recorded as `EOF` so masking stopped at a
+// bare `EOF` line inside the body. Every one was a false GREEN, the exact bug
+// this file exists to prevent. The masking apparatus is gone: the first
+// command line is the one position that cannot be shell data, because a
+// heredoc body needs an earlier `<<` and a quoted span needs an earlier quote.
+// A rule that cannot be wrong about shell quoting beats one that is accurate
+// only once someone has finished writing a shell lexer inside a test.
 //
-// Known limitation, stated rather than papered over: an INDIRECT invocation —
+// Known limitations, stated rather than papered over. An INDIRECT invocation —
 // an npm script, a composite action, a shell wrapper — matches neither rule and
-// reports as unreachable. That is the safe direction. A false red is read and
-// resolved by whoever added it; a false green is the bug this file prevents.
+// reports as unreachable, and so does a `node` call that is not the first
+// command of its step (`npm ci && node x-tests.mjs`, or a second line of a
+// block scalar). Both are the safe direction: a false red is read and resolved
+// by whoever wrote the workflow, and the remedy is a step of its own. A false
+// green is the bug this file prevents.
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import * as yaml from 'js-yaml';
@@ -288,114 +292,62 @@ export function runCommands(doc) {
 }
 
 /**
- * Blank out the parts of a shell script that are DATA rather than commands:
- * heredoc bodies and quoted spans. Line structure is preserved so the command
- * regex below can still anchor on `^`.
+ * The first COMMAND line of a shell script: the first line that is neither
+ * blank nor a whole-line comment.
  *
- * Without this, a heredoc body is indistinguishable from a command list —
- *
- *     cat <<EOF > script.sh
- *     node x-tests.mjs        <-- line start, but writing a file, not running
- *     EOF
- *
- * — which the first version matched (CodeRabbit, #3765). The multi-line quoted
- * form was safe only by accident: the closing `"` defeated the trailing
- * lookahead, so the same string with a flag after the filename would have
- * matched.
- *
- * Deliberately blunt about one case: `sh -c "node x-tests.mjs"` IS an
- * invocation and now reads as unreachable, because its command lives inside a
- * quoted span this cannot tell from data. That is the safe direction and the
- * same trade this file states for indirect invocations — a false red is read
- * and resolved by whoever wrote it; a false green is the bug.
+ * Line 1 is the one position in a script that cannot be shell data. A heredoc
+ * body needs a `<<` on an earlier line; a multi-line quoted span needs an
+ * earlier opening quote. So reading only the first command needs no shell
+ * lexing at all, and the whole class of bugs that comes with approximating one
+ * disappears with it.
  */
-export function maskShellData(script) {
-  // 1. Heredoc bodies. The delimiters form an ORDERED QUEUE: `cat <<A <<B`
-  //    queues two bodies, A's then B's, and recording only the first left B's
-  //    body visible as commands. Termination is exact for `<<WORD` — an
-  //    indented `  EOF` does NOT end `<<EOF`, so treating it as a terminator
-  //    un-masked the rest of a heredoc that was still running. `<<-WORD`
-  //    strips leading TABS only (not spaces), which is the shell's rule.
-  const lines = script.split('\n');
-  const kept = [];
-  const pending = [];
-  for (const line of lines) {
-    if (pending.length) {
-      const { word, stripTabs } = pending[0];
-      const probe = stripTabs ? line.replace(/^\t+/, '') : line;
-      if (probe === word) pending.shift();
-      kept.push('');
-      continue;
-    }
-    // `<<\\EOF` quotes the delimiter exactly as `<<'EOF'` does; missing it left
-    // the body unmasked and readable as commands.
-    const ops = [...line.matchAll(/<<(-?)\s*\\?(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/g)];
-    if (ops.length) {
-      for (const m of ops) pending.push({ word: m[3], stripTabs: m[1] === '-' });
-      // Keep only what precedes the first `<<`: `node a.mjs; cat <<EOF` still
-      // shows its real command, while the redirection tail cannot be mistaken
-      // for one.
-      kept.push(line.slice(0, ops[0].index));
-      continue;
-    }
-    kept.push(line);
+export function firstCommandLine(script) {
+  for (const line of String(script).split('\n')) {
+    const t = line.trim();
+    if (t === '' || t.startsWith('#')) continue;
+    return line;
   }
-
-  // 2. Quoted spans and shell comments, in ONE pass because each governs the
-  //    other: a `#` inside quotes is not a comment, and a quote inside a
-  //    comment does not open a span. A comment runs to end of line, so
-  //    `# setup; node x-tests.mjs` must not leave a `;` for the command regex
-  //    to anchor on. `#` only starts a comment at a word boundary — `foo#bar`
-  //    and `${#x}` are not comments.
-  const joined = kept.join('\n');
-  let out = '';
-  let quote = null;
-  let prev = '\n';
-  let i = 0;
-  while (i < joined.length) {
-    const c = joined[i];
-    if (quote) {
-      if (c === '\\' && quote === '"') { out += '  '; i += 2; prev = ' '; continue; }
-      if (c === quote) { quote = null; out += c; i++; prev = c; continue; }
-      out += c === '\n' ? '\n' : ' ';
-      i++; prev = ' ';
-      continue;
-    }
-    // A control operator ends a word just as whitespace does, so `;#` opens a
-    // comment. Missing that left the `;` inside `true;# note; node x.mjs`
-    // visible for the command regex to anchor on.
-    if (c === '#' && (prev === '\n' || /[\s;&|()]/.test(prev))) {
-      while (i < joined.length && joined[i] !== '\n') { out += ' '; i++; }
-      prev = ' ';
-      continue;
-    }
-    if (c === "'" || c === '"') { quote = c; out += c; i++; prev = c; continue; }
-    out += c; i++; prev = c;
-  }
-  return out;
+  return null;
 }
 
 /**
- * True when `name` is the target of a `node` invocation at a COMMAND POSITION
- * in any of `scripts` — line start, or after a `;`/`&&`/`||`/pipe — once the
- * script's data spans have been masked.
+ * True when `name` is the first command of any of `scripts`.
  *
- * The position requirement separates running a file from naming one:
- * `echo node foo-tests.mjs` matched the first version of this rule (#3765).
+ * DELIBERATELY STRICTER THAN THE SHELL. `npm ci && node x-tests.mjs` and a
+ * `node` call on the second line of a block scalar are real invocations that
+ * this reports as unreachable.
+ *
+ * That trade is the point. The previous version matched a `node` command
+ * anywhere at a command position, which meant it had to know which text in a
+ * `run:` script was data — and five consecutive review rounds each found a
+ * shell construct it got wrong (#3765): quoted spans, heredoc bodies, comments
+ * after control operators, `<<\\EOF`, `<<1`, and `<<EOF-1` recorded as `EOF`,
+ * which stopped masking at a bare `EOF` line inside the body and exposed
+ * everything after it. Every one of those was a false GREEN — a suite reading
+ * as reachable while nothing ran it, which is the exact bug this file exists to
+ * prevent. A rule that cannot be wrong about shell quoting beats a rule that is
+ * accurate once someone has finished writing a shell lexer in a test.
+ *
+ * The cost is false REDS, and this file already takes that direction for
+ * indirect invocations: a false red is read and resolved by whoever wrote the
+ * workflow, and the fix is to put the invocation in its own step. All three
+ * upgrade-tests.mjs steps are already `run: node upgrade-tests.mjs --<flag>`.
  */
 export function invokesNode(scripts, name) {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // The trailing boundary accepts the shell's word terminators, not just
-  // whitespace: `(cd sub && node x-tests.mjs)` and `node x-tests.mjs; echo ok`
-  // are invocations, and requiring \s or EOL reported both as unreachable.
-  const re = new RegExp(String.raw`(?:^|[;&|(])\s*node\s+(?:\.[\\/])?${esc}(?=[\s;)&|]|$)`, 'm');
-  return scripts.some((sc) => re.test(maskShellData(sc)));
+  const re = new RegExp(String.raw`^\s*node\s+(?:\.[\\/])?${esc}(?=[\s;)&|]|$)`);
+  return scripts.some((sc) => {
+    const first = firstCommandLine(sc);
+    return first !== null && re.test(first);
+  });
 }
 
 // ── Fixtures for the two match rules ────────────────────────────────────────
-// The rules are the guard. A rule that silently loosens turns this whole file
-// into the false green it exists to prevent, so both are pinned against the
-// shapes that fooled the first version.
+// The rules ARE the guard: one that silently loosens turns this file into the
+// false green it exists to prevent. Both directions are pinned — the shapes
+// that must NOT count, and the accepted false reds, so that narrowing the
+// workflow rule to the first command stays a deliberate choice on the record
+// rather than something a later edit quietly undoes.
 const HARNESS_CASES = [
   ["{ name: 'x-tests.mjs', expectExit: 0 },", true, 'a real registration'],
   ["run(NODE, ['./x-tests.mjs']);", true, 'a path-qualified invocation'],
@@ -406,33 +358,23 @@ const HARNESS_CASES = [
   ['fail(`x-tests.mjs is gone`);', true, 'a template literal is still a literal'],
 ];
 const WORKFLOW_CASES = [
-  ['node x-tests.mjs --pr-gate', true, 'a bare invocation'],
-  ['  node x-tests.mjs', true, 'an indented invocation'],
-  ['npm ci && node x-tests.mjs', true, 'after a shell separator'],
-  ['node x-tests.mjs\nnpm test', true, 'first line of a multi-line script'],
-  ['# node x-tests.mjs', false, 'a YAML comment (#3765)'],
-  ['echo node x-tests.mjs', false, 'an echo argument (#3765)'],
-  ['echo "see x-tests.mjs"', false, 'a bare mention'],
-  ['cat <<EOF > s.sh\nnode x-tests.mjs\nEOF', false, 'a heredoc body (#3765 second pass)'],
-  ["cat <<'EOF'\nnode x-tests.mjs\nEOF", false, 'a quoted-delimiter heredoc'],
-  ['MSG="note\nnode x-tests.mjs --flag"', false, 'a multi-line double-quoted span'],
-  ['cat <<EOF\nnode x-tests.mjs\nEOF\nnode x-tests.mjs', true, 'a real command AFTER a heredoc still counts'],
-  ['# setup; node x-tests.mjs', false, 'a shell comment hiding a separator (#3765 third pass)'],
-  ['echo hi # node x-tests.mjs', false, 'a trailing shell comment'],
-  ['node x-tests.mjs # note', true, 'a real command with a trailing comment'],
-  ['echo foo#bar && node x-tests.mjs', true, 'a # mid-word is not a comment'],
-  ['cat <<EOF\na\n  EOF\nnode x-tests.mjs', false, 'an INDENTED EOF does not terminate <<EOF'],
-  ['cat <<-EOF\na\n\tEOF\nnode x-tests.mjs', true, '<<- strips tabs, so the terminator lands'],
-  ['cat <<FIRST <<SECOND\na\nFIRST\nnode x-tests.mjs\nSECOND', false, "the SECOND heredoc's body is still data"],
-  ['cat <<\\EOF\nnode x-tests.mjs\nEOF', false, 'a backslash-quoted heredoc delimiter (#3765 fourth pass)'],
-  ['true;# note; node x-tests.mjs', false, 'a comment opened by ;# (#3765 fourth pass)'],
-  ['true; node x-tests.mjs', true, 'a real command after ; still counts'],
-  ['(cd sub && node x-tests.mjs)', true, 'a command inside a subshell still counts'],
-  ['node x-tests.mjs; echo ok', true, 'a trailing ; is a word terminator, not a mismatch'],
-  ['node x-tests.mjs | tee log', true, 'a piped invocation still counts'],
-  ['node xx-tests.mjs', false, 'a longer sibling name must not match'],
+  ['node x-tests.mjs --pr-gate', true, 'the first command'],
+  ['  node x-tests.mjs', true, 'indented'],
+  ['node ./x-tests.mjs', true, 'path-qualified'],
+  ['node x-tests.mjs; echo ok', true, 'a trailing separator is a word terminator'],
+  ['\n\nnode x-tests.mjs', true, 'leading blank lines are skipped'],
+  ['# set the gate\nnode x-tests.mjs', true, 'a leading comment line is skipped'],
+  ['echo node x-tests.mjs', false, 'an echo argument is not a command'],
+  ['# node x-tests.mjs', false, 'a commented-out invocation'],
+  ['node xx-tests.mjs', false, 'a longer sibling name'],
+  ['cat <<EOF\nnode x-tests.mjs\nEOF', false, 'a heredoc body cannot be the first line'],
+  ['cat <<1\nnode x-tests.mjs\n1', false, 'nor can a numeric-delimiter heredoc body'],
+  ['MSG="note\nnode x-tests.mjs --flag"', false, 'nor a quoted span opened earlier'],
+  // Accepted false REDS. Each is a real invocation the strict rule declines to
+  // see; the remedy is a step of its own, and the alternative is a shell lexer.
+  ['npm ci && node x-tests.mjs', false, 'chained after another command (accepted false red)'],
+  ['npm ci\nnode x-tests.mjs', false, 'on a later line (accepted false red)'],
 ];
-
 // runCommands must read only the one path that executes. `with.run` is an
 // action input; `defaults.run` is a mapping of shell settings.
 const WORKFLOW_DOC = {
