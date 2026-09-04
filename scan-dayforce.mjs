@@ -73,8 +73,10 @@ import {
   buildVisaFilter,
   loadCandidateCountry,
   matchedTitleKeywords,
+  loadBlacklist,
   PORTALS_PATH,
 } from './scan.mjs';
+import { normalizeCompany } from './tracker-utils.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -294,7 +296,9 @@ export function loadConfig(portalsPath = PORTALS_PATH) {
   }
 
   const rawBoards = Array.isArray(config.dayforce_boards) ? config.dayforce_boards : [];
-  const validBoards = rawBoards.map(normalizeBoardEntry).filter(Boolean);
+  const blacklist = loadBlacklist();
+  const validBoards = rawBoards.map(normalizeBoardEntry).filter(Boolean)
+    .filter(board => !blacklist.has(normalizeCompany(board.name)));
   const boards = validBoards.filter(b => !SINGLE_TENANT || b.tenant === SINGLE_TENANT);
   const filters = {
     titleFilter: buildTitleFilter(config.title_filter),
@@ -317,7 +321,7 @@ export function loadConfig(portalsPath = PORTALS_PATH) {
  * @param {import('playwright').Page} page
  */
 async function fetchCsrfToken(page) {
-  const resp = await page.request.get(buildCsrfUrl());
+  const resp = await page.request.get(buildCsrfUrl(), { maxRedirects: 0 });
   if (!resp.ok()) throw new Error(`csrf fetch failed: HTTP ${resp.status()}`);
   const json = await resp.json();
   if (!json || typeof json.csrfToken !== 'string' || !json.csrfToken) {
@@ -334,6 +338,7 @@ async function fetchCsrfToken(page) {
  */
 async function fetchSearchPage(page, boardCfg, csrfToken, paginationStart) {
   const resp = await page.request.post(buildSearchUrl(boardCfg.tenant), {
+    maxRedirects: 0,
     headers: { 'X-CSRF-TOKEN': csrfToken, 'Content-Type': 'application/json' },
     data: {
       clientNamespace: boardCfg.tenant,
@@ -359,7 +364,7 @@ async function fetchSearchPage(page, boardCfg, csrfToken, paginationStart) {
  * @param {string|number} jobPostingId
  */
 async function fetchDetail(page, boardCfg, jobPostingId) {
-  const resp = await page.request.get(buildDetailUrl(boardCfg.tenant, boardCfg.culture, boardCfg.jobBoardId, jobPostingId));
+  const resp = await page.request.get(buildDetailUrl(boardCfg.tenant, boardCfg.culture, boardCfg.jobBoardId, jobPostingId), { maxRedirects: 0 });
   if (resp.status() === 404 || resp.status() === 410) return null; // closed between list and detail — skip, don't abort
   if (resp.status() === 403 || resp.status() === 429) {
     const err = new Error(`detail HTTP ${resp.status()}`);
@@ -378,7 +383,16 @@ async function fetchDetail(page, boardCfg, jobPostingId) {
  * @param {{ name: string, tenant: string, board: string, culture: string, jobBoardId: string }} boardCfg
  * @param {{ titleFilter: Function, locationFilter: Function, contentFilter: Function, countryEligibilityFilter: Function, visaFilter: Function, matchedTitleKeywords: Function }} [filters]
  */
-export async function scanBoard(page, boardCfg, filters) {
+export async function scanBoard(page, boardCfg, filters = {}) {
+  filters = {
+    titleFilter: () => true,
+    locationFilter: () => true,
+    contentFilter: () => true,
+    countryEligibilityFilter: () => true,
+    visaFilter: () => true,
+    matchedTitleKeywords: () => [],
+    ...filters,
+  };
   const found = [];
   const boardUrl = buildBoardUrl(boardCfg.culture, boardCfg.tenant, boardCfg.board);
 
