@@ -327,7 +327,9 @@ export function maskShellData(script) {
       kept.push('');
       continue;
     }
-    const ops = [...line.matchAll(/<<(-?)\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/g)];
+    // `<<\\EOF` quotes the delimiter exactly as `<<'EOF'` does; missing it left
+    // the body unmasked and readable as commands.
+    const ops = [...line.matchAll(/<<(-?)\s*\\?(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/g)];
     if (ops.length) {
       for (const m of ops) pending.push({ word: m[3], stripTabs: m[1] === '-' });
       // Keep only what precedes the first `<<`: `node a.mjs; cat <<EOF` still
@@ -359,7 +361,10 @@ export function maskShellData(script) {
       i++; prev = ' ';
       continue;
     }
-    if (c === '#' && (prev === '\n' || /\s/.test(prev))) {
+    // A control operator ends a word just as whitespace does, so `;#` opens a
+    // comment. Missing that left the `;` inside `true;# note; node x.mjs`
+    // visible for the command regex to anchor on.
+    if (c === '#' && (prev === '\n' || /[\s;&|()]/.test(prev))) {
       while (i < joined.length && joined[i] !== '\n') { out += ' '; i++; }
       prev = ' ';
       continue;
@@ -380,7 +385,10 @@ export function maskShellData(script) {
  */
 export function invokesNode(scripts, name) {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(String.raw`(?:^|[;&|])\s*node\s+(?:\.[\\/])?${esc}(?=\s|$)`, 'm');
+  // The trailing boundary accepts the shell's word terminators, not just
+  // whitespace: `(cd sub && node x-tests.mjs)` and `node x-tests.mjs; echo ok`
+  // are invocations, and requiring \s or EOL reported both as unreachable.
+  const re = new RegExp(String.raw`(?:^|[;&|(])\s*node\s+(?:\.[\\/])?${esc}(?=[\s;)&|]|$)`, 'm');
   return scripts.some((sc) => re.test(maskShellData(sc)));
 }
 
@@ -416,6 +424,13 @@ const WORKFLOW_CASES = [
   ['cat <<EOF\na\n  EOF\nnode x-tests.mjs', false, 'an INDENTED EOF does not terminate <<EOF'],
   ['cat <<-EOF\na\n\tEOF\nnode x-tests.mjs', true, '<<- strips tabs, so the terminator lands'],
   ['cat <<FIRST <<SECOND\na\nFIRST\nnode x-tests.mjs\nSECOND', false, "the SECOND heredoc's body is still data"],
+  ['cat <<\\EOF\nnode x-tests.mjs\nEOF', false, 'a backslash-quoted heredoc delimiter (#3765 fourth pass)'],
+  ['true;# note; node x-tests.mjs', false, 'a comment opened by ;# (#3765 fourth pass)'],
+  ['true; node x-tests.mjs', true, 'a real command after ; still counts'],
+  ['(cd sub && node x-tests.mjs)', true, 'a command inside a subshell still counts'],
+  ['node x-tests.mjs; echo ok', true, 'a trailing ; is a word terminator, not a mismatch'],
+  ['node x-tests.mjs | tee log', true, 'a piped invocation still counts'],
+  ['node xx-tests.mjs', false, 'a longer sibling name must not match'],
 ];
 
 // runCommands must read only the one path that executes. `with.run` is an
