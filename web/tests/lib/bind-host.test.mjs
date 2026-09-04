@@ -1,13 +1,16 @@
 // The bind decision, tested on values.
 //
 // This is the module the launcher exists to apply, so these are the cases that
-// decide whether the dashboard is reachable from the network. Two of them are
+// decide whether the dashboard is reachable from the network. Several are
 // regressions that shipped once and were caught in review:
 //
 //   - a loopback-only opt-in used to widen the socket to every interface while
 //     granting no host the Host filter did not already admit;
-//   - `widened` used to be read off the env value, so a caller-supplied -H could
-//     open the socket with the startup warning staying silent.
+//   - the widened warning used to be read off the env value, so a caller-supplied
+//     -H could open the socket with the startup notice staying silent;
+//   - any string the loopback predicate rejected counted as an opt-in, so
+//     CAREER_OPS_WEB_ALLOWED_HOSTS=off bound every interface;
+//   - naming one LAN address bound every interface rather than that address.
 //
 // Run:  node --test tests/lib/bind-host.test.mjs
 
@@ -18,15 +21,77 @@ import {
   LOOPBACK_BIND,
   ALL_INTERFACES_BIND,
   NEXT_COMMANDS,
+  validateAllowedHosts,
   resolveBindHost,
   isWidenedBind,
+  hasHostFlag,
   planNextRun,
 } from "../../src/lib/bind-host.mjs";
+
+// --- validateAllowedHosts -------------------------------------------------
+
+test("a value that reads as a switch is refused, not treated as a host", () => {
+  // Given the words someone types to turn exposure OFF. Each is a syntactically
+  // valid hostname, so the loopback predicate rejects it and it used to count as
+  // an opt-in — binding every interface for a user asking for the opposite.
+  for (const envValue of ["off", "false", "no", "0", "none", "disabled"]) {
+    // When the value is validated
+    const result = validateAllowedHosts(envValue);
+    // Then the run is refused with the reason, rather than silently widening
+    assert.equal(result.ok, false, `${JSON.stringify(envValue)} must be refused`);
+    assert.match(result.error, /not a switch/, "the message must explain what the variable is");
+  }
+});
+
+test("a token that is not a hostname or an address is refused", () => {
+  // Given values no resolver could take
+  // `10.0.0.999` and `010.0.0.1` are the near-misses: neither is a valid address,
+  // and both would otherwise have passed as all-numeric "hostnames" and opened
+  // the socket. A leading-zero quad is read as octal by some resolvers and
+  // decimal by others, which is no basis for a bind or an allow-list comparison.
+  for (const envValue of ["what?!", "-nas", "host_name", "10.0.0.999", "010.0.0.1"]) {
+    // When the value is validated
+    const result = validateAllowedHosts(envValue);
+    // Then it fails fast and names the offending token
+    assert.equal(result.ok, false, `${JSON.stringify(envValue)} must be refused`);
+  }
+});
+
+test("a URL written where a host belongs is refused", () => {
+  // Given a URL. Host-header normalization cuts at the first colon, so this
+  // arrives as the bare name `http` — valid, non-loopback, and would have opened
+  // the socket while appearing to name an address.
+  const result = validateAllowedHosts("http://192.168.1.50");
+  // When the value is validated
+  // Then it is refused with the reason, not resolved to the scheme name
+  assert.equal(result.ok, false);
+  assert.match(result.error, /not URLs/);
+});
+
+test("real hosts and addresses are accepted", () => {
+  // Given the spellings the README tells users to write
+  for (const envValue of ["192.168.1.50", "nas.local", "dev-box", "fe80::1", "nas.local.", "a.b, 10.0.0.4"]) {
+    // When the value is validated
+    // Then it is accepted, so a legitimate opt-in is never blocked by the guard
+    assert.equal(validateAllowedHosts(envValue).ok, true, `${JSON.stringify(envValue)} must be accepted`);
+  }
+});
+
+test("an absent or blank value is accepted and names nobody", () => {
+  // Given no opt-in, in each spelling a shell or a stray comma produces
+  for (const envValue of [undefined, "", " ", ",", " , , ", ":3000", "[]"]) {
+    // When the value is validated
+    const result = validateAllowedHosts(envValue);
+    // Then it passes with an empty list — blankness is not a typo
+    assert.equal(result.ok, true, `${JSON.stringify(envValue)} must not be an error`);
+    assert.deepEqual(result.hosts, []);
+  }
+});
 
 // --- resolveBindHost ------------------------------------------------------
 
 test("an absent or blank opt-in keeps the socket on loopback", () => {
-  // Given no opt-in, in each of the spellings a shell or a stray comma produces
+  // Given no opt-in
   for (const envValue of [undefined, "", " ", ",", " , , ", ":3000", "[]"]) {
     // When the bind is resolved
     const bind = resolveBindHost(envValue);
@@ -47,17 +112,33 @@ test("naming only loopback hosts is not an opt-in to anything", () => {
   }
 });
 
-test("naming a host loopback cannot serve widens the bind", () => {
-  // Given a host that is only reachable off-loopback
+test("naming one address binds that address, not every interface", () => {
+  // Given a single IP literal — the documented way to reach one LAN box
   // When the bind is resolved
-  // Then the socket opens so that host can actually connect
+  // Then only that interface is published: 0.0.0.0 would also expose a VPN
+  // tunnel or a phone hotspot that was never opted in to.
+  assert.equal(resolveBindHost("192.168.1.50"), "192.168.1.50");
+  assert.equal(resolveBindHost("192.168.1.50:3000"), "192.168.1.50", "a port is not part of the address");
+  assert.equal(resolveBindHost("fe80::1"), "fe80::1", "an IPv6 literal binds too — 0.0.0.0 could not serve it");
+});
+
+test("naming a loopback host alongside an address opts back into every interface", () => {
+  // Given a caller who wants the LAN box AND their own browser to reach it
+  // When the bind is resolved
+  // Then it widens, because one socket cannot carry two addresses — this is the
+  // documented escape hatch from the single-address bind above
+  assert.equal(resolveBindHost("192.168.1.50, localhost"), ALL_INTERFACES_BIND);
+  assert.equal(resolveBindHost("127.0.0.1 10.0.0.4"), ALL_INTERFACES_BIND);
+});
+
+test("anything the launcher cannot bind to one address falls back to every interface", () => {
+  // Given a hostname, which needs a resolver this module deliberately lacks, or
+  // two addresses, which cannot share a socket
+  // When the bind is resolved
+  // Then it widens rather than guessing
   assert.equal(resolveBindHost("nas.local"), ALL_INTERFACES_BIND);
-  assert.equal(resolveBindHost("192.168.1.50:3000"), ALL_INTERFACES_BIND);
-  assert.equal(
-    resolveBindHost("localhost, 10.0.0.4"),
-    ALL_INTERFACES_BIND,
-    "one non-loopback host among loopback ones is still a real opt-in",
-  );
+  assert.equal(resolveBindHost("10.0.0.4, 10.0.0.5"), ALL_INTERFACES_BIND);
+  assert.equal(resolveBindHost("nas.local, 10.0.0.4"), ALL_INTERFACES_BIND);
 });
 
 test("the bind widens exactly when the opt-in names a non-loopback host", () => {
@@ -71,7 +152,7 @@ test("the bind widens exactly when the opt-in names a non-loopback host", () => 
   ]) {
     const grantsSomethingNew = [...parseAllowedHosts(envValue)].some((h) => !isLoopbackHost(h));
     assert.equal(
-      resolveBindHost(envValue) === ALL_INTERFACES_BIND,
+      isWidenedBind(resolveBindHost(envValue)),
       grantsSomethingNew,
       `${JSON.stringify(envValue)}: the bind must widen iff the filter gains a non-loopback host`,
     );
@@ -81,14 +162,41 @@ test("the bind widens exactly when the opt-in names a non-loopback host", () => 
 // --- isWidenedBind --------------------------------------------------------
 
 test("a bind is widened only when it is not a loopback address", () => {
-  // Given the addresses this module can produce, plus ones a future change might
+  // Given every address this module can now produce
   // When each is classified
-  // Then the answer follows the address itself, not a comparison to one literal
+  // Then the answer follows the address itself, not a comparison to one literal —
+  // which matters more now that a specific LAN address is one of the outcomes
   assert.equal(isWidenedBind(ALL_INTERFACES_BIND), true);
   assert.equal(isWidenedBind(LOOPBACK_BIND), false);
   assert.equal(isWidenedBind("::1"), false, "IPv6 loopback must not read as widened");
   assert.equal(isWidenedBind("127.0.0.2"), false, "the whole 127/8 range is loopback");
   assert.equal(isWidenedBind("192.168.1.50"), true);
+});
+
+// --- hasHostFlag ----------------------------------------------------------
+
+test("every spelling of next's hostname flag is detected", () => {
+  // Given the forms commander accepts, including the attached short form that
+  // was once missed — which made the launcher announce loopback while next
+  // opened every interface
+  for (const extra of [
+    ["-H", "0.0.0.0"], ["-H0.0.0.0"], ["--hostname", "0.0.0.0"], ["--hostname=0.0.0.0"],
+    ["-H"], ["--hostname"], ["-H", ""], ["--hostname="],
+    ["-p", "4000", "-H0.0.0.0"], ["-H", "0.0.0.0", "-H", "127.0.0.1"],
+  ]) {
+    // When argv is scanned
+    // Then the flag is seen regardless of how the value is attached, or absent
+    assert.equal(hasHostFlag(extra), true, `${extra.join(" ")} supplies a hostname flag`);
+  }
+});
+
+test("argv without a hostname flag is left alone", () => {
+  // Given flags the launcher has no opinion about
+  for (const extra of [[], ["-p", "4000"], ["--turbopack"], ["--experimental-https"]]) {
+    // When argv is scanned
+    // Then nothing is mistaken for the hostname flag, so the bind is still injected
+    assert.equal(hasHostFlag(extra), false, `${extra.join(" ")} supplies no hostname flag`);
+  }
 });
 
 // --- planNextRun ----------------------------------------------------------
@@ -104,6 +212,15 @@ test("an unknown or missing command is refused with usage", () => {
   }
 });
 
+test("an unreadable opt-in refuses the run rather than starting a widened server", () => {
+  // Given a value that cannot be a host list
+  const plan = planNextRun({ command: "dev", envValue: "off" });
+  // When a run is planned
+  // Then there is no argv to spawn — failing fast beats binding every interface
+  assert.equal(plan.ok, false);
+  assert.match(plan.error, /CAREER_OPS_WEB_ALLOWED_HOSTS/);
+});
+
 test("each supported command builds argv with the bind ahead of forwarded flags", () => {
   // Given a supported command and a caller's own flag
   for (const command of NEXT_COMMANDS) {
@@ -113,73 +230,78 @@ test("each supported command builds argv with the bind ahead of forwarded flags"
     assert.equal(plan.ok, true);
     assert.deepEqual(plan.argv, [command, "-H", LOOPBACK_BIND, "-p", "4000"]);
     assert.equal(plan.widened, false);
-    assert.equal(plan.overridden, false);
+    assert.equal(plan.hostFlagSupplied, false);
   }
 });
 
 test("an opt-in that widens is reported along with the hosts that caused it", () => {
-  // Given a real opt-in
+  // Given a real opt-in that cannot resolve to a single address
   const plan = planNextRun({ command: "start", envValue: "nas.local, 10.0.0.4" });
   // When the run is planned
   // Then the caller has everything needed to explain the exposure
   assert.equal(plan.ok, true);
   assert.deepEqual(plan.argv, ["start", "-H", ALL_INTERFACES_BIND]);
   assert.equal(plan.widened, true);
-  assert.equal(plan.overridden, false);
+  assert.equal(plan.hostFlagSupplied, false);
+  assert.equal(plan.loopbackUnreachable, false, "0.0.0.0 still answers on loopback");
   assert.deepEqual(plan.allowedHosts.sort(), ["10.0.0.4", "nas.local"]);
 });
 
-test("a caller's -H is forwarded and reported as the effective bind", () => {
-  // Given a deliberate override and no opt-in — the combination that used to
-  // widen the socket in silence, because `widened` was read off the env value
-  for (const extra of [["-H", "0.0.0.0"], ["--hostname", "0.0.0.0"], ["--hostname=0.0.0.0"]]) {
+test("a single-address bind is flagged as costing loopback", () => {
+  // Given the opt-in that now binds one address instead of every interface
+  const plan = planNextRun({ command: "dev", envValue: "192.168.1.50" });
+  // When the run is planned
+  // Then the caller is told localhost will stop answering — the symptom
+  // otherwise looks like a server that failed to start
+  assert.deepEqual(plan.argv, ["dev", "-H", "192.168.1.50"]);
+  assert.equal(plan.widened, true);
+  assert.equal(plan.loopbackUnreachable, true);
+});
+
+test("a caller's own hostname flag hands the bind decision to next", () => {
+  // Given a deliberate override, in each spelling commander accepts. Injecting a
+  // second -H alongside it made this launcher's warning depend on how commander
+  // resolves a duplicate — a bet against a dependency it has already lost once.
+  for (const extra of [
+    ["-H", "0.0.0.0"], ["--hostname", "0.0.0.0"], ["--hostname=0.0.0.0"], ["-H0.0.0.0"],
+    ["-H", ""], ["--hostname="], ["-H"], ["-H", "0.0.0.0", "-H", "127.0.0.1"],
+  ]) {
     // When the run is planned
     const plan = planNextRun({ command: "dev", extra, envValue: undefined });
-    // Then the plan reports what next will actually listen on, not what was resolved
+    // Then argv carries the caller's flag and nothing else, so there is no
+    // duplicate for commander to resolve and no bind for the launcher to assert
     assert.equal(plan.ok, true, `${extra.join(" ")} must still produce a runnable plan`);
-    assert.equal(plan.bindHost, LOOPBACK_BIND, "the resolved bind is unchanged");
-    assert.equal(plan.effectiveBindHost, "0.0.0.0", `${extra.join(" ")} decides the real bind`);
-    assert.equal(plan.widened, true, `${extra.join(" ")} must be reported as widening`);
-    assert.equal(plan.overridden, true);
+    assert.deepEqual(plan.argv, ["dev", ...extra], `${extra.join(" ")} must be forwarded untouched`);
+    assert.equal(plan.hostFlagSupplied, true, `${extra.join(" ")} must be reported as caller-owned`);
     assert.deepEqual(plan.allowedHosts, [], "the filter still names nobody");
   }
 });
 
-test("the attached short form -H0.0.0.0 is recognised as an override", () => {
-  // Given commander's attached spelling, which next honours. Missing it did not
-  // fail safe: the launcher announced the resolved bind while next opened every
-  // interface — a false statement about exposure rather than a silent one.
-  for (const extra of [["-H0.0.0.0"], ["-p", "3000", "-H0.0.0.0"]]) {
-    // When the run is planned with no opt-in
-    const plan = planNextRun({ command: "dev", extra, envValue: undefined });
-    // Then the plan reports the interface next will really listen on
-    assert.equal(plan.effectiveBindHost, "0.0.0.0", `${extra.join(" ")} sets the real bind`);
-    assert.equal(plan.widened, true, `${extra.join(" ")} must be reported as widening`);
-    assert.equal(plan.overridden, true);
-  }
-});
-
-test("a -H whose next token is another flag supplies no host", () => {
-  // Given a malformed invocation next will reject itself
-  const plan = planNextRun({ command: "dev", extra: ["-H", "-p", "4000"], envValue: undefined });
+test("a caller's flag does not silence the resolved bind, it replaces the claim", () => {
+  // Given an override alongside an opt-in that would have widened
+  const plan = planNextRun({ command: "dev", extra: ["-H", "127.0.0.1"], envValue: "nas.local" });
   // When the run is planned
-  // Then `-p` is not mistaken for the hostname, which would announce "binding -p"
-  assert.equal(plan.effectiveBindHost, LOOPBACK_BIND);
-  assert.equal(plan.widened, false);
+  // Then the launcher injects nothing and reports that next owns the bind. The
+  // resolved value is still there for context, but hostFlagSupplied is what any
+  // claim about exposure must be read against.
+  assert.deepEqual(plan.argv, ["dev", "-H", "127.0.0.1"]);
+  assert.equal(plan.hostFlagSupplied, true);
+  assert.equal(plan.bindHost, ALL_INTERFACES_BIND, "the resolved bind is unchanged and unused");
+  assert.equal(plan.loopbackUnreachable, false, "no claim is made about a bind next chooses");
 });
 
 test("an allow-list of only loopback hosts grants nothing new", () => {
-  // Given an opt-in that names hosts the guard already admits, plus an override
-  // that opens the socket — the state that used to print no second notice
+  // Given an opt-in naming hosts the guard already admits, plus a caller's flag
+  // that may open the socket — the state that used to print no second notice
   const plan = planNextRun({
     command: "dev",
     extra: ["-H", "0.0.0.0"],
     envValue: "localhost, 127.0.0.1, ::1",
   });
   // When the run is planned
-  // Then it is flagged: the port is open and the filter names nobody who could
-  // not already reach it on loopback
-  assert.equal(plan.widened, true);
+  // Then it is flagged: if that flag opens the port, the filter names nobody who
+  // could not already reach it on loopback
+  assert.equal(plan.hostFlagSupplied, true);
   assert.equal(plan.grantsNoNewHost, true, "a loopback-only list grants nothing");
 });
 
@@ -189,59 +311,4 @@ test("an allow-list naming a reachable host does grant something", () => {
   // When the run is planned
   // Then the filter is meaningful and the second notice must not fire
   assert.equal(plan.grantsNoNewHost, false);
-});
-
-test("an empty -H value widens the bind, because Node treats it as unset", () => {
-  // Given an override with no value — `-H ""` or `--hostname=`
-  for (const extra of [["-H", ""], ["--hostname="]]) {
-    // When the run is planned
-    const plan = planNextRun({ command: "dev", extra, envValue: undefined });
-    // Then it is reported as widening: listen(port, "") binds every interface
-    // exactly as listen(port, undefined) does, so treating it as "no override"
-    // would silence a warning for a socket that really is open.
-    assert.equal(plan.widened, true, `${extra.join(" ")} opens every interface`);
-    assert.equal(
-      plan.effectiveBindHost,
-      ALL_INTERFACES_BIND,
-      "the notice must name the interface, not echo an empty string",
-    );
-  }
-});
-
-test("a bare -H at the end of argv is not read as an override", () => {
-  // Given a flag with nothing following it — next will reject this itself
-  for (const extra of [["-H"], ["--hostname"], ["-p", "4000", "-H"]]) {
-    // When the run is planned
-    const plan = planNextRun({ command: "dev", extra, envValue: undefined });
-    // Then there is no value to override with, so the resolved bind stands
-    assert.equal(plan.effectiveBindHost, LOOPBACK_BIND, `${extra.join(" ")} supplies no host`);
-    assert.equal(plan.widened, false);
-  }
-});
-
-test("the last -H wins, as next itself resolves a repeated option", () => {
-  // Given a caller who passes the flag twice
-  const plan = planNextRun({
-    command: "dev",
-    extra: ["-H", "0.0.0.0", "-H", "127.0.0.1"],
-    envValue: undefined,
-  });
-  // When the effective bind is computed
-  // Then it matches what commander will hand next, so the warning cannot disagree
-  assert.equal(plan.effectiveBindHost, "127.0.0.1");
-  assert.equal(plan.widened, false, "a narrowing override must not warn");
-});
-
-test("an override that narrows an opted-in bind is not reported as widening", () => {
-  // Given an opt-in that widens, and a caller pulling the bind back to loopback
-  const plan = planNextRun({
-    command: "dev",
-    extra: ["-H", "127.0.0.1"],
-    envValue: "nas.local",
-  });
-  // When the run is planned
-  // Then the resolved bind still widens, but nothing is actually exposed
-  assert.equal(plan.bindHost, ALL_INTERFACES_BIND);
-  assert.equal(plan.effectiveBindHost, "127.0.0.1");
-  assert.equal(plan.widened, false, "the warning must follow the socket, not the env var");
 });

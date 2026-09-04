@@ -85,13 +85,31 @@ Pass one-off flags through npm's `--`: `npm run dev -- -p 4000`.
 
 ### Exposing it beyond this machine
 
-`CAREER_OPS_WEB_ALLOWED_HOSTS` is the switch. Unset (or blank) the server binds
-`127.0.0.1`; name a host it cannot already reach on loopback and the server binds
-`0.0.0.0`, with the API guard answering for loopback and the hosts you named:
+`CAREER_OPS_WEB_ALLOWED_HOSTS` is the list of hosts allowed to reach the
+dashboard. Unset (or blank) the server binds `127.0.0.1`; name a host it cannot
+already reach on loopback and the socket opens, with the guard answering for
+loopback and the hosts you named:
 
 ```bash
 CAREER_OPS_WEB_ALLOWED_HOSTS="192.168.1.50" npm run dev
 ```
+
+It is not an on/off switch, and it is not read as one: `off`, `false`, `no` and
+`0` are all valid hostnames, so treating them as words would have opened the
+socket to the whole network for someone typing the word for "closed". They are
+refused, as is anything else that cannot be read as a hostname or an IP address.
+To stay on loopback, unset the variable.
+
+**How the bind is chosen.** Name a single IP address and the socket binds exactly
+that address — `192.168.1.50` and nothing else. Binding `0.0.0.0` for it would
+also publish the dashboard on every other interface the machine has, a VPN tunnel
+or a phone hotspot included, none of which you asked for. One socket carries one
+address, so `http://localhost:3000` stops answering; open it at the address you
+named. If you want loopback too, name a loopback host alongside
+(`"192.168.1.50, localhost"`) — that binds `0.0.0.0` and accepts the wider
+exposure deliberately. Anything else — a hostname, which needs a resolver the
+launcher does not have, or two addresses, which cannot share a socket — binds
+`0.0.0.0`. The startup line says which of these happened.
 
 Naming only loopback (`localhost`, `127.0.0.1`, `::1`) is not an opt-in and
 changes nothing — the guard already answers for those, so widening the socket
@@ -117,9 +135,17 @@ re-resolve its own domain to `127.0.0.1` and read the dashboard from your own
 browser as same-origin, which a loopback bind does nothing to stop. The `Host`
 header on that request carries the attacker's domain, which is what refuses it.
 
-You can also override the bind directly — `npm run dev -- -H 0.0.0.0` — since
-Next keeps the last value of a repeated option. **Prefer the env var.** An `-H`
-on its own opens the socket while the allow-list stays empty, which is the one
+**In a container** the bind has to be `0.0.0.0` — loopback inside a network
+namespace is not reachable from the host — so name a non-loopback host to open
+it. A forwarded port (`-p 3000:3000`) still arrives with `Host: localhost`, which
+the guard admits, so the port publication is the whole of the access control
+there: publish it on `127.0.0.1:3000:3000`, not `0.0.0.0`.
+
+You can also override the bind directly — `npm run dev -- -H 0.0.0.0`. When you
+pass `-H` or `--hostname`, the launcher injects nothing and Next resolves the
+flag itself, so the startup line says the bind is Next's to choose rather than
+claiming an address it would have to guess. **Prefer the env var.** An `-H` on
+its own opens the socket while the allow-list stays empty, which is the one
 combination with no honest reading: the guard then refuses LAN clients that
 identify themselves truthfully and admits any that spell `Host: localhost`. The
 launcher says so on startup rather than doing it quietly.

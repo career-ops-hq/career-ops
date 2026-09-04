@@ -109,7 +109,7 @@ test("an opt-in naming only loopback does not widen the bind", () => {
 });
 
 test("an opt-in naming a real host widens the bind and says so", () => {
-  // Given a host that loopback cannot serve
+  // Given a hostname, which the launcher cannot resolve to one address
   // When the launcher starts next
   const run = launch({ args: ["start"], env: { CAREER_OPS_WEB_ALLOWED_HOSTS: "nas.local" } });
   // Then next binds every interface and the user is told, with the reason
@@ -119,19 +119,57 @@ test("an opt-in naming a real host widens the bind and says so", () => {
   assert.ok(run.stderr.includes("nas.local"), "the notice should name what widened it");
 });
 
+test("an opt-in naming one address binds that address alone", () => {
+  // Given a single LAN address. Binding 0.0.0.0 here would also publish the
+  // dashboard on a VPN tunnel or a phone hotspot nobody opted in to.
+  const run = launch({ args: ["dev"], env: { CAREER_OPS_WEB_ALLOWED_HOSTS: "192.168.1.50" } });
+  // When the launcher starts next
+  // Then only that interface is published, and the cost is stated: one socket
+  // carries one address, so localhost stops answering
+  assert.deepEqual(run.argv, ["dev", "-H", "192.168.1.50"]);
+  assert.ok(run.stderr.includes("binding 192.168.1.50"), `stderr was: ${run.stderr}`);
+  assert.ok(!run.stderr.includes("binding 0.0.0.0"), "every interface must not be published");
+  assert.ok(run.stderr.includes("http://localhost:PORT will not answer"), "the cost must be stated");
+});
+
+test("naming a loopback host alongside an address opts back into every interface", () => {
+  // Given the documented escape hatch for keeping localhost working
+  const run = launch({
+    args: ["dev"],
+    env: { CAREER_OPS_WEB_ALLOWED_HOSTS: "192.168.1.50, localhost" },
+  });
+  // When the launcher starts next
+  // Then the wider bind is taken deliberately, and not reported as costing loopback
+  assert.deepEqual(run.argv, ["dev", "-H", "0.0.0.0"]);
+  assert.ok(!run.stderr.includes("will not answer"), "0.0.0.0 still answers on loopback");
+});
+
+test("a value that reads as a switch refuses the run instead of widening", () => {
+  // Given someone turning exposure off the way the variable's name suggests.
+  // Every such word is a valid hostname, so this used to bind every interface.
+  const run = launch({ args: ["dev"], env: { CAREER_OPS_WEB_ALLOWED_HOSTS: "off" } });
+  // When the launcher runs
+  // Then next never starts, and the message explains what the variable is
+  assert.equal(run.status, 1);
+  assert.equal(run.argv, null, "next must not run on an unreadable opt-in");
+  assert.ok(run.stderr.includes("is not a switch"), `stderr was: ${run.stderr}`);
+});
+
 // --- a caller's own -H ----------------------------------------------------
 
-test("a caller's -H is forwarded and announced, even with no opt-in", () => {
-  // Given the override that used to widen the socket in silence
-  // When the launcher starts next
+test("a caller's -H is forwarded alone, with no injected bind to resolve against", () => {
+  // Given the override that used to widen the socket in silence. The launcher
+  // used to append it after its own -H and rely on commander keeping the last
+  // value — a bet against a dependency, asserted only against this stub.
   const run = launch({ args: ["dev", "-H", "0.0.0.0"] });
-  // Then next still receives it last, so it wins as commander resolves it
-  assert.deepEqual(run.argv, ["dev", "-H", "127.0.0.1", "-H", "0.0.0.0"]);
-  // And the exposure is reported rather than left silent, naming the address
-  // that will actually be bound rather than the one that was resolved
-  assert.ok(run.stderr.includes("binding 0.0.0.0"), `stderr was: ${run.stderr}`);
-  assert.ok(run.stderr.includes("reachable from your network"), "an overriding -H must warn");
-  assert.ok(run.stderr.includes("overrides the resolved bind"), "the notice should name the cause");
+  // When the launcher starts next
+  // Then argv carries exactly what the caller wrote: no duplicate flag exists,
+  // so no assumption about how commander resolves one is load-bearing
+  assert.deepEqual(run.argv, ["dev", "-H", "0.0.0.0"]);
+  // And the run is reported as possibly exposed rather than claimed as loopback
+  assert.ok(run.stderr.includes("next chooses the bind"), `stderr was: ${run.stderr}`);
+  assert.ok(run.stderr.includes("may be reachable from your network"), "an -H must warn");
+  assert.ok(!run.stderr.includes("loopback only"), "it must not claim loopback");
   // And the combination with no honest reading is called out specifically
   assert.ok(
     run.stderr.includes("names no host beyond loopback"),
@@ -139,19 +177,22 @@ test("a caller's -H is forwarded and announced, even with no opt-in", () => {
   );
 });
 
-test("the attached short form -H0.0.0.0 is announced, not reported as loopback", () => {
+test("the attached short form -H0.0.0.0 is not reported as loopback", () => {
   // Given commander's attached spelling, which next honours. This exact argv
   // once printed "binding 127.0.0.1 — loopback only" while opening every
-  // interface, and a LAN client spoofing Host: localhost was served.
-  const run = launch({ args: ["dev", "-H0.0.0.0"] });
-  // When the launcher starts next
-  // Then the flag reaches next, and the notice tells the truth about it
-  assert.deepEqual(run.argv, ["dev", "-H", "127.0.0.1", "-H0.0.0.0"]);
-  assert.ok(run.stderr.includes("binding 0.0.0.0"), `stderr was: ${run.stderr}`);
-  assert.ok(!run.stderr.includes("loopback only"), "it must not claim loopback");
+  // interface, and a LAN client spoofing Host: localhost was served. Presence
+  // detection, unlike value parsing, cannot miss a spelling of the value.
+  for (const args of [["dev", "-H0.0.0.0"], ["dev", "-p", "4000", "-H0.0.0.0"], ["dev", "--hostname=0.0.0.0"]]) {
+    // When the launcher starts next
+    const run = launch({ args });
+    // Then the flag reaches next untouched, and no loopback claim is made
+    assert.deepEqual(run.argv, args, `${args.join(" ")} must be forwarded untouched`);
+    assert.ok(!run.stderr.includes("loopback only"), `${args.join(" ")} must not claim loopback`);
+    assert.ok(run.stderr.includes("next chooses the bind"), `stderr was: ${run.stderr}`);
+  }
 });
 
-test("a loopback-only allow-list with an override is flagged, not silently widened", () => {
+test("a loopback-only allow-list with an override is flagged, not silently passed", () => {
   // Given a non-empty allow-list that names nobody the guard could not already
   // serve — the state a length check mistook for a meaningful opt-in
   const run = launch({
@@ -159,23 +200,24 @@ test("a loopback-only allow-list with an override is flagged, not silently widen
     env: { CAREER_OPS_WEB_ALLOWED_HOSTS: "localhost" },
   });
   // When the launcher starts next
-  // Then the port is open and the user is told the filter protects nobody
-  assert.ok(run.stderr.includes("binding 0.0.0.0"), `stderr was: ${run.stderr}`);
+  // Then the user is told the filter would protect nobody on an open port
   assert.ok(
     run.stderr.includes("names no host beyond loopback"),
-    "a loopback-only list must not silence the notice",
+    `a loopback-only list must not silence the notice; stderr was: ${run.stderr}`,
   );
 });
 
-test("an -H that narrows an opted-in bind is not announced as exposure", () => {
-  // Given an opt-in, overridden back down to loopback
-  // When the launcher starts next
+test("an -H alongside an opt-in still hands the bind to next", () => {
+  // Given an opt-in that would have widened, plus a caller pulling it back down
   const run = launch({
     args: ["dev", "-H", "127.0.0.1"],
     env: { CAREER_OPS_WEB_ALLOWED_HOSTS: "nas.local" },
   });
-  // Then the notice follows the socket, not the variable
-  assert.ok(!run.stderr.includes("reachable from your network"), "nothing is exposed here");
+  // When the launcher starts next
+  // Then the resolved 0.0.0.0 is neither injected nor announced: the caller's
+  // flag is the only bind in argv, and the launcher does not claim to know it
+  assert.deepEqual(run.argv, ["dev", "-H", "127.0.0.1"]);
+  assert.ok(!run.stderr.includes("binding 0.0.0.0"), "the unused resolved bind must not be announced");
 });
 
 // --- forwarding and failure modes -----------------------------------------

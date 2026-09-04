@@ -33,27 +33,40 @@ if (!plan.ok) {
 // Reported before next is resolved: a user whose install is broken should still
 // learn their run would have been network-reachable, and the required CI job has
 // no web/node_modules, so anything below the resolve is untestable there.
-if (plan.widened) {
-  const why = plan.overridden
-    ? `-H ${plan.effectiveBindHost} overrides the resolved bind`
-    : `allowed hosts: ${plan.allowedHosts.join(", ")}`;
+if (plan.hostFlagSupplied) {
+  // No bind was injected, so next resolves the flag itself and this process does
+  // not know the answer. Saying "may be" is the whole point: the alternative is
+  // reimplementing commander here and asserting a bind that could be wrong, which
+  // is how this launcher once announced loopback while every interface was open.
   console.error(
-    `career-ops web: binding ${plan.effectiveBindHost} — reachable from your network (${why}).`,
+    "career-ops web: -H/--hostname supplied, so next chooses the bind — this run may be " +
+      "reachable from your network.",
   );
-  if (plan.overridden && plan.grantsNoNewHost) {
+  if (plan.grantsNoNewHost) {
     // The one combination with no honest reading: an open port whose Host filter
     // names nobody it could not already serve on loopback. It refuses LAN clients
     // that identify themselves truthfully and admits any that spell
     // `Host: localhost`. A list of only loopback spellings counts as naming
     // nobody, which is why this asks what the list grants rather than its length.
     console.error(
-      "career-ops web: CAREER_OPS_WEB_ALLOWED_HOSTS names no host beyond loopback, so " +
-        "the request guard will refuse honest clients on this interface and admit " +
-        "spoofed loopback ones. Name the hosts that should reach it in that variable.",
+      "career-ops web: CAREER_OPS_WEB_ALLOWED_HOSTS names no host beyond loopback, so if that " +
+        "flag opens the socket the request guard will refuse honest clients on this interface " +
+        "and admit spoofed loopback ones. Name the hosts that should reach it in that variable.",
+    );
+  }
+} else if (plan.widened) {
+  console.error(
+    `career-ops web: binding ${plan.bindHost} — reachable from your network ` +
+      `(allowed hosts: ${plan.allowedHosts.join(", ")}).`,
+  );
+  if (plan.loopbackUnreachable) {
+    console.error(
+      `career-ops web: one socket carries one address, so http://localhost:PORT will not answer — ` +
+        `open it at ${plan.bindHost}. Name a loopback host alongside it to bind every interface instead.`,
     );
   }
 } else {
-  console.error(`career-ops web: binding ${plan.effectiveBindHost} — loopback only.`);
+  console.error(`career-ops web: binding ${plan.bindHost} — loopback only.`);
 }
 
 // next's declared entry, not the private dist path: node_modules/.bin/next is a

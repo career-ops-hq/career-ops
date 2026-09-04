@@ -1,19 +1,21 @@
 // bind-host.mjs — what interface the dashboard listens on, and the argv that says so.
 //
-// The socket is the dashboard's access control. `next dev` / `next start` with
-// no -H reach server.listen(port, undefined), which binds every interface, and
-// the request guard cannot compensate: Host is chosen by the client, so a LAN
-// caller spelling `Host: localhost` satisfies it. See origin-guard.mjs's header
-// for the full threat model — this module owns only the bind half of it.
+// The socket is the dashboard's outermost access control. `next dev` /
+// `next start` with no -H reach server.listen(port, undefined), which binds every
+// interface, and the request guard cannot compensate: Host is chosen by the
+// client, so a LAN caller spelling `Host: localhost` satisfies it. See
+// origin-guard.mjs's header for the full threat model — this module owns only the
+// bind half of it, and the bind is not the whole of it.
 //
 // Kept out of origin-guard.mjs, which is per-request decision logic pinned to
 // the edge runtime. Both read CAREER_OPS_WEB_ALLOWED_HOSTS through the same
 // parseAllowedHosts, so neither can widen on that variable without the other.
 //
 // That is the limit of the guarantee, and the two layers do diverge elsewhere:
-// a caller's -H moves the bind with the allow-list untouched, and 0.0.0.0 is
-// IPv4-only, so an opted-in IPv6 host passes the filter with nothing listening
-// for it. planNextRun reports the first; the README documents both.
+// a caller's own -H moves the bind with the allow-list untouched, and a fallback
+// bind of 0.0.0.0 is IPv4-only, so an opted-in IPv6 host passes the filter with
+// nothing listening for it. planNextRun reports the first; the README documents
+// both.
 //
 // Pure: no node imports, no process state. server.mjs passes the environment in
 // and acts on what comes back, so the whole decision is testable on values
@@ -27,34 +29,158 @@ export const ALL_INTERFACES_BIND = "0.0.0.0";
 /** The `next` subcommands this launcher fronts. */
 export const NEXT_COMMANDS = Object.freeze(["dev", "start"]);
 
-/** Spellings of next's hostname option, in both `-H x` and `--hostname=x` forms. */
-const HOST_FLAGS = Object.freeze(["-H", "--hostname"]);
+// Values a user reaches for after reading the variable's name as a switch.
+// Every one of them is a syntactically valid hostname, so only an explicit list
+// catches them — and each would otherwise be a non-loopback host, i.e. an opt-in
+// to full network exposure typed by someone trying to turn exposure OFF.
+const SWITCH_LIKE = Object.freeze(
+  new Set(["on", "off", "true", "false", "yes", "no", "0", "1", "none", "all", "enable", "enabled", "disable", "disabled"]),
+);
+
+// A URL written where a host belongs. Host-header normalization cuts at the
+// first colon, so `http://192.168.1.50` arrives here as the bare name `http` —
+// a valid hostname, and a non-loopback one, so it too would have opened the
+// socket while looking like it named an address.
+const URL_SCHEMES = Object.freeze(new Set(["http", "https"]));
+
+const HOSTNAME_LABEL = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+
+/**
+ * A dotted-quad IPv4 literal, rejecting the leading-zero form.
+ *
+ * `010.0.0.1` is read as octal by some resolvers and as decimal by others, which
+ * makes it a poor thing to hand a bind call or compare an allow-list against.
+ *
+ * @param {string} host
+ * @returns {boolean}
+ */
+function isIPv4Literal(host) {
+  const octets = host.split(".");
+  return (
+    octets.length === 4 &&
+    octets.every((o) => /^\d{1,3}$/.test(o) && Number(o) <= 255 && String(Number(o)) === o)
+  );
+}
+
+/**
+ * An IPv6 literal, already unbracketed by parseAllowedHosts.
+ *
+ * Deliberately shallow — hex groups and at most one `::` run. A malformed
+ * address that slips through fails loudly at listen() with the address in the
+ * message; the point here is to separate addresses from words, not to
+ * reimplement inet_pton.
+ *
+ * @param {string} host
+ * @returns {boolean}
+ */
+function isIPv6Literal(host) {
+  if (!host.includes(":") || !/^[0-9a-f:]+$/.test(host)) return false;
+  return host.split("::").length <= 2 && host.split(":").filter(Boolean).length <= 8;
+}
+
+function isIPLiteral(host) {
+  return isIPv4Literal(host) || isIPv6Literal(host);
+}
+
+/**
+ * Is this a host someone could plausibly have meant?
+ *
+ * @param {string} host  a single entry, already lowercased and port-stripped
+ * @returns {boolean}
+ */
+function isPlausibleHost(host) {
+  if (isIPLiteral(host)) return true;
+  if (host.length > 253) return false;
+  const labels = host.replace(/\.$/, "").split("."); // a trailing root dot is a valid FQDN
+  if (!labels.every((label) => label.length <= 63 && HOSTNAME_LABEL.test(label))) return false;
+  // Having already failed isIPLiteral, an all-numeric final label means a
+  // malformed address — `10.0.0.999` — rather than a name anything could
+  // resolve (RFC 1123 §2.1 forbids a wholly numeric top-level label).
+  return !/^\d+$/.test(labels[labels.length - 1]);
+}
+
+/**
+ * The opted-in hosts, or a refusal naming what could not be read as a host.
+ *
+ * Fails fast rather than widening on nonsense: every value this rejects would
+ * otherwise have counted as a non-loopback host and opened the socket to the
+ * whole network, which is the opposite of what someone typing `off` intends.
+ *
+ * @param {string|undefined} envValue  CAREER_OPS_WEB_ALLOWED_HOSTS
+ * @returns {{ok: true, hosts: string[]} | {ok: false, error: string}}
+ */
+export function validateAllowedHosts(envValue) {
+  const hosts = [...parseAllowedHosts(envValue)];
+  for (const host of hosts) {
+    if (SWITCH_LIKE.has(host)) {
+      return {
+        ok: false,
+        error:
+          `CAREER_OPS_WEB_ALLOWED_HOSTS="${host}" is not a switch — it is the list of hosts allowed to\n` +
+          "reach the dashboard, and any name in it opens the socket beyond this machine.\n" +
+          "Unset the variable to stay on loopback, or name the hosts that should reach it.",
+      };
+    }
+    if (URL_SCHEMES.has(host)) {
+      return {
+        ok: false,
+        error:
+          "CAREER_OPS_WEB_ALLOWED_HOSTS takes hosts, not URLs — a scheme is cut off at the colon,\n" +
+          "leaving the name of the scheme itself as the allowed host.\n" +
+          'Write the host alone, e.g. CAREER_OPS_WEB_ALLOWED_HOSTS="192.168.1.50".',
+      };
+    }
+    if (!isPlausibleHost(host)) {
+      return {
+        ok: false,
+        error:
+          `CAREER_OPS_WEB_ALLOWED_HOSTS contains "${host}", which is not a hostname or IP address.\n` +
+          "Separate entries with commas or spaces, e.g. CAREER_OPS_WEB_ALLOWED_HOSTS=\"192.168.1.50, nas.local\".",
+      };
+    }
+  }
+  return { ok: true, hosts };
+}
 
 /**
  * Which interface to listen on, given the opt-in.
  *
- * Widens only for a host that loopback cannot already serve. Naming a loopback
- * host (`localhost`, `127.0.0.1`, `::1`) is not an opt-in to anything: the Host
- * filter admits loopback unconditionally, so widening for it would open every
- * interface while granting no host that was not already allowed — full LAN
- * exposure from a value a user could reasonably read as a no-op, or even as a
- * tightening.
+ * Three outcomes, narrowest first:
+ *
+ *   - Loopback, when nothing is named that loopback cannot already serve. Naming
+ *     a loopback host (`localhost`, `127.0.0.1`, `::1`) is not an opt-in to
+ *     anything: the Host filter admits loopback unconditionally, so widening for
+ *     it would open every interface while granting no host that was not already
+ *     allowed — full network exposure from a value a user could reasonably read
+ *     as a no-op, or even as a tightening.
+ *   - That address alone, when exactly one host is named and it is an IP
+ *     literal. Binding 0.0.0.0 for it would also publish the dashboard on every
+ *     other interface the machine happens to have — a VPN tunnel, a phone
+ *     hotspot — none of which was asked for. The cost is that loopback stops
+ *     answering, since one socket carries one address; naming a loopback host
+ *     alongside it is how a caller asks for both and accepts 0.0.0.0.
+ *   - 0.0.0.0, otherwise: a hostname needs a resolver this module deliberately
+ *     does not have, and two addresses cannot share one socket.
+ *
+ * Assumes validateAllowedHosts has already accepted the value.
  *
  * @param {string|undefined} envValue  CAREER_OPS_WEB_ALLOWED_HOSTS
- * @returns {"0.0.0.0"|"127.0.0.1"}
+ * @returns {string}
  */
 export function resolveBindHost(envValue) {
-  for (const host of parseAllowedHosts(envValue)) {
-    if (!isLoopbackHost(host)) return ALL_INTERFACES_BIND;
-  }
-  return LOOPBACK_BIND;
+  const named = [...parseAllowedHosts(envValue)];
+  const reachable = named.filter((host) => !isLoopbackHost(host));
+  if (reachable.length === 0) return LOOPBACK_BIND;
+  const loopbackAlsoNamed = reachable.length !== named.length;
+  if (!loopbackAlsoNamed && reachable.length === 1 && isIPLiteral(reachable[0])) return reachable[0];
+  return ALL_INTERFACES_BIND;
 }
 
 /**
  * Is this bind reachable from outside the machine?
  *
- * Asked of the host itself rather than compared against LOOPBACK_BIND, so a
- * future third value (`::1`, a specific interface) cannot silently invert the
+ * Asked of the host itself rather than compared against LOOPBACK_BIND, so the
+ * specific-address and all-interfaces binds above cannot silently invert the
  * warning that depends on it.
  *
  * @param {string} bindHost
@@ -65,60 +191,46 @@ export function isWidenedBind(bindHost) {
 }
 
 /**
- * The last hostname a caller supplied in forwarded argv, if any.
+ * Did the caller supply next's hostname flag themselves?
  *
- * next parses with commander, where a repeated option keeps the LAST value — so
- * this, not the resolved bind, is what the server will actually listen on.
+ * Presence only — not the value. next parses with commander, and reproducing its
+ * resolution here (attached `-H0.0.0.0`, `--hostname=`, last-of-repeated) is a
+ * standing bet against a dependency, one this launcher has already lost once:
+ * a missed spelling made it announce loopback while every interface was open.
+ * Knowing only that the flag is there is enough to hand the decision back to
+ * next and say so, and it cannot drift as next's parser changes.
+ *
+ * Erring towards a false positive is safe — the launcher forwards argv untouched
+ * and warns — so the short form is matched on its prefix, which has no false
+ * negative. No other `next dev` / `next start` option begins with `-H`.
  *
  * @param {string[]} extra
- * @returns {string|null}
+ * @returns {boolean}
  */
-function overriddenHost(extra) {
-  let found = null;
-  for (let i = 0; i < extra.length; i++) {
-    const token = String(extra[i]);
-
-    // Commander's attached short form, `-H0.0.0.0`. Missing it is not a silent
-    // no-op: next honours the flag and binds every interface while the startup
-    // notice, computed from the resolved bind, announces loopback. `--hostname`
-    // starts with `--`, so it cannot be caught here by accident.
-    if (token.startsWith("-H") && token.length > 2) {
-      found = token.slice(2);
-      continue;
-    }
-
-    const [name, attached] = token.split(/=(.*)/s);
-    if (!HOST_FLAGS.includes(name)) continue;
-    // A separated value is only a value if it is not the next flag: `-H -p 4000`
-    // would otherwise be reported as "binding -p".
-    const separated = extra[i + 1] !== undefined && !String(extra[i + 1]).startsWith("-")
-      ? extra[i + 1]
-      : undefined;
-    const value = attached !== undefined ? attached : separated;
-    if (value !== undefined) found = value;
-  }
-  return found;
+export function hasHostFlag(extra) {
+  return extra.some((token) => {
+    const flag = String(token);
+    return flag.startsWith("-H") || flag === "--hostname" || flag.startsWith("--hostname=");
+  });
 }
 
 /**
  * The argv for a `next` run, plus what it will actually expose.
  *
- * `-H` is forwarded rather than refused: it is a flag someone typed
- * deliberately, and Next accepts it. But because commander keeps the last value,
- * a caller-supplied `-H` overrides the resolved bind — and if it widens while
- * CAREER_OPS_WEB_ALLOWED_HOSTS is empty, the result is an open port whose filter
- * names nobody: honest LAN clients get 403, a client spoofing `Host: localhost`
- * gets through. That combination cannot be prevented without refusing the flag,
- * so it is reported instead. `widened` is therefore computed from the EFFECTIVE
- * host, never from the env value, so the warning can never go quiet while the
- * socket is open.
+ * The bind is injected only when the caller supplied no hostname flag of their
+ * own. `-H` is theirs to pass — they typed it deliberately and next accepts it —
+ * so rather than appending a second one and relying on how commander resolves the
+ * duplicate, the launcher stands aside and reports that next now owns the
+ * decision. The run may well be network-reachable; nothing here can say it is
+ * loopback, so nothing here does.
  *
  * @param {object} input
  * @param {string|undefined} input.command   argv[2] — a NEXT_COMMANDS entry
  * @param {string[]} [input.extra]           remaining argv, forwarded verbatim
  * @param {string|undefined} input.envValue  CAREER_OPS_WEB_ALLOWED_HOSTS
- * @returns {{ok: true, argv: string[], bindHost: string, effectiveBindHost: string,
- *            widened: boolean, overridden: boolean, allowedHosts: string[]}
+ * @returns {{ok: true, argv: string[], bindHost: string, hostFlagSupplied: boolean,
+ *            widened: boolean, allowedHosts: string[], grantsNoNewHost: boolean,
+ *            loopbackUnreachable: boolean}
  *          | {ok: false, error: string}}
  */
 export function planNextRun({ command, extra = [], envValue }) {
@@ -131,31 +243,35 @@ export function planNextRun({ command, extra = [], envValue }) {
     };
   }
 
-  const bindHost = resolveBindHost(envValue);
-  const override = overriddenHost(extra);
-  // An empty value is not "no override": Node binds every interface for
-  // listen(port, "") exactly as it does for undefined, so `-H ""` widens the
-  // socket. Naming it here keeps the notice readable and, more importantly,
-  // keeps it truthful — reporting the empty string as the bind would be
-  // accurate and useless, and treating it as absent would hide a real exposure.
-  const effectiveBindHost =
-    override === null ? bindHost : override.trim() === "" ? ALL_INTERFACES_BIND : override;
+  const validation = validateAllowedHosts(envValue);
+  if (!validation.ok) return validation;
 
-  const allowedHosts = [...parseAllowedHosts(envValue)];
+  const { hosts: allowedHosts } = validation;
+  const bindHost = resolveBindHost(envValue);
+  const hostFlagSupplied = hasHostFlag(extra);
+  const widened = isWidenedBind(bindHost);
+
   return {
     ok: true,
-    argv: [command, "-H", bindHost, ...extra],
+    argv: hostFlagSupplied ? [command, ...extra] : [command, "-H", bindHost, ...extra],
     bindHost,
-    effectiveBindHost,
-    widened: isWidenedBind(effectiveBindHost),
-    overridden: override !== null,
+    hostFlagSupplied,
+    // Describes the resolved bind, which is what next listens on unless the
+    // caller supplied their own flag — hence read together with hostFlagSupplied,
+    // never on its own.
+    widened,
     allowedHosts,
     // Whether the filter names anyone loopback could not already serve. An open
     // socket in this state has no honest reading: it refuses LAN clients that
     // identify themselves truthfully and admits any that spell `Host: localhost`.
-    // Asked of the hosts rather than of the list's length, because
-    // CAREER_OPS_WEB_ALLOWED_HOSTS=localhost is a non-empty list that grants
-    // exactly nothing — the case that used to slip through silently.
+    // Only reachable via a caller's own -H — the env var cannot widen the bind
+    // without naming such a host — and asked of the hosts rather than of the
+    // list's length, because CAREER_OPS_WEB_ALLOWED_HOSTS=localhost is a
+    // non-empty list that grants exactly nothing.
     grantsNoNewHost: !allowedHosts.some((host) => !isLoopbackHost(host)),
+    // A single named address carries the whole socket, so http://localhost:PORT
+    // stops answering. Worth saying out loud: the symptom otherwise looks like a
+    // server that failed to start.
+    loopbackUnreachable: !hostFlagSupplied && widened && bindHost !== ALL_INTERFACES_BIND,
   };
 }
