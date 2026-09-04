@@ -337,72 +337,66 @@ function bodySpan(code, head) {
 }
 
 /**
- * Does `fn` consult the predicate on the path it is about to DESCEND into?
+ * Is every recursive descent in `fn` preceded by a guard on THAT descent's own
+ * argument?
  *
- * A call is not enough. `isNestedCheckout(dir)` written inside the read loop
- * tests the directory being listed, not the child, so a marked directory's
- * subdirectories are skipped while the files sitting directly in it are still
- * collected — the mutation that passed the earlier gate, and the reason the
- * behavioural fixture below puts its stale suite at the fixture's top level.
+ * The rule is deliberately about the pairing rather than the shape of either
+ * half, because every shape-based approximation had a way past it:
+ *   - `isNestedCheckout(dir)` inside the read loop tests the directory being
+ *     listed, so the files sitting directly in a checkout are still collected;
+ *   - `const full = dir` and `resolve(dir)` name the parameter and still test
+ *     the parent;
+ *   - `join(dir, 'safe')` is a child path, of a directory the walk never
+ *     descends into;
+ *   - `isNestedCheckout(full);` as a statement computes a boolean and drops it;
+ *   - a guard after the recursion prevents nothing, and a guard before the
+ *     SECOND of two descents leaves the first unguarded.
  *
- * Three things must hold, because each was a way past the last rule:
- *   - the ARGUMENT is a child path — an expression COMBINING the walk's own
- *     parameter with the current entry (`join(dir, e.name)`), or a variable
- *     assigned from one. Merely mentioning the parameter is not enough:
- *     `const full = dir` and `resolve(dir)` both name it and both test the
- *     parent. The combination — a second operand — is what makes it a child.
- *     The one exception is the argument that IS the parameter, accepted only
- *     when the call comes BEFORE the first directory read: a guard at function
- *     entry, which the recursion applies to every child as it enters
- *     (`copyDirSync`).
- *   - the RESULT controls the flow. `isNestedCheckout(full);` on its own line
- *     computes a boolean and drops it, and `walk(full)` runs regardless.
- *   - the call comes BEFORE the recursion it is supposed to prevent.
+ * Matching the guard's argument to the descent's argument answers all of them
+ * at once: the guarded path is the path being entered, or it is not a guard.
+ * Textual match after whitespace normalization — every walker in this
+ * repository guards `full`, `p`, `abs` or `join(dir, entry.name)` and then
+ * recurses into exactly that.
  *
- * Anything else — `isNestedCheckout(ROOT)`, an unrelated directory, an alias of
- * the parent, a result nobody reads — is a call, not a guard.
+ * The one exception stays the entry guard (`copyDirSync`): a controlling call
+ * on the function's own parameter, before the first directory read, covers
+ * every descent at once because the recursion re-enters through it.
  *
  * @param {{params: string, body: string}} fn - A declaration record.
  * @param {string[]} recursiveNames - Names whose call is the recursion.
  * @returns {boolean}
  */
-function guardsAChild(fn, recursiveNames) {
+function guardsEveryDescent(fn, recursiveNames) {
   const firstParam = /^\s*\(?\s*([A-Za-z_$][\w$]*)/.exec(fn.params)?.[1];
-  if (!firstParam) return false;   // no parameter to build a child path from
-  const mentionsParam = new RegExp(`\\b${firstParam}\\b`);
-  // An expression that COMBINES the parameter with something else: a second
-  // argument, a concatenation, an interpolation. `join(dir, e.name)` qualifies;
-  // `dir`, `resolve(dir)` and `dirname(dir)` do not.
-  const combinesWithEntry = (expr) => mentionsParam.test(expr) && /[,+`]/.test(expr);
-  // Locals assigned from such an expression. One level is enough for every
-  // shape in this repository (`const full = join(dir, entry.name)`); a longer
-  // chain would need real dataflow, and the honest instrument for that is the
-  // behavioural test, not this.
-  const derived = new Set(
-    [...fn.body.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]+)/g)]
-      .filter((m) => combinesWithEntry(m[2]))
-      .map((m) => m[1]),
-  );
-  const read = fn.body.search(/\breaddirSync\s*\(/);
-  // Where the recursion happens, so a guard placed after it can be rejected.
-  const recursionAt = recursiveNames
-    .map((n) => fn.body.search(new RegExp(`\\b${n.split('#')[0]}\\s*\\(`)))
-    .filter((i) => i !== -1);
-  const lastRecursion = recursionAt.length ? Math.max(...recursionAt) : Infinity;
-  for (const m of fn.body.matchAll(/\bisNestedCheckout\s*\(\s*([^)]*(?:\([^)]*\))?[^)]*)\)/g)) {
-    const arg = m[1].trim();
-    // The result must reach a branch: an `if`, a negation, a boolean operator,
-    // a ternary, a returned expression. A bare statement drops it.
-    const before = fn.body.slice(Math.max(0, m.index - 60), m.index);
-    if (!/(?:if\s*\(|&&|\|\||!|\?|:|return\s|=>\s*|\breturn\b[^;]*)\s*$/.test(before)) continue;
-    if (m.index > lastRecursion) continue;   // guards nothing that follows it
-    if (arg === firstParam) {
-      if (read === -1 || m.index < read) return true;   // entry guard
-      continue;                                         // tests the dir being read
+  if (!firstParam) return false;
+  const norm = (expr) => expr.replace(/\s+/g, '');
+
+  // The first argument of the call whose `(` is at `open`.
+  const firstArg = (open) => {
+    let depth = 0;
+    for (let i = open; i < fn.body.length; i++) {
+      const c = fn.body[i];
+      if ('([{'.includes(c)) depth++;
+      else if (')]}'.includes(c)) { if (--depth === 0) return fn.body.slice(open + 1, i); }
+      else if (c === ',' && depth === 1) return fn.body.slice(open + 1, i);
     }
-    if (derived.has(arg) || combinesWithEntry(arg)) return true;
-  }
-  return false;
+    return '';
+  };
+
+  // A guard is a call whose RESULT reaches a branch. A bare statement drops it.
+  const guards = [...fn.body.matchAll(/\bisNestedCheckout\s*\(/g)]
+    .filter((m) => /(?:if\s*\(|&&|\|\||!|\?|:|return\s|=>\s*)\s*$/.test(fn.body.slice(Math.max(0, m.index - 60), m.index)))
+    .map((m) => ({ index: m.index, arg: norm(firstArg(m.index + m[0].length - 1)) }));
+
+  const read = fn.body.search(/\breaddirSync\s*\(/);
+  if (guards.some((g) => g.arg === firstParam && (read === -1 || g.index < read))) return true;
+
+  const descents = recursiveNames.flatMap((name) =>
+    [...fn.body.matchAll(new RegExp(`\\b${name.split('#')[0]}\\s*\\(`, 'g'))]
+      .map((m) => ({ index: m.index, arg: norm(firstArg(m.index + m[0].length - 1)) })),
+  );
+  if (descents.length === 0) return false;
+  return descents.every((d) => guards.some((g) => g.index < d.index && g.arg === d.arg && g.arg !== ''));
 }
 
 /**
@@ -500,7 +494,9 @@ function findRecursiveWalkers(entries) {
         file: rel,
         name: key,
         line: src.slice(0, fn.head).split('\n').length,
-        guarded: cycle.some((k) => guardsAChild(fns.get(k), cycle)),
+        // EVERY member of the cycle, not any: in a mutually recursive pair, a
+        // guarded half does not make the unguarded half's descent safe.
+        guarded: cycle.every((k) => guardsEveryDescent(fns.get(k), cycle)),
       });
     }
   }
@@ -662,6 +658,29 @@ test('the walker detector recognizes every shape it claims to, and only real rec
         }
       }
     `),
+    // A child path, of a directory the walk never enters: it tests
+    // `join(dir, 'safe')` and descends into `join(dir, e.name)`.
+    f('guards-other-child.mjs', `
+      function walk(dir) {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          if (e.isDirectory()) { if (isNestedCheckout(join(dir, 'safe'))) continue; walk(join(dir, e.name)); }
+        }
+      }
+    `),
+    // Two descents, one guard: the first call runs before the check, so it
+    // enters a nested checkout no matter what the second one does.
+    f('guards-second-descent-only.mjs', `
+      function walk(dir, out) {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, e.name);
+          if (e.isDirectory()) {
+            if (e.name === 'first') walk(full, out);
+            if (isNestedCheckout(full)) continue;
+            walk(full, out);
+          }
+        }
+      }
+    `),
     // The guard named ONLY in a comment. Documented as guarded, descends into
     // every checkout it finds.
     f('comment-only.mjs', `
@@ -693,7 +712,9 @@ test('the walker detector recognizes every shape it claims to, and only real rec
       'guards-elsewhere.mjs:walk',
       'guards-ignored-result.mjs:walk',
       'guards-normalized-parent.mjs:walk',
+      'guards-other-child.mjs:walk',
       'guards-parent.mjs:walk',
+      'guards-second-descent-only.mjs:walk',
       'guards-too-late.mjs:walk',
       'method.mjs:walk',
       'mutual.mjs:collect',
@@ -701,7 +722,7 @@ test('the walker detector recognizes every shape it claims to, and only real rec
       'regex-after-keyword.mjs:walk [guarded]',
       'wrapper-read.mjs:walk',
     ],
-    'the detector must see method, brace-less-arrow, unparenthesized-parameter arrow, mutually recursive, same-named and wrapper-reading walkers, must reject a guard that tests the directory being read, an alias or normalization of it, or an unrelated directory rather than the child path (while accepting one at function entry), must reject a predicate result that is dropped or consulted after the recursion, must not truncate a body at braces inside a literal or a keyword-position regex, must not count a guard written in a comment, and must ignore a non-recursive read',
+    'the detector must see method, brace-less-arrow, unparenthesized-parameter arrow, mutually recursive, same-named and wrapper-reading walkers, must reject a guard that names anything other than the path being descended into — the directory being read, an alias or normalization of it, an unrelated directory, another child — while accepting one at function entry, must reject a predicate result that is dropped, consulted after the recursion, or missing before an earlier descent, must not truncate a body at braces inside a literal or a keyword-position regex, must not count a guard written in a comment, and must ignore a non-recursive read',
   );
 });
 
