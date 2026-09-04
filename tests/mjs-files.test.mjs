@@ -258,16 +258,18 @@ const NOT_A_DECLARATION = new Set([
 ]);
 
 /**
- * Every function declaration in `code`, as {name, paren} where `paren` indexes
- * the `(` opening its parameter list.
+ * Every function declaration in `code`, as {name, head} where `head` indexes
+ * the start of its parameter list — the `(`, or the identifier itself for an
+ * arrow whose single parameter is unparenthesized.
  *
- * Three shapes, because a walker written in any of them recurses just the same:
- * `function walk(...)`, `const walk = (...) =>` / `= function (...)`, and the
- * method shorthand `walk(...) {` of a class body or object literal.
+ * Four shapes, because a walker written in any of them recurses just the same:
+ * `function walk(...)`, `const walk = (...) =>` / `= function (...)`, the
+ * method shorthand `walk(...) {` of a class body or object literal, and
+ * `const walk = dir => ...`, where the parameter wears no parentheses at all.
  */
 function declarations(code) {
   const found = [];
-  const push = (name, paren) => { if (!NOT_A_DECLARATION.has(name)) found.push({ name, paren }); };
+  const push = (name, head) => { if (!NOT_A_DECLARATION.has(name)) found.push({ name, head }); };
   for (const m of code.matchAll(/(?:^|[\n;{}(,])\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*(\w+)\s*\(/g)) {
     push(m[1], m.index + m[0].length - 1);
   }
@@ -279,11 +281,16 @@ function declarations(code) {
   for (const m of code.matchAll(/(?:^|[\n{,])\s*(?:static\s+|async\s+|get\s+|set\s+)?(\w+)\s*\([^()]*\)\s*\{/g)) {
     push(m[1], m.index + m[0].indexOf('('));
   }
+  // `const walk = dir => ...`. The lookahead ends the match ON the parameter,
+  // so `head` points at it the way it points at a `(` above.
+  for (const m of code.matchAll(/(?:^|[\n;{}])\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?=[A-Za-z_$][\w$]*\s*=>)/g)) {
+    push(m[1], m.index + m[0].length);
+  }
   return found;
 }
 
 /**
- * The body span of the declaration whose parameter list opens at `paren`.
+ * The body span of the declaration whose parameter list starts at `head`.
  *
  * Handles the braced body and the brace-less arrow (`const walk = (d) =>
  * readdirSync(d).flatMap(...)`) — an earlier version required a `{`, so a
@@ -291,13 +298,21 @@ function declarations(code) {
  *
  * @returns {[number, number]|null} Half-open [start, end) into `code`.
  */
-function bodySpan(code, paren) {
-  let depth = 0, i = paren;
-  for (; i < code.length; i++) {
-    if (code[i] === '(') depth++;
-    else if (code[i] === ')') { depth--; if (depth === 0) { i++; break; } }
+function bodySpan(code, head) {
+  let i = head;
+  if (code[i] === '(') {
+    let depth = 0;
+    for (; i < code.length; i++) {
+      if (code[i] === '(') depth++;
+      else if (code[i] === ')') { depth--; if (depth === 0) { i++; break; } }
+    }
+  } else {
+    // An unparenthesized arrow parameter: step over the identifier itself.
+    while (i < code.length && /[\w$]/.test(code[i])) i++;
   }
   const arrow = /^\s*=>/.exec(code.slice(i));
+  // A bare identifier is a parameter only when an arrow follows it.
+  if (code[head] !== '(' && !arrow) return null;
   let j = i + (arrow ? arrow[0].length : 0);
   while (j < code.length && /\s/.test(code[j])) j++;
   if (code[j] === '{') {
@@ -347,14 +362,14 @@ function findRecursiveWalkers(entries) {
     // 19 files declare one, including this test's own fixtures.
     const fns = new Map();
     const seenNames = new Map();
-    for (const { name, paren } of declarations(code)) {
-      const span = bodySpan(code, paren);
+    for (const { name, head } of declarations(code)) {
+      const span = bodySpan(code, head);
       if (!span) continue;
       const n = (seenNames.get(name) ?? 0) + 1;
       seenNames.set(name, n);
       // The first declaration keeps the bare `file:name` id, so an EXEMPT entry
       // stays stable when an unrelated same-named function is added later.
-      fns.set(n === 1 ? name : `${name}#${n}`, { name, paren, body: code.slice(span[0], span[1]) });
+      fns.set(n === 1 ? name : `${name}#${n}`, { name, head, body: code.slice(span[0], span[1]) });
     }
     // A call resolves BY NAME, so with duplicates it reaches every declaration
     // wearing that name. Deliberately over-approximate: the wrong direction to
@@ -391,7 +406,7 @@ function findRecursiveWalkers(entries) {
         id: `${rel}:${key}`,
         file: rel,
         name: key,
-        line: src.slice(0, fn.paren).split('\n').length,
+        line: src.slice(0, fn.head).split('\n').length,
         guarded: cycle.some((k) => fns.get(k).body.includes('isNestedCheckout(')),
       });
     }
@@ -453,6 +468,14 @@ test('the walker detector recognizes every shape it claims to, and only real rec
         return true;
       }
     `),
+    // An arrow whose single parameter wears no parentheses.
+    f('arrow-ident.mjs', `
+      const walk = dir => {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          if (e.isDirectory()) walk(join(dir, e.name));
+        }
+      };
+    `),
     // Two declarations of one name: a flat listing first, an unguarded walker
     // second. Keeping only the first hid the second entirely.
     f('duplicate-names.mjs', `
@@ -487,6 +510,7 @@ test('the walker detector recognizes every shape it claims to, and only real rec
   assert.deepEqual(
     found.map((w) => `${w.id}${w.guarded ? ' [guarded]' : ''}`).sort(),
     [
+      'arrow-ident.mjs:walk',
       'arrowless.mjs:walk',
       'braces-in-literals.mjs:walk [guarded]',
       'comment-only.mjs:walk',
@@ -495,7 +519,7 @@ test('the walker detector recognizes every shape it claims to, and only real rec
       'mutual.mjs:collect',
       'regex-after-keyword.mjs:walk [guarded]',
     ],
-    'the detector must see method, brace-less-arrow, mutually recursive and same-named walkers, must not truncate a body at braces inside a literal or a keyword-position regex, must not count a guard written in a comment, and must ignore a non-recursive read',
+    'the detector must see method, brace-less-arrow, unparenthesized-parameter arrow, mutually recursive and same-named walkers, must not truncate a body at braces inside a literal or a keyword-position regex, must not count a guard written in a comment, and must ignore a non-recursive read',
   );
 });
 
