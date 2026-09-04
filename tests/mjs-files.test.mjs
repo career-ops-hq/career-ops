@@ -22,6 +22,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -162,13 +163,39 @@ test('isNestedCheckout detects the marker, of either type, and nothing else', ()
   }
 });
 
+test('test discovery does not execute suites from a nested checkout', () => {
+  const dir = mkdtempSync(join(ROOT, 'tests', 'nested-checkout-'));
+  const filter = dir.slice(join(ROOT, 'tests').length + 1);
+  try {
+    writeFileSync(join(dir, '.git'), 'gitdir: /elsewhere/.git/worktrees/nested\n');
+    writeFileSync(join(dir, 'must-not-run.test.mjs'), "throw new Error('nested checkout suite executed');\n");
+
+    const result = spawnSync(process.execPath, ['test-all.mjs', '--only', filter], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+    });
+
+    assert.equal(result.status, 1, result.stdout || result.stderr);
+    assert.match(result.stdout, /no test files matched/, 'the nested suite must be absent from discovery');
+    assert.doesNotMatch(result.stdout + result.stderr, /nested checkout suite executed/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the private repo walkers consult the shared predicate, not their own rule', () => {
   // lib/mjs-files.mjs exists so two walkers cannot drift about what "every
   // file" means; the same reasoning applies to what "not our source" means.
   // These three suites keep private walkers because each filters differently
   // (.test.mjs, dot-dirs, SKIP_DIRS sets), so they import the predicate rather
   // than the collector — but a fourth hand-rolled `.git` rule is the drift.
-  for (const caller of ['tests/local-today-gates.test.mjs', 'tests/main-guard-convention.test.mjs', 'test-all.mjs']) {
+  for (const caller of [
+    'tests/local-today-gates.test.mjs',
+    'tests/main-guard-convention.test.mjs',
+    'tests/mojibake-canary.test.mjs',
+    'seed-fixture.mjs',
+    'test-all.mjs',
+  ]) {
     const src = readFileSync(join(ROOT, caller), 'utf-8');
 
     // The IMPORT is the assertion, not the call. Matching `isNestedCheckout(`
@@ -184,6 +211,44 @@ test('the private repo walkers consult the shared predicate, not their own rule'
     // ...and still use it: an unused import satisfies the check above while the
     // walk descends into every nested checkout exactly as before.
     assert.match(src, /isNestedCheckout\(/, `${caller} must actually call isNestedCheckout (#3499)`);
+  }
+});
+
+test('every subtree-anchored recursive edge checks the nested-checkout boundary', () => {
+  // Checking only that a FILE calls isNestedCheckout is too weak for test-all:
+  // it owns several independent recursive walkers, so one guarded walk can
+  // hide another unguarded one. Pin each recursive edge named in #3762.
+  const assertions = [
+    {
+      caller: 'test-all.mjs',
+      walker: 'test discovery',
+      pattern: /if \(entry\.isDirectory\(\)\) \{\s*if \(isNestedCheckout\(full\)\) continue;\s*out\.push\(\.\.\.discoverTests\(full\)\);/,
+    },
+    {
+      caller: 'test-all.mjs',
+      walker: 'plugin deny-list scan',
+      pattern: /if \(e\.isDirectory\(\)\) \{\s*if \(isNestedCheckout\(fp\)\) continue;\s*walkMjs\(fp\);/,
+    },
+    {
+      caller: 'test-all.mjs',
+      walker: 'web-suite parity scan',
+      pattern: /if \(e\.isDirectory\(\)\) return isNestedCheckout\(p\) \? \[\] : walk\(p\);/,
+    },
+    {
+      caller: 'tests/mojibake-canary.test.mjs',
+      walker: 'mojibake scan',
+      pattern: /if \(entry\.isDirectory\(\)\) \{\s*if \(isNestedCheckout\(fullPath\)\) continue;\s*walkAndCheck\(fullPath, entryRelativePath\);/,
+    },
+    {
+      caller: 'seed-fixture.mjs',
+      walker: 'fixture file scan',
+      pattern: /if \(statSync\(p\)\.isDirectory\(\)\) \{\s*if \(isNestedCheckout\(p\)\) continue;\s*walk\(p, base, out\);/,
+    },
+  ];
+
+  for (const { caller, walker, pattern } of assertions) {
+    const src = readFileSync(join(ROOT, caller), 'utf-8');
+    assert.match(src, pattern, `${caller} ${walker} must guard its own recursive edge (#3762)`);
   }
 });
 

@@ -11,6 +11,7 @@
 
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { isNestedCheckout } from '../lib/mjs-files.mjs';
 import { pass, fail, ROOT } from './helpers.mjs';
 
 console.log('\nmojibake-canary — double-encoded UTF-8 detection in templates/ and modes/');
@@ -206,6 +207,7 @@ function walkAndCheck(dir, relativePath = '') {
     const entryRelativePath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
     
     if (entry.isDirectory()) {
+      if (isNestedCheckout(fullPath)) continue;
       walkAndCheck(fullPath, entryRelativePath);
     } else if (entry.isFile()) {
       filesScanned++;

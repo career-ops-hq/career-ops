@@ -16,6 +16,7 @@ import { tmpdir } from 'os';
 import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { isNestedCheckout } from './lib/mjs-files.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(ROOT, 'test-fixtures', 'upgrade');
@@ -26,7 +27,10 @@ function walk(dir, base = dir, out = []) {
   // platforms (readdirSync returns filesystem order, which varies).
   for (const name of readdirSync(dir).sort()) {
     const p = join(dir, name);
-    if (statSync(p).isDirectory()) walk(p, base, out);
+    if (statSync(p).isDirectory()) {
+      if (isNestedCheckout(p)) continue;
+      walk(p, base, out);
+    }
     else out.push(relative(base, p).split(sep).join('/'));
   }
   return out;
@@ -36,7 +40,10 @@ export function listStates() {
   if (!existsSync(FIXTURES)) return [];
   // Sort for deterministic state ordering across platforms (readdirSync
   // returns filesystem order, which varies).
-  return readdirSync(FIXTURES).sort().filter((n) => statSync(join(FIXTURES, n)).isDirectory());
+  return readdirSync(FIXTURES).sort().filter((n) => {
+    const path = join(FIXTURES, n);
+    return statSync(path).isDirectory() && !isNestedCheckout(path);
+  });
 }
 
 // Strict allowlist: a state must be one of the real fixture subdirectories.

@@ -112,7 +112,10 @@ function discoverTests(dir) {
   const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   for (const entry of entries) {
     const full = join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...discoverTests(full));
+    if (entry.isDirectory()) {
+      if (isNestedCheckout(full)) continue;
+      out.push(...discoverTests(full));
+    }
     else if (entry.name.endsWith('.test.mjs')) out.push(full);
   }
   return out;
@@ -14998,7 +15001,10 @@ try {
   const walkMjs = (d) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const fp = join(d, e.name);
-      if (e.isDirectory()) walkMjs(fp);
+      if (e.isDirectory()) {
+        if (isNestedCheckout(fp)) continue;
+        walkMjs(fp);
+      }
       else if (e.name.endsWith('.mjs')) allPluginMjs.push(fp);
     }
   };
@@ -15850,7 +15856,7 @@ try {
         const webTestsRoot = join(ROOT, 'web', 'tests');
         const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
           const p = join(dir, e.name);
-          if (e.isDirectory()) return walk(p);
+          if (e.isDirectory()) return isNestedCheckout(p) ? [] : walk(p);
           return e.isFile() && e.name.endsWith('.test.mjs') ? [p] : [];
         });
         if (existsSync(webTestsRoot)) {
