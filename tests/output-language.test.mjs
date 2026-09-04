@@ -193,7 +193,7 @@ check(
 check(
   Number.isFinite(missingPrimary.tokenBudget)
     && Number.isFinite(noMarket.tokenBudget)
-    && missingPrimary.tokenBudget > noMarket.tokenBudget,
+    && missingPrimary.tokenBudget - noMarket.tokenBudget > 1000,
   'an unresolvable primary market keeps the DEFAULT evaluation mode and retains valid secondary shared context',
 );
 check(
