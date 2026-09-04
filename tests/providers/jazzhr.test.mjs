@@ -58,6 +58,8 @@ try {
   await provider.fetch({ name: 'Example Co', careers_url: board, jazzhr: { fetchDetails: true } }, { maxPages: 1, fetchText: async (url, opts) => { probeCalls.push({ url, opts }); return list; } });
   if (probeCalls.length === 1) pass('probe skips optional detail requests'); else fail('probe detail request was not skipped');
   let guarded = false;
-  try { await provider.fetch({ name: 'X', careers_url: 'https://evil.example/apply' }, { fetchText: async () => { throw new Error('should not fetch'); } }); } catch { guarded = true; }
-  if (guarded) pass('SSRF guard rejects untrusted host before network'); else fail('SSRF guard failed');
+  let guardCalls = 0;
+  try { await provider.fetch({ name: 'X', careers_url: 'https://evil.example/apply' }, { fetchText: async () => { guardCalls++; throw new Error('should not fetch'); } }); } catch { guarded = true; }
+  if (guarded && guardCalls === 0) pass('SSRF guard rejects untrusted host before network'); else fail(`SSRF guard failed: calls=${guardCalls}`);
+  try { mod.parseJazzHRList('<a href="/apply/1/role">role</a>', board, 'X'); fail('malformed ApplyToJob markup should throw'); } catch { pass('throws when ApplyToJob links exist but no posting card parses'); }
 } catch (e) { fail(`jazzhr provider tests crashed: ${e.message}`); }

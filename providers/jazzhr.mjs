@@ -108,6 +108,12 @@ export function parseJazzHRList(html, boardUrl, companyName) {
     jobs.push({ title, url: url.href, company: companyName || '', location });
     if (jobs.length >= MAX_JOBS) break;
   }
+  if (jobs.length === 0 && /<a\b[^>]*href=["'][^"']*\/apply\//i.test(html)) {
+    throw new Error('jazzhr: found ApplyToJob links but could not parse any posting cards');
+  }
+  if (jobs.length >= MAX_JOBS && [...html.matchAll(/<a\b[^>]*href=["'][^"']*\/apply\//gi)].length > MAX_JOBS) {
+    console.error(`⚠️  jazzhr: capped results at max_jobs=${MAX_JOBS}; additional postings were not returned`);
+  }
   return jobs;
 }
 
