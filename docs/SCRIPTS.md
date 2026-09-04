@@ -712,7 +712,7 @@ node tracker.mjs export --out repaired.md --force  # write even when columns wou
 
 **The round-trip carries the layout, not only the values (#3703).** `sync` maps columns by header NAME, so a customized tracker (a `Location`, `Via` or `URL` column, or one of your own) indexes correctly — but `export` used to write nine fixed columns in a fixed order under a fixed `# Applications Tracker` title, so adopting its output cost you those columns with no warning, right after `sync` reported a clean index. Losing the `URL` column in particular disables `merge-tracker.mjs`'s deterministic dedup pass, which is not visible in the file either. `export` now replays the header row it read, puts unmapped cells back in their own columns, and keeps the lines before and after the table (your own title, a legend, a trailing note) plus the file's line endings. The schema itself is still the canonical nine fields — extra columns ride along by position, so they are preserved by `export` but not queryable via `query`.
 
-**What "lossless" covers, exactly** — the round-trip `md → db → md` is byte-identical for a file holding ONE table: the title, preamble and trailing lines *with their own whitespace* (they are copied, not re-rendered), the header and separator, every row's values and column set, and CRLF vs LF. Enforced by `tracker-columns-tests.mjs`, including localized headers career-ops cannot name, unknown user columns, indented tables and indented prose.
+**What "lossless" covers, exactly** — the round-trip `md → db → md` is byte-identical for a file holding ONE table **whenever `export` reports no losses**: the title, preamble and trailing lines *with their own whitespace* (they are copied, not re-rendered), the header and separator, every row's values and column set, and CRLF vs LF. Enforced by `tracker-columns-tests.mjs`, including localized headers career-ops cannot name, unknown user columns, indented tables and indented prose. A reported loss is exactly the signal that byte identity does **not** hold for that file — a one-table tracker whose Notes cell holds a stray `|` is rewritten, and says so.
 
 The one thing normalized by design is whitespace **inside table cells**: a column-aligned table (`| 1    | Acme   |`) or an indented table comes back single-spaced, because `export` renders row values rather than replaying raw rows.
 
@@ -727,7 +727,7 @@ Everything else that cannot be reproduced is reported, never quietly changed. `e
 
 Data loss is a decision you make, not a side effect of adopting a repaired copy.
 
-**Exit codes:** `0` success, `1` validation error, missing prerequisites (Node < 22.5, no `applications.md` to index), or corruption found by `sync --check`.
+**Exit codes:** `0` success, `1` validation error, missing prerequisites (Node < 22.5, no `applications.md` to index), corruption found by `sync --check`, or `export --out` refusing to overwrite an existing file because something in it cannot be reproduced (re-run with `--force` to accept the loss). Nothing is written in that last case, so `1` from `export --out` always means the target is untouched.
 
 ---
 
