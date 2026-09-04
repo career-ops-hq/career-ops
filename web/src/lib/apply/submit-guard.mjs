@@ -54,10 +54,14 @@ export function snapshotLabel(facts = {}) {
 
 const labelSource = (facts) => facts.aria || facts.placeholder || facts.text || facts.value || facts.name;
 
-// Words that name the final action on a job application, in the languages the
-// portals we drive actually ship. Deliberately bounded: every entry here costs
-// the loop a click it could otherwise make, so this is the "sends it" vocabulary
-// and not everything that moves a form forward ("next", "continue", "weiter").
+// Two vocabularies, because the same verb means two things on a job portal.
+//
+// SUBMIT_TERMS name the action that sends the application, in the languages
+// the portals we drive actually ship. Refused wherever they appear. Deliberately
+// bounded: every entry costs the loop a click it could otherwise make, so this
+// is the "sends it" vocabulary and not everything that moves a form forward
+// ("next", "continue", "weiter"). «Откликнуться» sits here and not below
+// because on hh.ru that button sends the response in one click.
 const SUBMIT_TERMS = [
   // en
   "submit", "send application", "finish( application)?", "complete application", "apply (and|&) submit",
@@ -66,18 +70,29 @@ const SUBMIT_TERMS = [
   // de
   "absenden", "abschicken", "bewerbung senden",
   // fr
-  "envoyer", "soumettre", "postuler",
+  "envoyer", "soumettre",
   // it
-  "invia", "candidati",
+  "invia",
   // pt
   "enviar candidatura", "submeter",
   // nl
-  "verzenden", "solliciteren",
+  "verzenden",
   // pl
-  "wyślij", "aplikuj",
+  "wyślij",
   // ru
   "отправить", "откликнуться",
 ];
+
+// APPLY_TERMS are the apply verbs. Outside a form they are the entry point the
+// loop exists to click ("Apply for this job", <a>Postuler</a>), so they stay
+// actionable there; inside a form the same word is the final button, so they
+// are refused there.
+const APPLY_TERMS = [
+  "apply( now| for this job)?",
+  "postuler", "candidati", "candidatar-se", "solliciteren", "aplikuj", "bewerben",
+];
+
+const wordRx = (terms) => new RegExp(`(^|[^\\p{L}])(${terms.join("|")})($|[^\\p{L}])`, "iu");
 
 /**
  * Matches a label naming the submit action.
@@ -87,7 +102,10 @@ const SUBMIT_TERMS = [
  * at all, in either direction, so a Cyrillic submit button reads as ordinary
  * text. Not global, so the exported regex holds no `lastIndex` between calls.
  */
-export const SUBMIT_RX = new RegExp(`(^|[^\\p{L}])(${SUBMIT_TERMS.join("|")})($|[^\\p{L}])`, "iu");
+export const SUBMIT_RX = wordRx(SUBMIT_TERMS);
+
+/** Matches an apply verb: refused only inside a form (see APPLY_TERMS). */
+export const APPLY_RX = wordRx(APPLY_TERMS);
 
 /**
  * Would clicking this element submit the application?
@@ -112,7 +130,10 @@ export function isSubmitControl(facts = {}) {
   // The visible text is tested even when an aria-label outranks it: markup that
   // labels a button reading "Submit application" as "Continue" would otherwise
   // hide the wording from the guard while still showing it to the user.
-  if (SUBMIT_RX.test(label) || SUBMIT_RX.test(collapse(facts.text))) return true;
+  const text = collapse(facts.text);
+  if (SUBMIT_RX.test(label) || SUBMIT_RX.test(text)) return true;
+  // An apply verb is the final button inside a form and the way in outside it.
+  if (facts.inForm && (APPLY_RX.test(label) || APPLY_RX.test(text))) return true;
   // No wording at all inside a form: an icon-only <button>, or an
   // <input type="button"> that submits through its handler. Refused rather
   // than guessed at.

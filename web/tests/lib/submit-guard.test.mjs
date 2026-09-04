@@ -11,7 +11,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isSubmitControl, snapshotLabel, SUBMIT_RX } from "../../src/lib/apply/submit-guard.mjs";
+import { isSubmitControl, snapshotLabel, SUBMIT_RX, APPLY_RX } from "../../src/lib/apply/submit-guard.mjs";
 
 /** The facts drive.ts reads, with the defaults of an ordinary in-form control. */
 const el = (facts) => ({ tag: "button", type: "button", explicitType: true, inForm: true, ...facts });
@@ -170,6 +170,50 @@ test("isSubmitControl: an unlabelled input button inside a form is refused", () 
   const refused = isSubmitControl(facts);
 
   // Then it is refused like an unlabelled <button>: its handler can submit
+  assert.equal(refused, true);
+});
+
+test("isSubmitControl: an apply verb outside a form is the way in, and stays actionable", () => {
+  // Given the entry links portals ship before any form exists
+  const links = [
+    { tag: "a", role: "link", inForm: false, text: "Postuler" },
+    { tag: "a", role: "link", inForm: false, text: "Apply for this job" },
+    { tag: "button", type: "button", explicitType: true, inForm: false, text: "Candidati" },
+    { tag: "button", type: "button", explicitType: true, inForm: false, text: "Solliciteren" },
+    { tag: "button", type: "button", explicitType: true, inForm: false, text: "Aplikuj" },
+  ];
+
+  // When the guard classifies each
+  const refused = links.filter((facts) => isSubmitControl(facts));
+
+  // Then none is refused: without them the loop could never reach the form
+  assert.deepEqual(refused, []);
+});
+
+test("isSubmitControl: the same apply verb inside a form is the final button and is refused", () => {
+  // Given declared type="button" controls (so the type rule does not fire) inside a form
+  const finals = [
+    { tag: "button", type: "button", explicitType: true, inForm: true, text: "Postuler" },
+    { tag: "button", type: "button", explicitType: true, inForm: true, text: "Apply" },
+    { tag: "button", type: "button", explicitType: true, inForm: true, text: "Apply now" },
+    { tag: "button", type: "button", explicitType: true, inForm: true, text: "Bewerben" },
+  ];
+
+  // When the guard classifies each
+  const allowed = finals.filter((facts) => !isSubmitControl(facts));
+
+  // Then every one is refused
+  assert.deepEqual(allowed, []);
+});
+
+test("isSubmitControl: «Откликнуться» is refused even outside a form, because hh.ru sends the response on that click", () => {
+  // Given hh.ru's respond button, a declared button outside any form
+  const facts = { tag: "button", type: "button", explicitType: true, inForm: false, text: "Откликнуться" };
+
+  // When the guard classifies it
+  const refused = isSubmitControl(facts);
+
+  // Then it is refused: that click is the submission
   assert.equal(refused, true);
 });
 
