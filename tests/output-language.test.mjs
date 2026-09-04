@@ -108,6 +108,10 @@ function runGeminiEval(modesDirYaml) {
     });
     const stdout = result.stdout || '';
     const stderr = result.stderr || '';
+    const childSucceeded = !result.error && result.status === 0;
+    check(childSucceeded, 'gemini-eval.mjs context-only child exits successfully');
+    if (!childSucceeded) return { stdout, stderr, tokenBudget: NaN };
+
     const tokenBudget = Number(stdout.match(/Token budget: (\d+) tokens/)?.[1] ?? NaN);
     return { stdout, stderr, tokenBudget };
   } finally {

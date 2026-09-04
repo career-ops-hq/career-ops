@@ -480,7 +480,7 @@ LEGITIMACY: <High Confidence | Proceed with Caution | Suspicious>
 
 // Deterministic seam for context-resolution tests. This reports the computed
 // budget without constructing a client or making a network request.
-if (contextOnly) process.exit(0);
+if (!contextOnly) {
 
 // ---------------------------------------------------------------------------
 // Call Gemini API
@@ -675,3 +675,4 @@ console.log(`  Score: ${score}/5  |  Archetype: ${archetype}  |  Legitimacy: ${l
 console.log('─'.repeat(66) + '\n');
 
 console.log(formatBreakdown(tracker, modelName, 'gemini'));
+}
