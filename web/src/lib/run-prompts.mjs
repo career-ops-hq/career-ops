@@ -61,11 +61,24 @@ export function buildPrompt({ kind, input, memory, today, postedAt, lang }) {
   // readLanguageConfig() touches the filesystem, so callers that cannot supply
   // it (tests, future callers) keep working instead of this module reaching for
   // fs itself and losing its "plain module, testable as a value" property.
-  const resolvedLang = lang ?? { output: "en", modesDir: "modes", evalModeFile: "modes/oferta.md" };
-  const marketNote =
-    resolvedLang.modesDir !== "modes"
-      ? ` Also read ${resolvedLang.modesDir}/_shared.md for this market's vocabulary, benefits and legal concepts, and keep those terms (explained in the output language) where relevant.`
-      : "";
+  const resolvedLang = lang ?? { output: "en", modesDir: "modes", modesDirs: ["modes"], evalModeFile: "modes/oferta.md" };
+  // language.modes_dir may declare MULTIPLE simultaneous candidate markets
+  // (#3793 — e.g. an immigrant candidate applying in both Canada and China at
+  // once). `modesDirs` carries every declared market (primary first);
+  // `modesDir` alone (older callers, e.g. tests that only set that field)
+  // means exactly one declared market.
+  const declaredMarkets = (resolvedLang.modesDirs ?? [resolvedLang.modesDir]).filter(
+    (dir) => dir && dir !== "modes",
+  );
+  const marketNote = declaredMarkets.length
+    ? ` Also read ${declaredMarkets.map((dir) => `${dir}/_shared.md`).join(" and ")} for ${
+        declaredMarkets.length > 1 ? "these markets'" : "this market's"
+      } vocabulary, benefits and legal concepts, and keep those terms (explained in the output language) where relevant.${
+        declaredMarkets.length > 1
+          ? ` These are multiple DECLARED candidate markets — per posting, judge which one actually applies from the JD's own MARKET signals (hiring-entity jurisdiction, currency, benefits/legal vocabulary), reusing the same judgment Block G posting-legitimacy checks already use. Never infer the market from the JD's language alone (a French-language Quebec/federal-Canada posting needs Canada's concepts, not modes/fr's France/Belgium/Switzerland/Luxembourg ones). If genuinely ambiguous between the declared candidates, say so instead of guessing.`
+          : ""
+      }`
+    : "";
   const languageDirective = `\n\nWrite all human-facing output in "${resolvedLang.output}" regardless of the language of these instructions or the job description.${marketNote}\n`;
   const mem = (memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "") + languageDirective;
   if (kind === "research") {

@@ -299,6 +299,57 @@ test("buildPrompt: the default configuration adds no market note", () => {
   assert.doesNotMatch(prompt, /this market's vocabulary/);
 });
 
+// ── language.modes_dir as a list (#3793) ──────────────────────────────────
+//
+// A candidate can be running parallel campaigns in more than one market at
+// once (e.g. an immigrant applying in both Canada and China simultaneously).
+// language.modes_dir may declare multiple candidate markets as an array;
+// readLanguageConfig() (web/src/lib/career-ops.ts) normalizes both the single
+// string and the array shape into `modesDirs`, primary market first.
+
+const DE_ZH = {
+  output: "de",
+  modesDir: "modes/de",
+  modesDirs: ["modes/de", "modes/zh"],
+  evalModeFile: "modes/de/angebot.md",
+};
+
+test("buildPrompt: two declared markets both get a _shared.md pointer", () => {
+  const prompt = buildPrompt({ kind: "evaluate", ...ARGS, lang: DE_ZH });
+  assert.match(prompt, /modes\/de\/_shared\.md/);
+  assert.match(prompt, /modes\/zh\/_shared\.md/);
+});
+
+test("buildPrompt: multiple declared markets tell the agent to judge by market signal, not JD language", () => {
+  const prompt = buildPrompt({ kind: "evaluate", ...ARGS, lang: DE_ZH });
+  assert.match(prompt, /MARKET signals/);
+  assert.match(prompt, /Never infer the market from the JD's language alone/);
+  assert.match(prompt, /ambiguous/i);
+});
+
+test("buildPrompt: the primary declared market still drives the evaluation-mode file with multiple markets configured", () => {
+  const prompt = buildPrompt({ kind: "evaluate", ...ARGS, lang: DE_ZH });
+  assert.match(prompt, /Read modes\/de\/angebot\.md and follow it EXACTLY/);
+});
+
+test("buildPrompt: a one-element modesDirs array behaves exactly like a plain string modesDir", () => {
+  const singleArray = { output: "de", modesDir: "modes/de", modesDirs: ["modes/de"], evalModeFile: "modes/de/angebot.md" };
+  const promptFromArray = buildPrompt({ kind: "evaluate", ...ARGS, lang: singleArray });
+  const promptFromString = buildPrompt({ kind: "evaluate", ...ARGS, lang: DE });
+  assert.equal(promptFromArray, promptFromString);
+  // Single-market disambiguation language must not appear when only one
+  // market is declared — it would be noise for the ~90% single-market case.
+  assert.doesNotMatch(promptFromArray, /MARKET signals/);
+});
+
+test("buildPrompt: missing modes_dir (no lang.modesDirs, no lang.modesDir) keeps the unconfigured default behavior", () => {
+  const prompt = buildPrompt({ kind: "evaluate", ...ARGS });
+  assert.match(prompt, /Read modes\/oferta\.md and follow it EXACTLY/);
+  assert.doesNotMatch(prompt, /this market's vocabulary/);
+  assert.doesNotMatch(prompt, /these markets' vocabulary/);
+  assert.doesNotMatch(prompt, /MARKET signals/);
+});
+
 test("buildPrompt: the language directive is not limited to the evaluate prompt", () => {
   // language.output governs human-facing prose generally, not only the report.
   //

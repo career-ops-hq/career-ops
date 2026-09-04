@@ -450,9 +450,22 @@ export function rememberFact(fact: string): "ok" | "deduped" | "error" {
 export type LanguageConfig = {
   /** language.output — prose language for user-facing text. Default "en". */
   output: string;
-  /** language.modes_dir, normalized without a trailing slash. Default "modes". */
+  /**
+   * language.modes_dir's PRIMARY declared market, normalized without a
+   * trailing slash. Default "modes". When modes_dir is an array (#3793 —
+   * multiple simultaneous target markets), this is `modesDirs[0]`: the
+   * evaluation-mode file can only come from one market at a time.
+   */
   modesDir: string;
-  /** The market's evaluation-mode file, repo-root-relative. Default "modes/oferta.md". */
+  /**
+   * Every market declared in language.modes_dir, primary first. A plain
+   * string config normalizes to a single-element array; the default (no
+   * modes_dir configured) is `["modes"]`. Prefer this over `modesDir` when a
+   * caller needs to know about ALL declared candidate markets, not just the
+   * primary one (#3793).
+   */
+  modesDirs: string[];
+  /** The primary market's evaluation-mode file, repo-root-relative. Default "modes/oferta.md". */
   evalModeFile: string;
 };
 
@@ -516,7 +529,7 @@ function resolveEvalModeFile(root: string, modesDir: string): string {
  */
 export function readLanguageConfig(): LanguageConfig {
   const root = careerOpsRoot();
-  let modesDir = "modes";
+  let modesDirs = ["modes"];
   let output = "en";
   try {
     const parsed = yaml.load(fs.readFileSync(path.join(root, "config", "profile.yml"), "utf8"));
@@ -525,14 +538,22 @@ export function readLanguageConfig(): LanguageConfig {
       if (language && typeof language === "object" && !Array.isArray(language)) {
         const l = language as Record<string, unknown>;
         if (typeof l.output === "string" && l.output.trim()) output = l.output.trim();
-        if (typeof l.modes_dir === "string" && l.modes_dir.trim()) {
-          const candidate = l.modes_dir.trim().replace(/\/+$/, "");
-          if (MODES_DIR_RE.test(candidate)) modesDir = candidate;
-        }
+        // modes_dir may be a single declared market (string, the historical
+        // shape) or a list of simultaneously declared candidate markets
+        // (#3793). Either shape normalizes to a string array here; an empty
+        // or fully-invalid list falls back to the ["modes"] default.
+        const rawModesDir = l.modes_dir;
+        const rawCandidates = Array.isArray(rawModesDir) ? rawModesDir : [rawModesDir];
+        const resolved = rawCandidates
+          .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+          .map((v) => v.trim().replace(/\/+$/, ""))
+          .filter((v) => MODES_DIR_RE.test(v));
+        if (resolved.length) modesDirs = resolved;
       }
     }
   } catch {
     /* no profile yet, or malformed — defaults are correct */
   }
-  return { output, modesDir, evalModeFile: resolveEvalModeFile(root, modesDir) };
+  const modesDir = modesDirs[0];
+  return { output, modesDir, modesDirs, evalModeFile: resolveEvalModeFile(root, modesDir) };
 }

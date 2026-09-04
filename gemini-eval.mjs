@@ -93,37 +93,58 @@ const PATHS = {
   trackerAdditions: join(DATA_ROOT, 'batch', 'tracker-additions'),
 };
 
-// Determine the localization modes directory and evaluation filename dynamically from config/profile.yml
-let modesDir = 'modes';
+// Determine the localization modes directory/directories and evaluation filename
+// dynamically from config/profile.yml. language.modes_dir may be a single string
+// (one declared market — the historical, still-default shape) or an array of
+// strings (multiple simultaneously-declared candidate markets, #3793). The FIRST
+// declared market is always "primary": it supplies the evaluation-mode file
+// (oferta.md/angebot.md/...), because Block A-F evaluation logic can only run
+// from one such file at a time. Every declared market's _shared.md is loaded
+// into context (see below) so the agent can judge, from the JD's own signals —
+// never from JD language alone — which declared market actually applies.
+let modesDirs = ['modes'];
 let evalFilename = 'oferta.md';
 
 function stripBom(str) {
   return str.charCodeAt(0) === 0xFEFF ? str.slice(1) : str;
 }
 
+/** Validate one modes_dir candidate: must stay inside the project root and exist. */
+function resolveModesDirCandidate(customModesDir) {
+  if (typeof customModesDir !== 'string' || !customModesDir.trim()) return null;
+  const dirPath = resolve(CODE_ROOT, customModesDir);
+  const rel = relative(CODE_ROOT, dirPath);
+  if (rel.startsWith('..') || isAbsolute(customModesDir)) {
+    console.warn(`⚠️   modes_dir "${customModesDir}" escapes project root; skipping`);
+    return null;
+  }
+  if (!existsSync(dirPath)) {
+    console.warn(`⚠️   modes_dir "${customModesDir}" not found; skipping`);
+    return null;
+  }
+  return customModesDir;
+}
+
 if (existsSync(PATHS.profileYml)) {
   try {
     const yamlContent = stripBom(readFileSync(PATHS.profileYml, 'utf-8'));
     const profile = yaml.load(yamlContent);
-    if (profile && profile.language && profile.language.modes_dir) {
-      const customModesDir = profile.language.modes_dir;
-      const dirPath = resolve(CODE_ROOT, customModesDir);
-      const rel = relative(CODE_ROOT, dirPath);
-      if (rel.startsWith('..') || isAbsolute(customModesDir)) {
-        console.warn(`⚠️   modes_dir "${customModesDir}" escapes project root; using default modes/`);
-      } else {
-        if (existsSync(dirPath)) {
-          const candidateFiles = ['oferta.md', 'angebot.md', 'offre.md', 'kyujin.md', 'is-ilani.md', 'naukri.md'];
-          const found = candidateFiles.find((file) => existsSync(join(dirPath, file)));
-          if (found) {
-            modesDir = customModesDir;
-            evalFilename = found;
-          } else {
-            console.warn(`⚠️   No matching evaluation file found in ${customModesDir}; using default modes/oferta.md`);
-          }
+    const rawModesDir = profile && profile.language && profile.language.modes_dir;
+    if (rawModesDir) {
+      const candidates = Array.isArray(rawModesDir) ? rawModesDir : [rawModesDir];
+      const resolved = candidates.map(resolveModesDirCandidate).filter(Boolean);
+      if (resolved.length) {
+        const primaryDir = resolved[0];
+        const candidateFiles = ['oferta.md', 'angebot.md', 'offre.md', 'kyujin.md', 'is-ilani.md', 'naukri.md'];
+        const found = candidateFiles.find((file) => existsSync(join(CODE_ROOT, primaryDir, file)));
+        if (found) {
+          modesDirs = resolved;
+          evalFilename = found;
         } else {
-          console.warn(`⚠️   modes_dir "${customModesDir}" not found; using default modes/`);
+          console.warn(`⚠️   No matching evaluation file found in ${primaryDir}; using default modes/oferta.md`);
         }
+      } else {
+        console.warn('⚠️   No usable modes_dir entries found; using default modes/');
       }
     }
   } catch (err) {
@@ -131,8 +152,12 @@ if (existsSync(PATHS.profileYml)) {
   }
 }
 
+const modesDir = modesDirs[0];
 PATHS.shared = join(CODE_ROOT, modesDir, '_shared.md');
 PATHS.oferta = join(CODE_ROOT, modesDir, evalFilename);
+// Additional declared markets (modes_dir given as an array with 2+ entries):
+// their _shared.md files are read alongside the primary one further below.
+const extraModesDirs = modesDirs.slice(1);
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing
@@ -363,8 +388,19 @@ console.log('\n📂  Loading context files...');
 
 const sharedLabel = join(modesDir, '_shared.md').replace(/\\/g, '/');
 const ofertaLabel = join(modesDir, evalFilename).replace(/\\/g, '/');
-const sharedContext  = readFile(PATHS.shared,      sharedLabel);
+let sharedContext    = readFile(PATHS.shared,      sharedLabel);
 const ofertaLogic    = readFile(PATHS.oferta,      ofertaLabel);
+
+// Multi-market (#3793): fold in every OTHER declared market's _shared.md so the
+// agent has all declared candidates' vocabulary/legal-concept context, not just
+// the primary one. It must pick per-JD by market signal (hiring-entity
+// jurisdiction, currency, benefits/legal vocabulary), never by JD language alone
+// — see AGENTS.md "Output Language vs Market Modes".
+for (const extraDir of extraModesDirs) {
+  const extraLabel = join(extraDir, '_shared.md').replace(/\\/g, '/');
+  const extraContent = readFile(join(CODE_ROOT, extraDir, '_shared.md'), extraLabel);
+  sharedContext += `\n\n--- Additional declared market: ${extraDir} (${extraLabel}) ---\n${extraContent}`;
+}
 const cvContent      = readFile(PATHS.cv,          'cv.md');
 const profileContent = readFile(PATHS.profile,     'modes/_profile.md');
 const profileYml     = readFile(PATHS.profileYml,  'config/profile.yml');
