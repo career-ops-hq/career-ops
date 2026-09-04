@@ -11,6 +11,11 @@
 // postback model) that needs a cookie session carried across a GET → POST →
 // GET sequence, and HTML scraped with tag-agnostic id-based extraction.
 //
+// Single-company adapter, `tracked_companies:` only — each PeopleSoft-hosting
+// institution (Western, TMU, McMaster, WSIB, …) is one `careers_url`/`api`
+// entry, the same "one employer, one entry" shape as ibm.mjs/dassault.mjs;
+// there is no board-wide feed to point a `job_boards:` entry at.
+//
 // ── Detection ────────────────────────────────────────────────────────────
 // Every tenant runs on its own branded domain (recruit.uwo.ca is nothing
 // like careers.torontomu.ca), so — same reasoning as successfactors.mjs's
@@ -69,7 +74,7 @@
 // apply to us at all. This provider's OWN `ctx.maxPages` cooperation is
 // therefore the ONLY thing bounding a probe's request count — not a
 // belt-and-suspenders nicety like it is for a fetchJson/fetchText provider.
-// See `resolveEffectiveCaps()` below.
+// See `resolveMaxLoadMore()` below.
 //
 // ── Session cookies ──────────────────────────────────────────────────────
 // This codebase's one existing precedent (csod.mjs) captures Set-Cookie off
@@ -84,13 +89,19 @@
 //
 // ── description output ───────────────────────────────────────────────────
 // Detail-page description sections (`[id^="win0divHRS_SCH_PSTDSC_row$"]`) are
-// concatenated in DOM order into three forms: `descriptionHtml` (sanitized —
-// see sanitizeHtml, a small allowlist tag filter; no HTML sanitizer exists
-// elsewhere in this codebase to reuse), `description` (plain text, via the
-// shared htmlToText from _html-to-text.mjs — reused, not reimplemented), and
-// `descriptionSections` ({label, html, text}[], for debuggability). Detail
-// enrichment is opt-in (`peoplesoft: { fetchDetails: true }`) and skipped
-// during a probe, same convention as adp-workforcenow.mjs/vdab.mjs.
+// concatenated in DOM order into the one description form Job actually has
+// (`_types.js`): `description`, plain text via the shared htmlToText from
+// _html-to-text.mjs — reused, not reimplemented. An earlier revision also
+// built a sanitized-HTML form and a raw-section debug array and attached
+// both to the output row; neither is a Job field, nothing downstream reads
+// them, and the hand-rolled sanitizer that built the HTML form was the
+// source of two CodeQL "incomplete multi-character sanitization" alerts —
+// removed along with it (review round on #3724/#3739). `parseJobDetail()`
+// still returns its internal `sections` (`{label, text}[]`) so the
+// section-by-section extraction stays independently testable; only
+// `descriptionText` crosses into `fetch()`'s output. Detail enrichment is
+// opt-in (`peoplesoft: { fetchDetails: true }`) and skipped during a probe,
+// same convention as adp-workforcenow.mjs/vdab.mjs.
 
 import { decodeEntities } from './_html-entities.mjs';
 import { htmlToText, DESCRIPTION_CAP } from './_html-to-text.mjs';
@@ -115,15 +126,14 @@ const LOAD_MORE_ACTION = 'HRS_AGNT_RSLT_I$hdown$0';
 const DEFAULT_MAX_LOAD_MORE = 20; // generous: PeopleSoft's own anonymous cap is ~100 results
 const MAX_LOAD_MORE_CAP = 100;
 
-// Bounded per-tenant concurrency for detail-page enrichment, per the source
-// issue's guidance (2-4 concurrent).
-const DETAIL_CONCURRENCY = 3;
+// Cap on how many postings get per-job detail enrichment in one run. Detail
+// fetches run sequentially (see fetch()'s enrichment loop — no concurrency
+// pool, to avoid a stale read on the shared session cookie jar), so this is
+// also the total enrichment request burst for a tenant.
 const DEFAULT_DETAIL_LIMIT = 25;
 
 // Polite pacing between GET/POST/detail hops against the same tenant.
 const INTER_REQUEST_DELAY_MS = 300;
-
-const RETRY_POLICY = { retries: 2, baseDelayMs: 500, maxDelayMs: 8_000 };
 
 // PeopleSoft's Fluid UI is known to serve degraded/legacy markup to a bare
 // default UA on some tenants — same rationale as icims.mjs/workday.mjs.
@@ -136,6 +146,33 @@ const HEADERS = {
 
 /**
  * Resolve a portals.yml entry to a PeopleSoft tenant config, or null.
+ *
+ * No fixed-hostname allowlist here (unlike a single-SaaS-host provider such
+ * as greenhouse.mjs's ALLOWED_GREENHOUSE_HOSTS): PeopleSoft is a self-hosted,
+ * per-institution install with no shared vendor domain to pin to — the same
+ * reason successfactors.mjs's branded RMK hosts and phenom.mjs carry no host
+ * allowlist either (see the "Detection" note in this file's header). A fixed
+ * list would either have to be curated per tenant forever (defeating the
+ * point of a general-purpose provider) or degenerate into something too
+ * broad to be a meaningful restriction (e.g. "any .edu/.ca/.com/.org/.net").
+ * The guard that actually matters, and that IS enforced: the origin accepted
+ * here (from trusted portals.yml data, HTTPS-only, gated on the anchored
+ * PeopleTools path signature) becomes `config.origin`, and every later
+ * request — including every redirect hop, see requestWithSession() below —
+ * is re-validated to stay at EXACTLY that origin (assertPeopleSoftUrl()),
+ * closing the actual attack this class of guard exists for: a
+ * compromised/malicious response bouncing the scanner to a different host
+ * than the one portals.yml configured. DNS-rebinding / private-address
+ * targets (127.0.0.1, 169.254.169.254 cloud metadata, RFC1918, …) are
+ * blocked independently and unconditionally for every provider request by
+ * the shared `providerFetchContext` guard in `_ip-guard.mjs` /
+ * `providers/_http.mjs` — see Scott-Emberson's 2026-09-04 review on
+ * career-ops-hq/career-ops#3739, which verified this origin-pinning design
+ * sound. (CodeRabbit's automated "Provider Contract" pre-merge check flags
+ * the absence of a host allowlist here — that check's heuristic assumes the
+ * ADP/UKG-Pro/Taleo shape, a small fixed set of vendor SaaS hosts; it does
+ * not have a branded-per-tenant-domain exception, which is what this
+ * actually is.)
  * @param {import('./_types.js').PortalEntry} entry
  * @returns {{origin: string, site: string, searchUrl: string} | null}
  */
@@ -493,11 +530,17 @@ async function requestWithSession(ctx, jar, config, method, url, opts = {}) {
       ...baseHeaders,
       ...(cookieHeader(jar) ? { cookie: cookieHeader(jar) } : {}),
     };
+    // No 4th `policy` argument: this tenant needs no cadence different from
+    // fetchResponseWithRetry's own default ({ retries: 2, baseDelayMs: 500,
+    // maxDelayMs: 8_000 } — see _http.mjs RETRY_DEFAULTS). A prior revision
+    // passed an explicit policy object that was byte-identical to that
+    // default, which is a no-op, not a real override (contrast
+    // workday.mjs/oraclecloud.mjs, which pass `{ retries: 3 }` because their
+    // API is WAF-fronted — a genuine reason to differ).
     const res = await fetchResponseWithRetry(
       ctx,
       currentUrl,
       { method: currentMethod, redirect: 'manual', headers, body: currentMethod === 'GET' ? undefined : currentBody },
-      RETRY_POLICY,
     );
     const setCookies = typeof res?.headers?.getSetCookie === 'function' ? res.headers.getSetCookie() : [];
     updateCookieJar(jar, setCookies);
@@ -583,111 +626,6 @@ export async function fetchAdditionalResults(state, session) {
 
 // ── detail-page parsing ─────────────────────────────────────────────────
 
-const ALLOWED_TAGS = new Set([
-  'p', 'br', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'u', 'span', 'div',
-  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'table', 'thead', 'tbody', 'tr', 'td', 'th',
-]);
-
-/** @param {string} s */
-function escapeHtmlText(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function sanitizeAttrs(tag, attrString) {
-  // Only <a href> ever survives — every other attribute (style, class, and
-  // critically every on* event handler) is dropped unconditionally. This is
-  // what makes the sanitizer safe: there is no attribute allowlist to keep in
-  // sync per tag, just one narrow exception.
-  if (tag !== 'a') return '';
-  const attrs = parseAttrs(attrString);
-  if (typeof attrs.href !== 'string') return '';
-  const href = attrs.href.trim();
-  // http(s) or a same-origin-relative path only — never javascript:, data:, etc.
-  if (!/^https?:\/\//i.test(href) && !href.startsWith('/')) return '';
-  return ` href="${escapeHtmlText(href)}" rel="noopener noreferrer" target="_blank"`;
-}
-
-/**
- * Minimal allowlist HTML sanitizer for job-description bodies. No HTML
- * sanitizer exists elsewhere in this codebase (only the strip-to-plain-text
- * htmlToText from _html-to-text.mjs, reused for the plain-text form below) —
- * this is new, deliberately narrow, and does exactly one thing: drop every
- * tag not on ALLOWED_TAGS (keeping its text content) and every attribute
- * except a validated `href` on `<a>`. `<script>`/`<style>` are removed with
- * their content; everything else that isn't allowlisted is removed as a tag
- * only, so its inner text survives.
- * @param {string} html
- */
-export function sanitizeHtml(html) {
-  const input = String(html);
-  let out = '';
-  let cursor = 0;
-
-  while (cursor < input.length) {
-    const tagStart = input.indexOf('<', cursor);
-    if (tagStart === -1) {
-      out += input.slice(cursor);
-      break;
-    }
-    out += input.slice(cursor, tagStart);
-
-    if (input.startsWith('<!--', tagStart)) {
-      const commentEnd = input.indexOf('-->', tagStart + 4);
-      if (commentEnd === -1) break; // unterminated comment: discard the ambiguous remainder
-      cursor = commentEnd + 3;
-      continue;
-    }
-
-    // Find the tag end without treating a `>` inside a quoted attribute as
-    // the terminator. If this is not a complete tag, encode its opening `<`
-    // so it can never combine with a later removal into executable markup.
-    let quote = null;
-    let tagEnd = -1;
-    for (let i = tagStart + 1; i < input.length; i++) {
-      const ch = input[i];
-      if (quote) {
-        if (ch === quote) quote = null;
-      } else if (ch === '"' || ch === "'") {
-        quote = ch;
-      } else if (ch === '>') {
-        tagEnd = i;
-        break;
-      }
-    }
-    if (tagEnd === -1) {
-      out += '&lt;';
-      cursor = tagStart + 1;
-      continue;
-    }
-
-    const token = input.slice(tagStart, tagEnd + 1);
-    const match = token.match(/^<\s*(\/?)\s*([a-zA-Z][a-zA-Z0-9]*)\b([\s\S]*?)>$/);
-    if (!match) {
-      out += '&lt;';
-      cursor = tagStart + 1;
-      continue;
-    }
-
-    const closing = match[1] === '/';
-    const tag = match[2].toLowerCase();
-    if (!closing && (tag === 'script' || tag === 'style')) {
-      const closeRe = new RegExp(`<\\/\\s*${tag}\\s*>`, 'ig');
-      closeRe.lastIndex = tagEnd + 1;
-      const close = closeRe.exec(input);
-      if (!close) break; // an unterminated raw-text element owns the remainder
-      cursor = close.index + close[0].length;
-      continue;
-    }
-
-    if (ALLOWED_TAGS.has(tag)) {
-      out += closing ? `</${tag}>` : `<${tag}${sanitizeAttrs(tag, match[3])}>`;
-    }
-    cursor = tagEnd + 1;
-  }
-
-  return out.trim();
-}
-
 /**
  * Parse a job detail page, verifying identity against the requested job id.
  *
@@ -713,7 +651,6 @@ export function parseJobDetail(html, expectedJobId) {
 
   const title = extractTextById(str, 'HRS_SCH_WRK2_POSTING_TITLE') || '';
   const location = extractTextById(str, 'HRS_SCH_WRK_HRS_DESCRLONG') || '';
-  const employmentType = extractTextById(str, 'HRS_SCH_WRK_HRS_FULL_PART_TIME') || '';
 
   // Section containers appear in DOM order — collecting indices via a single
   // forward regex scan preserves that order without needing real tree walk.
@@ -722,6 +659,15 @@ export function parseJobDetail(html, expectedJobId) {
   let sm;
   while ((sm = secRe.exec(str))) sectionIndices.push(sm[1]);
 
+  // Sections are collected as plain text only — descriptionText (via the
+  // shared htmlToText) is the only description form this provider exposes on
+  // Job. Earlier revisions also built a sanitized-HTML form and a raw-section
+  // debug array, but neither is a Job field (_types.js) and nothing in
+  // scan.mjs reads them off an output row (review round on #3724/#3739), so
+  // producing them was dead weight — and, for the HTML form specifically, the
+  // surface for two now-moot CodeQL "incomplete multi-character sanitization"
+  // alerts on the hand-rolled tag filter that built it. Removed rather than
+  // kept unused.
   const sections = [];
   for (const idx of sectionIndices) {
     // Same `$N` grid-instance convention as the search-page rows (see
@@ -732,14 +678,10 @@ export function parseJobDetail(html, expectedJobId) {
     if (labelRaw === null && bodyRaw === null) continue; // neither half present — nothing to concatenate
     sections.push({
       label: labelRaw !== null ? htmlToText(labelRaw) : '',
-      html: sanitizeHtml(bodyRaw || ''),
       text: htmlToText(bodyRaw || ''),
     });
   }
 
-  const descriptionHtml = sections
-    .map((s) => (s.label ? `<h3>${escapeHtmlText(s.label)}</h3>\n` : '') + s.html)
-    .join('\n');
   const descriptionText = sections
     .map((s) => (s.label ? `${s.label}\n` : '') + s.text)
     .join('\n\n')
@@ -752,9 +694,7 @@ export function parseJobDetail(html, expectedJobId) {
     jobId: returnedJobId,
     title,
     location,
-    employmentType,
     sections,
-    descriptionHtml,
     descriptionText,
   };
 }
@@ -793,19 +733,6 @@ function parsePeoplesoftEntryConfig(entry) {
     fetchDetails: cfg.fetchDetails === true,
     detailLimit: intInRange(cfg.detailLimit, DEFAULT_DETAIL_LIMIT, 1, 100),
   };
-}
-
-/** Small bounded-concurrency worker pool — no library dependency needed. */
-async function runWithConcurrency(items, limit, worker) {
-  let idx = 0;
-  const workerCount = Math.max(1, Math.min(limit, items.length));
-  const workers = Array.from({ length: workerCount }, async () => {
-    while (idx < items.length) {
-      const i = idx++;
-      await worker(items[i]);
-    }
-  });
-  await Promise.all(workers);
 }
 
 // ── provider ─────────────────────────────────────────────────────────────
@@ -886,10 +813,27 @@ export default {
 
     // Completeness is meaningless during a probe (it only ever fetches page
     // one on purpose) — skip the marker/warning there entirely.
-    const complete = probing || reportedTotal === null || byId.size >= reportedTotal;
+    //
+    // Completeness can only be asserted when either (a) a reported total was
+    // actually reached, or (b) the load-more walk genuinely ran out of new
+    // rows on its own (load-more-no-progress) — the one clean-exhaustion
+    // signal available on a tenant that never reports a count at all. Every
+    // other stop (a fetch failure, an unrecognized response, or hitting the
+    // load-more ceiling) must NOT be silently treated as "done" just because
+    // `reportedTotal` happened to stay null — that used to be exactly the
+    // gap: a tenant whose win0divHRS_AGNT_RSLT_Irowcnt$0 element is absent or
+    // unparseable (parseReportedTotal() correctly returning null, a shape
+    // this code is supposed to handle) looked byte-identical to a clean,
+    // complete sweep — no warning, no marker, no reason. Mirrors
+    // workday.mjs's stopReason, which never depends on ever having seen a
+    // total.
+    const reachedKnownTotal = reportedTotal !== null && byId.size >= reportedTotal;
+    const cleanlyExhausted = reachedKnownTotal || (reportedTotal === null && stopCause === 'load-more-no-progress');
+    const complete = probing || cleanlyExhausted;
     if (!probing && !complete) {
       if (!stopCause) stopCause = 'pagination-ceiling-reached';
-      const prefix = `⚠️  peoplesoft: ${entry.name} — parsed ${byId.size} of ${reportedTotal} reported postings; `;
+      const totalDesc = reportedTotal === null ? 'an unknown total of' : `${reportedTotal} reported`;
+      const prefix = `⚠️  peoplesoft: ${entry.name} — parsed ${byId.size} of ${totalDesc} postings; `;
       if (stopCause === 'load-more-fetch-failed') {
         console.error(`${prefix}load-more request failed${stopDetail ? `: ${stopDetail}` : ''}.`);
       } else if (stopCause === 'load-more-response-unrecognized') {
@@ -911,7 +855,11 @@ export default {
         company: entry.name,
         location: row.location,
       };
-      if (row.department) job.department = row.department;
+      // department was previously carried through as an extra Job field, but
+      // it isn't one (_types.js) and nothing downstream (scan.mjs, the
+      // tracker/report writers) reads it off an output row — dropped per
+      // review, same reasoning as descriptionHtml/descriptionSections/
+      // employmentType below.
       if (typeof row.postedAt === 'number') job.postedAt = row.postedAt;
       jobs.push(Object.assign(job, { _jobId: row.jobId }));
     }
@@ -919,24 +867,31 @@ export default {
     // Detail enrichment answers "what does this job say", not "is this
     // endpoint alive" — skip entirely during a probe, same rule as
     // adp-workforcenow.mjs/vdab.mjs.
+    //
+    // Sequential, not a bounded-concurrency pool: fetchJobDetail() reads
+    // `cookieHeader(session.jar)` and then merges Set-Cookie back into that
+    // SAME jar (a plain Map) after every hop, and this provider's own header
+    // comment documents PeopleSoft rotating its session cookie across the
+    // chain. Running several fetchJobDetail() calls concurrently over one
+    // shared jar lets one worker's mid-flight cookie read interleave with
+    // another worker's write, handing it a stale or half-updated session —
+    // ultipro.mjs / adp-workforcenow.mjs keep their own detail enrichment
+    // sequential for exactly this reason, and there's no throughput case here
+    // strong enough to reintroduce the race for it (detailLimit already
+    // bounds the burst; see DEFAULT_DETAIL_LIMIT).
     const { fetchDetails, detailLimit } = parsePeoplesoftEntryConfig(entry);
     if (fetchDetails && !probing) {
       const targets = jobs.slice(0, detailLimit);
-      await runWithConcurrency(targets, DETAIL_CONCURRENCY, async (job) => {
+      for (const job of targets) {
         await sleep(INTER_REQUEST_DELAY_MS, ctx);
         try {
           const detail = await fetchJobDetail(config, session, job._jobId);
-          if (detail) {
-            if (detail.descriptionText) job.description = detail.descriptionText;
-            if (detail.descriptionHtml) job.descriptionHtml = detail.descriptionHtml;
-            if (detail.sections.length) job.descriptionSections = detail.sections;
-            if (detail.employmentType) job.employmentType = detail.employmentType;
-          }
+          if (detail?.descriptionText) job.description = detail.descriptionText;
         } catch {
           // Detail fetch is enrichment only — keep the listing result
           // (same fail-open contract as adp-workforcenow.mjs/smartrecruiters.mjs).
         }
-      });
+      }
     }
 
     const out = jobs.map(({ _jobId, ...job }) => job);
