@@ -1,19 +1,43 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
-import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry } from './_http.mjs';
+// JazzHR provider — scrapes the public, server-rendered ApplyToJob career
+// page. Auto-detects from careers_url/api on any `*.applytojob.com` https
+// host (canonical form: `https://<tenant>.applytojob.com/apply`, which the
+// same tenant also serves identically at its bare host). This is a
+// single-company ATS adapter driven entirely from `tracked_companies:` in
+// portals.yml — there is no public directory of ApplyToJob tenants to
+// enumerate, so unlike greenhouse/lever/ashby/workday/icims this provider is
+// never wired into scan-ats-full.mjs's reverse sweep.
+//
+// The board is one page with no pagination — every posting is in the
+// initial HTML. Title/URL/location come from the list markup; an opt-in
+// `jazzhr: { fetchDetails: true, detailLimit: N }` portal entry additionally
+// fetches each posting's own page (capped at `detailLimit`, default 25, max
+// 100) for its JSON-LD description and posted date.
+
+import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry, sleep } from './_http.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 
 const HOST_RE = /^[a-z0-9][a-z0-9-]*\.applytojob\.com$/i;
 const MAX_JOBS = 1000;
 const DETAIL_DEFAULT_LIMIT = 25;
+// Courtesy delay between back-to-back detail-page requests to the same
+// tenant, same pattern as providers/taleo.mjs (#3743) and the inter-page
+// delays in providers/careerviet.mjs / providers/itviec.mjs — avoids a WAF
+// burst trigger on a loop that can fire up to 100 requests with no pacing.
+const DETAIL_FETCH_DELAY_MS = 200;
 
 function parseBoardUrl(raw) {
   if (typeof raw !== 'string' || !raw.trim()) return null;
   try {
     const url = new URL(raw.trim());
     if (url.protocol !== 'https:' || !HOST_RE.test(url.hostname)) return null;
-    if (!/^\/apply(?:\/|$)/i.test(url.pathname)) return null;
+    // Real JazzHR boards serve the same listing at the bare host and at
+    // /apply — every natural route in (a company's own careers button, an
+    // aggregator link, a search hit) hands over the bare host, never the
+    // constructed /apply form, so both must resolve.
+    if (!/^\/(?:apply(?:\/.*)?)?$/i.test(url.pathname)) return null;
     return url;
   } catch { return null; }
 }
@@ -94,8 +118,16 @@ export function parseJazzHRDetail(html, job) {
   if (!job.title && typeof node.title === 'string') job.title = clean(node.title);
   const description = clean(node.description);
   if (description) job.description = description;
-  const location = locationText(node.jobLocation);
-  if (location) job.location = location;
+  // Only overwrite from the detail page when the list value is empty or a
+  // literal "n/a" (mirrors icims.mjs's enrichDate guard) — the list page
+  // often carries a fuller location than the detail JSON-LD, so an
+  // unconditional overwrite silently downgrades it (e.g. "Berlin, Berlin,
+  // Germany" from the list to just "Berlin" from a detail page missing
+  // country), which matters because location_filter matches on this field.
+  if (!String(job.location || '').trim() || /^n\/?a$/i.test(String(job.location).trim())) {
+    const location = locationText(node.jobLocation);
+    if (location) job.location = location;
+  }
   if (typeof node.datePosted === 'string') {
     const parsed = Date.parse(node.datePosted);
     if (!Number.isNaN(parsed)) job.postedAt = parsed;
@@ -124,7 +156,10 @@ export default {
     const { fetchDetails, detailLimit } = config(entry);
     const probing = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0;
     if (fetchDetails && !probing) {
-      for (const job of jobs.slice(0, detailLimit)) {
+      const targets = jobs.slice(0, detailLimit);
+      for (let i = 0; i < targets.length; i++) {
+        if (i > 0) await sleep(DETAIL_FETCH_DELAY_MS, ctx);
+        const job = targets[i];
         try {
           const detailUrl = assertJazzHRUrl(job.url);
           const detail = await fetchTextWithRetry(ctx, detailUrl.href, { redirect: 'error', headers: { 'User-Agent': BROWSER_LIKE_USER_AGENT, Accept: 'text/html' } });
@@ -133,11 +168,6 @@ export default {
       }
     }
     return jobs;
-  },
-  async enrichDate(job, ctx) {
-    const detailUrl = assertJazzHRUrl(job.url);
-    const html = await fetchTextWithRetry(ctx, detailUrl.href, { redirect: 'error', headers: { 'User-Agent': BROWSER_LIKE_USER_AGENT, Accept: 'text/html' } });
-    parseJazzHRDetail(html, job);
   },
 };
 
