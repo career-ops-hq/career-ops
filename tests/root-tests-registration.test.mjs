@@ -138,10 +138,10 @@ if (rootOk) {
     // section does".
     const literals = stringLiterals(readFileSync(join(ROOT, 'test-all.mjs'), 'utf-8'));
 
-    // `'x-tests.mjs'`, `'./x-tests.mjs'`, and `'x-tests.mjs --flag'` all count;
-    // the scripts list splits its own entries on whitespace.
-    const registeredInHarness = (name) =>
-      literals.some((v) => v === name || v.startsWith(`${name} `) || v.endsWith(`/${name}`));
+    // harnessMatches is defined once, below, and used by BOTH the live check
+    // and the fixtures — see the note there for why a second copy is worse
+    // than useless.
+    const registeredInHarness = (name) => harnessMatches(literals, name);
 
     // ── Surface 2: node invocations in the workflows ─────────────────────────
     // .github/ ships to installs (SYSTEM_PATHS, update-system.mjs:432), so this
@@ -341,6 +341,27 @@ export function invokesNode(scripts, name) {
   });
 }
 
+/**
+ * Whether `name` is registered among `literals` — the string literals of
+ * test-all.mjs. `'x-tests.mjs'`, `'./x-tests.mjs'` and `'x-tests.mjs --flag'`
+ * all count; the scripts list splits its own entries on whitespace.
+ *
+ * ONE definition, used by the live check and by the fixtures below. A second
+ * copy in the fixture loop is worse than no fixtures at all: it keeps passing
+ * while the rule it claims to pin drifts away from it. Measured on this branch
+ * by @artemtrofymenko — dropping the `endsWith` clause from the live rule left
+ * all 24 fixtures green, including the path-qualified case that exists to
+ * cover exactly that clause, because nothing registered today is
+ * path-qualified. The fixtures were reporting on a rule that had stopped being
+ * the rule.
+ */
+// A hoisted `function`, deliberately, not `const`: the live check above runs
+// at module top level BEFORE this line is reached, and a const would be in the
+// temporal dead zone there (ReferenceError, contained as a suite failure).
+export function harnessMatches(literals, name) {
+  return literals.some((v) => v === name || v.startsWith(`${name} `) || v.endsWith(`/${name}`));
+}
+
 // ── Fixtures for the two match rules ────────────────────────────────────────
 // The rules ARE the guard: one that silently loosens turns this file into the
 // false green it exists to prevent. Both directions are pinned — the shapes
@@ -395,8 +416,7 @@ const WORKFLOW_DOC = {
 
 let ruleFailures = [];
 for (const [src, want, label] of HARNESS_CASES) {
-  const lits = stringLiterals(src);
-  const got = lits.some((v) => v === 'x-tests.mjs' || v.startsWith('x-tests.mjs ') || v.endsWith('/x-tests.mjs'));
+  const got = harnessMatches(stringLiterals(src), 'x-tests.mjs');
   if (got !== want) ruleFailures.push(`harness rule: ${label} → ${got}, want ${want}`);
 }
 for (const [src, want, label] of WORKFLOW_CASES) {
