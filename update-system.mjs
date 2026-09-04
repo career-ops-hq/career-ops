@@ -684,6 +684,75 @@ function compareVersions(a, b) {
   return 0;
 }
 
+/**
+ * Pin a moving ref to the immutable commit SHA it names right now.
+ *
+ * `FETCH_HEAD` is a pseudo-ref, not a snapshot: every read re-resolves whatever
+ * the last fetch wrote, and apply() read it more than a dozen times across
+ * bootstrap, checkout, prune, .gitignore reconciliation and staging. Nothing
+ * tied those reads together, so a single apply run had no guarantee that the
+ * tree it inspected was the tree it checked out. Resolving once and passing the
+ * resulting SHA down makes the whole run address one immutable commit.
+ *
+ * @param {string} [ref='FETCH_HEAD'] - Ref to resolve.
+ * @param {{git?: Function}} [ctx] - Test seam; defaults to the ROOT-bound runner.
+ * @returns {string} A 40-hex commit SHA.
+ */
+export function pinRefToCommit(ref = 'FETCH_HEAD', ctx = {}) {
+  // gitQuiet: an unresolvable ref is reported by the throw below, so git's own
+  // "fatal: Needed a single revision" on inherited stderr is duplicate noise.
+  const runGit = ctx.git || gitQuiet;
+  const sha = runGit('rev-parse', '--verify', `${ref}^{commit}`).trim();
+  if (!/^[0-9a-f]{40}$/.test(sha)) {
+    throw new Error(`Could not pin ${ref} to a commit (git rev-parse returned ${JSON.stringify(sha)}).`);
+  }
+  return sha;
+}
+
+/**
+ * The VERSION a ref ships, or '' when the ref carries none.
+ *
+ * @param {string} ref - Any commit-ish.
+ * @param {{git?: Function}} [ctx] - Test seam; defaults to the ROOT-bound runner.
+ * @returns {string} Parsed version string, or '' if unreadable.
+ */
+export function versionAtRef(ref, ctx = {}) {
+  const runGit = ctx.git || gitQuiet;
+  try {
+    return parseVersionFile(runGit('show', `${ref}:VERSION`));
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Why apply() must refuse this target, or null when it may proceed.
+ *
+ * apply() never checked what it was about to install. `compareVersions` exists
+ * and is called twice — both times inside check(), which only decides whether
+ * to NOTIFY. The install path itself checked out whatever the fetch produced,
+ * so any target that turned out to be older than the installed tree was written
+ * over the current system files with no comparison, no warning, and a "Update
+ * complete: vX -> vY" banner where Y < X.
+ *
+ * Fail closed: an unreadable target VERSION is not evidence of a newer target,
+ * so it is refused rather than assumed benign. Same-version targets stay allowed
+ * — re-applying the current release is a legitimate repair path (#1998).
+ *
+ * @param {string} installedVersion - VERSION on disk before the update.
+ * @param {string} targetVersion - VERSION shipped by the pinned target ref.
+ * @returns {string|null} Refusal reason, or null when the target is acceptable.
+ */
+export function downgradeRefusal(installedVersion, targetVersion) {
+  if (!targetVersion) {
+    return `could not read VERSION from the update target, refusing to apply an unverifiable target`;
+  }
+  if (compareVersions(targetVersion, installedVersion) < 0) {
+    return `target VERSION ${targetVersion} is older than installed ${installedVersion}, refusing`;
+  }
+  return null;
+}
+
 function updateBackupBranchName(version, date = new Date()) {
   const stamp = date.toISOString()
     .replace(/[-:]/g, '')
@@ -869,9 +938,10 @@ function assertOwnGitToplevel() {
  * out when the next script crashes with ERR_MODULE_NOT_FOUND (#1998).
  *
  * @param {string[]} targetPaths - SYSTEM_PATHS read from the target updater.
- * @returns {string[]} Entries present in FETCH_HEAD but absent locally.
+ * @param {string} targetRef - The pinned target commit, not a moving pseudo-ref.
+ * @returns {string[]} Entries present in the target tree but absent locally.
  */
-function missingFromTargetManifest(targetPaths) {
+function missingFromTargetManifest(targetPaths, targetRef) {
   const missing = [];
   for (const path of targetPaths) {
     const spec = path.endsWith('/') ? path.slice(0, -1) : path;
@@ -884,10 +954,10 @@ function missingFromTargetManifest(targetPaths) {
     if (path.endsWith('/')) {
       let treeFiles = [];
       try {
-        treeFiles = gitQuiet('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', spec)
+        treeFiles = gitQuiet('ls-tree', '-r', '--name-only', targetRef, '--', spec)
           .split('\n').map(s => s.trim()).filter(Boolean);
       } catch {
-        continue; // FETCH_HEAD unreadable for this spec — treat as stale, not missing
+        continue; // target tree unreadable for this spec — treat as stale, not missing
       }
       // Empty tree ⇒ the target ships nothing here (stale manifest entry).
       if (treeFiles.some(f => !existsSync(join(ROOT, f)))) missing.push(path);
@@ -898,7 +968,7 @@ function missingFromTargetManifest(targetPaths) {
     // Only count it as missing when the target actually ships it — a manifest
     // entry the target no longer carries is a stale entry, not a failed update.
     try {
-      gitQuiet('cat-file', '-e', `FETCH_HEAD:${spec}`);
+      gitQuiet('cat-file', '-e', `${targetRef}:${spec}`);
       missing.push(path);
     } catch { /* absent upstream too — nothing to materialize */ }
   }
@@ -2029,6 +2099,45 @@ async function apply() {
     console.log('Fetching latest from upstream...');
     git('fetch', CANONICAL_REPO, 'main');
 
+    // 2a. Resolve the target ONCE, then address it by SHA for the rest of the
+    // run. `FETCH_HEAD` is re-resolved on every read, so the dozen reads this
+    // function used to make were a dozen independent questions about a ref that
+    // is free to move between them — the bootstrap checkout, the manifest read,
+    // the per-path checkout loop, the stale-file prune, the .gitignore
+    // reconciliation and the staging expansion could each have seen a different
+    // tree. Pinning makes one apply run mean one commit.
+    //
+    // The re-exec'd child re-fetches, so without the inherited SHA it would pin
+    // its own target — and then install a tree different from the one the parent
+    // verified and bootstrapped from. The env value is a hint, not an
+    // authorization (#2866): it is only read in the authenticated re-exec, it is
+    // validated by rev-parse against the local object store, and an unusable
+    // value falls back to a fresh pin rather than aborting.
+    const inheritedTarget = isReexec ? (process.env.CAREER_OPS_UPDATE_TARGET_SHA || '') : '';
+    let targetRef;
+    try {
+      targetRef = inheritedTarget ? pinRefToCommit(inheritedTarget) : pinRefToCommit('FETCH_HEAD');
+    } catch {
+      targetRef = pinRefToCommit('FETCH_HEAD');
+    }
+
+    // 2b. Verify the target before touching a single file. apply() never did:
+    // compareVersions() is called only from check(), which decides whether to
+    // NOTIFY, so the install path checked out whatever the fetch produced and
+    // printed a success banner regardless of which direction the version moved.
+    // Refuse an older target instead, and refuse a target whose VERSION cannot
+    // be read at all — an unverifiable target is not a verified one.
+    const targetVersion = versionAtRef(targetRef);
+    const refusal = downgradeRefusal(local, targetVersion);
+    if (refusal) {
+      throw new Error(
+        `Refusing to update from ${targetRef.slice(0, 12)}: ${refusal}.\n` +
+        `    No system files were changed. To go back to an earlier state deliberately,\n` +
+        `    use \`node update-system.mjs rollback\`, which restores the backup branch\n` +
+        `    this installation made rather than overwriting it with an older upstream tree.`,
+      );
+    }
+
     if (!isReexec) {
       const timeout = reexecTimeoutMs();
       try {
@@ -2036,8 +2145,8 @@ async function apply() {
         // at load time must exist first. Resolve the fetched update-system.mjs's
         // relative-import closure and check out exactly those files, so a future
         // new top-level import can't reintroduce the self-reexec crash (#1245).
-        const reexecFiles = resolveReexecCheckout('FETCH_HEAD', 'update-system.mjs');
-        const bootstrapAtRisk = locallyModifiedSystemFiles(reexecFiles, 'FETCH_HEAD');
+        const reexecFiles = resolveReexecCheckout(targetRef, 'update-system.mjs');
+        const bootstrapAtRisk = locallyModifiedSystemFiles(reexecFiles, targetRef);
         if (bootstrapAtRisk.length > 0) {
           console.log('');
           console.log(`${bootstrapAtRisk.length} self-bootstrap file(s) differ from upstream because THIS install changed them:`);
@@ -2051,7 +2160,7 @@ async function apply() {
           console.log('Self-bootstrap must load the upstream versions; the local versions remain in the backups above.');
           console.log('');
         }
-        git('checkout', 'FETCH_HEAD', '--', ...reexecFiles);
+        git('checkout', targetRef, '--', ...reexecFiles);
         const marker = createReexecMarker();
         execFileSync(process.execPath, [
           'update-system.mjs',
@@ -2070,6 +2179,9 @@ async function apply() {
             // marker was introduced; only the authenticated child receives it.
             CAREER_OPS_UPDATE_REEXEC: '1',
             CAREER_OPS_UPDATE_BACKUP_BRANCH: backupBranch,
+            // The child must install the tree this parent pinned and verified,
+            // not whatever its own fetch happens to resolve.
+            CAREER_OPS_UPDATE_TARGET_SHA: targetRef,
             ...(updateForce ? { CAREER_OPS_UPDATE_FORCE: '1' } : {}),
             // Keep the legacy confirmation channel for older target updaters;
             // this process still requires the authenticated marker above.
@@ -2092,7 +2204,7 @@ async function apply() {
     const updated = [];
     let remoteSystemPaths = [];
     try {
-      const remoteUpdaterSource = git('show', 'FETCH_HEAD:update-system.mjs');
+      const remoteUpdaterSource = git('show', `${targetRef}:update-system.mjs`);
       remoteSystemPaths = extractArrayFromSource(remoteUpdaterSource, 'SYSTEM_PATHS');
     } catch {
       // Older targets may not have update-system.mjs. Fall back to the
@@ -2109,7 +2221,7 @@ async function apply() {
     // so; `--force` overwrites. Either way a .bak of the local content is
     // written first, so the fix is recoverable even from the forced path.
     const preservedPaths = [];
-    const atRisk = locallyModifiedSystemFiles(updatePaths, 'FETCH_HEAD');
+    const atRisk = locallyModifiedSystemFiles(updatePaths, targetRef);
     if (atRisk.length > 0) {
       console.log('');
       console.log(`${atRisk.length} system file(s) differ from upstream because THIS install changed them:`);
@@ -2153,7 +2265,7 @@ async function apply() {
         if (preservedHere.length > 0) {
           let upstreamFiles = [];
           try {
-            upstreamFiles = gitQuiet('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', path)
+            upstreamFiles = gitQuiet('ls-tree', '-r', '--name-only', targetRef, '--', path)
               .split('\n').map((f) => f.trim()).filter(Boolean);
           } catch {
             // Unreadable entry — fall through to the normal checkout, which
@@ -2169,17 +2281,17 @@ async function apply() {
         // `error: pathspec '...' did not match any file(s) known to git`
         // immediately before the success banner — which reads as a failed
         // update and sends people chasing the wrong root cause (#1998).
-        gitQuiet('checkout', 'FETCH_HEAD', '--', path, ...preserveSpecs);
+        gitQuiet('checkout', targetRef, '--', path, ...preserveSpecs);
         updated.push(path);
       } catch (err) {
         // A path genuinely absent upstream is the expected skip. But the catch
         // also caught timeouts, permission errors, and repo corruption and
         // reported them as skips too — letting a partial update reach the
         // success banner (#1998). Confirm the path is actually absent from
-        // FETCH_HEAD before treating the failure as benign; otherwise rethrow.
+        // the target tree before treating the failure as benign; else rethrow.
         const spec = path.endsWith('/') ? path.slice(0, -1) : path;
         let absentUpstream = false;
-        try { gitQuiet('cat-file', '-e', `FETCH_HEAD:${spec}`); }
+        try { gitQuiet('cat-file', '-e', `${targetRef}:${spec}`); }
         catch { absentUpstream = true; }
         if (!absentUpstream) throw err;
         skippedPaths.push(path);
@@ -2198,7 +2310,7 @@ async function apply() {
       let remoteFiles = new Set();
       try {
         remoteFiles = new Set(
-          git('ls-tree', '-r', '--name-only', 'FETCH_HEAD')
+          git('ls-tree', '-r', '--name-only', targetRef)
             .split('\n').filter(Boolean).map((p) => p.replace(/\\/g, '/'))
         );
       } catch {
@@ -2241,7 +2353,7 @@ async function apply() {
     // and what it could only prevent inside this repository.
     try {
       const gitignorePath = join(ROOT, '.gitignore');
-      const upstreamGitignore = gitShowRaw('FETCH_HEAD:.gitignore');
+      const upstreamGitignore = gitShowRaw(`${targetRef}:.gitignore`);
       // Uncommitted local edits to .gitignore are the user's, and that is a
       // routine state rather than an exotic one: agent-inbox.mjs's own
       // ensureGitignored() appends a rule without committing it. Such a file
@@ -2284,7 +2396,7 @@ async function apply() {
       // Never abort an update over this, but never swallow it either: a silent
       // skip here is precisely how the original bug stayed invisible.
       console.error(`Could not reconcile .gitignore: ${err.message}`);
-      console.error('Your own rules were left untouched. Compare manually with: git diff FETCH_HEAD -- .gitignore');
+      console.error(`Your own rules were left untouched. Compare manually with: git diff ${targetRef} -- .gitignore`);
     }
 
     // Lazy import: keep update-system.mjs self-loading (see the top-of-file
@@ -2419,7 +2531,7 @@ async function apply() {
     // longer ships. That can sweep a user's unstaged edit into the updater
     // commit even though staging never touched it (#3504). Exclusion
     // pathspecs remain in the expanded list so preserved files stay out.
-    const expandedPathsToStage = expandToShippedFiles(pathsToStage);
+    const expandedPathsToStage = expandToShippedFiles(pathsToStage, targetRef);
 
     try {
       prepareMaterializedSkillEntrypointsForStage(materializedSkillEntrypoints);
@@ -2435,7 +2547,7 @@ async function apply() {
       // …but the pathspec form builds the commit from the WORKING TREE for those
       // paths rather than from the index. Where `core.fileMode` is false — the
       // default on Windows — the working tree cannot express the executable bit,
-      // so a mode change that `git checkout FETCH_HEAD -- <path>` just staged is
+      // so a mode change that `git checkout <target> -- <path>` just staged is
       // dropped from the commit and left sitting in the index. The install is
       // dirty the instant a "clean" update finishes, and stays dirty, because
       // every later update re-stages the same mode and drops it again.
@@ -2504,7 +2616,7 @@ async function apply() {
     // Re-running apply fixes it (the first pass did update update-system.mjs
     // itself, so the second pass uses the target manifest) — but only if the
     // user is told, instead of being shown "Update complete" (#1998).
-    const unmaterialized = missingFromTargetManifest(remoteSystemPaths);
+    const unmaterialized = missingFromTargetManifest(remoteSystemPaths, targetRef);
     if (unmaterialized.length > 0) {
       console.error(`\nUpdate incomplete: v${local} → v${remote}`);
       console.error(`${unmaterialized.length} path(s) from the target manifest were not checked out:`);
