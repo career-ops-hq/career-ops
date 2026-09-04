@@ -42,7 +42,14 @@ export function listStates() {
   if (!existsSync(FIXTURES)) return [];
   // Sort for deterministic state ordering across platforms (readdirSync
   // returns filesystem order, which varies).
-  return readdirSync(FIXTURES).sort().filter((n) => statSync(join(FIXTURES, n)).isDirectory());
+  //
+  // A checkout under test-fixtures/upgrade/ is excluded HERE, not only in
+  // walk(): this list is the state allowlist, and walk() starts AT the state
+  // directory, where the child-only guard cannot see it (the walk root is
+  // deliberately exempt). Leaving it in would make a whole second repository an
+  // allowlisted fixture state and seed it into the install under test (#3762).
+  return readdirSync(FIXTURES).sort()
+    .filter((n) => statSync(join(FIXTURES, n)).isDirectory() && !isNestedCheckout(join(FIXTURES, n)));
 }
 
 // Strict allowlist: a state must be one of the real fixture subdirectories.

@@ -337,16 +337,58 @@ function bodySpan(code, head) {
 }
 
 /**
+ * Does `fn` consult the predicate on the path it is about to DESCEND into?
+ *
+ * A call is not enough. `isNestedCheckout(dir)` written inside the read loop
+ * tests the directory being listed, not the child, so a marked directory's
+ * subdirectories are skipped while the files sitting directly in it are still
+ * collected — the mutation that passed the earlier gate, and the reason the
+ * behavioural fixture below puts its stale suite at the fixture's top level.
+ *
+ * Two accepted shapes:
+ *   - the argument is not the walk's own first parameter (`full`, `p`,
+ *     `join(dir, e.name)`) — the child path, tested before descending;
+ *   - the argument IS that parameter, but the call comes BEFORE the first
+ *     directory read in the body: a guard at function entry, which the
+ *     recursion applies to every child as it enters (`copyDirSync`).
+ *
+ * @param {{head: number, body: string}} fn - A declaration record.
+ * @returns {boolean}
+ */
+function guardsAChild(fn) {
+  const firstParam = /^\s*\(?\s*([A-Za-z_$][\w$]*)/.exec(fn.params)?.[1];
+  const read = fn.body.search(/\breaddirSync\s*\(/);
+  for (const m of fn.body.matchAll(/\bisNestedCheckout\s*\(\s*([^)]*)\)/g)) {
+    const arg = m[1].trim();
+    if (firstParam && arg === firstParam) {
+      if (read === -1 || m.index < read) return true;   // entry guard
+      continue;                                         // tests the dir being read
+    }
+    if (arg) return true;
+  }
+  return false;
+}
+
+/**
  * Every recursive directory walker in `entries`.
  *
  * A walker reads a directory and reaches itself through the file's own call
  * graph — which covers mutual recursion (`a` calls `b` calls `a`), where no
- * single body contains a call to itself. Non-recursive `readdirSync` is not
- * this bug: a nested checkout is a directory, and only descending into one
- * gets its contents graded.
+ * single body contains a call to itself. The read counts transitively too: a
+ * body that calls a local `readDir` wrapper is reading a directory, and
+ * requiring the literal `readdirSync(` made `intake.mjs`'s recursion over
+ * `documents/` invisible. Non-recursive `readdirSync` is not this bug: a nested
+ * checkout is a directory, and only descending into one gets its contents
+ * graded.
  *
  * `guarded` is reported over the whole recursion cycle, not one body: in a
- * mutually recursive pair, either half may hold the guard.
+ * mutually recursive pair, either half may hold the guard. The ARGUMENT is
+ * checked, not just the call: `isNestedCheckout(dir)` inside the loop tests the
+ * directory being read rather than the child about to be descended into, so it
+ * skips a marked directory's subdirectories while still walking the files
+ * directly inside it. That mutant passed the gate. The one shape where testing
+ * the walk's own parameter IS correct is a guard placed BEFORE the read, at
+ * function entry (`copyDirSync`), where every child is checked as it recurses.
  *
  * @param {{rel: string, src: string}[]} entries
  * @returns {{id: string, file: string, name: string, line: number, guarded: boolean}[]}
@@ -369,7 +411,14 @@ function findRecursiveWalkers(entries) {
       seenNames.set(name, n);
       // The first declaration keeps the bare `file:name` id, so an EXEMPT entry
       // stays stable when an unrelated same-named function is added later.
-      fns.set(n === 1 ? name : `${name}#${n}`, { name, head, body: code.slice(span[0], span[1]) });
+      fns.set(n === 1 ? name : `${name}#${n}`, {
+        name,
+        head,
+        // The parameter list as written, so a guard's argument can be compared
+        // against the directory this function was handed.
+        params: code.slice(head, span[0]),
+        body: code.slice(span[0], span[1]),
+      });
     }
     // A call resolves BY NAME, so with duplicates it reaches every declaration
     // wearing that name. Deliberately over-approximate: the wrong direction to
@@ -394,8 +443,16 @@ function findRecursiveWalkers(entries) {
       }
       return false;
     };
+    // Reading a directory counts through a local wrapper, so a walker whose
+    // body only calls `readDir(dir)` is still a walker.
+    const readsDir = (key, seen = new Set()) => {
+      if (seen.has(key)) return false;
+      seen.add(key);
+      if (fns.get(key).body.includes('readdirSync(')) return true;
+      return (callsOf.get(key) ?? []).some((k) => readsDir(k, seen));
+    };
     for (const [key, fn] of fns) {
-      if (!fn.body.includes('readdirSync(')) continue;
+      if (!readsDir(key)) continue;
       if (!reaches(key, key)) continue;
       // The recursion cycle: everything fn reaches that reaches fn back. The
       // guard may sit in either half of a mutually recursive pair, and nowhere
@@ -407,7 +464,7 @@ function findRecursiveWalkers(entries) {
         file: rel,
         name: key,
         line: src.slice(0, fn.head).split('\n').length,
-        guarded: cycle.some((k) => fns.get(k).body.includes('isNestedCheckout(')),
+        guarded: cycle.some((k) => guardsAChild(fns.get(k))),
       });
     }
   }
@@ -489,6 +546,36 @@ test('the walker detector recognizes every shape it claims to, and only real rec
         return walk(root);
       }
     `),
+    // Reads through a local wrapper: no literal readdirSync in the walker.
+    f('wrapper-read.mjs', `
+      function scan(root) {
+        const readDir = (d) => { try { return readdirSync(d, { withFileTypes: true }); } catch { return []; } };
+        const walk = (dir) => {
+          for (const e of readDir(dir)) if (e.isDirectory()) walk(join(dir, e.name));
+        };
+        return walk(root);
+      }
+    `),
+    // Consults the predicate on the directory being READ, not the child about
+    // to be descended into: files sitting directly inside a marked directory
+    // are still collected. A call is not a guard.
+    f('guards-parent.mjs', `
+      function walk(dir, out) {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          if (e.isDirectory()) { if (isNestedCheckout(dir)) continue; walk(join(dir, e.name), out); }
+          else out.push(e.name);
+        }
+      }
+    `),
+    // The one shape where testing the walk's own parameter is right: a guard at
+    // function ENTRY, before the read, which the recursion applies to every
+    // child as it enters.
+    f('entry-guard.mjs', `
+      const copyDir = (src, dest) => {
+        if (src !== ROOT && isNestedCheckout(src)) return;
+        for (const name of readdirSync(src)) copyDir(join(src, name), join(dest, name));
+      };
+    `),
     // The guard named ONLY in a comment. Documented as guarded, descends into
     // every checkout it finds.
     f('comment-only.mjs', `
@@ -515,11 +602,15 @@ test('the walker detector recognizes every shape it claims to, and only real rec
       'braces-in-literals.mjs:walk [guarded]',
       'comment-only.mjs:walk',
       'duplicate-names.mjs:walk#2',
+      'entry-guard.mjs:copyDir [guarded]',
+      'guards-parent.mjs:walk',
       'method.mjs:walk',
       'mutual.mjs:collect',
+      'mutual.mjs:descend',
       'regex-after-keyword.mjs:walk [guarded]',
+      'wrapper-read.mjs:walk',
     ],
-    'the detector must see method, brace-less-arrow, unparenthesized-parameter arrow, mutually recursive and same-named walkers, must not truncate a body at braces inside a literal or a keyword-position regex, must not count a guard written in a comment, and must ignore a non-recursive read',
+    'the detector must see method, brace-less-arrow, unparenthesized-parameter arrow, mutually recursive, same-named and wrapper-reading walkers, must reject a guard that tests the directory being read rather than the child (while accepting one at function entry), must not truncate a body at braces inside a literal or a keyword-position regex, must not count a guard written in a comment, and must ignore a non-recursive read',
   );
 });
 
@@ -569,8 +660,26 @@ test('every recursive walker over this checkout consults the shared predicate', 
     `found only ${walkers.length} recursive walkers — the detector has stopped matching, not the repo stopped walking`,
   );
 
+  // EXEMPT is keyed `file:name`, deliberately WITHOUT the `#N` ordinal a
+  // duplicate declaration carries: an unrelated same-named function added above
+  // an exempt walker would otherwise renumber it, and the exemption would go
+  // stale for a reason that has nothing to do with either walker. The trade is
+  // that a name must stay unambiguous within its file — two walkers sharing an
+  // exempt name fail loudly rather than one silently inheriting the other's
+  // reason.
+  const baseId = (w) => `${w.file}:${w.name.split('#')[0]}`;
+  for (const id of EXEMPT.keys()) {
+    const matches = walkers.filter((w) => baseId(w) === id);
+    assert.ok(matches.length > 0, `EXEMPT lists ${id}, which is no longer a recursive walker`);
+    assert.equal(
+      matches.length, 1,
+      `EXEMPT lists ${id}, but ${matches.length} walkers in that file share the name (${matches.map((w) => `line ${w.line}`).join(', ')}) — ` +
+      'an exemption must name one walker, so rename one of them',
+    );
+  }
+
   const unguarded = walkers
-    .filter((w) => !EXEMPT.has(w.id) && !w.guarded)
+    .filter((w) => !EXEMPT.has(baseId(w)) && !w.guarded)
     .map((w) => `${w.file}:${w.line} (${w.name})`);
   assert.deepEqual(
     unguarded,
@@ -579,11 +688,33 @@ test('every recursive walker over this checkout consults the shared predicate', 
     'call isNestedCheckout() on child directories, or add a reasoned entry to EXEMPT (#3499, #3762)',
   );
 
-  // An exemption for a walker that no longer exists is a stale claim about the
-  // code, and the next reader would take it for a reviewed decision.
-  for (const id of EXEMPT.keys()) {
-    assert.ok(walkers.some((w) => w.id === id), `EXEMPT lists ${id}, which is no longer a recursive walker`);
+  // Recursion that Node performs INSIDE one call — `readdirSync(dir, {
+  // recursive: true })` and `globSync` — leaves no per-directory decision to
+  // guard, so `findRecursiveWalkers` cannot see it and the floor above would
+  // never notice. It is the same defect: a worktree under `modes/` turned 174
+  // files into 459 and failed a real check naming another tree's file (#3762).
+  // The rule there is to filter the RESULT, so the gate is that such a call and
+  // `isUnderNestedCheckout` appear in the same file. Coarse on purpose — a
+  // finer rule would have to bind the filter to the call, and the honest
+  // instrument for that is the behavioural test, not this.
+  // `[^)]*` between the call and the option would stop at the first `)`, which
+  // in `readdirSync(join(ROOT, 'modes'), { recursive: true })` belongs to
+  // join() — the regex then missed the exact call this gate exists for. Bounded
+  // by statement instead.
+  const ONE_CALL_RECURSION = /readdirSync\s*\([^;]{0,200}?recursive\s*:\s*true|\bglobSync\s*\(/;
+  const unfiltered = [];
+  for (const file of collectMjsFiles(ROOT)) {
+    const rel = file.slice(ROOT.length + 1).replace(/\\/g, '/');
+    if (rel === 'tests/mjs-files.test.mjs' || rel === 'lib/mjs-files.mjs') continue;   // this gate and the helper itself
+    const src = readFileSync(file, 'utf-8');
+    if (ONE_CALL_RECURSION.test(src) && !src.includes('isUnderNestedCheckout(')) unfiltered.push(rel);
   }
+  assert.deepEqual(
+    unfiltered,
+    [],
+    `${unfiltered.join(', ')}: expands a whole subtree in one call (readdirSync recursive / globSync) without ` +
+    'filtering the result through isUnderNestedCheckout — a nested checkout\u2019s files come back as ours (#3762)',
+  );
 
   // The IMPORT is a separate assertion from the call. Matching
   // `isNestedCheckout(` anywhere is satisfied by a local
@@ -594,7 +725,7 @@ test('every recursive walker over this checkout consults the shared predicate', 
   // accepting any relative depth: a walker can live at any depth under ROOT, so
   // a depth-limited pattern would accuse a correctly guarded nested file of
   // re-implementing the predicate.
-  const guardedFiles = [...new Set(walkers.filter((w) => !EXEMPT.has(w.id)).map((w) => w.file))];
+  const guardedFiles = [...new Set(walkers.filter((w) => !EXEMPT.has(baseId(w))).map((w) => w.file))];
   for (const caller of guardedFiles) {
     if (caller === 'lib/mjs-files.mjs') continue;   // the definition itself
     const src = readFileSync(join(ROOT, caller), 'utf-8');
@@ -619,10 +750,14 @@ test('a checkout under tests/ does not get its suites EXECUTED by the runner', (
   try {
     mkdirSync(join(fixture, 'tests'), { recursive: true });
     writeFileSync(join(fixture, '.git'), 'gitdir: /nowhere\n');
-    writeFileSync(
-      join(fixture, 'tests', 'stale.test.mjs'),
-      "import test from 'node:test';\ntest('a stale checkout suite must never run', () => {});\n",
-    );
+    // Directly beside the marker, NOT one level below it. With the suite at
+    // `fixture/tests/`, a guard mutated to test the directory being read
+    // (`isNestedCheckout(dir)`) still skipped it — that mutant kept every test
+    // green while walking the files sitting immediately inside a checkout. The
+    // second copy deeper down keeps the recursive case covered too.
+    const stale = "import test from 'node:test';\ntest('NESTED SUITE EXECUTED', () => { throw new Error('a stale checkout suite ran'); });\n";
+    writeFileSync(join(fixture, 'stale.test.mjs'), stale);
+    writeFileSync(join(fixture, 'tests', 'stale-nested.test.mjs'), stale);
 
     let status = 0;
     let output = '';
@@ -640,9 +775,40 @@ test('a checkout under tests/ does not get its suites EXECUTED by the runner', (
     // not discovered, so there was nothing to run.
     assert.equal(status, 1, `the runner discovered suites inside a nested checkout:\n${output}`);
     assert.match(output, /no test files matched/, output);
-    assert.doesNotMatch(output, /stale\.test\.mjs/, output);
+    assert.doesNotMatch(output, /stale(-nested)?\.test\.mjs|NESTED SUITE EXECUTED/, output);
   } finally {
     rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test('a checkout parked among the fixture states is not an allowlisted state', () => {
+  // The class no static gate can see: `listStates()` reads one level, and its
+  // result becomes the ROOT that `walk()` starts from — where the child-only
+  // guard is deliberately blind (the walk root is exempt on purpose). So a
+  // checkout at test-fixtures/upgrade/<state> would be a valid `--state` name
+  // and seedFixture would copy a whole second repository into the install
+  // under test, hashing every file of it into the manifest (#3762).
+  const FIXTURES = join(ROOT, 'test-fixtures', 'upgrade');
+  const probe = join(FIXTURES, 'state-nested-checkout-probe');
+  rmSync(probe, { recursive: true, force: true });
+  try {
+    mkdirSync(probe, { recursive: true });
+    writeFileSync(join(probe, '.git'), 'gitdir: /nowhere\n');
+    writeFileSync(join(probe, 'cv.md'), '# not ours\n');
+
+    const listed = execFileSync(
+      process.execPath,
+      ['-e', "import('./seed-fixture.mjs').then((m) => console.log(JSON.stringify(m.listStates())))"],
+      { cwd: ROOT, encoding: 'utf-8', timeout: 60000 },
+    );
+    const states = JSON.parse(listed);
+    assert.ok(states.length > 0, 'the probe must not empty the state list — that would pass for the wrong reason');
+    assert.ok(
+      !states.includes('state-nested-checkout-probe'),
+      `listStates() offered a nested checkout as a fixture state: ${states.join(', ')}`,
+    );
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
   }
 });
 

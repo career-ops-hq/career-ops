@@ -57,7 +57,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
-import { collectMjsFiles, isNestedCheckout } from './lib/mjs-files.mjs';
+import { collectMjsFiles, isNestedCheckout, isUnderNestedCheckout } from './lib/mjs-files.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -2665,7 +2665,14 @@ if (shared.includes('_profile.md')) {
   // alone can't catch.
   const writingRefRe = /_shared\.md[^.\n]{0,40}(Voice DNA|Writing Style|Professional Writing)|(Voice DNA|Writing Style|Professional Writing)[^.\n]{0,40}_shared\.md/;
   const stale = [];
-  for (const f of readdirSync(join(ROOT, 'modes'), { recursive: true }).filter(p => typeof p === 'string' && p.endsWith('.md'))) {
+  // `{ recursive: true }` descends on Node's side, so there is no per-directory
+  // decision to guard — a checkout under modes/ is filtered out of the RESULT
+  // instead. Verified: a worktree there made this check fail naming that other
+  // tree's file as a stale reference of ours (#3762).
+  const modeDocs = readdirSync(join(ROOT, 'modes'), { recursive: true })
+    .filter(p => typeof p === 'string' && p.endsWith('.md'))
+    .filter(p => !isUnderNestedCheckout(join(ROOT, 'modes'), p));
+  for (const f of modeDocs) {
     const src = readFile(`modes/${f.split(/[\\/]/).join('/')}`);
     if (writingRefRe.test(src)) stale.push(f);
   }
