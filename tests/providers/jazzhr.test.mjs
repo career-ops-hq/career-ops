@@ -16,6 +16,15 @@ try {
   for (const bad of ['http://exampleco.applytojob.com/apply', 'https://evil.example/apply', 'https://exampleco.applytojob.com/login', null, 7]) {
     if (provider.detect({ name: 'X', careers_url: bad }) === null) pass(`rejects ${String(bad)}`); else fail(`accepted ${String(bad)}`);
   }
+  // Regression: detect(null) (and other missing/malformed entry shapes) must
+  // return null, not throw — resolveBoardUrl used to dereference entry.api
+  // unguarded, so a null/undefined entry crashed instead of being rejected.
+  try {
+    if (provider.detect(null) === null) pass('detect(null) returns null, does not throw'); else fail('detect(null) did not return null');
+  } catch (e) { fail(`detect(null) threw: ${e.message}`); }
+  try {
+    if (provider.detect(undefined) === null) pass('detect(undefined) returns null, does not throw'); else fail('detect(undefined) did not return null');
+  } catch (e) { fail(`detect(undefined) threw: ${e.message}`); }
   const list = `<ul><li class="list-group-item"><h3 class="list-group-item-heading"><a href="https://exampleco.applytojob.com/apply/A1/Learning-Designer">Learning &amp; Development Designer</a></h3><ul><li><i class="fa fa-map-marker"></i>Toronto, ON</li></ul></li><li class="list-group-item"><h3><a href="/apply/B2/Analyst">Analyst</a></h3><ul><li><i class="fa fa-map-marker"></i>Remote</li></ul></li></ul>`;
   const jobs = mod.parseJazzHRList(list, board, 'Example Co');
   if (jobs.length === 2 && jobs[0].title === 'Learning & Development Designer' && jobs[0].location === 'Toronto, ON') pass('parses list titles, entities, locations, and relative/absolute links'); else fail(`list parse failed ${JSON.stringify(jobs)}`);

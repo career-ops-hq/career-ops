@@ -43,7 +43,7 @@ function parseBoardUrl(raw) {
 }
 
 function resolveBoardUrl(entry) {
-  for (const raw of [entry.api, entry.careers_url]) {
+  for (const raw of [entry?.api, entry?.careers_url]) {
     const parsed = parseBoardUrl(raw);
     if (parsed) return parsed;
   }
