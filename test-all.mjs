@@ -2448,11 +2448,62 @@ if (
   fail('batch final JSON does not require typed, escaped serialization');
 }
 
-const batchTrackerStep = batchPrompt.match(/### Step 5 \u2014 Tracker TSV Line[\s\S]*?### Step 6 \u2014 Final JSON/)?.[0] ?? '';
+// Anchored on the step NUMBER, not the section's wording: the title used to be
+// matched verbatim, so rewording it ("TSV Line" → "TSV Row" when the format
+// gained a header row, #3517) left this matching nothing and failing on the
+// empty string rather than on the thing it asserts.
+const batchTrackerStep = batchPrompt.match(/### Step 5 \u2014 [^\n]*[\s\S]*?### Step 6 \u2014 Final JSON/)?.[0] ?? '';
 if (/\{\{REPORT_NUM\}\}\\t\{\{DATE\}\}/.test(batchTrackerStep) && !/Compute `\{next_num\}`/.test(batchTrackerStep)) {
   pass('batch workers use the coordinator-reserved tracker number');
 } else {
   fail('batch workers still compute tracker numbers independently');
+}
+
+// ...and Step 5 must still describe the FORMAT it writes. The assertion above
+// cannot see that: a prompt that dropped the header row, the additions path, or
+// the one-data-row rule would still carry `{{REPORT_NUM}}\t{{DATE}}` and pass,
+// while telling workers to emit the headerless form — the one where score and
+// status are told apart by content, with a case that has no answer (#3517).
+// The labels come from tracker-parse rather than a list here, so this follows
+// the format instead of restating it and drifting.
+const { TSV_REQUIRED_FIELDS: REQUIRED_TSV_LABELS } = await import(pathToFileURL(join(ROOT, 'tracker-parse.mjs')).href);
+// The prompt writes tabs as the literal two-character escape, not real tabs.
+const batchStepLines = batchTrackerStep.split('\n');
+const batchTsvLines = batchStepLines.filter(l => l.includes('\\t'));
+const batchTsvLabels = (batchTsvLines[0] ?? '').trim().split('\\t').map(s => s.trim());
+const batchLabelsMissing = REQUIRED_TSV_LABELS.filter(f => !batchTsvLabels.includes(f));
+// Width parity, NOT width == REQUIRED_TSV_LABELS.length: the prompt carries the
+// optional `notes` and `url` columns on purpose (url is the deterministic dedup
+// key #1298 added here), so pinning the count to the required set would forbid
+// them. What must hold is that the two lines describe the SAME row — a header
+// with an extra label over a short data row is a template that teaches a
+// shifted row.
+const batchDataFields = (batchTsvLines[1] ?? '').trim().split('\\t');
+// Structure, not prose: the labels line must be immediately followed by the
+// data row, so the section shows ONE headed block rather than two examples that
+// happen to sit in the same step. The instruction sentence is matched exactly
+// rather than by keyword — `/two TSV lines/i` also matches "do NOT write two
+// TSV lines", which is the polarity trap that lets a reversed instruction pass.
+const batchHeaderIdx = batchStepLines.findIndex(l => l.includes('\\t'));
+// Identity, not just "the next line mentions the placeholder": a prose line
+// carrying {{REPORT_NUM}} between the two fence lines would satisfy a contains
+// check while batchDataFields went on reading the real data row further down —
+// adjacency and width would then be describing different lines, and a prompt
+// that split the block would pass.
+const batchRowFollowsHeader = batchHeaderIdx >= 0
+  && batchStepLines[batchHeaderIdx + 1] === batchTsvLines[1]
+  && (batchTsvLines[1] ?? '').includes('{{REPORT_NUM}}');
+if (
+  batchTsvLines.length === 2 &&
+  batchLabelsMissing.length === 0 &&
+  batchDataFields.length === batchTsvLabels.length &&
+  batchRowFollowsHeader &&
+  /batch\/tracker-additions\//.test(batchTrackerStep) &&
+  /Write exactly two TSV lines/.test(batchTrackerStep)
+) {
+  pass('batch Step 5 specifies the headed tracker-addition format (labels, one data row, path)');
+} else {
+  fail(`batch Step 5 no longer specifies the headed TSV format — tab lines: ${batchTsvLines.length}, missing labels: ${batchLabelsMissing.join(', ') || 'none'}, labels/fields: ${batchTsvLabels.length}/${batchDataFields.length}, data row follows header: ${batchRowFollowsHeader}`);
 }
 
 const batchMachineSummary = batchPrompt.match(/#### Machine Summary[\s\S]*?### Step 3 \u2014 Save the Report/)?.[0] ?? '';
