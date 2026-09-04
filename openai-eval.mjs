@@ -249,8 +249,19 @@ function tsvSafe(value) {
  */
 function normalizedTrackerScore(value) {
   const clean = tsvSafe(value);
-  if (!clean || clean === '?' || /n\/?a/i.test(clean) || isNaN(parseFloat(clean))) return 'N/A';
-  return /\/5$/i.test(clean) ? clean : `${parseFloat(clean)}/5`;
+  // Leading number, with an optional explicit denominator. Trailing prose is
+  // tolerated because models add it ("4.2 (strong fit)"), but a denominator that
+  // is not 5 is refused rather than reinterpreted: parseFloat alone read `8/10`
+  // as 8 and wrote `8/5`, which satisfies SCORE_CELL_RE and merges as a genuine
+  // score. Nothing else range-checks this -- unlike gemini-eval, these two have
+  // no validateReport -- so an out-of-range value would reach stats.mjs averages
+  // and score gates as fact. N/A is the honest cell for anything unreadable.
+  const parsed = clean.match(/^(\d+(?:\.\d+)?)\s*(?:\/\s*(\d+(?:\.\d+)?))?/);
+  if (!parsed) return 'N/A';
+  const score = parseFloat(parsed[1]);
+  const denominator = parsed[2] === undefined ? 5 : parseFloat(parsed[2]);
+  if (!Number.isFinite(score) || denominator !== 5 || score < 0 || score > 5) return 'N/A';
+  return `${score}/5`;
 }
 
 // ---------------------------------------------------------------------------

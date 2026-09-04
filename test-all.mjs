@@ -9631,12 +9631,18 @@ try {
     'tsvSafe\\(`[^`]*\\$\\{modelName\\}[^`]*`\\),',
     '\\];',
   ].join('\\s*'));
+  // ...and the field list has to reach the disk. Pinning only the literal would
+  // let a source that builds trackerFields and never writes it -- or writes
+  // something else -- pass both checks, which is a failure wearing a pass.
+  const writeSinkRe = /writeFileSync\(\s*join\(PATHS\.trackerAdditions,[^)]+\),\s*`\$\{trackerFields\.join\('\\t'\)\}/;
   const wrongShape = ['openai-eval.mjs', 'ollama-eval.mjs']
-    .filter(name => !nineFieldRe.test(readFile(name)));
+    .map(name => [name, readFile(name)])
+    .filter(([, src]) => !nineFieldRe.test(src) || !writeSinkRe.test(src))
+    .map(([name]) => name);
   if (wrongShape.length === 0) {
-    pass('openai-eval and ollama-eval write the nine-column addition with status before score');
+    pass('openai-eval and ollama-eval write the nine-column addition, status before score, through writeFileSync');
   } else {
-    fail(`tracker addition fields wrong or reordered in: ${wrongShape.join(', ')}`);
+    fail(`tracker addition fields wrong, reordered, or never written in: ${wrongShape.join(', ')}`);
   }
 
   // --count N: contiguous range from an empty dir.
