@@ -27,7 +27,8 @@
  *   node tracker.mjs query [--status Applied] [--company acme] [--role designer]
  *                          [--since 2026-01-01] [--id N] [--limit 20] [--json]
  *   node tracker.mjs history --id N             # status transition log observed across syncs
- *   node tracker.mjs export [--out FILE]        # inverse: applications.db → canonical markdown (stdout by default)
+ *   node tracker.mjs export [--out FILE] [--force]  # inverse: applications.db → markdown (stdout by default)
+ *                                               # --force: write even when columns would be dropped
  *   node tracker.mjs delete --num N [--dry-run] # remove one application row from applications.md + reindex
  *
  * query/history auto-resync when applications.md changed since the last sync,
@@ -40,7 +41,9 @@ import { dirname, resolve, join, basename } from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import * as yaml from 'js-yaml';
-import { resolveColumns } from './tracker-parse.mjs';
+import {
+  resolveColumns, detectColumns, isHeaderRow, isSeparatorRow, LEGACY_COLMAP,
+} from './tracker-parse.mjs';
 import {
   canonicalizeTrackerPath, openTrackerTransaction, writeFileAtomic,
 } from './tracker-utils.mjs';
@@ -104,6 +107,22 @@ const STATES_PATH = join(CODEBASE_ROOT, 'templates/states.yml');
 const HEADER = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |';
 const SEPARATOR = '|---|------|---------|------|-------|--------|-----|--------|-------|';
 
+// The nine fields the index stores as real columns, keyed by the field name
+// tracker-parse.mjs's column map uses. Everything else a header declares
+// (Location, Via, URL, a user's own column) is carried through the round-trip
+// by POSITION in `applications.extras` instead of being widened into the
+// schema — see the export section (#3703).
+const SCHEMA_FIELDS = {
+  num: 'id', date: 'date', company: 'company', role: 'role', score: 'score',
+  status: 'status', pdf: 'pdf', report: 'report', notes: 'notes',
+};
+
+// Bumped whenever the derived index gains data an older sync did not record.
+// ensureFresh() rebuilds on a mismatch, so a db written before `extras` and
+// the stored header existed cannot serve an export that would silently drop
+// the columns it never captured.
+const SCHEMA_VERSION = '2';
+
 // ── node:sqlite loading ─────────────────────────────────────────────
 
 async function loadSqlite() {
@@ -148,7 +167,11 @@ export function openDb(DatabaseSync) {
       status  TEXT NOT NULL,
       pdf     TEXT NOT NULL DEFAULT '❌',
       report  TEXT NOT NULL DEFAULT '—',
-      notes   TEXT NOT NULL DEFAULT ''
+      notes   TEXT NOT NULL DEFAULT '',
+      -- Cells of columns the schema has no field for, keyed by their index in
+      -- the source row's split by pipe. JSON object, '{}' when the layout is
+      -- the canonical nine columns.
+      extras  TEXT NOT NULL DEFAULT '{}'
     );
     CREATE TABLE IF NOT EXISTS status_events (
       id     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -164,6 +187,13 @@ export function openDb(DatabaseSync) {
     CREATE INDEX IF NOT EXISTS idx_apps_company ON applications(company);
     CREATE INDEX IF NOT EXISTS idx_events_app ON status_events(app_id);
   `);
+  // CREATE TABLE IF NOT EXISTS leaves a db built by an older version alone, so
+  // a column added after the fact has to be migrated in explicitly. Cheap and
+  // idempotent; the rows are refilled by the next sync either way.
+  const columns = db.prepare('PRAGMA table_info(applications)').all().map(c => c.name);
+  if (!columns.includes('extras')) {
+    db.exec("ALTER TABLE applications ADD COLUMN extras TEXT NOT NULL DEFAULT '{}'");
+  }
   return db;
 }
 
@@ -221,30 +251,85 @@ function repairPlaceholder(cell) {
 
 // ── Markdown parsing ────────────────────────────────────────────────
 
+/**
+ * Locate the tracker's header and separator lines, and the labels they declare.
+ *
+ * Recorded so `export` can rebuild the table it READ rather than the table it
+ * assumes. Before #3703 the read side mapped columns by name and the write side
+ * emitted nine fixed ones, so a Location/Via/URL column survived every query and
+ * vanished on export — silently, over the user's own tracker with `--out`.
+ *
+ * @param {string[]} lines - All lines of the tracker markdown.
+ * @returns {{header: string, separator: string|null, labels: string[]}|null}
+ *   null when the file has no recognizable header row (legacy positional table).
+ */
+function detectLayout(lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (!isHeaderRow(t)) continue;
+    const next = (lines[i + 1] ?? '').trim();
+    return { header: t, separator: isSeparatorRow(next) ? next : null, labels: headerLabels(t) };
+  }
+  return null;
+}
+
+/**
+ * Column labels of a table row, in `split('|')` order minus the padding cells.
+ * Index 0 of the returned array is column index 1, matching the column maps.
+ *
+ * @param {string} row - A trimmed markdown table row.
+ * @returns {string[]}
+ */
+function headerLabels(row) {
+  const parts = row.split('|').map(c => c.trim());
+  const cells = parts.slice(1);
+  if (cells.length && cells[cells.length - 1] === '' && row.endsWith('|')) cells.pop();
+  return cells;
+}
+
 function parseMarkdownRows(text, diag) {
   const lines = text.split('\n');
   // Map columns by header name (tracker-parse.mjs, #954) so a customized layout
   // (e.g. an inserted Location column) can't shift Score into Status. Falls back
   // to the legacy fixed 9-column layout when no header row is found.
   const colmap = resolveColumns(lines);
-  // Expected `split('|')` width: highest mapped index + the trailing empty cell.
-  const width = Math.max(...Object.values(colmap)) + 2;
+  const layout = detectLayout(lines);
+  // Expected `split('|')` width: leading empty cell + one per column + the
+  // trailing empty cell. Taken from the HEADER when there is one, not from the
+  // highest mapped index: a header whose last column is one no field claims
+  // (a user's own `| … | Notes | Priority |`) makes every row look one cell too
+  // wide, and the stray-pipe fold below then swallows that column into notes.
+  const width = layout ? layout.labels.length + 2 : Math.max(...Object.values(colmap)) + 2;
+  // Column indices the nine schema fields occupy; everything else in a row is
+  // carried through the round-trip positionally (see SCHEMA_FIELDS).
+  const schemaIndices = new Set(Object.keys(SCHEMA_FIELDS).map(k => colmap[k]).filter(i => i != null));
   const rows = [];
   for (const line of lines) {
     const t = line.trim();
     if (!t.startsWith('|')) continue;
     let parts = t.split('|').map(c => c.trim());
     if (parts.length < 3) continue; // needs at least one real cell
-    if ((parts[colmap.num] ?? '') === '#' || /^[-: ]*$/.test(parts.join(''))) continue; // header / separator
+    if ((parts[colmap.num] ?? '') === '#' || isHeaderRow(t) || /^[-: ]*$/.test(parts.join(''))) continue; // header / separator
     if (parts.length > width && colmap.notes === width - 2) {
       // Stray pipes inside the trailing free-text column → fold back into notes.
       parts = [...parts.slice(0, colmap.notes), parts.slice(colmap.notes, parts.length - 1).join(' | '), ''];
       if (diag) diag.strayPipes++;
     }
     const at = (k) => (colmap[k] != null ? (parts[colmap[k]] ?? '') : '');
-    rows.push([at('num'), at('date'), at('company'), at('role'), at('score'), at('status'), at('pdf'), at('report'), at('notes')]);
+    // Last index holding a real cell: the trailing empty part only exists when
+    // the row ends with a pipe — a hand-edited row without one ends in data.
+    const lastCell = t.endsWith('|') ? parts.length - 2 : parts.length - 1;
+    const extras = {};
+    for (let i = 1; i <= lastCell; i++) {
+      if (schemaIndices.has(i)) continue;
+      if (parts[i]) extras[i] = parts[i]; // empty cells re-materialize as '' on export
+    }
+    rows.push({
+      cells: [at('num'), at('date'), at('company'), at('role'), at('score'), at('status'), at('pdf'), at('report'), at('notes')],
+      extras,
+    });
   }
-  return rows;
+  return { rows, layout };
 }
 
 // Remove every table row whose first cell (the application number) equals `num`,
@@ -283,13 +368,13 @@ export function removeRowByNum(content, num) {
 // dedup-tracker.mjs).
 function parseTracker(states) {
   const diag = { mojibake: 0, scoreInStatus: 0, unknownStatus: 0, badId: 0, badDate: 0, strayPipes: 0 };
-  const rows = parseMarkdownRows(readFileSync(MD_PATH, 'utf-8'), diag);
+  const { rows, layout } = parseMarkdownRows(readFileSync(MD_PATH, 'utf-8'), diag);
 
   const usedIds = new Set();
   let maxId = 0;
   const apps = [];
 
-  for (const cells of rows) {
+  for (const { cells, extras } of rows) {
     let [idRaw, date, company, role, score, status, pdf, report, notes] = cells;
 
     const before = [score, pdf, report].join('|');
@@ -326,11 +411,14 @@ function parseTracker(states) {
 
     if (!DATE_RE.test(date)) diag.badDate++; // kept as-is — flagged, not destroyed
 
-    apps.push({ id, pos: apps.length, date, company, role, score: score || '—', status, pdf: pdf || '❌', report: report || '—', notes });
+    apps.push({
+      id, pos: apps.length, date, company, role, score: score || '—', status,
+      pdf: pdf || '❌', report: report || '—', notes, extras: JSON.stringify(extras),
+    });
   }
   for (const app of apps) if (app.id === 0) app.id = ++maxId;
 
-  return { apps, diag };
+  return { apps, diag, layout };
 }
 
 function mdHash() {
@@ -357,15 +445,15 @@ function reportDiagnostics(diag) {
 }
 
 function syncIndex(db, states) {
-  const { apps, diag } = parseTracker(states);
+  const { apps, diag, layout } = parseTracker(states);
   const today = new Date().toISOString().slice(0, 10);
 
   db.exec('BEGIN');
   db.exec('PRAGMA defer_foreign_keys = ON'); // full rebuild — FKs settle at commit
   try {
     db.exec('DELETE FROM applications');
-    const insertApp = db.prepare('INSERT INTO applications (id, pos, date, company, role, score, status, pdf, report, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    for (const a of apps) insertApp.run(a.id, a.pos, a.date, a.company, a.role, a.score, a.status, a.pdf, a.report, a.notes);
+    const insertApp = db.prepare('INSERT INTO applications (id, pos, date, company, role, score, status, pdf, report, notes, extras) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const a of apps) insertApp.run(a.id, a.pos, a.date, a.company, a.role, a.score, a.status, a.pdf, a.report, a.notes, a.extras);
 
     // Status history: events persist across rebuilds, keyed by id. An app whose
     // status changed since the last sync gets a new event; rows that left the
@@ -379,8 +467,14 @@ function syncIndex(db, states) {
       else if (last.status !== a.status) insertEvent.run(a.id, a.status, today);
     }
 
-    db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
-      .run('md_sha256', mdHash());
+    const setMeta = db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+    setMeta.run('md_sha256', mdHash());
+    setMeta.run('schema_version', SCHEMA_VERSION);
+    // The source layout, so export rebuilds this table rather than the default
+    // one. Empty strings mean "no header row in the source" — a legacy
+    // positional table, which exports as the canonical nine columns.
+    setMeta.run('md_header', layout?.header ?? '');
+    setMeta.run('md_separator', layout?.separator ?? '');
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');
@@ -419,7 +513,12 @@ function ensureFresh(db, states) {
     process.exit(1);
   }
   const synced = db.prepare('SELECT value FROM meta WHERE key = ?').get('md_sha256');
-  if (synced && synced.value === mdHash()) return;
+  // The schema version is part of freshness, not just the content hash: a db
+  // written before `extras`/`md_header` existed matches the hash while missing
+  // the columns an export needs, which is exactly the silent drop #3703 is
+  // about. A version mismatch forces the rebuild that fills them in.
+  const version = db.prepare('SELECT value FROM meta WHERE key = ?').get('schema_version');
+  if (synced && synced.value === mdHash() && version?.value === SCHEMA_VERSION) return;
   console.error(`(index stale — resyncing from ${MD_PATH})`);
   syncIndex(db, states);
 }
@@ -433,9 +532,11 @@ function flagValue(args, flag) {
   return kv ? kv.split('=').slice(1).join('=') : null;
 }
 
+// A pipe inside a cell would split the row; a newline would end it.
+const cleanCell = (v) => String(v ?? '').replace(/\|/g, '│').replace(/\r?\n/g, ' ');
+
 function rowToMarkdown(r) {
-  const clean = (v) => String(v ?? '').replace(/\|/g, '│').replace(/\r?\n/g, ' ');
-  return `| ${r.id} | ${clean(r.date)} | ${clean(r.company)} | ${clean(r.role)} | ${clean(r.score)} | ${clean(r.status)} | ${clean(r.pdf)} | ${clean(r.report)} | ${clean(r.notes)} |`;
+  return `| ${r.id} | ${cleanCell(r.date)} | ${cleanCell(r.company)} | ${cleanCell(r.role)} | ${cleanCell(r.score)} | ${cleanCell(r.status)} | ${cleanCell(r.pdf)} | ${cleanCell(r.report)} | ${cleanCell(r.notes)} |`;
 }
 
 async function query(args) {
@@ -499,13 +600,81 @@ async function history(args) {
 }
 
 // ── Export (index → canonical markdown) ─────────────────────────────
-// The inverse of sync: regenerates the canonical table from the index. Used by
-// the round-trip tests (md → db → md must be lossless for clean input), and as
-// a repaired copy the user can review and adopt by hand. It never touches
-// applications.md unless explicitly asked to via --out.
+// The inverse of sync: regenerates the table from the index. Used by the
+// round-trip tests (md → db → md must be lossless), and as a repaired copy the
+// user can review and adopt by hand. It never touches applications.md unless
+// explicitly asked to via --out.
+//
+// "Lossless" means the LAYOUT too, not only the values (#3703). The read side
+// maps columns by header name, so a tracker with Location/Via/URL — or a user's
+// own column — indexes perfectly; the write side used to emit nine fixed
+// columns in a fixed order, so adopting the export cost the user those columns
+// with no warning, and `sync` had just said the index matched cleanly. Export
+// now rebuilds the header it read and re-materializes unmapped cells from
+// `applications.extras` by position, and refuses to write over an existing
+// tracker at all when something genuinely cannot be placed.
+
+/** @param {string} raw - the `extras` JSON column. @returns {Object<number,string>} */
+function parseExtras(raw) {
+  try {
+    const parsed = JSON.parse(raw || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {}; // a hand-corrupted index cell must not abort the export
+  }
+}
+
+/**
+ * Rebuild the markdown table from indexed rows and the recorded source layout.
+ *
+ * @param {object[]} rows - `applications` rows, ordered by pos.
+ * @param {{header: string, separator: string}} layout - Recorded source layout;
+ *   empty header means the source had no header row (legacy positional table).
+ * @returns {{header: string, separator: string, body: string[], dropped: string[]}}
+ *   `dropped` names every column carrying content this export cannot place —
+ *   empty for every layout career-ops can reproduce.
+ */
+function renderTable(rows, layout) {
+  const header = layout.header || HEADER;
+  const labels = layout.header ? headerLabels(layout.header) : headerLabels(HEADER);
+  const colmap = (layout.header ? detectColumns([layout.header]) : null) || LEGACY_COLMAP;
+
+  // Column index → the indexed field that owns it. Everything else is filled
+  // from the row's extras, so a Location/Via/URL/custom column comes back in
+  // its own place with its own value.
+  const fieldAt = new Map();
+  for (const [field, dbField] of Object.entries(SCHEMA_FIELDS)) {
+    if (colmap[field] != null) fieldAt.set(colmap[field], dbField);
+  }
+
+  const width = labels.length;
+  const unplaceable = new Set();
+  const body = rows.map((r) => {
+    const extras = parseExtras(r.extras);
+    for (const key of Object.keys(extras)) {
+      if (Number(key) > width) unplaceable.add(Number(key));
+    }
+    const cells = [];
+    for (let i = 1; i <= width; i++) {
+      const field = fieldAt.get(i);
+      cells.push(cleanCell(field ? r[field] : extras[i] ?? ''));
+    }
+    return `| ${cells.join(' | ')} |`;
+  });
+
+  const separator = layout.separator
+    || (layout.header
+      ? `|${labels.map(l => '-'.repeat(Math.max(3, l.length + 2))).join('|')}|`
+      : SEPARATOR);
+
+  const dropped = [...unplaceable].sort((a, b) => a - b)
+    .map(i => `column ${i}${labels[i - 1] ? ` (${labels[i - 1]})` : ''}`);
+  return { header, separator, body, dropped };
+}
 
 async function exportMd(args) {
   const outPath = flagValue(args, '--out');
+  const force = args.includes('--force');
   if (outPath && existsSync(outPath) && statSync(outPath).isDirectory()) {
     console.error(`Error: --out ${outPath} is a directory — pass a file path.`);
     process.exit(1);
@@ -524,22 +693,40 @@ async function exportMd(args) {
     const db = openDb(DatabaseSync);
     ensureFresh(db, loadStates());
     const rows = db.prepare('SELECT * FROM applications ORDER BY pos').all();
-    const out = [
-      '# Applications Tracker',
-      '',
-      HEADER,
-      SEPARATOR,
-      ...rows.map(rowToMarkdown),
-      '',
-    ].join('\n');
+    const meta = db.prepare('SELECT key, value FROM meta').all()
+      .reduce((acc, m) => Object.assign(acc, { [m.key]: m.value }), {});
+    const { header, separator, body, dropped } = renderTable(rows, {
+      header: meta.md_header || '', separator: meta.md_separator || '',
+    });
+    const out = ['# Applications Tracker', '', header, separator, ...body, ''].join('\n');
+
+    // Never lose a column quietly. Reporting it is worth doing even though the
+    // rebuild above should leave `dropped` empty for every layout career-ops
+    // can produce: it is what turns data loss into a decision the user makes.
+    if (dropped.length) {
+      console.error(`Warning: ${dropped.length} column(s) in ${MD_PATH} cannot be reproduced by export and will be dropped:`);
+      for (const d of dropped) console.error(`  ${d}`);
+      console.error('These cells are outside the header this tracker declares — widen the header row, or keep the current file.');
+    }
 
     if (!outPath) {
       process.stdout.write(out);
       return;
     }
     mkdirSync(dirname(outPath) || '.', { recursive: true });
-    // Never silently clobber — whatever was there is backed up first.
     const writeTarget = writesTracker ? trackerPath : outPath;
+    // Overwriting an existing file with a table known to be missing columns is
+    // the failure mode of #3703 — the .bak below makes it recoverable, but only
+    // for a user who was told there was something to recover.
+    if (dropped.length && existsSync(writeTarget) && !force) {
+      console.error(`Refusing to overwrite ${outPath} — that would drop the column(s) listed above.`);
+      console.error('Re-run with --force if you have read the list and want the export anyway.');
+      // exitCode + return, never process.exit(): exiting here would skip the
+      // finally below and leave the tracker lock dir held until it goes stale.
+      process.exitCode = 1;
+      return;
+    }
+    // Never silently clobber — whatever was there is backed up first.
     if (existsSync(writeTarget)) {
       copyFileSync(writeTarget, writeTarget + '.bak');
       console.error(`Existing ${outPath} backed up to ${outPath}.bak`);

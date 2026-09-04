@@ -17,7 +17,7 @@
  *   3. The original 9-column layout still works unchanged (back-compat).
  */
 
-import { execFileSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, utimesSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
@@ -41,24 +41,35 @@ function pass(m) { console.log(`PASS ${m}`); passed++; }
 function fail(m) { console.error(`FAIL ${m}`); failed++; }
 
 // Run a script with tracker/additions redirected to a sandbox. Returns
-// { code, stdout } — code is 0 on success, the process exit code otherwise.
+// { code, stdout, stderr } — code is 0 on success, the process exit code
+// otherwise. `stdout` folds in stderr on the failure path so an assertion
+// message carries the reason; `stderr` is always the raw stream, which is where
+// tracker.mjs puts its diagnostics so stdout stays pipeable.
 function runScript(script, args, sandbox) {
   const env = {
     ...process.env,
     CAREER_OPS_TRACKER: sandbox.tracker,
     CAREER_OPS_ADDITIONS: sandbox.additions,
     CAREER_OPS_TRACKER_LOCK: sandbox.lock,
+    // The derived SQLite index defaults to sitting beside the tracker it was
+    // built from — pin it into the sandbox so a test run can never create one
+    // next to the developer's real data (#3506).
+    CAREER_OPS_TRACKER_DB: join(sandbox.dir, 'applications.db'),
     // Pinned for the same reason as the tracker: keep the fixture isolated from
     // the real reports/ dir. See makeSandbox.
     ...(sandbox.reports ? { CAREER_OPS_REPORTS: sandbox.reports } : {}),
   };
   try {
-    const stdout = execFileSync(NODE, [join(ROOT, script), ...args], {
-      cwd: ROOT, env, encoding: 'utf-8', timeout: 30000,
+    const res = spawnSync(NODE, [join(ROOT, script), ...args], {
+      cwd: ROOT, env, encoding: 'utf-8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'],
     });
-    return { code: 0, stdout };
+    if (res.error) throw res.error;
+    const stdout = res.stdout || '';
+    const stderr = res.stderr || '';
+    if (res.status === 0) return { code: 0, stdout, stderr };
+    return { code: res.status ?? 1, stdout: `${stdout}${stderr}`, stderr };
   } catch (e) {
-    return { code: e.status ?? 1, stdout: `${e.stdout || ''}${e.stderr || ''}` };
+    return { code: e.status ?? 1, stdout: `${e.stdout || ''}${e.stderr || ''}`, stderr: `${e.stderr || ''}` };
   }
 }
 
@@ -700,6 +711,158 @@ if (!HAS_WEB) {
   } else {
     fail(`web reader: dropped the last cell — web "${tailWeb && tailWeb.notes}" vs core "${tailCore && tailCore.notes}"`);
   }
+}
+
+// ═══ tracker.mjs export: the round-trip carries the LAYOUT (#3703) ══════════
+// `sync` read the tracker by header NAME and `export` wrote it back by fixed
+// POSITION, so a customized layout round-tripped every VALUE correctly and lost
+// the COLUMN — silently, and `--out data/applications.md` writes that result
+// back over the user's own tracker. Losing the URL column also disables
+// merge-tracker's deterministic dedup pass, which is invisible in the file.
+
+const runTracker = (args, sb) => runScript('tracker.mjs', args, sb);
+
+// ── Test 16: a Location + URL layout survives sync → export byte-for-byte ────
+{
+  const CUSTOM = `# Applications Tracker
+
+| # | Date | Company | Location | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|----------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Acme | Berlin | Engineer | 4.2/5 | Applied | ❌ | [1](../reports/1.md) | note one | https://acme.example/jobs/1 |
+`;
+  const sb = makeSandbox(CUSTOM);
+  const sync = runTracker(['sync'], sb);
+  const exported = runTracker(['export'], sb);
+  if (sync.code === 0 && exported.code === 0 && exported.stdout === CUSTOM) {
+    pass('tracker.mjs export: Location/URL layout round-trips byte-for-byte');
+  } else {
+    fail(`tracker.mjs export: custom layout round-trip (sync ${sync.code}, export ${exported.code})\n--- got ---\n${exported.stdout}--- want ---\n${CUSTOM}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── Test 17: an unknown user column keeps its own values, not just its header ─
+{
+  const CUSTOM = `# Applications Tracker
+
+| # | Date | Company | Priority | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|----------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-01-01 | Acme | high | Engineer | 4.2/5 | Applied | ✅ | — | seed row |
+| 2 | 2026-01-02 | Globex | low | Manager | 3.0/5 | Rejected | ❌ | — | second row |
+`;
+  const sb = makeSandbox(CUSTOM);
+  runTracker(['sync'], sb);
+  const exported = runTracker(['export'], sb);
+  if (exported.code === 0 && exported.stdout === CUSTOM) {
+    pass('tracker.mjs export: unknown extra column keeps its per-row values');
+  } else {
+    fail(`tracker.mjs export: unknown column round-trip\n--- got ---\n${exported.stdout}--- want ---\n${CUSTOM}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── Test 18: the legacy 9-column layout is unchanged ────────────────────────
+{
+  const sb = makeSandbox(HEADER_9);
+  runTracker(['sync'], sb);
+  const exported = runTracker(['export'], sb);
+  if (exported.code === 0 && exported.stdout === HEADER_9) {
+    pass('tracker.mjs export: legacy 9-column layout round-trips unchanged');
+  } else {
+    fail(`tracker.mjs export: 9-col round-trip\n--- got ---\n${exported.stdout}--- want ---\n${HEADER_9}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── Test 19: --out over the tracker preserves the custom columns ────────────
+// The adoption path from the issue: export a repaired copy back over
+// applications.md. Adopting it used to cost the user Location, Via and URL.
+{
+  const CUSTOM = `# Applications Tracker
+
+| # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|-----|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | ? | Hays | Engineer | 4.2/5 | aplicado | ❌ | — | agency row | https://acme.example/jobs/1 |
+`;
+  const sb = makeSandbox(CUSTOM);
+  runTracker(['sync'], sb);
+  const res = runTracker(['export', '--out', sb.tracker], sb);
+  const after = readFileSync(sb.tracker, 'utf-8');
+  const cells = after.split('\n').find(l => l.includes('Hays'))?.split('|').map(c => c.trim()) ?? [];
+  // cells: ['', num, date, company, via, role, score, status, pdf, report, notes, url, '']
+  if (res.code === 0 && cells[4] === 'Hays' && cells[11] === 'https://acme.example/jobs/1') {
+    pass('tracker.mjs export --out: Via and URL survive adoption over the tracker');
+  } else {
+    fail(`tracker.mjs export --out over tracker (code ${res.code})\n${after}`);
+  }
+  // The point of exporting over the tracker is the repair: a non-canonical
+  // status is normalized while the custom columns stay put.
+  if (cells[7] === 'Applied') pass('tracker.mjs export --out: non-canonical status still repaired');
+  else fail(`tracker.mjs export --out: status repair — got "${cells[7]}"`);
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── Test 20: cells the layout cannot hold are named, and block --out ────────
+// Option 3 of the issue: whatever the round-trip cannot reproduce must be a
+// decision the user makes, not a silent drop under a "backed up to .bak" line.
+{
+  const WIDE = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Acme | Engineer | 4.2/5 | Applied | ❌ | — | note | with | stray | https://acme.example/1 |
+`;
+  const sb = makeSandbox(WIDE);
+  runTracker(['sync'], sb);
+  const stdoutRun = runTracker(['export'], sb);
+  if (/cannot be reproduced by export/.test(stdoutRun.stderr)) {
+    pass('tracker.mjs export: names the columns it cannot reproduce');
+  } else {
+    fail(`tracker.mjs export: expected a dropped-column warning\n${stdoutRun.stderr}`);
+  }
+
+  const before = readFileSync(sb.tracker, 'utf-8');
+  const refused = runTracker(['export', '--out', sb.tracker], sb);
+  if (refused.code === 1 && readFileSync(sb.tracker, 'utf-8') === before) {
+    pass('tracker.mjs export --out: refuses to overwrite when columns would be dropped');
+  } else {
+    fail(`tracker.mjs export --out: expected refusal (code ${refused.code})\n${refused.stdout}`);
+  }
+
+  const forced = runTracker(['export', '--out', sb.tracker, '--force'], sb);
+  if (forced.code === 0 && readFileSync(sb.tracker, 'utf-8') !== before) {
+    pass('tracker.mjs export --out --force: writes once the drop is acknowledged');
+  } else {
+    fail(`tracker.mjs export --out --force (code ${forced.code})\n${forced.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── Test 21: an index built before extras/md_header existed is rebuilt ──────
+// The md hash still matches, so freshness alone would serve an export with no
+// layout and no extras — the exact silent drop, from a stale schema.
+{
+  const CUSTOM = `# Applications Tracker
+
+| # | Date | Company | Location | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|----------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-01-01 | Acme | Berlin | Engineer | 4.2/5 | Applied | ❌ | — | seed row |
+`;
+  const sb = makeSandbox(CUSTOM);
+  runTracker(['sync'], sb);
+  const dbFile = join(sb.dir, 'applications.db');
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(dbFile);
+  db.exec("DELETE FROM meta WHERE key IN ('schema_version', 'md_header', 'md_separator')");
+  db.exec("UPDATE applications SET extras = '{}'");
+  db.close();
+  const exported = runTracker(['export'], sb);
+  if (exported.code === 0 && exported.stdout === CUSTOM) {
+    pass('tracker.mjs export: a pre-#3703 index is resynced instead of exporting a lossy table');
+  } else {
+    fail(`tracker.mjs export: stale-schema index\n--- got ---\n${exported.stdout}--- want ---\n${CUSTOM}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
