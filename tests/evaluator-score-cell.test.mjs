@@ -34,6 +34,7 @@ const cases = [
   ['4.2/5',               '4.2/5'],
   ['4.2 (strong fit)',    '4.2/5'],
   ['4.2 (strong fit)/5',  '4.2/5'],
+  ['4.2 (strong fit)/10', 'N/A'],
   ['4.2 (final)',         '4.2/5'],
   ['4.2 (internal)',      '4.2/5'],
   ['4.5 - strong signal', '4.5/5'],
