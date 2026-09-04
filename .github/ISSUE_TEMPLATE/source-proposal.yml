@@ -69,7 +69,7 @@ body:
     id: rule6
     attributes:
       label: "Rule 6 — robots.txt"
-      description: Paste the source's robots.txt. Which group applies to a generic client (`User-agent: *`)? Does any `Disallow` cover the listing paths a provider would read, or only routes it never requests (`/api`, a subscribe form)? Note any rule that names an AI/agent crawler (`ClaudeBot`, `anthropic-ai`).
+      description: "Paste the source's robots.txt. Which group applies to a generic client (`User-agent: *`)? Does any `Disallow` cover the listing paths a provider would read, or only routes it never requests (`/api`, a subscribe form)? Note any rule that names an AI/agent crawler (`ClaudeBot`, `anthropic-ai`)."
     validations:
       required: true
   - type: input
