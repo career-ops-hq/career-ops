@@ -262,33 +262,103 @@ export function stringLiterals(src) {
   return out;
 }
 
-/** Every `run:` script in a parsed workflow document, at any nesting depth. */
+/**
+ * The `run:` scripts of a parsed workflow: `jobs.<id>.steps[].run`, and only
+ * that.
+ *
+ * The first version walked the whole document for any key named `run`, which
+ * also collected `steps[].with.run` — an action INPUT that happens to be named
+ * `run` and executes nothing (CodeRabbit, #3765). Treating one as a command is
+ * a false green: the suite reads as reachable while nothing runs it.
+ * `defaults.run` escaped only because it is a mapping rather than a string,
+ * which is luck, not a rule. This walks the one path that executes.
+ */
 export function runCommands(doc) {
   const out = [];
-  const walk = (node) => {
-    if (Array.isArray(node)) return node.forEach(walk);
-    if (node && typeof node === 'object') {
-      for (const [k, v] of Object.entries(node)) {
-        if (k === 'run' && typeof v === 'string') out.push(v);
-        else walk(v);
-      }
+  const jobs = doc && typeof doc === 'object' ? doc.jobs : null;
+  if (!jobs || typeof jobs !== 'object') return out;
+  for (const job of Object.values(jobs)) {
+    const steps = job && typeof job === 'object' ? job.steps : null;
+    if (!Array.isArray(steps)) continue;
+    for (const step of steps) {
+      if (step && typeof step === 'object' && typeof step.run === 'string') out.push(step.run);
     }
-  };
-  walk(doc);
+  }
+  return out;
+}
+
+/**
+ * Blank out the parts of a shell script that are DATA rather than commands:
+ * heredoc bodies and quoted spans. Line structure is preserved so the command
+ * regex below can still anchor on `^`.
+ *
+ * Without this, a heredoc body is indistinguishable from a command list —
+ *
+ *     cat <<EOF > script.sh
+ *     node x-tests.mjs        <-- line start, but writing a file, not running
+ *     EOF
+ *
+ * — which the first version matched (CodeRabbit, #3765). The multi-line quoted
+ * form was safe only by accident: the closing `"` defeated the trailing
+ * lookahead, so the same string with a flag after the filename would have
+ * matched.
+ *
+ * Deliberately blunt about one case: `sh -c "node x-tests.mjs"` IS an
+ * invocation and now reads as unreachable, because its command lives inside a
+ * quoted span this cannot tell from data. That is the safe direction and the
+ * same trade this file states for indirect invocations — a false red is read
+ * and resolved by whoever wrote it; a false green is the bug.
+ */
+export function maskShellData(script) {
+  // 1. Heredoc bodies, `<<WORD` / `<<-WORD` / `<<'WORD'`, up to the delimiter.
+  const lines = script.split('\n');
+  const kept = [];
+  let delimiter = null;
+  for (const line of lines) {
+    if (delimiter !== null) {
+      if (line.trim() === delimiter) delimiter = null;
+      kept.push('');
+      continue;
+    }
+    const m = line.match(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/);
+    if (m) {
+      delimiter = m[2];
+      kept.push(line.slice(0, m.index));
+      continue;
+    }
+    kept.push(line);
+  }
+
+  // 2. Quoted spans, single and double, which may run across lines.
+  const joined = kept.join('\n');
+  let out = '';
+  let quote = null;
+  for (let i = 0; i < joined.length; i++) {
+    const c = joined[i];
+    if (quote) {
+      if (c === '\\' && quote === '"') { out += '  '; i++; continue; }
+      if (c === quote) { quote = null; out += c; continue; }
+      out += c === '\n' ? '\n' : ' ';
+      continue;
+    }
+    if (c === "'" || c === '"') { quote = c; out += c; continue; }
+    out += c;
+  }
   return out;
 }
 
 /**
  * True when `name` is the target of a `node` invocation at a COMMAND POSITION
- * in any of `scripts` — line start, or after a `;`/`&&`/`||`/pipe.
+ * in any of `scripts` — line start, or after a `;`/`&&`/`||`/pipe — once the
+ * script's data spans have been masked.
  *
- * The position requirement is what separates running a file from naming one:
+ * The position requirement separates running a file from naming one:
  * `echo node foo-tests.mjs` matched the first version of this rule (#3765).
  */
 export function invokesNode(scripts, name) {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(String.raw`(?:^|[;&|])\s*node\s+(?:\.[\\/])?${esc}(?=\s|$)`, 'm');
-  return scripts.some((sc) => re.test(sc));
+  return scripts.some((sc) => re.test(maskShellData(sc)));
 }
 
 // ── Fixtures for the two match rules ────────────────────────────────────────
@@ -308,10 +378,29 @@ const WORKFLOW_CASES = [
   ['node x-tests.mjs --pr-gate', true, 'a bare invocation'],
   ['  node x-tests.mjs', true, 'an indented invocation'],
   ['npm ci && node x-tests.mjs', true, 'after a shell separator'],
+  ['node x-tests.mjs\nnpm test', true, 'first line of a multi-line script'],
   ['# node x-tests.mjs', false, 'a YAML comment (#3765)'],
   ['echo node x-tests.mjs', false, 'an echo argument (#3765)'],
   ['echo "see x-tests.mjs"', false, 'a bare mention'],
+  ['cat <<EOF > s.sh\nnode x-tests.mjs\nEOF', false, 'a heredoc body (#3765 second pass)'],
+  ["cat <<'EOF'\nnode x-tests.mjs\nEOF", false, 'a quoted-delimiter heredoc'],
+  ['MSG="note\nnode x-tests.mjs --flag"', false, 'a multi-line double-quoted span'],
+  ['cat <<EOF\nnode x-tests.mjs\nEOF\nnode x-tests.mjs', true, 'a real command AFTER a heredoc still counts'],
 ];
+
+// runCommands must read only the one path that executes. `with.run` is an
+// action input; `defaults.run` is a mapping of shell settings.
+const WORKFLOW_DOC = {
+  defaults: { run: { shell: 'bash' } },
+  jobs: {
+    build: {
+      steps: [
+        { run: 'node x-tests.mjs --pr-gate' },
+        { uses: 'actions/setup-node@v4', with: { run: 'node y-tests.mjs' } },
+      ],
+    },
+  },
+};
 
 let ruleFailures = [];
 for (const [src, want, label] of HARNESS_CASES) {
@@ -329,8 +418,13 @@ if (stringLiterals(`const re = /from ['"]node:test['"]/; const n = 'x-tests.mjs'
   ruleFailures.push('harness rule: a regex literal containing quotes swallowed the code after it');
 }
 
+const collected = runCommands(WORKFLOW_DOC);
+if (collected.length !== 1 || collected[0] !== 'node x-tests.mjs --pr-gate') {
+  ruleFailures.push(`runCommands read ${JSON.stringify(collected)} — expected only the steps[].run command (with.run and defaults.run are not commands)`);
+}
+
 if (ruleFailures.length === 0) {
-  pass(`both match rules hold against ${HARNESS_CASES.length + WORKFLOW_CASES.length + 1} fixtures (comments and echo args do NOT count as reachable)`);
+  pass(`both match rules hold against ${HARNESS_CASES.length + WORKFLOW_CASES.length + 2} fixtures (comments, echo args, heredoc bodies and with.run do NOT count as reachable)`);
 } else {
   fail(`${ruleFailures.length} match-rule fixture(s) failed:\n` + ruleFailures.map((f) => `    ${f}`).join('\n'));
 }
