@@ -441,7 +441,13 @@ per-posting detail fetches:
   the norm; raise it
   only where throttling was actually observed (`careerviet`, `itviec` at
   750 ms) or a published rate limit dictates it (`agentic-jobs` at 2100 ms
-  for 30 req/60 s). Don't gold-plate a feed that never complained.
+  for 30 req/60 s). Don't gold-plate a feed that never complained. A
+  `robots.txt` `Crawl-delay` (rule 6), when the source states one, is a
+  reasonable floor for `INTER_PAGE_DELAY_MS` directly, no need to observe
+  throttling first. It governs spacing *between* requests, not a mandatory
+  pause before the first one — `Crawl-delay` isn't even part of RFC 9309,
+  the base robots.txt spec (`jobbankca.mjs` delays before page 1 too, but
+  that's a per-provider choice, not something rule 6 requires).
 - **Bounded retry.** Wrap every page fetch — and the one-shot
   config-resolving fetch before pagination, if any — in `fetchJsonWithRetry`
   / `fetchTextWithRetry` (`_http.mjs`). They retry 429, any 5xx, and
