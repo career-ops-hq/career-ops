@@ -161,7 +161,7 @@ num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
 {num}\t{date}\t{company}\t{role}\t{status}\t{score}\t{pdf_emoji}\t[{num}](reports/{num}-{slug}-{date}.md)\t{note}\t{url}
 ```
 
-Sütun adlarını **İngilizce ve tam olarak yukarıdaki gibi** yaz — `merge-tracker.mjs` alanları ADA göre çözer; bu yüzden sütun sırası önemsizdir ve hiçbir değer yanlış sütuna düşemez.
+Her iki satırı da **tam olarak yukarıdaki gibi** yaz: sütun adları İngilizce, değerler ise **üstlerindeki adlarla aynı sırada**. `merge-tracker.mjs` alanları ADA göre çözer; tam da bu yüzden adların altlarındaki satırı tarif etmesi gerekir — satırlardan yalnızca birini yeniden sıralarsan `company` ile `role` sessizce yer değiştirir (ikisi de serbest metin olduğu için içerik kontrolü bunu yakalayamaz).
 
 - `{num}` = sıradaki numara (tam sayı, `reports/` klasöründen hesapla)
 - `{status}` = `Evaluated`

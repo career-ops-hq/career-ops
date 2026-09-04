@@ -157,6 +157,10 @@ if (missed.length) {
 const STALE_PROSE = [
   { re: /\b8\s*(?:or|veya|или|або|of|oder|ou|o|nebo|veya)\s*9\b/i, why: 'a fixed column count' },
   { re: /status\s*(?:before|önce|перед|voor|vóór|前)\s*score/i, why: 'the "status before score" framing' },
+  // True of the PARSER, unsafe as instruction to an emitter: it licenses
+  // reordering one line and not the other, and the resulting company/role swap
+  // is undetectable (#3813 review).
+  { re: /(?:порядок колонок (?:значення не має|роли не играет)|sütun sırası önemsizdir|kolomvolgorde doet er niet toe|컬럼 순서는 의미가 없)/i, why: 'that the column order carries no meaning' },
 ];
 
 for (const rel of [...seen].sort()) {
@@ -209,13 +213,50 @@ for (const rel of [...seen].sort()) {
     pass(`${rel}: header and data row are both ${header.length} columns`);
   }
 
-  // 5. A literal (non-placeholder) status cell must be canonical.
+  // 5. The data row must be in the SAME order as its header. Name resolution
+  //    maps a label to a POSITION and then reads that position from the data
+  //    row, so labels and values only agree while both lines are written
+  //    together. Reorder one line and not the other and `company`/`role` swap
+  //    silently: both are free text, so the score-corroboration gate in
+  //    merge-tracker (which catches a reorder that displaces `score`) cannot
+  //    see it. Checked on the cells whose field is identifiable from content.
+  const identify = (cell) => {
+    const c = cell.trim();
+    if (/\]\(reports\//.test(c)) return 'report';
+    if (/^\{url\}$/i.test(c) || /^https?:\/\//i.test(c)) return 'url';
+    if (/^\{num\}$/i.test(c)) return 'num';
+    if (/^\{(date|datum|fecha|data)\}$/i.test(c)) return 'date';
+    if (/^\{score\}(\/5)?$/i.test(c)) return 'score';
+    if (/^\{pdf(_emoji)?\}$/i.test(c)) return 'pdf';
+    if (/^\{status\}$/i.test(c) || /^(Evaluated|Applied|Responded|Interview|Offer|Hired|Rejected|Discarded|SKIP)$/.test(c)) return 'status';
+    // company and role matter MOST here and are the hardest to catch any other
+    // way: both are free text, so nothing downstream can tell a swap of the two
+    // from a legitimate row. Each market names them in its own language, so the
+    // placeholder vocabulary is listed rather than pattern-matched.
+    if (/^\{(company|bedrijf|empresa|sirket|şirket|firma|会社|회사)\}$/i.test(c)) return 'company';
+    if (/^\{(role|rol|rolle|puesto|poste|cargo|pozisyon|직무)\}$/i.test(c)) return 'role';
+    if (/^\{(note|notes|notitie|nota|notiz|not|메모)\}$/i.test(c)) return 'notes';
+    return null;
+  };
+  const misaligned = row
+    .map((cell, i) => ({ i, cell, want: identify(cell) }))
+    .filter(({ i, want }) => want && map[want] !== i);
+  if (misaligned.length) {
+    for (const { i, cell, want } of misaligned) {
+      const labelHere = header[i] ?? '(none)';
+      fail(`${rel}: data-row cell ${i + 1} is "${cell}" (a ${want} value) but the header labels that position "${labelHere}" — the two lines are not in the same order`);
+    }
+  } else {
+    pass(`${rel}: data row is in header order on every identifiable cell`);
+  }
+
+  // 6. A literal (non-placeholder) status cell must be canonical.
   const statusCell = row[map.status] ?? '';
   if (statusCell && !/\{/.test(statusCell) && !/^(Evaluated|Applied|Responded|Interview|Offer|Hired|Rejected|Discarded|SKIP)$/.test(statusCell)) {
     fail(`${rel}: the data row's literal status cell is "${statusCell}", which is not a canonical state (templates/states.yml)`);
   }
 
-  // 6. No prose that the header made wrong.
+  // 7. No prose that the header made wrong.
   for (const { re, why } of STALE_PROSE) {
     const hit = entry.text.split('\n').findIndex((l) => re.test(l));
     if (hit >= 0) fail(`${rel}:${hit + 1} still states ${why} — under a header the column order is not a fact about the format`);

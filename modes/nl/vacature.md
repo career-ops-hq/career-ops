@@ -168,4 +168,4 @@ num	date	company	role	status	score	pdf	report	notes	url
 {num}	{datum}	{bedrijf}	{rol}	{status}	{score}	{pdf_emoji}	[{num}](reports/{num}-{slug}-{datum}.md)	{notitie}	{url}
 ```
 
-Schrijf de kolomnamen **in het Engels, exact zoals hierboven** — `merge-tracker.mjs` herleidt elk veld op NAAM, dus de kolomvolgorde doet er niet toe en geen waarde kan in de verkeerde kolom belanden.
+Schrijf beide regels **exact zoals hierboven**: de kolomnamen in het Engels, en de waarden **in dezelfde volgorde als de namen erboven**. `merge-tracker.mjs` herleidt elk veld op NAAM, en juist daarom moeten de namen de regel eronder beschrijven: herschik je maar één van de twee regels, dan wisselen `company` en `role` geruisloos van plaats (beide zijn vrije tekst, dus een controle op inhoud ziet dat niet).

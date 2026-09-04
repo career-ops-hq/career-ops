@@ -160,7 +160,7 @@ num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
 {num}\t{date}\t{company}\t{role}\tEvaluated\t{score}/5\t{pdf}\t[{num}](reports/{num}-{company-slug}-{date}.md)\t{note}\t{url}
 ```
 
-- 컬럼 이름 줄은 **영어로, 위와 똑같이** 씁니다. `merge-tracker.mjs`가 필드를 이름으로 해석하므로 컬럼 순서는 의미가 없고, 값이 엉뚱한 컬럼에 들어갈 수 없습니다.
+- 두 줄 모두 **위와 똑같이** 씁니다. 컬럼 이름은 영어로, 값은 **바로 위 이름과 같은 순서로** 씁니다. `merge-tracker.mjs`가 필드를 이름으로 해석하기 때문에 이름 줄은 반드시 그 아래 줄을 설명해야 합니다. 두 줄 중 하나만 순서를 바꾸면 `company`와 `role`이 소리 없이 뒤바뀝니다 (둘 다 자유 텍스트라 내용 검사로는 잡히지 않습니다).
 - `pdf`는 PDF가 생성되면 `✅`, 아니면 `❌`
 - report 링크는 root-relative로 작성합니다: `[001](reports/001-company-2026-01-01.md)`
 - `url`은 공고 URL이며 **중복 판정의 결정적 키**입니다. `merge-tracker.mjs`는 이 값을 가장 먼저 대조하고, 없을 때만 company+role 유사 매칭으로 넘어갑니다. URL이 없으면 셀을 **비워 둡니다** — `N/A`나 `-`는 절대 쓰지 않습니다. 이런 placeholder는 버려지고 row는 키 없이 남습니다.
