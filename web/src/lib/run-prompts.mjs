@@ -74,15 +74,17 @@ export function buildPrompt({ kind, input, memory, today, postedAt, lang }) {
   const declaredMarkets = allDeclaredMarkets.length > 1
     ? allDeclaredMarkets.filter(Boolean)
     : allDeclaredMarkets.filter((dir) => dir && dir !== "modes");
-  const marketNote = declaredMarkets.length
+  const sharedMarketNote = declaredMarkets.length
     ? ` Also read ${declaredMarkets.map((dir) => `${dir}/_shared.md`).join(" and ")} for ${
         declaredMarkets.length > 1 ? "these markets'" : "this market's"
-      } vocabulary, benefits and legal concepts, and keep those terms (explained in the output language) where relevant.${
-        declaredMarkets.length > 1
-          ? ` These are multiple DECLARED candidate markets — per posting, judge which one actually applies from the JD's own MARKET signals (hiring-entity jurisdiction, currency, benefits/legal vocabulary), reusing the same judgment Block G posting-legitimacy checks already use. Never infer the market from the JD's language alone (a French-language Quebec/federal-Canada posting needs Canada's concepts, not modes/fr's France/Belgium/Switzerland/Luxembourg ones). If genuinely ambiguous between the declared candidates, STOP BEFORE WRITING OR MERGING any report or tracker entry, ask the candidate to select the market, and do not guess.`
-          : ""
-      }`
+      } vocabulary, benefits and legal concepts, and keep those terms (explained in the output language) where relevant.`
     : "";
+  // Market selection affects evaluation persistence. Research is read-only and
+  // may use the shared context without receiving evaluation-only stop rules.
+  const marketSelectionNote = kind === "evaluate" && declaredMarkets.length > 1
+    ? ` These are multiple DECLARED candidate markets — per posting, judge which one actually applies from the JD's own MARKET signals (hiring-entity jurisdiction, currency, benefits/legal vocabulary), reusing the same judgment Block G posting-legitimacy checks already use. Never infer the market from the JD's language alone (a French-language Quebec/federal-Canada posting needs Canada's concepts, not modes/fr's France/Belgium/Switzerland/Luxembourg ones). If genuinely ambiguous between the declared candidates, STOP BEFORE WRITING OR MERGING any report or tracker entry, ask the candidate to select the market, and do not guess.`
+    : "";
+  const marketNote = sharedMarketNote + marketSelectionNote;
   const languageDirective = `\n\nWrite all human-facing output in "${resolvedLang.output}" regardless of the language of these instructions or the job description.${marketNote}\n`;
   const mem = (memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "") + languageDirective;
   if (kind === "research") {
