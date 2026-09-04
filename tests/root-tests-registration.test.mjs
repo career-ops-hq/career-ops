@@ -369,6 +369,11 @@ const WORKFLOW_CASES = [
   ['node xx-tests.mjs', false, 'a longer sibling name'],
   ['cat <<EOF\nnode x-tests.mjs\nEOF', false, 'a heredoc body cannot be the first line'],
   ['cat <<1\nnode x-tests.mjs\n1', false, 'nor can a numeric-delimiter heredoc body'],
+  // The sharpest case the masking version got wrong: it recorded `EOF` as the
+  // delimiter of `<<EOF-1`, stopped at the bare `EOF` INSIDE the body, and
+  // exposed everything after it. Kept as a fixture because it is the one that
+  // would bite hardest if the matching strategy ever widens again.
+  ['cat <<EOF-1\nEOF\nnode x-tests.mjs\nEOF-1', false, 'a partial delimiter match cannot expose a body line'],
   ['MSG="note\nnode x-tests.mjs --flag"', false, 'nor a quoted span opened earlier'],
   // Accepted false REDS. Each is a real invocation the strict rule declines to
   // see; the remedy is a step of its own, and the alternative is a shell lexer.
