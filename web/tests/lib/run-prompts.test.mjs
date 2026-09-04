@@ -340,6 +340,14 @@ test("buildPrompt: multiple declared markets tell the agent to judge by market s
   assert.match(prompt, /ask the candidate to select the market/i);
 });
 
+test("buildPrompt: research gets shared market context without evaluation stop rules", () => {
+  const prompt = buildPrompt({ kind: "research", ...ARGS, lang: DE_ZH });
+  assert.match(prompt, /modes\/de\/_shared\.md/);
+  assert.match(prompt, /modes\/zh\/_shared\.md/);
+  assert.doesNotMatch(prompt, /STOP BEFORE WRITING OR MERGING/i);
+  assert.doesNotMatch(prompt, /ask the candidate to select the market/i);
+});
+
 test("buildPrompt: the primary declared market still drives the evaluation-mode file with multiple markets configured", () => {
   const prompt = buildPrompt({ kind: "evaluate", ...ARGS, lang: DE_ZH });
   assert.match(prompt, /Read modes\/de\/angebot\.md and follow it EXACTLY/);
