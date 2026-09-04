@@ -2,7 +2,8 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // ADP Workforce Now Recruitment provider — hits the public, no-auth
-// "staffing" event API behind a tenant's recruitment page.
+// "staffing" event API behind a tenant's recruitment page. A single-company
+// ATS adapter: configure it as a `tracked_companies:` entry, one per tenant.
 // Auto-detects from careers_url pattern
 // `https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=...&ccId=...`
 //
@@ -299,7 +300,7 @@ export function buildPostingUrl(cid, ccId, itemId, externalJobId) {
  *
  * @param {any} json
  * @param {{ cid: string, ccId: string, companyName: string }} cfg
- * @returns {{ jobs: Array<{title: string, url: string, company: string, location: string, postedAt?: number, salary?: {min: number | null, max: number | null, currency: string}, employmentType?: string}>, total: number | null, raw: any[] }}
+ * @returns {{ jobs: Array<{title: string, url: string, company: string, location: string, postedAt?: number, salary?: {min: number | null, max: number | null, currency: string}}>, total: number | null, raw: any[] }}
  */
 export function parseListPage(json, cfg) {
   if (!json || typeof json !== 'object' || Array.isArray(json)) {
@@ -319,7 +320,7 @@ export function parseListPage(json, cfg) {
     const externalJobId = extractExternalJobId(job.customFieldGroup);
     const url = buildPostingUrl(cfg.cid, cfg.ccId, itemId, externalJobId);
     if (!url) continue; // a lone-surrogate id — drop just this one posting
-    /** @type {{title: string, url: string, company: string, location: string, postedAt?: number, salary?: {min: number | null, max: number | null, currency: string}, employmentType?: string}} */
+    /** @type {{title: string, url: string, company: string, location: string, postedAt?: number, salary?: {min: number | null, max: number | null, currency: string}}} */
     const row = {
       title,
       url,
@@ -330,8 +331,6 @@ export function parseListPage(json, cfg) {
     if (postedAt !== undefined) row.postedAt = postedAt;
     const salary = extractSalary(job);
     if (salary) row.salary = salary;
-    const employmentType = job?.workLevelCode?.shortName;
-    if (typeof employmentType === 'string' && employmentType.trim()) row.employmentType = employmentType.trim();
     jobs.push(Object.assign(row, { _itemId: itemId }));
   }
   return { jobs, total, raw };
@@ -378,6 +377,14 @@ export default {
     const seen = new Set();
     let skip = 1; // ADP's $skip is one-based.
     let total = null;
+    // True only when the walk stopped because it ran out of page budget with
+    // known postings still unreached — the difference between "this is the
+    // whole board" and "this is as much of it as the cap allowed" (never set
+    // while ctxCap is finite: a probe's single-page cap is expected, not an
+    // incomplete-board condition). Tracked unconditionally, independent of
+    // whether meta.totalNumber was ever present, so a tenant that omits it
+    // still gets a truncation signal instead of a silent partial board.
+    let cappedIncomplete = false;
 
     for (let page = 0; page < pageLimit; page++) {
       if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
@@ -414,6 +421,17 @@ export default {
 
       skip += raw.length; // advance by rows actually returned, never PAGE_SIZE
       if (total !== null && jobs.length >= total) break;
+
+      // This was the last iteration the for-loop will run — if the board
+      // still has more (or an unknown amount, when meta.totalNumber was
+      // never present) left, the cap truncated it.
+      if (page === pageLimit - 1) cappedIncomplete = true;
+    }
+
+    const truncated = cappedIncomplete && ctxCap === Infinity;
+    if (truncated) {
+      const jobsSummary = `${jobs.length}${total !== null ? ` of ${total}` : ''} jobs`;
+      console.error(`⚠️  adp-workforcenow: ${entry.name} truncated at max_pages=${maxPages} (${jobsSummary}) — raise max_pages on this entry for more`);
     }
 
     // Detail enrichment answers "what does this job say", not "is this
@@ -444,6 +462,12 @@ export default {
 
     // _itemId drove dedup/detail lookups above; it's internal plumbing and
     // must not leak into the pipeline's Job rows (mirrors smartrecruiters.mjs).
-    return jobs.map(({ _itemId, ...job }) => job);
+    const result = jobs.map(({ _itemId, ...job }) => job);
+    // The tag lives on the returned array (mirrors workday.mjs's
+    // workdayTruncated / workdayNoDateSkip pattern, and ultipro.mjs's
+    // ultiproTruncated) — re-applied here because .map() above produces a
+    // fresh array that wouldn't otherwise carry it.
+    if (truncated) /** @type {any} */ (result).adpTruncated = true;
+    return result;
   },
 };

@@ -35,6 +35,14 @@
  *                               usable date. scan.mjs ignores it; consumers
  *                               like scan-ats-full.mjs use it for recency
  *                               filtering.
+ * @property {{min: number | null, max: number | null, currency: string}} [salary]
+ *                               Optional, best-effort compensation range.
+ *                               Populated only when the source's payload
+ *                               carries a usable structured or free-text
+ *                               range — never invented. Consumed by
+ *                               scan.mjs's salary_filter and
+ *                               formatCompensation(); see ashby.mjs /
+ *                               adp-workforcenow.mjs for producers.
  * @property {number} [trustScore] 0-100 trust score from _trust-validator.mjs.
  * @property {string[]} [trustFlags] Flags raised by trust validation (e.g.
  *                                   'invalid_url', 'suspicious_domain').
