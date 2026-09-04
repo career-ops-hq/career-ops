@@ -20,6 +20,7 @@ import { execFileSync, execFile } from 'child_process';
 import { promisify } from 'util';
 import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 const execFileAsync = promisify(execFile);
 try {
   const { config } = await import('dotenv');
@@ -297,7 +298,9 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
       'Evaluated', normalizedTrackerScore(score), '❌', `[${num}](reports/${filename})`,
       'Batch Gemini evaluation'
     ];
-    writeFileSync(trackerPath, `${trackerFields.join('\t')}\n`, 'utf-8');
+    // Header row first: merge-tracker resolves the fields by name, so this row
+    // cannot be ingested into the wrong columns (#3517).
+    writeFileSync(trackerPath, `${TSV_ADDITION_HEADER}\n${trackerFields.join('\t')}\n`, 'utf-8');
 
     console.log(`✅ Success: ${company} - ${role} | Score: ${score}/5 | Saved as ${filename}`);
     

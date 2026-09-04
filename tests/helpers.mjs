@@ -633,3 +633,63 @@ export function hermeticGitEnv(gitConfigPath, base = process.env) {
   delete env.GIT_CONFIG;
   return env;
 }
+
+/**
+ * Can a directory write-deny actually stop THIS process from creating a file?
+ *
+ * Two suites arrange a write failure by making the tracker's directory
+ * unwritable and asserting the structured error that follows. An elevated
+ * Windows shell is not bound by that ACE: the temp-file write lands, the CLI
+ * exits 0, and the assertion reports `code=0 json=undefined`, which reads like
+ * the CLI is broken rather than like a setup step that could not be arranged
+ * (#3423). That is the same "permissions do not apply to me" case those suites
+ * already skip for root on POSIX, so it takes the same loud skip.
+ *
+ * Measured, never inferred: this performs the very operation those tests depend
+ * on - apply the deny, then create a file with the same fs API - instead of
+ * asking a proxy whether the shell is elevated. A proxy is the wrong tool here.
+ * A restricted token still lists the Administrators SID in `whoami /groups`
+ * (present for deny only), and inside one elevated token PowerShell's
+ * Set-Content is refused while Node's writeFileSync succeeds, so "is elevated"
+ * and "can still write" are genuinely different questions.
+ *
+ * Fails toward RUNNING the assertion: if the probe cannot be arranged at all
+ * (no icacls, a non-zero exit, anything thrown) it answers true so the caller
+ * still executes its check. A skip on an inconclusive probe would quietly turn
+ * "the failure could not be arranged" into "the failure handling is fine",
+ * which is the blind spot those assertions exist to catch.
+ *
+ * Lives here rather than in each suite because the two copies of this setup
+ * have already drifted once: `tests/mark-pdf-ready.test.mjs` says it mirrors
+ * `set-status-tests.mjs`, and it mirrored this bug along with the arrangement.
+ *
+ * @returns {boolean} true when the deny binds, or when it could not be evaluated.
+ */
+export function directoryDenyBinds() {
+  let probeDir = null;
+  try {
+    probeDir = mkdtempSync(join(tmpdir(), 'co-denyprobe-'));
+    execFileSync('icacls', [probeDir, '/deny', '*S-1-1-0:(WD,AD)'], { stdio: 'ignore' });
+    try {
+      writeFileSync(join(probeDir, 'canary.tmp'), 'x');
+      return false;
+    } catch {
+      return true;
+    }
+  } catch {
+    return true;
+  } finally {
+    if (probeDir) {
+      // Cleanup must not escape this function. A throw from `finally` replaces
+      // the value the try block already computed, so a failed rmSync would turn
+      // a decided probe into an exception and take both callers down with it -
+      // the opposite of the fail-toward-running-the-assertion contract above.
+      // Windows makes that reachable: rmSync can answer EPERM for a while after
+      // a child exits (the reason the wrapper retries at all), and this
+      // directory carries a deny ACE. A leaked temp directory is the cheaper
+      // failure.
+      try { execFileSync('icacls', [probeDir, '/remove:d', '*S-1-1-0'], { stdio: 'ignore' }); } catch {}
+      try { rmSync(probeDir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}

@@ -26,7 +26,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { collectMjsFiles, SKIP_DIRS } from '../lib/mjs-files.mjs';
+import { collectMjsFiles, isNestedCheckout, SKIP_DIRS } from '../lib/mjs-files.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -91,6 +91,99 @@ test('the syntax gate reaches past the repository root', () => {
   // 'web/ test discovery contract' check already uses instead of hardcoding it.
   if (existsSync(join(ROOT, 'web'))) {
     assert.ok(files.some((f) => f.startsWith('web/')), 'web/ must be inside the gate when present');
+  }
+});
+
+test('a nested checkout is not walked as this repository\u2019s source', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'co-mjs-files-'));
+  try {
+    writeFileSync(join(dir, 'real.mjs'), '');
+
+    // A linked worktree, exactly as git writes one: a `.git` FILE holding a
+    // gitdir pointer. The `.git` entry in SKIP_DIRS matches a NAME, so it never
+    // fires here, and the walk used to descend into the whole second checkout —
+    // 1097 files reported in a 576-file repo (#3499).
+    mkdirSync(join(dir, 'wt'));
+    writeFileSync(join(dir, 'wt', '.git'), 'gitdir: /elsewhere/.git/worktrees/wt\n');
+    writeFileSync(join(dir, 'wt', 'stale.mjs'), '');
+    mkdirSync(join(dir, 'wt', 'tests'));
+    writeFileSync(join(dir, 'wt', 'tests', 'deep.mjs'), '');
+
+    // A nested independent clone marks itself with a `.git` DIRECTORY. SKIP_DIRS
+    // drops git's storage there but not the working tree beside it, so the same
+    // second-copy hazard applies.
+    mkdirSync(join(dir, 'clone', '.git'), { recursive: true });
+    writeFileSync(join(dir, 'clone', 'other.mjs'), '');
+
+    const rel = collectMjsFiles(dir).map((f) => f.slice(dir.length + 1).replace(/\\/g, '/'));
+
+    assert.deepEqual(rel, ['real.mjs'],
+      `only this checkout's source is walked, got: ${rel.join(', ')}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the walk root is exempt, so running from inside a worktree still checks it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'co-mjs-files-'));
+  try {
+    // The root's own `.git` is what makes it the repository, and in a linked
+    // worktree it is a file — the same marker the predicate skips on below the
+    // root. Applying it to the root would return [] and the syntax gate would
+    // report "0 .mjs files" and pass, having checked nothing: strictly worse
+    // than the bug it fixes, and the same shape as #3419.
+    writeFileSync(join(dir, '.git'), 'gitdir: /elsewhere/.git/worktrees/self\n');
+    writeFileSync(join(dir, 'source.mjs'), '');
+    mkdirSync(join(dir, 'lib'));
+    writeFileSync(join(dir, 'lib', 'nested.mjs'), '');
+
+    const rel = collectMjsFiles(dir).map((f) => f.slice(dir.length + 1).replace(/\\/g, '/'));
+
+    assert.deepEqual(rel, ['lib/nested.mjs', 'source.mjs']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('isNestedCheckout detects the marker, of either type, and nothing else', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'co-mjs-files-'));
+  try {
+    mkdirSync(join(dir, 'worktree'));
+    writeFileSync(join(dir, 'worktree', '.git'), 'gitdir: /elsewhere\n');
+    mkdirSync(join(dir, 'clone', '.git'), { recursive: true });
+    mkdirSync(join(dir, 'plain'));
+
+    assert.equal(isNestedCheckout(join(dir, 'worktree')), true, 'a .git file is a linked worktree or submodule');
+    assert.equal(isNestedCheckout(join(dir, 'clone')), true, 'a .git directory is an independent clone');
+    assert.equal(isNestedCheckout(join(dir, 'plain')), false, 'an ordinary subdirectory is source');
+    assert.equal(isNestedCheckout(join(dir, 'does-not-exist')), false, 'a missing directory is not a checkout');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the private repo walkers consult the shared predicate, not their own rule', () => {
+  // lib/mjs-files.mjs exists so two walkers cannot drift about what "every
+  // file" means; the same reasoning applies to what "not our source" means.
+  // These three suites keep private walkers because each filters differently
+  // (.test.mjs, dot-dirs, SKIP_DIRS sets), so they import the predicate rather
+  // than the collector — but a fourth hand-rolled `.git` rule is the drift.
+  for (const caller of ['tests/local-today-gates.test.mjs', 'tests/main-guard-convention.test.mjs', 'test-all.mjs']) {
+    const src = readFileSync(join(ROOT, caller), 'utf-8');
+
+    // The IMPORT is the assertion, not the call. Matching `isNestedCheckout(`
+    // anywhere in the file is satisfied by a local `const isNestedCheckout =
+    // () => false` — a hand-rolled re-implementation wearing the shared name,
+    // which is precisely the drift this test exists to catch, passing as proof
+    // against itself. Pinning the import binds the name to the one definition.
+    assert.match(
+      src,
+      /import\s*\{[^}]*\bisNestedCheckout\b[^}]*\}\s*from\s*'\.{1,2}\/lib\/mjs-files\.mjs'/,
+      `${caller} must import isNestedCheckout FROM lib/mjs-files.mjs, not re-implement it (#3499)`,
+    );
+    // ...and still use it: an unused import satisfies the check above while the
+    // walk descends into every nested checkout exactly as before.
+    assert.match(src, /isNestedCheckout\(/, `${caller} must actually call isNestedCheckout (#3499)`);
   }
 });
 
