@@ -349,6 +349,78 @@ try {
     else fail(`adp-workforcenow.fetch() made ${calls} calls above MAX_PAGES_CAP, expected 1500`);
   }
 
+  // Hitting the page-count ceiling before meta.totalNumber is reached must
+  // mark the result incomplete (a console warning + the adpTruncated tag),
+  // not silently "done" — a 2000-posting sweep of a 3000-posting tenant is
+  // otherwise indistinguishable from a complete one.
+  {
+    let calls = 0;
+    const mockCtx = {
+      sleep: async () => {},
+      fetchJson: async () => {
+        calls++;
+        // Every page is a full 20-row page and meta.totalNumber is far beyond
+        // what max_pages will ever reach — pagination can only stop by
+        // hitting the cap.
+        return { jobRequisitions: fullPage(calls * 20 - 19), meta: { totalNumber: 999999 } };
+      },
+    };
+    let warnings = [];
+    const origError = console.error;
+    console.error = (m) => warnings.push(m);
+    let jobs;
+    try {
+      jobs = await adp.fetch({ name: 'ExampleCo', careers_url: CAREERS_URL, max_pages: 3 }, mockCtx);
+    } finally {
+      console.error = origError;
+    }
+    if (calls === 3 && jobs.adpTruncated === true && warnings.some((w) => /truncated/i.test(w) && /raise max_pages/.test(w))) {
+      pass('adp-workforcenow.fetch() warns and tags adpTruncated when the page cap is hit before meta.totalNumber is reached');
+    } else {
+      fail(`adp-workforcenow.fetch() cap-incomplete handling wrong: calls=${calls}, adpTruncated=${jobs.adpTruncated}, warnings=${JSON.stringify(warnings)}`);
+    }
+  }
+
+  // Same cap-exhaustion case, but the tenant never exposes meta.totalNumber
+  // at all — the `total !== null` gate on the old completion check must not
+  // silently swallow this signal too.
+  {
+    let calls = 0;
+    const mockCtx = {
+      sleep: async () => {},
+      fetchJson: async () => {
+        calls++;
+        return { jobRequisitions: fullPage(calls * 20 - 19) }; // no meta at all
+      },
+    };
+    let warnings = [];
+    const origError = console.error;
+    console.error = (m) => warnings.push(m);
+    let jobs;
+    try {
+      jobs = await adp.fetch({ name: 'ExampleCo', careers_url: CAREERS_URL, max_pages: 2 }, mockCtx);
+    } finally {
+      console.error = origError;
+    }
+    if (calls === 2 && jobs.adpTruncated === true && warnings.some((w) => /truncated/i.test(w))) {
+      pass('adp-workforcenow.fetch() warns and tags adpTruncated on a cap-exhausting run even when meta.totalNumber is never present');
+    } else {
+      fail(`adp-workforcenow.fetch() no-total cap handling wrong: calls=${calls}, adpTruncated=${jobs.adpTruncated}, warnings=${JSON.stringify(warnings)}`);
+    }
+  }
+
+  // A tenant that finishes exactly at the cap (meta.totalNumber reached) is
+  // NOT tagged truncated — the cap and "genuinely done" must not be conflated.
+  {
+    const mockCtx = {
+      sleep: async () => {},
+      fetchJson: async () => ({ jobRequisitions: fullPage(1), meta: { totalNumber: 20 } }),
+    };
+    const jobs = await adp.fetch({ name: 'ExampleCo', careers_url: CAREERS_URL, max_pages: 1 }, mockCtx);
+    if (jobs.adpTruncated === undefined) pass('adp-workforcenow.fetch() does not tag adpTruncated when the board finished exactly at the cap');
+    else fail('adp-workforcenow.fetch() should not tag adpTruncated when meta.totalNumber was actually reached');
+  }
+
   // A page that comes back empty (not just short) stops pagination — the
   // infinite-loop guard for a malformed/empty response, independent of totals.
   {
@@ -454,6 +526,28 @@ try {
       pass("adp-workforcenow.fetch() passes redirect:'error' on every list request");
     } else {
       fail(`adp-workforcenow.fetch() redirect option wrong: ${JSON.stringify(seenOpts)}`);
+    }
+  }
+
+  {
+    // Same guard, but exercised on the detail-fetch path (fetchDetails: true
+    // with a matching posting) — the earlier test's empty list page meant no
+    // /job-requisitions/{id} detail request was ever made, so the provider's
+    // detail loop passing redirect:'error' was unverified.
+    const seenOpts = [];
+    const mockCtx = {
+      sleep: async () => {},
+      fetchJson: async (url, opts) => {
+        seenOpts.push(opts);
+        if (String(url).includes('/job-requisitions/')) return { requisitionDescription: 'x' };
+        return { jobRequisitions: [mkJob('item-1', 'Instructional Designer', 'ext-1')], meta: { totalNumber: 1 } };
+      },
+    };
+    await adp.fetch({ name: 'ExampleCo', careers_url: CAREERS_URL, adpWorkforcenow: { fetchDetails: true } }, mockCtx);
+    if (seenOpts.length === 2 && seenOpts.every((o) => o.redirect === 'error')) {
+      pass("adp-workforcenow.fetch() passes redirect:'error' on the detail request too");
+    } else {
+      fail(`adp-workforcenow.fetch() detail-request redirect option wrong: ${JSON.stringify(seenOpts)}`);
     }
   }
 
