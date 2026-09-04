@@ -310,39 +310,62 @@ export function runCommands(doc) {
  * and resolved by whoever wrote it; a false green is the bug.
  */
 export function maskShellData(script) {
-  // 1. Heredoc bodies, `<<WORD` / `<<-WORD` / `<<'WORD'`, up to the delimiter.
+  // 1. Heredoc bodies. The delimiters form an ORDERED QUEUE: `cat <<A <<B`
+  //    queues two bodies, A's then B's, and recording only the first left B's
+  //    body visible as commands. Termination is exact for `<<WORD` — an
+  //    indented `  EOF` does NOT end `<<EOF`, so treating it as a terminator
+  //    un-masked the rest of a heredoc that was still running. `<<-WORD`
+  //    strips leading TABS only (not spaces), which is the shell's rule.
   const lines = script.split('\n');
   const kept = [];
-  let delimiter = null;
+  const pending = [];
   for (const line of lines) {
-    if (delimiter !== null) {
-      if (line.trim() === delimiter) delimiter = null;
+    if (pending.length) {
+      const { word, stripTabs } = pending[0];
+      const probe = stripTabs ? line.replace(/^\t+/, '') : line;
+      if (probe === word) pending.shift();
       kept.push('');
       continue;
     }
-    const m = line.match(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/);
-    if (m) {
-      delimiter = m[2];
-      kept.push(line.slice(0, m.index));
+    const ops = [...line.matchAll(/<<(-?)\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/g)];
+    if (ops.length) {
+      for (const m of ops) pending.push({ word: m[3], stripTabs: m[1] === '-' });
+      // Keep only what precedes the first `<<`: `node a.mjs; cat <<EOF` still
+      // shows its real command, while the redirection tail cannot be mistaken
+      // for one.
+      kept.push(line.slice(0, ops[0].index));
       continue;
     }
     kept.push(line);
   }
 
-  // 2. Quoted spans, single and double, which may run across lines.
+  // 2. Quoted spans and shell comments, in ONE pass because each governs the
+  //    other: a `#` inside quotes is not a comment, and a quote inside a
+  //    comment does not open a span. A comment runs to end of line, so
+  //    `# setup; node x-tests.mjs` must not leave a `;` for the command regex
+  //    to anchor on. `#` only starts a comment at a word boundary — `foo#bar`
+  //    and `${#x}` are not comments.
   const joined = kept.join('\n');
   let out = '';
   let quote = null;
-  for (let i = 0; i < joined.length; i++) {
+  let prev = '\n';
+  let i = 0;
+  while (i < joined.length) {
     const c = joined[i];
     if (quote) {
-      if (c === '\\' && quote === '"') { out += '  '; i++; continue; }
-      if (c === quote) { quote = null; out += c; continue; }
+      if (c === '\\' && quote === '"') { out += '  '; i += 2; prev = ' '; continue; }
+      if (c === quote) { quote = null; out += c; i++; prev = c; continue; }
       out += c === '\n' ? '\n' : ' ';
+      i++; prev = ' ';
       continue;
     }
-    if (c === "'" || c === '"') { quote = c; out += c; continue; }
-    out += c;
+    if (c === '#' && (prev === '\n' || /\s/.test(prev))) {
+      while (i < joined.length && joined[i] !== '\n') { out += ' '; i++; }
+      prev = ' ';
+      continue;
+    }
+    if (c === "'" || c === '"') { quote = c; out += c; i++; prev = c; continue; }
+    out += c; i++; prev = c;
   }
   return out;
 }
@@ -386,6 +409,13 @@ const WORKFLOW_CASES = [
   ["cat <<'EOF'\nnode x-tests.mjs\nEOF", false, 'a quoted-delimiter heredoc'],
   ['MSG="note\nnode x-tests.mjs --flag"', false, 'a multi-line double-quoted span'],
   ['cat <<EOF\nnode x-tests.mjs\nEOF\nnode x-tests.mjs', true, 'a real command AFTER a heredoc still counts'],
+  ['# setup; node x-tests.mjs', false, 'a shell comment hiding a separator (#3765 third pass)'],
+  ['echo hi # node x-tests.mjs', false, 'a trailing shell comment'],
+  ['node x-tests.mjs # note', true, 'a real command with a trailing comment'],
+  ['echo foo#bar && node x-tests.mjs', true, 'a # mid-word is not a comment'],
+  ['cat <<EOF\na\n  EOF\nnode x-tests.mjs', false, 'an INDENTED EOF does not terminate <<EOF'],
+  ['cat <<-EOF\na\n\tEOF\nnode x-tests.mjs', true, '<<- strips tabs, so the terminator lands'],
+  ['cat <<FIRST <<SECOND\na\nFIRST\nnode x-tests.mjs\nSECOND', false, "the SECOND heredoc's body is still data"],
 ];
 
 // runCommands must read only the one path that executes. `with.run` is an
