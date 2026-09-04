@@ -138,5 +138,5 @@ if (discoveryError !== null) {
 } else if (offenders.length === 0) {
   pass(`all ${files.length} tracked YAML files parse`);
 } else {
-  fail(`YAML file(s) that do not parse — a GitHub Issue Form or workflow in this set will not load: ${offenders.join(' · ')}`);
+  fail(`YAML file(s) that do not parse: ${offenders.join(' · ')}`);
 }
