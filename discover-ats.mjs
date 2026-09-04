@@ -568,6 +568,7 @@ export async function resolveWorkday(company, coords, ctx) {
   const tried = [];
   let emptyUrl = null;
   let lastError;
+  let lastRefusedRedirect = false;
 
   for (const candidate of candidates) {
     tried.push(candidate.careers_url);
@@ -593,11 +594,22 @@ export async function resolveWorkday(company, coords, ctx) {
       if (!emptyUrl) emptyUrl = candidate.careers_url;
     } catch (err) {
       lastError = err?.message || String(err);
+      // The file's second `.fetch(` site, and workday.mjs passes
+      // redirect:'error' too — so a Workday host that redirects arrives here as
+      // the same bare "fetch failed" probeVendor used to report. Keeping the
+      // cause costs nothing and stops the two error paths from describing the
+      // same failure differently (#3788).
+      if (isRefusedRedirectError(err)) {
+        lastError = `${lastError} (${err.cause.message})`;
+        lastRefusedRedirect = true;
+      } else {
+        lastRefusedRedirect = false;
+      }
     }
   }
   return emptyUrl
     ? { status: 'empty', tried, careers_url: emptyUrl }
-    : { status: 'error', tried, detail: lastError };
+    : { status: 'error', tried, detail: lastError, refusedRedirect: lastRefusedRedirect };
 }
 
 /**
@@ -650,7 +662,15 @@ export async function resolveCompany(company, { vendors = VENDOR_ORDER, ctx, inc
       // Use the host resolveWorkday actually confirmed empty, not always wd1.
       emptyBoards.push({ vendor: 'workday', careers_url: wd.careers_url });
     } else if (wd.detail) {
-      errors.push({ vendor: 'workday', error: wd.detail });
+      /** @type {any} */
+      const wdEntry = { vendor: 'workday', error: wd.detail };
+      // Carried so errors[] describes a Workday refusal the same way it
+      // describes a BambooHR one. It cannot reach the reason ladder — the
+      // refused-redirect branch is guarded by !coords and a Workday probe only
+      // runs WITH coords — but a machine reading errors[] should not have to
+      // know that (#3788).
+      if (wd.refusedRedirect) wdEntry.refusedRedirect = true;
+      errors.push(wdEntry);
     }
   }
 

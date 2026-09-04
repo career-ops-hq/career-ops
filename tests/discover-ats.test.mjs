@@ -32,6 +32,7 @@ import {
   parseWorkdayHint,
   buildWorkdayCandidates,
   resolveCompany,
+  resolveWorkday,
 } from '../discover-ats.mjs';
 import * as yaml from 'js-yaml';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
@@ -479,6 +480,76 @@ const redirectPlus503 = await resolveCompany({ name: 'Half Answered Co' },
   });
 ok('refused redirect + 503 → still unknown, the 503 vendor never answered',
   /status unknown/i.test(redirectPlus503.unresolved.reason));
+
+// Guard, the direction that costs a user real time. A DNS failure reaches this
+// code as the SAME bare TypeError with no status; only err.cause distinguishes
+// it. Widening the predicate in providers/_http.mjs to accept any cause leaves
+// every assertion above green while turning a network hiccup into "your slug is
+// wrong" — measured, not hypothetical: that mutation reddens --only _http and
+// leaves --only discover-ats at 149/0. This is the case that closes it.
+const dnsFailureCtx = () => ({
+  fetchJson: async () => {
+    throw Object.assign(new TypeError('fetch failed'), {
+      cause: { message: 'getaddrinfo ENOTFOUND unreachable-co.bamboohr.com' },
+    });
+  },
+  fetchText: async () => { throw new Error('unused'); },
+});
+const dnsFailure = await resolveCompany({ name: 'Unreachable Co' },
+  { vendors: ['bamboohr'], includeWorkday: false, ctx: dnsFailureCtx() });
+ok('DNS-shaped TypeError → still an unknown status',
+  /status unknown/i.test(dnsFailure.unresolved.reason));
+ok('DNS-shaped TypeError → still advises a re-run',
+  /errors\[\] and re-run/i.test(dnsFailure.unresolved.reason));
+ok('DNS-shaped TypeError → not marked as a refused redirect',
+  dnsFailure.unresolved.errors.every(e => e.refusedRedirect !== true));
+ok('DNS-shaped TypeError → the slug is never blamed for a transport failure',
+  !/redirected off-tenant/i.test(dnsFailure.unresolved.reason));
+
+// The refused-redirect branch sits ABOVE the workday-hint branch, so a
+// malformed hint alongside a refusal reports the redirect. That order is
+// deliberate and load-bearing: the redirect is an answer a vendor actually
+// gave, while the hint is a field the user must fix in either case — and main
+// said "status unknown" here, so this is a choice between two new messages
+// rather than a regression. Pinned so reshuffling the ladder has to argue.
+const hintPlusRedirect = await resolveCompany(
+  { name: 'Hinted Co', workday: { tenant: 'a/b', site: 'S' } },
+  { vendors: ['bamboohr'], includeWorkday: true, ctx: refusalCtx() });
+ok('malformed workday hint + refused redirect → the measured answer wins the message',
+  /redirected off-tenant/i.test(hintPlusRedirect.unresolved.reason));
+
+// And a malformed hint on its own is untouched — the guard that the branch
+// above did not swallow the Workday case wholesale.
+const hintOnly = await resolveCompany(
+  { name: 'Hint Only Co', workday: { tenant: 'a/b', site: 'S' } },
+  { vendors: [], includeWorkday: true });
+ok('malformed workday hint alone → still the Workday-hint message',
+  /Workday hint given but rejected/i.test(hintOnly.unresolved.reason));
+
+// resolveWorkday is the file's OTHER .fetch( site, and workday.mjs passes
+// redirect:'error' as well — so the same refusal arrives there and used to be
+// flattened to a bare "fetch failed" while probeVendor's copy kept the cause.
+//
+// Injected through ctx.fetchJson, which is where the provider actually reads:
+// a first attempt passing `{}` and stubbing globalThis.fetch produced
+// detail === "ctx.fetchJson is not a function", i.e. a failing assertion that
+// never reached the refusal path at all.
+{
+  const wdRefusalCtx = {
+    fetchJson: async () => {
+      throw Object.assign(new TypeError('fetch failed'), { cause: { message: 'unexpected redirect' } });
+    },
+    fetchText: async () => { throw new Error('unused'); },
+  };
+  const wdCoords = parseWorkdayHint({ name: 'WD Co', workday: { tenant: 'acme', site: 'External' } });
+  const wd = await resolveWorkday({ name: 'WD Co' }, wdCoords, wdRefusalCtx);
+  ok('workday refusal → reaches the refusal path, not a ctx shape error',
+    wd.status === 'error' && /fetch failed/.test(String(wd.detail)));
+  ok('workday refusal → the cause survives into detail',
+    /unexpected redirect/.test(String(wd.detail)));
+  ok('workday refusal → carries the same discriminator as a vendor probe',
+    wd.refusedRedirect === true);
+}
 
 // parseCompanyInput warns on a present-but-wrong-typed workday field (e.g. a number).
 const wrongType = parseCompanyInput('companies:\n  - name: X\n    workday: 42\n', []);
