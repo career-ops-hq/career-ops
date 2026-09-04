@@ -37,7 +37,7 @@ import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { renameSyncWithRetry } from './tracker-utils.mjs';
 
-import { makeHttpCtx } from './providers/_http.mjs';
+import { makeHttpCtx, isRefusedRedirectError } from './providers/_http.mjs';
 import greenhouse from './providers/greenhouse.mjs';
 import ashby from './providers/ashby.mjs';
 import lever from './providers/lever.mjs';
@@ -522,6 +522,18 @@ export async function probeVendor(company, candidate, ctx) {
     // what lets the caller tell a definitive 404 from a transient 5xx instead of
     // re-parsing the message text (#2883).
     if (Number.isInteger(err?.status)) out.httpStatus = err.status;
+    // A refused redirect has no status at all: it is a bare `TypeError: fetch
+    // failed`, and the vendor's actual answer lives one level down in
+    // err.cause. Recording only err.message discarded that answer, so a
+    // BambooHR tenant that does not exist — answered with `302 →
+    // www.bamboohr.com`, not a 404 — reached the user as the single word
+    // "fetch failed" under advice to re-run it. Same reasoning as the
+    // httpStatus line above: keep the discriminator on the object rather than
+    // re-parsing prose downstream (#3788).
+    if (isRefusedRedirectError(err)) {
+      out.refusedRedirect = true;
+      out.error = `${out.error} (${err.cause.message})`;
+    }
     return out;
   }
 }
@@ -621,6 +633,7 @@ export async function resolveCompany(company, { vendors = VENDOR_ORDER, ctx, inc
       /** @type {any} */
       const entry = { vendor: candidate.vendor, error: result.error };
       if (Number.isInteger(result.httpStatus)) entry.httpStatus = result.httpStatus;
+      if (result.refusedRedirect) entry.refusedRedirect = true;
       if (isDefinitiveAbsence(result)) entry.definitive = true;
       errors.push(entry);
     }
@@ -649,36 +662,59 @@ export async function resolveCompany(company, { vendors = VENDOR_ORDER, ctx, inc
   const workdayHintProvided = includeWorkday
     && (typeof company.workday === 'string' ? !!company.workday.trim()
       : (company.workday && typeof company.workday === 'object'));
+  // A failure is SETTLED when the vendor answered and re-running the identical
+  // probe cannot produce a different answer. Two ways that happens, and they
+  // mean different things:
+  //
+  //   - a definitive 404/410 — the board is not there (#2883);
+  //   - a refused redirect — the vendor pointed us off-tenant, which says "not
+  //     this slug", NOT "no board". BambooHR does not 404 an unknown tenant; it
+  //     answers `302 → www.bamboohr.com`. MaRS Discovery District redirects on
+  //     the derived `mars-discovery-district` and returns three jobs on
+  //     `marsdd`, so calling that absence would be as wrong as calling it
+  //     transient (#3788).
+  //
+  // Both are settled, so neither should advise re-running the same probe; only
+  // the first establishes absence, which is why refusedRedirect gets its own
+  // verdict below instead of joining isDefinitiveAbsence().
+  const isSettled = (e) => isDefinitiveAbsence(e) || e.refusedRedirect === true;
   const reason = emptyBoards.length
     ? 'board(s) found but currently list 0 jobs — re-run later or force-add manually'
     // Every probe errored and nothing was confirmed absent or empty — don't
     // claim "no board found", the status is unknown.
     //
-    // Unless every failure was DEFINITIVE. A 404 from Greenhouse/Ashby/Lever is
+    // Unless every failure was SETTLED. A 404 from Greenhouse/Ashby/Lever is
     // an answer, not a hiccup: the board is not there and re-running will say so
     // again. Advising a retry in that case erased the difference between "this
     // company has no board" and "the network hiccuped", which is exactly the
     // pair a user pruning portals.yml has to tell apart (#2883). One transient
     // failure among them is enough to leave the question open — that vendor
     // never answered, so absence is not established.
-    : (errors.length && !coords && !errors.every(isDefinitiveAbsence))
+    : (errors.length && !coords && !errors.every(isSettled))
       ? 'probe error(s) occurred — board status unknown, see errors[] and re-run'
-      // A hint was given but rejected by parseWorkdayHint (bad chars, missing
-      // tenant/site): tell the user to fix it, not to add one.
-      : (workdayHintProvided && !coords)
-        ? 'Workday hint given but rejected (invalid/missing tenant or site) — check the `workday` field and re-run'
-        : coords
-          ? 'Workday coordinates given but no live board with open jobs found at the probed host(s).'
-          // Nothing was probeable: every vendor's own contract rejected this
-          // slug's shape, so no board was ruled out — say that, rather than
-          // implying we looked and found nothing.
-          : (!candidates.length && unsupported.length)
-            ? `slug "${company.slug || deriveSlug(company.name)}" is not a valid board slug for any probed vendor `
-              + `(${unsupported.join(', ')}) — nothing was probed; fix the \`slug\` field and re-run.`
-            // VENDOR_ORDER covers eleven vendors now, so name none of them here.
-            : 'no supported ATS board found. If this company uses Workday, add a hint — '
-              + 'a full careers URL (workday: https://<tenant>.wd<N>.myworkdayjobs.com/<site>) or '
-              + 'workday: {tenant, site} — and re-run; discover-ats will confirm and add it.';
+      // Settled, but by a redirect rather than a 404: the actionable fix is the
+      // slug, not a retry and not a Workday hint.
+      : (errors.length && !coords && errors.some((e) => e.refusedRedirect))
+        ? 'vendor(s) redirected off-tenant ('
+          + errors.filter((e) => e.refusedRedirect).map((e) => e.vendor).join(', ')
+          + ') — the slug is wrong, or no board exists under it. The same probe '
+          + 'will redirect again, so set an explicit `slug` and re-run.'
+        // A hint was given but rejected by parseWorkdayHint (bad chars, missing
+        // tenant/site): tell the user to fix it, not to add one.
+        : (workdayHintProvided && !coords)
+          ? 'Workday hint given but rejected (invalid/missing tenant or site) — check the `workday` field and re-run'
+          : coords
+            ? 'Workday coordinates given but no live board with open jobs found at the probed host(s).'
+            // Nothing was probeable: every vendor's own contract rejected this
+            // slug's shape, so no board was ruled out — say that, rather than
+            // implying we looked and found nothing.
+            : (!candidates.length && unsupported.length)
+              ? `slug "${company.slug || deriveSlug(company.name)}" is not a valid board slug for any probed vendor `
+                + `(${unsupported.join(', ')}) — nothing was probed; fix the \`slug\` field and re-run.`
+              // VENDOR_ORDER covers eleven vendors now, so name none of them here.
+              : 'no supported ATS board found. If this company uses Workday, add a hint — '
+                + 'a full careers URL (workday: https://<tenant>.wd<N>.myworkdayjobs.com/<site>) or '
+                + 'workday: {tenant, site} — and re-run; discover-ats will confirm and add it.';
 
   /** @type {any} */
   const unresolved = { name: company.name, triedVendors, reason };
