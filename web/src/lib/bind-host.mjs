@@ -17,10 +17,17 @@
 // nothing listening for it. planNextRun reports the first; the README documents
 // both.
 //
-// Pure: no node imports, no process state. server.mjs passes the environment in
-// and acts on what comes back, so the whole decision is testable on values
-// rather than inferred from the launcher's source text.
+// Pure in the sense that matters: no process state, no I/O. server.mjs passes
+// the environment in and acts on what comes back, so the whole decision is
+// testable on values rather than inferred from the launcher's source text.
+//
+// It does import node:net for isIP. Only server.mjs and the tests import this
+// module — proxy.ts imports origin-guard.mjs, which stays free of node imports
+// for the edge runtime — so the dependency costs nothing here, and hand-rolling
+// an address parser instead proved to be exactly the wrong trade: the version
+// that counted colons admitted `2001:db8:1` as a bind target.
 
+import { isIP } from "node:net";
 import { parseAllowedHosts, isLoopbackHost } from "./origin-guard.mjs";
 
 export const LOOPBACK_BIND = "127.0.0.1";
@@ -46,40 +53,23 @@ const URL_SCHEMES = Object.freeze(new Set(["http", "https"]));
 const HOSTNAME_LABEL = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 /**
- * A dotted-quad IPv4 literal, rejecting the leading-zero form.
+ * An IPv4 or IPv6 literal, already unbracketed by parseAllowedHosts.
  *
- * `010.0.0.1` is read as octal by some resolvers and as decimal by others, which
- * makes it a poor thing to hand a bind call or compare an allow-list against.
+ * Node's own parser rather than a hand-rolled one. The first version here
+ * counted colons and hex digits, which accepted incomplete addresses like
+ * `2001:db8:1` — enough to be treated as a bindable literal and handed to
+ * `next -H`, where listen() then refused to start the server. Being lenient here
+ * cannot fail safe, because whatever this admits becomes a bind target.
  *
- * @param {string} host
- * @returns {boolean}
- */
-function isIPv4Literal(host) {
-  const octets = host.split(".");
-  return (
-    octets.length === 4 &&
-    octets.every((o) => /^\d{1,3}$/.test(o) && Number(o) <= 255 && String(Number(o)) === o)
-  );
-}
-
-/**
- * An IPv6 literal, already unbracketed by parseAllowedHosts.
- *
- * Deliberately shallow — hex groups and at most one `::` run. A malformed
- * address that slips through fails loudly at listen() with the address in the
- * message; the point here is to separate addresses from words, not to
- * reimplement inet_pton.
+ * isIP also rejects the leading-zero form `010.0.0.1`, which some resolvers read
+ * as octal and others as decimal — a poor thing to bind or to compare an
+ * allow-list against.
  *
  * @param {string} host
  * @returns {boolean}
  */
-function isIPv6Literal(host) {
-  if (!host.includes(":") || !/^[0-9a-f:]+$/.test(host)) return false;
-  return host.split("::").length <= 2 && host.split(":").filter(Boolean).length <= 8;
-}
-
 function isIPLiteral(host) {
-  return isIPv4Literal(host) || isIPv6Literal(host);
+  return isIP(host) !== 0;
 }
 
 /**

@@ -50,7 +50,7 @@ test("a token that is not a hostname or an address is refused", () => {
   // and both would otherwise have passed as all-numeric "hostnames" and opened
   // the socket. A leading-zero quad is read as octal by some resolvers and
   // decimal by others, which is no basis for a bind or an allow-list comparison.
-  for (const envValue of ["what?!", "-nas", "host_name", "10.0.0.999", "010.0.0.1"]) {
+  for (const envValue of ["what?!", "-nas", "host_name", "10.0.0.999", "010.0.0.1", "192.168.1"]) {
     // When the value is validated
     const result = validateAllowedHosts(envValue);
     // Then it fails fast and names the offending token
@@ -71,6 +71,22 @@ test("an every-interface address is refused as an allowed host", () => {
     assert.equal(result.ok, false, `${JSON.stringify(envValue)} must be refused`);
     assert.match(result.error, /every interface/);
   }
+});
+
+test("an incomplete IPv6 address is refused, not treated as a bind target", () => {
+  // Given addresses that look right to a colon-counting check but are not valid.
+  // Leniency here cannot fail safe: whatever validation admits as a literal
+  // becomes the address handed to `next -H`, and listen() then refuses to start
+  // the server at all. The first parser here accepted every one of these.
+  for (const envValue of ["2001:db8:1", "1:2:3", "2001:db8::5::1", "12345::1", "2001:db8:zz::1"]) {
+    // When the value is validated
+    // Then it is refused before it can reach the bind
+    assert.equal(validateAllowedHosts(envValue).ok, false, `${envValue} is not a valid address`);
+  }
+  // And a well-formed address of each family is still accepted, so the check
+  // discriminates rather than simply rejecting anything with colons
+  assert.equal(validateAllowedHosts("2001:db8::5").ok, true);
+  assert.equal(validateAllowedHosts("192.168.1.50").ok, true);
 });
 
 test("an unscoped link-local address is refused", () => {
