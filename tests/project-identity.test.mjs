@@ -1,5 +1,11 @@
-// tests/project-identity.test.mjs — four files describe this project and nothing
-// compared them, so they drifted in silence.
+// tests/project-identity.test.mjs — several files describe this project and only
+// one pair of them was ever compared, so the rest drifted in silence.
+//
+// This test started out asserting over FOUR files, which was wrong: sweeping by
+// content instead of by the filenames I expected found three more short blurbs
+// (.claude-plugin/marketplace.json carries two, and .github/plugin/ mirrors the
+// manifest). The count in a comment is exactly the thing that goes stale, so the
+// assertions below enumerate the places from the files themselves where they can.
 //
 // What was found on 2026-09-04, all three at once:
 //
@@ -32,18 +38,33 @@ import { fileURLToPath } from 'node:url';
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const read = (p) => readFileSync(join(ROOT, p), 'utf-8');
 
-test('package.json and plugin.json describe the same project in the same words', () => {
+test('every short blurb describes the same project in the same words', () => {
   const pkg = JSON.parse(read('package.json'));
-  const plugin = JSON.parse(read('.claude-plugin/plugin.json'));
+  const marketplace = JSON.parse(read('.claude-plugin/marketplace.json'));
 
-  assert.ok(pkg.description, 'package.json must carry a description');
-  assert.ok(plugin.description, '.claude-plugin/plugin.json must carry a description');
-  assert.equal(
-    plugin.description,
-    pkg.description,
-    'the npm blurb and the plugin blurb are the same sentence for the same audience: ' +
-    'if one changes, change both in the same commit',
-  );
+  // package.json is the reference only because npm publishes it; it carries no
+  // more authority than the others. What matters is that they agree.
+  const blurbs = [
+    ['package.json', pkg.description],
+    ['.claude-plugin/plugin.json', JSON.parse(read('.claude-plugin/plugin.json')).description],
+    ['.github/plugin/plugin.json', JSON.parse(read('.github/plugin/plugin.json')).description],
+    ['.claude-plugin/marketplace.json metadata', marketplace.metadata?.description],
+    // Enumerated from the file, not from a count kept here: a marketplace with a
+    // second plugin one day should widen this automatically.
+    ...(marketplace.plugins ?? []).map((pl, i) => [`.claude-plugin/marketplace.json plugins[${i}]`, pl.description]),
+  ];
+
+  for (const [where, blurb] of blurbs) {
+    assert.ok(blurb, `${where} must carry a description`);
+  }
+  for (const [where, blurb] of blurbs.slice(1)) {
+    assert.equal(
+      blurb,
+      pkg.description,
+      `${where} drifted from package.json: these are the same sentence for the same ` +
+      'audience, so if one changes, change them all in the same commit',
+    );
+  }
 });
 
 test("CITATION.cff's url is the project's site, not a personal one", () => {
