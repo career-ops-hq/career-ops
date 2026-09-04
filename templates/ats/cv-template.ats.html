@@ -13,6 +13,8 @@ version: 1.0.0
     --font-family: "Liberation Sans", "Helvetica Neue", Arial, "DejaVu Sans", sans-serif;
     --font-size: 11px;
     --page-margin: 0.6in;
+    /* #3242: unchanged default — this template has always kept a role whole. */
+    --job-break-inside: avoid;
   }
   @page { margin: var(--page-margin); }
 
@@ -314,10 +316,15 @@ version: 1.0.0
   .edu-item,
   .cert-item,
   .competency-item,
-  .skill-item,
-  .job {
+  .skill-item {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  /* #3242: opt-in — see the --job-break-inside default above. */
+  .job {
+    break-inside: var(--job-break-inside, avoid);
+    page-break-inside: var(--job-break-inside, avoid);
   }
 
   .section-title,

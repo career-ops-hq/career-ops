@@ -16,6 +16,10 @@
        comes from the later @page rule injectPrintPageCss appends (which reads
        this same variable), so this default must match it exactly. */
     --page-margin: 0.6in;
+    /* #3242: unchanged default — a role may still flow across a page break to
+       keep the CV compact (see #1145). Override via config/profile.yml
+       `style.job_break_inside: avoid` for "a role is one unit, never split". */
+    --job-break-inside: auto;
   }
   @page { margin: var(--page-margin); }
 
@@ -444,6 +448,12 @@
   .skill-item {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  /* #3242: opt-in — see the --job-break-inside default above. */
+  .job {
+    break-inside: var(--job-break-inside, auto);
+    page-break-inside: var(--job-break-inside, auto);
   }
 
   /* Keep a heading attached to the content that follows it, so headings are not

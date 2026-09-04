@@ -415,6 +415,15 @@ version: 1.0.0
     page-break-inside: avoid;
   }
 
+  /* #3242: opt-in, unchanged default (see templates/cv-template.html) — this
+     template has no :root theme-token block of its own, so the fallback below
+     is the only default; a config/profile.yml style.job_break_inside override
+     still reaches it via the injected :root block. */
+  .job {
+    break-inside: var(--job-break-inside, auto);
+    page-break-inside: var(--job-break-inside, auto);
+  }
+
   /* Keep a heading attached to the content that follows it, so headings are not
      orphaned at the bottom of a page. */
   .section-title,

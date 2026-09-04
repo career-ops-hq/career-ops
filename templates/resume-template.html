@@ -400,11 +400,19 @@
 
   /* === PAGE BREAK CONTROL === */
   .avoid-break,
-  .job,
   .project,
   .edu-item {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  /* #3242: opt-in — unchanged default (this template has always kept a role
+     whole; override via config/profile.yml style.job_break_inside: auto to
+     let a role flow across a page break instead). No :root token block exists
+     in this template yet, so the fallback below is the only default. */
+  .job {
+    break-inside: var(--job-break-inside, avoid);
+    page-break-inside: var(--job-break-inside, avoid);
   }
 
   /* === RTL (Arabic) Support === */

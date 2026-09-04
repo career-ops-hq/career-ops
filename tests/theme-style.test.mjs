@@ -15,10 +15,10 @@ try {
   } = await import(pathToFileURL(join(ROOT, 'theme-style.mjs')).href);
 
   // styleTokensFrom: recognized keys → css vars; ignore unknown/non-string/missing
-  const t = styleTokensFrom({ accent_color: '#2563eb', font_family: 'Outfit, sans-serif', font_size: '10pt', margin: '0.5in', nope: 'x', font_weight: 700 });
+  const t = styleTokensFrom({ accent_color: '#2563eb', font_family: 'Outfit, sans-serif', font_size: '10pt', margin: '0.5in', job_break_inside: 'avoid', nope: 'x', font_weight: 700 });
   if (t['--accent-color'] === '#2563eb' && t['--font-family'] === 'Outfit, sans-serif' && t['--font-size'] === '10pt' && t['--page-margin'] === '0.5in'
-      && !('--font-weight' in t) && Object.keys(t).length === 4) {
-    pass('styleTokensFrom maps the 4 recognized keys and ignores unknown/non-string');
+      && t['--job-break-inside'] === 'avoid' && !('--font-weight' in t) && Object.keys(t).length === 5) {
+    pass('styleTokensFrom maps the 5 recognized keys and ignores unknown/non-string');
   } else {
     fail(`styleTokensFrom => ${JSON.stringify(t)}`);
   }
@@ -86,6 +86,36 @@ try {
     if (hasRoot && usesVars && !circular) pass(`${tpl} declares :root theme defaults and reads them via var() (no circular refs)`);
     else fail(`${tpl}: hasRoot=${hasRoot} usesVars=${usesVars} circular=${circular}`);
   }
+  // Template contract (#3242): every shipped template's .job rule reads
+  // --job-break-inside with ITS OWN current pagination behavior as the var()
+  // fallback, so the opt-in token changes nobody's default. resume-template.html
+  // and templates/ats/cv-template.ats.html have always kept a role whole
+  // (avoid); the rest let a role flow across a page break (auto, per #1145).
+  {
+    const expected = {
+      'templates/cv-template.html': 'auto',
+      'templates/cv-template.compact.html': 'auto',
+      'templates/cv-template.executive.html': 'auto',
+      'templates/cv-template.jake.html': 'auto',
+      'templates/cv-template.leadership.html': 'auto',
+      'templates/cv-template.modern.html': 'auto',
+      'templates/cv-template.zh-minimal.html': 'auto',
+      'templates/resume-template.html': 'avoid',
+      'templates/ats/cv-template.ats.html': 'avoid',
+    };
+    for (const [tpl, fallback] of Object.entries(expected)) {
+      const src = readFileSync(join(ROOT, tpl), 'utf-8');
+      const jobRule = src.match(/\.job\s*\{[^}]*break-inside:[^}]*\}/s)?.[0] || '';
+      const usesVar = new RegExp(`break-inside:\\s*var\\(--job-break-inside,\\s*${fallback}\\)`).test(jobRule);
+      const noHardcoded = !/break-inside:\s*(avoid|auto)\s*;/.test(jobRule.replace(/var\([^)]*\)/g, ''));
+      if (usesVar && noHardcoded) {
+        pass(`${tpl}: .job reads --job-break-inside with its own default (${fallback}) as the fallback`);
+      } else {
+        fail(`${tpl}: .job break-inside contract broken => ${jobRule}`);
+      }
+    }
+  }
+
   // Regression: localized CJK body font stacks must honor the profile
   // --font-family override while keeping their curated fallback stacks.
   {

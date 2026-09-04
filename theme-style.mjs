@@ -7,10 +7,11 @@
  * Users declare a `style:` block in config/profile.yml:
  *
  *   style:
- *     accent_color: "#2563eb"
- *     font_family:  "Outfit, Inter, sans-serif"
- *     font_size:    "10pt"
- *     margin:       "0.5in"
+ *     accent_color:     "#2563eb"
+ *     font_family:      "Outfit, Inter, sans-serif"
+ *     font_size:        "10pt"
+ *     margin:           "0.5in"
+ *     job_break_inside: "avoid"
  *
  * These are injected as CSS custom properties into the rendered HTML before it
  * hits the PDF pipeline. The templates read them via `var(--x, <default>)`, so a
@@ -31,10 +32,18 @@ import * as yaml from 'js-yaml';
 // Recognized style tokens → the CSS custom property each maps to. Anything not
 // listed here is ignored, so a typo or an unrelated `style:` key is inert.
 export const STYLE_VAR_MAP = {
-  accent_color: '--accent-color',
-  font_family:  '--font-family',
-  font_size:    '--font-size',
-  margin:       '--page-margin',
+  accent_color:     '--accent-color',
+  font_family:      '--font-family',
+  font_size:        '--font-size',
+  margin:           '--page-margin',
+  // #3242: whether a Work Experience entry may split across a page break.
+  // Each template supplies its OWN current behavior as the var() fallback, so
+  // this is purely additive — no shipped template's default pagination
+  // changes for anyone who doesn't set this. Raw CSS keyword (e.g. "avoid" or
+  // "auto"), same contract as the other tokens. Trade-off worth knowing:
+  // "avoid" cannot help an entry taller than a full page — it still splits,
+  // just after leaving a bottom gap on the page before it.
+  job_break_inside: '--job-break-inside',
 };
 
 /**

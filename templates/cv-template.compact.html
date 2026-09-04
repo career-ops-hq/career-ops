@@ -33,6 +33,8 @@ version: 1.0.0
        appended later by injectPrintPageCss reading this same variable. */
     --page-margin: 0.6in;
     --rail-width: 96px;
+    /* #3242: unchanged default — see templates/cv-template.html. */
+    --job-break-inside: auto;
   }
   @page { margin: var(--page-margin); }
 
@@ -276,6 +278,12 @@ version: 1.0.0
   .skill-item {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  /* #3242: opt-in — see the --job-break-inside default above. */
+  .job {
+    break-inside: var(--job-break-inside, auto);
+    page-break-inside: var(--job-break-inside, auto);
   }
 
   .section-title,
