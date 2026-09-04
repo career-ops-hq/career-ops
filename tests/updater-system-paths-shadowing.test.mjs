@@ -1,4 +1,4 @@
-// tests/system-paths-no-shadowing.test.mjs — no SYSTEM_PATHS file entry may sit
+// tests/updater-system-paths-shadowing.test.mjs — no SYSTEM_PATHS file entry may sit
 // under a directory entry that already covers it.
 //
 // `covered()` in validate-system-paths-coverage.mjs matches a trailing-slash
@@ -19,24 +19,21 @@
 // directory entry, so they do not trip this.
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { extractArrayFromSource } from '../update-system.mjs';
 import { pass, fail, ROOT } from './helpers.mjs';
 
 console.log('\nupdate-system.mjs — no shadowed SYSTEM_PATHS entries');
 
-/**
- * Manifest entries in a SYSTEM_PATHS-style array body.
- *
- * Accepts any indentation and either quote style. The first version required
- * exactly two spaces and a single quote, which silently skipped anything else
- * — and a skipped entry is not a parse error here, it is an entry the
- * shadowing check never examines while `entries.length > 0` still holds. That
- * is a false green in a guard, which is the failure this whole file exists to
- * prevent. Every entry is two-space single-quoted today; the point is that the
- * 310th does not have to be.
- */
-export function manifestEntries(body) {
-  return Array.from(body.matchAll(/^\s*(['"])([^'"]+)\1\s*,/gm), (m) => m[2]);
-}
+// The manifest is read with update-system.mjs's OWN exported extractor rather
+// than a regex of this file's own. A second parser is a second set of rules to
+// drift: the first draft here required exactly two spaces and a single quote,
+// which silently skipped any other style — not a parse error, an entry the
+// shadowing check never examined while `entries.length > 0` still held. It
+// also read entries out of `/* ... */` comments and rejected `const X=[`,
+// neither of which the production extractor does (CodeRabbit, #3766).
+// Calling the shipped function makes those questions unaskable: whatever the
+// updater considers an entry is exactly what is checked here, and
+// tests/updater-extract-array-syntax.test.mjs already covers the parser itself.
 
 // A missing or renamed update-system.mjs must report as a controlled failure,
 // not an uncaught throw: the throw is contained by test-all.mjs's #2828 guard,
@@ -49,30 +46,12 @@ try {
   fail(`update-system.mjs is unreadable at ${ROOT} (${err.code || err.message}) — the manifest was never parsed, so this is not a clean result`);
 }
 
-const block = src ? src.match(/const SYSTEM_PATHS = \[([\s\S]*?)\n\];/) : null;
-const entries = block ? manifestEntries(block[1]) : [];
+const entries = src ? extractArrayFromSource(src, 'SYSTEM_PATHS') : [];
 
 if (entries.length > 0) {
-  pass(`SYSTEM_PATHS parsed (${entries.length} entries)`);
+  pass(`SYSTEM_PATHS parsed via update-system.mjs's own extractor (${entries.length} entries)`);
 } else if (src) {
   fail('could not parse SYSTEM_PATHS — this guard would pass vacuously');
-}
-
-// The parser is part of the guard: one that quietly stops seeing entries turns
-// this file green while checking less.
-const PARSE_CASES = [
-  ["  'a.mjs',", ['a.mjs'], 'two-space single-quoted (every entry today)'],
-  ['  "b.mjs",', ['b.mjs'], 'double-quoted'],
-  ["    'c.mjs',", ['c.mjs'], 'deeper indentation'],
-  ["  // 'd.mjs' was retired", [], 'a commented-out entry is not an entry'],
-];
-const parseFailures = PARSE_CASES
-  .filter(([body, want]) => JSON.stringify(manifestEntries(body)) !== JSON.stringify(want))
-  .map(([body, want, label]) => `${label}: got ${JSON.stringify(manifestEntries(body))}, want ${JSON.stringify(want)}`);
-if (parseFailures.length === 0) {
-  pass(`the entry parser reads all ${PARSE_CASES.length} supported styles`);
-} else {
-  fail(`${parseFailures.length} parser case(s) failed:\n` + parseFailures.map((f) => `    ${f}`).join('\n'));
 }
 
 const dirs = entries.filter((e) => e.endsWith('/'));
