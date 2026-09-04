@@ -85,13 +85,9 @@ check(
 // translated, per AGENTS.md) rather than fabricating fake ones; only
 // config/profile.yml, cv.md and modes/_profile.md need to live in the sandbox,
 // via CAREER_OPS_ROOT (getCareerOpsRoot() in path-resolver.mjs honors it).
-// execFileSync only returns stdout — it captures stderr on the object it
-// throws (a failed exit), but on a SUCCESSFUL run stderr is simply discarded.
-// gemini-eval.mjs's missing-file warnings go through console.warn (stderr),
-// and every path exercised below reaches the mocked-API-key failure, which
-// exits non-zero — so this happened to work only by accident. spawnSync
-// always returns both streams regardless of exit status, so use that instead
-// (CodeRabbit, PR #3798).
+// Capture both streams because gemini-eval.mjs's missing-file warnings go
+// through console.warn (stderr). Use its deterministic --context-only seam so
+// these tests never contact Gemini (CodeRabbit, PR #3798).
 function runGeminiEval(modesDirYaml) {
   const tmp = mkdtempSync(join(ROOT, 'co-modes-dir-'));
   try {
@@ -104,7 +100,7 @@ function runGeminiEval(modesDirYaml) {
     const jdPath = join(tmp, 'mock-jd.txt');
     writeFileSync(jdPath, 'Job description text', 'utf-8');
 
-    const result = spawnSync(NODE, [join(ROOT, 'gemini-eval.mjs'), '--file', jdPath, '--no-save'], {
+    const result = spawnSync(NODE, [join(ROOT, 'gemini-eval.mjs'), '--file', jdPath, '--no-save', '--context-only'], {
       cwd: tmp,
       env: { ...process.env, GEMINI_API_KEY: 'mock-api-key-12345', CAREER_OPS_ROOT: tmp },
       encoding: 'utf-8',
@@ -175,19 +171,15 @@ check(
   missingPrimary.stderr.includes('modes_dir "modes/does-not-exist-anywhere" not found'),
   'gemini-eval.mjs reports why the primary market could not be resolved',
 );
-// Not an exact equality: config/profile.yml's own text is part of the prompt
-// context (it differs by a few bytes between the "no modes_dir" and "invalid
-// modes_dir" fixtures — different YAML), so a few tokens of drift is
-// expected and fine. What matters is the ORDER of magnitude: falling back to
-// the default (modes/, ~24.2K tokens here) is nothing like promoting modes/de
-// (~5.3K tokens here — an entirely different, much smaller pair of files).
-// A tight tolerance here would still catch an accidental promotion; a
-// same-order-of-magnitude gap would not.
+// The missing primary must keep the default evaluation mode while preserving
+// valid secondary shared context from modes/de. Its budget therefore exceeds
+// the default-only run, while the separate primary-market assertion above
+// proves the second market was not promoted into the evaluation slot.
 check(
   Number.isFinite(missingPrimary.tokenBudget)
     && Number.isFinite(noMarket.tokenBudget)
-    && Math.abs(missingPrimary.tokenBudget - noMarket.tokenBudget) < 100,
-  'an unresolvable primary market falls back to the DEFAULT evaluation mode (same context, modulo a few bytes of profile.yml text, as no modes_dir at all)',
+    && missingPrimary.tokenBudget > noMarket.tokenBudget,
+  'an unresolvable primary market keeps the DEFAULT evaluation mode and retains valid secondary shared context',
 );
 check(
   Number.isFinite(missingPrimary.tokenBudget)

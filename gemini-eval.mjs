@@ -142,18 +142,21 @@ if (existsSync(PATHS.profileYml)) {
       const primaryDir = resolveModesDirCandidate(primaryRaw);
       const candidateFiles = ['oferta.md', 'angebot.md', 'offre.md', 'kyujin.md', 'is-ilani.md', 'naukri.md'];
       const primaryEvalFile = primaryDir && candidateFiles.find((file) => existsSync(join(CODE_ROOT, primaryDir, file)));
+      const extras = candidates.slice(1).map(resolveModesDirCandidate).filter(Boolean);
       if (primaryDir && primaryEvalFile) {
         // Primary resolved. Any further declared markets only need to exist —
         // they contribute _shared.md context (below), never an evaluation
         // mode file of their own.
-        const extras = candidates.slice(1).map(resolveModesDirCandidate).filter(Boolean);
         modesDirs = [primaryDir, ...extras];
         evalFilename = primaryEvalFile;
-      } else if (primaryDir) {
+      } else {
         // Primary directory exists but has no recognizable evaluation-mode
         // file in it — fall back to the default (modes/oferta.md), not to
         // any secondary declared market.
-        console.warn(`⚠️   No matching evaluation file found in ${primaryDir}; using default modes/oferta.md`);
+        if (primaryDir) {
+          console.warn(`⚠️   No matching evaluation file found in ${primaryDir}; using default modes/oferta.md`);
+        }
+        modesDirs = ['modes', ...extras.filter((dir) => dir !== 'modes')];
       }
       // else: resolveModesDirCandidate(primaryRaw) already warned why the
       // primary itself could not be resolved; falling through to the default
@@ -217,6 +220,7 @@ let postingUrl = '';
 let modelName = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 let saveReport = true;
 let noCompress = false;
+let contextOnly = false;
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--file' && args[i + 1]) {
@@ -234,6 +238,8 @@ for (let i = 0; i < args.length; i++) {
     saveReport = false;
   } else if (args[i] === '--no-compress') {
     noCompress = true;
+  } else if (args[i] === '--context-only') {
+    contextOnly = true;
   } else if (!args[i].startsWith('--')) {
     jdText += (jdText ? '\n' : '') + args[i];
   }
@@ -471,6 +477,10 @@ ARCHETYPE: <detected archetype>
 LEGITIMACY: <High Confidence | Proceed with Caution | Suspicious>
 ---END_SUMMARY---
 `;
+
+// Deterministic seam for context-resolution tests. This reports the computed
+// budget without constructing a client or making a network request.
+if (contextOnly) process.exit(0);
 
 // ---------------------------------------------------------------------------
 // Call Gemini API
