@@ -19,6 +19,7 @@
 
 import { spawnSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, utimesSync } from 'fs';
+import { createHash } from 'crypto';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
@@ -63,9 +64,16 @@ function runScript(script, args, sandbox) {
     const res = spawnSync(NODE, [join(ROOT, script), ...args], {
       cwd: ROOT, env, encoding: 'utf-8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'],
     });
-    if (res.error) throw res.error;
     const stdout = res.stdout || '';
     const stderr = res.stderr || '';
+    // A timeout still fills stdout/stderr, and `res.error` is a plain Error with
+    // no `.status`/`.stdout` — rethrowing it into the catch below turned every
+    // timeout into "code 1, no output", the exact reasonless failure the
+    // fixture comments elsewhere in this file warn about (PR #3794 review).
+    if (res.error) {
+      const why = `${res.error.message}${res.signal ? ` (signal ${res.signal})` : ''}`;
+      return { code: 1, stdout: `${stdout}${stderr}${why}`, stderr: `${stderr}${why}` };
+    }
     if (res.status === 0) return { code: 0, stdout, stderr };
     return { code: res.status ?? 1, stdout: `${stdout}${stderr}`, stderr };
   } catch (e) {
@@ -840,7 +848,10 @@ const runTracker = (args, sb) => runScript('tracker.mjs', args, sb);
 
 // ── Test 21: an index built before extras/md_header existed is rebuilt ──────
 // The md hash still matches, so freshness alone would serve an export with no
-// layout and no extras — the exact silent drop, from a stale schema.
+// layout and no extras — the exact silent drop, from a stale schema. Built with
+// the PRE-#3703 schema by hand rather than by mutating a current index: a test
+// that assumes the new `extras` column exists cannot fail cleanly against the
+// old code, it aborts on "no such column" (PR #3794 review).
 {
   const CUSTOM = `# Applications Tracker
 
@@ -849,18 +860,165 @@ const runTracker = (args, sb) => runScript('tracker.mjs', args, sb);
 | 1 | 2026-01-01 | Acme | Berlin | Engineer | 4.2/5 | Applied | ❌ | — | seed row |
 `;
   const sb = makeSandbox(CUSTOM);
-  runTracker(['sync'], sb);
-  const dbFile = join(sb.dir, 'applications.db');
   const { DatabaseSync } = await import('node:sqlite');
-  const db = new DatabaseSync(dbFile);
-  db.exec("DELETE FROM meta WHERE key IN ('schema_version', 'md_header', 'md_separator')");
-  db.exec("UPDATE applications SET extras = '{}'");
+  const db = new DatabaseSync(join(sb.dir, 'applications.db'));
+  db.exec(`CREATE TABLE applications (
+    id INTEGER PRIMARY KEY, pos INTEGER NOT NULL, date TEXT NOT NULL,
+    company TEXT NOT NULL, role TEXT NOT NULL, score TEXT NOT NULL DEFAULT '—',
+    status TEXT NOT NULL, pdf TEXT NOT NULL DEFAULT '❌',
+    report TEXT NOT NULL DEFAULT '—', notes TEXT NOT NULL DEFAULT '');
+    CREATE TABLE status_events (id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL REFERENCES applications(id), status TEXT NOT NULL, date TEXT NOT NULL);
+    CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+  db.prepare('INSERT INTO applications VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(1, 0, '2026-01-01', 'Acme', 'Engineer', '4.2/5', 'Applied', '❌', '—', 'seed row');
+  // The hash a pre-#3703 sync would have stored: freshness passes, so only the
+  // missing schema_version can force the rebuild.
+  db.prepare('INSERT INTO meta VALUES (?,?)')
+    .run('md_sha256', createHash('sha256').update(readFileSync(sb.tracker)).digest('hex'));
   db.close();
+
   const exported = runTracker(['export'], sb);
-  if (exported.code === 0 && exported.stdout === CUSTOM) {
-    pass('tracker.mjs export: a pre-#3703 index is resynced instead of exporting a lossy table');
+  const headerLine = exported.stdout.split('\n').find(l => l.startsWith('| #')) ?? '';
+  if (exported.code === 0 && /\| Location \|/.test(headerLine)) {
+    pass('tracker.mjs export: a pre-#3703 index is rebuilt, exporting the source header');
   } else {
-    fail(`tracker.mjs export: stale-schema index\n--- got ---\n${exported.stdout}--- want ---\n${CUSTOM}`);
+    fail(`tracker.mjs export: stale-schema index kept the default header — got "${headerLine}"`);
+  }
+  if (exported.stdout === CUSTOM) {
+    pass('tracker.mjs export: the rebuilt stale index round-trips byte-for-byte');
+  } else {
+    fail(`tracker.mjs export: stale-schema round-trip\n--- got ---\n${exported.stdout}--- want ---\n${CUSTOM}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── Test 22: content around and inside the table (PR #3794 review) ──────────
+// `export` emitted a fixed skeleton, so `--out` over the tracker deleted a
+// localized title, a legend, an archive section and a trailing note — and the
+// drop gate never saw it, because it counted only cells past the header width.
+{
+  const RICH = `# Seguimiento de candidaturas
+
+Legend: ✅ sent · ❌ not sent.
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Acme | Engineer | 4.2/5 | Applied | ❌ | — | note | https://a.example/1 |
+
+Last reviewed 2026-09-01.
+`;
+  const sb = makeSandbox(RICH);
+  runTracker(['sync'], sb);
+  const exported = runTracker(['export'], sb);
+  if (exported.code === 0 && exported.stdout === RICH) {
+    pass('tracker.mjs export: title, preamble and trailing note survive the round-trip');
+  } else {
+    fail(`tracker.mjs export: non-table content\n--- got ---\n${exported.stdout}--- want ---\n${RICH}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── Test 23: content BETWEEN table rows is named and gated ─────────────────
+// A second table's rows are indexed against the FIRST table's columns, so
+// replaying its heading and header would frame a shifted row as intact. It is
+// reported as a loss instead, and `--out` refuses.
+{
+  const ARCHIVED = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Acme | Engineer | 4.2/5 | Applied | ❌ | — | note | https://a.example/1 |
+
+## Archive (2025)
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 9 | 2025-06-01 | Oldco | Analyst | 3.0/5 | Rejected | ❌ | — | archived |
+`;
+  const sb = makeSandbox(ARCHIVED);
+  runTracker(['sync'], sb);
+  const exported = runTracker(['export'], sb);
+  if (/## Archive \(2025\)/.test(exported.stderr) && /cannot be reproduced by export/.test(exported.stderr)) {
+    pass('tracker.mjs export: a section between table rows is named as a loss');
+  } else {
+    fail(`tracker.mjs export: expected the archive section in the loss list\n${exported.stderr}`);
+  }
+  const before = readFileSync(sb.tracker, 'utf-8');
+  const refused = runTracker(['export', '--out', sb.tracker], sb);
+  if (refused.code === 1 && readFileSync(sb.tracker, 'utf-8') === before) {
+    pass('tracker.mjs export --out: refuses to flatten a tracker with an archive section');
+  } else {
+    fail(`tracker.mjs export --out: expected refusal (code ${refused.code})\n${refused.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── Test 24: an indented table reads and writes the same layout ────────────
+// resolveColumns needs `startsWith('|')` and detectLayout trimmed on its own,
+// so an indented header gave the LEGACY map on read and the real map on write:
+// Berlin moved into Role and Applied into PDF (PR #3794 review).
+{
+  const INDENTED = [
+    '# Applications Tracker',
+    '',
+    '  | # | Date | Company | Location | Role | Score | Status | PDF | Report | Notes |',
+    '  |---|------|---------|----------|------|-------|--------|-----|--------|-------|',
+    '  | 1 | 2026-01-01 | Acme | Berlin | Engineer | 4.2/5 | Applied | ❌ | — | note |',
+    '',
+  ].join('\n');
+  const sb = makeSandbox(INDENTED);
+  runTracker(['sync'], sb);
+  const exported = runTracker(['export'], sb);
+  const cells = exported.stdout.split('\n').find(l => l.includes('Acme'))?.split('|').map(c => c.trim()) ?? [];
+  // cells: ['', num, date, company, location, role, score, status, pdf, report, notes, '']
+  if (cells[4] === 'Berlin' && cells[5] === 'Engineer' && cells[7] === 'Applied' && cells[10] === 'note') {
+    pass('tracker.mjs export: an indented table keeps every cell in its own column');
+  } else {
+    fail(`tracker.mjs export: indented table shifted cells — ${JSON.stringify(cells)}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── Test 25: a header career-ops cannot name is still preserved ─────────────
+// isHeaderRow only fires when the alias table resolves the FULL schema, so a
+// Spanish header (puntuación/estado are unmapped) recorded no layout at all and
+// exported as the English default, exit 0 (PR #3794 review).
+{
+  const SPANISH = `# Seguimiento
+
+| # | Fecha | Empresa | Puesto | Puntuación | Estado | PDF | Informe | Notas |
+|---|-------|---------|--------|------------|--------|-----|---------|-------|
+| 1 | 2026-01-01 | Acme | Ingeniero | 4.2/5 | Applied | ❌ | — | nota |
+`;
+  const sb = makeSandbox(SPANISH);
+  runTracker(['sync'], sb);
+  const exported = runTracker(['export'], sb);
+  if (exported.code === 0 && exported.stdout === SPANISH) {
+    pass('tracker.mjs export: an unresolvable localized header round-trips verbatim');
+  } else {
+    fail(`tracker.mjs export: localized header\n--- got ---\n${exported.stdout}--- want ---\n${SPANISH}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── Test 26: CRLF line endings survive ─────────────────────────────────────
+{
+  const CRLF = [
+    '# Applications Tracker',
+    '',
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|------|---------|------|-------|--------|-----|--------|-------|',
+    '| 1 | 2026-01-01 | Acme | Engineer | 4.2/5 | Applied | ❌ | — | note |',
+    '',
+  ].join('\r\n');
+  const sb = makeSandbox(CRLF);
+  runTracker(['sync'], sb);
+  const exported = runTracker(['export'], sb);
+  if (exported.code === 0 && exported.stdout === CRLF) {
+    pass('tracker.mjs export: CRLF line endings are not rewritten to LF');
+  } else {
+    fail(`tracker.mjs export: CRLF round-trip — got ${JSON.stringify(exported.stdout)}`);
   }
   rmSync(sb.dir, { recursive: true, force: true });
 }

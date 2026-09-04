@@ -259,16 +259,36 @@ function repairPlaceholder(cell) {
  * emitted nine fixed ones, so a Location/Via/URL column survived every query and
  * vanished on export — silently, over the user's own tracker with `--out`.
  *
- * @param {string[]} lines - All lines of the tracker markdown.
- * @returns {{header: string, separator: string|null, labels: string[]}|null}
- *   null when the file has no recognizable header row (legacy positional table).
+ * TWO detection passes, and the second one matters. `isHeaderRow` only fires
+ * when the alias table resolves the FULL schema, so a header career-ops cannot
+ * name — a Spanish `| # | Fecha | Empresa | Puesto | Puntuación | Estado | … |`,
+ * where `puntuación` and `estado` are absent from tracker-aliases.json — records
+ * no layout at all and exports as the English default (PR #3794 review). Falling
+ * back to the markdown SHAPE (the line above the first separator row) records
+ * the header verbatim whether or not its labels can be resolved; field placement
+ * still comes from `detectColumns`/LEGACY_COLMAP, exactly as the read side does,
+ * so an unresolvable header round-trips as text without ever being trusted as a
+ * column map.
+ *
+ * @param {string[]} lines - All lines of the tracker markdown, pre-trimmed.
+ * @returns {{header: string, separator: string|null, labels: string[],
+ *   headerIndex: number, separatorIndex: number|null}|null}
+ *   null when the file holds no table at all.
  */
 function detectLayout(lines) {
-  for (let i = 0; i < lines.length; i++) {
-    const t = lines[i].trim();
-    if (!isHeaderRow(t)) continue;
-    const next = (lines[i + 1] ?? '').trim();
-    return { header: t, separator: isSeparatorRow(next) ? next : null, labels: headerLabels(t) };
+  const at = (i) => {
+    const separatorIndex = isSeparatorRow(lines[i + 1] ?? '') ? i + 1 : null;
+    return {
+      header: lines[i],
+      separator: separatorIndex === null ? null : lines[separatorIndex],
+      labels: headerLabels(lines[i]),
+      headerIndex: i,
+      separatorIndex,
+    };
+  };
+  for (let i = 0; i < lines.length; i++) if (isHeaderRow(lines[i])) return at(i);
+  for (let i = 1; i < lines.length; i++) {
+    if (isSeparatorRow(lines[i]) && lines[i - 1].startsWith('|')) return at(i - 1);
   }
   return null;
 }
@@ -288,7 +308,16 @@ function headerLabels(row) {
 }
 
 function parseMarkdownRows(text, diag) {
-  const lines = text.split('\n');
+  // Line endings are part of the file, not of the table: splitting on '\n' and
+  // joining the export back with '\n' silently rewrote a CRLF tracker to LF
+  // (PR #3794 review). Remember the dominant ending and restore it on export.
+  const eol = /\r\n/.test(text) ? '\r\n' : '\n';
+  // ONE trimmed view, used by every consumer below. resolveColumns needs
+  // `startsWith('|')` and detectLayout used to trim on its own, so an indented
+  // table gave the legacy map on READ and the real map on WRITE — cells landed
+  // a column off (Berlin in Role, Applied in PDF) on a layout the reader had
+  // never accepted in the first place.
+  const lines = text.split('\n').map(l => l.replace(/\r$/, '').trim());
   // Map columns by header name (tracker-parse.mjs, #954) so a customized layout
   // (e.g. an inserted Location column) can't shift Score into Status. Falls back
   // to the legacy fixed 9-column layout when no header row is found.
@@ -304,11 +333,20 @@ function parseMarkdownRows(text, diag) {
   // carried through the round-trip positionally (see SCHEMA_FIELDS).
   const schemaIndices = new Set(Object.keys(SCHEMA_FIELDS).map(k => colmap[k]).filter(i => i != null));
   const rows = [];
-  for (const line of lines) {
-    const t = line.trim();
+  // Every line index the rebuilt table accounts for: the header, the separator,
+  // and each row that became an indexed application. What is left INSIDE the
+  // table's span is content export cannot place (see collectStructure).
+  const consumed = new Set();
+  if (layout) {
+    consumed.add(layout.headerIndex);
+    if (layout.separatorIndex !== null) consumed.add(layout.separatorIndex);
+  }
+  for (let index = 0; index < lines.length; index++) {
+    const t = lines[index];
     if (!t.startsWith('|')) continue;
     let parts = t.split('|').map(c => c.trim());
     if (parts.length < 3) continue; // needs at least one real cell
+    if (index === layout?.headerIndex) continue;
     if ((parts[colmap.num] ?? '') === '#' || isHeaderRow(t) || /^[-: ]*$/.test(parts.join(''))) continue; // header / separator
     if (parts.length > width && colmap.notes === width - 2) {
       // Stray pipes inside the trailing free-text column → fold back into notes.
@@ -324,12 +362,48 @@ function parseMarkdownRows(text, diag) {
       if (schemaIndices.has(i)) continue;
       if (parts[i]) extras[i] = parts[i]; // empty cells re-materialize as '' on export
     }
+    consumed.add(index);
     rows.push({
       cells: [at('num'), at('date'), at('company'), at('role'), at('score'), at('status'), at('pdf'), at('report'), at('notes')],
       extras,
     });
   }
-  return { rows, layout };
+  return { rows, layout: layout && { ...layout, ...collectStructure(lines, consumed), eol } };
+}
+
+/**
+ * Split the file around the table export rebuilds.
+ *
+ * `export` used to emit a fixed skeleton — the literal title `# Applications
+ * Tracker`, the header, the separator, the rows — so `--out data/applications.md`
+ * deleted a localized title, any legend or preamble, an `## Archive` section and
+ * any trailing note, and the drop gate never saw it because it only counted
+ * cells past the header width (PR #3794 review).
+ *
+ * Everything BEFORE the table and everything AFTER it is recorded verbatim and
+ * replayed on export. Everything left INSIDE the table's span — a heading
+ * between two tables, a second table's header and separator — is content the
+ * rebuilt single table genuinely cannot hold: it is reported as a drop and
+ * gated behind `--force`, rather than being replayed into a layout it does not
+ * belong to (the second table's rows are indexed against the FIRST table's
+ * columns, so re-emitting its structure would frame a shifted row as intact).
+ *
+ * @param {string[]} lines - Trimmed lines of the tracker.
+ * @param {Set<number>} consumed - Line indices the rebuilt table reproduces.
+ * @returns {{prologue: string[], epilogue: string[], interior: string[]}}
+ */
+function collectStructure(lines, consumed) {
+  const indices = [...consumed].sort((a, b) => a - b);
+  if (indices.length === 0) return { prologue: [], epilogue: [], interior: [] };
+  const first = indices[0];
+  const last = indices[indices.length - 1];
+  // Blank lines count too. Excluding them would put a "silently dropped" line
+  // back into a function written to end silent drops — the blank line that
+  // separates a tracker from a section below it is exactly the kind of
+  // structure a user notices missing.
+  const interior = [];
+  for (let i = first + 1; i < last; i++) if (!consumed.has(i)) interior.push(lines[i]);
+  return { prologue: lines.slice(0, first), epilogue: lines.slice(last + 1), interior };
 }
 
 // Remove every table row whose first cell (the application number) equals `num`,
@@ -343,7 +417,11 @@ export function removeRowByNum(content, num) {
   const lines = content.split('\n');
   // Header-aware report-column lookup (#954) — fixed index 7 read the wrong
   // cell on customized layouts (e.g. with a Location column).
-  const colmap = resolveColumns(lines);
+  // Trimmed for detection, raw for output: resolveColumns needs a line that
+  // starts with '|', so an indented table resolved to the legacy map here while
+  // the filter below matched on the trimmed line — the read/write split fixed in
+  // parseMarkdownRows (PR #3794 review). Lines are still emitted byte-for-byte.
+  const colmap = resolveColumns(lines.map(l => l.trim()));
   let removedCount = 0;
   let report = null;
   const kept = lines.filter((line) => {
@@ -470,11 +548,17 @@ function syncIndex(db, states) {
     const setMeta = db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
     setMeta.run('md_sha256', mdHash());
     setMeta.run('schema_version', SCHEMA_VERSION);
-    // The source layout, so export rebuilds this table rather than the default
-    // one. Empty strings mean "no header row in the source" — a legacy
-    // positional table, which exports as the canonical nine columns.
+    // The source layout, so export rebuilds this FILE rather than the default
+    // skeleton: the header and separator it read, the lines around the table,
+    // the lines inside it that no rebuilt table can hold, and the line ending.
+    // Empty strings mean "no table in the source", which exports as the
+    // canonical nine columns under the default title.
     setMeta.run('md_header', layout?.header ?? '');
     setMeta.run('md_separator', layout?.separator ?? '');
+    setMeta.run('md_prologue', JSON.stringify(layout?.prologue ?? []));
+    setMeta.run('md_epilogue', JSON.stringify(layout?.epilogue ?? []));
+    setMeta.run('md_interior', JSON.stringify(layout?.interior ?? []));
+    setMeta.run('md_eol', layout?.eol ?? '\n');
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');
@@ -634,6 +718,36 @@ function parseExtras(raw) {
  *   `dropped` names every column carrying content this export cannot place —
  *   empty for every layout career-ops can reproduce.
  */
+/**
+ * The recorded source layout, decoded from `meta` with safe defaults.
+ *
+ * An index written before these keys existed (or one whose meta was edited by
+ * hand) yields the canonical skeleton, which is what the export emitted for
+ * every tracker before #3703.
+ *
+ * @param {Object<string,string>} meta - The `meta` table as a plain object.
+ * @returns {{header: string, separator: string, prologue: string[],
+ *   epilogue: string[], interior: string[], eol: string}}
+ */
+function readLayout(meta) {
+  const list = (raw, fallback) => {
+    try {
+      const parsed = JSON.parse(raw ?? '');
+      return Array.isArray(parsed) ? parsed.map(String) : fallback;
+    } catch {
+      return fallback;
+    }
+  };
+  return {
+    header: meta.md_header || '',
+    separator: meta.md_separator || '',
+    prologue: list(meta.md_prologue, ['# Applications Tracker', '']),
+    epilogue: list(meta.md_epilogue, ['']),
+    interior: list(meta.md_interior, []),
+    eol: meta.md_eol === '\r\n' ? '\r\n' : '\n',
+  };
+}
+
 function renderTable(rows, layout) {
   const header = layout.header || HEADER;
   const labels = layout.header ? headerLabels(layout.header) : headerLabels(HEADER);
@@ -695,18 +809,24 @@ async function exportMd(args) {
     const rows = db.prepare('SELECT * FROM applications ORDER BY pos').all();
     const meta = db.prepare('SELECT key, value FROM meta').all()
       .reduce((acc, m) => Object.assign(acc, { [m.key]: m.value }), {});
-    const { header, separator, body, dropped } = renderTable(rows, {
-      header: meta.md_header || '', separator: meta.md_separator || '',
-    });
-    const out = ['# Applications Tracker', '', header, separator, ...body, ''].join('\n');
+    const layout = readLayout(meta);
+    const { header, separator, body, dropped } = renderTable(rows, layout);
+    // The lines around the table are replayed verbatim; the ones inside it that
+    // no single rebuilt table can hold are reported instead, never invented.
+    const out = [...layout.prologue, header, separator, ...body, ...layout.epilogue]
+      .join(layout.eol);
 
-    // Never lose a column quietly. Reporting it is worth doing even though the
-    // rebuild above should leave `dropped` empty for every layout career-ops
-    // can produce: it is what turns data loss into a decision the user makes.
-    if (dropped.length) {
-      console.error(`Warning: ${dropped.length} column(s) in ${MD_PATH} cannot be reproduced by export and will be dropped:`);
-      for (const d of dropped) console.error(`  ${d}`);
-      console.error('These cells are outside the header this tracker declares — widen the header row, or keep the current file.');
+    const losses = [
+      ...dropped,
+      ...layout.interior.map(line => `line between table rows: ${line === '' ? '(blank)' : `"${line}"`}`),
+    ];
+    // Never lose anything quietly. Worth reporting even though the rebuild above
+    // leaves `losses` empty for every file career-ops itself produces: it is
+    // what turns data loss into a decision the user makes.
+    if (losses.length) {
+      console.error(`Warning: ${losses.length} item(s) in ${MD_PATH} cannot be reproduced by export and will be dropped:`);
+      for (const d of losses) console.error(`  ${d}`);
+      console.error('Cells outside the declared header, and content between the first and last table row, have nowhere to go in a single rebuilt table.');
     }
 
     if (!outPath) {
@@ -718,8 +838,8 @@ async function exportMd(args) {
     // Overwriting an existing file with a table known to be missing columns is
     // the failure mode of #3703 — the .bak below makes it recoverable, but only
     // for a user who was told there was something to recover.
-    if (dropped.length && existsSync(writeTarget) && !force) {
-      console.error(`Refusing to overwrite ${outPath} — that would drop the column(s) listed above.`);
+    if (losses.length && existsSync(writeTarget) && !force) {
+      console.error(`Refusing to overwrite ${outPath} — that would drop the item(s) listed above.`);
       console.error('Re-run with --force if you have read the list and want the export anyway.');
       // exitCode + return, never process.exit(): exiting here would skip the
       // finally below and leave the tracker lock dir held until it goes stale.
