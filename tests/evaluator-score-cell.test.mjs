@@ -35,6 +35,12 @@ const cases = [
   ['4.2 (strong fit)',    '4.2/5'],
   ['4.2 (strong fit)/5',  '4.2/5'],
   ['4.2 (strong fit)/10', 'N/A'],
+  // The first fraction stays authoritative: a later `/5` must not mask an
+  // unrelated `3/4` earlier in the cell. Refusing here is the documented
+  // trade-off for taking the denominator wherever it sits, and it is pinned so
+  // nobody quietly relaxes it into guessing a score.
+  ['4.2 (fit 3/4 axes)/5', 'N/A'],
+  ['4.2 (fit 3/4 axes)',   'N/A'],
   ['4.2 (final)',         '4.2/5'],
   ['4.2 (internal)',      '4.2/5'],
   ['4.5 - strong signal', '4.5/5'],
