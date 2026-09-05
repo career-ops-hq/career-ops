@@ -137,6 +137,25 @@ ok('an employer-board URL mismatch still proves two postings apart', () => {
   } finally { cleanup(env); }
 });
 
+ok('a URL match carries the incoming company spelling onto the row', () => {
+  // The URL tier is a CONFIRMED same-posting identity (a normalized-URL
+  // match), unlike the fuzzy company+role tier above: the incoming spelling
+  // is authoritative here even though the row otherwise keeps its own name.
+  // A tracking-param tail (utm_source) must still normalize to the same key.
+  const env = makeEnv();
+  try {
+    const H = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |';
+    const S = '|---|---|---|---|---|---|---|---|---|---|';
+    writeFileSync(env.tracker, ['# Applications Tracker', '', H, S,
+      '| 1 | 2026-06-01 | Acme Technologies Inc. | Director of Marketing | 4.0/5 | Evaluated | ❌ | [1](reports/1-a.md) | n | https://boards.greenhouse.io/acme/jobs/7001 |', ''].join('\n'));
+    addTsv(env, '2-b.tsv', ['2', '2026-06-03', 'Acme', 'Director of Marketing', 'Evaluated', '4.1/5', '❌', '[2](reports/2-b.md)', 'n', 'https://boards.greenhouse.io/acme/jobs/7001?utm_source=x']);
+    runMerge(env);
+    const rows = trackerRows(env);
+    assert.equal(rows.length, 1, `expected the same posting to update in place, got ${rows.length} rows`);
+    assert.ok(rows[0].includes('| Acme |'), `row did not take the incoming spelling: ${rows[0]}`);
+  } finally { cleanup(env); }
+});
+
 ok('a role that does not fuzzy-match is unaffected by the wider company match', () => {
   const rows = mergeOne({
     existingCompany: 'Acme Technologies', existingRole: 'Director of Marketing',
