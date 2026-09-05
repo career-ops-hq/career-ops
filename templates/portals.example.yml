@@ -925,7 +925,7 @@ search_queries:
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
 # field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
-# himalayas, ibm, jobbankca, jobicy, jobstreet, justjoin, landingjobs, mycareersfuture, nofluffjobs, remoteok, remotive, senjob,
+# himalayas, ibm, jobbankca, jobicy, jobstreet, justjoin, landingjobs, mycareersfuture, nofluffjobs, occ, remoteok, remotive, senjob,
 # manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent. Examples for every built-in provider are below.
 
 # ── Built-in provider examples ────────────────────────────────────
@@ -1177,6 +1177,16 @@ search_queries:
 #     scope: remote                       # optional; restricts to /jobs/remote
 #     max_pages: 3                        # optional page cap (25 jobs/page, default 3)
 #   enabled: true
+#
+# - name: OCC Mundial                     # Mexico's dominant general job board
+#   provider: occ                         # no detect() — only reachable via provider:
+#   queries: ["automatizacion", "robotica"]  # REQUIRED: OCC is a keyword-search board
+#                                         # with no browsable listing, so there is no
+#                                         # default — a built-in list would be one
+#                                         # user's search profile, not a board default.
+#   states: ["nuevo-leon", "jalisco"]     # optional; omit to scan nationwide
+#   max_pages: 3                          # optional page cap (20 jobs/page, default 3, max 10)
+#   enabled: true                         # 750ms pacing between pages
 #
 # - name: The Hub                         # Nordic/EU startup board
 #   provider: thehub
