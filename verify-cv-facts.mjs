@@ -22,8 +22,9 @@ const DEFAULT_SOURCES = ['cv.md', 'article-digest.md'];
 const DEFAULT_CONFIG = join(ROOT, 'config', 'cv-facts.json');
 const TOOL_PROSE_WORDS = new Set([
   'a', 'an', 'and', 'at', 'built', 'by', 'containerized', 'deployment',
-  'deployments', 'for', 'from', 'in', 'of', 'on', 'production', 'project',
-  'team', 'the', 'to', 'using', 'with',
+  'deployments', 'delivery', 'diagnosing', 'efficiency', 'feedback', 'for', 'from', 'improve',
+  'improving', 'in', 'of', 'on', 'on-time', 'operations', 'production', 'project',
+  'recurring', 'resolving', 'submission', 'team', 'the', 'to', 'using', 'with',
 ]);
 const TOOL_PHRASE_PATTERN = /^(?=.{1,80}$)[\p{L}\p{N}.][\p{L}\p{N}+#./-]*(?:\s+[\p{L}\p{N}.][\p{L}\p{N}+#./-]*){0,2}$/u;
 const DELEGATED_PARTY_RE = /\b(?:vendors?|agenc(?:y|ies)|contractors?|consultanc(?:y|ies)|consultants?|external teams?|outsourc(?:ed|ing)|implementation partners?)\b/i;
@@ -280,19 +281,57 @@ function normalizeFact(value) {
   return normalizeClaim(value).replace(/[.;:,]+$/g, '').trim();
 }
 
-/** Keep likely technology names while dropping ordinary prose fragments. */
-function isLikelyTool(value) {
-  const normalized = normalizeFact(value);
-  const words = normalized.split(' ');
-  if (!normalized || words.length > 3 || words.some(word => TOOL_PROSE_WORDS.has(word))) return false;
-  // The surrounding grammar ("using", "built with", "tech stack") already
-  // asserts that each short fragment is a tool. Requiring capitalization or a
-  // hand-maintained allowlist makes unknown lowercase tools bypass the gate.
-  return TOOL_PHRASE_PATTERN.test(value.trim());
+/** Whether a raw (unnormalized) tool fragment looks like a real product name: Title Case, or carries a digit/version token (e.g. "n8n", "Python 3.11", "GPT-4"). */
+function looksToolShaped(rawValue) {
+  const trimmed = String(rawValue).trim();
+  if (!trimmed) return false;
+  // A digit anywhere marks a version or a name built on one: "n8n", "GPT-4",
+  // "Python 3.11".
+  if (/\d/.test(trimmed)) return true;
+  // Every word capitalised: "React", "Google Cloud", "Node.js". A single
+  // lowercase connector inside an otherwise-capitalised phrase never reaches
+  // here — TOOL_PHRASE_PATTERN caps a tool fragment at 3 words and the
+  // surrounding split on `and`/`with`/`in` already removes connectors.
+  return trimmed.split(/\s+/).every(word => /^[\p{Lu}]/u.test(word));
 }
 
-/** Extract explicitly asserted employer, title, and tool claims from text. */
-export function factClaims(text) {
+/**
+ * Keep likely technology names while dropping ordinary prose fragments.
+ *
+ * A fragment that does not look tool-shaped (see `looksToolShaped`) is kept
+ * anyway when it is already an exact substring of the source files: a real
+ * lowercase tool name ("kubernetes", "n8n") a user genuinely used and listed
+ * in cv.md must still pass, and rejecting it on casing alone would just trade
+ * one false-positive class for another.
+ *
+ * A fragment that is neither tool-shaped nor source-backed is still retained
+ * by default, preserving the gate's fail-closed behavior for lowercase names.
+ * Only exact words observed as prose false positives are rejected through
+ * `TOOL_PROSE_WORDS`; morphological suffixes are deliberately not used
+ * because real products such as Spring, Unity, and Processing share them.
+ */
+function isLikelyTool(value, sourceNormalized) {
+  const normalized = normalizeFact(value);
+  const words = normalized.split(' ');
+  if (!normalized || words.length > 3) return false;
+  if (!TOOL_PHRASE_PATTERN.test(value.trim())) return false;
+  if (looksToolShaped(value)) return true;
+  if (sourceNormalized != null && sourceContainsFact(sourceNormalized, normalized)) return true;
+  return !words.some(word => TOOL_PROSE_WORDS.has(word));
+}
+
+/**
+ * Extract explicitly asserted employer, title, and tool claims from text.
+ *
+ * `sourceNormalized` (from `normalizeFact(stripMarkup(sourceText))`, as
+ * `verifyFacts` already builds it) is optional and used only to let a
+ * lowercase-but-genuine tool fragment through `isLikelyTool` when it is
+ * already backed by a source file — see that function's doc comment. Callers
+ * that omit it (existing direct callers, tests) get the same conservative
+ * shape-only behaviour as before: a tool-shaped fragment is extracted, an
+ * ordinary lowercase one is not.
+ */
+export function factClaims(text, sourceNormalized = null) {
   const clean = stripMarkup(text);
   const claims = [];
   const patterns = [
@@ -330,7 +369,7 @@ export function factClaims(text) {
         : [match[1] || match[2]];
       for (const raw of rawValues) {
         const value = normalizeFact(raw);
-        if (value && (kind !== 'tool' || isLikelyTool(raw))) claims.push({ kind, value });
+        if (value && (kind !== 'tool' || isLikelyTool(raw, sourceNormalized))) claims.push({ kind, value });
       }
     }
   }
@@ -721,7 +760,7 @@ export function verifyFacts(targetText, {
   const invented = [...targetClaims].filter(claim => !allowed.has(claim));
   const sourceNormalized = normalizeFact(stripMarkup(sourceText));
   const allowedFacts = new Set(config.allow_facts.map(normalizeFact));
-  const unsupportedFacts = [...factClaims(targetText), ...delegatedAuthorshipClaims(targetText, sourceText)]
+  const unsupportedFacts = [...factClaims(targetText, sourceNormalized), ...delegatedAuthorshipClaims(targetText, sourceText)]
     .filter(({ value }) => !sourceContainsFact(sourceNormalized, value) && !allowedFacts.has(value))
     .filter((claim, index, claims) => claims.findIndex(other => other.kind === claim.kind && other.value === claim.value) === index);
   const forbidden = config.forbidden_phrases

@@ -32,6 +32,7 @@ import {
   parseWorkdayHint,
   buildWorkdayCandidates,
   resolveCompany,
+  resolveWorkday,
 } from '../discover-ats.mjs';
 import * as yaml from 'js-yaml';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
@@ -414,6 +415,141 @@ ok('all-503 → errors are not marked definitive', all503.unresolved.errors.ever
 const mixed = await resolveCompany({ name: 'Mixed Co' },
   { vendors: SLUG_VENDORS, includeWorkday: false, ctx: httpErrorCtx({ gh: 404, ashby: 503, lever: 404 }) });
 ok('mixed 404/503 → still unknown, absence not established', /status unknown/i.test(mixed.unresolved.reason));
+
+// ── Refused redirect: a third answer, neither transient nor absence (#3788) ──
+//
+// Subdomain vendors don't 404 an unknown tenant. BambooHR answers
+// `302 → www.bamboohr.com`, which redirect:'error' (#1440) turns into a bare
+// `TypeError: fetch failed` — the same SHAPE as a timeout, so it was reported
+// as an unknown status with advice to re-run. It is deterministic: the same
+// probe redirects again, forever. providers/_http.mjs already said so for the
+// retry layer; this pins the user-facing half to the same verdict.
+//
+// The cause message is hardcoded, not imported, for the same reason
+// tests/providers/_http.test.mjs hardcodes it: comparing the constant to
+// itself would pin nothing.
+const refusalCtx = () => ({
+  fetchJson: async () => {
+    throw Object.assign(new TypeError('fetch failed'), { cause: { message: 'unexpected redirect' } });
+  },
+  fetchText: async () => { throw new Error('unused'); },
+});
+const redirected = await resolveCompany({ name: 'MaRS Discovery District' },
+  { vendors: ['bamboohr'], includeWorkday: false, ctx: refusalCtx() });
+
+ok('refused redirect → not reported as an unknown status',
+  !/status unknown/i.test(redirected.unresolved.reason));
+ok('refused redirect → no advice to re-run the same probe',
+  !/errors\[\] and re-run/i.test(redirected.unresolved.reason));
+ok('refused redirect → names the slug as the fix',
+  /slug/i.test(redirected.unresolved.reason));
+ok('refused redirect → names the vendor that redirected',
+  /bamboohr/i.test(redirected.unresolved.reason));
+// Not absence: the board may well exist under a different tenant label —
+// mars-discovery-district redirects, marsdd serves jobs. Saying "no supported
+// ATS board found" here would be as wrong as saying "re-run".
+ok('refused redirect → does NOT claim no board was found',
+  !/no .*board found/i.test(redirected.unresolved.reason));
+ok('refused redirect → error entry carries the discriminator',
+  redirected.unresolved.errors.every(e => e.refusedRedirect === true));
+ok('refused redirect → error entry is not marked definitive',
+  redirected.unresolved.errors.every(e => e.definitive !== true));
+// The cause is what says "not this tenant"; keeping only err.message left
+// errors[] reading the single word "fetch failed".
+ok('refused redirect → the dropped cause survives into errors[]',
+  redirected.unresolved.errors.every(e => /unexpected redirect/.test(e.error)));
+
+// Guard, the direction that matters most: a redirect refusal must not swallow
+// a genuinely transient failure alongside it. That vendor never answered, so
+// the status really is unknown and a re-run really is the right advice.
+const redirectPlus503 = await resolveCompany({ name: 'Half Answered Co' },
+  {
+    vendors: ['gh', 'bamboohr'],
+    includeWorkday: false,
+    ctx: {
+      fetchJson: async (url) => {
+        if (/bamboohr/.test(url)) {
+          throw Object.assign(new TypeError('fetch failed'), { cause: { message: 'unexpected redirect' } });
+        }
+        const err = new Error('HTTP 503');
+        err.status = 503;
+        throw err;
+      },
+      fetchText: async () => { throw new Error('unused'); },
+    },
+  });
+ok('refused redirect + 503 → still unknown, the 503 vendor never answered',
+  /status unknown/i.test(redirectPlus503.unresolved.reason));
+
+// Guard, the direction that costs a user real time. A DNS failure reaches this
+// code as the SAME bare TypeError with no status; only err.cause distinguishes
+// it. Widening the predicate in providers/_http.mjs to accept any cause leaves
+// every assertion above green while turning a network hiccup into "your slug is
+// wrong" — measured, not hypothetical: that mutation reddens --only _http and
+// leaves --only discover-ats at 149/0. This is the case that closes it.
+const dnsFailureCtx = () => ({
+  fetchJson: async () => {
+    throw Object.assign(new TypeError('fetch failed'), {
+      cause: { message: 'getaddrinfo ENOTFOUND unreachable-co.bamboohr.com' },
+    });
+  },
+  fetchText: async () => { throw new Error('unused'); },
+});
+const dnsFailure = await resolveCompany({ name: 'Unreachable Co' },
+  { vendors: ['bamboohr'], includeWorkday: false, ctx: dnsFailureCtx() });
+ok('DNS-shaped TypeError → still an unknown status',
+  /status unknown/i.test(dnsFailure.unresolved.reason));
+ok('DNS-shaped TypeError → still advises a re-run',
+  /errors\[\] and re-run/i.test(dnsFailure.unresolved.reason));
+ok('DNS-shaped TypeError → not marked as a refused redirect',
+  dnsFailure.unresolved.errors.every(e => e.refusedRedirect !== true));
+ok('DNS-shaped TypeError → the slug is never blamed for a transport failure',
+  !/redirected off-tenant/i.test(dnsFailure.unresolved.reason));
+
+// The refused-redirect branch sits ABOVE the workday-hint branch, so a
+// malformed hint alongside a refusal reports the redirect. That order is
+// deliberate and load-bearing: the redirect is an answer a vendor actually
+// gave, while the hint is a field the user must fix in either case — and main
+// said "status unknown" here, so this is a choice between two new messages
+// rather than a regression. Pinned so reshuffling the ladder has to argue.
+const hintPlusRedirect = await resolveCompany(
+  { name: 'Hinted Co', workday: { tenant: 'a/b', site: 'S' } },
+  { vendors: ['bamboohr'], includeWorkday: true, ctx: refusalCtx() });
+ok('malformed workday hint + refused redirect → the measured answer wins the message',
+  /redirected off-tenant/i.test(hintPlusRedirect.unresolved.reason));
+
+// And a malformed hint on its own is untouched — the guard that the branch
+// above did not swallow the Workday case wholesale.
+const hintOnly = await resolveCompany(
+  { name: 'Hint Only Co', workday: { tenant: 'a/b', site: 'S' } },
+  { vendors: [], includeWorkday: true });
+ok('malformed workday hint alone → still the Workday-hint message',
+  /Workday hint given but rejected/i.test(hintOnly.unresolved.reason));
+
+// resolveWorkday is the file's OTHER .fetch( site, and workday.mjs passes
+// redirect:'error' as well — so the same refusal arrives there and used to be
+// flattened to a bare "fetch failed" while probeVendor's copy kept the cause.
+//
+// Injected through ctx.fetchJson, which is where the provider actually reads:
+// a first attempt passing `{}` and stubbing globalThis.fetch produced
+// detail === "ctx.fetchJson is not a function", i.e. a failing assertion that
+// never reached the refusal path at all.
+{
+  const wdRefusalCtx = {
+    fetchJson: async () => {
+      throw Object.assign(new TypeError('fetch failed'), { cause: { message: 'unexpected redirect' } });
+    },
+    fetchText: async () => { throw new Error('unused'); },
+  };
+  const wdCoords = parseWorkdayHint({ name: 'WD Co', workday: { tenant: 'acme', site: 'External' } });
+  const wd = await resolveWorkday({ name: 'WD Co' }, wdCoords, wdRefusalCtx);
+  ok('workday refusal → reaches the refusal path, not a ctx shape error',
+    wd.status === 'error' && /fetch failed/.test(String(wd.detail)));
+  ok('workday refusal → the cause survives into detail',
+    /unexpected redirect/.test(String(wd.detail)));
+  ok('workday refusal → carries the same discriminator as a vendor probe',
+    wd.refusedRedirect === true);
+}
 
 // parseCompanyInput warns on a present-but-wrong-typed workday field (e.g. a number).
 const wrongType = parseCompanyInput('companies:\n  - name: X\n    workday: 42\n', []);
