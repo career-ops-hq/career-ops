@@ -602,15 +602,51 @@ function isLinkedUrlCell(value) {
  * same substitution, so the encoded and unencoded spellings normalize to one
  * key (url-key.mjs rebuilds path and query through the URL object).
  *
- * `|` is deliberately NOT encoded: `%7C` and a literal `|` normalize alike in
- * the query but NOT in the path, so encoding one would silently re-key the row.
- * Such a URL cannot be linked at all — see formatUrlCell.
+ * Nothing else may be rewritten. `%7C` and a literal `|` normalize alike in the
+ * query but NOT in the path, and `%28`/`%29` never normalize to `(`/`)` at all,
+ * so encoding any of those would silently re-key the row. Backslash-escaping
+ * them is not an option either: this module's parser unescapes `\(` on
+ * read-back, the Go dashboard's regex does not, and two readers disagreeing
+ * about a row's URL is the exact drift the shared extractor exists to prevent.
+ * A href carrying those characters is written BARE instead — see
+ * isLinkableDestination.
  *
  * @param {string} href
  * @returns {string} The same URL, safe to sit between `](` and `)`.
  */
 function urlForCellDestination(href) {
   return href.replace(/\s/g, (ch) => encodeURIComponent(ch));
+}
+
+/**
+ * Whether a href survives a markdown link destination byte for byte.
+ *
+ * Both readers find the destination's end by matching parentheses, so an
+ * UNMATCHED one silently changes what comes back:
+ *
+ *   https://x.com/a)b  →  [x.com](https://x.com/a)b)  →  reads https://x.com/a
+ *   https://x.com/a(b  →  [x.com](https://x.com/a(b)  →  reads nothing at all
+ *
+ * The first is the dangerous one — a shorter, still-parseable key for a broader
+ * path — and the second drops the row to fuzzy matching. BALANCED parens are
+ * fine and stay linked; Workday-style slugs carry them routinely.
+ *
+ * A backslash is excluded for a different reason: this module's parser
+ * unescapes `\(`, `\)` and `\\` on read-back while the Go dashboard's regex does
+ * not, so a linked href containing one means the two surfaces disagree about
+ * the row's URL.
+ *
+ * @param {string} href
+ * @returns {boolean}
+ */
+function isLinkableDestination(href) {
+  if (href.includes('\\')) return false;
+  let depth = 0;
+  for (const ch of href) {
+    if (ch === '(') depth++;
+    else if (ch === ')' && depth-- === 0) return false;
+  }
+  return depth === 0;
 }
 
 /**
@@ -663,6 +699,11 @@ function formatUrlCell(raw, previousCell = '') {
   // instead, so a pipe-bearing URL lands as a bare cell whichever form it
   // arrived in. The label is lost with it; there is no cell that can hold both.
   if (href.includes('|')) return cell(href);
+
+  // Same rule, different container: a href that cannot survive a markdown
+  // destination unchanged is written bare rather than linked. Bare costs only
+  // the readability this change is for; a lossy link costs the key.
+  if (!isLinkableDestination(href)) return cell(href);
 
   // An incoming value that is already a link keeps its label: a hand-written
   // one survives every rebuild.

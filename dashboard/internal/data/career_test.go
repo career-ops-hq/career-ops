@@ -675,3 +675,31 @@ func TestParseApplicationsReadsLinkedURLCells(t *testing.T) {
 		t.Errorf("linked JobURL = %q, want the tracker href to beat the report header", got)
 	}
 }
+
+// The writer only links a href that survives a markdown destination byte for
+// byte (merge-tracker.mjs isLinkableDestination); everything else is written
+// bare. Both forms must read back whole HERE too — the Node parser and this
+// regex disagreeing about a row's URL is the drift the shared extractor exists
+// to prevent, and it is why backslash-escaping the destination was rejected:
+// the Node side unescapes, this side does not.
+func TestExtractCellURLAgreesWithTheWriterOnUnlinkableHrefs(t *testing.T) {
+	cases := []struct {
+		name string
+		cell string
+		want string
+	}{
+		// Written bare by the writer, so they must read back verbatim.
+		{"unmatched close paren, bare", "https://example.com/jobs/a)b", "https://example.com/jobs/a)b"},
+		{"unmatched open paren, bare", "https://example.com/jobs/a(b", "https://example.com/jobs/a(b"},
+		{"backslash, bare", `https://example.com/jobs/a\b`, `https://example.com/jobs/a\b`},
+		// Written linked, because balanced parens round-trip.
+		{"balanced parens, linked", "[example.com](https://example.com/jobs/eng(remote))", "https://example.com/jobs/eng(remote)"},
+		// Whitespace is percent-encoded by the writer rather than left raw.
+		{"encoded space, linked", "[example.com](https://example.com/jobs/a%20b)", "https://example.com/jobs/a%20b"},
+	}
+	for _, tc := range cases {
+		if got := extractCellURL(tc.cell); got != tc.want {
+			t.Errorf("%s: extractCellURL(%q) = %q, want %q", tc.name, tc.cell, got, tc.want)
+		}
+	}
+}

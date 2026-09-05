@@ -1376,6 +1376,56 @@ if (!HAS_WEB) {
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
+// A href that cannot survive a markdown destination byte for byte is written
+// bare. Both readers end the destination by MATCHING parens, so an unmatched one
+// changes what comes back: `…/a)b` reads back as `…/a` (a shorter, still
+// parseable key for a broader path) and `…/a(b` reads back as nothing at all.
+// Balanced parens are fine and stay linked — Workday slugs carry them routinely.
+// Backslash-escaping instead was the reviewer's suggestion and is not viable:
+// this module's parser unescapes `\(` on read-back and the Go dashboard's regex
+// does not, so the two surfaces would disagree about the row's URL.
+{
+  const { extractCellUrl } = await import('./tracker-parse.mjs');
+  const { normalizeUrl } = await import('./url-key.mjs');
+  const cases = [
+    ['unmatched close paren', 'https://example.com/jobs/a)b', false],
+    ['unmatched open paren', 'https://example.com/jobs/a(b', false],
+    ['backslash', 'https://example.com/jobs/a\\b', false],
+    ['balanced parens', 'https://example.com/jobs/eng(remote)', true],
+  ];
+  const broken = [];
+  for (const [name, url, shouldLink] of cases) {
+    const sb = makeSandbox(
+      `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | Applied | ✅ | — | seed | — |
+`,
+      {
+        '2-globex.tsv':
+          'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+          `2\t2026-02-02\tGlobex\tManager\tApplied\t4.5/5\t❌\t—\t${name}\t${url}\n`,
+      },
+    );
+    const merge = runCaptured('merge-tracker.mjs', sb);
+    const written = (dataRows(sb.tracker).find(l => l.includes('Globex')) || '').split('|').map(c => c.trim())[10] ?? '';
+    rmSync(sb.dir, { recursive: true, force: true });
+    // The property that matters is the ROUND TRIP: whatever form is written,
+    // reading it back must yield the same posting key the addition carried.
+    const roundTrips = normalizeUrl(extractCellUrl(written)) === normalizeUrl(url) && normalizeUrl(url) !== '';
+    const linked = /^\[[^\]]*\]\(/.test(written);
+    if (merge.code !== 0 || !roundTrips || linked !== shouldLink) {
+      broken.push(`${name}: wrote ${JSON.stringify(written)} (linked=${linked}, want ${shouldLink}, roundTrips=${roundTrips})`);
+    }
+  }
+  if (broken.length === 0) {
+    pass('#3516: an unlinkable href (unmatched paren, backslash) is written bare; balanced parens stay linked — all four round-trip to the same key');
+  } else {
+    fail(`#3516 destination round-trip — ${broken.join(' | ')}`);
+  }
+}
+
 // --migrate-urls: opt-in, idempotent, and it must never change a href — the
 // href is the dedup key, so a migration that touched it would re-key the table.
 {
