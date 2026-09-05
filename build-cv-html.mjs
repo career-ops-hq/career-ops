@@ -626,6 +626,15 @@ function buildPhoto(candidate, name) {
   return `<img class="cv-photo cv-photo--${style}" src="${sanitizeImageSrc(photo)}" alt="${escapeHtml(name || '')}">`;
 }
 
+// Professional title / headline under the name (candidate.title). An ATS reads
+// this first to place the candidate ("Backend Engineer" vs "Accountant"); a CV
+// with no title forces the reader to infer the role. Empty/absent → no element,
+// so a payload without a title renders byte-identical to before.
+function buildTitle(candidate) {
+  const title = candidate && candidate.title != null ? String(candidate.title).trim() : '';
+  return title ? `<div class="header-title">${escapeHtml(title)}</div>` : '';
+}
+
 function renderReport(payload, partials) {
   const sectionTitles = { ...DEFAULT_SECTION_TITLES, ...(payload.sections || {}) };
   const candidate = payload.candidate || {};
@@ -670,6 +679,7 @@ function renderHtml(template, payload, templatePath) {
   // no <img>), so they are rebuilt as whole blocks before placeholder fill.
   let html = template.replace(CONTACT_ROW_RE, () => buildContactRow(candidate));
   html = html.replace(/\{\{PHOTO\}\}/g, () => buildPhoto(candidate, candidate.name));
+  html = html.replace(/\{\{TITLE_BLOCK\}\}/g, () => buildTitle(candidate));
 
   // Drop the optional sections (projects, education) that have no entries, so
   // an absent one leaves no bare header behind. See cv-sections-core.mjs.

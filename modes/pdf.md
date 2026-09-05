@@ -138,6 +138,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
   "page_format": "letter",
   "candidate": {
     "name": "Jane Smith",
+    "title": "Senior Backend Engineer",
     "phone": "+1 415 555 0100",
     "email": "jane@example.com",
     "linkedin": { "url": "https://linkedin.com/in/janesmith", "display": "linkedin.com/in/janesmith" },
@@ -194,6 +195,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | `lang` | string | CV language code (`en`, `es`, `zh-CN`, `ja`, `ar`). Drives language-specific CSS: `zh-CN` enables Simplified Chinese fonts and strict CJK line breaking; `ja` enables a Japanese CJK font fallback; `ar` enables RTL + Arabic fonts. Defaults to `en`. |
 | `page_format` | string | `letter` → `8.5in` page width, `a4` → `210mm`. Defaults to `letter`. Pass the SAME value to `generate-pdf.mjs --format`. |
 | `candidate.name` | string | From `profile.yml`. |
+| `candidate.title` | string | Optional professional headline shown directly under the name (e.g. "Senior Backend Engineer"). Read it from `candidate.title` in `config/profile.yml`. An ATS reads this first to place the candidate; a CV with no title forces the reader to infer the role. Omit or leave empty → no title element, byte-identical to before. Tailor it to the JD's own title wording when the candidate's real level supports it (never inflate). |
 | `candidate.phone` | string | Optional — **omit or leave empty** to drop the `tel:` link and its separator (no empty cell). |
 | `candidate.email` | string | From `profile.yml`. |
 | `candidate.linkedin` | `{url, display}` | Optional — omit to drop the item and its separator. |

@@ -87,6 +87,15 @@ version: 1.0.0
     line-height: 1.02;
   }
 
+  .header-title {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--accent-color, #0d0f13);
+    margin-top: 3px;
+    line-height: 1.15;
+  }
+
   /* Short accent rule under the name, not a full-width gradient. */
   .header-gradient {
     width: 46px;
@@ -381,6 +390,7 @@ version: 1.0.0
   <!-- HEADER -->
   <div class="header">
     <h1>{{NAME}}</h1>
+    {{TITLE_BLOCK}}
     <div class="header-gradient"></div>
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
