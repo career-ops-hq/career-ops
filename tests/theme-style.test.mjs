@@ -11,7 +11,7 @@ console.log('\ntheme-style.mjs (dynamic PDF theming, #1837)');
 
 try {
   const {
-    styleTokensFrom, readStyleTokens, buildThemeStyleBlock, injectThemeStyle,
+    styleTokensFrom, readStyleTokens, readLockedSections, buildThemeStyleBlock, injectThemeStyle,
   } = await import(pathToFileURL(join(ROOT, 'theme-style.mjs')).href);
 
   // styleTokensFrom: recognized keys → css vars; ignore unknown/non-string/missing
@@ -28,7 +28,7 @@ try {
     fail('styleTokensFrom should return {} for null/non-object/array');
   }
 
-  // readStyleTokens: from a profile file; missing file → {}
+  // readStyleTokens & readLockedSections: from a profile file; missing file handling
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-theme-'));
   try {
     const p = join(dir, 'profile.yml');
@@ -42,6 +42,30 @@ try {
     const p2 = join(dir, 'nostyle.yml'); writeFileSync(p2, 'candidate:\n  full_name: X\n');
     if (Object.keys(readStyleTokens(p2)).length === 0) pass('readStyleTokens returns {} when there is no style block');
     else fail('readStyleTokens should return {} without a style block');
+
+    // readLockedSections helper tests (#2053)
+    if (Array.isArray(readLockedSections(join(dir, 'nope.yml'))) && readLockedSections(join(dir, 'nope.yml')).length === 0) {
+      pass('readLockedSections returns empty array for non-existent file');
+    } else {
+      fail('readLockedSections should return empty array for non-existent file');
+    }
+
+    const pLocked = join(dir, 'profile-locked.yml');
+    writeFileSync(pLocked, 'cv:\n  locked_sections:\n    - Education\n    - Open Source Contributions\n', 'utf-8');
+    const loaded = readLockedSections(pLocked);
+    if (loaded.length === 2 && loaded[0] === 'education' && loaded[1] === 'open source contributions') {
+      pass('readLockedSections parses array and applies foldKey lowercase');
+    } else {
+      fail(`readLockedSections unexpected result: ${JSON.stringify(loaded)}`);
+    }
+
+    writeFileSync(pLocked, 'cv:\n  locked_sections: Education\n', 'utf-8');
+    const loadedSingle = readLockedSections(pLocked);
+    if (loadedSingle.length === 1 && loadedSingle[0] === 'education') {
+      pass('readLockedSections tolerates single string value');
+    } else {
+      fail(`readLockedSections unexpected single string result: ${JSON.stringify(loadedSingle)}`);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

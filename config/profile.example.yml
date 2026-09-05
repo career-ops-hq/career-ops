@@ -165,6 +165,11 @@ cv:
   # rendered CV against it, and still fails if they disagree.
   # sections: [skills, education, certifications, awards]
 
+  # Sections that the AI must never remove, shorten, or paraphrase during CV generation or tailoring.
+  # locked_sections:
+  #   - "Open Source Contributions"
+  #   - "GitHub Projects"
+
 # ── Culture Screen ───────────────────────────────────────────────────────────
 #
 # Enforces structural capping on the "Cultural signals" dimension during evaluation.

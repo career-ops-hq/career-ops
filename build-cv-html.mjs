@@ -31,11 +31,16 @@ import { resolve, dirname, basename, join, extname, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { stripEmptySections } from './cv-sections-core.mjs';
+import { validateLockedSections, sectionKey } from './generate-pdf.mjs';
+import { readLockedSections } from './theme-style.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { hasRequiredFields, validatePayload } from './lib/cv-payload-schema.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
+const trackerPath = resolveTrackerPath(DATA_ROOT);
+const workspaceRoot = resolveWorkspaceRoot(trackerPath);
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.html');
 const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
 const CONTACT_ROW_RE = /<div class="contact-row">[\s\S]*?<\/div>/;
@@ -698,6 +703,13 @@ async function writeAndReport(html, absOutput, payload, extra = {}) {
   const { warnings = [], ...rest } = extra;
   const outDir = dirname(absOutput);
   if (!existsSync(outDir)) await mkdir(outDir, { recursive: true });
+
+  const profilePath = resolve(workspaceRoot, 'config', 'profile.yml');
+  const lockedKeys = readLockedSections(profilePath, sectionKey);
+  const cvPath = resolve(workspaceRoot, 'cv.md');
+  const cvMarkdown = existsSync(cvPath) ? readFileSync(cvPath, 'utf-8') : '';
+  validateLockedSections(html, cvMarkdown, lockedKeys);
+
   await writeFile(absOutput, html, 'utf-8');
 
   const fileInfo = await stat(absOutput);

@@ -40,7 +40,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFile
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { getCareerOpsRoot } from './path-resolver.mjs';
-import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
+import { readStyleTokens, injectThemeStyle, readCvSectionOrder, readLockedSections } from './theme-style.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
@@ -489,6 +489,74 @@ export function validateCvSectionOrder(html, cvMarkdown, { allowReorder = false 
     return;
   }
   throw new Error(message);
+}
+
+function normalizeForComparison(text) {
+  if (!text) return '';
+  return text
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&[a-z]+;/gi, ' ')
+    .replace(/[#*`_~|•·]/g, ' ') // Strip markdown and bullet chars
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ') // Strip punctuation to be safe against ATS transformations
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Validate that sections marked as locked in config/profile.yml are identical
+ * (ignoring formatting) between the source cv.md and the rendered HTML.
+ * @param {string} html 
+ * @param {string} cvMarkdown 
+ * @param {string[]} lockedKeys 
+ */
+export function validateLockedSections(html, cvMarkdown, lockedKeys) {
+  if (!lockedKeys || lockedKeys.length === 0) return;
+
+  const htmlSections = html.matchAll(/<[^>]+class=["'][^"']*\bsection-title\b[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/gi);
+  const renderedMap = new Map();
+  let lastKey = null;
+  let lastIndex = 0;
+  for (const match of htmlSections) {
+    if (lastKey) {
+      renderedMap.set(lastKey, html.substring(lastIndex, match.index));
+    }
+    lastKey = sectionKey(match[1]);
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastKey) {
+    renderedMap.set(lastKey, html.substring(lastIndex));
+  }
+
+  const sourceLines = cvMarkdown.split(/\r?\n/);
+  const sourceMap = new Map();
+  let currentKey = null;
+  let currentText = '';
+  for (const line of sourceLines) {
+    const heading = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
+    if (heading) {
+      if (currentKey) sourceMap.set(currentKey, currentText);
+      currentKey = sectionKey(heading[2]);
+      currentText = '';
+    } else if (currentKey) {
+      currentText += line + '\n';
+    }
+  }
+  if (currentKey) sourceMap.set(currentKey, currentText);
+
+  for (const key of lockedKeys) {
+    if (!sourceMap.has(key)) {
+      const availableKeys = Array.from(sourceMap.keys()).map(k => `'${k}'`).join(', ');
+      throw new Error(`Configured locked_section '${key}' not found in cv.md. Available sections: ${availableKeys}`);
+    }
+    const sourceNorm = normalizeForComparison(sourceMap.get(key));
+    const renderedRaw = renderedMap.get(key) || '';
+    const renderedNorm = normalizeForComparison(renderedRaw);
+
+    if (sourceNorm !== renderedNorm) {
+      throw new Error(`Locked section '${key}' was modified during tailoring.\nExpected (normalized): ${sourceNorm}\nFound (normalized): ${renderedNorm}`);
+    }
+  }
 }
 
 /**
@@ -1326,6 +1394,7 @@ async function generatePDF() {
   html = reorderCvSections(html, readCvSectionOrder(resolve(workspaceRoot, 'config', 'profile.yml')));
 
   validateCvSectionOrder(html, cvMarkdown, { allowReorder });
+  validateLockedSections(html, cvMarkdown, readLockedSections(resolve(workspaceRoot, 'config', 'profile.yml'), sectionKey));
 
   // Normalize text for ATS compatibility (issue #1)
   const normalized = normalizeTextForATS(html);

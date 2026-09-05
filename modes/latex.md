@@ -4,6 +4,8 @@ Export a tailored, ATS-optimized CV as a `.tex` file and compile it to PDF via `
 
 ## Pipeline
 
+**Locked Sections:** If `cv.locked_sections` is defined in `profile.yml`, NEVER remove, shorten, or paraphrase those sections during CV generation or tailoring. They must appear verbatim.
+
 1. Read `cv.md` as source of truth
 2. Read `config/profile.yml` for candidate identity and contact info
 3. Ask the user for the JD if not already in context (text or URL)

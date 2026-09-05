@@ -34,6 +34,8 @@ latex:
 
 ## Pipeline
 
+**Locked Sections:** If `cv.locked_sections` is defined in `profile.yml`, NEVER remove, shorten, or paraphrase those sections during CV generation or tailoring. They must appear verbatim.
+
 1. Resolve source `.tex` path (see above)
 2. Run: `node extract-latex-content.mjs <source.tex> --out /tmp/cv-slots-{company}.json`
 3. If `supported: false` → show `error` + `hint`; do not proceed

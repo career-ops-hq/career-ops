@@ -54,6 +54,26 @@ export function readStyleTokens(profilePath = 'config/profile.yml') {
 }
 
 /**
+ * Read the `cv.locked_sections` array from a profile file, folding them into
+ * canonical section keys.
+ * @param {string} [profilePath]
+ * @param {Function} [foldKey] - Optional function to fold keys, defaults to lowercase
+ * @returns {string[]}
+ */
+export function readLockedSections(profilePath = 'config/profile.yml', foldKey = (s) => s.toLowerCase()) {
+  try {
+    if (!existsSync(profilePath)) return [];
+    const raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    const locked = raw?.cv?.locked_sections;
+    if (Array.isArray(locked)) return locked.map(foldKey);
+    if (typeof locked === 'string') return [foldKey(locked)];
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Map a parsed `style:` object to { '--css-var': value }, keeping only the
  * recognized string tokens. Exported for tests.
  * @param {unknown} style
