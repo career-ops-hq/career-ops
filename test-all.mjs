@@ -3998,7 +3998,7 @@ if (
 // loudly otherwise), so the list can only shrink. Denominator asserted: the
 // locale walk must find the known files, or the whole check is blind.
 {
-  const FROZEN_OFERTA = new Set(['da', 'es', 'pl', 'pt', 'ru', 'ua']);
+  const FROZEN_OFERTA = new Set(['da', 'es', 'pl', 'pt', 'ua']);
   const REQUIRED_HEADINGS = ['## A)', '## B)', '## C)', '## D)', '## E)', '## F)', '## G)', '## Risk Summary', '## H)'];
   const REQUIRED_LABELS = ['**Date:**', '**URL:**', '**Archetype:**', '**Score:**', '**Legitimacy:**', '**PDF:**'];
   const withOferta = readdirSync(join(ROOT, 'modes'), { withFileTypes: true })
