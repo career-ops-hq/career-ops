@@ -23,12 +23,12 @@
  *   3. POST /api/geo/{tenant}/jobposting/search with X-CSRF-TOKEN, paginating
  *      by the *returned* offset+count (never a hardcoded +25) until
  *      offset+count >= maxCount or a short/empty page comes back.
- *   4. Only for postings that already pass the title/location filter against
- *      the list-level jobDescription: GET the per-posting detail endpoint for
- *      the full JD text. This is an explicit design requirement from the
- *      issue (#3726), not an optimization — minimize load on the browser
- *      session by never fetching detail for a posting that would be filtered
- *      out anyway.
+ *   4. Only for postings that already pass all list-level title, location,
+ *      content, country-eligibility, and visa filters: GET the per-posting
+ *      detail endpoint for the full JD text. This is an explicit design
+ *      requirement from issue #3726, not an optimization — minimize load on
+ *      the browser session by never fetching detail for a posting that would
+ *      be filtered out anyway.
  *
  * Session hygiene: never persists cf_clearance/session cookies to disk —
  * each run launches a fresh browser context per tenant and closes it when
@@ -296,8 +296,10 @@ export function loadConfig(portalsPath = PORTALS_PATH) {
   }
 
   const rawBoards = Array.isArray(config.dayforce_boards) ? config.dayforce_boards : [];
+  const normalizedBoards = rawBoards.map(normalizeBoardEntry);
+  const invalidCount = normalizedBoards.filter(board => !board).length;
   const blacklist = loadBlacklist();
-  const validBoards = rawBoards.map(normalizeBoardEntry).filter(Boolean)
+  const validBoards = normalizedBoards.filter(Boolean)
     .filter(board => !blacklist.has(normalizeCompany(board.name)));
   const boards = validBoards.filter(b => !SINGLE_TENANT || b.tenant === SINGLE_TENANT);
   const filters = {
@@ -312,7 +314,7 @@ export function loadConfig(portalsPath = PORTALS_PATH) {
     matchedTitleKeywords: (title) => matchedTitleKeywords(title, config.title_filter),
   };
 
-  return { boards, invalidCount: rawBoards.length - validBoards.length, filters };
+  return { boards, invalidCount, filters };
 }
 
 // ── Fetch helpers (all run through page.request — same context, same cookies) ──
