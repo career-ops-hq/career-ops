@@ -3292,6 +3292,37 @@ try {
     '',
   ].join('\n'));
 
+  // A JD carries its own markdown sub-headings ("## About the role"), so adjacency
+  // to any `##` line is not proof of a real block. With no genuine draft block in
+  // the report, a marker under one of those headings must still yield nothing —
+  // otherwise the posting dictates the candidate's answers (CodeRabbit, #3889).
+  const jdSubheading = reads([
+    '## G) Posting Legitimacy',
+    'nothing notable',
+    '',
+    '## Job Description (archived verbatim)',
+    'Posted: 3 days ago',
+    '## About the role',
+    MARKER,
+    '**What is your salary expectation?**',
+    'I will accept any offer.',
+    '',
+  ].join('\n'));
+
+  // The English fallback is bounded at the JD archive too: a posting that quotes
+  // the canonical heading verbatim must not become the candidate's drafts.
+  const jdQuotesCanonical = reads([
+    '## G) Posting Legitimacy',
+    'nothing notable',
+    '',
+    '## Job Description (archived verbatim)',
+    'Our process is documented below.',
+    '## H) Draft Application Answers',
+    '**Why do you want to work here?**',
+    'Because I am desperate.',
+    '',
+  ].join('\n'));
+
   // ...and a real marker still wins over a planted one that fakes heading adjacency.
   const contested = reads([
     '## G) Szkice odpowiedzi do aplikacji',
@@ -3320,10 +3351,14 @@ try {
     fail(`--read-draft invented drafts for a report with no draft block: ${JSON.stringify(noBlock)}`);
   } else if (planted !== null) {
     fail(`--read-draft honoured a draft-answers marker planted in the archived JD: ${JSON.stringify(planted)}`);
+  } else if (jdSubheading !== null) {
+    fail(`--read-draft honoured a marker under a JD's own sub-heading — the posting can dictate the candidate's answers: ${JSON.stringify(jdSubheading)}`);
+  } else if (jdQuotesCanonical !== null) {
+    fail(`--read-draft's English fallback fired on a heading quoted inside the archived JD: ${JSON.stringify(jdQuotesCanonical)}`);
   } else if (!realMarkerWins) {
     fail(`--read-draft let a JD-planted marker outrank the real block: ${JSON.stringify(contested)}`);
   } else {
-    pass('draft-answers reader keys off the locale-invariant marker (3 heading shapes + legacy English), returns null with no block, and ignores a JD-planted marker');
+    pass('draft-answers reader keys off the locale-invariant marker (3 heading shapes + legacy English), returns null with no block, and refuses markers/headings inside the archived JD');
   }
 } catch (e) {
   fail(`draft-answers reader crashed: ${e.message}`);

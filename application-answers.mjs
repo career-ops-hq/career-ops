@@ -348,24 +348,59 @@ const DRAFT_ANSWERS_MARKER = /^<!--[ \t]*career-ops:draft-answers[ \t]*-->[ \t]*
 const CANONICAL_DRAFT_HEADING = /^##\s+H\)\s*Draft Application Answers\s*$/m;
 
 /**
- * Offset where the draft-answers body starts, or `null` when the report has no
- * such block. The first qualifying marker wins: the JD archive sits after the
- * block in the report format, so a marker planted in a posting cannot out-rank
- * the real one even if it managed to look heading-adjacent.
+ * The report's JD archive, which is where untrusted text lives.
  *
- * @param {string} report Report markdown, newlines already normalized.
- * @returns {number | null}
+ * Kept identical to `JD_HEADING_RE` in `check-jd-archive.mjs` (the canonical
+ * heading is `## Job Description (archived verbatim)`; the suffix is optional).
+ * Deliberately NOT imported from there: that module resolves the data root, the
+ * tracker path and the states file at import time, which is far too much to drag
+ * into a parser the apply flow calls. If one moves, move both.
+ */
+const JD_ARCHIVE_HEADING = /^##\s+Job Description\b.*$/im;
+
+/**
+ * A lettered report-section heading (`## G)`, `## H)`, ...). Every one of the 19
+ * evaluation modes numbers the draft-answers block this way, in every locale —
+ * the letters are not translated, only the names are — so requiring one costs
+ * nothing and is the same "is this a real report section?" test that
+ * `check-jd-archive.mjs`'s NEXT_REPORT_SECTION_RE already applies.
+ */
+const LETTERED_BLOCK_HEADING = /^##[ \t]+[A-Z]\)/;
+
+/**
+ * Offset where the draft-answers body starts, or `null` when the report has no
+ * such block.
+ *
+ * TWO barriers, because a report embeds the posting verbatim and that text is
+ * untrusted (AGENTS.md). Whatever comes back from here is adapted by
+ * `modes/apply.md` into a real submission, so a JD that can steer this function
+ * can put its own words in the candidate's mouth.
+ *
+ *   1. The search stops at the JD archive heading. Everything from there on is
+ *      the employer's text, not the evaluation's.
+ *   2. The marker must sit under a LETTERED block heading. Adjacency to any
+ *      `##` line is not enough: a pasted JD routinely carries its own markdown
+ *      sub-headings (`## Responsibilities`, `## About the role`) — the same
+ *      collision `check-jd-archive.mjs` documents from PR #2791 — and one of
+ *      those directly above a planted marker would otherwise clear the guard.
+ *
+ * The first qualifying marker wins, so even inside the searched region the real
+ * block outranks anything later. The English fallback is bounded the same way; a
+ * JD quoting the canonical heading verbatim must not trigger it either.
  */
 function findDraftAnswersBody(report) {
+  const jdArchive = JD_ARCHIVE_HEADING.exec(report);
+  const searchable = jdArchive ? report.slice(0, jdArchive.index) : report;
+
   const marker = new RegExp(DRAFT_ANSWERS_MARKER.source, 'gm');
-  for (let hit = marker.exec(report); hit; hit = marker.exec(report)) {
-    const preceding = report.slice(0, hit.index).split('\n');
+  for (let hit = marker.exec(searchable); hit; hit = marker.exec(searchable)) {
+    const preceding = searchable.slice(0, hit.index).split('\n');
     preceding.pop(); // the empty partial line the marker itself starts on
     let i = preceding.length - 1;
     while (i >= 0 && preceding[i].trim() === '') i -= 1;
-    if (i >= 0 && /^##[ \t]+\S/.test(preceding[i])) return hit.index + hit[0].length;
+    if (i >= 0 && LETTERED_BLOCK_HEADING.test(preceding[i])) return hit.index + hit[0].length;
   }
-  const heading = CANONICAL_DRAFT_HEADING.exec(report);
+  const heading = CANONICAL_DRAFT_HEADING.exec(searchable);
   return heading ? heading.index + heading[0].length : null;
 }
 
