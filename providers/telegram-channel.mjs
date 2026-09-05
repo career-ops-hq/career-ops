@@ -72,6 +72,20 @@ const ANONYMOUS_RE = /(?:название скрыто|компания скры
 const LOCATIONISH_RE = /\b(remote|удал[её]нк\w*|hybrid|onsite|office|офис|full[- ]?time|part[- ]?time|москва|спб|berlin|london|germany|europe|usa)\b/i;
 const DATE_LIKE_RE = /\b(19|20)\d{2}\b|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\b/i;
 const ZERO_WIDTH_RE = /[\u200B-\u200D\uFEFF]/g;
+// A line of nothing but hashtags ("#middle #удаленка") — never a title, and
+// on the channel template measured 2026-09-05 (@ai_rabota, @job_python since
+// their 2026-08-17 change) it precedes a bare employer name with no marker.
+const HASHTAG_LINE_RE = /^#\S+(?:\s+#\S+)*$/u;
+// Seniority/role vocabulary, matched with Unicode-aware lookarounds instead
+// of \b: JS word boundaries are ASCII-only ([A-Za-z0-9_]), so \b never fires
+// around Cyrillic letters and would silently never match разработчик/инженер.
+// Unlike the other four employerName() shapes, the hashtag-template line has
+// no marker at all pinning it to "employer", so a short role title ("Senior
+// Engineer", "Ведущий инженер") would otherwise pass every plausibleEmployer()
+// check a real employer name does. Measured live 2026-09-05: all 46
+// hashtag-first-line posts across two fetched pages of each channel still
+// resolve to an employer, none blocked by this list.
+const ROLE_WORD_RE = /(?<![\p{L}\p{N}])(senior|middle|junior|lead|principal|staff|head|chief|intern|trainee|engineer|developer|manager|analyst|designer|architect|specialist|consultant|director|recruiter|scientist|инженер|разработчик|менеджер|специалист|аналитик|директор|архитектор|рекрутер|стажер|стажёр)(?![\p{L}\p{N}])/iu;
 
 /** First non-empty line of a post, cut at a word boundary under TITLE_CAP. */
 function headline(lines) {
@@ -105,13 +119,22 @@ function plausibleEmployer(name, fromTitle) {
 /**
  * The employer a post names, or '' when it names none.
  *
- * Four shapes cover what public channels actually write (measured
- * 2026-09-03, 461 RU/CIS job posts): a labelled line (`Компания: Контур`,
+ * Five shapes cover what public channels actually write. Measured
+ * 2026-09-03 (461 RU/CIS job posts): a labelled line (`Компания: Контур`,
  * 117 posts), `Title @ Employer` (50, board-mirror channels), `Title | Employer`
  * (studio channels), and a second line opening `в Employer —` / `at Employer`
- * (35, junior boards). Nothing else is guessed: not the channel name, not the
- * link's host, not free text — a wrong employer on a row is worse than a
- * missing row.
+ * (35, junior boards). The fifth — a hashtag-only first line followed by the
+ * bare employer name on the next — is a template two HR-curated channels
+ * switched to on 2026-08-17; measured live 2026-09-05 on two fetched pages
+ * each, it recovers 4/40 posts on @ai_rabota and 11/40 on @job_python that
+ * the other four shapes could not attribute (0/40 on @jobforjunior, which
+ * never used this template). Unlike the first four, this shape has no
+ * marker pinning the candidate line to "employer" at all, so it also
+ * refuses one that reads as a role (`ROLE_WORD_RE`, e.g. "Senior Engineer") —
+ * every other shape is anchored by an explicit `Компания:`/`@`/`|`/`в` token
+ * and does not need that check. Nothing else is guessed: not the channel
+ * name, not the link's host, not free text — a wrong employer on a row is
+ * worse than a missing row.
  *
  * Exported for tests.
  *
@@ -128,6 +151,12 @@ export function employerName(lines) {
   if ((m = first.match(/^.{3,140}?\s+@\s+(.{2,60})$/))) return plausibleEmployer(m[1], true);
   if ((m = first.match(/^.{3,140}?\s+\|\s+([^|]{2,60})$/))) return plausibleEmployer(m[1], true);
   if ((m = second.match(/^(?:в|at)\s+([^—–,(]{2,60}?)\s*(?:[—–]|$)/u))) return plausibleEmployer(m[1], true);
+  // A hashtag-only first line carries no title, and this template puts the
+  // bare employer name alone on the next one, with no marker at all.
+  if (HASHTAG_LINE_RE.test(first) && second) {
+    const hashtagEmployer = plausibleEmployer(second, false);
+    if (hashtagEmployer && !ROLE_WORD_RE.test(hashtagEmployer)) return hashtagEmployer;
+  }
   return '';
 }
 
@@ -282,9 +311,27 @@ export function postToJob(post) {
   if (ANONYMOUS_RE.test(post.lines.slice(0, 3).join('\n'))) return null;
   const link = applicationLink(post.hrefs);
   if (!link) return null;
+  // post.title is lines[0], parsed before the policy runs. On the
+  // hashtag-first template that line is tags, not a title (employerName()
+  // above already skipped it to read the employer from the next line) — the
+  // real title is the first line after that which is neither more tags, the
+  // employer name just matched, nor a bare link (t.me autolinks a raw URL
+  // with the URL itself as the anchor's visible text, so a post with no
+  // third line at all leaves the link as post.lines[1]). When no such line
+  // exists the shape has no title to give, and falling back to post.title
+  // would emit the hashtag line itself as the title — the same
+  // wrong-field-is-worse-than-a-missing-row principle applicationLink() and
+  // employerName() already apply, so the post is dropped instead.
+  let title = post.title;
+  if (HASHTAG_LINE_RE.test(post.lines[0] || '')) {
+    const isLinkLine = (l) => post.hrefs.includes(l) || /^https?:\/\//i.test(l);
+    const better = post.lines.slice(1).find((l) => l !== company && !HASHTAG_LINE_RE.test(l) && !isLinkLine(l));
+    if (!better) return null;
+    title = headline([better]);
+  }
   const source = `\n\nSource: ${post.url}`;
   return {
-    title: post.title,
+    title,
     url: link.url,
     company,
     location: '',

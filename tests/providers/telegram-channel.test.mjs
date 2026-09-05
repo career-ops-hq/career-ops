@@ -39,13 +39,23 @@ const P_LINE2 = post(12506, '2026-08-28T10:00:00+00:00', `Junior Android Develop
 // The employer's own page beats the board mirror of the same vacancy, wherever it sits in the post.
 const P_PREFER = post(12505, '2026-08-27T10:00:00+00:00', `Senior Python Developer @ Ozon<br/>${A('https://getmatch.ru/vacancies/35075-senior-python')}<br/>Или напрямую: ${A('https://ozon.tech/vacancies/senior-python-7788')}`);
 const P_LINKEDIN_JOB = post(12504, '2026-08-26T10:00:00+00:00', `Junior QA Engineer<br/>в Playrix — игровая компания.<br/>${A('https://www.linkedin.com/jobs/view/4123456789/', 'LinkedIn')}`);
+// The template two HR-curated channels switched to on 2026-08-17: a
+// hashtag-only first line (never a title), the bare employer alone on the
+// next, the real title only on the third.
+const P_HASHTAG = post(12480, '2026-09-04T10:00:00+00:00', `#middle #удаленка<br/>Т1<br/>Data Science (LLM/NLP) Engineer<br/>${A('https://career.t1.ru/vacancies/vacancy-detail?id=136067001')}`);
+// Same template, but the employer name is itself the apply link (no third
+// line at all) — the shape must be dropped, not emit the hashtag line as title.
+const P_HASHTAG_NO_TITLE = post(12479, '2026-09-04T09:00:00+00:00', `#middle #удаленка<br/>${A('https://career.t1.ru/vacancies/vacancy-detail?id=136067001', 'Т1')}`);
+// Same template, but the third line is a bare pasted link — t.me autolinks a
+// raw URL with the URL itself as the anchor's visible text — not a title.
+const P_HASHTAG_BARE_LINK = post(12478, '2026-09-04T08:00:00+00:00', `#middle #удаленка<br/>Т1<br/>${A('https://career.t1.ru/vacancies/vacancy-detail?id=136067001')}`);
 // The shapes the policy drops.
 const P_NO_NAME = post(12503, '2026-08-25T10:00:00+00:00', `Ищем UE5 разработчика (кооп / прототип выживача)<br/>О проекте: делаем прототип.<br/>Писать: @hr_handle · ${A('https://ll-games.com/en/jobs/ue5')}`);
 const P_NO_LINK = post(12502, '2026-08-24T10:00:00+00:00', `🔵 Финансовый аналитик<br/>🏢 Компания: deeplay<br/>📍 Локация: Санкт-Петербург${FOOTER}`);
 const P_HOMEPAGE = post(12501, '2026-08-23T10:00:00+00:00', `Project Manager | Last Level<br/>Студия Last Level ищет PM.<br/>${A('https://ll-games.com/')}`);
 const P_FORM = post(12500, '2026-08-22T10:00:00+00:00', `Backend Developer | Acme Studio<br/>Анкета: ${A('https://forms.gle/xB6AMK2STtF6G9vG8')}`);
 const P_SHORTENER = post(12499, '2026-08-21T10:00:00+00:00', `Senior Magento Developer. #Grana<br/>Company: Grana<br/>${A('https://goo.gl/E5F9Zx', 'Apply')}`);
-const P_LINKEDIN_POST = post(12498, '2026-08-20T10:00:00+00:00', `Junior Android Developer<br/>в Kaspi — крупнейшая fintech-экосистема.<br/>Ищет Диана, ${A('https://www.linkedin.com/posts/diana-ebert-527604297_activity-7123', 'её пост на LinkedIn')}`);
+const P_LINKEDIN_POST = post(12498, '2026-08-20T10:00:00+00:00', `Junior Android Developer<br/>в Kaspi — крупнейшая fintech-экосистема.<br/>Ищет Мария, ${A('https://www.linkedin.com/posts/example-user-000000000_activity-1', 'её пост на LinkedIn')}`);
 const P_ANON = post(12497, '2026-08-19T10:00:00+00:00', `Senior AI/ML Engineer (LLM Agents) [Remote] @ Название скрыто<br/>${A('https://getmatch.ru/vacancies/35099-senior-ai-ml')}`);
 const P_AGENCY = post(12496, '2026-08-18T10:00:00+00:00', `Senior CV Engineer / Team Lead<br/>Компания: Наш клиент<br/>Мы ищем специалиста в IT-компанию, которая занимается аналитикой.<br/>${A('https://spectral.tech/careers/cv-lead')}`);
 const P_DIGEST = post(12495, '2026-08-17T10:00:00+00:00', `💼 Еженедельная подборка вакансий<br/>Компания: Geeklink<br/>${A('https://geeklink.io/job/artfrost-full-stack-game-developer')}<br/>${A('https://geeklink.io/job/hr-experts-senior-lead-backend')}<br/>${A('https://geeklink.io/job/kvando-senior-python')}`);
@@ -121,6 +131,8 @@ try {
     [['Junior QA', 'at Picnic — groceries'], 'Picnic', 'a second line "at Employer —"'],
     [['Python Developer', 'Company: X5 Tech', 'more'], 'X5 Tech', 'a labelled field may carry digits'],
     [['Engineering Manager @ Constructor‍.io'], 'Constructor.io', 'zero-width characters are stripped from the name'],
+    [['#middle #удаленка', 'Т1', 'Data Science (LLM/NLP)'], 'Т1', 'a hashtag-only first line, bare employer alone on the next (measured live 2026-09-05)'],
+    [['#senior #гибрид #москва', 'X5 Медиа', 'Ведущий backend-разработчик'], 'X5 Медиа', 'a hashtag-only first line, employer name carrying a digit'],
   ];
   for (const [lines, want, label] of names) {
     const got = employerName(lines);
@@ -135,6 +147,10 @@ try {
     [['#senior #удаленка #москва', 'Компания: HFT-фонде.'], 'a label whose value is not a name (ends with a period)'],
     [['Роль', 'Компания: Наш клиент'], 'an agency\'s "our client"'],
     [['Backend Engineer | Remote'], 'a contract word after the pipe'],
+    [['#senior #офис', 'Backend Developer Senior (Python / Scraping Product)'], 'a hashtag-only first line whose next line is a title, not an employer (too many words)'],
+    [['#senior #удаленка', 'Senior Engineer'], 'a hashtag-only first line whose next line is a short role title, not an employer'],
+    [['#middle #гибрид', 'Ведущий инженер'], 'a hashtag-only first line whose next line is a short Russian role title (JS \\b never matches around Cyrillic)'],
+    [['#tag1 #tag2'], 'a hashtag-only first line with no second line at all'],
   ];
   for (const [lines, label] of noNames) {
     const got = employerName(lines);
@@ -150,10 +166,10 @@ try {
     ['https://getmatch.ru/vacancies/33927-data-engineer?s=bot', 'board', 'a board\'s per-vacancy page'],
     ['https://www.linkedin.com/jobs/view/4123456789/', 'board', 'a LinkedIn job page'],
     ['https://getmatch.ru/companies/PLln3LRJ-ostrovok', null, 'a board\'s company page'],
-    ['https://www.linkedin.com/posts/diana-ebert-527604297_activity-7123', null, 'a LinkedIn post'],
+    ['https://www.linkedin.com/posts/example-user-000000000_activity-1', null, 'a LinkedIn post'],
     ['https://acme.example/blog/2024/company-update', null, 'a dated blog post (a bare year segment is not a vacancy id)'],
     ['https://acme.example/news/2025', null, 'a year-only news archive'],
-    ['https://acme.example/careers-4554989/', 'employer', 'a five-digit slug id still qualifies'],
+    ['https://acme.example/role-4554989/', 'employer', 'a numeric-id slug qualifies with no vacancy keyword in the path'],
     ['https://ll-games.com/', null, 'a homepage'],
     ['https://ll-games.com/?utm_source=telegram&utm_medium=post', null, 'a homepage with a tracking tail'],
     ['https://ll-games.com/jobs', null, 'a listing root with no vacancy'],
@@ -222,6 +238,30 @@ try {
   const leaked = dropped.filter(([, j]) => j !== null);
   if (dropped.length === 10 && leaked.length === 0) pass('no employer, no link, homepage, form, shortener, LinkedIn post, hidden employer, agency, digest and date-title posts are all dropped');
   else fail(`leaked through the policy: ${JSON.stringify(leaked.map(([id, j]) => [id, j.company, j.url]))}`);
+
+  // A hashtag-only first line must not become the title, even though
+  // parseChannelPage() already set post.title = headline(lines) = lines[0]
+  // before the policy ever runs.
+  const hashtagJob = postToJob(parseChannelPage(page(P_HASHTAG), 'devjobs').posts[0]);
+  if (hashtagJob && hashtagJob.company === 'Т1' && hashtagJob.title === 'Data Science (LLM/NLP) Engineer' && hashtagJob.url === 'https://career.t1.ru/vacancies/vacancy-detail?id=136067001') {
+    pass('a hashtag-only first line is skipped for both the employer and the title; the title is the first substantive line after the employer');
+  } else {
+    fail(`hashtag-template job = ${JSON.stringify(hashtagJob)}`);
+  }
+
+  // A hashtag-first post with no title line at all (the employer name is
+  // itself the apply link) must be dropped, not emit the hashtag line as
+  // `title` — that would just be post.title, untouched by the shape's guard.
+  const hashtagNoTitleJob = postToJob(parseChannelPage(page(P_HASHTAG_NO_TITLE), 'devjobs').posts[0]);
+  if (hashtagNoTitleJob === null) pass('a hashtag-first post with no distinct title line is dropped rather than emitting the hashtag line as title');
+  else fail(`hashtag post with no title line = ${JSON.stringify(hashtagNoTitleJob)}`);
+
+  // A hashtag-first post whose only candidate line is a bare pasted link
+  // (t.me autolinks a raw URL with the URL as its own visible text) must
+  // also be dropped, not emit the vacancy URL itself as `title`.
+  const hashtagBareLinkJob = postToJob(parseChannelPage(page(P_HASHTAG_BARE_LINK), 'devjobs').posts[0]);
+  if (hashtagBareLinkJob === null) pass('a hashtag-first post whose only remaining line is the bare vacancy URL is dropped rather than emitting the URL as title');
+  else fail(`hashtag post with bare-link-only line = ${JSON.stringify(hashtagBareLinkJob)}`);
 
   // --- fetch: redirect guard, mapping, paging ------------------------------
   const calls = [];

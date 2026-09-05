@@ -1281,9 +1281,9 @@ search_queries:
 #   careers_url: https://solid.jobs/public-api/offers/engineering
 #   enabled: true
 #
-# - name: Telegram @ai_rabota             # public Telegram channel, read via its t.me/s/ web preview
+# - name: Telegram @jobforjunior          # public Telegram channel, read via its t.me/s/ web preview
 #   provider: telegram-channel            # no detect() — only reachable via provider:
-#   channel: ai_rabota    # handle without the @ (5-32 letters, digits, underscores)
+#   channel: jobforjunior # handle without the @ (5-32 letters, digits, underscores)
 #   since_days: 30        # optional window; pages are walked back until it (default 30)
 #   max_pages: 10         # optional page cap (20 posts/page, default 10, max 10)
 #   enabled: true
@@ -2454,12 +2454,12 @@ job_boards:
   # link. Measured 2026-09-03: HR-curated channels pass 32-77% of posts,
   # community channels of free-text posts pass almost none.
 
-  - name: "Telegram @ai_rabota"
+  - name: "Telegram @jobforjunior"
     provider: telegram-channel
-    channel: ai_rabota        # handle without the @
+    channel: jobforjunior     # handle without the @
     since_days: 14
     enabled: false
-    notes: "AI/ML jobs (RU), posts carry 'Компания:' + the employer's ATS link; ~40% pass the employer+link gate. title_filter runs on each post's FIRST LINE; content_filter only narrows that set."
+    notes: "Junior/entry RU tech roles, posts carry 'Компания:' + a geekjob.ru/ATS link; 21 jobs emitted at this 14-day window (35% of 60 posts read), measured live 2026-09-05. title_filter runs on each post's FIRST LINE; content_filter only narrows that set."
 
   # ── SolidJobs (Polish market) ──────────────────────────────────────
   # Public API — no auth needed. Division in URL path, campaign=career-ops for tracking.
