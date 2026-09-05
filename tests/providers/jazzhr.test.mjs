@@ -13,7 +13,15 @@ try {
   if (provider.detect({ name: 'Example', careers_url: bareHost })?.url === bareHost) pass('detects bare-host *.applytojob.com board'); else fail('bare-host detect failed');
   const bareHostNoSlash = 'https://exampleco.applytojob.com';
   if (provider.detect({ name: 'Example', careers_url: bareHostNoSlash })?.url === `${bareHostNoSlash}/`) pass('detects bare-host board with no trailing slash'); else fail('bare-host-no-slash detect failed');
-  for (const bad of ['http://exampleco.applytojob.com/apply', 'https://evil.example/apply', 'https://exampleco.applytojob.com/login', null, 7]) {
+  for (const bad of [
+    'http://exampleco.applytojob.com/apply',
+    'https://evil.example/apply',
+    'https://exampleco.applytojob.com/login',
+    'https://x.applytojob.com.evil.com/apply', // suffix-host bypass
+    'https://x.applytojob.com@evil/apply', // userinfo-host bypass
+    null,
+    7,
+  ]) {
     if (provider.detect({ name: 'X', careers_url: bad }) === null) pass(`rejects ${String(bad)}`); else fail(`accepted ${String(bad)}`);
   }
   // Regression: detect(null) (and other missing/malformed entry shapes) must
