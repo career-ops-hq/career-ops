@@ -1100,7 +1100,8 @@ export async function loadConfiguredTemplateVariants({ profilePath } = {}) {
  * @param {string[]} remoteFiles - repo-relative files present in upstream.
  * @param {{cv?: string, cover?: string}} configuredVariants - active defaults.
  * @param {Record<string, string>} localContents - local file contents.
- * @param {Record<string, string>} remoteContents - upstream file contents.
+ * @param {Record<string, string>} remoteContents - upstream file contents;
+ *   a missing entry is treated as unsafe to overwrite.
  * @returns {string[]} configured variant paths to exclude from checkout.
  */
 export function configuredTemplateVariantPathsToPreserve(
@@ -1116,8 +1117,8 @@ export function configuredTemplateVariantPathsToPreserve(
     .filter((file) => isUserConfiguredTemplateVariant(file, configuredVariants))
     .filter((file) => remote.has(file))
     .filter((file) => Object.prototype.hasOwnProperty.call(localContents, file))
-    .filter((file) => Object.prototype.hasOwnProperty.call(remoteContents, file))
-    .filter((file) => normalizeContent(localContents[file]) !== normalizeContent(remoteContents[file]))
+    .filter((file) => !Object.prototype.hasOwnProperty.call(remoteContents, file)
+      || normalizeContent(localContents[file]) !== normalizeContent(remoteContents[file]))
     .sort();
 }
 
@@ -1160,7 +1161,8 @@ export async function snapshotConfiguredTemplateVariants({
       const content = readRemoteContent(file);
       if (content !== null && content !== undefined) remoteContents[file] = content;
     } catch {
-      // An unreadable blob is not safe to compare, so leave it to checkout.
+      // An unreadable blob is unsafe to overwrite. Its missing remoteContents
+      // entry makes configuredTemplateVariantPathsToPreserve() fail closed.
     }
   }
   return {
