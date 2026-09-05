@@ -30,15 +30,16 @@
  * independent exemption instead of relying on the preservedPaths detour.
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { pass, fail, ROOT } from './helpers.mjs';
+import { pass, fail } from './helpers.mjs';
 import {
   staleSystemFiles,
   isUserConfiguredTemplateVariant,
   configuredTemplateVariantPathsToPreserve,
   loadConfiguredTemplateVariants,
+  snapshotConfiguredTemplateVariants,
 } from '../update-system.mjs';
 
 console.log('\n🧪 Testing user-configured template-variant carve-out...');
@@ -85,15 +86,18 @@ console.log('\n🧪 Testing user-configured template-variant carve-out...');
   }
 }
 
-// ── 4. Exercise the same lazy-import wiring that apply() uses ─────────────
-// A pure staleSystemFiles() test cannot catch a renamed/missing cv-templates.mjs
-// export if apply()'s broad compatibility catch swallows the import failure.
-// Use a fixture profile through the helper's explicit path, then pin that
-// apply() calls the helper and passes its result into the prune call.
+// ── 4. Exercise the same data-root snapshot that apply() uses ─────────────
+// Use a temporary user data root and an upstream same-name/different-content
+// blob. This verifies the runtime path reaches checkout preservation without
+// relying on source-text regular expressions.
 {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-configured-variant-'));
   const profile = join(dir, 'profile.yml');
   writeFileSync(profile, 'cv:\n  template: BW\ncover_letter:\n  template: Concise\n');
+  mkdirSync(join(dir, 'config'), { recursive: true });
+  writeFileSync(join(dir, 'config', 'profile.yml'), readFileSync(profile, 'utf8'));
+  mkdirSync(join(dir, 'templates'), { recursive: true });
+  writeFileSync(join(dir, 'templates', 'cv-template.bw.html'), '<h1>user variant</h1>\n');
   try {
     const configured = await loadConfiguredTemplateVariants({ profilePath: profile });
     if (configured.cv === 'bw' && configured.cover === 'concise') {
@@ -101,12 +105,16 @@ console.log('\n🧪 Testing user-configured template-variant carve-out...');
     } else {
       fail(`lazy wiring returned ${JSON.stringify(configured)}`);
     }
-    const source = readFileSync(join(ROOT, 'update-system.mjs'), 'utf8');
-    const callsHelper = /const configuredTemplateVariants = await loadConfiguredTemplateVariants\(\{[\s\S]*profilePath: join\(dataRoot, 'config', 'profile\.yml'\)/.test(source);
-    const readsThroughDataRoot = /readFileSync\(join\(dataRoot, \.\.\.file\.split\('\/'\)\)/.test(source);
-    const passesToPrune = /staleSystemFiles\([\s\S]*configuredTemplateVariants/.test(source);
-    if (callsHelper && readsThroughDataRoot && passesToPrune) pass('apply() resolves configured variants and reads them through the data root');
-    else fail('apply() lazy variant wiring is missing or disconnected from staleSystemFiles()');
+    const snapshot = await snapshotConfiguredTemplateVariants({
+      dataRoot: dir,
+      remoteFiles: ['templates/cv-template.bw.html'],
+      readRemoteContent: () => '<h1>upstream variant</h1>\n',
+    });
+    if (snapshot.preservedPaths.length === 1 && snapshot.preservedPaths[0] === 'templates/cv-template.bw.html') {
+      pass('apply snapshot reads the configured variant from the temporary data root and preserves it before checkout');
+    } else {
+      fail(`apply snapshot did not preserve the data-root variant: ${JSON.stringify(snapshot.preservedPaths)}`);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

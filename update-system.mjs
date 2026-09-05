@@ -1069,6 +1069,59 @@ export function configuredTemplateVariantPathsToPreserve(
     .sort();
 }
 
+/**
+ * Snapshot configured variant files from the user data root before checkout.
+ * The callback keeps Git access in apply() while making the data-root read
+ * directly testable without mutating the real repository.
+ *
+ * @param {{dataRoot?: string, remoteFiles?: string[], readRemoteContent?: (path: string) => string}} options
+ * @returns {Promise<{configuredVariants: object, localFiles: string[], localContents: object, remoteContents: object, preservedPaths: string[]}>}
+ */
+export async function snapshotConfiguredTemplateVariants({
+  dataRoot = ROOT,
+  remoteFiles = [],
+  readRemoteContent = () => null,
+} = {}) {
+  const configuredVariants = await loadConfiguredTemplateVariants({
+    profilePath: join(dataRoot, 'config', 'profile.yml'),
+  });
+  const configuredVariantPaths = [];
+  for (const [kind, name] of Object.entries(configuredVariants)) {
+    const prefix = kind === 'cv' ? 'cv-template' : 'cover-letter-template';
+    for (const extension of ['html', 'tex']) {
+      configuredVariantPaths.push(`templates/${prefix}.${name}.${extension}`);
+    }
+  }
+  const localContents = {};
+  const remoteContents = {};
+  const localFiles = configuredVariantPaths.filter((file) => {
+    try {
+      localContents[file] = readFileSync(join(dataRoot, ...file.split('/')), 'utf8');
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  for (const file of localFiles) {
+    if (!remoteFiles.includes(file)) continue;
+    try {
+      const content = readRemoteContent(file);
+      if (content !== null && content !== undefined) remoteContents[file] = content;
+    } catch {
+      // An unreadable blob is not safe to compare, so leave it to checkout.
+    }
+  }
+  return {
+    configuredVariants,
+    localFiles,
+    localContents,
+    remoteContents,
+    preservedPaths: configuredTemplateVariantPathsToPreserve(
+      localFiles, remoteFiles, configuredVariants, localContents, remoteContents,
+    ),
+  };
+}
+
 export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths = USER_PATHS, configuredVariants = {}) {
   const remote = new Set([...remoteFiles].map(normalizeRepoPath));
   if (remote.size === 0) return [];
@@ -2335,16 +2388,6 @@ async function apply() {
       // Very old targets may not have path-resolver.mjs yet; ROOT is the
       // historical data root and remains the safe compatibility fallback.
     }
-    const configuredTemplateVariants = await loadConfiguredTemplateVariants({
-      profilePath: join(dataRoot, 'config', 'profile.yml'),
-    });
-    const configuredVariantPaths = [];
-    for (const [kind, name] of Object.entries(configuredTemplateVariants)) {
-      const prefix = kind === 'cv' ? 'cv-template' : 'cover-letter-template';
-      for (const extension of ['html', 'tex']) {
-        configuredVariantPaths.push(`templates/${prefix}.${name}.${extension}`);
-      }
-    }
     let configuredVariantRemoteFiles = [];
     try {
       configuredVariantRemoteFiles = git('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', 'templates')
@@ -2353,31 +2396,13 @@ async function apply() {
       // If the upstream tree cannot be read, the checkout below reports the
       // real failure; do not infer a preservation decision from an empty tree.
     }
-    const configuredVariantLocalContents = {};
-    const configuredVariantRemoteContents = {};
-    const configuredVariantLocalFiles = configuredVariantPaths.filter((file) => {
-      try {
-        configuredVariantLocalContents[file] = readFileSync(join(dataRoot, ...file.split('/')), 'utf8');
-        return true;
-      } catch {
-        return false;
-      }
+    const configuredSnapshot = await snapshotConfiguredTemplateVariants({
+      dataRoot,
+      remoteFiles: configuredVariantRemoteFiles,
+      readRemoteContent: (file) => gitShowRaw(`FETCH_HEAD:${file}`),
     });
-    for (const file of configuredVariantLocalFiles) {
-      if (!configuredVariantRemoteFiles.includes(file)) continue;
-      try {
-        configuredVariantRemoteContents[file] = gitShowRaw(`FETCH_HEAD:${file}`);
-      } catch {
-        // An unreadable blob is not safe to compare, so leave it to checkout.
-      }
-    }
-    const configuredAtRisk = configuredTemplateVariantPathsToPreserve(
-      configuredVariantLocalFiles,
-      configuredVariantRemoteFiles,
-      configuredTemplateVariants,
-      configuredVariantLocalContents,
-      configuredVariantRemoteContents,
-    );
+    const { configuredTemplateVariants } = configuredSnapshot;
+    const configuredAtRisk = configuredSnapshot.preservedPaths;
     if (configuredAtRisk.length > 0) {
       preservedPaths.push(...configuredAtRisk.filter((file) => !preservedPaths.includes(file)));
       console.log(`Keeping configured template variant(s) with local content: ${configuredAtRisk.join(', ')}`);
