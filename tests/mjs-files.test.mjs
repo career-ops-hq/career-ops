@@ -23,13 +23,59 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { collectMjsFiles, isNestedCheckout, SKIP_DIRS } from '../lib/mjs-files.mjs';
+import { collectMjsFiles, isNestedCheckout, trackedFiles, SKIP_DIRS } from '../lib/mjs-files.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+
+/**
+ * A throwaway repository, and a `git` bound to it.
+ *
+ * `-C dir` rather than `cwd`, so nothing here depends on the process working
+ * directory. The three configs are not decoration: `user.*` because `commit`
+ * refuses without them on a machine that has no global identity, and
+ * `commit.gpgsign=false` because a contributor whose global config signs every
+ * commit would otherwise have these fixtures block on a passphrase prompt.
+ *
+ * @param {string} prefix - mkdtemp prefix.
+ * @returns {{dir: string, git: (...args: string[]) => string}} The repo.
+ */
+function gitRepo(prefix) {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  const git = (...args) => execFileSync('git', ['-C', dir, ...args], {
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  git('init', '-q', '-b', 'trunk');
+  git('config', 'user.email', 'fixture@example.invalid');
+  git('config', 'user.name', 'Fixture');
+  git('config', 'commit.gpgsign', 'false');
+  return { dir, git };
+}
+
+/** Repo-relative POSIX paths, so an assertion reads the same on every OS. */
+const relPaths = (files, dir) => files.map((f) => f.slice(dir.length + 1).replace(/\\/g, '/'));
+
+/**
+ * Run `body` with console.warn captured.
+ *
+ * @param {() => T} body - The call under test.
+ * @returns {{value: T, warnings: string[]}} Its return value and what it warned.
+ * @template T
+ */
+function capturingWarnings(body) {
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  try {
+    return { value: body(), warnings };
+  } finally {
+    console.warn = original;
+  }
+}
 
 test('collectMjsFiles recurses, filters, skips and sorts', () => {
   const dir = mkdtempSync(join(tmpdir(), 'co-mjs-files-'));
@@ -160,6 +206,198 @@ test('isNestedCheckout detects the marker, of either type, and nothing else', ()
     assert.equal(isNestedCheckout(join(dir, 'does-not-exist')), false, 'a missing directory is not a checkout');
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── trackedFiles: the guards' enumerator ────────────────────────────────────
+
+test('trackedFiles lists what git tracks, and nothing else', () => {
+  const { dir, git } = gitRepo('co-tracked-');
+  try {
+    mkdirSync(join(dir, 'nested', 'deep'), { recursive: true });
+    mkdirSync(join(dir, 'node_modules'), { recursive: true });
+    writeFileSync(join(dir, '.gitignore'), 'node_modules/\ngenerated.mjs\n');
+    writeFileSync(join(dir, 'zz-root.mjs'), '');
+    writeFileSync(join(dir, 'nested', 'deep', 'leaf.mjs'), '');
+    writeFileSync(join(dir, 'nested', 'notes.md'), '');
+    git('add', '-A');
+
+    // The three kinds of file a hand-maintained skip-list gets wrong, all
+    // present at once: vendored code it has to remember to exclude, generated
+    // output it has to remember to exclude, and a brand-new working file that
+    // is not part of the repository yet. The index already knows which is
+    // which, so none of them needs a rule here.
+    writeFileSync(join(dir, 'node_modules', 'dep.mjs'), '');
+    writeFileSync(join(dir, 'generated.mjs'), '');
+    writeFileSync(join(dir, 'scratch.mjs'), '');
+
+    const rel = relPaths(trackedFiles(dir), dir);
+
+    assert.deepEqual(rel, ['.gitignore', 'nested/deep/leaf.mjs', 'nested/notes.md', 'zz-root.mjs'],
+      `only tracked paths, sorted, at any depth — got: ${rel.join(', ')}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('trackedFiles applies the caller filter to the repo-relative path', () => {
+  const { dir, git } = gitRepo('co-tracked-filter-');
+  try {
+    mkdirSync(join(dir, 'templates'), { recursive: true });
+    writeFileSync(join(dir, 'templates', 'cv.html'), '');
+    writeFileSync(join(dir, 'root.mjs'), '');
+    writeFileSync(join(dir, 'root.test.mjs'), '');
+    git('add', '-A');
+
+    // POSIX separators in the filter argument on every platform: `ls-files`
+    // emits forward slashes even on Windows, and a caller scoping to a subtree
+    // writes `startsWith('templates/')` exactly once rather than per-OS.
+    assert.deepEqual(relPaths(trackedFiles(dir, (rel) => rel.startsWith('templates/')), dir),
+      ['templates/cv.html']);
+    assert.deepEqual(
+      relPaths(trackedFiles(dir, (rel) => rel.endsWith('.mjs') && !rel.endsWith('.test.mjs')), dir),
+      ['root.mjs'],
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('trackedFiles skips a path the index lists but the tree does not have, and says so', () => {
+  // A REAL unresolved merge, not a simulated one. `git ls-files` reports the
+  // index, and mid-merge the index holds stages for a path the working tree may
+  // not have — here because the deletion is the resolution being accepted and
+  // has not been staged yet. That is an ordinary Tuesday, not a corrupt repo,
+  // and a guard that throws ENOENT during conflict resolution is a guard people
+  // learn to skip (#3890).
+  const { dir, git } = gitRepo('co-tracked-unmerged-');
+  try {
+    writeFileSync(join(dir, 'keep.mjs'), 'const keep = 1;\n');
+    writeFileSync(join(dir, 'doomed.mjs'), 'const a = 1;\n');
+    git('add', '-A');
+    git('commit', '-qm', 'base');
+
+    git('checkout', '-q', '-b', 'deleting');
+    git('rm', '-q', 'doomed.mjs');
+    git('commit', '-qm', 'delete it');
+
+    git('checkout', '-q', 'trunk');
+    writeFileSync(join(dir, 'doomed.mjs'), 'const a = 2;\n');
+    git('commit', '-qam', 'change it');
+
+    git('checkout', '-q', 'deleting');
+    // Exits non-zero on the conflict it is here to create.
+    assert.throws(() => git('merge', 'trunk'), /./, 'the fixture must actually conflict');
+    unlinkSync(join(dir, 'doomed.mjs'));   // accept the deletion, do not stage it
+
+    const status = git('status', '--porcelain');
+    assert.match(status, /^DU doomed\.mjs$/m, `fixture is not in the DU state: ${status}`);
+
+    const { value: files, warnings } = capturingWarnings(() => trackedFiles(dir));
+
+    // The crash this exists to prevent, asserted where it actually happened:
+    // every path handed back can be opened.
+    for (const file of files) readFileSync(file);
+
+    assert.deepEqual(relPaths(files, dir), ['keep.mjs'],
+      'the listed-but-absent path must be skipped, and the rest of the scan must survive it');
+    assert.equal(warnings.length, 1, `expected exactly one warning, got: ${JSON.stringify(warnings)}`);
+    assert.match(warnings[0], /doomed\.mjs/, 'the warning must name the path that was skipped');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('trackedFiles returns an unmerged path once, not once per index stage', () => {
+  // `git ls-files` prints one line per stage, so a conflicted path arrives two
+  // or three times. Left as-is, every offender inside one would be reported
+  // twice and every per-file count would be wrong for the duration of a merge.
+  const { dir, git } = gitRepo('co-tracked-stages-');
+  try {
+    writeFileSync(join(dir, 'both.mjs'), 'const a = 0;\n');
+    git('add', '-A');
+    git('commit', '-qm', 'base');
+
+    git('checkout', '-q', '-b', 'theirs');
+    writeFileSync(join(dir, 'both.mjs'), 'const a = 2;\n');
+    git('commit', '-qam', 'theirs');
+
+    git('checkout', '-q', 'trunk');
+    writeFileSync(join(dir, 'both.mjs'), 'const a = 1;\n');
+    git('commit', '-qam', 'ours');
+    assert.throws(() => git('merge', 'theirs'), /./, 'the fixture must actually conflict');
+
+    // The fixture is only meaningful while git really is listing it repeatedly.
+    const listed = git('ls-files').trim().split('\n').filter((l) => l === 'both.mjs');
+    assert.ok(listed.length > 1, `ls-files listed the unmerged path ${listed.length} time(s)`);
+
+    assert.deepEqual(relPaths(trackedFiles(dir), dir), ['both.mjs']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('trackedFiles throws rather than reporting an empty, passing scan', () => {
+  // Same stance as collectMjsFiles above and validate-system-paths-coverage.mjs:
+  // a guard that could not look must never read as a guard that passed. The
+  // realistic way to get here is running from a temp copy inside the repo,
+  // where `ls-files` reports nothing at all — which is how the SYSTEM_PATHS
+  // coverage guard sat green and inert in CI for its whole life.
+  const empty = gitRepo('co-tracked-empty-');
+  try {
+    writeFileSync(join(empty.dir, 'untracked.mjs'), '');
+    assert.throws(() => trackedFiles(empty.dir), /no tracked files|tracked nothing|listed no/i);
+  } finally {
+    rmSync(empty.dir, { recursive: true, force: true });
+  }
+
+  const notARepo = mkdtempSync(join(tmpdir(), 'co-tracked-norepo-'));
+  try {
+    // And a failing `git` must propagate as a failure, not as "nothing tracked".
+    assert.throws(() => trackedFiles(notARepo));
+  } finally {
+    rmSync(notARepo, { recursive: true, force: true });
+  }
+});
+
+test('trackedFiles enumerates this repository, and reaches past its root', () => {
+  const rel = relPaths(trackedFiles(ROOT, (f) => f.endsWith('.mjs')), ROOT);
+  const rootOnly = rel.filter((f) => !f.includes('/'));
+
+  assert.ok(rel.length > rootOnly.length * 2,
+    `the guards must cover far more than the root: ${rel.length} total vs ${rootOnly.length} at root`);
+  assert.ok(rel.includes('lib/mjs-files.mjs'), 'the module under test must be inside its own enumeration');
+  assert.ok(rel.some((f) => f.startsWith('tests/')), 'tests/ must be enumerated');
+  assert.ok(!rel.some((f) => f.startsWith('node_modules/')), 'vendored code is never tracked, so never enumerated');
+});
+
+test('every repo-scanning guard enumerates through the shared definition', () => {
+  // The four that did not, and carried #3419's defect the whole time: a private
+  // walk with a hand-maintained skip-list, silently narrowing whenever a file
+  // moved or a directory was forgotten (#3890).
+  //
+  // The IMPORT is the assertion, for the same reason as the predicate check
+  // below: matching `trackedFiles(` anywhere is satisfied by a local
+  // re-implementation wearing the shared name.
+  for (const caller of [
+    'tests/main-guard-convention.test.mjs',
+    'tests/local-today-gates.test.mjs',
+    'tests/mojibake-canary.test.mjs',
+    'tests/helpers.mjs',
+  ]) {
+    const src = readFileSync(join(ROOT, caller), 'utf-8');
+    assert.match(
+      src,
+      /import\s*\{[^}]*\btrackedFiles\b[^}]*\}\s*from\s*'\.{1,2}\/lib\/mjs-files\.mjs'/,
+      `${caller} must enumerate through lib/mjs-files.mjs, not its own walk (#3890)`,
+    );
+    assert.match(src, /trackedFiles\(/, `${caller} must actually call trackedFiles (#3890)`);
+
+    // ...and must not have kept a walk beside it. A readdir here is how a
+    // second definition of "every file" gets back in, which is the whole
+    // reason this module exists.
+    assert.doesNotMatch(src, /readdirSync\s*\(/,
+      `${caller} still walks a directory to build its own file list (#3890)`);
   }
 });
 
