@@ -897,8 +897,11 @@ function mergeOne(tsv, name = '2-globex.tsv') {
   const globex = (rows.find(l => l.includes('Globex')) || '').split('|').map(s => s.trim());
   const initech = (rows.find(l => l.includes('Initech')) || '').split('|').map(s => s.trim());
   // cells: ['', num, date, company, via, role, location, score, status, pdf, report, notes, url, '']
-  if (merge.code === 0 && globex[4] === 'Hays' && globex[6] === 'Singapore' && globex[7] === '4.5/5' && globex[8] === 'Applied' && globex[12] === 'https://example.com/jobs/2') {
-    pass('headed addition fills Via / Location / URL by name');
+  // The TSV's url field stays a RAW URL (that boundary is the whole reason the
+  // first-party web, which writes these TSVs, needed no change for #3516); the
+  // tracker cell it lands in is written as a markdown link.
+  if (merge.code === 0 && globex[4] === 'Hays' && globex[6] === 'Singapore' && globex[7] === '4.5/5' && globex[8] === 'Applied' && globex[12] === '[example.com](https://example.com/jobs/2)') {
+    pass('headed addition fills Via / Location / URL by name, URL rendered as a markdown link');
   } else {
     fail(`headed optional columns — row: ${globex.join(' | ')}\n${merge.stdout}`);
   }
@@ -1488,6 +1491,410 @@ Last reviewed 2026-09-01.
     pass('tracker.mjs export: CRLF line endings are not rewritten to LF');
   } else {
     fail(`tracker.mjs export: CRLF round-trip — got ${JSON.stringify(exported.stdout)}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── #3516: the URL cell is a markdown link, and BOTH forms key the same ──
+//
+// The dangerous half of this change is invisible: `normalizeUrl` returns '' for
+// a markdown-wrapped cell, and '' means "this row has no URL", so a reader that
+// never learned the link form does not fail — it silently drops the row out of
+// merge-tracker's exact-URL dedup tier and into fuzzy company+role matching,
+// where two distinct postings at one employer merge into one row. These tests
+// pin the key parity first and the rendering second.
+{
+  const { normalizeUrl } = await import('./url-key.mjs');
+  const { extractCellUrl, resolveColumns, parseTrackerRow } = await import('./tracker-parse.mjs');
+
+  const HREF = 'https://jobs.ashbyhq.com/temporal/8a65908d';
+  const parity = [
+    ['ATS label', `[ashby](${HREF})`],
+    ['host label', `[jobs.ashbyhq.com](${HREF})`],
+    ['angle-bracketed destination', `[ashby](<${HREF}>)`],
+    ['label containing brackets-free punctuation', `[ashby · temporal](${HREF})`],
+  ];
+  const mismatched = parity.filter(([, cellText]) =>
+    normalizeUrl(extractCellUrl(cellText)) !== normalizeUrl(HREF) || normalizeUrl(HREF) === '');
+  if (mismatched.length === 0) {
+    pass('#3516: a linked URL cell and a bare one produce the same normalizeUrl key');
+  } else {
+    fail(`#3516 key parity broken for: ${mismatched.map(([n]) => n).join(', ')}`);
+  }
+
+  // A URL with balanced parentheses is the case a `\(([^)]+)\)` extraction gets
+  // wrong, and getting it wrong is worse than not extracting at all: the
+  // truncated href still parses, so it becomes a WRONG key rather than none.
+  const paren = 'https://example.com/jobs/eng(remote)';
+  if (extractCellUrl(`[example.com](${paren})`) === paren) {
+    pass('#3516: a href containing balanced parens is extracted whole, not truncated');
+  } else {
+    fail(`#3516 paren href truncated: ${extractCellUrl(`[example.com](${paren})`)}`);
+  }
+
+  // Non-URLs must stay non-URLs. normalizeUrl's "no key is not a key" rule is
+  // what stops every placeholder row keying equal to every other one.
+  const passthrough = ['', '—', 'N/A', 'local:jds/acme.md', '[jd](local:jds/acme.md)'];
+  if (passthrough.every(v => normalizeUrl(extractCellUrl(v)) === '')) {
+    pass('#3516: placeholders and non-http links still yield no key');
+  } else {
+    fail('#3516: a placeholder cell produced a dedup key');
+  }
+
+  // The shared row parser — not merge-tracker alone — must return the href, so
+  // the dozen scripts that read `.url` off a parsed row cannot each get it
+  // wrong in their own way.
+  const lines = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |',
+    '|---|------|---------|------|-------|--------|-----|--------|-------|-----|',
+    `| 1 | 2026-01-01 | Temporal | Engineer | 4.0/5 | Applied | ✅ | — | linked | [ashby](${HREF}) |`,
+    `| 2 | 2026-01-02 | Temporal | Engineer | 4.0/5 | Applied | ✅ | — | bare | ${HREF} |`,
+  ];
+  const cols = resolveColumns(lines);
+  const linked = parseTrackerRow(lines[2], cols);
+  const bare = parseTrackerRow(lines[3], cols);
+  if (linked?.url === HREF && bare?.url === HREF) {
+    pass('#3516: parseTrackerRow returns the href for both written forms');
+  } else {
+    fail(`#3516 parseTrackerRow url: linked=${JSON.stringify(linked?.url)} bare=${JSON.stringify(bare?.url)}`);
+  }
+}
+
+// A tracker still carrying the OLD bare form must keep its exact-URL dedup: the
+// tier is what stops a re-evaluation of the same posting becoming a second row.
+{
+  const HREF = 'https://jobs.ashbyhq.com/temporal/8a65908d';
+  const sb = makeSandbox(
+    `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Temporal | Engineer | 4.0/5 | Applied | ✅ | — | seed | ${HREF} |
+`,
+    {
+      // Same posting, different title and a tracking param — only the URL tier
+      // can match this, and it must, exactly as it did before the cell changed.
+      '9-temporal.tsv':
+        'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+        `9\t2026-03-01\tTemporal\tStaff Engineer\tApplied\t4.6/5\t✅\t—\tre-eval\t${HREF}?utm_source=newsletter\n`,
+    },
+  );
+  const merge = runCaptured('merge-tracker.mjs', sb);
+  const rows = dataRows(sb.tracker);
+  const linked = rows.filter(l => l.includes('Temporal'));
+  if (merge.code === 0 && rows.length === 1 && linked.length === 1 && /\[ashby\]\(/.test(linked[0])) {
+    pass('#3516: a pre-existing bare URL row still dedups on URL, and is rewritten as a link');
+  } else {
+    fail(`#3516 old-form dedup — ${rows.length} row(s):\n${rows.join('\n')}\n${merge.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// Same again from the other side: an ALREADY-LINKED row must dedup too. This is
+// the regression the issue predicted — convert the column without teaching the
+// reader and this merge adds a second row instead of updating the first.
+{
+  const HREF = 'https://jobs.ashbyhq.com/temporal/8a65908d';
+  const sb = makeSandbox(
+    `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Temporal | Engineer | 4.0/5 | Applied | ✅ | — | seed | [ashby](${HREF}) |
+`,
+    {
+      '9-temporal.tsv':
+        'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+        `9\t2026-03-01\tTemporal\tStaff Engineer\tApplied\t4.6/5\t✅\t—\tre-eval\t${HREF}\n`,
+    },
+  );
+  const merge = runCaptured('merge-tracker.mjs', sb);
+  const rows = dataRows(sb.tracker);
+  if (merge.code === 0 && rows.length === 1 && rows[0].includes('4.6/5')) {
+    pass('#3516: a linked row dedups on URL instead of falling through to fuzzy matching');
+  } else {
+    fail(`#3516 linked-row dedup — ${rows.length} row(s):\n${rows.join('\n')}\n${merge.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// A rebuild that does not change the posting must keep the cell verbatim. The
+// merge path passes the extracted HREF back into the writer, so without the
+// previous-cell check a user's hand-written label would be silently re-derived
+// on the next PDF sync or re-evaluation.
+{
+  const HREF = 'https://jobs.ashbyhq.com/temporal/8a65908d';
+  const sb = makeSandbox(
+    `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Temporal | Engineer | 4.0/5 | Applied | ✅ | — | seed | [Temporal · platform team](${HREF}) |
+`,
+    {
+      '9-temporal.tsv':
+        'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+        `9\t2026-03-01\tTemporal\tEngineer\tApplied\t4.6/5\t✅\t—\tre-eval\t${HREF}\n`,
+    },
+  );
+  const merge = runCaptured('merge-tracker.mjs', sb);
+  const row = dataRows(sb.tracker).find(l => l.includes('Temporal')) || '';
+  if (merge.code === 0 && row.includes(`[Temporal · platform team](${HREF})`) && row.includes('4.6/5')) {
+    pass('#3516: a hand-written URL label survives a merge-driven row rebuild');
+  } else {
+    fail(`#3516 hand-written label lost on rebuild — row: ${row}\n${merge.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// A URL the cell cannot carry must not be LINKED, because a link makes the
+// existing damage worse. cell() rewrites a literal `|` to ` / ` (readers split
+// rows on pipes, and `\\|` splits too) — so a pipe-bearing URL already loses its
+// key on main. Put that rewritten value in a link destination and the reader
+// truncates at the injected space, yielding a shorter, still-parseable key for
+// a DIFFERENT posting scope. Bare is the honest form here.
+{
+  const PIPE = 'https://example.com/jobs?team=eng|ml';
+  const sb = makeSandbox(
+    `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | Applied | ✅ | — | seed | — |
+`,
+    {
+      '2-globex.tsv':
+        'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+        `2\t2026-02-02\tGlobex\tManager\tApplied\t4.5/5\t❌\t—\tpipe in url\t${PIPE}\n`,
+    },
+  );
+  const merge = runCaptured('merge-tracker.mjs', sb);
+  const row = dataRows(sb.tracker).find(l => l.includes('Globex')) || '';
+  const cells = row.split('|').map(c => c.trim());
+  if (merge.code === 0 && !/\]\(/.test(cells[10] ?? '') && cells.length === 12) {
+    pass('#3516: a pipe-bearing URL is written bare, never as a link whose destination would be truncated');
+  } else {
+    fail(`#3516 pipe URL — row: ${row}\n${merge.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// Whitespace, unlike a pipe, CAN be fixed without touching the key: `new URL()`
+// substitutes %20 itself, so both spellings normalize to one key. Encoding it is
+// what stops the markdown destination ending at the space.
+{
+  const { normalizeUrl } = await import('./url-key.mjs');
+  const { extractCellUrl } = await import('./tracker-parse.mjs');
+  const SPACED = 'https://example.com/jobs/a b';
+  const sb = makeSandbox(
+    `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | Applied | ✅ | — | seed | — |
+`,
+    {
+      '2-globex.tsv':
+        'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+        `2\t2026-02-02\tGlobex\tManager\tApplied\t4.5/5\t❌\t—\tspace in url\t${SPACED}\n`,
+    },
+  );
+  const merge = runCaptured('merge-tracker.mjs', sb);
+  const row = dataRows(sb.tracker).find(l => l.includes('Globex')) || '';
+  const written = row.split('|').map(c => c.trim())[10] ?? '';
+  if (merge.code === 0
+      && written === '[example.com](https://example.com/jobs/a%20b)'
+      && normalizeUrl(extractCellUrl(written)) === normalizeUrl(SPACED)
+      && normalizeUrl(SPACED) !== '') {
+    pass('#3516: whitespace in a href is percent-encoded, keeping the destination whole and the key identical');
+  } else {
+    fail(`#3516 spaced URL — cell: ${JSON.stringify(written)}\n${merge.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ...and the pipe rule has to fire on an ALREADY-LINKED incoming value too. A
+// headed TSV may put `[Jobs](https://…?team=eng|ml)` in its url column; cell()
+// then rewrites the pipe INSIDE the destination, and passing that through as
+// "already linked" writes malformed markdown whose href truncates at the
+// injected space — the very failure the rule exists to prevent.
+{
+  const sb = makeSandbox(
+    `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | Applied | ✅ | — | seed | — |
+`,
+    {
+      '2-globex.tsv':
+        'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+        '2\t2026-02-02\tGlobex\tManager\tApplied\t4.5/5\t❌\t—\tlinked pipe url\t[Jobs](https://example.com/jobs?team=eng|ml)\n',
+    },
+  );
+  const merge = runCaptured('merge-tracker.mjs', sb);
+  const written = (dataRows(sb.tracker).find(l => l.includes('Globex')) || '').split('|').map(c => c.trim())[10] ?? '';
+  if (merge.code === 0 && !/\]\(/.test(written)) {
+    pass('#3516: an already-linked incoming value with a pipe href is written bare, not as malformed markdown');
+  } else {
+    fail(`#3516 linked pipe url — cell: ${JSON.stringify(written)}\n${merge.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// Label preservation compares NORMALIZED identities. Pass 0 matches a re-eval on
+// the normalized key, so the incoming URL routinely differs from the stored one
+// by a tracking param or a trailing slash — the same posting by the tracker's
+// own definition, and no reason to discard the user's label or churn the href.
+{
+  const STORED = 'https://jobs.ashbyhq.com/temporal/8a65908d';
+  const sb = makeSandbox(
+    `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Temporal | Engineer | 4.0/5 | Applied | ✅ | — | seed | [Temporal · platform team](${STORED}) |
+`,
+    {
+      '9-temporal.tsv':
+        'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+        // Same posting, spelled with a tracking param and a trailing slash.
+        `9\t2026-03-01\tTemporal\tEngineer\tApplied\t4.6/5\t✅\t—\tre-eval\t${STORED}/?utm_source=newsletter\n`,
+    },
+  );
+  const merge = runCaptured('merge-tracker.mjs', sb);
+  const row = dataRows(sb.tracker).find(l => l.includes('Temporal')) || '';
+  if (merge.code === 0 && row.includes(`[Temporal · platform team](${STORED})`) && row.includes('4.6/5')) {
+    pass('#3516: a custom label survives a re-eval whose URL differs only by normalization');
+  } else {
+    fail(`#3516 label vs equivalent spelling — row: ${row}\n${merge.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// A href that cannot survive a markdown destination byte for byte is written
+// bare. Both readers end the destination by MATCHING parens, so an unmatched one
+// changes what comes back: `…/a)b` reads back as `…/a` (a shorter, still
+// parseable key for a broader path) and `…/a(b` reads back as nothing at all.
+// Balanced parens are fine and stay linked — Workday slugs carry them routinely.
+// Backslash-escaping instead was the reviewer's suggestion and is not viable:
+// this module's parser unescapes `\(` on read-back and the Go dashboard's regex
+// does not, so the two surfaces would disagree about the row's URL.
+{
+  const { extractCellUrl } = await import('./tracker-parse.mjs');
+  const { normalizeUrl } = await import('./url-key.mjs');
+  const cases = [
+    ['unmatched close paren', 'https://example.com/jobs/a)b', false],
+    ['unmatched open paren', 'https://example.com/jobs/a(b', false],
+    ['backslash', 'https://example.com/jobs/a\\b', false],
+    ['balanced parens', 'https://example.com/jobs/eng(remote)', true],
+  ];
+  const broken = [];
+  for (const [name, url, shouldLink] of cases) {
+    const sb = makeSandbox(
+      `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | Applied | ✅ | — | seed | — |
+`,
+      {
+        '2-globex.tsv':
+          'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+          `2\t2026-02-02\tGlobex\tManager\tApplied\t4.5/5\t❌\t—\t${name}\t${url}\n`,
+      },
+    );
+    const merge = runCaptured('merge-tracker.mjs', sb);
+    const written = (dataRows(sb.tracker).find(l => l.includes('Globex')) || '').split('|').map(c => c.trim())[10] ?? '';
+    rmSync(sb.dir, { recursive: true, force: true });
+    // The property that matters is the ROUND TRIP: whatever form is written,
+    // reading it back must yield the same posting key the addition carried.
+    const roundTrips = normalizeUrl(extractCellUrl(written)) === normalizeUrl(url) && normalizeUrl(url) !== '';
+    const linked = /^\[[^\]]*\]\(/.test(written);
+    if (merge.code !== 0 || !roundTrips || linked !== shouldLink) {
+      broken.push(`${name}: wrote ${JSON.stringify(written)} (linked=${linked}, want ${shouldLink}, roundTrips=${roundTrips})`);
+    }
+  }
+  if (broken.length === 0) {
+    pass('#3516: an unlinkable href (unmatched paren, backslash) is written bare; balanced parens stay linked — all four round-trip to the same key');
+  } else {
+    fail(`#3516 destination round-trip — ${broken.join(' | ')}`);
+  }
+}
+
+// BOTH cell forms round-trip through `tracker.mjs sync/export`, which is the
+// item the maintainer listed on #3516 alongside the merge and dashboard
+// readers. Main's Test 16 pins a bare URL cell; the linked form is what this
+// change introduces, and #3794 made export carry the tracker's real layout
+// instead of nine fixed columns, so the URL column now survives. A cell whose
+// text changed on the way through would be a silent re-key of the row — the
+// export is offered as a repaired copy the user can adopt over their tracker.
+{
+  const BOTH_FORMS = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Temporal | Engineer | 4.0/5 | Applied | ✅ | [1](../reports/1.md) | linked, ATS label | [ashby](https://jobs.ashbyhq.com/temporal/8a65908d) |
+| 2 | 2026-01-02 | Snowflake | Director | 4.2/5 | Applied | ❌ | [2](../reports/2.md) | linked, host label | [careers.snowflake.com](https://careers.snowflake.com/us/en/job/4735b223) |
+| 3 | 2026-01-03 | Acme | PM | 3.5/5 | Applied | ❌ | [3](../reports/3.md) | bare, pre-#3516 row | https://careers.acme.example/1 |
+| 4 | 2026-01-04 | Globex | Lead | 3.0/5 | Applied | ❌ | [4](../reports/4.md) | no url | — |
+`;
+  const sb = makeSandbox(BOTH_FORMS);
+  const sync = runTracker(['sync'], sb);
+  const exported = runTracker(['export'], sb);
+  if (sync.code === 0 && exported.code === 0 && exported.stdout === BOTH_FORMS) {
+    pass('#3516: linked AND bare URL cells both round-trip through tracker.mjs sync/export byte-for-byte');
+  } else {
+    fail(`#3516 sync/export round-trip (sync ${sync.code}, export ${exported.code})\n--- got ---\n${exported.stdout}--- want ---\n${BOTH_FORMS}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// --migrate-urls: opt-in, idempotent, and it must never change a href — the
+// href is the dedup key, so a migration that touched it would re-key the table.
+{
+  const ASHBY = 'https://jobs.ashbyhq.com/temporal/8a65908d';
+  const OWN = 'https://careers.snowflake.com/us/en/job/4735b223/Director-of-Engineering';
+  const sb = makeSandbox(
+    `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Temporal | Engineer | 4.0/5 | Applied | ✅ | — | vendor board | ${ASHBY} |
+| 2 | 2026-01-02 | Snowflake | Director | 4.2/5 | Applied | ✅ | — | own careers page | ${OWN} |
+| 3 | 2026-01-03 | Initech | PM | 3.0/5 | Applied | ❌ | — | no url | — |
+| 4 | 2026-01-04 | Globex | Lead | 3.5/5 | Applied | ❌ | — | hand-labelled | [my note](${ASHBY}2) |
+`,
+  );
+  const dry = runScript('merge-tracker.mjs', ['--migrate-urls', '--dry-run'], sb);
+  const untouched = readFileSync(sb.tracker, 'utf-8').includes(`| ${ASHBY} |`);
+  const first = runScript('merge-tracker.mjs', ['--migrate-urls'], sb);
+  const after = dataRows(sb.tracker);
+  const second = runScript('merge-tracker.mjs', ['--migrate-urls'], sb);
+  const afterAgain = dataRows(sb.tracker);
+
+  if (dry.code === 0 && /would be rendered/.test(dry.stdout) && untouched) {
+    pass('#3516: --migrate-urls --dry-run reports without writing');
+  } else {
+    fail(`#3516 migrate dry-run — wrote=${!untouched}\n${dry.stdout}`);
+  }
+  const vendor = after.find(l => l.includes('Temporal')) || '';
+  const own = after.find(l => l.includes('Snowflake')) || '';
+  const none = after.find(l => l.includes('Initech')) || '';
+  const custom = after.find(l => l.includes('Globex')) || '';
+  if (first.code === 0
+      && vendor.includes(`[ashby](${ASHBY})`)
+      && own.includes(`[careers.snowflake.com](${OWN})`)
+      && none.includes('| — |')
+      && custom.includes(`[my note](${ASHBY}2)`)) {
+    pass('#3516: --migrate-urls labels a vendor board by vendor, a careers page by host, keeps placeholders and hand-written labels');
+  } else {
+    fail(`#3516 migrate output:\n${after.join('\n')}\n${first.stdout}`);
+  }
+  if (second.code === 0 && afterAgain.join('\n') === after.join('\n') && /rendered 0 URL cell/.test(second.stdout)) {
+    pass('#3516: --migrate-urls is idempotent');
+  } else {
+    fail(`#3516 migrate not idempotent:\n${afterAgain.join('\n')}\n${second.stdout}`);
   }
   rmSync(sb.dir, { recursive: true, force: true });
 }

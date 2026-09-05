@@ -15654,6 +15654,50 @@ try {
     fail('tracker.mjs no longer writes the canonical 9-col header — BREAKING for the web reader; coordinate web/ in lockstep');
   }
 
+  // 55.1b tracker URL CELL form (#3516). The header label stays `URL`; what
+  // changed is the cell, which merge-tracker now writes as `[label](href)`.
+  //
+  // This belongs in the freeze section for the reason the section exists: the
+  // cell is read by three surfaces outside merge-tracker — the shared Node row
+  // parser, the Go dashboard (tier 0 of its JobURL chain since #3452), and,
+  // were the web ever to start reading it, the web. A reader that has not
+  // learned the link form does not fail loudly; `normalizeUrl('[l](u)')` is '',
+  // and '' means "no URL", so the row silently loses its exact-match dedup
+  // tier. Freezing the writer AND both readers here makes any future change to
+  // the form edit this assertion.
+  const mergeSrc = readFileSync(join(ROOT, 'merge-tracker.mjs'), 'utf-8');
+  const parseSrc = readFileSync(join(ROOT, 'tracker-parse.mjs'), 'utf-8');
+  const goCareerSrc = readFileSync(join(ROOT, 'dashboard', 'internal', 'data', 'career.go'), 'utf-8');
+  const urlCellReaders = [
+    ["tracker-parse.mjs exports the shared extractor", /export function extractCellUrl\(/.test(parseSrc)],
+    ["merge-tracker.mjs writes the cell through formatUrlCell", /put\('url', formatUrlCell\(/.test(mergeSrc)],
+    ["merge-tracker.mjs reads the href before keying", /url: COLMAP\.url != null \? extractCellUrl\(/.test(mergeSrc)],
+    ["tracker-parse.mjs returns the href on parsed rows", /url: extractCellUrl\(at\('url'\)\)/.test(parseSrc)],
+    ["the Go dashboard extracts the href", /func extractCellURL\(/.test(goCareerSrc) && /JobURL:\s+extractCellURL\(at\("url"\)\)/.test(goCareerSrc)],
+  ];
+  const brokenReaders = urlCellReaders.filter(([, ok]) => !ok).map(([label]) => label);
+  if (brokenReaders.length === 0) {
+    pass('tracker URL cell: written as a markdown link, and every reader extracts the href (#3516)');
+  } else {
+    fail(`tracker URL cell contract broken — ${brokenReaders.join('; ')}. A reader that misses the link form reads the row as having NO url and silently drops it to fuzzy dedup (#3516)`);
+  }
+
+  // 55.1c the boundary that kept the web out of this change: the TSV's `url`
+  // field stays a RAW url, and the web (which WRITES those TSVs) does not read
+  // the tracker's url cell — its field map has no `url` entry. If either half
+  // stops holding, the link form becomes a lockstep core+web change.
+  if (existsSync(join(ROOT, 'web', 'src', 'lib', 'tracker-table.mjs'))) {
+    const webTableSrc = readFileSync(join(ROOT, 'web', 'src', 'lib', 'tracker-table.mjs'), 'utf-8');
+    const webFieldBlock = webTableSrc.match(/const WEB_FIELD = \{[\s\S]*?\};/)?.[0] ?? '';
+    if (webFieldBlock && !/\burl:/.test(webFieldBlock)) {
+      pass('web tracker reader still ignores the URL column — the #3516 link form stays a core-only change');
+    } else {
+      fail('web tracker reader now maps the URL column: the markdown-link cell form (#3516) must be taught to it in lockstep, or the cell must go back to a raw URL');
+    }
+  } else {
+    console.log('   ⏭️  web/ not present (core-only install) — skipping the web URL-column boundary check');
+  }
+
   // 55.2 scan-history.tsv header prefix (scan.mjs → web whats-new + first_seen map)
   const scanSrc = readFileSync(join(ROOT, 'scan.mjs'), 'utf-8');
   const SCAN_HISTORY_PREFIX = 'url\\tfirst_seen\\tportal\\ttitle\\tcompany\\tstatus\\tlocation';
