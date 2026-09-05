@@ -1317,6 +1317,65 @@ if (!HAS_WEB) {
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
+// ...and the pipe rule has to fire on an ALREADY-LINKED incoming value too. A
+// headed TSV may put `[Jobs](https://…?team=eng|ml)` in its url column; cell()
+// then rewrites the pipe INSIDE the destination, and passing that through as
+// "already linked" writes malformed markdown whose href truncates at the
+// injected space — the very failure the rule exists to prevent.
+{
+  const sb = makeSandbox(
+    `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | Applied | ✅ | — | seed | — |
+`,
+    {
+      '2-globex.tsv':
+        'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+        '2\t2026-02-02\tGlobex\tManager\tApplied\t4.5/5\t❌\t—\tlinked pipe url\t[Jobs](https://example.com/jobs?team=eng|ml)\n',
+    },
+  );
+  const merge = runCaptured('merge-tracker.mjs', sb);
+  const written = (dataRows(sb.tracker).find(l => l.includes('Globex')) || '').split('|').map(c => c.trim())[10] ?? '';
+  if (merge.code === 0 && !/\]\(/.test(written)) {
+    pass('#3516: an already-linked incoming value with a pipe href is written bare, not as malformed markdown');
+  } else {
+    fail(`#3516 linked pipe url — cell: ${JSON.stringify(written)}\n${merge.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// Label preservation compares NORMALIZED identities. Pass 0 matches a re-eval on
+// the normalized key, so the incoming URL routinely differs from the stored one
+// by a tracking param or a trailing slash — the same posting by the tracker's
+// own definition, and no reason to discard the user's label or churn the href.
+{
+  const STORED = 'https://jobs.ashbyhq.com/temporal/8a65908d';
+  const sb = makeSandbox(
+    `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Temporal | Engineer | 4.0/5 | Applied | ✅ | — | seed | [Temporal · platform team](${STORED}) |
+`,
+    {
+      '9-temporal.tsv':
+        'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+        // Same posting, spelled with a tracking param and a trailing slash.
+        `9\t2026-03-01\tTemporal\tEngineer\tApplied\t4.6/5\t✅\t—\tre-eval\t${STORED}/?utm_source=newsletter\n`,
+    },
+  );
+  const merge = runCaptured('merge-tracker.mjs', sb);
+  const row = dataRows(sb.tracker).find(l => l.includes('Temporal')) || '';
+  if (merge.code === 0 && row.includes(`[Temporal · platform team](${STORED})`) && row.includes('4.6/5')) {
+    pass('#3516: a custom label survives a re-eval whose URL differs only by normalization');
+  } else {
+    fail(`#3516 label vs equivalent spelling — row: ${row}\n${merge.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
 // --migrate-urls: opt-in, idempotent, and it must never change a href — the
 // href is the dedup key, so a migration that touched it would re-key the table.
 {

@@ -649,21 +649,35 @@ function formatUrlCell(raw, previousCell = '') {
   if (!value) return '';
   const href = extractCellUrl(rawValue);
 
-  // An incoming value that is already a link keeps its label: a hand-written
-  // one survives every rebuild.
-  if (isLinkedUrlCell(value)) return value;
-
   // Anything that is not a usable posting URL — empty, `N/A`, `—`, a
   // `local:jds/…` reference — is written verbatim. normalizeUrl() already reads
   // all of these as "no key"; wrapping one in link syntax would only hide that.
   if (!normalizeUrl(href)) return value;
 
-  // A pipe-bearing URL cannot be linked without changing its key (see above).
-  if (href.includes('|')) return value;
+  // The pipe rule comes BEFORE the already-linked passthrough, not after it.
+  // An incoming value can arrive already linked — a headed TSV whose `url`
+  // column carries `[Jobs](https://…?team=eng|ml)` — and `value` is that cell
+  // with cell() having rewritten the pipe INSIDE the destination. Returning it
+  // would write malformed markdown whose href truncates at the injected space,
+  // which is the exact failure the pipe rule exists to prevent. cell(href)
+  // instead, so a pipe-bearing URL lands as a bare cell whichever form it
+  // arrived in. The label is lost with it; there is no cell that can hold both.
+  if (href.includes('|')) return cell(href);
+
+  // An incoming value that is already a link keeps its label: a hand-written
+  // one survives every rebuild.
+  if (isLinkedUrlCell(value)) return value;
 
   const destination = urlForCellDestination(href);
   const previous = String(previousCell ?? '').trim();
-  if (previous && isLinkedUrlCell(previous) && extractCellUrl(previous) === destination) return previous;
+  // Compare NORMALIZED identities, not literal strings. Pass 0 matches a
+  // re-evaluation on the normalized key, so the incoming URL routinely differs
+  // from the stored one by a tracking param, a trailing slash, http-vs-https or
+  // host case — the same posting by the tracker's own definition. A literal
+  // comparison called that a new posting and discarded the user's label, and
+  // churned the stored href between equivalent spellings for no reason.
+  if (previous && isLinkedUrlCell(previous)
+      && normalizeUrl(extractCellUrl(previous)) === normalizeUrl(href)) return previous;
 
   const label = trackerUrlLabel(href);
   return label ? `[${label}](${destination})` : destination;
