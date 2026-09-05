@@ -1096,7 +1096,7 @@ search_queries:
 #                          # PeopleSoft's own anonymous-session cap is ~100 results regardless
 #   peoplesoft:
 #     fetchDetails: false  # opt-in per-posting detail fetch for the full JD (off by default,
-#                          # zero-token); bounded 2-4 concurrent, capped by detailLimit (default 25)
+#                          # zero-token); sequential and paced, capped by detailLimit (default 25)
 #     detailLimit: 25
 #   enabled: true
 #
