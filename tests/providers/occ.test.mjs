@@ -108,6 +108,9 @@ try {
   // ── fetch() end-to-end against a stub ctx (no network) ───────────────────
   const pagesRequested = [];
   const stubCtx = {
+    // No-op clock: the provider paces requests (INTER_REQUEST_DELAY_MS) and
+    // backs off on retry. Without this the suite would sleep for real.
+    async sleep() {},
     async fetchText(url) {
       pagesRequested.push(url);
       // Mirror the live quirk: an out-of-range page re-serves page 1.
@@ -128,18 +131,110 @@ try {
     fail(`fetch() shape = ${JSON.stringify(jobs)}`);
   }
 
-  // A transport failure on one keyword must not take down the whole board.
-  const failingCtx = { async fetchText() { throw new Error('boom'); } };
-  const resilient = await occ.fetch({ name: 'OCC', queries: ['a', 'b'], max_pages: 2 }, failingCtx);
-  if (Array.isArray(resilient) && resilient.length === 0) {
-    pass('fetch() survives transport errors and returns an empty array');
+  // ── Outage vs. empty board ───────────────────────────────────────────────
+  // A board answering every request with a Cloudflare challenge (HTTP 403) must
+  // NOT read downstream as a live board with no matching jobs, so a total
+  // outage throws instead of returning [].
+  const failingCtx = { async sleep() {}, async fetchText() { throw new Error('boom'); } };
+  let outage = null;
+  try {
+    await occ.fetch({ name: 'OCC', queries: ['a', 'b'], max_pages: 2 }, failingCtx);
+  } catch (err) { outage = err; }
+  if (outage && /all \d+ search request\(s\) failed/.test(outage.message)) {
+    pass('fetch() throws on a total outage instead of returning an empty board');
   } else {
-    fail(`fetch() on failing ctx = ${JSON.stringify(resilient)}`);
+    fail(`total outage did not throw as expected: ${outage && outage.message}`);
+  }
+
+  // Recall-first still holds for a PARTIAL failure: one dead keyword must not
+  // take down a board that otherwise answered.
+  let firstQuery = true;
+  const partialCtx = {
+    async sleep() {},
+    async fetchText(url) {
+      if (firstQuery && url.includes('de-dead')) throw new Error('boom');
+      firstQuery = false;
+      return FIXTURE;
+    },
+  };
+  const partial = await occ.fetch({ name: 'OCC', queries: ['dead', 'alive'], max_pages: 1 }, partialCtx);
+  if (Array.isArray(partial) && partial.length === 2) {
+    pass('fetch() tolerates one failed keyword when another answers');
+  } else {
+    fail(`partial failure = ${JSON.stringify(partial)}`);
+  }
+
+  // ── queries is required ──────────────────────────────────────────────────
+  // No DEFAULT_QUERIES: a built-in keyword list would be one user's search
+  // profile silently applied to everyone else's scan.
+  for (const badEntry of [{ name: 'OCC' }, { name: 'OCC', queries: [] }, { name: 'OCC', queries: ['  '] }]) {
+    let threw = null;
+    try {
+      await occ.fetch(badEntry, stubCtx);
+    } catch (err) { threw = err; }
+    if (threw && /requires a non-empty queries/.test(threw.message)) {
+      pass(`fetch() rejects ${JSON.stringify(badEntry.queries ?? null)} queries with a clear message`);
+    } else {
+      fail(`missing queries did not throw: ${threw && threw.message}`);
+    }
+  }
+
+  // ── ctx.maxPages (verify-portals.mjs health probe) ───────────────────────
+  const probeRequests = [];
+  const probeCtx = {
+    async sleep() {},
+    async fetchText(url) {
+      probeRequests.push(url);
+      // Every page yields fresh ids, so only ctx.maxPages can stop the loop.
+      return FIXTURE.replace(/2131967\d/g, String(1000 + probeRequests.length));
+    },
+  };
+  await occ.fetch({ name: 'OCC', queries: ['x'], max_pages: 10 }, { ...probeCtx, maxPages: 1 });
+  if (probeRequests.length === 1) {
+    pass('fetch() honours ctx.maxPages=1 even when max_pages says 10');
+  } else {
+    fail(`ctx.maxPages=1 issued ${probeRequests.length} requests`);
+  }
+
+  // While probing, a per-request error must propagate UNWRAPPED so
+  // verify-portals.mjs's `err instanceof ProbePageBudgetReached` still works.
+  class FakeSentinel extends Error {}
+  let sentinel = null;
+  let sentinelAttempts = 0;
+  try {
+    await occ.fetch(
+      { name: 'OCC', queries: ['a', 'b'], max_pages: 3 },
+      { async sleep() {}, maxPages: 1, async fetchText() { sentinelAttempts++; throw new FakeSentinel(); } },
+    );
+  } catch (err) { sentinel = err; }
+  if (sentinel instanceof FakeSentinel) {
+    pass('fetch() propagates a probe sentinel unwrapped instead of flattening it to []');
+  } else {
+    fail(`probe sentinel = ${sentinel && sentinel.constructor.name}`);
+  }
+  if (sentinelAttempts === 1) {
+    pass('fetch() does not retry while probing, so the sentinel costs one request');
+  } else {
+    fail(`probe sentinel took ${sentinelAttempts} requests`);
+  }
+
+  // ── source-policy rule 1: never fabricate an employer ────────────────────
+  const NO_COMPANY = `
+    <div class="card-job-offer" data-id='777'><h2>Sin empresa</h2>
+      <div class="no-alter-loc-text"><span></span><p>Monterrey</p></div>
+    </div>`;
+  const anonCtx = { async sleep() {}, async fetchText() { return NO_COMPANY; } };
+  const anon = await occ.fetch({ name: 'OCC Mundial', queries: ['x'], max_pages: 1 }, anonCtx);
+  if (anon[0]?.company === '?') {
+    pass('fetch() emits the "?" marker for an unparsed employer, not the board name');
+  } else {
+    fail(`unparsed company = ${JSON.stringify(anon[0]?.company)}`);
   }
 
   // max_pages is bounded so a bad config cannot hammer the site.
   const manyPages = [];
   const countingCtx = {
+    async sleep() {},
     async fetchText(url) { manyPages.push(url); return FIXTURE.replace(/21319670/g, String(manyPages.length)); },
   };
   await occ.fetch({ name: 'OCC', queries: ['x'], max_pages: 999 }, countingCtx);

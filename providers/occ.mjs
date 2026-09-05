@@ -31,19 +31,38 @@
 //     <div class="h-[21px] flex items-center gap-1"><span ...>COMPANY</span>
 //     <div class="no-alter-loc-text ..."><span...></span><p ...>CITY, STATE</p></div>
 //
+// OCC has no detect(): it is a board-wide aggregator on one host, not a
+// per-employer tenant, so it is only reachable through an explicit
+// `provider: occ` entry.
+//
 // Wire in via a `job_boards:` entry with `provider: occ`:
 //   - name: OCC Mundial
 //     provider: occ
-//     queries: ["automatizacion", "robotica", "mecatronica"]
-//     states: ["nuevo-leon", "jalisco"]      # optional; omit for nationwide
+//     queries: ["automatizacion", "robotica"] # REQUIRED — see below
+//     states: ["nuevo-leon", "jalisco"]       # optional; omit for nationwide
 //     max_pages: 3                            # optional, default 3, hard cap 10
+//
+// `queries` is required and has no default. OCC is a keyword-search board with
+// no browsable "all jobs" listing, so a built-in default would not be a board
+// default at all — it would be one user's search profile silently applied to
+// everyone else's scan. Same contract as wttj and builtin.
+//
+// Availability note: a reviewer measured (2026-09-04) HTTP 403 with
+// `cf-mitigated: challenge` from two non-Mexican egresses, on both the search
+// paths and /robots.txt. Node's fetch cannot clear a JS challenge, and a
+// challenge page parses to zero cards. A board that answers every request with
+// a challenge therefore now throws (see the outage guard in fetch) instead of
+// returning [], which would have read as a healthy but empty board.
 
+import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 
 const ORIGIN = 'https://www.occ.com.mx';
-const DEFAULT_QUERIES = ['automatizacion', 'robotica', 'mecatronica', 'sistemas-embebidos', 'control'];
 const DEFAULT_MAX_PAGES = 3;
 const HARD_PAGE_CAP = 10;
+
+/** Pacing between page requests, matching the parser providers (jobbankca, careerviet). */
+const INTER_REQUEST_DELAY_MS = 750;
 
 /** Strip tags, decode entities, collapse whitespace. */
 function text(html) {
@@ -118,29 +137,67 @@ export default {
   id: 'occ',
 
   async fetch(entry, ctx) {
-    const queries = Array.isArray(entry.queries) && entry.queries.length
-      ? entry.queries : DEFAULT_QUERIES;
+    // No default queries: OCC is a keyword-search board with no browsable
+    // "all jobs" listing, so a built-in list would be one profile's search
+    // silently applied to every user. Fail loudly instead (cf. wttj, builtin).
+    const queries = Array.isArray(entry.queries)
+      ? entry.queries.map((q) => String(q).trim()).filter(Boolean)
+      : [];
+    if (!queries.length) {
+      throw new Error(
+        `occ: entry "${entry.name || 'OCC'}" requires a non-empty queries: [...] list `
+        + '(e.g. queries: ["automatizacion", "robotica"]) — OCC is a keyword-search '
+        + 'board and has no default listing to scan.',
+      );
+    }
+
     const states = Array.isArray(entry.states) && entry.states.length
       ? entry.states : [null];
-    const maxPages = Math.min(
+
+    // verify-portals.mjs's health probe sets ctx.maxPages (1): it only needs the
+    // first page to tell a live board from a broken one and must not walk the
+    // whole board. Honour it as a ceiling over the entry's own cap.
+    const probing = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0;
+    const entryMaxPages = Math.min(
       Number.isInteger(entry.max_pages) && entry.max_pages > 0 ? entry.max_pages : DEFAULT_MAX_PAGES,
       HARD_PAGE_CAP,
     );
+    const maxPages = probing ? Math.min(entryMaxPages, ctx.maxPages) : entryMaxPages;
 
     const seen = new Set();
     const jobs = [];
+    const errors = [];
+    let succeeded = 0; // query/state pairs whose first request the board answered
 
     for (const query of queries) {
       for (const state of states) {
+        let answered = false;
         for (let page = 1; page <= maxPages; page++) {
+          await sleep(INTER_REQUEST_DELAY_MS, ctx);
+
           const url = buildSearchUrl(query, state, page);
           let html;
           try {
-            html = await ctx.fetchText(url, { redirect: 'error' });
+            html = await fetchTextWithRetry(ctx, url, {
+              headers: { 'User-Agent': BROWSER_LIKE_USER_AGENT },
+              redirect: 'error',
+            // isRetryableError() treats a status-less rejection as retryable, and
+            // verify-portals.mjs's budget sentinel is status-less: retrying it
+            // would burn the probe's remaining budget re-raising the same stop
+            // signal. The probe wants one page, so it gets one request.
+            }, probing ? { retries: 0 } : {});
+            answered = true;
           } catch (err) {
-            // One bad keyword/state/page must not kill the whole board.
+            // While probing, propagate unwrapped so verify-portals.mjs's
+            // error-identity checks (e.g. ProbePageBudgetReached) still work —
+            // flattening it here would turn the sentinel into an empty board.
+            if (probing) throw err;
+            // Otherwise recall-first: one bad keyword/state/page must not kill
+            // the whole board, but record it for the outage guard below.
+            if (page === 1) errors.push(`"${query}"${state ? `/${state}` : ''}: ${(err && err.message) || err}`);
             break;
           }
+
           const cards = parseCards(html);
           if (!cards.length) break;
 
@@ -155,13 +212,25 @@ export default {
             jobs.push({
               title: c.title,
               url: c.url,
-              company: c.company || (entry.name || 'OCC'),
+              // Never substitute the board's own name for a missing employer:
+              // source-policy rule 1. parseCards already emits the '?' marker
+              // for OCC's "Empresa confidencial" placeholder; an unparsed row
+              // gets the same marker rather than a fabricated company.
+              company: c.company || '?',
               location: c.location,
             });
           }
           if (fresh === 0) break;
         }
+        if (answered) succeeded++;
       }
+    }
+
+    // Total outage: every query/state pair's first request failed. A Cloudflare
+    // challenge answers every request with 403, and returning [] here would read
+    // downstream as a live board that simply has no matching jobs.
+    if (succeeded === 0 && errors.length) {
+      throw new Error(`occ: all ${errors.length} search request(s) failed — ${errors[0]}`);
     }
 
     return jobs;
