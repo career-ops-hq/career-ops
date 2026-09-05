@@ -149,11 +149,15 @@ if (!existsSync(WEB_PKG)) {
   // without a loader, so one would sit in the tree looking like coverage and
   // never execute.
   const TEST_FILE = /(?:\.test\.(?:mjs|js|ts|tsx)|^test-.*\.(?:mjs|js|ts|tsx))$/;
-  // node_modules matters for speed, not just noise: a populated
-  // web/node_modules is ~400 MB (see test-all.mjs's copy-exclusion note).
-  const SKIP_DIRS = new Set(['node_modules', '.next', '.git', 'out', 'dist', 'coverage']);
-
-  const found = walkFiles(WEB, TEST_FILE, SKIP_DIRS)
+  // Scoped to what web/ TRACKS (#3890): walkFiles enumerates the index now, so
+  // `node_modules`, `.next`, `out`, `dist` and `coverage` drop out because git
+  // does not track them, not because this file remembered to list them. That
+  // list was also the narrowing hazard — an unlisted generated directory put a
+  // built copy of every suite under the contract, and a suite added under a
+  // listed one silently left it. node_modules mattered for speed too: a
+  // populated web/node_modules is ~400 MB (see test-all.mjs's copy-exclusion
+  // note), and the index never walks into it at all.
+  const found = walkFiles(WEB, TEST_FILE)
     .map((p) => relative(WEB, p).split(sep).join('/'));
 
   const pkg = JSON.parse(readFileSync(WEB_PKG, 'utf8'));
