@@ -1822,6 +1822,34 @@ Last reviewed 2026-09-01.
   }
 }
 
+// BOTH cell forms round-trip through `tracker.mjs sync/export`, which is the
+// item the maintainer listed on #3516 alongside the merge and dashboard
+// readers. Main's Test 16 pins a bare URL cell; the linked form is what this
+// change introduces, and #3794 made export carry the tracker's real layout
+// instead of nine fixed columns, so the URL column now survives. A cell whose
+// text changed on the way through would be a silent re-key of the row — the
+// export is offered as a repaired copy the user can adopt over their tracker.
+{
+  const BOTH_FORMS = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Temporal | Engineer | 4.0/5 | Applied | ✅ | [1](../reports/1.md) | linked, ATS label | [ashby](https://jobs.ashbyhq.com/temporal/8a65908d) |
+| 2 | 2026-01-02 | Snowflake | Director | 4.2/5 | Applied | ❌ | [2](../reports/2.md) | linked, host label | [careers.snowflake.com](https://careers.snowflake.com/us/en/job/4735b223) |
+| 3 | 2026-01-03 | Acme | PM | 3.5/5 | Applied | ❌ | [3](../reports/3.md) | bare, pre-#3516 row | https://careers.acme.example/1 |
+| 4 | 2026-01-04 | Globex | Lead | 3.0/5 | Applied | ❌ | [4](../reports/4.md) | no url | — |
+`;
+  const sb = makeSandbox(BOTH_FORMS);
+  const sync = runTracker(['sync'], sb);
+  const exported = runTracker(['export'], sb);
+  if (sync.code === 0 && exported.code === 0 && exported.stdout === BOTH_FORMS) {
+    pass('#3516: linked AND bare URL cells both round-trip through tracker.mjs sync/export byte-for-byte');
+  } else {
+    fail(`#3516 sync/export round-trip (sync ${sync.code}, export ${exported.code})\n--- got ---\n${exported.stdout}--- want ---\n${BOTH_FORMS}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
 // --migrate-urls: opt-in, idempotent, and it must never change a href — the
 // href is the dedup key, so a migration that touched it would re-key the table.
 {
