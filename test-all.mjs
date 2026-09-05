@@ -17114,6 +17114,23 @@ try {
   }
   rmSync(runsTmp, { recursive: true, force: true });
 
+  // Scan-run persistence, missing parent directory: filePath nested inside a
+  // directory that does not exist yet, proving appendScanRunSummary creates its
+  // own parent rather than relying on a folder some earlier step happened to make.
+  {
+    const nestedTmp = mkdtempSync(join(tmpdir(), 'scanruns-nested-'));
+    const nestedFile = join(nestedTmp, 'nested', 'deep', 'scan-runs.tsv');
+    appendScanRunSummary(counters, nestedFile);
+    const nestedRows = readFileSync(nestedFile, 'utf-8').trim().split('\n');
+    if (nestedRows[0] === SCAN_RUNS_HEADER.trim() && nestedRows.length === 2
+      && nestedRows[1].startsWith('2026-07-03T14:02:11Z\tcompleted\t45\t3\t120\t')) {
+      pass('appendScanRunSummary creates a missing nested parent directory and writes header + row');
+    } else {
+      fail(`appendScanRunSummary with missing nested parent: wrong file contents: ${JSON.stringify(nestedRows)}`);
+    }
+    rmSync(nestedTmp, { recursive: true, force: true });
+  }
+
   // computeRunStats: header-name parsing, torn rows skipped, failed runs
   // excluded from averages.
   const stats = await import(pathToFileURL(join(ROOT, 'stats.mjs')).href);

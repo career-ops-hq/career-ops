@@ -100,6 +100,14 @@ const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(DATA_ROOT, 'con
 // two it still writes into the one inbox and the one dedup history. That is not
 // just untidy: scan-history.tsv IS the dedup source, so a posting surfaced in
 // lane A is silently counted as a duplicate in lane B and never shown at all.
+
+const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || 'data/scan-history.tsv';
+const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || 'data/pipeline.md';
+const APPLICATIONS_PATH = 'data/applications.md';
+const PROVIDERS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'providers');
+const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(DATA_ROOT, 'data/scan-history.tsv');
+const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data/pipeline.md');
+=======
 // Exported because scan-ats-full.mjs, scan-interamt.mjs and scan-hn.mjs write to
 // these same files through appendToPipeline/appendToScanHistory. They each used
 // to carry their own bare-relative copy, so a sibling could check existence and
@@ -107,6 +115,7 @@ const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(DATA_ROOT, 'con
 // anchored one (#3510). One resolution, imported, cannot drift.
 export const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(DATA_ROOT, 'data/scan-history.tsv');
 export const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data/pipeline.md');
+
 const APPLICATIONS_PATH = path.join(DATA_ROOT, 'data/applications.md');
 const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 
@@ -2505,6 +2514,9 @@ export function writeRunFailureRow(status = 'failed', filePath = SCAN_RUNS_PATH)
 }
 
 export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
+
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  if (!existsSync(filePath)) writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
   // The header is written only on first creation, so a release that appends or inserts a counter
   // leaves existing files with a header that no longer describes the rows below it. Nothing
   // migrates it and nothing notices: stats.mjs reads by column NAME, so it silently returns a
@@ -3425,11 +3437,11 @@ async function main() {
   const unreachableTargets = errors.filter((e) => e.kind === 'slug_gone');
   const networkTargets = errors.filter((e) => e.kind === 'network');
   const otherErrors = errors.filter((e) => e.kind !== 'slug_gone' && e.kind !== 'network');
-  
+
   const STREAK_THRESHOLD = config.portal_health_threshold || 3;
   const nowStr = new Date().toISOString();
   const healthRecords = [];
-  
+
   // Record each errored target under its real classifyFetchError kind. Before
   // this, only slug_gone/network were recorded and auth (401/403), server
   // (5xx), and unknown fell through to 'reachable' — so a portal WAF-403ing
@@ -3454,7 +3466,7 @@ async function main() {
   const persistentlyDead = [];
   const newlyDeadSlug = [];
   const newlyDeadNetwork = [];
-  
+
   // All error kinds can reach the 🚨 persistent list (auth/server/unknown
   // included — a WAF that 403s the scanner every run is coverage decay too).
   // Below threshold, only slug_gone/network keep their dedicated warnings;
