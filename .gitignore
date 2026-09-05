@@ -104,6 +104,15 @@ reports/*-RESERVED.md
 # original sitting untracked in the repo root. Trailing `*` covers both.
 *.bak*
 
+# Atomic-write temp files, the sibling of the backups above and from the same
+# two writers: `.{name}.{pid}.{ts}.{uuid}.tmp` (tracker-utils.mjs
+# writeFileAtomic, web/src/lib/core/safe-write.ts atomicWrite). They exist only
+# between the write and the rename — but a rename that throws (Windows
+# destination-handle contention, ENOSPC, a read-only mount) leaves one behind
+# holding a byte-for-byte copy of cv.md / profile.yml / portals.yml, under a
+# name the `*.bak*` rule does not match. Same PII, same reflexive `git add .`.
+*.tmp*
+
 # The tracker and its follow-ups file in the LEGACY ROOT LAYOUT. resolveTrackerPath()
 # documents its own fallback chain — CAREER_OPS_TRACKER > <root>/data/applications.md
 # > <root>/applications.md — and that third entry is a supported install shape, not a
