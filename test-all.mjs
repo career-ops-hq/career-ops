@@ -2705,7 +2705,7 @@ const expectedModes = [
   'batch.md', 'apply.md', 'auto-pipeline.md', 'contacto.md', 'deep.md',
   'ofertas.md', 'pipeline.md', 'project.md', 'tracker.md', 'training.md',
   'interview.md', 'latex.md', 'latex-tex.md', 'email.md', 'add.md', 'titles.md',
-  'expand.md', 'discover.md',
+  'expand.md', 'discover.md', 'ats-score.md',
   'regional/eu-swe.md',
 ];
 
@@ -2976,6 +2976,96 @@ if (
   pass('expand mode includes url limits, confirm gate, add-entry funneling, additive-only, and literal evidence rules');
 } else {
   fail('expand mode missing required behavior boundaries (url limits, confirm gate, additive-only, literal evidence, add-entry funneling)');
+}
+
+const atsScoreMode = readFile('modes/ats-score.md');
+if (
+  /never.{0,10}depend on:.{0,10}name, gender/i.test(atsScoreMode) &&
+  /hiring-agent/i.test(atsScoreMode) &&
+  /MIT licensed/i.test(atsScoreMode) &&
+  /Open Source \(0-35/i.test(atsScoreMode) &&
+  /Self Projects \(0-30/i.test(atsScoreMode) &&
+  /Production \(0-25/i.test(atsScoreMode) &&
+  /Technical Skills \(0-10/i.test(atsScoreMode) &&
+  /interview-prep\/ats-score\.md.{0,20}create if missing/i.test(atsScoreMode) &&
+  /do not overwrite prior runs/i.test(atsScoreMode)
+) {
+  pass('ats-score mode includes fairness constraint, HackerRank attribution, all 4 scoring categories, and append-only output rule');
+} else {
+  fail('ats-score mode missing required elements (fairness constraint, HackerRank attribution, scoring categories, or append-only output rule)');
+}
+
+// #2284 — the class check below catches `gh api -f` generally; this pins the one
+// command the mode actually depends on. The contributions lookup drives the
+// heaviest-weighted category, so it must stay on the query-string form (which
+// works), stay public-only (the token can otherwise reach private repos a real
+// ATS never sees), and keep excluding self-owned PRs from the external count.
+const atsScoreLookup = {
+  'uses the query-string form, not `-f` (which POSTs and 404s)':
+    /gh api "search\/issues\?q=author:\{username\}\+type:pr/.test(atsScoreMode),
+  'scopes every contributions search to public results':
+    (atsScoreMode.match(/search\/issues\?q=[^"'`\s]*/g) ?? []).length > 0 &&
+    (atsScoreMode.match(/search\/issues\?q=[^"'`\s]*/g) ?? []).every(q => q.includes('is:public')),
+  'excludes self-owned repos from the external contribution count':
+    /is:public\+-user:\{username\}/.test(atsScoreMode),
+  'falls back to public events so commit-only contributors are not scored 0':
+    /users\/\{username\}\/events\/public/.test(atsScoreMode),
+};
+const atsScoreLookupMissing = Object.entries(atsScoreLookup).filter(([, ok]) => !ok).map(([k]) => k);
+if (atsScoreLookupMissing.length === 0) {
+  pass('ats-score contributions lookup is pinned: working query form, public-only, self-owned PRs excluded, commit-only fallback');
+} else {
+  fail(`ats-score contributions lookup regressed: ${atsScoreLookupMissing.join('; ')}`);
+}
+
+// The link-quality adjustment feeds a score, so it has to be a function, not a
+// judgement call: four mutually exclusive rows with fixed multipliers. A range
+// ("0.5 to 0.7") means identical evidence can produce different totals.
+const atsScoreLinkTable = atsScoreMode.slice(atsScoreMode.indexOf('**Link penalty'), atsScoreMode.indexOf('### Production'));
+if (
+  /\| yes \| yes \| 1\.15 \|/.test(atsScoreLinkTable) &&
+  /\| yes \| no \| 0\.80 \|/.test(atsScoreLinkTable) &&
+  /\| no \| yes \| 0\.70 \|/.test(atsScoreLinkTable) &&
+  /\| no \| no \| 0\.60 \|/.test(atsScoreLinkTable) &&
+  !/\d\s*to\s*0?\.\d/.test(atsScoreLinkTable)
+) {
+  pass('ats-score link-quality table covers all 4 link/demo combinations with fixed multipliers (no ranges)');
+} else {
+  fail('ats-score link-quality table must cover all 4 link/demo combinations with fixed multipliers, not ranges');
+}
+
+// MIT requires the copyright and permission notice travel with the derived work,
+// and the rubric is a close adaptation of hiring-agent's two prompt files.
+if (
+  /Copyright \(c\) 2025 HackerRank/.test(atsScoreMode) &&
+  /Permission is hereby granted, free of charge/.test(atsScoreMode) &&
+  /THE SOFTWARE IS PROVIDED "AS IS"/.test(atsScoreMode)
+) {
+  pass('ats-score carries the full hiring-agent MIT notice, not just a license name-drop');
+} else {
+  fail('ats-score must carry the full MIT copyright + permission notice for hiring-agent');
+}
+
+// #2284 — `gh api` switches from GET to POST the moment a `-f`/`-F` param is
+// supplied, and GET-only endpoints (search/issues, search/code) answer POST
+// with a 404. A prescribed command that always 404s reads fine in review and
+// only breaks when a user actually runs the mode, so pin the shape here.
+// Modes only ever READ from the GitHub API, so a bare `-f` is a bug; an
+// explicit `-X GET` (or `-X POST`, should a write ever be intended) is fine.
+const ghApiFieldRe = /\bgh api\b[^\n`]*/g;
+const ghApiPostByAccident = [];
+for (const f of readdirSync(join(ROOT, 'modes'), { recursive: true }).filter(p => typeof p === 'string' && p.endsWith('.md'))) {
+  const rel = `modes/${f.split(/[\\/]/).join('/')}`;
+  for (const cmd of readFile(rel).match(ghApiFieldRe) ?? []) {
+    const sendsFields = /\s(?:-f|-F|--field|--raw-field)[\s=]/.test(cmd);
+    const pinsMethod = /\s(?:-X|--method)\s/.test(cmd);
+    if (sendsFields && !pinsMethod) ghApiPostByAccident.push(`${rel}: ${cmd.trim()}`);
+  }
+}
+if (ghApiPostByAccident.length === 0) {
+  pass('no mode prescribes a `gh api` call that -f silently turns into a POST (use a query string, or pin -X GET)');
+} else {
+  fail(`mode(s) prescribe \`gh api\` with -f and no explicit method, which POSTs and 404s on GET-only endpoints: ${ghApiPostByAccident.join(' | ')}`);
 }
 
 try {
