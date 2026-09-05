@@ -31,6 +31,30 @@
 # scan_history:
 #   recheck_after_days: 30
 
+# -- Location-aware duplicate roles (optional, opt-in) --
+# By default two postings that share a company and a title are ONE role, however
+# many cities they name: an employer that opens one req per city would otherwise
+# leak a city variant into your pipeline on every scan.
+#
+# Set dedup_include_location: true to keep the city in that comparison, so
+# "Staff Engineer — London" and "Staff Engineer — Dublin" are two entries rather
+# than whichever one the ATS happened to return first. Turn it on when your
+# eligibility is location-bound (work authorization, relocation, an office you
+# must be near): location_filter cannot choose for you when it allows both
+# cities, and the arbitrary survivor may be the one you cannot take.
+# Expect more entries per scan at large multi-country employers.
+#
+# Rows that record no location (a tracker without a Location column, a processed
+# pipeline entry) still match every city, so a role you already applied to never
+# comes back city by city.
+#
+# A posting that names SEVERAL cities in one location field is compared as the
+# set of those cities, so a board that re-orders its own list ("London | Dublin"
+# becoming "Dublin | London") does not re-add a posting you already have.
+#
+# scan_history:
+#   dedup_include_location: true
+
 # -- Interamt.de searches (optional, German public sector) --
 # Read by scan-interamt.mjs (`npm run scan:interamt`), a separate Playwright
 # scanner for Interamt.de, a portal for German federal, state, and municipal
@@ -514,6 +538,39 @@ title_filter:
     - "Lead"
     - "Head"
     - "Director"
+
+# -- Title filter overrides (optional, scan-ats-full.mjs only) --
+# The reverse ATS sweep (scan-ats-full.mjs) applies ONE global title_filter
+# to every company in the public dataset it walks. Some employers legitimately
+# deserve a WIDER title net than everyone else, without loosening the global
+# filter for the rest of the sweep. title_filter_overrides lets specific
+# companies (matched by an explicit slug list) OR extra positive keywords
+# into their own title match, for that scan run only.
+#
+# `companies` matches the company/tenant slug the scanner already derives
+# from the job-board-aggregator dataset entry (e.g. for a Workday tenant at
+# https://uwaterloo.wd3.myworkdayjobs.com/..., the slug is "uwaterloo" — the
+# same value scan-ats-full.mjs logs as the board name on fetch errors).
+# `positive_extra` keywords are ADDITIVE to (never a replacement for)
+# title_filter.positive above, and the global `negative` list still applies.
+#
+# v1 keeps matching simple and explicit: a literal slug list, no
+# company-type inference and no domain heuristics. A company not listed in
+# any entry here is completely unaffected — this is opt-in per company.
+#
+# Example: broaden the net for a few university/college employers so
+# general campus-admin roles surface alongside EdTech/ID-focused titles.
+# Add your own institutions/companies the same way.
+#
+# title_filter_overrides:
+#   - companies: ["uwaterloo", "ubc", "fanshawec"]
+#     positive_extra:
+#       - "Administrator"
+#       - "Coordinator"
+#       - "Assistant"
+#       - "Program Administrator"
+#       - "Registrar"
+#       - "Student Services"
 
 # -- Search queries --
 # Each query triggers a WebSearch. Use site: to filter by portal.

@@ -117,6 +117,93 @@ try {
     fail(`fact matching accepted an embedded substring: ${JSON.stringify(boundary)}`);
   }
 
+  // #3639 — concrete false positives hit in one real session: ordinary
+  // gerund/abstract-noun prose after a "using"/"with"/"in" trigger word was
+  // extracted as a "tool" claim and blocked a truthful document. Each of
+  // these must now produce NO tool claim at all.
+  const falsePositiveCases = [
+    ['gerund alone', 'Built this using diagnosing and resolving workflow friction.'],
+    ['gerund + abstract-noun-suffix phrase', 'Built this using recurring HR and operations tasks.'],
+    ['bare abstract noun', 'Built this using efficiency.'],
+    ['stoplisted noun + abstract-noun-suffix phrase', 'Built this using feedback and improve delivery.'],
+    ['three-word gerund-led phrase', 'Built this using improving on-time submission.'],
+  ];
+  for (const [label, text] of falsePositiveCases) {
+    const found = factClaims(text).filter(claim => claim.kind === 'tool');
+    if (found.length === 0) {
+      pass(`#3639 false positive fixed: ${label}`);
+    } else {
+      fail(`#3639 false positive NOT fixed (${label}): ${JSON.stringify(found)}`);
+    }
+  }
+
+  // Review regression: a word ending that looks like ordinary English is not
+  // enough to discard a lowercase tool claim. Spring, Unity, and Processing
+  // are real technology names and must remain subject to source verification.
+  for (const tool of ['spring', 'unity', 'processing']) {
+    const directClaims = factClaims(`Built this using ${tool}.`).filter(claim => claim.kind === 'tool');
+    const unbacked = verifyFacts(`Built this using ${tool}.`, {
+      sourcePaths: [source], configPath: config,
+    });
+    if (directClaims.some(claim => claim.value === tool)
+        && unbacked.verdict === 'block'
+        && unbacked.unsupportedFacts.some(claim => claim.kind === 'tool' && claim.value === tool)) {
+      pass(`lowercase technology with prose-like suffix remains fail-closed: ${tool}`);
+    } else {
+      fail(`lowercase technology bypassed the fact gate: ${JSON.stringify({ tool, directClaims, unbacked })}`);
+    }
+  }
+
+  writeFileSync(source, 'Built the workflow using delivery.');
+  const sourceBackedCollision = verifyFacts('Built the workflow using delivery.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (sourceBackedCollision.verdict === 'pass') {
+    pass('source evidence overrides an exact prose-word collision');
+  } else {
+    fail(`source-backed lowercase tool collided with the prose filter: ${JSON.stringify(sourceBackedCollision)}`);
+  }
+
+  // The fix must not let a fabricated tool typed in lowercase evade
+  // detection just by losing its capitalisation — the false-positive fix is
+  // scoped to prose-shaped (gerund/abstract-noun) fragments only.
+  const lowercaseFabricationStillCaught = verifyFacts('Shipped it using kubernetes and google cloud.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (lowercaseFabricationStillCaught.verdict === 'block'
+      && lowercaseFabricationStillCaught.unsupportedFacts.some(claim => claim.value === 'kubernetes')
+      && lowercaseFabricationStillCaught.unsupportedFacts.some(claim => claim.value === 'google cloud')) {
+    pass('#3639 fix does not open a lowercase-evasion bypass');
+  } else {
+    fail(`lowercase fabricated tools bypassed the fact gate after the #3639 fix: ${JSON.stringify(lowercaseFabricationStillCaught)}`);
+  }
+
+  // A genuinely fabricated, Title-Cased tool with no source backing must
+  // still block — the shape check only ever ADDS a source-backed exemption,
+  // it never removes the requirement for evidence.
+  const capitalizedFabricationStillCaught = verifyFacts('Shipped it using Kubernetes and Terraform.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (capitalizedFabricationStillCaught.verdict === 'block'
+      && capitalizedFabricationStillCaught.unsupportedFacts.some(claim => claim.value === 'kubernetes')
+      && capitalizedFabricationStillCaught.unsupportedFacts.some(claim => claim.value === 'terraform')) {
+    pass('a fabricated Title-Cased tool with no source backing still blocks');
+  } else {
+    fail(`a fabricated Title-Cased tool bypassed the fact gate: ${JSON.stringify(capitalizedFabricationStillCaught)}`);
+  }
+
+  // A real lowercase tool name genuinely used and listed in the source must
+  // still pass cleanly, even though it is neither Title-Cased nor numbered.
+  writeFileSync(source, 'Senior Platform Engineer at Acme Labs. Built using React and Docker on kubernetes with n8n. Cut spend to $120k and closed a €90,000 deal.');
+  const backedLowercaseTool = verifyFacts('Deployed the service using kubernetes and n8n.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (backedLowercaseTool.verdict === 'pass') {
+    pass('a source-backed lowercase tool name is not penalized for casing');
+  } else {
+    fail(`a source-backed lowercase tool name was blocked: ${JSON.stringify(backedLowercaseTool)}`);
+  }
+
   const delegatedSource = [
     'Sourced and directed vendor Acme Interactive through the WebGL build of an in-store kiosk.',
     'Built the internal deployment pipeline using Node.js.',

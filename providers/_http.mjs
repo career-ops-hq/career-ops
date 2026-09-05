@@ -181,6 +181,28 @@ export function parseRetryAfterMs(value) {
 }
 
 /**
+ * Whether a failure is a redirect refused by the mandatory SSRF guard —
+ * `redirect:'error'` meeting a 3xx (#1440). It arrives as a bare TypeError
+ * with no `.status`, indistinguishable by shape from a timeout or a DNS
+ * failure, and only `err.cause.message` tells them apart.
+ *
+ * Exported because the verdict has two consumers, not one. isRetryableError()
+ * below needs it to stop retrying; discover-ats.mjs needs it to stop telling a
+ * human to re-run. Before it was shared, those two disagreed about the same
+ * error object: the retry layer called it deterministic while the CLI reported
+ * "board status unknown — re-run", and 48 of one user's 62 companies were
+ * BambooHR answering "no such tenant" with a 302 (#3788).
+ *
+ * @param {any} err
+ * @returns {boolean}
+ */
+export function isRefusedRedirectError(err) {
+  return err?.status === undefined
+    && err instanceof TypeError
+    && err?.cause?.message === REDIRECT_REFUSAL_CAUSE_MESSAGE;
+}
+
+/**
  * Whether a failed request is worth retrying: 429, any 5xx, or a transport
  * error (no status — timeout/abort/DNS). A 4xx other than 429 is the server
  * telling us the request itself is wrong, and retrying it just burns time.
@@ -188,13 +210,13 @@ export function parseRetryAfterMs(value) {
  * A refused redirect (redirect:'error' meeting a 3xx) surfaces as a bare
  * TypeError with no .status — the same shape as a transient network error —
  * but it's deterministic and will never succeed on retry. See
- * REDIRECT_REFUSAL_CAUSE_MESSAGE above for how it's distinguished.
+ * isRefusedRedirectError() above for how it's distinguished.
  */
 export function isRetryableError(err) {
   const status = err?.status;
   if (status === 429) return true;
   if (typeof status === 'number' && status >= 500) return true;
-  if (status === undefined && err instanceof TypeError && err?.cause?.message === REDIRECT_REFUSAL_CAUSE_MESSAGE) return false;
+  if (isRefusedRedirectError(err)) return false;
   return status === undefined; // network error / timeout / abort — no status set
 }
 
