@@ -9794,30 +9794,39 @@ try {
   // as a non-data line, so the pasted evaluation vanished and verify-pipeline
   // still reported the tracker clean.
   //
-  // Each evaluator names its own path and content variables, so the write sink is
-  // declared per file rather than sniffed. The table is checked against
-  // evaluatorSources below: a fifth evaluator, or a rename, fails here rather
-  // than quietly dropping out of coverage. Presence of the string
-  // "tracker-additions" is deliberately NOT the test -- a comment satisfies that.
-  const writeSinks = {
-    'ollama-eval.mjs':          /writeFileSync\(\s*join\(PATHS\.trackerAdditions,[^)]+\),\s*`\$\{trackerFields\.join\('\\t'\)\}/,
-    'openai-eval.mjs':          /writeFileSync\(\s*join\(PATHS\.trackerAdditions,[^)]+\),\s*`\$\{trackerFields\.join\('\\t'\)\}/,
-    'gemini-eval.mjs':          /writeFileSync\(\s*trackerPath,\s*`\$\{trackerFields\.join\('\\t'\)\}/,
-    'openrouter-runner.mjs':    /writeFile\(\s*tsvFile,\s*tsvLine\s*\)/,
+  // The sink is expressed as the #3706 contract rather than as per-file patterns:
+  // a write call whose payload interpolates a header constant, a newline, then
+  // the row. Patterns naming each file's own variables went stale the moment
+  // #3706 rewrote gemini-eval and openrouter-runner to emit TSV_ADDITION_HEADER
+  // -- they reported "bypasses the tracker-addition path" against a tree where
+  // both persist correctly, a false alarm on files this PR does not own. Keying
+  // on the shared contract means the check tracks the contract, not the spelling.
+  // Presence of the string "tracker-additions" is deliberately NOT the test: a
+  // comment satisfies that.
+  const writeSinkRe = /write(?:File|FileSync)\([\s\S]{0,200}?\$\{[A-Za-z0-9_]*(?:HEADER|Header)\}\\n\$\{([^}]+)\}/;
+  // ...and the payload has to BE the row. Accepting any identifier let a mutation
+  // that replaced `${trackerFields.join('\t')}` with `${placeholder}` pass, which
+  // is the failure-wearing-a-pass this check exists to stop. Either the join is
+  // inline, or the named variable's own definition is tab-separated
+  // (openrouter-runner builds `tsvLine` a line earlier).
+  const writesTheRow = (source) => {
+    const sink = source.match(writeSinkRe);
+    if (!sink) return false;
+    const payload = sink[1].trim();
+    if (/\.join\('\\t'\)$/.test(payload)) return true;
+    const defined = source.match(new RegExp(`const\\s+${payload.replace(/[^A-Za-z0-9_]/g, '')}\\s*=[^;]*`));
+    return Boolean(defined && defined[0].includes('\\t'));
   };
-  const uncovered = evaluatorSources.map(([name]) => name).filter(name => !writeSinks[name]);
-  const orphaned  = Object.keys(writeSinks).filter(name => !evaluatorSources.some(([n]) => n === name));
   const pastedRowRe = /Tracker entry \(add to|console\.log\(`[^`]*\|\s*\$\{num\}\s*\|/;
   const unpersistedEvaluators = evaluatorSources
-    .filter(([name, source]) => !writeSinks[name]?.test(source) || pastedRowRe.test(source))
+    .filter(([, source]) => !writesTheRow(source) || pastedRowRe.test(source))
     .map(([name]) => name);
-  if (uncovered.length > 0 || orphaned.length > 0) {
-    fail(`write-sink table out of step with the evaluator family: uncovered=${uncovered.join(', ') || 'none'} orphaned=${orphaned.join(', ') || 'none'}`);
-  } else if (unpersistedEvaluators.length === 0) {
+  if (unpersistedEvaluators.length === 0) {
     pass('all headless evaluators write their addition to disk, none dictates a hand-pasted row');
   } else {
     fail(`headless evaluators bypass the tracker-addition path: ${unpersistedEvaluators.join(', ')}`);
   }
+
   // The addition itself must carry all nine columns in the TSV contract's order
   // (status BEFORE score) -- the two evaluators converted in #3707 build the row
   // from a literal, so pin the field list rather than only the directory.

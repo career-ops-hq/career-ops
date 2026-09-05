@@ -26,6 +26,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
 import {
   formatReportNumber, releaseReportNumbers, reserveReportNumbers,
@@ -223,19 +224,26 @@ function tsvSafe(value) {
  */
 function normalizedTrackerScore(value) {
   const clean = tsvSafe(value);
-  // Leading number, with an optional explicit denominator. Trailing prose is
-  // tolerated because models add it ("4.2 (strong fit)"), but a denominator that
-  // is not 5 is refused rather than reinterpreted: parseFloat alone read `8/10`
-  // as 8 and wrote `8/5`, which satisfies SCORE_CELL_RE and merges as a genuine
-  // score. Nothing else range-checks this -- unlike gemini-eval, these two have
-  // no validateEvaluationShape (gemini-eval.mjs:228) -- an out-of-range value
-  // would reach stats.mjs averages
-  // and score gates as fact. N/A is the honest cell for anything unreadable.
-  const parsed = clean.match(/^(\d+(?:\.\d+)?)\s*(?:\/\s*(\d+(?:\.\d+)?))?/);
+  // Parse, do not pattern-match the string. Two bugs lived in the old guard:
+  // `/n\/?a/i` was unanchored with an optional slash, so bare `na` matched and a
+  // real score with trailing prose -- `4.2 (final)`, `4.2 (internal)`,
+  // `4.5 - strong signal` -- was recorded as `N/A`; and the `/5` early return kept
+  // the whole string, so `4.2/10` became `4.2/5` and merged as a genuine score.
+  // Trailing prose is tolerated because models produce it; a denominator that is
+  // not 5, or a value outside 0..5, is refused rather than reinterpreted.
+  const parsed = clean.match(/^(\d+(?:\.\d+)?)/);
   if (!parsed) return 'N/A';
   const score = parseFloat(parsed[1]);
-  const denominator = parsed[2] === undefined ? 5 : parseFloat(parsed[2]);
-  if (!Number.isFinite(score) || denominator !== 5 || score < 0 || score > 5) return 'N/A';
+  // The denominator is load-bearing wherever it sits. Requiring it immediately
+  // after the number read `4.2 (strong fit)/10` -- a ten-point score with an
+  // annotation -- as a bare 4.2 and wrote `4.2/5`, the same wrong number
+  // `8/10` used to produce. The first denominator in the cell is taken and must
+  // be 5; absent one, the scale is the contract's. A cell that puts an unrelated
+  // fraction first (`4.2 (fit 3/4 axes)`) is refused rather than guessed at --
+  // N/A is recoverable, a wrong score is not.
+  const denominator = clean.match(/\/\s*(\d+(?:\.\d+)?)/);
+  const scale = denominator ? parseFloat(denominator[1]) : 5;
+  if (!Number.isFinite(score) || scale !== 5 || score < 0 || score > 5) return 'N/A';
   return `${score}/5`;
 }
 
@@ -499,12 +507,20 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
       `[${num}](reports/${filename})`,
       tsvSafe(`Ollama evaluation (${modelName})`),
     ];
-    // Optional tenth field. merge-tracker.mjs:697 detects it by its http(s)
-    // prefix, so it stays order-independent with the optional location field,
-    // and Pass 0 can match on it instead of waiting for --backfill-urls.
+    // Optional tenth field, labelled in the header below so it resolves by name.
+    // Pass 0 can then match on it instead of waiting for --backfill-urls.
     if (postingUrl) trackerFields.push(tsvSafe(postingUrl));
+    // Header row first (#3517/#3706): merge-tracker resolves the fields by name,
+    // so this row cannot be ingested into the wrong columns. The optional URL
+    // needs its own label -- values are read BY label, so a tenth field the
+    // header does not name is not mis-mapped, it is dropped.
+    const additionHeader = postingUrl ? `${TSV_ADDITION_HEADER}\turl` : TSV_ADDITION_HEADER;
     mkdirSync(PATHS.trackerAdditions, { recursive: true });
-    writeFileSync(join(PATHS.trackerAdditions, additionName), `${trackerFields.join('\t')}\n`, 'utf-8');
+    writeFileSync(
+      join(PATHS.trackerAdditions, additionName),
+      `${additionHeader}\n${trackerFields.join('\t')}\n`,
+      'utf-8',
+    );
     console.log(`\n📊  Tracker addition saved: batch/tracker-additions/${additionName}`);
     console.log('    Run `node merge-tracker.mjs` to merge it into the tracker.');
   } catch (err) {
