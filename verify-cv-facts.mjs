@@ -716,7 +716,17 @@ export function scopeInflationClaims(targetText, sourceText) {
       // Tier 1 is participation, so it cannot be an escalation of anything: the
       // check is for bullets that claim execution or ownership.
       if (!opening || opening.tier < 2) continue;
-      const tokens = scopeObjectTokens(clause);
+      // DISTINCT tokens. `overlap` below counts matches rather than distinct
+      // matches, so a clause that repeats a word reached the two-token
+      // threshold on the strength of one shared token: "Owned the payments
+      // platform migration to payments v2" counted `payments` twice and linked
+      // to a source saying only "Contributed to payments", blocking a truthful
+      // bullet on an unrelated line. It also mis-sized `required`, since a
+      // short clause repeating its only token looked like two.
+      //
+      // The source side has always wrapped in a Set, and
+      // `delegatedAuthorshipClaims` dedupes its tokens the same way.
+      const tokens = [...new Set(scopeObjectTokens(clause))];
       if (!tokens.length) continue;
 
       // Two shared tokens, the threshold `delegatedAuthorshipClaims` uses, except
@@ -1565,6 +1575,18 @@ function runSelfTest() {
   equal('a single shared token does not link unrelated entries',
     scopeOf('Designed the onboarding automation.', 'Supported the onboarding revamp for new hires.'),
     []);
+  // ...and it stays one token however many times the bullet repeats it.
+  // Counting matches rather than distinct matches let a repeated word clear the
+  // two-token threshold by itself.
+  equal('a repeated word is still one shared token',
+    scopeOf('Owned the payments platform migration to payments v2.', 'Contributed to payments.'),
+    []);
+  // The guard must not swing the other way: two genuinely distinct shared
+  // tokens still link, repetition or not.
+  equal('two distinct shared tokens still link',
+    scopeOf('Owned the payments platform migration to payments v2.',
+      'Contributed to the payments platform.'),
+    ['owned the payments platform migration to payments v2']);
   // Tier 1 claims participation, so it can never be an escalation.
   equal('a participation verb is never flagged',
     scopeOf('Supported the billing migration', 'Worked on the billing migration.'), []);
