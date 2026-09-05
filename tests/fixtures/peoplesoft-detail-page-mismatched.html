@@ -1,0 +1,22 @@
+<!-- Redacted/synthetic PeopleSoft Fluid detail page for a DEAD deep-link: the
+     PostingSeq requested doesn't exist for this job opening, and PeopleSoft
+     redirected to an unrelated generic posting instead of erroring cleanly.
+     The job id embedded in the page (JR99999999) does not match whatever
+     jobId a test requests (e.g. JR00012345) — parseJobDetail() must reject
+     this, not silently attribute JR99999999's content to the wrong job. -->
+<!DOCTYPE html>
+<html>
+<head><title>Job Posting</title></head>
+<body>
+<div id="ptifrmtgtframe">
+<span id="HRS_SCH_WRK2_HRS_JOB_OPENING_ID">JR99999999</span>
+<span id="HRS_SCH_WRK2_POSTING_TITLE">Unrelated Generic Posting</span>
+<span id="HRS_SCH_WRK_HRS_DESCRLONG">Toronto, ON, Canada</span>
+<span id="HRS_SCH_WRK_HRS_FULL_PART_TIME">Part-Time</span>
+<div id="win0divHRS_SCH_PSTDSC_row$0">
+  <span id="HRS_SCH_WRK_DESCR100$0lbl">Description</span>
+  <div id="HRS_SCH_PSTDSC_DESCRLONG$0"><p>This is not the job you requested.</p></div>
+</div>
+</div>
+</body>
+</html>

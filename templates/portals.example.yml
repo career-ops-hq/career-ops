@@ -909,6 +909,9 @@ search_queries:
 #   gem             jobs.gem.com/<boardId>
 #   join            join.com/companies/<slug>  (SSR __NEXT_DATA__ parse, no separate API)
 #   icims           careers-<tenant>.icims.com / *.icims.com
+#   peoplesoft      /psc/<site>/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL  (PeopleSoft Fluid Candidate
+#                   Gateway — the URL PATH is the signature, not the host: every tenant runs on its own
+#                   branded institution domain, e.g. recruit.uwo.ca, careers.torontomu.ca, hr.mcmaster.ca, wsib.ca)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -1081,6 +1084,25 @@ search_queries:
 #   # iCIMS hosted-portal board. Auto-detects any *.icims.com host from
 #   # careers_url/api.
 #   careers_url: https://careers-exampleco.icims.com/jobs/search?ss=1
+#   enabled: true
+#
+# - name: Example PeopleSoft Co
+#   # PeopleSoft Fluid Candidate Gateway. No vendor-owned host to pattern-match
+#   # (every tenant runs on its own branded institution domain) — detect() keys
+#   # on the Fluid job-search URL PATH instead, so any host works as long as the
+#   # path is exactly this shape.
+#   careers_url: https://careers.exampleu.edu/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Page=HRS_APP_SCHJOB_FL&Action=U&FOCUS=Applicant&SiteId=1
+#   max_pages: 20          # optional cap on "load more" POST replays (default 20, max 100) —
+#                          # PeopleSoft's own anonymous-session cap is ~100 results regardless
+#   peoplesoft:
+#     fetchDetails: false  # opt-in per-posting detail fetch for the full JD (off by default,
+#                          # zero-token); sequential and paced, capped by detailLimit (default 25)
+#     detailLimit: 25
+#   enabled: true
+#
+# - name: Western University                  # worked example — real, smoke-tested live 2026-09
+#                                                # (fetched 97/97 real postings incl. full JD text)
+#   careers_url: https://recruit.uwo.ca/psc/hrprdwebER/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Page=HRS_APP_SCHJOB_FL&Action=U&FOCUS=Applicant&SiteId=1
 #   enabled: true
 #
 # - name: Example SuccessFactors Co
