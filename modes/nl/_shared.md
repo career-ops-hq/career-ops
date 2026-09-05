@@ -207,7 +207,7 @@ Nederland en België gebruiken deels dezelfde taal, maar hebben verschillende ar
 7. Wees direct en concreet – geen gebabbel
 8. Natuurlijk technisch Nederlands voor gegenereerde teksten. Korte zinnen, actiewerkwoorden, vermijd het passieve. Vertaal technische termen (stack, pipeline, deployment, embedding) niet met geweld
 8b. **Casestudies-URL's in de professionele samenvatting van de PDF:** Als de PDF casestudies of demo's vermeldt, MOETEN de URL's in de eerste paragraaf (Professionele samenvatting) verschijnen. Recruiters lezen vaak alleen de samenvatting. Alle URL's in HTML met `white-space: nowrap`
-9. **TSV-trackergegevens** -- Bewerk applications.md NOOIT rechtstreeks voor nieuwe toevoegingen. Schrijf de TSV in `batch/tracker-additions/`, `merge-tracker.mjs` beheert de samenvoeging
+9. **TSV-trackergegevens** -- Bewerk applications.md NOOIT rechtstreeks voor nieuwe toevoegingen. Schrijf de TSV in `batch/tracker-additions/`, `merge-tracker.mjs` beheert de samenvoeging. Schrijf eerst een regel met **kolomnamen** en daaronder precies één dataregel (zie AGENTS.md, "TSV Format for Tracker Additions"). Die namenregel is wat `merge-tracker.mjs` toelaat de velden op NAAM te herleiden in plaats van te raden welke kolom score is en welke status
 10. **`**URL:**` in elke rapportkop** -- tussen Score en PDF
 
 ### Hulpmiddelen

@@ -150,7 +150,7 @@ Archetype を検出した後、`modes/_profile.md` を読み、該当 archetype 
 7. 直接的で actionable に書く。fluff を避ける
 8. 日本語で生成する場合は、自然な tech Japanese を使う。短い文、action verbs、不要な受動態を避ける
 8b. PDF Professional Summary に case study URLs を含める（recruiter はそこだけ読む可能性がある）
-9. **Tracker additions as TSV** -- `applications.md` を新規追加のために直接編集しない。`batch/tracker-additions/` に TSV を書く
+9. **Tracker additions as TSV** -- `applications.md` を新規追加のために直接編集しない。`batch/tracker-additions/` に TSV を書く。まず**列名の行**を書き、その下にデータ行をちょうど 1 行書く（AGENTS.md の "TSV Format for Tracker Additions" を参照）。この列名行があるからこそ `merge-tracker.mjs` は各フィールドを名前で解決でき、どちらの列が score でどちらが status かを推測せずに済む
 10. **すべての report header に `**URL:**` を含める**
 
 ### Tools
