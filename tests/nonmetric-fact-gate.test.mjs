@@ -283,6 +283,147 @@ try {
   } else {
     fail(`explicit direct-work evidence was ignored: ${JSON.stringify(directlySupported)}`);
   }
+
+  // Scope-verb inflation and unsourced adoption claims (#3685), end to end
+  // through verifyFacts and its real source files. Both cases below were passed
+  // by the gate in a real run and had to be caught by hand.
+  const scopeSource = join(tmp, 'scope-cv.md');
+  writeFileSync(scopeSource, [
+    'Contributed to the migration to a service architecture.',
+    'Implemented the ingest pipeline for the analytics team.',
+  ].join('\n'));
+
+  const inflatedScope = verifyFacts('Led the migration to a service architecture.', {
+    sourcePaths: [scopeSource], configPath: config,
+  });
+  const scopeClaim = inflatedScope.unsupportedFacts.find(claim => claim.kind === 'scope');
+  // Which line was picked is the assertion, not its exact punctuation:
+  // factStatements keeps a statement's own trailing period when a line break
+  // supplied the delimiter, so pinning the full string would be brittle for a
+  // reason unrelated to this check.
+  if (inflatedScope.verdict === 'block'
+      && scopeClaim
+      && scopeClaim.sourceLine.includes('Contributed to the migration')
+      && !scopeClaim.sourceLine.includes('ingest')) {
+    pass('an upgraded scope verb blocks and names the source line');
+  } else {
+    fail(`scope inflation was not blocked: ${JSON.stringify(inflatedScope)}`);
+  }
+
+  const truthfulScope = verifyFacts('Implemented the ingest pipeline for the analytics team.', {
+    sourcePaths: [scopeSource], configPath: config,
+  });
+  if (truthfulScope.verdict === 'pass'
+      && !truthfulScope.unsupportedFacts.some(claim => claim.kind === 'scope')) {
+    pass('a bullet whose source carries the same verb passes');
+  } else {
+    fail(`a truthful scope claim was blocked: ${JSON.stringify(truthfulScope)}`);
+  }
+
+  // "worked on" is the participation wording #3685 names beside "contributed
+  // to". Reading it as no-evidence let every stronger rewrite of it through.
+  const workedOnSource = join(tmp, 'worked-on-cv.md');
+  writeFileSync(workedOnSource, 'Worked on the migration.\nWorked at Acme Labs as a Platform Engineer.');
+  const workedOn = verifyFacts('Led the migration.', {
+    sourcePaths: [workedOnSource], configPath: config,
+  });
+  if (workedOn.verdict === 'block'
+      && workedOn.unsupportedFacts.some(claim => claim.kind === 'scope' && claim.value === 'led the migration')) {
+    pass('a stronger verb over a "worked on" source blocks');
+  } else {
+    fail(`scope inflation over "worked on" was accepted: ${JSON.stringify(workedOn)}`);
+  }
+
+  // Employment wording is not a scope claim, so it must not become the weaker
+  // side of a comparison for anything it shares a noun with.
+  const employmentOnly = join(tmp, 'employment-cv.md');
+  writeFileSync(employmentOnly, 'Worked at Acme Labs on the billing migration.');
+  const employment = verifyFacts('Led the billing migration.', {
+    sourcePaths: [employmentOnly], configPath: config,
+  });
+  if (!employment.unsupportedFacts.some(claim => claim.kind === 'scope')) {
+    pass('"worked at" is not treated as scope evidence');
+  } else {
+    fail(`employment wording was read as scope evidence: ${JSON.stringify(employment)}`);
+  }
+
+  // A verb binds to its own work item. The strong half of a compound source
+  // sentence must not vouch for the weak half.
+  const compoundSource = join(tmp, 'compound-cv.md');
+  writeFileSync(compoundSource, 'Contributed to the billing migration and led the payments rewrite.');
+  const compoundWeak = verifyFacts('Led the billing migration.', {
+    sourcePaths: [compoundSource], configPath: config,
+  });
+  const compoundStrong = verifyFacts('Led the payments rewrite.', {
+    sourcePaths: [compoundSource], configPath: config,
+  });
+  if (compoundWeak.unsupportedFacts.some(claim => claim.kind === 'scope')
+      && !compoundStrong.unsupportedFacts.some(claim => claim.kind === 'scope')) {
+    pass('a compound source binds each verb to its own work item');
+  } else {
+    fail(`compound source scoping is wrong: ${JSON.stringify({ compoundWeak, compoundStrong })}`);
+  }
+
+  const unsourcedAdoption = verifyFacts('Built internal tooling used daily across the engineering org.', {
+    sourcePaths: [scopeSource], configPath: config,
+  });
+  if (unsourcedAdoption.verdict === 'block'
+      && unsourcedAdoption.unsupportedFacts.some(claim => claim.kind === 'adoption' && claim.value === 'used daily')) {
+    pass('an adoption claim absent from every source blocks');
+  } else {
+    fail(`an unsourced adoption claim was accepted: ${JSON.stringify(unsourcedAdoption)}`);
+  }
+
+  const orgWide = verifyFacts('Rolled the linter out organization-wide.', {
+    sourcePaths: [scopeSource], configPath: config,
+  });
+  if (orgWide.verdict === 'block'
+      && orgWide.unsupportedFacts.some(claim => claim.kind === 'adoption' && claim.value === 'organization-wide')) {
+    pass('the spelled-out organization-wide claim blocks');
+  } else {
+    fail(`organization-wide bypassed the gate: ${JSON.stringify(orgWide)}`);
+  }
+
+  // The source side is a lemma, so a truthful CV that paraphrases its own
+  // source is not punished for the rewording.
+  const paraphrased = join(tmp, 'paraphrase-cv.md');
+  writeFileSync(paraphrased, 'Three teams adopted the tool. The rollout went across the whole company.');
+  const paraphrase = verifyFacts('Adopted by 3 teams. Rolled out company-wide.', {
+    sourcePaths: [paraphrased], configPath: config,
+  });
+  if (!paraphrase.unsupportedFacts.some(claim => claim.kind === 'adoption')) {
+    pass('a source that words its adoption differently still supports the claim');
+  } else {
+    fail(`a paraphrased adoption claim was blocked: ${JSON.stringify(paraphrase)}`);
+  }
+
+  const sourcedAdoption = join(tmp, 'adoption-cv.md');
+  writeFileSync(sourcedAdoption, 'Implemented the ingest pipeline, used daily by the analytics team.');
+  const adoptionAllowed = verifyFacts('Implemented the ingest pipeline, used daily by the analytics team.', {
+    sourcePaths: [sourcedAdoption], configPath: config,
+  });
+  if (adoptionAllowed.verdict === 'pass'
+      && !adoptionAllowed.unsupportedFacts.some(claim => claim.kind === 'adoption')) {
+    pass('a source-backed adoption claim passes');
+  } else {
+    fail(`a source-backed adoption claim was blocked: ${JSON.stringify(adoptionAllowed)}`);
+  }
+
+  // allow_facts is the existing escape hatch for a verified exception, and it
+  // has to reach the new kinds too or the only way past a false positive is to
+  // reword the CV.
+  const allowConfig = join(tmp, 'cv-facts-allow.json');
+  writeFileSync(allowConfig, JSON.stringify({
+    allow_metrics: [], allow_facts: ['led the migration to a service architecture'], forbidden_phrases: [],
+  }));
+  const allowed = verifyFacts('Led the migration to a service architecture.', {
+    sourcePaths: [scopeSource], configPath: allowConfig,
+  });
+  if (!allowed.unsupportedFacts.some(claim => claim.kind === 'scope')) {
+    pass('allow_facts exempts a verified scope claim');
+  } else {
+    fail(`allow_facts did not reach the scope check: ${JSON.stringify(allowed)}`);
+  }
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }
