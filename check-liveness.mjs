@@ -81,6 +81,15 @@ export function recordingEnabled(args = []) {
  * @returns {Promise<number>} How many rows were written.
  */
 export async function recordExpiredVerdicts(verdicts) {
+  // This one check is deliberately OUTSIDE the lock, unlike the read below.
+  // No history means no URL is known, so there is nothing to retire and no
+  // reason to pay for a lock — and locking it would buy nothing, because the
+  // scenario it looks like it prevents is not preventable. A scanner that
+  // creates the file and surfaces this URL a microsecond after the check is
+  // indistinguishable from one that does it a second after the whole function
+  // returns: either way the posting was discovered after the verdict, and the
+  // next sweep is what covers it. (The file is created by atomicWriteFile,
+  // which renames into place, so this can never see a half-written history.)
   if (!existsSync(SCAN_HISTORY_PATH)) return 0;
   return withPipelineLock(SCAN_HISTORY_PATH, async () => {
     const rows = planExpiredHistoryRows(
