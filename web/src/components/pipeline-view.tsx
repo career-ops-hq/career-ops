@@ -11,6 +11,7 @@ import { canonStatus, scoreNum, scoreTone, statusDot } from "@/lib/format";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { cn } from "@/lib/cn";
 import { companyPresentation, companySearchText } from "@/lib/company-presentation.mjs";
+import { compareTrackerNumbers } from "@/lib/pipeline-sort.mjs";
 
 // INBOX (the triage queue) is the default tab; the rest filter the tracker.
 const TABS = [
@@ -28,7 +29,7 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number];
 
-const SORT_KEYS = ["company", "role", "score", "status", "date"] as const;
+const SORT_KEYS = ["tracker", "company", "role", "score", "status", "date"] as const;
 type SortKey = (typeof SORT_KEYS)[number];
 
 export function PipelineView({
@@ -106,6 +107,7 @@ export function PipelineView({
       rows = rows.filter((r) => companySearchText(r).toLowerCase().includes(needle));
     }
     return [...rows].sort((a, b) => {
+      if (sort.key === "tracker") return compareTrackerNumbers(a, b) * sort.dir;
       if (sort.key === "score") {
         const an = scoreNum(a.score);
         const bn = scoreNum(b.score);
@@ -206,13 +208,20 @@ export function PipelineView({
                 {SORT_KEYS.map((k) => (
                   <th
                     key={k}
-                    className="cursor-pointer select-none whitespace-nowrap px-4 py-2.5 font-medium hover:text-foreground"
-                    onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
+                    aria-sort={sort.key === k ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
+                    className={cn(
+                      "whitespace-nowrap px-4 py-2.5 font-medium",
+                      k === "date" && "hidden lg:table-cell",
+                    )}
                   >
-                    <span className="inline-flex items-center gap-1">
+                    <button
+                      type="button"
+                      className="inline-flex cursor-pointer select-none items-center gap-1 uppercase tracking-wide hover:text-foreground"
+                      onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
+                    >
                       {k}
-                      <ChevronsUpDown className="size-3" />
-                    </span>
+                      <ChevronsUpDown aria-hidden="true" className="size-3" />
+                    </button>
                   </th>
                 ))}
               </tr>
@@ -222,6 +231,11 @@ export function PipelineView({
                 const company = companyPresentation(r);
                 return (
                   <tr key={`${r.n}-${i}`} className="group transition-colors hover:bg-surface/40">
+                    <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
+                      <Link href={`/pipeline/${r.n}`} className="transition-colors group-hover:text-brand">
+                        #{r.n}
+                      </Link>
+                    </td>
                     <td className="px-4 py-3 font-medium">
                       <Link href={`/pipeline/${r.n}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
                         <CompanyLogo name={company.logoName} size={20} />
@@ -240,7 +254,7 @@ export function PipelineView({
                       {r.status}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-faint tabular-nums">{r.date}</td>
+                  <td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">{r.date}</td>
                   </tr>
                 );
               })}
