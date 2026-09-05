@@ -79,6 +79,21 @@ try {
   } else {
     fail(`formatBreakdown zero-token step rendering failed:\n${breakdownZero}`);
   }
+
+  // 8. MiniMax model rates include uncached input, cached input, and output
+  const minimaxUsage = { prompt_tokens: 1000000, completion_tokens: 1000000, cached_tokens: 500000 };
+  const minimaxCases = [
+    ['MiniMax-M3', 2.76],
+    ['MiniMax-M2.7', 1.38],
+  ];
+  for (const [model, expected] of minimaxCases) {
+    const actual = estimateCost(model, minimaxUsage, 'minimax');
+    if (actual !== null && Math.abs(actual - expected) < 1e-9) {
+      pass(`estimateCost for ${model} includes its cached-input rate`);
+    } else {
+      fail(`estimateCost for ${model} failed: expected ${expected}, got ${actual}`);
+    }
+  }
 } catch (e) {
   fail(`token-tracker tests crashed: ${e.message}`);
 }

@@ -2563,6 +2563,18 @@ for (const header of ['podsumowanie zawodowe', 'doświadczenie zawodowe', 'wyksz
   }
 }
 
+// Same gap, same two shipped Chinese markets (#3658): modes/zh-TW and modes/zh
+// rendered titles the alias table could not name, so the guard was disabled AND
+// cv.sections — the documented way to correct an order — silently did nothing.
+// Both scripts are required: a CV written in either renders through this table.
+for (const header of ['專業摘要', '工作經歷', '學歷', '證照', '技能', '专业摘要', '工作经历', '学历', '证书', '项目']) {
+  if (generatePdfScript.includes(`['${header}',`)) {
+    pass(`SECTION_ALIASES maps Chinese header: ${header}`);
+  } else {
+    fail(`SECTION_ALIASES missing Chinese header: ${header}`);
+  }
+}
+
 // generate-pdf.mjs imports playwright at module scope; degrade to a warning
 // rather than crashing the suite where it is not installed.
 let pdfModule = null;
@@ -2589,6 +2601,12 @@ if (pdfModule) {
     ['Umiejetnosci', 'skills'],      // diacritics stripped
     ['Work Experience', 'experience'], // English must be unchanged
     ['Core Competencies', 'competencies'],
+    ['專業摘要', 'summary'],       // Traditional (modes/zh-TW)
+    ['工作經歷', 'experience'],
+    ['學歷', 'education'],
+    ['专业摘要', 'summary'],       // Simplified (modes/zh)
+    ['工作经历', 'experience'],
+    ['学历', 'education'],
   ];
   let keysOk = true;
   for (const [title, expected] of keyCases) {
@@ -2598,7 +2616,7 @@ if (pdfModule) {
       keysOk = false;
     }
   }
-  if (keysOk) pass(`sectionKey resolves all ${keyCases.length} PL/EN heading spellings`);
+  if (keysOk) pass(`sectionKey resolves all ${keyCases.length} PL/EN/ZH heading spellings`);
 
   // Hermetic cv.md stand-in: passed in directly, so the test does not depend on
   // a cv.md existing in the checkout (it is gitignored).
@@ -2618,6 +2636,13 @@ if (pdfModule) {
   ]);
   const enMisordered = titlesToHtml([
     'Professional Summary', 'Education', 'Work Experience',
+  ]);
+  // Education hoisted above 工作經歷 — the Chinese half of #3658.
+  const zhMisordered = titlesToHtml([
+    '專業摘要', '學歷', '工作經歷',
+  ]);
+  const zhCorrect = titlesToHtml([
+    '专业摘要', '工作经历', '学历', '证书', '技能',
   ]);
 
   const throws = (html, opts) => {
@@ -2640,6 +2665,18 @@ if (pdfModule) {
     pass('English CV order check still rejects divergence (no regression)');
   } else {
     fail('English CV order check regressed');
+  }
+
+  if (throws(zhMisordered)) {
+    pass('Traditional Chinese CV with Education before Work Experience is rejected');
+  } else {
+    fail('Traditional Chinese CV with Education before Work Experience was NOT rejected (guard is a no-op)');
+  }
+
+  if (!throws(zhCorrect)) {
+    pass('Simplified Chinese CV in cv.md order is accepted');
+  } else {
+    fail('Simplified Chinese CV in cv.md order was wrongly rejected');
   }
 
   // --allow-reorder must keep downgrading the divergence to a warning now that
@@ -12341,11 +12378,15 @@ try {
     // to LEGACY_COLMAP (#2274). On a plain 9-column table the fallback happens
     // to line up and hides the bug; with a Location column inserted, the Score
     // cell is read from Location instead — an ES tracker scored "Remote".
+    // `date` is not in REQUIRED_HEADER_FIELDS, so a missing `fecha` alias does
+    // not fail the header — it resolves with no date column and every row comes
+    // back with an empty date (#3705). Assert the Fecha column is actually
+    // resolved, not silently absent.
     const trackerParse = await import(pathToFileURL(join(ROOT, 'tracker-parse.mjs')).href);
     const esHeader = '| # | Fecha | Empresa | Puesto | Location | Score | Status | PDF | Report | Notes |';
     const esMap = trackerParse.detectColumns([esHeader]);
-    if (esMap && esMap.score === 6 && esMap.company === 3 && esMap.role === 4 && esMap.location === 5) {
-      pass('a fully localized header maps through the alias table (#2274)');
+    if (esMap && esMap.date === 2 && esMap.score === 6 && esMap.company === 3 && esMap.role === 4 && esMap.location === 5) {
+      pass('a fully localized header maps through the alias table (#2274, #3705)');
     } else {
       fail(`localized header did not map: ${JSON.stringify(esMap)}`);
     }

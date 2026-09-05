@@ -1567,6 +1567,40 @@ function rejectDirectories(paths, root) {
 const EXCLUDE_PATHSPEC_PREFIX = ':(exclude)';
 
 /**
+ * The concrete FILE list to stage and scope-commit for an update.
+ *
+ * `pathsToStage` is a git PATHSPEC list: positive manifest entries (files, and
+ * directory entries ending in '/') plus `:(exclude)<path>` specs for files this
+ * install preserved (#2337). Two consumers need a plain file list, not that
+ * pathspec list:
+ *
+ *   - addPaths force-adds under `--literal-pathspecs`, where a `:(exclude)`
+ *     spec is read as a LITERAL, nonexistent filename. git aborts with "pathspec
+ *     did not match any files" and the whole update commit dies half-done — the
+ *     exact break a preserved local edit (a Docker/sandbox `Dockerfile`) hit in
+ *     the field. The exclude specs simply must not reach it.
+ *   - the scoped commit is clearest, and mode-safe, naming exactly what staged.
+ *
+ * So expand only the positive specs against the target tree, then SUBTRACT the
+ * preserved files. Subtraction is what the exclude spec was meant to do and,
+ * during staging, never did: a preserved file living under a positive DIRECTORY
+ * entry (`providers/` over a preserved `providers/acme.mjs`) is pulled in by the
+ * expansion and has to be removed here, not merely appended as a spec the
+ * expansion ignores.
+ *
+ * @param {string[]} pathsToStage - positive specs + `:(exclude)<path>` specs.
+ * @param {string[]|Set<string>} [preserved] - exact preserved file paths.
+ * @param {string} [ref] - tree the directory entries resolve against.
+ * @param {{git?: Function}} [ctx] - test seam; defaults to the ROOT-bound runner.
+ * @returns {string[]} concrete file paths, preserved files removed, no exclusions.
+ */
+export function stagingFileList(pathsToStage, preserved = [], ref = 'FETCH_HEAD', ctx = {}) {
+  const preservedSet = preserved instanceof Set ? preserved : new Set(preserved);
+  const positives = pathsToStage.filter((spec) => !spec.startsWith(EXCLUDE_PATHSPEC_PREFIX));
+  return expandToShippedFiles(positives, ref, ctx).filter((path) => !preservedSet.has(path));
+}
+
+/**
  * Staged paths that are NOT covered by `owned`.
  *
  * Used to decide whether committing the whole index is equivalent to a
@@ -2414,13 +2448,16 @@ async function apply() {
     // recovery command. Declared outside the try because the catch reads it.
     let usedIndexCommit = false;
 
-    // The staging and scoped-commit paths must use the same file-only list.
+    // The staging and scoped-commit paths must use the same concrete file list.
     // Passing a manifest directory to `git commit -- <dir>` reads matching
     // tracked files from the working tree, including files the target tree no
-    // longer ships. That can sweep a user's unstaged edit into the updater
-    // commit even though staging never touched it (#3504). Exclusion
-    // pathspecs remain in the expanded list so preserved files stay out.
-    const expandedPathsToStage = expandToShippedFiles(pathsToStage);
+    // longer ships, which can sweep a user's unstaged edit into the updater
+    // commit even though staging never touched it (#3504). stagingFileList
+    // expands the positive specs and subtracts the preserved files, so no
+    // `:(exclude)` spec reaches addPaths (where --literal-pathspecs would read
+    // it as a literal filename and abort the commit) and no preserved file is
+    // staged. preservedSet is the same Set built at the top of apply().
+    const expandedPathsToStage = stagingFileList(pathsToStage, preservedSet);
 
     try {
       prepareMaterializedSkillEntrypointsForStage(materializedSkillEntrypoints);
