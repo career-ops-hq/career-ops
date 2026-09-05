@@ -24,7 +24,13 @@ try {
   const relative = mod.parseCollageResponse({ positions: [{ title: 'Relative URL', hostedUrl: '/jobs/1', applyUrl: 'jobs/1' }] }, 'X');
   if (relative.length === 0) pass('parser drops relative job URLs'); else fail('parser accepted a relative job URL');
   try { if (mod.parseCollageResponse({ positions: [] }, 'X').length === 0) pass('empty positions envelope returns []'); else fail('empty positions envelope failed'); } catch { fail('empty positions envelope should be valid'); }
-  try { mod.parseCollageResponse({}, 'X'); fail('unknown envelope should throw'); } catch { pass('unknown response envelope throws descriptively'); }
+  try {
+    mod.parseCollageResponse({}, 'X');
+    fail('unknown envelope should throw');
+  } catch (e) {
+    if (/positions array|collage: unrecognized response envelope/i.test(e.message)) pass('unknown response envelope throws descriptively');
+    else fail(`unknown envelope error was not descriptive: ${e.message}`);
+  }
   let fetchedUrl = ''; let fetchedOpts;
   const fetched = await p.fetch({ name: 'Example Collage Co', api: 'https://api.collage.co/v1/positions/exampleco' }, { fetchJson: async (url, opts) => { fetchedUrl = url; fetchedOpts = opts; return sample; } });
   if (fetchedUrl === 'https://api.collage.co/v1/positions/exampleco' && fetchedOpts?.redirect === 'error' && fetched.length === 1) pass('fetch pins API host and uses redirect:error'); else fail(`fetch=${fetchedUrl} ${JSON.stringify(fetchedOpts)}`);
