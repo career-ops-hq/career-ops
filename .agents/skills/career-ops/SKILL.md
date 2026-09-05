@@ -96,11 +96,11 @@ If `$mode` is not a sub-command AND doesn't look like a JD, show discovery.
 Before executing any mode, read `config/profile.yml` if it exists and resolve:
 
 - `language.output` → ISO language code for human-facing output. Default: `en`.
-- `language.modes_dir` → optional market-mode directory. This controls market vocabulary and local evaluation rules only.
+- `language.modes_dir` → optional market-mode directory. This controls market vocabulary and local evaluation rules only. It may be a single string (one declared market, the historical default) or a list of declared candidate markets for a candidate genuinely running parallel campaigns in more than one market at once (#3793), e.g. `modes_dir: [modes/de, modes/zh]`. When a list is given, the FIRST entry is primary and supplies the evaluation-mode file (Block A-F rules can only run from one market's file at a time); EVERY declared market's `_shared.md` is loaded into context. Per posting, judge which declared market actually applies from the JD's own MARKET signals (hiring-entity jurisdiction, currency, benefits/legal vocabulary) — never from the JD's language alone — and ask the candidate if genuinely ambiguous between the declared options.
 
 Inject this directive after loading the mode instructions and before producing any user-visible content:
 
-> Write all human-facing output in `{language.output}` regardless of the language of these instructions or of the job description. This includes reports, tracker notes, PDFs, cover letters, outreach, interview prep, form answers, and summaries. If `language.modes_dir` supplies market-specific vocabulary, keep the market logic but explain terms in `{language.output}` when needed.
+> Write all human-facing output in `{language.output}` regardless of the language of these instructions or of the job description. This includes reports, tracker notes, PDFs, cover letters, outreach, interview prep, form answers, and summaries. If `language.modes_dir` supplies market-specific vocabulary (one market, or several declared at once), keep the market logic but explain terms in `{language.output}` when needed.
 
 `language.output` is authoritative for prose. `modes_dir` is market context; it must not force the prose language.
 
