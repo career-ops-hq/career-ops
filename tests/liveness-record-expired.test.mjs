@@ -24,11 +24,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFile, spawnSync } from 'node:child_process';
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { acquirePipelineLock } from '../pipeline-lock.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -220,6 +221,74 @@ test('a re-confirmed dead posting stops resurfacing in the web feed', async () =
 
   // Idempotent: sweeping the same dead posting again writes nothing more.
   assert.equal(await recordExpiredVerdicts([{ url: DEAD, result: 'expired' }]), 0);
+});
+
+test('the history read happens inside the lock, so a concurrent scan cannot cause a duplicate', async () => {
+  // The plan is computed FROM the history, so reading it outside the lock is a
+  // check-then-act: a scanner appending the same `skipped_expired` row in the
+  // window between the read and the append would leave two death certificates
+  // for one posting, and the write-once rule would be true only when nobody
+  // else was writing.
+  //
+  // Deterministic, not a race the suite hopes to lose (tests/scan-history-lock
+  // rejects that style for good reason): the lock IS the barrier. This holds it,
+  // lets the recorder block on it, appends the row the recorder must notice,
+  // and only then releases. A recorder that read before blocking has a stale
+  // plan and writes a duplicate; one that reads after acquiring sees the row
+  // and writes nothing.
+  const historyFixture = join(sandbox, 'concurrent-history.tsv');
+  const marker = join(sandbox, 'child-started');
+  writeFileSync(
+    historyFixture,
+    `${HEADER}\n${DEAD}\t2026-09-02\tgreenhouse\tStaff Engineer\tAcme\tadded\tRemote\n`,
+    'utf-8',
+  );
+
+  const child = `
+    import { writeFileSync } from 'node:fs';
+    writeFileSync(process.argv[process.argv.length - 1], 'go');
+    const { recordExpiredVerdicts } = await import(process.argv[process.argv.length - 2]);
+    console.log(await recordExpiredVerdicts([{ url: ${JSON.stringify(DEAD)}, result: 'expired' }]));
+  `;
+
+  const lock = await acquirePipelineLock(historyFixture, { timeoutMs: 30000 });
+  let out;
+  try {
+    const proc = execFile(
+      process.execPath,
+      ['--input-type=module', '-e', child, pathToFileURL(join(ROOT, 'check-liveness.mjs')).href, marker],
+      { env: { ...process.env, CAREER_OPS_SCAN_HISTORY: historyFixture }, encoding: 'utf-8' },
+    );
+    const finished = new Promise((resolve, reject) => {
+      proc.on('error', reject);
+      let stdout = '';
+      proc.stdout.on('data', (c) => { stdout += c; });
+      proc.on('close', (code) => (code === 0 ? resolve(stdout) : reject(new Error(`child exited ${code}`))));
+    });
+
+    // The child has imported and is about to read-or-block. The marker covers
+    // process start and module load (the slow, variable part); what remains is
+    // a few microseconds of straight-line code, and the sleep dwarfs it.
+    while (!existsSync(marker)) await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 500));
+
+    // The concurrent scanner's write, landing while the recorder waits.
+    appendFileSync(
+      historyFixture,
+      `${DEAD}\t2026-09-04\tgreenhouse\tStaff Engineer\tAcme\tskipped_expired\tRemote\n`,
+      'utf-8',
+    );
+    lock.release();
+    out = await finished;
+  } finally {
+    lock.release(); // idempotent; covers the throwing path
+  }
+
+  assert.equal(out.trim(), '0', 'the recorder planned from a history snapshot taken before the lock');
+  const deathCertificates = readFileSync(historyFixture, 'utf-8')
+    .split('\n')
+    .filter((line) => line.startsWith(DEAD) && line.includes('skipped_expired'));
+  assert.equal(deathCertificates.length, 1, `one posting, ${deathCertificates.length} death certificates`);
 });
 
 test('recording is a no-op when no history file exists', async () => {
