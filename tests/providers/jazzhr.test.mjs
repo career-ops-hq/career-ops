@@ -10,9 +10,9 @@ try {
   if (provider.id === 'jazzhr') pass('jazzhr.id is "jazzhr"'); else fail('wrong provider id');
   if (provider.detect({ name: 'Example', careers_url: board })?.url === board) pass('detects *.applytojob.com/apply board'); else fail('detect failed');
   const bareHost = 'https://exampleco.applytojob.com/';
-  if (provider.detect({ name: 'Example', careers_url: bareHost })?.url === bareHost) pass('detects bare-host *.applytojob.com board'); else fail('bare-host detect failed');
+  if (provider.detect({ name: 'Example', careers_url: bareHost })?.url === 'https://exampleco.applytojob.com/apply') pass('normalizes bare-host board to /apply'); else fail('bare-host normalization failed');
   const bareHostNoSlash = 'https://exampleco.applytojob.com';
-  if (provider.detect({ name: 'Example', careers_url: bareHostNoSlash })?.url === `${bareHostNoSlash}/`) pass('detects bare-host board with no trailing slash'); else fail('bare-host-no-slash detect failed');
+  if (provider.detect({ name: 'Example', careers_url: bareHostNoSlash })?.url === `${bareHostNoSlash}/apply`) pass('normalizes bare-host board without trailing slash'); else fail('bare-host-no-slash normalization failed');
   for (const bad of [
     'http://exampleco.applytojob.com/apply',
     'https://evil.example/apply',
@@ -59,9 +59,10 @@ try {
   const skipped = mod.parseJazzHRList(noTitleCard, board, 'X');
   if (skipped.length === 1 && skipped[0].title === 'Analyst') pass('skips a card with no title, keeps the rest'); else fail(`no-title card was not skipped ${JSON.stringify(skipped)}`);
   const calls = [];
-  const ctx = { fetchText: async (url, opts) => { calls.push({ url, opts }); return calls.length === 1 ? list : detail; }, sleep: async () => {} };
-  const fetched = await provider.fetch({ name: 'Example Co', careers_url: board, jazzhr: { fetchDetails: true, detailLimit: 1 } }, ctx);
-  if (fetched.length === 2 && calls.length === 2 && calls.every(c => c.opts.redirect === 'error')) pass('fetches public list and optional detail with redirect:error'); else fail(`fetch contract failed ${JSON.stringify(calls)}`);
+  const delays = [];
+  const ctx = { fetchText: async (url, opts) => { calls.push({ url, opts }); return calls.length === 1 ? list : detail; }, sleep: async (ms) => { delays.push(ms); } };
+  const fetched = await provider.fetch({ name: 'Example Co', careers_url: board, jazzhr: { fetchDetails: true, detailLimit: 2 } }, ctx);
+  if (fetched.length === 2 && calls.length === 3 && calls.every(c => c.opts.redirect === 'error') && delays.length === 1 && delays[0] === 200) pass('fetches details with redirect:error and 200ms pacing'); else fail(`fetch contract failed ${JSON.stringify({ calls, delays })}`);
   const probeCalls = [];
   await provider.fetch({ name: 'Example Co', careers_url: board, jazzhr: { fetchDetails: true } }, { maxPages: 1, fetchText: async (url, opts) => { probeCalls.push({ url, opts }); return list; } });
   if (probeCalls.length === 1) pass('probe skips optional detail requests'); else fail('probe detail request was not skipped');

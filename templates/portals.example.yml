@@ -970,7 +970,7 @@ search_queries:
 #                   do not guess it from the company name)
 #   join            join.com/companies/<slug>  (SSR __NEXT_DATA__ parse, no separate API)
 #   icims           careers-<tenant>.icims.com / *.icims.com
-#   jazzhr          <tenant>.applytojob.com/apply (JazzHR-hosted public career pages; Humi may use this surface)
+#   jazzhr          <tenant>.applytojob.com or <tenant>.applytojob.com/apply (bare hosts normalize to /apply; JazzHR-hosted public career pages; Humi may use this surface)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to

@@ -37,7 +37,8 @@ function parseBoardUrl(raw) {
     // /apply — every natural route in (a company's own careers button, an
     // aggregator link, a search hit) hands over the bare host, never the
     // constructed /apply form, so both must resolve.
-    if (!/^\/(?:apply(?:\/.*)?)?$/i.test(url.pathname)) return null;
+    if (url.pathname === '/' || url.pathname === '') url.pathname = '/apply';
+    else if (!/^\/apply(?:\/.*)?$/i.test(url.pathname)) return null;
     return url;
   } catch { return null; }
 }
