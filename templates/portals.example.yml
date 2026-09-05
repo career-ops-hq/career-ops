@@ -981,9 +981,10 @@ search_queries:
 #
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
-# field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
-# himalayas, ibm, jobbankca, jobicy, jobstreet, justjoin, landingjobs, mycareersfuture, nofluffjobs, remoteok, remotive, senjob,
-# manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent. Examples for every built-in provider are below.
+# field. Those are the provider modules that omit detect(); the commented
+# stanzas below are the authoritative list of them — each one carries its
+# own `provider:` line. (A provider with a URL-pattern detect() is
+# auto-claimed from its host instead, per the table above.)
 
 # ── Built-in provider examples ────────────────────────────────────
 # One commented stanza per provider in providers/. Uncomment one and adjust.
@@ -1422,6 +1423,24 @@ search_queries:
 #
 # - name: Agentic Engineering Jobs        # AI-agent engineering roles (SSR HTML, one fetch)
 #   provider: agentic-jobs
+#   enabled: true
+#
+# - name: Torre                           # pan-LatAm talent marketplace (torre.ai)
+#   provider: torre
+#   search: engineering manager           # optional but strongly recommended — an
+#                                         # unfiltered query returns the whole ~300k board
+#   experience: 1-plus-year               # required companion to search; one of
+#                                         # potential-to-develop / 1-plus-year / 2-plus-years /
+#                                         # 3-plus-years / 5-plus-years
+#   remote_only: true                     # optional
+#   enabled: true
+#   # Capped at 20 results/query, no paging — use several entries with
+#   # different search terms for breadth.
+#
+# - name: Yourator                        # Taiwanese startup/digital-roles board
+#   provider: yourator
+#   careers_url: https://www.yourator.co/jobs
+#   max_pages: 120                        # optional page cap (default 120, max 500)
 #   enabled: true
 #
 # Comeet needs the full careers-api URL (it carries a per-tenant token that a
