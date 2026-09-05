@@ -28,6 +28,8 @@ Open http://localhost:3000. The app reads the career-ops checkout it lives in
   write back through the core's own scripts.
 - **Explore** — the free reverse-ATS scan with an honest partial-dataset
   indicator, plus AI-assisted discovery (bring your own CLI/keys, including Grok Build CLI).
+- **Scheduled scans** — save local zero-token or full-dataset scans and run due
+  jobs through an optional Windows Task Scheduler worker.
 - **Apply** — assisted form prefill with a hard rule inherited from the core:
   **it never submits for you** — you always press the button.
 - **Today / Analytics / CV / Config** — action queue, funnel, CV editing with
@@ -51,6 +53,20 @@ Open http://localhost:3000. The app reads the career-ops checkout it lives in
   the envelope, never a file an agent wrote behind it.
 - **Additive:** the web is isolated from the core's packaging, CI and release
   automation. The CLI works exactly the same without it.
+
+## Scheduled scans on Windows
+
+The web UI can save scan definitions without installing an OS task. To check and
+run due jobs every 15 minutes, install the local worker from the repository root:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-scan-schedule.ps1
+```
+
+Remove it with `scripts/uninstall-scan-schedule.ps1`. It runs in the current user's interactive session, so the user must be logged in. The task runs only
+`scripts/scheduled-jobs-runner.mjs`; it never evaluates roles, applies, or invokes
+an AI model. Job definitions and run history stay in the gitignored `data/`
+directory.
 
 ## Development
 

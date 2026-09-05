@@ -279,6 +279,12 @@ const SYSTEM_PATHS = [
 
   'reserve-report-num.mjs',
   'scan.mjs',
+  'scripts/install-scan-schedule.ps1',
+  'scripts/scheduled-jobs-runner.mjs',
+  'web/src/lib/scheduled-jobs-store.mjs',
+  'web/src/lib/scheduled-cadence.mjs',
+  'web/src/lib/scheduled-runner-path.mjs',
+  'scripts/uninstall-scan-schedule.ps1',
   'pipeline-lock.mjs',
   'portal-health-lock.mjs',
   'classify-tier.mjs',
