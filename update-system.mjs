@@ -2324,7 +2324,17 @@ async function apply() {
     // can be present upstream under the same filename; in that case the
     // generic locallyModifiedSystemFiles() baseline check may no longer flag
     // it, but checkout would still overwrite the user's local content.
-    const configuredTemplateVariants = await loadConfiguredTemplateVariants();
+    let dataRoot = ROOT;
+    try {
+      const { getCareerOpsRoot } = await import('./path-resolver.mjs');
+      dataRoot = getCareerOpsRoot();
+    } catch {
+      // Very old targets may not have path-resolver.mjs yet; ROOT is the
+      // historical data root and remains the safe compatibility fallback.
+    }
+    const configuredTemplateVariants = await loadConfiguredTemplateVariants({
+      profilePath: join(dataRoot, 'config', 'profile.yml'),
+    });
     const configuredVariantPaths = [];
     for (const [kind, name] of Object.entries(configuredTemplateVariants)) {
       const prefix = kind === 'cv' ? 'cv-template' : 'cover-letter-template';
@@ -2344,7 +2354,7 @@ async function apply() {
     const configuredVariantRemoteContents = {};
     const configuredVariantLocalFiles = configuredVariantPaths.filter((file) => {
       try {
-        configuredVariantLocalContents[file] = readFileSync(join(ROOT, ...file.split('/')), 'utf8');
+        configuredVariantLocalContents[file] = readFileSync(join(dataRoot, ...file.split('/')), 'utf8');
         return true;
       } catch {
         return false;
