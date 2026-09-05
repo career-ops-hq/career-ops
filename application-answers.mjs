@@ -317,36 +317,88 @@ export function parseApplicationAnswersSection(reportText, { strict = false } = 
 }
 
 /**
- * Read the evaluation mode's `## H) Draft Application Answers` block.
+ * The locale-invariant discriminator for the evaluation's draft-answers block.
+ *
+ * REPLACES a `/^## H\) Draft Application Answers$/` heading match, which found
+ * the block in 5 of the 19 evaluation modes and returned `null` — documented as
+ * "the report has no block" — for the other 14. Neither half of that heading is
+ * stable: the LETTER has been both `G)` (12 modes, pending the #3669 re-sync)
+ * and `H)` (7 modes), and the NAME is user-facing prose that every localized
+ * mode translates. The marker is the one part of the block no mode translates or
+ * renumbers, so this reader works before and after that re-sync. Specified in
+ * `modes/oferta.md` under "Draft-answers marker (required)".
+ *
+ * Placement is load-bearing, not cosmetic: a marker counts only when its
+ * preceding non-blank line is an `##` heading. Reports carry the posting's full
+ * text in `## Job Description (archived verbatim)`, which is untrusted external
+ * content (AGENTS.md); without the adjacency rule, a JD containing this literal
+ * would hand the posting's own words back as the candidate's draft answers, and
+ * `modes/apply.md` adapts whatever comes back into a real submission.
+ */
+const DRAFT_ANSWERS_MARKER = /^<!--[ \t]*career-ops:draft-answers[ \t]*-->[ \t]*$/m;
+
+/**
+ * Legacy path for reports written before the marker existed. It is unambiguous,
+ * so it costs nothing to keep, but it recovers English reports only — which is
+ * why it is the fallback and not the discriminator. Non-English reports already
+ * on disk stay unreadable: recognizing them would mean guessing at a translated
+ * heading, and picking the wrong BLOCK carries the same mispairing risk the body
+ * parser below refuses to take, one level up.
+ */
+const CANONICAL_DRAFT_HEADING = /^##\s+H\)\s*Draft Application Answers\s*$/m;
+
+/**
+ * Offset where the draft-answers body starts, or `null` when the report has no
+ * such block. The first qualifying marker wins: the JD archive sits after the
+ * block in the report format, so a marker planted in a posting cannot out-rank
+ * the real one even if it managed to look heading-adjacent.
+ *
+ * @param {string} report Report markdown, newlines already normalized.
+ * @returns {number | null}
+ */
+function findDraftAnswersBody(report) {
+  const marker = new RegExp(DRAFT_ANSWERS_MARKER.source, 'gm');
+  for (let hit = marker.exec(report); hit; hit = marker.exec(report)) {
+    const preceding = report.slice(0, hit.index).split('\n');
+    preceding.pop(); // the empty partial line the marker itself starts on
+    let i = preceding.length - 1;
+    while (i >= 0 && preceding[i].trim() === '') i -= 1;
+    if (i >= 0 && /^##[ \t]+\S/.test(preceding[i])) return hit.index + hit[0].length;
+  }
+  const heading = CANONICAL_DRAFT_HEADING.exec(report);
+  return heading ? heading.index + heading[0].length : null;
+}
+
+/**
+ * Read the evaluation mode's draft application answers block.
  *
  * A DIFFERENT producer and a different format from the section above.
  * `parseApplicationAnswersSection` reads a format this module also writes, so
- * the two halves are pinned to each other. Nothing writes Block H from code:
- * `modes/oferta.md:622` specifies its heading and nothing about its body, so
- * the bold-question-then-paragraph shape below is a CONVENTION the evaluation
- * happens to emit, not a contract. This reads the convention and degrades to an
- * empty list when it does not hold, rather than guessing: a mispaired
- * question/answer here would be re-submitted to an employer later.
+ * the two halves are pinned to each other. Nothing writes this block from code:
+ * `modes/oferta.md` specifies its heading and its marker and nothing about its
+ * body, so the bold-question-then-paragraph shape below is a CONVENTION the
+ * evaluation happens to emit, not a contract. This reads the convention and
+ * degrades to an empty list when it does not hold, rather than guessing: a
+ * mispaired question/answer here would be re-submitted to an employer later.
  *
- * Worth reading despite that, because `modes/apply.md` already treats Block H
+ * Worth reading despite that, because `modes/apply.md` already treats the block
  * as a legitimate base for a real application ("If there is a Section H or
  * `## Application Answers` -> load previous answers as a base"), and until now
- * nothing in the tree could load it. An evaluated report is the one case where
- * answers exist before any form has been seen.
+ * nothing in the tree could load it outside English. An evaluated report is the
+ * one case where answers exist before any form has been seen.
  *
- * Returns the primary key spelling (`question`/`answer`) and omits the keys
- * Block H cannot carry, so the result is a partial snapshot that
+ * Returns the primary key spelling (`question`/`answer`) and omits the keys the
+ * block cannot carry, so the result is a partial snapshot that
  * `normalizeApplicationAnswersSnapshot` accepts as-is.
  *
  * @param {string} reportText Full report markdown.
- * @returns {{freeText: object[]} | null} `null` when the report has no Block H.
+ * @returns {{freeText: object[]} | null} `null` when the report has no draft block.
  */
 export function parseDraftAnswersBlockH(reportText) {
   const report = String(reportText ?? '').replace(/\r\n/g, '\n');
-  const heading = /^##\s+H\)\s*Draft Application Answers\s*$/m.exec(report);
-  if (!heading) return null;
+  const afterHeading = findDraftAnswersBody(report);
+  if (afterHeading === null) return null;
 
-  const afterHeading = heading.index + heading[0].length;
   const nextHeading = /^## .+$/m.exec(report.slice(afterHeading));
   const body = report.slice(
     afterHeading,
@@ -423,10 +475,11 @@ function usage() {
     '--read prints the parsed ## Application Answers snapshot as JSON (null when the section is absent).',
     '--strict makes --read refuse a partially unreadable section, naming every line it could not parse,',
     'instead of skipping it. Recovery callers (modes/apply.md) want the refusal; the default stays total.',
-    '--read-draft prints the evaluation mode\'s ## H) Draft Application Answers block instead, as a partial',
-    'snapshot ({"freeText": [...]}), or null when the report has no Block H. Best-effort by construction:',
-    'modes/oferta.md fixes the heading and not the body, so an empty freeText means "drafted, unreadable",',
-    'which is why --strict does not apply to it.',
+    '--read-draft prints the evaluation mode\'s draft-answers block instead, as a partial snapshot',
+    '({"freeText": [...]}), or null when the report has no such block. The block is located by the',
+    'locale-invariant <!-- career-ops:draft-answers --> marker, never by its heading: localized modes',
+    'translate the name and number it G) or H). Best-effort by construction: modes/oferta.md fixes the',
+    'marker and not the body, so an empty freeText means "drafted, unreadable", and --strict does not apply.',
   ].join('\n');
 }
 
