@@ -30,8 +30,15 @@
  * independent exemption instead of relying on the preservedPaths detour.
  */
 
-import { pass, fail } from './helpers.mjs';
-import { staleSystemFiles, isUserConfiguredTemplateVariant } from '../update-system.mjs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { pass, fail, ROOT } from './helpers.mjs';
+import {
+  staleSystemFiles,
+  isUserConfiguredTemplateVariant,
+  loadConfiguredTemplateVariants,
+} from '../update-system.mjs';
 
 console.log('\n🧪 Testing user-configured template-variant carve-out...');
 
@@ -68,6 +75,32 @@ console.log('\n🧪 Testing user-configured template-variant carve-out...');
     pass('an unconfigured install exempts nothing (safe default)');
   } else {
     fail('a file was exempted with no configured variant at all');
+  }
+}
+
+// ── 4. Exercise the same lazy-import wiring that apply() uses ─────────────
+// A pure staleSystemFiles() test cannot catch a renamed/missing cv-templates.mjs
+// export if apply()'s broad compatibility catch swallows the import failure.
+// Use a fixture profile through the helper's explicit path, then pin that
+// apply() calls the helper and passes its result into the prune call.
+{
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-configured-variant-'));
+  const profile = join(dir, 'profile.yml');
+  writeFileSync(profile, 'cv:\n  template: BW\ncover_letter:\n  template: Concise\n');
+  try {
+    const configured = await loadConfiguredTemplateVariants({ profilePath: profile });
+    if (configured.cv === 'bw' && configured.cover === 'concise') {
+      pass('apply helper resolves configured variants through cv-templates.mjs lazy wiring');
+    } else {
+      fail(`lazy wiring returned ${JSON.stringify(configured)}`);
+    }
+    const source = readFileSync(join(ROOT, 'update-system.mjs'), 'utf8');
+    const callsHelper = /const configuredTemplateVariants = await loadConfiguredTemplateVariants\(\);/.test(source);
+    const passesToPrune = /staleSystemFiles\([\s\S]*configuredTemplateVariants/.test(source);
+    if (callsHelper && passesToPrune) pass('apply() passes lazy-resolved variants into staleSystemFiles()');
+    else fail('apply() lazy variant wiring is missing or disconnected from staleSystemFiles()');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 

@@ -1011,6 +1011,30 @@ export function isUserConfiguredTemplateVariant(file, configuredVariants = {}) {
   return Boolean(configured) && configured === name;
 }
 
+/**
+ * Resolve the user's configured named-template variants through the same
+ * lazy import used by apply(). Keeping this wiring in one small helper lets
+ * tests exercise the real cv-templates.mjs exports without importing that
+ * module statically at updater startup (the self-reexec constraint above).
+ *
+ * @param {{profilePath?: string}} [options]
+ * @returns {Promise<{cv?: string, cover?: string}>}
+ */
+export async function loadConfiguredTemplateVariants({ profilePath } = {}) {
+  const configuredVariants = {};
+  try {
+    const { loadProfileDefault, kebab } = await import('./cv-templates.mjs');
+    for (const kind of ['cv', 'cover']) {
+      const configured = loadProfileDefault(kind, profilePath ? { profilePath } : undefined);
+      if (configured) configuredVariants[kind] = kebab(configured);
+    }
+  } catch {
+    // cv-templates.mjs absent (very old target) or config/profile.yml
+    // unreadable/unparseable — fall back to no exemption (prior behavior).
+  }
+  return configuredVariants;
+}
+
 export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths = USER_PATHS, configuredVariants = {}) {
   const remote = new Set([...remoteFiles].map(normalizeRepoPath));
   if (remote.size === 0) return [];
@@ -2317,17 +2341,7 @@ async function apply() {
     // was just checked out above (it's in SYSTEM_PATHS), so it resolves here
     // even on a pre-#1245 old→new re-exec; kept as a lazy import, per the
     // top-of-file self-loading note, rather than a static one.
-    let configuredTemplateVariants = {};
-    try {
-      const { loadProfileDefault, kebab } = await import('./cv-templates.mjs');
-      for (const kind of ['cv', 'cover']) {
-        const configured = loadProfileDefault(kind);
-        if (configured) configuredTemplateVariants[kind] = kebab(configured);
-      }
-    } catch {
-      // cv-templates.mjs absent (very old target) or config/profile.yml
-      // unreadable/unparseable — fall back to no exemption (prior behavior).
-    }
+    const configuredTemplateVariants = await loadConfiguredTemplateVariants();
 
     // All tracked system files need the same stale-file treatment. In
     // particular, root-level system files removed upstream (for example an
