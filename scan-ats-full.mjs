@@ -56,6 +56,7 @@ import workday from './providers/workday.mjs';
 import icims from './providers/icims.mjs';
 import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays, PORTALS_PATH, PIPELINE_PATH } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
@@ -1077,9 +1078,7 @@ async function main() {
   if (offers.length && opts.liveness) offers = await filterLive(offers);
   offers.sort((a, b) => (b.postedAt || 0) - (a.postedAt || 0));
 
-  log(`\n${'━'.repeat(45)}`);
-  log(`Reverse ATS Scan — ${date}`);
-  log(`${'━'.repeat(45)}`);
+  printScanSummaryHeader('Reverse ATS Scan', date, log);
   log(`Companies scanned:  ${totalCompaniesScanned}${capHit ? ` of ${totalCompaniesAvailable} (capped)` : ''}`);
   log(`Unreachable boards: ${totalErrors}`);
   if (cappedBoards) log(`Page-capped boards: ${cappedBoards} (partial coverage — later postings not scanned)`);

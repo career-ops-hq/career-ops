@@ -555,6 +555,37 @@ export default {
         const facet = chooseSplitFacet(result.facets, { exclude: excluded });
         if (!facet) { splitIncomplete = true; return; }
 
+        // The clamp is detected against the LARGEST facet sum, but the split
+        // runs on whichever facet partitions most finely. Postings outside the
+        // chosen facet's values are never requested by any slice, so a facet
+        // that covers materially less than the board can finish every slice
+        // cleanly and still leave the board short — reported recovered, which
+        // is the failure this path exists to avoid.
+        //
+        // Materiality matters here, and the bar comes from the response. Real
+        // facets disagree by a point or two (a posting missing a facet value is
+        // absent from that facet's counts), so the chosen facet sits just under
+        // the max on essentially every board — DSG: trueTotal 8367, chosen
+        // jobFamily 8366. A bare `chosen < trueTotal` would tag every one of
+        // them, the tag-that-says-nothing case 'cap' already had to avoid above.
+        // The spread across the OTHER counted facets measures that ordinary
+        // disagreement (77 on DSG, 2 on cvshealth); a gap wider than it is real
+        // undercoverage. The chosen facet is excluded from the spread because a
+        // badly under-covering facet is itself the minimum, and leaving it in
+        // would inflate the bar to exactly the gap it should be judged against.
+        const chosenCoverage = facet.values.reduce((sum, v) => sum + v.count, 0);
+        const trueTotal = trueTotalFromFacets(result.facets);
+        if (trueTotal !== null) {
+          const others = [];
+          for (const f of Array.isArray(result.facets) ? result.facets : []) {
+            if (f?.facetParameter === facet.facetParameter) continue;
+            const coverage = facetCoverage(f);
+            if (coverage !== null) others.push(coverage);
+          }
+          const spread = others.length > 0 ? Math.max(...others) - Math.min(...others) : 0;
+          if (trueTotal - chosenCoverage > spread) splitIncomplete = true;
+        }
+
         for (const value of facet.values) {
           if (slicesSpent >= MAX_SPLIT_SLICES) { splitIncomplete = true; break; }
           if (pagesSpent >= pageBudget) { splitIncomplete = true; break; }

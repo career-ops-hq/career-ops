@@ -72,6 +72,7 @@ import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTit
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { promoteKnownFragmentIdentity } from './url-key.mjs';
 
@@ -3308,9 +3309,7 @@ async function main() {
   }
 
   // 7. Print summary
-  console.log(`\n${'━'.repeat(45)}`);
-  console.log(`Portal Scan — ${date}`);
-  console.log(`${'━'.repeat(45)}`);
+  printScanSummaryHeader('Portal Scan', date);
   const summaryCompanies = targets.filter(t => !t._isBoard).length;
   const summaryBoards = targets.filter(t => t._isBoard).length;
   console.log(`Companies scanned:     ${summaryCompanies}`);

@@ -232,6 +232,7 @@ const SYSTEM_PATHS = [
   'lib/cli-flags.mjs',
   'lib/gemini-node-floor.mjs',
   'lib/local-today.mjs',
+  'lib/scan-summary-marker.mjs',
   'lib/is-main-module.mjs',
   'lib/mjs-files.mjs',
   'lib/outcome-dir.mjs',
@@ -1269,6 +1270,72 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
 }
 
 /**
+ * True when checking out `path` from upstream with `preservedPaths` excluded
+ * would leave nothing to check out — i.e. `path` itself is (for a single
+ * file) or entirely consists of (for a `dir/`-suffixed directory) preserved
+ * content. apply()'s checkout loop uses this to skip such an entry outright:
+ * `git checkout FETCH_HEAD -- <path> :(exclude)<path>` errors with "did not
+ * match any file(s)" when the exclusions cancel the whole pathspec, and that
+ * error is indistinguishable from a genuine checkout failure at the call
+ * site, so it would abort the entire update over a file the user asked to
+ * keep.
+ *
+ * A single-file `path` that exactly matches a preserved entry is fully
+ * preserved by definition — the match IS the file's only content, so no
+ * upstream lookup can add information. Only a directory `path` needs the
+ * upstream ls-tree lookup, to confirm EVERY file it would check out is
+ * preserved; an unreadable lookup degrades to "not fully preserved" so the
+ * real checkout runs and reports its own diagnostics, same contract as
+ * `locallyModifiedSystemFiles`.
+ *
+ * Two limits are deliberate, both raised in review of #3781:
+ *
+ * 1. The single-file shortcut diverges from the pre-extraction inline check
+ *    for a preserved file ABSENT from FETCH_HEAD. That check fell through to
+ *    the real checkout, which failed and put the path in apply()'s "Skipped
+ *    N path(s) absent upstream" summary; this returns true and skips it
+ *    silently. Unreachable while preserved paths come from
+ *    `locallyModifiedSystemFiles`, which only reports files that exist
+ *    upstream (it gates each candidate on `cat-file -e <ref>:<file>`), so
+ *    nothing today can construct the case — but it is a real divergence, not
+ *    a behaviour-preserving one, and a future caller sourcing preservedPaths
+ *    some other way would hit it.
+ *
+ * 2. The directory branch's `catch → false` does NOT close the cancel-out
+ *    abort for directories. A throwing ls-tree still falls through to
+ *    `git checkout FETCH_HEAD -- modes/ :(exclude)modes/pdf.md`, which
+ *    aborts the update when the directory happens to be fully preserved.
+ *    That is exactly the pre-extraction behaviour, carried over unchanged —
+ *    this function makes the check testable and drops a redundant lookup for
+ *    the single-file case; it does not fix the directory case. Closing it
+ *    needs a tri-state result whose "unknown" makes the checkout's "did not
+ *    match any file(s)" benign at the call site; tracked separately rather
+ *    than folded in here, since that means matching on git's stderr text.
+ *
+ * @param {string} path - a SYSTEM_PATHS entry, file or `dir/`-suffixed directory.
+ * @param {string[]} preservedPaths - files this run is keeping local content for.
+ * @param {Set<string>} preservedSet - the same paths, as a Set, for lookup.
+ * @param {{git?: Function}} [ctx] - injection point for tests; defaults to gitQuiet.
+ * @returns {boolean}
+ */
+export function pathFullyPreserved(path, preservedPaths, preservedSet, ctx = {}) {
+  if (preservedSet.size === 0) return false;
+  const runGitQuiet = ctx.git || gitQuiet;
+  const isDirectory = path.endsWith('/');
+  const preservedHere = preservedPaths.filter((f) => (isDirectory ? f.startsWith(path) : f === path));
+  if (preservedHere.length === 0) return false;
+  if (!isDirectory) return true;
+  let upstreamFiles = [];
+  try {
+    upstreamFiles = runGitQuiet('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', path)
+      .split('\n').map((f) => f.trim()).filter(Boolean);
+  } catch {
+    return false;
+  }
+  return upstreamFiles.length > 0 && upstreamFiles.every((f) => preservedSet.has(f));
+}
+
+/**
  * Preserve byte-for-byte copies of system files before an unavoidable
  * overwrite. The self-bootstrap stage cannot use the normal "keep local"
  * path: it must load the fetched updater to remain forward-compatible. A
@@ -2186,22 +2253,8 @@ async function apply() {
       // match any file(s)" when the exclusions cancel the whole pathspec — and
       // that error is indistinguishable from a genuine failure at the catch
       // below, so it would abort the entire update. Skip the entry instead when
-      // nothing would be left to check out. Only entries that actually contain
-      // a preserved file pay for the extra ls-tree, normally none.
-      if (preservedSet.size > 0) {
-        const preservedHere = preservedPaths.filter((f) => (path.endsWith('/') ? f.startsWith(path) : f === path));
-        if (preservedHere.length > 0) {
-          let upstreamFiles = [];
-          try {
-            upstreamFiles = gitQuiet('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', path)
-              .split('\n').map((f) => f.trim()).filter(Boolean);
-          } catch {
-            // Unreadable entry — fall through to the normal checkout, which
-            // reports the real failure with its own diagnostics.
-          }
-          if (upstreamFiles.length > 0 && upstreamFiles.every((f) => preservedSet.has(f))) continue;
-        }
-      }
+      // nothing would be left to check out (see pathFullyPreserved).
+      if (pathFullyPreserved(path, preservedPaths, preservedSet)) continue;
       try {
         // stderr is piped rather than inherited here. A path absent upstream is
         // an EXPECTED skip (a stale manifest entry such as `.gemini/commands/`),

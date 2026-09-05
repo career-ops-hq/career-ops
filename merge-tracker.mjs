@@ -1478,7 +1478,12 @@ for (const file of tsvFiles) {
   if (!duplicate) {
     // Company + role fuzzy match
     const additionReqNum = extractReqNumber(addition.notes);
-    duplicate = existingApps.find(app => {
+    // Two passes, exact company first. With a single find() the wider
+    // corporate-form comparison (#3665) let an EARLIER "Acme Technologies" row
+    // claim an addition for "Acme" while an exact "Acme" row sat further down
+    // the table: the duplicate that comparison exists to prevent was written
+    // to a second time and the exact row never updated.
+    const fuzzyTierMatch = (app, widenToCorporateForm) => {
       // Two different posting URLs are two different postings — a fuzzy title
       // collision must never collapse them. This is the structural version of
       // the #1524 req-number guard, and the tier where an unkeyed addition is
@@ -1491,7 +1496,7 @@ for (const file of tsvFiles) {
       // tier already requires a fuzzy role match, and the req-number and URL
       // guards below and above still get to prove the rows distinct.
       if (!companiesMatch(app.company, addition.company)
-          && !companiesMatchIgnoringCorporateForm(app.company, addition.company)) return false;
+          && !(widenToCorporateForm && companiesMatchIgnoringCorporateForm(app.company, addition.company))) return false;
       if (!roleFuzzyMatch(addition.role, app.role)) return false;
       // Cross-channel guard (#1596): unknown-employer rows (`?`) all normalize
       // to the same empty company key, but the same role via two DIFFERENT
@@ -1549,7 +1554,9 @@ for (const file of tsvFiles) {
       const appReqNum = extractReqNumber(app.notes);
       if (additionReqNum && appReqNum && additionReqNum !== appReqNum) return false;
       return true;
-    });
+    };
+    duplicate = existingApps.find(app => fuzzyTierMatch(app, false))
+      || existingApps.find(app => fuzzyTierMatch(app, true));
   }
 
   if (duplicate) {
@@ -1615,7 +1622,16 @@ for (const file of tsvFiles) {
       ? '✅'
       : (reportChanged ? '❌' : duplicate.pdf);
     const updatedLine = buildRow({
-      num: duplicate.num, date: addition.date, company: addition.company,
+      num: duplicate.num, date: addition.date,
+      // A corporate-form match (#3665) pairs the row with a VARIANT spelling of
+      // its employer, so the row keeps the name it was filed under, the same
+      // rule the fuzzy tiers apply to the role below. Renaming it breaks every
+      // company-keyed join (company-history, blacklist, follow-ups,
+      // linkedin-join) and, on a table already holding both spellings, leaves
+      // two rows under one literal name. An exact, URL or report match carries
+      // the incoming spelling, as before.
+      company: (reportNumMatched || dupReason === 'url' || companiesMatch(duplicate.company, addition.company))
+        ? addition.company : duplicate.company,
       // A URL match is a CONFIRMED same-posting identity, so the incoming title
       // is authoritative the same way a report-number match is — employers do
       // edit a live posting's title. The fuzzy tiers stay conservative and keep
