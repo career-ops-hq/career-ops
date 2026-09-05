@@ -39,11 +39,32 @@ import {
   isUserConfiguredTemplateVariant,
   configuredTemplateVariantPathsToPreserve,
   loadConfiguredTemplateVariants,
+  configuredTemplateVariantsFromProfileSource,
   snapshotConfiguredTemplateVariants,
   REEXEC_FALLBACK_FILES,
 } from '../update-system.mjs';
 
 console.log('\n🧪 Testing user-configured template-variant carve-out...');
+
+const zeroDependencyConfigured = configuredTemplateVariantsFromProfileSource(
+  'cv:\n  output_format: html\n  template: "BW" # active\ncover_letter:\n  template: concise\n',
+);
+if (zeroDependencyConfigured.cv === 'bw' && zeroDependencyConfigured.cover === 'concise') {
+  pass('self-reexec can read configured variants before js-yaml is installed');
+} else {
+  fail(`zero-dependency profile reader returned ${JSON.stringify(zeroDependencyConfigured)}`);
+}
+let zeroDependencyMalformedRejected = false;
+try {
+  configuredTemplateVariantsFromProfileSource('cv:\n  template: [unterminated\n');
+} catch {
+  zeroDependencyMalformedRejected = true;
+}
+if (zeroDependencyMalformedRejected) {
+  pass('zero-dependency profile reader rejects ambiguous template syntax');
+} else {
+  fail('zero-dependency profile reader accepted malformed template syntax');
+}
 
 if (REEXEC_FALLBACK_FILES.includes('cv-templates.mjs')
     && REEXEC_FALLBACK_FILES.includes('lib/is-main-module.mjs')

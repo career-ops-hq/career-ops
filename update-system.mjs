@@ -1015,10 +1015,106 @@ export function isUserConfiguredTemplateVariant(file, configuredVariants = {}) {
 }
 
 /**
+ * Read the two profile keys needed by the updater without requiring js-yaml.
+ * The self-reexec stage deliberately runs before dependencies are installed,
+ * so this strict fallback must remain self-contained. Unsupported or ambiguous
+ * syntax throws instead of silently disabling user-file protection.
+ *
+ * @param {string} source
+ * @returns {{cv?: string, cover?: string}}
+ */
+export function configuredTemplateVariantsFromProfileSource(source) {
+  const lines = String(source).replace(/\r\n/g, '\n').split('\n');
+  const configuredVariants = {};
+
+  const parseScalar = (raw, label) => {
+    let value = raw.trim();
+    if (!value) return null;
+    let quote = null;
+    for (let i = 0; i < value.length; i++) {
+      const char = value[i];
+      if (quote === '"' && char === '\\') {
+        i++;
+        continue;
+      }
+      if (char === quote) {
+        if (quote === "'" && value[i + 1] === "'") {
+          i++;
+          continue;
+        }
+        quote = null;
+        continue;
+      }
+      if (!quote && (char === '"' || char === "'")) {
+        quote = char;
+        continue;
+      }
+      if (!quote && char === '#' && (i === 0 || /\s/.test(value[i - 1]))) {
+        value = value.slice(0, i).trimEnd();
+        break;
+      }
+    }
+    if (quote) throw new Error(`Unterminated quoted value for ${label}`);
+    if (!value) return null;
+    if (value.startsWith('"')) {
+      try {
+        const parsed = JSON.parse(value);
+        if (typeof parsed !== 'string') throw new Error('not a string');
+        return parsed;
+      } catch (err) {
+        throw new Error(`Unsupported quoted value for ${label}`, { cause: err });
+      }
+    }
+    if (value.startsWith("'")) {
+      if (!value.endsWith("'")) throw new Error(`Unterminated quoted value for ${label}`);
+      return value.slice(1, -1).replace(/''/g, "'");
+    }
+    if (/^[\[\]{ }&*!|>@`]/.test(value)) {
+      throw new Error(`Unsupported YAML value for ${label}`);
+    }
+    if (/^(?:null|~|true|false|yes|no|on|off|[-+]?\d+(?:\.\d+)?)$/i.test(value)) return null;
+    return value;
+  };
+
+  for (const [section, kind] of [['cv', 'cv'], ['cover_letter', 'cover']]) {
+    const header = new RegExp(`^${section}\\s*:(.*)$`);
+    const start = lines.findIndex((line) => header.test(line));
+    if (start < 0) continue;
+    const headerTail = lines[start].match(header)[1].trim();
+    if (headerTail && !headerTail.startsWith('#')) {
+      throw new Error(`Unsupported inline YAML mapping for ${section}`);
+    }
+    const entries = [];
+    for (let i = start + 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line.trim() || line.trimStart().startsWith('#')) continue;
+      if (/^\s*\t/.test(line)) throw new Error(`Unsupported tab indentation in ${section}`);
+      const indent = line.match(/^ */)[0].length;
+      if (indent === 0) break;
+      const mapping = line.match(/^\s*([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+      if (mapping) entries.push({ indent, key: mapping[1], value: mapping[2] });
+    }
+    if (entries.length === 0) continue;
+    const childIndent = Math.min(...entries.map((entry) => entry.indent));
+    const templateEntries = entries.filter(
+      (entry) => entry.indent === childIndent && entry.key === 'template',
+    );
+    if (templateEntries.length > 1) throw new Error(`Duplicate ${section}.template value`);
+    if (templateEntries.length === 0) continue;
+    const configured = parseScalar(templateEntries[0].value, `${section}.template`);
+    if (!configured) continue;
+    const normalized = String(configured)
+      .trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    if (normalized && normalized !== 'standard') configuredVariants[kind] = normalized;
+  }
+  return configuredVariants;
+}
+
+/**
  * Resolve the user's configured named-template variants through the same
- * lazy import used by apply(). Keeping this wiring in one small helper lets
- * tests exercise the real cv-templates.mjs exports without importing that
- * module statically at updater startup (the self-reexec constraint above).
+ * lazy import used by apply(). When the old-to-new self-reexec has no installed
+ * js-yaml package yet, use the strict zero-dependency reader above rather than
+ * degrading to an empty exemption set.
  *
  * @param {{profilePath?: string}} [options]
  * @returns {Promise<{cv?: string, cover?: string}>}
@@ -1035,13 +1131,19 @@ export async function loadConfiguredTemplateVariants({ profilePath } = {}) {
       // no-exemption behavior only for that exact compatibility case.
       return configuredVariants;
     }
+    if (err?.code === 'ERR_MODULE_NOT_FOUND'
+        && /Cannot find package ['"]js-yaml['"]/.test(err?.message || '')) {
+      if (!profilePath || !existsSync(profilePath)) return configuredVariants;
+      return configuredTemplateVariantsFromProfileSource(readFileSync(profilePath, 'utf8'));
+    }
     throw err;
   }
   const { loadProfileDefault, kebab } = templateModule;
   for (const kind of ['cv', 'cover']) {
     const options = profilePath ? { profilePath, strict: true } : { strict: true };
     const configured = loadProfileDefault(kind, options);
-    if (configured) configuredVariants[kind] = kebab(configured);
+    const normalized = configured ? kebab(configured) : '';
+    if (normalized && normalized !== 'standard') configuredVariants[kind] = normalized;
   }
   return configuredVariants;
 }
