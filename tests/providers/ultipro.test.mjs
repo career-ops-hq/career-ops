@@ -71,6 +71,12 @@ try {
   } catch {
     pass('assertUltiproUrl() rejects an off-allowlist host directly');
   }
+  try {
+    assertUltiproUrl('http://recruiting.ultipro.com/T/JobBoard/B/');
+    fail('assertUltiproUrl() should reject non-HTTPS URLs directly');
+  } catch {
+    pass('assertUltiproUrl() rejects non-HTTPS URLs directly');
+  }
 
   // fetch() on an off-allowlist host must throw BEFORE any network call —
   // resolveTenant() returning null is not enough on its own; a stub that
@@ -637,11 +643,6 @@ try {
       fetchText: async () => { detailCalls++; return wrapHtml(JSON.stringify({ Id: 'opp-1', Title: 'x', Description: 'x' })); },
     };
     const jobs = await ultipro.fetch({ name: 'ExampleCo', careers_url: `https://recruiting.ultipro.ca/${TENANT}/JobBoard/${BOARD_ID}/` }, listCtx);
-    if (detailCalls === 0 && jobs[0]?.description !== undefined) {
-      // The list-level BriefDescription (empty in mkOpp's default) means no
-      // description key at all is also acceptable here — the key assertion
-      // is zero detail calls.
-    }
     if (detailCalls === 0) {
       pass('ultipro.fetch() never fetches the detail page unless fetchDetails:true is set (zero-token default)');
     } else {
