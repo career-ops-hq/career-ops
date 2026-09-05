@@ -308,6 +308,49 @@ cover_letter:
 #   triage_threshold: 3.5
 #   triage_min_urls: 5
 
+# ── Heuristic pre-score gate (opt-in, zero-token) ───────────────────────────
+#
+# `node prescore.mjs` scores a posting from data already at intake (title,
+# must-have list, occupation, stated comp) against this file and cv.md: regex
+# and set comparisons only, no network, no model, no tokens. When enabled it
+# runs in `/career-ops pipeline` after the liveness sweep and before the
+# pre-screen and triage gates, at every spend tier and batch size, so a posting
+# you would reject on sight never reaches an LLM. It never runs on a single
+# interactive evaluation, and it never touches the 1-5 evaluation score.
+#
+# Four properties. A signal with no evidence scores 4, not a neutral 3, so a
+# posting that omits a salary is not penalized for it. A skip always rests on
+# at least one signal with evidence against the posting. Compensation alone
+# never rejects. A company on the `## Priority Override List` in
+# modes/_brief.md always proceeds. When this file or cv.md cannot be read,
+# nothing is filtered. Every skip is one three-field row in data/discard.log
+# (timestamp, URL, `pre-score {score}/5: {signal}: {reason}`), so pre-filtering
+# is auditable and a pre-score row is distinguishable from the LLM pre-screen
+# rows that share the file; review them with `node discard-analytics.mjs`.
+#
+#   enabled         — off by default. Absent or false, nothing is filtered: the
+#                     script itself answers `proceed` on every posting.
+#   gate_threshold  — minimum pre-score (out of 5) to proceed to evaluation,
+#                     0 to 5; anything else falls back to the default with a
+#                     warning. Default 3.0, the same FAIL boundary the two-pass
+#                     triage gate above and the Quick Scoring Guide in
+#                     modes/_brief.md use: below 3.0 is filtered silently, 3.0
+#                     and up is at worst MARGINAL and shown to you. Scores are
+#                     rounded to 0.1 before the comparison. At 4.0 a posting
+#                     needs positive evidence (a matching title, covered
+#                     must-haves, a band clearing your floor) to clear the gate;
+#                     four unknown signals score exactly 4.0 and still proceed.
+#
+# `pipeline:` is one mapping. If you enabled the triage gate above, add
+# `prescore:` beside `triage_threshold` rather than as a second `pipeline:` key.
+#
+# pipeline:
+#   triage_threshold: 3.5
+#   triage_min_urls: 5
+#   prescore:
+#     enabled: false
+#     gate_threshold: 3.0
+
 # ── Re-apply Cooldown Windows ──────────────────────────────────────────────
 #
 # Define cooldown windows for companies where you've recently applied.

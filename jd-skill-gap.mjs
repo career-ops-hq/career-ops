@@ -53,9 +53,23 @@ const CV_PATH = 'cv.md';
 // \W, and after a CJK char the following whitespace / colon / newline is also
 // \W, so no boundary fires. The fix is a separate alternation arm for CJK
 // terms that drops s?\b; both arms share the same ^#{0,6}\s* prefix.
+// Headers that open a NICE-TO-HAVE block, listed once: spliced into
+// REQUIREMENT_HEADER_RE below so they open a block like any other requirement
+// header, and tested on their own by PREFERRED_HEADER_RE so the block (or a
+// single bullet) is classified as preferred. One list, so a term added here
+// cannot open a block without also classifying it.
+const PREFERRED_HEADER_TERMS = [
+  'preferred', 'nice[- ]to[- ]have',
+  'it\\s+would\\s+be\\s+great\\s+if\\s+you\\s+ha(?:ve|d)',
+];
+const PREFERRED_HEADER_TERMS_CJK = [
+  '\u52A0\u5206\u9805\u76EE',   // 加分項目
+  '\u52A0\u5206\u689D\u4EF6',   // 加分條件
+];
+
 const REQUIREMENT_HEADER_RE = new RegExp(
   '^#{0,6}\\s*(?:(?:' + [
-    'required', 'requirements', 'qualifications', 'must[- ]have', 'preferred', 'nice[- ]to[- ]have',
+    'required', 'requirements', 'qualifications', 'must[- ]have', ...PREFERRED_HEADER_TERMS,
     "what\\s+we(?:'|’)?\\s*re\\s+looking\\s+for",
     "what\\s+you(?:(?:'|’)ll|\\s+will)?\\s+bring",
     'who\\s+you\\s+are',
@@ -70,7 +84,6 @@ const REQUIREMENT_HEADER_RE = new RegExp(
     // Postings that phrase must-have/nice-to-have as full sentences rather
     // than noun headings.
     "it(?:'|’)?s\\s+important\\s+to\\s+us\\s+that\\s+you\\s+have",
-    'it\\s+would\\s+be\\s+great\\s+if\\s+you\\s+ha(?:ve|d)',
     'ideal\\s+candidate',
     'skills\\s+(?:and|&)\\s+experience',
   ].join('|') + ')s?\\b|(?:' + [
@@ -84,9 +97,7 @@ const REQUIREMENT_HEADER_RE = new RegExp(
     '\u5FC5\u8981\u689D\u4EF6',   // 必要條件
     '\u57FA\u672C\u8981\u6C42',   // 基本要求 (zh-CN)
     '\u8077\u4F4D\u8981\u6C42',   // 職位要求 (zh-CN)
-    // preferred / nice-to-have
-    '\u52A0\u5206\u9805\u76EE',   // 加分項目
-    '\u52A0\u5206\u689D\u4EF6',   // 加分條件
+    ...PREFERRED_HEADER_TERMS_CJK,
   ].join('|') + ')).*$',
   'im'
 );
@@ -157,6 +168,8 @@ const STOPWORDS = new Set([
   'bachelor', 'bachelors', 'master', 'masters', 'degree', 'diploma', 'certification', 'certificate',
   // experience / seniority boilerplate
   'experience', 'years', 'year', 'senior', 'junior', 'entry', 'level', 'minimum', 'preferred', 'required',
+  // the capitalized opener of a "Nice to have:" / "Plus:" bullet
+  'nice', 'plus',
   // generic sentence-starters that show up capitalized at the start of a bullet
   'candidates', 'candidate', 'applicants', 'applicant', 'ideal', 'successful',
   'knowledge', 'understanding', 'familiarity', 'exposure', 'background',
@@ -167,6 +180,22 @@ const STOPWORDS = new Set([
   'track', 'record', 'real', 'bonus', 'plus', 'hands', 'proficiency', 'fluency',
   'expertise', 'demonstrated', 'extensive', 'practical', 'good', 'great', 'clear',
 ]);
+
+// Which CLASS a requirement header (or a single bullet) opens.
+//
+// REQUIREMENT_HEADER_RE above deliberately opens one block for must-haves and
+// nice-to-haves alike, because this script's own question ("what does the
+// posting name that cv.md does not cover?") is the same for both. A caller
+// computing a coverage RATIO cannot use that flat list (two must-haves and
+// eight nice-to-haves would score 20% on a perfect must-have match), so this
+// classifies an already-opened block; the flat extraction is unchanged.
+// "bonus" and "plus" do not open a block, but they do mark a bullet inside one
+// ("- Bonus points for Terraform") as a nice-to-have.
+const PREFERRED_HEADER_RE = new RegExp(
+  '^#{0,6}\\s*(?:(?:' + [...PREFERRED_HEADER_TERMS, 'bonus', 'plus(?:es)?'].join('|') + ')s?\\b|(?:'
+  + PREFERRED_HEADER_TERMS_CJK.join('|') + ')).*$',
+  'im'
+);
 
 /**
  * Scan a JD once, returning both the extracted skills and whether a
@@ -182,14 +211,24 @@ const STOPWORDS = new Set([
  * the block-open/block-close logic would drift from this one, which is the exact
  * failure the shared skill-extract.mjs module was introduced to end.
  *
+ * `required` / `preferred` split the same tokens by which class of header opened
+ * the block they came from; `skills` remains their union in first-seen order, so
+ * extractJdSkills() is unaffected by the split existing.
+ *
  * @param {string} jdText
- * @returns {{skills: string[], sawRequirementSection: boolean}}
+ * @returns {{skills: string[], sawRequirementSection: boolean, required: string[],
+ *            preferred: string[], sawRequiredSection: boolean, sawPreferredSection: boolean}}
  */
 function scanJd(jdText) {
   const lines = jdText.split('\n');
   const skills = new Set();
+  const required = new Set();
+  const preferred = new Set();
   let inRequirementsBlock = false;
+  let blockClass = 'required';
   let sawRequirementSection = false;
+  let sawRequiredSection = false;
+  let sawPreferredSection = false;
 
   for (const line of lines) {
     // Checked before the requirement test so a heading that satisfies both
@@ -201,6 +240,11 @@ function scanJd(jdText) {
     if (REQUIREMENT_HEADER_RE.test(line)) {
       inRequirementsBlock = true;
       sawRequirementSection = true;
+      // Classify the block this header opens. Purely additive: the flat
+      // `skills` set below is filled exactly as before regardless.
+      blockClass = PREFERRED_HEADER_RE.test(line) ? 'preferred' : 'required';
+      if (blockClass === 'preferred') sawPreferredSection = true;
+      else sawRequiredSection = true;
       continue;
     }
     if (inRequirementsBlock && line.trim() === '') continue;
@@ -211,17 +255,29 @@ function scanJd(jdText) {
     const bulletMatch = BULLET_LINE_RE.exec(line);
     if (inRequirementsBlock && bulletMatch) {
       const bulletText = bulletMatch[1];
+      // A bullet that opens with its own nice-to-have marker ("- Nice to have:
+      // Rust, Scala") inside a must-have block is classified by the bullet,
+      // so those names do not count as must-haves the CV then fails.
+      const lineClass = PREFERRED_HEADER_RE.test(bulletText) ? 'preferred' : blockClass;
       let m;
       SKILL_TOKEN_RE.lastIndex = 0;
       while ((m = SKILL_TOKEN_RE.exec(bulletText)) !== null) {
         const token = m[1].trim();
         if (!STOPWORDS.has(token.toLowerCase()) && token.length > 1) {
           skills.add(token);
+          (lineClass === 'preferred' ? preferred : required).add(token);
         }
       }
     }
   }
-  return { skills: [...skills], sawRequirementSection };
+  return {
+    skills: [...skills],
+    sawRequirementSection,
+    required: [...required],
+    preferred: [...preferred],
+    sawRequiredSection,
+    sawPreferredSection,
+  };
 }
 
 /**
@@ -231,6 +287,31 @@ function scanJd(jdText) {
  */
 function extractJdSkills(jdText) {
   return scanJd(jdText).skills;
+}
+
+/**
+ * The same extraction, split by whether the header that opened the block asked
+ * for a MUST-have or a NICE-to-have.
+ *
+ * Added for prescore.mjs, which computes a coverage RATIO and therefore cannot
+ * use the flat list: a posting with two must-haves and eight nice-to-haves
+ * would score 20% on a perfect must-have match. extractJdSkills() above is
+ * unchanged: its own question is the same for both classes.
+ *
+ * A token named under both classes appears in both arrays; a caller scoring
+ * required coverage should read `required` and ignore the overlap.
+ *
+ * @param {string} jdText
+ * @returns {{required: string[], preferred: string[], sawRequired: boolean, sawPreferred: boolean}}
+ */
+function extractJdSkillsByClass(jdText) {
+  const scan = scanJd(jdText);
+  return {
+    required: scan.required,
+    preferred: scan.preferred,
+    sawRequired: scan.sawRequiredSection,
+    sawPreferred: scan.sawPreferredSection,
+  };
 }
 
 /**
@@ -396,7 +477,7 @@ function classifySkillGaps(jdSkills, cvText) {
 }
 
 // ── Exports (for test-all.mjs and other consumers) ───────────────────
-export { extractJdSkills, skillMentionedInText, classifySkillGaps, diagnoseExtraction };
+export { extractJdSkills, extractJdSkillsByClass, skillMentionedInText, classifySkillGaps, diagnoseExtraction };
 
 // ── CLI ──────────────────────────────────────────────────────────────
 
