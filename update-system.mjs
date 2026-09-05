@@ -2403,7 +2403,7 @@ async function apply() {
       remoteFiles: configuredVariantRemoteFiles,
       readRemoteContent: (file) => gitShowRaw(`FETCH_HEAD:${file}`),
     });
-    const { configuredTemplateVariants } = configuredSnapshot;
+    const { configuredVariants } = configuredSnapshot;
     const configuredAtRisk = configuredSnapshot.preservedPaths;
     if (configuredAtRisk.length > 0) {
       preservedPaths.push(...configuredAtRisk.filter((file) => !preservedPaths.includes(file)));
@@ -2475,7 +2475,7 @@ async function apply() {
         // so a preserved file with no upstream counterpart was backed up to
         // .bak by the block above and then unlinked by this one in the same run.
         const staleCandidates = staleSystemFiles(
-          localFiles, remoteFiles, SYSTEM_PATHS, mergePathLists(USER_PATHS, preservedPaths), configuredTemplateVariants,
+          localFiles, remoteFiles, SYSTEM_PATHS, mergePathLists(USER_PATHS, preservedPaths), configuredVariants,
         );
         for (const f of staleCandidates) {
           if (isReferencedByPreservedFile(f, preservedPaths)) {
