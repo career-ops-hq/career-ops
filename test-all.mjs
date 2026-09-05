@@ -9884,7 +9884,14 @@ try {
   // receive a posting URL from. Absent one, `(pasted)` is the honest value and
   // keeps the field present; normalizeUrl derives no key from it, so it cannot
   // hand every pasted row the same key.
-  const urlHeaderRe  = /\*\*URL:\*\*/;
+  // Both halves run over comment-stripped source (`executable`, above), and the
+  // header must carry an INTERPOLATED value rather than a bare literal: a
+  // comment mentioning `**URL:**`, or a hardcoded line with nothing substituted
+  // into it, would otherwise satisfy a raw-source scan while the report shipped
+  // no URL -- a failure wearing a pass. Every writer today interpolates
+  // (`**URL:** ${postingUrl || '(pasted)'}`, `**URL:** ${url}`), so requiring it
+  // ties the header to a value reaching the report write path.
+  const urlHeaderRe  = /\*\*URL:\*\*[^\n]*\$\{/;
   const urlSourceRe  = /--posting-url|\bpostingUrl\b|\$\{input \|\| '\(pasted\)'\}/;
   // Empty since #3797 landed the header in openai-eval.mjs and ollama-eval.mjs,
   // the two files it exempted. The list is asserted to be EXACTLY the files still
@@ -9894,6 +9901,7 @@ try {
   // deliberately, instead of the check being quietly weakened to accommodate it.
   const pendingUrlHeader = [];
   const missingUrlHeader = evaluatorSources
+    .map(([name, source]) => [name, executable(source)])
     .filter(([, source]) => !urlHeaderRe.test(source) || !urlSourceRe.test(source))
     .map(([name]) => name);
   const staleExemptions = pendingUrlHeader.filter(name => !missingUrlHeader.includes(name));
