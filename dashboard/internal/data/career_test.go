@@ -611,3 +611,67 @@ func TestUpdateApplicationStatusRefusesUnrecognizableCell(t *testing.T) {
 		t.Errorf("file was modified despite refusal, now:\n%s", string(out))
 	}
 }
+
+// The URL cell is written as a markdown link with a short label (#3516), while
+// trackers written before that — and any row no merge has rewritten since —
+// still carry the bare URL. Tier 0 of the JobURL chain must read the same href
+// out of both, because failing to read one does not error: it looks exactly
+// like a row with no URL and falls through to the report / scan-history tiers,
+// which resolve a different posting.
+func TestExtractCellURLReadsBothWrittenForms(t *testing.T) {
+	cases := []struct {
+		name string
+		cell string
+		want string
+	}{
+		{"bare (pre-#3516 tracker)", "https://jobs.ashbyhq.com/temporal/8a65908d", "https://jobs.ashbyhq.com/temporal/8a65908d"},
+		{"linked with an ATS label", "[ashby](https://jobs.ashbyhq.com/temporal/8a65908d)", "https://jobs.ashbyhq.com/temporal/8a65908d"},
+		{"linked with a host label", "[careers.snowflake.com](https://careers.snowflake.com/us/en/job/4735b223/Director)", "https://careers.snowflake.com/us/en/job/4735b223/Director"},
+		{"href with balanced parens is not truncated", "[example.com](https://example.com/jobs/eng(remote))", "https://example.com/jobs/eng(remote)"},
+		{"angle-bracketed destination", "[example.com](<https://example.com/jobs/1>)", "https://example.com/jobs/1"},
+		{"query string survives", "[greenhouse](https://boards.greenhouse.io/acme/jobs/9?gh_jid=123)", "https://boards.greenhouse.io/acme/jobs/9?gh_jid=123"},
+		{"empty cell", "", ""},
+		{"placeholder is passed through, not invented into a URL", "—", "—"},
+		{"non-http link is not mistaken for a posting URL", "[jd](local:jds/acme.md)", "[jd](local:jds/acme.md)"},
+	}
+	for _, tc := range cases {
+		if got := extractCellURL(tc.cell); got != tc.want {
+			t.Errorf("%s: extractCellURL(%q) = %q, want %q", tc.name, tc.cell, got, tc.want)
+		}
+	}
+}
+
+// The same property end to end: a linked cell and a bare cell must produce the
+// same JobURL, and the linked one must still beat the report-header tier.
+func TestParseApplicationsReadsLinkedURLCells(t *testing.T) {
+	tempDir, _ := writeTracker(t, `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-08-28 | Acme | Triage Engineer | 4.0/5 | Evaluated | — | — | linked | [jobs.example.com](https://jobs.example.com/triage) |
+| 2 | 2026-08-28 | Globex | Platform Engineer | 4.2/5 | Evaluated | — | [2](../reports/002-globex.md) | linked, has report | [jobs.example.com](https://jobs.example.com/tracker) |
+`)
+
+	reportsDir := filepath.Join(tempDir, "reports")
+	if err := os.MkdirAll(reportsDir, 0o755); err != nil {
+		t.Fatalf("mkdir reports: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(reportsDir, "002-globex.md"),
+		[]byte("**URL:** https://jobs.example.com/report\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+
+	apps := ParseApplications(tempDir)
+	if len(apps) != 2 {
+		t.Fatalf("expected 2 applications, got %d", len(apps))
+	}
+	if got := apps[0].JobURL; got != "https://jobs.example.com/triage" {
+		t.Errorf("linked JobURL = %q, want the href", got)
+	}
+	if got := apps[1].JobURL; got != "https://jobs.example.com/tracker" {
+		t.Errorf("linked JobURL = %q, want the tracker href to beat the report header", got)
+	}
+}
