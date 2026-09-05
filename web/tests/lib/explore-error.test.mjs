@@ -7,6 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  isAbortError,
   isScannerMissing,
   scannerMissingBody,
   SCANNER_MISSING_CODE,
@@ -80,4 +81,15 @@ test("the response body the route sends is classified by the client", () => {
   assert.equal(typeof body.error, "string");
   assert.ok(body.error.length > 0, "the panel renders body.error, so it must carry copy");
   assert.equal(isScannerMissing(body), true);
+});
+
+// Next.js aborts POST /api/explore when it treats a URL/tab change as
+// navigation. That is cancelled, not failed — and not scanner-missing.
+test("AbortError is cancelled, not a scan failure", () => {
+  assert.equal(isAbortError(Object.assign(new Error("The user aborted a request."), { name: "AbortError" })), true);
+  assert.equal(isAbortError(new DOMException("The operation was aborted.", "AbortError")), true);
+  assert.equal(isAbortError(new Error("The scanner returned no readable output.")), false);
+  assert.equal(isAbortError({ error: "The user aborted a request." }), false);
+  assert.equal(isAbortError(null), false);
+  assert.equal(isAbortError("AbortError"), false);
 });
