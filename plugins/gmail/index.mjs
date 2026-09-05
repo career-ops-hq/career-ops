@@ -21,6 +21,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import {
   extractUrls, isCleanUrl, isAuthenticEmail, parseRoleAtCompany,
+  parseDigestLeads, canonicalizeJobUrl,
   getMessageBody, companyFromUrl,
 } from './_helpers.mjs';
 
@@ -125,7 +126,20 @@ export default {
       }
 
       const seed = parseRoleAtCompany(subject);
-      const cleanUrls = extractUrls(getMessageBody(msg.payload)).filter(isCleanUrl);
+
+      // A digest states what each posting is; take that before falling back to
+      // treating the message as a bag of links. Registering the canonical URL in
+      // seenUrls first is what stops the generic sweep below from re-adding the
+      // same posting a second time, untitled, from its tracking link.
+      for (const lead of parseDigestLeads(headers, msg.payload)) {
+        if (seenUrls.has(lead.url)) continue;
+        seenUrls.add(lead.url);
+        jobs.push(lead);
+      }
+
+      const cleanUrls = extractUrls(getMessageBody(msg.payload))
+        .filter(isCleanUrl)
+        .map(canonicalizeJobUrl);
       for (const url of cleanUrls) {
         if (seenUrls.has(url)) continue;
         seenUrls.add(url);
