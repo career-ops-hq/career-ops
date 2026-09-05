@@ -8,6 +8,7 @@
  *
  * Usage:
  *   node update-system.mjs check      # Check if update available
+ *   node update-system.mjs status     # Print installed version (with short SHA)
  *   node update-system.mjs apply --confirm
  *                                     # Apply update after explicit confirmation
  *   node update-system.mjs apply --force --confirm
