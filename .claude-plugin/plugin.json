@@ -1,7 +1,7 @@
 {
   "name": "career-ops",
-  "version": "1.31.0",
-  "description": "AI job search command center — evaluate offers, tailor CVs, scan portals, track applications",
+  "version": "1.32.0",
+  "description": "Open-source AI job search that runs locally in your AI coding CLI: scan job portals, evaluate listings into a structured A-H report with a 1-5 score, tailor your CV, track applications",
   "author": {
     "name": "santifer",
     "url": "https://santifer.io"

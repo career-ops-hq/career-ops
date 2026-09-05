@@ -31,6 +31,9 @@ import { acquireTrackerLock } from './tracker-utils.mjs';
 // and fail for the hours of the day where they differ — a test that passes
 // only in part of the UTC day.
 import { localToday } from './lib/local-today.mjs';
+// Shared with tests/mark-pdf-ready.test.mjs so the two write-failure setups
+// cannot drift apart again (#3423).
+import { directoryDenyBinds } from './tests/helpers.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const NODE = process.execPath;
@@ -769,6 +772,11 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
 {
   if (process.platform !== 'win32' && process.getuid?.() === 0) {
     pass('write-failure: skipped (running as root — directory permissions are not enforced)');
+  } else if (process.platform === 'win32' && !directoryDenyBinds()) {
+    // Same escape hatch as root above, for the platform whose privilege model
+    // most often bypasses a permission bit. Loud on purpose: it names what was
+    // measured, so nobody reads it as the write-failure path being exercised.
+    pass('write-failure: skipped (an icacls write-deny does not bind this token - elevated shell)');
   } else {
     const dir = mkdtempSync(join(tmpdir(), 'co-setstatus-wf-'));
     const roDir = join(dir, 'ro');

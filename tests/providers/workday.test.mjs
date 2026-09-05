@@ -293,6 +293,50 @@ try {
     fail(`workday.detect(fallthrough) returned ${JSON.stringify(hitFallthrough)}`);
   }
 
+  // A CXS-form api: is the *resolved* endpoint, not a careers page. It matches
+  // the careers-page host shape too, so parsing it as one captured the literal
+  // `wday` as the site and produced a nonexistent endpoint — a live board
+  // reporting zero jobs and then reading as unreachable (#3498). The invariant:
+  // a correct api: resolves to exactly what careers_url alone resolves to.
+  const cxsCareers = 'https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers';
+  const cxsApi = 'https://crowdstrike.wd5.myworkdayjobs.com/wday/cxs/crowdstrike/crowdstrikecareers/jobs';
+  const withoutApi = workday.detect({ name: 'CrowdStrike', careers_url: cxsCareers });
+  const withApi = workday.detect({ name: 'CrowdStrike', careers_url: cxsCareers, api: cxsApi });
+  if (withApi && withoutApi && withApi.url === withoutApi.url && withApi.url === cxsApi) {
+    pass('workday.detect() resolves a CXS-form api: to the same endpoint as careers_url alone');
+  } else {
+    fail(`workday.detect(cxs api) returned ${JSON.stringify(withApi)}, careers_url alone ${JSON.stringify(withoutApi)}`);
+  }
+
+  // Same shape given as careers_url (no api: at all) — the misparse was in the
+  // shared pattern, not in the api: slot.
+  const cxsAsCareers = workday.detect({ name: 'CrowdStrike', careers_url: cxsApi });
+  if (cxsAsCareers && cxsAsCareers.url === cxsApi) {
+    pass('workday.detect() accepts a CXS-form careers_url');
+  } else {
+    fail(`workday.detect(cxs careers_url) returned ${JSON.stringify(cxsAsCareers)}`);
+  }
+
+  // The trailing /jobs is optional — a CXS base URL names the same board.
+  const cxsNoJobs = workday.detect({ name: 'CrowdStrike', api: 'https://crowdstrike.wd5.myworkdayjobs.com/wday/cxs/crowdstrike/crowdstrikecareers' });
+  if (cxsNoJobs && cxsNoJobs.url === cxsApi) {
+    pass('workday.detect() accepts a CXS api: without the trailing /jobs');
+  } else {
+    fail(`workday.detect(cxs no-/jobs) returned ${JSON.stringify(cxsNoJobs)}`);
+  }
+
+  // jobBase is derived from the CXS site too, so posting URLs stay on the
+  // site path (an externalPath hung off the host root 404s).
+  const cxsJobs = parseWorkdayResponse(
+    { jobPostings: [{ title: 'SRE', externalPath: '/job/Austin/SRE_R1', locationsText: 'Austin, TX' }] },
+    { name: 'CrowdStrike', careers_url: cxsCareers, api: cxsApi },
+  );
+  if (cxsJobs.length === 1 && cxsJobs[0].url === 'https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers/job/Austin/SRE_R1') {
+    pass('parseWorkdayResponse builds site-relative posting URLs from a CXS-form api:');
+  } else {
+    fail(`parseWorkdayResponse(cxs api) row 0 = ${JSON.stringify(cxsJobs[0])}`);
+  }
+
   // Path-spoofed URL: myworkdayjobs.com in path, not hostname
   if (workday.detect({ name: 'Spoof', careers_url: 'https://evil.example/test.wd5.myworkdayjobs.com/en-US/board' }) === null) {
     pass('workday.detect() rejects path-spoofed URL');

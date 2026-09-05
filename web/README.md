@@ -27,7 +27,7 @@ Open http://localhost:3000. The app reads the career-ops checkout it lives in
 - **Pipeline** — your tracker as a sortable, filterable table; status changes
   write back through the core's own scripts.
 - **Explore** — the free reverse-ATS scan with an honest partial-dataset
-  indicator, plus AI-assisted discovery (bring your own CLI/keys).
+  indicator, plus AI-assisted discovery (bring your own CLI/keys, including Grok Build CLI).
 - **Apply** — assisted form prefill with a hard rule inherited from the core:
   **it never submits for you** — you always press the button.
 - **Today / Analytics / CV / Config** — action queue, funnel, CV editing with
@@ -63,6 +63,16 @@ npm run build        # production build
 
 Set `CAREER_OPS_ROOT=/path/to/checkout` in `web/.env.local` to point the app at
 a different career-ops directory (useful for testing against sample data).
+
+`/api` is gated by the same-origin + loopback guard in `src/lib/origin-guard.mjs`.
+Two opt-ins widen it, both unset by default and both in `web/.env.local`:
+`CAREER_OPS_WEB_ALLOWED_HOSTS` names extra non-loopback hosts the dashboard may
+answer on, and `CAREER_OPS_ALLOWED_ORIGINS` names origins allowed to call the
+API from outside the app — a comma- or space-separated list, no trailing slash.
+The second is what a local companion client needs: a browser extension calls
+from a `chrome-extension://` origin, which Fetch Metadata always reports as
+`cross-site`, so the guard refuses it unless the id is named here. The host
+layer still applies to an allowlisted origin.
 
 ### Tests
 

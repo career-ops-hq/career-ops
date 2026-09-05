@@ -196,7 +196,14 @@ export default {
       let location = j.location?.name || '';
       if (officeMap && isWorkModelOnly(location)) {
         const offices = officeMap.get(j.id);
-        if (offices && offices.size > 0) location = [location, ...offices].join(' · ');
+        // Sorted, not in /offices traversal order. The set is built by walking
+        // the office tree, so the order is Greenhouse's, and it is not promised
+        // to be stable between responses. Unsorted, a board that re-orders its
+        // offices rewrites this string, which changes the posting's location
+        // dedupe key (scan.mjs `normalizeLocationForDedup`) and the row already
+        // written to scan-history.tsv — so a posting nothing changed about
+        // reads as new. Sorting costs nothing and removes the dependency.
+        if (offices && offices.size > 0) location = [location, ...[...offices].sort()].join(' · ');
       }
       const description = contentToText(j.content);
       return {

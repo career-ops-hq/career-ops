@@ -55,9 +55,9 @@ import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
+import { pass, fail, warn, run, runAcrossUtcDay, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
-import { collectMjsFiles } from './lib/mjs-files.mjs';
+import { collectMjsFiles, isNestedCheckout } from './lib/mjs-files.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -331,6 +331,7 @@ const scripts = [
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
   { name: 'calibrate.mjs --self-test', expectExit: 0 },
   { name: 'check-table-freshness.mjs --self-test', expectExit: 0 },
+  { name: 'check-jd-archive.mjs --self-test', expectExit: 0 },
   { name: 'upskill.mjs --self-test', expectExit: 0 },
   { name: 'detect-reposts.mjs --self-test', expectExit: 0 },
   { name: 'rank-pipeline.mjs --self-test', expectExit: 0 },
@@ -413,6 +414,14 @@ try {
     if (dirname(src) === ROOT && exclude.includes(name)) return;
     const stat = statSync(src);
     if (stat.isDirectory()) {
+      // A linked worktree is a whole second checkout of this repo and carries a
+      // `.git` FILE, not a directory, so the name-based exclusion above never
+      // fires on one (#3499). Copying it doubles this section's copy cost and
+      // seeds the throwaway tree with a stale duplicate of every script.
+      // Skipped below the root ONLY: `src === ROOT` on the first call, and
+      // ROOT's own `.git` is legitimately a file when the suite is being run
+      // FROM a worktree — testing it there would copy nothing at all.
+      if (src !== ROOT && isNestedCheckout(src)) return;
       mkdirSync(dest, { recursive: true });
       for (const entry of readdirSync(src)) {
         copyDirSync(join(src, entry), join(dest, entry), exclude);
@@ -427,6 +436,7 @@ try {
     // drops them wherever they occur, root included.
     'data',
     'reports',
+    '.update-lock',
     '.career-ops-web',
     '.playwright-mcp',
     '.agents',
@@ -649,9 +659,16 @@ try {
     hiddenScriptMetric,
     '<html><body><script>const claim = "500 users";</script\t\n bar><p>Generated CV</p></body></html>'
   );
+  // The metric must be one NO real cv.md can support. verify-cv-facts.mjs
+  // validates against the LIVE source files, so a plausible fixture number
+  // silently inverts this assertion for any user whose CV happens to contain
+  // it: on a checkout whose cv.md read "~500 active users/month", the old
+  // "500 users" fixture was genuinely SUPPORTED, verify-cv-facts correctly
+  // declined to flag it, and this test reported that correct behaviour as a
+  // miss. The test passed or failed depending on whose CV was checked out.
   writeFileSync(
     visibleMetric,
-    '<html><body><p>Improved onboarding for 500 users.</p></body></html>'
+    '<html><body><p>Improved onboarding for 918273645 users.</p></body></html>'
   );
 
   const hiddenResult = run(NODE, ['verify-cv-facts.mjs', hiddenScriptMetric], {
@@ -2070,7 +2087,18 @@ if (generatePdfScript.includes('--allow-reorder')) {
 try {
   const { validateCvSectionOrder } = await import(pathToFileURL(join(ROOT, 'generate-pdf.mjs')).href);
   const cvMarkdown = '# Education\ntext\n# Work Experience\ntext\n# Projects\ntext';
-  const reorderedHtml = '<div class="section-title">Projects</div><div class="section-title">Education</div>';
+  // Education first, then Projects, then Experience last: diverges from cv.md
+  // (which puts Education before Experience before Projects) AND from the
+  // canonical modes/pdf.md tailoring order (#3640, which puts Experience
+  // before Projects before Education) — genuinely scrambled rather than the
+  // one documented reorder pdf.md always produces, which #3640 makes this
+  // guard stop rejecting. `<div class="section-title">Projects</div><div
+  // class="section-title">Education</div>` used to stand in for "reordered",
+  // but Projects-before-Education IS that documented reorder, so it no
+  // longer exercises the "genuinely scrambled" path this test is named for.
+  const reorderedHtml = '<div class="section-title">Education</div>'
+    + '<div class="section-title">Projects</div>'
+    + '<div class="section-title">Experience</div>';
 
   let threw = false;
   try {
@@ -2079,9 +2107,9 @@ try {
     threw = true;
   }
   if (threw) {
-    pass('validateCvSectionOrder throws on a reordered CV by default (--allow-reorder unset)');
+    pass('validateCvSectionOrder throws on a genuinely scrambled CV by default (--allow-reorder unset)');
   } else {
-    fail('validateCvSectionOrder should throw by default when section order diverges from cv.md');
+    fail('validateCvSectionOrder should throw by default when section order diverges from cv.md AND the canonical modes/pdf.md order');
   }
 
   const originalWarn = console.warn;
@@ -2428,11 +2456,62 @@ if (
   fail('batch final JSON does not require typed, escaped serialization');
 }
 
-const batchTrackerStep = batchPrompt.match(/### Step 5 \u2014 Tracker TSV Line[\s\S]*?### Step 6 \u2014 Final JSON/)?.[0] ?? '';
+// Anchored on the step NUMBER, not the section's wording: the title used to be
+// matched verbatim, so rewording it ("TSV Line" → "TSV Row" when the format
+// gained a header row, #3517) left this matching nothing and failing on the
+// empty string rather than on the thing it asserts.
+const batchTrackerStep = batchPrompt.match(/### Step 5 \u2014 [^\n]*[\s\S]*?### Step 6 \u2014 Final JSON/)?.[0] ?? '';
 if (/\{\{REPORT_NUM\}\}\\t\{\{DATE\}\}/.test(batchTrackerStep) && !/Compute `\{next_num\}`/.test(batchTrackerStep)) {
   pass('batch workers use the coordinator-reserved tracker number');
 } else {
   fail('batch workers still compute tracker numbers independently');
+}
+
+// ...and Step 5 must still describe the FORMAT it writes. The assertion above
+// cannot see that: a prompt that dropped the header row, the additions path, or
+// the one-data-row rule would still carry `{{REPORT_NUM}}\t{{DATE}}` and pass,
+// while telling workers to emit the headerless form — the one where score and
+// status are told apart by content, with a case that has no answer (#3517).
+// The labels come from tracker-parse rather than a list here, so this follows
+// the format instead of restating it and drifting.
+const { TSV_REQUIRED_FIELDS: REQUIRED_TSV_LABELS } = await import(pathToFileURL(join(ROOT, 'tracker-parse.mjs')).href);
+// The prompt writes tabs as the literal two-character escape, not real tabs.
+const batchStepLines = batchTrackerStep.split('\n');
+const batchTsvLines = batchStepLines.filter(l => l.includes('\\t'));
+const batchTsvLabels = (batchTsvLines[0] ?? '').trim().split('\\t').map(s => s.trim());
+const batchLabelsMissing = REQUIRED_TSV_LABELS.filter(f => !batchTsvLabels.includes(f));
+// Width parity, NOT width == REQUIRED_TSV_LABELS.length: the prompt carries the
+// optional `notes` and `url` columns on purpose (url is the deterministic dedup
+// key #1298 added here), so pinning the count to the required set would forbid
+// them. What must hold is that the two lines describe the SAME row — a header
+// with an extra label over a short data row is a template that teaches a
+// shifted row.
+const batchDataFields = (batchTsvLines[1] ?? '').trim().split('\\t');
+// Structure, not prose: the labels line must be immediately followed by the
+// data row, so the section shows ONE headed block rather than two examples that
+// happen to sit in the same step. The instruction sentence is matched exactly
+// rather than by keyword — `/two TSV lines/i` also matches "do NOT write two
+// TSV lines", which is the polarity trap that lets a reversed instruction pass.
+const batchHeaderIdx = batchStepLines.findIndex(l => l.includes('\\t'));
+// Identity, not just "the next line mentions the placeholder": a prose line
+// carrying {{REPORT_NUM}} between the two fence lines would satisfy a contains
+// check while batchDataFields went on reading the real data row further down —
+// adjacency and width would then be describing different lines, and a prompt
+// that split the block would pass.
+const batchRowFollowsHeader = batchHeaderIdx >= 0
+  && batchStepLines[batchHeaderIdx + 1] === batchTsvLines[1]
+  && (batchTsvLines[1] ?? '').includes('{{REPORT_NUM}}');
+if (
+  batchTsvLines.length === 2 &&
+  batchLabelsMissing.length === 0 &&
+  batchDataFields.length === batchTsvLabels.length &&
+  batchRowFollowsHeader &&
+  /batch\/tracker-additions\//.test(batchTrackerStep) &&
+  /Write exactly two TSV lines/.test(batchTrackerStep)
+) {
+  pass('batch Step 5 specifies the headed tracker-addition format (labels, one data row, path)');
+} else {
+  fail(`batch Step 5 no longer specifies the headed TSV format — tab lines: ${batchTsvLines.length}, missing labels: ${batchLabelsMissing.join(', ') || 'none'}, labels/fields: ${batchTsvLabels.length}/${batchDataFields.length}, data row follows header: ${batchRowFollowsHeader}`);
 }
 
 const batchMachineSummary = batchPrompt.match(/#### Machine Summary[\s\S]*?### Step 3 \u2014 Save the Report/)?.[0] ?? '';
@@ -2441,13 +2520,27 @@ if (
   /^via:/m.test(batchMachineSummary) &&
   /^company_confidential:/m.test(batchMachineSummary) &&
   /^reports_to:/m.test(batchMachineSummary) &&
+  /^requirement_importance:/m.test(batchMachineSummary) &&
   /['"]via['"]/.test(patternsMachineFields) &&
   /['"]company_confidential['"]/.test(patternsMachineFields) &&
-  /['"]reports_to['"]/.test(patternsMachineFields)
+  /['"]reports_to['"]/.test(patternsMachineFields) &&
+  /['"]requirement_importance['"]/.test(patternsMachineFields)
 ) {
   pass('batch Machine Summary fields are preserved by the downstream parser');
 } else {
   fail('batch Machine Summary and downstream parser fields are misaligned');
+}
+
+// batch-prompt.md carries the Machine Summary schema TWICE — the standalone
+// #### Machine Summary section and the report-header template in Step 3. A key
+// added to one fence only produces reports whose shape depends on which fence
+// the worker happened to follow, so both are asserted (same rule the existing
+// two-fence checks enforce).
+const machineSummaryFenceCount = (batchPrompt.match(/^requirement_importance:/gm) ?? []).length;
+if (machineSummaryFenceCount >= 2) {
+  pass('requirement_importance is present in BOTH batch-prompt Machine Summary fences');
+} else {
+  fail(`requirement_importance appears in ${machineSummaryFenceCount} batch-prompt Machine Summary fence(s), expected both`);
 }
 
 // ── 7e. CV SECTION ORDER CHECK IS LANGUAGE-AWARE ────────────────
@@ -2467,6 +2560,18 @@ for (const header of ['podsumowanie zawodowe', 'doświadczenie zawodowe', 'wyksz
     pass(`SECTION_ALIASES maps Polish header: ${header}`);
   } else {
     fail(`SECTION_ALIASES missing Polish header: ${header}`);
+  }
+}
+
+// Same gap, same two shipped Chinese markets (#3658): modes/zh-TW and modes/zh
+// rendered titles the alias table could not name, so the guard was disabled AND
+// cv.sections — the documented way to correct an order — silently did nothing.
+// Both scripts are required: a CV written in either renders through this table.
+for (const header of ['專業摘要', '工作經歷', '學歷', '證照', '技能', '专业摘要', '工作经历', '学历', '证书', '项目']) {
+  if (generatePdfScript.includes(`['${header}',`)) {
+    pass(`SECTION_ALIASES maps Chinese header: ${header}`);
+  } else {
+    fail(`SECTION_ALIASES missing Chinese header: ${header}`);
   }
 }
 
@@ -2496,6 +2601,12 @@ if (pdfModule) {
     ['Umiejetnosci', 'skills'],      // diacritics stripped
     ['Work Experience', 'experience'], // English must be unchanged
     ['Core Competencies', 'competencies'],
+    ['專業摘要', 'summary'],       // Traditional (modes/zh-TW)
+    ['工作經歷', 'experience'],
+    ['學歷', 'education'],
+    ['专业摘要', 'summary'],       // Simplified (modes/zh)
+    ['工作经历', 'experience'],
+    ['学历', 'education'],
   ];
   let keysOk = true;
   for (const [title, expected] of keyCases) {
@@ -2505,7 +2616,7 @@ if (pdfModule) {
       keysOk = false;
     }
   }
-  if (keysOk) pass(`sectionKey resolves all ${keyCases.length} PL/EN heading spellings`);
+  if (keysOk) pass(`sectionKey resolves all ${keyCases.length} PL/EN/ZH heading spellings`);
 
   // Hermetic cv.md stand-in: passed in directly, so the test does not depend on
   // a cv.md existing in the checkout (it is gitignored).
@@ -2525,6 +2636,13 @@ if (pdfModule) {
   ]);
   const enMisordered = titlesToHtml([
     'Professional Summary', 'Education', 'Work Experience',
+  ]);
+  // Education hoisted above 工作經歷 — the Chinese half of #3658.
+  const zhMisordered = titlesToHtml([
+    '專業摘要', '學歷', '工作經歷',
+  ]);
+  const zhCorrect = titlesToHtml([
+    '专业摘要', '工作经历', '学历', '证书', '技能',
   ]);
 
   const throws = (html, opts) => {
@@ -2547,6 +2665,18 @@ if (pdfModule) {
     pass('English CV order check still rejects divergence (no regression)');
   } else {
     fail('English CV order check regressed');
+  }
+
+  if (throws(zhMisordered)) {
+    pass('Traditional Chinese CV with Education before Work Experience is rejected');
+  } else {
+    fail('Traditional Chinese CV with Education before Work Experience was NOT rejected (guard is a no-op)');
+  }
+
+  if (!throws(zhCorrect)) {
+    pass('Simplified Chinese CV in cv.md order is accepted');
+  } else {
+    fail('Simplified Chinese CV in cv.md order was wrongly rejected');
   }
 
   // --allow-reorder must keep downgrading the divergence to a warning now that
@@ -3853,6 +3983,53 @@ if (
   pass('Chinese modes include company-type compensation reliability checks');
 } else {
   fail('Chinese modes missing company-type compensation reliability checks');
+}
+
+// ── Localized oferta.md structural parity (#3669) ──
+// Six localized oferta.md files were frozen at a pre-Block-G shape: no Block G,
+// no Risk Summary, and `## G)` meaning the draft-answers block that is `## H)`
+// in the canonical. A locale WITHOUT an oferta.md falls back to the canonical
+// and gets all of it, so a stale translation is worse than none. This pins the
+// structural contract on EVERY modes/*/oferta.md: the report-format letters
+// A)–H) present, `## Risk Summary` between G) and H), and the header field
+// labels + `## Risk Summary` literal in English (the web viewer maps them by
+// name and silently drops what it does not know). The allowlist below names the
+// files still frozen; a re-synced file MUST be removed from it (the check fails
+// loudly otherwise), so the list can only shrink. Denominator asserted: the
+// locale walk must find the known files, or the whole check is blind.
+{
+  const FROZEN_OFERTA = new Set(['da', 'es', 'pl', 'pt', 'ru', 'ua']);
+  const REQUIRED_HEADINGS = ['## A)', '## B)', '## C)', '## D)', '## E)', '## F)', '## G)', '## Risk Summary', '## H)'];
+  const REQUIRED_LABELS = ['**Date:**', '**URL:**', '**Archetype:**', '**Score:**', '**Legitimacy:**', '**PDF:**'];
+  const withOferta = readdirSync(join(ROOT, 'modes'), { withFileTypes: true })
+    .filter(d => d.isDirectory() && existsSync(join(ROOT, 'modes', d.name, 'oferta.md')))
+    .map(d => d.name).sort();
+  const structuralGaps = (text) => {
+    const gaps = REQUIRED_HEADINGS.filter(h => !text.includes(h)).concat(REQUIRED_LABELS.filter(l => !text.includes(l)));
+    const g = text.lastIndexOf('## G)'), rs = text.lastIndexOf('## Risk Summary'), h = text.lastIndexOf('## H)');
+    if (gaps.length === 0 && !(g < rs && rs < h)) gaps.push('order G) → Risk Summary → H)');
+    return gaps;
+  };
+  if (withOferta.length < 8 || !withOferta.includes('zh') || !withOferta.includes('ru')) {
+    fail(`localized oferta.md walk found ${withOferta.length} files (${withOferta.join(', ')}) — expected ≥8 incl. zh and ru; the parity check would be blind`);
+  } else {
+    const canonicalGaps = structuralGaps(readFile('modes/oferta.md'));
+    const stillFrozen = [], resynced = [], drifted = [];
+    for (const lang of withOferta) {
+      const gaps = structuralGaps(readFile(`modes/${lang}/oferta.md`));
+      if (FROZEN_OFERTA.has(lang)) (gaps.length === 0 ? resynced : stillFrozen).push(lang);
+      else if (gaps.length > 0) drifted.push(`${lang} (${gaps.join(', ')})`);
+    }
+    if (canonicalGaps.length > 0) {
+      fail(`canonical modes/oferta.md lost its own report-format contract: ${canonicalGaps.join(', ')}`);
+    } else if (drifted.length > 0) {
+      fail(`localized oferta.md drifted from the canonical report structure: ${drifted.join('; ')}`);
+    } else if (resynced.length > 0) {
+      fail(`localized oferta.md re-synced but still listed as frozen — remove from FROZEN_OFERTA in test-all.mjs and tick it in #3669: ${resynced.join(', ')}`);
+    } else {
+      pass(`localized oferta.md structural parity: ${withOferta.length - stillFrozen.length} of ${withOferta.length} files carry A)–H) + Risk Summary + English header labels; still frozen (allowlisted, #3669): ${stillFrozen.join(', ') || 'none'}`);
+    }
+  }
 }
 
 const batchPromptDoc = readFile('batch/batch-prompt.md');
@@ -6691,8 +6868,6 @@ if (fileExists('VERSION')) {
 
 console.log('\n12. archive-posting.mjs');
 
-const todayStr = new Date().toISOString().split('T')[0];
-
 // dry-run: URL-based company detection across each supported ATS
 for (const [url, expected] of [
   ['https://boards.greenhouse.io/openai/jobs/123', 'openai'],
@@ -6716,9 +6891,13 @@ overrideOut?.includes('Acme') && overrideOut?.includes('staff-engineer')
   ? pass('dry-run: --company and --role overrides respected')
   : fail('dry-run: --company / --role overrides not reflected in output');
 
-// dry-run: output always contains a local:jds/ reference and today's date
-const refOut = run(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
-refOut?.includes('local:jds/') && refOut?.includes(todayStr)
+// dry-run: output always contains a local:jds/ reference and today's date.
+// The date the child prints is its own clock read, so it is compared against
+// the day(s) spanning the call rather than one captured up-section — see
+// runAcrossUtcDay() for why a single capture fails a run that crosses
+// midnight UTC (#3816).
+const { out: refOut, days: refDays } = runAcrossUtcDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
+refOut?.includes('local:jds/') && refDays.some((day) => refOut?.includes(day))
   ? pass('dry-run: local:jds/ reference and date emitted')
   : fail('dry-run: reference or date missing from output');
 
@@ -6766,8 +6945,8 @@ reportSpaceOut?.includes('jds/042-') && reportSpaceOut?.toLowerCase().includes('
   : fail('--report N: swallowed the URL or dropped the report number');
 
 // omitting --report leaves the historical filename shape untouched
-const noReportOut = run(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
-noReportOut?.includes(`jds/${todayStr}_`)
+const { out: noReportOut, days: noReportDays } = runAcrossUtcDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
+noReportDays.some((day) => noReportOut?.includes(`jds/${day}_`))
   ? pass('no --report: filename shape unchanged')
   : fail('no --report: filename shape regressed');
 
@@ -7199,6 +7378,117 @@ try {
     pass('without block_hard, always_allow still wins over block (unchanged semantics)');
   } else {
     fail('omitting block_hard must preserve the pre-existing always_allow-wins behaviour');
+  }
+
+  // Case 9e: US-targeted always_allow + blocked foreign cities must not drop
+  // US homonym cities ("Dublin, OH" is Ohio, not Ireland). State names and
+  // 2-letter codes both count; the foreign counterpart still rejects.
+  const usHomonymFilter = buildLocationFilter({
+    always_allow: ['United States', 'USA'],
+    allow: [],
+    block: ['Dublin', 'Paris', 'London', 'Berlin', 'Manchester', 'Cambridge'],
+  });
+  const usHomonymPass = [
+    ['Dublin, OH', 'abbrev'],
+    ['Dublin, Ohio', 'state name'],
+    ['Paris, TX', 'Paris TX'],
+    ['London, KY', 'London KY'],
+    ['Berlin, NH', 'Berlin NH'],
+    ['Cambridge, MA', 'Cambridge MA'],
+  ];
+  const usHomonymReject = [
+    ['Dublin, Ireland', 'Dublin Ireland'],
+    ['Paris, France', 'Paris France'],
+    ['London, United Kingdom', 'London UK'],
+    ['Berlin, Germany', 'Berlin Germany'],
+    ['Cambridge, UK', 'Cambridge UK'],
+  ];
+  const usHomonymLeaks = usHomonymPass.filter(([loc]) => usHomonymFilter(loc) !== true);
+  const usHomonymMisses = usHomonymReject.filter(([loc]) => usHomonymFilter(loc) !== false);
+  if (usHomonymLeaks.length === 0) {
+    pass('US always_allow treats City, ST homonyms as US (Dublin OH / Paris TX / London KY)');
+  } else {
+    fail(`US city homonym should pass: ${usHomonymLeaks.map(([l]) => l).join('; ')}`);
+  }
+  if (usHomonymMisses.length === 0) {
+    pass('US always_allow still blocks the foreign counterpart (Dublin Ireland / Paris France)');
+  } else {
+    fail(`foreign counterpart should still reject: ${usHomonymMisses.map(([l]) => l).join('; ')}`);
+  }
+
+  // Case 9f: URL hint "City-ST" (Workday) is the same expansion.
+  if (usHomonymFilter('5 Locations', 'https://x.wd1.myworkdayjobs.com/c/job/Dublin-OH/Eng_R1') === true) {
+    pass('US state expansion applies to the URL location hint (Dublin-OH)');
+  } else {
+    fail('Workday URL hint "Dublin-OH" should pass via the USPS abbrev');
+  }
+
+  // Case 9g: genuine always_allow city still passes; block_hard still wins
+  // over the US expansion (country-level, never a false rejection).
+  const usHomonymWithCity = buildLocationFilter({
+    always_allow: ['united states', 'amsterdam'],
+    allow: [],
+    block: ['Dublin', 'Paris', 'London', 'Berlin'],
+    block_hard: ['ireland', 'brazil', 'usa'],
+  });
+  if (usHomonymWithCity('Amsterdam, Netherlands') === true) {
+    pass('genuine always_allow city (Amsterdam, Netherlands) still passes under US expansion');
+  } else {
+    fail('Amsterdam, Netherlands must still pass via always_allow amsterdam');
+  }
+  if (
+    usHomonymWithCity('Dublin, Ireland') === false &&
+    usHomonymWithCity('USA - New York - Malta') === false &&
+    usHomonymWithCity('Porto Alegre, Rio Grande do Sul, Brazil') === false
+  ) {
+    pass('block_hard still wins over US state expansion (Ireland / USA / Brazil)');
+  } else {
+    fail('block_hard must still reject country-level hits when US expansion is active');
+  }
+
+  // Case 9h: no US country token → expansion is off (EU-targeted installs).
+  const euFilter = buildLocationFilter({
+    always_allow: ['belgium', 'brussels', 'amsterdam'],
+    allow: [],
+    block: ['Dublin', 'Paris', 'London'],
+  });
+  if (
+    euFilter('Dublin, OH') === false &&
+    euFilter('Paris, TX') === false &&
+    euFilter('Amsterdam, Netherlands') === true
+  ) {
+    pass('without a US always_allow token, City, ST homonyms stay blocked (EU config unchanged)');
+  } else {
+    fail('EU-targeted always_allow must not grow USPS state matches');
+  }
+
+  // Case 9j: the other documented US country spellings trigger the same expansion.
+  const usDot = buildLocationFilter({ always_allow: ['U.S.'], block: ['Dublin'] });
+  const usDotA = buildLocationFilter({ always_allow: ['U.S.A.'], block: ['Dublin'] });
+  if (usDot('Dublin, OH') === true && usDotA('Dublin, Ohio') === true) {
+    pass('u.s. / u.s.a. always_allow tokens also expand USPS states');
+  } else {
+    fail('u.s. and u.s.a. must trigger the same US homonym rescue as United States');
+  }
+
+  // Case 9i: 2-letter codes do not match inside other words, and English
+  // "or"/"in" in a multi-location string is not Oregon/Indiana. always_allow
+  // is checked before block, so a leak would rescue these rather than reject.
+  const usAbbrevLeakFilter = buildLocationFilter({
+    always_allow: ['united states'],
+    allow: ['united states', 'usa'],
+    block: ['france', 'belgium', 'dublin', 'india'],
+  });
+  if (
+    usAbbrevLeakFilter('Remote, Belgium or France') === false &&
+    usAbbrevLeakFilter('Hyderabad, India') === false &&
+    usAbbrevLeakFilter('Dublin, India') === false &&
+    usAbbrevLeakFilter('Portland, OR') === true &&
+    usAbbrevLeakFilter('Dublin, IN') === true
+  ) {
+    pass('USPS abbrevs do not match inside India / English or-in conjunctions');
+  } else {
+    fail('state abbrevs leaked: IN/OR must not match India or "Belgium or France"');
   }
 
   // Case 10: all-null/non-string list → empty after normalization (no false rejects)
@@ -7976,6 +8266,96 @@ try {
   }
 } catch (e) {
   fail(`title filter acronym tests crashed: ${e.message}`);
+}
+
+// ── 11c. TITLE FILTER OVERRIDES — per-company broadened title net ──
+console.log('\n11c. Title filter overrides (scan-ats-full.mjs per-company broadening)');
+try {
+  const { buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildTitleFilter } =
+    await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+
+  const titleFilterConfig = {
+    positive: ['instructional designer', 'edtech'],
+    negative: ['intern'],
+  };
+  const overridesConfig = [
+    {
+      companies: ['uwaterloo', 'UBC'], // mixed case — matching must be case-insensitive
+      positive_extra: ['Administrator', 'Coordinator', 'Registrar'],
+    },
+  ];
+  const overridesMap = buildTitleFilterOverrides(overridesConfig);
+  const filter = buildTitleFilterWithOverrides(titleFilterConfig, overridesMap);
+
+  // A company matching an override gets the broadened net applied.
+  if (filter('Program Administrator', 'uwaterloo') === true) {
+    pass('title_filter_overrides: an override-listed company matches on positive_extra keywords');
+  } else {
+    fail('title_filter_overrides: override-listed company should match on positive_extra');
+  }
+  if (filter('Program Administrator', 'UBC') === true) {
+    pass('title_filter_overrides: company-slug matching is case-insensitive');
+  } else {
+    fail('title_filter_overrides: company-slug matching should be case-insensitive');
+  }
+
+  // The global negative list still applies even under an override.
+  if (filter('Administrator Intern', 'uwaterloo') === false) {
+    pass('title_filter_overrides: global negative keywords still reject override matches');
+  } else {
+    fail('title_filter_overrides: global negative list should still apply under an override');
+  }
+
+  // A company NOT in any override list is completely unaffected — regression
+  // guard: the override mechanism must be a strict no-op for everyone else.
+  if (filter('Program Administrator', 'some-other-company') === false) {
+    pass('title_filter_overrides: a non-listed company is unaffected by positive_extra');
+  } else {
+    fail('title_filter_overrides: a non-listed company must not get the broadened net');
+  }
+  if (filter('Program Administrator', undefined) === false) {
+    pass('title_filter_overrides: no company slug at all behaves like the plain global filter');
+  } else {
+    fail('title_filter_overrides: missing company slug should fall back to the global filter only');
+  }
+  // Titles that already pass the global filter still pass, override or not.
+  const plain = buildTitleFilter(titleFilterConfig);
+  if (filter('Instructional Designer', 'some-other-company') === plain('Instructional Designer')) {
+    pass('title_filter_overrides: global-filter-passing titles are unaffected by the override mechanism');
+  } else {
+    fail('title_filter_overrides: global filter behavior must be identical outside overrides');
+  }
+
+  // An override with an empty/missing positive_extra doesn't crash and adds nothing.
+  const emptyOverridesMap = buildTitleFilterOverrides([
+    { companies: ['uwaterloo'], positive_extra: [] },
+    { companies: ['fanshawec'] }, // positive_extra missing entirely
+  ]);
+  const emptyFilter = buildTitleFilterWithOverrides(titleFilterConfig, emptyOverridesMap);
+  if (emptyFilter('Program Administrator', 'uwaterloo') === false && emptyFilter('Program Administrator', 'fanshawec') === false) {
+    pass('title_filter_overrides: empty/missing positive_extra does not crash and adds no matches');
+  } else {
+    fail('title_filter_overrides: empty/missing positive_extra should be a no-op, not a crash');
+  }
+
+  // Malformed title_filter_overrides (not an array, junk entries) must not crash.
+  const junkMap = buildTitleFilterOverrides('not-an-array');
+  const junkMap2 = buildTitleFilterOverrides([null, 42, { companies: 'not-an-array' }, { companies: ['x'], positive_extra: 'not-an-array' }]);
+  if (junkMap.size === 0 && junkMap2.size === 0) {
+    pass('buildTitleFilterOverrides ignores malformed title_filter_overrides without crashing');
+  } else {
+    fail('buildTitleFilterOverrides should ignore malformed entries and produce an empty map');
+  }
+
+  // No overrides at all (absent config) → identical behavior to buildTitleFilter directly.
+  const noOverridesFilter = buildTitleFilterWithOverrides(titleFilterConfig, buildTitleFilterOverrides(undefined));
+  if (noOverridesFilter('Coordinator', 'uwaterloo') === plain('Coordinator') && noOverridesFilter('Coordinator', 'uwaterloo') === false) {
+    pass('title_filter_overrides: absent title_filter_overrides is a strict no-op');
+  } else {
+    fail('title_filter_overrides: absent config should behave exactly like buildTitleFilter alone');
+  }
+} catch (e) {
+  fail(`title filter overrides tests crashed: ${e.message}`);
 }
 
 // ── 12. FOLLOW-UP CADENCE LOGIC ─────────────────────────────────
@@ -12090,11 +12470,15 @@ try {
     // to LEGACY_COLMAP (#2274). On a plain 9-column table the fallback happens
     // to line up and hides the bug; with a Location column inserted, the Score
     // cell is read from Location instead — an ES tracker scored "Remote".
+    // `date` is not in REQUIRED_HEADER_FIELDS, so a missing `fecha` alias does
+    // not fail the header — it resolves with no date column and every row comes
+    // back with an empty date (#3705). Assert the Fecha column is actually
+    // resolved, not silently absent.
     const trackerParse = await import(pathToFileURL(join(ROOT, 'tracker-parse.mjs')).href);
     const esHeader = '| # | Fecha | Empresa | Puesto | Location | Score | Status | PDF | Report | Notes |';
     const esMap = trackerParse.detectColumns([esHeader]);
-    if (esMap && esMap.score === 6 && esMap.company === 3 && esMap.role === 4 && esMap.location === 5) {
-      pass('a fully localized header maps through the alias table (#2274)');
+    if (esMap && esMap.date === 2 && esMap.score === 6 && esMap.company === 3 && esMap.role === 4 && esMap.location === 5) {
+      pass('a fully localized header maps through the alias table (#2274, #3705)');
     } else {
       fail(`localized header did not map: ${JSON.stringify(esMap)}`);
     }
@@ -12510,6 +12894,29 @@ if (!sqliteAvailable) {
         pass('corruption repair never touches the markdown itself');
       } else {
         fail('sync modified the corrupted markdown (must only diagnose)');
+      }
+
+      // A numeric prefix is not a valid application number. parseInt() used to
+      // accept `9junk` as 9, so --check reported the source as clean and the
+      // index could attach this row (and its status history) to the wrong ID.
+      const malformedId = clean +
+        '| 9junk | 2026-01-06 | Prefix Co | PM | 3.5/5 | Applied | ❌ | — | malformed id |\n';
+      writeFileSync(md, malformedId);
+      if (trackerRun(['sync', '--check']) === null) {
+        pass('sync --check rejects an application ID with a numeric prefix');
+      } else {
+        fail('sync --check accepted a numeric-prefix application ID');
+      }
+      const repairedId = JSON.parse(trackerRun(['query', '--company', 'Prefix Co', '--json']) || '[]');
+      if (repairedId.length === 1 && repairedId[0].id === 3) {
+        pass('malformed application ID is reassigned instead of coerced to its numeric prefix');
+      } else {
+        fail(`malformed application ID was not safely reassigned: ${JSON.stringify(repairedId)}`);
+      }
+      if (trackerRun(['query', '--id', '1junk', '--json']) === null && trackerRun(['history', '--id', '1junk']) === null) {
+        pass('query/history reject numeric-prefix --id values');
+      } else {
+        fail('query/history accepted a numeric-prefix --id value');
       }
 
       // 3. Staleness: query after an md edit must auto-resync (no stale reads).
@@ -13373,7 +13780,9 @@ try {
     fail('section-count check did not flag a CV with too few sections');
   }
 
-  // CJK content must be rejected with actionable guidance.
+  // CJK content must be rejected with actionable guidance when no CJK-capable
+  // engine/template is in play (pdflatex-only, or no engine resolved at all —
+  // whatever this CI box actually has on PATH).
   const cjk = latexValidate(baseTex('職務経歴'));
   if (cjk && cjk.issues.some((i) => /CJK/.test(i)) && cjk.valid === false) {
     pass('CJK content is rejected with guidance to use pdf mode');
@@ -13382,6 +13791,129 @@ try {
   }
 } catch (e) {
   fail(`LaTeX validator i18n test crashed: ${e.message}`);
+}
+
+// ── 20a. LATEX CJK TEMPLATE (tectonic path, #3553) ──────────────
+// This drives validateLatexContent() directly with a forced `engine` value
+// so the tectonic-vs-pdflatex branch is deterministic regardless of what
+// LaTeX engine (if any) is actually installed on the machine running the
+// suite — see generate-latex.mjs's resolveLatexEngine()/CJK_PACKAGE_RE.
+
+console.log('\n20a. LaTeX CJK template (tectonic engine path)');
+
+try {
+  const { validateLatexContent } = await import(pathToFileURL(join(ROOT, 'generate-latex.mjs')).href);
+
+  const cjkTemplatePath = join(ROOT, 'templates', 'cv-template.cjk.tex');
+  if (fileExists(join('templates', 'cv-template.cjk.tex'))) {
+    pass('templates/cv-template.cjk.tex exists');
+  } else {
+    fail('templates/cv-template.cjk.tex is missing');
+  }
+  const cjkTemplateSrc = existsSync(cjkTemplatePath) ? readFileSync(cjkTemplatePath, 'utf-8') : '';
+  if (/\\usepackage\{fontspec\}/.test(cjkTemplateSrc) && /\\usepackage\{xeCJK\}/.test(cjkTemplateSrc) && /\\setCJKmainfont\{/.test(cjkTemplateSrc)) {
+    pass('cv-template.cjk.tex loads fontspec + xeCJK + a CJK main font');
+  } else {
+    fail('cv-template.cjk.tex is missing fontspec/xeCJK/\\setCJKmainfont');
+  }
+  // Same required commands/placeholders as the base template — it must stay
+  // a drop-in variant, not a divergent structure.
+  const requiredTokens = ['\\resumeSubheading', '\\resumeItem', '\\resumeProjectHeading', '{{NAME}}', '{{EDUCATION}}', '{{EXPERIENCE}}', '{{PROJECTS}}', '{{AWARDS}}', '{{SKILLS}}'];
+  const missingTokens = requiredTokens.filter((t) => !cjkTemplateSrc.includes(t));
+  if (cjkTemplateSrc && missingTokens.length === 0) {
+    pass('cv-template.cjk.tex keeps the same required commands/placeholders as the base template');
+  } else {
+    fail(`cv-template.cjk.tex is missing tokens: ${JSON.stringify(missingTokens)}`);
+  }
+
+  const cjkFilledTemplate = () => cjkTemplateSrc
+    .replace(/\{\{NAME\}\}/g, 'Test Candidate')
+    .replace(/\{\{CONTACT_LINE\}\}/g, 'Toronto, ON')
+    .replace(/\{\{EMAIL_URL\}\}/g, 'test@example.com')
+    .replace(/\{\{EMAIL_DISPLAY\}\}/g, 'test@example.com')
+    .replace(/\{\{LINKEDIN_URL\}\}/g, 'https://linkedin.com/in/test')
+    .replace(/\{\{LINKEDIN_DISPLAY\}\}/g, 'linkedin.com/in/test')
+    .replace(/\{\{GITHUB_URL\}\}/g, 'https://github.com/test')
+    .replace(/\{\{GITHUB_DISPLAY\}\}/g, 'github.com/test')
+    .replace(/\{\{EDUCATION\}\}/g, '    \\resumeSubheading\n      {示例大学}{Toronto, ON}\n      {计算机科学硕士学位}{2023 - 2025}')
+    .replace(/\{\{EXPERIENCE\}\}/g, '    \\resumeSubheading\n      {示例公司}{2022 - Present}\n      {软件工程师}{Remote}\n      \\resumeItemListStart\n            \\resumeItem{设计并交付了多个内部工具}\n      \\resumeItemListEnd')
+    .replace(/\{\{PROJECTS\}\}/g, '    \\resumeProjectHeading\n      {\\textbf{示例项目}}{2024}\n      \\resumeItemListStart\n            \\resumeItem{构建了一个交互式数据分析平台}\n      \\resumeItemListEnd')
+    .replace(/\{\{AWARDS\}\}/g, '    \\resumeProjectHeading\n      {\\textbf{优秀毕业生奖}}{2024}')
+    .replace(/\{\{SKILLS\}\}/g, '        \\textbf{语言}{: 中文，英语} \\\\');
+
+  // A CJK-filled cv-template.cjk.tex, resolved to tectonic, must NOT be
+  // blocked — the whole point of #3553 is that this path now compiles.
+  const filled = cjkFilledTemplate();
+  const tectonicCjk = validateLatexContent(filled, false, 'tectonic');
+  if (tectonicCjk.issues.length === 0) {
+    pass('CJK content + xeCJK template + tectonic engine validates clean (no CJK block)');
+  } else {
+    fail(`CJK content + xeCJK template + tectonic engine was unexpectedly blocked: ${JSON.stringify(tectonicCjk.issues)}`);
+  }
+
+  // CJK content on tectonic WITHOUT the CJK package loaded (e.g. someone
+  // pastes CJK text into the base cv-template.tex) must still be blocked,
+  // but with guidance pointing at --template=cjk instead of only "use pdf mode".
+  const baseTemplateWithCjk = baseTex('職務経歴');
+  const tectonicNoPackage = validateLatexContent(baseTemplateWithCjk, false, 'tectonic');
+  if (tectonicNoPackage.issues.some((i) => /CJK/.test(i) && /--template=cjk/.test(i))) {
+    pass('CJK content on tectonic without xeCJK/ctex loaded is blocked with --template=cjk guidance');
+  } else {
+    fail(`CJK content on tectonic without CJK package was not blocked with the expected guidance: ${JSON.stringify(tectonicNoPackage.issues)}`);
+  }
+
+  // The pdflatex-only guard must not regress: even the CJK-aware template
+  // (xeCJK loaded) stays blocked when the resolved engine is pdflatex, since
+  // pdflatex has no Unicode/CJK font support regardless of packages loaded.
+  const pdflatexCjk = validateLatexContent(filled, false, 'pdflatex');
+  if (pdflatexCjk.issues.some((i) => /CJK/.test(i))) {
+    pass('CJK content stays blocked on pdflatex even with the CJK template (pdflatex cannot render CJK)');
+  } else {
+    fail(`CJK content should stay blocked on pdflatex: ${JSON.stringify(pdflatexCjk.issues)}`);
+  }
+
+  // No engine resolved at all (engine=null) — same as the pre-#3553 default.
+  const noEngineCjk = validateLatexContent(filled, false, null);
+  if (noEngineCjk.issues.some((i) => /CJK/.test(i))) {
+    pass('CJK content stays blocked when no LaTeX engine is resolved');
+  } else {
+    fail(`CJK content should stay blocked with no engine resolved: ${JSON.stringify(noEngineCjk.issues)}`);
+  }
+
+  // Supplementary-plane ideographs (CJK Unified Ideographs Extension B and
+  // later, e.g. U+20000) must be caught too, not just the BMP ranges — a
+  // codepoint-range regex without the `u` flag only ever sees lone UTF-16
+  // surrogate halves for these and silently misses them (CodeRabbit finding).
+  const supplementaryChar = String.fromCodePoint(0x20000);
+  const supplementaryCjk = validateLatexContent(baseTex(supplementaryChar), false, null);
+  if (supplementaryCjk.issues.some((i) => /CJK/.test(i))) {
+    pass('supplementary-plane CJK ideograph (U+20000) is detected, not just BMP CJK');
+  } else {
+    fail(`supplementary-plane CJK ideograph (U+20000) was not detected: ${JSON.stringify(supplementaryCjk.issues)}`);
+  }
+
+  // CJK_PACKAGE_RE must recognize xeCJK/ctex as part of a comma-separated
+  // \usepackage list, not only as the package's sole argument.
+  const listFormTex = baseTex('職務経歴').replace('\\documentclass{article}', '\\documentclass{article}\n\\usepackage{fontspec,xeCJK}');
+  const listFormResult = validateLatexContent(listFormTex, false, 'tectonic');
+  if (listFormResult.issues.length === 0) {
+    pass('\\usepackage{fontspec,xeCJK} (comma-separated list) is recognized as loading xeCJK');
+  } else {
+    fail(`comma-separated \\usepackage list with xeCJK was not recognized: ${JSON.stringify(listFormResult.issues)}`);
+  }
+
+  // CJK_PACKAGE_RE must also recognize the ctex bundle's own document classes
+  // (ctexart/ctexrep/ctexbook), which auto-configure CJK support without a
+  // separate \usepackage{xeCJK} line.
+  const ctexClassTex = baseTex('職務経歴').replace('\\documentclass{article}', '\\documentclass[fontset=windows]{ctexart}');
+  const ctexClassResult = validateLatexContent(ctexClassTex, false, 'tectonic');
+  if (ctexClassResult.issues.length === 0) {
+    pass('\\documentclass{ctexart} (ctex document class) is recognized as CJK-capable');
+  } else {
+    fail(`ctex document class was not recognized as CJK-capable: ${JSON.stringify(ctexClassResult.issues)}`);
+  }
+} catch (e) {
+  fail(`LaTeX CJK template test crashed: ${e.message}`);
 }
 
 // ── 20b. LATEX-TEX IN-PLACE TAILORING ───────────────────────────
@@ -15288,6 +15820,117 @@ try {
     pass('modes/oferta.md keeps the A-G report block structure (new blocks may be appended)');
   } else {
     fail(`modes/oferta.md lost report block(s): ${missingBlocks.join(', ')} — BREAKING for the web report view`);
+  }
+
+  // 55.4b Block B's table columns are CONTRACT (#2330). Block B was the last
+  // report block whose columns were unspecified — oferta.md said only "create a
+  // table with each JD requirement mapped to exact lines in the CV" — so the
+  // requirement-importance design is also the moment those columns get pinned
+  // down. They were frozen deliberately on the day they landed: the 18 localized
+  // evaluation modes each describe Block B in their own words, and a rename here
+  // that does not reach them splits the report format silently.
+  const BLOCK_B_COLUMNS = ['Requirement', 'Importance', 'Match', 'JD signal', 'Evidence / gap'];
+  const blockBSection = ofertaSrc.match(/## Block B [\s\S]*?\n## Block C /)?.[0] ?? '';
+  const blockBHeaderRow = blockBSection.match(/^\|\s*Requirement\s*\|.*\|$/m)?.[0] ?? '';
+  const missingBlockBCols = BLOCK_B_COLUMNS.filter(
+    (c) => !blockBHeaderRow.includes(c),
+  );
+  if (blockBHeaderRow && missingBlockBCols.length === 0) {
+    pass('modes/oferta.md Block B keeps its frozen column set (#2330)');
+  } else if (!blockBHeaderRow) {
+    fail('modes/oferta.md Block B has no Requirement-led table header row — the #2330 column freeze cannot verify');
+  } else {
+    fail(`modes/oferta.md Block B lost column(s): ${missingBlockBCols.join(', ')} — columns are contract (#2330)`);
+  }
+  // The ORDER is contract too (2-sep): on a 390px viewport a 5-column table
+  // scrolls horizontally and only the first three columns are visible, so the
+  // decisive trio (Requirement, Importance, Match) must lead. Measured on the
+  // web report view before this freeze: with Importance in 4th place the column
+  // the whole block exists for was off-screen on mobile.
+  const blockBHeaderCells = blockBHeaderRow.split('|').map((c) => c.trim()).filter(Boolean);
+  if (blockBHeaderCells.slice(0, BLOCK_B_COLUMNS.length).join('|') === BLOCK_B_COLUMNS.join('|')) {
+    pass('modes/oferta.md Block B keeps its frozen column ORDER (decisive trio first)');
+  } else {
+    fail(`modes/oferta.md Block B column order drifted: ${blockBHeaderCells.join(' | ')} — expected ${BLOCK_B_COLUMNS.join(' | ')}`);
+  }
+  const batchBlockBRow = readFile('batch/batch-prompt.md').match(/^\|\s*Requirement\s*\|.*\|$/m)?.[0] ?? '';
+  if (batchBlockBRow && batchBlockBRow.split('|').map((c) => c.trim()).filter(Boolean).slice(0, 5).join('|') === BLOCK_B_COLUMNS.join('|')) {
+    pass('batch/batch-prompt.md Block B mirrors the frozen column order');
+  } else {
+    fail(`batch/batch-prompt.md Block B column order diverges from modes/oferta.md: ${batchBlockBRow || '(no header row)'}`);
+  }
+
+  // 55.4c The two rules that make the importance column defensible rather than
+  // just more numbers in the report. Frozen at doc level, in the style of the
+  // upskill trust-model promises: both are model-followed instructions with no
+  // runtime to assert against, so the text IS the enforcement surface and its
+  // deletion must fail CI rather than pass quietly.
+  //
+  //   the gate      — importance may only create obligations from JD-stated or
+  //                   JD-structural evidence, never a market-weight guess
+  //   the two-pass  — importance is fixed from the JD BEFORE cv.md is read, so
+  //                   rule            a written "Strong" cannot anchor it
+  const blockBPromises = [
+    ['inferred cap', /can \*\*never\*\* be `critical` or `high`/],
+    ['gate statement', /never from a market-weight guess/],
+    ['hard_stops exclusion', /`inferred` row never contributes to `hard_stops`/],
+    ['two-pass rule', /before reading `cv\.md`/],
+    ['no revision after pass 2', /never revised in pass 2/],
+    ['verbatim quote for stated', /\*\*verbatim\*\* JD quote/],
+    ['score neutrality', /does \*\*not\*\* affect the 1-5 global score/],
+  ];
+  const brokenPromises = blockBPromises.filter(([, re]) => !re.test(blockBSection)).map(([name]) => name);
+  if (brokenPromises.length === 0) {
+    pass('modes/oferta.md Block B keeps the frozen importance-evidence promises (#2330)');
+  } else {
+    fail(`modes/oferta.md Block B dropped importance promise(s): ${brokenPromises.join(', ')} — these ARE the feature (#2330)`);
+  }
+
+  // The gate has to hold for the batch path too, or headless workers become the
+  // hole in it: batch/batch-prompt.md is a second, independent writer of Block B.
+  const batchPromptSrc = readFile('batch/batch-prompt.md');
+  const batchGatePromises = [
+    ['inferred cap', /can \*\*never\*\* be `critical` or `high`/],
+    ['gate statement', /never from a market-weight guess/],
+    ['two-pass rule', /before reading `cv\.md`/],
+  ];
+  const brokenBatchPromises = batchGatePromises.filter(([, re]) => !re.test(batchPromptSrc)).map(([name]) => name);
+  if (brokenBatchPromises.length === 0) {
+    pass('batch workers inherit the Block B importance-evidence gate (#2330)');
+  } else {
+    fail(`batch/batch-prompt.md dropped importance gate rule(s): ${brokenBatchPromises.join(', ')} — batch would bypass the gate (#2330)`);
+  }
+
+  // 55.4d The two-pass rule is only real if nothing loads candidate evidence
+  // BEFORE Block B's first pass. batch-prompt.md's Step 2 preamble used to open
+  // with "Read `cv.md`, `article-digest.md`, ..." for every block at once, which
+  // made the rule unachievable on the batch path however carefully Block B
+  // worded it — the ordering was lost two sections earlier. Asserted on the
+  // preamble's text because that is where the regression would reappear: any
+  // future edit that hoists the CV read back up to Step 2 silently re-anchors
+  // every batch evaluation's importance column.
+  const step2Preamble = batchPromptSrc.match(/### Step 2 — Evaluate A-G[\s\S]*?\n#### Block B /)?.[0] ?? '';
+  const hoistsCvRead = /Read `cv\.md`/.test(step2Preamble);
+  const defersCvRead = /\*\*Do not read `cv\.md` or `article-digest\.md` yet\.\*\*/.test(step2Preamble);
+  const namesLoadPoint = /\*\*Load\*\* `cv\.md` and `article-digest\.md` now/.test(batchPromptSrc);
+  // The Sources of Truth table is the SECOND place the ordering can be lost:
+  // its "When" column said `cv.md` → "Always" under a heading that reads "read
+  // before evaluating", which contradicts the deferral in Step 2 just as
+  // effectively. Both hoist points are asserted, or fixing one leaves the other.
+  const sourcesTable = batchPromptSrc.match(/## Sources of Truth[\s\S]*?\nRules:/)?.[0] ?? '';
+  const cvRow = sourcesTable.match(/^\| CV \| `cv\.md` \|(.*)\|$/m)?.[1] ?? '';
+  const cvRowDefers = /Deferred to Block B pass 2/.test(cvRow);
+  if (!step2Preamble) {
+    fail('batch/batch-prompt.md Step 2 → Block B region not found — the #2330 two-pass ordering freeze cannot verify');
+  } else if (!cvRow) {
+    fail('batch/batch-prompt.md Sources of Truth has no `cv.md` row — the #2330 two-pass ordering freeze cannot verify');
+  } else if (!hoistsCvRead && defersCvRead && namesLoadPoint && cvRowDefers) {
+    pass('batch/batch-prompt.md defers the CV read until Block B pass 2 at both hoist points, so the two-pass rule is achievable (#2330)');
+  } else {
+    fail(
+      'batch/batch-prompt.md broke the Block B two-pass ordering (#2330): ' +
+      `hoistsCvRead=${hoistsCvRead} defersCvRead=${defersCvRead} namesLoadPoint=${namesLoadPoint} cvRowDefers=${cvRowDefers}`,
+    );
   }
 
   // 55.5 cross-check: the web parser still speaks the same column names
@@ -17685,6 +18328,187 @@ try {
   if (geminiTmp && existsSync(geminiTmp)) {
     rmSync(geminiTmp, { recursive: true, force: true });
   }
+}
+
+console.log('\n74. gmail: isCleanUrl() drops page assets');
+try {
+  const { isCleanUrl } = await import(pathToFileURL(join(ROOT, 'plugins', 'gmail', '_helpers.mjs')).href);
+
+  // The bug: job-alert emails embed a company logo per job. These reached the
+  // pipeline as untitled "job leads" because they are https, carry no tracker
+  // keyword, and sit on the board's own domain.
+  const assets = [
+    'https://80000hours.org/wp-content/uploads/2023/11/acme-160x160.jpeg',
+    'https://example.com/logo.svg?v=2',              // cache-buster after the extension
+    'https://example.com/hero.PNG',                  // extension case is not significant
+    'https://cdn.example.com/anything',              // asset subdomain, no extension
+    'https://images.example.com/x',
+    'https://fonts.googleapis.com/css2?family=Inter', // webfont CSS has no extension
+    'https://example.com/wp-includes/js/x',
+  ];
+  const bad = assets.filter(isCleanUrl);
+  if (bad.length === 0) pass('isCleanUrl() rejects logos, webfonts and asset hosts');
+  else fail(`isCleanUrl() let ${bad.length} asset URL(s) through: ${bad.join(', ')}`);
+
+  // Regression guard: real postings must survive. "gh_src=js" and "/static-site/"
+  // are the shapes most likely to trip a naive asset filter.
+  const postings = [
+    'https://boards.greenhouse.io/acme/jobs/4384681009?gh_src=js',
+    'https://jobs.ashbyhq.com/acme/abc-123',
+    'https://jobs.lever.co/acme/b71cd010-d3cf-446c-80fa',
+    'https://careers.example.com/static-site-engineer',
+    'https://example.com/jobs/senior-media-buyer',
+  ];
+  const lost = postings.filter(u => !isCleanUrl(u));
+  if (lost.length === 0) pass('isCleanUrl() still accepts real job postings');
+  else fail(`isCleanUrl() wrongly rejected: ${lost.join(', ')}`);
+
+  // Pre-existing behaviour must not regress.
+  if (!isCleanUrl('http://example.com/jobs/1') && !isCleanUrl('https://example.com/click/track')
+      && !isCleanUrl('not a url')) {
+    pass('isCleanUrl() keeps rejecting http, trackers and malformed input');
+  } else {
+    fail('isCleanUrl() regressed on http / tracker / malformed input');
+  }
+} catch (e) {
+  fail(`gmail isCleanUrl tests crashed: ${e.message}`);
+}
+
+// check-jd-archive.mjs's own --self-test (invoked above via the CLI-check
+// table) covers the finding logic on synthetic fixtures. This section pins
+// the wiring: the script ships, updates, is documented, the mode files state
+// the archival step as required (not conditional), and the checker stays
+// strictly read-only — it reports missing archives; it must never be able to
+// "fix" one itself by writing a report or a jds/ file.
+
+console.log('\n75. JD-archive validator wiring + read-only boundary (#2789)');
+
+try {
+  const jdArchiveSrc = readFile('check-jd-archive.mjs');
+
+  const updaterSrc = readFile('update-system.mjs');
+  const jdArchiveSysBlock = (updaterSrc.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
+  if (jdArchiveSysBlock.includes("'check-jd-archive.mjs'")) {
+    pass('check-jd-archive.mjs is in update-system.mjs SYSTEM_PATHS (shipped + updatable)');
+  } else {
+    fail('check-jd-archive.mjs is NOT in SYSTEM_PATHS — updates would never deliver it');
+  }
+
+  const pkg = JSON.parse(readFile('package.json'));
+  if (pkg.scripts && pkg.scripts['jd-archive'] === 'node check-jd-archive.mjs') {
+    pass('package.json exposes npm run jd-archive');
+  } else {
+    fail('package.json missing the jd-archive script entry');
+  }
+
+  const scriptsDoc = readFile('docs/SCRIPTS.md');
+  if (scriptsDoc.includes('## check-jd-archive') && scriptsDoc.includes('missing-jd-archive')) {
+    pass('docs/SCRIPTS.md documents check-jd-archive (section + finding type)');
+  } else {
+    fail('docs/SCRIPTS.md missing the check-jd-archive section');
+  }
+
+  const agentsDoc = readFile('AGENTS.md');
+  if (agentsDoc.includes('`check-jd-archive.mjs`')) {
+    pass('AGENTS.md Main Files table lists check-jd-archive.mjs');
+  } else {
+    fail('AGENTS.md Main Files table missing check-jd-archive.mjs');
+  }
+  if (/REQUIRED.*Job Description \(archived verbatim\)|Job Description \(archived verbatim\).*REQUIRED/.test(agentsDoc)) {
+    pass('AGENTS.md states the JD-archive section as required, not conditional');
+  } else {
+    fail('AGENTS.md does not state the JD-archive section as required');
+  }
+
+  const ofertaDoc = readFile('modes/oferta.md');
+  if (ofertaDoc.includes('## Job Description (archived verbatim)')) {
+    pass('modes/oferta.md report template carries a Job Description (archived verbatim) section');
+  } else {
+    fail('modes/oferta.md report template missing the Job Description (archived verbatim) section');
+  }
+  if (/JD archival \(required, #2789\)/.test(ofertaDoc)) {
+    pass('modes/oferta.md states JD archival as required (matches the Machine Summary "required" phrasing style)');
+  } else {
+    fail('modes/oferta.md does not state JD archival as a required step');
+  }
+
+  const pdfDoc = readFile('modes/pdf.md');
+  if (!/write the JD to a scratch file[\s\S]{0,20}if it isn't already one/.test(pdfDoc)) {
+    pass('modes/pdf.md no longer phrases JD archival as conditional ("if it isn\'t already one")');
+  } else {
+    fail('modes/pdf.md still phrases JD archival as conditional, not required');
+  }
+  if (pdfDoc.includes('JD archival (required, #2789)')) {
+    pass('modes/pdf.md states JD archival as a required step');
+  } else {
+    fail('modes/pdf.md does not state JD archival as a required step');
+  }
+
+  // Read-only import boundary: the ONLY fs capabilities check-jd-archive.mjs
+  // may hold for scanning reports/jds are readFileSync/readdirSync/existsSync.
+  // It also imports mkdtempSync/mkdirSync/writeFileSync/rmSync — but ONLY for
+  // building its own self-test fixtures in a temp dir, never for reports/ or
+  // jds/. The boundary check below allows the self-test-fixture write APIs by
+  // name but asserts they never appear outside the self-test function body.
+  const SELF_TEST_ONLY_FS = new Set(['mkdtempSync', 'mkdirSync', 'writeFileSync', 'rmSync']);
+  const READ_ONLY_FS = new Set(['readFileSync', 'readdirSync', 'existsSync']);
+  const fsImportMatch = jdArchiveSrc.match(/import\s*\{([^}]*)\}\s*from\s*['"](?:node:)?fs['"]/);
+  const fsNames = fsImportMatch ? fsImportMatch[1].split(',').map(s => s.trim()).filter(Boolean) : [];
+  const unexpected = fsNames.filter(n => !READ_ONLY_FS.has(n) && !SELF_TEST_ONLY_FS.has(n));
+  if (fsNames.length > 0 && unexpected.length === 0) {
+    pass('check-jd-archive.mjs fs imports are limited to read-only scanning APIs plus self-test-fixture builders');
+  } else {
+    fail(`check-jd-archive.mjs fs import boundary violated: ${unexpected.join(', ') || 'no fs import matched'}`);
+  }
+
+  // The self-test-only write APIs must never be called from checkJdArchive,
+  // hasEmbeddedJdArchive, or parseReportFilename — only from runSelfTest.
+  // Extracting that function's body needs brace-counting, not a greedy
+  // regex: `[\s\S]*` backtracks to the LAST `\n}` in the whole file (e.g. the
+  // CLI-invocation block at the end), so `.replace(selfTestBody, '')` could
+  // strip out everything from runSelfTest onward — including real code after
+  // it — and a stray write call there would never get scanned, silently
+  // passing the very boundary check this is meant to enforce (CodeRabbit,
+  // PR #2791). Walk brace depth from the opening `{` instead, so nested
+  // blocks/arrow functions inside runSelfTest don't end the match early
+  // either.
+  const runSelfTestStart = jdArchiveSrc.indexOf('function runSelfTest()');
+  let selfTestBody = '';
+  if (runSelfTestStart !== -1) {
+    const openBrace = jdArchiveSrc.indexOf('{', runSelfTestStart);
+    let depth = 0;
+    let i = openBrace;
+    for (; i < jdArchiveSrc.length; i += 1) {
+      if (jdArchiveSrc[i] === '{') depth += 1;
+      else if (jdArchiveSrc[i] === '}') {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    selfTestBody = jdArchiveSrc.slice(openBrace, i + 1);
+  }
+  const outsideSelfTest = jdArchiveSrc
+    .replace(selfTestBody, '')
+    .split('\n')
+    .filter(line => [...SELF_TEST_ONLY_FS].some(fn => line.includes(`${fn}(`)) && !/^\s*import\b/.test(line));
+  if (outsideSelfTest.length === 0) {
+    pass('check-jd-archive.mjs never calls a write-capable fs API outside its own self-test fixtures');
+  } else {
+    fail(`check-jd-archive.mjs calls a write-capable fs API outside runSelfTest: ${outsideSelfTest.join(' | ')}`);
+  }
+
+  if (!/from\s*['"](?:node:)?fs\/promises['"]/.test(jdArchiveSrc)) {
+    pass('check-jd-archive.mjs does not import fs/promises');
+  } else {
+    fail('check-jd-archive.mjs imports fs/promises — write-capable API surface');
+  }
+  if (!/\brequire\s*\(/.test(jdArchiveSrc)) {
+    pass('check-jd-archive.mjs has no require() escape hatch');
+  } else {
+    fail('check-jd-archive.mjs uses require() — bypasses the import whitelist');
+  }
+} catch (e) {
+  fail(`jd-archive wiring check: ${e.message}`);
 }
 
 await runDiscovered();
