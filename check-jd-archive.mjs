@@ -190,10 +190,73 @@ function isPathOnlyPointer(strippedSection) {
   return POINTER_SENTENCE_RE.test(withoutPostedLine);
 }
 
-export function hasEmbeddedJdArchive(content) {
+// A third rejection category, alongside the unfilled-template placeholder and
+// the path-only pointer sentence above: content that clears MIN_ARCHIVE_CHARS
+// on length alone but was never a job posting to begin with — a fetch that
+// hit a login/auth wall, a 404 shell, a paywall interstitial, or a "please
+// enable JavaScript" placeholder instead of the real page (#3829). Without
+// this, a report archives e.g. "Sign in to view this job · Join LinkedIn to
+// see who you know at Acme" (well past 40 chars) under a heading that
+// promises "(archived verbatim)", and the validator reports green — a false
+// positive worse than no archive at all, since the user believes the real
+// posting is saved.
+//
+// Each pattern is anchored to phrasing distinctive enough not to collide
+// with real JD prose. Deliberately NOT included: generic "this posting has
+// closed" / "no longer available" phrasing standing alone — an ATS that
+// shows a genuine "this posting has closed" message for an EXPIRED listing
+// is legitimate content worth keeping for the record (the report may still
+// need the JD's substance for a later comparison). Only the specific
+// login-wall/404-shell/paywall/JS-required shapes the issue calls out are
+// rejected here, not every possible "closed" phrasing — over-rejecting a
+// real archived-but-closed posting would be its own bug (#3829 analysis).
+const NON_CONTENT_MARKERS = [
+  {
+    category: 'login-wall',
+    reason: 'looks like a sign-in/login wall, not a posting',
+    re: /(sign in to view this job|join linkedin to see who you know at|please log in to continue|sign in to continue)/i,
+  },
+  {
+    category: '404-shell',
+    reason: 'looks like a 404 / page-not-found shell, not a posting',
+    re: /(404\s*(?:error|not found)|page not found|this job posting is no longer available)/i,
+  },
+  {
+    category: 'paywall',
+    reason: 'looks like a paywall/subscription interstitial, not a posting',
+    re: /(subscribe to continue reading|this content is for subscribers)/i,
+  },
+  {
+    category: 'js-required',
+    reason: 'looks like a "please enable JavaScript" shell, not a posting',
+    re: /(please enable javascript|this site requires javascript|<noscript)/i,
+  },
+];
+
+// Returns the first matching marker ({category, reason}) or null. Exported
+// so checkJdArchive() can surface the specific reason in a finding's detail
+// (per #3829: "`--summary` should name the reason so a user reads 'looks
+// like a sign-in wall, not a posting' rather than a generic miss") — a
+// separate lookup from the boolean hasEmbeddedJdArchive() below so the two
+// stay independently testable while sharing the exact same stripped-section
+// input.
+export function detectNonContentMarker(strippedSection) {
+  for (const marker of NON_CONTENT_MARKERS) {
+    if (marker.re.test(strippedSection)) return marker;
+  }
+  return null;
+}
+
+// Shared section extraction, used by both hasEmbeddedJdArchive() and the
+// non-content-marker lookup in checkJdArchive() so the two never drift on
+// what counts as "the stripped section text" (heading match, next-heading
+// truncation, and the fixed-point comment strip all applied identically).
+// Returns the trimmed section text, or null when there is no
+// "## Job Description" heading at all.
+export function extractStrippedJdSection(content) {
   const text = String(content ?? '');
   const m = JD_HEADING_RE.exec(text);
-  if (!m) return false;
+  if (!m) return null;
   const rest = text.slice(m.index + m[0].length);
   const nextHeadingOffset = rest.search(NEXT_REPORT_SECTION_RE);
   const section = nextHeadingOffset === -1 ? rest : rest.slice(0, nextHeadingOffset);
@@ -209,9 +272,15 @@ export function hasEmbeddedJdArchive(content) {
     prev = stripped;
     stripped = stripped.replace(/<!--[\s\S]*?-->/g, '');
   } while (stripped !== prev);
-  stripped = stripped.trim();
+  return stripped.trim();
+}
+
+export function hasEmbeddedJdArchive(content) {
+  const stripped = extractStrippedJdSection(content);
+  if (stripped === null) return false;
   if (stripped === UNFILLED_TEMPLATE_PLACEHOLDER) return false;
   if (isPathOnlyPointer(stripped)) return false;
+  if (detectNonContentMarker(stripped)) return false;
   return stripped.length >= MIN_ARCHIVE_CHARS;
 }
 
@@ -337,9 +406,18 @@ export function checkJdArchive(reportsDir, jdsDir, { trackerPath = null, statesP
 
     if (state === 'terminal') continue; // done deal, zero retroactive risk — not even a warning
 
-    const detail = meta
-      ? `no "## Job Description" section with archived JD text, and no jds/ capture found for report ${meta.reportNum} (company slug "${meta.companySlug}")`
-      : `no "## Job Description" section with archived JD text, and the filename does not match the {###}-{company-slug}-{YYYY-MM-DD}.md convention so no jds/ capture could be resolved`;
+    // A rejected section may carry a specific reason (fetch-failure/
+    // non-content marker, #3829) rather than just being absent or too
+    // short — surface it so a user reads "looks like a sign-in wall, not a
+    // posting" instead of a generic miss.
+    const strippedSection = extractStrippedJdSection(content);
+    const marker = strippedSection !== null ? detectNonContentMarker(strippedSection) : null;
+
+    const detail = marker
+      ? `"## Job Description" section ${marker.reason} — not credited as an archive, and no jds/ capture found${meta ? ` for report ${meta.reportNum} (company slug "${meta.companySlug}")` : ''}`
+      : meta
+        ? `no "## Job Description" section with archived JD text, and no jds/ capture found for report ${meta.reportNum} (company slug "${meta.companySlug}")`
+        : `no "## Job Description" section with archived JD text, and the filename does not match the {###}-{company-slug}-{YYYY-MM-DD}.md convention so no jds/ capture could be resolved`;
 
     findings.push(state === 'live'
       ? {
@@ -441,6 +519,59 @@ function runSelfTest() {
     '## Job Description (archived verbatim)\n\nThis role owns curriculum design end to end, including SCORM packaging and LMS rollout. See jds/legacy-notes.md for historical context on the prior version of this posting.\n\n## Machine Summary'),
     'hasEmbeddedJdArchive credits substantive JD prose even when it also mentions a jds/*.md path in passing — the section is not JUST the canonical pointer sentence, so it is read as archived text, not a pointer (CodeRabbit, PR #2791 round 4)');
 
+  // --- Fetch-failure / non-content markers (#3829) ---
+  // A LinkedIn-style login wall clears MIN_ARCHIVE_CHARS comfortably on
+  // length alone, so each shape needs its own rejection, mirroring the
+  // placeholder/pointer checks above.
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nSign in to view this job · Join LinkedIn to see who you know at Acme Corporation.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a LinkedIn-style login-wall shell even though it clears MIN_ARCHIVE_CHARS by length alone (#3829)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nPlease log in to continue. You must sign in to view this content and manage your job alerts.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a generic "please log in to continue" auth-wall shell (#3829)');
+  // CodeRabbit review on #3837: a bare "please log in" alternative (with no
+  // "to continue"/"to view" qualifier) was too broad and matched legitimate
+  // JD prose instructing the eventual HIRE to log in to an internal system —
+  // narrowed to the full "please log in to continue" phrase. Regression test
+  // for the exact false-positive shape CodeRabbit flagged.
+  check(hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nThis role manages our online course catalog. Please log in to our internal LMS after onboarding to review the current curriculum before your first day.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive does not false-positive on real JD prose containing a bare "Please log in" instruction unrelated to the archive itself being a login wall (CodeRabbit, PR #3837)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\n404 Not Found. The page you requested could not be located on this server.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a 404 error shell (#3829)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nThis job posting is no longer available. It may have been filled or removed by the employer.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a "this job posting is no longer available" removed-posting shell (#3829)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nSubscribe to continue reading. This content is for subscribers only — create a free account to keep reading.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a paywall/subscription interstitial (#3829)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nPlease enable JavaScript to run this application. This site requires JavaScript to display job listings.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a "please enable JavaScript" shell (#3829)');
+  check(detectNonContentMarker('Sign in to view this job · Join LinkedIn to see who you know at Acme.')?.category === 'login-wall',
+    'detectNonContentMarker classifies a login-wall shell with the login-wall category');
+  check(detectNonContentMarker('404 Not Found. Page not found.')?.category === '404-shell',
+    'detectNonContentMarker classifies a 404 shell with the 404-shell category');
+  check(detectNonContentMarker('Subscribe to continue reading this article.')?.category === 'paywall',
+    'detectNonContentMarker classifies a paywall interstitial with the paywall category');
+  check(detectNonContentMarker('Please enable JavaScript to run this application.')?.category === 'js-required',
+    'detectNonContentMarker classifies a JS-required shell with the js-required category');
+  check(detectNonContentMarker('This role owns curriculum design end to end, including SCORM packaging and LMS rollout across three teams.') === null,
+    'detectNonContentMarker returns null for substantive real JD prose with no non-content phrasing');
+  // A genuine, terse-but-real JD excerpt must still pass — proves the new
+  // rejection category is not over-aggressive on legitimate short postings.
+  check(hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nWe are hiring a part-time Instructional Design Assistant to support course updates in our LMS, 10 hours/week, remote, $28/hr. Email your resume to hiring@example.com.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive still credits a genuine, terse real JD excerpt — the non-content-marker rejection is not over-aggressive (#3829)');
+  // A real posting that legitimately says the ROLE requires signing in to an
+  // internal portal (not that the ARCHIVE itself is a login wall) should not
+  // false-positive just because it mentions "sign in" in passing without any
+  // of the anchored login-wall phrasing.
+  check(hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nOnce hired, you will sign in to our internal LMS daily to manage learner rosters and publish course updates across three regional campuses.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive does not false-positive on real JD prose that merely mentions signing in to an internal system, since it does not match the anchored login-wall phrasing (#3829)');
+
   // --- Fixture directory tree (mkdtempSync, mirrors the repo's own test convention) ---
   const tmpDir = mkdtempSync(join(tmpdir(), 'check-jd-archive-test-'));
   const reportsDir = join(tmpDir, 'reports');
@@ -531,9 +662,26 @@ function runSelfTest() {
     ].join('\n'));
     writeFileSync(join(jdsDir, '006-2026-01-21_oscorp_analyst.pdf'), 'fake-pdf-bytes');
 
+    // Fixture 7: the archive section is a LinkedIn-style login wall that
+    // clears MIN_ARCHIVE_CHARS on length alone, with no jds/ capture to fall
+    // back on -> flagged, and the finding's detail names the specific reason
+    // rather than a generic miss (#3829).
+    writeFileSync(join(reportsDir, '007-wayne-2026-01-22.md'), [
+      '# Evaluation: Wayne Enterprises — Analyst',
+      '',
+      '**URL:** https://linkedin.com/jobs/view/wayne-analyst',
+      '',
+      '## Job Description (archived verbatim)',
+      '',
+      'Sign in to view this job · Join LinkedIn to see who you know at Wayne Enterprises.',
+      '',
+      '## Machine Summary',
+      'score: 4.0',
+    ].join('\n'));
+
     const result = checkJdArchive(reportsDir, jdsDir);
 
-    check(result.reportsScanned === 6, `all 6 fixture reports scanned (got ${result.reportsScanned})`);
+    check(result.reportsScanned === 7, `all 7 fixture reports scanned (got ${result.reportsScanned})`);
 
     const flaggedFiles = new Set(result.findings.map((f) => f.file));
     check(flaggedFiles.has('001-acme-2026-01-15.md'), 'report with neither archive form is flagged missing-jd-archive');
@@ -541,10 +689,15 @@ function runSelfTest() {
     check(!flaggedFiles.has('003-initech-2026-01-17.md'), 'report with a matching jds/ capture (no embedded section) is not flagged');
     check(flaggedFiles.has('005-umbrella-2026-01-20.md'), 'a path-only pointer to a NONEXISTENT jds/ capture is flagged, not accepted on length alone');
     check(!flaggedFiles.has('006-oscorp-2026-01-21.md'), 'a path-only pointer to an EXISTING jds/ capture is not flagged — resolves via findCaptureForReport');
+    check(flaggedFiles.has('007-wayne-2026-01-22.md'), 'a LinkedIn-style login-wall archive is flagged, not accepted on length alone (#3829)');
     check(flaggedFiles.has('hand-named-report.md'), 'report with a non-conforming filename and no archive section is flagged');
 
     const handNamedFinding = result.findings.find((f) => f.file === 'hand-named-report.md');
     check(handNamedFinding?.report === null, 'non-conforming filename finding carries report: null instead of guessing');
+
+    const loginWallFinding = result.findings.find((f) => f.file === '007-wayne-2026-01-22.md');
+    check(loginWallFinding?.detail?.includes('sign-in/login wall'),
+      'the login-wall finding names the specific reason in its detail, not a generic miss (#3829)');
 
     check(result.findings.every((f) => f.type === 'missing-jd-archive'), 'every finding uses the missing-jd-archive type');
     check(hasMissingArchive(result.findings) === true, 'hasMissingArchive is true when findings are present');

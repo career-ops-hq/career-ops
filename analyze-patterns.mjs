@@ -578,6 +578,35 @@ requirement_importance:
     if (re.test(text)) failures.push(`split-line header parsed as valid: ${JSON.stringify(text)}`);
   }
 
+  // One case per localized mode that ships its own archetype label, so a mode
+  // renaming its header breaks a named assertion instead of silently emptying
+  // the archetype breakdown.
+  const localeArchetypeCases = [
+    ['Arquétipo: Delivery Manager', 'pt'],
+    ['Arquetipo: Delivery Manager', 'es'],
+    ['Archétype : Delivery Manager', 'fr (accented)'],
+    ['Archetype : Delivery Manager', 'fr (as the mode writes it)'],
+    ['Archetipo: Delivery Manager', 'it'],
+    ['Archetyp: Delivery Manager', 'de, pl'],
+    ['Arketipe: Delivery Manager', 'id'],
+    ['Arketype: Delivery Manager', 'da'],
+    ['Arketip: Delivery Manager', 'tr'],
+    ['Архетип: Delivery Manager', 'ru, ua'],
+  ];
+  for (const [line, locale] of localeArchetypeCases) {
+    const got = REPORT_ARCHETYPE_RE.exec(line)?.[1] ?? null;
+    if (got !== 'Delivery Manager') failures.push(`archetype label for ${locale} → ${JSON.stringify(got)}`);
+  }
+
+  // Block A stays English-only on purpose, so the header fallback is what serves
+  // localized reports. Loosening the Block A cell pattern to accept a suffixed
+  // qualifier ("Archétype détecté") would also match a scoring row whose first
+  // cell merely starts with the word, and capture its weight as the archetype:
+  //   | **Archétype / séniorité** | 25 % | **2.0** | …
+  // That is the leak #3808 closed, reopened from the table side.
+  const scoringRow = '| Archétype / séniorité | 25 % | 2.0 |';
+  if (REPORT_ARCHETYPE_RE.test(scoringRow)) failures.push('archetype pattern matched a scoring table row');
+
   // Via channel analysis (#1596): agency vs direct yield, normalized buckets.
   const viaRows = [
     { via: 'Hays', normalizedStatus: 'interview' },
@@ -886,7 +915,32 @@ function readTextIfExists(path) {
 // than left permissive. Keep the accent-less spellings: reports written before this
 // fix, and the `Arquetipo` Spanish variant, must keep parsing.
 const REPORT_URL_RE = /^URL[ \t\u00a0]*:[ \t\u00a0]*(https?:\/\/\S+)/im;
-const REPORT_ARCHETYPE_RE = /^(?:Arch[eé]type|Arquetipo)[ \t\u00a0]*:[ \t\u00a0]*(.+?)$/im;
+// Every archetype header label shipped by a localized evaluation mode in this
+// repo. Each form is extracted from the mode that writes it, never translated
+// here: an invented spelling adds a key no report ever carries while the real
+// one keeps being dropped. Same sourcing rule #3679 applies on the web side.
+//
+// Longest-first so a shorter form never shadows a longer one that starts with it
+// (Arketip / Arketipe). Backtracking would resolve it either way; the order makes
+// the intent explicit rather than incidental.
+const ARCHETYPE_LABELS = [
+  'Arquétipo',  // pt   — modes/pt/oferta.md
+  'Arquetipo',  // es   — modes/es/oferta.md
+  'Archétype',  // fr   — as generated when the agent writes the accent
+  'Archetype',  // en, nl, zh, zh-TW — and modes/fr/offre.md, which writes it unaccented
+  'Archetipo',  // it   — modes/it/annuncio.md
+  'Archetyp',   // de, pl — modes/de/angebot.md, modes/pl/oferta.md
+  'Arketipe',   // id   — modes/id/lowongan.md
+  'Arketype',   // da   — modes/da/oferta.md
+  'Arketip',    // tr   — modes/tr/is-ilani.md
+  'Архетип',    // ru, ua — modes/ru/oferta.md, modes/ua/oferta.md
+];
+
+const HEADER_HSPACE = '[ \\t\\u00a0]*';
+const REPORT_ARCHETYPE_RE = new RegExp(
+  `^(?:${ARCHETYPE_LABELS.join('|')})${HEADER_HSPACE}:${HEADER_HSPACE}(.+?)$`,
+  'im',
+);
 
 function parseReport(reportPath) {
   const content = readTextIfExists(reportPath);

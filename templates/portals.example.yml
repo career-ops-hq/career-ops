@@ -983,7 +983,8 @@ search_queries:
 # URL to detect, so they must be selected with an explicit `provider:`
 # field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
 # himalayas, ibm, jobbankca, jobicy, jobstreet, justjoin, landingjobs, mycareersfuture, nofluffjobs, remoteok, remotive, senjob,
-# manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent. Examples for every built-in provider are below.
+# manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent,
+# telegram-channel. Examples for every built-in provider are below.
 
 # ── Built-in provider examples ────────────────────────────────────
 # One commented stanza per provider in providers/. Uncomment one and adjust.
@@ -1337,6 +1338,13 @@ search_queries:
 #   careers_url: https://solid.jobs/public-api/offers/engineering
 #   enabled: true
 #
+# - name: Telegram @jobforjunior          # public Telegram channel, read via its t.me/s/ web preview
+#   provider: telegram-channel            # no detect() — only reachable via provider:
+#   channel: jobforjunior # handle without the @ (5-32 letters, digits, underscores)
+#   since_days: 30        # optional window; pages are walked back until it (default 30)
+#   max_pages: 10         # optional page cap (20 posts/page, default 10, max 10)
+#   enabled: true
+#
 # -- Remote-job feeds  (→ job_boards:; set provider: plus any provider-specific fields) --
 # title_filter / location_filter defined above still apply.
 #
@@ -1502,9 +1510,10 @@ search_queries:
 # scan-history, an aggregator's clusters are indistinguishable by shape from
 # legitimate ones (both around 2 sightings over 2 dates). See #2703.
 #
-# Scanning is unaffected — the postings are real and worth finding. Only the
-# repost inference over them is meaningless. Companies with no flag are
-# untouched, so leaving this out changes nothing.
+# Scanning keeps every posting: on a flagged entry the intra-scan company+role
+# dedup is skipped (two identical titles under the board's name are two jobs)
+# and only the URL dedups. Companies with no flag are untouched, so leaving
+# this out changes nothing.
 #
 #   - name: SomeBoard
 #     careers_url: https://jobs.lever.co/someboard
@@ -2486,6 +2495,28 @@ tracked_companies:
 # Same title/location filtering and dedup apply.
 
 job_boards:
+
+  # ── Telegram channels (public) ─────────────────────────────────────
+  # Public web preview at https://t.me/s/<channel>: no API key, no login.
+  # 20 posts per page, walked back until since_days (default 30) or max_pages
+  # (cap 10; a cut-short window is warned about). A private channel is
+  # reported, not skipped.
+  #
+  # A post is emitted only when it names an employer AND links to a vacancy
+  # (Source Indexing Policy, rules 1-2): company = that employer, url = that
+  # link, the t.me permalink rides in the description as "Source:". Posts
+  # with a contact handle and no employer, digests, forms, shorteners and
+  # hidden employers are dropped, so pick channels whose posts carry a
+  # "Компания:" / "Company:" line or "Title @ Employer" plus an ATS or board
+  # link. Measured 2026-09-03: HR-curated channels pass 32-77% of posts,
+  # community channels of free-text posts pass almost none.
+
+  - name: "Telegram @jobforjunior"
+    provider: telegram-channel
+    channel: jobforjunior     # handle without the @
+    since_days: 14
+    enabled: false
+    notes: "Junior/entry RU tech roles, posts carry 'Компания:' + a geekjob.ru/ATS link; 21 jobs emitted at this 14-day window (35% of 60 posts read), measured live 2026-09-05. title_filter runs on each post's FIRST LINE; content_filter only narrows that set."
 
   # ── SolidJobs (Polish market) ──────────────────────────────────────
   # Public API — no auth needed. Division in URL path, campaign=career-ops for tracking.
