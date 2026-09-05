@@ -138,6 +138,7 @@ Die vollständige Bewertung in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` ab
 (vollständiger Inhalt von Block F)
 
 ## G) Draft-Antworten für die Bewerbung
+<!-- career-ops:draft-answers -->
 (nur bei Score >= 4.5 — Entwürfe für die Antwortfelder im Bewerbungsformular)
 
 ---
