@@ -1008,7 +1008,10 @@ export function isUserConfiguredTemplateVariant(file, configuredVariants = {}) {
   const kind = TEMPLATE_VARIANT_KIND[match[1]];
   const name = match[2];
   const configured = configuredVariants?.[kind];
-  return Boolean(configured) && configured === name;
+  // "standard" resolves to the base template (without a named suffix), so
+  // a leftover cv-template.standard.* / cover-letter-template.standard.* is
+  // inactive and must remain eligible for stale-file pruning.
+  return Boolean(configured) && configured !== 'standard' && configured === name;
 }
 
 /**
