@@ -1,11 +1,5 @@
-// tests/providers/_http.test.mjs — direct coverage of isRetryableError(),
-// fetchJsonWithRetry() and sleep(), previously only exercised indirectly
-// through consumer providers' tests.
-//
-// Main case: a refused redirect (redirect:'error' meeting a 3xx — mandatory
-// on every provider, #1440) surfaces as a bare TypeError with no .status, the
-// same shape as a transient network error, but it's deterministic and must
-// NOT be retried.
+// tests/providers/_http.test.mjs — direct coverage for the shared HTTP layer
+// (providers/_http.mjs).
 import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
@@ -37,11 +31,17 @@ if (isRetryableError(new Error('network down')) === true) {
   fail('isRetryableError(generic no-status network error) should be true');
 }
 
-// The refused-redirect shape: a bare TypeError with err.cause.message set to
-// undici's REDIRECT_REFUSAL_CAUSE_MESSAGE (see providers/_http.mjs). Hardcoded
-// here rather than imported — the whole point of pinning it is to catch a
-// typo/drift in the production constant, not compare it to itself. Must be
-// classified as non-retryable, unlike a plain network error above.
+// A redirect refused by the mandatory SSRF guard — redirect:'error' meeting a
+// 3xx (#1440) — arrives as a bare TypeError with no .status, indistinguishable
+// by shape from a timeout or a DNS failure; only err.cause.message tells them
+// apart. It's deterministic, so it must NOT be retried — unlike the plain
+// network error just above.
+//
+// undici's message for that case is pinned as REDIRECT_REFUSAL_CAUSE_MESSAGE in
+// providers/_http.mjs. Hardcoded here rather than imported — pinning it catches
+// a typo/drift in the production constant instead of comparing it to itself, so
+// a Node/undici bump that changes the wording fails loudly here instead of
+// silently reverting to over-retrying.
 const UNEXPECTED_REDIRECT_CAUSE_MESSAGE = 'unexpected redirect';
 const redirectRefusal = Object.assign(new TypeError('fetch failed'), {
   cause: { message: UNEXPECTED_REDIRECT_CAUSE_MESSAGE },
