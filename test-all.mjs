@@ -1957,6 +1957,7 @@ const allowedFiles = [
   // Dashboard credit string
   'dashboard/internal/ui/screens/pipeline.go',
   'dashboard/internal/ui/screens/progress.go',
+  'dashboard/internal/ui/screens/stats.go',
 ];
 
 // Build pathspec for git grep — only scan tracked files matching these
