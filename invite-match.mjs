@@ -257,11 +257,24 @@ export function companySimilarity(a, b) {
 // too much for one regex to be authoritative, so this is a best-effort
 // extraction — the fuzzy match against the tracker is what actually decides
 // the result, not this heuristic alone.
+//
+// The name class is Unicode, not `[A-Z][\w…]`: `\w` is ASCII-only in JS, so a
+// lazy `[\w…]{1,60}?` cannot cross the `é` in Nestlé and the terminator it is
+// looking for never arrives — the whole pattern fails and the invite yields no
+// company at all. `[A-Z]` refused a non-Latin first letter for the same reason,
+// so Яндекс and 株式会社 never even started matching. `\p{Lo}` covers
+// scripts with no case distinction; the body class is the one
+// normalizeCompanyName() already uses (#2517), plus the punctuation company
+// names carry, plus `_`: `\w` included it, and dropping it reproduces the
+// exact same failure mode this fix is for (a lazy class with no reachable
+// terminator fails the whole pattern, not just the one character) for any
+// ASCII company name that happens to contain an underscore. The first
+// pattern captures `(.+)` and was never script-bound.
 const COMPANY_LINE_PATTERNS = [
   /(?:^|\n)\s*company\s*[:\-]\s*(.+)/i,
-  /interview(?:ing)?\s+(?:with|at)\s+([A-Z][\w.,&' -]{1,60}?)(?:[.,\n]|\s+for\s|\s+regarding\s|$)/i,
-  /(?:phone screen|screening|interview)\s*[-–—:]\s*([A-Z][\w.,&' -]{1,60}?)(?:\s+opportunity)?(?:[.,\n]|$)/i,
-  /schedule your (?:phone screen|interview)\s*(?:[-–—:]\s*)?([A-Z][\w.,&' -]{1,60}?)\s*opportunity/i,
+  /interview(?:ing)?\s+(?:with|at)\s+([\p{Lu}\p{Lo}][\p{L}\p{M}\p{N}_.,&' -]{1,60}?)(?:[.,\n]|\s+for\s|\s+regarding\s|$)/iu,
+  /(?:phone screen|screening|interview)\s*[-–—:]\s*([\p{Lu}\p{Lo}][\p{L}\p{M}\p{N}_.,&' -]{1,60}?)(?:\s+opportunity)?(?:[.,\n]|$)/iu,
+  /schedule your (?:phone screen|interview)\s*(?:[-–—:]\s*)?([\p{Lu}\p{Lo}][\p{L}\p{M}\p{N}_.,&' -]{1,60}?)\s*opportunity/iu,
 ];
 
 /**
