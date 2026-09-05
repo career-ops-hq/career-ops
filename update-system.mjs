@@ -980,14 +980,294 @@ function pathMatchesManifest(file, entry) {
   return normalizedFile === normalizedEntry || normalizedFile.startsWith(`${normalizedEntry}/`);
 }
 
-export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths = USER_PATHS) {
+// A user-authored named template variant, per cv-templates.mjs's own naming
+// convention (KINDS.cv.prefix = 'cv-template', KINDS.cover.prefix =
+// 'cover-letter-template'; parseFilename() there recognizes exactly this
+// `<prefix>.<name>.<html|tex>` shape). A file matching this shape lives
+// directly under templates/ next to the real shipped template files, and by
+// construction never exists upstream once it is a personal variant — see the
+// gap this closes (distinct from #3636/#3638, which cover generated
+// per-application CVs, not user-authored template *variants*).
+const TEMPLATE_VARIANT_RE = /^templates\/(cv-template|cover-letter-template)\.([a-z0-9-]+)\.(html|tex)$/;
+const TEMPLATE_VARIANT_KIND = { 'cv-template': 'cv', 'cover-letter-template': 'cover' };
+
+/**
+ * Is `file` a named template variant this install's config/profile.yml has
+ * itself configured as the active default (`cv.template` / `cover_letter.template`
+ * — the same keys cv-templates.mjs's resolveTemplate() reads)?
+ *
+ * A file matching TEMPLATE_VARIANT_RE is ambiguous on name alone: it could be
+ * a real shipped variant (`cv-template.zh-minimal.html`) that upstream still
+ * ships (handled fine by the normal remote-tree comparison — never reaches
+ * this check) or has genuinely been removed upstream (should still prune,
+ * same as before), OR it could be the user's own variant that will NEVER
+ * exist upstream, and whose only signal of intent is that they pointed
+ * config/profile.yml at its name. `configuredVariants` is precomputed by the
+ * caller (apply(), via a lazy `import('./cv-templates.mjs')` — this module
+ * must stay self-loading, see the top-of-file note) so this function itself
+ * stays pure and synchronous, exactly like the SYSTEM_PATHS/USER_PATHS
+ * filters it sits next to, and is trivially unit-testable without touching
+ * the filesystem.
+ *
+ * @param {string} file - repo-relative path.
+ * @param {{cv?: string, cover?: string}} configuredVariants - kebab-case
+ *   variant names read from config/profile.yml's cv.template / cover_letter.template.
+ */
+export function isUserConfiguredTemplateVariant(file, configuredVariants = {}) {
+  const match = normalizeRepoPath(file).match(TEMPLATE_VARIANT_RE);
+  if (!match) return false;
+  const kind = TEMPLATE_VARIANT_KIND[match[1]];
+  const name = match[2];
+  const configured = configuredVariants?.[kind];
+  // "standard" resolves to the base template (without a named suffix), so
+  // a leftover cv-template.standard.* / cover-letter-template.standard.* is
+  // inactive and must remain eligible for stale-file pruning.
+  return Boolean(configured) && configured !== 'standard' && configured === name;
+}
+
+/**
+ * Read the two profile keys needed by the updater without requiring js-yaml.
+ * The self-reexec stage deliberately runs before dependencies are installed,
+ * so this strict fallback must remain self-contained. Unsupported or ambiguous
+ * syntax throws instead of silently disabling user-file protection.
+ *
+ * @param {string} source
+ * @returns {{cv?: string, cover?: string}}
+ */
+export function configuredTemplateVariantsFromProfileSource(source) {
+  const lines = String(source).replace(/\r\n/g, '\n').split('\n');
+  const configuredVariants = {};
+
+  const parseScalar = (raw, label) => {
+    let value = raw.trim();
+    if (!value) return null;
+    let quote = null;
+    for (let i = 0; i < value.length; i++) {
+      const char = value[i];
+      if (quote === '"' && char === '\\') {
+        i++;
+        continue;
+      }
+      if (char === quote) {
+        if (quote === "'" && value[i + 1] === "'") {
+          i++;
+          continue;
+        }
+        quote = null;
+        continue;
+      }
+      if (!quote && (char === '"' || char === "'")) {
+        quote = char;
+        continue;
+      }
+      if (!quote && char === '#' && (i === 0 || /\s/.test(value[i - 1]))) {
+        value = value.slice(0, i).trimEnd();
+        break;
+      }
+    }
+    if (quote) throw new Error(`Unterminated quoted value for ${label}`);
+    if (!value) return null;
+    if (value.startsWith('"')) {
+      try {
+        const parsed = JSON.parse(value);
+        if (typeof parsed !== 'string') throw new Error('not a string');
+        return parsed;
+      } catch (err) {
+        throw new Error(`Unsupported quoted value for ${label}`, { cause: err });
+      }
+    }
+    if (value.startsWith("'")) {
+      if (!value.endsWith("'")) throw new Error(`Unterminated quoted value for ${label}`);
+      return value.slice(1, -1).replace(/''/g, "'");
+    }
+    if (/^[\[\]{ }&*!|>@`]/.test(value)) {
+      throw new Error(`Unsupported YAML value for ${label}`);
+    }
+    if (/^(?:null|~|true|false|yes|no|on|off|[-+]?\d+(?:\.\d+)?)$/i.test(value)) return null;
+    return value;
+  };
+
+  for (const [section, kind] of [['cv', 'cv'], ['cover_letter', 'cover']]) {
+    const header = new RegExp(`^${section}\\s*:(.*)$`);
+    const starts = lines
+      .map((line, index) => (header.test(line) ? index : -1))
+      .filter((index) => index >= 0);
+    if (starts.length > 1) throw new Error(`Duplicate top-level ${section} section`);
+    if (starts.length === 0) continue;
+    const start = starts[0];
+    const headerTail = lines[start].match(header)[1].trim();
+    if (headerTail && !headerTail.startsWith('#')) {
+      throw new Error(`Unsupported inline YAML mapping for ${section}`);
+    }
+    const entries = [];
+    for (let i = start + 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line.trim() || line.trimStart().startsWith('#')) continue;
+      if (/^\s*\t/.test(line)) throw new Error(`Unsupported tab indentation in ${section}`);
+      const indent = line.match(/^ */)[0].length;
+      if (indent === 0) break;
+      const mapping = line.match(/^\s*([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+      if (mapping) entries.push({ indent, key: mapping[1], value: mapping[2] });
+    }
+    if (entries.length === 0) continue;
+    const childIndent = Math.min(...entries.map((entry) => entry.indent));
+    const templateEntries = entries.filter(
+      (entry) => entry.indent === childIndent && entry.key === 'template',
+    );
+    if (templateEntries.length > 1) throw new Error(`Duplicate ${section}.template value`);
+    if (templateEntries.length === 0) continue;
+    const configured = parseScalar(templateEntries[0].value, `${section}.template`);
+    if (!configured) continue;
+    const normalized = String(configured)
+      .trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    if (normalized && normalized !== 'standard') configuredVariants[kind] = normalized;
+  }
+  return configuredVariants;
+}
+
+/**
+ * Resolve the user's configured named-template variants through the same
+ * lazy import used by apply(). When the old-to-new self-reexec has no installed
+ * js-yaml package yet, use the strict zero-dependency reader above rather than
+ * degrading to an empty exemption set.
+ *
+ * @param {{profilePath?: string}} [options]
+ * @returns {Promise<{cv?: string, cover?: string}>}
+ */
+export async function loadConfiguredTemplateVariants({ profilePath } = {}) {
+  const configuredVariants = {};
+  let templateModule;
+  try {
+    templateModule = await import('./cv-templates.mjs');
+  } catch (err) {
+    const expectedUrl = new URL('./cv-templates.mjs', import.meta.url).href;
+    if (err?.code === 'ERR_MODULE_NOT_FOUND' && err?.url === expectedUrl) {
+      // Very old targets may not ship cv-templates.mjs. Preserve the historical
+      // no-exemption behavior only for that exact compatibility case.
+      return configuredVariants;
+    }
+    if (err?.code === 'ERR_MODULE_NOT_FOUND'
+        && /Cannot find package ['"]js-yaml['"]/.test(err?.message || '')) {
+      if (!profilePath || !existsSync(profilePath)) return configuredVariants;
+      return configuredTemplateVariantsFromProfileSource(readFileSync(profilePath, 'utf8'));
+    }
+    throw err;
+  }
+  const { loadProfileDefault, kebab } = templateModule;
+  for (const kind of ['cv', 'cover']) {
+    const options = profilePath ? { profilePath, strict: true } : { strict: true };
+    const configured = loadProfileDefault(kind, options);
+    const normalized = configured ? kebab(configured) : '';
+    if (normalized && normalized !== 'standard') configuredVariants[kind] = normalized;
+  }
+  return configuredVariants;
+}
+
+/**
+ * Find configured template variants whose local content would be overwritten
+ * by the incoming tree. A configured name is not enough on its own: if the
+ * local and upstream blobs are identical, checkout is harmless and should be
+ * allowed to update the index normally.
+ *
+ * @param {string[]} localFiles - repo-relative files currently present locally.
+ * @param {string[]} remoteFiles - repo-relative files present in upstream.
+ * @param {{cv?: string, cover?: string}} configuredVariants - active defaults.
+ * @param {Record<string, string>} localContents - local file contents.
+ * @param {Record<string, string>} remoteContents - upstream file contents;
+ *   a missing entry is treated as unsafe to overwrite.
+ * @returns {string[]} configured variant paths to exclude from checkout.
+ */
+export function configuredTemplateVariantPathsToPreserve(
+  localFiles,
+  remoteFiles,
+  configuredVariants = {},
+  localContents = {},
+  remoteContents = {},
+) {
+  const remote = new Set([...remoteFiles].map(normalizeRepoPath));
+  const normalizeContent = (content) => String(content).replace(/\r\n/g, '\n');
+  return [...new Set(localFiles.map(normalizeRepoPath))]
+    .filter((file) => isUserConfiguredTemplateVariant(file, configuredVariants))
+    .filter((file) => remote.has(file))
+    .filter((file) => Object.prototype.hasOwnProperty.call(localContents, file))
+    .filter((file) => !Object.prototype.hasOwnProperty.call(remoteContents, file)
+      || normalizeContent(localContents[file]) !== normalizeContent(remoteContents[file]))
+    .sort();
+}
+
+/**
+ * Snapshot configured variant files from the user data root before checkout.
+ * The callback keeps Git access in apply() while making the data-root read
+ * directly testable without mutating the real repository.
+ *
+ * @param {{dataRoot?: string, remoteFiles?: string[], readRemoteContent?: (path: string) => string,
+ *   readLocalContent?: (path: string) => string, localPathExists?: (path: string) => boolean}} options
+ * @returns {Promise<{configuredVariants: object, localFiles: string[], localContents: object, remoteContents: object, preservedPaths: string[]}>}
+ */
+export async function snapshotConfiguredTemplateVariants({
+  dataRoot = ROOT,
+  remoteFiles = [],
+  readRemoteContent = () => null,
+  readLocalContent = (path) => readFileSync(path, 'utf8'),
+  localPathExists = existsSync,
+} = {}) {
+  const configuredVariants = await loadConfiguredTemplateVariants({
+    profilePath: join(dataRoot, 'config', 'profile.yml'),
+  });
+  const configuredVariantPaths = [];
+  for (const [kind, name] of Object.entries(configuredVariants)) {
+    const prefix = kind === 'cv' ? 'cv-template' : 'cover-letter-template';
+    for (const extension of ['html', 'tex']) {
+      configuredVariantPaths.push(`templates/${prefix}.${name}.${extension}`);
+    }
+  }
+  const localContents = {};
+  const remoteContents = {};
+  const localFiles = configuredVariantPaths.filter((file) => {
+    const localPath = join(dataRoot, ...file.split('/'));
+    try {
+      localContents[file] = readLocalContent(localPath);
+      return true;
+    } catch (err) {
+      if (localPathExists(localPath)) {
+        throw new Error(
+          `Configured template variant is unreadable: ${file}. Refusing to update because checkout could overwrite it.`,
+          { cause: err },
+        );
+      }
+      return false;
+    }
+  });
+  for (const file of localFiles) {
+    if (!remoteFiles.includes(file)) continue;
+    try {
+      const content = readRemoteContent(file);
+      if (content !== null && content !== undefined) remoteContents[file] = content;
+    } catch {
+      // An unreadable blob is unsafe to overwrite. Its missing remoteContents
+      // entry makes configuredTemplateVariantPathsToPreserve() fail closed.
+    }
+  }
+  return {
+    configuredVariants,
+    localFiles,
+    localContents,
+    remoteContents,
+    preservedPaths: configuredTemplateVariantPathsToPreserve(
+      localFiles, remoteFiles, configuredVariants, localContents, remoteContents,
+    ),
+  };
+}
+
+export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths = USER_PATHS, configuredVariants = {}) {
   const remote = new Set([...remoteFiles].map(normalizeRepoPath));
   if (remote.size === 0) return [];
   return [...localFiles]
     .map(normalizeRepoPath)
     .filter((file) => !remote.has(file))
     .filter((file) => systemPaths.some((entry) => pathMatchesManifest(file, entry)))
-    .filter((file) => !userPaths.some((entry) => pathMatchesManifest(file, entry)));
+    .filter((file) => !userPaths.some((entry) => pathMatchesManifest(file, entry)))
+    .filter((file) => !isUserConfiguredTemplateVariant(file, configuredVariants));
 }
 
 // A stale-file prune candidate can still be load-bearing for a file this same
@@ -996,27 +1276,42 @@ export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths
 // e.g. a user's custom CV template referencing a font file upstream no longer
 // ships. Deleting the referenced asset out from under a preserved file leaves
 // the preserved file silently broken (missing font, broken image) even though
-// the file itself survived. Scoped to preserved HTML/CSS files' on-disk
+// the file itself survived. Scoped to preserved HTML/CSS/TeX files' on-disk
 // content, since those are the only preserved file types known to reference
-// other system files by relative path.
-export function isReferencedByPreservedFile(candidatePath, preservedPaths, readFile = (path) => readFileSync(path, 'utf-8')) {
+// other system files by relative path. `roots` lets apply() inspect both the
+// code checkout and an external CAREER_OPS_ROOT without treating a missing
+// directory in either location as fatal.
+export function isReferencedByPreservedFile(
+  candidatePath,
+  preservedPaths,
+  readFile = (path) => readFileSync(path, 'utf-8'),
+  roots = [ROOT],
+) {
   const basename = normalizeRepoPath(candidatePath).split('/').pop();
   if (!basename) return false;
   return preservedPaths.some((preservedPath) => {
-    if (!/\.(html|css)$/i.test(preservedPath)) return false;
-    try {
-      return readFile(join(ROOT, ...preservedPath.split('/'))).includes(basename);
-    } catch {
-      return false;
-    }
+    if (!/\.(html|css|tex)$/i.test(preservedPath)) return false;
+    return roots.some((root) => {
+      try {
+        return readFile(join(root, ...preservedPath.split('/'))).includes(basename);
+      } catch {
+        return false;
+      }
+    });
   });
 }
 
 // Files the self-reexec stage must check out so the TARGET update-system.mjs
-// loads without a missing-module crash. Today this is the entry plus its only
-// local import; resolveReexecCheckout derives the real set from the fetched
-// source, so this is only a defensive fallback if parsing ever misses one.
-const REEXEC_FALLBACK_FILES = ['update-system.mjs', 'scaffolder/bin/skill-entrypoints.mjs'];
+// and its pre-checkout dynamic imports can load. resolveReexecCheckout derives
+// static imports from the fetched source; this list covers literal dynamic
+// imports and their local dependencies because the parser cannot see them.
+export const REEXEC_FALLBACK_FILES = [
+  'update-system.mjs',
+  'scaffolder/bin/skill-entrypoints.mjs',
+  'cv-templates.mjs',
+  'lib/is-main-module.mjs',
+  'path-resolver.mjs',
+];
 
 // Extracts static relative import/export specifiers ('./x.mjs', '../y.mjs')
 // from ESM source. Bare ('node:fs') and package ('js-yaml') specifiers are
@@ -2167,6 +2462,38 @@ async function apply() {
       }
       console.log('');
     }
+    // Read the active template defaults BEFORE checkout. A configured variant
+    // can be present upstream under the same filename; in that case the
+    // generic locallyModifiedSystemFiles() baseline check may no longer flag
+    // it, but checkout would still overwrite the user's local content.
+    let dataRoot = ROOT;
+    try {
+      const { getCareerOpsRoot } = await import('./path-resolver.mjs');
+      dataRoot = getCareerOpsRoot();
+    } catch {
+      // Very old targets may not have path-resolver.mjs yet; ROOT is the
+      // historical data root and remains the safe compatibility fallback.
+    }
+    let configuredVariantRemoteFiles = [];
+    try {
+      configuredVariantRemoteFiles = git('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', 'templates')
+        .split('\n').map((file) => file.trim()).filter(Boolean);
+    } catch {
+      // If the upstream tree cannot be read, the checkout below reports the
+      // real failure; do not infer a preservation decision from an empty tree.
+    }
+    const configuredSnapshot = await snapshotConfiguredTemplateVariants({
+      dataRoot,
+      remoteFiles: configuredVariantRemoteFiles,
+      readRemoteContent: (file) => gitShowRaw(`FETCH_HEAD:${file}`),
+    });
+    const { configuredVariants } = configuredSnapshot;
+    const configuredReferencePaths = configuredSnapshot.localFiles;
+    const configuredAtRisk = configuredSnapshot.preservedPaths;
+    if (configuredAtRisk.length > 0) {
+      preservedPaths.push(...configuredAtRisk.filter((file) => !preservedPaths.includes(file)));
+      console.log(`Keeping configured template variant(s) with local content: ${configuredAtRisk.join(', ')}`);
+    }
     // Excluding by pathspec keeps the index and the working tree in agreement:
     // checking out and restoring afterwards would leave the index holding the
     // upstream blob, so the scoped commit below would record the very content
@@ -2241,14 +2568,20 @@ async function apply() {
       }
       if (remoteFiles.size > 0) {
         const localFiles = git('ls-files').split('\n').filter(Boolean);
+        const preservedReferencePaths = mergePathLists(preservedPaths, configuredReferencePaths);
+        const preservedReferenceRoots = [...new Set([ROOT, dataRoot])];
         // A file just preserved above because THIS install modified it (e.g. a
         // custom cv-template.*.html no longer shipped upstream) must never also
         // be deleted here as "stale" — the two checks used to run independently,
         // so a preserved file with no upstream counterpart was backed up to
         // .bak by the block above and then unlinked by this one in the same run.
-        const staleCandidates = staleSystemFiles(localFiles, remoteFiles, SYSTEM_PATHS, mergePathLists(USER_PATHS, preservedPaths));
+        const staleCandidates = staleSystemFiles(
+          localFiles, remoteFiles, SYSTEM_PATHS, mergePathLists(USER_PATHS, preservedPaths), configuredVariants,
+        );
         for (const f of staleCandidates) {
-          if (isReferencedByPreservedFile(f, preservedPaths)) {
+          if (isReferencedByPreservedFile(
+            f, preservedReferencePaths, undefined, preservedReferenceRoots,
+          )) {
             console.log(`Kept stale asset still referenced by a preserved file: ${f}`);
             continue;
           }
