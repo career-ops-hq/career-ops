@@ -13,6 +13,7 @@
  */
 
 import { pass, fail } from './helpers.mjs';
+import { join } from 'path';
 import { staleSystemFiles, isReferencedByPreservedFile } from '../update-system.mjs';
 
 console.log('\n🧪 Testing preserved-file vs. stale-file prune interaction...');
@@ -94,5 +95,20 @@ console.log('\n🧪 Testing preserved-file vs. stale-file prune interaction...')
     pass('an unreadable preserved file fails closed (treated as no reference) instead of throwing');
   } else {
     fail('an unreadable preserved file should fail closed, not throw or report a false reference');
+  }
+
+  const codeRoot = join('fixture', 'code-root');
+  const dataRoot = join('fixture', 'data-root');
+  const dataRootTemplate = join(dataRoot, 'templates', 'cv-template.custom.html');
+  const readAcrossRoots = (path) => {
+    if (path === dataRootTemplate) return fakeTemplateSource;
+    throw new Error(`ENOENT: ${path}`);
+  };
+  if (isReferencedByPreservedFile(
+    'fonts/eb-garamond-400.ttf', preserved, readAcrossRoots, [codeRoot, dataRoot],
+  )) {
+    pass('a configured template under a separate data root protects the asset it references');
+  } else {
+    fail('the reference check read only the code root and missed the configured data-root template');
   }
 }

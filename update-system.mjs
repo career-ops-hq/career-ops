@@ -1075,13 +1075,16 @@ export function configuredTemplateVariantPathsToPreserve(
  * The callback keeps Git access in apply() while making the data-root read
  * directly testable without mutating the real repository.
  *
- * @param {{dataRoot?: string, remoteFiles?: string[], readRemoteContent?: (path: string) => string}} options
+ * @param {{dataRoot?: string, remoteFiles?: string[], readRemoteContent?: (path: string) => string,
+ *   readLocalContent?: (path: string) => string, localPathExists?: (path: string) => boolean}} options
  * @returns {Promise<{configuredVariants: object, localFiles: string[], localContents: object, remoteContents: object, preservedPaths: string[]}>}
  */
 export async function snapshotConfiguredTemplateVariants({
   dataRoot = ROOT,
   remoteFiles = [],
   readRemoteContent = () => null,
+  readLocalContent = (path) => readFileSync(path, 'utf8'),
+  localPathExists = existsSync,
 } = {}) {
   const configuredVariants = await loadConfiguredTemplateVariants({
     profilePath: join(dataRoot, 'config', 'profile.yml'),
@@ -1096,10 +1099,17 @@ export async function snapshotConfiguredTemplateVariants({
   const localContents = {};
   const remoteContents = {};
   const localFiles = configuredVariantPaths.filter((file) => {
+    const localPath = join(dataRoot, ...file.split('/'));
     try {
-      localContents[file] = readFileSync(join(dataRoot, ...file.split('/')), 'utf8');
+      localContents[file] = readLocalContent(localPath);
       return true;
-    } catch {
+    } catch (err) {
+      if (localPathExists(localPath)) {
+        throw new Error(
+          `Configured template variant is unreadable: ${file}. Refusing to update because checkout could overwrite it.`,
+          { cause: err },
+        );
+      }
       return false;
     }
   });
@@ -1143,25 +1153,40 @@ export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths
 // the preserved file silently broken (missing font, broken image) even though
 // the file itself survived. Scoped to preserved HTML/CSS files' on-disk
 // content, since those are the only preserved file types known to reference
-// other system files by relative path.
-export function isReferencedByPreservedFile(candidatePath, preservedPaths, readFile = (path) => readFileSync(path, 'utf-8')) {
+// other system files by relative path. `roots` lets apply() inspect both the
+// code checkout and an external CAREER_OPS_ROOT without treating a missing
+// directory in either location as fatal.
+export function isReferencedByPreservedFile(
+  candidatePath,
+  preservedPaths,
+  readFile = (path) => readFileSync(path, 'utf-8'),
+  roots = [ROOT],
+) {
   const basename = normalizeRepoPath(candidatePath).split('/').pop();
   if (!basename) return false;
   return preservedPaths.some((preservedPath) => {
     if (!/\.(html|css)$/i.test(preservedPath)) return false;
-    try {
-      return readFile(join(ROOT, ...preservedPath.split('/'))).includes(basename);
-    } catch {
-      return false;
-    }
+    return roots.some((root) => {
+      try {
+        return readFile(join(root, ...preservedPath.split('/'))).includes(basename);
+      } catch {
+        return false;
+      }
+    });
   });
 }
 
 // Files the self-reexec stage must check out so the TARGET update-system.mjs
-// loads without a missing-module crash. Today this is the entry plus its only
-// local import; resolveReexecCheckout derives the real set from the fetched
-// source, so this is only a defensive fallback if parsing ever misses one.
-const REEXEC_FALLBACK_FILES = ['update-system.mjs', 'scaffolder/bin/skill-entrypoints.mjs'];
+// and its pre-checkout dynamic imports can load. resolveReexecCheckout derives
+// static imports from the fetched source; this list covers literal dynamic
+// imports and their local dependencies because the parser cannot see them.
+export const REEXEC_FALLBACK_FILES = [
+  'update-system.mjs',
+  'scaffolder/bin/skill-entrypoints.mjs',
+  'cv-templates.mjs',
+  'lib/is-main-module.mjs',
+  'path-resolver.mjs',
+];
 
 // Extracts static relative import/export specifiers ('./x.mjs', '../y.mjs')
 // from ESM source. Bare ('node:fs') and package ('js-yaml') specifiers are
@@ -2404,6 +2429,7 @@ async function apply() {
       readRemoteContent: (file) => gitShowRaw(`FETCH_HEAD:${file}`),
     });
     const { configuredVariants } = configuredSnapshot;
+    const configuredReferencePaths = configuredSnapshot.localFiles;
     const configuredAtRisk = configuredSnapshot.preservedPaths;
     if (configuredAtRisk.length > 0) {
       preservedPaths.push(...configuredAtRisk.filter((file) => !preservedPaths.includes(file)));
@@ -2469,6 +2495,8 @@ async function apply() {
       }
       if (remoteFiles.size > 0) {
         const localFiles = git('ls-files').split('\n').filter(Boolean);
+        const preservedReferencePaths = mergePathLists(preservedPaths, configuredReferencePaths);
+        const preservedReferenceRoots = [...new Set([ROOT, dataRoot])];
         // A file just preserved above because THIS install modified it (e.g. a
         // custom cv-template.*.html no longer shipped upstream) must never also
         // be deleted here as "stale" — the two checks used to run independently,
@@ -2478,7 +2506,9 @@ async function apply() {
           localFiles, remoteFiles, SYSTEM_PATHS, mergePathLists(USER_PATHS, preservedPaths), configuredVariants,
         );
         for (const f of staleCandidates) {
-          if (isReferencedByPreservedFile(f, preservedPaths)) {
+          if (isReferencedByPreservedFile(
+            f, preservedReferencePaths, undefined, preservedReferenceRoots,
+          )) {
             console.log(`Kept stale asset still referenced by a preserved file: ${f}`);
             continue;
           }

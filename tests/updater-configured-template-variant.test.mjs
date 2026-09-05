@@ -40,9 +40,18 @@ import {
   configuredTemplateVariantPathsToPreserve,
   loadConfiguredTemplateVariants,
   snapshotConfiguredTemplateVariants,
+  REEXEC_FALLBACK_FILES,
 } from '../update-system.mjs';
 
 console.log('\n🧪 Testing user-configured template-variant carve-out...');
+
+if (REEXEC_FALLBACK_FILES.includes('cv-templates.mjs')
+    && REEXEC_FALLBACK_FILES.includes('lib/is-main-module.mjs')
+    && REEXEC_FALLBACK_FILES.includes('path-resolver.mjs')) {
+  pass('self-reexec checks out configured-template loading and data-root dependencies before apply');
+} else {
+  fail('self-reexec fallback omits a configured-template dependency needed before normal checkout');
+}
 
 // ── 1. isUserConfiguredTemplateVariant: name-matching classification ──
 {
@@ -125,6 +134,22 @@ console.log('\n🧪 Testing user-configured template-variant carve-out...');
       pass('an unreadable upstream blob fails closed and preserves the configured local variant');
     } else {
       fail(`unreadable upstream blob did not preserve the variant: ${JSON.stringify(unreadableSnapshot.preservedPaths)}`);
+    }
+    let unreadableLocalRejected = false;
+    try {
+      await snapshotConfiguredTemplateVariants({
+        dataRoot: dir,
+        remoteFiles: ['templates/cv-template.bw.html'],
+        readLocalContent: () => { throw new Error('local template unavailable'); },
+        localPathExists: () => true,
+      });
+    } catch (err) {
+      unreadableLocalRejected = err.message.includes('Refusing to update');
+    }
+    if (unreadableLocalRejected) {
+      pass('an unreadable existing local variant aborts before checkout can overwrite it');
+    } else {
+      fail('an unreadable existing local variant did not abort the update snapshot');
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
