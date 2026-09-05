@@ -172,7 +172,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
     { "name": "Project Name", "url": "https://github.com/...", "badge": "Open Source", "tech": "Python, FastAPI", "description": "What it does." }
   ],
   "education": [
-    { "title": "B.S. Computer Science", "org": "University Name", "year": "2022", "description": "Optional line." }
+    { "title": "B.S. Computer Science", "org": "University Name", "location": "City, ST", "year": "2022", "description": "Optional line." }
   ],
   "certifications": [
     { "title": "Certified Kubernetes Administrator", "org": "CNCF", "year": "2024" }
@@ -207,7 +207,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | `competencies` | string[] | 6-8 keyword phrases → competency tags. |
 | `experience[]` | object | `company`, `role`, `location` (optional), `dates`, `bullets` (reordered, keyword-injected; `**…**` emphasis supported). Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Only for candidates with no professional history to list (students, new graduates, career changers); never drop it to hide a gap. |
 | `projects[]` | object | `name`, `url` (optional project/repo link), `badge` (optional), `tech` (optional), `description` (a `bullets` array is also accepted and joined into the description line). |
-| `education[]` | object | `title` (degree), `org` (institution), `year`, `description` (optional). |
+| `education[]` | object | `title` (degree), `org` (institution), `location` (optional, city/state), `year`, `description` (optional). |
 | `certifications[]` | object | `title`, `org`, `year`. |
 | `awards[]` | object | `title` (award name), `org` (issuing body, optional), `year` (optional). Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Use it for competitive or academic distinctions (olympiad medals, hackathon wins, dean's list) that carry more signal than a thin experience section. |
 | `skills[]` | object | `items` (**required**): a non-blank comma-separated string, or a non-empty array of non-blank strings — every element must be text, since the builder joins the whole array. `category` (optional): omitted, the line renders without its prefix. |

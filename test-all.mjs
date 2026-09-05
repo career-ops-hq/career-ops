@@ -55,7 +55,7 @@ import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
+import { pass, fail, warn, run, runAcrossUtcDay, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { collectMjsFiles, isNestedCheckout } from './lib/mjs-files.mjs';
 
@@ -1804,21 +1804,29 @@ for (const f of skillEntrypoints) {
   }
 }
 
-// The plugin manifest ships in two locations: .claude-plugin/plugin.json is
-// canonical (Claude Code + Copilot CLI both read it), and .github/plugin/
+// The plugin manifest ships in three locations: .claude-plugin/plugin.json is
+// canonical (Claude Code + Copilot CLI both read it); .github/plugin/
 // plugin.json exists only because the awesome-copilot marketplace validator
-// accepts just three paths and the Claude-compat one is not among them. Both
-// are bumped by release-please; this assert makes any other divergence fail CI
-// loudly instead of shipping two drifting manifests.
+// accepts just three paths and the Claude-compat one is not among them; and
+// .codex-plugin/plugin.json is the path the awesome-ai-plugins catalogue
+// resolves a Codex plugin's install_url to. All are bumped by release-please;
+// this assert makes any other divergence fail CI loudly instead of shipping
+// drifting manifests.
 {
   const canonManifest = readFile('.claude-plugin/plugin.json');
-  const copilotManifest = fileExists('.github/plugin/plugin.json') ? readFile('.github/plugin/plugin.json') : null;
-  if (copilotManifest === null) {
-    fail('.github/plugin/plugin.json missing — awesome-copilot validator needs it (mirror of .claude-plugin/plugin.json)');
-  } else if (canonManifest === copilotManifest) {
-    pass('plugin.json mirror (.github/plugin/) is byte-identical to the canonical manifest');
-  } else {
-    fail('plugin.json mirror (.github/plugin/) DIVERGED from .claude-plugin/plugin.json — edit the canonical one and copy it verbatim');
+  const mirrors = [
+    ['.github/plugin/plugin.json', 'awesome-copilot validator needs it'],
+    ['.codex-plugin/plugin.json', 'awesome-ai-plugins resolves the Codex install_url to it'],
+  ];
+  for (const [mirrorPath, why] of mirrors) {
+    const mirror = fileExists(mirrorPath) ? readFile(mirrorPath) : null;
+    if (mirror === null) {
+      fail(`${mirrorPath} missing — ${why} (mirror of .claude-plugin/plugin.json)`);
+    } else if (canonManifest === mirror) {
+      pass(`plugin.json mirror (${mirrorPath}) is byte-identical to the canonical manifest`);
+    } else {
+      fail(`plugin.json mirror (${mirrorPath}) DIVERGED from .claude-plugin/plugin.json — edit the canonical one and copy it verbatim`);
+    }
   }
 }
 
@@ -2563,6 +2571,18 @@ for (const header of ['podsumowanie zawodowe', 'doświadczenie zawodowe', 'wyksz
   }
 }
 
+// Same gap, same two shipped Chinese markets (#3658): modes/zh-TW and modes/zh
+// rendered titles the alias table could not name, so the guard was disabled AND
+// cv.sections — the documented way to correct an order — silently did nothing.
+// Both scripts are required: a CV written in either renders through this table.
+for (const header of ['專業摘要', '工作經歷', '學歷', '證照', '技能', '专业摘要', '工作经历', '学历', '证书', '项目']) {
+  if (generatePdfScript.includes(`['${header}',`)) {
+    pass(`SECTION_ALIASES maps Chinese header: ${header}`);
+  } else {
+    fail(`SECTION_ALIASES missing Chinese header: ${header}`);
+  }
+}
+
 // generate-pdf.mjs imports playwright at module scope; degrade to a warning
 // rather than crashing the suite where it is not installed.
 let pdfModule = null;
@@ -2589,6 +2609,12 @@ if (pdfModule) {
     ['Umiejetnosci', 'skills'],      // diacritics stripped
     ['Work Experience', 'experience'], // English must be unchanged
     ['Core Competencies', 'competencies'],
+    ['專業摘要', 'summary'],       // Traditional (modes/zh-TW)
+    ['工作經歷', 'experience'],
+    ['學歷', 'education'],
+    ['专业摘要', 'summary'],       // Simplified (modes/zh)
+    ['工作经历', 'experience'],
+    ['学历', 'education'],
   ];
   let keysOk = true;
   for (const [title, expected] of keyCases) {
@@ -2598,7 +2624,7 @@ if (pdfModule) {
       keysOk = false;
     }
   }
-  if (keysOk) pass(`sectionKey resolves all ${keyCases.length} PL/EN heading spellings`);
+  if (keysOk) pass(`sectionKey resolves all ${keyCases.length} PL/EN/ZH heading spellings`);
 
   // Hermetic cv.md stand-in: passed in directly, so the test does not depend on
   // a cv.md existing in the checkout (it is gitignored).
@@ -2618,6 +2644,13 @@ if (pdfModule) {
   ]);
   const enMisordered = titlesToHtml([
     'Professional Summary', 'Education', 'Work Experience',
+  ]);
+  // Education hoisted above 工作經歷 — the Chinese half of #3658.
+  const zhMisordered = titlesToHtml([
+    '專業摘要', '學歷', '工作經歷',
+  ]);
+  const zhCorrect = titlesToHtml([
+    '专业摘要', '工作经历', '学历', '证书', '技能',
   ]);
 
   const throws = (html, opts) => {
@@ -2640,6 +2673,18 @@ if (pdfModule) {
     pass('English CV order check still rejects divergence (no regression)');
   } else {
     fail('English CV order check regressed');
+  }
+
+  if (throws(zhMisordered)) {
+    pass('Traditional Chinese CV with Education before Work Experience is rejected');
+  } else {
+    fail('Traditional Chinese CV with Education before Work Experience was NOT rejected (guard is a no-op)');
+  }
+
+  if (!throws(zhCorrect)) {
+    pass('Simplified Chinese CV in cv.md order is accepted');
+  } else {
+    fail('Simplified Chinese CV in cv.md order was wrongly rejected');
   }
 
   // --allow-reorder must keep downgrading the divergence to a warning now that
@@ -6999,8 +7044,6 @@ if (fileExists('VERSION')) {
 
 console.log('\n12. archive-posting.mjs');
 
-const todayStr = new Date().toISOString().split('T')[0];
-
 // dry-run: URL-based company detection across each supported ATS
 for (const [url, expected] of [
   ['https://boards.greenhouse.io/openai/jobs/123', 'openai'],
@@ -7024,9 +7067,13 @@ overrideOut?.includes('Acme') && overrideOut?.includes('staff-engineer')
   ? pass('dry-run: --company and --role overrides respected')
   : fail('dry-run: --company / --role overrides not reflected in output');
 
-// dry-run: output always contains a local:jds/ reference and today's date
-const refOut = run(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
-refOut?.includes('local:jds/') && refOut?.includes(todayStr)
+// dry-run: output always contains a local:jds/ reference and today's date.
+// The date the child prints is its own clock read, so it is compared against
+// the day(s) spanning the call rather than one captured up-section — see
+// runAcrossUtcDay() for why a single capture fails a run that crosses
+// midnight UTC (#3816).
+const { out: refOut, days: refDays } = runAcrossUtcDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
+refOut?.includes('local:jds/') && refDays.some((day) => refOut?.includes(day))
   ? pass('dry-run: local:jds/ reference and date emitted')
   : fail('dry-run: reference or date missing from output');
 
@@ -7074,8 +7121,8 @@ reportSpaceOut?.includes('jds/042-') && reportSpaceOut?.toLowerCase().includes('
   : fail('--report N: swallowed the URL or dropped the report number');
 
 // omitting --report leaves the historical filename shape untouched
-const noReportOut = run(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
-noReportOut?.includes(`jds/${todayStr}_`)
+const { out: noReportOut, days: noReportDays } = runAcrossUtcDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
+noReportDays.some((day) => noReportOut?.includes(`jds/${day}_`))
   ? pass('no --report: filename shape unchanged')
   : fail('no --report: filename shape regressed');
 
@@ -8395,6 +8442,96 @@ try {
   }
 } catch (e) {
   fail(`title filter acronym tests crashed: ${e.message}`);
+}
+
+// ── 11c. TITLE FILTER OVERRIDES — per-company broadened title net ──
+console.log('\n11c. Title filter overrides (scan-ats-full.mjs per-company broadening)');
+try {
+  const { buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildTitleFilter } =
+    await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+
+  const titleFilterConfig = {
+    positive: ['instructional designer', 'edtech'],
+    negative: ['intern'],
+  };
+  const overridesConfig = [
+    {
+      companies: ['uwaterloo', 'UBC'], // mixed case — matching must be case-insensitive
+      positive_extra: ['Administrator', 'Coordinator', 'Registrar'],
+    },
+  ];
+  const overridesMap = buildTitleFilterOverrides(overridesConfig);
+  const filter = buildTitleFilterWithOverrides(titleFilterConfig, overridesMap);
+
+  // A company matching an override gets the broadened net applied.
+  if (filter('Program Administrator', 'uwaterloo') === true) {
+    pass('title_filter_overrides: an override-listed company matches on positive_extra keywords');
+  } else {
+    fail('title_filter_overrides: override-listed company should match on positive_extra');
+  }
+  if (filter('Program Administrator', 'UBC') === true) {
+    pass('title_filter_overrides: company-slug matching is case-insensitive');
+  } else {
+    fail('title_filter_overrides: company-slug matching should be case-insensitive');
+  }
+
+  // The global negative list still applies even under an override.
+  if (filter('Administrator Intern', 'uwaterloo') === false) {
+    pass('title_filter_overrides: global negative keywords still reject override matches');
+  } else {
+    fail('title_filter_overrides: global negative list should still apply under an override');
+  }
+
+  // A company NOT in any override list is completely unaffected — regression
+  // guard: the override mechanism must be a strict no-op for everyone else.
+  if (filter('Program Administrator', 'some-other-company') === false) {
+    pass('title_filter_overrides: a non-listed company is unaffected by positive_extra');
+  } else {
+    fail('title_filter_overrides: a non-listed company must not get the broadened net');
+  }
+  if (filter('Program Administrator', undefined) === false) {
+    pass('title_filter_overrides: no company slug at all behaves like the plain global filter');
+  } else {
+    fail('title_filter_overrides: missing company slug should fall back to the global filter only');
+  }
+  // Titles that already pass the global filter still pass, override or not.
+  const plain = buildTitleFilter(titleFilterConfig);
+  if (filter('Instructional Designer', 'some-other-company') === plain('Instructional Designer')) {
+    pass('title_filter_overrides: global-filter-passing titles are unaffected by the override mechanism');
+  } else {
+    fail('title_filter_overrides: global filter behavior must be identical outside overrides');
+  }
+
+  // An override with an empty/missing positive_extra doesn't crash and adds nothing.
+  const emptyOverridesMap = buildTitleFilterOverrides([
+    { companies: ['uwaterloo'], positive_extra: [] },
+    { companies: ['fanshawec'] }, // positive_extra missing entirely
+  ]);
+  const emptyFilter = buildTitleFilterWithOverrides(titleFilterConfig, emptyOverridesMap);
+  if (emptyFilter('Program Administrator', 'uwaterloo') === false && emptyFilter('Program Administrator', 'fanshawec') === false) {
+    pass('title_filter_overrides: empty/missing positive_extra does not crash and adds no matches');
+  } else {
+    fail('title_filter_overrides: empty/missing positive_extra should be a no-op, not a crash');
+  }
+
+  // Malformed title_filter_overrides (not an array, junk entries) must not crash.
+  const junkMap = buildTitleFilterOverrides('not-an-array');
+  const junkMap2 = buildTitleFilterOverrides([null, 42, { companies: 'not-an-array' }, { companies: ['x'], positive_extra: 'not-an-array' }]);
+  if (junkMap.size === 0 && junkMap2.size === 0) {
+    pass('buildTitleFilterOverrides ignores malformed title_filter_overrides without crashing');
+  } else {
+    fail('buildTitleFilterOverrides should ignore malformed entries and produce an empty map');
+  }
+
+  // No overrides at all (absent config) → identical behavior to buildTitleFilter directly.
+  const noOverridesFilter = buildTitleFilterWithOverrides(titleFilterConfig, buildTitleFilterOverrides(undefined));
+  if (noOverridesFilter('Coordinator', 'uwaterloo') === plain('Coordinator') && noOverridesFilter('Coordinator', 'uwaterloo') === false) {
+    pass('title_filter_overrides: absent title_filter_overrides is a strict no-op');
+  } else {
+    fail('title_filter_overrides: absent config should behave exactly like buildTitleFilter alone');
+  }
+} catch (e) {
+  fail(`title filter overrides tests crashed: ${e.message}`);
 }
 
 // ── 12. FOLLOW-UP CADENCE LOGIC ─────────────────────────────────
@@ -9822,6 +9959,40 @@ try {
     pass('all headless evaluators use the shared atomic report allocator');
   } else {
     fail(`headless evaluators still carry private max+1 allocators: ${unmigratedEvaluators.join(', ')}`);
+  }
+
+  // Same family, second contract (#3795): every headless evaluator writes
+  // `**URL:**` into its report header, per AGENTS.md Pipeline Integrity rule 3.
+  // The report is where the posting URL survives the posting, and it is the only
+  // place merge-tracker.mjs's resolveReportUrl() looks -- a report without the
+  // line yields `no-url`, so the row can never be backfilled and stays outside
+  // the deterministic URL dedup key, the tier merge-tracker tries FIRST and the
+  // one that can prove two same-title rows are different openings.
+  //
+  // Two halves, because the line is worthless without a value to put in it:
+  // the header must be written, AND the evaluator must have somewhere to
+  // receive a posting URL from. Absent one, `(pasted)` is the honest value and
+  // keeps the field present; normalizeUrl derives no key from it, so it cannot
+  // hand every pasted row the same key.
+  const urlHeaderRe  = /\*\*URL:\*\*/;
+  const urlSourceRe  = /--posting-url|\bpostingUrl\b|\$\{input \|\| '\(pasted\)'\}/;
+  // openai-eval.mjs and ollama-eval.mjs gain the same header in #3797, which
+  // owns those two files. Named rather than skipped, and the list is asserted
+  // to be EXACTLY the files still missing the header: once #3797 lands this
+  // fails until the names are removed, so the exemption cannot outlive its
+  // reason and quietly become permanent coverage loss.
+  const pendingUrlHeader = ['openai-eval.mjs', 'ollama-eval.mjs'];
+  const missingUrlHeader = evaluatorSources
+    .filter(([, source]) => !urlHeaderRe.test(source) || !urlSourceRe.test(source))
+    .map(([name]) => name);
+  const staleExemptions = pendingUrlHeader.filter(name => !missingUrlHeader.includes(name));
+  const unexemptedGaps  = missingUrlHeader.filter(name => !pendingUrlHeader.includes(name));
+  if (unexemptedGaps.length > 0) {
+    fail(`headless evaluators write a report with no **URL:** header, so their rows can never reach the URL dedup key: ${unexemptedGaps.join(', ')}`);
+  } else if (staleExemptions.length > 0) {
+    fail(`stale #3797 exemption — these now carry the **URL:** header, remove them from pendingUrlHeader: ${staleExemptions.join(', ')}`);
+  } else {
+    pass('every headless evaluator outside the #3797 exemption writes **URL:** and takes a posting URL');
   }
 
   // --count N: contiguous range from an empty dir.

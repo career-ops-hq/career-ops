@@ -20,6 +20,7 @@ if (process.platform === 'win32') {
  * Usage:
  *   node gemini-eval.mjs "Paste full JD text here"
  *   node gemini-eval.mjs --file ./jds/my-job.txt
+ *   node gemini-eval.mjs --posting-url https://acme.com/jobs/42 --file ./jds/my-job.txt
  *
  * Requires:
  *   GEMINI_API_KEY in .env (or environment variable)
@@ -154,6 +155,8 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
   OPTIONS
     --file <path>    Read JD from a file instead of inline text
     --model <name>   Gemini model to use (default: gemini-3.6-flash)
+    --posting-url <url>  Posting URL, recorded in the report header and
+                     used as the tracker's dedup key
     --no-save        Do not save report to reports/ directory
     --no-compress    Skip token budget compression (full context injection)
     --help           Show this help
@@ -166,12 +169,14 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
   EXAMPLES
     node gemini-eval.mjs "We are looking for a Senior AI Engineer..."
     node gemini-eval.mjs --file ./jds/openai-swe.txt
+    node gemini-eval.mjs --posting-url https://acme.com/jobs/42 --file ./jds/openai-swe.txt
 `);
   process.exit(0);
 }
 
 // Parse flags
 let jdText = '';
+let postingUrl = '';
 let modelName = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 let saveReport = true;
 let noCompress = false;
@@ -186,6 +191,8 @@ for (let i = 0; i < args.length; i++) {
     jdText = stripBom(readFileSync(filePath, 'utf-8')).trim();
   } else if (args[i] === '--model' && args[i + 1]) {
     modelName = args[++i];
+  } else if (args[i] === '--posting-url' && args[i + 1]) {
+    postingUrl = args[++i];
   } else if (args[i] === '--no-save') {
     saveReport = false;
   } else if (args[i] === '--no-compress') {
@@ -197,6 +204,18 @@ for (let i = 0; i < args.length; i++) {
 
 if (!jdText) {
   console.error('❌  No Job Description provided. Run with --help for usage.');
+  process.exit(1);
+}
+
+// A posting URL is the tracker's deterministic dedup key, so it is taken only in
+// a form that can actually become one. Parsed, not prefix-matched: `https://`
+// satisfies a prefix test and would then sit in the URL column looking like a
+// key while normalizeUrl derives nothing from it, deduping nothing. A
+// placeholder written there would be worse still, handing every such row the
+// same key -- which is why an absent URL yields `(pasted)` in the report header
+// and no url cell at all, rather than a stand-in.
+if (postingUrl && !isPostingUrl(postingUrl)) {
+  console.error(`❌  --posting-url must be a complete http(s) URL: "${postingUrl}"`);
   process.exit(1);
 }
 
@@ -274,14 +293,57 @@ function slugifyCompany(value) {
     .replace(/^-|-$/g, '') || 'unknown';
 }
 
+/**
+ * Whether a value is a complete http(s) URL, and so can become a dedup key.
+ * @param {string} value - Candidate posting URL.
+ * @returns {boolean} True only for a parseable http/https URL with a host.
+ */
+function isPostingUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname !== '';
+  } catch {
+    return false;
+  }
+}
+
 function tsvSafe(value) {
   return String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
 }
 
+/**
+ * Normalize a model-reported score into the tracker's score cell.
+ *
+ * `extract('SCORE')` returns the whole rest of the SCORE line, while
+ * `validateEvaluationShape` only checks its numeric prefix -- so
+ * `SCORE: 4.2 (strong fit)` passes validation and arrives here intact.
+ *
+ * @param {string} value - Score as extracted from the model's summary block.
+ * @returns {string} `X.X/5`, or the documented `N/A` sentinel (#1799).
+ */
 function normalizedTrackerScore(value) {
   const clean = tsvSafe(value);
-  if (!clean || clean === '?') return 'N/A';
-  return /\/5$/i.test(clean) ? clean : `${clean}/5`;
+  // Parse, do not pattern-match the string. Two bugs lived in the old guard:
+  // `/n\/?a/i` was unanchored with an optional slash, so bare `na` matched and a
+  // real score with trailing prose -- `4.2 (final)`, `4.2 (internal)`,
+  // `4.5 - strong signal` -- was recorded as `N/A`; and the `/5` early return kept
+  // the whole string, so `4.2/10` became `4.2/5` and merged as a genuine score.
+  // Trailing prose is tolerated because models produce it; a denominator that is
+  // not 5, or a value outside 0..5, is refused rather than reinterpreted.
+  const parsed = clean.match(/^(\d+(?:\.\d+)?)/);
+  if (!parsed) return 'N/A';
+  const score = parseFloat(parsed[1]);
+  // The denominator is load-bearing wherever it sits. Requiring it immediately
+  // after the number read `4.2 (strong fit)/10` -- a ten-point score with an
+  // annotation -- as a bare 4.2 and wrote `4.2/5`, the same wrong number
+  // `8/10` used to produce. The first denominator in the cell is taken and must
+  // be 5; absent one, the scale is the contract's. A cell that puts an unrelated
+  // fraction first (`4.2 (fit 3/4 axes)`) is refused rather than guessed at --
+  // N/A is recoverable, a wrong score is not.
+  const denominator = clean.match(/\/\s*(\d+(?:\.\d+)?)/);
+  const scale = denominator ? parseFloat(denominator[1]) : 5;
+  if (!Number.isFinite(score) || scale !== 5 || score < 0 || score > 5) return 'N/A';
+  return `${score}/5`;
 }
 
 // Lazy import — only used when saving
@@ -480,6 +542,7 @@ if (saveReport) {
 **Date:** ${today}
 **Archetype:** ${archetype}
 **Score:** ${score}/5
+**URL:** ${postingUrl || '(pasted)'}
 **Legitimacy:** ${legitimacy}
 **PDF:** pending
 **Tool:** Gemini (${modelName})
@@ -502,9 +565,19 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
         `[${num}](reports/${filename})`,
         'Gemini evaluation',
       ];
+      // Optional `url` column, appended only when there is a real URL to put in
+      // it. merge-tracker.mjs matches on the URL FIRST -- the one tier that can
+      // prove two same-title rows are different openings -- so writing it here
+      // puts the row on that tier at merge time instead of leaving it to a
+      // later `--backfill-urls`. Label and value are appended together: the
+      // headed path resolves cells by NAME, so a value without its label would
+      // be dropped, and a label without its value would leave the url cell
+      // absent (#3517).
+      const trackerHeader = postingUrl ? `${TSV_ADDITION_HEADER}\turl` : TSV_ADDITION_HEADER;
+      if (postingUrl) trackerFields.push(tsvSafe(postingUrl));
       // Header row first: merge-tracker resolves the fields by name, so this
       // row cannot be ingested into the wrong columns (#3517).
-      writeFileSync(trackerPath, `${TSV_ADDITION_HEADER}\n${trackerFields.join('\t')}\n`, 'utf-8');
+      writeFileSync(trackerPath, `${trackerHeader}\n${trackerFields.join('\t')}\n`, 'utf-8');
       console.log(`\n✅  Report saved: reports/${filename}`);
       console.log(`📊  Tracker addition saved: batch/tracker-additions/${num}-${companySlug}.tsv`);
       reportSaved = true;

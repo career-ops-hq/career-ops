@@ -166,11 +166,29 @@ function checkTrackedBakFiles(root) {
   let raw;
   try {
     raw = execFileSync('git', ['ls-files', '-z', '--', '*.bak*'], {
-      cwd: root, encoding: 'utf-8', timeout: 5000,
+      cwd: root,
+      encoding: 'utf-8',
+      timeout: 5000,
+      // stderr PIPED, not inherited. execFileSync's default hands the child our
+      // own stderr, so outside a checkout git printed
+      //   fatal: not a git repository (or any of the parent directories): .git
+      // before this catch ever ran — ahead of the JSON on `doctor --json`, which
+      // AGENTS.md has every agent run on the first message of every session. The
+      // catch below already handles that case; git's own message added nothing
+      // but the appearance of something being broken.
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-  } catch {
-    // Not a git checkout (or git unavailable) — nothing to check.
-    return { pass: true, label: 'Tracked .bak files: skipped (not a git checkout)' };
+  } catch (err) {
+    // Piping means the reason is ours to read rather than the terminal's. Not
+    // being a checkout is the expected case and stays a clean skip; anything
+    // else — git missing, a permissions problem, a timeout — is reported, since
+    // silently skipping those would claim a check ran that did not.
+    const stderr = String(err?.stderr ?? '');
+    if (/not a git repository/i.test(stderr) || err?.code === 'ENOENT') {
+      return { pass: true, label: 'Tracked .bak files: skipped (not a git checkout)' };
+    }
+    const detail = stderr.trim().split('\n')[0] || err?.message || 'unknown error';
+    return { warn: true, label: `Tracked .bak files: check could not run (${detail})` };
   }
   const paths = raw.split('\0').filter(Boolean);
   if (paths.length === 0) {
