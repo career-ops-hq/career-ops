@@ -31,6 +31,7 @@ import {
 import { checkLivenessViaApi } from './liveness-api.mjs';
 import { planExpiredHistoryRows } from './liveness-core.mjs';
 import { appendToScanHistory, normalizeUrlForDedup, SCAN_HISTORY_PATH } from './scan.mjs';
+import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { existsSync, readFileSync } from 'fs';
@@ -70,18 +71,26 @@ export function recordingEnabled(args = []) {
  * The row is stamped with localToday(), like every other scan-history writer:
  * a UTC day is the wrong day for most of the world for part of every day.
  *
+ * The read and the append share ONE critical section. What to append is decided
+ * by what the file already says, so reading outside the lock is a check-then-act:
+ * a scanner appending the same `skipped_expired` row in between would leave two
+ * death certificates for one posting. The lock is not reentrant, hence
+ * `alreadyLocked` on the append rather than a second acquisition.
+ *
  * @param {{url: string, result: string}[]} verdicts
  * @returns {Promise<number>} How many rows were written.
  */
 export async function recordExpiredVerdicts(verdicts) {
   if (!existsSync(SCAN_HISTORY_PATH)) return 0;
-  const rows = planExpiredHistoryRows(
-    readFileSync(SCAN_HISTORY_PATH, 'utf-8'),
-    verdicts,
-    normalizeUrlForDedup,
-  );
-  if (rows.length > 0) await appendToScanHistory(rows, localToday(), 'skipped_expired');
-  return rows.length;
+  return withPipelineLock(SCAN_HISTORY_PATH, async () => {
+    const rows = planExpiredHistoryRows(
+      readFileSync(SCAN_HISTORY_PATH, 'utf-8'),
+      verdicts,
+      normalizeUrlForDedup,
+    );
+    if (rows.length > 0) await appendToScanHistory(rows, localToday(), 'skipped_expired', { alreadyLocked: true });
+    return rows.length;
+  });
 }
 
 async function main() {
