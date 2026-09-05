@@ -592,6 +592,28 @@ function isLinkedUrlCell(value) {
 }
 
 /**
+ * Serialize a posting URL for a markdown link destination, WITHOUT changing the
+ * key it produces.
+ *
+ * Whitespace is the only hazard that can be fixed here. A markdown destination
+ * ends at the first space, so an unencoded one truncates the href on read-back
+ * — and a truncated href still parses, which makes it a WRONG key rather than
+ * an absent one. `%20` is safe to substitute because `new URL()` performs the
+ * same substitution, so the encoded and unencoded spellings normalize to one
+ * key (url-key.mjs rebuilds path and query through the URL object).
+ *
+ * `|` is deliberately NOT encoded: `%7C` and a literal `|` normalize alike in
+ * the query but NOT in the path, so encoding one would silently re-key the row.
+ * Such a URL cannot be linked at all — see formatUrlCell.
+ *
+ * @param {string} href
+ * @returns {string} The same URL, safe to sit between `](` and `)`.
+ */
+function urlForCellDestination(href) {
+  return href.replace(/\s/g, (ch) => encodeURIComponent(ch));
+}
+
+/**
  * Render the tracker's URL cell (#3516).
  *
  * merge-tracker is the ONLY writer of this form. The TSV additions it reads
@@ -602,6 +624,15 @@ function isLinkedUrlCell(value) {
  * The href is never altered, only wrapped: it is the dedup key, and a writer
  * that rewrote it would re-key the table.
  *
+ * A URL containing a literal `|` is written BARE, through the same cell()
+ * sanitization every other column uses, and is not linked. A pipe cannot live
+ * in this table under any spelling — readers split rows on it, and `\|` splits
+ * too (see tracker-utils.mjs cell()) — so cell() rewrites it to ` / ` and the
+ * key is lost either way. That loss predates this change and is not made worse
+ * here; putting the rewritten value in a link destination WOULD make it worse,
+ * because the reader then truncates at the injected space and produces a
+ * shorter, still-parseable key for a different posting scope.
+ *
  * @param {*} raw - The row's URL value (an href, a bare URL, or a whole cell).
  * @param {string} [previousCell] - The cell being rebuilt, when there is one.
  *   A rebuild that does not change the posting keeps its cell verbatim, so a
@@ -609,15 +640,17 @@ function isLinkedUrlCell(value) {
  * @returns {string} The cell text to write.
  */
 function formatUrlCell(raw, previousCell = '') {
-  const value = cell(raw);
+  // Read the value BEFORE cell() sanitization: cell() rewrites `|` to ` / `,
+  // and a link destination built from that is truncated on read-back. The
+  // sanitized form is still what gets WRITTEN on every path that does not
+  // produce a link.
+  const rawValue = String(raw ?? '').replace(/[\r\n]+/g, ' ').trim();
+  const value = cell(rawValue);
   if (!value) return '';
-  const href = extractCellUrl(value);
+  const href = extractCellUrl(rawValue);
 
-  const previous = String(previousCell ?? '').trim();
-  if (previous && isLinkedUrlCell(previous) && extractCellUrl(previous) === href) return previous;
-
-  // An incoming value that is already a link keeps its label for the same
-  // reason.
+  // An incoming value that is already a link keeps its label: a hand-written
+  // one survives every rebuild.
   if (isLinkedUrlCell(value)) return value;
 
   // Anything that is not a usable posting URL — empty, `N/A`, `—`, a
@@ -625,8 +658,15 @@ function formatUrlCell(raw, previousCell = '') {
   // all of these as "no key"; wrapping one in link syntax would only hide that.
   if (!normalizeUrl(href)) return value;
 
+  // A pipe-bearing URL cannot be linked without changing its key (see above).
+  if (href.includes('|')) return value;
+
+  const destination = urlForCellDestination(href);
+  const previous = String(previousCell ?? '').trim();
+  if (previous && isLinkedUrlCell(previous) && extractCellUrl(previous) === destination) return previous;
+
   const label = trackerUrlLabel(href);
-  return label ? `[${label}](${href})` : href;
+  return label ? `[${label}](${destination})` : destination;
 }
 
 // Build a tracker row string matching the detected layout. Every field

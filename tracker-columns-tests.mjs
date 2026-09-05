@@ -1251,6 +1251,72 @@ if (!HAS_WEB) {
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
+// A URL the cell cannot carry must not be LINKED, because a link makes the
+// existing damage worse. cell() rewrites a literal `|` to ` / ` (readers split
+// rows on pipes, and `\\|` splits too) — so a pipe-bearing URL already loses its
+// key on main. Put that rewritten value in a link destination and the reader
+// truncates at the injected space, yielding a shorter, still-parseable key for
+// a DIFFERENT posting scope. Bare is the honest form here.
+{
+  const PIPE = 'https://example.com/jobs?team=eng|ml';
+  const sb = makeSandbox(
+    `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | Applied | ✅ | — | seed | — |
+`,
+    {
+      '2-globex.tsv':
+        'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+        `2\t2026-02-02\tGlobex\tManager\tApplied\t4.5/5\t❌\t—\tpipe in url\t${PIPE}\n`,
+    },
+  );
+  const merge = runCaptured('merge-tracker.mjs', sb);
+  const row = dataRows(sb.tracker).find(l => l.includes('Globex')) || '';
+  const cells = row.split('|').map(c => c.trim());
+  if (merge.code === 0 && !/\]\(/.test(cells[10] ?? '') && cells.length === 12) {
+    pass('#3516: a pipe-bearing URL is written bare, never as a link whose destination would be truncated');
+  } else {
+    fail(`#3516 pipe URL — row: ${row}\n${merge.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// Whitespace, unlike a pipe, CAN be fixed without touching the key: `new URL()`
+// substitutes %20 itself, so both spellings normalize to one key. Encoding it is
+// what stops the markdown destination ending at the space.
+{
+  const { normalizeUrl } = await import('./url-key.mjs');
+  const { extractCellUrl } = await import('./tracker-parse.mjs');
+  const SPACED = 'https://example.com/jobs/a b';
+  const sb = makeSandbox(
+    `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | Applied | ✅ | — | seed | — |
+`,
+    {
+      '2-globex.tsv':
+        'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl\n' +
+        `2\t2026-02-02\tGlobex\tManager\tApplied\t4.5/5\t❌\t—\tspace in url\t${SPACED}\n`,
+    },
+  );
+  const merge = runCaptured('merge-tracker.mjs', sb);
+  const row = dataRows(sb.tracker).find(l => l.includes('Globex')) || '';
+  const written = row.split('|').map(c => c.trim())[10] ?? '';
+  if (merge.code === 0
+      && written === '[example.com](https://example.com/jobs/a%20b)'
+      && normalizeUrl(extractCellUrl(written)) === normalizeUrl(SPACED)
+      && normalizeUrl(SPACED) !== '') {
+    pass('#3516: whitespace in a href is percent-encoded, keeping the destination whole and the key identical');
+  } else {
+    fail(`#3516 spaced URL — cell: ${JSON.stringify(written)}\n${merge.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
 // --migrate-urls: opt-in, idempotent, and it must never change a href — the
 // href is the dedup key, so a migration that touched it would re-key the table.
 {
