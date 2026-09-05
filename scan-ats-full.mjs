@@ -31,6 +31,7 @@
  *   node scan-ats-full.mjs                      # scan all ATS directories, last 3 days
  *   node scan-ats-full.mjs --since 7            # postings from the last 7 days
  *   node scan-ats-full.mjs --ats greenhouse,workday  # subset of sources
+ *   node scan-ats-full.mjs --ats successfactors # scan boards found in application history
  *   node scan-ats-full.mjs --limit 200          # max companies per ATS (default: all)
  *   node scan-ats-full.mjs --dry-run            # preview without writing files
  *   node scan-ats-full.mjs --liveness           # Playwright-verify matches before writing
@@ -44,6 +45,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'fs';
 import { createHash } from 'crypto';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { renameSyncWithRetry } from './tracker-utils.mjs';
 
@@ -54,7 +56,7 @@ import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
 import workday from './providers/workday.mjs';
 import icims from './providers/icims.mjs';
-import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays, PORTALS_PATH, PIPELINE_PATH } from './scan.mjs';
+import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays, PORTALS_PATH, PIPELINE_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
@@ -63,6 +65,9 @@ import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { boardKey, loadDeadBoards, recordBoardResult, saveDeadBoards, shouldSkipDeadBoard } from './dead-boards.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { KNOWN_ATS_VENDORS } from './ats-vendor.mjs';
+import { loadHistoryAtsSeeds } from './history-ats-seeds.mjs';
+import { loadProviders } from './providers/_registry.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -73,6 +78,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 // Its portals fallback had the same split: it honored CAREER_OPS_PORTALS but
 // otherwise looked in the cwd instead of the data root.
 const DATA_ROOT = getCareerOpsRoot();
+const PROVIDERS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'providers');
 const CACHE_DIR = path.join(DATA_ROOT, 'data/cache/ats-companies');
 const CACHE_TTL_HOURS = 24;
 // Tracks `main` deliberately: the dataset's value is freshness (new boards
@@ -273,6 +279,7 @@ const USAGE = `Usage:
   node scan-ats-full.mjs                      # scan all ATS directories, last 3 days
   node scan-ats-full.mjs --since 7            # postings from the last 7 days
   node scan-ats-full.mjs --ats greenhouse,workday  # subset of sources
+  node scan-ats-full.mjs --ats successfactors # history-derived boards for this ATS
   node scan-ats-full.mjs --limit 200          # max companies per ATS (default: all)
   node scan-ats-full.mjs --dry-run            # preview without writing files
   node scan-ats-full.mjs --liveness           # Playwright-verify matches before writing
@@ -332,15 +339,18 @@ function parseArgs(argv) {
   const ats = atsArg
     ? atsArg.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
     : (seeds.length > 0 ? [] : Object.keys(SOURCES));
-  const unknown = ats.filter(a => !SOURCES[a]);
+  const validAts = new Set([...Object.keys(SOURCES), ...KNOWN_ATS_VENDORS]);
+  const unknown = ats.filter(a => !validAts.has(a));
   if (unknown.length) {
-    console.error(`Error: unknown ATS source(s): ${unknown.join(', ')}. Valid: ${Object.keys(SOURCES).join(', ')}`);
+    console.error(`Error: unknown ATS source(s): ${unknown.join(', ')}. Valid: ${[...validAts].join(', ')}`);
     process.exit(1);
   }
   return {
     sinceDays,
     limit,
     ats,
+    atsExplicit: Boolean(atsArg),
+    historySeeds: seeds.length === 0 || Boolean(atsArg),
     seeds,
     dryRun: args.includes('--dry-run'),
     liveness: args.includes('--liveness'),
@@ -489,7 +499,7 @@ export function dedupTokenFor(job, provider) {
 // offer's lookup misses and callers fall back to URL-only dedup, unchanged
 // from before #3439.
 export function providerForSource(source) {
-  return SOURCES[String(source || '').replace(/-full$/, '')]?.provider;
+  return SOURCES[String(source || '').replace(/(?:-history)?-full$/, '')]?.provider;
 }
 
 // Cap-aware company sampling. Default: the dataset's natural (alphabetical)
@@ -597,6 +607,53 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
   });
 
   return { offers, errors, total: capped.length };
+}
+
+/**
+ * Scan the ATS boards derived from the user's tracker and scan history.
+ * Unsupported vendor labels stay in the local seed set but make no network
+ * request. Known labels begin feeding the sweep automatically when a provider
+ * with the same id is added later, without a tracker migration.
+ */
+export async function runHistorySeedScan(seeds, providers, opts, ctx, processJobs) {
+  const selected = opts.atsExplicit
+    ? seeds.filter((seed) => opts.ats.includes(seed.vendor))
+    : seeds;
+  const grouped = new Map();
+  for (const seed of selected) {
+    if (!grouped.has(seed.vendor)) grouped.set(seed.vendor, []);
+    grouped.get(seed.vendor).push(seed);
+  }
+  const capped = [...grouped.values()].flatMap((group) => sampleCompanies(group, opts.limit, opts.shuffle));
+  const scannable = [];
+  for (const seed of capped) {
+    const provider = providers.get(seed.vendor);
+    if (!provider) continue;
+    const entry = { name: seed.company, careers_url: seed.careersUrl, provider: seed.vendor };
+    try {
+      if (provider.detect?.(entry)) scannable.push({ seed, provider, entry });
+    } catch { /* unroutable history is a skipped seed, not a failed network request */ }
+  }
+  let errors = 0;
+
+  await parallelEach(scannable, CONCURRENCY, async ({ seed, provider, entry }) => {
+    try {
+      await withTimeout((async () => {
+        const jobs = await provider.fetch(entry, ctx);
+        await processJobs(jobs, `${seed.vendor}-history`, provider, entry.name);
+      })(), COMPANY_TIMEOUT_MS, `${seed.vendor}-history/${entry.name}`);
+    } catch (err) {
+      errors++;
+      if (opts.verbose) console.error(`  ✗ ${seed.vendor}-history/${entry.name}: ${err.message}`);
+    }
+  });
+
+  return {
+    total: scannable.length,
+    derived: selected.length,
+    unsupported: capped.length - scannable.length,
+    errors,
+  };
 }
 
 // ── Parallel fetch with concurrency limit ───────────────────────────
@@ -730,6 +787,14 @@ async function main() {
   // Raw title_filter config, needed by matchedTitleKeywords() to scope
   // content_filter.by_title_keyword the same way scan.mjs does.
   opts.titleFilterConfig = fullTitleFilterConfig;
+
+  // User-layer history is an additive board directory: it fills the vendors
+  // that have no public community dataset without changing the tracker schema.
+  // --seeds alone remains the explicitly requested VC-only mode; a normal run,
+  // or an explicit --ats selection, includes history-derived boards.
+  const historySeeds = opts.historySeeds
+    ? loadHistoryAtsSeeds({ dataRoot: DATA_ROOT, scanHistoryPath: SCAN_HISTORY_PATH })
+    : [];
 
   const atsSummary = opts.ats.length ? `ats: ${opts.ats.join(', ')}` : '';
   const seedsSummary = opts.seeds.length ? `seeds: ${opts.seeds.join(', ')}` : '';
@@ -876,7 +941,7 @@ async function main() {
   // scope by the time the checkpoint's fate is decided at the end of main().
   let stoppedByOutage = false;
 
-  for (const name of opts.ats) {
+  for (const name of opts.ats.filter((ats) => SOURCES[ats])) {
     const source = SOURCES[name];
     // Stats are accumulated BEFORE the completed-source skip: on --resume a
     // source finished before the checkpoint was written still contributed its
@@ -1064,6 +1129,16 @@ async function main() {
       writeCheckpoint({ ...checkpointBase(), current: null, counters: snapshotCounters() });
     }
     log(`\n  done (${errors} unreachable boards, ${deadBoardsSkipped} retired boards skipped)`);
+  }
+
+  // ── User tracker + scan-history ATS seeds (#3697) ───────────────
+  if (historySeeds.length) {
+    const providers = await loadProviders(PROVIDERS_DIR);
+    log(`\n🌱 Application history — ${historySeeds.length} unique ATS board(s) derived locally...`);
+    const result = await runHistorySeedScan(historySeeds, providers, opts, ctx, processJobs);
+    totalCompaniesScanned += result.total;
+    totalErrors += result.errors;
+    log(`  done — ${result.total} board(s) probed, ${result.unsupported} without a scanner provider (${result.errors} errors)`);
   }
 
   // ── VC portfolio seed sources (--seeds flag) ───────────────────────

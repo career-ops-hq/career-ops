@@ -280,6 +280,8 @@ const SYSTEM_PATHS = [
   'verify-ats.mjs',
   'update-system.mjs',
   'path-resolver.mjs',
+  'ats-vendor.mjs',
+  'history-ats-seeds.mjs',
 
   'reserve-report-num.mjs',
   'scan.mjs',
