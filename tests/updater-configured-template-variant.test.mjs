@@ -71,8 +71,12 @@ for (const section of ['cv', 'cover_letter']) {
     configuredTemplateVariantsFromProfileSource(
       `${section}:\n  template: first\n${section}:\n  template: second\n`,
     );
-  } catch {
-    duplicateRejected = true;
+  } catch (err) {
+    if (err.message === `Duplicate top-level ${section} section`) {
+      duplicateRejected = true;
+    } else {
+      throw err;
+    }
   }
   if (duplicateRejected) {
     pass(`zero-dependency profile reader rejects duplicate ${section} sections`);
