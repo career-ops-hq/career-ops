@@ -1,10 +1,10 @@
 // tests/providers/inter-page-sleep-shared.test.mjs — providers/_http.mjs
 // exports the ctx-aware `sleep(ms, ctx)` helper, and every provider's
 // inter-page / inter-request pacing is meant to import it. #2723 predicted
-// that a hand-rolled local copy "arrives with the next provider" — it recurred
-// eleven times before they were all routed through the shared export. Prose in
-// ADDING_A_PROVIDER.md ("don't hand-roll a local copy") did not hold the line,
-// so this guard fails the build on a twelfth.
+// that a hand-rolled local copy "arrives with the next provider" — it kept
+// recurring across a dozen-plus providers until they were all routed through
+// the shared export. Prose in ADDING_A_PROVIDER.md ("don't hand-roll a local
+// copy") did not hold the line, so this guard fails the build on the next one.
 //
 // A provider declaring its own `sleep` (function/const/let/var) WITHOUT
 // importing `sleep` from './_http.mjs' is the offence. The `const wait = …`
