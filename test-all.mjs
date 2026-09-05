@@ -57,7 +57,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { pass, fail, warn, run, runAcrossUtcDay, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
-import { collectMjsFiles, isNestedCheckout } from './lib/mjs-files.mjs';
+import { collectMjsFiles, isNestedCheckout, isUnderNestedCheckout } from './lib/mjs-files.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -112,8 +112,18 @@ function discoverTests(dir) {
   const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   for (const entry of entries) {
     const full = join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...discoverTests(full));
-    else if (entry.name.endsWith('.test.mjs')) out.push(full);
+    if (entry.isDirectory()) {
+      // A worktree under tests/ is a second checkout of this repository, and
+      // this walker does not merely read what it finds — it hands the files to
+      // the runner. Without this guard a stale checkout's suites execute
+      // against the current tree and the run prints "safe to push/merge" for
+      // them (#3762). `git worktree add` accepts any path, so nothing but this
+      // check keeps one out. Tested on children only: TESTS_DIR is never itself
+      // a checkout root, and the root exemption in `collectMjsFiles` exists for
+      // a case that cannot arise here.
+      if (isNestedCheckout(full)) continue;
+      out.push(...discoverTests(full));
+    } else if (entry.name.endsWith('.test.mjs')) out.push(full);
   }
   return out;
 }
@@ -2751,7 +2761,14 @@ if (shared.includes('_profile.md')) {
   // alone can't catch.
   const writingRefRe = /_shared\.md[^.\n]{0,40}(Voice DNA|Writing Style|Professional Writing)|(Voice DNA|Writing Style|Professional Writing)[^.\n]{0,40}_shared\.md/;
   const stale = [];
-  for (const f of readdirSync(join(ROOT, 'modes'), { recursive: true }).filter(p => typeof p === 'string' && p.endsWith('.md'))) {
+  // `{ recursive: true }` descends on Node's side, so there is no per-directory
+  // decision to guard — a checkout under modes/ is filtered out of the RESULT
+  // instead. Verified: a worktree there made this check fail naming that other
+  // tree's file as a stale reference of ours (#3762).
+  const modeDocs = readdirSync(join(ROOT, 'modes'), { recursive: true })
+    .filter(p => typeof p === 'string' && p.endsWith('.md'))
+    .filter(p => !isUnderNestedCheckout(join(ROOT, 'modes'), p));
+  for (const f of modeDocs) {
     const src = readFile(`modes/${f.split(/[\\/]/).join('/')}`);
     if (writingRefRe.test(src)) stale.push(f);
   }
@@ -15190,6 +15207,11 @@ try {
   const walkMjs = (d) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const fp = join(d, e.name);
+      // NO nested-checkout guard here, deliberately — see the EXEMPT map in
+      // tests/mjs-files.test.mjs. This is a security scan over third-party
+      // code, so skipping a directory that carries a `.git` marker would let a
+      // plugin drop a `.git` file beside its sources and opt straight out of
+      // the deny-list. Same reasoning as plugins/_lock.mjs (#3762).
       if (e.isDirectory()) walkMjs(fp);
       else if (e.name.endsWith('.mjs')) allPluginMjs.push(fp);
     }
@@ -16042,7 +16064,9 @@ try {
         const webTestsRoot = join(ROOT, 'web', 'tests');
         const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
           const p = join(dir, e.name);
-          if (e.isDirectory()) return walk(p);
+          // A checkout under web/tests/ holds another tree's suites; reporting
+          // them as ungated web suites is a false failure (#3762).
+          if (e.isDirectory()) return isNestedCheckout(p) ? [] : walk(p);
           return e.isFile() && e.name.endsWith('.test.mjs') ? [p] : [];
         });
         if (existsSync(webTestsRoot)) {
