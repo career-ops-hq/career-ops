@@ -23,7 +23,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -303,6 +303,65 @@ test('trackedFiles skips a path the index lists but the tree does not have, and 
       'the listed-but-absent path must be skipped, and the rest of the scan must survive it');
     assert.equal(warnings.length, 1, `expected exactly one warning, got: ${JSON.stringify(warnings)}`);
     assert.match(warnings[0], /doomed\.mjs/, 'the warning must name the path that was skipped');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('trackedFiles skips a tracked symlink rather than following it', (t) => {
+  // `ls-files` lists symlinks, and existsSync/readFileSync follow them. This
+  // repository tracks seven (each CLI's SKILL.md links to the canonical one),
+  // so following is not hypothetical: the target is tracked in its own right,
+  // and one offender inside it would be reported once per link. A link pointing
+  // OUT of the checkout is worse — it puts source this repository does not own
+  // under a guard that grades it, the #3499 hazard in a new costume.
+  const { dir, git } = gitRepo('co-tracked-symlink-');
+  try {
+    writeFileSync(join(dir, 'real.mjs'), 'const a = 1;\n');
+    try {
+      symlinkSync(join(dir, 'real.mjs'), join(dir, 'alias.mjs'));
+    } catch (err) {
+      // Windows needs a privilege for this unless Developer Mode is on (#2828).
+      // A machine that cannot link must SKIP, not redden.
+      return t.skip(`symlinks unsupported here (${err.code || err.message})`);
+    }
+    git('add', '-A');
+    assert.match(git('ls-files', '-s'), /^120000 /m, 'the fixture did not track a symlink');
+
+    const { value: files, warnings } = capturingWarnings(() => trackedFiles(dir));
+
+    assert.deepEqual(relPaths(files, dir), ['real.mjs'],
+      'the link must be skipped and its target returned exactly once');
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /alias\.mjs \(a symlink\)/, 'the warning must name the link, and say it is one');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('trackedFiles skips a gitlink directory rather than throwing EISDIR', () => {
+  // An initialised submodule is one index entry (mode 160000) that is a
+  // DIRECTORY on disk. existsSync says yes and readFileSync throws EISDIR.
+  // Written straight into the index rather than by wiring up a real submodule:
+  // the entry is what the enumerator sees, and this needs no second repository,
+  // no network, and no `protocol.file.allow` config to reproduce.
+  const { dir, git } = gitRepo('co-tracked-gitlink-');
+  try {
+    writeFileSync(join(dir, 'real.mjs'), 'const a = 1;\n');
+    git('add', '-A');
+    git('commit', '-qm', 'base');
+    const sha = git('rev-parse', 'HEAD').trim();
+    git('update-index', '--add', '--cacheinfo', `160000,${sha},sub`);
+    mkdirSync(join(dir, 'sub'));
+    assert.match(git('ls-files', '-s'), /^160000 /m, 'the fixture did not create a gitlink');
+
+    const { value: files, warnings } = capturingWarnings(() => trackedFiles(dir));
+
+    for (const file of files) readFileSync(file);   // the EISDIR this prevents
+
+    assert.deepEqual(relPaths(files, dir), ['real.mjs']);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /sub \(not a regular file\)/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
