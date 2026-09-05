@@ -4,6 +4,8 @@ import {
   normalizeHost,
   isLoopbackHost,
   parseAllowedHosts,
+  parseAllowedOrigins,
+  normalizeOrigin,
   checkRequest,
 } from "../../src/lib/origin-guard.mjs";
 
@@ -180,4 +182,123 @@ test("a cross-site request is blocked even on an allowed LAN host", () => {
     allowedHosts: parseAllowedHosts("192.168.1.50"),
   });
   assert.equal(d.ok, false);
+});
+
+// --- the origin allowlist (CAREER_OPS_ALLOWED_ORIGINS) -------------------
+
+test("normalizeOrigin lowercases and strips trailing slashes", () => {
+  assert.equal(normalizeOrigin("Chrome-Extension://ABCDEF/"), "chrome-extension://abcdef");
+  assert.equal(normalizeOrigin(undefined), "");
+});
+
+test("normalizeOrigin drops a port that is the scheme's default", () => {
+  // The browser omits it: a page on http://localhost:80 sends
+  // `Origin: http://localhost`. Both spellings have to land on one string, or
+  // an allowlist entry written with the port never matches a real request.
+  assert.equal(normalizeOrigin("http://localhost:80"), normalizeOrigin("http://localhost"));
+  assert.equal(normalizeOrigin("https://dash.example:443"), normalizeOrigin("https://dash.example"));
+  // A non-default port is part of the origin and stays.
+  assert.equal(normalizeOrigin("http://localhost:3000"), "http://localhost:3000");
+  // A value the URL parser refuses still matches itself rather than vanishing.
+  assert.equal(normalizeOrigin("not an origin"), "not an origin");
+});
+
+test("an allowlist entry written with the default port matches the header without it", () => {
+  const d = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "http://dash.example",
+    host: "localhost:3000",
+    allowedHosts: parseAllowedHosts(""),
+    allowedOrigins: parseAllowedOrigins("http://dash.example:80"),
+  });
+  assert.equal(d.ok, true);
+});
+
+test("the reverse spelling matches too, and an unrelated origin still does not", () => {
+  const allowedOrigins = parseAllowedOrigins("https://dash.example");
+  const allowed = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "https://dash.example:443",
+    host: "localhost:3000",
+    allowedHosts: parseAllowedHosts(""),
+    allowedOrigins,
+  });
+  assert.equal(allowed.ok, true);
+  const blocked = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "https://evil.example",
+    host: "localhost:3000",
+    allowedHosts: parseAllowedHosts(""),
+    allowedOrigins,
+  });
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.status, 403);
+});
+
+test("parseAllowedOrigins is empty when the variable is unset or blank", () => {
+  assert.equal(parseAllowedOrigins(undefined).size, 0);
+  assert.equal(parseAllowedOrigins("").size, 0);
+  assert.equal(parseAllowedOrigins("   ").size, 0);
+});
+
+test("parseAllowedOrigins splits on commas and whitespace", () => {
+  const origins = parseAllowedOrigins("chrome-extension://abcdef, http://localhost:3000");
+  assert.equal(origins.has("chrome-extension://abcdef"), true);
+  assert.equal(origins.has("http://localhost:3000"), true);
+  assert.equal(origins.size, 2);
+});
+
+test("allows an allowlisted extension origin despite Sec-Fetch-Site: cross-site", () => {
+  const d = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "chrome-extension://abcdef",
+    host: "localhost:3000",
+    allowedHosts: parseAllowedHosts(""),
+    allowedOrigins: parseAllowedOrigins("chrome-extension://abcdef"),
+  });
+  assert.equal(d.ok, true);
+});
+
+test("still blocks a cross-site origin that is not on the allowlist", () => {
+  const d = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "https://evil.example.com",
+    host: "localhost:3000",
+    allowedHosts: parseAllowedHosts(""),
+    allowedOrigins: parseAllowedOrigins("chrome-extension://abcdef"),
+  });
+  assert.equal(d.ok, false);
+  assert.equal(d.status, 403);
+});
+
+test("the allowlist never rescues the opaque 'null' origin", () => {
+  const d = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "null",
+    host: "localhost:3000",
+    allowedHosts: parseAllowedHosts(""),
+    allowedOrigins: parseAllowedOrigins("null, chrome-extension://abcdef"),
+  });
+  assert.equal(d.ok, false);
+});
+
+test("the allowlist does not lift the LAN host block", () => {
+  const d = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "chrome-extension://abcdef",
+    host: "192.168.1.50:3000",
+    allowedHosts: parseAllowedHosts(""),
+    allowedOrigins: parseAllowedOrigins("chrome-extension://abcdef"),
+  });
+  assert.equal(d.ok, false);
+});
+
+test("the guard still works with no allowedOrigins passed at all", () => {
+  const d = checkRequest({
+    secFetchSite: "same-origin",
+    origin: "http://localhost:3000",
+    host: "localhost:3000",
+    allowedHosts: parseAllowedHosts(""),
+  });
+  assert.equal(d.ok, true);
 });

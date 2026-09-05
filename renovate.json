@@ -13,6 +13,7 @@
     {
       "matchManagers": ["github-actions"],
       "groupName": "GitHub Actions",
+      "pinDigests": true,
       "automerge": false
     },
     {

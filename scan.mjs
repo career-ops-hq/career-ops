@@ -72,6 +72,7 @@ import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTit
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { promoteKnownFragmentIdentity } from './url-key.mjs';
 
@@ -178,6 +179,81 @@ export function emitJsonReceipt(receipt, exitCode) {
 // compileContentKeyword shares the `word:`/`stem:` prefix machinery but skips
 // the title filter's short-acronym auto-anchor (#3274).
 export { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter };
+
+// ── Title filter overrides (per-company broadened title net) ───────
+// Optional. `title_filter_overrides` in portals.yml lets specific companies
+// (matched by an explicit slug list — the company/tenant slug the scanner
+// already derives from the job-board-aggregator dataset entry, e.g. the
+// Workday tenant "uwaterloo") opt into a WIDER positive keyword net than the
+// global `title_filter.positive`, without loosening the global filter for
+// every other company in the sweep. Distinct from (and composes cleanly
+// with) `content_filter.by_title_keyword`, which scopes a stricter
+// description-level check to specific title keywords — this scopes a
+// broader title-level net to specific companies.
+//
+// Shape:
+//   title_filter_overrides:
+//     - companies: ["uwaterloo", "ubc", "fanshawec"]
+//       positive_extra:
+//         - "Administrator"
+//         - "Coordinator"
+//
+// v1 keeps matching simple and explicit: a literal (case-insensitive) slug
+// list, no fuzzy company-type inference, no domain heuristics.
+export function buildTitleFilterOverrides(overrides) {
+  const map = new Map();
+  if (!Array.isArray(overrides)) return map;
+  for (const entry of overrides) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const companies = Array.isArray(entry.companies) ? entry.companies : [];
+    const extraRaw = Array.isArray(entry.positive_extra) ? entry.positive_extra : [];
+    // compilePositiveKeyword (not compileKeyword) so positive_extra supports
+    // the same AND-groups / `word:`/`stem:` prefixes as title_filter.positive —
+    // it's an additive positive list, so it should behave like one.
+    const matchers = extraRaw
+      .filter(k => typeof k === 'string')
+      .map(k => k.trim().toLowerCase())
+      .filter(k => k.length > 0)
+      .map(compilePositiveKeyword);
+    if (matchers.length === 0) continue; // nothing to add — skip the entry entirely
+    for (const slug of companies) {
+      if (typeof slug !== 'string' || !slug.trim()) continue;
+      const key = slug.trim().toLowerCase();
+      map.set(key, (map.get(key) || []).concat(matchers));
+    }
+  }
+  return map;
+}
+
+// Wraps buildTitleFilter() with per-company overrides from
+// buildTitleFilterOverrides(). Returns (title, companySlug) => boolean:
+//   - if the global title_filter already matches, pass (companySlug unused)
+//   - else, if companySlug has override entries, pass when any of its
+//     positive_extra keywords match AND no global negative keyword matches
+//   - a company with no override entry behaves EXACTLY like the plain
+//     buildTitleFilter(titleFilter) — the mechanism is a strict no-op for
+//     everyone not explicitly listed.
+export function buildTitleFilterWithOverrides(titleFilter, overridesMap) {
+  const base = buildTitleFilter(titleFilter);
+  const overrides = overridesMap instanceof Map ? overridesMap : new Map();
+  if (overrides.size === 0) return (title) => base(title);
+
+  const normalize = (arr) => (Array.isArray(arr) ? arr : [])
+    .filter(k => typeof k === 'string')
+    .map(k => k.trim().toLowerCase())
+    .filter(k => k.length > 0)
+    .map(compileKeyword);
+  const negative = normalize(titleFilter?.negative);
+
+  return (title, companySlug) => {
+    if (base(title)) return true;
+    const extra = overrides.get(String(companySlug ?? '').trim().toLowerCase());
+    if (!extra || extra.length === 0) return false;
+    const lower = String(title ?? '').toLowerCase();
+    if (negative.some(m => m(lower))) return false;
+    return extra.some(m => m(lower));
+  };
+}
 
 // Compiled-matcher cache for matchedTitleKeywords(), keyed by the
 // `title_filter.positive` array reference. The scan loop calls this once per
@@ -2980,7 +3056,12 @@ async function main() {
     // postings on later pages go unfetched. Documented in modes/scan.md; the
     // fix belongs in workday.mjs, where closing it costs the optimisation on
     // every tenant that mixes.
-    const ctx = { ...makeHttpCtx(), sinceMs: earlyStopSinceMs, includeUndated: true };
+    const ctx = {
+      ...makeHttpCtx(),
+      sinceMs: earlyStopSinceMs,
+      includeUndated: true,
+      locationHints: config.location_filter,
+    };
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
     try {
       let jobs;
@@ -3102,14 +3183,22 @@ async function main() {
         // candidate: two candidates with DIFFERENT cities must stay distinct.
         // `key === baseKey` whenever the flag is off, and the index is empty in
         // that case, so the default path is unchanged.
+        //
+        // An aggregator feed (portals.yml `aggregator: true`) names itself as
+        // the company, so two same-titled posts are two employers' jobs: only
+        // the URL dedups there, and the key is null.
         const baseKey = companyRoleDedupKey(job.company, job.title, canonicalizeCompany);
-        const key = dedupIncludeLocation
-          ? companyRoleDedupKey(job.company, job.title, canonicalizeCompany, job.location)
-          : baseKey;
+        const key = company.aggregator === true
+          ? null
+          : (dedupIncludeLocation
+            ? companyRoleDedupKey(job.company, job.title, canonicalizeCompany, job.location)
+            : baseKey);
         if (
-          seenCompanyRoles.has(key) ||
-          seenCompanyRoles.has(baseKey) ||
-          (key === baseKey && seenCompanyRoleBases.has(baseKey))
+          key !== null && (
+            seenCompanyRoles.has(key) ||
+            seenCompanyRoles.has(baseKey) ||
+            (key === baseKey && seenCompanyRoleBases.has(baseKey))
+          )
         ) {
           totalDupes++;
           continue;
@@ -3128,8 +3217,10 @@ async function main() {
         // city THIS run also suppresses a locationless twin later in the run —
         // not only across runs.
         seenUrls.add(dedupUrl);
-        seenCompanyRoles.add(key);
-        if (key !== baseKey) seenCompanyRoleBases.add(baseKey);
+        if (key !== null) {
+          seenCompanyRoles.add(key);
+          if (key !== baseKey) seenCompanyRoleBases.add(baseKey);
+        }
         // Tag with the company's careers domain so verify can offer a 404/410
         // rediscovery fallback. A null domain (no careers_url) marks the offer
         // as broad-discovery — ineligible for the fallback, per the issue scope.
@@ -3233,9 +3324,7 @@ async function main() {
   }
 
   // 7. Print summary
-  console.log(`\n${'━'.repeat(45)}`);
-  console.log(`Portal Scan — ${date}`);
-  console.log(`${'━'.repeat(45)}`);
+  printScanSummaryHeader('Portal Scan', date);
   const summaryCompanies = targets.filter(t => !t._isBoard).length;
   const summaryBoards = targets.filter(t => t._isBoard).length;
   console.log(`Companies scanned:     ${summaryCompanies}`);
