@@ -38,10 +38,16 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { parseTrackerRow, resolveColumns, isSeparatorRow, isHeaderRow } from './tracker-parse.mjs';
 import { resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import { canonicalOutcome } from './lib/outcome-types.mjs';
 import { outcomeDirsFor } from './lib/outcome-dir.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+// The USER's data root, not this file's directory. It was __dirname under the
+// name CAREER_OPS, so resolveTrackerPath() looked inside the checkout and a user
+// with CAREER_OPS_ROOT (or a .career-ops-data marker) got "No tracker found ...
+// nothing to calibrate yet" — which reads as "you have no outcome data",
+// exactly the thing this advisory is meant to answer.
+const DATA_ROOT = getCareerOpsRoot();
 
 // --- Outcome semantics ---------------------------------------------------
 //
@@ -440,7 +446,7 @@ if (isMainModule(import.meta.url)) {
     console.error('--min-band-n must be a positive integer');
     process.exit(2);
   }
-  const appsFile = resolveTrackerPath(CAREER_OPS);
+  const appsFile = resolveTrackerPath(DATA_ROOT);
   if (!existsSync(appsFile)) {
     console.error(`No tracker found at ${appsFile} — nothing to calibrate yet.`);
     process.exit(1);

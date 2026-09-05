@@ -765,6 +765,16 @@ export function applyRejectionStatus(appNumber, options = {}) {
   try {
     const out = execFileSync(process.execPath, [scriptPath, String(appNumber), 'Rejected', '--json'], {
       encoding: 'utf-8', env,
+      // Capture the child's stderr instead of letting execFileSync's default
+      // inherit it. set-status.mjs's failWith writes the machine payload to
+      // stdout AND an `❌ {message}` line to stderr; inherited, that line
+      // printed straight through this function — which by contract returns a
+      // structured result and never speaks for itself — into whatever was
+      // running it. In the test suite a *passing* assertion therefore emitted
+      // `❌ No tracker row with #999`, indistinguishable from a real failure.
+      // Nothing is lost: it is the same string as the JSON `error` field the
+      // CLI already prints as "Apply FAILED: ...".
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     return JSON.parse(out);
   } catch (err) {
@@ -774,7 +784,11 @@ export function applyRejectionStatus(appNumber, options = {}) {
     if (err.stdout) {
       try { return JSON.parse(err.stdout); } catch { /* fall through */ }
     }
-    return { error: err.message, code: 'apply-failed' };
+    // failUsage's non-JSON branch (and any hard crash) leaves stderr as the
+    // only account of what went wrong; now that it is piped, fold it into the
+    // returned error rather than dropping it on the floor.
+    const stderr = typeof err.stderr === 'string' ? err.stderr.trim() : '';
+    return { error: stderr || err.message, code: 'apply-failed' };
   }
 }
 

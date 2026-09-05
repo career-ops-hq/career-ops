@@ -73,6 +73,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 // Paths
 // ---------------------------------------------------------------------------
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -277,10 +278,39 @@ function tsvSafe(value) {
   return String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
 }
 
+/**
+ * Normalize a model-reported score into the tracker's score cell.
+ *
+ * `extract('SCORE')` returns the whole rest of the SCORE line, while
+ * `validateEvaluationShape` only checks its numeric prefix -- so
+ * `SCORE: 4.2 (strong fit)` passes validation and arrives here intact.
+ *
+ * @param {string} value - Score as extracted from the model's summary block.
+ * @returns {string} `X.X/5`, or the documented `N/A` sentinel (#1799).
+ */
 function normalizedTrackerScore(value) {
   const clean = tsvSafe(value);
-  if (!clean || clean === '?') return 'N/A';
-  return /\/5$/i.test(clean) ? clean : `${clean}/5`;
+  // Parse, do not pattern-match the string. Two bugs lived in the old guard:
+  // `/n\/?a/i` was unanchored with an optional slash, so bare `na` matched and a
+  // real score with trailing prose -- `4.2 (final)`, `4.2 (internal)`,
+  // `4.5 - strong signal` -- was recorded as `N/A`; and the `/5` early return kept
+  // the whole string, so `4.2/10` became `4.2/5` and merged as a genuine score.
+  // Trailing prose is tolerated because models produce it; a denominator that is
+  // not 5, or a value outside 0..5, is refused rather than reinterpreted.
+  const parsed = clean.match(/^(\d+(?:\.\d+)?)/);
+  if (!parsed) return 'N/A';
+  const score = parseFloat(parsed[1]);
+  // The denominator is load-bearing wherever it sits. Requiring it immediately
+  // after the number read `4.2 (strong fit)/10` -- a ten-point score with an
+  // annotation -- as a bare 4.2 and wrote `4.2/5`, the same wrong number
+  // `8/10` used to produce. The first denominator in the cell is taken and must
+  // be 5; absent one, the scale is the contract's. A cell that puts an unrelated
+  // fraction first (`4.2 (fit 3/4 axes)`) is refused rather than guessed at --
+  // N/A is recoverable, a wrong score is not.
+  const denominator = clean.match(/\/\s*(\d+(?:\.\d+)?)/);
+  const scale = denominator ? parseFloat(denominator[1]) : 5;
+  if (!Number.isFinite(score) || scale !== 5 || score < 0 || score > 5) return 'N/A';
+  return `${score}/5`;
 }
 
 // Lazy import — only used when saving
@@ -501,7 +531,9 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
         `[${num}](reports/${filename})`,
         'Gemini evaluation',
       ];
-      writeFileSync(trackerPath, `${trackerFields.join('\t')}\n`, 'utf-8');
+      // Header row first: merge-tracker resolves the fields by name, so this
+      // row cannot be ingested into the wrong columns (#3517).
+      writeFileSync(trackerPath, `${TSV_ADDITION_HEADER}\n${trackerFields.join('\t')}\n`, 'utf-8');
       console.log(`\n✅  Report saved: reports/${filename}`);
       console.log(`📊  Tracker addition saved: batch/tracker-additions/${num}-${companySlug}.tsv`);
       reportSaved = true;
