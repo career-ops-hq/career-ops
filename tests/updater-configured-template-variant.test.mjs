@@ -37,6 +37,7 @@ import { pass, fail, ROOT } from './helpers.mjs';
 import {
   staleSystemFiles,
   isUserConfiguredTemplateVariant,
+  configuredTemplateVariantPathsToPreserve,
   loadConfiguredTemplateVariants,
 } from '../update-system.mjs';
 
@@ -101,6 +102,41 @@ console.log('\n🧪 Testing user-configured template-variant carve-out...');
     else fail('apply() lazy variant wiring is missing or disconnected from staleSystemFiles()');
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 2. checkout protection: a same-named upstream file with different ───────
+// ──    content must not overwrite the user's configured local variant       ──
+{
+  const path = 'templates/cv-template.bw.html';
+  const configured = { cv: 'bw' };
+  const local = { [path]: '<h1>my configured template</h1>\n' };
+  const remote = { [path]: '<h1>upstream template</h1>\n' };
+  const preserved = configuredTemplateVariantPathsToPreserve(
+    [path], [path], configured, local, remote,
+  );
+  if (preserved.length === 1 && preserved[0] === path) {
+    pass('a configured variant with same-named but different upstream content is preserved before checkout');
+  } else {
+    fail(`same-name overwrite protection returned ${JSON.stringify(preserved)}`);
+  }
+
+  const sameContent = configuredTemplateVariantPathsToPreserve(
+    [path], [path], configured, local, { [path]: local[path].replace(/\n/g, '\r\n') },
+  );
+  if (sameContent.length === 0) {
+    pass('identical local/upstream content does not create an unnecessary preserve rule');
+  } else {
+    fail('identical content was incorrectly treated as a local overwrite risk');
+  }
+
+  const absentUpstream = configuredTemplateVariantPathsToPreserve(
+    [path], [], configured, local, {},
+  );
+  if (absentUpstream.length === 0) {
+    pass('an upstream-absent configured variant remains handled by stale-file exemption');
+  } else {
+    fail('an upstream-absent variant was incorrectly routed through checkout protection');
   }
 }
 

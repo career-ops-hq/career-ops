@@ -1035,6 +1035,37 @@ export async function loadConfiguredTemplateVariants({ profilePath } = {}) {
   return configuredVariants;
 }
 
+/**
+ * Find configured template variants whose local content would be overwritten
+ * by the incoming tree. A configured name is not enough on its own: if the
+ * local and upstream blobs are identical, checkout is harmless and should be
+ * allowed to update the index normally.
+ *
+ * @param {string[]} localFiles - repo-relative files currently present locally.
+ * @param {string[]} remoteFiles - repo-relative files present in upstream.
+ * @param {{cv?: string, cover?: string}} configuredVariants - active defaults.
+ * @param {Record<string, string>} localContents - local file contents.
+ * @param {Record<string, string>} remoteContents - upstream file contents.
+ * @returns {string[]} configured variant paths to exclude from checkout.
+ */
+export function configuredTemplateVariantPathsToPreserve(
+  localFiles,
+  remoteFiles,
+  configuredVariants = {},
+  localContents = {},
+  remoteContents = {},
+) {
+  const remote = new Set([...remoteFiles].map(normalizeRepoPath));
+  const normalizeContent = (content) => String(content).replace(/\r\n/g, '\n');
+  return [...new Set(localFiles.map(normalizeRepoPath))]
+    .filter((file) => isUserConfiguredTemplateVariant(file, configuredVariants))
+    .filter((file) => remote.has(file))
+    .filter((file) => Object.prototype.hasOwnProperty.call(localContents, file))
+    .filter((file) => Object.prototype.hasOwnProperty.call(remoteContents, file))
+    .filter((file) => normalizeContent(localContents[file]) !== normalizeContent(remoteContents[file]))
+    .sort();
+}
+
 export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths = USER_PATHS, configuredVariants = {}) {
   const remote = new Set([...remoteFiles].map(normalizeRepoPath));
   if (remote.size === 0) return [];
@@ -2289,6 +2320,55 @@ async function apply() {
       }
       console.log('');
     }
+    // Read the active template defaults BEFORE checkout. A configured variant
+    // can be present upstream under the same filename; in that case the
+    // generic locallyModifiedSystemFiles() baseline check may no longer flag
+    // it, but checkout would still overwrite the user's local content.
+    const configuredTemplateVariants = await loadConfiguredTemplateVariants();
+    const configuredVariantPaths = [];
+    for (const [kind, name] of Object.entries(configuredTemplateVariants)) {
+      const prefix = kind === 'cv' ? 'cv-template' : 'cover-letter-template';
+      for (const extension of ['html', 'tex']) {
+        configuredVariantPaths.push(`templates/${prefix}.${name}.${extension}`);
+      }
+    }
+    let configuredVariantRemoteFiles = [];
+    try {
+      configuredVariantRemoteFiles = git('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', 'templates')
+        .split('\n').map((file) => file.trim()).filter(Boolean);
+    } catch {
+      // If the upstream tree cannot be read, the checkout below reports the
+      // real failure; do not infer a preservation decision from an empty tree.
+    }
+    const configuredVariantLocalContents = {};
+    const configuredVariantRemoteContents = {};
+    const configuredVariantLocalFiles = configuredVariantPaths.filter((file) => {
+      try {
+        configuredVariantLocalContents[file] = readFileSync(join(ROOT, ...file.split('/')), 'utf8');
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    for (const file of configuredVariantLocalFiles) {
+      if (!configuredVariantRemoteFiles.includes(file)) continue;
+      try {
+        configuredVariantRemoteContents[file] = gitShowRaw(`FETCH_HEAD:${file}`);
+      } catch {
+        // An unreadable blob is not safe to compare, so leave it to checkout.
+      }
+    }
+    const configuredAtRisk = configuredTemplateVariantPathsToPreserve(
+      configuredVariantLocalFiles,
+      configuredVariantRemoteFiles,
+      configuredTemplateVariants,
+      configuredVariantLocalContents,
+      configuredVariantRemoteContents,
+    );
+    if (configuredAtRisk.length > 0) {
+      preservedPaths.push(...configuredAtRisk.filter((file) => !preservedPaths.includes(file)));
+      console.log(`Keeping configured template variant(s) with local content: ${configuredAtRisk.join(', ')}`);
+    }
     // Excluding by pathspec keeps the index and the working tree in agreement:
     // checking out and restoring afterwards would leave the index holding the
     // upstream blob, so the scoped commit below would record the very content
@@ -2331,17 +2411,6 @@ async function apply() {
     if (skippedPaths.length > 0) {
       console.log(`Skipped ${skippedPaths.length} path(s) absent upstream: ${skippedPaths.join(', ')}`);
     }
-
-    // A named template variant the user configured as their active default
-    // (config/profile.yml's cv.template / cover_letter.template) survives the
-    // stale-file prune below even once it stops looking "locally modified"
-    // (see isUserConfiguredTemplateVariant()'s doc comment) — it can never
-    // exist upstream once it is genuinely a personal variant, so the ordinary
-    // absent-from-remote signal alone would eventually delete it. cv-templates.mjs
-    // was just checked out above (it's in SYSTEM_PATHS), so it resolves here
-    // even on a pre-#1245 old→new re-exec; kept as a lazy import, per the
-    // top-of-file self-loading note, rather than a static one.
-    const configuredTemplateVariants = await loadConfiguredTemplateVariants();
 
     // All tracked system files need the same stale-file treatment. In
     // particular, root-level system files removed upstream (for example an
