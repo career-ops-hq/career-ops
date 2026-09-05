@@ -390,6 +390,7 @@ const SYSTEM_PATHS = [
   '.opencode/skills/',
   '.opencode/commands/',
   '.claude-plugin/',
+  '.codex-plugin/',
   '.qwen/',
   '.antigravitycli/skills/',
   '.grok/skills/',

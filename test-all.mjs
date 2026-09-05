@@ -1804,21 +1804,29 @@ for (const f of skillEntrypoints) {
   }
 }
 
-// The plugin manifest ships in two locations: .claude-plugin/plugin.json is
-// canonical (Claude Code + Copilot CLI both read it), and .github/plugin/
+// The plugin manifest ships in three locations: .claude-plugin/plugin.json is
+// canonical (Claude Code + Copilot CLI both read it); .github/plugin/
 // plugin.json exists only because the awesome-copilot marketplace validator
-// accepts just three paths and the Claude-compat one is not among them. Both
-// are bumped by release-please; this assert makes any other divergence fail CI
-// loudly instead of shipping two drifting manifests.
+// accepts just three paths and the Claude-compat one is not among them; and
+// .codex-plugin/plugin.json is the path the awesome-ai-plugins catalogue
+// resolves a Codex plugin's install_url to. All are bumped by release-please;
+// this assert makes any other divergence fail CI loudly instead of shipping
+// drifting manifests.
 {
   const canonManifest = readFile('.claude-plugin/plugin.json');
-  const copilotManifest = fileExists('.github/plugin/plugin.json') ? readFile('.github/plugin/plugin.json') : null;
-  if (copilotManifest === null) {
-    fail('.github/plugin/plugin.json missing — awesome-copilot validator needs it (mirror of .claude-plugin/plugin.json)');
-  } else if (canonManifest === copilotManifest) {
-    pass('plugin.json mirror (.github/plugin/) is byte-identical to the canonical manifest');
-  } else {
-    fail('plugin.json mirror (.github/plugin/) DIVERGED from .claude-plugin/plugin.json — edit the canonical one and copy it verbatim');
+  const mirrors = [
+    ['.github/plugin/plugin.json', 'awesome-copilot validator needs it'],
+    ['.codex-plugin/plugin.json', 'awesome-ai-plugins resolves the Codex install_url to it'],
+  ];
+  for (const [mirrorPath, why] of mirrors) {
+    const mirror = fileExists(mirrorPath) ? readFile(mirrorPath) : null;
+    if (mirror === null) {
+      fail(`${mirrorPath} missing — ${why} (mirror of .claude-plugin/plugin.json)`);
+    } else if (canonManifest === mirror) {
+      pass(`plugin.json mirror (${mirrorPath}) is byte-identical to the canonical manifest`);
+    } else {
+      fail(`plugin.json mirror (${mirrorPath}) DIVERGED from .claude-plugin/plugin.json — edit the canonical one and copy it verbatim`);
+    }
   }
 }
 
