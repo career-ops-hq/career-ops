@@ -2570,6 +2570,138 @@ async function apply() {
 
 // ── ROLLBACK ────────────────────────────────────────────────────
 
+/**
+ * A path's meaningful segments: forward-slash-normalized, empty segments
+ * dropped (collapses `//`), lone `.` segments dropped (`./x` means the same
+ * thing as `x`), Unicode-normalized to NFC, and case-folded (`.toLowerCase()`,
+ * not `.toLocaleLowerCase()` — these paths are never meant to be
+ * locale-sensitive, and folding under a Turkish-style locale can map `I`/`i`
+ * unexpectedly). Deliberately keeps `..` segments — callers that care about
+ * traversal check for those explicitly against this same list; `..` has no
+ * case or normalization variant, so neither step touches it.
+ *
+ * Case folding and Unicode normalization both matter because the
+ * checkout/delete loop this feeds operates at the OS filesystem level
+ * (CodeRabbit follow-up on #3782): macOS (APFS default) and Windows (NTFS
+ * default) are case-insensitive, so `.GIT/` and `.git/`, or `CV.md` and
+ * `cv.md`, resolve to the exact same file there even though a case-sensitive
+ * `===` sees different strings — and on top of that, a single visual
+ * character can have more than one valid Unicode encoding (an accented
+ * letter as one precomposed codepoint, NFC, versus the base letter plus a
+ * combining mark, NFD); some filesystems normalize on write while a
+ * comparison over raw code units treats the two spellings as different
+ * strings even though they resolve to the same file on disk. Normalizing to
+ * NFC before lowercasing closes that gap the same way case folding does.
+ * This is the single point both `isSafeManifestPath()` comparisons (the
+ * `.git` segment check and the user-layer-path check) read from, so both
+ * fixes live here instead of patching each comparison site separately.
+ *
+ * @param {string} path
+ * @returns {string[]}
+ */
+function pathSegments(path) {
+  return String(path).replace(/\\/g, '/').split('/')
+    .filter((s) => s !== '' && s !== '.')
+    .map((s) => s.normalize('NFC').toLowerCase());
+}
+
+/**
+ * True when a target-manifest entry is safe to hand to rollback()'s
+ * checkout/delete loop. That loop's delete-fallback (rmSync) operates on the
+ * raw filesystem path regardless of git tracking state, so an entry read
+ * from FETCH_HEAD's SYSTEM_PATHS — a remote-controlled source, unlike the
+ * hardcoded SYSTEM_PATHS/BOOTSTRAP_PATHS constants this process is already
+ * running — must never reach it unvalidated (CodeRabbit review of #3782,
+ * CWE-22): an absolute path or a `..` segment could resolve outside the
+ * repository entirely once joined onto ROOT, a `.git` segment could corrupt
+ * the repository itself, and a declared user-layer path (`cv.md`, `data/`,
+ * ...) could be deleted outright if it happens to be absent from the backup
+ * branch.
+ *
+ * Compares on segment arrays, not raw strings (CodeRabbit follow-up on
+ * #3782): `path.join(ROOT, pathspec)` normalizes away a leading `./`, a
+ * trailing `/`, and doubled internal `//` before rollback() ever touches the
+ * filesystem, so a manifest entry spelling the same real file a different
+ * way (`./cv.md`, `modes//_profile.md`, `data`) must be judged on the same
+ * canonical form it resolves to, not the literal string a raw `===` or
+ * `startsWith` would compare.
+ *
+ * @param {string} path
+ * @param {string[]} [userPaths] - defaults to effectiveUserPaths().
+ * @returns {boolean}
+ */
+export function isSafeManifestPath(path, userPaths = effectiveUserPaths()) {
+  if (!path || typeof path !== 'string') return false;
+  const normalized = path.replace(/\\/g, '/');
+  if (normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) return false; // absolute (POSIX or Windows drive)
+  const segments = pathSegments(path);
+  if (segments.length === 0 || segments.some((s) => s === '..' || s === '.git')) return false;
+  if (userPaths.some((userPath) => {
+    const userSegments = pathSegments(userPath);
+    if (userPath.endsWith('/')) {
+      return segments.length >= userSegments.length
+        && userSegments.every((seg, i) => segments[i] === seg);
+    }
+    return segments.length === userSegments.length
+      && userSegments.every((seg, i) => segments[i] === seg);
+  })) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * The paths rollback() considers for restore/removal: the CURRENTLY
+ * installed SYSTEM_PATHS plus the TARGET release's own SYSTEM_PATHS (read
+ * from FETCH_HEAD's update-system.mjs — the update this rollback is
+ * undoing) plus BOOTSTRAP_PATHS. Same target-manifest mechanism apply()
+ * already uses (#983/#1998).
+ *
+ * FETCH_HEAD still points at the update being undone — nothing else fetches
+ * between a failed apply() and running rollback() — so this closes the gap
+ * where apply() failed before it got as far as checking out its own
+ * update-system.mjs: the on-disk SYSTEM_PATHS constant still describes the
+ * OLD release, and a file the target release newly added would otherwise be
+ * invisible to rollback() entirely, left behind as an untracked orphan
+ * (#3780). Degrades to SYSTEM_PATHS + BOOTSTRAP_PATHS alone if FETCH_HEAD is
+ * missing (consumed by a later fetch) or predates update-system.mjs itself —
+ * the property `locallyModifiedSystemFiles` and `pathFullyPreserved` already
+ * follow: a manifest lookup this system cannot compute degrades the result,
+ * never the operation.
+ *
+ * @param {{git?: Function, userPaths?: string[], warn?: Function}} [ctx] -
+ *   injection points for tests: `git` defaults to the real `git()`;
+ *   `userPaths` defaults to `isSafeManifestPath()`'s own default
+ *   (`effectiveUserPaths()`, which reads the developer's real
+ *   `config/local-paths.txt`) — pass a fixed fixture to keep a test hermetic
+ *   instead of depending on local dev state; `warn` defaults to
+ *   `console.warn` and receives the one degraded-path notice.
+ * @returns {string[]}
+ */
+export function rollbackSystemPaths(ctx = {}) {
+  const runGit = ctx.git || git;
+  const warn = ctx.warn || console.warn;
+  let targetSystemPaths = [];
+  try {
+    const targetUpdaterSource = runGit('show', 'FETCH_HEAD:update-system.mjs');
+    targetSystemPaths = extractArrayFromSource(targetUpdaterSource, 'SYSTEM_PATHS')
+      .filter((path) => isSafeManifestPath(path, ctx.userPaths));
+  } catch (err) {
+    // Degraded — and nothing downstream can tell WHY. A consumed FETCH_HEAD is
+    // expected and harmless; a git timeout or a corrupt object store is not,
+    // and both land here identically. Rollback continues either way on
+    // SYSTEM_PATHS + BOOTSTRAP_PATHS alone and then prints "Rollback complete",
+    // so without this line the one case where a file the failed update added
+    // is knowingly left behind looks exactly like a clean run (#3782 review).
+    warn(
+      `Note: could not read the target manifest from FETCH_HEAD (${err.message}). `
+      + 'Continuing with the current manifest only — a file the failed update '
+      + 'added may be left behind; check `git status` for untracked leftovers.',
+    );
+  }
+  return mergePathLists(SYSTEM_PATHS, targetSystemPaths, BOOTSTRAP_PATHS);
+}
+
 function rollback() {
   // Same precondition as apply(): a nested .git-less install would look its
   // backup branches up — and check files out — in the enclosing repo (#3334).
@@ -2585,6 +2717,8 @@ function rollback() {
     }
 
     console.log(`Rolling back to: ${latest}`);
+
+    const systemPathsToRestore = rollbackSystemPaths();
 
     // Checkout system files from backup branch.
     //
@@ -2603,17 +2737,51 @@ function rollback() {
     // that but is a larger change; tracked separately if it ever bites.
     const restored = [];
     const removed = [];
-    for (const path of SYSTEM_PATHS) {
+    for (const path of systemPathsToRestore) {
       try {
-        git('checkout', latest, '--', path);
+        // --literal-pathspecs: `path` can come from the FETCH_HEAD-sourced
+        // target manifest (rollbackSystemPaths), not just the hardcoded
+        // SYSTEM_PATHS/BOOTSTRAP_PATHS constants — isSafeManifestPath()
+        // validates filesystem safety (no absolute path, no `..`, no `.git`,
+        // no declared user-layer path) but a string like `:(top,glob)**`
+        // passes all of those checks while still being valid Git pathspec
+        // magic. Without this flag, `--` ends OPTION parsing but does not
+        // stop Git from reinterpreting the pathspec itself, so that entry
+        // would expand into "everything in the tree" instead of the one
+        // validated path (CodeRabbit follow-up on #3782, CWE-22).
+        // gitQuiet, not git: failure mode (a) below is an EXPECTED, handled
+        // outcome (the path simply didn't exist in the backup), and printing
+        // git's raw "pathspec did not match" stderr for it reads as a
+        // rollback failure even though the catch handles it correctly — the
+        // same misleading-stderr class #1998 already fixed for apply()'s
+        // analogous checkout.
+        gitQuiet('--literal-pathspecs', 'checkout', latest, '--', path);
         restored.push(path);
       } catch (err) {
         const pathspec = path.endsWith('/') ? path.slice(0, -1) : path;
-        let existedInBackup = true;
+        // ls-tree, not cat-file -e: cat-file -e throws identically whether
+        // the path is genuinely absent from the backup OR the lookup itself
+        // failed (a timeout, a corrupt object, an unreadable ref). The
+        // catch-all collapsed both to "absent", which then DELETES a path
+        // rollback should have restored. ls-tree returns an empty but
+        // SUCCESSFUL result for a path absent from the tree, and only throws
+        // on a genuine lookup failure, so the two cases stay distinguishable.
+        let existedInBackup;
         try {
-          git('cat-file', '-e', `${latest}:${pathspec}`);
-        } catch {
-          existedInBackup = false;
+          existedInBackup = gitQuiet('--literal-pathspecs', 'ls-tree', latest, '--', pathspec).length > 0;
+        } catch (lookupErr) {
+          // Wrapped deliberately: this runs INSIDE the catch, so an escaping
+          // throw would end rollback() mid-restore with paths already checked
+          // out and nothing committed, reporting the lookup failure instead of
+          // the checkout error that actually started this (review of #3781).
+          // The state is indeterminate — "absent from the backup" (safe to
+          // remove) is indistinguishable from "lookup failed" (must NOT
+          // remove) — so fail loudly, naming the path, and chain the original
+          // checkout error so neither half is lost.
+          throw new Error(
+            `rollback could not determine whether "${pathspec}" exists in ${latest}: ${lookupErr.message}`,
+            { cause: err },
+          );
         }
         if (existedInBackup) {
           throw err;
@@ -2623,7 +2791,8 @@ function rollback() {
         // for tracked files; `rmSync` cleans up the untracked-but-
         // on-disk case (e.g. an apply() that crashed between checkout
         // and commit, leaving the path untracked locally).
-        git('rm', '-r', '-f', '--ignore-unmatch', '--', pathspec);
+        // --literal-pathspecs: same reasoning as the checkout above.
+        git('--literal-pathspecs', 'rm', '-r', '-f', '--ignore-unmatch', '--', pathspec);
         try {
           rmSync(join(ROOT, pathspec), { recursive: true, force: true });
         } catch {
@@ -2647,8 +2816,13 @@ function rollback() {
     try {
       // Scope the commit to the rollback paths (#915 bug 2). A bare
       // `git commit` would sweep unrelated staged files into the rollback.
+      // --literal-pathspecs: expandToShippedFiles only expands entries that
+      // end in `/` through `ls-tree` — a non-directory manifest string (the
+      // same `:(top,glob)**`-style magic pathspec the checkout/rm calls
+      // above guard against) passes through here unexpanded and would
+      // otherwise still be open to pathspec-magic reinterpretation.
       if (expandedRollbackPaths.length > 0) {
-        git('commit', '-m', `chore: rollback system files from ${latest}`, '--', ...expandedRollbackPaths);
+        git('--literal-pathspecs', 'commit', '-m', `chore: rollback system files from ${latest}`, '--', ...expandedRollbackPaths);
       }
     } catch {
       // Tolerate any commit failure here — the common case is the
