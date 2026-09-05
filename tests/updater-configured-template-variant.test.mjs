@@ -65,6 +65,21 @@ if (zeroDependencyMalformedRejected) {
 } else {
   fail('zero-dependency profile reader accepted malformed template syntax');
 }
+for (const section of ['cv', 'cover_letter']) {
+  let duplicateRejected = false;
+  try {
+    configuredTemplateVariantsFromProfileSource(
+      `${section}:\n  template: first\n${section}:\n  template: second\n`,
+    );
+  } catch {
+    duplicateRejected = true;
+  }
+  if (duplicateRejected) {
+    pass(`zero-dependency profile reader rejects duplicate ${section} sections`);
+  } else {
+    fail(`zero-dependency profile reader accepted duplicate ${section} sections`);
+  }
+}
 
 if (REEXEC_FALLBACK_FILES.includes('cv-templates.mjs')
     && REEXEC_FALLBACK_FILES.includes('lib/is-main-module.mjs')

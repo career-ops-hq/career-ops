@@ -1078,8 +1078,12 @@ export function configuredTemplateVariantsFromProfileSource(source) {
 
   for (const [section, kind] of [['cv', 'cv'], ['cover_letter', 'cover']]) {
     const header = new RegExp(`^${section}\\s*:(.*)$`);
-    const start = lines.findIndex((line) => header.test(line));
-    if (start < 0) continue;
+    const starts = lines
+      .map((line, index) => (header.test(line) ? index : -1))
+      .filter((index) => index >= 0);
+    if (starts.length > 1) throw new Error(`Duplicate top-level ${section} section`);
+    if (starts.length === 0) continue;
+    const start = starts[0];
     const headerTail = lines[start].match(header)[1].trim();
     if (headerTail && !headerTail.startsWith('#')) {
       throw new Error(`Unsupported inline YAML mapping for ${section}`);
