@@ -49,6 +49,32 @@ ok('anything that is not an http(s) posting yields NO key', () => {
   }
 });
 
+ok('a fully-qualified host with the root label is the same posting', () => {
+  // `example.com.` and `example.com` are the same DNS name — the trailing dot
+  // is the root label written explicitly. WHATWG URL preserves it, so without
+  // normalization one posting yields two keys and dedup sees two rows where
+  // there is one. This is NOT aggregator-specific: an employer board splits the
+  // same way, which is why it belongs here rather than in isAggregatorUrl.
+  assert.equal(
+    normalizeUrl('https://linkedin.com./jobs/1'),
+    normalizeUrl('https://linkedin.com/jobs/1'));
+  assert.equal(
+    normalizeUrl('https://job-boards.greenhouse.io./acme/jobs/7'),
+    normalizeUrl('https://job-boards.greenhouse.io/acme/jobs/7'));
+  // Case and the root label are independent; both must fold.
+  assert.equal(
+    normalizeUrl('https://WWW.LinkedIn.COM./jobs/1'),
+    normalizeUrl('https://www.linkedin.com/jobs/1'));
+  // Only ONE terminal dot is the root label. A doubled dot is not a valid host
+  // and must not be silently repaired into a key that matches a real posting.
+  assert.notEqual(
+    normalizeUrl('https://linkedin.com../jobs/1'),
+    normalizeUrl('https://linkedin.com/jobs/1'));
+  // A bare root host keeps whatever key it had: rejecting it is a separate
+  // decision from folding the root label, and this change does not make it.
+  assert.equal(normalizeUrl('https://./jobs/1'), 'https://./jobs/1');
+});
+
 // ───────────────────────── isAggregatorUrl (unit) ─────────────────────────
 console.log('\nisAggregatorUrl()');
 ok('recognizes an aggregator at its apex and on any subdomain', () => {
@@ -77,6 +103,17 @@ ok('matches on the registrable domain, not a bare substring', () => {
 });
 ok('anything that is not a URL is not an aggregator', () => {
   for (const v of ['', null, 'N/A', 'local:jds/foo.md']) assert.equal(isAggregatorUrl(v), false);
+});
+ok('the root label does not hide an aggregator', () => {
+  // isAggregatorUrl parses the host itself rather than going through
+  // normalizeUrl, so it needs the same folding or a trailing dot downgrades a
+  // known aggregator to "employer board" — which is the direction that turns a
+  // non-signal back into false evidence of a distinct requisition.
+  assert.equal(isAggregatorUrl('https://linkedin.com./jobs/1'), true);
+  assert.equal(isAggregatorUrl('https://www.indeed.com./viewjob?jk=1'), true);
+  assert.equal(isAggregatorUrl('https://WWW.LinkedIn.COM./jobs/1'), true);
+  // The lookalike guard must survive the folding.
+  assert.equal(isAggregatorUrl('https://linkedin.com.evil.example./jobs/1'), false);
 });
 
 // ───────────────────────── merge-tracker (integration) ─────────────────────────

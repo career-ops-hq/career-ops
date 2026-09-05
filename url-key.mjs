@@ -58,6 +58,31 @@ const AGGREGATOR_DOMAINS = [
 ];
 
 /**
+ * Fold a hostname to its comparison form: lowercase, with the DNS root label
+ * dropped.
+ *
+ * `example.com.` and `example.com` are the same name — the terminal dot is the
+ * root label written explicitly — but WHATWG URL preserves it verbatim. Both
+ * exported functions below parse the host themselves, so without one shared
+ * fold the same posting yields two keys in `normalizeUrl` (dedup sees two rows
+ * where there is one) AND slips past `isAggregatorUrl` (an aggregator gets
+ * treated as an employer board, which is the direction that turns a non-signal
+ * back into false evidence of a distinct requisition).
+ *
+ * Exactly one dot is stripped. `example.com..` is not a valid host, so it is
+ * left alone rather than silently repaired into a key that would match a real
+ * posting, and a bare root host is left as-is — rejecting it is a separate
+ * decision this does not make.
+ *
+ * @param {string} host - A hostname from a parsed URL.
+ * @returns {string} The folded hostname.
+ */
+function foldHostname(host) {
+  const h = String(host).toLowerCase();
+  return h.length > 1 && h.endsWith('.') && !h.endsWith('..') ? h.slice(0, -1) : h;
+}
+
+/**
  * Is this posting URL hosted by a multi-employer aggregator?
  *
  * Callers use it to decide whether a URL mismatch is evidence about identity.
@@ -70,7 +95,7 @@ const AGGREGATOR_DOMAINS = [
 export function isAggregatorUrl(raw) {
   if (typeof raw !== 'string') return false;
   let host;
-  try { host = new URL(raw.trim()).hostname.toLowerCase(); } catch { return false; }
+  try { host = foldHostname(new URL(raw.trim()).hostname); } catch { return false; }
   // Label boundary, never a substring: `linkedin.com.evil.example` and
   // `myindeed.com` both contain an aggregator domain and are neither.
   return AGGREGATOR_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`));
@@ -124,7 +149,7 @@ export function normalizeUrl(raw) {
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
 
   u.protocol = 'https:';            // http vs https is the same posting
-  u.hostname = u.hostname.toLowerCase();
+  u.hostname = foldHostname(u.hostname);
   promoteKnownFragmentIdentity(u);
   u.hash = '';                      // fragments never identify the posting
 
