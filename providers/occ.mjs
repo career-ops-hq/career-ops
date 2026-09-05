@@ -103,6 +103,25 @@ export function buildSearchUrl(query, state, page) {
 }
 
 /**
+ * OCC's own "this search matched nothing" copy.
+ *
+ * Needed because a zero-card parse is ambiguous: a legitimately empty search, a
+ * Cloudflare challenge (HTTP 200 is not guaranteed to mean HTML we can read)
+ * and a markup change all produce the same `[]`. Treating them alike is how a
+ * broken scraper reads as a healthy board with no jobs — the same failure mode
+ * the outage guard in fetch() exists to prevent, arriving through a 200 instead
+ * of a rejection. Accents are folded so a copy tweak on "busqueda" cannot break
+ * the match.
+ *
+ * @param {string} html
+ * @returns {boolean}
+ */
+export function isEmptyResultPage(html) {
+  const plain = String(html).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return /no hay empleos que coincidan/i.test(plain);
+}
+
+/**
  * Parse the job cards out of one rendered search page.
  * @param {string} html
  * @returns {Array<{title:string,url:string,company:string,location:string,id:string}>}
@@ -211,7 +230,18 @@ export default {
           }
 
           const cards = parseCards(html);
-          if (!cards.length) break;
+          if (!cards.length) {
+            // A first page that parses to nothing is only "no matches" when the
+            // board says so. Anything else — a challenge interstitial, an error
+            // page, a markup change — is a scraper break, and must not count as
+            // a page the board answered, or it would slip past the outage guard
+            // below on a 200 the way it used to slip past on a 403.
+            if (page === 1 && !isEmptyResultPage(html)) {
+              answered = false;
+              errors.push(`"${query}"${state ? `/${state}` : ''}: page 1 parsed to zero cards and is not OCC's empty-result page (challenge or markup change) — ${url}`);
+            }
+            break;
+          }
 
           // OCC answers an out-of-range page with page 1 rather than an empty
           // result, so "no new ids on this page" is the real end-of-results

@@ -10,7 +10,7 @@ console.log('\nProvider — occ');
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'providers/occ.mjs')).href);
   const occ = mod.default;
-  const { buildSearchUrl, parseCards } = mod;
+  const { buildSearchUrl, parseCards, isEmptyResultPage } = mod;
 
   if (occ.id === 'occ') pass('occ.id is "occ"');
   else fail(`occ.id is ${JSON.stringify(occ.id)}`);
@@ -164,6 +164,59 @@ try {
     fail(`partial failure = ${JSON.stringify(partial)}`);
   }
 
+  // ── zero cards: empty search vs. broken scraper ──────────────────────────
+  // A zero-card parse is ambiguous. Only OCC's own empty-result copy means
+  // "no matches"; a challenge interstitial or a markup change must not be
+  // laundered into a healthy empty board through an HTTP 200.
+  const EMPTY_PAGE = '<html><body><h1>No hay empleos que coincidan con tu b&#xFA;squeda</h1></body></html>';
+  const CHALLENGE_PAGE = '<html><head><title>Just a moment...</title></head><body><div id="cf-chl"></div></body></html>';
+
+  if (isEmptyResultPage(EMPTY_PAGE) && !isEmptyResultPage(CHALLENGE_PAGE) && !isEmptyResultPage('')) {
+    pass('isEmptyResultPage() recognizes OCC empty-result copy and nothing else');
+  } else {
+    fail('isEmptyResultPage() misclassified a page');
+  }
+
+  // Accent folding: a copy tweak on "busqueda"/"búsqueda" must not break it.
+  if (isEmptyResultPage('No hay empleos que coincidan con tu busqueda')) {
+    pass('isEmptyResultPage() folds accents');
+  } else {
+    fail('isEmptyResultPage() is accent-sensitive');
+  }
+
+  const emptyCtx = { async sleep() {}, async fetchText() { return EMPTY_PAGE; } };
+  const emptyJobs = await occ.fetch({ name: 'OCC', queries: ['nada'], max_pages: 3 }, emptyCtx);
+  if (Array.isArray(emptyJobs) && emptyJobs.length === 0) {
+    pass('fetch() returns [] for a genuinely empty search without throwing');
+  } else {
+    fail(`empty search = ${JSON.stringify(emptyJobs)}`);
+  }
+
+  // The bug this guards: HTTP 200 + unreadable body used to increment the
+  // answered counter, so a fully challenged board slipped past the outage guard.
+  const challengeCtx = { async sleep() {}, async fetchText() { return CHALLENGE_PAGE; } };
+  let challenged = null;
+  try {
+    await occ.fetch({ name: 'OCC', queries: ['a', 'b'], max_pages: 2 }, challengeCtx);
+  } catch (err) { challenged = err; }
+  if (challenged && /all \d+ search request\(s\) failed/.test(challenged.message)) {
+    pass('fetch() throws when every page 1 is a challenge served with HTTP 200');
+  } else {
+    fail(`challenge HTML did not throw: ${challenged && challenged.message}`);
+  }
+
+  // One broken keyword alongside a working one still degrades gracefully.
+  const mixedCtx = {
+    async sleep() {},
+    async fetchText(url) { return url.includes('de-roto') ? CHALLENGE_PAGE : FIXTURE; },
+  };
+  const mixed = await occ.fetch({ name: 'OCC', queries: ['roto', 'bueno'], max_pages: 1 }, mixedCtx);
+  if (Array.isArray(mixed) && mixed.length === 2) {
+    pass('fetch() tolerates one challenged keyword when another parses');
+  } else {
+    fail(`mixed challenge/ok = ${JSON.stringify(mixed)}`);
+  }
+
   // ── queries is required ──────────────────────────────────────────────────
   // No DEFAULT_QUERIES: a built-in keyword list would be one user's search
   // profile silently applied to everyone else's scan.
@@ -238,8 +291,11 @@ try {
     async fetchText(url) { manyPages.push(url); return FIXTURE.replace(/21319670/g, String(manyPages.length)); },
   };
   await occ.fetch({ name: 'OCC', queries: ['x'], max_pages: 999 }, countingCtx);
-  if (manyPages.length <= 10) pass('fetch() caps max_pages at 10 regardless of config');
-  else fail(`fetch() requested ${manyPages.length} pages with max_pages: 999`);
+  // Exactly 10, not "<= 10": the fixture yields a fresh id on every page, so a
+  // provider that stopped at 1 or at the default 3 would also satisfy <= 10 and
+  // the cap would be untested.
+  if (manyPages.length === 10) pass('fetch() caps max_pages at exactly 10 regardless of config');
+  else fail(`fetch() requested ${manyPages.length} pages with max_pages: 999, expected exactly 10`);
 
 } catch (err) {
   fail(`occ provider test threw: ${err.message}`);
