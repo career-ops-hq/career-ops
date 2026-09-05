@@ -54,6 +54,7 @@ console.log('\n🧪 Testing user-configured template-variant carve-out...');
   ];
   const shouldNotMatch = [
     ['templates/cv-template.zh-minimal.html', false], // real shipped variant, not the configured one
+    ['templates/cv-template.standard.html', false], // standard resolves to the unsuffixed base file
     ['templates/cv-template.html', false], // base file — never a "named variant"
     ['templates/cover-letter-template.html', false],
     ['templates/cv-template.bw.png', false], // wrong extension, not html/tex
@@ -76,6 +77,11 @@ console.log('\n🧪 Testing user-configured template-variant carve-out...');
     pass('an unconfigured install exempts nothing (safe default)');
   } else {
     fail('a file was exempted with no configured variant at all');
+  }
+  if (!isUserConfiguredTemplateVariant('templates/cv-template.standard.html', { cv: 'standard' })) {
+    pass('the standard template selection does not exempt a suffixed standard variant');
+  } else {
+    fail('a suffixed standard variant was incorrectly exempted from stale pruning');
   }
 }
 
