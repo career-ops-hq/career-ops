@@ -164,7 +164,36 @@ When a JD publishes a salary figure, distinguish advertised range, likely guaran
 
 ## Archetype Detection
 
-Classify every offer into one of these types (or hybrid of 2):
+Classify the offer by archetype. `modes/_profile.md` → *Your Target Roles* is
+authoritative: where it defines archetypes, detect against **that** table and
+use the one below only as a fallback for what it does not cover. This mirrors
+the precedence already stated above — user customizations in `_profile.md`
+override the defaults in this file.
+
+The table below is a default, not a closed set. It reflects one particular
+search (see AGENTS.md → Origin) and will not describe every user's field: a
+silicon design-verification engineer, a quant, a clinician have no archetype
+here at all.
+
+**If an offer matches no archetype the user actually targets, say so plainly
+and score North Star alignment low.** That is a real and useful signal.
+Forcing it into the nearest available label — or into a "hybrid" of two —
+manufactures a confident fit narrative for a job the user is not applying for,
+which is worse than a low score because it reads as analysis.
+
+**A match against the default table below is not a match against the user's
+targets.** Where `_profile.md` defines archetypes, "targeted" means one of
+those. An offer that lands cleanly on a default row and on nothing in
+`_profile.md` is still an unmatched offer: name the default archetype if it
+helps explain the role, and score North Star as unmatched anyway. Reading the
+fallback as a target is the exact failure this section exists to stop — it is
+how a program-management req came back as "Technical AI PM / AI Transformation
+Lead (hybrid)" for a candidate who targets neither.
+
+On the number: `modes/ofertas.md` already anchors this dimension at
+`5 = exact target role, 1 = unrelated`. Unmatched sits at the bottom of that
+scale, not in the middle — the offer is not one the user is looking for, and a
+mid score reads as a partial fit that does not exist.
 
 | Archetype | Key signals in JD |
 |-----------|-------------------|
