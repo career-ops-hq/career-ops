@@ -39,6 +39,11 @@ export async function resolveCliId(): Promise<string | null> {
     const d = (await r.json()) as { clis?: { id: string; installed?: boolean }[] };
     const sole = pickSoleInstalled(d.clis);
     if (!sole) return null;
+    // The fetch above may have taken a while: re-check for a choice the user
+    // made (e.g. via Config) while it was in flight, so a slow detection
+    // result can never clobber a fresher explicit save.
+    const savedMeanwhile = readSavedCliId();
+    if (savedMeanwhile) return savedMeanwhile;
     persistCliId(sole);
     return sole;
   } catch {
