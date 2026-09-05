@@ -12,7 +12,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — _http retry helpers');
 
-const { isRetryableError, fetchJsonWithRetry, fetchResponse } =
+const { isRetryableError, isRefusedRedirectError, fetchJsonWithRetry, fetchResponse } =
   await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
 
 // isRetryableError() — status-based classification.
@@ -71,6 +71,50 @@ if (isRetryableError(nonTypeErrorLookalike) === true) {
   pass('isRetryableError(non-TypeError with matching cause.message) is true');
 } else {
   fail('isRetryableError(non-TypeError with matching cause.message) should stay retryable');
+}
+
+// isRefusedRedirectError() — the same verdict, now reachable by name so a
+// second consumer (discover-ats.mjs, which reports it to a human) cannot drift
+// from the retry layer's answer. Asserted directly rather than only through
+// isRetryableError: a caller that needs "is this a refused redirect" gets a
+// wrong answer from "is this retryable" for every 4xx, which is not a redirect
+// and is equally non-retryable.
+if (isRefusedRedirectError(redirectRefusal) === true) {
+  pass('isRefusedRedirectError(refused redirect) is true');
+} else {
+  fail('isRefusedRedirectError(refused redirect) should be true');
+}
+
+if (isRefusedRedirectError(nonTypeErrorLookalike) === false) {
+  pass('isRefusedRedirectError(non-TypeError with matching cause.message) is false');
+} else {
+  fail('isRefusedRedirectError(non-TypeError with matching cause.message) should be false');
+}
+
+if (isRefusedRedirectError(oldNodeShape) === false) {
+  pass('isRefusedRedirectError(cause===undefined, old-Node fallback) is false');
+} else {
+  fail('isRefusedRedirectError(cause===undefined) should be false — nothing identifies it');
+}
+
+// The discriminating pair: a 404 is non-retryable but is NOT a refused
+// redirect. Without this, a predicate that simply returned !isRetryableError()
+// would pass every assertion above.
+if (isRefusedRedirectError({ status: 404 }) === false && isRetryableError({ status: 404 }) === false) {
+  pass('isRefusedRedirectError(404) is false while isRetryableError(404) is also false');
+} else {
+  fail('isRefusedRedirectError must not fire on a 404 — non-retryable is a wider set than refused-redirect');
+}
+
+// A plain transport failure (timeout/DNS) has the TypeError shape and no
+// status, and must not be mistaken for a redirect.
+const transportFailure = Object.assign(new TypeError('fetch failed'), {
+  cause: { message: 'getaddrinfo ENOTFOUND example.invalid' },
+});
+if (isRefusedRedirectError(transportFailure) === false) {
+  pass('isRefusedRedirectError(DNS-shaped TypeError) is false');
+} else {
+  fail('isRefusedRedirectError(DNS-shaped TypeError) should be false');
 }
 
 // End-to-end: fetchJsonWithRetry must call ctx.fetchJson exactly once on a

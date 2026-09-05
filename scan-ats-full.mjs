@@ -14,6 +14,12 @@
  * list do not have to double as the filter for every public board. Absent,
  * `title_filter` is used exactly as before.
  *
+ * Optional `title_filter_overrides` broadens the title net further still,
+ * but scoped to specific companies (matched by slug) rather than the whole
+ * sweep — e.g. letting known university/college employers surface general
+ * campus-admin postings without loosening the net for everyone else. See
+ * scan.mjs's buildTitleFilterOverrides()/buildTitleFilterWithOverrides().
+ *
  * Company directories come from the public job-board-aggregator dataset
  * (github.com/Feashliaa/job-board-aggregator), cached in data/cache/ for 24h.
  *
@@ -48,7 +54,7 @@ import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
 import workday from './providers/workday.mjs';
 import icims from './providers/icims.mjs';
-import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays, PORTALS_PATH, PIPELINE_PATH } from './scan.mjs';
+import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays, PORTALS_PATH, PIPELINE_PATH } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
@@ -454,8 +460,8 @@ export function resolveTitleFilterConfig(config) {
 // pure, exported helper keeps the content_filter.by_title_keyword wiring
 // (#1846) unit-testable without mocking providers or duplicating the rule
 // order in two places for the caller that doesn't need per-stage counts.
-export function passesFilters(job, { titleFilter, locationFilter, contentFilter, titleFilterConfig }) {
-  if (!titleFilter(job.title)) return false;
+export function passesFilters(job, { titleFilter, locationFilter, contentFilter, titleFilterConfig, companySlug }) {
+  if (!titleFilter(job.title, companySlug)) return false;
   // job.url is passed so the location filter can fall back to the URL's own
   // location segment when the provider reports a rolled-up "N Locations" string;
   // job.title so a title-stated remote role survives a city-only location.
@@ -575,6 +581,7 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
         titleFilter: opts.titleFilter,
         locationFilter: opts.locationFilter,
         contentFilter: opts.contentFilter,
+        companySlug: entry.name,
         titleFilterConfig: opts.titleFilterConfig,
       })) continue;
       // provider is always one of SEED_PROVIDERS (greenhouse/lever/ashby) here —
@@ -702,7 +709,11 @@ async function main() {
   }
   const config = yaml.load(readFileSync(PORTALS_PATH, 'utf-8'));
   const fullTitleFilterConfig = resolveTitleFilterConfig(config);
-  const titleFilter = buildTitleFilter(fullTitleFilterConfig);
+  // title_filter_overrides is independent of title_filter_full: it broadens
+  // the net for specific companies on top of whichever title filter config
+  // (title_filter or title_filter_full) this run is already using.
+  const titleFilterOverrides = buildTitleFilterOverrides(config?.title_filter_overrides);
+  const titleFilter = buildTitleFilterWithOverrides(fullTitleFilterConfig, titleFilterOverrides);
   const locationFilter = buildLocationFilter(config?.location_filter);
   // Same content_filter (incl. by_title_keyword scoping) scan.mjs applies —
   // see #1846. Built once here from the same portals.yml config.
@@ -814,7 +825,7 @@ async function main() {
   // Per-job filter chain, shared by the parallel sweep, the truncation retry
   // pass (workday), and date enrichment (icims). Closure over the filters and
   // counters so both passes update the same run totals.
-  const processJobs = async (jobs, sourceName, provider) => {
+  const processJobs = async (jobs, sourceName, provider, companySlug) => {
     for (const job of jobs) {
       if (!job.url || !job.title) continue;
       // Confirmed-stale postings are always dropped. Undated postings are
@@ -835,13 +846,13 @@ async function main() {
       // posting stale, --since was silently ignored for the entire source.
       // Enrich first, then let the undated policy decide.
       if (dateClass === 'undated' && provider.enrichDate
-          && titleFilter(job.title) && locationFilter(job.location, job.url, job.title)) {
+          && titleFilter(job.title, companySlug) && locationFilter(job.location, job.url, job.title)) {
         try { await provider.enrichDate(job, ctx); } catch { /* stays undated */ }
         dateClass = classifyPostingDate(job, cutoff);
       }
       if (dateClass === 'stale') continue;
       if (dateClass === 'undated' && !opts.includeUndated) { droppedNoDate++; continue; }
-      if (!titleFilter(job.title)) continue;
+      if (!titleFilter(job.title, companySlug)) continue;
       // job.url is passed so the location filter can fall back to the URL's own
       // location segment when the provider reports a rolled-up "N Locations" string;
       // job.title so a title-stated remote role survives a city-only location.
@@ -926,7 +937,7 @@ async function main() {
             if (opts.verbose) console.error(`  ⚠ ${name}/${entry.name}: hit the page cap — later postings not scanned`);
           }
           if (jobs.workdayNoDateSkip) { noDateSkipCompanies++; noDateSkipJobs += jobs.length; }
-          await processJobs(jobs, name, source.provider);
+          await processJobs(jobs, name, source.provider, entry.name);
         })(), COMPANY_TIMEOUT_MS, `${name}/${entry.name}`);
       } catch (err) {
         // Mostly defunct boards in the public dataset — expected noise, so the
@@ -990,7 +1001,7 @@ async function main() {
           await withTimeout((async () => {
             const jobs = await source.provider.fetch(entry, ctx);
             recordBoardResult(deadBoards, name, boardKey(entry), 200);
-            await processJobs(jobs, name, source.provider);
+            await processJobs(jobs, name, source.provider, entry.name);
             if (jobs.workdayTruncated) {
               errors++; // still truncated on a quiet line — genuine board problem, move on
               if (opts.verbose) console.error(`  ✗ ${name}/${entry.name}: still truncated after sequential retry`);
