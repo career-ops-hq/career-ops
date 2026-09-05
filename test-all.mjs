@@ -9785,6 +9785,40 @@ try {
     fail(`headless evaluators still carry private max+1 allocators: ${unmigratedEvaluators.join(', ')}`);
   }
 
+  // Same family, second contract (#3795): every headless evaluator writes
+  // `**URL:**` into its report header, per AGENTS.md Pipeline Integrity rule 3.
+  // The report is where the posting URL survives the posting, and it is the only
+  // place merge-tracker.mjs's resolveReportUrl() looks -- a report without the
+  // line yields `no-url`, so the row can never be backfilled and stays outside
+  // the deterministic URL dedup key, the tier merge-tracker tries FIRST and the
+  // one that can prove two same-title rows are different openings.
+  //
+  // Two halves, because the line is worthless without a value to put in it:
+  // the header must be written, AND the evaluator must have somewhere to
+  // receive a posting URL from. Absent one, `(pasted)` is the honest value and
+  // keeps the field present; normalizeUrl derives no key from it, so it cannot
+  // hand every pasted row the same key.
+  const urlHeaderRe  = /\*\*URL:\*\*/;
+  const urlSourceRe  = /--posting-url|\bpostingUrl\b|\$\{input \|\| '\(pasted\)'\}/;
+  // openai-eval.mjs and ollama-eval.mjs gain the same header in #3797, which
+  // owns those two files. Named rather than skipped, and the list is asserted
+  // to be EXACTLY the files still missing the header: once #3797 lands this
+  // fails until the names are removed, so the exemption cannot outlive its
+  // reason and quietly become permanent coverage loss.
+  const pendingUrlHeader = ['openai-eval.mjs', 'ollama-eval.mjs'];
+  const missingUrlHeader = evaluatorSources
+    .filter(([, source]) => !urlHeaderRe.test(source) || !urlSourceRe.test(source))
+    .map(([name]) => name);
+  const staleExemptions = pendingUrlHeader.filter(name => !missingUrlHeader.includes(name));
+  const unexemptedGaps  = missingUrlHeader.filter(name => !pendingUrlHeader.includes(name));
+  if (unexemptedGaps.length > 0) {
+    fail(`headless evaluators write a report with no **URL:** header, so their rows can never reach the URL dedup key: ${unexemptedGaps.join(', ')}`);
+  } else if (staleExemptions.length > 0) {
+    fail(`stale #3797 exemption — these now carry the **URL:** header, remove them from pendingUrlHeader: ${staleExemptions.join(', ')}`);
+  } else {
+    pass('every headless evaluator outside the #3797 exemption writes **URL:** and takes a posting URL');
+  }
+
   // --count N: contiguous range from an empty dir.
   const rangeTmp = mkdtempSync(join(tmpdir(), 'career-ops-reserve-range-'));
   const range = reserveRun(['--count', '3'], rangeTmp);
