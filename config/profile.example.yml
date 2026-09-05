@@ -90,6 +90,18 @@ location:
   # For remote roles outside your country:
   # onsite_availability: "1 week/month in any city"
 
+# Optional. If you have a documented disability, some jurisdictions run
+# affirmative/quota hiring for it (e.g. Brazil's Lei de Cotas, Lei 8.213/91 --
+# employers with 100+ staff must reserve 2-5% of roles for PcD candidates).
+# Setting this does NOT disclose anything automatically -- it only lets
+# evaluation mode (modes/oferta.md -> Block A "PcD-quota check") notice when
+# a JD is already advertising a quota-designated opening and treat that as a
+# positive opportunity signal. Actual disclosure on an application form is
+# ALWAYS a separate, per-application, candidate-confirmed decision (see
+# modes/apply.md -- self-identification questions are never auto-answered).
+# disability:
+#   br_pcd_quota_eligible: true
+
 language:
   # Human-facing output language for reports, tracker notes, PDFs, cover
   # letters, outreach, and form answers. Use an ISO language code such as
