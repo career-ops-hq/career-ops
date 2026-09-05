@@ -585,11 +585,18 @@ function stripListMarker(statement) {
 
 /** The opening verb of a statement, with its tier, or null when it opens with neither. */
 function openingScopeVerb(statement) {
-  const opening = stripListMarker(statement).match(/^([\p{L}]+)/u);
+  const text = stripListMarker(statement);
+  const opening = text.match(/^([\p{L}]+)/u);
   if (!opening) return null;
   const verb = opening[1].toLowerCase();
   const tier = SCOPE_VERB_TIERS.get(verb);
-  return tier ? { verb, tier } : null;
+  if (!tier) return null;
+  // "Led to" is causation, not ownership: "led to a 40% speedup" claims a
+  // result, not a mandate. Only reachable now that the target side is split
+  // into clauses, which puts a mid-sentence "and led to ..." at the start of
+  // one, where it would otherwise read as a tier-3 ownership claim.
+  if (/^(?:lead|leads|leading|led)\s+to\b/i.test(text)) return null;
+  return { verb, tier };
 }
 
 // Tier evidence a single word cannot carry. "Worked on" is the participation
@@ -698,45 +705,55 @@ export function scopeInflationClaims(targetText, sourceText) {
   const claims = [];
   for (const raw of factStatements(targetText)) {
     const statement = stripListMarker(raw);
-    const opening = openingScopeVerb(statement);
-    // Tier 1 is participation, so it cannot be an escalation of anything: the
-    // check is for bullets that claim execution or ownership.
-    if (!opening || opening.tier < 2) continue;
-    const tokens = scopeObjectTokens(statement);
-    if (!tokens.length) continue;
+    // Clause-scoped on BOTH sides. Reading only the statement-initial verb
+    // skipped a compound bullet entirely: "Contributed to the billing
+    // migration and led the payments rewrite" opens at tier 1, and the tier-3
+    // half was never compared to anything. It also skipped any bullet opening
+    // with a modifier, since factStatements does not split on commas, so
+    // "As tech lead, drove the migration" was invisible.
+    for (const clause of scopeClauses(statement)) {
+      const opening = openingScopeVerb(clause);
+      // Tier 1 is participation, so it cannot be an escalation of anything: the
+      // check is for bullets that claim execution or ownership.
+      if (!opening || opening.tier < 2) continue;
+      const tokens = scopeObjectTokens(clause);
+      if (!tokens.length) continue;
 
-    // Two shared tokens, the threshold `delegatedAuthorshipClaims` uses, except
-    // where the bullet has only one token to share. On one token alone,
-    // "Designed the onboarding automation" linked to "Supported the onboarding
-    // revamp for new hires" and reported two unrelated work items as one
-    // inflated claim. The single-token case is kept because a short bullet is
-    // the issue's own example: "Led the migration" against "Contributed to the
-    // migration" shares exactly `migration`, and it is 100% of what the bullet
-    // says rather than a fragment of it.
-    const required = Math.min(2, tokens.length);
-    const overlaps = sourceClauses.map(source => ({
-      source,
-      overlap: tokens.filter(token => source.tokens.has(token)).length,
-    }));
+      // Two shared tokens, the threshold `delegatedAuthorshipClaims` uses, except
+      // where the bullet has only one token to share. On one token alone,
+      // "Designed the onboarding automation" linked to "Supported the onboarding
+      // revamp for new hires" and reported two unrelated work items as one
+      // inflated claim. The single-token case is kept because a short bullet is
+      // the issue's own example: "Led the migration" against "Contributed to the
+      // migration" shares exactly `migration`, and it is 100% of what the bullet
+      // says rather than a fragment of it.
+      const required = Math.min(2, tokens.length);
+      const overlaps = sourceClauses.map(source => ({
+        source,
+        overlap: tokens.filter(token => source.tokens.has(token)).length,
+      }));
 
-    // Two thresholds, because the two questions pull in opposite directions.
-    // A link that ACCUSES has to be strict, since a wrong one invents an
-    // inflation. A link that VOUCHES has to be loose, since a missed one
-    // invents the same thing. Using the strict threshold for both made
-    // "I led that payments effort end to end" fail to rescue "Led the payments
-    // rewrite", because the restatement shared only `payments`.
-    const linked = overlaps.filter(({ overlap }) => overlap >= required);
-    if (!linked.length) continue;
-    const vouched = overlaps.some(({ overlap, source }) => overlap > 0 && source.tier >= opening.tier);
-    if (vouched) continue;
+      // Two thresholds, because the two questions pull in opposite directions.
+      // A link that ACCUSES has to be strict, since a wrong one invents an
+      // inflation. A link that VOUCHES has to be loose, since a missed one
+      // invents the same thing. Using the strict threshold for both made
+      // "I led that payments effort end to end" fail to rescue "Led the payments
+      // rewrite", because the restatement shared only `payments`.
+      const linked = overlaps.filter(({ overlap }) => overlap >= required);
+      if (!linked.length) continue;
+      const vouched = overlaps.some(({ overlap, source }) => overlap > 0 && source.tier >= opening.tier);
+      if (vouched) continue;
 
-    const closest = linked.reduce((best, next) => (next.overlap > best.overlap ? next : best));
-    claims.push({
-      kind: 'scope',
-      value: normalizeFact(statement),
-      line: statement,
-      sourceLine: closest.source.statement,
-    });
+      const closest = linked.reduce((best, next) => (next.overlap > best.overlap ? next : best));
+      claims.push({
+        kind: 'scope',
+        // The clause is the claim; the whole bullet is what gets quoted back,
+        // since a clause on its own reads as a fragment to whoever fixes cv.md.
+        value: normalizeFact(clause),
+        line: statement,
+        sourceLine: closest.source.statement,
+      });
+    }
   }
   return claims.filter((claim, index, all) => (
     all.findIndex(other => other.value === claim.value) === index
@@ -783,7 +800,11 @@ const ADOPTION_CHECKS = [
   },
   {
     target: /\bstandard\s+across\b/giu,
-    source: /\bstandard\b/iu,
+    // Inflection-tolerant like the other four. The bare word alone did not
+    // match the wording a source most often uses for this claim, so
+    // "Standardised the linter across every team" failed to evidence
+    // "Became standard across the platform teams" and blocked a truthful line.
+    source: /\bstandards?\b|\bstandardi[sz](?:e|es|ed|ing|ation)\b/iu,
   },
 ];
 
@@ -1508,6 +1529,30 @@ function runSelfTest() {
     scopeOf('Led the billing migration.', compound), ['led the billing migration']);
   equal('and the half that really is tier 3 still passes',
     scopeOf('Led the payments rewrite.', compound), []);
+  // The target side is clause-scoped too. Reading only the statement-initial
+  // verb skipped a compound bullet entirely, because it opens at tier 1 and
+  // the tier-3 half was never compared to anything.
+  equal('a compound TARGET bullet is checked clause by clause',
+    scopeOf('Contributed to the billing migration and led the payments rewrite.',
+      'Contributed to the payments rewrite.'),
+    ['led the payments rewrite']);
+  // factStatements does not split on commas, so a bullet opening with a
+  // modifier had no recognisable opening verb at all.
+  equal('a bullet opening with a modifier is still checked',
+    scopeOf('As tech lead, drove the migration.', 'Contributed to the migration.'),
+    ['drove the migration']);
+  // The whole bullet is still what gets quoted back, even though the clause is
+  // what gets claimed.
+  equal('the quoted CV line is the whole bullet, not the clause',
+    scopeInflationClaims('As tech lead, drove the migration.', 'Contributed to the migration.')
+      .map(claim => claim.line),
+    ['As tech lead, drove the migration']);
+  // "Led to" is causation, not a mandate. Splitting the target into clauses is
+  // what puts a mid-sentence "and led to ..." at the start of one, where it
+  // would otherwise read as a tier-3 ownership claim.
+  equal('led to is a result, not an ownership claim',
+    scopeOf('Refactored the pipeline and led to a faster speedup.', 'Contributed to the speedup.'),
+    []);
 
   // Several tier words are also ordinary nouns, so scoring every token let a
   // product name stand in for the verb: `drive` in "Google Drive" scored the
@@ -1563,6 +1608,17 @@ function runSelfTest() {
     adoptionOf('Adopted by 3 teams.', 'Three teams adopted the tool.'), []);
   equal('and a reach claim the source words as a phrase, not a compound',
     adoptionOf('Rolled out company-wide.', 'The tool went out across the whole company.'), []);
+  // `standard` was the one check whose source side was still a bare word, so
+  // the wording a source most often uses for this claim did not count.
+  equal('a standardised source evidences a standard-across claim',
+    adoptionOf('Became standard across the platform teams.',
+      'Standardised the linter across every team.'), []);
+  equal('and the plural noun does too',
+    adoptionOf('Became standard across the platform teams.',
+      'Set coding standards for every team.'), []);
+  equal('but a source that claims no standard at all is still caught',
+    adoptionOf('Became standard across the platform teams.', 'Implemented a linter.'),
+    ['standard across']);
   // Matched per statement: collapsing the document first let a phrase form
   // across a line break that neither line contains, and the resulting claim
   // had no CV line to quote back.
