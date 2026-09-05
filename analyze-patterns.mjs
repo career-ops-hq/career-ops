@@ -543,6 +543,41 @@ requirement_importance:
     if (got !== expected) failures.push(`detectVendor(${JSON.stringify(url)}) → ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
   }
 
+  // Report header fields survive the locale they were written in. French output
+  // puts a space before the colon and accents "Archétype"; both used to make the
+  // field parse as absent, silently. parseReport strips `**` first, so the cases
+  // below are given in that post-strip form. Call the pattern rather than the
+  // string: `subject.match(re)` makes CodeQL read these URL fixtures as patterns
+  // (js/incomplete-hostname-regexp) because of their unescaped host dots.
+  const headerCases = [
+    ['URL: https://job-boards.greenhouse.io/acme/jobs/1', REPORT_URL_RE, 'https://job-boards.greenhouse.io/acme/jobs/1'],
+    ['URL : https://job-boards.greenhouse.io/acme/jobs/1', REPORT_URL_RE, 'https://job-boards.greenhouse.io/acme/jobs/1'],
+    ['URL\u00a0: https://jobs.lever.co/acme/x', REPORT_URL_RE, 'https://jobs.lever.co/acme/x'],
+    ['Archetype: Delivery Manager', REPORT_ARCHETYPE_RE, 'Delivery Manager'],
+    ['Archétype : Delivery Manager', REPORT_ARCHETYPE_RE, 'Delivery Manager'],
+    ['Arquetipo: Delivery Manager', REPORT_ARCHETYPE_RE, 'Delivery Manager'],
+  ];
+  for (const [line, re, expected] of headerCases) {
+    const got = re.exec(line)?.[1] ?? null;
+    if (got !== expected) failures.push(`report header ${JSON.stringify(line)} → ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
+  }
+
+  // A header that is genuinely absent must still yield null, so the fix cannot
+  // turn "no field" into a false positive.
+  if (REPORT_URL_RE.test('Score: 4.4/5')) failures.push('REPORT_URL_RE matched a line with no URL field');
+
+  // A header field is single-line. A label split from its colon, or a value pushed to
+  // the next line, must not parse — otherwise the capture picks up whatever URL happens
+  // to follow in the document.
+  const splitHeaderCases = [
+    ['URL\n: https://elsewhere.example.com/x', REPORT_URL_RE],
+    ['URL :\nhttps://elsewhere.example.com/y', REPORT_URL_RE],
+    ['Archétype\n: Delivery Manager', REPORT_ARCHETYPE_RE],
+  ];
+  for (const [text, re] of splitHeaderCases) {
+    if (re.test(text)) failures.push(`split-line header parsed as valid: ${JSON.stringify(text)}`);
+  }
+
   // Via channel analysis (#1596): agency vs direct yield, normalized buckets.
   const viaRows = [
     { via: 'Hays', normalizedStatus: 'interview' },
@@ -831,6 +866,28 @@ function readTextIfExists(path) {
 }
 
 // --- Parse a single report file ---
+// --- Report header field patterns (locale-tolerant) ---
+//
+// A report header is written by the modes in the user's output language, and
+// French typography puts a space before a colon: `**URL :**`, `**Archétype :**`.
+// The original patterns required `URL:` and `Archetype:` with no space and no
+// accent, so every French report parsed as "field absent" — silently, since a
+// missing header field is a legitimate state for older reports and never raises.
+//
+// The failure is invisible and it empties the analysis rather than breaking it:
+// on a 224-report corpus, 128 reports lost their URL (so their ATS vendor fell
+// into the `unknown` bucket, leaving the vendor breakdown to speak for 1 report
+// out of 22 submitted) and 61 lost their archetype. Same shape as #3495.
+//
+// The whitespace class is horizontal-only: space, tab, and U+00A0, the one French
+// editors insert automatically. `\s` would also match a line break, letting a header
+// split across two lines parse as valid and capture a value that belongs to the next
+// line; a header field is single-line by definition, so the class is bounded rather
+// than left permissive. Keep the accent-less spellings: reports written before this
+// fix, and the `Arquetipo` Spanish variant, must keep parsing.
+const REPORT_URL_RE = /^URL[ \t\u00a0]*:[ \t\u00a0]*(https?:\/\/\S+)/im;
+const REPORT_ARCHETYPE_RE = /^(?:Arch[eé]type|Arquetipo)[ \t\u00a0]*:[ \t\u00a0]*(.+?)$/im;
+
 function parseReport(reportPath) {
   const content = readTextIfExists(reportPath);
   if (content === null) return null;
@@ -897,13 +954,13 @@ function parseReport(reportPath) {
   const compRegex = /\|\s*(?:Comp|Salary|Salario|Listed salary)\s*\|\s*(.*?)\s*\|/i;
   const domainRegex = /\|\s*(?:Domain|Dominio|Industry)\s*\|\s*(.*?)\s*\|/i;
 
-  // Fallback: report header field `Archetype: ...` or `Arquetipo: ...` (newer reports use this).
-  const headerArchRegex = /^(?:Archetype|Arquetipo):\s*(.+?)$/im;
+  // Fallback: report header field `Archetype: ...` (newer reports use this).
+  const headerArchRegex = REPORT_ARCHETYPE_RE;
 
   // Report header carries `**URL:**` between Score and PDF (see CLAUDE.md /
   // Pipeline Integrity). Capture the first http(s) URL on that line for vendor
   // detection; reports predating the field simply leave url null (→ unknown bucket).
-  const urlMatch = plain.match(/^URL:\s*(https?:\/\/\S+)/im);
+  const urlMatch = plain.match(REPORT_URL_RE);
   if (urlMatch && !report.url) report.url = urlMatch[1].trim().replace(/[)>\].,]+$/, '');
 
   const archMatch = plain.match(blockARegex) || plain.match(headerArchRegex);

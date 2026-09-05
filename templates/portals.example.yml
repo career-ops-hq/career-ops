@@ -31,6 +31,30 @@
 # scan_history:
 #   recheck_after_days: 30
 
+# -- Location-aware duplicate roles (optional, opt-in) --
+# By default two postings that share a company and a title are ONE role, however
+# many cities they name: an employer that opens one req per city would otherwise
+# leak a city variant into your pipeline on every scan.
+#
+# Set dedup_include_location: true to keep the city in that comparison, so
+# "Staff Engineer — London" and "Staff Engineer — Dublin" are two entries rather
+# than whichever one the ATS happened to return first. Turn it on when your
+# eligibility is location-bound (work authorization, relocation, an office you
+# must be near): location_filter cannot choose for you when it allows both
+# cities, and the arbitrary survivor may be the one you cannot take.
+# Expect more entries per scan at large multi-country employers.
+#
+# Rows that record no location (a tracker without a Location column, a processed
+# pipeline entry) still match every city, so a role you already applied to never
+# comes back city by city.
+#
+# A posting that names SEVERAL cities in one location field is compared as the
+# set of those cities, so a board that re-orders its own list ("London | Dublin"
+# becoming "Dublin | London") does not re-add a posting you already have.
+#
+# scan_history:
+#   dedup_include_location: true
+
 # -- Interamt.de searches (optional, German public sector) --
 # Read by scan-interamt.mjs (`npm run scan:interamt`), a separate Playwright
 # scanner for Interamt.de, a portal for German federal, state, and municipal

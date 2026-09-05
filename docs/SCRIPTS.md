@@ -578,6 +578,10 @@ Zero-token portal scanner. Runs configured local parsers for SSR/static career p
 
 `scan_history.recheck_after_days` in `portals.yml` lets old `added` URLs become eligible for recheck after the configured number of days. If absent, scan-history dedup keeps the historical behavior and dedups forever. Permanent invalid statuses such as blocked host and malformed URL remain permanent.
 
+`scan_history.dedup_include_location` (optional, opt-in, default off) adds the posting location to the company+role dedup key. Off, two postings that share a company and a title are one role however many cities they name — the collapse that keeps an employer with one req per city from leaking a city variant into the pipeline on every scan. On, `Staff Engineer — London` and `Staff Engineer — Dublin` stay two entries instead of the scan keeping whichever one the ATS returned first. Turn it on when eligibility is location-bound (work authorization, relocation, an office to be near): `location_filter` cannot discriminate between two cities it both allows, so the arbitrary survivor may be the city the user cannot legally take. Sources that record no location (a tracker without a Location column, a processed pipeline row) still seed a key matching every city, so a role already applied to never resurfaces city by city.
+
+The location component is the canonical **set** of the places a posting names, not the provider's display string. That field is free text and is often not one place: live Greenhouse boards pack several into one value with `;`, `|`, `/` or the word `or`, sometimes mixing two separators in the same value, and several providers here (greenhouse, ashby, eightfold, gem, ibm, echojobs) fold a multi-site role's extra cities into the string themselves in whatever order the upstream array arrived. Keying that string verbatim is stable only while the order holds, so a re-ordered list would read as a new posting and re-enter the pipeline. Splitting on those separators, normalizing each place, deduplicating and sorting makes the key depend on which places a posting names rather than the order it names them in. `,` is not a separator - it delimits city from region inside one place.
+
 For custom SSR pages, configure a tracked company with `scan_method: local_parser` and a `parser` block. The parser can be written in JavaScript, Python, or any language available as a local executable. Company-specific parsers usually already know their source URL and only need to print JSON jobs to stdout:
 
 ```yaml
@@ -724,17 +728,41 @@ node tracker.mjs sync --check             # diagnose corruption only, no write (
 node tracker.mjs query --status Applied --since 2026-05-01
 node tracker.mjs query --company acme --json
 node tracker.mjs history --id 42          # status transitions observed across syncs (Applied → Interview → ...)
-node tracker.mjs export                   # inverse: index → canonical markdown table on stdout
+node tracker.mjs export                   # inverse: index → markdown table on stdout
 node tracker.mjs export --out repaired.md # write to a file (existing file backed up to .bak first)
+node tracker.mjs export --out repaired.md --force  # write even when columns would be dropped
 ```
 
 `query` and `history` auto-resync when the markdown changed since the last sync, so the index can never serve stale reads.
 
 `sync` detects and reports the corruption classes markdown accumulates — mojibake placeholder cells, scores stranded in the status column, non-canonical statuses (resolved via `templates/states.yml` aliases), missing/malformed/duplicate ids, stray pipes — and normalizes them **in the index only**; the markdown is never modified. Fix at the source with `normalize-statuses.mjs` / `dedup-tracker.mjs`, then re-sync. Status changes between syncs accumulate in a `status_events` table, which gives `analyze-patterns.mjs` a real funnel instead of only the current snapshot.
 
-`export` is the inverse of `sync` (round-trip `md → db → md` is lossless for clean input — enforced by `test-all.mjs`). It writes to stdout by default and never touches `applications.md` unless you explicitly pass it as `--out`. Phase 2 of #918 (DB becomes source of truth, markdown becomes a rendered view) is a separate, explicit per-user opt-in — not part of this script yet.
+`export` is the inverse of `sync`. It writes to stdout by default and never touches `applications.md` unless you explicitly pass it as `--out`. Phase 2 of #918 (DB becomes source of truth, markdown becomes a rendered view) is a separate, explicit per-user opt-in — not part of this script yet.
 
-**Exit codes:** `0` success, `1` validation error, missing prerequisites (Node < 22.5, no `applications.md` to index), or corruption found by `sync --check`.
+**The round-trip carries the layout, not only the values (#3703).** `sync` maps columns by header NAME, so a customized tracker (a `Location`, `Via` or `URL` column, or one of your own) indexes correctly — but `export` used to write nine fixed columns in a fixed order under a fixed `# Applications Tracker` title, so adopting its output cost you those columns with no warning, right after `sync` reported a clean index. Losing the `URL` column in particular disables `merge-tracker.mjs`'s deterministic dedup pass, which is not visible in the file either. `export` now replays the header row it read, puts unmapped cells back in their own columns, and keeps the lines before and after the table (your own title, a legend, a trailing note) plus the file's line endings. The schema itself is still the canonical nine fields — extra columns ride along by position, so they are preserved by `export` but not queryable via `query`.
+
+**What "lossless" covers, exactly.** The guarantee is about *structure*, not bytes: `export` preserves the layout and every value it does not deliberately repair. Concretely it keeps the title, preamble and trailing lines *with their own whitespace* (they are copied, not re-rendered), the header and separator, the column set and every row's position in it, and CRLF vs LF. Enforced by `tracker-columns-tests.mjs`, including localized headers career-ops cannot name, unknown user columns, indented tables and indented prose.
+
+The round-trip `md → db → md` is **byte-identical** only for a one-table file that is already in canonical form and where `export` reports no losses. Three things change bytes without being losses, because each is either the point of the tool or cosmetic:
+
+- **Repairs.** `export` is offered as *a repaired copy you can review and adopt*, so it emits what `sync` normalized: canonical statuses, mojibake placeholders, a score recovered from the status column, reassigned duplicate ids. Status canonicalization can be silent — `aplicado` is a recognized alias in `templates/states.yml`, so `sync --check` reports no corruption and exports `Applied` anyway. That is the feature, not data loss.
+- **Whitespace inside table cells.** A column-aligned table (`| 1    | Acme   |`) or an indented table comes back single-spaced, because `export` renders row values rather than replaying raw rows.
+- Nothing else. Any *other* difference is reported (below) and gated.
+
+If you want to know what a run would change before adopting it, diff the export against the tracker rather than relying on the exit code: `node tracker.mjs export | diff data/applications.md -`.
+
+Everything else that cannot be reproduced is reported, never quietly changed. `export` names each one on stderr and `--out` over an existing file **refuses to write** until you re-run with `--force`:
+
+| Reported | Why it cannot be rebuilt |
+|----------|--------------------------|
+| A cell outside the columns the header declares | The header has no column to put it in |
+| A line between the first and last table row (a heading, a second table's header) | A single rebuilt table has nowhere to put it |
+| A row belonging to a later table (an `## Archive (2025)` section) | It was indexed against the **first** table's header, so re-emitting it there would move archived data into the active table under columns it never had |
+| A cell whose value had to be rewritten to survive as a cell (a stray `\|` folded into Notes comes back as `│`) | The value itself changed |
+
+Data loss is a decision you make, not a side effect of adopting a repaired copy.
+
+**Exit codes:** `0` success, `1` validation error, missing prerequisites (Node < 22.5, no `applications.md` to index), corruption found by `sync --check`, or `export --out` refusing to overwrite an existing file because something in it cannot be reproduced (re-run with `--force` to accept the loss). Nothing is written in that last case, so `1` from `export --out` always means the target is untouched.
 
 ---
 
