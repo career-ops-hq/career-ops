@@ -96,9 +96,10 @@ console.log('\n🧪 Testing user-configured template-variant carve-out...');
       fail(`lazy wiring returned ${JSON.stringify(configured)}`);
     }
     const source = readFileSync(join(ROOT, 'update-system.mjs'), 'utf8');
-    const callsHelper = /const configuredTemplateVariants = await loadConfiguredTemplateVariants\(\);/.test(source);
+    const callsHelper = /const configuredTemplateVariants = await loadConfiguredTemplateVariants\(\{[\s\S]*profilePath: join\(dataRoot, 'config', 'profile\.yml'\)/.test(source);
+    const readsThroughDataRoot = /readFileSync\(join\(dataRoot, \.\.\.file\.split\('\/'\)\)/.test(source);
     const passesToPrune = /staleSystemFiles\([\s\S]*configuredTemplateVariants/.test(source);
-    if (callsHelper && passesToPrune) pass('apply() passes lazy-resolved variants into staleSystemFiles()');
+    if (callsHelper && readsThroughDataRoot && passesToPrune) pass('apply() resolves configured variants and reads them through the data root');
     else fail('apply() lazy variant wiring is missing or disconnected from staleSystemFiles()');
   } finally {
     rmSync(dir, { recursive: true, force: true });
