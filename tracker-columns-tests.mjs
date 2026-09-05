@@ -358,12 +358,98 @@ if (!HAS_WEB) {
   } else {
     fail(`web reader: Notes past unknown column — got "${r && r.notes}"`);
   }
+  // Recognizing a column is not the same as delivering it: `location` is in
+  // tracker-aliases.json AND in WEB_FIELD, so detectColumnMap mapped it all
+  // along — and the emitter, written out by hand, dropped the value anyway.
+  // Same failure as Apply Link / Follow-up below, one step further along.
+  if (r && r.location === 'Remote') {
+    pass('web reader: Location column reaches the caller');
+  } else {
+    fail(`web reader: Location on 10-col tracker — got ${JSON.stringify(r)}`);
+  }
+  // A tracker predating the column keeps working; the field reads as "".
+  const LEGACY_NO_LOCATION = `| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | Applied | ✅ | — | seed row |
+`;
+  const noLoc = parseApplications(LEGACY_NO_LOCATION, ROOT)[0];
+  if (noLoc && noLoc.location === '' && noLoc.notes === 'seed row') {
+    pass('web reader: tracker without a Location column still parses, field empty');
+  } else {
+    fail(`web reader: tracker without Location — got ${JSON.stringify(noLoc)}`);
+  }
   // The web reader and the Node tooling must consume the IDENTICAL table.
   const webAliases = loadHeaderAliases(ROOT);
   if (JSON.stringify(webAliases) === JSON.stringify(HEADER_ALIASES) && Object.keys(webAliases).length > 0) {
     pass('web reader: alias table is byte-identical to tracker-parse HEADER_ALIASES');
   } else {
     fail(`web reader: alias table drifted from HEADER_ALIASES — web ${JSON.stringify(webAliases)} vs core ${JSON.stringify(HEADER_ALIASES)}`);
+  }
+
+  // Every column the SHARED alias table resolves has to reach the caller, not
+  // just be recognized: "apply link" → applylink and "follow-up" → followup are
+  // in tracker-aliases.json, but WEB_FIELD mapped neither, so the web read path
+  // detected both columns and then dropped their values on the floor.
+  const WEB_APPLY_FOLLOWUP = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Apply Link | Follow-up | Notes |
+|---|------|---------|------|-------|--------|-----|--------|------------|-----------|-------|
+| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | Applied | ✅ | — | [ad](https://example.com/jobs/1) | 2026-01-08 | seed row |
+`;
+  const wide = parseApplications(WEB_APPLY_FOLLOWUP, ROOT)[0];
+  if (wide && wide.applyLink === '[ad](https://example.com/jobs/1)' && wide.followUp === '2026-01-08') {
+    pass('web reader: Apply Link / Follow-up columns reach the caller');
+  } else {
+    fail(`web reader: Apply Link / Follow-up on 11-col tracker — got ${JSON.stringify(wide)}`);
+  }
+  if (wide && wide.notes === 'seed row' && wide.status === 'Applied') {
+    pass('web reader: Notes/Status unaffected by the two added fields');
+  } else {
+    fail(`web reader: Notes/Status on 11-col tracker — got ${JSON.stringify(wide)}`);
+  }
+  // A tracker predating those columns keeps working; the fields read as "".
+  // Its header IS recognized, so this covers the mapped branch with the two
+  // columns simply absent from the map.
+  const LEGACY_9COL = `| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | Applied | ✅ | — | seed row |
+`;
+  const legacy = parseApplications(LEGACY_9COL, ROOT)[0];
+  if (legacy && legacy.applyLink === '' && legacy.followUp === '' && legacy.notes === 'seed row') {
+    pass('web reader: 9-column tracker still parses, new fields empty');
+  } else {
+    fail(`web reader: 9-column tracker — got ${JSON.stringify(legacy)}`);
+  }
+  // The general rule the three field bugs are instances of: whatever WEB_FIELD
+  // names, a parsed row carries. Asserted on the shape rather than on any one
+  // field, so the next column added to the map cannot be dropped silently by
+  // an emitter that forgot it.
+  const { WEB_FIELD_NAMES } = await import('./web/src/lib/tracker-table.mjs');
+  const shaped = parseApplications(WEB_10COL, ROOT)[0];
+  const missing = WEB_FIELD_NAMES.filter((f) => !(f in shaped));
+  if (missing.length === 0) {
+    pass(`web reader: every WEB_FIELD name reaches the caller (${WEB_FIELD_NAMES.length} fields)`);
+  } else {
+    fail(`web reader: fields named by the map but absent from the row — ${missing.join(', ')}`);
+  }
+  // The fixed-order fallback is a SECOND path, reached only when no header is
+  // recognized at all — the shape of a tracker whose header row was edited or
+  // lost. The fixture above cannot reach it, so the branch that hard-codes the
+  // column order needs its own rows with no header above them.
+  const NO_HEADER = `| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | Applied | ✅ | — | seed row |
+`;
+  const positional = parseApplications(NO_HEADER, ROOT)[0];
+  if (
+    positional &&
+    positional.company === 'Acme' &&
+    positional.role === 'Engineer' &&
+    positional.applyLink === '' &&
+    positional.followUp === '' &&
+    positional.notes === 'seed row'
+  ) {
+    pass('web reader: headerless tracker takes the fixed-order path, new fields empty');
+  } else {
+    fail(`web reader: fixed-order fallback — got ${JSON.stringify(positional)}`);
   }
 }
 
