@@ -47,12 +47,24 @@
 // default at all — it would be one user's search profile silently applied to
 // everyone else's scan. Same contract as wttj and builtin.
 //
-// Availability note: a reviewer measured (2026-09-04) HTTP 403 with
-// `cf-mitigated: challenge` from two non-Mexican egresses, on both the search
-// paths and /robots.txt. Node's fetch cannot clear a JS challenge, and a
-// challenge page parses to zero cards. A board that answers every request with
-// a challenge therefore now throws (see the outage guard in fetch) instead of
-// returning [], which would have read as a healthy but empty board.
+// Availability note — the Cloudflare challenge is GEO-SCOPED (measured
+// 2026-09-04). From two non-Mexican egresses a reviewer got HTTP 403 with
+// `cf-mitigated: challenge` on both the search paths and /robots.txt. From a
+// Mexican residential egress (AS8151 Uninet, Nuevo Leon) the same four URLs
+// answer HTTP 200 with no challenge: /robots.txt (699 B), page 1 (22 cards),
+// -pagina-2 (20 cards) and a state-scoped path (21 cards).
+//
+// So the board is reachable for its intended audience — candidates in Mexico —
+// and not reachable from a foreign CI runner. Node's fetch cannot clear a JS
+// challenge, and a challenge page parses to zero cards, so a challenged run
+// now THROWS (see the outage guard in fetch) rather than returning [], which
+// would have read downstream as a healthy board that simply had no jobs.
+//
+// robots.txt (readable from Mexico, quoted 2026-09-04): `User-agent: *`
+// disallows /Cuenta/, /Ayuda/, /Empleo/Guardar_Oferta/, /rest, /blog/wp-login
+// and two /empresas/ paths. The /empleos/ search paths this provider reads are
+// NOT disallowed, and no crawler is name-blocked except LinkedInBot. This
+// provider requests only /empleos/ pages.
 
 import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
