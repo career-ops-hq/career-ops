@@ -115,6 +115,17 @@ console.log('\n🧪 Testing user-configured template-variant carve-out...');
     } else {
       fail(`apply snapshot did not preserve the data-root variant: ${JSON.stringify(snapshot.preservedPaths)}`);
     }
+    const unreadableSnapshot = await snapshotConfiguredTemplateVariants({
+      dataRoot: dir,
+      remoteFiles: ['templates/cv-template.bw.html'],
+      readRemoteContent: () => { throw new Error('upstream blob unavailable'); },
+    });
+    if (unreadableSnapshot.preservedPaths.length === 1
+      && unreadableSnapshot.preservedPaths[0] === 'templates/cv-template.bw.html') {
+      pass('an unreadable upstream blob fails closed and preserves the configured local variant');
+    } else {
+      fail(`unreadable upstream blob did not preserve the variant: ${JSON.stringify(unreadableSnapshot.preservedPaths)}`);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
