@@ -74,6 +74,7 @@
 //     keywords: ["AI", "大模型", "Agent"]
 
 import { createDecipheriv } from 'crypto';
+import { sleep } from './_http.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 
 const API = 'https://app.mokahr.com/api/outer/ats-apply/website/jobs/v2';
@@ -216,14 +217,13 @@ export default {
 
     /** @type {Map<string, import('./_types.js').Job>} */
     const seen = new Map();
-    const sleep = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     let firstRequest = true;
     let succeededOnce = false;
 
     for (const keyword of keywords) {
       for (let page = 1; page <= maxPages; page++) {
         if (firstRequest) firstRequest = false;
-        else await sleep(INTER_PAGE_DELAY_MS);
+        else await sleep(INTER_PAGE_DELAY_MS, ctx);
         const offset = (page - 1) * MAX_LIMIT;
 
         let envelope;
