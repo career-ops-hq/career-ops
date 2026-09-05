@@ -55,9 +55,9 @@ import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
+import { pass, fail, warn, run, runAcrossUtcDay, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
-import { collectMjsFiles } from './lib/mjs-files.mjs';
+import { collectMjsFiles, isNestedCheckout } from './lib/mjs-files.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -331,6 +331,7 @@ const scripts = [
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
   { name: 'calibrate.mjs --self-test', expectExit: 0 },
   { name: 'check-table-freshness.mjs --self-test', expectExit: 0 },
+  { name: 'check-jd-archive.mjs --self-test', expectExit: 0 },
   { name: 'upskill.mjs --self-test', expectExit: 0 },
   { name: 'detect-reposts.mjs --self-test', expectExit: 0 },
   { name: 'rank-pipeline.mjs --self-test', expectExit: 0 },
@@ -413,6 +414,14 @@ try {
     if (dirname(src) === ROOT && exclude.includes(name)) return;
     const stat = statSync(src);
     if (stat.isDirectory()) {
+      // A linked worktree is a whole second checkout of this repo and carries a
+      // `.git` FILE, not a directory, so the name-based exclusion above never
+      // fires on one (#3499). Copying it doubles this section's copy cost and
+      // seeds the throwaway tree with a stale duplicate of every script.
+      // Skipped below the root ONLY: `src === ROOT` on the first call, and
+      // ROOT's own `.git` is legitimately a file when the suite is being run
+      // FROM a worktree — testing it there would copy nothing at all.
+      if (src !== ROOT && isNestedCheckout(src)) return;
       mkdirSync(dest, { recursive: true });
       for (const entry of readdirSync(src)) {
         copyDirSync(join(src, entry), join(dest, entry), exclude);
@@ -650,9 +659,16 @@ try {
     hiddenScriptMetric,
     '<html><body><script>const claim = "500 users";</script\t\n bar><p>Generated CV</p></body></html>'
   );
+  // The metric must be one NO real cv.md can support. verify-cv-facts.mjs
+  // validates against the LIVE source files, so a plausible fixture number
+  // silently inverts this assertion for any user whose CV happens to contain
+  // it: on a checkout whose cv.md read "~500 active users/month", the old
+  // "500 users" fixture was genuinely SUPPORTED, verify-cv-facts correctly
+  // declined to flag it, and this test reported that correct behaviour as a
+  // miss. The test passed or failed depending on whose CV was checked out.
   writeFileSync(
     visibleMetric,
-    '<html><body><p>Improved onboarding for 500 users.</p></body></html>'
+    '<html><body><p>Improved onboarding for 918273645 users.</p></body></html>'
   );
 
   const hiddenResult = run(NODE, ['verify-cv-facts.mjs', hiddenScriptMetric], {
@@ -1788,21 +1804,29 @@ for (const f of skillEntrypoints) {
   }
 }
 
-// The plugin manifest ships in two locations: .claude-plugin/plugin.json is
-// canonical (Claude Code + Copilot CLI both read it), and .github/plugin/
+// The plugin manifest ships in three locations: .claude-plugin/plugin.json is
+// canonical (Claude Code + Copilot CLI both read it); .github/plugin/
 // plugin.json exists only because the awesome-copilot marketplace validator
-// accepts just three paths and the Claude-compat one is not among them. Both
-// are bumped by release-please; this assert makes any other divergence fail CI
-// loudly instead of shipping two drifting manifests.
+// accepts just three paths and the Claude-compat one is not among them; and
+// .codex-plugin/plugin.json is the path the awesome-ai-plugins catalogue
+// resolves a Codex plugin's install_url to. All are bumped by release-please;
+// this assert makes any other divergence fail CI loudly instead of shipping
+// drifting manifests.
 {
   const canonManifest = readFile('.claude-plugin/plugin.json');
-  const copilotManifest = fileExists('.github/plugin/plugin.json') ? readFile('.github/plugin/plugin.json') : null;
-  if (copilotManifest === null) {
-    fail('.github/plugin/plugin.json missing — awesome-copilot validator needs it (mirror of .claude-plugin/plugin.json)');
-  } else if (canonManifest === copilotManifest) {
-    pass('plugin.json mirror (.github/plugin/) is byte-identical to the canonical manifest');
-  } else {
-    fail('plugin.json mirror (.github/plugin/) DIVERGED from .claude-plugin/plugin.json — edit the canonical one and copy it verbatim');
+  const mirrors = [
+    ['.github/plugin/plugin.json', 'awesome-copilot validator needs it'],
+    ['.codex-plugin/plugin.json', 'awesome-ai-plugins resolves the Codex install_url to it'],
+  ];
+  for (const [mirrorPath, why] of mirrors) {
+    const mirror = fileExists(mirrorPath) ? readFile(mirrorPath) : null;
+    if (mirror === null) {
+      fail(`${mirrorPath} missing — ${why} (mirror of .claude-plugin/plugin.json)`);
+    } else if (canonManifest === mirror) {
+      pass(`plugin.json mirror (${mirrorPath}) is byte-identical to the canonical manifest`);
+    } else {
+      fail(`plugin.json mirror (${mirrorPath}) DIVERGED from .claude-plugin/plugin.json — edit the canonical one and copy it verbatim`);
+    }
   }
 }
 
@@ -2440,11 +2464,62 @@ if (
   fail('batch final JSON does not require typed, escaped serialization');
 }
 
-const batchTrackerStep = batchPrompt.match(/### Step 5 \u2014 Tracker TSV Line[\s\S]*?### Step 6 \u2014 Final JSON/)?.[0] ?? '';
+// Anchored on the step NUMBER, not the section's wording: the title used to be
+// matched verbatim, so rewording it ("TSV Line" → "TSV Row" when the format
+// gained a header row, #3517) left this matching nothing and failing on the
+// empty string rather than on the thing it asserts.
+const batchTrackerStep = batchPrompt.match(/### Step 5 \u2014 [^\n]*[\s\S]*?### Step 6 \u2014 Final JSON/)?.[0] ?? '';
 if (/\{\{REPORT_NUM\}\}\\t\{\{DATE\}\}/.test(batchTrackerStep) && !/Compute `\{next_num\}`/.test(batchTrackerStep)) {
   pass('batch workers use the coordinator-reserved tracker number');
 } else {
   fail('batch workers still compute tracker numbers independently');
+}
+
+// ...and Step 5 must still describe the FORMAT it writes. The assertion above
+// cannot see that: a prompt that dropped the header row, the additions path, or
+// the one-data-row rule would still carry `{{REPORT_NUM}}\t{{DATE}}` and pass,
+// while telling workers to emit the headerless form — the one where score and
+// status are told apart by content, with a case that has no answer (#3517).
+// The labels come from tracker-parse rather than a list here, so this follows
+// the format instead of restating it and drifting.
+const { TSV_REQUIRED_FIELDS: REQUIRED_TSV_LABELS } = await import(pathToFileURL(join(ROOT, 'tracker-parse.mjs')).href);
+// The prompt writes tabs as the literal two-character escape, not real tabs.
+const batchStepLines = batchTrackerStep.split('\n');
+const batchTsvLines = batchStepLines.filter(l => l.includes('\\t'));
+const batchTsvLabels = (batchTsvLines[0] ?? '').trim().split('\\t').map(s => s.trim());
+const batchLabelsMissing = REQUIRED_TSV_LABELS.filter(f => !batchTsvLabels.includes(f));
+// Width parity, NOT width == REQUIRED_TSV_LABELS.length: the prompt carries the
+// optional `notes` and `url` columns on purpose (url is the deterministic dedup
+// key #1298 added here), so pinning the count to the required set would forbid
+// them. What must hold is that the two lines describe the SAME row — a header
+// with an extra label over a short data row is a template that teaches a
+// shifted row.
+const batchDataFields = (batchTsvLines[1] ?? '').trim().split('\\t');
+// Structure, not prose: the labels line must be immediately followed by the
+// data row, so the section shows ONE headed block rather than two examples that
+// happen to sit in the same step. The instruction sentence is matched exactly
+// rather than by keyword — `/two TSV lines/i` also matches "do NOT write two
+// TSV lines", which is the polarity trap that lets a reversed instruction pass.
+const batchHeaderIdx = batchStepLines.findIndex(l => l.includes('\\t'));
+// Identity, not just "the next line mentions the placeholder": a prose line
+// carrying {{REPORT_NUM}} between the two fence lines would satisfy a contains
+// check while batchDataFields went on reading the real data row further down —
+// adjacency and width would then be describing different lines, and a prompt
+// that split the block would pass.
+const batchRowFollowsHeader = batchHeaderIdx >= 0
+  && batchStepLines[batchHeaderIdx + 1] === batchTsvLines[1]
+  && (batchTsvLines[1] ?? '').includes('{{REPORT_NUM}}');
+if (
+  batchTsvLines.length === 2 &&
+  batchLabelsMissing.length === 0 &&
+  batchDataFields.length === batchTsvLabels.length &&
+  batchRowFollowsHeader &&
+  /batch\/tracker-additions\//.test(batchTrackerStep) &&
+  /Write exactly two TSV lines/.test(batchTrackerStep)
+) {
+  pass('batch Step 5 specifies the headed tracker-addition format (labels, one data row, path)');
+} else {
+  fail(`batch Step 5 no longer specifies the headed TSV format — tab lines: ${batchTsvLines.length}, missing labels: ${batchLabelsMissing.join(', ') || 'none'}, labels/fields: ${batchTsvLabels.length}/${batchDataFields.length}, data row follows header: ${batchRowFollowsHeader}`);
 }
 
 const batchMachineSummary = batchPrompt.match(/#### Machine Summary[\s\S]*?### Step 3 \u2014 Save the Report/)?.[0] ?? '';
@@ -2496,6 +2571,18 @@ for (const header of ['podsumowanie zawodowe', 'doświadczenie zawodowe', 'wyksz
   }
 }
 
+// Same gap, same two shipped Chinese markets (#3658): modes/zh-TW and modes/zh
+// rendered titles the alias table could not name, so the guard was disabled AND
+// cv.sections — the documented way to correct an order — silently did nothing.
+// Both scripts are required: a CV written in either renders through this table.
+for (const header of ['專業摘要', '工作經歷', '學歷', '證照', '技能', '专业摘要', '工作经历', '学历', '证书', '项目']) {
+  if (generatePdfScript.includes(`['${header}',`)) {
+    pass(`SECTION_ALIASES maps Chinese header: ${header}`);
+  } else {
+    fail(`SECTION_ALIASES missing Chinese header: ${header}`);
+  }
+}
+
 // generate-pdf.mjs imports playwright at module scope; degrade to a warning
 // rather than crashing the suite where it is not installed.
 let pdfModule = null;
@@ -2522,6 +2609,12 @@ if (pdfModule) {
     ['Umiejetnosci', 'skills'],      // diacritics stripped
     ['Work Experience', 'experience'], // English must be unchanged
     ['Core Competencies', 'competencies'],
+    ['專業摘要', 'summary'],       // Traditional (modes/zh-TW)
+    ['工作經歷', 'experience'],
+    ['學歷', 'education'],
+    ['专业摘要', 'summary'],       // Simplified (modes/zh)
+    ['工作经历', 'experience'],
+    ['学历', 'education'],
   ];
   let keysOk = true;
   for (const [title, expected] of keyCases) {
@@ -2531,7 +2624,7 @@ if (pdfModule) {
       keysOk = false;
     }
   }
-  if (keysOk) pass(`sectionKey resolves all ${keyCases.length} PL/EN heading spellings`);
+  if (keysOk) pass(`sectionKey resolves all ${keyCases.length} PL/EN/ZH heading spellings`);
 
   // Hermetic cv.md stand-in: passed in directly, so the test does not depend on
   // a cv.md existing in the checkout (it is gitignored).
@@ -2551,6 +2644,13 @@ if (pdfModule) {
   ]);
   const enMisordered = titlesToHtml([
     'Professional Summary', 'Education', 'Work Experience',
+  ]);
+  // Education hoisted above 工作經歷 — the Chinese half of #3658.
+  const zhMisordered = titlesToHtml([
+    '專業摘要', '學歷', '工作經歷',
+  ]);
+  const zhCorrect = titlesToHtml([
+    '专业摘要', '工作经历', '学历', '证书', '技能',
   ]);
 
   const throws = (html, opts) => {
@@ -2573,6 +2673,18 @@ if (pdfModule) {
     pass('English CV order check still rejects divergence (no regression)');
   } else {
     fail('English CV order check regressed');
+  }
+
+  if (throws(zhMisordered)) {
+    pass('Traditional Chinese CV with Education before Work Experience is rejected');
+  } else {
+    fail('Traditional Chinese CV with Education before Work Experience was NOT rejected (guard is a no-op)');
+  }
+
+  if (!throws(zhCorrect)) {
+    pass('Simplified Chinese CV in cv.md order is accepted');
+  } else {
+    fail('Simplified Chinese CV in cv.md order was wrongly rejected');
   }
 
   // --allow-reorder must keep downgrading the divergence to a warning now that
@@ -6764,8 +6876,6 @@ if (fileExists('VERSION')) {
 
 console.log('\n12. archive-posting.mjs');
 
-const todayStr = new Date().toISOString().split('T')[0];
-
 // dry-run: URL-based company detection across each supported ATS
 for (const [url, expected] of [
   ['https://boards.greenhouse.io/openai/jobs/123', 'openai'],
@@ -6789,9 +6899,13 @@ overrideOut?.includes('Acme') && overrideOut?.includes('staff-engineer')
   ? pass('dry-run: --company and --role overrides respected')
   : fail('dry-run: --company / --role overrides not reflected in output');
 
-// dry-run: output always contains a local:jds/ reference and today's date
-const refOut = run(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
-refOut?.includes('local:jds/') && refOut?.includes(todayStr)
+// dry-run: output always contains a local:jds/ reference and today's date.
+// The date the child prints is its own clock read, so it is compared against
+// the day(s) spanning the call rather than one captured up-section — see
+// runAcrossUtcDay() for why a single capture fails a run that crosses
+// midnight UTC (#3816).
+const { out: refOut, days: refDays } = runAcrossUtcDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
+refOut?.includes('local:jds/') && refDays.some((day) => refOut?.includes(day))
   ? pass('dry-run: local:jds/ reference and date emitted')
   : fail('dry-run: reference or date missing from output');
 
@@ -6839,8 +6953,8 @@ reportSpaceOut?.includes('jds/042-') && reportSpaceOut?.toLowerCase().includes('
   : fail('--report N: swallowed the URL or dropped the report number');
 
 // omitting --report leaves the historical filename shape untouched
-const noReportOut = run(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
-noReportOut?.includes(`jds/${todayStr}_`)
+const { out: noReportOut, days: noReportDays } = runAcrossUtcDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
+noReportDays.some((day) => noReportOut?.includes(`jds/${day}_`))
   ? pass('no --report: filename shape unchanged')
   : fail('no --report: filename shape regressed');
 
@@ -8160,6 +8274,96 @@ try {
   }
 } catch (e) {
   fail(`title filter acronym tests crashed: ${e.message}`);
+}
+
+// ── 11c. TITLE FILTER OVERRIDES — per-company broadened title net ──
+console.log('\n11c. Title filter overrides (scan-ats-full.mjs per-company broadening)');
+try {
+  const { buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildTitleFilter } =
+    await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+
+  const titleFilterConfig = {
+    positive: ['instructional designer', 'edtech'],
+    negative: ['intern'],
+  };
+  const overridesConfig = [
+    {
+      companies: ['uwaterloo', 'UBC'], // mixed case — matching must be case-insensitive
+      positive_extra: ['Administrator', 'Coordinator', 'Registrar'],
+    },
+  ];
+  const overridesMap = buildTitleFilterOverrides(overridesConfig);
+  const filter = buildTitleFilterWithOverrides(titleFilterConfig, overridesMap);
+
+  // A company matching an override gets the broadened net applied.
+  if (filter('Program Administrator', 'uwaterloo') === true) {
+    pass('title_filter_overrides: an override-listed company matches on positive_extra keywords');
+  } else {
+    fail('title_filter_overrides: override-listed company should match on positive_extra');
+  }
+  if (filter('Program Administrator', 'UBC') === true) {
+    pass('title_filter_overrides: company-slug matching is case-insensitive');
+  } else {
+    fail('title_filter_overrides: company-slug matching should be case-insensitive');
+  }
+
+  // The global negative list still applies even under an override.
+  if (filter('Administrator Intern', 'uwaterloo') === false) {
+    pass('title_filter_overrides: global negative keywords still reject override matches');
+  } else {
+    fail('title_filter_overrides: global negative list should still apply under an override');
+  }
+
+  // A company NOT in any override list is completely unaffected — regression
+  // guard: the override mechanism must be a strict no-op for everyone else.
+  if (filter('Program Administrator', 'some-other-company') === false) {
+    pass('title_filter_overrides: a non-listed company is unaffected by positive_extra');
+  } else {
+    fail('title_filter_overrides: a non-listed company must not get the broadened net');
+  }
+  if (filter('Program Administrator', undefined) === false) {
+    pass('title_filter_overrides: no company slug at all behaves like the plain global filter');
+  } else {
+    fail('title_filter_overrides: missing company slug should fall back to the global filter only');
+  }
+  // Titles that already pass the global filter still pass, override or not.
+  const plain = buildTitleFilter(titleFilterConfig);
+  if (filter('Instructional Designer', 'some-other-company') === plain('Instructional Designer')) {
+    pass('title_filter_overrides: global-filter-passing titles are unaffected by the override mechanism');
+  } else {
+    fail('title_filter_overrides: global filter behavior must be identical outside overrides');
+  }
+
+  // An override with an empty/missing positive_extra doesn't crash and adds nothing.
+  const emptyOverridesMap = buildTitleFilterOverrides([
+    { companies: ['uwaterloo'], positive_extra: [] },
+    { companies: ['fanshawec'] }, // positive_extra missing entirely
+  ]);
+  const emptyFilter = buildTitleFilterWithOverrides(titleFilterConfig, emptyOverridesMap);
+  if (emptyFilter('Program Administrator', 'uwaterloo') === false && emptyFilter('Program Administrator', 'fanshawec') === false) {
+    pass('title_filter_overrides: empty/missing positive_extra does not crash and adds no matches');
+  } else {
+    fail('title_filter_overrides: empty/missing positive_extra should be a no-op, not a crash');
+  }
+
+  // Malformed title_filter_overrides (not an array, junk entries) must not crash.
+  const junkMap = buildTitleFilterOverrides('not-an-array');
+  const junkMap2 = buildTitleFilterOverrides([null, 42, { companies: 'not-an-array' }, { companies: ['x'], positive_extra: 'not-an-array' }]);
+  if (junkMap.size === 0 && junkMap2.size === 0) {
+    pass('buildTitleFilterOverrides ignores malformed title_filter_overrides without crashing');
+  } else {
+    fail('buildTitleFilterOverrides should ignore malformed entries and produce an empty map');
+  }
+
+  // No overrides at all (absent config) → identical behavior to buildTitleFilter directly.
+  const noOverridesFilter = buildTitleFilterWithOverrides(titleFilterConfig, buildTitleFilterOverrides(undefined));
+  if (noOverridesFilter('Coordinator', 'uwaterloo') === plain('Coordinator') && noOverridesFilter('Coordinator', 'uwaterloo') === false) {
+    pass('title_filter_overrides: absent title_filter_overrides is a strict no-op');
+  } else {
+    fail('title_filter_overrides: absent config should behave exactly like buildTitleFilter alone');
+  }
+} catch (e) {
+  fail(`title filter overrides tests crashed: ${e.message}`);
 }
 
 // ── 12. FOLLOW-UP CADENCE LOGIC ─────────────────────────────────
@@ -9587,6 +9791,40 @@ try {
     pass('all headless evaluators use the shared atomic report allocator');
   } else {
     fail(`headless evaluators still carry private max+1 allocators: ${unmigratedEvaluators.join(', ')}`);
+  }
+
+  // Same family, second contract (#3795): every headless evaluator writes
+  // `**URL:**` into its report header, per AGENTS.md Pipeline Integrity rule 3.
+  // The report is where the posting URL survives the posting, and it is the only
+  // place merge-tracker.mjs's resolveReportUrl() looks -- a report without the
+  // line yields `no-url`, so the row can never be backfilled and stays outside
+  // the deterministic URL dedup key, the tier merge-tracker tries FIRST and the
+  // one that can prove two same-title rows are different openings.
+  //
+  // Two halves, because the line is worthless without a value to put in it:
+  // the header must be written, AND the evaluator must have somewhere to
+  // receive a posting URL from. Absent one, `(pasted)` is the honest value and
+  // keeps the field present; normalizeUrl derives no key from it, so it cannot
+  // hand every pasted row the same key.
+  const urlHeaderRe  = /\*\*URL:\*\*/;
+  const urlSourceRe  = /--posting-url|\bpostingUrl\b|\$\{input \|\| '\(pasted\)'\}/;
+  // openai-eval.mjs and ollama-eval.mjs gain the same header in #3797, which
+  // owns those two files. Named rather than skipped, and the list is asserted
+  // to be EXACTLY the files still missing the header: once #3797 lands this
+  // fails until the names are removed, so the exemption cannot outlive its
+  // reason and quietly become permanent coverage loss.
+  const pendingUrlHeader = ['openai-eval.mjs', 'ollama-eval.mjs'];
+  const missingUrlHeader = evaluatorSources
+    .filter(([, source]) => !urlHeaderRe.test(source) || !urlSourceRe.test(source))
+    .map(([name]) => name);
+  const staleExemptions = pendingUrlHeader.filter(name => !missingUrlHeader.includes(name));
+  const unexemptedGaps  = missingUrlHeader.filter(name => !pendingUrlHeader.includes(name));
+  if (unexemptedGaps.length > 0) {
+    fail(`headless evaluators write a report with no **URL:** header, so their rows can never reach the URL dedup key: ${unexemptedGaps.join(', ')}`);
+  } else if (staleExemptions.length > 0) {
+    fail(`stale #3797 exemption — these now carry the **URL:** header, remove them from pendingUrlHeader: ${staleExemptions.join(', ')}`);
+  } else {
+    pass('every headless evaluator outside the #3797 exemption writes **URL:** and takes a posting URL');
   }
 
   // --count N: contiguous range from an empty dir.
@@ -12274,11 +12512,15 @@ try {
     // to LEGACY_COLMAP (#2274). On a plain 9-column table the fallback happens
     // to line up and hides the bug; with a Location column inserted, the Score
     // cell is read from Location instead — an ES tracker scored "Remote".
+    // `date` is not in REQUIRED_HEADER_FIELDS, so a missing `fecha` alias does
+    // not fail the header — it resolves with no date column and every row comes
+    // back with an empty date (#3705). Assert the Fecha column is actually
+    // resolved, not silently absent.
     const trackerParse = await import(pathToFileURL(join(ROOT, 'tracker-parse.mjs')).href);
     const esHeader = '| # | Fecha | Empresa | Puesto | Location | Score | Status | PDF | Report | Notes |';
     const esMap = trackerParse.detectColumns([esHeader]);
-    if (esMap && esMap.score === 6 && esMap.company === 3 && esMap.role === 4 && esMap.location === 5) {
-      pass('a fully localized header maps through the alias table (#2274)');
+    if (esMap && esMap.date === 2 && esMap.score === 6 && esMap.company === 3 && esMap.role === 4 && esMap.location === 5) {
+      pass('a fully localized header maps through the alias table (#2274, #3705)');
     } else {
       fail(`localized header did not map: ${JSON.stringify(esMap)}`);
     }
@@ -18172,6 +18414,143 @@ try {
   }
 } catch (e) {
   fail(`gmail isCleanUrl tests crashed: ${e.message}`);
+}
+
+// check-jd-archive.mjs's own --self-test (invoked above via the CLI-check
+// table) covers the finding logic on synthetic fixtures. This section pins
+// the wiring: the script ships, updates, is documented, the mode files state
+// the archival step as required (not conditional), and the checker stays
+// strictly read-only — it reports missing archives; it must never be able to
+// "fix" one itself by writing a report or a jds/ file.
+
+console.log('\n75. JD-archive validator wiring + read-only boundary (#2789)');
+
+try {
+  const jdArchiveSrc = readFile('check-jd-archive.mjs');
+
+  const updaterSrc = readFile('update-system.mjs');
+  const jdArchiveSysBlock = (updaterSrc.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
+  if (jdArchiveSysBlock.includes("'check-jd-archive.mjs'")) {
+    pass('check-jd-archive.mjs is in update-system.mjs SYSTEM_PATHS (shipped + updatable)');
+  } else {
+    fail('check-jd-archive.mjs is NOT in SYSTEM_PATHS — updates would never deliver it');
+  }
+
+  const pkg = JSON.parse(readFile('package.json'));
+  if (pkg.scripts && pkg.scripts['jd-archive'] === 'node check-jd-archive.mjs') {
+    pass('package.json exposes npm run jd-archive');
+  } else {
+    fail('package.json missing the jd-archive script entry');
+  }
+
+  const scriptsDoc = readFile('docs/SCRIPTS.md');
+  if (scriptsDoc.includes('## check-jd-archive') && scriptsDoc.includes('missing-jd-archive')) {
+    pass('docs/SCRIPTS.md documents check-jd-archive (section + finding type)');
+  } else {
+    fail('docs/SCRIPTS.md missing the check-jd-archive section');
+  }
+
+  const agentsDoc = readFile('AGENTS.md');
+  if (agentsDoc.includes('`check-jd-archive.mjs`')) {
+    pass('AGENTS.md Main Files table lists check-jd-archive.mjs');
+  } else {
+    fail('AGENTS.md Main Files table missing check-jd-archive.mjs');
+  }
+  if (/REQUIRED.*Job Description \(archived verbatim\)|Job Description \(archived verbatim\).*REQUIRED/.test(agentsDoc)) {
+    pass('AGENTS.md states the JD-archive section as required, not conditional');
+  } else {
+    fail('AGENTS.md does not state the JD-archive section as required');
+  }
+
+  const ofertaDoc = readFile('modes/oferta.md');
+  if (ofertaDoc.includes('## Job Description (archived verbatim)')) {
+    pass('modes/oferta.md report template carries a Job Description (archived verbatim) section');
+  } else {
+    fail('modes/oferta.md report template missing the Job Description (archived verbatim) section');
+  }
+  if (/JD archival \(required, #2789\)/.test(ofertaDoc)) {
+    pass('modes/oferta.md states JD archival as required (matches the Machine Summary "required" phrasing style)');
+  } else {
+    fail('modes/oferta.md does not state JD archival as a required step');
+  }
+
+  const pdfDoc = readFile('modes/pdf.md');
+  if (!/write the JD to a scratch file[\s\S]{0,20}if it isn't already one/.test(pdfDoc)) {
+    pass('modes/pdf.md no longer phrases JD archival as conditional ("if it isn\'t already one")');
+  } else {
+    fail('modes/pdf.md still phrases JD archival as conditional, not required');
+  }
+  if (pdfDoc.includes('JD archival (required, #2789)')) {
+    pass('modes/pdf.md states JD archival as a required step');
+  } else {
+    fail('modes/pdf.md does not state JD archival as a required step');
+  }
+
+  // Read-only import boundary: the ONLY fs capabilities check-jd-archive.mjs
+  // may hold for scanning reports/jds are readFileSync/readdirSync/existsSync.
+  // It also imports mkdtempSync/mkdirSync/writeFileSync/rmSync — but ONLY for
+  // building its own self-test fixtures in a temp dir, never for reports/ or
+  // jds/. The boundary check below allows the self-test-fixture write APIs by
+  // name but asserts they never appear outside the self-test function body.
+  const SELF_TEST_ONLY_FS = new Set(['mkdtempSync', 'mkdirSync', 'writeFileSync', 'rmSync']);
+  const READ_ONLY_FS = new Set(['readFileSync', 'readdirSync', 'existsSync']);
+  const fsImportMatch = jdArchiveSrc.match(/import\s*\{([^}]*)\}\s*from\s*['"](?:node:)?fs['"]/);
+  const fsNames = fsImportMatch ? fsImportMatch[1].split(',').map(s => s.trim()).filter(Boolean) : [];
+  const unexpected = fsNames.filter(n => !READ_ONLY_FS.has(n) && !SELF_TEST_ONLY_FS.has(n));
+  if (fsNames.length > 0 && unexpected.length === 0) {
+    pass('check-jd-archive.mjs fs imports are limited to read-only scanning APIs plus self-test-fixture builders');
+  } else {
+    fail(`check-jd-archive.mjs fs import boundary violated: ${unexpected.join(', ') || 'no fs import matched'}`);
+  }
+
+  // The self-test-only write APIs must never be called from checkJdArchive,
+  // hasEmbeddedJdArchive, or parseReportFilename — only from runSelfTest.
+  // Extracting that function's body needs brace-counting, not a greedy
+  // regex: `[\s\S]*` backtracks to the LAST `\n}` in the whole file (e.g. the
+  // CLI-invocation block at the end), so `.replace(selfTestBody, '')` could
+  // strip out everything from runSelfTest onward — including real code after
+  // it — and a stray write call there would never get scanned, silently
+  // passing the very boundary check this is meant to enforce (CodeRabbit,
+  // PR #2791). Walk brace depth from the opening `{` instead, so nested
+  // blocks/arrow functions inside runSelfTest don't end the match early
+  // either.
+  const runSelfTestStart = jdArchiveSrc.indexOf('function runSelfTest()');
+  let selfTestBody = '';
+  if (runSelfTestStart !== -1) {
+    const openBrace = jdArchiveSrc.indexOf('{', runSelfTestStart);
+    let depth = 0;
+    let i = openBrace;
+    for (; i < jdArchiveSrc.length; i += 1) {
+      if (jdArchiveSrc[i] === '{') depth += 1;
+      else if (jdArchiveSrc[i] === '}') {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    selfTestBody = jdArchiveSrc.slice(openBrace, i + 1);
+  }
+  const outsideSelfTest = jdArchiveSrc
+    .replace(selfTestBody, '')
+    .split('\n')
+    .filter(line => [...SELF_TEST_ONLY_FS].some(fn => line.includes(`${fn}(`)) && !/^\s*import\b/.test(line));
+  if (outsideSelfTest.length === 0) {
+    pass('check-jd-archive.mjs never calls a write-capable fs API outside its own self-test fixtures');
+  } else {
+    fail(`check-jd-archive.mjs calls a write-capable fs API outside runSelfTest: ${outsideSelfTest.join(' | ')}`);
+  }
+
+  if (!/from\s*['"](?:node:)?fs\/promises['"]/.test(jdArchiveSrc)) {
+    pass('check-jd-archive.mjs does not import fs/promises');
+  } else {
+    fail('check-jd-archive.mjs imports fs/promises — write-capable API surface');
+  }
+  if (!/\brequire\s*\(/.test(jdArchiveSrc)) {
+    pass('check-jd-archive.mjs has no require() escape hatch');
+  } else {
+    fail('check-jd-archive.mjs uses require() — bypasses the import whitelist');
+  }
+} catch (e) {
+  fail(`jd-archive wiring check: ${e.message}`);
 }
 
 await runDiscovered();

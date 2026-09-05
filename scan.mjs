@@ -72,6 +72,7 @@ import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTit
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { promoteKnownFragmentIdentity } from './url-key.mjs';
 
@@ -178,6 +179,81 @@ export function emitJsonReceipt(receipt, exitCode) {
 // compileContentKeyword shares the `word:`/`stem:` prefix machinery but skips
 // the title filter's short-acronym auto-anchor (#3274).
 export { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter };
+
+// ── Title filter overrides (per-company broadened title net) ───────
+// Optional. `title_filter_overrides` in portals.yml lets specific companies
+// (matched by an explicit slug list — the company/tenant slug the scanner
+// already derives from the job-board-aggregator dataset entry, e.g. the
+// Workday tenant "uwaterloo") opt into a WIDER positive keyword net than the
+// global `title_filter.positive`, without loosening the global filter for
+// every other company in the sweep. Distinct from (and composes cleanly
+// with) `content_filter.by_title_keyword`, which scopes a stricter
+// description-level check to specific title keywords — this scopes a
+// broader title-level net to specific companies.
+//
+// Shape:
+//   title_filter_overrides:
+//     - companies: ["uwaterloo", "ubc", "fanshawec"]
+//       positive_extra:
+//         - "Administrator"
+//         - "Coordinator"
+//
+// v1 keeps matching simple and explicit: a literal (case-insensitive) slug
+// list, no fuzzy company-type inference, no domain heuristics.
+export function buildTitleFilterOverrides(overrides) {
+  const map = new Map();
+  if (!Array.isArray(overrides)) return map;
+  for (const entry of overrides) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const companies = Array.isArray(entry.companies) ? entry.companies : [];
+    const extraRaw = Array.isArray(entry.positive_extra) ? entry.positive_extra : [];
+    // compilePositiveKeyword (not compileKeyword) so positive_extra supports
+    // the same AND-groups / `word:`/`stem:` prefixes as title_filter.positive —
+    // it's an additive positive list, so it should behave like one.
+    const matchers = extraRaw
+      .filter(k => typeof k === 'string')
+      .map(k => k.trim().toLowerCase())
+      .filter(k => k.length > 0)
+      .map(compilePositiveKeyword);
+    if (matchers.length === 0) continue; // nothing to add — skip the entry entirely
+    for (const slug of companies) {
+      if (typeof slug !== 'string' || !slug.trim()) continue;
+      const key = slug.trim().toLowerCase();
+      map.set(key, (map.get(key) || []).concat(matchers));
+    }
+  }
+  return map;
+}
+
+// Wraps buildTitleFilter() with per-company overrides from
+// buildTitleFilterOverrides(). Returns (title, companySlug) => boolean:
+//   - if the global title_filter already matches, pass (companySlug unused)
+//   - else, if companySlug has override entries, pass when any of its
+//     positive_extra keywords match AND no global negative keyword matches
+//   - a company with no override entry behaves EXACTLY like the plain
+//     buildTitleFilter(titleFilter) — the mechanism is a strict no-op for
+//     everyone not explicitly listed.
+export function buildTitleFilterWithOverrides(titleFilter, overridesMap) {
+  const base = buildTitleFilter(titleFilter);
+  const overrides = overridesMap instanceof Map ? overridesMap : new Map();
+  if (overrides.size === 0) return (title) => base(title);
+
+  const normalize = (arr) => (Array.isArray(arr) ? arr : [])
+    .filter(k => typeof k === 'string')
+    .map(k => k.trim().toLowerCase())
+    .filter(k => k.length > 0)
+    .map(compileKeyword);
+  const negative = normalize(titleFilter?.negative);
+
+  return (title, companySlug) => {
+    if (base(title)) return true;
+    const extra = overrides.get(String(companySlug ?? '').trim().toLowerCase());
+    if (!extra || extra.length === 0) return false;
+    const lower = String(title ?? '').toLowerCase();
+    if (negative.some(m => m(lower))) return false;
+    return extra.some(m => m(lower));
+  };
+}
 
 // Compiled-matcher cache for matchedTitleKeywords(), keyed by the
 // `title_filter.positive` array reference. The scan loop calls this once per
@@ -1186,6 +1262,28 @@ function scanHistoryPolicy(config = {}) {
   };
 }
 
+/**
+ * Read the opt-in `scan_history.dedup_include_location` switch.
+ *
+ * Collapsing every city of one role into a single pipeline entry is deliberate
+ * (see `collectSeenCompanyRoles`) and stays the default: companies that open one
+ * req per city would otherwise leak a city variant per scan. But the survivor is
+ * whichever twin the provider returned first, which is wrong for anyone whose
+ * eligibility is location-bound — an EU-based candidate's `location_filter`
+ * passes both "London, UK" and "Dublin, IE", so the filter cannot choose between
+ * them and dedupe silently keeps the city he cannot legally work in.
+ *
+ * Strict boolean `true` only: a stray string or number is a typo, and the safe
+ * reading of a typo is the default behavior, not a pipeline full of city
+ * variants the user never asked for.
+ *
+ * @param {object} [config] - Parsed portals.yml.
+ * @returns {boolean} Whether the location joins the company+role dedupe key.
+ */
+export function resolveDedupIncludeLocation(config = {}) {
+  return config.scan_history?.dedup_include_location === true;
+}
+
 // Query params that carry no identity information for a job posting — safe to
 // strip when computing the dedup key. Deliberately an allowlist rather than
 // "strip everything": several ATSes key the posting off a query param (e.g.
@@ -1266,6 +1364,37 @@ const PIPELINE_CHECKBOX_RE = /^\s*- \[[ x]\]\s+/;
  * every other posting that shares it.
  */
 const PIPELINE_CHECKBOX_STRICT_RE = /^- \[[ x]\]\s+/;
+
+/**
+ * A labeled trailing segment of a pipeline entry, as written by the two writers
+ * that emit one: `formatPipelineOffer` here (`posted:`, `trust:`, `note:`) and
+ * `appendRankAnnotation` in `rank-pipeline.mjs` (`rank:`).
+ *
+ * Labeled segments are appended after the positional columns, so one slides into
+ * the location column whenever an offer has neither a location nor a
+ * compensation. Used only to reject such a cell as a location.
+ *
+ * The label set is an ALLOW-LIST, not the shape `\p{L}[\p{L}\p{N} _-]*:` it
+ * replaces. "Any word followed by a colon" is not a property that separates
+ * metadata from locations: a location is free text on the board's side, and
+ * `Remote: EMEA` / `Remote: Southeast US` (live Neo4j postings) are ordinary
+ * values of that field. Reading one as metadata drops it to the bare wildcard
+ * key, which then suppresses every city-specific variant of the same role —
+ * exactly the collapse `dedup_include_location` exists to prevent, reintroduced
+ * through the parser instead of the key.
+ *
+ * Deliberately NOT in the list: `score:`. `rank-pipeline.mjs` uses that word
+ * only inside the prompt it sends an LLM ("score: 0-5, where 5 is an excellent
+ * match"); the segment it actually writes to pipeline.md is `rank: {n}/5 — …`.
+ * Prompt text is not a serialization format. Extend this list only alongside a
+ * writer that really emits the label.
+ *
+ * Case-insensitive because the shape it replaces was (`\p{L}` spans both cases)
+ * and because the two directions are not symmetric: failing to recognize a real
+ * segment invents a city for a role and lets it resurface, while a genuine
+ * location beginning `Posted: ` / `Rank: ` does not occur.
+ */
+const PIPELINE_LABELED_SEGMENT_RE = /^(?:posted|trust|note|rank):\s/iu;
 
 /**
  * The `~~…~~` wrapper an expired entry is written with.
@@ -1358,9 +1487,24 @@ function extractPipelineUrl(line) {
  * - **Pre-screen discards** (`#-- | {url} | skipped (…)`). The cell after the
  *   URL is a discard reason, not a company.
  *
+ * The third cell after the URL is reported as `location` only where it really is
+ * one, because that column is positional and means different things per shape:
+ *
+ * - Only in the URL-first shape (`urlIndex === 0`) — the one `appendToPipeline`
+ *   writes — is it the location. A report-led processed entry (`#143 | {url} |
+ *   … | 4.2/5 | PDF ✅`) puts the SCORE in that position, and keying on it would
+ *   invent a city for an already-processed role.
+ * - A labeled segment (`posted:` / `trust:` / `note:` / `rank:`) slides into that
+ *   position when the offer carried no location and no compensation, so it is
+ *   skipped too. Only those four labels count — see
+ *   {@link PIPELINE_LABELED_SEGMENT_RE} for why a bare `word:` prefix does not.
+ *
+ * Both fall back to `''` (location unknown), which `companyRoleDedupKey` reads as
+ * "matches every city" — the conservative direction.
+ *
  * @param {string} line - One raw line of `data/pipeline.md`.
- * @returns {{company: string, role: string}|null} The pair, or null when the
- *   line has none to contribute.
+ * @returns {{company: string, role: string, location: string}|null} The pair plus
+ *   its location (`''` when unknown), or null when the line has none to contribute.
  */
 function extractPipelineCompanyRole(line) {
   const entry = pipelineEntry(line, PIPELINE_CHECKBOX_STRICT_RE);
@@ -1372,8 +1516,9 @@ function extractPipelineCompanyRole(line) {
   const urlIndex = cells.findIndex(cell => PIPELINE_URL_RE.test(cell));
   if (urlIndex === -1) return null;
 
-  const [company = '', role = ''] = cells.slice(urlIndex + 1);
-  return { company, role };
+  const [company = '', role = '', third = ''] = cells.slice(urlIndex + 1);
+  const location = urlIndex === 0 && !PIPELINE_LABELED_SEGMENT_RE.test(third) ? third : '';
+  return { company, role, location };
 }
 
 /**
@@ -1697,19 +1842,102 @@ export function normalizeRoleForDedup(role) {
 }
 
 /**
+ * The separators a provider or a board uses to pack SEVERAL places into the one
+ * free-text location field.
+ *
+ * The field is not reliably a single place, and the packing is not done one way.
+ * Sampled across live Greenhouse boards, a multi-location value uses `;`, the
+ * word `or`, `|` or `/`, and a single value mixes two of them — Anthropic ships
+ * `"Boston, MA; Remote-Friendly (Travel-Required) | San Francisco, CA | Seattle,
+ * WA | New York City, NY; Washington, DC"`. The scanner's own providers add a
+ * fifth: greenhouse/ashby/eightfold/gem/ibm/echojobs all fold a multi-site role's
+ * extra cities into the string themselves, `' · '`-joined, in whatever order the
+ * upstream array happened to arrive in.
+ *
+ * `,` is deliberately NOT a separator. It is the city/region delimiter INSIDE a
+ * place ("London, UK"), so splitting on it would shatter every ordinary location
+ * into fragments and make "London, UK" and "Dublin, UK" share the fragment `uk`.
+ *
+ * Used only by {@link normalizeLocationForDedup}; nothing else parses the field.
+ */
+const LOCATION_LIST_SEPARATOR_RE = /\s*(?:[;|\u00b7/]|\bor\b)\s*/iu;
+
+/**
+ * Normalize a posting location into a dedupe-key component.
+ *
+ * Each place is keyed by the same rule as the role (`normalizeTextKey`,
+ * space-separated) so "London, UK" and "London  UK" are one city and no second
+ * private strip has to exist. A missing, blank or non-string location yields ''
+ * — see {@link companyRoleDedupKey} for what that means.
+ *
+ * A value carrying several places is reduced to the SET of them, sorted, rather
+ * than keyed as the verbatim string. Keying the string verbatim is stable only
+ * while the employer lists the cities in a constant order, and nothing holds
+ * that order still: the value is free text on the board's side, and on ours the
+ * providers listed above build it from an upstream array. Re-order the list and
+ * the verbatim key changes, so a posting already in scan-history reads as new
+ * and re-enters the pipeline — the same duplicate-per-scan failure the location
+ * key exists to avoid, arriving from the other direction. Sorting the set makes
+ * the key depend on WHICH places a posting names and not on the order it names
+ * them in, and deduplicating it absorbs the boards that repeat a city.
+ *
+ * A single-place value is unaffected: it splits into one segment and joins back
+ * to exactly the string this function returned before, so keys already seeded
+ * from single-place rows keep matching.
+ *
+ * @param {unknown} location - Raw location label from a provider or a data file.
+ * @returns {string} Normalized location key, or '' when unknown.
+ */
+export function normalizeLocationForDedup(location) {
+  if (typeof location !== 'string') return '';
+  const places = new Set();
+  for (const segment of location.split(LOCATION_LIST_SEPARATOR_RE)) {
+    const place = normalizeTextKey(segment, ' ');
+    if (place) places.add(place);
+  }
+  // `+` cannot appear inside a component: normalizeTextKey keeps only letters,
+  // marks and digits, so the join is unambiguous and two different sets can
+  // never render as one string.
+  return [...places].sort().join('+');
+}
+
+/**
  * Build the canonical company+role dedupe key.
  *
  * This shared helper is used by both the tracker-side load and the scan-side
  * check so those two code paths cannot drift. `canonicalize` defaults to plain
  * lowercase/trim behavior when no alias map is configured.
  *
+ * `location` is the opt-in fourth component (`scan_history.dedup_include_location`,
+ * see `resolveDedupIncludeLocation`). Callers that omit it — every caller before
+ * the flag existed — get the identical `company::role` string they always did,
+ * which is what makes the flag inert by default.
+ *
+ * A key with NO location is deliberately a wildcard rather than a fourth
+ * component that happens to be empty: the seed sources do not all record a
+ * location (applications.md usually has no Location column, and a report-led
+ * pipeline row puts a score where a pending row puts the city), so a bare key
+ * has to keep matching every city. Losing that would let a role the user has
+ * already applied to resurface once per city the moment the flag went on.
+ *
+ * The location component is the canonical SET of the places the posting names
+ * (see {@link normalizeLocationForDedup}), not the provider's display string, so
+ * a board that re-orders a multi-city list does not turn one posting into two.
+ *
  * @param {unknown} company - Raw company label.
  * @param {unknown} role - Raw role title.
  * @param {(name: unknown) => string} [canonicalize] - Company canonicalizer.
- * @returns {string} Stable dedupe key in `company::role` form.
+ * @param {unknown} [location] - Optional posting location. Blank/absent/non-string
+ *   → the bare two-component key.
+ * @returns {string} Stable dedupe key: `company::role`, or `company::role@@places`.
  */
-export function companyRoleDedupKey(company, role, canonicalize = defaultCompanyNormalizer) {
-  return `${canonicalize(company)}::${normalizeRoleForDedup(role)}`;
+export function companyRoleDedupKey(company, role, canonicalize = defaultCompanyNormalizer, location = undefined) {
+  const base = `${canonicalize(company)}::${normalizeRoleForDedup(role)}`;
+  const places = normalizeLocationForDedup(location);
+  // `@@` and not a third `::`: normalizeTextKey strips punctuation, so neither
+  // the role nor the location component can ever contain the separator, and a
+  // company alias carrying one cannot forge a located key out of a bare one.
+  return places ? `${base}@@${places}` : base;
 }
 
 /**
@@ -1744,41 +1972,65 @@ export function companyRoleDedupKey(company, role, canonicalize = defaultCompany
  *   recheck policy, shared with `loadSeenUrls`.
  * @param {(name: unknown) => string} [canonicalize=defaultCompanyNormalizer] -
  *   Company canonicalizer shared with scan-side dedupe.
+ * @param {{includeLocation?: boolean, locatedBases?: Set<string>|null}} [options] -
+ *   When `includeLocation` is true (`scan_history.dedup_include_location`), each
+ *   row seeds a location-qualified key wherever its source records a location, and
+ *   the bare wildcard key where it does not. Default false = the historical keys,
+ *   byte for byte. `locatedBases`, when a Set is supplied, additionally collects
+ *   the BARE key of every row that seeded a located one — see
+ *   {@link loadDedupSnapshot} for what reads it.
  * @returns {Set<string>} Existing company+role dedupe keys.
  */
-export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer) {
+export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer, { includeLocation = false, locatedBases = null } = {}) {
   const { applicationsText = '', scanHistoryText = '', pipelineText = '' } = sources;
   const seen = new Set();
-  const add = (company, role) => {
+  const add = (company, role, location) => {
     const c = String(company ?? '').trim();
     const r = String(role ?? '').trim();
     if (!c || !r) return;
     // Header and markdown-separator cells are not roles.
     if (c.toLowerCase() === 'company') return;
     if (/^[-:]+$/.test(c) || /^[-:]+$/.test(r)) return;
-    seen.add(companyRoleDedupKey(c, r, canonicalize));
+    const key = companyRoleDedupKey(c, r, canonicalize, includeLocation ? location : undefined);
+    seen.add(key);
+    // Reverse index, recorded where the key is BUILT rather than by splitting a
+    // finished key back apart. `defaultCompanyNormalizer` only trims and
+    // lowercases, so a company label may legitimately contain the `@@`
+    // separator; a parsed base would then be wrong for exactly the rows that
+    // matter. Skipped entirely when the flag is off — no key can carry a
+    // location, so the set stays empty and every reader of it is inert.
+    if (locatedBases && includeLocation) {
+      const base = companyRoleDedupKey(c, r, canonicalize);
+      if (key !== base) locatedBases.add(base);
+    }
   };
 
   // applications.md — header-aware parse (tracker-parse.mjs, #954). The old
   // positional regex captured the wrong cells on customized layouts (e.g. with a
   // Location column), so the seen-set keyed on garbage and dedup misfired.
+  //
+  // `row.location` is present only when the user's tracker actually has a
+  // Location column; the default layout has none, so an applied role seeds the
+  // wildcard and no city variant of it can resurface.
   if (applicationsText) {
     const lines = applicationsText.split('\n');
     const colmap = resolveColumns(lines);
     for (const line of lines) {
       const row = parseTrackerRow(line, colmap);
       if (!row) continue;
-      add(row.company, row.role);
+      add(row.company, row.role, row.location);
     }
   }
 
-  // scan-history.tsv — url, first_seen, portal, title, company, status, location
+  // scan-history.tsv — url, first_seen, portal, title, company, status, location.
+  // This is the source that carries a location for every scanned posting, and so
+  // the one that makes the opt-in key discriminate between two cities of one role.
   for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
-    const [url, firstSeen, , title, company, status = 'added'] = line.split('\t');
+    const [url, firstSeen, , title, company, status = 'added', location] = line.split('\t');
     if (!url) continue;
     if (status !== 'added') continue;
     if (!shouldDedupScanHistoryRow({ firstSeen, status }, policy)) continue;
-    add(company, title);
+    add(company, title, location);
   }
 
   // pipeline.md — company/title are the two cells after the URL cell, plus
@@ -1789,7 +2041,7 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
   // wrong cells, so the seen-set keyed on garbage.
   for (const line of pipelineText.split('\n')) {
     const pair = extractPipelineCompanyRole(line);
-    if (pair) add(pair.company, pair.role);
+    if (pair) add(pair.company, pair.role, pair.location);
   }
 
   return seen;
@@ -1819,18 +2071,23 @@ function readIfExists(filePath) {
  *   Scan-history recheck policy, shared with `loadSeenUrls`.
  * @param {string} [options.scanHistoryPath=SCAN_HISTORY_PATH] - Scan-history path.
  * @param {string} [options.pipelinePath=PIPELINE_PATH] - Pipeline inbox path.
+ * @param {boolean} [options.includeLocation=false] - Opt-in location-aware keys,
+ *   forwarded to {@link collectSeenCompanyRoles}.
+ * @param {Set<string>|null} [options.locatedBases=null] - Optional reverse-index
+ *   sink, forwarded to {@link collectSeenCompanyRoles} so the two seed paths
+ *   cannot drift.
  * @returns {Set<string>} Existing company+role dedupe keys.
  */
 export function loadSeenCompanyRoles(
   appsPath = APPLICATIONS_PATH,
   canonicalize = defaultCompanyNormalizer,
-  { policy = {}, scanHistoryPath = SCAN_HISTORY_PATH, pipelinePath = PIPELINE_PATH } = {},
+  { policy = {}, scanHistoryPath = SCAN_HISTORY_PATH, pipelinePath = PIPELINE_PATH, includeLocation = false, locatedBases = null } = {},
 ) {
   return collectSeenCompanyRoles({
     applicationsText: readIfExists(appsPath),
     scanHistoryText: readIfExists(scanHistoryPath),
     pipelineText: readIfExists(pipelinePath),
-  }, policy, canonicalize);
+  }, policy, canonicalize, { includeLocation, locatedBases });
 }
 
 // ── Pipeline writer ─────────────────────────────────────────────────
@@ -2041,7 +2298,7 @@ export function loadFingerprintHistory(historyPath = SCAN_HISTORY_PATH) {
  *   Scan-history recheck policy, shared by the URL and company+role sets.
  * @param {(name: unknown) => string} [canonicalize=defaultCompanyNormalizer] -
  *   Company canonicalizer for the role keys.
- * @returns {{seen: Set<string>, recheckEligible: number, seenCompanyRoles: Set<string>, fingerprintHistory: Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}}
+ * @returns {{seen: Set<string>, recheckEligible: number, seenCompanyRoles: Set<string>, seenCompanyRoleBases: Set<string>, fingerprintHistory: Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}}
  */
 // Same path seam as loadSeenUrls/appendToPipeline: anchored defaults, explicit
 // paths for a caller with its own lane or a test with a fixture.
@@ -2049,14 +2306,19 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
   scanHistoryPath = SCAN_HISTORY_PATH,
   pipelinePath = PIPELINE_PATH,
   applicationsPath = APPLICATIONS_PATH,
+  includeLocation = false,
 } = {}) {
   const scanHistoryText = readIfExists(scanHistoryPath);
   const pipelineText = readIfExists(pipelinePath);
   const applicationsText = readIfExists(applicationsPath);
   const { seen, recheckEligible } = collectSeenUrls({ scanHistoryText, pipelineText, applicationsText }, policy);
-  const seenCompanyRoles = collectSeenCompanyRoles({ applicationsText, scanHistoryText, pipelineText }, policy, canonicalize);
+  // Companion index: the bare key of every seeded row that carried a location.
+  // It makes the wildcard rule symmetric in O(1) — see the dedupe check in
+  // main() for the direction it closes. Empty whenever the flag is off.
+  const seenCompanyRoleBases = new Set();
+  const seenCompanyRoles = collectSeenCompanyRoles({ applicationsText, scanHistoryText, pipelineText }, policy, canonicalize, { includeLocation, locatedBases: seenCompanyRoleBases });
   const fingerprintHistory = collectFingerprintHistory(scanHistoryText);
-  return { seen, recheckEligible, seenCompanyRoles, fingerprintHistory };
+  return { seen, recheckEligible, seenCompanyRoles, seenCompanyRoleBases, fingerprintHistory };
 }
 
 // Standard skeleton created on fresh install — matches the format documented
@@ -2718,9 +2980,11 @@ async function main() {
   // 4. Load dedup sets — one read per source file for the whole run (#2382).
   const historyPolicy = scanHistoryPolicy(config);
   const canonicalizeCompany = buildCompanyCanonicalizer(config.company_aliases);
-  const dedupSnapshot = loadDedupSnapshot(historyPolicy, canonicalizeCompany);
+  const dedupIncludeLocation = resolveDedupIncludeLocation(config);
+  const dedupSnapshot = loadDedupSnapshot(historyPolicy, canonicalizeCompany, { includeLocation: dedupIncludeLocation });
   const seenUrls = dedupSnapshot.seen;
   const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
+  const seenCompanyRoleBases = dedupSnapshot.seenCompanyRoleBases ?? new Set();
 
   // 5. Fetch from each target
   // LOCAL day. This one value does two things that both care which day it is:
@@ -2792,7 +3056,12 @@ async function main() {
     // postings on later pages go unfetched. Documented in modes/scan.md; the
     // fix belongs in workday.mjs, where closing it costs the optimisation on
     // every tenant that mixes.
-    const ctx = { ...makeHttpCtx(), sinceMs: earlyStopSinceMs, includeUndated: true };
+    const ctx = {
+      ...makeHttpCtx(),
+      sinceMs: earlyStopSinceMs,
+      includeUndated: true,
+      locationHints: config.location_filter,
+    };
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
     try {
       let jobs;
@@ -2888,8 +3157,49 @@ async function main() {
           totalDupes++;
           continue;
         }
-        const key = companyRoleDedupKey(job.company, job.title, canonicalizeCompany);
-        if (seenCompanyRoles.has(key)) {
+        // Three lookups, not one, when the location joins the key. A bare key is
+        // a wildcard (see companyRoleDedupKey) and a wildcard has to match in
+        // BOTH directions, but the two directions are stored differently:
+        //
+        //   1. seed bare → candidate located. A source that recorded no location
+        //      (applications.md rarely has a Location column) contributed
+        //      `company::role`; a candidate keyed `company::role@@london` must
+        //      still be suppressed by it. That is the `has(baseKey)` lookup.
+        //   2. seed located → candidate bare. The reverse: history holds
+        //      `company::role@@london` and a provider now returns the same role
+        //      with its location field empty, so the candidate's own key IS
+        //      `baseKey` and matches neither stored entry. Without the third
+        //      lookup it is added as new — an already-applied role resurfacing,
+        //      which is the very thing the wildcard exists to stop.
+        //
+        // Case 2 is answered from a prebuilt index rather than by scanning
+        // seenCompanyRoles for the `${baseKey}@@` prefix: that set holds one
+        // entry per historical posting (thousands on an established install) and
+        // a prefix scan would walk all of them for every candidate of every
+        // company — O(candidates x history) added to a zero-token scan people
+        // run daily. seenCompanyRoleBases answers it in one hash lookup.
+        //
+        // Guarded on `key === baseKey` so it fires only for a locationless
+        // candidate: two candidates with DIFFERENT cities must stay distinct.
+        // `key === baseKey` whenever the flag is off, and the index is empty in
+        // that case, so the default path is unchanged.
+        //
+        // An aggregator feed (portals.yml `aggregator: true`) names itself as
+        // the company, so two same-titled posts are two employers' jobs: only
+        // the URL dedups there, and the key is null.
+        const baseKey = companyRoleDedupKey(job.company, job.title, canonicalizeCompany);
+        const key = company.aggregator === true
+          ? null
+          : (dedupIncludeLocation
+            ? companyRoleDedupKey(job.company, job.title, canonicalizeCompany, job.location)
+            : baseKey);
+        if (
+          key !== null && (
+            seenCompanyRoles.has(key) ||
+            seenCompanyRoles.has(baseKey) ||
+            (key === baseKey && seenCompanyRoleBases.has(baseKey))
+          )
+        ) {
           totalDupes++;
           continue;
         }
@@ -2902,9 +3212,15 @@ async function main() {
           });
           continue;
         }
-        // Mark as seen to avoid intra-scan dupes
+        // Mark as seen to avoid intra-scan dupes. The index is maintained in the
+        // same breath as the set it indexes, so a role first surfaced with a
+        // city THIS run also suppresses a locationless twin later in the run —
+        // not only across runs.
         seenUrls.add(dedupUrl);
-        seenCompanyRoles.add(key);
+        if (key !== null) {
+          seenCompanyRoles.add(key);
+          if (key !== baseKey) seenCompanyRoleBases.add(baseKey);
+        }
         // Tag with the company's careers domain so verify can offer a 404/410
         // rediscovery fallback. A null domain (no careers_url) marks the offer
         // as broad-discovery — ineligible for the fallback, per the issue scope.
@@ -3008,9 +3324,7 @@ async function main() {
   }
 
   // 7. Print summary
-  console.log(`\n${'━'.repeat(45)}`);
-  console.log(`Portal Scan — ${date}`);
-  console.log(`${'━'.repeat(45)}`);
+  printScanSummaryHeader('Portal Scan', date);
   const summaryCompanies = targets.filter(t => !t._isBoard).length;
   const summaryBoards = targets.filter(t => t._isBoard).length;
   console.log(`Companies scanned:     ${summaryCompanies}`);

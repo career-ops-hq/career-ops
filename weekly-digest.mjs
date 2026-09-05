@@ -47,10 +47,15 @@ import * as yaml from 'js-yaml';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_SESSIONS_DIR = join(CAREER_OPS, 'interview-prep', 'sessions');
-const DEFAULT_QUESTION_BANK_PATH = join(CAREER_OPS, 'interview-prep', 'question-bank.md');
+// The USER's data root. interview-prep/ is USER_PATHS in update-system.mjs, so
+// resolving it from this file's directory meant that with a data root configured
+// the digest looked in the checkout, found nothing, and said "no session files
+// fall inside this range" — blaming the dates for a directory it never opened.
+const DATA_ROOT = getCareerOpsRoot();
+const DEFAULT_SESSIONS_DIR = join(DATA_ROOT, 'interview-prep', 'sessions');
+const DEFAULT_QUESTION_BANK_PATH = join(DATA_ROOT, 'interview-prep', 'question-bank.md');
 
 const ROUND_ENUM = ['screen', 'hiring-manager', 'technical', 'system-design', 'behavioral', 'onsite', 'final'];
 

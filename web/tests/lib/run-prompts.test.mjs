@@ -159,18 +159,25 @@ test("isShellSafeCompanyName: refuses anything that could close the quote", () =
   assert.equal(isShellSafeCompanyName(undefined), false);
 });
 
-// ── the tracker-additions TSV row (#1298) ───────────────────────────────────
+// ── the tracker-additions TSV row (#1298, #3517) ────────────────────────────
 //
 // The web is a WRITER of batch/tracker-additions/*.tsv, not just a reader of the
-// tracker. merge-tracker accepts 9 fields forever, so a stale template can never
-// go red — it just silently leaves every web-evaluated job out of the URL dedup.
-// Nothing else in this repo can catch that, which is why it is asserted here.
+// tracker. merge-tracker accepts 9 fields forever, and accepts HEADERLESS files
+// forever, so a stale template can never go red — it just silently leaves every
+// web-evaluated job out of the URL dedup, and on the ingest path where score and
+// status have to be told apart by content. Nothing else in this repo can catch
+// that, which is why it is asserted here.
 
-/** The example row the evaluate prompt tells the agent to append. */
+/** The two example lines the evaluate prompt tells the agent to write. */
+function exampleTsvLines(prompt) {
+  const lines = prompt.split("\n").filter((l) => l.includes("\t"));
+  assert.equal(lines.length, 2, `the evaluate prompt must show a header line and one data line, got ${lines.length}`);
+  return { header: lines[0].trim().split("\t"), fields: lines[1].trim().split("\t") };
+}
+
+/** The example DATA row the evaluate prompt tells the agent to append. */
 function exampleTsvRow(prompt) {
-  const line = prompt.split("\n").find((l) => l.includes("\t"));
-  assert.ok(line, "the evaluate prompt must contain a literal tab-separated example row");
-  return line.trim().split("\t");
+  return exampleTsvLines(prompt).fields;
 }
 
 test("buildPrompt: the evaluate prompt's TSV row carries all 10 fields, url last", () => {
@@ -183,6 +190,26 @@ test("buildPrompt: the evaluate prompt's TSV row carries all 10 fields, url last
   assert.match(fields[9], /posting URL/i, "the 10th field must be the posting URL");
   // ...and the prose agrees, so the agent is not told "9" while shown 10
   assert.match(prompt, /10 TAB-separated columns/);
+});
+
+test("buildPrompt: the evaluate prompt shows a header row, labelled for merge-tracker (#3517)", () => {
+  // Given the header is what lets merge-tracker resolve fields by NAME instead
+  // of telling score from status by content — a discrimination with an
+  // undecidable case (`—` is both a score sentinel and a status)
+  const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.com/jobs/7", memory: "", today: "2026-08-04" });
+  const { header, fields } = exampleTsvLines(prompt);
+
+  // Then the labels are the ones tracker-aliases.json knows, in step with the
+  // data row beneath them. These are lowercase canonical names on purpose: the
+  // alias table is matched case-insensitively, but an agent copies what it sees.
+  assert.deepEqual(header, [
+    "num", "date", "company", "role", "status", "score", "pdf", "report", "notes", "url",
+  ]);
+  assert.equal(header.length, fields.length, "header and data row must have the same field count");
+  // ...and the prose tells the agent to write BOTH lines, since a data row alone
+  // is still accepted and would silently fall back to the content-sniffing path
+  assert.match(prompt, /HEADER row/);
+  assert.match(prompt, /resolves every field by NAME/i);
 });
 
 test("buildPrompt: the evaluate prompt demands an EMPTY url field, never a placeholder", () => {
@@ -286,4 +313,47 @@ test("buildPrompt: the language directive is not limited to the evaluate prompt"
       `kind ${kind} lost the language directive`,
     );
   }
+});
+
+// ── the evaluate prompt must not out-source its own honesty (#2789) ──────────
+// WebFetch answers 200 with a login wall, an expired ad or a bot challenge, and
+// none of those announce themselves. Handed that text, an agent grades it: the
+// result is a confident A–F report about a login screen, indistinguishable in
+// shape from a real one. Nothing downstream can catch it either — a JD-archive
+// validator that measures LENGTH accepts a wall's text, and comparing the
+// archive against the report's own keywords compares two outputs the same agent
+// wrote from the same bad page. So the refusal has to be instructed here.
+
+test("buildPrompt: evaluate refuses to score a page that is not the posting", () => {
+  const prompt = buildPrompt({ kind: "evaluate", input: "https://example.com/jobs/9", memory: "", today: "2026-09-04" });
+  for (const wall of ["login", "404", "paywall", "bot challenge"]) {
+    assert.ok(
+      prompt.toLowerCase().includes(wall),
+      `the evaluate prompt must name "${wall}" as a case to stop on, or the agent grades whatever came back`,
+    );
+  }
+  // The refusal must POINT AT the core's rule, not restate a rule of its own —
+  // the web is a view over the modes, and a second policy here would be the
+  // thing that drifts. modes/oferta.md step 3 owns "stop before Block A".
+  assert.ok(/STOP BEFORE BLOCK A/i.test(prompt), "the instruction must be to stop, not merely to note it");
+  assert.ok(
+    /posting appears closed/i.test(prompt),
+    "it must invoke the mode file's existing rule by name rather than inventing a parallel one",
+  );
+  assert.ok(
+    /do not generate an evaluation, a report or a CV/i.test(prompt),
+    "the consequence must match modes/oferta.md step 3, not a softer web-only version",
+  );
+});
+
+test("buildPrompt: evaluate does not enumerate the report's sections", () => {
+  // The section list lives in modes/oferta.md. A copy of it here cannot help —
+  // `follow it EXACTLY` already carries the instruction — and can only go stale,
+  // which it had: the old text named "blocks A–F, G posting-legitimacy, and the
+  // Machine Summary" while the template also requires Risk Summary, H) Draft
+  // Application Answers and Keywords extracted. Nothing failed, which is why it
+  // survived. This pins that the subset does not come back.
+  const prompt = buildPrompt({ kind: "evaluate", input: "https://example.com/jobs/9", memory: "", today: "2026-09-04" });
+  assert.ok(!/blocks?\s+A[–-]F/i.test(prompt), "the prompt must not name a subset of the mode file's sections");
+  assert.ok(/EVERY section its report template specifies/i.test(prompt), "it must defer to the mode file for the section set");
 });
