@@ -139,6 +139,7 @@ Sauvegarder l'evaluation complete dans `reports/{###}-{company-slug}-{YYYY-MM-DD
 (contenu complet du bloc F)
 
 ## G) Brouillons de reponses pour la candidature
+<!-- career-ops:draft-answers -->
 (uniquement si score >= 4.5 -- brouillons de reponses pour le formulaire de candidature)
 
 ---
