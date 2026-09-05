@@ -592,13 +592,64 @@ function openingScopeVerb(statement) {
   return tier ? { verb, tier } : null;
 }
 
-/** The strongest scope tier asserted anywhere in a statement, or 0 when it asserts none. */
-function strongestScopeTier(statement) {
-  let strongest = 0;
-  for (const word of String(statement ?? '').toLowerCase().match(/[\p{L}]+/gu) ?? []) {
-    strongest = Math.max(strongest, SCOPE_VERB_TIERS.get(word) ?? 0);
+// Tier evidence a single word cannot carry. "Worked on" is the participation
+// wording #3685 names alongside "contributed to", but `worked` alone is the
+// ordinary verb of employment: "Worked at Acme Labs" asserts a job, not a
+// scope, and scoring it as tier 1 would make every employer line evidence that
+// the candidate merely participated in whatever it linked to.
+const SCOPE_PHRASE_TIERS = [
+  [/\bworked\s+on\b/iu, 1],
+  [/\bpart\s+of\s+the\s+team\b/iu, 1],
+];
+
+// A clause, for scope purposes, is one work item and the verb that governs it.
+// Splitting on coordinators is the point: a source sentence can pair a weak
+// verb with one item and a strong verb with another, and the strong half must
+// not vouch for the weak one.
+//
+// This deliberately differs from `clauseAround` above, which JOINS a
+// coordinator-led clause to the one before it because a stated plan governs
+// both halves. A verb does not: "Contributed to the billing migration and led
+// the payments rewrite" makes exactly one tier-3 claim, about the rewrite.
+const SCOPE_CLAUSE_SPLIT_RE = /\s*[,;:]\s*|\s+(?:and|then|plus|while|before|after)\s+/iu;
+
+/** Split a statement into clauses, so a verb is weighed only against its own work item. */
+function scopeClauses(statement) {
+  return String(statement ?? '')
+    .split(SCOPE_CLAUSE_SPLIT_RE)
+    .map(clause => clause.trim())
+    .filter(Boolean);
+}
+
+/**
+ * The scope tier a clause asserts, from the FIRST scope signal it contains.
+ *
+ * First, not strongest. Scoring every token let an unrelated noun stand in for
+ * the verb, because several tier words are also ordinary nouns: `drive`,
+ * `design` and `support` all appear in product names, so "Built the Google
+ * Drive integration" scored tier 3 and silently vouched for any ownership
+ * claim linked to it. The verb a reader parses as the clause's action is the
+ * first one, and a trailing noun cannot displace it.
+ */
+function clauseScopeTier(clause) {
+  const text = String(clause ?? '');
+  let earliest = Infinity;
+  let tier = 0;
+  for (const match of text.matchAll(/[\p{L}]+/gu)) {
+    const candidate = SCOPE_VERB_TIERS.get(match[0].toLowerCase());
+    if (candidate && match.index < earliest) {
+      earliest = match.index;
+      tier = candidate;
+    }
   }
-  return strongest;
+  for (const [pattern, candidate] of SCOPE_PHRASE_TIERS) {
+    const match = pattern.exec(text);
+    if (match && match.index < earliest) {
+      earliest = match.index;
+      tier = candidate;
+    }
+  }
+  return tier;
 }
 
 /** Content tokens of a statement, with scope verbs removed so a tier word cannot link two entries. */
@@ -627,15 +678,22 @@ export function scopeInflationClaims(targetText, sourceText) {
   // verb as tier 0 reported every sourced-but-differently-worded bullet as
   // inflation. A bullet with no scope evidence at all is an unsourced bullet,
   // which is the named-fact checks' business, not this one's.
-  const sourceStatements = factStatements(sourceText)
+  // Scoped per CLAUSE, not per statement. A statement-wide tier let the
+  // strongest verb in a sentence vouch for every work item in it, so
+  // "Contributed to the billing migration and led the payments rewrite"
+  // cleared "Led the billing migration" on the strength of a verb that was
+  // never about the migration.
+  const sourceClauses = factStatements(sourceText)
     .map(stripListMarker)
-    .map(statement => ({
+    .flatMap(statement => scopeClauses(statement).map(clause => ({
+      // The whole statement is what gets quoted back, since a clause on its own
+      // reads as a fragment to whoever has to go and fix cv.md.
       statement,
-      tier: strongestScopeTier(statement),
-      tokens: new Set(scopeObjectTokens(statement)),
-    }))
+      tier: clauseScopeTier(clause),
+      tokens: new Set(scopeObjectTokens(clause)),
+    })))
     .filter(source => source.tokens.size && source.tier >= 1);
-  if (!sourceStatements.length) return [];
+  if (!sourceClauses.length) return [];
 
   const claims = [];
   for (const raw of factStatements(targetText)) {
@@ -647,17 +705,30 @@ export function scopeInflationClaims(targetText, sourceText) {
     const tokens = scopeObjectTokens(statement);
     if (!tokens.length) continue;
 
-    const linked = sourceStatements
-      .map(source => ({
-        source,
-        overlap: tokens.filter(token => source.tokens.has(token)).length,
-      }))
-      .filter(({ overlap }) => overlap > 0);
+    // Two shared tokens, the threshold `delegatedAuthorshipClaims` uses, except
+    // where the bullet has only one token to share. On one token alone,
+    // "Designed the onboarding automation" linked to "Supported the onboarding
+    // revamp for new hires" and reported two unrelated work items as one
+    // inflated claim. The single-token case is kept because a short bullet is
+    // the issue's own example: "Led the migration" against "Contributed to the
+    // migration" shares exactly `migration`, and it is 100% of what the bullet
+    // says rather than a fragment of it.
+    const required = Math.min(2, tokens.length);
+    const overlaps = sourceClauses.map(source => ({
+      source,
+      overlap: tokens.filter(token => source.tokens.has(token)).length,
+    }));
+
+    // Two thresholds, because the two questions pull in opposite directions.
+    // A link that ACCUSES has to be strict, since a wrong one invents an
+    // inflation. A link that VOUCHES has to be loose, since a missed one
+    // invents the same thing. Using the strict threshold for both made
+    // "I led that payments effort end to end" fail to rescue "Led the payments
+    // rewrite", because the restatement shared only `payments`.
+    const linked = overlaps.filter(({ overlap }) => overlap >= required);
     if (!linked.length) continue;
-    // Benefit of the doubt: one linked statement carrying the claimed scope is
-    // enough, wherever it sits. Sources restate the same entry across several
-    // sentences, and the mandate is often in a different one from the work.
-    if (linked.some(({ source }) => source.tier >= opening.tier)) continue;
+    const vouched = overlaps.some(({ overlap, source }) => overlap > 0 && source.tier >= opening.tier);
+    if (vouched) continue;
 
     const closest = linked.reduce((best, next) => (next.overlap > best.overlap ? next : best));
     claims.push({
@@ -680,13 +751,40 @@ export function scopeInflationClaims(targetText, sourceText) {
 // `across the ... org` carries a small window because the real phrasing names
 // the org ("across the engineering org"), and a literal `across the org` would
 // have missed the case the issue was filed for.
-const ADOPTION_PATTERNS = [
-  /\bused\s+daily\b/giu,
-  /\bacross\s+the\s+(?:[\p{L}-]+\s+){0,2}org(?:ani[sz]ations?)?\b/giu,
-  /\bcompany[-\s]?wide\b/giu,
-  /\borg[-\s]?wide\b/giu,
-  /\badopted\s+by\b/giu,
-  /\bstandard\s+across\b/giu,
+// Each check pairs the wording to CATCH with the wording that COUNTS AS
+// EVIDENCE for it, and the two are deliberately not the same regex.
+//
+// Requiring the source to repeat the CV's exact phrasing made the gate
+// punish paraphrase, which is the one thing a tailored CV always does:
+// "Adopted by 3 teams" blocked against a source saying "Three teams adopted
+// the tool", and "company-wide" blocked against "across the whole company".
+// The source side is therefore a lemma, loose on purpose. It can only ever
+// silence a claim, never raise one, so the asymmetry costs a missed catch at
+// worst and buys back every truthful restatement.
+const ADOPTION_CHECKS = [
+  {
+    target: /\bused\s+daily\b/giu,
+    source: /\bdaily\b/iu,
+  },
+  {
+    target: /\bacross\s+the\s+(?:[\p{L}-]+\s+){0,2}org(?:ani[sz]ations?)?\b/giu,
+    source: /\bacross\s+the\b[^.;!?]{0,40}\b(?:org|organi[sz]ations?|company|business)\b|\b(?:company|org(?:ani[sz]ation)?)[-\s]?wide\b/iu,
+  },
+  {
+    // One check for both spellings. `org-wide` alone missed
+    // `organization-wide` and `organisation-wide`, so an unsourced reach claim
+    // walked straight through the gate.
+    target: /\b(?:company|org(?:ani[sz]ation)?)[-\s]?wide\b/giu,
+    source: /\b(?:company|org(?:ani[sz]ation)?)[-\s]?wide\b|\bacross\s+the\s+(?:whole\s+|entire\s+)?(?:company|org(?:ani[sz]ation)?)\b/iu,
+  },
+  {
+    target: /\badopted\s+by\b/giu,
+    source: /\badopt(?:ed|s|ing|ion)?\b/iu,
+  },
+  {
+    target: /\bstandard\s+across\b/giu,
+    source: /\bstandard\b/iu,
+  },
 ];
 
 /**
@@ -700,28 +798,26 @@ const ADOPTION_PATTERNS = [
  * blocks generation.
  */
 export function adoptionClaims(targetText, sourceText) {
-  const target = stripMarkup(targetText);
   const source = stripMarkup(sourceText);
-  // Statement splitting is only needed to quote the offending line back, so it
-  // is deferred until something actually matches: a clean document is the
-  // common case, and stripMarkup over the whole target is the expensive part.
-  let statements = null;
-  const lineFor = (phrase) => {
-    statements ??= factStatements(targetText).map(stripListMarker);
-    return statements.find(statement => statement.toLowerCase().includes(phrase.toLowerCase())) ?? null;
-  };
+  // Matched per STATEMENT, not across the whole flattened document. Collapsing
+  // the target first let a phrase form across a line break that neither line
+  // contains, so "...we used" followed by "Daily standups ran on it" reported
+  // `used daily` and then had no CV line to quote back, blocking generation
+  // with nothing for the user to go and fix.
+  const statements = factStatements(targetText).map(stripListMarker);
   const claims = [];
-  for (const pattern of ADOPTION_PATTERNS) {
-    pattern.lastIndex = 0;
-    if (pattern.test(source)) continue;
-    pattern.lastIndex = 0;
-    for (const match of target.matchAll(pattern)) {
-      claims.push({
-        kind: 'adoption',
-        value: normalizeFact(match[0]),
-        line: lineFor(match[0]),
-        sourceLine: null,
-      });
+  for (const { target, source: evidence } of ADOPTION_CHECKS) {
+    if (evidence.test(source)) continue;
+    for (const statement of statements) {
+      target.lastIndex = 0;
+      for (const match of statement.matchAll(target)) {
+        claims.push({
+          kind: 'adoption',
+          value: normalizeFact(match[0]),
+          line: statement,
+          sourceLine: null,
+        });
+      }
     }
   }
   return claims.filter((claim, index, all) => (
@@ -1391,7 +1487,39 @@ function runSelfTest() {
   // a comparison. Before source statements were required to carry a verb, this
   // reported every sourced bullet whose source simply worded it differently.
   equal('a source with no scope verb is not evidence of inflation',
-    scopeOf('Built the billing migration', 'Worked on the billing migration.'), []);
+    scopeOf('Built the billing migration', 'The billing migration shipped in March.'), []);
+  // ...but "worked on" IS the participation wording #3685 names, and reading
+  // it as no-evidence let every tier-2 and tier-3 rewrite of it through.
+  equal('worked on is participation evidence',
+    scopeOf('Built the billing migration', 'Worked on the billing migration.'),
+    ['built the billing migration']);
+  equal('and the issue\'s own pairing of it',
+    scopeOf('Led the migration', 'Worked on the migration.'), ['led the migration']);
+  // `worked at` is employment, not scope. Scoring it as tier 1 would turn
+  // every employer line into evidence that the candidate merely participated
+  // in whatever it happened to share a noun with.
+  equal('worked at is not scope evidence',
+    scopeOf('Led the migration', 'Worked at Acme Labs on the migration.'), []);
+
+  // A verb governs its own work item, not every item in the sentence. The
+  // statement-wide tier let the strong half vouch for the weak one.
+  const compound = 'Contributed to the billing migration and led the payments rewrite.';
+  equal('a compound source does not lend its strong verb to the weak half',
+    scopeOf('Led the billing migration.', compound), ['led the billing migration']);
+  equal('and the half that really is tier 3 still passes',
+    scopeOf('Led the payments rewrite.', compound), []);
+
+  // Several tier words are also ordinary nouns, so scoring every token let a
+  // product name stand in for the verb: `drive` in "Google Drive" scored the
+  // clause tier 3 and vouched for any ownership claim linked to it.
+  equal('a noun homograph does not set the clause tier',
+    scopeOf('Led the Google Drive integration.', 'Built the Google Drive integration.'),
+    ['led the google drive integration']);
+
+  // One shared token is not enough to call two entries the same work item.
+  equal('a single shared token does not link unrelated entries',
+    scopeOf('Designed the onboarding automation.', 'Supported the onboarding revamp for new hires.'),
+    []);
   // Tier 1 claims participation, so it can never be an escalation.
   equal('a participation verb is never flagged',
     scopeOf('Supported the billing migration', 'Worked on the billing migration.'), []);
@@ -1422,6 +1550,28 @@ function runSelfTest() {
   equal('a differently worded source adoption claim still supports it',
     adoptionOf('Used daily across the engineering org',
       'Used daily by six teams across the wider org.'), []);
+  // Both spellings of the long form. `org-wide` alone let an unsourced reach
+  // claim through whenever the CV spelled the word out.
+  equal('organization-wide is caught',
+    adoptionOf('Rolled the linter out organization-wide.', scopeSource), ['organization-wide']);
+  equal('organisation-wide is caught too',
+    adoptionOf('Rolled the linter out organisation-wide.', scopeSource), ['organisation-wide']);
+  // The source side is a lemma on purpose. Requiring it to repeat the CV's
+  // exact phrasing punished paraphrase, which is what a tailored CV always
+  // does to a source line.
+  equal('a source that states adoption in its own words supports the claim',
+    adoptionOf('Adopted by 3 teams.', 'Three teams adopted the tool.'), []);
+  equal('and a reach claim the source words as a phrase, not a compound',
+    adoptionOf('Rolled out company-wide.', 'The tool went out across the whole company.'), []);
+  // Matched per statement: collapsing the document first let a phrase form
+  // across a line break that neither line contains, and the resulting claim
+  // had no CV line to quote back.
+  equal('a phrase spanning two statements is not a claim',
+    adoptionOf('...we used\nDaily standups ran on it.', 'nothing relevant here'), []);
+  equal('every adoption claim carries the line it came from',
+    adoptionClaims('Built internal tooling, used daily across the engineering org.', scopeSource)
+      .every(claim => typeof claim.line === 'string' && claim.line.length > 0),
+    true);
 
   console.log(`verify-cv-facts self-test: ${passed} passed, ${failed} failed`);
   return failed ? 1 : 0;
