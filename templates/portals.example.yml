@@ -206,6 +206,7 @@
 #
 # trust_filter:
 #   enabled: true
+
 #   suspicious_domains:
 #     - "bit.ly"
 #     - "tinyurl.com"
@@ -966,6 +967,9 @@ search_queries:
 #   gem             jobs.gem.com/<boardId>
 #   join            join.com/companies/<slug>  (SSR __NEXT_DATA__ parse, no separate API)
 #   icims           careers-<tenant>.icims.com / *.icims.com
+#   ultipro         {host}/<tenant>/JobBoard/<boardId>/  (UKG Pro / UltiPro Recruiting; host is one of several
+#                   recruiting.ultipro.(ca|com) / recruiting2/3.ultipro.com variants, matched by pattern —
+#                   whichever host the tenant's own board URL uses is preserved, not normalized)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -1149,6 +1153,19 @@ search_queries:
 #   careers_url: https://www.exampleco.com/careers   # public/branded careers page
 #   provider: successfactors
 #   api: https://jobs.exampleco.com                  # RMK board origin
+#   enabled: true
+#
+# - name: Example UKG Pro Co
+#   # UKG Pro / UltiPro Recruiting public job board. Auto-detects any
+#   # {host}/<tenant>/JobBoard/<boardId>/ URL across UKG's several recruiting
+#   # hosts (recruiting.ultipro.ca, recruiting.ultipro.com, recruiting2/3.ultipro.com,
+#   # matched by pattern) — whichever host the tenant's own board URL uses is
+#   # preserved as-is.
+#   careers_url: https://recruiting.ultipro.ca/EXA5001EXCO/JobBoard/00000000-0000-0000-0000-000000000000/
+#   max_pages: 100          # optional page cap (50 jobs/page, default 100, max 1500)
+#   ultipro:
+#     fetchDetails: true    # optional: fetch each posting's detail page for a full description (off by default — the list payload carries only a brief description)
+#     detailLimit: 25       # optional: max detail calls per sweep when fetchDetails is true
 #   enabled: true
 #
 # - name: Example join.com Co
@@ -1512,6 +1529,11 @@ search_queries:
 #     aggregator: true
 
 tracked_companies:
+
+  - name: YMCA of Greater Toronto
+    careers_url: https://recruiting.ultipro.ca/YMC5001YMGT/JobBoard/7fde8f3e-7920-4d9d-8394-87bd44cc2330/
+    provider: ultipro
+    enabled: false
 
   # -- AI Labs & LLM providers --
 
