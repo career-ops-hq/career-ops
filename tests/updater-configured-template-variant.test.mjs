@@ -81,8 +81,8 @@ if (REEXEC_FALLBACK_FILES.includes('cv-templates.mjs')
     fail(`misclassified: ${JSON.stringify(wrong.map(([f]) => f))}`);
   }
 
-  // No configuration at all (default profile, or profile.yml missing/unreadable)
-  // must never exempt anything — this is the "fall back to prior behavior" path.
+  // No configured template at all (default profile or a missing profile.yml)
+  // must never exempt anything.
   if (!isUserConfiguredTemplateVariant('templates/cv-template.bw.html', {})) {
     pass('an unconfigured install exempts nothing (safe default)');
   } else {
@@ -150,6 +150,22 @@ if (REEXEC_FALLBACK_FILES.includes('cv-templates.mjs')
       pass('an unreadable existing local variant aborts before checkout can overwrite it');
     } else {
       fail('an unreadable existing local variant did not abort the update snapshot');
+    }
+
+    writeFileSync(join(dir, 'config', 'profile.yml'), 'cv:\n  template: [unterminated\n');
+    let malformedProfileRejected = false;
+    try {
+      await snapshotConfiguredTemplateVariants({
+        dataRoot: dir,
+        remoteFiles: ['templates/cv-template.bw.html'],
+      });
+    } catch {
+      malformedProfileRejected = true;
+    }
+    if (malformedProfileRejected) {
+      pass('a malformed existing profile aborts before checkout or stale pruning');
+    } else {
+      fail('a malformed existing profile silently disabled configured-variant protection');
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

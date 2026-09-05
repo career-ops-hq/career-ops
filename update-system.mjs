@@ -1025,15 +1025,23 @@ export function isUserConfiguredTemplateVariant(file, configuredVariants = {}) {
  */
 export async function loadConfiguredTemplateVariants({ profilePath } = {}) {
   const configuredVariants = {};
+  let templateModule;
   try {
-    const { loadProfileDefault, kebab } = await import('./cv-templates.mjs');
-    for (const kind of ['cv', 'cover']) {
-      const configured = loadProfileDefault(kind, profilePath ? { profilePath } : undefined);
-      if (configured) configuredVariants[kind] = kebab(configured);
+    templateModule = await import('./cv-templates.mjs');
+  } catch (err) {
+    const expectedUrl = new URL('./cv-templates.mjs', import.meta.url).href;
+    if (err?.code === 'ERR_MODULE_NOT_FOUND' && err?.url === expectedUrl) {
+      // Very old targets may not ship cv-templates.mjs. Preserve the historical
+      // no-exemption behavior only for that exact compatibility case.
+      return configuredVariants;
     }
-  } catch {
-    // cv-templates.mjs absent (very old target) or config/profile.yml
-    // unreadable/unparseable — fall back to no exemption (prior behavior).
+    throw err;
+  }
+  const { loadProfileDefault, kebab } = templateModule;
+  for (const kind of ['cv', 'cover']) {
+    const options = profilePath ? { profilePath, strict: true } : { strict: true };
+    const configured = loadProfileDefault(kind, options);
+    if (configured) configuredVariants[kind] = kebab(configured);
   }
   return configuredVariants;
 }
@@ -1151,7 +1159,7 @@ export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths
 // e.g. a user's custom CV template referencing a font file upstream no longer
 // ships. Deleting the referenced asset out from under a preserved file leaves
 // the preserved file silently broken (missing font, broken image) even though
-// the file itself survived. Scoped to preserved HTML/CSS files' on-disk
+// the file itself survived. Scoped to preserved HTML/CSS/TeX files' on-disk
 // content, since those are the only preserved file types known to reference
 // other system files by relative path. `roots` lets apply() inspect both the
 // code checkout and an external CAREER_OPS_ROOT without treating a missing
@@ -1165,7 +1173,7 @@ export function isReferencedByPreservedFile(
   const basename = normalizeRepoPath(candidatePath).split('/').pop();
   if (!basename) return false;
   return preservedPaths.some((preservedPath) => {
-    if (!/\.(html|css)$/i.test(preservedPath)) return false;
+    if (!/\.(html|css|tex)$/i.test(preservedPath)) return false;
     return roots.some((root) => {
       try {
         return readFile(join(root, ...preservedPath.split('/'))).includes(basename);

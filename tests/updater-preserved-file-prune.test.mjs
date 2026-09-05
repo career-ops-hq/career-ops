@@ -74,7 +74,20 @@ console.log('\n🧪 Testing preserved-file vs. stale-file prune interaction...')
     fail('an unreferenced font was reported as referenced (false positive)');
   }
 
-  // Scoping: only html/css preserved files are ever read for references — a
+  const preservedTex = ['templates/cv-template.custom.tex'];
+  const readTex = (path) => {
+    if (path.endsWith('cv-template.custom.tex')) {
+      return '\\setmainfont[Path=../fonts/]{eb-garamond-400.ttf}';
+    }
+    throw new Error(`ENOENT: ${path}`);
+  };
+  if (isReferencedByPreservedFile('fonts/eb-garamond-400.ttf', preservedTex, readTex)) {
+    pass('a font referenced only by a preserved TeX template is detected as still needed');
+  } else {
+    fail('a TeX-only font reference was missed and would be pruned');
+  }
+
+  // Scoping: only html/css/tex preserved files are read for references — a
   // preserved .mjs/.md file with the same substring by coincidence must not
   // count, since system scripts/docs are not known to reference fonts by path.
   const preservedScript = ['build-cv-html.mjs'];
@@ -83,7 +96,7 @@ console.log('\n🧪 Testing preserved-file vs. stale-file prune interaction...')
     throw new Error(`ENOENT: ${path}`);
   };
   if (!isReferencedByPreservedFile('fonts/eb-garamond-400.ttf', preservedScript, readScript)) {
-    pass('a non-html/css preserved file is never consulted for asset references');
+    pass('a non-template preserved file is never consulted for asset references');
   } else {
     fail('a .mjs preserved file was incorrectly treated as an asset-reference source');
   }
