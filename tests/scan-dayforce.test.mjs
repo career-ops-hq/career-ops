@@ -29,7 +29,6 @@ import {
   scanBoard,
   ALLOWED_HOST,
 } from '../scan-dayforce.mjs';
-import { decodeEntities } from '../providers/_html-entities.mjs';
 
 test('validateTenant/validateBoardCode — alphanumeric + _/- only', () => {
   assert.strictEqual(validateTenant('gnghcm'), true);
@@ -88,7 +87,7 @@ test('normalizeBoardEntry — fills defaults, rejects malformed entries without 
 
 test('scanBoard applies all list-level description gates before detail fetch and emits the human company name', async () => {
   const rows = [
-    { jobPostingId: 1, jobTitle: 'Keep', jobDescription: 'keep', postingLocations: [{ formattedAddress: 'Toronto, ON' }] },
+    { jobPostingId: 1, jobTitle: 'Keep &amp; Acquire', jobDescription: 'keep', postingLocations: [{ formattedAddress: 'Toronto, ON' }] },
     { jobPostingId: 2, jobTitle: 'Content blocked', jobDescription: 'blocked-content', postingLocations: [{ formattedAddress: 'Toronto, ON' }] },
     { jobPostingId: 3, jobTitle: 'Country blocked', jobDescription: 'blocked-country', postingLocations: [{ formattedAddress: 'Toronto, ON' }] },
     { jobPostingId: 4, jobTitle: 'Visa blocked', jobDescription: 'blocked-visa', postingLocations: [{ formattedAddress: 'Toronto, ON' }] },
@@ -111,7 +110,7 @@ test('scanBoard applies all list-level description gates before detail fetch and
         if (String(url).endsWith('/api/auth/csrf')) return response({ csrfToken: 'token' });
         const id = String(url).split('/').at(-1);
         detailIds.push(id);
-        return response({ jobTitle: 'Kept detail', jobPostingContent: { jobDescription: 'full detail' } });
+        return response({ jobTitle: 'Keep &amp; Acquire', jobPostingContent: { jobDescription: 'full detail' } });
       },
     },
   };
@@ -131,6 +130,7 @@ test('scanBoard applies all list-level description gates before detail fetch and
   assert.deepStrictEqual(detailIds, ['1']);
   assert.strictEqual(result.found.length, 1);
   assert.strictEqual(result.found[0].company, 'Human Company');
+  assert.strictEqual(result.found[0].title, 'Keep & Acquire');
   assert.strictEqual(result.contentSkipped.length, 1);
   assert.strictEqual(result.countryEligibilitySkipped.length, 1);
   assert.strictEqual(result.visaSkipped.length, 1);
@@ -204,17 +204,6 @@ test('joinLocations — prefers formattedAddress, falls back to city/state/count
   );
   // A location object with nothing usable drops out rather than emitting ''.
   assert.strictEqual(joinLocations([{}, { formattedAddress: 'Ottawa, ON' }]), 'Ottawa, ON');
-});
-
-test('job titles decode HTML entities (regression: live gnghcm smoke test returned "Strategy &amp; Acquisition" unescaped)', () => {
-  // scan-dayforce.mjs runs decodeEntities() over both list-row and detail
-  // jobTitle before it reaches title_filter / the pipeline — confirmed
-  // necessary by a live response, not a hypothetical: Dayforce's list API
-  // returns titles HTML-entity-escaped, same as its jobDescription field.
-  assert.strictEqual(
-    decodeEntities('Manager, Corporate Strategy &amp; Acquisition - Legal, Strategy and Acquisitions'),
-    'Manager, Corporate Strategy & Acquisition - Legal, Strategy and Acquisitions'
-  );
 });
 
 test('buildJobDescriptionText — header/body/footer concatenation with any piece legitimately empty', () => {
