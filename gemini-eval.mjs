@@ -92,46 +92,89 @@ const PATHS = {
   trackerAdditions: join(DATA_ROOT, 'batch', 'tracker-additions'),
 };
 
-// Determine the localization modes directory and evaluation filename dynamically from config/profile.yml
-let modesDir = 'modes';
+// Determine the localization modes directory/directories and evaluation filename
+// dynamically from config/profile.yml. language.modes_dir may be a single string
+// (one declared market — the historical, still-default shape) or an array of
+// strings (multiple simultaneously-declared candidate markets, #3793). The FIRST
+// declared market is always "primary": it supplies the evaluation-mode file
+// (oferta.md/angebot.md/...), because Block A-F evaluation logic can only run
+// from one such file at a time. Every declared market's _shared.md is loaded
+// into context (see below) so the agent can judge, from the JD's own signals —
+// never from JD language alone — which declared market actually applies.
+let modesDirs = ['modes'];
 let evalFilename = 'oferta.md';
 
 function stripBom(str) {
   return str.charCodeAt(0) === 0xFEFF ? str.slice(1) : str;
 }
 
+/** Validate one modes_dir candidate: must stay inside the project root and exist. */
+function resolveModesDirCandidate(customModesDir) {
+  if (typeof customModesDir !== 'string' || !customModesDir.trim()) return null;
+  const dirPath = resolve(CODE_ROOT, customModesDir);
+  const rel = relative(CODE_ROOT, dirPath);
+  if (rel.startsWith('..') || isAbsolute(customModesDir)) {
+    console.warn(`⚠️   modes_dir "${customModesDir}" escapes project root; skipping`);
+    return null;
+  }
+  if (!existsSync(dirPath)) {
+    console.warn(`⚠️   modes_dir "${customModesDir}" not found; skipping`);
+    return null;
+  }
+  return customModesDir;
+}
+
 if (existsSync(PATHS.profileYml)) {
   try {
     const yamlContent = stripBom(readFileSync(PATHS.profileYml, 'utf-8'));
     const profile = yaml.load(yamlContent);
-    if (profile && profile.language && profile.language.modes_dir) {
-      const customModesDir = profile.language.modes_dir;
-      const dirPath = resolve(CODE_ROOT, customModesDir);
-      const rel = relative(CODE_ROOT, dirPath);
-      if (rel.startsWith('..') || isAbsolute(customModesDir)) {
-        console.warn(`⚠️   modes_dir "${customModesDir}" escapes project root; using default modes/`);
+    const rawModesDir = profile && profile.language && profile.language.modes_dir;
+    if (rawModesDir) {
+      const candidates = Array.isArray(rawModesDir) ? rawModesDir : [rawModesDir];
+      // AGENTS.md "Output Language vs Market Modes": the FIRST declared entry
+      // is always primary. Resolve IT first, before touching the rest — an
+      // unusable primary falls back to the DEFAULT evaluation mode, and must
+      // NEVER silently promote a later declared market into the primary slot
+      // (that would evaluate against the wrong market's A-F rules without
+      // anyone asking for it).
+      const primaryRaw = candidates[0];
+      const primaryDir = resolveModesDirCandidate(primaryRaw);
+      const candidateFiles = ['oferta.md', 'angebot.md', 'offre.md', 'kyujin.md', 'is-ilani.md', 'naukri.md'];
+      const primaryEvalFile = primaryDir && candidateFiles.find((file) => existsSync(join(CODE_ROOT, primaryDir, file)));
+      const extras = candidates.slice(1).map(resolveModesDirCandidate).filter(Boolean);
+      if (primaryDir && primaryEvalFile) {
+        // Primary resolved. Any further declared markets only need to exist —
+        // they contribute _shared.md context (below), never an evaluation
+        // mode file of their own.
+        modesDirs = [primaryDir, ...extras];
+        evalFilename = primaryEvalFile;
       } else {
-        if (existsSync(dirPath)) {
-          const candidateFiles = ['oferta.md', 'angebot.md', 'offre.md', 'kyujin.md', 'is-ilani.md', 'naukri.md'];
-          const found = candidateFiles.find((file) => existsSync(join(dirPath, file)));
-          if (found) {
-            modesDir = customModesDir;
-            evalFilename = found;
-          } else {
-            console.warn(`⚠️   No matching evaluation file found in ${customModesDir}; using default modes/oferta.md`);
-          }
-        } else {
-          console.warn(`⚠️   modes_dir "${customModesDir}" not found; using default modes/`);
+        // Primary directory exists but has no recognizable evaluation-mode
+        // file in it — fall back to the default (modes/oferta.md), not to
+        // any secondary declared market.
+        if (primaryDir) {
+          console.warn(`⚠️   No matching evaluation file found in ${primaryDir}; using default modes/oferta.md`);
         }
+        // The primary may still have useful _shared.md context even when its
+        // evaluation file is missing. Keep it after the default evaluation
+        // directory, then append valid secondary markets.
+        modesDirs = ['modes', ...(primaryDir && primaryDir !== 'modes' ? [primaryDir] : []), ...extras.filter((dir) => dir !== 'modes' && dir !== primaryDir)];
       }
+      // else: resolveModesDirCandidate(primaryRaw) already warned why the
+      // primary itself could not be resolved; falling through to the default
+      // modes/oferta.md below.
     }
   } catch (err) {
     console.warn(`⚠️   Could not parse config/profile.yml: ${err.message}`);
   }
 }
 
+const modesDir = modesDirs[0];
 PATHS.shared = join(CODE_ROOT, modesDir, '_shared.md');
 PATHS.oferta = join(CODE_ROOT, modesDir, evalFilename);
+// Additional declared markets (modes_dir given as an array with 2+ entries):
+// their _shared.md files are read alongside the primary one further below.
+const extraModesDirs = modesDirs.slice(1);
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing
@@ -166,6 +209,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
   EXAMPLES
     node gemini-eval.mjs "We are looking for a Senior AI Engineer..."
     node gemini-eval.mjs --file ./jds/openai-swe.txt
+    node gemini-eval.mjs --context-only --file ./jds/openai-swe.txt  # print context budget without calling Gemini
 `);
   process.exit(0);
 }
@@ -175,6 +219,7 @@ let jdText = '';
 let modelName = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 let saveReport = true;
 let noCompress = false;
+let contextOnly = false;
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--file' && args[i + 1]) {
@@ -190,6 +235,8 @@ for (let i = 0; i < args.length; i++) {
     saveReport = false;
   } else if (args[i] === '--no-compress') {
     noCompress = true;
+  } else if (args[i] === '--context-only') {
+    contextOnly = true;
   } else if (!args[i].startsWith('--')) {
     jdText += (jdText ? '\n' : '') + args[i];
   }
@@ -330,8 +377,19 @@ console.log('\n📂  Loading context files...');
 
 const sharedLabel = join(modesDir, '_shared.md').replace(/\\/g, '/');
 const ofertaLabel = join(modesDir, evalFilename).replace(/\\/g, '/');
-const sharedContext  = readFile(PATHS.shared,      sharedLabel);
+let sharedContext    = readFile(PATHS.shared,      sharedLabel);
 const ofertaLogic    = readFile(PATHS.oferta,      ofertaLabel);
+
+// Multi-market (#3793): fold in every OTHER declared market's _shared.md so the
+// agent has all declared candidates' vocabulary/legal-concept context, not just
+// the primary one. It must pick per-JD by market signal (hiring-entity
+// jurisdiction, currency, benefits/legal vocabulary), never by JD language alone
+// — see AGENTS.md "Output Language vs Market Modes".
+for (const extraDir of extraModesDirs) {
+  const extraLabel = join(extraDir, '_shared.md').replace(/\\/g, '/');
+  const extraContent = readFile(join(CODE_ROOT, extraDir, '_shared.md'), extraLabel);
+  sharedContext += `\n\n--- Additional declared market: ${extraDir} (${extraLabel}) ---\n${extraContent}`;
+}
 const cvContent      = readFile(PATHS.cv,          'cv.md');
 const profileContent = readFile(PATHS.profile,     'modes/_profile.md');
 const profileYml     = readFile(PATHS.profileYml,  'config/profile.yml');
@@ -390,6 +448,10 @@ ARCHETYPE: <detected archetype>
 LEGITIMACY: <High Confidence | Proceed with Caution | Suspicious>
 ---END_SUMMARY---
 `;
+
+// Deterministic seam for context-resolution tests. This reports the computed
+// budget without constructing a client or making a network request.
+if (!contextOnly) {
 
 // ---------------------------------------------------------------------------
 // Call Gemini API
@@ -573,3 +635,4 @@ console.log(`  Score: ${score}/5  |  Archetype: ${archetype}  |  Legitimacy: ${l
 console.log('─'.repeat(66) + '\n');
 
 console.log(formatBreakdown(tracker, modelName, 'gemini'));
+}

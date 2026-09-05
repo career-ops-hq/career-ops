@@ -98,6 +98,16 @@ language:
   # vocabulary/rules, while output selects the prose language.
   output: en
   # modes_dir: modes/de  # optional: use DACH market vocabulary while still writing in English
+  # modes_dir can also be a LIST of declared candidate markets, for a
+  # candidate genuinely running parallel campaigns in more than one market at
+  # once (e.g. applying in both Canada and China simultaneously) — not for
+  # switching sequentially. The FIRST entry is primary (drives the
+  # evaluation-mode file); every declared market's _shared.md is loaded into
+  # context, and which one applies to a given JD is judged from the JD's own
+  # market signals (hiring-entity jurisdiction, currency, benefits/legal
+  # vocabulary), never from the JD's language alone. See AGENTS.md "Output
+  # Language vs Market Modes" for the full contract.
+  # modes_dir: [modes/de, modes/zh]
 
 # Optional follow-up cadence preferences for `node followup-cadence.mjs`.
 # CLI flags still win for one-off runs (for example `--applied-days 10`).

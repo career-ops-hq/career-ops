@@ -89,7 +89,7 @@ If yes → `node update-system.mjs apply --confirm`. If no → `node update-syst
 
 ## What is career-ops
 
-AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (Claude Code, Cursor, Codex, OpenCode, Qwen, Copilot, Kimi, Antigravity CLI, Grok Build CLI). Legacy Gemini API evaluation remains via `gemini-eval.mjs`.
+AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (Claude Code, Cursor, Codex, OpenCode, Qwen, Copilot, Kimi, Antigravity CLI, Grok Build CLI). Legacy Gemini API evaluation remains via `gemini-eval.mjs`. For deterministic diagnostics, `gemini-eval.mjs --context-only` prints the resolved context budget without making a Gemini request.
 
 ### Codex invocation
 
@@ -308,6 +308,22 @@ Two separate axes:
 3. You detect a JD written in that language → *suggest* switching
 
 **When NOT to switch market modes:** If the user applies to English-language roles, even at companies from those markets, use the default English market modes — *unless* the user has explicitly requested another market mode in this conversation, or `language.modes_dir` is set in `config/profile.yml` (the explicit user preference always wins over JD-language detection). This does not override `language.output`; prose still follows `language.output`.
+
+**Multiple simultaneous target markets (#3793).** `language.modes_dir` may also be a **list** of declared candidate markets, for a candidate genuinely running parallel campaigns — not switching sequentially — e.g. a candidate applying in both the DACH region and China at once:
+
+```yaml
+language:
+  output: en
+  modes_dir: [modes/de, modes/zh] # DACH and China
+```
+
+Declared, not inferred: the user states which markets they are actually running campaigns in. When two or more are declared:
+- The FIRST entry is the **primary** market and supplies the evaluation-mode file (`oferta.md`/`angebot.md`/...) — one JD can only be evaluated against one set of A-F rules at a time.
+- EVERY declared market's `_shared.md` is loaded into context, not just the primary one.
+- Per-JD, which declared market's concepts actually apply is determined from the JD's own **MARKET signals** — hiring-entity jurisdiction, currency, benefits/legal vocabulary — the same judgment Block G's posting-legitimacy signals already exercise (`modes/oferta.md`: "benefits/employment terminology country mismatch", "third-party platform location tag mismatch"). **Never infer the market from the JD's language alone.** A French-language Quebec/federal-Canada JD needs Canada's concepts (EI, CPP, ESA) — not `modes/fr`'s France/Belgium/Switzerland/Luxembourg concepts (CDI/CDD, SYNTEC, RTT) — because language and market are different axes.
+- When the market signal is genuinely ambiguous between two declared candidates, **ask the candidate rather than silently guessing** — the same posture as the single-market "suggest switching" rule above, applied to disambiguation instead of detection.
+
+A single-string `modes_dir` (today's default, ~90% of users) behaves exactly as before — this is additive, not a breaking change.
 
 ### Skill Modes
 
