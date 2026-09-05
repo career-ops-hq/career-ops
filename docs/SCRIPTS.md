@@ -1045,10 +1045,101 @@ These have no `npm run` binding — modes and agents call them with
 | `node agent-inbox.mjs add "..."` | Append a request to the queue the agent drains at the next session start |
 | `node generate-latex.mjs <input.tex> [output.pdf]` | Validate and compile a generated `.tex` CV via tectonic or pdflatex |
 | `node classify-tier.mjs` | Classify a job title into intern / entry / mid / senior |
+| `node ats-payload.mjs <payload.json> [--summary]` | ATS payload transform: folds `competencies[]` into `skills[]` (one safe, idempotent transform) and reports three judgement calls it deliberately does not apply. Payload on stdout, findings on stderr |
 | `node plugins.mjs list\|run <id> [hook]` | CLI host for non-provider plugin hooks (see [PLUGINS.md](PLUGINS.md)) |
 | `node plugin-install.mjs` | Clone/scaffold/validate community plugins (allowlisted URLs, pinned SHA) |
 | `node plugin-audit.mjs` | Static safety scan for community/registry plugins |
 | `node validate-plugin-registry.mjs` | Shape gate for `plugins-registry/<id>.json` files |
+
+---
+
+## ats-payload.mjs
+
+Prepares a `build-cv-html.mjs` payload for an ATS parser: **one safe transform,
+three lints**. Zero-LLM, deterministic, offline, and read-only with respect to
+user-layer files — it consumes a payload and emits a new one, and never writes
+back to `cv.md` or `config/profile.yml`.
+
+```bash
+node ats-payload.mjs cv.json > cv-ats.json
+node ats-payload.mjs cv.json --summary > cv-ats.json     # human findings on stderr
+cat cv.json | node ats-payload.mjs - > cv-ats.json
+node build-cv-html.mjs cv-ats.json out.html templates/ats/cv-template.ats.html
+```
+
+**stdout is the payload and only the payload**; every human-facing word goes to
+stderr (JSON by default, a formatted report with `--summary`). That is what makes
+`> cv-ats.json` safe and lets the script compose into a pipe.
+
+### The transform (applied)
+
+`competencies[]` is folded into `skills[]` as one comma-delimited category, and
+the source array is emptied.
+
+The reason is a fact about parsers, not about any one user. `build-cv-html.mjs`
+renders competencies as bare tag spans into a container whose separation is
+entirely visual (`.competencies-grid { gap: 8px }`) — there is no delimiter
+*character* between one competency and the next, so extracting the text layer
+runs adjacent competencies into a single token. And the block ships under
+`Core Competencies`, which parsers do not recognise as a section name, so it is
+frequently dropped whole rather than merely mangled. `Skills` **is** recognised,
+and already renders as `Category: a, b, c` — comma-delimited, under a header
+parsers look for. The same facts, expressed two ways, survive or don't depending
+on which array they sit in.
+
+Pure data movement: no text is invented, and the transform is reversible and
+**idempotent** — a second run is a no-op, and re-added competencies merge into
+the existing category rather than creating a duplicate one. A payload carrying a
+localized `sections.competencies` keeps its own label as the category name.
+
+### The lints (reported, never applied)
+
+Each needs a decision only the author can make, which is exactly where the
+no-fabrication rule in `AGENTS.md` draws the line.
+
+| Code | What it sees | Why it is not applied |
+|------|--------------|-----------------------|
+| `employer-in-role` | An employer name inside `experience[].role` — the trap for consulting and agency work, where a client's name reads naturally as part of the title. Yields a phantom employer in the parsed record | Deciding "this substring is an employer" is not something a script should be confident about, and silently rewriting a job title is worse than the mangling it prevents |
+| `parenthetical-in-company` | `Globex (Cloud Platform Division)` — kept verbatim as part of the employer name, so the record matches no search for the employer | Stripping it is easy; deciding where that detail *goes* instead (role, location, a bullet) is authoring |
+| `multiple-date-ranges` | Two date ranges in one `experience[].dates` — two stints at one employer parse as one | Splitting them needs someone to decide which bullets belong to which stint. The script can see the second range; it cannot allocate the bullets |
+
+Findings are **advisory**: the transform still succeeds and the payload on stdout
+is still usable, so the script exits 0 with findings present. Exit 1 is reserved
+for an unreadable or malformed input.
+
+### Input validation
+
+The three fields the script reads are shape-checked at the CLI boundary, and a
+payload that would make the run quietly wrong is **refused, not accommodated** —
+nothing reaches stdout, so a shell redirect cannot capture a half-right artifact.
+
+- `skills` present and not an array — folding into it would discard the value you
+  supplied and hand back a well-formed-looking payload with the skills gone.
+- `experience` present and not an array — the lints would report nothing, which
+  prints as "No lint findings" and reads exactly like a clean payload.
+- `competencies` present and neither an array nor a comma-separated string, or an
+  array holding a member with no scalar value (an object, array or `null`) — that
+  member would be dropped rather than folded, thinning the section silently.
+- the existing category the fold would merge into holding such a member in its
+  `items`, or an `items` that is neither a string nor an array — the merge reads
+  it, gets nothing, and overwrites the supplied value. Both are checked only when
+  a fold will actually happen, and only for the one category it would touch, so a
+  payload that would pass through untouched is never rejected for it.
+
+The line is drawn at what is *lost*, not at what is not a string: a numeric or
+boolean member is coerced by `String()` and keeps its value, which is what
+`build-cv-html.mjs` does with it too (numeric years and dates must render, not
+vanish — `tests/cv-numeric-scalars.test.mjs`). Rejecting those would make this
+script stricter than the builder it feeds. An `items` *container* is the other
+way round and is refused: the builder's `joinItems()` returns `''` for anything
+that is neither a string nor an array, so a scalar there has no value-preserving
+path in either tool.
+
+Refusing rather than coercing is deliberate: there is no honest place to put a
+string `skills` value inside `skills[]`, and inventing the structure to hold it
+is the same authoring the lints exist to avoid.
+
+Self-test: `node ats-payload.mjs --self-test`.
 
 ---
 
