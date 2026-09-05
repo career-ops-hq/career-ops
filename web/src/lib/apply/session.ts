@@ -3,6 +3,7 @@ import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
 import { statusBlock, dismissConsent, tryApplyTrigger, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, type ApplyIssue } from "./diagnose";
 import { agentInterpretForm } from "./agent-interpret";
+import { assertSafeApplyUrl, installApplyEgressGuard, isUnsafeApplyUrlError, isBlockedNavigation, UnsafeApplyUrlError } from "./url-guard.mjs";
 
 /** The frame with the most interactive controls — where the agentic interpreter
  *  should look when deterministic extraction found nothing usable. */
@@ -28,15 +29,20 @@ function cssAttr(v: string): string {
 
 /** Navigate resiliently: a transient nav error / slow ATS shouldn't fail the
  *  whole apply. Up to 3 attempts with backoff; returns the navigation Response
- *  (status/headers feed the cheap status-block check). */
+ *  (status/headers feed the cheap status-block check). A blocked/private hop
+ *  is not retried — it is the same SSRF miss as a first-hop-only check. */
 async function gotoResilient(page: Page, url: string): Promise<Response | null> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await assertSafeApplyUrl(page.url());
       await page.waitForLoadState("load", { timeout: 8_000 }).catch(() => {});
+      await assertSafeApplyUrl(page.url());
       return resp;
     } catch (e) {
+      if (isUnsafeApplyUrlError(e)) throw e;
+      if (isBlockedNavigation(e)) throw new UnsafeApplyUrlError();
       lastErr = e;
       await page.waitForTimeout(800 * (attempt + 1));
     }
@@ -174,10 +180,14 @@ async function nudgeScroll(page: Page): Promise<void> {
 }
 
 export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean): Promise<{ id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; needsDrive?: boolean }> {
+  // Refuse before launching any navigation, so an obviously-internal target
+  // never reaches Playwright at all.
+  await assertSafeApplyUrl(url);
   prune();
   if (globalThis.__coIdleTimer) clearTimeout(globalThis.__coIdleTimer); // someone's active
   const browser = await headedBrowser();
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await installApplyEgressGuard(context);
   context.setDefaultTimeout(8000); // no single action hangs the whole open/fill
   const page = await context.newPage();
   const abort = async (msg: string): Promise<never> => {
@@ -198,7 +208,14 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     }
   };
   // 1) Navigate (resilient) → cheapest hard-block check on the Response status.
-  const resp = await gotoResilient(page, url);
+  let resp: Response | null;
+  try {
+    resp = await gotoResilient(page, url);
+  } catch (e) {
+    await context.close().catch(() => {});
+    if (SESSIONS.size === 0) scheduleIdleClose();
+    throw e;
+  }
   await snap(); // first paint
   const sBlock = statusBlock(resp?.status(), resp ? resp.headers() : {});
   if (sBlock) return abort(sBlock.message);
@@ -289,15 +306,22 @@ export function getSession(id: string): Session | undefined {
 /** Open a bare headed page on a URL (for the agentic drive loop / validation),
  *  without the full extract pipeline. Caller must close the context. */
 export async function newDrivePage(url: string): Promise<{ page: Page; context: BrowserContext }> {
+  await assertSafeApplyUrl(url);
   if (globalThis.__coIdleTimer) clearTimeout(globalThis.__coIdleTimer);
   const browser = await headedBrowser();
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await installApplyEgressGuard(context);
   context.setDefaultTimeout(8000);
   const page = await context.newPage();
-  await gotoResilient(page, url);
-  await dismissConsent(page).catch(() => {});
-  await page.waitForTimeout(1000);
-  return { page, context };
+  try {
+    await gotoResilient(page, url);
+    await dismissConsent(page).catch(() => {});
+    await page.waitForTimeout(1000);
+    return { page, context };
+  } catch (e) {
+    await context.close().catch(() => {});
+    throw e;
+  }
 }
 
 /** Extract+enrich the current page (used after the drive loop reaches a form). */
