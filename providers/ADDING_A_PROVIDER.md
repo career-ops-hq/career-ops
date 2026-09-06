@@ -21,7 +21,8 @@ that gate is decided on the source's data, not on how the client is written.
 **A single-company ATS adapter** (a new Greenhouse/Workday/Ashby-class
 vendor, or a company on its own careers API) clears this by construction: the
 postings are the employer's own, and the adapter reads exactly one source.
-Nothing to do here — go to section 1.
+Nothing to do here — including the `robots.txt` bullet below, which is a
+board/aggregator gate — go to section 1.
 
 **A job board, aggregator, or talent network** is where the policy bites.
 In short:
@@ -265,9 +266,16 @@ surface instead of reading as `0` jobs forever. Three outcomes:
   all* is a markup change → `throw`. An empty list inside an otherwise
   well-formed payload is the empty-board case → `[]`. Reference:
   `providers/join.mjs` — `!Array.isArray(items)` throws, `items.length
-  === 0` returns `[]`. `icims.mjs` does not draw this line (zero cards on
-  a page is read as "past the last page"); don't carry that into a new
-  scraper.
+  === 0` returns `[]`. A **regex scraper** has no array container to
+  type-check, so it keys the same split off a listing signal that only a
+  populated board carries: posting-shaped links (an `href` to a
+  detail-page path) present in the HTML but zero cards parsed ⇒ a markup
+  change → `throw`; neither the links nor the cards present ⇒ a genuinely
+  empty board → `[]`. Reference: `providers/itviec.mjs`
+  (`assertParsedSomething` — detail-page hrefs matched by shape but no row
+  built ⇒ throw), called on the first page only. `icims.mjs` does not draw
+  this line at all (zero cards on a page is read as "past the last page");
+  don't carry that into a new scraper.
 - Paginating provider whose loop-termination reads the raw page shape
   (`json.hits.hits.length < PAGE_SIZE`): returning `[]` from the parser is
   not enough — guard that bound or `throw` deliberately (the "fail loud vs
@@ -626,7 +634,10 @@ went through them. Must cover:
   documented envelope → a descriptive throw. Assert both branches — for a
   scraper that means a fixture whose card selector / embedded blob matches
   nothing throws, while a well-formed page carrying an empty list still
-  returns `[]` (`join.mjs`).
+  returns `[]` (`join.mjs`). For a regex scraper with no container to
+  type-check, the throwing fixture must carry the listing signal (a
+  detail-page href in the HTML) with zero rows parsed, and the `[]` fixture
+  must carry neither (`itviec.mjs`).
 - Pagination (if any): the provider's own `DEFAULT_MAX_PAGES` stops it even
   when the source reports more pages; `ctx.maxPages` stops it earlier. For a
   provider that fans out over several query/category passes behind one shared
@@ -644,10 +655,12 @@ went through them. Must cover:
 - `detailLimit` (if `fetchDetails`): a test caps the detail-fetch count at
   `detailLimit` however many postings match — `smartrecruiters.test.mjs`
   runs 40 postings at `detailLimit: 10` and asserts exactly 10 detail calls.
-- Probe cooperation (if paginating): with `ctx.maxPages: 1`, exactly one list
-  request and no `fetchDetails` / enrichment calls; and a `ctx.fetch*`
-  rejection *while `ctx.maxPages` is set* propagates unwrapped — not swallowed
-  to `[]`, not rewrapped (reference: `vdab.test.mjs`).
+- Probe cooperation (if paginating *or* fetching details): with
+  `ctx.maxPages: 1`, exactly one list request and no `fetchDetails` /
+  enrichment calls — a non-paginating provider that skips the detail loop
+  under the probe still owes this assertion; and a `ctx.fetch*` rejection
+  *while `ctx.maxPages` is set* propagates unwrapped — not swallowed to
+  `[]`, not rewrapped (reference: `vdab.test.mjs`).
 - HTML parsing (if any): a fixture title with an entity comes out decoded
   *before* the keyword match runs (an encoded `&amp;` must not drop the job —
   #2923), not just that `decodeEntities` was called.
@@ -675,7 +688,7 @@ Dev loop: `node test-all.mjs --only providers/{name}`. Before a PR: the full
 | Pagination honoring `ctx.maxPages` | `providers/workday.mjs` |
 | HTML scraping with the shared `decodeEntities` | `providers/icims.mjs` |
 | SSR JSON inside HTML (`__NEXT_DATA__`) | `providers/join.mjs` |
-| Empty board vs a broken selector, told apart | `providers/join.mjs` |
+| Empty board vs a broken selector, told apart | `providers/join.mjs` (array shape), `providers/itviec.mjs` (regex scraper) |
 | Wildcard-tenant host allowlisting (anchored, not a `Set`) | `providers/bamboohr.mjs`, `providers/workday.mjs` |
 | RSS parsed in-process | `providers/larajobs.mjs` |
 | `job.url` from a host-controlled `id` / `slug` via `safeEncodeURIComponent` | `providers/phenom.mjs`, `providers/bamboohr.mjs` |
@@ -761,7 +774,10 @@ provider whose tuning needs differ from the shared default
       the matching region/topic section, **only when it carries more than the
       stanza in (2)** — a real `careers_url` / `api`, a resolvable slug or
       board id, or provider-specific keys (every company ATS, and any
-      slug/URL-bearing board such as Getro). Skip (3) for a bare
+      slug/URL-bearing board such as Getro). "Live" here means uncommented
+      and carrying real config (a resolvable `careers_url` / slug), not
+      necessarily `enabled: true` — a company-ATS entry can ship
+      `enabled: false` and still satisfy this. Skip (3) for a bare
       `provider: {id}` feed with no per-entry URL or config (a regional
       board, an RSS feed) — there a live entry is byte-identical to (2).
 - [ ] **Editing an existing provider, not adding one?** The
