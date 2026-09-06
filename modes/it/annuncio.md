@@ -139,6 +139,7 @@ Salvare la valutazione completa in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md
 (contenuto completo del blocco F)
 
 ## G) Bozze di risposta per la candidatura
+<!-- career-ops:draft-answers -->
 (solo se punteggio >= 4.5 -- risposte pronte per i moduli del portale aziendale)
 
 ---

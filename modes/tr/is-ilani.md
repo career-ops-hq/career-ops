@@ -144,6 +144,7 @@ Değerlendirmenin tamamını `reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` olara
 (her risk sinyali için bir satır, sabit sıra — yukarıdaki Risk Summary bölümüne bakın)
 
 ## H) Başvuru Formu Taslak Yanıtları
+<!-- career-ops:draft-answers -->
 (yalnızca puan >= 4,5 ise — form alanları için taslak yanıtlar)
 
 ---

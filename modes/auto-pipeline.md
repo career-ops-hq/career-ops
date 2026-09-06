@@ -64,7 +64,7 @@ If the final score is >= 4.5, generate a draft of responses for the application 
 
 1. **Extract form questions**: Use Playwright to navigate to the form and take a snapshot. If they cannot be extracted, use the generic questions.
 2. **Generate responses** following the tone (see below).
-3. **Save in the report** as section `## H) Draft Application Answers`.
+3. **Save in the report** as section `## H) Draft Application Answers`, with the literal marker line `<!-- career-ops:draft-answers -->` directly under the heading — `application-answers.mjs --read-draft` finds the block by that marker and nothing else, so a block written without it is invisible to `modes/apply.md`, which then regenerates every answer from scratch. See "Draft-answers marker (required)" in `modes/oferta.md`.
 
 ### Generic questions (use if they cannot be extracted from the form)
 

@@ -139,6 +139,7 @@ Guardar la evaluación completa en `reports/{###}-{company-slug}-{YYYY-MM-DD}.md
 (contenido completo del bloque F)
 
 ## G) Borradores de respuestas para la candidatura
+<!-- career-ops:draft-answers -->
 (solo si score >= 4.5 -- borradores de respuestas para el formulario de candidatura)
 
 ---

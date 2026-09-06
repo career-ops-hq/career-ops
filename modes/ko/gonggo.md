@@ -141,6 +141,7 @@ WebSearch를 사용합니다.
 (블록 F 전체 내용)
 
 ## G) 지원서 답변 초안
+<!-- career-ops:draft-answers -->
 (score >= 4.5일 때만 -- 지원서 폼 답변 초안)
 
 ---
