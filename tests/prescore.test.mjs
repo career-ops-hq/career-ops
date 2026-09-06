@@ -597,11 +597,19 @@ const deepEq = (label, actual, expected) => {
   eq('a closed band is not open', extractJdComp('$120,000 - $150,000').annual[0]?.open, false);
 
   // The pathological input for a two-bound pattern is a long digit run that
-  // is NOT followed by the keyword, so every split of the run is tried.
+  // is NOT followed by the keyword, so every split of the run is tried. The
+  // bound is set by the shape of the failure, not by machine speed: a linear
+  // scan of 40,000 digits takes about 2 ms, the quadratic form measured 4.1 s
+  // on the same input, so a loaded runner has two orders of magnitude of room
+  // and the quadratic form still fails inside the per-file budget rather than
+  // hanging the event loop until the harness kills the file.
+  extractJdComp('999 per year');
+  const adversarial = `${'9'.repeat(40000)} per year, no currency stated`;
   const t0 = performance.now();
-  extractJdComp(`${'9'.repeat(20000)} per year, no currency stated`);
+  const scanned = extractJdComp(adversarial);
   const ms = performance.now() - t0;
-  ok('a 20,000-digit run with no LPA after it is scanned in under 50 ms', ms < 50, `${ms.toFixed(1)} ms`);
+  eq('the adversarial digit run yields no figure', scanned.annual.length + (scanned.nonAnnual ? 1 : 0), 0);
+  ok('a 40,000-digit run with no LPA after it is scanned in under 1 s', ms < 1000, `${ms.toFixed(1)} ms`);
 }
 
 // ── 16. Compensation scoring ─────────────────────────────────────────
