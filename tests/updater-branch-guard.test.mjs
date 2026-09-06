@@ -264,6 +264,22 @@ function repoWithWithheldUpdate() {
 const atRiskIn = (dir, gitAt) =>
   locallyModifiedSystemFiles(['sys.mjs'], 'upstream', { git: gitAt, root: dir });
 
+// `git stash push --staged` needs git 2.35, and nothing in this repo declares a
+// minimum — so on an older git it would throw out of gitIn() and take the whole
+// suite file down with it, turning a version difference into a mystery failure.
+// Plain `stash push` performs the same index-and-worktree transition for a
+// fixture whose only change IS the staged one, so the scenario stays real on
+// every version; the flag is used where it exists because that is the exact
+// command the withheld-update notice hands the user.
+function stashStagedArgs(g) {
+  const version = /(\d+)\.(\d+)/.exec(g('--version')) || [];
+  const [major, minor] = [Number(version[1]), Number(version[2])];
+  const supportsStagedStash = major > 2 || (major === 2 && minor >= 35);
+  return supportsStagedStash
+    ? ['stash', 'push', '--staged', '-m', 'career-ops']
+    : ['stash', 'push', '-m', 'career-ops'];
+}
+
 // ── 12. NEGATIVE CONTROL + fix: pending snapshot is not a local edit ────
 {
   const { dir, gitAt } = repoWithWithheldUpdate();
@@ -333,7 +349,7 @@ const atRiskIn = (dir, gitAt) =>
   g('checkout', '-q', '-b', 'feat/x');
   recordStagedUpdate('2.0.0', { git: gitAt });
 
-  g('stash', 'push', '--staged', '-m', 'career-ops');
+  g(...stashStagedArgs(g));
   g('switch', '-q', 'main');
   const whileStashed = atRiskIn(dir, gitAt);      // distrusted: nothing is staged
   g('stash', 'pop');
