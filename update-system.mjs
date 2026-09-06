@@ -653,6 +653,51 @@ export function userLayerViolations(changedFiles, updatePaths, userPaths) {
   return violations;
 }
 
+/**
+ * Split a manifest into entries apply() may write and entries it must refuse.
+ *
+ * A manifest entry naming a user path is a data-loss bug regardless of intent: the
+ * per-path `git checkout FETCH_HEAD -- <dir>` writes upstream's files over the user's,
+ * and an UNTRACKED user file the install has no history for is invisible to the
+ * #2337 local-edit detector, so it gets no .bak and is not preserved. The abort path
+ * then deletes it as an addition HEAD lacks, while reporting "your content was NOT
+ * overwritten". Refusing the entry up front is what keeps that sequence from starting.
+ *
+ * Apply this to the MERGED manifest, never to the fetched half alone. apply()
+ * self-bootstraps — it checks the fetched update-system.mjs out and re-execs it — so
+ * by the time the merge runs, the SYSTEM_PATHS constant in this file IS upstream's
+ * list. There is no local half left to trust, and filtering only `remoteSystemPaths`
+ * lets the identical entry back in through the "local" one.
+ *
+ * Only the two shapes that can only be a mistake are refused: a directory entry
+ * overlapping the user layer in either direction (`documents/`, `data/outcomes/`),
+ * and an entry naming a declared user path outright (`cv.md`, `writing-samples/`).
+ *
+ * A specific system-owned FILE inside a user directory stays allowed. That is the
+ * established pattern — writing-samples/README.md and documents/README.md ship this
+ * way today — and refusing it would stop new upstream files from ever reaching an
+ * install, which is #958: a silent non-arrival that raises no error and can go
+ * unnoticed for months.
+ *
+ * @param {string[]} manifestPaths - The merged manifest apply() is about to write.
+ * @param {string[]} userPaths - User-layer paths, normally effectiveUserPaths().
+ * @returns {{kept: string[], refused: string[]}} Entries to check out, and entries to
+ *   report and drop. Order within each list follows the input.
+ */
+export function rejectUserLayerPaths(manifestPaths, userPaths) {
+  const kept = [];
+  const refused = [];
+  for (const path of manifestPaths) {
+    // Both directions: the entry may sit inside a user path (`data/outcomes/` under
+    // `data/`) or contain one (`modes/` would claim the user's `modes/_profile.md`).
+    const overlapsUserDir = path.endsWith('/')
+      && userPaths.some((userPath) => path.startsWith(userPath) || userPath.startsWith(path));
+    if (overlapsUserDir || userPaths.includes(path)) refused.push(path);
+    else kept.push(path);
+  }
+  return { kept, refused };
+}
+
 function parseVersionFile(raw) {
   // VERSION may carry a release-please marker, e.g. "1.6.0 # x-release-please-version".
   // Take the first whitespace-delimited token so the marker doesn't break semver parsing.
@@ -2191,7 +2236,25 @@ async function apply() {
 
     // 3a. Keep bootstrap paths as a fallback for very old targets, but the
     // target updater's SYSTEM_PATHS is now the source of truth for new files.
-    const updatePaths = mergePathLists(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS);
+    // Being the source of truth stops at the user layer. The filter runs over the
+    // MERGED list, not just remoteSystemPaths: by the time this code executes it is
+    // itself the fetched updater (apply() self-bootstraps and re-execs, step 2), so
+    // the local SYSTEM_PATHS constant above is upstream's list too. Filtering only
+    // the remote half would leave the identical entry to walk in through the "local"
+    // one. Refuse loudly rather than aborting — one bad manifest entry must not
+    // brick every install's updates, but staying silent is what would keep the
+    // mistake invisible.
+    const { kept: updatePaths, refused } = rejectUserLayerPaths(
+      mergePathLists(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS),
+      effectiveUserPaths(),
+    );
+    if (refused.length > 0) {
+      console.log('');
+      console.log(`Refused ${refused.length} manifest entry(ies) naming the user layer:`);
+      for (const path of refused) console.log(`  ${path}`);
+      console.log('Your files were NOT touched. Please report this — it is a manifest error.');
+      console.log('');
+    }
 
     // 3b. Local edits to system files (#2337). The checkout is a raw overwrite,
     // so anything this install fixed locally and upstream has not adopted is

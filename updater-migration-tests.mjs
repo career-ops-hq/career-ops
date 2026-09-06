@@ -307,6 +307,14 @@ const twoPassManifestChecks = [
     pattern: /mergePathLists\(SYSTEM_PATHS,\s*remoteSystemPaths[\s\S]*?\)/,
   },
   {
+    // The guard must wrap the MERGED manifest. apply() self-bootstraps into the
+    // fetched updater before this runs, so the local SYSTEM_PATHS constant is
+    // upstream's list too — a regression that filters only remoteSystemPaths
+    // reads as protection while the same entry walks in through the other half.
+    name: 'apply filters the MERGED manifest against the user layer, not just the fetched half',
+    pattern: /rejectUserLayerPaths\(\s*\n?\s*mergePathLists\(SYSTEM_PATHS,\s*remoteSystemPaths,\s*BOOTSTRAP_PATHS\),\s*\n?\s*effectiveUserPaths\(\),?\s*\n?\s*\)/,
+  },
+  {
     name: 'apply checks out the merged manifest instead of only the local manifest',
     pattern: /for\s*\(const path of updatePaths\)/,
   },
