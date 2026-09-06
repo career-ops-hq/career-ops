@@ -100,6 +100,10 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 let jdText    = '';
 let modelName = process.env.OLLAMA_MODEL || 'llama3.3';
 let baseUrl   = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
+// Context window for the request AND the prompt budget. Defaults to the previous hardcoded
+// 32768, so behaviour is unchanged unless OLLAMA_NUM_CTX is set. Raise it for a model with a
+// bigger window; `ollama show` reports each model's ceiling (qwen2.5 caps at 32768).
+const numCtx = parseInt(process.env.OLLAMA_NUM_CTX || '32768', 10);
 let saveReport = true;
 
 for (let i = 0; i < args.length; i++) {
@@ -217,7 +221,7 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
   profileYml,
   profileContent,
   jdText,
-  maxTokens: 32_768, // matches options.num_ctx below
+  maxTokens: numCtx, // matches options.num_ctx below
 });
 
 if (budgetReport.compressed) {
@@ -282,14 +286,18 @@ try {
         { role: 'system', content: systemPrompt },
         { role: 'user',   content: `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}` },
       ],
-      stream: false,
+      // stream:true so response headers arrive with the FIRST token. With stream:false
+      // Ollama sends nothing until the whole report is generated, and Node's undici client
+      // gives up at its own 300s headersTimeout — a deadline neither OLLAMA_TIMEOUT_MS nor
+      // AbortSignal.timeout controls, which surfaced as a bare "fetch failed" at 5:01.
+      stream: true,
       // Ollama's native /api/chat reads generation params from `options` only.
       // This call targets that endpoint (NOT the OpenAI-compatible /v1 route,
       // which ignores `options` and has no num_ctx equivalent), so both the
       // deterministic temperature and the enlarged context window actually take
       // effect. Without num_ctx here Ollama defaults to a 2048-token context and
       // silently truncates the prompt; without temperature it runs at 0.8.
-      options: { temperature: 0.4, num_ctx: 32768 },
+      options: { temperature: 0.4, num_ctx: numCtx },
     }),
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -301,14 +309,50 @@ try {
     process.exit(1);
   }
 
-  const data = await res.json();
-  evaluationText = data.message?.content?.trim();
+  // Streamed /api/chat is newline-delimited JSON: one object per token, the last carrying
+  // done:true and the token counts.
+  let acc = '', buf = '', promptCount = 0, evalCount = 0;
+  const decoder = new TextDecoder();
+  for await (const chunk of res.body) {
+    buf += decoder.decode(chunk, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      let obj;
+      try { obj = JSON.parse(line); } catch { continue; }
+      if (obj.error) {
+        console.error(`❌  Ollama error: ${obj.error}`);
+        process.exit(1);
+      }
+      if (obj.message?.content) acc += obj.message.content;
+      if (obj.done) {
+        promptCount = obj.prompt_eval_count ?? 0;
+        evalCount = obj.eval_count ?? 0;
+      }
+    }
+  }
+  // Flush a final line that arrived without a trailing newline. Ollama terminates every
+  // chunk with one, but a body that ends mid-line would otherwise be dropped silently.
+  const tail = buf.trim();
+  if (tail) {
+    try {
+      const obj = JSON.parse(tail);
+      if (obj.message?.content) acc += obj.message.content;
+      if (obj.done) {
+        promptCount = obj.prompt_eval_count ?? promptCount;
+        evalCount = obj.eval_count ?? evalCount;
+      }
+    } catch { /* a truncated final line is not recoverable; the empty-response check below reports it */ }
+  }
+  evaluationText = acc.trim();
   // Native /api/chat reports tokens as prompt_eval_count / eval_count, not an
   // OpenAI-shaped `usage` object; map them through the shared normalizer.
   const usage = normalizeOpenAIUsage({
-    prompt_tokens: data.prompt_eval_count,
-    completion_tokens: data.eval_count,
-    total_tokens: (data.prompt_eval_count ?? 0) + (data.eval_count ?? 0),
+    prompt_tokens: promptCount,
+    completion_tokens: evalCount,
+    total_tokens: promptCount + evalCount,
   });
   tracker.record('evaluation', usage);
   if (!evaluationText) {
