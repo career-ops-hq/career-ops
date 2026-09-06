@@ -27,6 +27,11 @@
  *                                     # …track main instead: every merge,
  *                                     # including whatever's mid-flight
  *                                     # between a bad one and its fix.
+ *   node update-system.mjs apply --commit-on-branch --confirm
+ *                                     # …and commit even when HEAD is not on
+ *                                     # the default branch (#3846). Without it
+ *                                     # the update is applied and staged there,
+ *                                     # and the commit is left to you.
  *   node update-system.mjs rollback   # Rollback last update
  *   node update-system.mjs dismiss [--version X.Y.Z]
  *                                     # Don't ask again about this release;
@@ -122,6 +127,11 @@ function isLegacyReexec() {
 }
 
 const CANONICAL_REPO = 'https://github.com/career-ops-hq/career-ops.git';
+// Where an update whose commit the branch guard withheld records the upstream
+// commit its staged files came from (#3846). A local ref, like the WIP stash
+// ref above it: invisible to `git status`, carried by no branch, and therefore
+// unable to leak into a contributor's pull request. See stagedUpdateBaseline().
+export const STAGED_UPDATE_REF = 'refs/career-ops/staged-update';
 const RAW_VERSION_URL = 'https://raw.githubusercontent.com/career-ops-hq/career-ops/main/VERSION';
 const RELEASES_API = 'https://api.github.com/repos/career-ops-hq/career-ops/releases/latest';
 
@@ -2163,7 +2173,14 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
   } catch {
     mergeBase = null;
   }
-  let baseline = mergeBase;
+  // A withheld update leaves its installed snapshot staged without a commit.
+  let stagedBaseline = null;
+  try {
+    stagedBaseline = runGit('rev-parse', '--verify', '--quiet', `${STAGED_UPDATE_REF}^{commit}`).trim() || null;
+  } catch {
+    // No withheld update recorded.
+  }
+  let baseline = stagedBaseline || mergeBase;
   if (!baseline) {
     try {
       baseline = runGit('rev-list', '--max-parents=0', 'HEAD')
@@ -3499,6 +3516,209 @@ export function reconcileGitignore(localText, upstreamText) {
   return { text: `${localText}${separator}${body}${eol}`, added };
 }
 
+// ── BRANCH SAFETY (#3846) ───────────────────────────────────────
+
+/**
+ * Opt-in that restores the pre-#3846 behaviour: commit the update onto
+ * whatever branch HEAD is on. Kept as its own switch rather than folded into
+ * `--force`, which already means something else entirely ("overwrite system
+ * files this install edited locally") — a fourth meaning on that flag would
+ * make neither state readable.
+ */
+export const COMMIT_ON_BRANCH_FLAG = '--commit-on-branch';
+
+export function commitOnBranchOptIn(argv = process.argv, env = process.env) {
+  return argv.includes(COMMIT_ON_BRANCH_FLAG) ||
+    env.CAREER_OPS_UPDATE_COMMIT_ON_BRANCH === '1';
+}
+
+/**
+ * The checked-out branch name, or null on a detached HEAD (or no git at all).
+ *
+ * @param {string} [root=ROOT] - Repository to read.
+ * @returns {string|null} Branch name, or null.
+ */
+export function currentBranchIn(root = ROOT) {
+  try {
+    return gitQuietIn(root, 'symbolic-ref', '--quiet', '--short', 'HEAD') || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * This checkout's default branch, or null when it cannot be established.
+ *
+ * `origin/HEAD` is the authoritative answer and is what `git clone` records,
+ * so a stock install always has it. The `main`/`master` fallback covers
+ * checkouts whose `origin/HEAD` was never set or has been pruned; it only
+ * answers with a branch that actually exists locally.
+ *
+ * Returning null is a real outcome, not a failure: the caller treats "cannot
+ * tell" as "behave exactly as before", because an updater that guesses wrong
+ * about the default branch would withhold the commit from the very users the
+ * plain path is for.
+ *
+ * @param {string} [root=ROOT] - Repository to read.
+ * @returns {string|null} Default branch name, or null.
+ */
+export function defaultBranchIn(root = ROOT) {
+  try {
+    const ref = gitQuietIn(root, 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD');
+    if (ref.startsWith('origin/') && ref.length > 'origin/'.length) {
+      return ref.slice('origin/'.length);
+    }
+  } catch {
+    // No origin/HEAD (never set, pruned, or no remote). Fall through.
+  }
+  for (const name of ['main', 'master']) {
+    try {
+      gitQuietIn(root, 'show-ref', '--verify', '--quiet', `refs/heads/${name}`);
+      return name;
+    } catch {
+      // Not this one.
+    }
+  }
+  return null;
+}
+
+/**
+ * Whether the update commit may land on the branch HEAD is on.
+ *
+ * Pure, so the policy is testable without a repo; the git reads that feed it
+ * live in currentBranchIn/defaultBranchIn.
+ *
+ * Every uncertain case answers `commit: true`. The plain-user path — on the
+ * default branch, no local commits — is the overwhelming majority of runs and
+ * must not change or grow a prompt (#3846), and the mirror-image failure of an
+ * updater that withholds too eagerly is worse than the bug being fixed:
+ * stale system files are invisible until something breaks.
+ *
+ * @param {object} params
+ * @param {string|null} params.currentBranch - From currentBranchIn().
+ * @param {string|null} params.defaultBranch - From defaultBranchIn().
+ * @param {boolean} [params.optIn] - From commitOnBranchOptIn().
+ * @returns {{commit: boolean, reason: string}} Decision and why.
+ */
+export function updateCommitBranchDecision({ currentBranch, defaultBranch, optIn = false }) {
+  if (optIn) return { commit: true, reason: 'opt-in' };
+  if (!currentBranch) return { commit: true, reason: 'detached-head' };
+  if (!defaultBranch) return { commit: true, reason: 'unknown-default-branch' };
+  if (currentBranch === defaultBranch) return { commit: true, reason: 'on-default-branch' };
+  return { commit: false, reason: 'non-default-branch' };
+}
+
+/**
+ * updateCommitBranchDecision against a real repository: the exact composition
+ * apply() runs, exported so a test drives the same entry point rather than
+ * re-deriving the branch reads around a pure function that would then pass on
+ * its own while the caller wired it up wrong.
+ *
+ * @param {string} [root=ROOT] - Repository to read.
+ * @param {{optIn?: boolean}} [options] - Defaults to the CLI/env opt-in.
+ * @returns {{commit: boolean, reason: string, currentBranch: string|null, defaultBranch: string|null}}
+ */
+export function resolveUpdateCommitBranch(root = ROOT, options = {}) {
+  const optIn = options.optIn ?? commitOnBranchOptIn();
+  const currentBranch = currentBranchIn(root);
+  const defaultBranch = defaultBranchIn(root);
+  return {
+    ...updateCommitBranchDecision({ currentBranch, defaultBranch, optIn }),
+    currentBranch,
+    defaultBranch,
+  };
+}
+
+/**
+ * The commit command for a given staging outcome — the one the updater runs,
+ * and therefore the one to hand the user when it does not run it itself.
+ *
+ * The pathspec form is NOT interchangeable with the index form: it drops
+ * staged mode bits where `core.fileMode` is false. Suggesting it after the
+ * index form was selected would tell the user to reintroduce that bug.
+ *
+ * @param {string} version - Target version for the commit message.
+ * @param {boolean} usedIndexCommit - Whether the index form is safe here.
+ * @param {string[]} expandedPathsToStage - Concrete staged file list.
+ * @returns {string} A runnable git command.
+ */
+export function updateCommitCommand(version, usedIndexCommit, expandedPathsToStage) {
+  const message = `chore: auto-update system files to v${version}`;
+  if (usedIndexCommit) return `git commit -m "${message}"`;
+  const pathspec = expandedPathsToStage.map(p => `'${p.replace(/'/g, "'\\''")}'`).join(' ');
+  return `git commit -m "${message}" -- ${pathspec}`;
+}
+
+/**
+ * Record/clear the commit a withheld update's staged files came from.
+ *
+ * Both are best-effort: this bookkeeping improves the NEXT run's diagnosis, and
+ * an update that succeeded must not be reported as failed because a local ref
+ * could not be written. A stale ref is self-correcting — it names real content
+ * the install actually holds, so it stays a truthful baseline until cleared.
+ *
+ * @param {string} upstreamRef - Ref whose commit the staged files came from.
+ * @returns {void}
+ */
+export function recordStagedUpdate(upstreamRef = 'FETCH_HEAD') {
+  try {
+    git('update-ref', STAGED_UPDATE_REF, git('rev-parse', `${upstreamRef}^{commit}`));
+  } catch {
+    // Non-fatal, see above.
+  }
+}
+
+export function clearStagedUpdate() {
+  try {
+    gitQuiet('rev-parse', '--verify', '--quiet', `${STAGED_UPDATE_REF}^{commit}`);
+  } catch {
+    return; // Nothing recorded.
+  }
+  try {
+    git('update-ref', '-d', STAGED_UPDATE_REF);
+  } catch {
+    // Non-fatal, see above.
+  }
+}
+
+/**
+ * What the user is told when the update is applied but not committed.
+ *
+ * The whole point of #3846 is that this is not silent and leaves a choice, so
+ * the notice names the branch, says exactly what state the tree is in, and
+ * gives all three exits: keep it here, move it to the default branch, or undo
+ * it. `rollback` is the sanctioned undo — apply() already created a backup
+ * branch this run — so no destructive `reset --hard` is ever suggested.
+ *
+ * @param {object} params
+ * @param {string} params.currentBranch
+ * @param {string} params.defaultBranch
+ * @param {string} params.version
+ * @param {string} params.commitCommand - From updateCommitCommand().
+ * @returns {string} Multi-line notice.
+ */
+export function skippedBranchCommitNotice({ currentBranch, defaultBranch, version, commitCommand }) {
+  return [
+    '',
+    `Update applied but NOT committed: you are on '${currentBranch}', not '${defaultBranch}'.`,
+    'The refreshed system files are staged in your working tree. Committing them here',
+    'would put a full system snapshot on your branch, which is how a small pull request',
+    'turns into an unreviewable one (#3846).',
+    '',
+    'Pick one:',
+    '  1. Keep the update on this branch:',
+    `       ${commitCommand}`,
+    `  2. Move it to '${defaultBranch}' (git 2.35+ for --staged):`,
+    `       git stash push --staged -m "career-ops v${version}"`,
+    `       git switch ${defaultBranch} && git stash pop && ${commitCommand}`,
+    '  3. Undo the update entirely:',
+    '       node update-system.mjs rollback',
+    '',
+    `Always want it committed here? Re-run with ${COMMIT_ON_BRANCH_FLAG}, or set`,
+    'CAREER_OPS_UPDATE_COMMIT_ON_BRANCH=1.',
+  ].join('\n');
+}
+
 // ── APPLY ───────────────────────────────────────────────────────
 
 /**
@@ -3543,6 +3763,7 @@ async function apply() {
     (process.argv.includes('--confirm') && process.env.CAREER_OPS_UPDATE_REEXEC === '1');
   const updateForce = process.argv.includes('--force') ||
     (isReexec && process.env.CAREER_OPS_UPDATE_FORCE === '1');
+  const commitOnBranch = commitOnBranchOptIn();
   const updateConfirmed = process.argv.includes('--confirm') ||
     (isReexec && (process.env.CAREER_OPS_UPDATE_CONFIRM === '1' || legacyReexec));
   const initialStatusPaths = new Set(gitStatusEntries().map(entry => entry.path));
@@ -3651,6 +3872,10 @@ async function apply() {
           'apply',
           '--confirm',
           ...(updateForce ? ['--force'] : []),
+          // The child is the process that commits, so the branch opt-in has to
+          // reach it. The env twin below covers older targets that do not know
+          // the flag; a target that does know it reads either.
+          ...(commitOnBranch ? [COMMIT_ON_BRANCH_FLAG] : []),
         ], {
           cwd: ROOT,
           stdio: 'inherit',
@@ -3665,6 +3890,7 @@ async function apply() {
             CAREER_OPS_UPDATE_BACKUP_BRANCH: backupBranch,
             CAREER_OPS_UPDATE_TARGET_REF: targetRef,
             ...(updateForce ? { CAREER_OPS_UPDATE_FORCE: '1' } : {}),
+            ...(commitOnBranch ? { CAREER_OPS_UPDATE_COMMIT_ON_BRANCH: '1' } : {}),
             // Keep the legacy confirmation channel for older target updaters;
             // this process still requires the authenticated marker above.
             CAREER_OPS_UPDATE_CONFIRM: '1',
@@ -4069,6 +4295,9 @@ async function apply() {
     // Which commit form was used, so the failure path can suggest the matching
     // recovery command. Declared outside the try because the catch reads it.
     let usedIndexCommit = false;
+    // Set when the branch guard withheld the commit, so the closing summary
+    // reports what actually happened instead of implying a commit was made.
+    let skippedBranchCommit = false;
 
     // The staging and scoped-commit paths must use the same concrete file list.
     // Passing a manifest directory to `git commit -- <dir>` reads matching
@@ -4119,10 +4348,28 @@ async function apply() {
         preservedPaths,
       );
       usedIndexCommit = unrelated.length === 0;
-      if (usedIndexCommit) {
+      // Which branch receives the commit is decided here, after staging, so a
+      // withheld commit still leaves the refreshed files in the tree: the user
+      // is never left on stale system files by this guard (#3846).
+      const branchDecision = resolveUpdateCommitBranch(ROOT, { optIn: commitOnBranch });
+      if (!branchDecision.commit) {
+        skippedBranchCommit = true;
+        // Leave the next run a truthful baseline for these staged files, so it
+        // does not mistake this update's own output for the user's local edits
+        // and preserve the very files it came to install (#3846).
+        recordStagedUpdate('FETCH_HEAD');
+        console.log(skippedBranchCommitNotice({
+          currentBranch: branchDecision.currentBranch,
+          defaultBranch: branchDecision.defaultBranch,
+          version: remote,
+          commitCommand: updateCommitCommand(remote, usedIndexCommit, expandedPathsToStage),
+        }));
+      } else if (usedIndexCommit) {
         git('commit', '-m', `chore: auto-update system files to v${remote}`);
+        clearStagedUpdate();
       } else {
         git('commit', '-m', `chore: auto-update system files to v${remote}`, '--', ...expandedPathsToStage);
+        clearStagedUpdate();
       }
     } catch (e) {
       let commitFailed = false;
@@ -4139,14 +4386,11 @@ async function apply() {
       }
 
       if (commitFailed) {
-        const pathspec = expandedPathsToStage.map(p => `'${p.replace(/'/g, "'\\''")}'`).join(' ');
         // Print the command matching the path actually taken. Suggesting the
         // pathspec form after the index form was selected would tell the user to
         // run the very thing that drops the staged mode bits — a recovery step
         // that quietly reintroduces the bug it is recovering from.
-        const recovery = usedIndexCommit
-          ? `git commit -m "chore: auto-update system files to v${remote}"`
-          : `git commit -m "chore: auto-update system files to v${remote}" -- ${pathspec}`;
+        const recovery = updateCommitCommand(remote, usedIndexCommit, expandedPathsToStage);
         throw new Error(
           `Update commit failed (files may be staged but not committed).\n` +
           `    Error: ${e.message.split('\n')[0]}\n` +
@@ -4183,7 +4427,7 @@ async function apply() {
     }
 
     console.log(`\nUpdate complete: v${local} → v${remote}`);
-    console.log(`Updated ${updated.length} system paths.`);
+    console.log(`Updated ${updated.length} system paths.${skippedBranchCommit ? ' Staged, not committed (see above).' : ''}`);
     console.log(`Rollback available: node update-system.mjs rollback`);
 
     console.log('\n-- The CareerOps Manifesto ------------------------------');
@@ -4289,6 +4533,10 @@ function rollback() {
       // disk full) will resurface on the next normal git operation.
     }
 
+    // The tree no longer holds the staged update those files came from, so the
+    // recorded baseline would now describe content that is not there (#3846).
+    clearStagedUpdate();
+
     console.log(`Rollback complete. Restored ${restored.length} path(s) from ${latest}, removed ${removed.length} path(s) added after the backup.`);
     console.log('Your data (CV, profile, tracker, reports) was not affected.');
   } catch (err) {
@@ -4373,7 +4621,7 @@ if (isCli) {
       case 'rollback': rollback(); break;
       case 'dismiss': await dismiss(); break;
       default:
-        console.log('Usage: node update-system.mjs [check [--force] [--channel main]|status|apply --confirm [--force] [--channel main]|rollback|dismiss [--version X.Y.Z]]');
+        console.log('Usage: node update-system.mjs [check [--force] [--channel main]|status|apply --confirm [--force] [--channel main] [--commit-on-branch]|rollback|dismiss [--version X.Y.Z]]');
         process.exit(1);
     }
   } catch (err) {
