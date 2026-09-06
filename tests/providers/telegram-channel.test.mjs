@@ -168,6 +168,14 @@ try {
     if (got === '') pass(`employerName() refuses ${label}`);
     else fail(`employerName(${label}) = ${JSON.stringify(got)}, want ''`);
   }
+  // Every role token added for the hashtag template (#3928), one bare second
+  // line each, so a typo in any alternative of ROLE_WORD_RE fails its own row.
+  const roleTokens = ['Product Owner', 'QA', 'Tester', 'DevOps', 'SRE', 'Тестировщик', 'Тимлид', 'Владелец продукта', 'Руководитель', 'Маркетолог', 'Программист'];
+  for (const token of roleTokens) {
+    const got = employerName(['#middle #удаленка', token, 'Описание']);
+    if (got === '') pass(`employerName() refuses the role token "${token}" on the hashtag template`);
+    else fail(`employerName(hashtag + "${token}") = ${JSON.stringify(got)}, want ''`);
+  }
 
   // --- policy: link -----------------------------------------------------------
   const links = [
