@@ -107,10 +107,16 @@ function isLegacyReexec() {
 }
 
 const CANONICAL_REPO = 'https://github.com/career-ops-hq/career-ops.git';
-// Where an update whose commit the branch guard withheld records the upstream
-// commit its staged files came from (#3846). A local ref, like the WIP stash
-// ref above it: invisible to `git status`, carried by no branch, and therefore
-// unable to leak into a contributor's pull request. See stagedUpdateBaseline().
+// Where an update whose commit the branch guard withheld records the snapshot it
+// staged (#3846). A local ref, like the WIP stash ref above it: invisible to
+// `git status`, carried by no branch, and therefore unable to leak into a
+// contributor's pull request.
+//
+// It points at a commit whose TREE is the index the withheld update produced —
+// not at the upstream commit those files came from. The upstream commit would
+// describe what the update INTENDED; the staged tree describes what this install
+// actually holds, preserved files included, which is what a baseline has to mean.
+// It also makes the ref checkable: see stagedUpdateBaseline().
 export const STAGED_UPDATE_REF = 'refs/career-ops/staged-update';
 const RAW_VERSION_URL = 'https://raw.githubusercontent.com/career-ops-hq/career-ops/main/VERSION';
 const RELEASES_API = 'https://api.github.com/repos/career-ops-hq/career-ops/releases/latest';
@@ -1177,6 +1183,79 @@ export function systemTreeDiffers(systemPaths, upstreamRef = 'FETCH_HEAD', ctx =
  * @param {{git?: Function}} [ctx] - injectable git runner, for tests.
  * @returns {string[]} repo-relative file paths, sorted.
  */
+/**
+ * The withheld update's staged snapshot, when it is still the state on disk.
+ *
+ * The ref is durable and the state it describes is not, so trusting it on sight
+ * is a bug of its own: a contributor who discards a withheld update by hand
+ * (`git reset --hard`, `git restore`, a stash and a branch switch) leaves the
+ * ref behind, and every system file then reads as a local edit against a
+ * snapshot that is no longer there — preserved, `.bak`, delta skipped, the same
+ * invisible skip this guard exists to remove, one step further out. Measured:
+ * with the ref recorded and the tree reset to HEAD, `sys.mjs` came back in the
+ * at-risk set even though the working tree was untouched.
+ *
+ * So the ref is checked against the index before it is believed, over the paths
+ * actually being asked about. Being wrong in the safe direction costs a fallback
+ * to the ordinary baseline; being wrong in the other direction costs a skipped
+ * update the user cannot see.
+ *
+ * A ref that fails the check is distrusted but NOT deleted, which is a
+ * deliberate departure from "drop it otherwise". Deleting is what makes the
+ * damage permanent in the one sequence where the state comes back: the notice's
+ * own option 2 is `git stash push --staged` then a branch switch, and an
+ * updater run in that window would delete a ref that `git stash pop` is about
+ * to make current again — measured, the false positives return after the pop.
+ * A stale ref that is kept costs nothing, because the check is a content
+ * comparison: if it matches the index it describes the state on disk truthfully,
+ * whatever history produced it. The ref is cleared where the update genuinely
+ * ends — a commit, or a rollback (see clearStagedUpdate).
+ *
+ * @param {Function} runGit - Git runner (injectable for tests).
+ * @param {string[]} paths - Pathspecs the caller is asking about.
+ * @returns {string|null} Commit to use as the baseline, or null.
+ */
+export function stagedUpdateBaseline(runGit, paths) {
+  let ref;
+  try {
+    ref = runGit('rev-parse', '--verify', '--quiet', `${STAGED_UPDATE_REF}^{commit}`).trim();
+  } catch {
+    return null; // No withheld update recorded — the normal case.
+  }
+  if (!ref) return null;
+  // `--quiet` makes each of these an exit-code question: zero when the snapshot
+  // is still there, a throw when it is not. Scoped to `paths`, so a contributor
+  // staging their own work elsewhere in the tree does not invalidate it.
+  //
+  // The INDEX and the WORKING TREE are both asked, because the snapshot survives
+  // in one or the other depending on how it got here, and each check alone has a
+  // blind spot that costs a real case:
+  //   - index only: `git stash push --staged` + `git stash pop` restores the
+  //     files unstaged, so the index is back at HEAD and the snapshot — sitting
+  //     right there on disk — reads as gone. Measured: the false positives came
+  //     back after the pop.
+  //   - worktree only: a user edit to one system file while the update waits
+  //     makes the whole snapshot fail, taking the baseline away from every other
+  //     file with it.
+  // Either match is proof enough: the checks compare content, so a snapshot that
+  // matches what is on disk describes this tree truthfully whatever produced it.
+  for (const check of [
+    () => runGit('diff-index', '--cached', '--quiet', ref, '--', ...paths),
+    () => runGit('diff', '--quiet', ref, '--', ...paths),
+  ]) {
+    try {
+      check();
+      return ref;
+    } catch {
+      // Try the next one.
+    }
+  }
+  // Neither the index nor the tree holds it, so it says nothing about this
+  // install. Fall back to the ordinary baseline; see above for why the ref is
+  // left in place rather than deleted.
+  return null;
+}
+
 export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ctx = {}) {
   const runGit = ctx.git || git;
   if (!paths || paths.length === 0) return [];
@@ -1219,16 +1298,10 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
   // run would read the previous run's own files as local edits — preserving
   // them, writing .bak copies, and skipping exactly the delta it came to
   // install. Measured: with an updater commit at v1, an uncommitted v2 tree and
-  // upstream at v3, the file lands in the at-risk set. The ref written when the
-  // commit was withheld names the commit those files came from, so it is the
-  // truthful baseline whenever it exists.
-  let baseline = null;
-  try {
-    baseline = runGit('rev-parse', '--verify', '--quiet', `${STAGED_UPDATE_REF}^{commit}`).trim() || null;
-  } catch {
-    // No withheld update recorded — the normal case. Fall through.
-    baseline = null;
-  }
+  // upstream at v3, the file lands in the at-risk set. stagedUpdateBaseline()
+  // answers with that snapshot while it is genuinely still staged, and with
+  // null — pruning the ref — once it is not.
+  let baseline = stagedUpdateBaseline(runGit, paths);
   if (!baseline) {
     try {
       const updaterCommit = runGit(
@@ -2227,32 +2300,48 @@ export function updateCommitCommand(version, usedIndexCommit, expandedPathsToSta
 }
 
 /**
- * Record/clear the commit a withheld update's staged files came from.
+ * Record the snapshot a withheld update staged, so the next run can tell it
+ * apart from the user's own edits.
  *
- * Both are best-effort: this bookkeeping improves the NEXT run's diagnosis, and
- * an update that succeeded must not be reported as failed because a local ref
- * could not be written. A stale ref is self-correcting — it names real content
- * the install actually holds, so it stays a truthful baseline until cleared.
+ * Best-effort: this bookkeeping improves the NEXT run's diagnosis, and an update
+ * that succeeded must not be reported as failed because a local ref could not be
+ * written. The recorded commit hangs off HEAD with the staged index as its tree,
+ * which also makes it a snapshot the user could check out if they ever want it.
  *
- * @param {string} upstreamRef - Ref whose commit the staged files came from.
+ * @param {string} version - Target version, for the recorded commit's message.
+ * @param {object} [ctx] - `{ git }` runner override, for tests.
  * @returns {void}
  */
-export function recordStagedUpdate(upstreamRef = 'FETCH_HEAD') {
+export function recordStagedUpdate(version, ctx = {}) {
+  const runGit = ctx.git || git;
   try {
-    git('update-ref', STAGED_UPDATE_REF, git('rev-parse', `${upstreamRef}^{commit}`));
+    const tree = runGit('write-tree');
+    const commit = runGit(
+      'commit-tree', tree, '-p', runGit('rev-parse', 'HEAD'),
+      '-m', `career-ops staged update to v${version} (uncommitted)`,
+    );
+    runGit('update-ref', STAGED_UPDATE_REF, commit);
   } catch {
     // Non-fatal, see above.
   }
 }
 
-export function clearStagedUpdate() {
+/**
+ * Drop the recorded snapshot: the withheld update is no longer pending, either
+ * because it was committed or because a rollback replaced the tree.
+ *
+ * @param {object} [ctx] - `{ git }` runner override, for tests.
+ * @returns {void}
+ */
+export function clearStagedUpdate(ctx = {}) {
+  const runGit = ctx.git || git;
   try {
-    gitQuiet('rev-parse', '--verify', '--quiet', `${STAGED_UPDATE_REF}^{commit}`);
+    (ctx.git || gitQuiet)('rev-parse', '--verify', '--quiet', `${STAGED_UPDATE_REF}^{commit}`);
   } catch {
     return; // Nothing recorded.
   }
   try {
-    git('update-ref', '-d', STAGED_UPDATE_REF);
+    runGit('update-ref', '-d', STAGED_UPDATE_REF);
   } catch {
     // Non-fatal, see above.
   }
@@ -2798,7 +2887,7 @@ async function apply() {
         // Leave the next run a truthful baseline for these staged files, so it
         // does not mistake this update's own output for the user's local edits
         // and preserve the very files it came to install (#3846).
-        recordStagedUpdate('FETCH_HEAD');
+        recordStagedUpdate(remote);
         console.log(skippedBranchCommitNotice({
           currentBranch: branchDecision.currentBranch,
           defaultBranch: branchDecision.defaultBranch,
