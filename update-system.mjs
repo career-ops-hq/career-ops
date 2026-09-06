@@ -2282,6 +2282,24 @@ export function resolveUpdateCommitBranch(root = ROOT, options = {}) {
 }
 
 /**
+ * A value safe to paste into a shell, quoted only when it needs to be.
+ *
+ * The notice's commands are copied by hand into a terminal, so a value carrying
+ * shell syntax executes it there. Git's own ref rules forbid spaces and a
+ * handful of glob characters but allow `;`, `&`, `$`, backticks and parentheses,
+ * so a branch name is not the safe token it looks like. Plain names are left
+ * bare because the commands are read as much as they are run.
+ *
+ * @param {string} value - Value to interpolate into a printed command.
+ * @returns {string} The value, single-quoted if it carries anything unusual.
+ */
+export function shellQuoteArg(value) {
+  const text = String(value);
+  if (/^[A-Za-z0-9._@+/-]+$/.test(text)) return text;
+  return `'${text.replace(/'/g, "'\\''")}'`;
+}
+
+/**
  * The commit command for a given staging outcome — the one the updater runs,
  * and therefore the one to hand the user when it does not run it itself.
  *
@@ -2365,7 +2383,11 @@ export function clearStagedUpdate(ctx = {}) {
  * @param {string} params.commitCommand - From updateCommitCommand().
  * @returns {string} Multi-line notice.
  */
-export function skippedBranchCommitNotice({ currentBranch, defaultBranch, version, commitCommand }) {
+export function skippedBranchCommitNotice({
+  currentBranch, defaultBranch, version, commitCommand, hasUnrelatedStaged = false,
+}) {
+  const branch = shellQuoteArg(defaultBranch);
+  const stashMessage = shellQuoteArg(`career-ops v${version}`);
   return [
     '',
     `Update applied but NOT committed: you are on '${currentBranch}', not '${defaultBranch}'.`,
@@ -2377,8 +2399,17 @@ export function skippedBranchCommitNotice({ currentBranch, defaultBranch, versio
     '  1. Keep the update on this branch:',
     `       ${commitCommand}`,
     `  2. Move it to '${defaultBranch}' (git 2.35+ for --staged):`,
-    `       git stash push --staged -m "career-ops v${version}"`,
-    `       git switch ${defaultBranch} && git stash pop && ${commitCommand}`,
+    `       git stash push --staged -m ${stashMessage}`,
+    `       git switch ${branch} && git stash pop && ${commitCommand}`,
+    // `--staged` takes the whole index, not just this update's share of it, so
+    // for a contributor with their own work staged option 2 would carry that
+    // work onto the default branch too. The updater already knows when that is
+    // the case — it is the same signal that scopes the commit — so say it here
+    // rather than letting the recipe do it quietly.
+    ...(hasUnrelatedStaged ? [
+      '       NOTE: you have other changes staged. `stash push --staged` takes the whole',
+      '       index, so this would move them too — commit or unstage them first.',
+    ] : []),
     '  3. Undo the update entirely:',
     '       node update-system.mjs rollback',
     '',
@@ -2895,6 +2926,7 @@ async function apply() {
           defaultBranch: branchDecision.defaultBranch,
           version: remote,
           commitCommand: updateCommitCommand(remote, usedIndexCommit, expandedPathsToStage),
+          hasUnrelatedStaged: unrelated.length > 0,
         }));
       } else if (usedIndexCommit) {
         git('commit', '-m', `chore: auto-update system files to v${remote}`);
