@@ -582,6 +582,7 @@ export function localUserPaths(root = ROOT) {
   const reject = (path, why) => {
     throw new Error(`${LOCAL_PATHS_FILE}: refusing "${path}" — ${why}`);
   };
+  const underSystemPath = [];
 
   for (const path of declared) {
     if (path === LOCAL_PATHS_FILE) {
@@ -619,16 +620,33 @@ export function localUserPaths(root = ROOT) {
     if (segments.includes('.')) {
       reject(path, 'paths must be written plainly, with no "." segment (use "merge-tracker.mjs", not "./merge-tracker.mjs")');
     }
+    // Warned, not refused. This check assumed a SYSTEM_PATHS match proves
+    // upstream ships the path, and it does not:
+    //
+    //   - a directory entry is a wildcard, so `providers/` covers upstream's
+    //     greenhouse.mjs and a provider that exists only in a fork alike;
+    //   - even an exact entry can be stale, naming a file the fetched tree no
+    //     longer has (the checkout loop already tolerates exactly that, calling
+    //     it "a path genuinely absent upstream").
+    //
+    // So the refusal fired on precisely the files this mechanism exists for —
+    // a fork's own provider, skill or doc under an owned prefix — leaving them
+    // undeclarable, after which staleSystemFiles() deleted them as though
+    // upstream had dropped them. Answering "does upstream ship this?" needs the
+    // fetched tree, which this function cannot reach: it is also called by
+    // validate-system-paths-coverage.mjs, offline. Warning keeps the original
+    // rationale, which was about *silence* rather than refusal: fork a
+    // genuinely shipped file and you are told it stops updating.
     const collision = SYSTEM_PATHS.find((sys) =>
       sys.endsWith('/') ? path.startsWith(sys) : path === sys,
     );
-    if (collision) {
-      reject(
-        path,
-        `the system layer ships it (SYSTEM_PATHS entry "${collision}"). `
-        + 'Declaring it would stop updates to it with no other signal',
-      );
-    }
+    if (collision) underSystemPath.push({ path, collision });
+  }
+  for (const { path, collision } of underSystemPath) {
+    console.error(
+      `${LOCAL_PATHS_FILE}: "${path}" is inside system path "${collision}" — treating it as yours. `
+      + 'If upstream ships this file, it will no longer receive updates.',
+    );
   }
   return declared;
 }
@@ -2247,9 +2265,20 @@ async function apply() {
     // checking out and restoring afterwards would leave the index holding the
     // upstream blob, so the scoped commit below would record the very content
     // the user asked to keep out.
-    const preserveSpecs = preservedPaths.map((file) => `${EXCLUDE_PATHSPEC_PREFIX}${file}`);
+    // Declared fork-local paths (config/local-paths.txt) are excluded from the
+    // raw checkout too, not only from the stale-file prune below: that file's
+    // whole contract is "apply will never write to it". A declared path upstream
+    // does not ship is unreachable by the checkout anyway, so this matters for
+    // the one upstream DOES ship — which would otherwise be overwritten despite
+    // the declaration. Unconditional, and deliberately outside the `--force`
+    // branch: --force means "discard my local edits to system files", not
+    // "discard the files I told you are mine".
+    const keptFromCheckout = mergePathLists(preservedPaths, localUserPaths(ROOT));
+    const preserveSpecs = keptFromCheckout.map((file) => `${EXCLUDE_PATHSPEC_PREFIX}${file}`);
 
-    const preservedSet = new Set(preservedPaths);
+    // Tracks preserveSpecs, not the .bak messaging (which stays keyed to
+    // atRisk — a declared path is not necessarily a modified one).
+    const preservedSet = new Set(keptFromCheckout);
 
     const skippedPaths = [];
     for (const path of updatePaths) {
@@ -2258,7 +2287,7 @@ async function apply() {
       // that error is indistinguishable from a genuine failure at the catch
       // below, so it would abort the entire update. Skip the entry instead when
       // nothing would be left to check out (see pathFullyPreserved).
-      if (pathFullyPreserved(path, preservedPaths, preservedSet)) continue;
+      if (pathFullyPreserved(path, keptFromCheckout, preservedSet)) continue;
       try {
         // stderr is piped rather than inherited here. A path absent upstream is
         // an EXPECTED skip (a stale manifest entry such as `.gemini/commands/`),
@@ -2308,7 +2337,13 @@ async function apply() {
         // be deleted here as "stale" — the two checks used to run independently,
         // so a preserved file with no upstream counterpart was backed up to
         // .bak by the block above and then unlinked by this one in the same run.
-        const staleCandidates = staleSystemFiles(localFiles, remoteFiles, SYSTEM_PATHS, mergePathLists(USER_PATHS, preservedPaths));
+        // effectiveUserPaths(), not USER_PATHS: a fork's own file living under a
+        // SYSTEM_PATHS directory prefix (a new provider in providers/, a custom
+        // skill in .claude/skills/, a design doc in docs/) is absent upstream and
+        // therefore looks exactly like a stale system file here. Reading only the
+        // built-in list deleted them. Protection also must not depend on the file
+        // having uncommitted edits, which is all that put it in preservedPaths.
+        const staleCandidates = staleSystemFiles(localFiles, remoteFiles, SYSTEM_PATHS, mergePathLists(effectiveUserPaths(), preservedPaths));
         for (const f of staleCandidates) {
           if (isReferencedByPreservedFile(f, preservedPaths)) {
             console.log(`Kept stale asset still referenced by a preserved file: ${f}`);
