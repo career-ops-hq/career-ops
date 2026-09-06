@@ -200,7 +200,7 @@ func TestStatusTargetRejectsMalformedStatusAndUnsafeNotes(t *testing.T) {
 }
 
 func TestStatusTargetRejectsInvalidNewStatus(t *testing.T) {
-	for _, status := range []string{"", "???", "Applied | Interview", "Applied\nInterview"} {
+	for _, status := range []string{"", "???", "Applied | Interview", "Applied\nInterview", "not applied", "Applied Materials", "**Applied**", "Applied 2026-09-06", " Applied "} {
 		t.Run(status, func(t *testing.T) {
 			t.Setenv("CAREER_OPS_TRACKER", "")
 			before := statusTargetHeader + statusTargetRow
@@ -245,4 +245,56 @@ func TestStatusTargetAppendsToCompactEmptyNotes(t *testing.T) {
 	want := strings.Replace(row, "| Applied |", "| Interview |", 1)
 	want = strings.Replace(want, "||", "| follow-up |", 1)
 	assertStatusTargetBytes(t, path, statusTargetHeader+want)
+}
+
+func TestStatusTargetRejectsMalformedReportCell(t *testing.T) {
+	for _, report := range []string{
+		"[7](reports/007.md) [8](reports/008.md)",
+		"[7](reports/007.md) trailing text",
+		"prefix [7](reports/007.md)",
+		"[7](reports/007.md) [7](reports/007.md)",
+	} {
+		t.Run(report, func(t *testing.T) {
+			t.Setenv("CAREER_OPS_TRACKER", "")
+			row := strings.Replace(statusTargetRow, "[7](reports/007.md)", report, 1)
+			before := statusTargetHeader + row
+			root, path := writeTracker(t, before)
+			err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7", Status: "Applied"}, "Interview")
+			if err == nil {
+				t.Fatal("malformed Report must fail without choosing a link")
+			}
+			assertStatusTargetBytes(t, path, before)
+			// Do not skip the malformed candidate and silently target a different row.
+			before += strings.Replace(statusTargetRow, "| 42 |", "| 99 |", 1)
+			writeStatusTarget(t, path, before)
+			if err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7", Status: "Applied"}, "Interview"); err == nil {
+				t.Fatal("malformed candidate must not redirect the update")
+			}
+			assertStatusTargetBytes(t, path, before)
+		})
+	}
+}
+
+func TestStatusTargetAcceptsCanonicalNames(t *testing.T) {
+	for _, status := range []string{"Evaluated", "Applied", "Responded", "Interview", "Offer", "Hired", "Rejected", "Discarded", "SKIP", "Skip", "skip"} {
+		t.Run(status, func(t *testing.T) {
+			t.Setenv("CAREER_OPS_TRACKER", "")
+			before := statusTargetHeader + statusTargetRow
+			root, path := writeTracker(t, before)
+			if err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7", Status: "Applied"}, status); err != nil {
+				t.Fatal(err)
+			}
+			assertStatusTargetBytes(t, path, strings.Replace(before, "| Applied |", "| "+status+" |", 1))
+		})
+	}
+}
+
+func TestStatusTargetStillReadsLegacyDiskStatus(t *testing.T) {
+	t.Setenv("CAREER_OPS_TRACKER", "")
+	before := statusTargetHeader + strings.Replace(statusTargetRow, "| Applied |", "| **Applied** |", 1)
+	root, path := writeTracker(t, before)
+	if err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7", Status: "Applied"}, "Interview"); err != nil {
+		t.Fatal(err)
+	}
+	assertStatusTargetBytes(t, path, strings.Replace(before, "| **Applied** |", "| Interview |", 1))
 }

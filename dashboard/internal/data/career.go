@@ -706,7 +706,7 @@ func UpdateApplicationStatusAndNotes(careerOpsPath string, app model.CareerAppli
 	if strings.ContainsAny(notesAppend, "|\r\n\t") {
 		return fmt.Errorf("notes cannot contain table delimiters or line breaks")
 	}
-	if strings.ContainsAny(newStatus, "|\r\n\t") || !isCanonicalStatusValue(newStatus) {
+	if !isCanonicalStatusName(newStatus) {
 		return fmt.Errorf("unrecognized status: %q", newStatus)
 	}
 	filePath := resolveTrackerPath(careerOpsPath)
@@ -765,6 +765,9 @@ func UpdateApplicationStatusAndNotes(careerOpsPath string, app model.CareerAppli
 		match := reReportLink.FindStringSubmatch(cells[reportIdx])
 		if match == nil || match[1] != app.ReportNumber {
 			continue
+		}
+		if match[0] != strings.TrimSpace(cells[reportIdx]) {
+			return fmt.Errorf("malformed report cell for report %s: expected exactly one report link", app.ReportNumber)
 		}
 		if target >= 0 {
 			return fmt.Errorf("ambiguous application: report %s occurs in multiple rows", app.ReportNumber)
@@ -902,7 +905,13 @@ func statusCellIndex(cells []string, canonicalIdx int) int {
 // known tracker statuses (in any accepted spelling/language), i.e. whether it
 // is safe to treat the cell as the Status column.
 func isCanonicalStatusValue(cell string) bool {
-	switch NormalizeStatus(cell) {
+	return isCanonicalStatusName(NormalizeStatus(cell))
+}
+
+// New writes accept canonical names only. Historical disk cells still use
+// NormalizeStatus above; its permissive aliases must not authorize new values.
+func isCanonicalStatusName(status string) bool {
+	switch strings.ToLower(status) {
 	case "evaluated", "applied", "responded", "interview", "offer", "hired", "rejected", "discarded", "skip":
 		return true
 	}
