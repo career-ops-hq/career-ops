@@ -14,7 +14,6 @@ const TALEO_BUSINESS_EDITION_HOST = 'tre.taleo.net';
 const SECTION_RE = /^\/careersection\/([a-z0-9._-]+)\/(?:jobsearch|joblist|jobdetail)\.ftl$/i;
 const DEFAULT_MAX_PAGES = 100;
 const MAX_PAGES_CAP = 1000;
-const PAGE_SIZE = 25;
 const DEFAULT_DETAIL_LIMIT = 25;
 const MAX_DETAIL_LIMIT = 100;
 const INTER_PAGE_DELAY_MS = 200;
@@ -50,6 +49,29 @@ function resolveBoard(entry) {
     if (parsed) return parsed;
   }
   return null;
+}
+
+/**
+ * Taleo's location column sometimes carries the raw JSON-encoded array the
+ * UI groups multi-location postings from (e.g. `["AB-Calgary"]` or
+ * `["AB-Calgary","AB-Edmonton"]`) instead of plain text. Detect that shape
+ * and join it into readable text; anything else (including a genuinely
+ * plain string) passes through unchanged.
+ */
+function parseLocationField(value) {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed) && parsed.every((v) => typeof v === 'string')) {
+          const joined = parsed.map((v) => htmlToText(v)).filter(Boolean).join('; ');
+          if (joined) return joined;
+        }
+      } catch { /* not valid JSON; fall through to the raw string */ }
+    }
+  }
+  return value;
 }
 
 function textValue(value) {
@@ -108,7 +130,7 @@ function parseColumns(row, headings) {
   const locationIndex = locationMatch >= 0 ? locationMatch : (positional ? 1 : -1);
   const postedIndex = postedMatch >= 0 ? postedMatch : (positional ? 2 : -1);
   const title = titleIndex >= 0 ? values[titleIndex] : textValue(row?.title || row?.jobTitle);
-  const location = locationIndex >= 0 ? values[locationIndex] : textValue(row?.location || row?.locationsColumns);
+  const location = parseLocationField(locationIndex >= 0 ? values[locationIndex] : textValue(row?.location || row?.locationsColumns));
   const posted = postedIndex >= 0 ? values[postedIndex] : '';
   return { title, location, posted };
 }
@@ -246,8 +268,14 @@ export default {
       const rawCount = Array.isArray(json?.requisitionList) ? json.requisitionList.length : 0;
       const paging = json?.pagingData || {};
       const total = Number(paging.totalCount);
-      const size = Number(paging.pageSize) || PAGE_SIZE;
-      if (!rawCount || (Number.isFinite(total) && page * size >= total) || rawCount < size) break;
+      // Terminate once nothing came back, or once we've accumulated at least
+      // as many rows as the source's own reported total. A page returning
+      // fewer rows than the assumed/reported pageSize is NOT a reliable
+      // end-of-results signal — some Taleo boards return uneven page sizes
+      // (e.g. 14 rows on page 1, 16 on page 2) — so that is deliberately not
+      // a termination condition here. The `maxPages` loop bound above is the
+      // safety net when `total` is missing or not a usable number.
+      if (!rawCount || (Number.isFinite(total) && all.length >= total)) break;
     }
 
     // Health probes are deliberately list-only. Normal scans enrich a bounded

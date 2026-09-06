@@ -129,4 +129,37 @@ try {
   let sameError = false;
   try { await provider.fetch({ name: 'ProbeErrorCo', careers_url: url }, { maxPages: 1, fetchText: async () => shell, fetchJson: async () => { throw probeError; } }); } catch (e) { sameError = e === probeError; }
   if (sameError) pass('probe fetch errors propagate with original identity'); else fail('probe error was swallowed or wrapped');
+
+  // A page can under-report relative to the board's own advertised pageSize
+  // (e.g. Taleo reports pageSize: 25 but returns only 14 rows on page 1).
+  // That must not be mistaken for end-of-results while totalCount says
+  // there's more — pagination should keep going until the accumulated row
+  // count reaches totalCount (or the maxPages ceiling).
+  const shortFirstPage = {
+    requisitionList: Array.from({ length: 14 }, (_, i) => ({ jobId: `f${i}`, column: [`First ${i}`, 'Calgary', '2026-09-01'] })),
+    pagingData: { totalCount: 30, pageSize: 25 },
+  };
+  const fullerSecondPage = {
+    requisitionList: Array.from({ length: 16 }, (_, i) => ({ jobId: `s${i}`, column: [`Second ${i}`, 'Edmonton', '2026-09-02'] })),
+    pagingData: { totalCount: 30, pageSize: 25 },
+  };
+  const underReportCalls = [];
+  const underReport = await provider.fetch({ name: 'UnderReportCo', careers_url: url }, {
+    fetchText: async () => shell,
+    fetchJson: async (u, o) => { const p = JSON.parse(o.body).pageNo; underReportCalls.push(p); return p === 1 ? shortFirstPage : fullerSecondPage; },
+    sleep: async () => {},
+  });
+  if (underReport.length === 30 && underReportCalls.join(',') === '1,2') pass('keeps paginating when a page under-reports vs. its own pageSize but totalCount is not yet reached'); else fail(`under-reported page size terminated pagination early: ${underReportCalls.join(',')} / ${underReport.length}`);
+
+  // Taleo's location column sometimes carries the raw JSON-encoded array the
+  // UI groups multi-location postings from, instead of plain text.
+  const jsonLocationResponse = { requisitionList: [
+    { jobId: 'loc-1', column: ['Single Location Role', '["AB-Calgary"]', '2026-09-01'] },
+    { jobId: 'loc-2', column: ['Multi Location Role', '["AB-Calgary","AB-Edmonton"]', '2026-09-02'] },
+    { jobId: 'loc-3', column: ['Plain Location Role', 'Toronto', '2026-09-03'] },
+  ] };
+  const locationJobs = mod.parseTaleoResponse(jsonLocationResponse, { url: new URL(url), section: 'demo' }, mod.extractHeadings(shell), 'Example');
+  if (locationJobs[0].location === 'AB-Calgary') pass('parses a single-element JSON location array into plain text'); else fail(`single JSON location array not parsed: ${JSON.stringify(locationJobs[0])}`);
+  if (locationJobs[1].location === 'AB-Calgary; AB-Edmonton') pass('joins a multi-element JSON location array with "; "'); else fail(`multi JSON location array not joined: ${JSON.stringify(locationJobs[1])}`);
+  if (locationJobs[2].location === 'Toronto') pass('leaves a plain-string location unchanged'); else fail(`plain location was altered: ${JSON.stringify(locationJobs[2])}`);
 } catch (e) { fail(`taleo provider tests crashed: ${e.message}`); }
