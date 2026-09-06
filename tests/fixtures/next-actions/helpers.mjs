@@ -16,9 +16,16 @@ export const LATER = new Date('2030-03-02T09:00:00.000Z');
 export const CASES = JSON.parse(readFileSync(join(FIXTURES, 'history-cases.json'), 'utf8'));
 const execFileAsync = promisify(execFile);
 
+// Node 18.0-18.12 has no TestContext.after. Keep one fallback listener per
+// test process, including failing tests, without raising the project's floor.
+const deferredCleanup = new Set();
+const removeFixture = root => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+process.once('exit', () => { for (const root of deferredCleanup) removeFixture(root); });
+
 export function fixture(t, { tracker = true } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'career-next-actions-'));
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  if (typeof t.after === 'function') t.after(() => removeFixture(root));
+  else deferredCleanup.add(root);
   const store = join(root, 'data', 'next-actions.json');
   if (tracker) {
     mkdirSync(join(root, 'data'), { recursive: true });

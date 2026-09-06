@@ -1,6 +1,16 @@
 # Next actions
 
-Keep the replies, forms, assignments and outreach you still need to handle across sessions. Each action has its own evidence, owner, links and review history. Completing a questionnaire closes that task; application status remains a separate decision.
+A recruiter asks for a questionnaire and a reply. The application can stay `Responded` while both requests remain unfinished. Next actions keeps those requests, their evidence and who owes the next step available in the next session. Completing the questionnaire closes that task; application status remains a separate decision.
+
+## Use with your agent
+
+Run `/career-ops next-actions`, or ask your coding agent to run the next-actions mode. For example:
+
+- “Keep this questionnaire as my next step, with the form and prepared-answer links.”
+- “What still needs my attention, and what are we waiting for the company to do?”
+- “I completed the questionnaire; mark that action done.”
+
+An explicit request can authorize recording and accepting an action together. Requests inferred from a message remain proposals for review. The agent reads the saved list before reconstructing work and selects the specific task before changing it. This release accepts manual or agent-prepared structured input; it does not monitor your inbox or send reminders in the background.
 
 ## Record and review an action
 
@@ -76,7 +86,7 @@ Deadline formats:
 
 Dates without a timezone remain uncertain and are never labelled overdue. Date-only deadlines keep that precision; no cutoff hour is invented. Exact instants require seconds and `Z` or an explicit offset. Relative timing stays in evidence until its date can be established. No deadline is inferred from the date of an email or from a bot leaving a chat.
 
-`list --time-zone Europe/Berlin` controls the calendar display of instant deadlines; the default is UTC and is included in the output. Date-only deadlines and personal targets use their own declared timezone.
+`list --time-zone Europe/Berlin` controls the calendar display and grouping of instant deadlines; the default is UTC and is included in the output. Human summaries display instants in that timezone; JSON retains their normalized UTC values. Date-only deadlines and personal targets use their own declared timezone. The summary also preserves the employer's timing text when a date cannot be established.
 
 For example, `patch.json` can contain:
 
@@ -104,6 +114,8 @@ node next-actions.mjs reopen <id> --revision <current-revision> --reason "User w
 
 Binding uses the exact tracker row ID, not the report number or a fuzzy company match. Duplicate or malformed IDs fail. A binding stores the selected tracker and the observed company, role, report and posting URL. If those change, the task requires review. With no report/posting identity, the binding is explicitly weaker; identical names cannot guarantee an ID was never reused. Unmatched outreach tasks are valid.
 
+An unavailable tracker leaves standalone task operations usable and flags affected bindings for review. Moving the store between Windows and POSIX keeps saved references readable; a reference to the old machine requires explicit unbinding or rebinding. Saved references are never opened automatically.
+
 | Operation | Allowed starting state | Result |
 |---|---|---|
 | `accept` | `proposed` | `open` |
@@ -118,6 +130,8 @@ Binding uses the exact tracker row ID, not the report number or a fuzzy company 
 ## Storage and failure behavior
 
 `data/next-actions.json` belongs to the User Layer under the resolved Data Root: `CAREER_OPS_ROOT` / `CAREER_OPS_DATA_DIR`, then `.career-ops-data`, then the code root. An explicit `CAREER_OPS_TRACKER` changes the tracker used for binding, not the task store. Relative tracker overrides resolve against the code root. Existing `data/*` ignore and updater protection cover the store.
+
+An explicit `--file` argument follows normal CLI path semantics: relative to the caller's current working directory, or absolute as supplied. This matches `paste-reply.mjs` and `invite-match.mjs`; it is independent of the store location. Use an absolute input path when running from another directory. A missing input fails without searching another root or creating the store.
 
 The schema is versioned (`schemaVersion: 1`). Each task contains a UUID, an immutable source and original import, acknowledged source variants, mutable state, revision and history. Each history entry has a timestamp, operation, reason and complete mutable `after` snapshot. The writer validates revision continuity and snapshot consistency, then commits state and history in one atomic replacement under the existing process lock.
 

@@ -3,7 +3,6 @@
 /** Local action intake and review. Task commands never submit or update tracker states. */
 import { constants, openSync, closeSync, fstatSync, statSync, readSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { parseArgs } from 'node:util';
 import { isMainModule } from './lib/is-main-module.mjs';
 import {
   ActionError, createActionsContext, readActions, importActions, updateAction, listActions,
@@ -27,6 +26,7 @@ Reopen returns a closed task to review. Ack-source recognizes a reviewed source
 variant without changing task content. Read docs/NEXT_ACTIONS.md for schemas.
 Without --key, each manual add creates a distinct task. Keep a key for retries.
 --dry-run validates a preview; it neither writes nor reserves an ID.
+Relative --file paths use the current working directory; absolute paths are unchanged.
 Data: {CAREER_OPS_ROOT or resolved Data Root}/data/next-actions.json`;
 
 const OPTIONS = {
@@ -53,6 +53,35 @@ const GROUP_LABELS = {
 
 function invalid(message) {
   throw new ActionError('VALIDATION', message);
+}
+
+// Keep the declared Node >=18 floor: util.parseArgs needs 18.3 and its
+// duplicate-detection tokens need 18.7. The shared validateFlags helper exits
+// the process; this importable CLI must return typed errors to its caller.
+function parseOptions(args) {
+  if (!Array.isArray(args) || args.some(arg => typeof arg !== 'string')) invalid('Command arguments must be strings.');
+  const values = Object.create(null);
+  const positionals = [];
+  let literal = false;
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (literal || !arg.startsWith('-') || arg === '-') { positionals.push(arg); continue; }
+    if (arg === '--') { literal = true; continue; }
+    const match = arg === '-h' ? [arg, 'help'] : /^--([^=]+)(?:=([\s\S]*))?$/.exec(arg);
+    if (!match || !Object.hasOwn(OPTIONS, match[1])) invalid('Unknown command option. Run node next-actions.mjs --help.');
+    const [, name, inline] = match;
+    if (Object.hasOwn(values, name)) invalid(`Option --${name} must be supplied once.`);
+    if (OPTIONS[name].type === 'boolean') {
+      if (inline !== undefined) invalid(`Option --${name} does not take a value.`);
+      values[name] = true;
+    } else {
+      const value = inline === undefined ? args[++index] : inline;
+      if (typeof value !== 'string' || !value || value.startsWith('--')
+        || (inline === undefined && value.startsWith('-') && value !== '-')) invalid(`Option --${name} requires a value.`);
+      values[name] = value;
+    }
+  }
+  return { values, positionals };
 }
 
 // Input is bounded even if it grows after fstat. Never echo a JSON parse snippet:
@@ -93,25 +122,35 @@ function safeText(value) {
   return String(value ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, ' ');
 }
 
-function taskLines(task) {
+function displayInstant(at, timeZone) {
+  return `${new Intl.DateTimeFormat('en-GB', {
+    timeZone, year: 'numeric', month: 'short', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).format(new Date(at))} (${timeZone})`;
+}
+
+function taskLines(task, timeZone = 'UTC') {
   const due = task.employerDue;
   const dueText = due.kind === 'unknown' ? 'unknown'
-    : due.kind === 'instant' ? due.at : `${due.date} (${due.timeZone ?? 'timezone unknown'})`;
+    : due.kind === 'instant' ? displayInstant(due.at, timeZone) : `${due.date} (${due.timeZone ?? 'timezone unknown'})`;
   const lines = [
     `${task.id}  rev ${task.revision}  ${task.state}  actor: ${task.actor}`,
     `  ${safeText(task.title)}`,
     `  Employer due: ${safeText(dueText)}`,
   ];
+  if (due.text) lines.push(`  Timing evidence: ${safeText(due.text)}`);
   if (task.targetDate) lines.push(`  Personal target: ${task.targetDate.date} (${safeText(task.targetDate.timeZone)})`);
-  if (task.snoozedUntil) lines.push(`  Snoozed until: ${task.snoozedUntil}`);
+  if (task.snoozedUntil) lines.push(`  Snoozed until: ${displayInstant(task.snoozedUntil, timeZone)}`);
   if (task.application) lines.push(`  Tracker #${task.application.trackerId}: ${safeText(task.application.company)} / ${safeText(task.application.role)}`);
   if (task.flags) {
     const f = task.flags;
-    if (f.employerOverdue) lines.push('  Employer deadline has passed.');
-    else if (f.employerDueToday) lines.push('  Employer deadline is today.');
-    if (f.targetPast) lines.push('  Your planned date has passed; this is still unfinished.');
-    if (f.snoozePastEmployerDue) lines.push('  Snooze extends past the employer deadline.');
-    if (f.snoozeOverridden) lines.push('  A reached deadline or personal target keeps this item visible.');
+    if (task.state === 'proposed' || task.state === 'open') {
+      if (f.employerOverdue) lines.push('  Employer deadline has passed.');
+      else if (f.employerDueToday) lines.push('  Employer deadline is today.');
+      if (f.targetPast) lines.push('  Your planned date has passed; this is still unfinished.');
+      if (f.snoozePastEmployerDue) lines.push('  Snooze extends past the employer deadline.');
+      if (f.snoozeOverridden) lines.push('  A reached deadline or personal target keeps this item visible.');
+    }
     if (f.bindingLimited) lines.push('  Application identity has limited evidence.');
     if (!['unbound', 'current'].includes(f.bindingState)) lines.push(`  Review application reference: ${safeText(f.bindingState)}.`);
     if (f.ageDays > 0) lines.push(`  Added ${f.ageDays} day(s) ago.`);
@@ -135,7 +174,7 @@ function printResult(result, summary, command) {
       lines.push('', `${GROUP_LABELS[bucket] ?? safeText(bucket)} (${ids.length})`);
       for (const id of ids) {
         const task = result.tasks.find((item) => item.id === id);
-        if (task) lines.push(...taskLines(task));
+        if (task) lines.push(...taskLines(task, result.timeZone));
       }
     }
   } else if (Array.isArray(result.created)) {
@@ -151,22 +190,7 @@ function printResult(result, summary, command) {
 
 /** @param {string[]} args @returns {Promise<void>} */
 export async function main(args = process.argv.slice(2)) {
-  let parsed;
-  try {
-    parsed = parseArgs({ args, options: OPTIONS, allowPositionals: true, strict: true, tokens: true });
-  } catch {
-    invalid('Invalid command options. Run node next-actions.mjs --help.');
-  }
-  const seen = new Set();
-  for (const token of parsed.tokens) {
-    if (token.kind !== 'option') continue;
-    if (seen.has(token.name)) invalid(`Option --${token.name} must be supplied once.`);
-    seen.add(token.name);
-    if (typeof token.value === 'string' && (!token.value || token.value.startsWith('--'))) {
-      invalid(`Option --${token.name} requires a value.`);
-    }
-  }
-  const { values, positionals } = parsed;
+  const { values, positionals } = parseOptions(args);
   const [command, operand] = positionals;
   if (values.summary && values.json) invalid('Choose --summary or --json.');
   if (command && !Object.hasOwn(COMMAND_FLAGS, command)) invalid('Unknown command. Run node next-actions.mjs --help.');

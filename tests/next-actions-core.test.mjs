@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, symlinkSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, symlinkSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   createActionsContext, readActions, importActions, updateAction, listActions,
 } from '../next-actions-core.mjs';
 import {
   NOW, LATER, REPO, fixture, proposal, createTask, openTask, mutate,
-  expectCode, storeBytes, protectedBytes, assertProtected,
+  expectCode, storeBytes, protectedBytes, assertProtected, cli,
 } from './fixtures/next-actions/helpers.mjs';
 
 test('empty reads and valid or invalid dry-runs leave an absent data directory absent', async (t) => {
@@ -333,6 +333,94 @@ test('limited bindings and switched trackers remain visible with honest evidence
   assert.equal(result.tasks[0].flags.bindingState, 'other-tracker');
   assert.ok(result.groups['needs-review'].includes(task.id));
   assert.deepEqual(storeBytes(store), before);
+});
+
+test('an unavailable external tracker leaves standalone actions usable and bound actions reviewable', async (t) => {
+  const { root, context, store } = fixture(t);
+  const protectedBefore = protectedBytes(root);
+  const externalDir = join(root, 'external-tracker');
+  mkdirSync(externalDir);
+  const externalPath = join(externalDir, 'applications.md');
+  writeFileSync(externalPath, readFileSync(context.trackerPath));
+  const externalContext = createActionsContext({ dataRoot: root, codeRoot: REPO, trackerPath: externalPath });
+  let bound = await openTask(externalContext, proposal('bound-external'));
+  bound = await mutate(externalContext, bound, 'bind', { trackerId: '101' });
+  const standalone = await openTask(externalContext, proposal('standalone'));
+
+  // ENOTDIR reproduces loss of tracker access on Windows and POSIX without
+  // depending on whether chmod binds an elevated test process.
+  renameSync(externalDir, join(root, 'external-backup'));
+  writeFileSync(externalDir, 'The external tracker directory is unavailable.');
+  const offlineContext = createActionsContext({ dataRoot: root, codeRoot: REPO, trackerPath: externalPath });
+  const originalStore = storeBytes(store);
+  const list = listActions(offlineContext, { now: NOW });
+  const unavailable = list.tasks.find((task) => task.id === bound.id);
+  assert.equal(unavailable.flags.bindingState, 'tracker-unavailable');
+  assert.equal(unavailable.bucket, 'needs-review');
+  assert.equal(list.tasks.find((task) => task.id === standalone.id).bucket, 'ready');
+  assert.equal(readActions(offlineContext).tasks.find((task) => task.id === bound.id).title, bound.title);
+  assert.deepEqual(storeBytes(store), originalStore, 'list/show do not repair or replace inaccessible references');
+
+  await expectCode(() => mutate(offlineContext, standalone, 'bind', { trackerId: '101' }), 'IO');
+  assert.deepEqual(storeBytes(store), originalStore, 'a failed explicit bind must preserve all action bytes');
+  const added = await createTask(offlineContext, proposal('added-while-tracker-offline'));
+  assert.equal(added.state, 'proposed');
+  const run = (args) => {
+    const result = cli(root, args, { env: { CAREER_OPS_TRACKER: externalPath } });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  };
+  assert.equal(run(['list']).tasks.find((task) => task.id === standalone.id).bucket, 'ready');
+  assert.equal(run(['show', bound.id]).title, bound.title);
+  assert.equal(run(['add', 'Offline manual action', '--key', 'offline-cli', '--evidence', 'The user explicitly asked.']).created.length, 1);
+  const completed = run(['done', bound.id, '--revision', String(bound.revision), '--reason', 'The user confirmed completion.']);
+  assert.equal(completed.state, 'done', 'a user can record completion without tracker availability');
+  assert.equal(readActions(offlineContext).tasks.length, 4);
+  assertProtected(root, protectedBefore);
+});
+
+test('saved absolute tracker references from either OS remain readable and can be explicitly unbound', async (t) => {
+  const { context, store } = fixture(t);
+  let task = await openTask(context, proposal('portable-binding'));
+  task = await mutate(context, task, 'bind', { trackerId: '101' });
+  const original = JSON.parse(readFileSync(store, 'utf8'));
+  for (const foreignPath of ['C:\\career-data\\applications.md', '/foreign-career-data/applications.md']) {
+    // These are valid snapshots produced on the named OS; changing every
+    // binding occurrence preserves the same current/history agreement.
+    const moved = structuredClone(original);
+    moved.tasks[0].application.trackerPath = foreignPath;
+    for (const revision of moved.tasks[0].history) {
+      if (revision.after.application) revision.after.application.trackerPath = foreignPath;
+    }
+    writeFileSync(store, JSON.stringify(moved, null, 2) + '\n');
+    const before = storeBytes(store);
+    const saved = readActions(context).tasks[0];
+    assert.equal(saved.application.trackerPath, foreignPath);
+    const listed = listActions(context, { now: NOW }).tasks[0];
+    assert.equal(listed.flags.bindingState, 'other-tracker');
+    assert.equal(listed.bucket, 'needs-review');
+    assert.deepEqual(storeBytes(store), before);
+    const unbound = await mutate(context, saved, 'unbind');
+    assert.equal(unbound.application, null);
+    assert.equal(readActions(context).tasks[0].history.at(-2).after.application.trackerPath, foreignPath);
+  }
+});
+
+test('supported IANA aliases with digits work for list and persisted due dates without accepting numeric offsets', async (t) => {
+  const { context } = fixture(t);
+  for (const timeZone of ['EST5EDT', 'CST6CDT', 'MST7MDT', 'PST8PDT']) {
+    assert.doesNotThrow(() => new Intl.DateTimeFormat('en-US', { timeZone }));
+    const task = await openTask(context, proposal(`iana-${timeZone}`, {
+      employerDue: { kind: 'date', date: '2030-03-01', timeZone, text: 'The employer stated this timezone.' },
+    }));
+    const listed = listActions(context, { timeZone, now: NOW }).tasks.find((item) => item.id === task.id);
+    assert.equal(listed.employerDue.timeZone, timeZone);
+    assert.equal(listed.flags.employerDueToday, true);
+    assert.equal(readActions(context).tasks.find((item) => item.id === task.id).employerDue.timeZone, timeZone);
+  }
+  for (const timeZone of ['+05:00', '-0430', 'UTC+5', 'Invalid/Zone']) {
+    assert.throws(() => listActions(context, { timeZone, now: NOW }), { code: 'VALIDATION' });
+  }
 });
 
 test('real-parent symlink aliases share one store; symlink store files are rejected without replacing the target', async (t) => {

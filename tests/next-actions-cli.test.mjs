@@ -143,9 +143,82 @@ test('CLI rejects unknown, duplicate, missing and inapplicable flags before any 
     ['accept', '11111111-1111-4111-8111-111111111111', '--revision', '1.0', '--reason', 'Reviewed'],
     ['accept', '11111111-1111-4111-8111-111111111111', '--revision', '1'],
     ['list', 'unexpected-operand'],
+    ['--help', '-h'],
+    ['list', '--summary=true'],
+    ['list', '--help', '--revision'],
+    ['add', 'A', '--evidence', '-h'],
+    ['add', 'A', '--evidence='],
+    ['list', '--__proto__=unsafe'],
   ];
   for (const args of cases) jsonError(cli(root, args), 'VALIDATION');
   assert.equal(existsSync(join(root, 'data')), false);
+});
+
+test('CLI accepts equals values and the option terminator without changing their meaning', (t) => {
+  const { root } = fixture(t, { tracker: false });
+  const args = ['add', '--evidence=Reviewed = a real note', '--actor=user', '--key=equals-key', '--', '--literal title'];
+  const task = jsonSuccess(cli(root, args)).created[0];
+  assert.equal(task.title, '--literal title');
+  assert.equal(task.evidence.text, 'Reviewed = a real note');
+  assert.equal(task.actor, 'user');
+  assert.equal(jsonSuccess(cli(root, args)).unchanged[0].id, task.id);
+  jsonError(cli(root, ['add', 'A', '--key=x', '--key', 'y', '--evidence', 'Reviewed']), 'VALIDATION');
+  assert.equal(jsonSuccess(cli(root, ['list', '--time-zone=UTC'])).counts.total, 1);
+});
+
+for (const state of ['done', 'dismissed']) {
+  test(`summary retains timing evidence for ${state} tasks without claiming they remain unfinished`, async (t) => {
+    const { root, context } = fixture(t);
+    let task = await openTask(context, proposal(`closed-${state}`, {
+      employerDue: { kind: 'date', date: '2000-01-01', timeZone: 'UTC', text: 'Finish before the original call.' },
+    }));
+    task = await mutate(context, task, 'edit', { patch: { targetDate: { date: '2000-01-01', timeZone: 'UTC' } } });
+    task = await mutate(context, task, state === 'done' ? 'done' : 'dismiss');
+    const summary = cli(root, ['list', '--all', '--summary']);
+    assert.equal(summary.status, 0, summary.stderr);
+    assert.match(summary.stdout, /Timing evidence: Finish before the original call\./);
+    assert.match(summary.stdout, /Personal target: 2000-01-01/);
+    assert.doesNotMatch(summary.stdout, /still unfinished|Employer deadline has passed|keeps this item visible/);
+    assert.equal(jsonSuccess(cli(root, ['show', task.id])).state, state);
+  });
+}
+
+test('summary keeps uncertain timing text visible without inferring a deadline', async (t) => {
+  const { root, context } = fixture(t);
+  await openTask(context, proposal('unknown-timing', {
+    employerDue: { kind: 'unknown', text: 'Before the next interview; date not established.' },
+  }));
+  const summary = cli(root, ['list', '--summary']);
+  assert.equal(summary.status, 0, summary.stderr);
+  assert.match(summary.stdout, /Employer due: unknown/);
+  assert.match(summary.stdout, /Timing evidence: Before the next interview; date not established\./);
+  assert.doesNotMatch(summary.stdout, /Employer deadline has passed|Employer deadline is today/);
+});
+
+test('summary displays instant deadlines in the selected timezone while JSON retains UTC precision', async (t) => {
+  const { root, context } = fixture(t);
+  const at = '2030-03-04T20:00:00.000Z';
+  await openTask(context, proposal('zoned-deadline', {
+    employerDue: { kind: 'instant', at, text: 'The confirmed cut-off.' },
+  }));
+  const summary = cli(root, ['list', '--time-zone', 'Asia/Bangkok', '--summary']);
+  assert.equal(summary.status, 0, summary.stderr);
+  assert.match(summary.stdout, /Employer due: 05 Mar 2030,? 03:00:00 \(Asia\/Bangkok\)/);
+  assert.equal(jsonSuccess(cli(root, ['list', '--time-zone', 'Asia/Bangkok'])).tasks[0].employerDue.at, at);
+});
+
+test('fixture fallback cleans up on process success and failure without TestContext.after', (t) => {
+  const helpers = new URL('./fixtures/next-actions/helpers.mjs', import.meta.url).href;
+  for (const fails of [false, true]) {
+    const script = `import {fixture} from ${JSON.stringify(helpers)};
+      const {root}=fixture({}, {tracker:false});
+      process.stdout.write(JSON.stringify({root}));
+      ${fails ? 'throw new Error("Expected fixture failure");' : ''}`;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 10_000 });
+    assert.equal(result.status, fails ? 1 : 0, result.stderr);
+    const { root } = JSON.parse(result.stdout);
+    assert.equal(existsSync(root), false, 'temporary root is removed even after a thrown assertion');
+  }
 });
 
 test('CLI dry-run validates proposals without reserving tasks or creating a data directory', (t) => {
@@ -203,22 +276,25 @@ for (const routing of ['root-env', 'data-dir-env', 'marker']) {
   test(`CLI resolves ${routing} and relative tracker override against code root from a foreign CWD`, (t) => {
     const { root } = fixture(t, { tracker: false });
     const { code, data, cwd } = copiedInstall(root);
-    const tracker = join(root, 'external-tracker.md');
+    const tracker = join(code, 'override.md');
     writeFileSync(tracker, readFileSync(join(FIXTURES, 'tracker.md')));
+    // Same filename in all three roots catches accidental Data Root/CWD routing.
+    writeFileSync(join(data, 'override.md'), 'Wrong Data Root tracker');
+    writeFileSync(join(cwd, 'override.md'), 'Wrong working-directory tracker');
     const trackerBefore = readFileSync(tracker);
     const env = isolatedEnv(root);
     delete env.CAREER_OPS_ROOT;
     if (routing === 'root-env') env.CAREER_OPS_ROOT = '../personal';
     else if (routing === 'data-dir-env') env.CAREER_OPS_DATA_DIR = '../personal';
     else writeFileSync(join(code, '.career-ops-data'), '../personal\n');
-    env.CAREER_OPS_TRACKER = '../external-tracker.md';
+    env.CAREER_OPS_TRACKER = 'override.md';
     const run = (args) => spawnSync(process.execPath, [join(code, 'next-actions.mjs'), ...args], { cwd, env, encoding: 'utf8', timeout: 20_000 });
     let task = jsonSuccess(run(['add', 'Reply to fixture invitation', '--evidence', 'User requested this reply.', '--key', routing])).created[0];
     task = jsonSuccess(run(['bind', task.id, '--revision', String(task.revision), '--tracker-id', '101', '--reason', 'User selected the exact tracker row.']));
     assert.equal(task.application.trackerId, '101');
     assert.equal(existsSync(join(data, 'data/next-actions.json')), true);
     assert.equal(existsSync(join(code, 'data/next-actions.json')), false);
-    assert.deepEqual(readdirSync(cwd), []);
+    assert.deepEqual(readdirSync(cwd), ['override.md']);
     assert.deepEqual(readFileSync(tracker), trackerBefore);
     assert.equal(jsonSuccess(run(['list'])).tasks[0].flags.bindingState, 'current');
   });
@@ -233,4 +309,39 @@ test('explicit missing tracker override never falls back to a different applicat
   });
   jsonError(result, 'NOT_FOUND', 2);
   assert.deepEqual(storeBytes(store), before);
+});
+
+test('explicit --file paths use the caller directory for import, edit and ack-source, independently of storage', (t) => {
+  const { root } = fixture(t, { tracker: false });
+  const { code, data, cwd } = copiedInstall(root);
+  const env = isolatedEnv(data);
+  const run = args => spawnSync(process.execPath, [join(code, 'next-actions.mjs'), ...args], { cwd, env, encoding: 'utf8', timeout: 20_000 });
+  const input = proposal('foreign-file');
+  for (const name of ['input.json', 'patch.json', 'source.json']) {
+    writeFileSync(join(code, name), 'wrong code-root input');
+    writeFileSync(join(data, name), 'wrong Data Root input');
+  }
+  writeInput(cwd, 'input.json', [input]);
+  const preview = jsonSuccess(run(['import', '--file=input.json', '--dry-run']));
+  assert.equal(preview.created[0].title, input.title);
+  assert.equal(existsSync(join(data, 'data')), false);
+  let task = jsonSuccess(run(['import', '--file', 'input.json'])).created[0];
+  const revise = (operation, file) => jsonSuccess(run([operation, task.id, '--revision', String(task.revision), '--reason', 'Reviewed input from the caller directory.', '--file', file]));
+  writeInput(cwd, 'patch.json', { title: 'Reviewed title from CWD' });
+  task = revise('edit', 'patch.json');
+  assert.equal(task.title, 'Reviewed title from CWD');
+  writeInput(cwd, 'source.json', { ...input, title: 'Corrected incoming title' });
+  task = revise('ack-source', 'source.json');
+  assert.equal(task.title, 'Reviewed title from CWD');
+  assert.equal(task.acknowledgedImports[0].title, 'Corrected incoming title');
+  assert.equal(jsonSuccess(run(['import', '--file', join(cwd, 'input.json')])).unchanged[0].id, task.id);
+  assert.equal(existsSync(join(code, 'data')), false);
+  assert.equal(existsSync(join(cwd, 'data')), false);
+
+  const missingRoot = join(root, 'not-created');
+  const missing = spawnSync(process.execPath, [join(code, 'next-actions.mjs'), 'import', '--file', 'absent.json'], {
+    cwd, env: isolatedEnv(missingRoot), encoding: 'utf8', timeout: 20_000,
+  });
+  jsonError(missing, 'IO');
+  assert.equal(existsSync(missingRoot), false);
 });

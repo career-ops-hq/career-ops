@@ -1,7 +1,7 @@
 /** Durable candidate actions. This module never writes the application tracker. */
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
@@ -67,7 +67,7 @@ function date(value) {
 }
 
 function zone(value) {
-  assert(typeof value === 'string' && /^[A-Za-z_]+(?:\/[A-Za-z0-9_+\-]+)*$/.test(value), 'Time zone must be an IANA name.');
+  assert(typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_+\-]*(?:\/[A-Za-z0-9_+\-]+)*$/.test(value), 'Time zone must be an IANA name.');
   try { new Intl.DateTimeFormat('en-US', { timeZone: value }); }
   catch { invalid('Time zone must be a supported IANA name.'); }
   return value;
@@ -176,7 +176,9 @@ function binding(value) {
   if (value === null) return null;
   object(value, ['trackerPath', 'trackerId', 'company', 'role', 'report', 'postingUrl']);
   text(value.trackerPath, 4096);
-  assert(isAbsolute(value.trackerPath) || safeRelative(value.trackerPath), 'Invalid saved tracker path.');
+  // A saved reference is metadata, including when its Data Root moves between
+  // Windows and POSIX. Only the current active tracker is ever opened.
+  assert(posix.isAbsolute(value.trackerPath) || win32.isAbsolute(value.trackerPath) || safeRelative(value.trackerPath), 'Invalid saved tracker path.');
   return {
     trackerPath: value.trackerPath, trackerId: trackerId(value.trackerId),
     company: text(value.company, 2000, { empty: true }), role: text(value.role, 2000, { empty: true }),
@@ -299,14 +301,17 @@ function ioError(error, message = 'Action storage operation failed.') {
 }
 
 // Realpath the existing ancestor even before first-run directories exist.
-function canonicalPath(path) {
+function canonicalPath(path, unavailableOK = false) {
   const absolute = resolve(path);
   try { return realpathSync(absolute); }
   catch (error) {
-    if (error.code !== 'ENOENT') throw error;
+    if (error.code !== 'ENOENT' && !unavailableOK) throw error;
     const parent = dirname(absolute);
-    if (parent === absolute) throw error;
-    return join(canonicalPath(parent), basename(absolute));
+    if (parent === absolute) {
+      if (unavailableOK) return absolute;
+      throw error;
+    }
+    return join(canonicalPath(parent, unavailableOK), basename(absolute));
   }
 }
 
@@ -338,7 +343,10 @@ export function createActionsContext({ dataRoot, codeRoot = CODE_ROOT, trackerPa
     const resolvedRoot = canonicalPath(resolve(resolvedCodeRoot, root));
     const override = trackerPath ?? process.env.CAREER_OPS_TRACKER?.trim();
     if (override !== undefined && override !== '') text(override, 4096);
-    const activeTracker = override ? canonicalPath(resolve(resolvedCodeRoot, override)) : canonicalPath(resolveTrackerPath(resolvedRoot));
+    // Canonicalize reachable ancestors even when this read-only dependency is
+    // unavailable. Store/root resolution stays strict; bind reports read errors
+    // and list marks affected bindings for review without gating other actions.
+    const activeTracker = canonicalPath(override ? resolve(resolvedCodeRoot, override) : resolveTrackerPath(resolvedRoot), true);
     return { dataRoot: resolvedRoot, storePath: storePath(join(resolvedRoot, 'data', 'next-actions.json')), trackerPath: activeTracker };
   } catch (error) { throw ioError(error, 'Cannot resolve action storage paths.'); }
 }
@@ -446,7 +454,7 @@ export async function importActions(context, proposals, { dryRun = false, now = 
 }
 
 function activeTrackerLabel(context) {
-  const path = canonicalPath(context.trackerPath);
+  const path = canonicalPath(context.trackerPath, true);
   const rel = relative(canonicalPath(context.dataRoot), path);
   return rel && rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel) ? rel.split(sep).join('/') : path;
 }
