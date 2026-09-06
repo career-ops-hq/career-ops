@@ -58,7 +58,7 @@ import * as yaml from 'js-yaml';
 import { pass, fail, warn, run, runAcrossUtcDay, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { collectMjsFiles, isNestedCheckout, isUnderNestedCheckout } from './lib/mjs-files.mjs';
-import { discoverEvaluationModes, readModeText, structuralGaps } from './tests/evaluation-mode-parity-helpers.mjs';
+import { FROZEN_EVALUATION_MODES, KNOWN_EVALUATION_MODES, discoverEvaluationModes, readModeText, structuralGaps } from './tests/evaluation-mode-parity-helpers.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -4029,28 +4029,14 @@ if (
 // market mode sets that keep theirs under a market name (angebot, offre,
 // naukri, lowongan, annuncio, gonggo, vacature) are checked alongside the
 // oferta.md files and a future one cannot hide from the check by its filename
-// (#3828). The allowlist below names the files still frozen; a re-synced file
-// MUST be removed from it (the check fails loudly otherwise), and an entry the
-// walk no longer finds fails too, so the list can only shrink. Denominator
+// (#3828). The allowlist in tests/evaluation-mode-parity-helpers.mjs names the
+// files still frozen; a re-synced file MUST be removed from it (the check fails
+// loudly otherwise). Entries the walk no longer finds also fail, so the list
+// can only shrink. Denominator
 // asserted against the full list of known files, or the check would go blind
 // one file at a time.
 {
-  const FROZEN_EVALUATION_MODES = new Set([
-    // modes/<lang>/oferta.md (#3669)
-    'da/oferta.md', 'es/oferta.md', 'pl/oferta.md', 'pt/oferta.md', 'ua/oferta.md',
-    // market-named evaluation modes (#3828)
-    'de/angebot.md', 'fr/offre.md', 'hi/naukri.md', 'id/lowongan.md', 'it/annuncio.md',
-    'ko/gonggo.md', 'nl/vacature.md', 'tr/is-ilani.md',
-  ]);
   const evaluationModes = discoverEvaluationModes(ROOT);
-  // Every evaluation mode known today. A file that stops being discovered
-  // (renamed, or its `## A)` block dropped) fails here instead of silently
-  // leaving the check; a new one is picked up without being listed.
-  const KNOWN_EVALUATION_MODES = [
-    'ar/fursah.md', 'da/oferta.md', 'de/angebot.md', 'es/oferta.md', 'fr/offre.md', 'hi/naukri.md',
-    'id/lowongan.md', 'it/annuncio.md', 'ja/kyujin.md', 'ko/gonggo.md', 'nl/vacature.md', 'pl/oferta.md',
-    'pt/oferta.md', 'ru/oferta.md', 'tr/is-ilani.md', 'ua/oferta.md', 'zh-TW/oferta.md', 'zh/oferta.md',
-  ];
   const undiscovered = KNOWN_EVALUATION_MODES.filter(f => !evaluationModes.includes(f));
   if (undiscovered.length > 0) {
     fail(`localized evaluation-mode walk did not find ${undiscovered.join(', ')} (renamed, or its \`## A)\` block is gone?) — found ${evaluationModes.length}: ${evaluationModes.join(', ')}`);
@@ -4069,7 +4055,7 @@ if (
     } else if (drifted.length > 0) {
       fail(`localized evaluation mode drifted from the canonical report structure: ${drifted.join('; ')}`);
     } else if (resynced.length > 0) {
-      fail(`localized evaluation mode re-synced but still listed as frozen — remove from FROZEN_EVALUATION_MODES in test-all.mjs and tick it in #3669 (oferta.md) or #3828 (market-named): ${resynced.join(', ')}`);
+      fail(`localized evaluation mode re-synced but still listed as frozen — remove from FROZEN_EVALUATION_MODES in tests/evaluation-mode-parity-helpers.mjs and tick it in #3669 (oferta.md) or #3828 (market-named): ${resynced.join(', ')}`);
     } else {
       pass(`localized evaluation-mode structural parity: ${evaluationModes.length - stillFrozen.length} of ${evaluationModes.length} files carry A)–H) + Risk Summary + English header labels; still frozen (allowlisted, #3669/#3828): ${stillFrozen.join(', ') || 'none'}`);
     }

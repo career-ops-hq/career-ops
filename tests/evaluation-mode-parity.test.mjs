@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { ROOT, rmSync } from './helpers.mjs';
-import { discoverEvaluationModes, readModeText, structuralGaps } from './evaluation-mode-parity-helpers.mjs';
+import { FROZEN_EVALUATION_MODES, KNOWN_EVALUATION_MODES, discoverEvaluationModes, readModeText, structuralGaps } from './evaluation-mode-parity-helpers.mjs';
 
 const REPORT = `# 評価: {Company} — {Role}
 
@@ -46,12 +46,22 @@ function sandbox(t) {
   return { parent, root };
 }
 
-test('canonical and all five re-synced locales retain their real fenced templates', () => {
-  for (const file of ['modes/oferta.md', 'modes/ar/fursah.md', 'modes/ja/kyujin.md',
-    'modes/ru/oferta.md', 'modes/zh/oferta.md', 'modes/zh-TW/oferta.md']) {
-    assert.deepEqual(structuralGaps(readModeText(ROOT, file)), [], file);
+test('canonical and re-synced locales retain their real fenced templates', () => {
+  const synced = KNOWN_EVALUATION_MODES.filter(file => !FROZEN_EVALUATION_MODES.has(file));
+  for (const file of ['oferta.md', ...synced]) {
+    assert.deepEqual(structuralGaps(readModeText(ROOT, `modes/${file}`)), [], file);
   }
-  assert.ok(structuralGaps(readModeText(ROOT, 'modes/de/angebot.md')).includes('## H)'));
+});
+
+test('frozen locales still require report-format resync', () => {
+  for (const file of FROZEN_EVALUATION_MODES) {
+    assert.ok(structuralGaps(readModeText(ROOT, `modes/${file}`)).length > 0,
+      `${file}: remove from FROZEN_EVALUATION_MODES in tests/evaluation-mode-parity-helpers.mjs`);
+  }
+});
+
+test('a missing H answers section is reported', () => {
+  assert.ok(structuralGaps(mode(REPORT.replace('## H) Answers\n{answers}\n', ''))).includes('## H)'));
 });
 
 test('a localized H1, CRLF and either Markdown fence spelling remain valid', () => {
