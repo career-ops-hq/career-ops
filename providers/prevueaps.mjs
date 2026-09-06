@@ -86,6 +86,7 @@ function assertPrevueapsUrl(url) {
  * @returns {string | null}
  */
 function resolveOrigin(entry) {
+  if (!entry || typeof entry !== 'object') return null;
   const rawApi = typeof entry.api === 'string' ? entry.api : '';
   const rawCareers = typeof entry.careers_url === 'string' ? entry.careers_url : '';
   const raw = (rawApi || rawCareers).trim();
@@ -200,10 +201,18 @@ export default {
  */
 export function parsePrevueapsResponse(json, companyName) {
   const jobs = json?.data?.jobs;
-  if (!Array.isArray(jobs)) return [];
+  // `jobs: []` is the real, documented zero-openings shape and must return []
+  // cleanly. Anything else that isn't an array (missing `data`, missing
+  // `jobs`, or `jobs` present but not an array/null) means the response
+  // doesn't match the documented envelope at all — that's a malformed or
+  // unexpected API shape, not "no jobs", so it must surface loudly rather
+  // than be swallowed as an empty result.
+  if (!Array.isArray(jobs)) {
+    throw new Error(`prevueaps: unexpected response shape for ${companyName} — missing or invalid data.jobs`);
+  }
   const out = [];
   for (const j of jobs) {
-    if (!j || !j.title) continue;
+    if (!j || typeof j.title !== 'string' || !j.title.trim()) continue;
 
     let url = '';
     const rawUrl = typeof j.jobUrl === 'string' ? j.jobUrl : '';
@@ -231,7 +240,7 @@ export function parsePrevueapsResponse(json, companyName) {
     }
 
     const job = {
-      title: String(j.title),
+      title: j.title.trim(),
       url,
       company: companyName,
       location,

@@ -33,6 +33,12 @@ try {
     fail('prevueaps.detect() should treat non-string careers_url as missing');
   }
 
+  if (prevueaps.detect(null) === null && prevueaps.detect(undefined) === null) {
+    pass('prevueaps.detect() returns null for a null/undefined entry (no throw)');
+  } else {
+    fail('prevueaps.detect() should return null for a null/undefined entry');
+  }
+
   // SSRF: prevueaps.ca appearing in the PATH (not host) must not be detected.
   if (prevueaps.detect({ name: 'Spoof', careers_url: 'https://evil.example/examplecoca.prevueaps.ca/foo' }) === null) {
     pass('prevueaps.detect() rejects path-spoofed URLs');
@@ -164,20 +170,62 @@ try {
     fail('zero-jobs response should yield an empty array');
   }
 
-  // ── Malformed / missing fields ──
-  if (parsePrevueapsResponse({}, 'X').length === 0) pass('empty {} → empty result');
-  else fail('empty {} should yield empty result');
-
-  if (parsePrevueapsResponse({ data: { jobs: null } }, 'X').length === 0) {
-    pass('null jobs → empty result (no crash)');
-  } else {
-    fail('null jobs should yield empty result');
+  // ── Malformed / missing envelope — must throw, never silently → [] ──
+  // Only a genuinely valid envelope with `data.jobs` as an array (including
+  // an empty array — the real "no job found" shape) may return [] cleanly.
+  // Anything that doesn't match that shape at all (missing `data`, missing
+  // `jobs`, or `jobs` present but not an array) is a malformed/unexpected
+  // API response and must surface as a descriptive error.
+  try {
+    parsePrevueapsResponse({}, 'X');
+    fail('empty {} should throw (malformed envelope), not return []');
+  } catch (e) {
+    if (/unexpected response shape for X/.test(e.message)) {
+      pass('empty {} throws a descriptive error');
+    } else {
+      fail(`empty {} threw the wrong error: ${e.message}`);
+    }
   }
 
-  if (parsePrevueapsResponse(null, 'X').length === 0 && parsePrevueapsResponse(undefined, 'X').length === 0) {
-    pass('null/undefined response → empty result (no crash)');
+  try {
+    parsePrevueapsResponse({ data: { jobs: null } }, 'X');
+    fail('null jobs should throw (malformed envelope), not return []');
+  } catch (e) {
+    if (/unexpected response shape for X/.test(e.message)) {
+      pass('null jobs throws a descriptive error');
+    } else {
+      fail(`null jobs threw the wrong error: ${e.message}`);
+    }
+  }
+
+  try {
+    parsePrevueapsResponse(null, 'X');
+    fail('null response should throw (malformed envelope), not return []');
+  } catch (e) {
+    if (/unexpected response shape for X/.test(e.message)) {
+      pass('null response throws a descriptive error');
+    } else {
+      fail(`null response threw the wrong error: ${e.message}`);
+    }
+  }
+
+  try {
+    parsePrevueapsResponse(undefined, 'X');
+    fail('undefined response should throw (malformed envelope), not return []');
+  } catch (e) {
+    if (/unexpected response shape for X/.test(e.message)) {
+      pass('undefined response throws a descriptive error');
+    } else {
+      fail(`undefined response threw the wrong error: ${e.message}`);
+    }
+  }
+
+  // The real, documented zero-openings shape must still return [] cleanly —
+  // covered again here alongside the malformed-envelope cases for contrast.
+  if (parsePrevueapsResponse({ success: true, message: 'No job found', data: { jobs: [], jobCount: 0 } }, 'X').length === 0) {
+    pass('a valid envelope with jobs: [] still returns [] cleanly (not an error)');
   } else {
-    fail('null/undefined response should yield empty result');
+    fail('a valid empty-jobs envelope should return [] without throwing');
   }
 
   const malformedRows = parsePrevueapsResponse(
@@ -188,6 +236,9 @@ try {
           { title: 'Insecure URL', jobUrl: 'http://tbca.prevueaps.ca/jobs/1' },
           { title: 'Malformed URL', jobUrl: 'not a url' },
           { jobUrl: 'https://tbca.prevueaps.ca/jobs/2' }, // no title
+          { title: '', jobUrl: 'https://tbca.prevueaps.ca/jobs/4' }, // empty title
+          { title: '   ', jobUrl: 'https://tbca.prevueaps.ca/jobs/5' }, // whitespace-only title
+          { title: 42, jobUrl: 'https://tbca.prevueaps.ca/jobs/6' }, // non-string title
           { title: 'Good row', jobUrl: 'https://tbca.prevueaps.ca/jobs/3', city: 'Toronto', abbreviation: 'ON' },
         ],
       },
@@ -195,9 +246,25 @@ try {
     'X',
   );
   if (malformedRows.length === 1 && malformedRows[0]?.title === 'Good row') {
-    pass('parsePrevueapsResponse filters rows missing title/url or with non-https/malformed url');
+    pass('parsePrevueapsResponse filters rows missing title/url, non-https/malformed url, or empty/whitespace/non-string title');
   } else {
     fail(`malformedRows = ${JSON.stringify(malformedRows)}`);
+  }
+
+  const trimmedTitleRows = parsePrevueapsResponse(
+    {
+      data: {
+        jobs: [
+          { title: '  Padded Title  ', jobUrl: 'https://tbca.prevueaps.ca/jobs/7' },
+        ],
+      },
+    },
+    'X',
+  );
+  if (trimmedTitleRows[0]?.title === 'Padded Title') {
+    pass('parsePrevueapsResponse trims surrounding whitespace from title');
+  } else {
+    fail(`trimmed title = ${JSON.stringify(trimmedTitleRows[0]?.title)}`);
   }
 
   if (malformedRows[0]?.location === 'Toronto, ON') {
