@@ -496,6 +496,39 @@ const HORIZON_LEAD_RE = /\b(?:the|my|our|your)?\s*(?:first|next)\s+$/i;
 // clause scope below carries the weight rather than this test alone.
 const FORWARD_MARKER_RE = /\b(?:would|will|shall|should)\b|['\u2019]d\b(?!\s+[A-Za-z]+ed\b)|['\u2019]ll\b|\b(?:plan|plans|planning|intend|intends)\s+to\b|\bgoing to\b|\blooking forward\b/i;
 
+// A DISCLOSED REQUIREMENT is a number the candidate cites from the POSTING
+// itself, in order to disclaim a gap against it -- nothing about the candidate
+// is being asserted:
+//
+//   "my background is at the individual-contributor level, without the 7+
+//   years of progressive L&D leadership ... this role's scope calls for"
+//
+// COUNT_CLAIM_RE reads that as the candidate personally claiming "7 years",
+// which cv.md never says, and the fact gate blocks generation over a number
+// that was only ever cited to be disclaimed (#3915).
+//
+// Two signals, EITHER of which is sufficient alone, mirroring the two-signal
+// design of the plan-horizon exception above -- but here each signal stands on
+// its own, because each already names a THIRD PARTY's threshold rather than
+// merely gesturing at time:
+//
+//   - a REQUIREMENT CITATION anywhere in the same clause as the number,
+//     naming what the posting/role/position/job asks for ("this role's scope
+//     calls for", "the posting requires", "this position calls for", "this
+//     job wants").
+//   - a NEGATION LEAD immediately before the number ("without (the)",
+//     "lacking", "don't have (the)", "doesn't have (the)", "do not have
+//     (the)") -- the candidate stating what they do NOT have.
+//
+// Clause-scoped for the same reason as the plan-horizon exception: a citation
+// elsewhere in the letter must not silence an unrelated number. A genuine
+// personal claim carries NEITHER signal -- "I have 12 years of experience" has
+// no negation lead and no role/posting/position/job citation nearby, and
+// "I bring 7+ years of L&D leadership" is the same shape -- so both are left
+// alone and still get checked against the sources.
+const REQUIREMENT_CITATION_RE = /\b(?:role|posting|position|job)\b[^.,;:!?\n]{0,30}\b(?:calls?\s+for|requires?|asks?\s+for|wants?)\b/i;
+const NEGATION_LEAD_RE = /\b(?:without(?:\s+the)?|lack(?:ing)?(?:\s+the)?|don['\u2019]?t\s+have(?:\s+the)?|doesn['\u2019]?t\s+have(?:\s+the)?|do\s+not\s+have(?:\s+the)?)\s*$/i;
+
 /**
  * The CLAUSE of `text` containing `index`.
  *
@@ -539,6 +572,22 @@ function clauseAround(text, index) {
 }
 
 /**
+ * Whether `match` is a number the candidate is citing from the posting's own
+ * stated requirement (to disclaim a gap against it), rather than a personal
+ * claim about themself. See the REQUIREMENT_CITATION_RE / NEGATION_LEAD_RE
+ * commentary above for the two independent signals this checks.
+ *
+ * @param {string} clean
+ * @param {RegExpMatchArray} match
+ * @returns {boolean}
+ */
+function isDisclosedRequirement(clean, match) {
+  const lead = clean.slice(Math.max(0, match.index - 40), match.index);
+  if (NEGATION_LEAD_RE.test(lead)) return true;
+  return REQUIREMENT_CITATION_RE.test(clauseAround(clean, match.index));
+}
+
+/**
  * Count-claim matches in `clean`, minus the ones that assert nothing.
  *
  * Shared by metricClaims and diagnoseCoverage so the two cannot disagree about
@@ -550,6 +599,7 @@ function clauseAround(text, index) {
 function countMatches(clean) {
   COUNT_CLAIM_RE.lastIndex = 0;
   return [...clean.matchAll(COUNT_CLAIM_RE)].filter((match) => {
+    if (isDisclosedRequirement(clean, match)) return false;
     if (!TIME_NOUNS.has(match[2].toLowerCase())) return true;
     const lead = clean.slice(Math.max(0, match.index - 40), match.index);
     if (!HORIZON_LEAD_RE.test(lead)) return true;
