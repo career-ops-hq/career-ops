@@ -29,6 +29,7 @@ import {
   defaultBranchIn,
   STAGED_UPDATE_REF,
   locallyModifiedSystemFiles,
+  recordStagedUpdate,
   resolveUpdateCommitBranch,
   skippedBranchCommitNotice,
   updateCommitBranchDecision,
@@ -234,66 +235,132 @@ console.log('\n🧪 Testing updater branch guard (#3846)...');
   }
 }
 
-// ── 12. A withheld update must not read as a local edit next time ──────
-{
-  // NEGATIVE CONTROL FIRST. Without the recorded baseline, the second update on
-  // the same branch sees the FIRST update's own staged files, finds no updater
-  // commit to explain them, and classifies them as edits this install made — so
-  // it preserves them, writes .bak copies, and skips exactly the delta it came
-  // to install. That is the staleness failure the issue warns is worse than the
-  // bug being fixed, arriving one run later.
+// ── 12-15. The withheld snapshot as a baseline, and its lifetime ───────
+//
+// A withheld update leaves its snapshot staged and uncommitted, so there is no
+// updater commit to serve as locallyModifiedSystemFiles' baseline and the next
+// run reads the previous run's own files as edits THIS install made: preserved,
+// .bak'd, and the delta it came to install skipped. recordStagedUpdate() writes
+// the snapshot the run staged; stagedUpdateBaseline() believes it only while it
+// is still the state on disk.
+//
+// A repo in the state a withheld run leaves behind: v1 is the last committed
+// updater snapshot, v2 is staged but uncommitted, upstream has moved to v3.
+function repoWithWithheldUpdate() {
   const { dir, g } = repo();
-  const gitAt = (...args) => gitIn(dir, ...args);
-
-  // v1 is the last committed updater snapshot; v2 is the update whose commit
-  // the guard withheld (staged only); v3 is what upstream has moved on to.
   writeFileSync(join(dir, 'sys.mjs'), 'v1\n');
   g('add', 'sys.mjs');
   g('commit', '-qm', 'chore: auto-update system files to v1');
   g('checkout', '-q', '-b', 'upstream-line');
-  writeFileSync(join(dir, 'sys.mjs'), 'v2\n');
-  g('commit', '-qam', 'upstream v2');
-  const upstreamV2 = g('rev-parse', 'HEAD');
   writeFileSync(join(dir, 'sys.mjs'), 'v3\n');
   g('commit', '-qam', 'upstream v3');
   g('tag', 'upstream');
   g('checkout', '-q', 'main');
-  writeFileSync(join(dir, 'sys.mjs'), 'v2\n');   // what the withheld run left staged
+  writeFileSync(join(dir, 'sys.mjs'), 'v2\n');
   g('add', 'sys.mjs');
+  return { dir, g, gitAt: (...args) => gitIn(dir, ...args) };
+}
 
-  const withoutRef = locallyModifiedSystemFiles(['sys.mjs'], 'upstream', { git: gitAt, root: dir });
-  g('update-ref', STAGED_UPDATE_REF, upstreamV2);
-  const withRef = locallyModifiedSystemFiles(['sys.mjs'], 'upstream', { git: gitAt, root: dir });
+const atRiskIn = (dir, gitAt) =>
+  locallyModifiedSystemFiles(['sys.mjs'], 'upstream', { git: gitAt, root: dir });
 
-  if (withoutRef.includes('sys.mjs') && !withRef.includes('sys.mjs')) {
+// ── 12. NEGATIVE CONTROL + fix: pending snapshot is not a local edit ────
+{
+  const { dir, gitAt } = repoWithWithheldUpdate();
+  const withoutRecord = atRiskIn(dir, gitAt);      // no snapshot recorded: the bug
+  recordStagedUpdate('2.0.0', { git: gitAt });
+  const withRecord = atRiskIn(dir, gitAt);
+
+  if (withoutRecord.includes('sys.mjs') && !withRecord.includes('sys.mjs')) {
     pass('withheld update is not mistaken for a local edit on the next run');
   } else {
-    fail(`baseline wrong: without ref=${JSON.stringify(withoutRef)} with ref=${JSON.stringify(withRef)}`);
+    fail(`baseline wrong: unrecorded=${JSON.stringify(withoutRecord)} recorded=${JSON.stringify(withRecord)}`);
   }
 }
 
-// ── 13. A genuine local edit is still caught with the ref recorded ──────
+// ── 13. A genuine local edit is still caught while one is pending ───────
 {
-  // The recorded baseline must not become a blanket amnesty: the preservation
+  // The recorded snapshot must not become a blanket amnesty: the preservation
   // guard (#2337) exists to stop the checkout silently overwriting a system
-  // file this install edited, and that has to keep working while a withheld
-  // update is pending.
-  const { dir, g } = repo();
-  writeFileSync(join(dir, 'sys.mjs'), 'v2\n');
-  g('add', 'sys.mjs');
-  g('commit', '-qm', 'staged update content');
-  g('update-ref', STAGED_UPDATE_REF, g('rev-parse', 'HEAD'));
-  writeFileSync(join(dir, 'sys.mjs'), 'v3-upstream\n');
-  g('commit', '-qam', 'upstream moved on');
-  g('tag', 'upstream');
-  g('reset', '-q', '--hard', 'HEAD~1');
-  writeFileSync(join(dir, 'sys.mjs'), 'my own local fix\n');   // the user's edit
+  // file this install edited, and it has to keep working while an update waits.
+  const { dir, gitAt } = repoWithWithheldUpdate();
+  recordStagedUpdate('2.0.0', { git: gitAt });
+  writeFileSync(join(dir, 'sys.mjs'), 'my own local fix\n');
 
-  const atRisk = locallyModifiedSystemFiles(['sys.mjs'], 'upstream', { git: (...a) => gitIn(dir, ...a), root: dir });
-  if (atRisk.includes('sys.mjs')) {
+  if (atRiskIn(dir, gitAt).includes('sys.mjs')) {
     pass('a real local edit is still flagged while a withheld update is pending');
   } else {
-    fail('the recorded baseline swallowed a genuine local edit');
+    fail('the recorded snapshot swallowed a genuine local edit');
+  }
+}
+
+// ── 14. Discarding the withheld update by hand must self-heal ──────────
+{
+  // The ref is durable; the state it describes is not. A contributor who throws
+  // the withheld update away leaves the ref behind, and believing it on sight
+  // makes every system file read as a local edit against a snapshot that is no
+  // longer there — the invisible skip this guard exists to remove, one step
+  // further out. Measured before the check existed: `sys.mjs` came back at risk
+  // with the working tree untouched.
+  for (const [label, discard] of [
+    ['git reset --hard', (g) => g('reset', '--hard', 'HEAD')],
+    ['git restore', (g) => { g('restore', '--staged', '--worktree', 'sys.mjs'); }],
+  ]) {
+    const { dir, g, gitAt } = repoWithWithheldUpdate();
+    recordStagedUpdate('2.0.0', { git: gitAt });
+    discard(g);
+
+    const atRisk = atRiskIn(dir, gitAt);
+    if (!atRisk.includes('sys.mjs')) {
+      pass(`discarded by hand (${label}): the stale snapshot is distrusted`);
+    } else {
+      fail(`${label}: stale snapshot still trusted, atRisk=${JSON.stringify(atRisk)}`);
+    }
+  }
+}
+
+// ── 16. …and distrust must not become deletion ─────────────────────────
+{
+  // Deleting a snapshot that fails the check would be tidier, but it makes the
+  // damage permanent in the one sequence where the state comes back: the
+  // notice's own option 2 is `git stash push --staged` then a branch switch, and
+  // an updater run in that window sees an index that does not match. Delete
+  // there and `git stash pop` restores the update with nothing left to explain
+  // it — the false positives return, on the default branch this time. Keeping
+  // the ref costs nothing: the check is a content comparison, so a ref that
+  // matches the index describes the tree truthfully whatever produced it.
+  const { dir, g, gitAt } = repoWithWithheldUpdate();
+  g('checkout', '-q', '-b', 'feat/x');
+  recordStagedUpdate('2.0.0', { git: gitAt });
+
+  g('stash', 'push', '--staged', '-m', 'career-ops');
+  g('switch', '-q', 'main');
+  const whileStashed = atRiskIn(dir, gitAt);      // distrusted: nothing is staged
+  g('stash', 'pop');
+  const afterPop = atRiskIn(dir, gitAt);          // trusted again: the state is back
+
+  if (!whileStashed.includes('sys.mjs') && !afterPop.includes('sys.mjs')) {
+    pass('a stashed-and-restored update is still explained after the round trip');
+  } else {
+    fail(`stash round trip: stashed=${JSON.stringify(whileStashed)} popped=${JSON.stringify(afterPop)}`);
+  }
+}
+
+// ── 15. Staging unrelated work does not invalidate the snapshot ─────────
+{
+  // The check is scoped to the paths being asked about, because a contributor
+  // with a withheld update pending is also, by definition, working on something
+  // else in the same tree. Invalidating on that would put the false positives
+  // straight back.
+  const { dir, g, gitAt } = repoWithWithheldUpdate();
+  recordStagedUpdate('2.0.0', { git: gitAt });
+  writeFileSync(join(dir, 'my-feature.mjs'), 'export const x = 1;\n');
+  g('add', 'my-feature.mjs');
+
+  if (!atRiskIn(dir, gitAt).includes('sys.mjs')) {
+    pass('the contributor\'s own staged work leaves the snapshot trusted');
+  } else {
+    fail('unrelated staged work invalidated the withheld snapshot');
   }
 }
 
