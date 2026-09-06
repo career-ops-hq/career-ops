@@ -85,7 +85,7 @@ const HASHTAG_LINE_RE = /^#\S+(?:\s+#\S+)*$/u;
 // check a real employer name does. Measured live 2026-09-05: all 46
 // hashtag-first-line posts across two fetched pages of each channel still
 // resolve to an employer, none blocked by this list.
-const ROLE_WORD_RE = /(?<![\p{L}\p{N}])(senior|middle|junior|lead|principal|staff|head|chief|intern|trainee|engineer|developer|manager|analyst|designer|architect|specialist|consultant|director|recruiter|scientist|инженер|разработчик|менеджер|специалист|аналитик|директор|архитектор|рекрутер|стажер|стажёр)(?![\p{L}\p{N}])/iu;
+const ROLE_WORD_RE = /(?<![\p{L}\p{N}])(senior|middle|junior|lead|principal|staff|head|chief|intern|trainee|engineer|developer|manager|analyst|designer|architect|specialist|consultant|director|recruiter|scientist|product\s+owner|qa|tester|devops|sre|инженер|разработчик|менеджер|специалист|аналитик|директор|архитектор|рекрутер|стажер|стажёр|тестировщик|тимлид|владелец|руководитель|маркетолог|программист)(?![\p{L}\p{N}])/iu;
 
 /** First non-empty line of a post, cut at a word boundary under TITLE_CAP. */
 function headline(lines) {

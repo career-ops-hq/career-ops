@@ -49,6 +49,10 @@ const P_HASHTAG_NO_TITLE = post(12479, '2026-09-04T09:00:00+00:00', `#middle #у
 // Same template, but the third line is a bare pasted link — t.me autolinks a
 // raw URL with the URL itself as the anchor's visible text — not a title.
 const P_HASHTAG_BARE_LINK = post(12478, '2026-09-04T08:00:00+00:00', `#middle #удаленка<br/>Т1<br/>${A('https://career.t1.ru/vacancies/vacancy-detail?id=136067001')}`);
+// Same template, but the line after the tags is a role, not an employer. The
+// shape has no marker pinning that line to "employer", so a role there must
+// drop the post rather than emit `company: 'Product Owner'`.
+const P_HASHTAG_ROLE = post(12477, '2026-09-04T07:00:00+00:00', `#middle #удаленка<br/>Product Owner<br/>Senior Python Developer<br/>${A('https://career.t1.ru/vacancies/vacancy-detail?id=136067001')}`);
 // The shapes the policy drops.
 const P_NO_NAME = post(12503, '2026-08-25T10:00:00+00:00', `Ищем UE5 разработчика (кооп / прототип выживача)<br/>О проекте: делаем прототип.<br/>Писать: @hr_handle · ${A('https://ll-games.com/en/jobs/ue5')}`);
 const P_NO_LINK = post(12502, '2026-08-24T10:00:00+00:00', `🔵 Финансовый аналитик<br/>🏢 Компания: deeplay<br/>📍 Локация: Санкт-Петербург${FOOTER}`);
@@ -133,6 +137,9 @@ try {
     [['Engineering Manager @ Constructor‍.io'], 'Constructor.io', 'zero-width characters are stripped from the name'],
     [['#middle #удаленка', 'Т1', 'Data Science (LLM/NLP)'], 'Т1', 'a hashtag-only first line, bare employer alone on the next (measured live 2026-09-05)'],
     [['#senior #гибрид #москва', 'X5 Медиа', 'Ведущий backend-разработчик'], 'X5 Медиа', 'a hashtag-only first line, employer name carrying a digit'],
+    [['#middle #офис', 'ПАО Сбербанк', 'Java-разработчик'], 'ПАО Сбербанк', 'a hashtag-only first line, employer name carrying a legal form'],
+    [['#senior #удаленка', 'Лаборатория Касперского', 'Инженер по безопасности'], 'Лаборатория Касперского', 'a hashtag-only first line, a two-word employer name'],
+    [['#middle', 'Product Hunt', 'Backend Engineer'], 'Product Hunt', 'a hashtag-only first line, an employer name that starts with a role modifier'],
   ];
   for (const [lines, want, label] of names) {
     const got = employerName(lines);
@@ -151,6 +158,10 @@ try {
     [['#senior #удаленка', 'Senior Engineer'], 'a hashtag-only first line whose next line is a short role title, not an employer'],
     [['#middle #гибрид', 'Ведущий инженер'], 'a hashtag-only first line whose next line is a short Russian role title (JS \\b never matches around Cyrillic)'],
     [['#tag1 #tag2'], 'a hashtag-only first line with no second line at all'],
+    [['#job #python', 'Product Owner', 'Senior Python Developer'], 'a hashtag-only first line whose next line is a role with no role noun of the first list ("Product Owner")'],
+    [['#senior #удаленка', 'QA Engineer'], 'a hashtag-only first line whose next line is a role acronym'],
+    [['#middle #гибрид', 'Тестировщик'], 'a hashtag-only first line whose next line is a one-word Russian role'],
+    [['#lead', 'Руководитель отдела'], 'a hashtag-only first line whose next line names a head of department'],
   ];
   for (const [lines, label] of noNames) {
     const got = employerName(lines);
@@ -262,6 +273,12 @@ try {
   const hashtagBareLinkJob = postToJob(parseChannelPage(page(P_HASHTAG_BARE_LINK), 'devjobs').posts[0]);
   if (hashtagBareLinkJob === null) pass('a hashtag-first post whose only remaining line is the bare vacancy URL is dropped rather than emitting the URL as title');
   else fail(`hashtag post with bare-link-only line = ${JSON.stringify(hashtagBareLinkJob)}`);
+
+  // A hashtag-first post whose second line is a role: the vacancy link is
+  // valid, so the only thing that can drop the post is the employer check.
+  const hashtagRoleJob = postToJob(parseChannelPage(page(P_HASHTAG_ROLE), 'devjobs').posts[0]);
+  if (hashtagRoleJob === null) pass('a hashtag-first post whose employer line is a role ("Product Owner") is dropped rather than attributed to that role');
+  else fail(`hashtag post with a role on the employer line = ${JSON.stringify(hashtagRoleJob)}`);
 
   // --- fetch: redirect guard, mapping, paging ------------------------------
   const calls = [];
