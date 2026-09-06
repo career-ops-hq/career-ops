@@ -110,6 +110,7 @@ func TestStatusTargetUsesOnlyReportColumn(t *testing.T) {
 		fail            bool
 	}{
 		{"notes-reference", "| 6 | 2026-09-01 | Other Co | Engineer | 4.2/5 | Applied | ❌ | [6](reports/006.md) | see [7] and [7](reports/007.md) |\n", "7", false},
+		{"unrelated-malformed-report", "| 6 | 2026-09-01 | Other Co | Engineer | 4.2/5 | Applied | ❌ | [8](reports/008.md) [9](reports/009.md) | see [7] |\n", "7", false},
 		{"duplicate-report", strings.Replace(statusTargetRow, "| 42 |", "| 99 |", 1), "7", true},
 		{"missing-report", "", "88", true},
 		{"empty-report", "", "", true},
@@ -250,6 +251,7 @@ func TestStatusTargetAppendsToCompactEmptyNotes(t *testing.T) {
 func TestStatusTargetRejectsMalformedReportCell(t *testing.T) {
 	for _, report := range []string{
 		"[7](reports/007.md) [8](reports/008.md)",
+		"[8](reports/008.md) [7](reports/007.md)",
 		"[7](reports/007.md) trailing text",
 		"prefix [7](reports/007.md)",
 		"[7](reports/007.md) [7](reports/007.md)",

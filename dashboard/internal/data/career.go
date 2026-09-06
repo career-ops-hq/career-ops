@@ -762,11 +762,18 @@ func UpdateApplicationStatusAndNotes(careerOpsPath string, app model.CareerAppli
 		if reportIdx < 0 || reportIdx >= len(cells) {
 			continue
 		}
-		match := reReportLink.FindStringSubmatch(cells[reportIdx])
-		if match == nil || match[1] != app.ReportNumber {
+		matches := reReportLink.FindAllStringSubmatch(cells[reportIdx], -1)
+		hasTarget := false
+		for _, match := range matches {
+			if match[1] == app.ReportNumber {
+				hasTarget = true
+				break
+			}
+		}
+		if !hasTarget {
 			continue
 		}
-		if match[0] != strings.TrimSpace(cells[reportIdx]) {
+		if len(matches) != 1 || matches[0][0] != strings.TrimSpace(cells[reportIdx]) {
 			return fmt.Errorf("malformed report cell for report %s: expected exactly one report link", app.ReportNumber)
 		}
 		if target >= 0 {
