@@ -406,6 +406,7 @@ const headers = { 'Content-Type': 'application/json' };
 if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
 let evaluationText;
+let evaluationUsage = null;
 try {
   // Streaming (SSE): llama.cpp/Unsloth brauchen bei langen Generationen den
   // sofortigen Header; Non-Streaming läuft in Node/undici in den 5-Minuten-
@@ -420,6 +421,8 @@ try {
         { role: 'user', content: `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}` },
       ],
       stream:      true,
+      // Compatible endpoints need not support this optional OpenAI parameter.
+      ...(endpointHost === 'api.openai.com' ? { stream_options: { include_usage: true } } : {}),
       temperature: 0.4,
     }),
     signal: AbortSignal.timeout(timeoutMs),
@@ -437,37 +440,73 @@ try {
     process.exit(1);
   }
 
-  // SSE-Zeilen akkumulieren: content + reasoning_content getrennt
+  // Keep transport EOF distinct from a successfully completed generation.
   const parts = [];
   const reader = res.body.getReader();
-  const decoder = new TextDecoder();
+  const decoder = new TextDecoder('utf-8', { fatal: true });
   let sseBuf = '';
   let thinkOpen = false;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    sseBuf += decoder.decode(value, { stream: true });
-    let nl;
-    while ((nl = sseBuf.indexOf('\n')) >= 0) {
-      const line = sseBuf.slice(0, nl).trim();
-      sseBuf = sseBuf.slice(nl + 1);
-      if (!line.startsWith('data:')) continue;
-      const payload = line.slice(5).trim();
-      if (payload === '[DONE]') continue;
-      let delta;
-      try { delta = JSON.parse(payload); } catch { continue; }
-      const d = delta.choices?.[0]?.delta ?? {};
-      if (d.reasoning_content) {
-        if (!thinkOpen) { parts.push('\n<think>\n'); thinkOpen = true; }
-        parts.push(d.reasoning_content);
-      } else {
-        if (thinkOpen) { parts.push('\n</think>\n\n'); thinkOpen = false; }
-        if (d.content) parts.push(d.content);
+  let streamDone = false;
+  let finishReason = null;
+  let answer = '';
+  let eventData = [];
+  const consumeEvent = () => {
+    if (!eventData.length) return;
+    const payload = eventData.join('\n').trim();
+    eventData = [];
+    if (payload === '[DONE]') { streamDone = true; return; }
+    const obj = JSON.parse(payload);
+    if (obj.error) throw new Error(obj.error.message || String(obj.error));
+    if (Number.isFinite(obj.usage?.prompt_tokens) && Number.isFinite(obj.usage?.completion_tokens)) {
+      evaluationUsage = {
+        ...obj.usage,
+        total_tokens: obj.usage.total_tokens ?? obj.usage.prompt_tokens + obj.usage.completion_tokens,
+      };
+    }
+    const choice = obj.choices?.[0];
+    if (choice?.finish_reason != null) {
+      finishReason = choice.finish_reason;
+      if (finishReason !== 'stop') throw new Error(`Incomplete evaluation: finish_reason=${finishReason}`);
+    }
+    const d = choice?.delta ?? {};
+    if (d.reasoning_content) {
+      if (!thinkOpen) { parts.push('\n<think>\n'); thinkOpen = true; }
+      parts.push(d.reasoning_content);
+    }
+    if (d.content) {
+      if (thinkOpen) { parts.push('\n</think>\n\n'); thinkOpen = false; }
+      parts.push(d.content);
+      answer += d.content;
+    }
+  };
+  const consumeLine = line => {
+    if (!line) consumeEvent();
+    else if (line.startsWith('data:')) eventData.push(line.slice(5).replace(/^ /, ''));
+  };
+  try {
+    while (!streamDone) {
+      const { done, value } = await reader.read();
+      sseBuf += done ? decoder.decode() : decoder.decode(value, { stream: true });
+      let nl;
+      while (!streamDone && (nl = sseBuf.indexOf('\n')) >= 0) {
+        consumeLine(sseBuf.slice(0, nl).replace(/\r$/, ''));
+        sseBuf = sseBuf.slice(nl + 1);
+      }
+      if (done) {
+        if (sseBuf) consumeLine(sseBuf.replace(/\r$/, ''));
+        consumeEvent();
+        break;
       }
     }
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
+  if (!streamDone && finishReason !== 'stop') throw new Error('Incomplete evaluation: stream ended before completion');
+  if (!answer.trim()) throw new Error('The endpoint returned an empty response.');
   if (thinkOpen) parts.push('\n</think>\n');
   evaluationText = parts.join('').trim();
+  if (evaluationUsage) tracker.record('evaluation', normalizeOpenAIUsage(evaluationUsage));
   if (!evaluationText) {
     console.error('❌  The endpoint returned an empty response.');
     process.exit(1);
@@ -600,4 +639,6 @@ console.log('\n' + '─'.repeat(66));
 console.log(`  Score: ${score}/5  |  Archetype: ${archetype}  |  Legitimacy: ${legitimacy}`);
 console.log('─'.repeat(66) + '\n');
 
-console.log(formatBreakdown(tracker, modelName, 'openai'));
+console.log(evaluationUsage
+  ? formatBreakdown(tracker, modelName, 'openai')
+  : `Token breakdown:\n  evaluation:    usage unavailable (endpoint did not report token counts)\n  (metadata: model=${modelName}, provider=openai)`);
