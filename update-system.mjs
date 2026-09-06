@@ -246,6 +246,9 @@ const SYSTEM_PATHS = [
   'story-provenance-check.mjs',
   'lib/latex-content.mjs',
   'lib/context-budget.mjs',
+  // Retired 2026-09-05: the suite moved to tests/context-budget.test.mjs. The
+  // entry stays so staleSystemFiles() prunes the orphan on an upgraded install;
+  // drop it once a release has shipped past that move.
   'lib/context-budget.test.mjs',
   'lib/golden-budget-analysis.mjs',
   'img-to-pdf.mjs',
