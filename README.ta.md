@@ -36,11 +36,13 @@
 
 <p align="center"><strong>740+ job listings evaluated · 100+ personalized CVs · 1 dream role landed</strong></p>
 
+<p align="center"><sub><a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>) என்பவரால் உருவாக்கி பராமரிக்கப்படுகிறது</sub></p>
+
 <p align="center">
   <a href="https://warpchart.dev/hq">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://warpchart.dev/api/chart?theme=dark&v=3">
-      <img alt="Live star telemetry of santifer/career-ops" src="https://warpchart.dev/api/chart?theme=light&v=3" loading="lazy">
+      <img alt="Live star telemetry of career-ops-hq/career-ops" src="https://warpchart.dev/api/chart?theme=light&v=3" loading="lazy">
     </picture>
   </a>
 </p>
@@ -50,7 +52,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/santifer/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
 </p>
 
 <p align="center">
@@ -80,7 +82,7 @@
 
 career-ops ([career-ops.org](https://career-ops.org), **careerops** என்றும் அழைக்கப்படுகிறது) என்பது எந்த AI Coding CLI-யையும் வேலை தேடலுக்கான முழுமையான கட்டுப்பாட்டு மையமாக மாற்றும் ஒரு Open Source அமைப்பு. Spreadsheet-ல் விண்ணப்பங்களைக் கைமுறையாகக் கண்காணிப்பதற்குப் பதிலாக, AI-ஆல் இயக்கப்படும் ஒரு செயல்முறையை இது வழங்குகிறது. இதன் மூலம் நீங்கள்:
 
-- **வேலை வாய்ப்புகளை மதிப்பீடு** செய்யலாம் — 10 எடையிடப்பட்ட அம்சங்களைக் கொண்ட A–H மதிப்பீட்டு முறையின் மூலம்.
+- **வேலை வாய்ப்புகளை மதிப்பீடு** செய்யலாம் — 10 எடையிடப்பட்ட அம்சங்களைக் கொண்ட A-H மதிப்பீட்டு முறையின் மூலம்.
 - **தனிப்பயனாக்கப்பட்ட PDF-களை உருவாக்கலாம்** — ஒவ்வொரு வேலை விளக்கத்திற்கும் (Job Description) ஏற்ற ATS-optimized CV-கள்.
 - **வேலைவாய்ப்பு தளங்களை தானாக Scan** செய்யலாம் — Greenhouse, Ashby, Lever மற்றும் நிறுவனங்களின் Career Pages.
 - **பல வேலை வாய்ப்புகளை ஒரே நேரத்தில் செயலாக்கலாம்** — Sub-agents மூலம் ஒரே நேரத்தில் 10-க்கும் மேற்பட்ட வேலை வாய்ப்புகளை மதிப்பிடலாம்.
@@ -144,7 +146,7 @@ claude   # அல்லது codex / qwen / opencode / agy / grok — உங்
 <summary><b>கைமுறையாக அமைக்க விரும்புகிறீர்களா? (git clone)</b></summary>
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # PDF உருவாக்குவதற்கு மட்டும் தேவை
 
@@ -470,14 +472,14 @@ Wikidata:
 
 ## Contributors
 
-<a href="https://github.com/santifer/career-ops/graphs/contributors">
+<a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
   <img
-  src="https://contrib.rocks/image?repo=santifer/career-ops"
+  src="https://contrib.rocks/image?repo=career-ops-hq/career-ops"
   alt="career-ops contributors"
 />
 </a>
 
-career-ops-ஐ பயன்படுத்தி வேலை கிடைத்ததா? [உங்கள் வெற்றிக் கதையைப் பகிருங்கள்!](https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml)
+career-ops-ஐ பயன்படுத்தி வேலை கிடைத்ததா? [உங்கள் வெற்றிக் கதையைப் பகிருங்கள்!](https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml)
 
 
 ## License & Trademark

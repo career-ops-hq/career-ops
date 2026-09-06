@@ -33,6 +33,8 @@
 
 **REGUŁA: NIGDY nie zakodowuj na sztywno metryk pochodzących z proof points.** Czytaj je z `cv.md` i `article-digest.md` w momencie oceny.
 **REGUŁA: Dla metryk z artykułów/projektów `article-digest.md` ma priorytet nad `cv.md`** (`cv.md` może zawierać starsze liczby).
+**REGUŁA: NIGDY nie twierdź, że kandydat jest autorem/twórcą projektu, repozytorium, biblioteki, narzędzia, frameworka ani artefaktu open-source, chyba że jest to wprost przypisane jemu w `cv.md` lub `article-digest.md`.** Mylenie "używania narzędzia" z "jego stworzeniem" (używanie X to nie jest stworzenie X) to najczęstszy wzorzec zmyślania i jest zabronione.
+**REGUŁA: Słowa kluczowe się przeformułowuje, nigdy nie zmyśla.** Zmieniać kolejność, ujęcie, akcent — ale nigdy nie wymyślać. Jeśli twierdzenie nie jest poparte plikiem w zakresie, zapytać kandydata; bez odpowiedzi — pominąć je. Milczenie na dany temat jest lepsze niż zmyślony szczegół.
 
 ---
 

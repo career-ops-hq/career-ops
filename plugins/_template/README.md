@@ -1,6 +1,6 @@
 # career-ops-plugin-{{NAME}}
 
-A community plugin for [career-ops](https://github.com/santifer/career-ops).
+A community plugin for [career-ops](https://github.com/career-ops-hq/career-ops).
 
 ## What it does
 
@@ -31,7 +31,7 @@ node plugins.mjs enable {{NAME}} --confirm  # grants it
 ## Get it listed as approved
 
 Open a registry PR against career-ops (see
-[docs/PLUGINS.md](https://github.com/santifer/career-ops/blob/main/docs/PLUGINS.md)).
+[docs/PLUGINS.md](https://github.com/career-ops-hq/career-ops/blob/main/docs/PLUGINS.md)).
 
 ## License
 

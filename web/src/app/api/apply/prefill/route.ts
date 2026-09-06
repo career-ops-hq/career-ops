@@ -1,9 +1,10 @@
-import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { getSession } from "@/lib/apply/session";
+import { buildAnswerPrompt } from "@/lib/apply/answer-prompt.mjs";
+import { runPlanner } from "@/lib/apply/planner";
 import { extractJsonObject } from "@/lib/extract-json-object.mjs";
 
 export const runtime = "nodejs";
@@ -67,76 +68,21 @@ export async function POST(req: Request) {
       if (!resolved) return fail(`CLI '${cliId}' not found on this machine`);
       const { spec, binPath } = resolved;
 
-      const fieldsList = s.fields
-        .map((f) => `${f.id}\t${f.type}${f.required ? "*" : ""}\t${f.label}${f.options ? `\t[options: ${f.options.join(" | ")}]` : ""}`)
-        .join("\n");
       const mem = readMemory().trim();
-      const prompt = `You are pre-filling a job application for the user (company/role: ${s.title}). Read cv.md and config/profile.yml; if a matching report for this company exists in reports/, read it too. Ground EVERY answer in the REAL candidate — never invent facts.${mem ? `\n\nDurable notes about the user:\n${mem}` : ""}
-
-FIELDS (id ⇥ type ⇥ label ⇥ options):
-${fieldsList}
-
-For each field give the best answer:
-- identity/contact (name, email, phone, github, linkedin, location) → from profile/cv.
-- free-text (Why us?, cover-letter, "most impactful thing you've built", etc.) → a concise, honest, concrete answer in the candidate's own voice (no buzzwords, active voice, real metrics only). Keep each under ~120 words.
-- select/radio → choose the best-matching option using the EXACT option text from the list.
-- NEVER fill legal / visa / work-authorization / salary / demographic / sensitive fields → set needs_confirmation:true and value:"".
-
-Output ONLY a compact JSON object mapping each field id → {"value": "...", "needs_confirmation": boolean}. No prose, no markdown, no code fence.`;
+      const prompt = buildAnswerPrompt({ title: s.title, fields: s.fields, memory: mem });
 
       log(`Form: "${s.title}" · ${s.fields.length} fields · prompt ${prompt.length} chars · memory ${mem.length} chars`);
       log(`Planner: ${cliId} (${binPath})`);
 
-      const isClaude = cliId === "claude";
-      // --strict-mcp-config with no --mcp-config = load ZERO MCP servers → much
-      // faster startup (skips the user's global playwright/gmail/linear/… servers
-      // the planner doesn't need; it only reads local files).
-      const args = isClaude
-        ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read,Glob,Grep", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"]
-        : spec.args(prompt);
-      // Scale the timeout with form size (big forms = more drafting). Cap < maxDuration.
-      const killMs = Math.min(300_000, 150_000 + s.fields.length * 6_000);
-      log(`Spawning planner (timeout ${Math.round(killMs / 1000)}s)…`);
-
-      const result = await new Promise<{ buf: string; code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-        // spawnHeadlessCli closes stdin right after spawning, so the CLI doesn't
-        // wait on piped input that will never arrive.
-        const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
-        let buf = "";
-        let firstByteAt = 0;
-        const hb = setInterval(() => {
-          log(`…running ${Math.round((Date.now() - t0) / 1000)}s · ${buf.length} chars received`);
-        }, 4000);
-        child.stdout.on("data", (d: Buffer) => {
-          if (!firstByteAt) {
-            firstByteAt = Date.now();
-            log(`first output byte at ${Math.round((firstByteAt - t0) / 1000)}s`);
-          }
-          buf += d.toString();
-        });
-        child.stderr.on("data", (d: Buffer) => {
-          const e = d.toString().trim();
-          if (e) log(`stderr: ${e.slice(0, 160).replace(/\s+/g, " ")}`);
-        });
-        const killer = setTimeout(() => {
-          log("TIMEOUT reached → SIGTERM");
-          try {
-            child.kill("SIGTERM");
-          } catch {
-            /* ignore */
-          }
-        }, killMs);
-        child.on("close", (code, signal) => {
-          clearTimeout(killer);
-          clearInterval(hb);
-          resolve({ buf, code, signal });
-        });
-        child.on("error", (e) => {
-          clearTimeout(killer);
-          clearInterval(hb);
-          log(`spawn error: ${e.message}`);
-          resolve({ buf, code: null, signal: null });
-        });
+      const result = await runPlanner({
+        cliId,
+        spec,
+        binPath,
+        prompt,
+        fieldCount: s.fields.length,
+        cwd: careerOpsRoot(),
+        t0,
+        log,
       });
 
       log(`Planner exited code=${result.code} signal=${result.signal} · ${result.buf.length} chars total`);

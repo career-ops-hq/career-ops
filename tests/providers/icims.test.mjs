@@ -244,6 +244,24 @@ const mkCtx = (pages) => ({
   if (job.location === 'MD, United States') pass('enrichDate drops UNAVAILABLE address parts');
   else fail(`location: ${job.location}`);
 }
+// Regression for #3727: the first jobLocation entry is entirely UNAVAILABLE
+// and the real address lives in a later entry. Reading only jobLocation[0]
+// returned no location at all even though a usable one was in the array.
+{
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","jobLocation":[{"address":{"addressCountry":"UNAVAILABLE"}},{"address":{"addressLocality":"Toronto","addressRegion":"ON","addressCountry":"CA"}}]}</script>`;
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: '' };
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.location === 'Toronto, ON, Canada') pass('enrichDate walks past an all-UNAVAILABLE jobLocation entry to a later one');
+  else fail(`location: ${job.location}`);
+}
+// Single-entry jobLocation behavior is unchanged.
+{
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","jobLocation":[{"address":{"addressLocality":"Denver","addressRegion":"CO","addressCountry":"US"}}]}</script>`;
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: '' };
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.location === 'Denver, CO, United States') pass('enrichDate still handles a single jobLocation entry');
+  else fail(`location: ${job.location}`);
+}
 // A location the list page did supply is authoritative: enrichment never
 // overwrites it.
 {

@@ -1,5 +1,5 @@
 /**
- * process-quality.test.mjs — Systematic test suite for process-quality.mjs
+ * tests/process-quality.test.mjs — Systematic test suite for process-quality.mjs
  *
  * Tests every exported function across:
  * - Markdown table parsing (well-formed, malformed, empty, header-only)
@@ -7,7 +7,10 @@
  * - Aggregation (grouping, dedup, threshold filtering, sort order)
  * - CLI behavior (args, flags, missing file)
  *
- * Run: node process-quality.test.mjs
+ * Run: node test-all.mjs --only process-quality
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
  */
 
 import { parseActiveInterviews, extractFriction, aggregateProcessQuality } from '../process-quality.mjs';

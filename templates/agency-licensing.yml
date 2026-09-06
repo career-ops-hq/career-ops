@@ -74,3 +74,22 @@ jurisdictions:
       - "Blakes — Ontario licensing regime and administrative penalties bulletin"
       - "HGR Graham Partners — Working for Workers Act licensing bulletin"
     as_of: "2026-07-18"
+
+  UK:
+    jurisdiction_name: "United Kingdom (Great Britain)"
+    licensing_required_for: both   # employment agencies (permanent introduction) AND employment businesses (temporary placement)
+    effective: "2004-04-06"        # commencement date of the Conduct of Employment Agencies and Employment Businesses Regulations 2003 (SI 2003/3319); Act passed 1973-07-18 (c. 35)
+    registry:
+      url: "https://www.gov.uk/employment-agencies-and-businesses"
+      what_it_shows: "GOV.UK official guidance and compliance resources for employment agencies and employment businesses — details statutory conduct rules, worker rights, enforcement under the Employment Agency Standards (EAS) Inspectorate (Department for Business and Trade), and official list of prohibited persons."
+    legal_basis: "Employment Agencies Act 1973 (c. 35) + Conduct of Employment Agencies and Employment Businesses Regulations 2003 (SI 2003/3319)"
+    client_side_prohibition: "Hirers/clients in general recruitment are not broadly prohibited from using agencies as general licensing was replaced by statutory conduct rules under EAS, though hirers are barred from using unlicensed labor providers in GLAA-regulated sectors (Gangmasters (Licensing) Act 2004)."
+    penalties: "Prosecution in Magistrates' Court (unlimited fines), tribunal awards, and formal prohibition orders banning individuals from operating or managing an employment agency/business for up to 10 years."
+    transitional_notes: "General recruitment in Great Britain is governed by statutory conduct regulations enforced by the EAS Inspectorate rather than universal pre-licensing — compliance is enforced via inspections and complaints, making outside assertions of non-compliance impossible without official enforcement actions."
+    sources:
+      - "https://www.legislation.gov.uk/ukpga/1973/35 — Employment Agencies Act 1973 (c. 35)"
+      - "https://www.legislation.gov.uk/uksi/2003/3319 — Conduct of Employment Agencies and Employment Businesses Regulations 2003 (SI 2003/3319)"
+      - "https://www.gov.uk/employment-agencies-and-businesses — GOV.UK guidance: Employment agencies and businesses"
+      - "https://www.gov.uk/government/organisations/employment-agency-standards-inspectorate — Employment Agency Standards (EAS) Inspectorate (DBT)"
+    as_of: "2026-09-03"
+

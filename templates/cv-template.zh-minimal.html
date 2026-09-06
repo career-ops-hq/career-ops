@@ -9,6 +9,14 @@ version: 1.0.0
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{NAME}} — CV</title>
 <style>
+  /* Themeable tokens (#1837): only --secondary-color is wired in this template
+     so far (this template does not yet expose --accent-color; that gap is
+     pre-existing and out of scope here). Overridable via config/profile.yml
+     `style:`, which the PDF pipeline injects as a later :root block. */
+  :root {
+    --secondary-color: hsl(270, 70%, 45%);
+  }
+
   /* ATS-safe typography (#font-extraction fix):
      The bundled variable woff2 fonts (Space Grotesk / DM Sans) render with
      glyph advances that make PDF text extractors inject spurious spaces inside
@@ -75,7 +83,7 @@ version: 1.0.0
 
   .header-gradient {
     height: 2px;
-    background: linear-gradient(to right, hsl(187, 74%, 32%), hsl(270, 70%, 45%));
+    background: linear-gradient(to right, hsl(187, 74%, 32%), var(--secondary-color));
     border-radius: 1px;
     margin-bottom: 10px;
   }
@@ -186,7 +194,7 @@ version: 1.0.0
     font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
     font-size: 12.5px;
     font-weight: 600;
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
   }
 
   .job-period {
@@ -232,7 +240,7 @@ version: 1.0.0
     font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
     font-size: 11.5px;
     font-weight: 600;
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
   }
 
   .project-badge {
@@ -277,7 +285,7 @@ version: 1.0.0
   }
 
   .edu-org {
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
     font-weight: 500;
   }
 
@@ -285,6 +293,11 @@ version: 1.0.0
     font-size: 10px;
     color: #777;
     white-space: nowrap;
+  }
+
+  .edu-location {
+    font-size: 10px;
+    color: #888;
   }
 
   .edu-desc {
@@ -317,7 +330,7 @@ version: 1.0.0
   }
 
   .cert-org {
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
     white-space: nowrap;
   }
 
@@ -352,7 +365,7 @@ version: 1.0.0
   }
 
   .award-org {
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
     white-space: nowrap;
   }
 
@@ -421,6 +434,7 @@ version: 1.0.0
   .job-company,
   .job-role,
   .job-location,
+  .edu-location,
   .project-title {
     break-after: avoid;
     page-break-after: avoid;
@@ -452,7 +466,7 @@ version: 1.0.0
   }
 
   html[lang="ar"] .header-gradient {
-    background: linear-gradient(to left, hsl(187, 74%, 32%), hsl(270, 70%, 45%));
+    background: linear-gradient(to left, hsl(187, 74%, 32%), var(--secondary-color));
   }
 
   html[lang="ar"] .job ul {
@@ -619,7 +633,8 @@ version: 1.0.0
   }
 
   .job-period,
-  .job-location {
+  .job-location,
+  .edu-location {
     color: var(--zhm-muted);
   }
 

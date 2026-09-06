@@ -25,7 +25,8 @@ Export a tailored, ATS-optimized CV as a `.tex` file and compile it to PDF via `
 ## Language support
 
 - **Localized section titles are fine.** The validator counts `\section{}` blocks instead of matching English titles, so a Spanish/French/German CV (e.g. `\section{Educación}`) validates normally.
-- **CJK (Japanese / Chinese / Korean) is NOT supported on this path yet.** The template is a pdfLaTeX / Computer-Modern setup with no CJK font, so kana/kanji/hangul cannot render. `generate-latex.mjs` detects CJK characters and stops with guidance. For a Japanese CV, use `pdf` mode (HTML → PDF), which renders CJK via a `lang="ja"` font fallback.
+- **CJK (Japanese / Chinese / Korean) requires the `tectonic` engine.** The base template is a pdfLaTeX / Computer-Modern setup with no CJK font, so `generate-latex.mjs` blocks CJK content on that path with guidance. Tectonic's backend is XeTeX, so `fontspec` + `xeCJK` can render CJK: generate from the CJK-aware variant instead —
+  `node build-cv-latex.mjs <input.json> <output.tex> --template=cjk` (uses `templates/cv-template.cjk.tex`) — then run `generate-latex.mjs` as usual. This path needs a XeTeX-based engine (fontspec/xeCJK); a pdflatex-only local setup still gets the blocking guidance, since pdfLaTeX itself can't drive this template regardless of what packages or fonts are present. Font availability is per environment, not a blanket requirement: **locally**, install tectonic and make sure a CJK-capable font is on your system — fontspec/xeCJK read the OS font list, tectonic does not bundle fonts — the template defaults to "Noto Serif CJK SC", swap `\setCJKmainfont{...}` for whatever CJK font you actually have installed if that name isn't found. **On Overleaf**, switch the compiler to XeLaTeX (Menu → Compiler → XeLaTeX) — Overleaf's default pdfLaTeX compiler can't build this file either — and a CJK font may already be available in Overleaf's TeX Live install (e.g. Noto CJK), or you can upload your own font file(s) as project resources if not. If neither a XeTeX engine nor a CJK font is available in your environment, use `pdf` mode (HTML → PDF) instead, which renders CJK via a `lang="ja"` font fallback.
 
 ## JSON Input Schema
 
@@ -109,8 +110,17 @@ Write a JSON file with this structure. `build-cv-latex.mjs` handles template mer
 | `awards[].title` | string | Award name, from cv.md Awards / Honors |
 | `awards[].org` | string | Optional — issuing body, rendered after the title |
 | `awards[].year` | string | Optional — year, right-aligned |
-| `skills[].category` | string | Skill category name (e.g. "Languages", "Frameworks") |
-| `skills[].items` | string | Comma-separated skills in that category |
+| `skills[].category` | string | Optional — skill category name (e.g. "Languages", "Frameworks"). Omitted, the line renders without the bold prefix. |
+| `skills[].items` | string or string[] | **Required** — a non-blank comma-separated string, or a non-empty array of non-blank strings (every element must be text; the builder joins the whole array). |
+
+**The key names above are enforced, not suggestions (#3523).** The payload root must be an object, and before rendering `build-cv-latex.mjs` validates every entry in `education`, `experience`, `projects`, `awards` and `skills`:
+
+- **Missing or blank required field → hard error, non-zero exit, no .tex written.** Required: `institution` + `degree` for education, `company` + `role` for experience, `name` for projects, `title` for awards, `items` for skills (a non-blank string or a non-empty array of them; `category` stays optional).
+- **A key no builder reads → warning on stderr and in the report's `warnings[]`;** the build proceeds and the key is ignored.
+- **A top-level section name the builder does not read → warning**, naming the nearest known key, so `educations` for `education` is visible instead of silently dropping the section.
+- **A section this template has no block for → warning.** The `.tex` template renders no `certifications`, `competencies`, `interests` or `summary` — all four exist on the HTML path only. Passing one drops it entirely, so the warning says what was lost. This is the message you get for those four; an unrecognised key gets the typo-style warning above instead, never both.
+
+**This schema is not the HTML one.** An education entry here is `{institution, degree, dates, coursework}`; in `modes/pdf.md` it is `{title, org, year, description}`, and projects use `context` here but `tech` there. The two payloads are not interchangeable — mixing them used to render an empty block while the report still said `"valid": true`. Each builder now rejects the other's vocabulary by name. The shared contract lives in `lib/cv-payload-schema.mjs`.
 
 ## LaTeX Escaping (handled by the script)
 

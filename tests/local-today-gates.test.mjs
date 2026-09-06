@@ -26,6 +26,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { localToday } from '../lib/local-today.mjs';
+import { isNestedCheckout } from '../lib/mjs-files.mjs';
 import { shouldDedupScanHistoryRow } from '../scan.mjs';
 import { parseScanHistory, detectReposts } from '../detect-reposts.mjs';
 
@@ -511,6 +512,13 @@ function sourceFiles(dir, acc = []) {
     if (entry.isDirectory()) {
       if (/^(node_modules|\.git|\.next|coverage|dist|build)$/.test(entry.name)) continue;
       if (entry.name.startsWith('.tmp-script-test-')) continue;
+      // ...and so would git's OWN scratch copy of the repo. The `\.git` above
+      // matches a directory NAME, which a linked worktree does not have — it
+      // marks itself with a `.git` file. This gate read the worktree's stale
+      // sources as repo source and failed, naming files that are correct on the
+      // branch under test (#3499). Same hazard as the line above it, different
+      // author of the second copy.
+      if (isNestedCheckout(join(dir, entry.name))) continue;
       sourceFiles(join(dir, entry.name), acc);
     } else if (entry.name.endsWith('.mjs') && !entry.name.endsWith('.test.mjs')) {
       acc.push(join(dir, entry.name));

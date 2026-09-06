@@ -104,6 +104,50 @@ reports/*-RESERVED.md
 # original sitting untracked in the repo root. Trailing `*` covers both.
 *.bak*
 
+# The tracker and its follow-ups file in the LEGACY ROOT LAYOUT. resolveTrackerPath()
+# documents its own fallback chain — CAREER_OPS_TRACKER > <root>/data/applications.md
+# > <root>/applications.md — and that third entry is a supported install shape, not a
+# mistake. data/ is covered by the blanket rule at the top of this file; the root
+# spelling was not covered by anything.
+#
+# The content is the user's whole job search: company, role, score, status, notes.
+# cv.md, portals.yml, article-digest.md and voice-dna.md are all ignored at the root
+# already, and #3469 ignores the derived .db index on the argument that it "holds the
+# same PII as the tracker" — while the tracker itself sat beside it, unignored.
+#
+# Unanchored, like the .db rule below and for the same reason: getCareerOpsRoot()
+# resolves a relative CAREER_OPS_ROOT (or .career-ops-data marker) against the
+# codebase directory, so a data root configured as `career-data` puts these inside
+# the checkout, where an anchored rule would not reach them. The upgrade fixtures
+# that share these names stay tracked via the `!test-fixtures/**` rule further down,
+# which is a later pattern and therefore wins.
+applications.md
+follow-ups.md
+
+# The tracker's derived SQLite index (tracker.mjs, #918). It sits beside the
+# tracker markdown, so on the standard layout it lands in data/ and is already
+# covered by the rules above — but resolveTrackerPath() falls back to
+# `<root>/applications.md` when data/applications.md is absent, and the index
+# follows it there. That is the legacy install layout, and it is also every
+# fresh clone: `node test-all.mjs` leaves a 36KB applications.db in the repo
+# root, which `git add .` then stages.
+#
+# Its content is the whole tracker — company, role, score, status, notes — so it
+# carries the same PII as the file it indexes, under a name none of the rules
+# above match. SQLite's -wal/-shm sidecars travel with it.
+#
+# Deliberately not root-anchored. The index follows the tracker markdown, and
+# getCareerOpsRoot() resolves a relative CAREER_OPS_ROOT (or .career-ops-data
+# marker) against the codebase directory — so a data root configured as
+# `career-data` puts both inside the checkout, in neither of the two places an
+# anchored rule would cover. Nothing tracked in this repo ends in .db, and an
+# ignore rule cannot untrack a file that is already tracked, so the cost of the
+# wider glob is a `git add -f` on a .db fixture nobody has added yet; the cost
+# of the narrower one is this leak, for every non-default data root.
+*.db
+*.db-wal
+*.db-shm
+
 # OpenRouter runner — generated data (personal, never commit)
 data/model-blacklist.json
 

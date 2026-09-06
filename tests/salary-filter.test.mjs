@@ -1,30 +1,28 @@
-#!/usr/bin/env node
 // @ts-check
 /**
- * Comprehensive test suite for salary filter and Ashby compensation parsing.
- * Run: node test-salary-filter.mjs
+ * tests/salary-filter.test.mjs — Comprehensive test suite for salary filter and Ashby compensation parsing.
+ * Run: node test-all.mjs --only salary-filter
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
  *
  * Tests cover:
  *   - buildSalaryFilter: range overlap, currency matching, edge cases, validation
  *   - parseCompensation (Ashby): interval normalization, malformed data, ordering
  */
 
-import { parseCompensation } from './providers/ashby.mjs';
-import { buildSalaryFilter } from './scan.mjs';
+import { parseCompensation } from '../providers/ashby.mjs';
+import { buildSalaryFilter } from '../scan.mjs';
+import { pass, fail } from './helpers.mjs';
+
+console.log('\nsalary filter + Ashby compensation parsing');
 
 // ── Test runner ──────────────────────────────────────────────────────
 
-let passed = 0;
-let failed = 0;
 
 function assert(condition, testName) {
-  if (condition) {
-    passed++;
-    console.log(`  ✓ ${testName}`);
-  } else {
-    failed++;
-    console.error(`  ✗ FAIL: ${testName}`);
-  }
+  if (condition) pass(testName);
+  else fail(testName);
 }
 
 function section(name) {
@@ -580,14 +578,3 @@ section('End-to-end — Ashby job through salary filter');
 // ══════════════════════════════════════════════════════════════════════
 // Summary
 // ══════════════════════════════════════════════════════════════════════
-
-console.log(`\n${'═'.repeat(50)}`);
-console.log(`  Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
-console.log(`${'═'.repeat(50)}`);
-
-if (failed > 0) {
-  console.error(`\n❌ ${failed} test(s) FAILED`);
-  process.exit(1);
-} else {
-  console.log(`\n✅ All ${passed} tests passed!`);
-}

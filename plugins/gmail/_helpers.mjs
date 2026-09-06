@@ -21,6 +21,13 @@ export function extractUrls(body) {
   return [...new Set(urls)];
 }
 
+/** File types that are page furniture (logos, webfonts, media), never a posting. */
+const ASSET_EXT_RE =
+  /\.(jpe?g|png|gif|svg|webp|avif|ico|bmp|tiff?|css|js|mjs|woff2?|ttf|otf|eot|mp4|webm|mp3|wav)(\?|#|$)/i;
+
+/** Subdomains that only ever serve static files. */
+const ASSET_HOST_PREFIXES = ['cdn.', 'static.', 'assets.', 'img.', 'images.', 'media.'];
+
 /**
  * Is a URL clean and relevant (not a click tracker, unsubscribe link, or pixel)?
  * @param {string} url
@@ -37,6 +44,17 @@ export function isCleanUrl(url) {
       'linkedin.com/legal', 'linkedin.com/help', 'linkedin.com/settings',
     ];
     if (badKeywords.some(kw => lowerUrl.includes(kw))) return false;
+    // Page assets, not postings. Job-alert emails embed one company logo per job,
+    // and those URLs pass every check above: https, no tracker keyword, hosted on
+    // the board's own domain. They land in the pipeline as untitled "job leads" you
+    // have to click to discover are 160x160 PNGs. Extension check first (query
+    // string included, since CDNs append cache-busters), then the CMS upload paths
+    // and asset subdomains that serve files without one.
+    const host = u.hostname.toLowerCase();
+    if (ASSET_EXT_RE.test(u.pathname + u.search)) return false;
+    if (/\/(wp-content|wp-includes)\//i.test(u.pathname)) return false;
+    if (host === 'fonts.googleapis.com' || host === 'fonts.gstatic.com') return false;
+    if (ASSET_HOST_PREFIXES.some(prefix => host.startsWith(prefix))) return false;
     return u.protocol === 'https:';
   } catch {
     return false;

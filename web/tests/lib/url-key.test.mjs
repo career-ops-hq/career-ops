@@ -54,6 +54,29 @@ test("the reported bug: two DIFFERENT Greenhouse postings (same host+path, disti
   assert.equal(webKey(jobB), coreKey(jobB));
 });
 
+test("Moka fragment-routed jobs keep distinct identity in both core and web keys", () => {
+  const base = "https://app.mokahr.com/social-recruitment/high-flyer/140576";
+  const jobA = `${base}#/job/7dcd6fde-84f1-4deb-890c-f1f275df0efc`;
+  const jobB = `${base}#/job/0cc59b14-538d-4b5c-8c82-05482810576b`;
+  assert.notEqual(webKey(jobA), webKey(jobB), "two distinct Moka openings collapsed to one web dedup key");
+  assert.equal(webKey(jobA), coreKey(jobA));
+  assert.equal(webKey(jobB), coreKey(jobB));
+});
+
+test("Moka fragment promotion stays limited to the exact host and route", () => {
+  const base = "https://app.mokahr.com/social-recruitment/high-flyer/140576";
+  const job = `${base}#/job/abc-123`;
+  const cases = [
+    [`${job}?view=compact`, job, "fragment query state should not change job identity"],
+    [`${base}#/job/abc-123/extra`, base, "unsupported route suffix must not be promoted"],
+    ["https://example.com/tenant#/job/abc-123", "https://example.com/tenant", "another host must not be promoted"],
+  ];
+  for (const [input, expectedInput, message] of cases) {
+    assert.equal(webKey(input), webKey(expectedInput), message);
+    assert.equal(webKey(input), coreKey(input), `root/web parity: ${input}`);
+  }
+});
+
 test("host+pathname-only shape must not return (regression lock on the pre-fix canon())", () => {
   // The pre-fix canon() discarded the ENTIRE query string, so both of these
   // collapsed to "boards.greenhouse.io/acme/jobs/apply". If that shape comes

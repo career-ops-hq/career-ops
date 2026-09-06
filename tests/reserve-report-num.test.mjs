@@ -5,11 +5,12 @@
 // #2026 and the next reservation jumped to 2027 — silently, and permanently.
 
 import { strict as assert } from 'assert';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { spawnSync } from 'child_process';
 import { reserveReportNumbers, releaseReportNumbers } from '../reserve-report-num.mjs';
-import { pass, fail } from './helpers.mjs';
+import { pass, fail, NODE, ROOT } from './helpers.mjs';
 
 // Reserve one slot in a scratch root and report which number it got. Released
 // afterwards so the assertion reflects the occupancy scan, not leftover state.
@@ -69,5 +70,30 @@ for (const c of cases) {
     pass(`${c.name} → ${got}`);
   } catch {
     fail(`${c.name}: expected ${c.expect}, got ${got}`);
+  }
+}
+
+// Regression: `--help`/`-h` used to fall through the CLI's cmd dispatch into
+// the default reserve-1 path — silently burning a real report-number slot
+// instead of printing usage. It must now short-circuit before touching any
+// reports/tracker path at all.
+for (const flag of ['--help', '-h']) {
+  const dir = mkdtempSync(join(tmpdir(), 'rrn-help-'));
+  try {
+    const result = spawnSync(NODE, [join(ROOT, 'reserve-report-num.mjs'), flag], {
+      cwd: dir,
+      encoding: 'utf-8',
+      timeout: 15000,
+    });
+    const sentinels = existsSync(join(dir, 'reports'))
+      ? readdirSync(join(dir, 'reports')).filter((f) => /-RESERVED\.md$/.test(f))
+      : [];
+    if (result.status === 0 && /Usage: node reserve-report-num\.mjs/.test(result.stdout) && sentinels.length === 0) {
+      pass(`${flag} prints usage and reserves nothing`);
+    } else {
+      fail(`${flag}: exit=${result.status}, sentinels=${sentinels.length}, stdout=${JSON.stringify(result.stdout.slice(0, 120))}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }

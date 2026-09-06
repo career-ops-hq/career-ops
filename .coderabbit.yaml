@@ -1,26 +1,263 @@
-language: en
+# CodeRabbit configuration for career-ops (career-ops-hq).
+# Reviewed by the maintainers on 2026-09-03 after the move to the org.
+# Docs: https://docs.coderabbit.ai/reference/configuration
+language: en-US
+tone_instructions: "Be specific and brief. Cite file:line. Use colons, not dashes. Warm to first-time contributors. Prefer one precise finding over three vague ones."
+
 reviews:
   profile: assertive
+  # Humans decide: the review is a signal. Before ever flipping this to true, or
+  # adding a CodeRabbit check to the branch protection required checks, give
+  # /web/ a second code owner. Its only owner cannot request a reviewer other
+  # than themselves, and override_requested_reviewers_only means a failing
+  # policy check would then have nobody able to clear it.
   request_changes_workflow: false
   high_level_summary: true
+  high_level_summary_instructions: "Explain what changes from the user's point of view (what they can do, what breaks). Name which system files are touched: AGENTS.md, modes/, update-system.mjs, DATA_CONTRACT.md, providers/, .github/."
   poem: false
+  collapse_walkthrough: true
+  sequence_diagrams: false
+  estimate_code_review_effort: true
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  suggested_labels: true
+  auto_apply_labels: false          # labels are routing signals here; a maintainer applies them
+  suggested_reviewers: true
+  auto_assign_reviewers: false      # CODEOWNERS already requests the right person
+  abort_on_close: true
+  auto_title_instructions: "Conventional Commits: fix, feat, docs, chore, test, refactor or i18n, then a scope in parentheses when the change is confined to one area, then a factual summary in the imperative. Release Please reads this prefix on the squash commit, so feat is reserved for a change a user notices."
+
+  # Low-effort and machine-generated PRs are a real cost on a repo this size.
+  # The label is a routing signal for a human to read it first: nothing is ever
+  # closed on it, and no automation acts on it.
+  slop_detection:
+    enabled: true
+    label: "quality-check"
+
   auto_review:
     enabled: true
     drafts: false
+    auto_incremental_review: true
+    # Default is to pause after 5 reviewed commits. A contributor who pushes six
+    # fixes deserves the sixth review too, so this never pauses. If that starts
+    # hitting the hourly ceiling, the ceiling is the thing to measure, not the
+    # contributor to ration.
+    auto_pause_after_reviewed_commits: 0
     base_branches:
       - main
+    ignore_usernames:
+      - renovate[bot]
+      - dependabot[bot]
+      - github-actions[bot]
+    ignore_title_keywords:
+      - "chore(main): release"
+      - "chore: release main"
+
+  path_filters:
+    - "!**/*.lock"
+    - "!package-lock.json"
+    - "!**/*.pdf"
+    - "!**/*.png"
+    - "!docs/hired-wall.svg"
+    - "!SIGNATURES.md"
+    - "!HIRED.md"
+
   path_instructions:
-    - path: "CLAUDE.md"
-      instructions: "This file controls agent behavior (Claude Code). Review changes very carefully for conflicts with existing instructions."
-    - path: "OPENCODE.md"
-      instructions: "This file controls agent behavior (OpenCode). Review changes very carefully for conflicts with existing instructions."
+    - path: "AGENTS.md"
+      instructions: "This is the single canonical instruction file for every AI CLI (Claude Code, Codex, OpenCode, Kimi, Gemini, Copilot). Review changes very carefully for conflicts with existing instructions, for anything that weakens the Data Contract or the source-of-truth boundary, and for user-specific content that belongs in modes/_profile.md or modes/_custom.md instead."
+    - path: "{CLAUDE,CODEX,OPENCODE,KIMI,GEMINI}.md"
+      instructions: "These are thin per-CLI wrappers that must import AGENTS.md (@AGENTS.md) and keep only CLI-specific lines. Flag any content duplicated from AGENTS.md or any instruction that should be canonical: it belongs in AGENTS.md, not here."
+    - path: ".github/copilot-instructions.md"
+      instructions: "Development instructions for Copilot working on the repository (mode B) that must stay compatible with users running career-ops through Copilot CLI (mode A, AGENTS.md governs). Flag anything that would make Copilot refuse product tasks for end users."
     - path: "modes/_shared.md"
-      instructions: "This file controls the scoring system. Any changes affect ALL evaluations. Flag anything that modifies scoring logic."
+      instructions: "This file controls the scoring system. Any change affects ALL evaluations. Flag anything that modifies scoring logic, block letters (A to H) or the report format, which the web UI parses."
+    - path: "modes/**/*.md"
+      instructions: "Product prompts. Localized copies (modes/<lang>/) must keep the canonical structure of modes/*.md: same blocks A to H, same report header labels, same placeholders. Flag structure drift, untranslated placeholders, and any real personal data (names, emails, companies) in examples."
     - path: "DATA_CONTRACT.md"
-      instructions: "This file defines system vs user file boundaries. Changes here are critical — reject if user-layer files are being reclassified."
+      instructions: "Defines the system vs user file boundary. Adding a new system file to a table is normal. Reclassifying a user-layer file as system, or changing the rules, is critical: flag it explicitly."
+    - path: "update-system.mjs"
+      instructions: "The self-updater touches every user install. Flag anything that could write into the user layer (cv.md, config/profile.yml, data/, reports/, output/, modes/_profile.md, modes/_custom.md), any new top-level shipped file missing from SYSTEM_PATHS, and any change to backup or rollback behavior."
     - path: "**/*.mjs"
-      instructions: "Check for command injection, path traversal, and SSRF. Ensure scripts handle missing data/ directories gracefully."
+      instructions: "Check for command injection, path traversal and SSRF. Scripts must handle a missing data/ directory gracefully and must resolve user files through the data-root helpers (CAREER_OPS_ROOT), never from the code root."
+    - path: "providers/**"
+      instructions: "Scanner providers read PUBLIC job listings only. Check against providers/ADDING_A_PROVIDER.md: host allowlist, no redirects to other hosts, SSRF guards, timeouts, parsing pinned with concrete assertions, and a contract test in tests/providers/<name>.test.mjs. Flag any provider that needs credentials, scrapes behind a login, or aggregates listings that are not attributed to an identifiable employer (Source Indexing Policy in CONTRIBUTING.md)."
+    - path: "tests/**"
+      instructions: "New tests belong in their own tests/**/*.test.mjs file (auto-discovered). Flag tests that depend on network, on the developer's real data, or on execution order."
+    - path: "test-all.mjs"
+      instructions: "The harness every check runs through. Flag new numbered sections (they belong in tests/ files) and any change that could make a failure look like a pass."
     - path: "dashboard/**"
-      instructions: "Go TUI code. Check for proper error handling and ensure no hardcoded paths."
+      instructions: "Go TUI code. Check for proper error handling, no hardcoded paths, and that it reads the tracker through the same canonical formats the CLI writes."
+    - path: "web/**"
+      instructions: "First-party web UI. It must remain a view over the canonical files (tracker, pipeline, reports), never a parallel engine. Flag any write to user files that bypasses the CLI scripts, any agent CLI invocation outside the spawn boundary, and any secret or API key committed."
+    - path: ".github/workflows/**"
+      instructions: "Treat as security-sensitive. Flag pull_request_target with a checkout of the fork, secrets exposed to fork code, unpinned third-party actions, and permissions broader than needed."
+    - path: "plugins/_*.mjs"
+      instructions: "Plugin engine and registry chokepoint: a mistake ships unreviewed code to every user. Flag any relaxation of pin, hash or lock verification."
+    - path: "plugins-registry.json"
+      instructions: "Registry entries must be pinned to a commit SHA and reviewed under docs/PLUGIN_REVIEW.md. Flag unpinned refs or entries that fetch from a mutable branch."
+    - path: "README*.md"
+      instructions: "There are 17 localized READMEs. When README.md changes, note which localized copies now drift, but do not request translations in the same PR."
+    - path: "package.json"
+      instructions: "New dependencies need a discussion first. Flag any new dependency, any postinstall change, and any version range widening."
+
+  tools:
+    gitleaks: { enabled: true }
+    trufflehog: { enabled: true }
+    presidio: { enabled: true }        # real names, emails, phones in examples are a hard no here
+    actionlint: { enabled: true }
+    zizmor: { enabled: true }
+    shellcheck: { enabled: true }
+    golangci-lint: { enabled: true }
+    osvScanner: { enabled: true }
+    semgrep: { enabled: true }
+    eslint: { enabled: true }
+    yamllint: { enabled: true }
+    github-checks: { enabled: true, timeout_ms: 900000 }
+    markdownlint: { enabled: false }   # 17 READMEs and long prompts: style noise, not review
+    languagetool: { enabled: false }
+    vale: { enabled: false }
+    ast-grep: { enabled: false }
+
+  finishing_touches:
+    docstrings: { enabled: false }
+    unit_tests: { enabled: true }     # on request only (@coderabbitai generate unit tests)
+    simplify: { enabled: false }
+    autofix: { enabled: false }       # no bot pushes to a contributor's branch
+    fix_ci: { enabled: false }
+    resolve_merge_conflict: { enabled: false }
+    # Recipes run only when a maintainer asks: @coderabbitai run <name>.
+    # They encode the mechanical work that keeps coming back on this repo.
+    custom:
+      - name: register-shipped-file
+        enabled: true
+        instructions: "For every new top-level file this PR adds that users must receive through the updater (a .mjs script, a template, a config sample or a doc that ships), add it to the SYSTEM_PATHS list in update-system.mjs, in the section that matches its kind, keeping the existing order and formatting. Do not add user-layer files as defined in DATA_CONTRACT.md. Change nothing else."
+      - name: provider-test-scaffold
+        enabled: true
+        instructions: "For every provider implementation this PR adds or changes under providers/ (a .mjs file whose name does NOT begin with an underscore: the leading underscore is this repo's convention for shared helpers such as _http.mjs or _safe-url.mjs, which are not providers and need no provider contract test, and the rule never applies to README.md or ADDING_A_PROVIDER.md), create or extend tests/providers/<name>.test.mjs following the existing files in that directory: no test framework, import pass and fail from ../helpers.mjs, never call process.exit, no network access in the test itself. Cover at minimum: the provider is registered, its host allowlist and timeout are set, and a malformed API response does not throw. Change nothing else."
+      - name: sync-language-mode
+        enabled: true
+        instructions: "Compare the language mode files this PR touches under modes/<lang>/ against their canonical English counterpart under modes/, and bring the translated file up to date: same block structure, same headings order, same placeholders. Translate new prose into the target language; never translate file names, flags, code fences, or the block letters A to H. Do not change the canonical English file. Change nothing else."
+
+  pre_merge_checks:
+    # These checks carry repository policy (the user layer boundary, personal
+    # data, the updater manifest), so the author of a PR should not be the one
+    # who waves them through: only a requested reviewer can.
+    override_requested_reviewers_only: true
+    docstrings: { mode: off }
+    title:
+      mode: warning
+      requirements: "Conventional Commits prefix (feat, fix, docs, chore, test, refactor, i18n) followed by a scope in parentheses when the change is confined to one area, then a factual summary. Release Please reads the prefix."
+    description:
+      mode: warning
+    issue_assessment:
+      mode: warning
+    custom_checks:
+      - name: "User layer untouched"
+        mode: error
+        instructions: "Fail if the PR adds or modifies any user-layer file defined in DATA_CONTRACT.md: cv.md, config/profile.yml, modes/_profile.md, modes/_custom.md, article-digest.md, portals.yml, anything under data/, documents/, reports/, output/, interview-prep/. Examples under examples/ are fine."
+      - name: "No personal data"
+        mode: error
+        instructions: "Fail if the diff contains real personal data: a person's real name paired with contact details, real emails, phone numbers, or a real CV. Sample data must use obvious placeholders."
+      - name: "Shipped file registered"
+        mode: warning
+        instructions: "Warn if the PR adds a new top-level .mjs, .md, template or config file that users should receive through the updater but SYSTEM_PATHS in update-system.mjs was not updated in the same PR."
+      - name: "Provider contract"
+        mode: warning
+        instructions: "Warn if the PR adds or changes a provider implementation under providers/ (a .mjs file whose name does NOT begin with an underscore: an underscore prefix marks a shared helper such as _http.mjs or _safe-url.mjs, not a provider; documentation such as README.md or ADDING_A_PROVIDER.md does not count either) without a matching tests/providers/<name>.test.mjs, or without host allowlisting and timeouts."
+      - name: "Agent-operated PR disclosure"
+        mode: warning
+        instructions: "If the PR author is a coding agent (branch copilot/* or author app/copilot-swe-agent), warn unless the description contains the sections '## AI assistance' and '## Human review' and the PR carries the label agent-generated."
+
+  # Run after the merge, as a text report on the merged PR. They exist to catch
+  # the two drifts that this repo pays for again and again, and to turn each one
+  # into concrete work a newcomer can pick up.
+  post_merge_actions:
+    - name: "localization drift report"
+      enabled: true
+      prompt: "Only act if this merge changed the canonical English content: a file directly under modes/ (not inside a language subdirectory), or README.md. List every localized counterpart that is now out of date: for a mode, every modes/<lang>/ file with the same name; for README.md, every README.<lang>.md. For each one, name the specific heading or block that now diverges and describe the change in one sentence. If the merge only changed localized files, or changed nothing localizable, reply with exactly: no localized file is affected. Post a text report in the result comment only. Do not open a pull request, do not create or edit issues, do not push commits, do not comment anywhere else."
+    - name: "documentation drift report"
+      enabled: true
+      prompt: "Only act if this merge changed something the documentation site describes: a CLI flag, a script name or entry point, an npm script, a mode block, an output format, or an environment variable. Using the linked repository career-ops-hq/career-ops-docs for context, list which documentation pages are now stale, by path when visible, and for each one the sentence that needs to change. If this merge adds, removes or renames a mode, always include content/docs/reference/modes/index.mdx and content/docs/reference/modes/meta.json in the list: those two hold the mode index and its navigation metadata, so a report that only names prose sentences misses them. If nothing documented changed, reply with exactly: no documentation drift. Post a text report in the result comment only. Do not open a pull request, do not create or edit issues, do not push commits, do not comment anywhere else."
+
+  labeling_instructions:
+    - label: "🔴 core-architecture"
+      instructions: "Apply when the PR touches AGENTS.md, CLAUDE.md, modes/_shared.md, DATA_CONTRACT.md or update-system.mjs."
+    - label: "⚠️ agent-behavior"
+      instructions: "Apply when the PR changes any file under modes/ or any per-CLI instruction file."
+    - label: "🌐 i18n"
+      instructions: "Apply when the PR touches localized READMEs (README.*.md) or modes/<lang>/."
+    - label: "📊 dashboard"
+      instructions: "Apply when the PR touches dashboard/."
+    - label: "area:web"
+      instructions: "Apply when the PR touches web/."
+    - label: "needs-rebase"
+      instructions: "Apply when the PR has merge conflicts with main."
+
+  suggested_reviewers_instructions:
+    - reviewers:
+        - handle: Scott-Emberson
+          type: user
+      instructions: "Suggest for PRs touching providers/, tests/providers/, tests/ or dashboard/ (area owner)."
+    - reviewers:
+        - handle: FReptar0
+          type: user
+      instructions: "Suggest for PRs touching the tracker scripts, CI under .github/, the updater or the dashboard (reviewer)."
+
 chat:
   auto_reply: true
+  allow_non_org_members: true   # contributors trigger reviews and ask questions on their own PRs; that is the on-ramp
+  art: false
+
+knowledge_base:
+  opt_out: false
+  web_search: { enabled: true }
+  learnings: { scope: auto, approval_delay: 7 }   # a week for a maintainer to reject a learning before it sticks
+  issues: { scope: auto }
+  pull_requests: { scope: auto }
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "CONTRIBUTING.md"
+      - "DATA_CONTRACT.md"
+      - "ARCHITECTURE.md"
+      - "providers/ADDING_A_PROVIDER.md"
+      - "docs/PLUGIN_REVIEW.md"
+      - "SECURITY.md"
+  linked_repositories:
+    - repository: career-ops-hq/career-ops-docs
+      instructions: "The documentation site. When a PR here changes a CLI flag, a script name, a mode block or an output format, note that the docs may drift."
+
+# Steers @coderabbitai generate unit tests. The suite has no framework by
+# design (issue #1440): it must run on a fresh clone with only Node.
+code_generation:
+  unit_tests:
+    path_instructions:
+      - path: "**/*.mjs"
+        instructions: "Put the suite in tests/<subject>.test.mjs. test-all.mjs discovers that directory automatically, so no registration is needed. Do not use node:test, jest, vitest or any other framework and do not add a dependency: import pass, fail and the run helper from ./helpers.mjs, print a one-line header with console.log, and never call process.exit. Keep every test hermetic: no network, and no writes outside a temporary directory. Never read or write a user-layer path as defined in DATA_CONTRACT.md (cv.md, config/profile.yml, data/, reports/, output/, modes/_profile.md, modes/_custom.md); use a fixture instead."
+      - path: "dashboard/**/*.go"
+        instructions: "Standard library table-driven tests in the same package, _test.go suffix, no external test framework, no network."
+      - path: "web/**"
+        instructions: "Use Node's built-in test runner. Import test from node:test and assert from node:assert/strict; no vitest, jest, chai or any external framework, and no describe blocks. Place tests at web/tests/lib/<subject>.test.mjs and import the subject as a relative path (../../src/lib/x.mjs): the @/ alias does not resolve under node --test, which is why testable logic lives in plain .mjs. Prefer assert.deepEqual on a whole returned value over several assert.equal on its parts. Each test name must state the property being asserted, not the function being called. Cover the negative case: what must NOT happen, and the value that would be wrong. When a test pins a past bug, say which one and what it cost in a comment above it."
+  docstrings:
+    path_instructions:
+      - path: "**/*.mjs"
+        instructions: "Only add a JSDoc block where the function contract is not obvious from its name and signature: what it returns, what it throws, and any invariant a caller must respect. Never restate the code in prose."
+
+issue_enrichment:
+  auto_enrich: { enabled: false }     # people's issues get human replies, not bot plans
+  planning:
+    enabled: true
+    # A plan is written only on issues a maintainer has marked agent-candidate,
+    # and never on an issue reserved for a person: the value of a good first
+    # issue is that the newcomer works out the how, so a bot plan would take
+    # exactly the part that makes it worth doing.
+    auto_planning:
+      enabled: true
+      labels:
+        - "agent-candidate"
+        - "!good first issue"
+        - "!first-timers-only"
+        - "!help wanted"
+  labeling:
+    auto_apply_labels: false

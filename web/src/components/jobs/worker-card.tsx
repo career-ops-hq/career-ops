@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Check, X, Loader2, AlertTriangle } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
+import { jobErrorHint } from "@/lib/job-error-hint.mjs";
 import { cn } from "@/lib/cn";
 
 // Humanize raw agent tool names into what the user actually cares about, so a
@@ -21,14 +22,6 @@ const STEP_LABELS: Record<string, string> = {
   Task: "Working",
 };
 const humanizeStep = (label: string): string => STEP_LABELS[label] ?? label;
-
-// Auth/sign-in failures are the most common real error — detect them so we can give
-// a concrete next step instead of a dead end (#8).
-function isAuthError(job: Job): boolean {
-  if (job.status !== "error") return false;
-  const hay = `${job.steps[job.steps.length - 1]?.label ?? ""} ${job.text}`.toLowerCase();
-  return /auth|login|sign[ -]?in|credential|api[ -]?key|unauthorized|not authenticated|installed and authenticated/.test(hay);
-}
 
 const fmtElapsed = (ms: number): string => {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -85,7 +78,7 @@ export function WorkerCard({
   const bottom = job.status === "done" && job.result?.summary ? job.result.summary : last;
   const inline = variant === "inline";
   const hasScore = job.result?.score != null;
-  const authError = isAuthError(job);
+  const errorHint = jobErrorHint(job);
   const tokens = job.status === "done" ? job.cost?.tokens ?? 0 : 0;
 
   return (
@@ -126,9 +119,9 @@ export function WorkerCard({
           {running ? `${last ?? "Working"} · ${fmtElapsed(elapsed)}` : bottom}
         </div>
       )}
-      {authError && (
+      {errorHint && (
         <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
-          Sign your CLI in from Config, then re-run.
+          {errorHint.text}
         </div>
       )}
       {tokens > 0 && (

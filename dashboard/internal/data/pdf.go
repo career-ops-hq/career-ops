@@ -172,7 +172,8 @@ var rePDFDate = regexp.MustCompile(`(\d{4}-\d{2}-\d{2})\.pdf$`)
 //  1. Manifest entry for the application's report number, when the file
 //     still exists. This is exact — generate-pdf.mjs recorded the linkage.
 //  2. Filename match: output/cv-*.pdf whose name contains the kebab-cased
-//     company. This covers every PDF generated before the manifest existed.
+//     company at hyphen boundaries. This covers every PDF generated before
+//     the manifest existed without matching a longer company's slug.
 //     Multiple matches are all returned (newest first) so the caller can
 //     offer a picker instead of guessing — one company can have several
 //     role-variant CVs from the same day.
@@ -207,16 +208,12 @@ func ResolvePDFs(careerOpsPath string, app model.CareerApplication, manifest PDF
 	return matches
 }
 
-// matchesCompanySlug reports whether a generated CV filename refers to the
-// company. Short slugs (< 3 runes) require a full "-slug-" segment so a
-// company like "X" can't match every file; longer slugs use substring
-// containment, which tolerates role-variant suffixes (cv-…-anthropic-staff-
-// ui-….pdf matches "anthropic").
+// matchesCompanySlug reports whether a generated CV filename contains the
+// company as a complete hyphen-delimited segment. This still permits role
+// variants (cv-…-anthropic-staff-ui-….pdf matches "anthropic") without letting
+// a company prefix match a different company ("meta" must not match "metabase").
 func matchesCompanySlug(base, slug string) bool {
-	if len([]rune(slug)) < 3 {
-		return strings.Contains(base, "-"+slug+"-")
-	}
-	return strings.Contains(base, slug)
+	return strings.Contains(base, "-"+slug+"-")
 }
 
 // sortPDFsNewestFirst orders candidate paths by the date stamp embedded in

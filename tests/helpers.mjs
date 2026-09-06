@@ -2,9 +2,11 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync as _rmSync, symlinkSync } from 'fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync as _rmSync, symlinkSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { isNestedCheckout } from '../lib/mjs-files.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
@@ -231,6 +233,77 @@ export function lastRunFailure() {
 }
 
 /**
+ * Today as `YYYY-MM-DD` in UTC — the form the scripts under test emit from
+ * their own `today()`.
+ *
+ * @param {Date} [at=new Date()] - Instant to render; injectable for tests.
+ * @returns {string}
+ */
+export function utcDay(at = new Date()) {
+  return at.toISOString().split('T')[0];
+}
+
+/**
+ * Every UTC day an operation bracketed by `before` and `after` could have
+ * observed, inclusive: one when it stayed inside a day, two when it crossed
+ * midnight, and each intervening day for anything longer.
+ *
+ * Returning only the two boundaries would be enough for a run() call left on
+ * its default timeout, but that timeout is caller-overridable, and a child
+ * spanning two midnights can report a day that sits between them. Filling the
+ * range keeps the result a property of the inputs rather than of a timeout
+ * somebody may change later.
+ *
+ * The bounds are ordered before use, so a clock stepped backwards mid-call
+ * (NTP correction on a CI runner) still yields the covering range instead of
+ * an empty one. Either bound unparseable yields [] — including when both are
+ * the same unparseable string, so the answer never depends on which branch a
+ * bad input happens to take.
+ *
+ * @param {string} before - utcDay() read before the operation.
+ * @param {string} after - utcDay() read after it.
+ * @returns {string[]} Ascending, inclusive of both bounds; [] if either is unparseable.
+ */
+export function daysSpanned(before, after) {
+  const start = Date.parse(`${before}T00:00:00Z`);
+  const end = Date.parse(`${after}T00:00:00Z`);
+  if (Number.isNaN(start) || Number.isNaN(end)) return [];
+  if (start === end) return [before];
+  const [lo, hi] = start < end ? [start, end] : [end, start];
+  const days = [];
+  for (let t = lo; t <= hi; t += 86_400_000) {
+    days.push(utcDay(new Date(t)));
+  }
+  return days;
+}
+
+/**
+ * run(), plus the UTC day(s) the child could have seen on its own clock.
+ *
+ * A test that captures the day once and compares it to a date the child
+ * computed for itself is reading the clock twice, and a UTC midnight between
+ * those two reads makes them disagree — turning an otherwise-green run red on
+ * whichever runner happens to straddle the boundary (#3816: macOS crossed
+ * midnight four seconds into test-all §12, while ubuntu and windows reached
+ * the same section after the rollover and passed).
+ *
+ * Bracketing the call removes the race without weakening the assertion: the
+ * child ran somewhere inside [before, after], so its own day is one of the
+ * returned days, and the caller still checks the date is current rather than
+ * merely date-shaped.
+ *
+ * @param {string} cmd - Executable, resolved through the run() allowlist.
+ * @param {string[]} [args=[]]
+ * @param {object} [opts={}] - Passed through to run().
+ * @returns {{out: string|null, days: string[]}}
+ */
+export function runAcrossUtcDay(cmd, args = [], opts = {}) {
+  const before = utcDay();
+  const out = run(cmd, args, opts);
+  return { out, days: daysSpanned(before, utcDay()) };
+}
+
+/**
  * The last failure rendered for interpolation into a failure message, or an
  * empty string when nothing has failed, so a caller can append it
  * unconditionally without changing its message on the success path.
@@ -320,6 +393,11 @@ export function walkFiles(dir, match, skipDirs = new Set()) {
   for (const entry of entries) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
+      // A linked worktree carries a `.git` FILE, so a caller's `skipDirs` set —
+      // which matches by NAME — never fires on one, and the walk descends into a
+      // whole second checkout of this repository (#3499, #3762). The caller's
+      // own set stays authoritative for everything else.
+      if (isNestedCheckout(full)) continue;
       if (!skipDirs.has(entry.name)) out.push(...walkFiles(full, match, skipDirs));
     } else if (match.test(entry.name)) {
       out.push(full);
@@ -523,6 +601,72 @@ export async function captureConsoleErrors(fn) {
 }
 
 /**
+ * Build a throwaway git repository for the two updater suites that drive git
+ * through the `gitIn` seam (`updater-add-paths`, `updater-is-tracked`). Only
+ * the first asserts on ignore RESOLUTION; the second writes its own .gitignore
+ * and then asks about index membership, which is a different question.
+ *
+ * The pins below are the reason this is shared rather than copied, but they are
+ * not all load-bearing for both callers, and this docstring should not imply
+ * otherwise. Mutation-tested by dropping each pin under a GIT_CONFIG_GLOBAL it
+ * exists to neutralise:
+ *
+ *   - `commit.gpgsign=false` and `core.hooksPath` → an empty dir. Either one
+ *     inherited from the environment breaks every commit the fixtures make.
+ *     Dropping either reddens BOTH suites.
+ *   - `core.excludesFile` → an empty file. A global ignore rule silently alters
+ *     what is measured (the failure mode reported in #2269). Dropping it reddens
+ *     updater-add-paths only: updater-is-tracked writes its own .gitignore and
+ *     then reads index membership, which a global rule does not move. Kept for
+ *     both as a defensive pin, proven by one.
+ *
+ * Point `core.excludesFile` at an empty file rather than /dev/null: git on
+ * Windows maps that to `nul` and dies with "fatal: cannot use nul as an
+ * exclude file".
+ *
+ * Kept as one body so a pin cannot be dropped from one caller while the other
+ * keeps it — which is the drift CodeRabbit flagged on #2531, where two copies
+ * meant a pin added to one left the other silently unprotected. Note that is a
+ * weaker guarantee than "deleting a pin fails both suites", which the table
+ * above shows is only true for two of the three.
+ *
+ * The two other `makeRepo` fixtures under tests/ are deliberately NOT folded in
+ * here: `updater-local-system-edits` pins line endings instead of excludes and
+ * seeds a base commit plus an `upstream` branch, and `updater-rollback-behavior`
+ * pins nothing. They are different fixtures that share a name, not copies of
+ * this one.
+ *
+ * `gitIn` is injected rather than imported so this module keeps depending on
+ * nothing but Node builtins — 57 of the 62 suites import it, and none of them
+ * should pull in update-system.mjs as a side effect of asking for `pass`/`fail`.
+ *
+ * @param {(dir: string, ...args: string[]) => any} gitIn - Updater's git runner.
+ * @param {object} [options]
+ * @param {string} [options.prefix='co-updater-'] - mkdtemp prefix, so a leftover
+ *   temp dir names the suite that made it.
+ * @param {boolean} [options.includeRoot=false] - Add `root` to the returned ctx.
+ *   `addPaths` resolves paths against it to decide what is a directory; without
+ *   it the guard would lstat the real career-ops checkout instead of the
+ *   fixture. `isTracked` never reads it.
+ * @returns {{dir: string, g: Function, ctx: {git: Function, root?: string}}}
+ */
+export function makeUpdaterRepo(gitIn, { prefix = 'co-updater-', includeRoot = false } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  const g = (...args) => gitIn(dir, ...args);
+  g('init', '-q', '-b', 'main', '.');
+  g('config', 'user.email', 'test@example.com');
+  g('config', 'user.name', 'Test');
+  const emptyExcludes = join(dir, '.git', 'co-empty-excludes');
+  const emptyHooks = join(dir, '.git', 'co-empty-hooks');
+  writeFileSync(emptyExcludes, '');
+  mkdirSync(emptyHooks, { recursive: true });
+  g('config', 'commit.gpgsign', 'false');
+  g('config', 'core.excludesFile', emptyExcludes);
+  g('config', 'core.hooksPath', emptyHooks);
+  return { dir, g, ctx: includeRoot ? { git: g, root: dir } : { git: g } };
+}
+
+/**
  * Build a git environment nothing ambient can reach into.
  *
  * GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM pin the FILE layers. They do not
@@ -565,4 +709,64 @@ export function hermeticGitEnv(gitConfigPath, base = process.env) {
   delete env.GIT_CONFIG_PARAMETERS;
   delete env.GIT_CONFIG;
   return env;
+}
+
+/**
+ * Can a directory write-deny actually stop THIS process from creating a file?
+ *
+ * Two suites arrange a write failure by making the tracker's directory
+ * unwritable and asserting the structured error that follows. An elevated
+ * Windows shell is not bound by that ACE: the temp-file write lands, the CLI
+ * exits 0, and the assertion reports `code=0 json=undefined`, which reads like
+ * the CLI is broken rather than like a setup step that could not be arranged
+ * (#3423). That is the same "permissions do not apply to me" case those suites
+ * already skip for root on POSIX, so it takes the same loud skip.
+ *
+ * Measured, never inferred: this performs the very operation those tests depend
+ * on - apply the deny, then create a file with the same fs API - instead of
+ * asking a proxy whether the shell is elevated. A proxy is the wrong tool here.
+ * A restricted token still lists the Administrators SID in `whoami /groups`
+ * (present for deny only), and inside one elevated token PowerShell's
+ * Set-Content is refused while Node's writeFileSync succeeds, so "is elevated"
+ * and "can still write" are genuinely different questions.
+ *
+ * Fails toward RUNNING the assertion: if the probe cannot be arranged at all
+ * (no icacls, a non-zero exit, anything thrown) it answers true so the caller
+ * still executes its check. A skip on an inconclusive probe would quietly turn
+ * "the failure could not be arranged" into "the failure handling is fine",
+ * which is the blind spot those assertions exist to catch.
+ *
+ * Lives here rather than in each suite because the two copies of this setup
+ * have already drifted once: `tests/mark-pdf-ready.test.mjs` says it mirrors
+ * `set-status-tests.mjs`, and it mirrored this bug along with the arrangement.
+ *
+ * @returns {boolean} true when the deny binds, or when it could not be evaluated.
+ */
+export function directoryDenyBinds() {
+  let probeDir = null;
+  try {
+    probeDir = mkdtempSync(join(tmpdir(), 'co-denyprobe-'));
+    execFileSync('icacls', [probeDir, '/deny', '*S-1-1-0:(WD,AD)'], { stdio: 'ignore' });
+    try {
+      writeFileSync(join(probeDir, 'canary.tmp'), 'x');
+      return false;
+    } catch {
+      return true;
+    }
+  } catch {
+    return true;
+  } finally {
+    if (probeDir) {
+      // Cleanup must not escape this function. A throw from `finally` replaces
+      // the value the try block already computed, so a failed rmSync would turn
+      // a decided probe into an exception and take both callers down with it -
+      // the opposite of the fail-toward-running-the-assertion contract above.
+      // Windows makes that reachable: rmSync can answer EPERM for a while after
+      // a child exits (the reason the wrapper retries at all), and this
+      // directory carries a deny ACE. A leaked temp directory is the cheaper
+      // failure.
+      try { execFileSync('icacls', [probeDir, '/remove:d', '*S-1-1-0'], { stdio: 'ignore' }); } catch {}
+      try { rmSync(probeDir, { recursive: true, force: true }); } catch {}
+    }
+  }
 }

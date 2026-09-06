@@ -22,6 +22,9 @@ import { localToday } from './lib/local-today.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
+// templates/states.yml is System Layer — resolved from the codebase, not from
+// the user's data root (#3500).
+const CODEBASE_ROOT = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
 
@@ -120,16 +123,19 @@ function statusAliasMap() {
   if (aliasMapCache) return aliasMapCache;
   const map = new Map();
   try {
-    for (const st of loadCanonicalStates(join(CAREER_OPS, 'templates', 'states.yml'))) {
+    for (const st of loadCanonicalStates(join(CODEBASE_ROOT, 'templates', 'states.yml'))) {
       const id = st.id.toLowerCase();
       map.set(foldStatusInput(id), id);
       if (st.label) map.set(foldStatusInput(st.label), id);
       for (const a of st.aliases) map.set(foldStatusInput(a), id);
     }
-  } catch {
+  } catch (err) {
     // A missing/malformed states.yml is a broken install. Degrade to
     // identity-normalization rather than resurrecting a hardcoded table: a
     // fallback copy is the same copy in disguise and drifts the same way.
+    // Report it, though — degrading silently is what hid #3500, and here it
+    // costs every localized status its place in the funnel.
+    console.error(`[followup-cadence] cannot read canonical states from templates/states.yml: ${err.message}`);
     return (aliasMapCache = new Map());
   }
   return (aliasMapCache = map);

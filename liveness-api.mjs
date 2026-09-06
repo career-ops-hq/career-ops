@@ -324,6 +324,16 @@ export function isAtsPosting(url) {
   return resolveAtsApi(url) !== null;
 }
 
+// ATS ids whose public API returns the actual JD body (not just a liveness
+// signal). Greenhouse (`content`), Lever (`descriptionPlain`), Ashby
+// (`descriptionPlain` on the org board), Workday (`jobPostingInfo.jobDescription`
+// on the per-job CXS endpoint) all ship full text for free in the same payload
+// resolveAtsApi() already points at. Microsoft and LinkedIn are on ATS_PROVIDERS
+// for liveness only — their public endpoints answer search/status, never body
+// text — so they are deliberately excluded here; see fetch-jd.mjs / the
+// fetch*Jd() family in browser-extract.mjs for the per-provider fetchers.
+export const JD_TEXT_API_ATS = new Set(['greenhouse', 'lever', 'ashby', 'workday']);
+
 /**
  * Zero-token liveness check via the posting's ATS API.
  * @param {string} url

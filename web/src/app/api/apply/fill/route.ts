@@ -10,19 +10,25 @@ export const maxDuration = 120;
 // each step for the "behind the scenes" strip, then bring the window to the front
 // so the HUMAN reviews and submits. NEVER submits — there is no submit path here.
 export async function POST(req: Request) {
-  let body: { sessionId?: string; answers?: Record<string, string>; fields?: ApplyField[]; handoff?: boolean; company?: string };
+  let body: { sessionId?: string; answers?: Record<string, string>; fields?: ApplyField[]; handoff?: boolean; company?: string; application?: string };
   try {
     body = await req.json();
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const { sessionId, answers = {}, fields = [], handoff, company } = body;
+  const { sessionId, answers = {}, fields = [], handoff, company, application } = body;
   if (!sessionId) return Response.json({ error: "sessionId required" }, { status: 400 });
+  if (company !== undefined && typeof company !== "string") {
+    return Response.json({ error: "company must be a string" }, { status: 400 });
+  }
+  if (application !== undefined && typeof application !== "string") {
+    return Response.json({ error: "application must be a string" }, { status: 400 });
+  }
 
   // Resolve the tailored CV server-side (never trust a client path): by the
   // offer's company if known, else best-effort from the form title.
   const session = getSession(sessionId);
-  const cvPath = resolveTailoredCv(company) ?? resolveTailoredCv(companyFromTitle(session?.title)) ?? undefined;
+  const cvPath = (await resolveTailoredCv(company, application)) ?? (application ? null : await resolveTailoredCv(companyFromTitle(session?.title))) ?? undefined;
 
   try {
     const result = await fillSession(sessionId, answers, fields, cvPath);

@@ -9,7 +9,228 @@ console.log('\nProvider — workday');
 try {
   const workdayModule = await import(pathToFileURL(join(ROOT, 'providers/workday.mjs')).href);
   const workday = workdayModule.default;
-  const { parseWorkdayResponse } = workdayModule;
+  const { parseWorkdayResponse, workdayDedupKey } = workdayModule;
+
+  // dedupKey (#3439) — one requisition served under several sites of the same
+  // tenant must collapse to one key; different tenants/instances must not.
+  if (workday.dedupKey === workdayDedupKey) {
+    pass('workday.dedupKey is wired to the exported workdayDedupKey helper');
+  } else {
+    fail('workday.dedupKey is not the exported workdayDedupKey helper');
+  }
+
+  const crossSiteA = workdayDedupKey({ url: 'https://acme.wd5.myworkdayjobs.com/External/job/Remote/Staff-Engineer_JR00123' });
+  const crossSiteB = workdayDedupKey({ url: 'https://acme.wd5.myworkdayjobs.com/Careers/job/Remote/Staff-Engineer_JR00123' });
+  if (crossSiteA && crossSiteA === crossSiteB) {
+    pass('workdayDedupKey() collapses the same requisition served under two sites of one tenant');
+  } else {
+    fail(`workdayDedupKey() cross-site collapse failed: ${JSON.stringify({ crossSiteA, crossSiteB })}`);
+  }
+
+  const tenantA = workdayDedupKey({ url: 'https://acme.wd5.myworkdayjobs.com/External/job/Remote/Staff-Engineer_JR00123' });
+  const tenantB = workdayDedupKey({ url: 'https://other.wd5.myworkdayjobs.com/External/job/Remote/Staff-Engineer_JR00123' });
+  if (tenantA && tenantB && tenantA !== tenantB) {
+    pass('workdayDedupKey() scopes by tenant — an identical requisition ID string on a different tenant does not collapse');
+  } else {
+    fail(`workdayDedupKey() must not collapse across tenants: ${JSON.stringify({ tenantA, tenantB })}`);
+  }
+
+  const instanceA = workdayDedupKey({ url: 'https://acme.wd5.myworkdayjobs.com/External/job/Remote/Staff-Engineer_JR00123' });
+  const instanceB = workdayDedupKey({ url: 'https://acme.wd1.myworkdayjobs.com/External/job/Remote/Staff-Engineer_JR00123' });
+  if (instanceA && instanceB && instanceA !== instanceB) {
+    pass('workdayDedupKey() scopes by instance too — same tenant name, different wd instance, does not collapse');
+  } else {
+    fail(`workdayDedupKey() must not collapse across instances: ${JSON.stringify({ instanceA, instanceB })}`);
+  }
+
+  const multiUnderscoreA = workdayDedupKey({ url: 'https://acme.wd5.myworkdayjobs.com/External/job/Remote/Staff-Engineer_JR_2024_00123' });
+  const multiUnderscoreB = workdayDedupKey({ url: 'https://acme.wd5.myworkdayjobs.com/Careers/job/Remote/Staff-Engineer_JR_2024_00123' });
+  if (multiUnderscoreA === 'workday:acme.wd5.myworkdayjobs.com:jr_2024_00123' && multiUnderscoreA === multiUnderscoreB) {
+    pass('workdayDedupKey() keeps a multi-underscore requisition ID intact (splits on the FIRST underscore only)');
+  } else {
+    fail(`workdayDedupKey() mishandled a multi-underscore requisition ID: ${JSON.stringify({ multiUnderscoreA, multiUnderscoreB })}`);
+  }
+
+  const localeSegment = workdayDedupKey({ url: 'https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote-Germany/Staff-Engineer_JR00123' });
+  if (localeSegment === 'workday:acme.wd5.myworkdayjobs.com:jr00123') {
+    pass('workdayDedupKey() is unaffected by extra path segments (locale, location) before the last one');
+  } else {
+    fail(`workdayDedupKey() with a locale segment returned ${JSON.stringify(localeSegment)}`);
+  }
+
+  if (workdayDedupKey({ url: 'https://acme.wd5.myworkdayjobs.com/External/job/Remote/StaffEngineer' }) === null) {
+    pass('workdayDedupKey() returns null when the last path segment has no requisition-ID separator');
+  } else {
+    fail('workdayDedupKey() should return null when it cannot find a requisition ID');
+  }
+
+  if (workdayDedupKey({ url: 'not a url' }) === null && workdayDedupKey({}) === null && workdayDedupKey(null) === null) {
+    pass('workdayDedupKey() returns null (not throws) for a malformed/missing url');
+  } else {
+    fail('workdayDedupKey() should return null, not throw, for malformed input');
+  }
+
+  // The 5 cases below are adapted from ronanime-arch's independent PR #3446
+  // implementation (same feature, different call sites — theirs covers
+  // runSeedScan + the main sweep, not checkpoint-resume reseed). Their case
+  // that caught a real bug here: Workday appends its own `-2`/`-3`
+  // disambiguator to the requisition tail when a requisition is republished
+  // on a second/third site, which this function didn't strip until now.
+
+  // Real-world case from their commit message (measured 2026-08-13): one
+  // requisition (agf R11312) served on three sites, Indeed/Glassdoor URLs
+  // carrying the `-2`/`-3` disambiguator Workday adds for the extra copies.
+  {
+    const base = 'https://agf.wd3.myworkdayjobs.com';
+    const keys = [
+      `${base}/agf_careers/job/Toronto-ON/Executive-Assistant--CIO---CFO_R11312`,
+      `${base}/indeed_careers/job/Toronto-ON/Executive-Assistant--CIO---CFO_R11312-3`,
+      `${base}/glassdoor_careers/job/Toronto-ON/Executive-Assistant--CIO---CFO_R11312-2`,
+    ].map(url => workdayDedupKey({ url }));
+    if (new Set(keys).size === 1 && keys[0]) {
+      pass('workdayDedupKey() strips the Indeed/Glassdoor `-N` disambiguator and collapses all 3 sites (ronanime-arch, PR #3446)');
+    } else {
+      fail(`workdayDedupKey() did not collapse the disambiguated sites: ${JSON.stringify(keys)}`);
+    }
+  }
+
+  // A multi-underscore requisition ID (R26_05710) carrying a disambiguator
+  // must keep the ID intact and still have the disambiguator stripped —
+  // not truncate to "05710" (first-underscore split) and not leave a
+  // dangling "-1" (missing disambiguator strip).
+  {
+    const k = workdayDedupKey({ url: 'https://agecare.wd10.myworkdayjobs.com/agecare_careers_external/job/Brooks-Alberta-Canada/Scheduler--Casual_R26_05710-1' });
+    if (k === 'workday:agecare.wd10.myworkdayjobs.com:r26_05710') {
+      pass('workdayDedupKey() keeps a multi-underscore requisition ID intact AND strips its disambiguator (ronanime-arch, PR #3446)');
+    } else {
+      fail(`workdayDedupKey() mishandled the multi-underscore + disambiguator case: ${k}`);
+    }
+  }
+
+  // #3446 review (ronanime-arch): the trailing-"-N" strip must fire ONLY when
+  // what precedes the hyphen is requisition-ID-shaped on its own (leading
+  // digit, 2+ trailing digits, underscores allowed between). Otherwise the
+  // hyphen-digits ARE the whole requisition ID and collapsing them merges every
+  // distinct posting at that tenant into one key. Fixtures below are
+  // ronanime's validated live cache.
+  {
+    const wd = (tail) =>
+      workdayDedupKey({ url: `https://acme.wd5.myworkdayjobs.com/careers/job/City/Some-Role_${tail}` });
+    const keyOf = (tail) => `workday:acme.wd5.myworkdayjobs.com:${tail.toLowerCase()}`;
+
+    // Two distinct R-NNNNNNN reqs at one tenant must NOT collapse.
+    if (wd('R-2593225') && wd('R-2592964') && wd('R-2593225') !== wd('R-2592964')) {
+      pass('workdayDedupKey() keeps two distinct R-NNNNNNN reqs apart (Walmart R-2593225 vs R-2592964)');
+    } else {
+      fail(`workdayDedupKey() collapsed distinct R-NNNNNNN reqs: ${wd('R-2593225')} vs ${wd('R-2592964')}`);
+    }
+
+    // Two distinct JR26-NNNNN reqs must NOT collapse.
+    if (wd('JR26-39350') && wd('JR26-42996') && wd('JR26-39350') !== wd('JR26-42996')) {
+      pass('workdayDedupKey() keeps two distinct JR26-NNNNN reqs apart (JR26-39350 vs JR26-42996)');
+    } else {
+      fail(`workdayDedupKey() collapsed distinct JR26-NNNNN reqs: ${wd('JR26-39350')} vs ${wd('JR26-42996')}`);
+    }
+
+    // Regression-lock: each of these hyphen tails is the requisition ID itself
+    // and must be left intact (no "-N" stripped).
+    const mustNotStrip = ['R-058589', 'R-101976', 'R-4253', 'R-103502',
+      'R2026-00707', 'R2026-01237', 'R2026-01334', 'R2026-01355'];
+    const wronglyStripped = mustNotStrip.filter((t) => wd(t) !== keyOf(t));
+    if (wronglyStripped.length === 0) {
+      pass('workdayDedupKey() leaves a non-req-shaped hyphen tail intact (Red Hat, XPEL, Lytx, Job Duck, R2026 quad)');
+    } else {
+      fail(`workdayDedupKey() wrongly altered: ${wronglyStripped.join(', ')}`);
+    }
+
+    // The R2026-NNNNN quad must be four distinct keys.
+    const quad = new Set(['R2026-00707', 'R2026-01237', 'R2026-01334', 'R2026-01355'].map(wd));
+    if (quad.size === 4) {
+      pass('workdayDedupKey() keeps the four R2026-NNNNN siblings distinct from each other');
+    } else {
+      fail(`workdayDedupKey() collapsed the R2026 quad to ${quad.size} key(s)`);
+    }
+
+    // Regression-lock the other half: a real disambiguator on a req-shaped base
+    // must STILL be stripped so the cross-site copies collapse to one key.
+    const mustCollapse = [
+      ['R11312', ['R11312-2', 'R11312-3']],
+      ['R260022205', ['R260022205-2']],
+      ['R26007842', ['R26007842-1']],
+      ['R266069', ['R266069-1']],
+      ['R53113', ['R53113-2']],
+      ['JR1126610', ['JR1126610-1']],
+      ['R2000678390', ['R2000678390-1']],
+    ];
+    const notCollapsed = mustCollapse.filter(([base, variants]) => variants.some((v) => wd(v) !== wd(base)));
+    if (notCollapsed.length === 0) {
+      pass('workdayDedupKey() still strips a real disambiguator off a req-shaped base (R11312/-2/-3, R260022205-2, R26007842-1, R266069-1, R53113-2, JR1126610-1, R2000678390-1)');
+    } else {
+      fail(`workdayDedupKey() failed to collapse: ${notCollapsed.map(([b]) => b).join(', ')}`);
+    }
+
+    // R26_05710 splits on "_" not "-": the guard allows underscores in the
+    // req-ID base, so the multi-underscore ID survives and the "-1" is dropped.
+    if (wd('R26_05710-1') === keyOf('R26_05710') && wd('R26_05710') === keyOf('R26_05710')) {
+      pass('workdayDedupKey() guard permits underscores in the req-ID base (R26_05710-1 → r26_05710, unchanged)');
+    } else {
+      fail(`workdayDedupKey() mishandled the underscore base: ${wd('R26_05710-1')} / ${wd('R26_05710')}`);
+    }
+  }
+
+  // Two different tenants reusing the same bare requisition number must not
+  // collapse — direct coverage of ronanime-arch's tenant-scoping case
+  // (already covered above by the JR00123 tenant/instance fixtures; kept as
+  // its own assertion since it's the literal case from their PR).
+  {
+    const a = workdayDedupKey({ url: 'https://one.wd3.myworkdayjobs.com/careers/job/Toronto/Analyst_R100' });
+    const b = workdayDedupKey({ url: 'https://two.wd3.myworkdayjobs.com/careers/job/Toronto/Analyst_R100' });
+    if (a && b && a !== b) {
+      pass('workdayDedupKey() does not collapse two tenants reusing the same requisition number (ronanime-arch, PR #3446)');
+    } else {
+      fail(`workdayDedupKey() incorrectly collapsed two tenants: ${JSON.stringify({ a, b })}`);
+    }
+  }
+
+  // No requisition-looking tail in the path — falls back rather than risk
+  // collapsing two different openings that happen to share a bare title.
+  if (workdayDedupKey({ url: 'https://acme.wd3.myworkdayjobs.com/careers/job/Toronto/Warehouse-Supervisor' }) === null) {
+    pass('workdayDedupKey() returns null for a bare title with no requisition ID (ronanime-arch, PR #3446)');
+  } else {
+    fail('workdayDedupKey() should return null for a bare-title path with no requisition ID');
+  }
+
+  // Non-Workday URLs are rejected by an explicit hostname check now (fixed
+  // per CodeRabbit against this function): previously these returned null
+  // only by coincidence, because their last path segment had no underscore.
+  // The Lever/Greenhouse cases below have an underscore in that segment
+  // specifically to prove the hostname check itself is doing the work, not
+  // the coincidence.
+  {
+    const bad = [
+      workdayDedupKey({ url: 'https://jobs.lever.co/achievers/abc-123' }),
+      workdayDedupKey({ url: 'not a url' }),
+      workdayDedupKey({}),
+    ];
+    if (bad.every(k => k === null)) {
+      pass('workdayDedupKey() returns null for non-Workday and malformed input (ronanime-arch, PR #3446)');
+    } else {
+      fail(`workdayDedupKey() expected all null for non-Workday/malformed input, got: ${JSON.stringify(bad)}`);
+    }
+  }
+
+  {
+    const spoofed = [
+      workdayDedupKey({ url: 'https://jobs.lever.co/acme/Role_R100' }),           // underscore in last segment, non-Workday host
+      workdayDedupKey({ url: 'https://boards.greenhouse.io/acme/jobs/Some_Role_12345' }),
+      workdayDedupKey({ url: 'https://evilmyworkdayjobs.com/job/Remote/Staff_JR1' }), // suffix without the leading dot
+    ];
+    if (spoofed.every(k => k === null)) {
+      pass('workdayDedupKey() rejects a non-Workday host even when the last path segment contains an underscore');
+    } else {
+      fail(`workdayDedupKey() should reject non-Workday hosts regardless of path shape: ${JSON.stringify(spoofed)}`);
+    }
+  }
 
   // Shared mock ctx shape for workday.fetch() calls below — only fetchJson varies per test.
   // sleep is a no-op so retry-backoff delays don't slow the test suite down.
@@ -70,6 +291,50 @@ try {
     pass('workday.detect() falls through a non-Workday api: to a valid careers_url');
   } else {
     fail(`workday.detect(fallthrough) returned ${JSON.stringify(hitFallthrough)}`);
+  }
+
+  // A CXS-form api: is the *resolved* endpoint, not a careers page. It matches
+  // the careers-page host shape too, so parsing it as one captured the literal
+  // `wday` as the site and produced a nonexistent endpoint — a live board
+  // reporting zero jobs and then reading as unreachable (#3498). The invariant:
+  // a correct api: resolves to exactly what careers_url alone resolves to.
+  const cxsCareers = 'https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers';
+  const cxsApi = 'https://crowdstrike.wd5.myworkdayjobs.com/wday/cxs/crowdstrike/crowdstrikecareers/jobs';
+  const withoutApi = workday.detect({ name: 'CrowdStrike', careers_url: cxsCareers });
+  const withApi = workday.detect({ name: 'CrowdStrike', careers_url: cxsCareers, api: cxsApi });
+  if (withApi && withoutApi && withApi.url === withoutApi.url && withApi.url === cxsApi) {
+    pass('workday.detect() resolves a CXS-form api: to the same endpoint as careers_url alone');
+  } else {
+    fail(`workday.detect(cxs api) returned ${JSON.stringify(withApi)}, careers_url alone ${JSON.stringify(withoutApi)}`);
+  }
+
+  // Same shape given as careers_url (no api: at all) — the misparse was in the
+  // shared pattern, not in the api: slot.
+  const cxsAsCareers = workday.detect({ name: 'CrowdStrike', careers_url: cxsApi });
+  if (cxsAsCareers && cxsAsCareers.url === cxsApi) {
+    pass('workday.detect() accepts a CXS-form careers_url');
+  } else {
+    fail(`workday.detect(cxs careers_url) returned ${JSON.stringify(cxsAsCareers)}`);
+  }
+
+  // The trailing /jobs is optional — a CXS base URL names the same board.
+  const cxsNoJobs = workday.detect({ name: 'CrowdStrike', api: 'https://crowdstrike.wd5.myworkdayjobs.com/wday/cxs/crowdstrike/crowdstrikecareers' });
+  if (cxsNoJobs && cxsNoJobs.url === cxsApi) {
+    pass('workday.detect() accepts a CXS api: without the trailing /jobs');
+  } else {
+    fail(`workday.detect(cxs no-/jobs) returned ${JSON.stringify(cxsNoJobs)}`);
+  }
+
+  // jobBase is derived from the CXS site too, so posting URLs stay on the
+  // site path (an externalPath hung off the host root 404s).
+  const cxsJobs = parseWorkdayResponse(
+    { jobPostings: [{ title: 'SRE', externalPath: '/job/Austin/SRE_R1', locationsText: 'Austin, TX' }] },
+    { name: 'CrowdStrike', careers_url: cxsCareers, api: cxsApi },
+  );
+  if (cxsJobs.length === 1 && cxsJobs[0].url === 'https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers/job/Austin/SRE_R1') {
+    pass('parseWorkdayResponse builds site-relative posting URLs from a CXS-form api:');
+  } else {
+    fail(`parseWorkdayResponse(cxs api) row 0 = ${JSON.stringify(cxsJobs[0])}`);
   }
 
   // Path-spoofed URL: myworkdayjobs.com in path, not hostname
