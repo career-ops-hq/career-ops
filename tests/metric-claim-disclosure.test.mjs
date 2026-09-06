@@ -65,6 +65,62 @@ for (const [label, text, expected] of genuineClaimCases) {
   }
 }
 
+// MIXED-CLAUSE: a genuine personal claim and a cited posting requirement can
+// share one clause ("I have 12 years of experience but this role requires 7
+// years" has no comma/semicolon between the two halves, so both numbers sit
+// in the SAME clauseAround() span). A citation test scoped to "does this
+// clause contain a citation ANYWHERE" would suppress both numbers instead of
+// just the cited one -- correctly excluding the personal claim from the fact
+// gate entirely (flagged in CodeRabbit review of PR #3917). Each of these
+// must still extract the personal claim while still suppressing the cited
+// requirement, whichever order they appear in and whether or not a comma
+// separates them.
+const mixedClauseCases = [
+  [
+    'CodeRabbit\'s literal example: comma + "and"',
+    'I have 12 years of experience, and this role requires 7 years.',
+  ],
+  [
+    'citation first, personal claim after comma',
+    'This role requires 7 years, but I have 12 years of experience.',
+  ],
+  [
+    'no comma at all -- both numbers share one undivided clause',
+    'I have 12 years of experience but this role requires 7 years.',
+  ],
+];
+for (const [label, text] of mixedClauseCases) {
+  const claims = [...metricClaims(text)];
+  if (claims.includes('12 years') && !claims.includes('7 years')) {
+    pass(`mixed-clause: personal claim kept, cited requirement suppressed (${label})`);
+  } else {
+    fail(`mixed-clause claim separation failed (${label}): ${JSON.stringify({ text, claims })}`);
+  }
+}
+
+// Same shape, end-to-end: the fabricated "12 years" must still block even
+// when it shares a clause with a correctly-cited posting requirement.
+{
+  const tmpMixed = mkdtempSync(join(tmpdir(), 'career-ops-metric-disclosure-mixed-'));
+  try {
+    const source = join(tmpMixed, 'cv.md');
+    const config = join(tmpMixed, 'cv-facts.json');
+    writeFileSync(source, 'Instructional Designer with 5 years of L&D experience.');
+    writeFileSync(config, JSON.stringify({ allow_metrics: [], allow_facts: [], forbidden_phrases: [] }));
+
+    const mixed = verifyFacts('I have 12 years of experience but this role requires 7 years.', {
+      sourcePaths: [source], configPath: config,
+    });
+    if (mixed.verdict === 'block' && mixed.invented.includes('12 years') && !mixed.invented.includes('7 years')) {
+      pass('mixed-clause fabricated personal claim still blocks alongside a correctly-cited requirement');
+    } else {
+      fail(`mixed-clause fabricated personal claim bypassed the fact gate: ${JSON.stringify(mixed)}`);
+    }
+  } finally {
+    rmSync(tmpMixed, { recursive: true, force: true });
+  }
+}
+
 // End-to-end through verifyFacts: a genuinely fabricated personal metric claim
 // (no source backing) must still block, and a real source-backed claim must
 // still pass -- the exemption must not weaken the gate for ordinary claims.

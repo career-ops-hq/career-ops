@@ -526,7 +526,7 @@ const FORWARD_MARKER_RE = /\b(?:would|will|shall|should)\b|['\u2019]d\b(?!\s+[A-
 // no negation lead and no role/posting/position/job citation nearby, and
 // "I bring 7+ years of L&D leadership" is the same shape -- so both are left
 // alone and still get checked against the sources.
-const REQUIREMENT_CITATION_RE = /\b(?:role|posting|position|job)\b[^.,;:!?\n]{0,30}\b(?:calls?\s+for|requires?|asks?\s+for|wants?)\b/i;
+const REQUIREMENT_CITATION_RE = /\b(?:role|posting|position|job)\b[^.,;:!?\n]{0,30}\b(?:calls?\s+for|requires?|asks?\s+for|wants?)\b/gi;
 const NEGATION_LEAD_RE = /\b(?:without(?:\s+the)?|lack(?:ing)?(?:\s+the)?|don['\u2019]?t\s+have(?:\s+the)?|doesn['\u2019]?t\s+have(?:\s+the)?|do\s+not\s+have(?:\s+the)?)\s*$/i;
 
 /**
@@ -542,7 +542,7 @@ const NEGATION_LEAD_RE = /\b(?:without(?:\s+the)?|lack(?:ing)?(?:\s+the)?|don['\
  * @param {number} index
  * @returns {string}
  */
-function clauseAround(text, index) {
+function clauseBounds(text, index) {
   const isBoundary = (i) => {
     const c = text[i];
     if (c === '\n') return true;
@@ -566,8 +566,26 @@ function clauseAround(text, index) {
   if (/^\s*(?:and|or|then|plus)\b/i.test(text.slice(start, end))) {
     let sentenceStart = 0;
     for (let i = start - 1; i >= 0; i--) if (isSentenceEnd(i)) { sentenceStart = i + 1; break; }
-    return text.slice(sentenceStart, end);
+    return { start: sentenceStart, end };
   }
+  return { start, end };
+}
+
+/**
+ * The CLAUSE of `text` containing `index`.
+ *
+ * Bounded by `. ! ? , ; :` and by a newline, so a marker in a neighbouring
+ * clause cannot reach the number: "grew in the first 99 months, and I would be
+ * glad to repeat it" keeps its claim, and so does the same pair soft-wrapped
+ * across two lines. A separator BETWEEN DIGITS is not a boundary, or the clause
+ * around "1.5 years" would end inside the number and lose its own marker.
+ *
+ * @param {string} text
+ * @param {number} index
+ * @returns {string}
+ */
+function clauseAround(text, index) {
+  const { start, end } = clauseBounds(text, index);
   return text.slice(start, end);
 }
 
@@ -577,14 +595,42 @@ function clauseAround(text, index) {
  * claim about themself. See the REQUIREMENT_CITATION_RE / NEGATION_LEAD_RE
  * commentary above for the two independent signals this checks.
  *
+ * `allMatches` is every COUNT_CLAIM_RE hit in the document, not just this one.
+ * A citation names ONE requirement, and when two numbers share an undivided
+ * clause with no comma/semicolon between them -- "I have 12 years of
+ * experience but this role requires 7 years" -- testing the citation against
+ * the WHOLE clause would suppress BOTH, quietly waving through a genuinely
+ * fabricated "12 years" personal claim alongside the correctly-cited "7
+ * years" (flagged in review of #3917). Instead, each citation is bound to the
+ * number NEAREST it in the clause -- here, "7" -- and only that number is
+ * treated as cited; "12" gets no citation match and is left to the normal
+ * source check like any other claim.
+ *
  * @param {string} clean
  * @param {RegExpMatchArray} match
+ * @param {RegExpMatchArray[]} allMatches
  * @returns {boolean}
  */
-function isDisclosedRequirement(clean, match) {
+function isDisclosedRequirement(clean, match, allMatches) {
   const lead = clean.slice(Math.max(0, match.index - 40), match.index);
   if (NEGATION_LEAD_RE.test(lead)) return true;
-  return REQUIREMENT_CITATION_RE.test(clauseAround(clean, match.index));
+
+  const { start, end } = clauseBounds(clean, match.index);
+  const clause = clean.slice(start, end);
+  REQUIREMENT_CITATION_RE.lastIndex = 0;
+  const citations = [...clause.matchAll(REQUIREMENT_CITATION_RE)];
+  if (!citations.length) return false;
+
+  const numbersInClause = allMatches.filter((m) => m.index >= start && m.index < end);
+  if (!numbersInClause.length) return false;
+
+  return citations.some((citation) => {
+    const citationIndex = start + citation.index;
+    const nearest = numbersInClause.reduce((best, m) => (
+      Math.abs(m.index - citationIndex) < Math.abs(best.index - citationIndex) ? m : best
+    ));
+    return nearest.index === match.index;
+  });
 }
 
 /**
@@ -598,8 +644,9 @@ function isDisclosedRequirement(clean, match) {
  */
 function countMatches(clean) {
   COUNT_CLAIM_RE.lastIndex = 0;
-  return [...clean.matchAll(COUNT_CLAIM_RE)].filter((match) => {
-    if (isDisclosedRequirement(clean, match)) return false;
+  const allMatches = [...clean.matchAll(COUNT_CLAIM_RE)];
+  return allMatches.filter((match) => {
+    if (isDisclosedRequirement(clean, match, allMatches)) return false;
     if (!TIME_NOUNS.has(match[2].toLowerCase())) return true;
     const lead = clean.slice(Math.max(0, match.index - 40), match.index);
     if (!HORIZON_LEAD_RE.test(lead)) return true;
