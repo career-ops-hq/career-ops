@@ -462,6 +462,7 @@ function activeTrackerLabel(context) {
 function readTracker(context) {
   const lines = readFileSync(context.trackerPath, 'utf8').split(/\r?\n/);
   const columns = resolveColumns(lines);
+  const postingColumn = columns.url ?? columns.applylink;
   const rows = new Map();
   const label = activeTrackerLabel(context);
   for (const line of lines) {
@@ -474,7 +475,7 @@ function readTracker(context) {
     assert(parsed, 'Tracker contains an incomplete row.');
     assert(!rows.has(id), 'Tracker contains duplicate IDs; repair the tracker before binding.');
     rows.set(id, binding({ trackerPath: label, trackerId: id, company: parsed.company, role: parsed.role,
-      report: parsed.report, postingUrl: columns.url === undefined ? '' : cells[columns.url] }));
+      report: parsed.report, postingUrl: postingColumn === undefined ? '' : cells[postingColumn] }));
   }
   return rows;
 }

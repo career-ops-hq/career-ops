@@ -296,6 +296,44 @@ test('binding uses strict original digit cells and detects posting changes witho
   assert.deepEqual(storeBytes(store), actionBytes);
 });
 
+test('Apply Link tracker layouts retain posting identity and detect changes without a report link', async (t) => {
+  for (const header of ['Apply Link', 'Apply']) {
+    const { root, context, store } = fixture(t);
+    const tracker = join(root, 'data/applications.md');
+    writeFileSync(tracker, readFileSync(tracker, 'utf8').replace('| URL |', `| ${header} |`).replace('[101](../reports/101-acme.md)', '—'));
+    let task = await openTask(context, proposal(`layout-${header}`));
+    task = await mutate(context, task, 'bind', { trackerId: '101' });
+    assert.equal(task.application.postingUrl, 'https://jobs.example.test/acme/A-101');
+    const current = listActions(context, { now: NOW }).tasks[0];
+    assert.equal(current.flags.bindingState, 'current');
+    assert.equal(current.flags.bindingLimited, false, 'an Apply Link is identity evidence even without a report');
+    const before = storeBytes(store);
+    writeFileSync(tracker, readFileSync(tracker, 'utf8').replace('https://jobs.example.test/acme/A-101', 'https://jobs.example.test/acme/A-999'));
+    const changed = listActions(context, { now: NOW }).tasks[0];
+    assert.equal(changed.flags.bindingState, 'changed');
+    assert.equal(changed.bucket, 'needs-review');
+    assert.deepEqual(storeBytes(store), before);
+  }
+});
+
+test('a dedicated URL column takes precedence when a tracker also has an Apply Link', async (t) => {
+  const { root, context } = fixture(t);
+  const tracker = join(root, 'data/applications.md');
+  const canonical = 'https://jobs.example.test/canonical/A-101';
+  const content = readFileSync(tracker, 'utf8').split('\n').map(line => {
+    if (line.startsWith('| # |')) return line.replace('| URL |', '| Apply Link | URL |');
+    if (line.startsWith('|---')) return `${line}-----|`;
+    if (/^\| \d+ \|/.test(line)) return `${line} ${canonical} |`;
+    return line;
+  }).join('\n');
+  writeFileSync(tracker, content);
+  let task = await openTask(context);
+  task = await mutate(context, task, 'bind', { trackerId: '101' });
+  assert.equal(task.application.postingUrl, canonical);
+  writeFileSync(tracker, content.replace('https://jobs.example.test/acme/A-101', 'https://jobs.example.test/acme/apply-999'));
+  assert.equal(listActions(context, { now: NOW }).tasks[0].flags.bindingState, 'current');
+});
+
 for (const invalidId of ['101x', '1e2', '101.0', '-101']) {
   test(`bind rejects malformed raw tracker ID ${invalidId}`, async (t) => {
     const { root, context, store } = fixture(t);
