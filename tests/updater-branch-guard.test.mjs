@@ -431,10 +431,28 @@ function stashStagedArgs(g) {
   g('config', '--unset', 'user.email');
   g('config', '--unset', 'user.name');
 
+  // Isolating the config files is not enough: git also takes an identity from
+  // GIT_AUTHOR_*/GIT_COMMITTER_* and from a bare EMAIL, and any of them makes
+  // `commit-tree` succeed. Measured — with the config isolated and either set,
+  // the bare call returns a sha. A runner that exports one would leave this test
+  // warning instead of testing, so all of them are cleared here.
   const noConfig = join(dir, 'no-such-gitconfig');   // absent file reads as empty, on every platform
-  const restore = { global: process.env.GIT_CONFIG_GLOBAL, system: process.env.GIT_CONFIG_SYSTEM };
-  process.env.GIT_CONFIG_GLOBAL = noConfig;
-  process.env.GIT_CONFIG_SYSTEM = noConfig;
+  const overrides = {
+    GIT_CONFIG_GLOBAL: noConfig,
+    GIT_CONFIG_SYSTEM: noConfig,
+    GIT_AUTHOR_NAME: undefined,
+    GIT_AUTHOR_EMAIL: undefined,
+    GIT_COMMITTER_NAME: undefined,
+    GIT_COMMITTER_EMAIL: undefined,
+    EMAIL: undefined,
+  };
+  const restore = Object.fromEntries(
+    Object.keys(overrides).map((key) => [key, process.env[key]]),
+  );
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
   try {
     // NEGATIVE CONTROL: the same call without a pinned identity is what fails.
     let bareCommitTreeFailed = false;
@@ -463,10 +481,10 @@ function stashStagedArgs(g) {
       fail(`no-identity: recorded=${recorded}, atRisk=${JSON.stringify(atRiskIn(dir, gitAt))}`);
     }
   } finally {
-    if (restore.global === undefined) delete process.env.GIT_CONFIG_GLOBAL;
-    else process.env.GIT_CONFIG_GLOBAL = restore.global;
-    if (restore.system === undefined) delete process.env.GIT_CONFIG_SYSTEM;
-    else process.env.GIT_CONFIG_SYSTEM = restore.system;
+    for (const [key, value] of Object.entries(restore)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 }
 
