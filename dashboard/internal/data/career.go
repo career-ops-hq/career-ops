@@ -703,13 +703,13 @@ func UpdateApplicationStatus(careerOpsPath string, app model.CareerApplication, 
 // whatever the Notes cell already contains. Pass an empty string to leave
 // notes unchanged.
 func UpdateApplicationStatusAndNotes(careerOpsPath string, app model.CareerApplication, newStatus, notesAppend string) (returnErr error) {
-	filePath := filepath.Join(careerOpsPath, "applications.md")
-	if _, err := os.Stat(filePath); err != nil {
-		filePath = filepath.Join(careerOpsPath, "data", "applications.md")
-		if _, err := os.Stat(filePath); err != nil {
-			return err
-		}
+	if strings.ContainsAny(notesAppend, "|\r\n\t") {
+		return fmt.Errorf("notes cannot contain table delimiters or line breaks")
 	}
+	if strings.ContainsAny(newStatus, "|\r\n\t") || !isCanonicalStatusValue(newStatus) {
+		return fmt.Errorf("unrecognized status: %q", newStatus)
+	}
+	filePath := resolveTrackerPath(careerOpsPath)
 	filePath, err := canonicalPath(filePath)
 	if err != nil {
 		return fmt.Errorf("resolve tracker path: %w", err)
@@ -746,35 +746,46 @@ func UpdateApplicationStatusAndNotes(careerOpsPath string, app model.CareerAppli
 		return fmt.Errorf("notes column not found in tracker, cannot append notes")
 	}
 
-	found := false
+	reportIdx, reportOk := cols["report"]
+	if !reportOk || app.ReportNumber == "" {
+		return fmt.Errorf("application has no report identity; use set-status.mjs --row to select a tracker row")
+	}
+
+	// Resolve exactly one target under the lock before changing any cells.
+	// A reference in Notes is not an application's Report identity.
+	target := -1
 	for i, line := range lines {
 		if !strings.HasPrefix(strings.TrimSpace(line), "|") {
 			continue
 		}
-		if app.ReportNumber == "" || !strings.Contains(line, fmt.Sprintf("[%s]", app.ReportNumber)) {
+		cells := splitTrackerRow(line)
+		if reportIdx < 0 || reportIdx >= len(cells) {
 			continue
 		}
-		// Update status
-		updated, ok := replaceStatusInLine(line, app.Status, newStatus, statusIdx)
-		if !ok {
-			return fmt.Errorf("failed to replace status: status cell '%s' not matched in row", app.Status)
+		match := reReportLink.FindStringSubmatch(cells[reportIdx])
+		if match == nil || match[1] != app.ReportNumber {
+			continue
 		}
-		// Optionally append to notes
-		if notesAppend != "" {
-			var ok bool
-			updated, ok = appendNotesInLine(updated, notesAppend, notesIdx)
-			if !ok {
-				return fmt.Errorf("failed to append notes: notes column index %d out of bounds", notesIdx)
-			}
+		if target >= 0 {
+			return fmt.Errorf("ambiguous application: report %s occurs in multiple rows", app.ReportNumber)
 		}
-		lines[i] = updated
-		found = true
-		break
+		target = i
 	}
 
-	if !found {
+	if target < 0 {
 		return fmt.Errorf("application not found: report %s", app.ReportNumber)
 	}
+	updated, ok := replaceStatusInLine(lines[target], newStatus, statusIdx)
+	if !ok {
+		return fmt.Errorf("failed to replace status: mapped status cell is missing or unrecognized")
+	}
+	if notesAppend != "" {
+		updated, ok = appendNotesInLine(updated, notesAppend, notesIdx)
+		if !ok {
+			return fmt.Errorf("failed to append notes: notes column index %d out of bounds", notesIdx)
+		}
+	}
+	lines[target] = updated
 
 	return writeFileAtomic(filePath, []byte(strings.Join(lines, "\n")))
 }
@@ -793,19 +804,33 @@ func appendNotesInLine(line, text string, notesField int) (string, bool) {
 		}
 		cells := strings.Split(body, "\t")
 		if notesField < len(cells) {
-			old := strings.TrimSpace(cells[notesField])
-			if old == "" {
-				cells[notesField] = " " + text + " "
-			} else {
-				cells[notesField] = " " + old + " " + text + " "
+			cell := cells[notesField]
+			suffix := ""
+			// The final tab-separated field may include the table's closing
+			// pipe. Keep it outside the Notes value when appending text.
+			if notesField == len(cells)-1 {
+				trimmed := strings.TrimRight(cell, " \r")
+				if strings.HasSuffix(trimmed, "|") {
+					end := len(trimmed) - 1
+					suffix = cell[end:]
+					cell = cell[:end]
+				}
 			}
+			value := strings.TrimSpace(strings.TrimSpace(cell) + " " + text)
+			cells[notesField] = spliceCellValue(cell, value) + suffix
 			return prefix + "|" + strings.Join(cells, "\t"), true
 		}
 		return line, false
 	}
 
 	segments := strings.Split(line, "|")
-	if notesField+1 < len(segments) {
+	end := len(segments)
+	// Exclude exactly one closing delimiter, retaining an explicit empty
+	// final cell (||). Trimming all outer pipes loses that distinction.
+	if strings.TrimSpace(segments[end-1]) == "" {
+		end--
+	}
+	if notesField+1 < end {
 		old := strings.TrimSpace(segments[notesField+1])
 		if old == "" {
 			segments[notesField+1] = " " + text + " "
@@ -823,15 +848,13 @@ func appendNotesInLine(line, text string, notesField int) (string, bool) {
 // the status text anywhere in the row — so a status word appearing as a
 // substring of an earlier cell (e.g. Company "Applied Materials") was rewritten
 // instead of the Status cell, corrupting that cell while the status appeared to
-// stay unchanged (#1180). Matching is whole-cell (never a substring) and, as the
-// old comment claimed but the code did not, case-insensitive.
+// stay unchanged (#1180). The mapped column must contain a recognized status;
+// another cell containing a status word is never a fallback target.
 //
 // statusField is the Status column index in splitTrackerRow field space (5 in
 // the legacy layout), resolved from the table header so a customized layout
 // (e.g. an inserted Location column) targets the right cell.
-func replaceStatusInLine(line, oldStatus, newStatus string, statusField int) (string, bool) {
-	want := strings.TrimSpace(oldStatus)
-
+func replaceStatusInLine(line, newStatus string, statusField int) (string, bool) {
 	// Mixed "| " + tab-separated format (mirrors ParseApplications). The body is
 	// tab-split, so cell index equals the field index.
 	if strings.Contains(line, "\t") {
@@ -839,10 +862,17 @@ func replaceStatusInLine(line, oldStatus, newStatus string, statusField int) (st
 		if !found {
 			return line, false
 		}
+		// A reordered Status field can be last; the closing table pipe is
+		// formatting, not part of the status value.
+		suffix := ""
+		if trimmed := strings.TrimRight(body, " \r"); strings.HasSuffix(trimmed, "|") {
+			end := len(trimmed) - 1
+			suffix, body = body[end:], body[:end]
+		}
 		cells := strings.Split(body, "\t")
-		if idx := statusCellIndex(cells, statusField, want); idx >= 0 {
+		if idx := statusCellIndex(cells, statusField); idx >= 0 {
 			cells[idx] = spliceCellValue(cells[idx], newStatus)
-			return prefix + "|" + strings.Join(cells, "\t"), true
+			return prefix + "|" + strings.Join(cells, "\t") + suffix, true
 		}
 		return line, false
 	}
@@ -851,36 +881,17 @@ func replaceStatusInLine(line, oldStatus, newStatus string, statusField int) (st
 	// cell N is segment N+1 (segment 0 is the empty text before the leading
 	// pipe), so the Status field maps to segment statusField+1.
 	segments := strings.Split(line, "|")
-	if idx := statusCellIndex(segments, statusField+1, want); idx >= 0 {
+	if idx := statusCellIndex(segments, statusField+1); idx >= 0 {
 		segments[idx] = spliceCellValue(segments[idx], newStatus)
 		return strings.Join(segments, "|"), true
 	}
 	return line, false
 }
 
-// statusCellIndex returns the index of the Status cell. It prefers the canonical
-// column (canonicalIdx, matching ParseApplications) and verifies it by value; if
-// that doesn't match — e.g. a custom tracker layout — it falls back to the first
-// cell that equals want exactly. Matching is whole-cell and case-insensitive,
-// never a substring, so a status word inside an earlier cell is never hit.
-//
-// Final fallback: when neither check matches (the in-memory status went stale —
-// e.g. set-status.mjs or merge-tracker.mjs rewrote the row while the dashboard
-// was open), trust canonicalIdx anyway *if* its current content normalizes to a
-// recognized canonical status. That keeps the #1180 guarantee (never rewrite a
-// non-status cell) while dropping the requirement that the UI's snapshot of the
-// old status still matches the file.
-// Returns -1 when nothing matches, so the caller leaves the row untouched rather
-// than corrupt a guess.
-func statusCellIndex(cells []string, canonicalIdx int, want string) int {
-	if canonicalIdx < len(cells) && strings.EqualFold(strings.TrimSpace(cells[canonicalIdx]), want) {
-		return canonicalIdx
-	}
-	for i, c := range cells {
-		if strings.EqualFold(strings.TrimSpace(c), want) {
-			return i
-		}
-	}
+// statusCellIndex validates only the mapped Status column. A stale UI snapshot
+// may overwrite a recognized disk status, as before, but cannot redirect the
+// write to a lookalike in Company or Notes. Invalid cells fail without a write.
+func statusCellIndex(cells []string, canonicalIdx int) int {
 	if canonicalIdx >= 0 && canonicalIdx < len(cells) && isCanonicalStatusValue(cells[canonicalIdx]) {
 		return canonicalIdx
 	}
