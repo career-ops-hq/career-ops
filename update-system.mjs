@@ -1299,8 +1299,10 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
   // them, writing .bak copies, and skipping exactly the delta it came to
   // install. Measured: with an updater commit at v1, an uncommitted v2 tree and
   // upstream at v3, the file lands in the at-risk set. stagedUpdateBaseline()
-  // answers with that snapshot while it is genuinely still staged, and with
-  // null — pruning the ref — once it is not.
+  // answers with that snapshot while it is genuinely still there, and with null
+  // once it is not. It leaves the ref in place either way — deleting a snapshot
+  // that fails the check breaks the stash round trip, which is why that case is
+  // pinned by a test; read its doc before changing that.
   let baseline = stagedUpdateBaseline(runGit, paths);
   if (!baseline) {
     try {
