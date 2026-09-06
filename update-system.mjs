@@ -2333,10 +2333,24 @@ export function updateCommitCommand(version, usedIndexCommit, expandedPathsToSta
  * @returns {void}
  */
 export function recordStagedUpdate(version, ctx = {}) {
-  const runGit = ctx.git || git;
+  // gitQuiet, not git: every failure here is swallowed on purpose, so git's raw
+  // stderr ("Please tell me who you are") must not surface in the middle of an
+  // update that is otherwise succeeding.
+  const runGit = ctx.git || gitQuiet;
   try {
     const tree = runGit('write-tree');
     const commit = runGit(
+      // A fixed synthetic identity, not the user's. `commit-tree` needs an
+      // author and a committer, and an install with no git identity configured
+      // — a container, a fresh machine, a harness that isolates the global
+      // config — makes it fail: measured, `fatal: unable to auto-detect email
+      // address`. The catch below would swallow that, and the next update would
+      // fall back to an older baseline and read this update's own files as the
+      // user's edits, which is the bug this ref exists to prevent. The identity
+      // is also honest about what the commit is: machinery, not authored work.
+      // `.invalid` is reserved by RFC 2606, so it can never route anywhere.
+      '-c', 'user.name=career-ops updater',
+      '-c', 'user.email=updater@career-ops.invalid',
       'commit-tree', tree, '-p', runGit('rev-parse', 'HEAD'),
       '-m', `career-ops staged update to v${version} (uncommitted)`,
     );
