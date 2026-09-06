@@ -46,10 +46,10 @@
  *
  * FAIL-OPEN IS OPERATIONAL, NOT JUST STATISTICAL. An exception inside any single
  * signal leaves that signal unknown, prints one warning line on stderr, and
- * exits 0 having proceeded. A missing or malformed config/profile.yml, or a
- * missing cv.md, goes further: those two files are what "fit" MEANS here, so
- * without either the verdict is `proceed` outright (`override:
- * 'not-configured'`) rather than a filter run on the half the gate can still
+ * exits 0 having proceeded. A missing or malformed config/profile.yml, a
+ * missing cv.md, or no usable YAML target_roles makes the verdict `proceed`
+ * outright (`override: 'not-configured'`). Those inputs define "fit", so their
+ * absence cannot authorize a filter run on the half the gate can still
  * see. Only an unreadable JD input is exit 2, and only a failed append to the
  * discard log is exit 3.
  *
@@ -275,13 +275,20 @@ const SECTION_HEADING_RE = /^\s*(?:about|overview|summary|benefits?|perks?|compe
 
 /**
  * Common ATS metadata headings ("## Location: Berlin", a Greenhouse and Lever
- * staple). Consulted ONLY by `detectTitle`'s residual fallback, never by
- * `looksLikeTitle`: "Location" is also a real job title ("Location Manager",
- * film and TV production), and folding it into `SECTION_HEADING_RE` would
+ * staple). Used for metadata labels in the preamble and `detectTitle`'s
+ * residual fallback, never by `looksLikeTitle`: "Location" is also a real job
+ * title ("Location Manager", film and TV production), and folding it into `SECTION_HEADING_RE` would
  * reject that title outright. The fallback has no such risk, because it never
  * runs while a title-shaped heading exists.
  */
 const POSTING_METADATA_HEADING_RE = /^\s*(?:location|department|employment\s+type|job\s+type|seniority(?:\s+level)?|reports\s+to|start\s+date|contract\s+type|work\s+arrangement|schedule)\b/i;
+// These values describe how the job is worked, not its occupation.
+const WORK_ARRANGEMENT_VALUE_RE = /^(?:(?:fully|100%)\s+)?(?:remote|hybrid|on[- ]?site|full[- ]?time|part[- ]?time|contract|permanent|temporary)$/i;
+const GLOBAL_LOCATION_VALUE_RE = /^(?:worldwide|anywhere)$/i;
+const METADATA_SEPARATOR_RE = /[,;/|&]| [-–—] |\b(?:and|or)\b/i;
+const PREAMBLE_WRAPPER_RE = /^(?:(?:job|role) description|overview|summary)$/i;
+const MAX_PREAMBLE_LINES = 8;
+const MAX_PREAMBLE_FRAGMENT_WORDS = 6;
 
 /** A job title is short. Twelve words is generous for the decorated ones. */
 const MAX_TITLE_WORDS = 12;
@@ -300,16 +307,111 @@ function looksLikeTitle(line) {
     && ROLE_NOUN_RE.test(line);
 }
 
+/** Normalize balanced brackets in one scan; keep malformed text intact. */
+function bracketText(value, { keepContents = false } = {}) {
+  const parts = [];
+  const stack = [];
+  let start = 0;
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+    if (char === '(' || char === '[') {
+      if (keepContents || stack.length === 0) parts.push(value.slice(start, i));
+      if (keepContents) start = i + 1;
+      stack.push(char);
+    } else if (char === ')' || char === ']') {
+      if (stack.pop() !== (char === ')' ? '(' : '[')) return value;
+      if (keepContents) parts.push(value.slice(start, i));
+      if (keepContents || stack.length === 0) start = i + 1;
+    }
+  }
+  if (stack.length > 0) return value;
+  parts.push(value.slice(start));
+  return parts.join(keepContents ? ',' : ' ');
+}
+
+function isWorkArrangementValue(value, allowUnclassifiedSuffix = false) {
+  // Normalize only for comparison; genuine titles retain their original text.
+  // Collapsing whitespace before splitting also avoids a quadratic separator
+  // search on a long space run with no separator after it.
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  const first = normalized.split(METADATA_SEPARATOR_RE, 1)[0].split(/[([]/, 1)[0].trim();
+  if (!WORK_ARRANGEMENT_VALUE_RE.test(first)) return false;
+  if (allowUnclassifiedSuffix) return true;
+  // Bracket contents may name the occupation ("Remote (QA)"), so explicit
+  // labels compare every field rather than discarding that text.
+  const fields = bracketText(normalized, { keepContents: true }).split(METADATA_SEPARATOR_RE)
+    .map((field) => field.trim()).filter(Boolean);
+  return fields.length > 0 && fields.every((field) => WORK_ARRANGEMENT_VALUE_RE.test(field) || GLOBAL_LOCATION_VALUE_RE.test(field));
+}
+
+function isPreambleFragment(line) {
+  return line.split(/\s+/).length <= MAX_PREAMBLE_FRAGMENT_WORDS
+    && !SECTION_HEADING_RE.test(line)
+    && !/^(?:[-*+•]|\d+[.)])\s/.test(line)
+    && !/[.!?。！？]$/.test(line)
+    && !/^(?:we|you|our|your|this role|join us|help us)\b/i.test(line);
+}
+
+/** Read labels in the opening metadata block, before any body section or prose. */
+function preambleTitle(lines) {
+  let sawHeading = false;
+  let nonblankLines = 0;
+  let ambiguousPosition = false;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (++nonblankLines > MAX_PREAMBLE_LINES) break;
+    const heading = MD_HEADING_RE.exec(line);
+    if (heading) {
+      // A capture may begin with a company or role heading. A second heading
+      // starts the body, including section names outside our English lists.
+      const wrapper = /^#\s/.test(line) && PREAMBLE_WRAPPER_RE.test(heading[1]);
+      if (sawHeading || (SECTION_HEADING_RE.test(heading[1]) && !wrapper)) break;
+      sawHeading = true;
+      continue;
+    }
+    const labelled = TITLE_LABEL_RE.exec(line);
+    if (labelled && labelled[1].trim() && isTitleLength(labelled[1])) {
+      const value = labelled[1].trim();
+      // Position commonly describes a work arrangement with an arbitrary
+      // location suffix. Title/Job Title/Role remain authoritative: a title
+      // such as "Remote, QA" or "Remote, Ingénieur" must retain its meaning.
+      const position = /^(?:job\s+)?position\s*[:\-]/i.test(line);
+      if (isWorkArrangementValue(value, position)) {
+        if (position) ambiguousPosition = true;
+        continue;
+      }
+      return { title: value, ambiguousPosition: false };
+    }
+    if (COMPANY_LABEL_RE.test(line) || URL_LABEL_RE.test(line)) continue;
+    const metadata = POSTING_METADATA_HEADING_RE.exec(line);
+    if (metadata && /^\s*[:\-]/.test(line.slice(metadata[0].length))) continue;
+    // ATS captures may put a bare location, date or Apply now between labels.
+    // Permit short fragments inside the line budget; prose and bullets end it.
+    if (isPreambleFragment(line)) continue;
+    break;
+  }
+  return { title: null, ambiguousPosition };
+}
+
 /**
  * The role title a JD states, or null when it states none.
  *
  * Order: `--title` (the pipeline row's Role column, or the CLI extractor's
- * title) > a labelled `Title:`/`Role:`/`Position:` line > the first heading that
+ * title) > a labelled `Title:`/`Role:`/`Position:` line in the opening preamble
+ * (which may start with a company heading) > the first heading that
  * reads like a job title > the first heading that is neither the company's own
  * name nor a known section or metadata heading > the first heading other than
  * the company > the first heading > the first line that reads like a job title
  * > the first non-empty line, when it is title-length. A posting collapsed to
  * one line has no title to detect and yields null rather than the posting.
+ * Labels consisting only of work-arrangement metadata, such as
+ * `Position: Remote, full-time`, do not supply a title.
+ * Position also treats unknown suffixes after a work arrangement as ambiguous:
+ * `Position: Remote, US` needs a confident role heading, or the title is unknown.
+ * This weaker interpretation does not apply to Title/Job Title/Role labels.
+ * The preamble spans at most eight nonblank lines; short metadata fragments
+ * can precede a label, but a second heading, prose or bullet closes it.
  *
  * The "reads like a job title" step is not cosmetic. Scraped captures very
  * commonly open with the COMPANY as the `# ` heading and put the role in a later
@@ -340,20 +442,40 @@ export function detectTitle(jdText, explicit = null, company = null) {
   if (typeof explicit === 'string' && explicit.trim()) return explicit.trim();
   const text = String(jdText ?? '');
 
-  // A labelled line is trusted only at title length. A capture whose
+  // A preamble label is trusted only at title length. A capture whose
   // whitespace was collapsed to one line ("Job Title: Senior Engineer Apply
   // now About us ...") would otherwise hand the rest of the posting back as
   // the title, and the title signal would become a body-text search.
-  const labelled = TITLE_LABEL_RE.exec(text);
-  if (labelled && labelled[1].trim() && isTitleLength(labelled[1])) return labelled[1].trim();
-
   const lines = text.split('\n');
+  const { title: labelled, ambiguousPosition } = preambleTitle(lines);
+  if (labelled) return labelled;
+
   const headings = [];
   const plainLines = [];
   for (const line of lines) {
     const heading = MD_HEADING_RE.exec(line);
     if (heading && heading[1].trim()) headings.push(heading[1].trim());
-    else if (line.trim()) plainLines.push(line.trim());
+    else if (line.trim() && !TITLE_LABEL_RE.test(line)) plainLines.push(line.trim());
+  }
+
+  if (ambiguousPosition) {
+    // Do not turn a company or section heading into a role just because a
+    // Position line supplied no reliable title. Require an occupation at the
+    // end of the base title, allowing one ATS level suffix; otherwise leave it
+    // unknown. Plain exports can supply only their first nonempty line. Explicit
+    // labels above accept every language without this conservative check.
+    const companyFolded = foldForCompare(company);
+    const firstLine = lines.find((line) => line.trim())?.trim() ?? '';
+    const firstPlain = firstLine && !MD_HEADING_RE.test(firstLine)
+      && !firstLine.includes(':') && isPreambleFragment(firstLine);
+    const candidates = firstPlain ? [firstLine, ...headings] : headings;
+    return candidates.find((heading) => {
+      if (companyFolded && foldForCompare(heading) === companyFolded) return false;
+      const base = bracketText(heading).split(/,| [-–—] /, 1)[0].trim()
+        .replace(/\s+(?:I{1,3}|IV|V|[1-9])$/i, '');
+      const lastWord = base.split(/\s+/).at(-1) ?? '';
+      return looksLikeTitle(base) && ROLE_NOUN_RE.test(lastWord);
+    }) ?? null;
   }
 
   const titledHeading = headings.find(looksLikeTitle);
@@ -918,9 +1040,12 @@ export function scoreComp(comp, floor) {
  */
 export function profileTargets(profile) {
   const roles = profile?.target_roles;
-  const primary = Array.isArray(roles?.primary) ? roles.primary.map((r) => String(r)) : [];
+  const primary = Array.isArray(roles?.primary)
+    ? roles.primary.filter((r) => typeof r === 'string' && r.trim()).map((r) => r.trim())
+    : [];
   const archetypes = Array.isArray(roles?.archetypes)
-    ? roles.archetypes.map((a) => String(a?.name ?? '')).filter(Boolean)
+    ? roles.archetypes.map((a) => a?.name)
+      .filter((name) => typeof name === 'string' && name.trim()).map((name) => name.trim())
     : [];
   return { primary, archetypes };
 }
@@ -1092,11 +1217,19 @@ export function prescore({
     notes.push(`the posting title could not be detected (${err?.message ?? err}), so title and domain scored as unknown`);
   }
 
+  let hasTargets = false;
   const signals = {
     // profileTargets() is read INSIDE the guard, not hoisted above it: a profile
     // whose shape surprises us must degrade this one signal to unknown, not take
     // the whole run down.
-    title: { ...safeSignal('title', () => scoreTitle(detected, profileTargets(profile)), notes), weight: WEIGHTS.title },
+    title: {
+      ...safeSignal('title', () => {
+        const targets = profileTargets(profile);
+        hasTargets = targets.primary.length + targets.archetypes.length > 0;
+        return scoreTitle(detected, targets);
+      }, notes),
+      weight: WEIGHTS.title,
+    },
     requirements: { ...safeSignal('requirements', () => scoreRequirements(jdText, cvText), notes), weight: WEIGHTS.requirements },
     domain: { ...safeSignal('domain', () => scoreDomain(detected), notes), weight: WEIGHTS.domain },
     comp: {
@@ -1144,6 +1277,9 @@ export function prescore({
   // filtering on the half it can still see.
   const missingInputs = [];
   if (!profile) missingInputs.push('config/profile.yml');
+  // Targeting can live in modes/_profile.md instead. This gate has no parser
+  // for that prose, so an empty YAML target list cannot authorize a skip.
+  else if (!hasTargets) missingInputs.push('target_roles in config/profile.yml');
   if (!String(cvText ?? '').trim()) missingInputs.push('cv.md');
 
   let verdict;

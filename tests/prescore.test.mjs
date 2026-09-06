@@ -123,6 +123,17 @@ const NURSE_JD = [
 // Everything the gate can see is perfect except the money: a real posting for a
 // role the user wants, at a company underpaying for it.
 const LOWBALL_JD = STRONG_JD.replace('$160,000 - $210,000 per year', '$60,000 - $70,000 per year');
+const TITLE_CAPTURE_BODY = '\n\n## Requirements\n- Python\n- AWS\n\nSalary: $60,000 - $70,000 per year';
+const TITLE_CAPTURE_CASES = [
+  ...['Remote (US)', 'Remote [US]', 'Remote (US [East])', 'Remote - Full time', 'Full-time (Remote)', 'Remote or Hybrid', 'Remote, Worldwide', 'Remote,', 'Remote, US', 'Remote, East Coast', 'Remote, QA', 'Remote, Ingénieur'].map((value) => [
+    `adjacent ${value}`, `# Senior AI Engineer\nPosition: ${value}`, 'Senior AI Engineer', null,
+  ]),
+  ['generic H1 wrapper', '# Job Description\nTitle: Staff ML Engineer', 'Staff ML Engineer', null],
+  ['bare location', '# Acme Corp\nBerlin, Germany\nTitle: Staff ML Engineer', 'Staff ML Engineer', null],
+  ['bare location with known company', '# Acme Corp\nBerlin, Germany\nTitle: Staff ML Engineer', 'Staff ML Engineer', 'Acme Corp'],
+  ['plain first title with US', 'Senior AI Engineer\nPosition: Remote, US', 'Senior AI Engineer', null],
+  ['plain first title with full-time', 'Senior AI Engineer\nPosition: Remote, full-time', 'Senior AI Engineer', null],
+];
 
 // A posting generous with its nice-to-haves. Two must-haves, both covered by the
 // CV; six nice-to-haves, none of them. Over the FLAT list that is 2 of 8 (25%,
@@ -302,6 +313,33 @@ const deepEq = (label, actual, expected) => {
   ok('naming the missing file', String(noProfile.overrideReason).includes('config/profile.yml'), noProfile.overrideReason);
   eq('a missing profile leaves the title unknown', noProfile.signals.title.unknown, true);
 
+  for (const [label, targetRoles] of [
+    ['absent', undefined],
+    ['null', null],
+    ['empty mapping', {}],
+    ['empty arrays', { primary: [], archetypes: [] }],
+    ['blank names', { primary: ['', ' \t '], archetypes: [{ name: '\n ' }, {}] }],
+    ['invalid types', { primary: [null, 123, {}], archetypes: [{ name: false }] }],
+  ]) {
+    const result = prescore({
+      jdText: NURSE_JD, cvText: CV,
+      profile: { ...PROFILE, target_roles: targetRoles }, threshold: 4.9,
+    });
+    ok(`${label} targets leave real negative evidence below the threshold`, result.score < result.threshold && result.dominantNegative !== null);
+    eq(`${label} YAML targets cannot authorize a skip`, result.verdict, 'proceed');
+    eq(`${label} YAML targets report not-configured`, result.override, 'not-configured');
+    ok(`${label} YAML targets identify the missing configuration`, String(result.overrideReason).includes('target_roles in config/profile.yml'), result.overrideReason);
+    eq(`${label} YAML targets leave the title signal unknown`, result.signals.title.unknown, true);
+  }
+  for (const [label, targetRoles] of [
+    ['primary only', { primary: [' ', 'Senior AI Engineer'] }],
+    ['archetype only', { primary: [], archetypes: [{ name: '  AI/ML Engineer  ' }] }],
+  ]) {
+    const result = prescore({ jdText: NURSE_JD, cvText: CV, profile: { ...PROFILE, target_roles: targetRoles } });
+    eq(`${label} YAML targets still allow evidenced skips`, result.verdict, 'skip');
+    eq(`${label} YAML targets are configured`, result.override, null);
+  }
+
   const noCv = prescore({ jdText: NURSE_JD, cvText: '', profile: PROFILE });
   eq('a missing cv.md proceeds too', noCv.verdict, 'proceed');
   ok('naming cv.md', String(noCv.overrideReason).includes('cv.md'), noCv.overrideReason);
@@ -413,9 +451,98 @@ const deepEq = (label, actual, expected) => {
 {
   eq('an explicit --title wins', detectTitle('# Acme\n\nTitle: Cook\n', 'Staff ML Engineer'), 'Staff ML Engineer');
   eq('a labelled title line is preferred over the heading', detectTitle('# Acme Corp\n\nRole: Staff ML Engineer\n'), 'Staff ML Engineer');
+  eq('preamble metadata can precede the title label', detectTitle('# Acme Corp\nURL: https://acme.example/jobs/1\nLocation: Remote\nTitle: Staff ML Engineer\n'), 'Staff ML Engineer');
+  eq('a plain company line can precede the title label', detectTitle('Acme Corp\nCompany: Acme Corp\nJob Title - Staff ML Engineer\n'), 'Staff ML Engineer');
+  for (const [label, preamble, title, company] of TITLE_CAPTURE_CASES) {
+    const result = prescore({ jdText: preamble + TITLE_CAPTURE_BODY, cvText: CV, profile: PROFILE, company });
+    eq(`${label} preserves the actual title`, result.title, title);
+    eq(`${label} scores 4.2 with a matching title`, result.score, 4.2);
+    eq(`${label} proceeds to full evaluation`, result.verdict, 'proceed');
+  }
+  for (const wrapper of ['Job Description', 'Role Description', 'Overview', 'Summary']) {
+    eq(`an initial H1 ${wrapper} can wrap a title label`, detectTitle(`# ${wrapper}\nTitle: Staff ML Engineer\n`), 'Staff ML Engineer');
+    eq(`a first H2 ${wrapper} still starts the body`, detectTitle(`## ${wrapper}\nTitle: Registered Nurse\n\n## Staff ML Engineer`), 'Staff ML Engineer');
+  }
+  eq('bare location, date and Apply now may precede a title label', detectTitle('# Acme Corp\nBerlin, Germany\n2026-09-07\nApply now\nTitle: Staff ML Engineer'), 'Staff ML Engineer');
+  eq('a title on the eighth nonblank preamble line is accepted', detectTitle(`# Acme Corp\n${'Berlin, Germany\n'.repeat(6)}Title: Staff ML Engineer`), 'Staff ML Engineer');
+  eq('a title beyond the preamble budget cannot override a role heading', detectTitle(`# Senior AI Engineer\n${'Berlin, Germany\n'.repeat(7)}Title: Registered Nurse`), 'Senior AI Engineer');
+  for (const label of ['Title', 'Job Title', 'Role']) {
+    for (const title of ['Remote, US', 'Remote, QA', 'Remote, SRE', 'Remote, Ingénieur']) {
+      eq(`${label} remains authoritative for ${title}`, detectTitle(`# Engineer Partners\n${label}: ${title}\n`), title);
+    }
+    eq(`${label} can resolve an earlier ambiguous Position`, detectTitle(`# Engineer Partners\nPosition: Remote, US\n${label}: Ingénieur logiciel\n`), 'Ingénieur logiciel');
+    for (const title of ['Remote (QA)', 'Remote (Ingénieur)', 'Remote [QA]', 'Remote (QA [Automation])', 'Remote (full-time', 'Remote [full-time', 'Remote (full-time]']) {
+      eq(`${label} preserves bracket contents in ${title}`, detectTitle(`# Engineer Partners\n${label}: ${title}\n`), title);
+    }
+  }
+  for (const title of ['Senior Software Engineer II', 'Staff Engineer III', 'Engineer 2']) {
+    eq(`ambiguous Position preserves the level in ${title}`, detectTitle(`# ${title}\nPosition: Remote, US\n`), title);
+    eq(`plain first title preserves the level in ${title}`, detectTitle(`${title}\nPosition: Remote, US\n`), title);
+  }
+  for (const title of ['Engineer 2026', 'Engineer II III']) {
+    eq(`an arbitrary numeric or repeated suffix is not an ATS level: ${title}`, detectTitle(`# ${title}\nPosition: Remote, US\n`), null);
+  }
+  for (const body of ['Senior AI Engineer', 'We need a Senior AI Engineer', '- Senior AI Engineer', 'Requirements\nSenior AI Engineer']) {
+    eq(`the plain fallback does not search body text: ${body}`, detectTitle(`Acme Corp\nPosition: Remote, US\n${body}\n`), null);
+  }
+  eq('the first plain candidate cannot be a company label', detectTitle('Company: Senior AI Engineer\nPosition: Remote, US\nSenior AI Engineer\n'), null);
+  eq('--title wins over ambiguous Position metadata', detectTitle('# Senior AI Engineer\nPosition: Remote, US\n', 'Remote, QA'), 'Remote, QA');
+  for (const [heading, company] of [['Acme Corp', null], ['Engineer Partners', null], ['Staff Engineer', 'Staff Engineer'], ['Job Description', null]]) {
+    const result = prescore({ jdText: `# ${heading}\nPosition: Remote, US${TITLE_CAPTURE_BODY}`, cvText: CV, profile: PROFILE, company });
+    eq(`ambiguous Position cannot promote ${heading} to a title`, result.title, null);
+    eq(`ambiguous Position with ${heading} leaves title unknown`, result.signals.title.unknown, true);
+    eq(`ambiguous Position with ${heading} leaves domain unknown`, result.signals.domain.unknown, true);
+    eq(`ambiguous Position with ${heading} still proceeds`, result.verdict, 'proceed');
+  }
+  eq('a decorated role heading resolves an ambiguous Position', detectTitle('# Senior AI Engineer (Retrieval), Remote\nPosition: Remote, US\n'), 'Senior AI Engineer (Retrieval), Remote');
+  for (const title of ['Медицинская сестра', 'Ingénieur logiciel', 'バックエンド開発者', 'वरिष्ठ सॉफ्टवेयर इंजीनियर']) {
+    eq(`a localized preamble title survives: ${title}`, detectTitle(`# Acme Corp\n\nPosition: ${title}\n\n## Requirements\n`), title);
+    eq(`a known title-shaped company does not block a localized label: ${title}`, detectTitle(`# Engineer Partners\n\nTitle: ${title}\n`, null, 'Engineer Partners'), title);
+    eq(`a title-shaped company needs no hint for a localized label: ${title}`, detectTitle(`# Engineer Partners\n\nTitle: ${title}\n`), title);
+    eq(`a localized label can carry a work arrangement: ${title}`, detectTitle(`# Engineer Partners\n\nTitle: ${title}, Remote\n`), `${title}, Remote`);
+    eq(`a localized label after bare metadata needs no English noun: ${title}`, detectTitle(`# Engineer Partners\nBerlin, Germany\nTitle: ${title}\n`), title);
+    eq(`a localized occupation after Remote is retained: ${title}`, detectTitle(`# Engineer Partners\nTitle: Remote, ${title}\n`), `Remote, ${title}`);
+  }
+  // A separator regex with a leading \s* retries a long internal space run
+  // from every offset when there is no comma/slash. Splitting on separators
+  // alone keeps this valid, two-word title linear (milliseconds, not seconds).
+  const spacedTitle = `Ingénieur${' '.repeat(40000)}logiciel`;
+  const titleStarted = performance.now();
+  const spacedDetected = detectTitle(`# Acme Corp\nTitle: ${spacedTitle}\n`);
+  const titleMs = performance.now() - titleStarted;
+  eq('a widely spaced localized title preserves its text', spacedDetected, spacedTitle);
+  ok('40,000 internal spaces in a title are scanned in under 1 s', titleMs < 1000, `${titleMs.toFixed(1)} ms`);
+  for (const opening of ['(', '[', '([']) {
+    const malformedTitle = `Remote ${opening.repeat(40000)}${' '.repeat(40000)}US`;
+    const started = performance.now();
+    const detected = detectTitle(`# Acme Corp\nTitle: ${malformedTitle}\n`);
+    const elapsed = performance.now() - started;
+    eq(`unclosed ${opening} qualifiers preserve the title text`, detected, malformedTitle);
+    ok(`40,000 unclosed ${opening} groups and whitespace parse in under 1 s`, elapsed < 1000, `${elapsed.toFixed(1)} ms`);
+  }
   eq('a markdown heading is used when nothing is labelled', detectTitle('# Senior AI Engineer\n\nWe are hiring.\n'), 'Senior AI Engineer');
   eq('the first non-empty line is the last resort', detectTitle('\n\nSenior AI Engineer\nWe are hiring.\n'), 'Senior AI Engineer');
   eq('an empty JD yields no title', detectTitle(''), null);
+
+  const bodyPositionJd = '# Senior AI Engineer\n\n## Requirements\n- Python\n- AWS\n\n## Working conditions\nPosition: Remote, full-time\n\nSalary: $60,000 - $70,000 per year';
+  const bodyPosition = prescore({ jdText: bodyPositionJd, cvText: CV, profile: PROFILE });
+  eq('body Position metadata cannot replace the role heading', bodyPosition.title, 'Senior AI Engineer');
+  eq('body Position metadata preserves the matching title score', bodyPosition.signals.title.score, 5);
+  eq('the body Position regression scores 4.2 rather than 2.7', bodyPosition.score, 4.2);
+  eq('a matching role with body Position metadata proceeds', bodyPosition.verdict, 'proceed');
+  const adjacentPosition = prescore({ jdText: bodyPositionJd.replace('## Working conditions\nPosition: Remote, full-time\n\n', '').replace('# Senior AI Engineer\n', '# Senior AI Engineer\nPosition: Remote, full-time\n'), cvText: CV, profile: PROFILE });
+  eq('adjacent Position metadata cannot replace a recognized role heading', adjacentPosition.title, 'Senior AI Engineer');
+  eq('a matching role with adjacent Position metadata proceeds', adjacentPosition.verdict, 'proceed');
+  eq('metadata-only Position can precede a real Title label', detectTitle('# Acme Corp\nPosition: Remote, full-time\nTitle: Staff ML Engineer\n'), 'Staff ML Engineer');
+  eq('a metadata-only Position is not reused by the plain-text fallback', detectTitle('Position: Remote, full-time\n'), null);
+  for (const label of ['Title', 'Role', 'Position']) {
+    for (const section of ['## Working conditions', '## Условия работы', 'We build production systems.', 'We build production systems', 'Join us to build systems', '- Python', '1. Build services', 'Berlin office with optional monthly team visits']) {
+      eq(`a ${label}: in body ${section} cannot override the heading`, detectTitle(`# Senior AI Engineer\n\n${section}\n${label}: Registered Nurse\n`), 'Senior AI Engineer');
+    }
+  }
+  eq('a known body section cannot start a labelled-title preamble', detectTitle('## Requirements\nTitle: Registered Nurse\n\n## Senior AI Engineer\n'), 'Senior AI Engineer');
+  eq('an H1 Requirements heading is not a generic wrapper', detectTitle('# Requirements\nTitle: Registered Nurse\n\n## Senior AI Engineer\n'), 'Senior AI Engineer');
+  eq('ignoring a body label preserves the localized heading fallback', detectTitle('# Lumière Systèmes\n\n## Ingénieur logiciel\n\n## Conditions\nPosition: Remote, full-time\n', null, 'Lumière Systèmes'), 'Ingénieur logiciel');
   // A capture whose whitespace was collapsed to one line has no title to
   // detect; returning the posting itself would turn the title signal into a
   // body-text search.
@@ -859,6 +986,60 @@ const deepEq = (label, actual, expected) => {
     eq('a list-valued profile.yml still exits 0', listProfile.status, 0);
     ok('and proceeds rather than filtering on a profile that names nothing', String(listProfile.stdout).includes('proceed (no usable config/profile.yml'), String(listProfile.stdout));
     ok('and warns that it did not parse to a mapping', String(listProfile.stderr).includes('mapping'), String(listProfile.stderr));
+
+    // A user may keep their targeting only in _profile.md. The gate does not
+    // parse that prose, and --log must not convert incomplete YAML into a skip.
+    mkdirSync(join(dir, 'modes'));
+    writeFileSync(join(dir, 'modes', '_profile.md'), '# Targeting\n\nI want to work as a Registered Nurse.\n');
+    mkdirSync(join(dir, 'data'));
+    const logPath = join(dir, 'data', 'discard.log');
+    const existingLog = '2026-01-01T00:00:00Z\thttps://example.invalid/old\tprior decision\n';
+    writeFileSync(logPath, existingLog);
+    for (const [label, targets] of [
+      ['absent', ''],
+      ['empty', 'target_roles: {}\n'],
+      ['all blank', 'target_roles:\n  primary: ["", "  "]\n  archetypes:\n    - name: "  "\n'],
+    ]) {
+      writeFileSync(join(dir, 'config', 'profile.yml'), `${targets}compensation:\n  currency: USD\n  minimum: "$120K"\npipeline:\n  prescore:\n    enabled: true\n`);
+      const result = spawn(['jd.md', '--threshold', '4.9', '--log']);
+      eq(`CLI ${label} YAML targets exit successfully`, result.status, 0);
+      const parsed = JSON.parse(result.stdout);
+      eq(`CLI ${label} YAML targets proceed`, parsed.verdict, 'proceed');
+      eq(`CLI ${label} YAML targets report not-configured`, parsed.override, 'not-configured');
+      eq(`CLI ${label} YAML targets do not report a discard`, parsed.discardLogged, false);
+      eq(`CLI ${label} YAML targets preserve prior discard bytes`, readFileSync(logPath, 'utf-8'), existingLog);
+    }
+
+    writeFileSync(join(dir, 'config', 'profile.yml'), PROFILE_YML);
+    writeFileSync(join(dir, 'body-position.md'), '# Senior AI Engineer\n\n## Requirements\n- Python\n- AWS\n\n## Working conditions\nPosition: Remote, full-time\n\nSalary: $60,000 - $70,000 per year');
+    const bodyPosition = spawn(['body-position.md', '--log']);
+    eq('CLI body Position metadata exits successfully', bodyPosition.status, 0);
+    const bodyPositionResult = JSON.parse(bodyPosition.stdout);
+    eq('CLI body Position metadata preserves the title', bodyPositionResult.title, 'Senior AI Engineer');
+    eq('CLI body Position metadata proceeds', bodyPositionResult.verdict, 'proceed');
+    eq('CLI body Position metadata does not report a discard', bodyPositionResult.discardLogged, false);
+    eq('CLI body Position metadata preserves prior discard bytes', readFileSync(logPath, 'utf-8'), existingLog);
+
+    for (const [label, preamble, title, company] of TITLE_CAPTURE_CASES) {
+      writeFileSync(join(dir, 'capture.md'), preamble + TITLE_CAPTURE_BODY);
+      const result = spawn(['capture.md', '--log', ...(company ? ['--company', company] : [])]);
+      eq(`CLI ${label} exits successfully`, result.status, 0);
+      const parsed = JSON.parse(result.stdout);
+      eq(`CLI ${label} preserves the title`, parsed.title, title);
+      eq(`CLI ${label} proceeds`, parsed.verdict, 'proceed');
+      eq(`CLI ${label} does not report a discard`, parsed.discardLogged, false);
+      eq(`CLI ${label} preserves prior discard bytes`, readFileSync(logPath, 'utf-8'), existingLog);
+    }
+
+    writeFileSync(join(dir, 'config', 'profile.yml'), PROFILE_YML.replace('Senior AI Engineer', 'Remote (QA)'));
+    writeFileSync(join(dir, 'bracket-title.md'), `# Engineer Partners\nTitle: Remote (QA)${TITLE_CAPTURE_BODY}`);
+    const bracketTitle = spawn(['bracket-title.md', '--log']);
+    eq('CLI bracketed explicit title exits successfully', bracketTitle.status, 0);
+    const bracketResult = JSON.parse(bracketTitle.stdout);
+    eq('CLI bracketed explicit title keeps its occupation', bracketResult.title, 'Remote (QA)');
+    eq('CLI bracketed explicit title matches the configured target', bracketResult.signals.title.score, 5);
+    eq('CLI matching bracketed explicit title proceeds', bracketResult.verdict, 'proceed');
+    eq('CLI matching bracketed explicit title preserves discard bytes', readFileSync(logPath, 'utf-8'), existingLog);
 
     // Out-of-range configured gate: announced, not applied.
     writeFileSync(join(dir, 'config', 'profile.yml'), `${PROFILE_YML_BASE}pipeline:\n  prescore:\n    enabled: true\n    gate_threshold: 6\n`);

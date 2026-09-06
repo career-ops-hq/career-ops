@@ -322,8 +322,10 @@ cover_letter:
 # posting that omits a salary is not penalized for it. A skip always rests on
 # at least one signal with evidence against the posting. Compensation alone
 # never rejects. A company on the `## Priority Override List` in
-# modes/_brief.md always proceeds. When this file or cv.md cannot be read,
-# nothing is filtered. Every skip is one three-field row in data/discard.log
+# modes/_brief.md always proceeds. When this file or cv.md cannot be read, or
+# YAML target_roles has no usable primary/archetype names, nothing is filtered.
+# Targeting kept only in modes/_profile.md reaches full evaluation unchanged.
+# Every skip is one three-field row in data/discard.log
 # (timestamp, URL, `pre-score {score}/5: {signal}: {reason}`), so pre-filtering
 # is auditable and a pre-score row is distinguishable from the LLM pre-screen
 # rows that share the file; review them with `node discard-analytics.mjs`.
