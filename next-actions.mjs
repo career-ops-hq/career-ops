@@ -169,11 +169,12 @@ function printResult(result, summary, command) {
   let lines;
   if (Array.isArray(result.tasks)) {
     lines = [`Next actions (${safeText(result.timeZone)}): ${result.tasks.length} shown`];
+    const tasksById = new Map(result.tasks.map((task) => [task.id, task]));
     for (const [bucket, ids] of Object.entries(result.groups)) {
       if (!ids.length) continue;
       lines.push('', `${GROUP_LABELS[bucket] ?? safeText(bucket)} (${ids.length})`);
       for (const id of ids) {
-        const task = result.tasks.find((item) => item.id === id);
+        const task = tasksById.get(id);
         if (task) lines.push(...taskLines(task, result.timeZone));
       }
     }

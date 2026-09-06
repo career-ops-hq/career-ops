@@ -385,21 +385,21 @@ test('an unavailable external tracker leaves standalone actions usable and bound
   bound = await mutate(externalContext, bound, 'bind', { trackerId: '101' });
   const standalone = await openTask(externalContext, proposal('standalone'));
 
-  // ENOTDIR reproduces loss of tracker access on Windows and POSIX without
-  // depending on whether chmod binds an elevated test process.
+  // A file replacing the parent makes the tracker unreachable without chmod.
+  // Windows reports ENOENT for this path; POSIX reports ENOTDIR.
   renameSync(externalDir, join(root, 'external-backup'));
   writeFileSync(externalDir, 'The external tracker directory is unavailable.');
   const offlineContext = createActionsContext({ dataRoot: root, codeRoot: REPO, trackerPath: externalPath });
   const originalStore = storeBytes(store);
   const list = listActions(offlineContext, { now: NOW });
   const unavailable = list.tasks.find((task) => task.id === bound.id);
-  assert.equal(unavailable.flags.bindingState, 'tracker-unavailable');
+  assert.equal(unavailable.flags.bindingState, process.platform === 'win32' ? 'missing' : 'tracker-unavailable');
   assert.equal(unavailable.bucket, 'needs-review');
   assert.equal(list.tasks.find((task) => task.id === standalone.id).bucket, 'ready');
   assert.equal(readActions(offlineContext).tasks.find((task) => task.id === bound.id).title, bound.title);
   assert.deepEqual(storeBytes(store), originalStore, 'list/show do not repair or replace inaccessible references');
 
-  await expectCode(() => mutate(offlineContext, standalone, 'bind', { trackerId: '101' }), 'IO');
+  await expectCode(() => mutate(offlineContext, standalone, 'bind', { trackerId: '101' }), process.platform === 'win32' ? 'NOT_FOUND' : 'IO');
   assert.deepEqual(storeBytes(store), originalStore, 'a failed explicit bind must preserve all action bytes');
   const added = await createTask(offlineContext, proposal('added-while-tracker-offline'));
   assert.equal(added.state, 'proposed');
