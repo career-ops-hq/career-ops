@@ -60,6 +60,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { spawnSync } from 'child_process';
 import { normalizeCompany } from './tracker-utils.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const CV_PATH = 'cv.md';
 
@@ -561,7 +562,7 @@ const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 const payloadPathArg = args.find(a => !a.startsWith('--'));
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   if (selfTestMode) {
     runSelfTest();
   } else {
