@@ -13,7 +13,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isSubmitControl, snapshotLabel, SUBMIT_RX, IN_FORM_RX } from "../../src/lib/apply/submit-guard.mjs";
+import { isSubmitControl, snapshotLabel, SUBMIT_RX, IN_FORM_RX, CJK_SUBMIT_RX } from "../../src/lib/apply/submit-guard.mjs";
 
 /** The facts drive.ts reads, with the defaults of an ordinary in-form control. */
 const el = (facts) => ({ tag: "button", type: "button", inForm: true, ...facts });
@@ -468,4 +468,83 @@ test("IN_FORM_RX: matches the verb, not every word containing it", () => {
   assert.equal(IN_FORM_RX.test("Send"), true);
   assert.equal(IN_FORM_RX.test("SEND »"), true);
   assert.equal(IN_FORM_RX.test("Apply now"), true);
+});
+
+// ── The project's own locales: fr, nl, tr, and the three CJK markets ──
+
+test("isSubmitControl: the Japanese, Chinese and Korean submit terms are refused inside a real label", () => {
+  // Given the final buttons as the portals actually label them, term inside
+  // the label with letters on both sides (no spaces in these scripts)
+  for (const text of ["応募内容を送信する", "提交申请", "제출하기", "提出する", "지원서 보내기", "发送申请"]) {
+    // When the guard reads them outside any form
+    // Then each is refused on wording alone
+    assert.equal(isSubmitControl(el({ inForm: false, text })), true, text);
+  }
+});
+
+test("CJK_SUBMIT_RX: matches as a substring, where a word boundary never would", () => {
+  // Given the maintainer's three examples
+  assert.equal(CJK_SUBMIT_RX.test("応募内容を送信する"), true);
+  assert.equal(CJK_SUBMIT_RX.test("提交申请"), true);
+  assert.equal(CJK_SUBMIT_RX.test("제출하기"), true);
+  // And the Latin tier keeps its boundaries: the substring form is CJK-only
+  assert.equal(SUBMIT_RX.test("Resubmitted"), false);
+  assert.equal(CJK_SUBMIT_RX.test("Resubmitted"), false);
+});
+
+test("isSubmitControl: Turkish «Başvur» is refused even outside a form, because kariyer.net completes the application on that click", () => {
+  for (const text of ["Başvur", "BAŞVUR", "Başvuruyu Gönder"]) {
+    assert.equal(isSubmitControl(el({ inForm: false, text })), true, text);
+  }
+});
+
+test("isSubmitControl: the Dutch final button is refused, the Dutch entry link is not", () => {
+  // Given Indeed NL's own labels: "Solliciteer" opens the flow, "Sollicitatie versturen" files it
+  assert.equal(isSubmitControl(el({ tag: "a", type: "", inForm: false, text: "Solliciteer" })), false);
+  for (const text of ["Sollicitatie versturen", "Verstuur je sollicitatie", "Sollicitatie verzenden", "Verzend sollicitatie"]) {
+    assert.equal(isSubmitControl(el({ inForm: false, text })), true, text);
+  }
+  // And the same entry verb inside a form is the final button
+  assert.equal(isSubmitControl(el({ inForm: true, text: "Solliciteer" })), true);
+});
+
+test("isSubmitControl: the bare send verb of nl, tr, ja, zh and ko is refused even outside a form", () => {
+  // Given the bare verbs a form-less ATS puts on its final button. English
+  // "send" alone is held to a form ("Send to a friend"); these are not,
+  // because on those markets the bare verb is the submit button, and a
+  // control like Indeed NL's phone-confirmation "Versturen" is the lost click
+  // this guard accepts.
+  for (const text of ["Versturen", "Verstuur", "Verzenden", "Gönder", "送信", "发送", "發送", "보내기"]) {
+    assert.equal(isSubmitControl(el({ tag: "a", type: "", inForm: false, text })), true, text);
+  }
+  assert.equal(isSubmitControl(el({ tag: "a", type: "", inForm: false, text: "Send" })), false);
+});
+
+test("isSubmitControl: CJK apply verbs are the way in outside a form and the final button inside one", () => {
+  for (const text of ["応募する", "申请职位", "지원하기", "投递简历"]) {
+    assert.equal(isSubmitControl(el({ tag: "a", type: "", inForm: false, text })), false, `${text} outside a form`);
+    assert.equal(isSubmitControl(el({ inForm: true, text })), true, `${text} inside a form`);
+  }
+});
+
+test("isSubmitControl: the documented CJK collisions land on the safe side", () => {
+  // Given labels that contain a tier term without being the submit button.
+  // Apply-verb collisions stay actionable outside a form and are refused
+  // inside one; send-verb collisions are refused anywhere. The accepted cost
+  // of matching without word boundaries: a lost click, never a lost
+  // application.
+  for (const text of ["応募者一覧", "지원자 관리"]) {
+    assert.equal(isSubmitControl(el({ tag: "a", type: "", inForm: false, text })), false, `${text} outside a form`);
+    assert.equal(isSubmitControl(el({ inForm: true, text })), true, `${text} inside a form`);
+  }
+  for (const text of ["发送验证码", "已提交的申请"]) {
+    assert.equal(isSubmitControl(el({ tag: "a", type: "", inForm: false, text })), true, text);
+  }
+});
+
+test("isSubmitControl: a CJK term on a fillable field is not a submit control", () => {
+  // Given a text field whose placeholder shares a term with the vocabulary
+  const facts = { tag: "input", type: "text", inForm: true, placeholder: "提交する内容を入力" };
+  // Then it stays fillable: the wording tiers are held to clickables
+  assert.equal(isSubmitControl(facts), false);
 });

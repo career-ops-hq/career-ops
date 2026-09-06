@@ -107,7 +107,9 @@ const names = (facts) => {
 // bounded: every entry costs the loop a click it could otherwise make, so this
 // is the "sends it" vocabulary and not everything that moves a form forward
 // ("next", "continue", "weiter"). «Откликнуться» sits here and not below
-// because on hh.ru that button sends the response in one click.
+// because on hh.ru that button sends the response in one click, and "başvur"
+// for the same reason: on kariyer.net it completes the application. The bare
+// nl/tr send verbs are here, unlike English "send" (see IN_FORM_TERMS).
 const SUBMIT_TERMS = [
   // en
   "submit", "send application", "finish( application)?", "complete application", "apply (and|&) submit",
@@ -122,11 +124,13 @@ const SUBMIT_TERMS = [
   // pt
   "enviar candidatura", "submeter",
   // nl
-  "verzenden",
+  "verzend(en)?", "verstu(ur|ren)", "sollicitatie (versturen|verzenden)",
   // pl
   "wyślij",
   // ru
   "отправить", "откликнуться",
+  // tr
+  "gönder", "başvur",
 ];
 
 // IN_FORM_TERMS are refused only on a clickable inside a form. Outside a form
@@ -136,10 +140,42 @@ const SUBMIT_TERMS = [
 // friend", on the last step of a form it is the button that files the
 // application, and a custom ATS ships exactly that as
 // `<div role="button">Send</div>`, which no type or tag rule can catch.
+// English "send" is the one bare send verb held to a form: "Send to a friend"
+// is a listing-page link the loop may need. The nl/tr/ja/zh/ko send verbs sit
+// in the global tier above instead, because on those markets' portals the
+// bare verb IS the final button and a form-less ATS renders it outside any
+// <form>. The cost is a control like Indeed NL's bare "Versturen" on its
+// phone-confirmation step, which is refused too: the loop stops there and
+// the person clicks it, which is the side this guard errs on.
 const IN_FORM_TERMS = [
   "apply( now| for this job)?",
-  "postuler", "candidati", "candidatar-se", "solliciteren", "aplikuj", "bewerben",
+  "postuler", "candidati", "candidatar-se", "solliciteren", "solliciteer", "aplikuj", "bewerben",
   "send",
+];
+
+// The same two tiers for Japanese, Chinese and Korean, matched as substrings:
+// these scripts put no spaces around words, so a term inside a real label has
+// letters on both sides (応募内容を送信する, 提交申请, 제출하기) and the
+// `\p{L}` boundaries below never match. What the substring form refuses by
+// design: 已提交 ("submitted", a tab of sent applications) and 发送验证码
+// ("send a verification code") anywhere, 応募者一覧 or 지원자 inside a form.
+// A lost click on those is the accepted price; a false allow on a real submit
+// button is not.
+const CJK_SUBMIT_TERMS = [
+  // ja: submit, send
+  "提出", "送信",
+  // zh: submit, send (simplified and traditional)
+  "提交", "发送", "發送",
+  // ko: submit, send
+  "제출", "보내기",
+];
+const CJK_IN_FORM_TERMS = [
+  // ja: apply
+  "応募",
+  // zh: apply, deliver (a résumé)
+  "申请", "申請", "投递", "投遞",
+  // ko: apply
+  "지원",
 ];
 
 const wordRx = (terms) => new RegExp(`(^|[^\\p{L}])(${terms.join("|")})($|[^\\p{L}])`, "iu");
@@ -156,6 +192,17 @@ export const SUBMIT_RX = wordRx(SUBMIT_TERMS);
 
 /** Matches the in-form tier: refused only on a clickable inside a form. */
 export const IN_FORM_RX = wordRx(IN_FORM_TERMS);
+
+const substringRx = (terms) => new RegExp(terms.join("|"), "u");
+
+/** The CJK submit tier: no word boundaries, see CJK_SUBMIT_TERMS. */
+export const CJK_SUBMIT_RX = substringRx(CJK_SUBMIT_TERMS);
+
+/** The CJK in-form tier. */
+export const CJK_IN_FORM_RX = substringRx(CJK_IN_FORM_TERMS);
+
+const namesSubmit = (s) => SUBMIT_RX.test(s) || CJK_SUBMIT_RX.test(s);
+const namesInFormAction = (s) => IN_FORM_RX.test(s) || CJK_IN_FORM_RX.test(s);
 
 /**
  * A control a click can act on. The in-form tier is held to this, so a checkbox
@@ -202,12 +249,12 @@ export function isSubmitControl(facts = {}) {
   // reading every source independently must not turn that ordinary field into
   // one just because its secondary label shares a word with the vocabulary.
   const named = names(facts);
-  if (isClickable(tag, type, role) && named.some((s) => SUBMIT_RX.test(s))) return true;
+  if (isClickable(tag, type, role) && named.some(namesSubmit)) return true;
   // `role="button"` counts as a button here and for the silence rule below, but
   // NOT for HTML's typeless default above: a <div> does not submit on its own,
   // while its wording and its silence read exactly like a <button>'s, and its
   // handler can call requestSubmit() either way.
-  if (facts.inForm && isClickable(tag, type, role) && named.some((s) => IN_FORM_RX.test(s))) return true;
+  if (facts.inForm && isClickable(tag, type, role) && named.some(namesInFormAction)) return true;
   // No wording at all inside a form: an icon-only <button>, a
   // <div role="button">, an unlabelled <a>, or an <input type="button"> that
   // submits through its handler. Held to `isClickable`, not to button/input
