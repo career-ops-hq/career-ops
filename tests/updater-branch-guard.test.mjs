@@ -21,7 +21,7 @@
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { pass, fail } from './helpers.mjs';
+import { pass, fail, warn } from './helpers.mjs';
 import {
   COMMIT_ON_BRANCH_FLAG,
   commitOnBranchOptIn,
@@ -36,6 +36,7 @@ import {
   updateCommitBranchDecision,
   updateCommitCommand,
   gitIn,
+  gitQuietIn,
 } from '../update-system.mjs';
 
 // A throwaway repo with one commit on `main`, no remote. Remotes are added per
@@ -416,6 +417,56 @@ function stashStagedArgs(g) {
     pass('the contributor\'s own staged work leaves the snapshot trusted');
   } else {
     fail('unrelated staged work invalidated the withheld snapshot');
+  }
+}
+
+// ── 17. The snapshot must be recordable without a git identity ─────────
+{
+  // `commit-tree` needs an author and a committer. On an install with no git
+  // identity — a container, a fresh machine, a harness that isolates the global
+  // config — it fails, recordStagedUpdate()'s catch swallows that, and the next
+  // run falls back to an older baseline and reads this update's own files as
+  // the user's edits: the second-order bug, back through a side door.
+  const { dir, g, gitAt } = repoWithWithheldUpdate();
+  g('config', '--unset', 'user.email');
+  g('config', '--unset', 'user.name');
+
+  const noConfig = join(dir, 'no-such-gitconfig');   // absent file reads as empty, on every platform
+  const restore = { global: process.env.GIT_CONFIG_GLOBAL, system: process.env.GIT_CONFIG_SYSTEM };
+  process.env.GIT_CONFIG_GLOBAL = noConfig;
+  process.env.GIT_CONFIG_SYSTEM = noConfig;
+  try {
+    // NEGATIVE CONTROL: the same call without a pinned identity is what fails.
+    let bareCommitTreeFailed = false;
+    try {
+      // gitQuietIn: this call is EXPECTED to fail, so its stderr is noise.
+      gitQuietIn(dir, 'commit-tree', gitAt('write-tree'), '-p', gitAt('rev-parse', 'HEAD'), '-m', 'probe');
+    } catch {
+      bareCommitTreeFailed = true;
+    }
+
+    recordStagedUpdate('2.0.0', { git: gitAt });
+    let recorded = false;
+    try {
+      recorded = Boolean(gitAt('rev-parse', '--verify', '--quiet', `${STAGED_UPDATE_REF}^{commit}`));
+    } catch {
+      recorded = false;
+    }
+
+    if (!bareCommitTreeFailed) {
+      // This git resolved an identity anyway, so the case cannot be exercised
+      // here — say so rather than passing on a control that never fired.
+      warn('no-identity case not reachable on this git; snapshot recording untested here');
+    } else if (recorded && !atRiskIn(dir, gitAt).includes('sys.mjs')) {
+      pass('the snapshot is recorded even with no git identity configured');
+    } else {
+      fail(`no-identity: recorded=${recorded}, atRisk=${JSON.stringify(atRiskIn(dir, gitAt))}`);
+    }
+  } finally {
+    if (restore.global === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = restore.global;
+    if (restore.system === undefined) delete process.env.GIT_CONFIG_SYSTEM;
+    else process.env.GIT_CONFIG_SYSTEM = restore.system;
   }
 }
 
