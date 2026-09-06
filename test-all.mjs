@@ -3993,49 +3993,82 @@ if (
   fail('Chinese modes missing company-type compensation reliability checks');
 }
 
-// ── Localized oferta.md structural parity (#3669) ──
-// Six localized oferta.md files were frozen at a pre-Block-G shape: no Block G,
+// ── Localized evaluation-mode structural parity (#3669, #3828) ──
+// Localized evaluation modes were frozen at a pre-Block-G shape: no Block G,
 // no Risk Summary, and `## G)` meaning the draft-answers block that is `## H)`
-// in the canonical. A locale WITHOUT an oferta.md falls back to the canonical
-// and gets all of it, so a stale translation is worse than none. This pins the
-// structural contract on EVERY modes/*/oferta.md: the report-format letters
-// A)–H) present, `## Risk Summary` between G) and H), and the header field
-// labels + `## Risk Summary` literal in English (the web viewer maps them by
-// name and silently drops what it does not know). The allowlist below names the
-// files still frozen; a re-synced file MUST be removed from it (the check fails
-// loudly otherwise), so the list can only shrink. Denominator asserted: the
-// locale walk must find the known files, or the whole check is blind.
+// in the canonical. A locale WITHOUT an evaluation mode falls back to the
+// canonical and gets all of it, so a stale translation is worse than none.
+// This pins the structural contract on EVERY localized evaluation mode: the
+// report-format letters A)–H) present, `## Risk Summary` between G) and H), and
+// the header field labels + `## Risk Summary` literal in English (the web
+// viewer maps them by name and silently drops what it does not know).
+//
+// Evaluation modes are discovered by content, not by name: any
+// modes/<lang>/*.md that opens a `## A)` report block is one, so the seven
+// market mode sets that keep theirs under a market name (angebot, offre,
+// naukri, lowongan, annuncio, gonggo, vacature) are checked alongside the
+// oferta.md files and a future one cannot hide from the check by its filename
+// (#3828). The allowlist below names the files still frozen; a re-synced file
+// MUST be removed from it (the check fails loudly otherwise), and an entry the
+// walk no longer finds fails too, so the list can only shrink. Denominator
+// asserted against the full list of known files, or the check would go blind
+// one file at a time.
 {
-  const FROZEN_OFERTA = new Set(['da', 'es', 'pl', 'pt', 'ru', 'ua']);
+  const FROZEN_EVALUATION_MODES = new Set([
+    // modes/<lang>/oferta.md (#3669)
+    'da/oferta.md', 'es/oferta.md', 'pl/oferta.md', 'pt/oferta.md', 'ru/oferta.md', 'ua/oferta.md',
+    // market-named evaluation modes (#3828)
+    'de/angebot.md', 'fr/offre.md', 'hi/naukri.md', 'id/lowongan.md', 'it/annuncio.md',
+    'ko/gonggo.md', 'nl/vacature.md', 'tr/is-ilani.md',
+  ]);
   const REQUIRED_HEADINGS = ['## A)', '## B)', '## C)', '## D)', '## E)', '## F)', '## G)', '## Risk Summary', '## H)'];
   const REQUIRED_LABELS = ['**Date:**', '**URL:**', '**Archetype:**', '**Score:**', '**Legitimacy:**', '**PDF:**'];
-  const withOferta = readdirSync(join(ROOT, 'modes'), { withFileTypes: true })
-    .filter(d => d.isDirectory() && existsSync(join(ROOT, 'modes', d.name, 'oferta.md')))
-    .map(d => d.name).sort();
+  const REPORT_FORMAT_RE = /^## A\)/m;
+  const evaluationModes = [];
+  for (const dir of readdirSync(join(ROOT, 'modes'), { withFileTypes: true })) {
+    if (!dir.isDirectory()) continue;
+    for (const file of readdirSync(join(ROOT, 'modes', dir.name))) {
+      if (file.endsWith('.md') && REPORT_FORMAT_RE.test(readFile(`modes/${dir.name}/${file}`))) {
+        evaluationModes.push(`${dir.name}/${file}`);
+      }
+    }
+  }
+  evaluationModes.sort();
   const structuralGaps = (text) => {
     const gaps = REQUIRED_HEADINGS.filter(h => !text.includes(h)).concat(REQUIRED_LABELS.filter(l => !text.includes(l)));
     const g = text.lastIndexOf('## G)'), rs = text.lastIndexOf('## Risk Summary'), h = text.lastIndexOf('## H)');
     if (gaps.length === 0 && !(g < rs && rs < h)) gaps.push('order G) → Risk Summary → H)');
     return gaps;
   };
-  if (withOferta.length < 8 || !withOferta.includes('zh') || !withOferta.includes('ru')) {
-    fail(`localized oferta.md walk found ${withOferta.length} files (${withOferta.join(', ')}) — expected ≥8 incl. zh and ru; the parity check would be blind`);
+  // Every evaluation mode known today. A file that stops being discovered
+  // (renamed, or its `## A)` block dropped) fails here instead of silently
+  // leaving the check; a new one is picked up without being listed.
+  const KNOWN_EVALUATION_MODES = [
+    'ar/fursah.md', 'da/oferta.md', 'de/angebot.md', 'es/oferta.md', 'fr/offre.md', 'hi/naukri.md',
+    'id/lowongan.md', 'it/annuncio.md', 'ja/kyujin.md', 'ko/gonggo.md', 'nl/vacature.md', 'pl/oferta.md',
+    'pt/oferta.md', 'ru/oferta.md', 'tr/is-ilani.md', 'ua/oferta.md', 'zh-TW/oferta.md', 'zh/oferta.md',
+  ];
+  const undiscovered = KNOWN_EVALUATION_MODES.filter(f => !evaluationModes.includes(f));
+  if (undiscovered.length > 0) {
+    fail(`localized evaluation-mode walk did not find ${undiscovered.join(', ')} (renamed, or its \`## A)\` block is gone?) — found ${evaluationModes.length}: ${evaluationModes.join(', ')}`);
   } else {
     const canonicalGaps = structuralGaps(readFile('modes/oferta.md'));
-    const stillFrozen = [], resynced = [], drifted = [];
-    for (const lang of withOferta) {
-      const gaps = structuralGaps(readFile(`modes/${lang}/oferta.md`));
-      if (FROZEN_OFERTA.has(lang)) (gaps.length === 0 ? resynced : stillFrozen).push(lang);
-      else if (gaps.length > 0) drifted.push(`${lang} (${gaps.join(', ')})`);
+    const stillFrozen = [], resynced = [], drifted = [], unknownFrozen = [...FROZEN_EVALUATION_MODES].filter(f => !evaluationModes.includes(f));
+    for (const file of evaluationModes) {
+      const gaps = structuralGaps(readFile(`modes/${file}`));
+      if (FROZEN_EVALUATION_MODES.has(file)) (gaps.length === 0 ? resynced : stillFrozen).push(file);
+      else if (gaps.length > 0) drifted.push(`${file} (${gaps.join(', ')})`);
     }
     if (canonicalGaps.length > 0) {
       fail(`canonical modes/oferta.md lost its own report-format contract: ${canonicalGaps.join(', ')}`);
+    } else if (unknownFrozen.length > 0) {
+      fail(`FROZEN_EVALUATION_MODES names files the walk did not find (renamed or deleted?): ${unknownFrozen.join(', ')}`);
     } else if (drifted.length > 0) {
-      fail(`localized oferta.md drifted from the canonical report structure: ${drifted.join('; ')}`);
+      fail(`localized evaluation mode drifted from the canonical report structure: ${drifted.join('; ')}`);
     } else if (resynced.length > 0) {
-      fail(`localized oferta.md re-synced but still listed as frozen — remove from FROZEN_OFERTA in test-all.mjs and tick it in #3669: ${resynced.join(', ')}`);
+      fail(`localized evaluation mode re-synced but still listed as frozen — remove from FROZEN_EVALUATION_MODES in test-all.mjs and tick it in #3669 (oferta.md) or #3828 (market-named): ${resynced.join(', ')}`);
     } else {
-      pass(`localized oferta.md structural parity: ${withOferta.length - stillFrozen.length} of ${withOferta.length} files carry A)–H) + Risk Summary + English header labels; still frozen (allowlisted, #3669): ${stillFrozen.join(', ') || 'none'}`);
+      pass(`localized evaluation-mode structural parity: ${evaluationModes.length - stillFrozen.length} of ${evaluationModes.length} files carry A)–H) + Risk Summary + English header labels; still frozen (allowlisted, #3669/#3828): ${stillFrozen.join(', ') || 'none'}`);
     }
   }
 }
