@@ -31,6 +31,7 @@ import {
   locallyModifiedSystemFiles,
   recordStagedUpdate,
   resolveUpdateCommitBranch,
+  shellQuoteArg,
   skippedBranchCommitNotice,
   updateCommitBranchDecision,
   updateCommitCommand,
@@ -232,6 +233,44 @@ console.log('\n🧪 Testing updater branch guard (#3846)...');
     pass('notice names the branch and offers keep / move / undo');
   } else {
     fail(`notice is missing: ${missing.join(', ')}`);
+  }
+}
+
+// ── 11b. The printed commands must survive being pasted into a shell ───
+{
+  // Git's ref rules forbid spaces and some glob characters but allow `;`, `&`,
+  // `$` and backticks, so a branch name is not the safe token it looks like —
+  // and these commands exist to be copied into a terminal.
+  const notice = skippedBranchCommitNotice({
+    currentBranch: 'feat/x',
+    defaultBranch: 'release;whoami',
+    version: '1.33.0',
+    commitCommand: 'git commit -m "x"',
+  });
+  const bare = shellQuoteArg('main') === 'main' && shellQuoteArg('feat/x') === 'feat/x';
+  if (notice.includes("git switch 'release;whoami'") && !notice.includes('git switch release;whoami') && bare) {
+    pass('a branch name carrying shell syntax is quoted in the printed commands');
+  } else {
+    fail(`unquoted interpolation in the notice:\n${notice}`);
+  }
+}
+
+// ── 11c. Option 2 must not move the contributor's own staged work ──────
+{
+  // `stash push --staged` takes the whole index, not this update's share of it.
+  // The updater already knows when something else is staged — the same signal
+  // that scopes its commit — so the recipe has to say so instead of quietly
+  // carrying that work onto the default branch.
+  const args = {
+    currentBranch: 'feat/x', defaultBranch: 'main', version: '1.33.0',
+    commitCommand: 'git commit -m "x"',
+  };
+  const warned = skippedBranchCommitNotice({ ...args, hasUnrelatedStaged: true });
+  const quiet = skippedBranchCommitNotice({ ...args, hasUnrelatedStaged: false });
+  if (/other changes staged/.test(warned) && !/other changes staged/.test(quiet)) {
+    pass('option 2 warns when other staged work would ride along, and only then');
+  } else {
+    fail('the unrelated-staged warning is missing or unconditional');
   }
 }
 
