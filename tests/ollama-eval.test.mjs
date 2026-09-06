@@ -1,5 +1,5 @@
-// tests/ollama-eval-streaming-context.test.mjs — the context window follows OLLAMA_NUM_CTX,
-// and the response is read as a stream.
+// tests/ollama-eval.test.mjs — the context window follows OLLAMA_NUM_CTX, and the response
+// is read as a stream.
 //
 // Two defects this locks down:
 //

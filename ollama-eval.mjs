@@ -104,6 +104,10 @@ let baseUrl   = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replac
 // 32768, so behaviour is unchanged unless OLLAMA_NUM_CTX is set. Raise it for a model with a
 // bigger window; `ollama show` reports each model's ceiling (qwen2.5 caps at 32768).
 const numCtx = parseInt(process.env.OLLAMA_NUM_CTX || '32768', 10);
+if (Number.isNaN(numCtx) || numCtx <= 0) {
+  console.error(`❌  Invalid OLLAMA_NUM_CTX: "${process.env.OLLAMA_NUM_CTX}" — must be a positive integer (tokens).`);
+  process.exit(1);
+}
 let saveReport = true;
 
 for (let i = 0; i < args.length; i++) {
@@ -339,6 +343,10 @@ try {
   if (tail) {
     try {
       const obj = JSON.parse(tail);
+      if (obj.error) {
+        console.error(`❌  Ollama error: ${obj.error}`);
+        process.exit(1);
+      }
       if (obj.message?.content) acc += obj.message.content;
       if (obj.done) {
         promptCount = obj.prompt_eval_count ?? promptCount;
