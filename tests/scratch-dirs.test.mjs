@@ -17,7 +17,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync, utimesSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, relative, sep } from 'path';
-import { pass, fail, ROOT } from './helpers.mjs';
+import { pass, fail, warn, ROOT } from './helpers.mjs';
 import {
   SCRATCH_PREFIX, MIN_SCRATCH_AGE_MS, MAX_SCRATCH_AGE_MS, isScratchDir,
   sweepScratchDirs, markScratchOwner, scratchOwnerAlive,
@@ -197,6 +197,7 @@ const age = (dir, ms = MIN_SCRATCH_AGE_MS * 2) => {
   // behind it. Smaller than it first looks, and still not this function's to
   // delete.
   const dir = mkdtempSync(join(tmpdir(), 'co-scratch-symlink-'));
+  let linkable = true;
   try {
     const precious = join(dir, 'precious');
     mkdirSync(join(precious, 'work'), { recursive: true });
@@ -204,7 +205,27 @@ const age = (dir, ms = MIN_SCRATCH_AGE_MS * 2) => {
     const root = join(dir, 'root');
     mkdirSync(root, { recursive: true });
     const link = join(root, `${SCRATCH_PREFIX}symlink`);
-    symlinkSync(precious, link, 'dir');
+    // A `dir` symlink needs SeCreateSymbolicLinkPrivilege on Windows, which a
+    // non-elevated shell without Developer Mode does not hold — the default box,
+    // and not what `windows-latest` reproduces. Measured there by @artemtrofymenko:
+    // this threw EPERM, the throw took the four sections after it with it, and CI
+    // stayed green so nothing said so.
+    //
+    // A junction needs no privilege and the target here is a directory, so it is
+    // a substitute rather than a weakening: `lstat` reports a junction as
+    // `isSymbolicLink() === true`, which is the property under test — it is what
+    // makes `entry.isDirectory()` false and sends the sweep down the branch this
+    // section exists to pin. Verified on that same box: the case passes for its
+    // own reason, target intact and all three result arrays empty.
+    try {
+      symlinkSync(precious, link, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch (err) {
+      // Anything else that cannot make a link says so and moves on, rather than
+      // throwing and silently deleting the sections below it from the run.
+      warn(`cannot create a link here (${err?.code ?? err?.message}) — the `
+        + 'symlink case did not run');
+      linkable = false;
+    }
     // The TARGET is backdated, not just the parent: a sweep that resolved the
     // link with statSync() would read this old mtime, judge the link stale, and
     // act on it. Ageing only the parent would leave the link looking fresh and
@@ -212,9 +233,13 @@ const age = (dir, ms = MIN_SCRATCH_AGE_MS * 2) => {
     age(precious);
     age(root);
 
-    const { removed, kept, failed } = sweepScratchDirs(root);
+    const { removed, kept, failed } = linkable
+      ? sweepScratchDirs(root)
+      : { removed: [], kept: [], failed: [] };
     const survived = existsSync(join(precious, 'work', 'important.txt'));
-    if (survived && removed.length === 0 && kept.length === 0 && failed.length === 0) {
+    if (!linkable) {
+      // Already warned above. Not a pass: this section asserted nothing.
+    } else if (survived && removed.length === 0 && kept.length === 0 && failed.length === 0) {
       pass('a symlink named like a scratch directory is neither followed nor removed');
     } else {
       fail(`symlink handling wrong: target survived=${survived} `
