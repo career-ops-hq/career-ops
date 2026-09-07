@@ -159,3 +159,4 @@ public commit with a stated reason.
 - @nessuarez | Nestor Suarez Alfonso | 2026-09-03 | "My career now belongs to me." | id:1491974 | src:https://github.com/career-ops-hq/career-ops/discussions/3777 | n:111
 - @digerati9 | 2026-09-04 | id:19416174 | src:https://github.com/career-ops-hq/career-ops/discussions/3806 | n:112
 - @mortee | 2026-09-04 | id:338540 | src:https://github.com/career-ops-hq/career-ops/discussions/3827 | n:113
+- @adityap | Aditya Poddar | 2026-09-07 | id:7117191 | src:https://github.com/career-ops-hq/career-ops/discussions/3970 | n:114
