@@ -324,7 +324,12 @@ test("buildPrompt: modes counts in a multi-market declaration without a redundan
   const prompt = buildPrompt({
     kind: "evaluate",
     ...ARGS,
-    lang: { ...DE_ZH, modesDir: "modes", modesDirs: ["modes", "modes/zh"] },
+    lang: {
+      ...DE_ZH,
+      modesDir: "modes",
+      modesDirs: ["modes", "modes/zh"],
+      evalModeFile: "modes/oferta.md",
+    },
   });
   assert.doesNotMatch(prompt, /read modes\/_shared\.md/i);
   assert.match(prompt, /modes\/zh\/_shared\.md/);
@@ -341,6 +346,11 @@ test("buildPrompt: unattended multi-market evaluation falls back to primary and 
   assert.match(prompt, /do not stop or ask the candidate/i);
   assert.match(prompt, /first\/primary market \(modes\/de\)/);
   assert.match(prompt, /report header or Block G/i);
+  assert.ok(
+    prompt.indexOf("If those signals remain genuinely ambiguous")
+      < prompt.indexOf("2. Persist the result CANONICALLY"),
+    "ambiguity resolution must precede report and tracker persistence",
+  );
 });
 
 test("buildPrompt: research gets shared market context without evaluation stop rules", () => {
