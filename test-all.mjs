@@ -15938,9 +15938,13 @@ try {
       '',
     );
     const emptyDefaults = emptyEmitted?.cadenceDefaults;
+    // Value equality, not just shape. Returning CADENCE here (defaults PLUS the
+    // user's profile overrides) would satisfy every structural check while
+    // handing the form one of the user's own overrides as the baseline they
+    // would be reverting to, which is the #2369 mistake exactly.
     const emptyOk = emptyDefaults && typeof emptyDefaults === 'object'
-      && cadKeys.every((k) => Number.isInteger(emptyDefaults[k]) && emptyDefaults[k] >= 0)
-      && Object.keys(emptyDefaults).length === cadKeys.length;
+      && Object.keys(emptyDefaults).length === cadKeys.length
+      && cadKeys.every((k) => Number.isInteger(emptyDefaults[k]) && emptyDefaults[k] === DEFAULT_CADENCE[k]);
     if (emptyOk) {
       pass('followup-cadence emits cadenceDefaults even when the tracker is empty (#4005)');
     } else {
