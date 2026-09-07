@@ -8,6 +8,7 @@
  *
  * Usage:
  *   node update-system.mjs check      # Check if update available
+ *   node update-system.mjs status     # Print installed version (with short SHA)
  *   node update-system.mjs apply --confirm
  *                                     # Apply update after explicit confirmation
  *   node update-system.mjs apply --force --confirm
@@ -659,9 +660,27 @@ function parseVersionFile(raw) {
   return raw.trim().split(/\s+/)[0] || '';
 }
 
-function localVersion() {
-  const vPath = join(ROOT, 'VERSION');
+function localShortSha(root = ROOT) {
+  try {
+    return gitQuietIn(root, 'rev-parse', '--short', 'HEAD') || '';
+  } catch {
+    return '';
+  }
+}
+
+function formatVersionWithSha(version, sha) {
+  return sha ? `${version} (${sha})` : version;
+}
+
+function localVersion(root = ROOT) {
+  const vPath = join(root, 'VERSION');
   return existsSync(vPath) ? parseVersionFile(readFileSync(vPath, 'utf-8')) : '0.0.0';
+}
+
+export function formatLocalVersion(root = ROOT) {
+  const version = localVersion(root);
+  const sha = localShortSha(root);
+  return formatVersionWithSha(version, sha);
 }
 
 function compareVersions(a, b) {
@@ -780,11 +799,11 @@ function git(...args) {
  * @param {...string} args - git arguments.
  * @returns {string} Trimmed stdout.
  */
-function gitQuiet(...args) {
+export function gitQuietIn(root, ...args) {
   const timeout = gitTimeoutMs(args);
   try {
     return execFileSync('git', args, {
-      cwd: ROOT, encoding: 'utf-8', timeout, stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: root, encoding: 'utf-8', timeout, stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
   } catch (err) {
     if (isTimeoutLikeError(err)) {
@@ -792,6 +811,10 @@ function gitQuiet(...args) {
     }
     throw err;
   }
+}
+
+function gitQuiet(...args) {
+  return gitQuietIn(ROOT, ...args);
 }
 
 /**
@@ -1789,6 +1812,7 @@ async function check() {
   }
 
   const local = localVersion();
+  const localSha = localShortSha();
   let remote = '';
   let releaseVersion = '';
   let changelog = '';
@@ -1883,7 +1907,7 @@ async function check() {
   }
 
   if (compareVersions(local, remote) >= 0 && !systemTreeDrift) {
-    console.log(JSON.stringify({ status: 'up-to-date', local, remote, local_commit: localCommit || undefined, remote_commit: remoteCommit || undefined }));
+    console.log(JSON.stringify({ status: 'up-to-date', local, remote, local_commit: localCommit || undefined, local_sha: localSha || undefined, remote_commit: remoteCommit || undefined }));
     return;
   }
 
@@ -1893,6 +1917,7 @@ async function check() {
     remote,
     reason: systemTreeDrift ? 'system-files-changed' : 'version-changed',
     local_commit: localCommit || undefined,
+    local_sha: localSha || undefined,
     remote_commit: remoteCommit || undefined,
     changelog: changelog.slice(0, 500),
   }));
@@ -2754,11 +2779,12 @@ if (isCli) {
   try {
     switch (cmd) {
       case 'check': await check(); break;
+      case 'status': console.log(`career-ops v${formatLocalVersion()}`); break;
       case 'apply': await apply(); break;
       case 'rollback': rollback(); break;
       case 'dismiss': dismiss(); break;
       default:
-        console.log('Usage: node update-system.mjs [check|apply --confirm [--force]|rollback|dismiss]');
+        console.log('Usage: node update-system.mjs [check|status|apply --confirm [--force]|rollback|dismiss]');
         process.exit(1);
     }
   } catch (err) {
