@@ -12,12 +12,13 @@
 import { pass, fail, ROOT, captureConsoleErrors } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
+import { execFileSync } from 'child_process';
 
 console.log('\nProvider — workday multi-location placeholders');
 
 const workdayModule = await import(pathToFileURL(join(ROOT, 'providers/workday.mjs')).href);
 const workday = workdayModule.default;
-const { isMultiLocationPlaceholder, locationsFromDetail } = workdayModule;
+const { isMultiLocationPlaceholder, locationsFromDetail, postedAtFromDetail } = workdayModule;
 
 const ENTRY = { name: 'CrowdStrike', careers_url: 'https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers' };
 const JOB_BASE = 'https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers';
@@ -42,13 +43,17 @@ const PAGE0 = {
     },
   ],
 };
+// `startDate` is the bare `YYYY-MM-DD` all 11 measured detail documents
+// returned; it is what makes a resolved posting exactly datable (#3860).
 const DETAIL = {
   jobPostingInfo: {
     id: 'R23456',
     location: 'USA - Sunnyvale, CA',
     additionalLocations: ['USA - Austin, TX', 'USA - Redmond, WA'],
+    startDate: '2026-09-04',
   },
 };
+const DETAIL_STARTED_MS = Date.parse('2026-09-04');
 
 const mkCtx = (fetchJson, extra = {}) => ({
   transport: 'http',
@@ -107,7 +112,7 @@ if (locationsFromDetail({ jobPostingInfo: { additionalLocations: ['USA - Austin,
 {
   const seen = [];
   const jobs = await workday.fetch(ENTRY, mkCtx(async (url, opts) => {
-    seen.push({ url, method: opts?.method || 'GET' });
+    seen.push({ url, method: opts?.method || 'GET', opts });
     if (url.startsWith(CXS_BASE) && url.endsWith('/jobs')) return PAGE0;
     if (url === `${CXS_BASE}/job/USA---Sunnyvale-CA/Engineer-III_R23456`) return DETAIL;
     throw new Error(`unexpected url ${url}`);
@@ -137,6 +142,121 @@ if (locationsFromDetail({ jobPostingInfo: { additionalLocations: ['USA - Austin,
     pass('the detail request is a GET (the list endpoint is the POST one)');
   } else {
     fail(`detail request used method ${JSON.stringify(details[0]?.method)}`);
+  }
+
+  // Both of these are load-bearing and both are invisible in the returned jobs,
+  // so without an assertion a refactor can drop either and this file stays
+  // green. `redirect: 'error'` is what stops a detail URL from being walked off
+  // the tenant origin; `accept-language` is what at least one tenant answers
+  // HTTP 500 without (#3860, reproduced 0/5 without it, 5/5 with).
+  const detailOpts = details[0]?.opts;
+  if (detailOpts?.redirect === 'error') {
+    pass("the detail request sets redirect: 'error' (no redirect off the tenant origin)");
+  } else {
+    fail(`detail request redirect was ${JSON.stringify(detailOpts?.redirect)}`);
+  }
+  if (detailOpts?.headers?.['accept-language']) {
+    pass('the detail request sends accept-language (a tenant 500s without it)');
+  } else {
+    fail(`detail request headers were ${JSON.stringify(detailOpts?.headers)}`);
+  }
+
+  // The date half of #3860: a resolved posting is dated from the detail
+  // document, not from the list endpoint's relative prose.
+  if (placeholder && placeholder.postedAt === DETAIL_STARTED_MS) {
+    pass('workday.fetch() dates a resolved posting from jobPostingInfo.startDate');
+  } else {
+    fail(`resolved posting postedAt was ${JSON.stringify(placeholder?.postedAt)}, expected ${DETAIL_STARTED_MS}`);
+  }
+  // The ordinary posting was never fetched in detail, so it must still carry
+  // what parsePostedOn derived — proof the enrichment did not redate the board.
+  if (ordinary && ordinary.postedAt !== DETAIL_STARTED_MS && typeof ordinary.postedAt === 'number') {
+    pass('workday.fetch() leaves an unresolved posting on its parsePostedOn date');
+  } else {
+    fail(`ordinary posting postedAt was ${JSON.stringify(ordinary?.postedAt)}`);
+  }
+}
+
+// --- postedAtFromDetail(): the date, strictly ---------------------------------
+// Deliberately narrower than Date.parse: an unrecognized format must leave
+// postedAt alone rather than produce an implementation-defined timestamp.
+for (const [label, doc, want] of [
+  ['a bare YYYY-MM-DD', { jobPostingInfo: { startDate: '2026-09-04' } }, Date.parse('2026-09-04')],
+  ['an ISO date with time and Z', { jobPostingInfo: { startDate: '2026-09-04T08:30:00Z' } }, Date.parse('2026-09-04T08:30:00Z')],
+  ['a padded value', { jobPostingInfo: { startDate: '  2026-09-04  ' } }, Date.parse('2026-09-04')],
+  ['an impossible date', { jobPostingInfo: { startDate: '2026-02-30' } }, undefined],
+  ['a day-31 rollover', { jobPostingInfo: { startDate: '2026-04-31' } }, undefined],
+  ['month 13', { jobPostingInfo: { startDate: '2026-13-01' } }, undefined],
+  // Kept, not discarded: its UTC day is the 5th, but the 4th is a real date and
+  // the offset form is legitimate. This is the case a naive round-trip loses.
+  ['an offset whose UTC day differs', { jobPostingInfo: { startDate: '2026-09-04T23:00:00-05:00' } }, Date.parse('2026-09-04T23:00:00-05:00')],
+  ['a leap day that exists', { jobPostingInfo: { startDate: '2028-02-29' } }, Date.parse('2028-02-29')],
+  ['a leap day that does not', { jobPostingInfo: { startDate: '2026-02-29' } }, undefined],
+  // Rejected on purpose: Date.parse would read this in the scanning machine's
+  // local zone, so the day it lands on depends on where the scan runs. See the
+  // TZ assertion below, which is what actually pins this down.
+  ['a time with no offset', { jobPostingInfo: { startDate: '2026-09-04T08:30:00' } }, undefined],
+  ['a time with no offset and no seconds', { jobPostingInfo: { startDate: '2026-09-04T08:30' } }, undefined],
+  // A real ISO year below 0100 — Date.UTC would map it onto 19xx.
+  // Hard literal, cross-checked against Python's datetime rather than derived
+  // from Date.parse — the value this file is asserting about.
+  ['a year below 0100', { jobPostingInfo: { startDate: '0026-05-05' } }, -61335964800000],
+  ['a US-style date', { jobPostingInfo: { startDate: '09/04/2026' } }, undefined],
+  ['prose', { jobPostingInfo: { startDate: 'Posted Today' } }, undefined],
+  ['an empty string', { jobPostingInfo: { startDate: '' } }, undefined],
+  ['a non-string', { jobPostingInfo: { startDate: 1788652800000 } }, undefined],
+  ['a missing startDate', { jobPostingInfo: { location: 'USA - Austin, TX' } }, undefined],
+  ['a missing jobPostingInfo', {}, undefined],
+  ['null', null, undefined],
+]) {
+  const got = postedAtFromDetail(doc);
+  if (got === want) pass(`postedAtFromDetail() returns ${JSON.stringify(want)} for ${label}`);
+  else fail(`postedAtFromDetail(${label}) returned ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+}
+
+// The same detail document must date a posting identically no matter where the
+// scan runs. Real child processes with TZ set, because Date.parse reads a
+// zoneless date-time in the machine's local zone and an in-process TZ change is
+// not reliably picked up once the engine has cached the zone.
+{
+  const script = `import { postedAtFromDetail } from '${pathToFileURL(join(ROOT, 'providers/workday.mjs')).href}';
+process.stdout.write(JSON.stringify([
+  postedAtFromDetail({ jobPostingInfo: { startDate: '2026-09-04' } }),
+  postedAtFromDetail({ jobPostingInfo: { startDate: '2026-09-04T08:30:00Z' } }),
+  postedAtFromDetail({ jobPostingInfo: { startDate: '2026-09-04T08:30:00' } }),
+]));`;
+  const zones = ['UTC', 'America/New_York', 'Asia/Tokyo'];
+  const results = zones.map((tz) => execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+    env: { ...process.env, TZ: tz }, encoding: 'utf8',
+  }));
+  if (new Set(results).size === 1) {
+    pass(`postedAtFromDetail() returns the same timestamps in ${zones.join(', ')}`);
+  } else {
+    fail(`postedAtFromDetail() is timezone-dependent: ${zones.map((tz, i) => `${tz}=${results[i]}`).join(' ')}`);
+  }
+  // And specifically: the zoneless form is the one that would have moved, so it
+  // must come back unparsed rather than "consistent by luck".
+  if (JSON.parse(results[0])[2] === null) {
+    pass('postedAtFromDetail() refuses a date-time that states no offset');
+  } else {
+    fail(`zoneless date-time parsed to ${JSON.parse(results[0])[2]}`);
+  }
+}
+
+// A detail document can resolve the location and still carry no usable date.
+// The location must be taken and the date left alone — an absent startDate is
+// not a reason to erase the date parsePostedOn already derived.
+{
+  const jobs = await workday.fetch(ENTRY, mkCtx(async (url) => {
+    if (url.endsWith('/jobs')) return PAGE0;
+    return { jobPostingInfo: { location: 'USA - Sunnyvale, CA', additionalLocations: ['USA - Austin, TX'] } };
+  }));
+  const placeholder = jobs.find((j) => j.url.endsWith('Engineer-III_R23456'));
+  if (placeholder && placeholder.location === 'USA - Sunnyvale, CA · USA - Austin, TX'
+    && typeof placeholder.postedAt === 'number' && placeholder.postedAt !== DETAIL_STARTED_MS) {
+    pass('workday.fetch() keeps the parsePostedOn date when the detail document has no startDate');
+  } else {
+    fail(`dateless detail left location ${JSON.stringify(placeholder?.location)} / postedAt ${JSON.stringify(placeholder?.postedAt)}`);
   }
 }
 

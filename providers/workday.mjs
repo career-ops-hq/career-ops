@@ -437,6 +437,74 @@ export function locationsFromDetail(detail) {
   return [...new Set(places)].join(' · ');
 }
 
+/**
+ * The posting's real publication date, from the detail document.
+ *
+ * The list endpoint offers only `postedOn`, relative prose that `parsePostedOn`
+ * turns into a coarse timestamp and that tops out at an unbounded "30+ Days
+ * Ago" (→ `undefined`). The detail document carries `jobPostingInfo.startDate`,
+ * an absolute date — so a posting we already paid a GET for can be dated
+ * exactly instead of approximately.
+ *
+ * Deliberately stricter than `Date.parse` alone: `Date.parse` falls back to an
+ * implementation-defined parse for anything non-ISO, so a tenant emitting some
+ * other date format could yield a plausible-looking timestamp on one Node build
+ * and NaN on another. Measured on cvshealth/crowdstrike/nvidia, 11 of 11 detail
+ * documents returned a bare `YYYY-MM-DD` and none carried a time — but 11 is a
+ * small sample and three further tenants could not be measured (their list
+ * endpoint answers HTTP 422), so anything that is not an ISO-8601 date is left
+ * alone rather than guessed at. `postedAt` then keeps its `parsePostedOn`
+ * value, which is the pre-existing behaviour.
+ *
+ * Note the granularity change this implies for a posting whose `postedOn` said
+ * "Posted Today": `Date.now()` becomes that day's UTC midnight, i.e. slightly
+ * EARLIER. That cannot cost a posting its place in a `--since` window —
+ * `resolveEffectiveAfter` truncates the cutoff to a date and
+ * `buildPostedDateFilter` parses it as UTC midnight too (scan.mjs), so both
+ * sides of the comparison are day-aligned.
+ *
+ * @param {unknown} detail - Parsed detail document.
+ * @returns {number|undefined} Epoch ms, or undefined when there is no usable date.
+ */
+export function postedAtFromDetail(detail) {
+  const raw = detail?.jobPostingInfo?.startDate;
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  // `YYYY-MM-DD`, or a time form that states its offset (`Z` / `±HH:MM`).
+  //
+  // The offset is REQUIRED once a time is present, and that is the whole point
+  // of this branch: Date.parse resolves a date-only string as UTC, and a
+  // date-time carrying Z or an offset as that offset, but a date-time WITHOUT
+  // one as the local time of whatever machine is scanning (ECMAScript
+  // §21.4.3.2). Measured: `2026-09-04T08:30:00` is 08:30Z on a UTC box, 12:30Z
+  // in America/New_York and 2026-09-**03**T23:30Z in Asia/Tokyo — the day
+  // itself moves. Since `--since` is compared day-against-day, that would make
+  // the same posting eligible on one machine and not on another. Such a string
+  // does not say which day it means, so it is left unparsed and `postedAt`
+  // keeps its `parsePostedOn` value.
+  const shape = /^(\d{4})-(\d{2})-(\d{2})(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2}))?$/.exec(trimmed);
+  if (!shape) return undefined;
+  // The shape above still admits a date that does not exist, and `Date.parse`
+  // does NOT reject those — it rolls them over (`2026-02-30` parses as
+  // 2026-03-02; measured on this Node, not assumed). A silently shifted date is
+  // worse than no date, so the calendar is checked on the Y-M-D components
+  // themselves. Doing it on the components rather than on the parsed timestamp
+  // keeps a legitimate offset form like `...T23:00:00-05:00`, whose UTC day is
+  // the NEXT one, from being thrown away as a rollover.
+  const [, y, m, d] = shape;
+  const asUtc = new Date(0);
+  // setUTCFullYear, not Date.UTC: Date.UTC maps a year of 0..99 onto 19xx, so
+  // Date.UTC(26, ...) is 1926 and the equality check below would reject the
+  // perfectly real date `0026-05-05`. Irrelevant to any live job posting, but
+  // this reads as a general ISO-8601 check and should not lie about one.
+  asUtc.setUTCFullYear(Number(y), Number(m) - 1, Number(d));
+  if (asUtc.getUTCFullYear() !== Number(y) || asUtc.getUTCMonth() !== Number(m) - 1 || asUtc.getUTCDate() !== Number(d)) {
+    return undefined;
+  }
+  const ms = Date.parse(trimmed);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
 export function parseWorkdayResponse(json, entry) {
   const ep = resolveEndpoint(entry);
   const jobBase = ep?.jobBase || '';
@@ -785,6 +853,7 @@ export default {
       const pending = placeholders.filter((j) => j.url.startsWith(`${ep.jobBase}/`));
       const unaddressable = placeholders.length - pending.length;
       let resolved = 0;
+      let redated = 0;
       let failed = 0;
       let spent = 0;
       for (const job of pending) {
@@ -794,9 +863,12 @@ export default {
         // Same politeness as the pagination loop: one tenant, one request at a
         // time, spaced. A burst of same-host GETs is what its WAF watches for.
         if (spent > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
-        let places = '';
+        // Fetched once and parsed twice: the location and the date both live in
+        // this one document, and a second GET for the date would double the
+        // cost of the enrichment for a field that is already in hand.
+        let detail;
         try {
-          places = locationsFromDetail(await fetchJsonWithRetry(ctx, `${ep.cxsBase}${externalPath}`, detailOpts, RETRY_POLICY));
+          detail = await fetchJsonWithRetry(ctx, `${ep.cxsBase}${externalPath}`, detailOpts, RETRY_POLICY);
         } catch {
           // Fail soft, per posting. A detail document that 404s, rate-limits or
           // returns something unexpected leaves the placeholder exactly as it
@@ -806,15 +878,29 @@ export default {
           failed++;
           continue;
         }
+        const places = locationsFromDetail(detail);
         if (places === '') { failed++; continue; }
         job.location = places;
         resolved++;
+        // Only on a posting whose location actually resolved: the date is a
+        // by-product of a request made for the location, never a reason to make
+        // one. A document with no usable startDate leaves postedAt as
+        // parsePostedOn left it — an absent date must not erase a present one.
+        const started = postedAtFromDetail(detail);
+        if (started !== undefined) {
+          job.postedAt = started;
+          redated++;
+        }
       }
       if (placeholders.length > 0) {
         const capped = pending.length > spent ? `, ${pending.length - spent} left unresolved by the ${MAX_DETAIL_REQUESTS}-request cap` : '';
         const unreadable = failed > 0 ? `, ${failed} detail document(s) unreadable` : '';
         const unroutable = unaddressable > 0 ? `, ${unaddressable} with no site-relative path` : '';
-        console.error(`ℹ️  workday: ${entry.name} resolved ${resolved} of ${placeholders.length} multi-location placeholder(s)${unreadable}${unroutable}${capped}`);
+        // Reported separately from `resolved` because the two can differ: a
+        // detail document can carry places but no parseable startDate. Folding
+        // them into one number would hide that.
+        const dated = redated > 0 ? `, ${redated} dated exactly from the detail document` : '';
+        console.error(`ℹ️  workday: ${entry.name} resolved ${resolved} of ${placeholders.length} multi-location placeholder(s)${unreadable}${unroutable}${capped}${dated}`);
       }
     }
 
