@@ -28,6 +28,21 @@ const historyContaining = (...paths) => (...args) => {
   return paths.includes(file) ? 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2' : '';
 };
 
+// A fake that models git's PATHSPEC behaviour: without --literal-pathspecs a
+// candidate containing glob metacharacters matches a different upstream path.
+// '*' is modelled as "matches any run of characters", which is enough to show
+// the difference the flag makes.
+const globbingHistory = (...paths) => (...args) => {
+  const file = args[args.length - 1];
+  const literal = args.includes('--literal-pathspecs');
+  const star = file.indexOf('*');
+  const matches = (p) => {
+    if (literal || star === -1) return p === file;
+    return p.startsWith(file.slice(0, star)) && p.endsWith(file.slice(star + 1));
+  };
+  return paths.some(matches) ? 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2' : '';
+};
+
 // The decision `apply()` actually makes, mirroring its call site:
 //   if (!wasEverShippedUpstream(f, ref)) { keep; continue; }
 // Tests assert through this rather than the bare return value — a helper named
@@ -106,5 +121,28 @@ const wouldPrune = (file, revList) => wasEverShippedUpstream(file, 'FETCH_HEAD',
     fail('an empty candidate path was reported as shipped');
   } else {
     pass('an empty candidate path is rejected without consulting history');
+  }
+}
+
+// ── 6. a filename with glob metacharacters is matched literally ─────────────
+{
+  // `-- <path>` is a pathspec. A fork-local `modes/_share[a-z].md` would match
+  // upstream's `modes/_shared.md`, read as "shipped", and be pruned — the very
+  // deletion this function exists to prevent. --literal-pathspecs stops it.
+  const revList = globbingHistory('modes/_shared.md');
+  if (wouldPrune('modes/_share*.md', revList)) {
+    fail('a fork-local filename with a glob was matched as a pattern and would be pruned');
+  } else {
+    pass('a candidate path with glob metacharacters is matched literally, not as a pattern');
+  }
+}
+
+// ── 7. the literal flag does not break ordinary paths ───────────────────────
+{
+  const revList = globbingHistory('modes/_shared.md');
+  if (wouldPrune('modes/_shared.md', revList)) {
+    pass('an ordinary path still resolves under --literal-pathspecs');
+  } else {
+    fail('--literal-pathspecs broke the ordinary lookup — retired files would stop pruning');
   }
 }

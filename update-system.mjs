@@ -1028,7 +1028,11 @@ export function wasEverShippedUpstream(candidatePath, ref = 'FETCH_HEAD', revLis
   const file = normalizeRepoPath(candidatePath);
   if (!file) return false;
   try {
-    return revList('rev-list', '--max-count=1', ref, '--', file) !== '';
+    // --literal-pathspecs: `-- <path>` is a PATHSPEC, so a tracked filename
+    // containing glob metacharacters would be matched as a pattern. A local
+    // `modes/_share[a-z].md` matches upstream's `modes/_shared.md`, reads as
+    // "shipped", and is pruned — the exact deletion this function prevents.
+    return revList('--literal-pathspecs', 'rev-list', '--max-count=1', ref, '--', file) !== '';
   } catch {
     // No evidence either way. The caller prunes only on a TRUE return, so
     // false is the safe answer: pruning requires positive proof the file was
