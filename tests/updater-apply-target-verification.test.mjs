@@ -34,6 +34,7 @@ import { pass, fail } from './helpers.mjs';
 import {
   gitIn, pinRefToCommit, versionAtRef, downgradeRefusal,
   isComparableVersion, targetIdentityRefusal, refusalMessage,
+  authoritativeShaFromRefBody,
 } from '../update-system.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -308,6 +309,84 @@ console.log('\n🧪 Testing that apply() verifies its update target (#3052)...')
   }
 
   rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
+
+// ── 2c-bis. a ref-API body that parses but says nothing must not be quoted ──
+// The authoritative SHA is a string the far side chose. A body can parse as JSON
+// and still carry no commit — a proxied error page, a truncated response, a
+// captive portal. Before the shape check, `object.sha` went to
+// targetIdentityRefusal() verbatim; git cannot resolve it, throws, and the catch
+// reports "does not descend from upstream main". That is a claim about the
+// TARGET made on the strength of a value that described nothing, and it sends
+// the user to look at a tree that was never actually examined. The truthful
+// outcome is the no-claim one that offline and rate-limited runs already take.
+{
+  const bodies = [
+    ['not-a-sha', 'a plain non-SHA string'],
+    ['<html><body>403 Forbidden</body></html>', 'an HTML error page in the sha field'],
+    ['abc123', 'a short hex string that is not a full object name'],
+    ['0'.repeat(39), 'a 39-hex near-miss'],
+    ['0'.repeat(41), 'a 41-hex near-miss'],
+    ['A'.repeat(40), 'uppercase hex, which is not what git rev-parse emits'],
+    ['  ', 'whitespace'],
+  ];
+
+  const leaked = bodies.filter(
+    ([sha]) => authoritativeShaFromRefBody(JSON.stringify({ object: { sha } })) !== '',
+  );
+  if (leaked.length === 0) {
+    pass(`every ref-API body carrying a non-SHA reads as "no answer" (${bodies.length} shapes)`);
+  } else {
+    fail(`non-SHA object.sha values survived the shape check: ${leaked.map(([s]) => JSON.stringify(s)).join(', ')}`);
+  }
+
+  // The two properties the fix is actually for, asserted end to end through the
+  // consumer: the verdict is the no-claim one, and git is never reached at all —
+  // so the guard is proven to stop the value BEFORE merge-base sees it, rather
+  // than rewording a refusal after the fact.
+  const calls = [];
+  const spy = { git: (...args) => { calls.push(args); throw new Error('git should never have been called'); } };
+  const target = 'a'.repeat(40);
+  const parsedButUseless = authoritativeShaFromRefBody(JSON.stringify({ object: { sha: 'not-a-sha' } }));
+  const verdict = targetIdentityRefusal(target, parsedButUseless, spy);
+
+  if (verdict === null) {
+    pass('a body that parses but carries no commit yields no identity verdict, not a false "does not descend"');
+  } else {
+    fail(`a non-SHA authoritative value produced a verdict about the target: ${JSON.stringify(verdict)}`);
+  }
+  if (calls.length === 0) {
+    pass('merge-base is never invoked for a non-SHA authoritative value');
+  } else {
+    fail(`git was called with an unresolvable value: ${JSON.stringify(calls)}`);
+  }
+
+  // The regression this replaces, stated as the control: feeding the RAW field
+  // (what the code did before the shape check) does reach merge-base and does
+  // produce the untrue sentence. Without this, the two assertions above would
+  // still pass if the whole identity guard were deleted.
+  const rawCalls = [];
+  const rawSpy = { git: (...args) => { rawCalls.push(args); throw new Error('fatal: Not a valid object name'); } };
+  const rawVerdict = targetIdentityRefusal(target, 'not-a-sha', rawSpy);
+  if (rawCalls.length === 1 && /does not descend from upstream main/.test(rawVerdict || '')) {
+    pass('control: the unchecked value would have reached merge-base and produced the untrue refusal');
+  } else {
+    fail(`control failed: the pre-fix path no longer misbehaves (calls=${rawCalls.length}, verdict=${JSON.stringify(rawVerdict)})`);
+  }
+
+  // Filter, not blanket rejection: a real ref-API body still yields its commit,
+  // and a body that does not parse at all keeps its existing '' answer.
+  const real = 'd'.repeat(40);
+  if (authoritativeShaFromRefBody(JSON.stringify({ object: { sha: real, type: 'commit' } })) === real) {
+    pass('control: a genuine ref-API body still yields its commit SHA');
+  } else {
+    fail('the shape check rejects a legitimate ref-API body');
+  }
+  if (authoritativeShaFromRefBody('<html>502</html>') === '' && authoritativeShaFromRefBody('{}') === '') {
+    pass("an unparseable body and a body with no object still read as '' (unchanged)");
+  } else {
+    fail('the malformed-body path regressed');
+  }
 }
 
 // ── 2d. refusalMessage tells the truth about what is on disk ──

@@ -1971,6 +1971,40 @@ function curlGet(url, extraArgs = []) {
 }
 
 /**
+ * The commit SHA carried by a GitHub ref-API body, or '' when it carries none.
+ *
+ * A body that parses is not a body that answered. `object.sha` is a string the
+ * far side chose, and a captive portal, a proxied error page or a truncated
+ * response can all put something else there. Whatever comes back is handed
+ * straight to `git merge-base --is-ancestor` by targetIdentityRefusal(), which
+ * throws on a value git cannot resolve — and the caller reports that throw as
+ * "does not descend from upstream main". That sentence is a claim about the
+ * TARGET, and it is false: nothing was ever learned about the target, because
+ * the authoritative side never produced a commit to compare it against.
+ *
+ * So the shape is checked here, at the boundary, and anything that is not a
+ * full 40-hex object name becomes '' — the same "no answer available" both
+ * callers already handle for offline and rate-limited runs. That is deliberately
+ * not a refusal: per the second edge documented on targetIdentityRefusal(), a
+ * body nobody could read is no more evidence of a rogue target than a rate limit
+ * is, and the explicit `refs/heads/main` refspec still ties the target to the
+ * branch. apply() prints its "could not be cross-checked" note instead of
+ * asserting something about the target that was never checked.
+ *
+ * @param {string} raw - The raw response body from the GitHub ref API.
+ * @returns {string} A 40-hex commit SHA, or '' when the body carries none.
+ */
+export function authoritativeShaFromRefBody(raw) {
+  let sha;
+  try {
+    sha = String(JSON.parse(raw)?.object?.sha || '').trim();
+  } catch {
+    return ''; // malformed API response
+  }
+  return /^[0-9a-f]{40}$/.test(sha) ? sha : '';
+}
+
+/**
  * The commit GitHub reports for upstream `main`, or '' when it cannot be read.
  *
  * The single source of the authoritative SHA, so check() and apply() cannot
@@ -1986,11 +2020,7 @@ async function upstreamMainCommit() {
     '--header', 'User-Agent: career-ops-update-checker',
   ]);
   if (raw === null) return '';
-  try {
-    return String(JSON.parse(raw)?.object?.sha || '').trim();
-  } catch {
-    return ''; // malformed API response
-  }
+  return authoritativeShaFromRefBody(raw);
 }
 
 async function check() {
