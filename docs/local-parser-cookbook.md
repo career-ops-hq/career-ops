@@ -1,10 +1,10 @@
 # Local Parser Cookbook
 
-Local parsers let `scan.mjs` read SSR or static career pages without asking an agent to browse the page. The parser runs as a local command, prints normalized jobs JSON to stdout, and lets the scanner keep using the same title filtering, deduplication, and pipeline output flow.
+Local parsers let `scan.mjs` read SSR, static, or user-saved career pages without asking an agent to browse the page. The parser runs as a local command, prints normalized jobs JSON to stdout, and lets the scanner keep using the same title filtering, deduplication, and pipeline output flow.
 
 ## When To Use This
 
-Use `scan_method: local_parser` when a company career page has stable HTML, a documented endpoint, or another deterministic source that is easier to parse locally than with Playwright. The parser can be written in JavaScript, Python, shell, Go, or any executable available on the user's machine. `career-ops` does not bundle company-specific parser scripts; users bring their own script and point `portals.yml` at it.
+Use `scan_method: local_parser` when a company career page has stable HTML, a documented endpoint, or another deterministic source that is easier to parse locally than with Playwright. The parser can be written in JavaScript, Python, shell, Go, or any executable available on the user's machine. Most scripts are user-supplied and referenced from `portals.yml`; the GO Jobs adapter below is bundled because its offline, human-saved input is the safe boundary for a bot-protected public-sector source.
 
 ## Portal Configuration
 
@@ -62,6 +62,38 @@ The parser must print one of these JSON shapes to stdout:
 ## Artifact Storage
 
 The scanner only needs stdout. If a parser also writes full JSON snapshots for debugging or audit, store them under `data/parser-output/{company}/`. Generated JSON artifacts must stay out of git; `.gitkeep` placeholders are the only committed exception for preserving directory structure.
+
+## Bot-protected source: Ontario GO Jobs
+
+`gojobs.gov.on.ca` puts its search and posting pages behind an interactive
+Radware challenge. A fresh HTTP client or headless browser cannot reliably read
+the listings, so career-ops does not ship a network provider or automate the
+challenge. `parse-gojobs-html.mjs` is a deliberately offline bridge:
+
+1. In your normal browser, open the GO Jobs search page, complete any challenge
+   yourself, run the search, and save each rendered results page as HTML.
+2. Put the files in a user-data directory such as `data/gojobs/`. For paginated
+   results, save every page you want scanned; duplicate Job IDs are collapsed.
+3. Test the capture with `npm run parse:gojobs -- data/gojobs`. A CAPTCHA page
+   or bare search form fails loudly instead of reporting a false empty scan.
+4. Add this entry to `portals.yml`:
+
+```yaml
+tracked_companies:
+  - name: Ontario Public Service
+    careers_url: https://www.gojobs.gov.on.ca/Search.aspx
+    scan_method: local_parser
+    parser:
+      command: node
+      script: parse-gojobs-html.mjs
+      args: [data/gojobs]
+      format: jobs-json-v1
+    enabled: true
+```
+
+`node scan.mjs` then applies normal filters, deduplication, and pipeline writes.
+The captures remain in the ignored user layer. Refreshing coverage still
+requires another manual browser save; this is not real-time unattended scanning.
 
 ## Failure Handling
 
