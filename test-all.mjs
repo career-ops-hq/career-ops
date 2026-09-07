@@ -58,6 +58,7 @@ import * as yaml from 'js-yaml';
 import { pass, fail, warn, run, runAcrossUtcDay, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { collectMjsFiles, isNestedCheckout, isUnderNestedCheckout } from './lib/mjs-files.mjs';
+import { SCRATCH_PREFIX, isScratchDir, sweepScratchDirs } from './lib/scratch-dirs.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -205,6 +206,38 @@ async function runDiscovered(filter = null) {
         if (line.trim()) console.log(`      ${line.trim()}`);
       }
     }
+  }
+}
+
+// A scratch copy left by a killed run used to poison every walker that follows:
+// `.gitignore` hides it and the copy carries no `.git`, so neither `git status`
+// nor `isNestedCheckout()` could see it, and the layout guards read a second
+// copy of `tests/` as several hundred misplaced suites (#3940).
+//
+// What makes the run correct is `isScratchDir` in the walkers, not this sweep —
+// they skip a leftover whether it gets removed or not. This only reclaims the
+// disk, which is why it can afford the age gate that keeps it off a scratch a
+// concurrent run is still writing into.
+//
+// Placed before the `--only` exit below: the 264-failure run is exactly the one
+// a developer then re-runs with `--only core-test-layout` to look closer, and a
+// sweep they skip past would leave that second run behaving differently again.
+{
+  const { removed, failed } = sweepScratchDirs(ROOT);
+  // Only speak when there was something to say. A sweep is silent on the
+  // overwhelming majority of runs, and a line reporting that nothing happened
+  // would be noise at the top of every one of them. `kept` is deliberately not
+  // reported: a young scratch is somebody else's live run, and it is none of
+  // this run's business.
+  for (const name of removed) {
+    console.log(`  🧹 removed a stale scratch copy from an interrupted run: ${name}/`);
+  }
+  for (const { name, error } of failed) {
+    // Not fatal — the walkers skip it, so every guard below still grades the
+    // real tree — but not silent either: something is holding a directory this
+    // run tried to delete, and that is worth knowing before it becomes a
+    // disk-space question.
+    warn(`could not remove the stale scratch copy ${name}/ (${error}) — the guards skip it, so this run is unaffected`);
   }
 }
 
@@ -406,7 +439,7 @@ const scripts = [
   { name: 'archive-posting.mjs --help', expectExit: 0 },
 ];
 
-const scriptTmp = mkdtempSync(join(ROOT, '.tmp-script-test-'));
+const scriptTmp = mkdtempSync(join(ROOT, SCRATCH_PREFIX));
 try {
   // Never copied, at any depth: dependency trees and git metadata. Nothing run
   // from the throwaway copy reads them (module resolution walks up into the
@@ -418,6 +451,20 @@ try {
   const copyDirSync = (src, dest, exclude = []) => {
     const name = src.split(/[\\/]/).pop();
     if (EXCLUDE_AT_ANY_DEPTH.has(name)) return;
+    // A leftover from an earlier interrupted run is not repository source, and
+    // copying one nests it inside this run's scratch — which is how #3940's
+    // `.tmp-script-test-OP9Bzd/.tmp-script-test-tBjFgy/…` came to exist. This
+    // run's OWN scratch is already excluded by name in `excludeDirs` below; what
+    // this adds is the stale one the startup sweep could not remove, and — since
+    // that sweep deliberately leaves a young directory alone — the live one a
+    // concurrent run is writing into right now.
+    //
+    // At any depth, deliberately, where sweepScratchDirs() looks only at the top
+    // level. The two are asymmetric because their costs are: skipping a
+    // directory that turns out to be someone's oddly-named fixture loses a copy
+    // nothing reads, while DELETING it loses their work. Cheap to over-skip,
+    // expensive to over-delete.
+    if (isScratchDir(name)) return;
     // Everything else is a top-level workspace dir (data/, reports/, …) and is
     // matched by basename ONLY at the repo root, so nested fixture subdirs such
     // as test-fixtures/upgrade/state-*/data and .../reports still get copied.
