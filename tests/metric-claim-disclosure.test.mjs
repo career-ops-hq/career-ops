@@ -123,6 +123,18 @@ for (const [label, text, personalClaim = '12 years', requirementClaim = '7 years
   }
 }
 
+// Descriptive words between the count and a demonstrative citation still
+// belong to the requirement: "7 years of leadership this role requires".
+{
+  const text = 'The 7 years of leadership this role requires is more than my 4 years of experience.';
+  const claims = [...metricClaims(text)];
+  if (claims.includes('4 years') && !claims.includes('7 years')) {
+    pass('mixed-clause: descriptive requirement count stays bound to its citation');
+  } else {
+    fail(`descriptive pre-citation requirement separation failed: ${JSON.stringify({ text, claims })}`);
+  }
+}
+
 // Same shape, end-to-end: the fabricated "12 years" must still block even
 // when it shares a clause with a correctly-cited posting requirement.
 {

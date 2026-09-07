@@ -631,10 +631,16 @@ function isDisclosedRequirement(clean, match, allMatches) {
     const citationEnd = start + citation.index + citation[0].length;
     const preceding = numbersInClause.filter((m) => m.index < citationStart).at(-1);
     const precedingEnd = preceding ? preceding.index + preceding[0].length : citationStart;
-    const directlyPrecedes = preceding
-      && /^\s*(?:this|that|the)?\s*$/i.test(clean.slice(precedingEnd, citationStart));
+    const precedingGap = clean.slice(precedingEnd, citationStart);
+    const precedesCitation = preceding && (
+      /^\s*(?:this|that|the)?\s*$/i.test(precedingGap)
+      || (
+        /\b(?:this|that)\s*$/i.test(precedingGap)
+        && !/[,;:]|\b(?:and|but)\b/i.test(precedingGap)
+      )
+    );
     const following = numbersInClause.find((m) => m.index >= citationEnd);
-    const cited = directlyPrecedes ? preceding : (following ?? preceding);
+    const cited = precedesCitation ? preceding : (following ?? preceding);
     return cited?.index === match.index;
   });
 }
