@@ -58,7 +58,7 @@ import * as yaml from 'js-yaml';
 import { pass, fail, warn, run, runAcrossUtcDay, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { collectMjsFiles, isNestedCheckout, isUnderNestedCheckout } from './lib/mjs-files.mjs';
-import { SCRATCH_PREFIX, isScratchDir, sweepScratchDirs } from './lib/scratch-dirs.mjs';
+import { SCRATCH_PREFIX, isScratchDir, markScratchOwner, sweepScratchDirs } from './lib/scratch-dirs.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -440,6 +440,10 @@ const scripts = [
 ];
 
 const scriptTmp = mkdtempSync(join(ROOT, SCRATCH_PREFIX));
+// Claim it before filling it, so a second run starting mid-copy already sees an
+// owner. Without this the sweep would be judging a live tree on its mtime, and
+// mtime stops advancing the moment this copy finishes (#3940 review).
+markScratchOwner(scriptTmp);
 try {
   // Never copied, at any depth: dependency trees and git metadata. Nothing run
   // from the throwaway copy reads them (module resolution walks up into the
@@ -463,13 +467,16 @@ try {
     // level. The two are asymmetric because their costs are: skipping a
     // directory that turns out to be someone's oddly-named fixture loses a copy
     // nothing reads, while DELETING it loses their work. Cheap to over-skip,
-    // expensive to over-delete.
-    if (isScratchDir(name)) return;
+    // expensive to over-delete. Applied against `stat` below, not here, because
+    // the prefix can name a FILE too and dropping a source file from the copy
+    // would make a script check pass by not running it.
+    //
     // Everything else is a top-level workspace dir (data/, reports/, …) and is
     // matched by basename ONLY at the repo root, so nested fixture subdirs such
     // as test-fixtures/upgrade/state-*/data and .../reports still get copied.
     if (dirname(src) === ROOT && exclude.includes(name)) return;
     const stat = statSync(src);
+    if (stat.isDirectory() && isScratchDir(name)) return;
     if (stat.isDirectory()) {
       // A linked worktree is a whole second checkout of this repo and carries a
       // `.git` FILE, not a directory, so the name-based exclusion above never

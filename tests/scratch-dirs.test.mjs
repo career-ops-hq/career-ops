@@ -18,7 +18,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync,
 import { tmpdir } from 'os';
 import { join, relative, sep } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
-import { SCRATCH_PREFIX, MIN_SCRATCH_AGE_MS, isScratchDir, sweepScratchDirs } from '../lib/scratch-dirs.mjs';
+import {
+  SCRATCH_PREFIX, MIN_SCRATCH_AGE_MS, isScratchDir, sweepScratchDirs,
+  markScratchOwner, scratchOwnerAlive,
+} from '../lib/scratch-dirs.mjs';
 import { collectMjsFiles } from '../lib/mjs-files.mjs';
 import { execFileSync } from 'child_process';
 
@@ -216,6 +219,86 @@ const age = (dir, ms = MIN_SCRATCH_AGE_MS * 2) => {
     } else {
       fail(`symlink handling wrong: target survived=${survived} `
         + `removed=${JSON.stringify(removed)} kept=${JSON.stringify(kept)} failed=${JSON.stringify(failed)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 8. The prefix names a directory, never a file ─────────────────────
+{
+  // `isScratchDir` tests a NAME, and a file can carry the prefix too. Excluding
+  // one from the walk would drop it from the syntax gate — a check passing by
+  // not running, which is the failure `lib/mjs-files.mjs` exists to remove.
+  // Only a directory can hold a copy of the repository.
+  const dir = mkdtempSync(join(tmpdir(), 'co-scratch-file-'));
+  try {
+    writeFileSync(join(dir, `${SCRATCH_PREFIX}sneaky.mjs`), 'export const a = 1;\n');
+    mkdirSync(join(dir, `${SCRATCH_PREFIX}OP9Bzd`), { recursive: true });
+    writeFileSync(join(dir, `${SCRATCH_PREFIX}OP9Bzd`, 'copied.mjs'), 'export {};\n');
+
+    const found = collectMjsFiles(dir).map(f => relative(dir, f).split(sep).join('/'));
+    if (found.length === 1 && found[0] === `${SCRATCH_PREFIX}sneaky.mjs`) {
+      pass('a FILE carrying the scratch prefix stays in the walk; only the directory is skipped');
+    } else {
+      fail(`walk returned ${JSON.stringify(found)}; expected only ${SCRATCH_PREFIX}sneaky.mjs`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 9. Liveness beats age, in both directions ─────────────────────────
+{
+  // Age is a proxy, and it is wrong in the direction that costs something: a run
+  // stops touching its scratch the moment the copy finishes, so one that then
+  // blocks — a debugger, a suspended process, a laptop that slept — ages while
+  // it is still running. The owner's pid is a question the OS can answer.
+  const dir = mkdtempSync(join(tmpdir(), 'co-scratch-owner-'));
+  try {
+    const live = join(dir, `${SCRATCH_PREFIX}live00`);
+    const dead = join(dir, `${SCRATCH_PREFIX}dead00`);
+    for (const d of [live, dead]) mkdirSync(d, { recursive: true });
+    markScratchOwner(live);            // this process, which is definitionally alive
+    markScratchOwner(dead, 0x7fffffff); // a pid nothing is going to be using
+    // Both are pushed well past the age gate: age must not be what decides.
+    age(live, MIN_SCRATCH_AGE_MS * 24);
+    age(dead, MIN_SCRATCH_AGE_MS * 24);
+
+    const { removed, kept } = sweepScratchDirs(dir);
+    if (existsSync(live) && !existsSync(dead)
+        && kept.length === 1 && removed.length === 1) {
+      pass('a live owner keeps its scratch past the age gate, a dead one does not save it');
+    } else {
+      fail(`liveness wrong: removed=${JSON.stringify(removed)} kept=${JSON.stringify(kept)} `
+        + `live exists=${existsSync(live)} dead exists=${existsSync(dead)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 10. An unreadable marker means "unknown", not "alive" ─────────────
+{
+  // Every leftover written before this marker existed has none, so treating an
+  // absent or unparseable marker as a live run would mean never sweeping again —
+  // the bug, restored through the mechanism meant to be careful about it.
+  const dir = mkdtempSync(join(tmpdir(), 'co-scratch-nomarker-'));
+  try {
+    const bare = join(dir, `${SCRATCH_PREFIX}bare00`);
+    const junk = join(dir, `${SCRATCH_PREFIX}junk00`);
+    mkdirSync(bare, { recursive: true });
+    mkdirSync(junk, { recursive: true });
+    writeFileSync(join(junk, '.owner-pid'), 'not-a-pid\n');
+
+    const unknown = !scratchOwnerAlive(bare) && !scratchOwnerAlive(junk);
+    age(bare);
+    age(junk);
+    const { removed } = sweepScratchDirs(dir);
+    if (unknown && removed.length === 2) {
+      pass('a missing or unparseable owner marker falls through to the age gate');
+    } else {
+      fail(`unknown-owner handling wrong: unknown=${unknown} removed=${JSON.stringify(removed)}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
