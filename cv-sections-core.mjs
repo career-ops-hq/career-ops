@@ -174,10 +174,13 @@ export function stripEmptySections(template, payload, format) {
 // A section's own title is present whether or not the section has content, so
 // it must not count as content. This matches the shipped templates'
 // `<div class="section-title">`, or a plain heading tag for a custom template
-// that uses one, and is applied once — a later heading inside a populated body
+// that uses one. Either quote style, matching generate-pdf.mjs's own
+// SECTION_TITLE_RE: a hand-written or third-party template may use single
+// quotes, and reading its title as content would keep every empty section.
+// Applied once — a later heading inside a populated body
 // keeps its text and correctly reads as content.
 const SECTION_HEADING_RE = new RegExp(
-  String.raw`<(div|h[1-6])\b[^>]*class="[^"]*\bsection-title\b[^"]*"[^>]*>[\s\S]*?<\/\1>` +
+  String.raw`<(div|h[1-6])\b[^>]*class=["'][^"']*\bsection-title\b[^"']*["'][^>]*>[\s\S]*?<\/\1>` +
   String.raw`|<(h[1-6])\b[^>]*>[\s\S]*?<\/\2>`,
   'i',
 );

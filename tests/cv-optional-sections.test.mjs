@@ -533,6 +533,8 @@ for (const section of ['competencies', 'experience', 'education', 'certification
 // heading stops being recognised.
 check('isEmptyRenderedSection: the section title alone is not content',
   isEmptyRenderedSection('<!-- PROJECTS -->\n<div class="section"><div class="section-title">Projects</div></div>\n<!-- EDUCATION -->', 'projects'), true);
+check('isEmptyRenderedSection: a single-quoted section title alone is not content',
+  isEmptyRenderedSection("<!-- PROJECTS -->\n<div class='section'><div class='section-title'>Projects</div></div>\n<!-- EDUCATION -->", 'projects'), true);
 check('isEmptyRenderedSection: a plain heading tag alone is not content',
   isEmptyRenderedSection('<!-- PROJECTS -->\n<section><h2>Projects</h2></section>\n<!-- EDUCATION -->', 'projects'), true);
 check('isEmptyRenderedSection: text under the heading is content',
