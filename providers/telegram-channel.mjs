@@ -318,8 +318,10 @@ export function postToJob(post) {
   // and "Title | Employer" candidates. With no remaining title, drop the post.
   let title = post.title;
   if (HASHTAG_LINE_RE.test(post.lines[0] || '')) {
+    const companyLower = company.toLowerCase();
     const isLinkLine = (l) => post.hrefs.includes(l) || /^https?:\/\//i.test(l);
-    const better = post.lines.slice(1).find((l) => l !== company && employerName(['', l]) !== company
+    const better = post.lines.slice(1).find((l) => l.toLowerCase() !== companyLower
+      && employerName(['', l]).toLowerCase() !== companyLower
       && !HASHTAG_LINE_RE.test(l) && !isLinkLine(l));
     if (!better) return null;
     title = headline([better]);

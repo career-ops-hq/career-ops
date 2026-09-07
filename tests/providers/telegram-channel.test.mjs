@@ -295,6 +295,9 @@ try {
     ['EN company field', 'Company: Picnic', 'Picnic', 'Backend Developer'],
     ['RU second-line employer', 'в Kaspi — fintech-экосистема.', 'Kaspi', 'Backend Developer'],
     ['EN second-line employer', 'at Picnic — grocery delivery.', 'Picnic', 'Backend Developer'],
+    ['mixed-case EN employer metadata', 'Company: Picnic<br/>at PICNIC — Backend Developer', 'Picnic', 'Platform Engineer'],
+    ['mixed-case RU employer metadata', 'Компания: Контур<br/>в КОНТУР — разработка сервисов.', 'Контур', 'MLOps-инженер'],
+    ['mixed-case bare employer', 'Company: Picnic<br/>PICNIC', 'Picnic', 'Platform Engineer'],
   ];
   const hashtagApplyUrl = 'https://example.com/jobs/12345';
   for (const [label, employerHtml, company, role] of hashtagEmployerCases) {
@@ -318,7 +321,7 @@ try {
 
   // Parsing a candidate as a whole post would mistake @/| role headlines for
   // employer-only metadata; broad at/в prefixes would also discard real titles.
-  for (const role of ['Backend Developer @ Picnic', 'Backend Developer | Picnic', 'at-scale Backend Developer', 'внутренний IT-аналитик']) {
+  for (const role of ['Backend Developer @ Picnic', 'Backend Developer @ PICNIC', 'Backend Developer | Picnic', 'at-scale Backend Developer', 'внутренний IT-аналитик']) {
     const html = post(12468, '2026-09-04T10:00:00+00:00', `#middle #remote<br/>Company: Picnic<br/>${role}<br/>${A(hashtagApplyUrl)}`);
     const job = postToJob(parseChannelPage(page(html), 'devjobs').posts[0]);
     if (job?.title === role && job.company === 'Picnic' && job.url === hashtagApplyUrl) {
