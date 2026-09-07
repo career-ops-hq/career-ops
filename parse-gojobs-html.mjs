@@ -81,17 +81,25 @@ export function parseSavedHtml(html, source = 'saved HTML') {
 function inputFiles(paths) {
   const canonicalize = realpathSync.native ?? realpathSync;
   const root = canonicalize(getCareerOpsRoot());
+  const insideRoot = (candidate, source) => {
+    const canonical = canonicalize(candidate);
+    const rel = relative(root, canonical);
+    if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+      throw new Error(`input is outside the career-ops data root: ${source}`);
+    }
+    return canonical;
+  };
   const files = [];
   for (const rawPath of paths) {
     const candidate = resolve(root, rawPath);
     if (!existsSync(candidate)) throw new Error(`input does not exist: ${rawPath}`);
-    const path = canonicalize(candidate);
-    const rel = relative(root, path);
-    if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
-      throw new Error(`input is outside the career-ops data root: ${rawPath}`);
-    }
+    const path = insideRoot(candidate, rawPath);
     if (statSync(path).isDirectory()) {
-      for (const name of readdirSync(path).sort()) if (['.html', '.htm'].includes(extname(name).toLowerCase())) files.push(join(path, name));
+      for (const name of readdirSync(path).sort()) {
+        if (!['.html', '.htm'].includes(extname(name).toLowerCase())) continue;
+        const child = insideRoot(join(path, name), join(rawPath, name));
+        if (statSync(child).isFile()) files.push(child);
+      }
     } else files.push(path);
   }
   if (files.length === 0) throw new Error('no .html/.htm input files found');
