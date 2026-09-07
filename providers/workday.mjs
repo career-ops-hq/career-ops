@@ -264,6 +264,11 @@ function makeEndpoint(origin, tenant, site) {
     // externalPath is relative to the site, not the host root — without the
     // site segment the URL 404s.
     jobBase: `${origin}/${site}`,
+    // Same externalPath against the CXS host instead of the careers host
+    // returns the posting's DETAIL document (GET, no body). That is the only
+    // place a multi-location posting's real places exist — see
+    // MULTI_LOCATION_PLACEHOLDER_RE.
+    cxsBase: `${origin}/wday/cxs/${tenant}/${site}`,
     origin,
   };
 }
@@ -361,6 +366,75 @@ export function workdayDedupKey(job) {
   const reqId = m && /^[a-z]*\d[a-z0-9_]*\d{2,}$/.test(m[1]) ? m[1] : raw;
   if (!reqId) return null;
   return `workday:${parsed.hostname.toLowerCase()}:${reqId}`;
+}
+
+// Workday's LIST endpoint answers a posting attached to more than one location
+// with a COUNT where every other posting carries a place: `"53 Locations"`. It
+// is not a location, and `buildLocationFilter` matches locations by
+// case-insensitive substring, so the string contributes nothing to any tier —
+// the posting is then judged on `locationHintFromUrl` alone, which carries only
+// the posting's PRIMARY location (`/job/USA---Sunnyvale-CA/…`). A role open in
+// Sunnyvale AND Austin is therefore invisible to an `allow: [austin]` config
+// (#3860).
+//
+// Measured live on three tenants (60 page-0/1/2 postings each, 2026-09-07):
+// placeholders are 53 of 291 postings — crowdstrike 23, nvidia 29, cvshealth 1
+// — so this is an ordinary case, not an edge one. Against `allow:
+// [united states, usa, remote]`, 23 of those 53 were rejected while a real
+// location would have passed; against `allow: [austin, new york]`, 17.
+//
+// Anchored, and `Locations?` singular-tolerant: it must not fire on a real
+// place that merely contains a digit and the word ("100 Locations Plaza").
+const MULTI_LOCATION_PLACEHOLDER_RE = /^\s*\d+\s+locations?\s*$/i;
+
+/**
+ * True when a Workday list location is the count-placeholder rather than a place.
+ * Exported for tests/providers/workday.test.mjs, which pins the boundary cases.
+ *
+ * @param {unknown} location - `locationsText` as the list endpoint returned it.
+ * @returns {boolean}
+ */
+export function isMultiLocationPlaceholder(location) {
+  return typeof location === 'string' && MULTI_LOCATION_PLACEHOLDER_RE.test(location);
+}
+
+// How many detail documents one entry may spend to resolve placeholders. The
+// enrichment is one extra GET per placeholder posting, and nvidia ran 29
+// placeholders in 60 postings — a 2,000-posting tenant at that rate would add
+// ~1,000 requests, which is a different kind of scan than the one the caller
+// asked for. The cap bounds that; it is deliberately loud rather than silent
+// (see the console.error below), because a silent cap reads as "all locations
+// resolved" when it isn't.
+const MAX_DETAIL_REQUESTS = 200;
+
+/**
+ * The real places behind a multi-location placeholder, from the detail document.
+ *
+ * Measured on cvshealth/crowdstrike/nvidia (7 of 7 probes, then 53 of 53):
+ * `jobPostingInfo.location` holds the primary place and
+ * `jobPostingInfo.additionalLocations` the rest, and
+ * `1 + additionalLocations.length` equals the number the placeholder announced
+ * every single time. `jobPostingInfo.locationsText` does not exist at this
+ * level, so there is nothing else to read.
+ *
+ * Joined with `' · '` — the separator greenhouse/ashby/eightfold/gem/ibm/
+ * echojobs already use for exactly this, and the one
+ * `normalizeLocationForDedup` (scan.mjs) splits back into a sorted SET, so the
+ * order Workday happens to return does not reach a dedupe key.
+ *
+ * @param {unknown} detail - Parsed detail document.
+ * @returns {string} `' · '`-joined places, or '' when the document has none.
+ */
+export function locationsFromDetail(detail) {
+  const info = detail?.jobPostingInfo;
+  if (!info || typeof info !== 'object') return '';
+  const extra = Array.isArray(info.additionalLocations) ? info.additionalLocations : [];
+  const places = [info.location, ...extra]
+    .filter((p) => typeof p === 'string' && p.trim() !== '')
+    .map((p) => p.trim());
+  // Deduped: a tenant that repeats the primary place inside additionalLocations
+  // would otherwise ship it twice into a user-visible field.
+  return [...new Set(places)].join(' · ');
 }
 
 export function parseWorkdayResponse(json, entry) {
@@ -679,6 +753,69 @@ export default {
       // recovered on top of the ceiling.
       const short = splitIncomplete || budgetExhausted ? ' (still incomplete)' : '';
       console.error(`⚠️  workday: ${entry.name} offset-clamped at ${WORKDAY_OFFSET_CEILING} — recovered ${jobs.length} jobs via ${slicesSpent} facet slices${short}`);
+    }
+
+    // Resolve `"53 Locations"` placeholders into the real places (#3860). Runs
+    // on the FINAL job list, after the facet split has deduped its overlapping
+    // slices — enriching before that would pay for the same posting once per
+    // slice it appears in.
+    //
+    // Skipped for a probe (`ctx.maxPages`): verify-portals/discover-ats only
+    // need to know the board answers and how many postings page 0 has, and
+    // charging a liveness check one GET per multi-location posting would make
+    // the probe cost scale with the board instead of staying at one request.
+    if (ctxCap === Infinity) {
+      const detailOpts = {
+        redirect: 'error',
+        headers: {
+          accept: 'application/json',
+          'user-agent': BROWSER_LIKE_USER_AGENT,
+          'accept-language': 'en-US,en;q=0.9',
+          referer: `${ep.jobBase}/`,
+        },
+      };
+      const placeholders = jobs.filter((j) => isMultiLocationPlaceholder(j.location));
+      // The detail document lives at the same externalPath under the CXS host.
+      // `job.url` is `jobBase + externalPath` (parseWorkdayResponse), so the
+      // path is recovered by removing the prefix rather than by re-parsing a
+      // URL whose site segment can itself contain slashes. A posting whose URL
+      // is not jobBase-relative has no recoverable path and is filtered out
+      // HERE rather than skipped inside the loop, so that the "left unresolved
+      // by the cap" count below cannot absorb it and report the wrong reason.
+      const pending = placeholders.filter((j) => j.url.startsWith(`${ep.jobBase}/`));
+      const unaddressable = placeholders.length - pending.length;
+      let resolved = 0;
+      let failed = 0;
+      let spent = 0;
+      for (const job of pending) {
+        if (spent >= MAX_DETAIL_REQUESTS) break;
+        const externalPath = job.url.slice(ep.jobBase.length);
+        spent++;
+        // Same politeness as the pagination loop: one tenant, one request at a
+        // time, spaced. A burst of same-host GETs is what its WAF watches for.
+        if (spent > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
+        let places = '';
+        try {
+          places = locationsFromDetail(await fetchJsonWithRetry(ctx, `${ep.cxsBase}${externalPath}`, detailOpts, RETRY_POLICY));
+        } catch {
+          // Fail soft, per posting. A detail document that 404s, rate-limits or
+          // returns something unexpected leaves the placeholder exactly as it
+          // was, which is the pre-#3860 behaviour — never a dropped posting and
+          // never an empty location, which reads as "location unknown"
+          // downstream and would be a worse lie than the count.
+          failed++;
+          continue;
+        }
+        if (places === '') { failed++; continue; }
+        job.location = places;
+        resolved++;
+      }
+      if (placeholders.length > 0) {
+        const capped = pending.length > spent ? `, ${pending.length - spent} left unresolved by the ${MAX_DETAIL_REQUESTS}-request cap` : '';
+        const unreadable = failed > 0 ? `, ${failed} detail document(s) unreadable` : '';
+        const unroutable = unaddressable > 0 ? `, ${unaddressable} with no site-relative path` : '';
+        console.error(`ℹ️  workday: ${entry.name} resolved ${resolved} of ${placeholders.length} multi-location placeholder(s)${unreadable}${unroutable}${capped}`);
+      }
     }
 
     // The cap is a safety net, not a working limit — silent by design, but a
