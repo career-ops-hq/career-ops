@@ -795,7 +795,12 @@ export function computeNextFollowupDate(status, appDate, lastFollowupDate, follo
 export function analyzeFromContent(trackerContent, followupsContent = '') {
   const apps = parseTrackerContent(trackerContent);
   if (apps.length === 0) {
-    return { error: 'No applications found in tracker.' };
+    // cadenceDefaults rides along on the error. It is a constant, so it is just
+    // as valid with no applications as with a hundred, and this is the ONE
+    // state where a consumer cannot do without it: on a first run the web
+    // cadence form has no profile overrides to fall back on either, so
+    // withholding it renders six empty fields with nothing to type back in.
+    return { error: 'No applications found in tracker.', cadenceDefaults: DEFAULT_CADENCE };
   }
 
   const followups = parseFollowups(followupsContent);
