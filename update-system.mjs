@@ -2395,13 +2395,17 @@ export function clearStagedUpdate(ctx = {}) {
  * @param {string} params.defaultBranch
  * @param {string} params.version
  * @param {string} params.commitCommand - From updateCommitCommand().
+ * @param {string[]} [params.unrelatedStaged] - Staged paths this update does not
+ *   own, from stagedPathsOutside(). The paths themselves, not a flag: option 2's
+ *   escape hatch is only runnable if it can name what to move.
  * @returns {string} Multi-line notice.
  */
 export function skippedBranchCommitNotice({
-  currentBranch, defaultBranch, version, commitCommand, hasUnrelatedStaged = false,
+  currentBranch, defaultBranch, version, commitCommand, unrelatedStaged = [],
 }) {
   const branch = shellQuoteArg(defaultBranch);
   const stashMessage = shellQuoteArg(`career-ops v${version}`);
+  const ownWorkMessage = shellQuoteArg('my work');
   return [
     '',
     `Update applied but NOT committed: you are on '${currentBranch}', not '${defaultBranch}'.`,
@@ -2420,9 +2424,24 @@ export function skippedBranchCommitNotice({
     // work onto the default branch too. The updater already knows when that is
     // the case — it is the same signal that scopes the commit — so say it here
     // rather than letting the recipe do it quietly.
-    ...(hasUnrelatedStaged ? [
-      '       NOTE: you have other changes staged. `stash push --staged` takes the whole',
-      '       index, so this would move them too — commit or unstage them first.',
+    //
+    // Naming the paths is the whole point. Both of the obvious unscoped reads
+    // fail, and they fail as the two things this guard exists to prevent:
+    // a bare `git commit` puts the update's own snapshot on the feature branch
+    // (#3846 itself), and a bare `git stash push` takes the refreshed files out
+    // of the tree, which is the staleness the guard is careful never to cause.
+    // Unstaging fails a third way: the change stays in the working tree, so the
+    // `git switch` below either carries it across or refuses to run.
+    //
+    // The path list is never truncated. A shortened command is a wrong command,
+    // and wrong-but-runnable is the failure this note is being written to fix;
+    // a long line that wraps is only ugly. stagedPathsOutside() reads `-z` to
+    // keep paths holding spaces intact, so they are quoted here to match.
+    ...(unrelatedStaged.length > 0 ? [
+      `       NOTE: ${unrelatedStaged.length === 1 ? 'one other path is' : `${unrelatedStaged.length} other paths are`} staged besides this update. \`stash push --staged\``,
+      '       takes the whole index, so option 2 would move them too. Take them out of',
+      '       the index first, scoped to their own paths — unstaging is not enough:',
+      `         git stash push -m ${ownWorkMessage} -- ${unrelatedStaged.map(shellQuoteArg).join(' ')}`,
     ] : []),
     '  3. Undo the update entirely:',
     '       node update-system.mjs rollback',
@@ -2940,7 +2959,7 @@ async function apply() {
           defaultBranch: branchDecision.defaultBranch,
           version: remote,
           commitCommand: updateCommitCommand(remote, usedIndexCommit, expandedPathsToStage),
-          hasUnrelatedStaged: unrelated.length > 0,
+          unrelatedStaged: unrelated,
         }));
       } else if (usedIndexCommit) {
         git('commit', '-m', `chore: auto-update system files to v${remote}`);
