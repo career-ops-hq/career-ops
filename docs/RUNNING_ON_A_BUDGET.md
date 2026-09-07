@@ -22,7 +22,7 @@ Before diving into CLI configuration, know that career-ops has a built-in knob f
 |------|-----------|
 | **economy** | Cheapest/fastest model, no extended thinking. Best for high-volume scanning. |
 | **standard** | Balanced model, no extended thinking. Default if the key is absent. |
-| **premium** | Most capable model, adaptive extended thinking. Best for high-stakes offers. |
+| **premium** | Most capable model. Extended thinking depends on the selected CLI/provider. Best for high-stakes offers. |
 
 The **economy** tier is the high-volume scanning choice — it processes the most offers per dollar. On **standard** and **premium**, a pre-screen gate automatically trims batch spend by skipping obvious mismatches before the full evaluation runs.
 
@@ -81,13 +81,17 @@ Project-level `.claude/settings.json` and `~/.claude/settings.local.json` can se
 
 ### The batch mode is the exception worth knowing
 
-`batch/batch-runner.sh` drives `claude -p` workers, and the headless path does not use the interactive login. If you want batch runs on your subscription rather than on credits, generate a long-lived token once:
+`batch/batch-runner.sh` drives `claude -p` workers. This installation enforces
+GPT-family model IDs, so configure Claude Code to use a GPT-capable custom
+gateway before running the batch tool. A stock Claude subscription cannot
+serve those model IDs.
 
 ```bash
-claude setup-token          # requires an active Claude subscription
+export ANTHROPIC_BASE_URL=https://your-gpt-capable-gateway.example
+export ANTHROPIC_AUTH_TOKEN=your-gateway-token
 ```
 
-Then export the value it prints as `CLAUDE_CODE_OAUTH_TOKEN` in the environment the batch runs in. It is a credential: treat it like one, and never commit it.
+Treat gateway credentials like secrets and never commit them.
 
 ### Two things worth expecting
 

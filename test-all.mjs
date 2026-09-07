@@ -13546,6 +13546,12 @@ function makeTierFixture(profileYml) {
   return { tmp, batchDir, fakeBin };
 }
 
+function capturedModel(argv) {
+  const args = argv.trim().split(/\r?\n/);
+  const modelIndex = args.indexOf('--model');
+  return modelIndex >= 0 ? args[modelIndex + 1] : null;
+}
+
 // economy tier
 try {
   const { tmp, batchDir, fakeBin } = makeTierFixture('spend_tier: economy\n');
@@ -13553,10 +13559,10 @@ try {
   const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}`, BATCH_ARG_FILE: argFile };
   const out = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'] }) || '';
   const argv = existsSync(argFile) ? readFileSync(argFile, 'utf-8') : '';
-  if (argv.includes('--model') && argv.includes('claude-haiku-4-5') && out.includes('spend_tier=economy')) {
-    pass('economy spend_tier resolves to claude-haiku-4-5');
+  if (capturedModel(argv) === 'gpt-4o-mini' && out.includes('spend_tier=economy')) {
+    pass('economy spend_tier resolves to gpt-4o-mini');
   } else {
-    fail(`economy spend_tier did not route to haiku: argv=${JSON.stringify(argv)}, out=${JSON.stringify(out.slice(-240))}`);
+    fail(`economy spend_tier did not route to gpt-4o-mini: argv=${JSON.stringify(argv)}, out=${JSON.stringify(out.slice(-240))}`);
   }
   try { rmSync(tmp, { recursive: true, force: true }); } catch {}
 } catch (e) { fail(`Batch spend_tier routing test crashed (economy): ${e.message}`); }
@@ -13568,10 +13574,10 @@ try {
   const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}`, BATCH_ARG_FILE: argFile };
   const premiumOut = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'] }) || '';
   const premiumArgv = existsSync(argFile) ? readFileSync(argFile, 'utf-8') : '';
-  if (premiumArgv.includes('--model') && premiumArgv.includes('claude-opus-5') && premiumOut.includes('spend_tier=premium')) {
-    pass('premium spend_tier resolves to claude-opus-5');
+  if (capturedModel(premiumArgv) === 'gpt-4.1' && premiumOut.includes('spend_tier=premium')) {
+    pass('premium spend_tier resolves to gpt-4.1');
   } else {
-    fail(`premium spend_tier did not route to opus: argv=${JSON.stringify(premiumArgv)}, out=${JSON.stringify(premiumOut.slice(-240))}`);
+    fail(`premium spend_tier did not route to gpt-4.1: argv=${JSON.stringify(premiumArgv)}, out=${JSON.stringify(premiumOut.slice(-240))}`);
   }
   try { rmSync(tmp, { recursive: true, force: true }); } catch {}
 } catch (e) { fail(`Batch spend_tier routing test crashed (premium): ${e.message}`); }
@@ -13581,15 +13587,32 @@ try {
   const { tmp, batchDir, fakeBin } = makeTierFixture('spend_tier: premium\n');
   const argFile = join(tmp, 'claude-argv.txt');
   const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}`, BATCH_ARG_FILE: argFile };
-  const overrideOut = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1', '--model', 'claude-sonnet-5'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'] }) || '';
+  const overrideOut = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1', '--model', 'gpt-4o-mini'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'] }) || '';
   const overrideArgv = existsSync(argFile) ? readFileSync(argFile, 'utf-8') : '';
-  if (overrideArgv.includes('--model') && overrideArgv.includes('claude-sonnet-5') && !overrideArgv.includes('claude-opus-5') && overrideOut.includes('explicit --model override')) {
+  if (capturedModel(overrideArgv) === 'gpt-4o-mini' && overrideOut.includes('explicit --model override')) {
     pass('--model override takes precedence over spend_tier');
   } else {
     fail(`--model override did not win: argv=${JSON.stringify(overrideArgv)}, out=${JSON.stringify(overrideOut.slice(-240))}`);
   }
   try { rmSync(tmp, { recursive: true, force: true }); } catch {}
 } catch (e) { fail(`Batch spend_tier routing test crashed (--model override): ${e.message}`); }
+
+// non-GPT model overrides are rejected
+try {
+  const { tmp, batchDir, fakeBin } = makeTierFixture('spend_tier: standard\n');
+  const argFile = join(tmp, 'claude-argv.txt');
+  const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}`, BATCH_ARG_FILE: argFile };
+  const rejectedResult = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1', '--model', 'claude-sonnet-5'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const rejection = lastRunFailure();
+  const rejectedOut = `${rejection?.stdout || ''}\n${rejection?.stderr || ''}`;
+  const rejectedArgv = existsSync(argFile) ? readFileSync(argFile, 'utf-8') : '';
+  if (rejectedResult === null && !rejectedArgv && rejectedOut.includes('--model must be a GPT-family model')) {
+    pass('non-GPT --model override is rejected');
+  } else {
+    fail(`non-GPT --model override was not rejected: argv=${JSON.stringify(rejectedArgv)}, out=${JSON.stringify(rejectedOut.slice(-240))}`);
+  }
+  try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+} catch (e) { fail(`Batch non-GPT model rejection test crashed: ${e.message}`); }
 
 // missing spend_tier key defaults to standard
 try {
@@ -13598,8 +13621,8 @@ try {
   const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}`, BATCH_ARG_FILE: argFile };
   const standardDefaultOut = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'] }) || '';
   const standardDefaultArgv = existsSync(argFile) ? readFileSync(argFile, 'utf-8') : '';
-  if (standardDefaultArgv.includes('--model') && standardDefaultArgv.includes('claude-sonnet-5') && standardDefaultOut.includes('spend_tier=standard')) {
-    pass('missing spend_tier key defaults to standard tier (claude-sonnet-5)');
+  if (capturedModel(standardDefaultArgv) === 'gpt-4o' && standardDefaultOut.includes('spend_tier=standard')) {
+    pass('missing spend_tier key defaults to standard tier (gpt-4o)');
   } else {
     fail(`missing spend_tier did not default to standard: argv=${JSON.stringify(standardDefaultArgv)}, out=${JSON.stringify(standardDefaultOut.slice(-240))}`);
   }
@@ -13613,8 +13636,8 @@ try {
   const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}`, BATCH_ARG_FILE: argFile };
   const invalidTierOut = run(getBash(), [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1'], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'] }) || '';
   const invalidTierArgv = existsSync(argFile) ? readFileSync(argFile, 'utf-8') : '';
-  if (invalidTierArgv.includes('--model') && invalidTierArgv.includes('claude-sonnet-5') && invalidTierOut.includes('spend_tier=standard')) {
-    pass('invalid spend_tier value falls back to standard tier (claude-sonnet-5)');
+  if (capturedModel(invalidTierArgv) === 'gpt-4o' && invalidTierOut.includes('spend_tier=standard')) {
+    pass('invalid spend_tier value falls back to standard tier (gpt-4o)');
   } else {
     fail(`invalid spend_tier did not fall back to standard: argv=${JSON.stringify(invalidTierArgv)}, out=${JSON.stringify(invalidTierOut.slice(-240))}`);
   }

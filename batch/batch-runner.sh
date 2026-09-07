@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# career-ops batch runner — standalone orchestrator for claude -p workers
-# Reads batch-input.tsv, delegates each offer to a claude -p worker,
+# career-ops batch runner — standalone orchestrator for GPT-backed claude -p workers
+# Reads batch-input.tsv, delegates each offer to a GPT-backed claude -p worker,
 # tracks state in batch-state.tsv for resumability.
 #
 # NOTE: This script is Claude Code-specific. It uses claude -p with
@@ -54,7 +54,7 @@ is_decimal_number() {
 
 usage() {
   cat <<'USAGE'
-career-ops batch runner — process job offers in batch via claude -p workers
+career-ops batch runner — process job offers with GPT-family models
 Uses spend_tier from config/profile.yml unless --model overrides it.
 
 Usage: batch-runner.sh [OPTIONS]
@@ -71,7 +71,7 @@ Options:
   --skip-pdf           Skip PDF generation entirely (write ❌ in tracker PDF column)
   --rate-limit-sleep N Seconds to wait before retrying a rate-limited worker
                        (default: 300)
-  --model NAME         Override the tier-resolved Claude model passed to
+  --model NAME         Override the tier-resolved GPT model passed to
                        `claude -p --model` (otherwise uses config/profile.yml
                        spend_tier: economy/standard/premium; default standard)
   --status             Show batch progress and a per-job table, then exit
@@ -388,18 +388,22 @@ read_spend_tier() {
   esac
 }
 
-# Tier -> model mapping. Keep in sync with the table in modes/_shared.md.
+# Tier -> GPT model mapping. Keep in sync with the table in modes/_shared.md.
 spend_tier_to_model() {
   case "$1" in
-    economy) echo "claude-haiku-4-5" ;;
-    premium) echo "claude-opus-5" ;;
-    standard|*) echo "claude-sonnet-5" ;;
+    economy) echo "gpt-4o-mini" ;;
+    premium) echo "gpt-4.1" ;;
+    standard|*) echo "gpt-4o" ;;
   esac
 }
 
 # Resolve the model to pass to `claude -p --model`. --model always wins.
 resolve_worker_model() {
   if [[ -n "$MODEL" ]]; then
+    if [[ "$MODEL" != gpt-* ]]; then
+      echo "ERROR: --model must be a GPT-family model (received: $MODEL)." >&2
+      exit 2
+    fi
     RESOLVED_MODEL="$MODEL"
     RESOLVED_SPEND_TIER="override"
     return 0

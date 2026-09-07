@@ -58,7 +58,7 @@ All User Layer files (such as `cv.md`, `config/profile.yml`, `modes/_profile.md`
 
 | CLI | economy | standard | premium | Extended thinking |
 |-----|---------|----------|---------|--------------------|
-| Claude Code | Haiku 4.5 | Sonnet 5 | Opus 5 | off / off / adaptive |
+| Claude Code (custom gateway) | GPT-4o mini | GPT-4o | GPT-4.1 | off / off / off |
 | OpenCode | your CLI's cheapest/fastest available model | balanced model | most capable model | off / off / adaptive |
 | Gemini CLI | your CLI's cheapest/fastest available model | balanced model | most capable model | off / off / adaptive |
 | Copilot CLI | your CLI's cheapest/fastest available model | balanced model | most capable model | off / off / adaptive |
@@ -66,7 +66,13 @@ All User Layer files (such as `cv.md`, `config/profile.yml`, `modes/_profile.md`
 | Qwen | your CLI's cheapest/fastest available model | balanced model | most capable model | off / off / adaptive |
 | Antigravity CLI | your CLI's cheapest/fastest available model | balanced model | most capable model | off / off / adaptive |
 
-The Claude Code row uses concrete model names because that lineup is well-established. The other rows intentionally avoid naming specific models -- nobody on this project can verify current model lineups for those CLIs with confidence, and a wrong specific guess routes users to a model that doesn't exist. If you actively use one of these CLIs and know its current cheapest/balanced/most-capable models, a follow-up PR filling in concrete names for that row is welcome.
+The Claude Code row uses the deployment's verified GPT-only gateway models.
+The other rows intentionally avoid naming specific models -- nobody on this
+project can verify current model lineups for those CLIs with confidence, and a
+wrong specific guess routes users to a model that doesn't exist. If you
+actively use one of these CLIs and know its current
+cheapest/balanced/most-capable models, a follow-up PR filling in concrete names
+for that row is welcome.
 
 Every other reference to tier elsewhere in the modes (batch.md, pipeline.md, etc.) MUST refer to it only as "the economy/standard/premium tier" or "the tier's model" -- never repeat a hardcoded model/provider name outside this table. This keeps the routing logic model-agnostic: if any CLI's mapping changes, only that row in this table needs to change.
 

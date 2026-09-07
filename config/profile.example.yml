@@ -112,7 +112,7 @@ language:
 # Controls which model tier evaluates your offers. Valid values:
 #   economy  -- cheapest/fastest model, no extended thinking. Best for high-volume scanning.
 #   standard -- balanced model, no extended thinking. Default if this key is absent.
-#   premium  -- most capable model, adaptive extended thinking. Best for high-stakes offers.
+#   premium  -- most capable model. Extended thinking depends on the selected CLI/provider.
 # See the tier -> model mapping table in modes/_shared.md.
 spend_tier: standard
 
