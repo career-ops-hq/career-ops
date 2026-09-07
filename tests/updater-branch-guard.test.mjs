@@ -18,10 +18,11 @@
  * apply() runs, so a caller wired up wrong cannot pass here.
  */
 
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { pass, fail, warn } from './helpers.mjs';
+import { pass, fail, warn, getBash, bashSource } from './helpers.mjs';
 import {
   COMMIT_ON_BRANCH_FLAG,
   commitOnBranchOptIn,
@@ -266,12 +267,78 @@ console.log('\n🧪 Testing updater branch guard (#3846)...');
     currentBranch: 'feat/x', defaultBranch: 'main', version: '1.33.0',
     commitCommand: 'git commit -m "x"',
   };
-  const warned = skippedBranchCommitNotice({ ...args, hasUnrelatedStaged: true });
-  const quiet = skippedBranchCommitNotice({ ...args, hasUnrelatedStaged: false });
-  if (/other changes staged/.test(warned) && !/other changes staged/.test(quiet)) {
+  const warned = skippedBranchCommitNotice({
+    ...args, unrelatedStaged: ['mine.txt', 'my notes.md'],
+  });
+  const quiet = skippedBranchCommitNotice({ ...args, unrelatedStaged: [] });
+  const fires = /staged besides this update/.test(warned)
+    && !/staged besides this update/.test(quiet);
+  if (fires) {
     pass('option 2 warns when other staged work would ride along, and only then');
   } else {
     fail('the unrelated-staged warning is missing or unconditional');
+  }
+  // The remedy names the paths, and quotes the ones that need it. Asserted on
+  // the rendered line rather than on the array, because an unquoted path with a
+  // space is what turns a correct remedy into two wrong ones.
+  if (/git stash push -m 'my work' -- mine\.txt 'my notes\.md'/.test(warned)) {
+    pass("option 2's remedy is scoped to the unrelated paths, quoted");
+  } else {
+    fail(`option 2's remedy does not name the paths to move:\n${warned}`);
+  }
+}
+
+// ── 11d. …and running that remedy actually leaves the update behind ────
+{
+  // The point of 11c is not the wording, it is that the printed command works.
+  // Both unscoped readings of an unscoped remedy fail, and they fail AS the two
+  // things this guard exists to prevent: a bare `git commit` puts the update's
+  // snapshot on the feature branch (#3846), and a bare `git stash push` takes
+  // the refreshed files out of the tree (the staleness the guard avoids). So
+  // run the line the notice prints and check what survives.
+  //
+  // Through getBash(), not execSync(): the notice quotes paths the POSIX way
+  // (shellQuoteArg), and cmd.exe — what execSync() spawns on win32 — passes
+  // `'my notes.md'` through as two literal arguments, quotes included. The
+  // command under test IS a shell string, so it needs the shell it was written
+  // for; running it under the wrong one would test the quoting of a shell no
+  // reader of this notice is in.
+  const bash = getBash();
+  const { dir, g } = makeRepo();
+  try {
+    g('checkout', '-qb', 'feat/x');
+    writeFileSync(join(dir, 'sys.mjs'), 'refreshed by the update\n');
+    writeFileSync(join(dir, 'mine.txt'), 'my own work\n');
+    writeFileSync(join(dir, 'my notes.md'), 'my own notes\n');
+    g('add', 'sys.mjs', 'mine.txt', 'my notes.md');
+
+    const unrelatedStaged = ['mine.txt', 'my notes.md'];
+    const notice = skippedBranchCommitNotice({
+      currentBranch: 'feat/x', defaultBranch: 'main', version: '1.33.0',
+      commitCommand: 'git commit -m "x"', unrelatedStaged,
+    });
+    const remedy = notice.split('\n').map(l => l.trim())
+      .find(l => l.startsWith('git stash push -m'));
+    if (bashSource() === 'unresolved') {
+      // Skip loudly rather than pass: this assertion is the only one that runs
+      // the remedy, so a silent skip would read as coverage that is not there.
+      warn('no POSIX shell found — the remedy was not executed, only its text checked');
+    } else if (!remedy) {
+      fail(`no runnable remedy line in the notice:\n${notice}`);
+    } else {
+      execFileSync(bash, ['-c', remedy], { cwd: dir, stdio: 'pipe' });
+      const staged = gitIn(dir, 'diff', '--cached', '--name-only').split('\n').filter(Boolean);
+      const onDisk = existsSync(join(dir, 'sys.mjs'));
+      const movedOut = unrelatedStaged.every(p => !staged.includes(p) && !existsSync(join(dir, p)));
+      if (staged.includes('sys.mjs') && onDisk && movedOut) {
+        pass("the remedy moves the contributor's work out and leaves the update staged");
+      } else {
+        fail(`after \`${remedy}\`: staged=[${staged}], sys.mjs on disk=${onDisk}, `
+          + `unrelated moved out=${movedOut}`);
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 
