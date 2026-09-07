@@ -349,6 +349,102 @@ for (const [label, detailImpl] of [
   }
 }
 
+// The cap must bound REQUESTS, not postings. The block above only ever walks
+// the happy path, where the two are the same number — so on its own it cannot
+// see a retry. A tenant answering 503 retries RETRY_POLICY.retries times per
+// posting, which turned the promised 200 GETs into 800 before this was fixed:
+// the ceiling failed in exactly the situation it exists for, an unhealthy
+// tenant. Measured against the transport, because that is what the tenant
+// counts.
+{
+  const many = Array.from({ length: 260 }, (_, i) => ({
+    title: `Engineer ${i}`,
+    externalPath: `/job/USA---Sunnyvale-CA/Engineer-${i}_R${i}`,
+    locationsText: '3 Locations',
+    postedOn: 'Posted Today',
+  }));
+  let detailRequests = 0;
+  const { result: jobs, errors } = await captureConsoleErrors(() => workday.fetch(ENTRY, mkCtx(async (url, opts) => {
+    if (url.endsWith('/jobs')) {
+      const offset = JSON.parse(opts?.body || '{}').offset || 0;
+      return { total: many.length, jobPostings: many.slice(offset, offset + 20) };
+    }
+    detailRequests++;
+    const err = new Error('service unavailable');
+    err.status = 503; // retryable — isRetryableError() in providers/_http.mjs
+    throw err;
+  })));
+  if (detailRequests <= 200) pass(`retries count against the cap: ${detailRequests} detail requests, not 800`);
+  else fail(`workday.fetch() made ${detailRequests} detail requests against a 200-request cap`);
+  // The postings the budget could not reach must be reported as capped, and
+  // the ones it reached and failed as unreadable — 260 pending, 50 reached at
+  // 4 attempts each, so 210 are behind the cap and 50 are unreadable. If those
+  // two were folded together the message would blame the wrong thing.
+  const line = errors.find((e) => typeof e === 'string' && e.includes('multi-location placeholder'));
+  if (line && line.includes('50 detail document(s) unreadable') && line.includes('210 left unresolved by the 200-request cap')) {
+    pass('a retry-exhausted run separates "unreadable" from "never reached"');
+  } else {
+    fail(`wrong accounting on a failing tenant: ${JSON.stringify(line)}`);
+  }
+  if (jobs.every((j) => j.location === '3 Locations')) pass('every placeholder survives a tenant whose detail endpoint is down');
+  else fail('a failed detail fetch changed a location');
+}
+
+// Counting alone is not enough: the LAST posting under the cap must not be
+// allowed to start a full retry ladder and step over it. The block above cannot
+// see this — 260 postings failing 4 times each land on 200 exactly, so nothing
+// overshoots. Here the budget is walked to 199 by postings that succeed first
+// try, and the 200th fails; unconstrained retries would spend 203.
+{
+  const many = Array.from({ length: 260 }, (_, i) => ({
+    title: `Engineer ${i}`,
+    externalPath: `/job/USA---Sunnyvale-CA/Engineer-${i}_R${i}`,
+    locationsText: '3 Locations',
+    postedOn: 'Posted Today',
+  }));
+  let detailRequests = 0;
+  await captureConsoleErrors(() => workday.fetch(ENTRY, mkCtx(async (url, opts) => {
+    if (url.endsWith('/jobs')) {
+      const offset = JSON.parse(opts?.body || '{}').offset || 0;
+      return { total: many.length, jobPostings: many.slice(offset, offset + 20) };
+    }
+    detailRequests++;
+    if (detailRequests <= 199) return DETAIL;
+    const err = new Error('service unavailable');
+    err.status = 503;
+    throw err;
+  })));
+  if (detailRequests === 200) pass('the last posting under the cap retries only as far as the budget allows');
+  else fail(`expected the cap to hold at exactly 200, got ${detailRequests}`);
+}
+
+// A retry that SUCCEEDS still costs the tenant two requests. It is the case no
+// post-hoc count can see — `err.attempts` exists only on the error withRetry
+// rethrows, so a first-try-503-then-200 reports nothing at all.
+{
+  let detailRequests = 0;
+  let firstTry = true;
+  const jobs = await workday.fetch(ENTRY, mkCtx(async (url) => {
+    if (url.endsWith('/jobs')) return PAGE0;
+    detailRequests++;
+    if (firstTry) {
+      firstTry = false;
+      const err = new Error('rate limited');
+      err.status = 429;
+      throw err;
+    }
+    return DETAIL;
+  }));
+  if (detailRequests === 2) pass('a transient failure and its successful retry are both counted');
+  else fail(`expected 2 detail requests across the retry, got ${detailRequests}`);
+  const enriched = jobs.find((j) => j.title === 'Engineer III, Cloud Native');
+  if (enriched.location === 'USA - Sunnyvale, CA · USA - Austin, TX · USA - Redmond, WA') {
+    pass('the retried posting is still enriched');
+  } else {
+    fail(`retry did not enrich: ${enriched.location}`);
+  }
+}
+
 // A probe (verify-portals / discover-ats set ctx.maxPages) asks whether the
 // board answers. Charging it one GET per multi-location posting would make a
 // liveness check cost scale with the board.

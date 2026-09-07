@@ -398,7 +398,8 @@ export function isMultiLocationPlaceholder(location) {
   return typeof location === 'string' && MULTI_LOCATION_PLACEHOLDER_RE.test(location);
 }
 
-// How many detail documents one entry may spend to resolve placeholders. The
+// How many detail GETs one entry may spend to resolve placeholders — every
+// request the tenant sees, retries included, not one per posting. The
 // enrichment is one extra GET per placeholder posting, and nvidia ran 29
 // placeholders in 60 postings — a 2,000-posting tenant at that rate would add
 // ~1,000 requests, which is a different kind of scan than the one the caller
@@ -855,20 +856,43 @@ export default {
       let resolved = 0;
       let redated = 0;
       let failed = 0;
-      let spent = 0;
+      // Two counters, because a retry is a request the tenant sees but not a
+      // posting the caller gets. `requests` is what MAX_DETAIL_REQUESTS bounds
+      // — every attempt, retries included — and `attempted` is how far down
+      // `pending` the loop reached, which is what "left unresolved" reports.
+      // Counting only postings made the cap a per-posting count wearing a
+      // request cap's name: with RETRY_POLICY at 3 retries, a tenant answering
+      // 503 turned a promised 200 GETs into 800 (measured, not reasoned) —
+      // and a failing tenant is exactly where restraint matters most.
+      let requests = 0;
+      let attempted = 0;
+      // Meters the transport itself rather than trusting a post-hoc count:
+      // withRetry calls ctx.fetchJson once per attempt, and on a SUCCESSFUL
+      // call after a transient failure it reports no attempt count anywhere
+      // (`err.attempts` only exists on the error it rethrows). Object.create
+      // rather than a spread so anything the caller's ctx carries — including
+      // accessors and prototype methods — stays reachable.
+      const meteredCtx = Object.create(ctx);
+      meteredCtx.fetchJson = (url, opts) => { requests++; return ctx.fetchJson(url, opts); };
       for (const job of pending) {
-        if (spent >= MAX_DETAIL_REQUESTS) break;
+        if (requests >= MAX_DETAIL_REQUESTS) break;
         const externalPath = job.url.slice(ep.jobBase.length);
-        spent++;
+        attempted++;
         // Same politeness as the pagination loop: one tenant, one request at a
         // time, spaced. A burst of same-host GETs is what its WAF watches for.
-        if (spent > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
+        if (attempted > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
+        // The last postings under the cap get fewer retries rather than the cap
+        // getting more requests: `remaining` is at least 1 (the loop broke
+        // otherwise), so this posting spends at most what is left and the
+        // documented ceiling holds for every tenant, not just healthy ones.
+        const remaining = MAX_DETAIL_REQUESTS - requests;
+        const policy = { ...RETRY_POLICY, retries: Math.min(RETRY_POLICY.retries, remaining - 1) };
         // Fetched once and parsed twice: the location and the date both live in
         // this one document, and a second GET for the date would double the
         // cost of the enrichment for a field that is already in hand.
         let detail;
         try {
-          detail = await fetchJsonWithRetry(ctx, `${ep.cxsBase}${externalPath}`, detailOpts, RETRY_POLICY);
+          detail = await fetchJsonWithRetry(meteredCtx, `${ep.cxsBase}${externalPath}`, detailOpts, policy);
         } catch {
           // Fail soft, per posting. A detail document that 404s, rate-limits or
           // returns something unexpected leaves the placeholder exactly as it
@@ -893,7 +917,7 @@ export default {
         }
       }
       if (placeholders.length > 0) {
-        const capped = pending.length > spent ? `, ${pending.length - spent} left unresolved by the ${MAX_DETAIL_REQUESTS}-request cap` : '';
+        const capped = pending.length > attempted ? `, ${pending.length - attempted} left unresolved by the ${MAX_DETAIL_REQUESTS}-request cap` : '';
         const unreadable = failed > 0 ? `, ${failed} detail document(s) unreadable` : '';
         const unroutable = unaddressable > 0 ? `, ${unaddressable} with no site-relative path` : '';
         // Reported separately from `resolved` because the two can differ: a
