@@ -15946,6 +15946,14 @@ try {
     } else {
       fail(`an empty tracker withholds cadenceDefaults, so a first-run web cadence form renders blank (#4005): ${JSON.stringify(emptyEmitted)}`);
     }
+    // The error must SURVIVE alongside the defaults: stats.mjs short-circuits on
+    // result.error before it reads entries, so dropping it while adding the
+    // defaults would hand that caller a payload with no entries to iterate.
+    if (emptyEmitted?.error === 'No applications found in tracker.') {
+      pass('the empty-tracker payload still reports its error alongside the defaults (#4005)');
+    } else {
+      fail(`the empty-tracker error was lost, so callers that branch on result.error now fall through (#4005): ${JSON.stringify(emptyEmitted)}`);
+    }
     const webFollowups = join(ROOT, 'web', 'src', 'lib', 'followups.ts');
     if (existsSync(webFollowups)) {
       const webSrc = readFileSync(webFollowups, 'utf-8');
