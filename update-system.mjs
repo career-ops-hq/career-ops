@@ -1825,12 +1825,12 @@ async function check() {
   // and apply() refuses the same layout with the actionable message.
   const foreignToplevel = gitToplevelMismatch();
   if (foreignToplevel) {
-    console.log(JSON.stringify({ status: 'not-a-git-toplevel', local: formatLocalVersion(), toplevel: foreignToplevel }));
+    console.log(JSON.stringify({ status: 'not-a-git-toplevel', local: localVersion(), toplevel: foreignToplevel }));
     return;
   }
 
   const local = localVersion();
-  const localFormatted = formatLocalVersion();
+  const localSha = localShortSha();
   let remote = '';
   let releaseVersion = '';
   let changelog = '';
@@ -1891,7 +1891,7 @@ async function check() {
     // right conservative behaviour (no version = can't determine status).
     const bothNetworkFailed = rawVersion === null && releaseRaw === null;
     const status = bothNetworkFailed ? 'offline' : 'no-remote-version';
-    console.log(JSON.stringify({ status, local: localFormatted }));
+    console.log(JSON.stringify({ status, local }));
     return;
   }
 
@@ -1925,16 +1925,17 @@ async function check() {
   }
 
   if (compareVersions(local, remote) >= 0 && !systemTreeDrift) {
-    console.log(JSON.stringify({ status: 'up-to-date', local: localFormatted, remote, local_commit: localCommit || undefined, remote_commit: remoteCommit || undefined }));
+    console.log(JSON.stringify({ status: 'up-to-date', local, remote, local_commit: localCommit || undefined, local_sha: localSha || undefined, remote_commit: remoteCommit || undefined }));
     return;
   }
 
   console.log(JSON.stringify({
     status: 'update-available',
-    local: localFormatted,
+    local,
     remote,
     reason: systemTreeDrift ? 'system-files-changed' : 'version-changed',
     local_commit: localCommit || undefined,
+    local_sha: localSha || undefined,
     remote_commit: remoteCommit || undefined,
     changelog: changelog.slice(0, 500),
   }));
