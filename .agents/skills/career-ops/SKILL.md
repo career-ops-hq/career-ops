@@ -96,7 +96,7 @@ If `$mode` is not a sub-command AND doesn't look like a JD, show discovery.
 Before executing any mode, read `config/profile.yml` if it exists and resolve:
 
 - `language.output` → ISO language code for human-facing output. Default: `en`.
-- `language.modes_dir` → optional market-mode directory. This controls market vocabulary and local evaluation rules only. It may be a single string (one declared market, the historical default) or a list of declared candidate markets for a candidate genuinely running parallel campaigns in more than one market at once (#3793), e.g. `modes_dir: [modes/de, modes/zh]`. When a list is given, the FIRST entry is primary and supplies the evaluation-mode file (Block A-F rules can only run from one market's file at a time); EVERY declared market's `_shared.md` is loaded into context. Per posting, judge which declared market actually applies from the JD's own MARKET signals (hiring-entity jurisdiction, currency, benefits/legal vocabulary) — never from the JD's language alone — and ask the candidate if genuinely ambiguous between the declared options.
+- `language.modes_dir` → optional market-mode directory. This controls market vocabulary and local evaluation rules only. It may be a single string (one declared market, the historical default) or a list of declared candidate markets for a candidate genuinely running parallel campaigns in more than one market at once (#3793), e.g. `modes_dir: [modes/de, modes/zh]`. When a list is given, the FIRST entry is primary and supplies the evaluation-mode file (Block A-F rules can only run from one market's file at a time); EVERY declared market's `_shared.md` is loaded into context. `modes` itself is a valid declared candidate for markets without a localized directory; when first it supplies `modes/oferta.md`, and its baseline `modes/_shared.md` is loaded once. Per posting, judge which declared market actually applies from the JD's own MARKET signals (hiring-entity jurisdiction, currency, benefits/legal vocabulary) — never from the JD's language alone. If genuinely ambiguous, an interactive session asks and stops before persistence; an unattended worker uses the primary market and records that fallback in the report header or Block G.
 
 Inject this directive after loading the mode instructions and before producing any user-visible content:
 
@@ -176,9 +176,11 @@ After determining the mode, load the necessary files before executing:
 
 If `modes/_custom.md` exists, read it after `modes/_profile.md` and before the selected mode file. It contains user house rules and procedural preferences. It may override workflow/style defaults, but it never adds factual claims about the candidate.
 
+Resolve `language.modes_dir` before applying the path shorthand below. With no setting, use `modes`. With a scalar directory, preserve the existing behavior: use that directory's `_shared.md` and localized mode file when it provides one. With a list, load every declared directory's `_shared.md` exactly once (including the baseline `modes/_shared.md` when `modes` appears), but use only the FIRST entry's evaluation-mode file for Blocks A-F; later entries contribute context, never a competing evaluation file. User-layer `_profile.md` and `_custom.md` remain under `modes/`.
+
 ### Modes that require `_shared.md` + their mode file
 
-Read `modes/_shared.md` + `modes/_profile.md` (if exists) + `modes/_custom.md` (if exists) + `modes/{mode}.md`
+Read the resolved shared context (default `modes/_shared.md`) + `modes/_profile.md` (if exists) + `modes/_custom.md` (if exists) + the resolved selected mode file (default `modes/{mode}.md`). For an A-F evaluation, that selected file is the primary directory's evaluation mode; do not also load an evaluation file from a secondary directory.
 
 Applies to: `auto-pipeline`, `oferta`, `ofertas`, `pdf`, `text`, `contacto`, `apply`, `pipeline`, `scan`, `batch`
 
@@ -190,12 +192,12 @@ Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `re
 
 ### Modes delegated to subagent
 
-For `scan`, `apply` (with Playwright), and `pipeline` (3+ URLs): launch as a worker/subagent with the content of `_shared.md` + `_profile.md` (if exists) + `_custom.md` (if exists) + `modes/{mode}.md` injected into the worker prompt. If your CLI exposes an `Agent(...)` primitive, the call looks like this:
+For `scan`, `apply` (with Playwright), and `pipeline` (3+ URLs): launch as a worker/subagent with the resolved shared context + `_profile.md` (if exists) + `_custom.md` (if exists) + the resolved selected mode file injected into the worker prompt. If your CLI exposes an `Agent(...)` primitive, the call looks like this:
 
 ```python
 Agent(
   subagent_type="general-purpose",
-  prompt="[output language directive]\n\n[content of modes/_shared.md]\n\n[content of modes/_profile.md if exists]\n\n[content of modes/_custom.md if exists]\n\n[content of modes/{mode}.md]\n\n[invocation-specific data]",
+  prompt="[output language directive]\n\n[content of modes/_shared.md, or resolved shared context: every declared _shared.md once]\n\n[content of modes/_profile.md if exists]\n\n[content of modes/_custom.md if exists]\n\n[content of modes/{mode}.md, or resolved selected mode file; primary evaluation file for Blocks A-F]\n\n[invocation-specific data]",
   description="career-ops {mode}"
 )
 ```

@@ -28,6 +28,7 @@ Before writing any user-visible prose, read `config/profile.yml` if it exists.
 - Resolve `language.output`; default to `en` when the key is absent.
 - `language.output` controls all human-facing output: report prose, report headings, tracker notes, PDF text, cover/application text if any, and final user-facing summaries.
 - `language.modes_dir`, when present, supplies market vocabulary and local evaluation rules only. It must not force the prose language. It may be a string or an ordered list of declared candidate markets; the first entry is primary for evaluation rules, while every declared market contributes shared context.
+- `modes` is a valid entry in that list for a target market with no localized directory. It counts as a declared candidate; when first, it uses `modes/oferta.md`, and its `modes/_shared.md` baseline is loaded only once.
 
 **Write all human-facing output in `language.output`, regardless of the language of this prompt or the job description.** Keep machine-readable field names exactly as specified. Keep market-specific terms from `language.modes_dir` when relevant, but explain them in `language.output` when needed.
 
@@ -37,7 +38,7 @@ Examples:
 - `language.output: en` + `language.modes_dir: [modes, modes/zh]` → keep English prose, load both shared contexts, and choose market concepts from the JD's jurisdiction, currency, benefits, and legal signals — not language alone.
 - Missing `language.output` → write in English.
 
-If the declared markets remain genuinely ambiguous after reviewing the JD, stop before writing or merging the report or tracker entry, ask the candidate to select the market, and do not guess.
+If the declared markets remain genuinely ambiguous after reviewing the JD, the behavior depends on the execution path: an interactive session asks the candidate and stops before writing or merging until they choose. This batch worker is unattended, so nobody can answer: continue with the first/primary market and state both the ambiguity and that fallback explicitly in the report header or Block G before writing the report and tracker entry.
 
 ---
 
