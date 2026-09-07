@@ -320,32 +320,35 @@ test("buildPrompt: two declared markets both get a _shared.md pointer", () => {
   assert.match(prompt, /modes\/zh\/_shared\.md/);
 });
 
-test("buildPrompt: the default modes directory is retained in a multi-market declaration", () => {
+test("buildPrompt: modes counts in a multi-market declaration without a redundant shared pointer", () => {
   const prompt = buildPrompt({
     kind: "evaluate",
     ...ARGS,
     lang: { ...DE_ZH, modesDir: "modes", modesDirs: ["modes", "modes/zh"] },
   });
-  assert.match(prompt, /modes\/_shared\.md/);
+  assert.doesNotMatch(prompt, /read modes\/_shared\.md/i);
   assert.match(prompt, /modes\/zh\/_shared\.md/);
   assert.match(prompt, /MARKET signals/);
+  assert.match(prompt, /first\/primary market \(modes\)/);
 });
 
-test("buildPrompt: multiple declared markets tell the agent to judge by market signal, not JD language", () => {
+test("buildPrompt: unattended multi-market evaluation falls back to primary and records ambiguity", () => {
   const prompt = buildPrompt({ kind: "evaluate", ...ARGS, lang: DE_ZH });
   assert.match(prompt, /MARKET signals/);
   assert.match(prompt, /Never infer the market from the JD's language alone/);
   assert.match(prompt, /ambiguous/i);
-  assert.match(prompt, /STOP BEFORE WRITING OR MERGING/i);
-  assert.match(prompt, /ask the candidate to select the market/i);
+  assert.match(prompt, /unattended run/i);
+  assert.match(prompt, /do not stop or ask the candidate/i);
+  assert.match(prompt, /first\/primary market \(modes\/de\)/);
+  assert.match(prompt, /report header or Block G/i);
 });
 
 test("buildPrompt: research gets shared market context without evaluation stop rules", () => {
   const prompt = buildPrompt({ kind: "research", ...ARGS, lang: DE_ZH });
   assert.match(prompt, /modes\/de\/_shared\.md/);
   assert.match(prompt, /modes\/zh\/_shared\.md/);
-  assert.doesNotMatch(prompt, /STOP BEFORE WRITING OR MERGING/i);
-  assert.doesNotMatch(prompt, /ask the candidate to select the market/i);
+  assert.doesNotMatch(prompt, /primary-market fallback/i);
+  assert.doesNotMatch(prompt, /do not stop or ask the candidate/i);
 });
 
 test("buildPrompt: the primary declared market still drives the evaluation-mode file with multiple markets configured", () => {
@@ -361,6 +364,7 @@ test("buildPrompt: a one-element modesDirs array behaves exactly like a plain st
   // Single-market disambiguation language must not appear when only one
   // market is declared — it would be noise for the ~90% single-market case.
   assert.doesNotMatch(promptFromArray, /MARKET signals/);
+  assert.doesNotMatch(promptFromArray, /Market ambiguity/i);
 });
 
 test("buildPrompt: missing modes_dir (no lang.modesDirs, no lang.modesDir) keeps the unconfigured default behavior", () => {
