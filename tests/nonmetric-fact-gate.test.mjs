@@ -249,6 +249,75 @@ try {
     fail(`a source-backed lowercase tool name was blocked: ${JSON.stringify(backedLowercaseTool)}`);
   }
 
+  // #4004 - `isLikelyTool()` accepts by default: a fragment that is neither
+  // tool-shaped nor an exact source match is still asserted as a tool unless
+  // one of its words happens to sit in `TOOL_PROSE_WORDS`. A tailoring run
+  // that rewords a "using" sentence out of the CV's own vocabulary therefore
+  // blocks the render of a document that asserts nothing false.
+  writeFileSync(source, [
+    'Regional Sales Manager at Northwind Supply.',
+    'Reported on campaign performance and on coverage of the pipeline every week.',
+    'Advised clients on solutions for print and digital channels.',
+    'Grew the account through a consultative approach to selling.',
+  ].join('\n'));
+  const rewordedProse = [
+    ['a reworded source phrase', 'Reported weekly using campaign performance and pipeline coverage.'],
+    ['a noun phrase reassembled from the source', 'Advised clients using digital solutions.'],
+    ['a gerund phrase from the source', 'Grew the account using consultative selling.'],
+  ];
+  for (const [label, target] of rewordedProse) {
+    const result = verifyFacts(target, { sourcePaths: [source], configPath: config });
+    if (result.verdict === 'pass' && !result.unsupportedFacts.some(claim => claim.kind === 'tool')) {
+      pass(`#4004 prose built from the source's own words is not a tool claim: ${label}`);
+    } else {
+      fail(`#4004 ordinary prose blocked a truthful document (${label}): ${JSON.stringify(result)}`);
+    }
+  }
+
+  // A name the source never mentions is still unverified, whatever its casing:
+  // the source-vocabulary test above must not become a way to smuggle one in.
+  const novelLowercaseTool = verifyFacts('Reported weekly using kubernetes.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (novelLowercaseTool.verdict === 'block'
+      && novelLowercaseTool.unsupportedFacts.some(claim => claim.kind === 'tool' && claim.value === 'kubernetes')) {
+    pass('#4004 a lowercase name absent from the source still blocks');
+  } else {
+    fail(`#4004 opened a bypass for an unbacked lowercase tool: ${JSON.stringify(novelLowercaseTool)}`);
+  }
+
+  // Determiners are a closed grammatical class, so this one needs no source:
+  // "that campaign" and "our playbook" are ordinary reference, not products.
+  const determinerCases = [
+    ['a demonstrative', 'Rebuilt the funnel using that campaign.'],
+    ['a possessive', 'Ran the quarterly review using our playbook.'],
+  ];
+  for (const [label, text] of determinerCases) {
+    const found = factClaims(text).filter(claim => claim.kind === 'tool');
+    if (found.length === 0) {
+      pass(`#4004 a determiner-led fragment is not a tool claim: ${label}`);
+    } else {
+      fail(`#4004 determiner-led prose was extracted as a tool (${label}): ${JSON.stringify(found)}`);
+    }
+  }
+
+  // The other direction: an explicit declaration is still a declaration.
+  const declaredTools = factClaims('Technologies: React, Postgres');
+  if (declaredTools.some(claim => claim.kind === 'tool' && claim.value === 'react')
+      && declaredTools.some(claim => claim.kind === 'tool' && claim.value === 'postgres')) {
+    pass('#4004 a Technologies: list is still extracted');
+  } else {
+    fail(`#4004 lost a declared technology list: ${JSON.stringify(declaredTools)}`);
+  }
+
+  const builtWithTools = factClaims('Built with Django and Redis.');
+  if (builtWithTools.some(claim => claim.kind === 'tool' && claim.value === 'django')
+      && builtWithTools.some(claim => claim.kind === 'tool' && claim.value === 'redis')) {
+    pass('#4004 a "built with" declaration is still extracted');
+  } else {
+    fail(`#4004 lost a "built with" declaration: ${JSON.stringify(builtWithTools)}`);
+  }
+
   const delegatedSource = [
     'Sourced and directed vendor Acme Interactive through the WebGL build of an in-store kiosk.',
     'Built the internal deployment pipeline using Node.js.',
