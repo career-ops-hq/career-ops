@@ -47,6 +47,9 @@ copyFileSync(join(ROOT, 'tracker-utils.mjs'), join(sandbox, 'tracker-utils.mjs')
 copyFileSync(join(ROOT, 'tracker-parse.mjs'), join(sandbox, 'tracker-parse.mjs'));
 copyFileSync(join(ROOT, 'tracker-aliases.json'), join(sandbox, 'tracker-aliases.json'));
 copyFileSync(join(ROOT, 'pipeline-lock.mjs'), join(sandbox, 'pipeline-lock.mjs'));
+// ...and it strips the optional sections that rendered as a bare header via
+// ./cv-sections-core.mjs (#3986), another local sibling this sandbox needs.
+copyFileSync(join(ROOT, 'cv-sections-core.mjs'), join(sandbox, 'cv-sections-core.mjs'));
 // ...and generate-pdf resolves user-layer paths via path-resolver.mjs
 // (CAREER_OPS_ROOT), so the fixture carries that too.
 copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs'));
@@ -68,7 +71,7 @@ writeFileSync(join(playwrightStub, 'package.json'), JSON.stringify({
   exports: './index.js',
 }), 'utf-8');
 writeFileSync(join(playwrightStub, 'index.js'), `
-import { readFile } from 'fs/promises';
+import { readFile, writeFile } from 'fs/promises';
 
 const twoPagePdf = Buffer.from(\`%PDF-1.7
 1 0 obj
@@ -117,6 +120,10 @@ export const chromium = {
         return {
           async goto(url) {
             const html = await readFile(new URL(url), 'utf-8');
+            // Keep the document that actually reached the renderer, after every
+            // transform generate-pdf.mjs applies to it. Written to the sandbox
+            // (the spawned script's cwd) so a case can assert on it.
+            await writeFile('.rendered.html', html, 'utf-8');
             renderedPdf = html.includes('THREE_PAGE_FIXTURE') ? threePagePdf : twoPagePdf;
           },
           async evaluate() {},
@@ -371,6 +378,55 @@ try {
     pass('renderHtmlToPdf keeps an external baseDir temporary file inside the workspace');
   } else {
     fail(`renderHtmlToPdf placed its temporary file outside the workspace: ${observedTempPath}`);
+  }
+  // --- Optional sections that arrived as a bare header (#3986) -------------
+  // The builders strip these from the payload before filling a template, but
+  // neither builder runs on the web pdf path: the agent emits finished HTML,
+  // which reaches this script with the empty wrappers intact. Assert on the
+  // document the renderer actually received, so removing the call in
+  // generate-pdf.mjs fails here and not only in the unit suite for the module.
+  const bareHeaderInput = join(sandbox, 'bare-header-sections.html');
+  writeFileSync(bareHeaderInput, `<!doctype html>
+<html>
+  <body>
+    <!-- WORK EXPERIENCE -->
+    <div class="section">
+      <div class="section-title">Work Experience</div>
+      <div class="job">Staff Engineer, Acme</div>
+    </div>
+
+    <!-- PROJECTS -->
+    <div class="section">
+      <div class="section-title">Projects</div>
+    </div>
+
+    <!-- EDUCATION -->
+    <div class="section">
+      <div class="section-title">Education</div>
+      <div class="edu">BSc, 2015</div>
+    </div>
+
+    <!-- END -->
+  </body>
+</html>
+`, 'utf-8');
+  const bareHeaderPdf = join(sandbox, 'bare-header-sections.pdf');
+  const bareHeaderRun = runPdf([bareHeaderInput, bareHeaderPdf]);
+  const renderedHtml = existsSync(join(sandbox, '.rendered.html'))
+    ? readFileSync(join(sandbox, '.rendered.html'), 'utf-8')
+    : '';
+  if (
+    bareHeaderRun.status === 0 &&
+    renderedHtml !== '' &&
+    !renderedHtml.includes('<!-- PROJECTS -->') &&
+    renderedHtml.includes('<!-- WORK EXPERIENCE -->') &&
+    renderedHtml.includes('Staff Engineer, Acme') &&
+    renderedHtml.includes('<!-- EDUCATION -->') &&
+    renderedHtml.includes('BSc, 2015')
+  ) {
+    pass('generate-pdf drops a section that arrived as a bare header and keeps the populated ones');
+  } else {
+    fail(`generate-pdf did not strip the empty Projects section from the rendered document: ${bareHeaderRun.output.trim()}`);
   }
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
