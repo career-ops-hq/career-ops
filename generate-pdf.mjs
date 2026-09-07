@@ -1354,6 +1354,11 @@ async function generatePDF() {
     // fails, which is the correct direction to fail for a fact gate.
     const { assertFacts } = await import('./verify-cv-facts.mjs');
     const factCheck = assertFacts(html, { label: basename(inputPath) });
+    // Ahead of the verdict, because it qualifies it: with no config the phrase
+    // lists are empty, so a "passed" below covers metrics and facts only.
+    if (factCheck.configMissing) {
+      console.warn('⚠️  No config/cv-facts.json — forbidden/advisory phrase checks did not run.');
+    }
     if (factCheck.verdict === 'warn') {
       console.warn(`⚠️  CV fact check warning: ${basename(inputPath)}`);
       for (const phrase of factCheck.warnings) console.warn(`  - advisory phrase: ${phrase}`);

@@ -1005,6 +1005,11 @@ search_queries:
 #   careers_url: https://exampleco.bamboohr.com/careers   # any *.bamboohr.com host
 #   enabled: true
 #
+# - name: Example Collage HR Co
+#   careers_url: https://secure.collage.co/jobs/exampleco      # explicit job-site address
+#   # Or pin the API directly: api: https://api.collage.co/v1/positions/exampleco
+#   enabled: true
+#
 # - name: Example Breezy Co
 #   careers_url: https://exampleco.breezy.hr              # any *.breezy.hr host
 #   enabled: true
