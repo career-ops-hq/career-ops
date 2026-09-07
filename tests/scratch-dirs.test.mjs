@@ -222,8 +222,8 @@ const age = (dir, ms = MIN_SCRATCH_AGE_MS * 2) => {
     } catch (err) {
       // Anything else that cannot make a link says so and moves on, rather than
       // throwing and silently deleting the sections below it from the run.
-      warn(`cannot create a link here (${err?.code ?? err?.message}) — the `
-        + 'symlink case did not run');
+      warn(`cannot create a link here (${err?.code ?? err?.message ?? String(err)}) `
+        + '— the symlink case did not run');
       linkable = false;
     }
     // The TARGET is backdated, not just the parent: a sweep that resolved the
