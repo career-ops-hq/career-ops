@@ -19,8 +19,8 @@ import { tmpdir } from 'os';
 import { join, relative, sep } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
 import {
-  SCRATCH_PREFIX, MIN_SCRATCH_AGE_MS, isScratchDir, sweepScratchDirs,
-  markScratchOwner, scratchOwnerAlive,
+  SCRATCH_PREFIX, MIN_SCRATCH_AGE_MS, MAX_SCRATCH_AGE_MS, isScratchDir,
+  sweepScratchDirs, markScratchOwner, scratchOwnerAlive,
 } from '../lib/scratch-dirs.mjs';
 import { collectMjsFiles } from '../lib/mjs-files.mjs';
 import { execFileSync } from 'child_process';
@@ -299,6 +299,36 @@ const age = (dir, ms = MIN_SCRATCH_AGE_MS * 2) => {
       pass('a missing or unparseable owner marker falls through to the age gate');
     } else {
       fail(`unknown-owner handling wrong: unknown=${unknown} removed=${JSON.stringify(removed)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 11. A living-owner claim does not hold forever ────────────────────
+{
+  // `kill(pid, 0)` answers "is that pid running", not "is that pid the run that
+  // wrote this marker". A pid freed by a crash gets reused, and the marker then
+  // reads as alive for as long as the recycled process lives — so the claim
+  // needs a ceiling, or "never sweep a live run" becomes "never sweep".
+  const dir = mkdtempSync(join(tmpdir(), 'co-scratch-ceiling-'));
+  try {
+    const recent = join(dir, `${SCRATCH_PREFIX}recent`);
+    const forever = join(dir, `${SCRATCH_PREFIX}foreve`);
+    for (const d of [recent, forever]) {
+      mkdirSync(d, { recursive: true });
+      markScratchOwner(d);   // this process: alive by construction, for both
+    }
+    age(recent, MIN_SCRATCH_AGE_MS * 2);        // stale, but well under the ceiling
+    age(forever, MAX_SCRATCH_AGE_MS * 2);       // past it
+
+    const { removed, kept } = sweepScratchDirs(dir);
+    if (existsSync(recent) && !existsSync(forever)
+        && kept.length === 1 && removed.length === 1) {
+      pass('a living owner protects its scratch, but not past the ceiling');
+    } else {
+      fail(`ceiling wrong: removed=${JSON.stringify(removed)} kept=${JSON.stringify(kept)} `
+        + `recent exists=${existsSync(recent)} forever exists=${existsSync(forever)}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

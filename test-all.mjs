@@ -455,27 +455,29 @@ try {
   const copyDirSync = (src, dest, exclude = []) => {
     const name = src.split(/[\\/]/).pop();
     if (EXCLUDE_AT_ANY_DEPTH.has(name)) return;
-    // A leftover from an earlier interrupted run is not repository source, and
-    // copying one nests it inside this run's scratch — which is how #3940's
-    // `.tmp-script-test-OP9Bzd/.tmp-script-test-tBjFgy/…` came to exist. This
-    // run's OWN scratch is already excluded by name in `excludeDirs` below; what
-    // this adds is the stale one the startup sweep could not remove, and — since
-    // that sweep deliberately leaves a young directory alone — the live one a
-    // concurrent run is writing into right now.
-    //
-    // At any depth, deliberately, where sweepScratchDirs() looks only at the top
-    // level. The two are asymmetric because their costs are: skipping a
-    // directory that turns out to be someone's oddly-named fixture loses a copy
-    // nothing reads, while DELETING it loses their work. Cheap to over-skip,
-    // expensive to over-delete. Applied against `stat` below, not here, because
-    // the prefix can name a FILE too and dropping a source file from the copy
-    // would make a script check pass by not running it.
-    //
     // Everything else is a top-level workspace dir (data/, reports/, …) and is
     // matched by basename ONLY at the repo root, so nested fixture subdirs such
     // as test-fixtures/upgrade/state-*/data and .../reports still get copied.
     if (dirname(src) === ROOT && exclude.includes(name)) return;
     const stat = statSync(src);
+    // A leftover from an earlier interrupted run is not repository source, and
+    // copying one nests it inside this run's scratch — which is how #3940's
+    // `.tmp-script-test-OP9Bzd/.tmp-script-test-tBjFgy/…` came to exist. This
+    // run's OWN scratch is already excluded by name just above; what this adds
+    // is the stale one the startup sweep could not remove, and — since that
+    // sweep deliberately leaves a live run's directory alone — the one a
+    // concurrent run is writing into right now.
+    //
+    // Directories only, which is why this reads `stat` rather than sitting with
+    // the name-based exclusions above: the prefix can name a FILE too, and
+    // dropping a source file from the copy would make a script check pass by
+    // not running it.
+    //
+    // At any depth, deliberately, where sweepScratchDirs() looks only at the top
+    // level. The two are asymmetric because their costs are: skipping a
+    // directory that turns out to be someone's oddly-named fixture loses a copy
+    // nothing reads, while DELETING it loses their work. Cheap to over-skip,
+    // expensive to over-delete.
     if (stat.isDirectory() && isScratchDir(name)) return;
     if (stat.isDirectory()) {
       // A linked worktree is a whole second checkout of this repo and carries a
