@@ -28,6 +28,13 @@ const historyContaining = (...paths) => (...args) => {
   return paths.includes(file) ? 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2' : '';
 };
 
+// The decision `apply()` actually makes, mirroring its call site:
+//   if (!wasEverShippedUpstream(f, ref)) { keep; continue; }
+// Tests assert through this rather than the bare return value — a helper named
+// for the SHIPPED state is easy to read with the wrong polarity at the point
+// where it decides a DELETE.
+const wouldPrune = (file, revList) => wasEverShippedUpstream(file, 'FETCH_HEAD', revList);
+
 // ── 1. a file upstream never shipped is kept ────────────────────────────────
 {
   // The real incident: a fork's own provider, spelled exactly like a shipped
@@ -66,14 +73,29 @@ const historyContaining = (...paths) => (...args) => {
 
 // ── 4. an unusable history keeps the file (fail safe) ───────────────────────
 {
-  // Shallow clone, or a rev walk that errors. History cannot prove the file was
-  // never shipped, and deleting a fork's source is not recoverable from the
-  // update itself, while keeping a retired file is cosmetic.
+  // A rev walk that errors (broken ref, git unavailable) proves nothing. The
+  // caller prunes only on a TRUE return, so the safe answer is false: pruning
+  // requires positive proof the file was shipped. Asserted through
+  // `wouldPrune` rather than the raw return value, because reading the
+  // polarity backwards here is exactly how the inverted fallback got written
+  // and then confirmed by its own test.
   const revListThrows = () => { throw new Error('fatal: bad object FETCH_HEAD'); };
-  if (wasEverShippedUpstream('providers/acme.mjs', 'FETCH_HEAD', revListThrows)) {
-    pass('an errored rev walk keeps the file rather than pruning on no evidence');
+  if (wouldPrune('providers/acme.mjs', revListThrows)) {
+    fail('an errored rev walk pruned the file — a broken ref would delete fork-local code');
   } else {
-    fail('an errored rev walk pruned the file — a shallow clone would delete fork-local code');
+    pass('an errored rev walk keeps the file rather than pruning on no evidence');
+  }
+}
+
+// ── 4b. a shallow clone keeps the file too ──────────────────────────────────
+{
+  // Truncated history does not throw; the walk simply finds nothing. Same
+  // verdict as the error case, reached by a different route.
+  const revListEmpty = () => '';
+  if (wouldPrune('modes/retired-mode.md', revListEmpty)) {
+    fail('a shallow clone pruned a file whose history it cannot see');
+  } else {
+    pass('a shallow clone keeps the file rather than pruning on truncated history');
   }
 }
 

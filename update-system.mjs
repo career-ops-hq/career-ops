@@ -1019,8 +1019,9 @@ export function isReferencedByPreservedFile(candidatePath, preservedPaths, readF
 // the case of a file upstream MOVED (its old path is in history), which is why
 // this does not simply disable the feature.
 //
-// Fails safe in both directions that matter: on a shallow clone, or if the rev
-// walk errors, history cannot prove the file was ever shipped, so it is kept.
+// Fails safe: pruning requires positive proof the file was shipped. On a
+// shallow clone the walk returns empty, and on a broken ref it throws; both
+// answer "not proven", so the file is kept.
 // Keeping a retired file is a cosmetic regression (#2532); deleting a fork's
 // source file is not recoverable from the update itself.
 export function wasEverShippedUpstream(candidatePath, ref = 'FETCH_HEAD', revList = (...args) => gitQuiet(...args)) {
@@ -1029,7 +1030,10 @@ export function wasEverShippedUpstream(candidatePath, ref = 'FETCH_HEAD', revLis
   try {
     return revList('rev-list', '--max-count=1', ref, '--', file) !== '';
   } catch {
-    return true; // Cannot prove it was never shipped -> keep it.
+    // No evidence either way. The caller prunes only on a TRUE return, so
+    // false is the safe answer: pruning requires positive proof the file was
+    // shipped, never the mere absence of a usable answer.
+    return false;
   }
 }
 
