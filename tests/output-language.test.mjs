@@ -166,6 +166,12 @@ check(
   'a plain string modes_dir and a one-element modes_dir array produce the same context',
 );
 
+const arabicMarket = runGeminiEval('  modes_dir: modes/ar');
+check(
+  !arabicMarket.stderr.includes('modes/ar/fursah.md not found') && Number.isFinite(arabicMarket.tokenBudget),
+  'gemini-eval.mjs resolves the Arabic fursah evaluation mode',
+);
+
 // Absent modes_dir keeps the historical default (modes/, oferta.md) — a
 // different token budget than the modes/de config above proves the default
 // files, not modes/de's, were actually read.

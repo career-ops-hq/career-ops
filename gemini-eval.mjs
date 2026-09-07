@@ -140,7 +140,7 @@ if (existsSync(PATHS.profileYml)) {
       // anyone asking for it).
       const primaryRaw = candidates[0];
       const primaryDir = resolveModesDirCandidate(primaryRaw);
-      const candidateFiles = ['oferta.md', 'angebot.md', 'offre.md', 'kyujin.md', 'is-ilani.md', 'naukri.md'];
+      const candidateFiles = ['oferta.md', 'angebot.md', 'offre.md', 'fursah.md', 'kyujin.md', 'is-ilani.md', 'naukri.md'];
       const primaryEvalFile = primaryDir && candidateFiles.find((file) => existsSync(join(CODE_ROOT, primaryDir, file)));
       const extras = candidates.slice(1).map(resolveModesDirCandidate).filter(Boolean);
       if (primaryDir && primaryEvalFile) {

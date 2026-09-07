@@ -100,7 +100,7 @@ language:
   # modes_dir: modes/de  # optional: use DACH market vocabulary while still writing in English
   # modes_dir can also be a LIST of declared candidate markets, for a
   # candidate genuinely running parallel campaigns in more than one market at
-  # once (e.g. applying in both Canada and China simultaneously) — not for
+  # once (e.g. applying in both DACH and China simultaneously) — not for
   # switching sequentially. The FIRST entry is primary (drives the
   # evaluation-mode file); every declared market's _shared.md is loaded into
   # context, and which one applies to a given JD is judged from the JD's own
