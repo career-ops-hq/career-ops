@@ -23,7 +23,7 @@ function fixture(t, { report, stateScore = '-', stateStatus = 'completed', langu
     `id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries\n1\t${URL}\t${stateStatus}\t2026-09-01\t2026-09-01\t42\t${stateScore}\t\t0\n`);
   writeFileSync(join(root, 'reports', '042-example-2026-09-01.md'), report);
   const run = (...args) => {
-    const result = spawnSync(process.execPath, [SCRIPT, ...args], {
+    const result = spawnSync(process.execPath, [SCRIPT, '--pipeline', pipeline, '--state', join(root, 'batch', 'batch-state.tsv'), ...args], {
       cwd: root,
       env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: root, CAREER_OPS_TRACKER: '' },
       encoding: 'utf8',
@@ -66,6 +66,10 @@ const cases = [
   ['bare numeric report score', '**Score:** 4.2', '4.2/5'],
   ['annotated score', '**Score:** 4.2/5 (strong match)', '4.2/5'],
   ['comma after denominator', '**Score:** 4.2/5, strong match', '4.2/5'],
+  ['period after denominator', '**Score:** 4.2/5.', '4.2/5'],
+  ['colon after denominator', '**Score:** 4.2/5: strong match', '4.2/5'],
+  ['closing punctuation after denominator', '**Score:** 4.2/5)', '4.2/5'],
+  ['closing bracket after denominator', '**Score:** 4.2/5]', '4.2/5'],
   ['annotated bare score', '**Score:** 4.2 (strong fit)', '4.2/5'],
   ['final score annotation', '**Score:** 4.2 (final)', '4.2/5'],
   ['internal score annotation', '**Score:** 4.2 (internal)', '4.2/5'],

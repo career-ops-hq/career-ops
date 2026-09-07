@@ -151,7 +151,7 @@ function resolveScore(stateScore, reportFile) {
     const denominator = rep.match(/\/[ \t]*(\d+(?:\.\d+)?)/);
     if (denominator) {
       const tail = rep.slice(denominator.index + denominator[0].length);
-      if (Number(denominator[1]) !== 5 || (tail && !/^[\s*_`,;(—–-]/.test(tail))) return 'N/A';
+      if (Number(denominator[1]) !== 5 || (tail && !/^[\s*_`,;:.()\]—–-]/.test(tail))) return 'N/A';
     } else if (/^[*_`]*[ \t]*\//.test(rep.slice(score[0].length))) {
       return 'N/A'; // An explicit but unreadable scale is not a bare score.
     }
