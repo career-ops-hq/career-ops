@@ -110,16 +110,6 @@ export const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_R
 const APPLICATIONS_PATH = path.join(DATA_ROOT, 'data/applications.md');
 const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 
-// Ensure required directories exist (fresh setup). Stays rooted in the user-data
-// directory; override parents are created by their writers before first write.
-const targetDataDir = path.join(DATA_ROOT, 'data');
-try {
-  mkdirSync(targetDataDir, { recursive: true });
-} catch (err) {
-  console.error(`ERROR: Could not create data directory at "${targetDataDir}": ${err.message}`);
-  process.exit(1);
-}
-
 const CONCURRENCY = 10;
 
 export function isIgnorableDirectoryFsyncError(err, platform = process.platform) {
@@ -2511,6 +2501,7 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
   // neighbouring counter. Surface the mismatch here rather than papering over it — rewriting the
   // header in place would misalign every historical row instead.
   if (!existsSync(filePath)) {
+    mkdirSync(path.dirname(filePath), { recursive: true });
     atomicWriteFile(filePath, SCAN_RUNS_HEADER);
   } else {
     const onDisk = (readFileSync(filePath, 'utf-8').split('\n', 1)[0] || '') + '\n';
