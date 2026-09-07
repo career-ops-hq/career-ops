@@ -5,12 +5,13 @@
  * It intentionally performs no network requests and never automates the site's
  * interactive Radware challenge.
  */
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
-import { extname, join, resolve } from 'path';
-import { fileURLToPath } from 'url';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'fs';
+import { extname, isAbsolute, join, relative, resolve, sep } from 'path';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const ORIGIN = 'https://www.gojobs.gov.on.ca';
-const CAPTCHA = ['radware captcha page', 'botmanager_support@radware.com', 'validate.perfdrive.com'];
+const CAPTCHA = ['radware captcha page', 'botmanager_support', 'validate.perfdrive.com'];
 
 function decodeEntities(value) {
   const named = new Map([['amp', '&'], ['apos', "'"], ['gt', '>'], ['lt', '<'], ['nbsp', ' '], ['quot', '"']]);
@@ -78,10 +79,17 @@ export function parseSavedHtml(html, source = 'saved HTML') {
 }
 
 function inputFiles(paths) {
+  const canonicalize = realpathSync.native ?? realpathSync;
+  const root = canonicalize(getCareerOpsRoot());
   const files = [];
   for (const rawPath of paths) {
-    const path = resolve(rawPath);
-    if (!existsSync(path)) throw new Error(`input does not exist: ${rawPath}`);
+    const candidate = resolve(root, rawPath);
+    if (!existsSync(candidate)) throw new Error(`input does not exist: ${rawPath}`);
+    const path = canonicalize(candidate);
+    const rel = relative(root, path);
+    if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+      throw new Error(`input is outside the career-ops data root: ${rawPath}`);
+    }
     if (statSync(path).isDirectory()) {
       for (const name of readdirSync(path).sort()) if (['.html', '.htm'].includes(extname(name).toLowerCase())) files.push(join(path, name));
     } else files.push(path);
@@ -109,4 +117,4 @@ function main() {
   catch (error) { console.error(`GO Jobs parser: ${error.message}`); process.exitCode = 1; }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) main();
+if (isMainModule(import.meta.url)) main();

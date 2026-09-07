@@ -73,7 +73,7 @@ challenge. `parse-gojobs-html.mjs` is a deliberately offline bridge:
 1. In your normal browser, open the GO Jobs search page, complete any challenge
    yourself, run the search, and save each rendered results page as HTML.
 2. Put the files in a user-data directory such as `data/gojobs/`. For paginated
-   results, save every page you want scanned; duplicate Job IDs are collapsed.
+   results, save every page you want scanned; duplicate canonical URLs are collapsed.
 3. Test the capture with `npm run parse:gojobs -- data/gojobs`. A CAPTCHA page
    or bare search form fails loudly instead of reporting a false empty scan.
 4. Add this entry to `portals.yml`:

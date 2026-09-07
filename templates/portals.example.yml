@@ -1539,6 +1539,7 @@ tracked_companies:
   #   parser:
   #     command: node
   #     script: parse-gojobs-html.mjs
+  #     # Relative capture paths resolve from CAREER_OPS_ROOT.
   #     args: [data/gojobs]
   #     format: jobs-json-v1
   #   enabled: true
