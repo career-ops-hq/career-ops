@@ -13,7 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail } from './helpers.mjs';
-import { gitIn, locallyModifiedSystemFiles, pathFullyPreserved, checkoutErrorIsBenign } from '../update-system.mjs';
+import { gitIn, locallyModifiedSystemFiles, pathFullyPreserved, checkoutErrorIsBenign, probeAbsentUpstream } from '../update-system.mjs';
 
 // A repo with an `upstream` branch standing in for FETCH_HEAD, and `main` as
 // the install. Both start from a shared base commit, which is what gives
@@ -394,6 +394,45 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
     pass('checkoutErrorIsBenign: cancel-out is benign only for an "unknown" directory, real failures still abort');
   } else {
     fail('#9g checkoutErrorIsBenign did not gate the cancel-out message correctly');
+  }
+}
+
+// ── 9h. probeAbsentUpstream — the helper apply()'s catch calls, driven
+//    directly against a real repo AND with a throwing probe (#1998, #3824,
+//    #3955 review): a retired path lists empty → benign skip; a present path
+//    does not → real error rethrows; a probe that THROWS → false, never a skip ──
+{
+  const repo = makeRepo();
+  repo.g('fetch', '.', 'upstream'); // populate FETCH_HEAD, same ref apply() uses
+  const ctx = { git: (...args) => gitIn(repo.dir, ...args) };
+
+  // 'modes/pdf.md' is in the tree; 'lib/retired.mjs' never was — the shape of a
+  // SYSTEM_PATHS entry removed upstream but still present on an old install.
+  const retiredIsAbsent = probeAbsentUpstream('lib/retired.mjs', ctx);
+  const presentIsAbsent = probeAbsentUpstream('modes/pdf.md', ctx);
+
+  // The regression this guards: a probe that could not run must NOT report
+  // absence, or a real checkout failure gets masked as an expected skip.
+  const throwingProbe = probeAbsentUpstream('modes/pdf.md', {
+    git: () => { throw new Error('fatal: not a git repository'); },
+  });
+
+  const realCheckoutFailure = Object.assign(new Error('git checkout FETCH_HEAD -- modes/'), {
+    stderr: 'fatal: unable to write new index file\n',
+  });
+
+  const ok =
+    retiredIsAbsent === true &&
+    presentIsAbsent === false &&
+    throwingProbe === false &&
+    // composed the way apply()'s catch does: retired path → skip, throwing probe → rethrow
+    checkoutErrorIsBenign(realCheckoutFailure, { absentUpstream: retiredIsAbsent, preservedState: false }) === true &&
+    checkoutErrorIsBenign(realCheckoutFailure, { absentUpstream: throwingProbe, preservedState: false }) === false;
+
+  if (ok) {
+    pass('probeAbsentUpstream: a retired path skips, a present path and a throwing probe both rethrow');
+  } else {
+    fail(`#9h retired=${retiredIsAbsent} present=${presentIsAbsent} throwing=${throwingProbe}`);
   }
 }
 

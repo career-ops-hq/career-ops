@@ -1350,6 +1350,31 @@ export function checkoutErrorIsBenign(err, { absentUpstream, preservedState }) {
 }
 
 /**
+ * Whether `spec` is absent from FETCH_HEAD's tree — the answer that makes a
+ * checkout failure in apply()'s per-path loop a benign skip rather than a real
+ * error to rethrow (#1998, #3824).
+ *
+ * Only a SUCCESSFUL empty `git ls-tree --name-only FETCH_HEAD -- <spec>` counts:
+ * ls-tree prints the entry when the path is in the tree and nothing when it is
+ * not, both at exit 0. A THROW (bad ref, unreadable repo, timeout) is the probe
+ * failing to run, not an answer — return false so the checkout error rethrows
+ * instead of being masked as a skip. Extracted from apply()'s catch so the
+ * throwing-probe path is testable without running apply() (#3955 review).
+ *
+ * @param {string} spec - path to probe; a `dir/` entry is passed without its trailing slash.
+ * @param {{git?: Function}} [ctx] - injection point for tests; defaults to gitQuiet.
+ * @returns {boolean}
+ */
+export function probeAbsentUpstream(spec, ctx = {}) {
+  const runGitQuiet = ctx.git || gitQuiet;
+  try {
+    return runGitQuiet('ls-tree', '--name-only', 'FETCH_HEAD', '--', spec).trim() === '';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Preserve byte-for-byte copies of system files before an unavoidable
  * overwrite. The self-bootstrap stage cannot use the normal "keep local"
  * path: it must load the fetched updater to remain forward-compatible. A
@@ -2292,9 +2317,7 @@ async function apply() {
         // exclusions cancelled the checkout out and git said "did not match
         // any file(s)" (#3824).
         const spec = path.endsWith('/') ? path.slice(0, -1) : path;
-        let absentUpstream = false;
-        try { gitQuiet('cat-file', '-e', `FETCH_HEAD:${spec}`); }
-        catch { absentUpstream = true; }
+        const absentUpstream = probeAbsentUpstream(spec);
         if (!checkoutErrorIsBenign(err, { absentUpstream, preservedState })) throw err;
         skippedPaths.push(path);
       }
