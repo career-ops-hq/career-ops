@@ -42,7 +42,7 @@
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
-import { stripEmptySections } from '../cv-sections-core.mjs';
+import { stripEmptySections, isEmptyRenderedSection, stripEmptyRenderedSections } from '../cv-sections-core.mjs';
 
 console.log('\ncv-sections-core.mjs — optional sections leave no bare header');
 
@@ -487,3 +487,74 @@ check('an absent projects key is treated as empty',
 let threw = false;
 try { stripEmptySections('x', EMPTY, 'pdf'); } catch { threw = true; }
 check('an unknown template format throws', threw, true);
+
+// --- Rendered HTML: the same strip, driven by content instead of a payload --
+// The web pdf path has no payload. Since #2185 the agent emits finished HTML
+// and the backend writes it straight to disk, so neither builder runs and an
+// optional section the agent left empty reaches the renderer as a bare header
+// (#3986). isEmptyRenderedSection reads the verdict back out of the document
+// with the same PATTERNS.html entry that removes the section, so these cases
+// also pin that the two halves agree on where a section starts and ends.
+
+// A CV as the agent emits one: the shipped template with every placeholder
+// resolved, projects/awards/interests left with nothing under their headers.
+// Built from the template on disk rather than a hand-written excerpt, so a
+// markup change to a real section is exercised here too.
+const AGENT_FILLED = {
+  COMPETENCIES: '<span class="tag">Rust</span>',
+  EXPERIENCE: '<div class="job"><div class="job-title">Engineer</div></div>',
+  PROJECTS: '',
+  EDUCATION: '<div class="edu">BSc, 2015</div>',
+  CERTIFICATIONS: '<div class="cert">AWS SA</div>',
+  AWARDS: '',
+  INTERESTS: '',
+  SKILLS: '<div class="skill">Languages: Rust, Go</div>',
+};
+const agentHtml = readFileSync(join(ROOT, 'templates/cv-template.html'), 'utf-8')
+  .replace(/\{\{([A-Z_]+)\}\}/g, (whole, key) => {
+    if (Object.hasOwn(AGENT_FILLED, key)) return AGENT_FILLED[key];
+    // Every other placeholder is a scalar (name, title, a section heading);
+    // the heading ones must stay non-empty or an empty section would look
+    // empty for the wrong reason and the assertions below would pass vacuously.
+    return key.startsWith('SECTION_') ? key.slice('SECTION_'.length) : 'x';
+  });
+
+for (const section of ['projects', 'awards', 'interests']) {
+  check(`isEmptyRenderedSection: an agent-emitted ${section} section with nothing under its header reads empty`,
+    isEmptyRenderedSection(agentHtml, section), true);
+}
+for (const section of ['competencies', 'experience', 'education', 'certifications', 'skills']) {
+  check(`isEmptyRenderedSection: a populated ${section} section does not read empty`,
+    isEmptyRenderedSection(agentHtml, section), false);
+}
+
+// The section title is present either way, so counting it as content would
+// make every section look populated — the guard that fails first if the
+// heading stops being recognised.
+check('isEmptyRenderedSection: the section title alone is not content',
+  isEmptyRenderedSection('<!-- PROJECTS -->\n<div class="section"><div class="section-title">Projects</div></div>\n<!-- EDUCATION -->', 'projects'), true);
+check('isEmptyRenderedSection: a plain heading tag alone is not content',
+  isEmptyRenderedSection('<!-- PROJECTS -->\n<section><h2>Projects</h2></section>\n<!-- EDUCATION -->', 'projects'), true);
+check('isEmptyRenderedSection: text under the heading is content',
+  isEmptyRenderedSection('<!-- PROJECTS -->\n<section><h2>Projects</h2><p>Rescued a CLI</p></section>\n<!-- EDUCATION -->', 'projects'), false);
+// A section the document does not contain is not "empty" — there is nothing
+// to strip, and saying otherwise invites a caller to act on markup that was
+// never there.
+check('isEmptyRenderedSection: an absent section does not read empty',
+  isEmptyRenderedSection('<!-- EDUCATION -->\n<div>Education</div>\n<!-- END -->', 'projects'), false);
+
+const strippedRendered = stripEmptyRenderedSections(agentHtml);
+for (const marker of ['<!-- PROJECTS -->', '<!-- AWARDS -->', '<!-- INTERESTS -->']) {
+  check(`stripEmptyRenderedSections: ${marker} is removed from an agent-emitted CV`,
+    strippedRendered.includes(marker), false);
+}
+for (const marker of ['<!-- CORE COMPETENCIES -->', '<!-- WORK EXPERIENCE -->', '<!-- EDUCATION -->', '<!-- CERTIFICATIONS -->', '<!-- SKILLS -->']) {
+  check(`stripEmptyRenderedSections: ${marker} survives with its content`,
+    strippedRendered.includes(marker), true);
+}
+check('stripEmptyRenderedSections: the populated sections keep their bodies',
+  ['Rust</span>', 'Engineer', 'BSc, 2015', 'AWS SA', 'Languages: Rust, Go'].every((t) => strippedRendered.includes(t)), true);
+check('stripEmptyRenderedSections: the closing document skeleton survives',
+  strippedRendered.includes('</body>\n</html>'), true);
+check('stripEmptyRenderedSections: a CV with nothing empty comes out byte-identical',
+  stripEmptyRenderedSections(strippedRendered), strippedRendered);
