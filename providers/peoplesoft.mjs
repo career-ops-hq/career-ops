@@ -391,11 +391,14 @@ export function parseFormState(html) {
 /** @param {string | null} text */
 export function parseReportedTotal(text) {
   if (!text) return null;
-  const ofMatch = String(text).match(/of\s+(\d+)/i);
+  // Preserve locale-grouped totals before splitting counter positions from
+  // totals: "1.234", "1 234", "1\u00a0234", and "1,234" all mean 1234.
+  const normalized = String(text).replace(/(\d)[\s\u00a0.,](?=\d{3}(?:\D|$))/g, '$1');
+  const ofMatch = normalized.match(/of\s+(\d+)/i);
   if (ofMatch) return Number(ofMatch[1]);
   // A bare total ("96 rows") has one integer, while localized position-first
   // counters ("Ligne 1 sur 96", "Zeile 1 von 96") put the total last.
-  const numbers = String(text).match(/\d+/g);
+  const numbers = normalized.match(/\d+/g);
   return numbers ? Number(numbers[numbers.length - 1]) : null;
 }
 
@@ -806,6 +809,7 @@ export default {
       if (reportedTotal !== null && byId.size >= reportedTotal) break;
       await sleep(INTER_REQUEST_DELAY_MS, ctx);
       let next;
+      const postedStateNum = currentState.formFields?.ICStateNum;
       try {
         next = await fetchAdditionalResults(currentState, session);
       } catch (err) {
@@ -830,7 +834,10 @@ export default {
       }
       currentState = next;
       if (fresh === 0) {
-        stopCause = 'load-more-no-progress';
+        const returnedStateNum = next.formFields?.ICStateNum;
+        stopCause = postedStateNum !== undefined && returnedStateNum === postedStateNum
+          ? 'load-more-stale-state'
+          : 'load-more-no-progress';
         break; // server stopped returning new rows — real end or a loop; either way, stop
       }
     }
@@ -864,6 +871,8 @@ export default {
         console.error(`${prefix}a load-more response was not recognizable.`);
       } else if (stopCause === 'load-more-no-progress') {
         console.error(`${prefix}the load-more response contained no new postings.`);
+      } else if (stopCause === 'load-more-stale-state') {
+        console.error(`${prefix}the load-more response repeated the posted ICStateNum without advancing.`);
       } else {
         console.error(`${prefix}raise max_pages on this entry, or this may be PeopleSoft's own ~100-result anonymous-session cap.`);
       }

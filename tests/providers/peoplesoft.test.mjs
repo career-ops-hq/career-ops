@@ -253,6 +253,15 @@ try {
   } else {
     fail(`parseReportedTotal() localized counters wrong: fr=${parseReportedTotal('Ligne 1 sur 96')} de=${parseReportedTotal('Zeile 1 von 96')}`);
   }
+  if (
+    parseReportedTotal('Ligne 1 sur 1 234') === 1234
+    && parseReportedTotal('Zeile 1 von 1.234') === 1234
+    && parseReportedTotal('1-20 of 1,234 Results') === 1234
+  ) {
+    pass('parseReportedTotal() preserves French, German, and English grouped totals');
+  } else {
+    fail('parseReportedTotal() truncated a locale-grouped total');
+  }
   if (parseReportedTotal(null) === null && parseReportedTotal('') === null) pass('parseReportedTotal() returns null for absent/empty text');
   else fail('parseReportedTotal() should return null for absent text');
   if (parseReportedTotal('no numbers here') === null) pass('parseReportedTotal() returns null when no number is present');
@@ -575,6 +584,23 @@ try {
       pass('fetch() incomplete marker reports the actual collected/reportedTotal numbers');
     } else {
       fail(`fetch() incomplete marker numbers wrong: ${JSON.stringify(jobs.peoplesoftIncomplete)}`);
+    }
+  }
+
+  {
+    // A rejected replay can render the same page with the same ICStateNum.
+    // That is not proof of clean exhaustion when the tenant reports no total.
+    const staleStatePage = `<form name="win0" action="/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL">
+      <input type="hidden" name="ICStateNum" value="7">
+      <li id="HRS_AGNT_RSLT_I$0_row_0"><a id="SCH_JOB_TITLE$0">Only Role</a><span id="HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID$0">ONLY</span><span id="LOCATION$0">Remote</span></li>
+      </form>`;
+    let calls = 0;
+    const ctx = { sleep: async () => {}, fetchResponse: async () => { calls++; return new Response(staleStatePage, { status: 200 }); } };
+    const jobs = await peoplesoft.fetch({ name: 'ExampleU', careers_url: SEARCH_URL }, ctx);
+    if (calls === 2 && jobs.peoplesoftIncomplete?.reason === 'load-more-stale-state') {
+      pass('fetch() marks a repeated ICStateNum replay incomplete instead of cleanly exhausted');
+    } else {
+      fail(`fetch() did not distinguish a stale ICStateNum replay: calls=${calls} marker=${JSON.stringify(jobs.peoplesoftIncomplete)}`);
     }
   }
 
