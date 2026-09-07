@@ -13,7 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail } from './helpers.mjs';
-import { gitIn, locallyModifiedSystemFiles, pathFullyPreserved } from '../update-system.mjs';
+import { gitIn, locallyModifiedSystemFiles, pathFullyPreserved, checkoutErrorIsBenign } from '../update-system.mjs';
 
 // A repo with an `upstream` branch standing in for FETCH_HEAD, and `main` as
 // the install. Both start from a shared base commit, which is what gives
@@ -347,8 +347,8 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
   }
 }
 
-// ── 9f. pathFullyPreserved: an unreadable upstream lookup degrades to "not
-//    fully preserved" for a directory, never throws ──
+// ── 9f. pathFullyPreserved: an unreadable upstream lookup is 'unknown' for a
+//    directory (not false), and never throws (#3824) ──
 {
   const preservedPaths = ['modes/pdf.md'];
   const preservedSet = new Set(preservedPaths);
@@ -361,10 +361,39 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
   } catch {
     threw = true;
   }
-  if (!threw && result === false) {
-    pass('an unreadable directory lookup degrades to "not fully preserved" instead of throwing');
+  if (!threw && result === 'unknown') {
+    pass('an unreadable directory lookup returns "unknown" instead of throwing or claiming "not preserved"');
   } else {
-    fail(`#9f threw=${threw} result=${result}`);
+    fail(`#9f threw=${threw} result=${JSON.stringify(result)}`);
+  }
+}
+
+// ── 9g. checkoutErrorIsBenign: the cancel-out abort a fully-preserved
+//    directory with an unreadable ls-tree used to trigger is now benign (#3824) ──
+{
+  // The error git actually raises when :(exclude) pathspecs cancel a checkout
+  // out (pinned live in section 9 above); stderr is where gitQuiet surfaces it.
+  const cancelOut = Object.assign(new Error('Command failed: git checkout FETCH_HEAD -- modes/'), {
+    stderr: "error: pathspec 'modes/' did not match any file(s) known to git\n",
+  });
+  const realFailure = Object.assign(new Error('Command failed: git checkout FETCH_HEAD -- modes/'), {
+    stderr: 'fatal: unable to write new index file\n',
+  });
+
+  const ok =
+    // 'unknown' + cancel-out message → benign, so apply() skips instead of aborting
+    checkoutErrorIsBenign(cancelOut, { absentUpstream: false, preservedState: 'unknown' }) === true &&
+    // 'unknown' + a real failure → still rethrown
+    checkoutErrorIsBenign(realFailure, { absentUpstream: false, preservedState: 'unknown' }) === false &&
+    // a genuinely absent path stays benign regardless of the message
+    checkoutErrorIsBenign(realFailure, { absentUpstream: true, preservedState: false }) === true &&
+    // 'false' (real content not preserved) never softens a cancel-out message
+    checkoutErrorIsBenign(cancelOut, { absentUpstream: false, preservedState: false }) === false;
+
+  if (ok) {
+    pass('checkoutErrorIsBenign: cancel-out is benign only for an "unknown" directory, real failures still abort');
+  } else {
+    fail('#9g checkoutErrorIsBenign did not gate the cancel-out message correctly');
   }
 }
 

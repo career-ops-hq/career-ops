@@ -379,11 +379,14 @@ const twoPassManifestChecks = [
     pattern: /ls-tree', '-r', '--name-only', 'FETCH_HEAD'[\s\S]{0,400}?treeFiles\.some\(f => !existsSync/,
   },
   {
-    // A checkout failure is only an expected skip when the path is truly absent
-    // from FETCH_HEAD; timeouts/permission errors must rethrow, not report
-    // success (#1998 CodeRabbit review).
-    name: 'a checkout failure only skips when the path is absent upstream, else rethrows (#1998)',
-    pattern: /catch \{ absentUpstream = true; \}\s*if \(!absentUpstream\) throw err;/,
+    // A checkout failure is an expected skip only when the path is truly absent
+    // from FETCH_HEAD, or (for a directory whose upstream content could not be
+    // enumerated, #3824) when the exclusions cancelled the pathspec out.
+    // Timeouts/permission errors must rethrow, not report success
+    // (#1998 CodeRabbit review). The rethrow condition routes through the
+    // checkoutErrorIsBenign predicate so both shapes are decided in one place.
+    name: 'a checkout failure only skips when it is benign, else rethrows (#1998, #3824)',
+    pattern: /catch \{ absentUpstream = true; \}[\s\S]{0,400}?if \(!checkoutErrorIsBenign\(err, \{ absentUpstream, preservedState \}\)\) throw err;/,
   },
   {
     // `git checkout HEAD -- docs/` restores tracked content but never removes
