@@ -288,6 +288,44 @@ try {
   if (hashtagRoleJob === null) pass('a hashtag-first post whose employer line is a role ("Product Owner") is dropped rather than attributed to that role');
   else fail(`hashtag post with a role on the employer line = ${JSON.stringify(hashtagRoleJob)}`);
 
+  // The matched employer can be a labelled field or a second-line at/в
+  // phrase, not just the bare name. These fixtures exercise the HTML path.
+  const hashtagEmployerCases = [
+    ['RU company field', '<b>🏢 Компания:</b> Контур', 'Контур', 'MLOps-инженер'],
+    ['EN company field', 'Company: Picnic', 'Picnic', 'Backend Developer'],
+    ['RU second-line employer', 'в Kaspi — fintech-экосистема.', 'Kaspi', 'Backend Developer'],
+    ['EN second-line employer', 'at Picnic — grocery delivery.', 'Picnic', 'Backend Developer'],
+  ];
+  const hashtagApplyUrl = 'https://example.com/jobs/12345';
+  for (const [label, employerHtml, company, role] of hashtagEmployerCases) {
+    const date = '2026-09-04T10:00:00+00:00';
+    const html = post(12470, date, `#middle #удаленка<br/>${employerHtml}<br/>${role}<br/>${A(hashtagApplyUrl)}`);
+    const [parsedPost] = parseChannelPage(page(html), 'devjobs').posts;
+    const job = postToJob(parsedPost);
+    if (job?.title === role) pass(`hashtag title skips the recognized ${label}`);
+    else fail(`${label} title = ${JSON.stringify(job?.title)}, expected ${JSON.stringify(role)}`);
+    if (job?.company === company && job.url === hashtagApplyUrl
+        && job.description === `${parsedPost.description}\n\nSource: https://t.me/devjobs/12470`
+        && job.postedAt === Date.parse(date)) {
+      pass(`${label} keeps the employer, vacancy URL, full post and source attribution`);
+    } else fail(`${label} attribution = ${JSON.stringify(job)}`);
+
+    const noTitleHtml = post(12469, date, `#middle #удаленка<br/>${employerHtml}<br/>#remote<br/>${A(hashtagApplyUrl)}`);
+    const noTitle = postToJob(parseChannelPage(page(noTitleHtml), 'devjobs').posts[0]);
+    if (noTitle === null) pass(`${label} with only tags and a bare link has no title and is dropped`);
+    else fail(`${label} without a role = ${JSON.stringify(noTitle)}`);
+  }
+
+  // Parsing a candidate as a whole post would mistake @/| role headlines for
+  // employer-only metadata; broad at/в prefixes would also discard real titles.
+  for (const role of ['Backend Developer @ Picnic', 'Backend Developer | Picnic', 'at-scale Backend Developer', 'внутренний IT-аналитик']) {
+    const html = post(12468, '2026-09-04T10:00:00+00:00', `#middle #remote<br/>Company: Picnic<br/>${role}<br/>${A(hashtagApplyUrl)}`);
+    const job = postToJob(parseChannelPage(page(html), 'devjobs').posts[0]);
+    if (job?.title === role && job.company === 'Picnic' && job.url === hashtagApplyUrl) {
+      pass(`hashtag metadata skipping preserves the actual role: ${role}`);
+    } else fail(`actual role ${JSON.stringify(role)} became ${JSON.stringify(job)}`);
+  }
+
   // --- fetch: redirect guard, mapping, paging ------------------------------
   const calls = [];
   const ctx = {

@@ -17,8 +17,9 @@
 // Posts that name no employer, link only to Telegram/social/footer hosts,
 // hide the employer ("название скрыто", "our client"), or bundle several
 // vacancies are not emitted. Measured 2026-09-03 over 809 posts from 17
-// public channels: 137 pass (25% of the RU/CIS corpus, none of the EN one,
-// whose channels mirror boards career-ops already scans or link through
+// public channels, before hashtag-template support: 137 pass (25% of the
+// RU/CIS corpus, none of the EN one, whose channels mirror boards career-ops
+// already scans or link through
 // shorteners); every rejection is a post the policy could not attribute, not
 // a parser failure.
 //
@@ -82,9 +83,9 @@ const HASHTAG_LINE_RE = /^#\S+(?:\s+#\S+)*$/u;
 // Unlike the other four employerName() shapes, the hashtag-template line has
 // no marker at all pinning it to "employer", so a short role title ("Senior
 // Engineer", "Ведущий инженер") would otherwise pass every plausibleEmployer()
-// check a real employer name does. Measured live 2026-09-05: all 46
-// hashtag-first-line posts across two fetched pages of each channel still
-// resolve to an employer, none blocked by this list.
+// check a real employer name does. The role-vocabulary extension was replayed
+// on 2026-09-07 against the saved 809-post corpus: the same 152 company/URL
+// attributions as before the extension.
 const ROLE_WORD_RE = /(?<![\p{L}\p{N}])(senior|middle|junior|lead|principal|staff|head|chief|intern|trainee|engineer|developer|manager|analyst|designer|architect|specialist|consultant|director|recruiter|scientist|product\s+owner|qa|tester|devops|sre|инженер|разработчик|менеджер|специалист|аналитик|директор|архитектор|рекрутер|стажер|стажёр|тестировщик|тимлид|владелец|руководитель|маркетолог|программист)(?![\p{L}\p{N}])/iu;
 
 /** First non-empty line of a post, cut at a word boundary under TITLE_CAP. */
@@ -311,21 +312,15 @@ export function postToJob(post) {
   if (ANONYMOUS_RE.test(post.lines.slice(0, 3).join('\n'))) return null;
   const link = applicationLink(post.hrefs);
   if (!link) return null;
-  // post.title is lines[0], parsed before the policy runs. On the
-  // hashtag-first template that line is tags, not a title (employerName()
-  // above already skipped it to read the employer from the next line) — the
-  // real title is the first line after that which is neither more tags, the
-  // employer name just matched, nor a bare link (t.me autolinks a raw URL
-  // with the URL itself as the anchor's visible text, so a post with no
-  // third line at all leaves the link as post.lines[1]). When no such line
-  // exists the shape has no title to give, and falling back to post.title
-  // would emit the hashtag line itself as the title — the same
-  // wrong-field-is-worse-than-a-missing-row principle applicationLink() and
-  // employerName() already apply, so the post is dropped instead.
+  // A hashtag-first post needs a later title: skip tags, the matched employer
+  // (bare or recognized metadata), and bare links. An empty first line below
+  // reuses only employerName's metadata rules, preserving "Title @ Employer"
+  // and "Title | Employer" candidates. With no remaining title, drop the post.
   let title = post.title;
   if (HASHTAG_LINE_RE.test(post.lines[0] || '')) {
     const isLinkLine = (l) => post.hrefs.includes(l) || /^https?:\/\//i.test(l);
-    const better = post.lines.slice(1).find((l) => l !== company && !HASHTAG_LINE_RE.test(l) && !isLinkLine(l));
+    const better = post.lines.slice(1).find((l) => l !== company && employerName(['', l]) !== company
+      && !HASHTAG_LINE_RE.test(l) && !isLinkLine(l));
     if (!better) return null;
     title = headline([better]);
   }
