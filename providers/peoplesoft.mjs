@@ -393,8 +393,10 @@ export function parseReportedTotal(text) {
   if (!text) return null;
   const ofMatch = String(text).match(/of\s+(\d+)/i);
   if (ofMatch) return Number(ofMatch[1]);
-  const bare = String(text).match(/(\d+)/);
-  return bare ? Number(bare[1]) : null;
+  // A bare total ("96 rows") has one integer, while localized position-first
+  // counters ("Ligne 1 sur 96", "Zeile 1 von 96") put the total last.
+  const numbers = String(text).match(/\d+/g);
+  return numbers ? Number(numbers[numbers.length - 1]) : null;
 }
 
 // SCH_OPENED renders US-format M/D/YYYY on every tenant observed live. An
@@ -482,7 +484,10 @@ export function parseSearchPage(html, config) {
     valid: true,
     errorReason: null,
     rows,
-    reportedTotal,
+    // A counter below the number of rows on this page cannot be the total.
+    // Keep it unknown so fetch() does not silently declare a partial page
+    // complete and omit peoplesoftIncomplete.
+    reportedTotal: reportedTotal !== null && reportedTotal < rows.length ? null : reportedTotal,
     formAction: formState.action,
     formFields: formState.fields,
   };

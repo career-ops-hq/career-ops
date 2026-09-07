@@ -32,6 +32,8 @@ try {
 
   const fx = (name) => readFileSync(join(ROOT, 'tests/fixtures', name), 'utf-8');
   const searchFixture = fx('peoplesoft-search-page.html');
+  const frenchSearchFixture = fx('peoplesoft-search-page-fr.html');
+  const germanSearchFixture = fx('peoplesoft-search-page-de.html');
   const emptyFixture = fx('peoplesoft-search-page-empty.html');
   const loginFixture = fx('peoplesoft-login-page.html');
   const detailFixture = fx('peoplesoft-detail-page.html');
@@ -246,6 +248,11 @@ try {
   else fail(`parseReportedTotal() wrong: ${parseReportedTotal('1-3 of 42 Results')}`);
   if (parseReportedTotal('0 of 0 Results') === 0) pass('parseReportedTotal() reads a zero total');
   else fail('parseReportedTotal() zero case wrong');
+  if (parseReportedTotal('Ligne 1 sur 96') === 96 && parseReportedTotal('Zeile 1 von 96') === 96) {
+    pass('parseReportedTotal() reads the last integer from French and German position-first counters');
+  } else {
+    fail(`parseReportedTotal() localized counters wrong: fr=${parseReportedTotal('Ligne 1 sur 96')} de=${parseReportedTotal('Zeile 1 von 96')}`);
+  }
   if (parseReportedTotal(null) === null && parseReportedTotal('') === null) pass('parseReportedTotal() returns null for absent/empty text');
   else fail('parseReportedTotal() should return null for absent text');
   if (parseReportedTotal('no numbers here') === null) pass('parseReportedTotal() returns null when no number is present');
@@ -289,6 +296,23 @@ try {
       pass('parseSearchPage() carries the full form state through for a later "load more" replay');
     } else {
       fail('parseSearchPage() should carry formAction/formFields');
+    }
+  }
+
+  {
+    const frenchPage = parseSearchPage(frenchSearchFixture, CONFIG);
+    const germanPage = parseSearchPage(germanSearchFixture, CONFIG);
+    if (frenchPage.rows.length === 2 && frenchPage.reportedTotal === 96 && germanPage.rows.length === 1 && germanPage.reportedTotal === 96) {
+      pass('parseSearchPage() preserves localized French and German reported totals from fixtures');
+    } else {
+      fail(`parseSearchPage() localized totals wrong: fr=${JSON.stringify({ rows: frenchPage.rows.length, total: frenchPage.reportedTotal })} de=${JSON.stringify({ rows: germanPage.rows.length, total: germanPage.reportedTotal })}`);
+    }
+
+    const impossibleTotalPage = parseSearchPage(frenchSearchFixture.replace('Ligne 1 sur 96', 'Ligne 1 sur 1'), CONFIG);
+    if (impossibleTotalPage.rows.length === 2 && impossibleTotalPage.reportedTotal === null) {
+      pass('parseSearchPage() rejects a reported total below the rows already parsed');
+    } else {
+      fail(`parseSearchPage() accepted an impossible reported total: ${JSON.stringify(impossibleTotalPage)}`);
     }
   }
 
