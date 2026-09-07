@@ -88,13 +88,38 @@ const mixedClauseCases = [
     'no comma at all -- both numbers share one undivided clause',
     'I have 12 years of experience but this role requires 7 years.',
   ],
+  [
+    'personal count before citation, requirement count after citation',
+    'Managed 15 engineers in a role that requires 3 direct reports.',
+    '15 engineers',
+    '3 reports',
+  ],
+  [
+    'personal count before a posting citation and requirement count after it',
+    'I bring 8 years to a posting that calls for 5 years.',
+    '8 years',
+    '5 years',
+  ],
 ];
-for (const [label, text] of mixedClauseCases) {
+for (const [label, text, personalClaim = '12 years', requirementClaim = '7 years'] of mixedClauseCases) {
   const claims = [...metricClaims(text)];
-  if (claims.includes('12 years') && !claims.includes('7 years')) {
+  if (claims.includes(personalClaim) && !claims.includes(requirementClaim)) {
     pass(`mixed-clause: personal claim kept, cited requirement suppressed (${label})`);
   } else {
     fail(`mixed-clause claim separation failed (${label}): ${JSON.stringify({ text, claims })}`);
+  }
+}
+
+// A requirement count may sit directly before its citation phrase. That
+// syntactic attachment must win over a later personal count, which remains
+// visible to the fact gate.
+{
+  const text = 'The 7 years this role requires is more than my 4 years.';
+  const claims = [...metricClaims(text)];
+  if (claims.includes('4 years') && !claims.includes('7 years')) {
+    pass('mixed-clause: trailing personal claim kept when requirement precedes its citation');
+  } else {
+    fail(`pre-citation requirement claim separation failed: ${JSON.stringify({ text, claims })}`);
   }
 }
 
@@ -115,6 +140,15 @@ for (const [label, text] of mixedClauseCases) {
       pass('mixed-clause fabricated personal claim still blocks alongside a correctly-cited requirement');
     } else {
       fail(`mixed-clause fabricated personal claim bypassed the fact gate: ${JSON.stringify(mixed)}`);
+    }
+
+    const directional = verifyFacts('Managed 15 engineers in a role that requires 3 direct reports.', {
+      sourcePaths: [source], configPath: config,
+    });
+    if (directional.verdict === 'block' && directional.invented.includes('15 engineers') && !directional.invented.includes('3 reports')) {
+      pass('directional citation keeps an unsupported personal count in the fact gate');
+    } else {
+      fail(`directional citation silenced a personal count: ${JSON.stringify(directional)}`);
     }
   } finally {
     rmSync(tmpMixed, { recursive: true, force: true });

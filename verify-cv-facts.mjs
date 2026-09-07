@@ -601,10 +601,12 @@ function clauseAround(text, index) {
  * experience but this role requires 7 years" -- testing the citation against
  * the WHOLE clause would suppress BOTH, quietly waving through a genuinely
  * fabricated "12 years" personal claim alongside the correctly-cited "7
- * years" (flagged in review of #3917). Instead, each citation is bound to the
- * number NEAREST it in the clause -- here, "7" -- and only that number is
- * treated as cited; "12" gets no citation match and is left to the normal
- * source check like any other claim.
+ * years" (flagged in review of #3917). Instead, each citation is bound
+ * directionally: an immediately preceding count in "7 years this role
+ * requires" belongs to the citation; otherwise bind the first count after the
+ * citation phrase, falling back to the nearest preceding count when none
+ * follows. Here that binds "7", while "12" gets no citation match and is left
+ * to the normal source check like any other claim.
  *
  * @param {string} clean
  * @param {RegExpMatchArray} match
@@ -625,11 +627,15 @@ function isDisclosedRequirement(clean, match, allMatches) {
   if (!numbersInClause.length) return false;
 
   return citations.some((citation) => {
-    const citationIndex = start + citation.index;
-    const nearest = numbersInClause.reduce((best, m) => (
-      Math.abs(m.index - citationIndex) < Math.abs(best.index - citationIndex) ? m : best
-    ));
-    return nearest.index === match.index;
+    const citationStart = start + citation.index;
+    const citationEnd = start + citation.index + citation[0].length;
+    const preceding = numbersInClause.filter((m) => m.index < citationStart).at(-1);
+    const precedingEnd = preceding ? preceding.index + preceding[0].length : citationStart;
+    const directlyPrecedes = preceding
+      && /^\s*(?:this|that|the)?\s*$/i.test(clean.slice(precedingEnd, citationStart));
+    const following = numbersInClause.find((m) => m.index >= citationEnd);
+    const cited = directlyPrecedes ? preceding : (following ?? preceding);
+    return cited?.index === match.index;
   });
 }
 
