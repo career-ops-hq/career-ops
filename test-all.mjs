@@ -3387,9 +3387,14 @@ if (
   }
 
   // 6. Risk Summary row exists and follows the "activates automatically" pattern
+  // End bound is searched FROM the section start, not globally: any section
+  // added before Risk Summary that also carries a "Block format:" example
+  // would otherwise make the end index precede the start and slice to empty,
+  // failing this check for a reason that has nothing to do with the row.
+  const riskSummaryStart = ofertaMode.indexOf('## Risk Summary (after Block G)');
   const riskSummarySection = ofertaMode.slice(
-    ofertaMode.indexOf('## Risk Summary (after Block G)'),
-    ofertaMode.indexOf('Block format:')
+    riskSummaryStart,
+    ofertaMode.indexOf('Block format:', riskSummaryStart)
   );
   if (
     riskSummarySection.includes('AI-screening disclosure') &&
