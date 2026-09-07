@@ -351,6 +351,12 @@ test("buildPrompt: unattended multi-market evaluation falls back to primary and 
       < prompt.indexOf("2. Persist the result CANONICALLY"),
     "ambiguity resolution must precede report and tracker persistence",
   );
+  assert.ok(
+    prompt.indexOf("MARKET signals") < prompt.indexOf("2. Persist the result CANONICALLY")
+      && prompt.indexOf("modes/de/_shared.md") < prompt.indexOf("2. Persist the result CANONICALLY")
+      && prompt.indexOf("modes/zh/_shared.md") < prompt.indexOf("2. Persist the result CANONICALLY"),
+    "market selection and every declared shared context must precede persistence",
+  );
 });
 
 test("buildPrompt: research gets shared market context without evaluation stop rules", () => {
