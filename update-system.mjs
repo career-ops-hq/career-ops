@@ -1267,39 +1267,35 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
  * preserved by definition — the match IS the file's only content, so no
  * upstream lookup can add information. Only a directory `path` needs the
  * upstream ls-tree lookup, to confirm EVERY file it would check out is
- * preserved; an unreadable lookup degrades to "not fully preserved" so the
- * real checkout runs and reports its own diagnostics, same contract as
- * `locallyModifiedSystemFiles`.
+ * preserved.
  *
- * Two limits are deliberate, both raised in review of #3781:
+ * Tri-state, because for a directory the ls-tree lookup can fail and `false`
+ * would then mean two different things (#3824):
  *
- * 1. The single-file shortcut diverges from the pre-extraction inline check
- *    for a preserved file ABSENT from FETCH_HEAD. That check fell through to
- *    the real checkout, which failed and put the path in apply()'s "Skipped
- *    N path(s) absent upstream" summary; this returns true and skips it
- *    silently. Unreachable while preserved paths come from
- *    `locallyModifiedSystemFiles`, which only reports files that exist
- *    upstream (it gates each candidate on `cat-file -e <ref>:<file>`), so
- *    nothing today can construct the case — but it is a real divergence, not
- *    a behaviour-preserving one, and a future caller sourcing preservedPaths
- *    some other way would hit it.
+ *   - `true`    — nothing is left to check out; apply() skips the entry.
+ *   - `false`   — real upstream content is not preserved; apply() checks it
+ *                 out and any error it hits is a genuine failure.
+ *   - `'unknown'` — the directory's upstream content could not be enumerated
+ *                 (unreadable ls-tree). apply() still checks it out, but a
+ *                 "did not match any file(s)" cancel-out error is then benign:
+ *                 the directory may in fact have been fully preserved, and
+ *                 that is not distinguishable here from a real failure without
+ *                 matching git's stderr at the call site.
  *
- * 2. The directory branch's `catch → false` does NOT close the cancel-out
- *    abort for directories. A throwing ls-tree still falls through to
- *    `git checkout FETCH_HEAD -- modes/ :(exclude)modes/pdf.md`, which
- *    aborts the update when the directory happens to be fully preserved.
- *    That is exactly the pre-extraction behaviour, carried over unchanged —
- *    this function makes the check testable and drops a redundant lookup for
- *    the single-file case; it does not fix the directory case. Closing it
- *    needs a tri-state result whose "unknown" makes the checkout's "did not
- *    match any file(s)" benign at the call site; tracked separately rather
- *    than folded in here, since that means matching on git's stderr text.
+ * One limit is deliberate, raised in review of #3781: the single-file
+ * shortcut diverges from the pre-extraction inline check for a preserved file
+ * ABSENT from FETCH_HEAD (that check fell through to the real checkout and
+ * listed the path in apply()'s "Skipped N path(s) absent upstream" summary;
+ * this returns true and skips it silently). Unreachable while preserved paths
+ * come from `locallyModifiedSystemFiles`, which only reports files that exist
+ * upstream, but a future caller sourcing preservedPaths another way would hit
+ * it.
  *
  * @param {string} path - a SYSTEM_PATHS entry, file or `dir/`-suffixed directory.
  * @param {string[]} preservedPaths - files this run is keeping local content for.
  * @param {Set<string>} preservedSet - the same paths, as a Set, for lookup.
  * @param {{git?: Function}} [ctx] - injection point for tests; defaults to gitQuiet.
- * @returns {boolean}
+ * @returns {boolean | 'unknown'}
  */
 export function pathFullyPreserved(path, preservedPaths, preservedSet, ctx = {}) {
   if (preservedSet.size === 0) return false;
@@ -1313,9 +1309,44 @@ export function pathFullyPreserved(path, preservedPaths, preservedSet, ctx = {})
     upstreamFiles = runGitQuiet('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', path)
       .split('\n').map((f) => f.trim()).filter(Boolean);
   } catch {
-    return false;
+    // Can't enumerate the directory's upstream content: it might be fully
+    // preserved (skip) or not (check out). The call site checks it out and
+    // treats a cancel-out error as benign — see checkoutErrorIsBenign.
+    return 'unknown';
   }
   return upstreamFiles.length > 0 && upstreamFiles.every((f) => preservedSet.has(f));
+}
+
+// git's pathspec cancel-out message. `git checkout <ref> -- <dir>/ :(exclude)…`
+// prints `error: pathspec '<dir>/' did not match any file(s) known to git` when
+// the exclusions leave nothing to check out. Match loosely: the wording has
+// been stable for years but the quoting and the "known to git" tail vary.
+const PATHSPEC_CANCELLED_RE = /did not match any file/i;
+
+/**
+ * Whether a checkout error thrown inside apply()'s per-path loop is a benign
+ * skip rather than a real failure that must abort the update.
+ *
+ * Two benign shapes:
+ *   - `absentUpstream` — the path is genuinely gone from FETCH_HEAD (a stale
+ *     SYSTEM_PATHS entry such as an old `.gemini/commands/` directory).
+ *   - a `pathFullyPreserved` result of `'unknown'` paired with git's pathspec
+ *     cancel-out message — the directory's upstream content could not be
+ *     enumerated up front, the exclusion pathspecs cancelled the whole
+ *     checkout out, and nothing was left to install (#3824).
+ *
+ * Anything else — timeouts, permission errors, repo corruption — is a real
+ * failure and is rethrown by the caller.
+ *
+ * @param {unknown} err - the error execFileSync threw.
+ * @param {{absentUpstream: boolean, preservedState: boolean | 'unknown'}} opts
+ * @returns {boolean}
+ */
+export function checkoutErrorIsBenign(err, { absentUpstream, preservedState }) {
+  if (absentUpstream) return true;
+  if (preservedState !== 'unknown') return false;
+  const text = `${(err && err.stderr) || ''}\n${(err && err.message) || ''}`;
+  return PATHSPEC_CANCELLED_RE.test(text);
 }
 
 /**
@@ -2235,9 +2266,12 @@ async function apply() {
       // `git checkout <ref> -- <path> :(exclude)<path>` errors with "did not
       // match any file(s)" when the exclusions cancel the whole pathspec — and
       // that error is indistinguishable from a genuine failure at the catch
-      // below, so it would abort the entire update. Skip the entry instead when
-      // nothing would be left to check out (see pathFullyPreserved).
-      if (pathFullyPreserved(path, preservedPaths, preservedSet)) continue;
+      // below, so it would abort the entire update. Skip the entry outright
+      // when nothing would be left to check out; when the directory's upstream
+      // content could not be enumerated ('unknown'), still check it out but let
+      // the catch treat a cancel-out error as benign (#3824).
+      const preservedState = pathFullyPreserved(path, preservedPaths, preservedSet);
+      if (preservedState === true) continue;
       try {
         // stderr is piped rather than inherited here. A path absent upstream is
         // an EXPECTED skip (a stale manifest entry such as `.gemini/commands/`),
@@ -2253,11 +2287,15 @@ async function apply() {
         // reported them as skips too — letting a partial update reach the
         // success banner (#1998). Confirm the path is actually absent from
         // FETCH_HEAD before treating the failure as benign; otherwise rethrow.
+        // A fully-preserved directory whose upstream content we could not
+        // enumerate up front ('unknown') is the second benign shape: the
+        // exclusions cancelled the checkout out and git said "did not match
+        // any file(s)" (#3824).
         const spec = path.endsWith('/') ? path.slice(0, -1) : path;
         let absentUpstream = false;
         try { gitQuiet('cat-file', '-e', `FETCH_HEAD:${spec}`); }
         catch { absentUpstream = true; }
-        if (!absentUpstream) throw err;
+        if (!checkoutErrorIsBenign(err, { absentUpstream, preservedState })) throw err;
         skippedPaths.push(path);
       }
     }
