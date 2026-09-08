@@ -10,6 +10,8 @@ import * as yaml from 'js-yaml';
 
 const webSrc = fileURLToPath(new URL('../../src/', import.meta.url));
 const coreRoot = fileURLToPath(new URL('../../../', import.meta.url));
+// Core CI installs at the repo root; Web CI installs only under web/.
+const yamlPackageRoot = path.dirname(fileURLToPath(import.meta.resolve('js-yaml/package.json')));
 // The same test-only alias loader used by apply-cv-resolver.test.mjs.
 register('data:text/javascript,' + encodeURIComponent(`
   import fs from 'node:fs';
@@ -67,15 +69,15 @@ test('a separate Data Root retains the pipeline and access to its core', async (
     put(code, 'config/profile.example.yml', 'language:\n  output: en\ncandidate:\n  full_name: Template Person\n');
     put(code, 'templates/portals.example.yml', 'tracked_companies:\n  - name: Fixture Employer\n    ats: greenhouse\n    board: fixture\n');
     put(code, 'doctor.mjs', 'process.stdout.write("core-script-ran");\n');
-    // Exercise the real core in an isolated checkout. Web CI installs only
-    // web/node_modules, so copy the dependency closure and its own YAML package
-    // rather than importing back into a root checkout with missing dependencies.
+    // Exercise the real core in an isolated checkout. Copy its dependency
+    // closure and the resolved YAML package, so either CI install layout works
+    // without importing back into a checkout with missing dependencies.
     for (const relative of ['set-status.mjs', 'tracker-utils.mjs', 'tracker-parse.mjs',
       'path-resolver.mjs', 'pipeline-lock.mjs', 'role-matcher.mjs', 'followup-seed.mjs',
       'followup-cadence.mjs', 'lib/local-today.mjs', 'lib/cli-flags.mjs', 'lib/is-main-module.mjs']) {
       put(code, relative, fs.readFileSync(path.join(coreRoot, relative)));
     }
-    fs.cpSync(new URL('../../node_modules/js-yaml', import.meta.url), path.join(code, 'node_modules/js-yaml'), { recursive: true });
+    fs.cpSync(yamlPackageRoot, path.join(code, 'node_modules/js-yaml'), { recursive: true });
     put(user, 'cv.md', '# Synthetic Candidate\n');
     put(user, 'config/profile.yml', 'language:\n  output: en\n  modes_dir: modes/de\n');
     put(user, 'modes/_profile.md', '# Targeting\n');

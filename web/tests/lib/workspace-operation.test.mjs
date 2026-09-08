@@ -10,6 +10,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const webSrc = fileURLToPath(new URL('../../src/', import.meta.url));
 const coreRoot = fileURLToPath(new URL('../../../', import.meta.url));
+// Core CI installs at the repo root; Web CI installs only under web/.
+const yamlPackageRoot = path.dirname(fileURLToPath(import.meta.resolve('js-yaml/package.json')));
 const spawnKey = Symbol.for('career-ops.test.workspace-spawn');
 // Only the AI CLI is replaced. PDF children and follow-up file locks are real.
 // This exercises delayed HTTP completion without starting an installed agent.
@@ -131,7 +133,7 @@ test('a queued follow-up write still contends on the captured file after the mar
       put(code, relative, fs.readFileSync(path.join(coreRoot, relative)));
     }
     put(code, 'templates/states.yml', fs.readFileSync(path.join(coreRoot, 'templates/states.yml')));
-    fs.cpSync(new URL('../../node_modules/js-yaml', import.meta.url), path.join(code, 'node_modules/js-yaml'), { recursive: true });
+    fs.cpSync(yamlPackageRoot, path.join(code, 'node_modules/js-yaml'), { recursive: true });
     const core = await import(pathToFileURL(path.join(code, 'followup-seed.mjs')).href);
     const file = followupsLogPath();
     assert.equal(file, path.join(a, 'data/follow-ups.md'));
