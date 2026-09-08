@@ -161,3 +161,6 @@ public commit with a stated reason.
 - @mortee | 2026-09-04 | id:338540 | src:https://github.com/career-ops-hq/career-ops/discussions/3827 | n:113
 - @adityap | Aditya Poddar | 2026-09-07 | id:7117191 | src:https://github.com/career-ops-hq/career-ops/discussions/3970 | n:114
 - @cooldashing24 | Vishnu | 2026-09-07 | "May the Force be with us all" | id:4034728 | src:https://github.com/career-ops-hq/career-ops/discussions/3977 | n:115
+- @infosolutiondmdc | EnggNbs | 2026-09-08 | id:242919430 | src:https://github.com/career-ops-hq/career-ops/discussions/4021 | n:116
+- @prasta1 | patrick ruster | 2026-09-08 | id:155988469 | src:https://github.com/career-ops-hq/career-ops/discussions/4022 | n:117
+- @krishnaS137 | 2026-09-08 | "Hiring has become automated and seeing the increasing amount of competition in the field and the rate at which we are expected to level up. We should also have the leverage to use automated pipelines…" | id:127772632 | src:https://github.com/career-ops-hq/career-ops/discussions/4025 | n:118
