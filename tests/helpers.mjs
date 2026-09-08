@@ -619,8 +619,8 @@ export async function captureConsoleErrors(fn) {
  *     what is measured (the failure mode reported in #2269). Dropping it reddens
  *     updater-add-paths only: updater-is-tracked writes its own .gitignore and
  *     then reads index membership, while updater-rollback-target-manifest stages
- *     snapshots with `git add -A`. Kept for all three as a defensive pin,
- *     proven by one.
+ *     snapshots with `git add -A`, so a global rule could drop a fixture file;
+ *     it stayed green in the mutation run only because no such rule was set.
  *
  * Point `core.excludesFile` at an empty file rather than /dev/null: git on
  * Windows maps that to `nul` and dies with "fatal: cannot use nul as an

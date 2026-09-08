@@ -487,12 +487,26 @@ const gitBetweenFetchAndPair = fetchAt >= 0 && pairAt >= 0
   : true;
 if (appearsInOrder(applySource, [
   fetchCall,
-  'const targetRef = targetRefForBackup(backupBranch);',
   pairCall,
 ]) && !gitBetweenFetchAndPair) {
   pass('apply pins FETCH_HEAD to the backup-paired target ref immediately after the canonical fetch');
 } else {
   fail('apply does not pin the canonical fetch to its backup-paired target before another git operation');
+}
+
+const targetRefDeclaration = 'const targetRef = targetRefForBackup(backupBranch);';
+const branchCreation = "git('branch', backupBranch);";
+if (applySource.indexOf(targetRefDeclaration) >= 0
+  && applySource.indexOf(branchCreation) > applySource.indexOf(targetRefDeclaration)) {
+  pass('apply validates the paired target-ref name before creating its backup branch');
+} else {
+  fail('apply can create a backup branch before validating its paired target-ref name');
+}
+
+if (appearsInOrder(applySource, [pairCall, 'pruneStaleTargetRefs();'])) {
+  pass('apply prunes stale paired target refs after creating the new pair');
+} else {
+  fail('apply does not prune stale paired target refs after creating the new pair');
 }
 
 if (appearsInOrder(applySource, [

@@ -26,6 +26,7 @@ import {
   gitIn,
   isSafeManifestPath,
   manifestTreeFiles,
+  pruneStaleTargetRefs,
   targetRefForBackup,
 } from '../update-system.mjs';
 import { fail, makeUpdaterRepo, pass, rmSync } from './helpers.mjs';
@@ -174,7 +175,47 @@ function rejectedBy(fn) {
   );
 }
 
-// ── 5. Tree expansion yields concrete, safe files only ──
+// ── 5. Target refs are retained only while their strict backup branch exists ──
+{
+  const { dir, g, ctx } = makeUpdaterRepo(gitIn, { prefix: 'co-target-ref-prune-' });
+  try {
+    writeFileSync(join(dir, 'seed.txt'), 'seed\n');
+    g('add', 'seed.txt');
+    g('commit', '-qm', 'seed');
+    const commit = g('rev-parse', 'HEAD');
+    const live = 'backup-pre-update-1.2.3-20260907T120000Z';
+    const stale = 'backup-pre-update-1.2.3-20260907T130000Z';
+    const liveRef = targetRefForBackup(live);
+    const staleRef = targetRefForBackup(stale);
+    const manualRef = 'refs/backup-pre-update-target/manual-retain';
+    g('branch', live, commit);
+    g('branch', stale, commit);
+    g('update-ref', liveRef, commit);
+    g('update-ref', staleRef, commit);
+    g('update-ref', manualRef, commit);
+    g('branch', '-D', stale);
+
+    const pruned = pruneStaleTargetRefs(ctx);
+    const hasRef = (ref) => {
+      try { g('show-ref', '--verify', '--quiet', ref); return true; }
+      catch { return false; }
+    };
+    check(
+      pruned.length === 1 && pruned[0] === staleRef && !hasRef(staleRef),
+      'stale paired target refs are pruned when their backup branch is gone',
+      `stale paired ref was not pruned: ${JSON.stringify(pruned)}`,
+    );
+    check(
+      hasRef(liveRef) && hasRef(manualRef),
+      'live backup pairs and unrecognised namespace refs are retained',
+      'target-ref pruning removed a live pair or manual namespace ref',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 6. Tree expansion yields concrete, safe files only ──
 {
   const { dir, g, ctx } = makeUpdaterRepo(gitIn, {
     prefix: 'co-rollback-manifest-files-',

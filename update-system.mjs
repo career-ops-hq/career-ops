@@ -611,6 +611,16 @@ export function localUserPaths(root = ROOT) {
       reject(path, 'paths must be written plainly, with no "." segment (use "merge-tracker.mjs", not "./merge-tracker.mjs")');
     }
     const pathSegments = manifestPathSegments(path);
+    // A declaration from an older install may repeat a built-in USER_PATHS
+    // directory (for example `documents/`). It became a SYSTEM_PATHS collision
+    // only when that directory gained a tracked scaffold. The built-in path
+    // already protects the declaration's complete scope, so ignore the
+    // redundant line rather than making apply()/rollback fail on upgrade.
+    const alreadyProtected = USER_PATHS.some((userPath) =>
+      userPathCoversDeclaration(userPath, path),
+    );
+    if (alreadyProtected) continue;
+
     const collision = SYSTEM_PATHS.find((sys) => {
       const systemSegments = manifestPathSegments(sys);
       const shared = Math.min(pathSegments.length, systemSegments.length);
@@ -620,11 +630,25 @@ export function localUserPaths(root = ROOT) {
       reject(
         path,
         `the system layer ships it (SYSTEM_PATHS entry "${collision}"). `
-        + 'Declaring it would stop updates to it with no other signal',
+        + 'Remove this line if USER_PATHS already protects it, or narrow it to a fork-owned path upstream does not ship.',
       );
     }
   }
-  return declared;
+  return declared.filter((path) => !USER_PATHS.some((userPath) =>
+    userPathCoversDeclaration(userPath, path),
+  ));
+}
+
+/** Whether a built-in user path fully covers a local declaration's scope. */
+function userPathCoversDeclaration(userPath, declaration) {
+  const userSegments = manifestPathSegments(userPath);
+  const declaredSegments = manifestPathSegments(declaration);
+  if (userPath.endsWith('/')) {
+    return userSegments.length <= declaredSegments.length
+      && userSegments.every((segment, index) => segment === declaredSegments[index]);
+  }
+  return userSegments.length === declaredSegments.length
+    && userSegments.every((segment, index) => segment === declaredSegments[index]);
 }
 
 /**
@@ -792,6 +816,33 @@ export function targetRefForBackup(backupBranch) {
     throw new Error(`Invalid updater backup branch: ${backupBranch}`);
   }
   return `refs/backup-pre-update-target/${backupBranch}`;
+}
+
+/**
+ * Remove target refs whose strict updater backup branch has been deleted.
+ * Paired refs remain for every existing backup so rollback can still identify
+ * target-only files; unrecognised/manual names in this namespace are retained.
+ * @param {{git?: Function}} [ctx] - Test seam; defaults to the ROOT-bound runner.
+ * @returns {string[]} Pruned ref names.
+ */
+export function pruneStaleTargetRefs(ctx = {}) {
+  const runGit = ctx.git || git;
+  const branches = new Set(
+    runGit('for-each-ref', '--format=%(refname)', 'refs/heads/backup-pre-update-*')
+      .split('\n').filter(Boolean),
+  );
+  const prefix = 'refs/backup-pre-update-target/';
+  const targetRefs = runGit('for-each-ref', '--format=%(refname)', prefix)
+    .split('\n').filter(Boolean);
+  const pruned = [];
+  for (const targetRef of targetRefs) {
+    const backupBranch = targetRef.slice(prefix.length);
+    if (!BACKUP_BRANCH_RE.test(backupBranch)) continue;
+    if (branches.has(`refs/heads/${backupBranch}`)) continue;
+    runGit('update-ref', '-d', targetRef);
+    pruned.push(targetRef);
+  }
+  return pruned;
 }
 
 function backupTimestamp(branchName) {
@@ -2246,9 +2297,9 @@ async function apply() {
     // stack, giving a recoverable ref for WIP even if the update fails.
     const inheritedBackupBranch = process.env.CAREER_OPS_UPDATE_BACKUP_BRANCH || '';
     const backupBranch = isReexec ? inheritedBackupBranch : updateBackupBranchName(local);
-    if (isReexec && !BACKUP_BRANCH_RE.test(backupBranch)) {
-      throw new Error('Authenticated updater re-exec did not carry a valid backup branch');
-    }
+    // Validate before any backup side effect. A malformed local VERSION must not
+    // leave an unpaired branch behind when targetRefForBackup() rejects it later.
+    const targetRef = targetRefForBackup(backupBranch);
     if (!isReexec) {
       try {
         const wip = git('stash', 'create');
@@ -2269,8 +2320,15 @@ async function apply() {
     // FETCH_HEAD is process-global and any later fetch can mutate it. Pair the
     // attempted target with this run's backup immediately, then use only that
     // durable ref for every read and checkout below.
-    const targetRef = targetRefForBackup(backupBranch);
     git('update-ref', targetRef, 'FETCH_HEAD');
+    if (!isReexec) {
+      try {
+        pruneStaleTargetRefs();
+      } catch (err) {
+        // Retention housekeeping must not prevent an otherwise safe update.
+        console.error(`Updater warning: could not prune stale backup target refs (${err.message}).`);
+      }
+    }
 
     // The fetched manifest is trusted updater code, but its paths still have to
     // obey the canonical data-contract boundary. Validate before even the

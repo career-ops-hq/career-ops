@@ -182,7 +182,48 @@ console.log('\n🧪 Local user-paths declaration file (#2421)\n');
   }
 }
 
-// ── 9. Absolute paths and parent-directory escapes are refused ──
+// ── 9. Redundant built-in declarations migrate away without widening scope ──
+//    Older local-paths files sometimes repeated a USER_PATHS directory before it
+//    gained a tracked scaffold. That declaration is already fully protected, so
+//    rejecting it would make both apply and rollback fail after an upgrade.
+{
+  const redundant = ['documents/', 'interview-prep/', 'writing-samples/', 'data/private/'];
+  const retained = 'fork-runner.mjs';
+  let problem = null;
+  try {
+    const got = localUserPaths(root(`${redundant.join('\n')}\n${retained}\n`));
+    if (!eq(got, [retained])) problem = `returned ${JSON.stringify(got)}`;
+    const widened = effectiveUserPaths(root(`${redundant.join('\n')}\n${retained}\n`));
+    if (!eq(widened, [...USER_PATHS, retained])) problem = `union was ${JSON.stringify(widened)}`;
+  } catch (err) {
+    problem = err.message;
+  }
+  if (!problem) {
+    pass('redundant built-in user-path declarations are ignored during migration');
+  } else {
+    fail(`#9 redundant built-in declarations did not migrate: ${problem}`);
+  }
+
+  const mixedAncestors = ['config/', 'modes/'];
+  const accepted = [];
+  for (const path of mixedAncestors) {
+    try {
+      localUserPaths(root(`${path}\n`));
+      accepted.push(path);
+    } catch (err) {
+      if (!err.message.includes('USER_PATHS') || !err.message.includes('narrow')) {
+        accepted.push(`${path} (missing actionable guidance: ${err.message})`);
+      }
+    }
+  }
+  if (accepted.length === 0) {
+    pass('mixed system/user ancestors remain refused with removal-or-narrowing guidance');
+  } else {
+    fail(`#9 unsafe broad declarations were accepted or unclear: ${accepted.join('; ')}`);
+  }
+}
+
+// ── 10. Absolute paths and parent-directory escapes are refused ──
 //    The declaration is a repo-relative statement about this checkout. A path
 //    that leaves it can only widen the "never touch" set over files the
 //    updater does not own.
@@ -202,7 +243,7 @@ console.log('\n🧪 Local user-paths declaration file (#2421)\n');
   }
 }
 
-// ── 9. The declaration file never declares itself away ──
+// ── 11. The declaration file never declares itself away ──
 //    It is gitignored, so it is not a tracked file and needs no coverage; a
 //    self-reference is a sign of a confused config, not a valid statement.
 {
