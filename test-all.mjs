@@ -7772,6 +7772,50 @@ try {
     fail('remote-title rescue changed behavior for non-remote or malformed titles');
   }
 
+  // Case 28: `location_filter.strict` (#3276). A location-restricted sweep over
+  // a provider that never returns a location (iCIMS) otherwise lets every
+  // out-of-region posting through, because the empty-location short-circuit
+  // passes before `allow` is consulted.
+  {
+    const lenient = buildLocationFilter({ allow: ['puerto rico', 'san juan'] });
+    const strict = buildLocationFilter({ allow: ['puerto rico', 'san juan'], strict: true });
+    const icimsUrl = 'https://careers-peraton.icims.com/jobs/168257/data-architect/job';
+    if (
+      // default: an empty-location iCIMS posting still passes (unchanged)
+      lenient('', icimsUrl) === true &&
+      // strict: the same posting is now rejected — no location, no confirmation
+      strict('', icimsUrl) === false &&
+      strict('', undefined) === false &&
+      strict(null, null) === false &&
+      // strict never touches a posting that DOES carry a matching location
+      strict('San Juan, PR', undefined) === true &&
+      // strict still rejects a real out-of-region location (allow unchanged)
+      strict('Boston, MA', undefined) === false
+    ) {
+      pass('location_filter.strict fails closed on empty locations without changing the default');
+    } else {
+      fail('location_filter.strict did not gate empty-location postings correctly');
+    }
+  }
+
+  // Case 29: `strict: true` alone — with no allow/block/block_hard — restricts
+  // nothing and must not reject every location-less posting.
+  {
+    const strictNoTiers = buildLocationFilter({ strict: true });
+    const strictBlockOnly = buildLocationFilter({ block: ['india'], strict: true });
+    if (
+      strictNoTiers('', undefined) === true &&
+      strictNoTiers('Anywhere', undefined) === true &&
+      // a block-only strict config DOES fail closed (can't confirm it's not blocked)
+      strictBlockOnly('', undefined) === false &&
+      strictBlockOnly('Berlin, Germany', undefined) === true
+    ) {
+      pass('strict:true with no restricting tier is inert; block-only strict fails closed');
+    } else {
+      fail('strict:true handling of the no-tier / block-only cases is wrong');
+    }
+  }
+
   if (
     shouldDedupScanHistoryRow({ firstSeen: '2026-06-01', status: 'added' }, { recheckAfterDays: 30, today: '2026-06-10' }) === true &&
     shouldDedupScanHistoryRow({ firstSeen: '2026-05-01', status: 'added' }, { recheckAfterDays: 30, today: '2026-06-10' }) === false &&
