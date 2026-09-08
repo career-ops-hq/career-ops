@@ -23,7 +23,7 @@
  */
 
 import { pass, fail } from './helpers.mjs';
-import { rejectUserLayerPaths } from '../update-system.mjs';
+import { rejectUserLayerPaths, manifestProbes } from '../update-system.mjs';
 
 // A stand-in for effectiveUserPaths() covering both declaration forms: a
 // trailing `/` is a directory, anything else is an exact file path.
@@ -266,5 +266,85 @@ console.log('\n🧪 Testing rejectUserLayerPaths (fetched manifest vs local user
     pass('an empty fetched manifest yields nothing on either side');
   } else {
     fail('an empty fetched manifest must yield nothing on either side');
+  }
+}
+
+// manifestProbes() is what apply() actually hands the rule. The blocks above use
+// doubles, so they verify the RULE; these verify the WIRING — that the probes read
+// the git output they are given. Left inline in apply(), this could only be checked
+// by pattern-matching the source, and a source pattern cannot tell
+// `trackedFiles.has(path)` from `() => true`.
+console.log('\n🧪 Testing manifestProbes (git output -> the rule\'s three questions)...');
+
+{
+  // Given: `ls-files -z` output naming two tracked files
+  const probes = manifestProbes({
+    trackedOutput: 'writing-samples/README.md\0documents/README.md\0',
+    upstreamOutput: '',
+  });
+
+  // When: the tracked probe is asked about a listed and an unlisted path
+  // Then: it answers from that output, not from the surrounding checkout
+  if (probes.tracked('writing-samples/README.md') && !probes.tracked('data/applications.md')) {
+    pass('tracked() answers from the ls-files output it was given');
+  } else {
+    fail('tracked() does not read the ls-files output');
+  }
+}
+
+{
+  // Given: a NUL-delimited name that a newline split would mangle. core.quotePath
+  // makes this the realistic shape, and it is why -z is used.
+  const probes = manifestProbes({
+    trackedOutput: 'documents/résumé notes.md\0documents/README.md\0',
+    upstreamOutput: '',
+  });
+
+  // When/Then: the whole name survives as one entry
+  if (probes.tracked('documents/résumé notes.md') && probes.tracked('documents/README.md')) {
+    pass('tracked() parses NUL-delimited names whole');
+  } else {
+    fail('tracked() mangles NUL-delimited names');
+  }
+}
+
+{
+  // Given: an upstream tree that ships files under data/outcomes but not under
+  // documents/GUIDE.md, which is a blob
+  const probes = manifestProbes({
+    trackedOutput: '',
+    upstreamOutput: 'data/outcomes/posting.md\0documents/GUIDE.md\0',
+  });
+
+  // When/Then: only the path with files beneath it is a subtree claim
+  if (probes.claimsSubtree('data/outcomes') && !probes.claimsSubtree('documents/GUIDE.md')) {
+    pass('claimsSubtree() distinguishes a tree from a blob using the upstream listing');
+  } else {
+    fail('claimsSubtree() does not read the upstream listing');
+  }
+}
+
+{
+  // Given: any probes, asked about a trailing-slash entry
+  const probes = manifestProbes({ trackedOutput: '', upstreamOutput: '' });
+
+  // When/Then: an explicit slash is a subtree claim without consulting the tree,
+  // so an entry upstream ships nothing under yet is still refused
+  if (probes.claimsSubtree('documents/')) {
+    pass('claimsSubtree() honours an explicit trailing slash with an empty tree');
+  } else {
+    fail('claimsSubtree() ignores an explicit trailing slash');
+  }
+}
+
+{
+  // Given: a root the exists probe should resolve against
+  const probes = manifestProbes({ trackedOutput: '', upstreamOutput: '', root: process.cwd() });
+
+  // When/Then: it reports on the real filesystem under that root
+  if (probes.exists('update-system.mjs') && !probes.exists('no-such-file-xyz.md')) {
+    pass('exists() resolves against the root it was given');
+  } else {
+    fail('exists() does not resolve against the given root');
   }
 }

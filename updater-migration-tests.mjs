@@ -323,12 +323,14 @@ const twoPassManifestChecks = [
     pattern: /rejectUserLayerPaths\([\s\S]{0,200}?effectiveUserPaths\(\)/,
   },
   {
-    // Both probes must come from the install and the tree being checked out: a
-    // tracked-file set from `ls-files`, and the upstream tree from `ls-tree`. The
-    // defaults inside the guard are per-path git calls; the call site batches them,
-    // and a regression that drops either seam silently disables half the rule.
-    name: 'the guard probes tracked state and the upstream tree from real git output',
-    pattern: /git\('ls-files',\s*'-z'\)[\s\S]{0,500}?git\('ls-tree',\s*'-r',\s*'--name-only',\s*'-z',\s*'FETCH_HEAD'\)[\s\S]{0,700}?claimsSubtree:/,
+    // The probes must be built by manifestProbes() from real git output, INSIDE
+    // the rejectUserLayerPaths() call. A source pattern cannot tell
+    // `trackedFiles.has(path)` from `() => true`, so what the probes DO is
+    // verified behaviourally in tests/updater-remote-manifest-user-paths.test.mjs
+    // against the factory's own exports; this only has to pin that apply() feeds
+    // it `ls-files -z` and `ls-tree -z` rather than something of its own.
+    name: 'the guard is handed probes built by manifestProbes from real git output',
+    pattern: /rejectUserLayerPaths\([\s\S]{0,300}?manifestProbes\(\{\s*trackedOutput:\s*git\('ls-files',\s*'-z'\),\s*upstreamOutput:\s*git\('ls-tree',\s*'-r',\s*'--name-only',\s*'-z',\s*'FETCH_HEAD'\),\s*\}\),/,
   },
   {
     // A refused entry was never checked out, so verifying it would report a gap

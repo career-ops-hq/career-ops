@@ -679,6 +679,41 @@ function upstreamShipsUnder(path, ref = 'FETCH_HEAD') {
 }
 
 /**
+ * Build the local-state probes rejectUserLayerPaths() asks its three questions of.
+ *
+ * Extracted and exported rather than inlined at the call site for the reason
+ * userLayerViolations() gives for being pure: apply() is ROOT-bound and full of
+ * side effects, so anything left inside it can only be checked by pattern-matching
+ * the source — and a source pattern cannot tell `trackedFiles.has(path)` from
+ * `() => true`. Gutting the probes that way disables the whole named-file half of
+ * the guard while every structural check still passes, which is precisely what
+ * happened before this was pulled out.
+ *
+ * Takes raw git output rather than parsed collections so the NUL parsing is part
+ * of what gets tested: `-z` is what makes a non-ASCII name survive
+ * core.quotePath, and both probes key on exact membership and prefix.
+ *
+ * @param {object} args
+ * @param {string} args.trackedOutput - Raw `git ls-files -z` output.
+ * @param {string} args.upstreamOutput - Raw `git ls-tree -r --name-only -z <ref>` output.
+ * @param {string} [args.root=ROOT] - Checkout the `exists` probe resolves against.
+ * @returns {{tracked: Function, exists: Function, claimsSubtree: Function}}
+ */
+export function manifestProbes({ trackedOutput, upstreamOutput, root = ROOT }) {
+  const trackedFiles = new Set(String(trackedOutput).split('\0').filter(Boolean));
+  const upstreamFiles = String(upstreamOutput).split('\0').filter(Boolean);
+  return {
+    tracked: (path) => trackedFiles.has(path),
+    exists: (path) => existsSync(join(root, path)),
+    claimsSubtree: (path) => {
+      if (path.endsWith('/')) return true;
+      const prefix = `${path}/`;
+      return upstreamFiles.some((file) => file.startsWith(prefix));
+    },
+  };
+}
+
+/**
  * Split a manifest into entries apply() may write and entries it must refuse.
  *
  * A manifest entry naming a user path is a data-loss bug regardless of intent: the
@@ -2328,23 +2363,16 @@ async function apply() {
     // entry: the merged list is ~340 paths, and the per-path defaults would spawn
     // git that many times each.
     // -z on both, for the reason expandStagingPaths documents: core.quotePath
-    // quotes a non-ASCII name, and both probes below key on exact membership and
+    // quotes a non-ASCII name, and both probes key on exact membership and
     // prefix. A quoted name would read as untracked, so a tracked system doc
     // inside a user directory would be refused instead of updated.
-    const trackedFiles = new Set(git('ls-files', '-z').split('\0').filter(Boolean));
-    const upstreamFiles = git('ls-tree', '-r', '--name-only', '-z', 'FETCH_HEAD').split('\0').filter(Boolean);
     const { kept: updatePaths, refused } = rejectUserLayerPaths(
       mergePathLists(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS),
       effectiveUserPaths(),
-      {
-        tracked: (path) => trackedFiles.has(path),
-        exists: (path) => existsSync(join(ROOT, path)),
-        claimsSubtree: (path) => {
-          if (path.endsWith('/')) return true;
-          const prefix = `${path}/`;
-          return upstreamFiles.some((file) => file.startsWith(prefix));
-        },
-      },
+      manifestProbes({
+        trackedOutput: git('ls-files', '-z'),
+        upstreamOutput: git('ls-tree', '-r', '--name-only', '-z', 'FETCH_HEAD'),
+      }),
     );
     const refusedSet = new Set(refused);
     if (refused.length > 0) {
