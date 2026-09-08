@@ -8,7 +8,7 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "li
 const src = readFileSync(SRC, "utf8");
 
 test("atomicWrite cleans up and rethrows when the write or rename fails", () => {
-  assert.match(src, /try\s*\{\s*fs\.writeFileSync\(tmp, content, "utf8"\);\s*fs\.renameSync\(tmp, file\);\s*\}\s*catch \(err\)\s*\{\s*fs\.rmSync\(tmp, \{ force: true \}\);\s*throw err;/s);
+  assert.match(src, /try\s*\{\s*fs\.writeFileSync\(tmp, content, "utf8"\);\s*fs\.renameSync\(tmp, file\);\s*\}\s*catch \(err\)\s*\{[\s\S]*?fs\.rmSync\(tmp, \{ force: true \}\);[\s\S]*?throw err;/s);
 });
 
 test("atomicWrite uses the canonical hidden temporary-file shape", () => {

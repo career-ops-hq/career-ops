@@ -21,7 +21,11 @@ export function atomicWrite(file: string, content: string): void {
     fs.writeFileSync(tmp, content, "utf8");
     fs.renameSync(tmp, file);
   } catch (err) {
-    fs.rmSync(tmp, { force: true });
+    try {
+      fs.rmSync(tmp, { force: true });
+    } catch {
+      // Preserve the original write or rename error if cleanup also fails.
+    }
     throw err;
   }
 }
