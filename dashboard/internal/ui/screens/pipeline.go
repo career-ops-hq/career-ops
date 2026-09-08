@@ -1789,7 +1789,9 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 		scoreStyle = lipgloss.NewStyle().Foreground(m.theme.Subtext)
 		scoreText = "\u2014"
 	}
-	score := scoreStyle.Render(scoreText)
+	// Width(3) so the one-rune sentinel occupies the same column as "4.2"
+	// and the row keeps its measured width.
+	score := scoreStyle.Width(3).Render(scoreText)
 
 	// Company (truncate)
 	company := truncateRunes(app.Company, cw.company)
