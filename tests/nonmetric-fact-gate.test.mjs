@@ -323,6 +323,25 @@ try {
     fail(`#4004 a determiner-led sibling suppressed a claim that must block: ${JSON.stringify(mixedListFailClosed)}`);
   }
 
+  // The whole-clause drop is about PROSE triggers: a determiner after "using"
+  // or "worked with" says the trigger is ordinary English. A determiner after
+  // "Technologies:" says no such thing, because that trigger is a declaration
+  // whatever follows it, so there the determiner taints only its own fragment.
+  const declaredWithDeterminer = factClaims('Technologies: our playbook and React').filter(claim => claim.kind === 'tool');
+  if (declaredWithDeterminer.some(claim => claim.value === 'react')
+      && !declaredWithDeterminer.some(claim => claim.value.includes('playbook'))) {
+    pass('#4004 a determiner in a declared list does not discard the list');
+  } else {
+    fail(`#4004 a declared technology was lost to a determiner sibling: ${JSON.stringify(declaredWithDeterminer)}`);
+  }
+
+  const declaredFailClosed = factClaims('Tech stack: our stack and kubernetes').filter(claim => claim.kind === 'tool');
+  if (declaredFailClosed.some(claim => claim.value === 'kubernetes')) {
+    pass('#4004 a declared list still yields the claim the gate must block');
+  } else {
+    fail(`#4004 a determiner sibling suppressed a declared claim: ${JSON.stringify(declaredFailClosed)}`);
+  }
+
   // The other direction: an explicit declaration is still a declaration.
   const declaredTools = factClaims('Technologies: React, Postgres');
   if (declaredTools.some(claim => claim.kind === 'tool' && claim.value === 'react')

@@ -31,6 +31,7 @@ const TOOL_PROSE_WORDS = new Set([
 // TOOL_PROSE_WORDS it cannot turn into a list that grows by one word per bug
 // report (#4004).
 const DETERMINER_LEAD_RE = /^(?:the|that|this|these|those|our|your|their|its|his|her|my)\s+/i;
+const DECLARED_TOOL_TRIGGER_RE = /^(?:technologies?|tech stack)\s*:/i;
 const TOOL_PHRASE_PATTERN = /^(?=.{1,80}$)[\p{L}\p{N}.][\p{L}\p{N}+#./-]*(?:\s+[\p{L}\p{N}.][\p{L}\p{N}+#./-]*){0,2}$/u;
 const DELEGATED_PARTY_RE = /\b(?:vendors?|agenc(?:y|ies)|contractors?|consultanc(?:y|ies)|consultants?|external teams?|outsourc(?:ed|ing)|implementation partners?)\b/i;
 const DELEGATION_RE = /\b(?:commissioned|coordinated|directed|engaged|hired|managed|oversaw|partnered with|supervised)\b/i;
@@ -391,13 +392,16 @@ export function factClaims(text, sourceNormalized = null) {
   for (const [kind, pattern] of patterns) {
     for (const match of clean.matchAll(pattern)) {
       const rawText = kind === 'tool' ? match[1].trim() : '';
+      // "Technologies:" and "tech stack:" declare a list whatever follows them.
+      // The prose triggers do not: a determiner straight after "using" or
+      // "worked with" means the trigger is ordinary English, so the whole clause
+      // is prose and "worked with the team in London" must not yield London.
+      const declaredList = kind === 'tool' && DECLARED_TOOL_TRIGGER_RE.test(match[0]);
       const rawValues = kind === 'tool'
-        // A determiner immediately after the trigger means the trigger is being
-        // used in its ordinary English sense, so the whole clause is prose:
-        // "worked with the team in London" must not yield London. A determiner
-        // LATER in the list taints only its own fragment, so filtering after the
-        // split keeps its siblings, including a name the gate has to block (#4004).
-        ? (DETERMINER_LEAD_RE.test(rawText)
+        // A determiner LATER in a list taints only its own fragment, so filter
+        // after the split and keep its siblings, including a name the gate has
+        // to block (#4004).
+        ? ((!declaredList && DETERMINER_LEAD_RE.test(rawText))
           ? []
           : rawText.split(/,|\band\b|\bwith\b|\bin\b/i).filter(raw => !DETERMINER_LEAD_RE.test(raw.trim())))
         : [match[1] || match[2]];
