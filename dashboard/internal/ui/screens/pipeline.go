@@ -1966,6 +1966,13 @@ func previewOutcome(app model.CareerApplication) string {
 // Stripping at the write path stops new bytes entering the tracker. It cannot
 // speak for a report header, a scan TSV, or a child process's stderr, none of
 // which pass through cell() -- and the flash renders all three.
+//
+// Text from those sources need not be valid UTF-8. strings.Map hands the
+// mapping function utf8.RuneError for a byte it cannot decode and writes
+// U+FFFD, so a raw 0x9b -- the byte an 8-bit terminal reads as CSI -- is
+// replaced rather than passed through. That is the property the guard needs;
+// it shows as a replacement character rather than disappearing, which is the
+// honest rendering of a byte nothing can decode.
 func sanitizeFlash(s string) string {
 	return strings.Map(func(r rune) rune {
 		switch {

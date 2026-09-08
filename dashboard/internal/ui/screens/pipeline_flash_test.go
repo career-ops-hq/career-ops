@@ -52,6 +52,16 @@ func TestSanitizeFlashDropsControlCharacters(t *testing.T) {
 			want: "one two three four",
 		},
 		{
+			// A byte that is not valid UTF-8 never reaches the terminal as
+			// itself: strings.Map hands the mapping function utf8.RuneError
+			// and writes U+FFFD, so a raw 0x9b — the byte an 8-bit terminal
+			// would read as CSI — is already destroyed. It is replaced rather
+			// than dropped, which is why the want here is not "ac".
+			name: "raw 0x9b is not valid UTF-8 and becomes the replacement rune",
+			in:   "a\x9bc",
+			want: "a\uFFFDc",
+		},
+		{
 			name: "ordinary text is untouched",
 			in:   "Could not open /tmp/cv.pdf: exit status 1 — café ✅",
 			want: "Could not open /tmp/cv.pdf: exit status 1 — café ✅",
@@ -64,6 +74,29 @@ func TestSanitizeFlashDropsControlCharacters(t *testing.T) {
 				t.Fatalf("sanitizeFlash(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+// The property that matters is narrower than any single expected string: no
+// byte that a terminal could read as the start of an escape sequence survives,
+// whether it arrived as a well-formed rune or as a raw byte in text that was
+// never valid UTF-8 (a path or a child process's stderr need not be).
+func TestSanitizeFlashLeavesNoEscapeIntroducerByte(t *testing.T) {
+	inputs := []string{
+		"a\x1bc",   // ESC
+		"a\x9bc",   // raw CSI byte, invalid UTF-8 on its own
+		"a\u009bc", // the same C1 control, correctly encoded
+		"a\x80c",   // a stray continuation byte
+		"one\ttwo",
+		"café ✅",
+	}
+	for _, in := range inputs {
+		out := sanitizeFlash(in)
+		for i := 0; i < len(out); i++ {
+			if out[i] == 0x1b || out[i] == 0x9b {
+				t.Fatalf("sanitizeFlash(%q) = %q left byte %#x at %d", in, out, out[i], i)
+			}
+		}
 	}
 }
 
