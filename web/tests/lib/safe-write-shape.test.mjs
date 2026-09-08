@@ -13,5 +13,5 @@ test("atomicWrite cleans up and rethrows when the write or rename fails", () => 
 
 test("atomicWrite uses the canonical hidden temporary-file shape", () => {
   assert.match(src, /`\.\$\{path\.basename\(file\)\}\.\$\{process\.pid\}\.\$\{Date\.now\(\)\}\.\$\{randomUUID\(\)\}\.tmp`/);
-  assert.match(src, /path\.join\(\s*path\.dirname\(file),/s);
+  assert.match(src, /path\.join\(\s*path\.dirname\(file\),/s);
 });
