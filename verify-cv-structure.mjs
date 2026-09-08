@@ -37,8 +37,8 @@
  *   node verify-cv-structure.mjs --self-test
  */
 
-import { existsSync, readFileSync, mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
-import { isAbsolute, join, dirname, basename } from 'path';
+import { existsSync, readFileSync, realpathSync, mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
+import { isAbsolute, join, resolve, relative, sep, dirname, basename } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -251,7 +251,28 @@ function resolveInputPath(path, cwd = process.cwd()) {
 }
 
 function resolveSourcePath(path) {
-  return isAbsolute(path) ? path : join(getCareerOpsRoot(), path);
+  if (isAbsolute(path)) {
+    throw new Error('--source must be relative to CAREER_OPS_ROOT');
+  }
+  const root = resolve(getCareerOpsRoot());
+  const candidate = resolve(root, path);
+  const relativePath = relative(root, candidate);
+  if (relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
+    throw new Error('--source must stay within CAREER_OPS_ROOT');
+  }
+
+  // Lexical containment blocks `..`; canonical containment also blocks an
+  // in-root symlink from redirecting readFileSync() outside the data root.
+  if (existsSync(candidate)) {
+    const canonicalRoot = realpathSync(root);
+    const canonicalCandidate = realpathSync(candidate);
+    const canonicalRelativePath = relative(canonicalRoot, canonicalCandidate);
+    if (canonicalRelativePath === '..' || canonicalRelativePath.startsWith(`..${sep}`) || isAbsolute(canonicalRelativePath)) {
+      throw new Error('--source must stay within CAREER_OPS_ROOT');
+    }
+    return canonicalCandidate;
+  }
+  return candidate;
 }
 
 function usage() {
@@ -263,6 +284,7 @@ for two structural regressions fabrication-checking cannot see: experience
 entries rendered out of cv.md's chronological order, and a company descriptor
 ("· Series B healthcare automation") silently dropped from an entry's location.
 Default source: cv.md
+The --source path must be relative to CAREER_OPS_ROOT and cannot escape it.
 
 This is a warning, not a hard gate: a structural pass, warn, or unverified
 result always exits 0 — a finding means review the payload against cv.md and
@@ -457,21 +479,21 @@ function runSelfTest() {
   {
     const selfTestDir = mkdtempSync(join(tmpdir(), 'verify-cv-structure-selftest-'));
     try {
-      const cvMdPath = join(selfTestDir, 'cv.md');
-      writeFileSync(cvMdPath, cvMd, 'utf-8');
       const nullPayloadPath = join(selfTestDir, 'null-payload.json');
       writeFileSync(nullPayloadPath, 'null', 'utf-8');
       const validPayloadPath = join(selfTestDir, 'valid-payload.json');
       writeFileSync(validPayloadPath, JSON.stringify({ experience: correctOrder }), 'utf-8');
-      const dirAsSourcePath = join(selfTestDir, 'a-directory-not-a-file');
-      mkdirSync(dirAsSourcePath);
       const nullEntryPayloadPath = join(selfTestDir, 'null-entry-payload.json');
       writeFileSync(nullEntryPayloadPath, JSON.stringify({ experience: [null, ...correctOrder] }), 'utf-8');
       const nonArrayExperiencePath = join(selfTestDir, 'non-array-experience-payload.json');
       writeFileSync(nonArrayExperiencePath, JSON.stringify({ experience: null }), 'utf-8');
       const dataRoot = join(selfTestDir, 'data-root');
       mkdirSync(dataRoot);
-      writeFileSync(join(dataRoot, 'cv.md'), cvMd, 'utf-8');
+      const cvMdPath = join(dataRoot, 'cv.md');
+      writeFileSync(cvMdPath, cvMd, 'utf-8');
+      const dirAsSourcePath = join(dataRoot, 'a-directory-not-a-file');
+      mkdirSync(dirAsSourcePath);
+      writeFileSync(join(selfTestDir, 'outside-cv.md'), cvMd, 'utf-8');
       const decoyCwd = join(selfTestDir, 'decoy-cwd');
       mkdirSync(decoyCwd);
 
@@ -481,15 +503,18 @@ function runSelfTest() {
       console.error = () => {};
       console.warn = () => {};
       console.log = () => {};
-      let nullExit, dirSourceExit, nullEntryExit, nonArrayExperienceExit, dataRootSourceExit;
+      let nullExit, dirSourceExit, nullEntryExit, nonArrayExperienceExit, dataRootSourceExit,
+        absoluteSourceExit, traversalSourceExit;
       const origCwd = process.cwd();
       const origDataRoot = process.env.CAREER_OPS_ROOT;
       try {
-        nullExit = runCli([nullPayloadPath, '--source', cvMdPath]);
-        dirSourceExit = runCli([validPayloadPath, '--source', dirAsSourcePath]);
-        nullEntryExit = runCli([nullEntryPayloadPath, '--source', cvMdPath]);
-        nonArrayExperienceExit = runCli([nonArrayExperiencePath, '--source', cvMdPath]);
         process.env.CAREER_OPS_ROOT = dataRoot;
+        nullExit = runCli([nullPayloadPath, '--source', 'cv.md']);
+        dirSourceExit = runCli([validPayloadPath, '--source', 'a-directory-not-a-file']);
+        nullEntryExit = runCli([nullEntryPayloadPath, '--source', 'cv.md']);
+        nonArrayExperienceExit = runCli([nonArrayExperiencePath, '--source', 'cv.md']);
+        absoluteSourceExit = runCli([validPayloadPath, '--source', cvMdPath]);
+        traversalSourceExit = runCli([validPayloadPath, '--source', '../outside-cv.md']);
         process.chdir(decoyCwd);
         dataRootSourceExit = runCli([validPayloadPath, '--source', 'cv.md']);
       } finally {
@@ -504,6 +529,8 @@ function runSelfTest() {
       equal('CLI rejects an unreadable (directory) --source instead of throwing', dirSourceExit, 1);
       equal('CLI rejects a null entry inside payload.experience instead of throwing', nullEntryExit, 1);
       equal('CLI rejects a non-array payload.experience instead of a false pass', nonArrayExperienceExit, 1);
+      equal('CLI rejects an absolute --source path even when it points inside the data root', absoluteSourceExit, 1);
+      equal('CLI rejects a --source path that traverses outside the data root', traversalSourceExit, 1);
       equal('CLI resolves a relative --source from the configured data root, not cwd', dataRootSourceExit, 0);
     } finally {
       rmSync(selfTestDir, { recursive: true, force: true });
@@ -558,7 +585,13 @@ export function runCli(args = process.argv.slice(2)) {
     console.error(`ERROR: payload not found: ${targetArg}`);
     return 1;
   }
-  const srcPath = resolveSourcePath(sourcePath);
+  let srcPath;
+  try {
+    srcPath = resolveSourcePath(sourcePath);
+  } catch (err) {
+    console.error(`ERROR: invalid source path: ${sourcePath}: ${err.message}`);
+    return 1;
+  }
   if (!existsSync(srcPath)) {
     console.error(`ERROR: source not found: ${sourcePath}`);
     return 1;
