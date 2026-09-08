@@ -312,7 +312,23 @@ const twoPassManifestChecks = [
     // upstream's list too — a regression that filters only remoteSystemPaths
     // reads as protection while the same entry walks in through the other half.
     name: 'apply filters the MERGED manifest against the user layer, not just the fetched half',
-    pattern: /rejectUserLayerPaths\(\s*\n?\s*mergePathLists\(SYSTEM_PATHS,\s*remoteSystemPaths,\s*BOOTSTRAP_PATHS\),\s*\n?\s*effectiveUserPaths\(\),?\s*\n?\s*\)/,
+    pattern: /rejectUserLayerPaths\(\s*mergePathLists\(SYSTEM_PATHS,\s*remoteSystemPaths,\s*BOOTSTRAP_PATHS\),/,
+  },
+  {
+    // The unit suite drives the rule with a synthetic user-path list and synthetic
+    // probes, so THIS is the only assertion tying the guard to the real sources.
+    // Weakening it to a shape-only match would let the rule keep passing while
+    // apply() fed it something other than the user layer and the real checkout.
+    name: 'the guard reads the real user layer, not a local stand-in',
+    pattern: /rejectUserLayerPaths\([\s\S]{0,200}?effectiveUserPaths\(\)/,
+  },
+  {
+    // Both probes must come from the install and the tree being checked out: a
+    // tracked-file set from `ls-files`, and the upstream tree from `ls-tree`. The
+    // defaults inside the guard are per-path git calls; the call site batches them,
+    // and a regression that drops either seam silently disables half the rule.
+    name: 'the guard probes tracked state and the upstream tree from real git output',
+    pattern: /git\('ls-files'\)[\s\S]{0,400}?git\('ls-tree',\s*'-r',\s*'--name-only',\s*'FETCH_HEAD'\)[\s\S]{0,600}?claimsSubtree:/,
   },
   {
     name: 'apply checks out the merged manifest instead of only the local manifest',

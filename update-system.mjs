@@ -21,7 +21,7 @@
  */
 
 import { execFile, execFileSync, execSync } from 'child_process';
-import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, lstatSync, mkdtempSync, realpathSync } from 'fs';
+import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, lstatSync, statSync, mkdtempSync, realpathSync } from 'fs';
 import { join, dirname, basename, resolve, posix as pathPosix } from 'path';
 import { tmpdir } from 'os';
 import { randomBytes, timingSafeEqual } from 'crypto';
@@ -654,6 +654,31 @@ export function userLayerViolations(changedFiles, updatePaths, userPaths) {
 }
 
 /**
+ * Does the ref ship files BENEATH this path, i.e. is the entry a directory?
+ *
+ * The manifest's own spelling cannot answer this — `documents` and `documents/`
+ * are the same pathspec to git — and the update is about to check this path out
+ * of `ref`, so `ref` is the authority on what it actually is.
+ *
+ * -z and --literal-pathspecs for the reasons expandStagingPaths documents: raw
+ * NUL-separated names survive core.quotePath, and no name is reinterpreted as a
+ * glob. An unreadable ref answers "not a subtree" rather than throwing — the
+ * caller then falls back to the single-file rule, which is the stricter branch.
+ *
+ * @param {string} path - Manifest entry, without a trailing slash.
+ * @param {string} [ref='FETCH_HEAD'] - Tree to interrogate.
+ * @returns {boolean} True when at least one file sits strictly under `path`.
+ */
+function upstreamShipsUnder(path, ref = 'FETCH_HEAD') {
+  try {
+    const listed = gitQuiet('--literal-pathspecs', 'ls-tree', '-r', '--name-only', '-z', ref, '--', path);
+    return listed.split('\0').filter(Boolean).some((file) => file.startsWith(`${path}/`));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Split a manifest into entries apply() may write and entries it must refuse.
  *
  * A manifest entry naming a user path is a data-loss bug regardless of intent: the
@@ -669,31 +694,86 @@ export function userLayerViolations(changedFiles, updatePaths, userPaths) {
  * list. There is no local half left to trust, and filtering only `remoteSystemPaths`
  * lets the identical entry back in through the "local" one.
  *
- * Only the two shapes that can only be a mistake are refused: a directory entry
- * overlapping the user layer in either direction (`documents/`, `data/outcomes/`),
- * and an entry naming a declared user path outright (`cv.md`, `writing-samples/`).
+ * Comparison is on path SEGMENTS, and a trailing slash carries no meaning here.
+ * `git checkout <ref> -- documents` and `-- documents/` name the same tree, so a
+ * rule keyed on the slash is bypassed by omitting one character. Two claims are
+ * refused however they are spelled: an entry equal to a declared user path, and an
+ * entry that is an ANCESTOR of one (`modes` would claim the user's
+ * modes/_profile.md; `documents` would claim everything under documents/).
  *
- * A specific system-owned FILE inside a user directory stays allowed. That is the
- * established pattern — writing-samples/README.md and documents/README.md ship this
- * way today — and refusing it would stop new upstream files from ever reaching an
- * install, which is #958: a silent non-arrival that raises no error and can go
- * unnoticed for months.
+ * An entry INSIDE a user directory splits two ways. A SUBTREE claim is refused
+ * outright: its contents are whatever upstream decides, now and in every later
+ * release, so it is an open-ended claim over user territory that cannot be
+ * adjudicated once. Directory-ness is read from upstream's own tree rather than a
+ * trailing slash, for the same reason the slash is ignored above.
+ *
+ * A single FILE inside a user directory cannot be judged by shape at all:
+ * writing-samples/README.md is a system-owned doc that must keep arriving, while
+ * interview-prep/story-bank.md is the user's own work. So the test is recoverability
+ * rather than intent — refuse only when the entry would land on a file this install
+ * does not track. Untracked-and-present is exactly the case the update cannot undo:
+ * the #2337 detector is diff-based and never sees such a file, so no .bak is written,
+ * `git stash create` captures nothing, and the backup branch holds only committed
+ * state. A tracked file is restorable from git, and a path absent locally has nothing
+ * to lose — refusing that one would block new upstream files, which is #958.
  *
  * @param {string[]} manifestPaths - The merged manifest apply() is about to write.
  * @param {string[]} userPaths - User-layer paths, normally effectiveUserPaths().
+ * @param {object} [probes] - Seams for the three state questions, so the rule stays
+ *   unit-testable without a repo. Default to the real checkout and FETCH_HEAD.
+ * @param {(path: string) => boolean} [probes.tracked] - Is the path in the index?
+ * @param {(path: string) => boolean} [probes.exists] - Is it on disk?
+ * @param {(path: string) => boolean} [probes.claimsSubtree] - Does upstream ship files
+ *   beneath it, i.e. is this entry a directory rather than a single file?
  * @returns {{kept: string[], refused: string[]}} Entries to check out, and entries to
  *   report and drop. Order within each list follows the input.
  */
-export function rejectUserLayerPaths(manifestPaths, userPaths) {
+export function rejectUserLayerPaths(manifestPaths, userPaths, probes = {}) {
+  const tracked = probes.tracked || ((path) => isTracked(path));
+  const exists = probes.exists || ((path) => existsSync(join(ROOT, path)));
+  // Default to the tree apply() is about to check out. A path that is a directory
+  // on disk counts too, so an entry naming a user directory the install already has
+  // is refused even when upstream ships nothing under it yet.
+  const claimsSubtree = probes.claimsSubtree || ((path) => {
+    if (path.endsWith('/')) return true;
+    try {
+      if (existsSync(join(ROOT, path)) && statSync(join(ROOT, path)).isDirectory()) return true;
+    } catch { /* unreadable: fall through to the upstream tree */ }
+    return upstreamShipsUnder(path);
+  });
+  // A trailing slash is a spelling, not a fact about the path — strip it on both
+  // sides so `documents` and `documents/` are the same claim.
+  const trimSlash = (path) => (path.endsWith('/') ? path.slice(0, -1) : path);
+  // Segment-boundary containment: `cv` must not claim `cv.md`, and `cv.md` must
+  // not claim `cv.md.bak` (the over-match userLayerViolations documents at :655).
+  const isUnder = (child, parent) => child.startsWith(`${parent}/`);
+  const declared = userPaths.map(trimSlash);
+  const declaredDirs = userPaths.filter((path) => path.endsWith('/')).map(trimSlash);
+
   const kept = [];
   const refused = [];
   for (const path of manifestPaths) {
-    // Both directions: the entry may sit inside a user path (`data/outcomes/` under
-    // `data/`) or contain one (`modes/` would claim the user's `modes/_profile.md`).
-    const overlapsUserDir = path.endsWith('/')
-      && userPaths.some((userPath) => path.startsWith(userPath) || userPath.startsWith(path));
-    if (overlapsUserDir || userPaths.includes(path)) refused.push(path);
-    else kept.push(path);
+    const entry = trimSlash(path);
+    // Names a user path, or stands above one and would sweep it up.
+    if (declared.some((userPath) => entry === userPath || isUnder(userPath, entry))) {
+      refused.push(path);
+      continue;
+    }
+    if (declaredDirs.some((dir) => isUnder(entry, dir))) {
+      // A subtree claim inside user territory is open-ended — upstream decides its
+      // contents in this release and every later one — so it cannot be adjudicated
+      // once and is refused outright.
+      if (claimsSubtree(path)) {
+        refused.push(path);
+        continue;
+      }
+      // A single file is a bounded claim: keep it only if losing it is recoverable.
+      if (!tracked(entry) && exists(entry)) {
+        refused.push(path);
+        continue;
+      }
+    }
+    kept.push(path);
   }
   return { kept, refused };
 }
@@ -2244,9 +2324,23 @@ async function apply() {
     // one. Refuse loudly rather than aborting — one bad manifest entry must not
     // brick every install's updates, but staying silent is what would keep the
     // mistake invisible.
+    // One `ls-files` and one `ls-tree` for the whole manifest rather than one per
+    // entry: the merged list is ~340 paths, and the per-path defaults would spawn
+    // git that many times each.
+    const trackedFiles = new Set(git('ls-files').split('\n').filter(Boolean));
+    const upstreamFiles = git('ls-tree', '-r', '--name-only', 'FETCH_HEAD').split('\n').filter(Boolean);
     const { kept: updatePaths, refused } = rejectUserLayerPaths(
       mergePathLists(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS),
       effectiveUserPaths(),
+      {
+        tracked: (path) => trackedFiles.has(path),
+        exists: (path) => existsSync(join(ROOT, path)),
+        claimsSubtree: (path) => {
+          if (path.endsWith('/')) return true;
+          const prefix = `${path}/`;
+          return upstreamFiles.some((file) => file.startsWith(prefix));
+        },
+      },
     );
     if (refused.length > 0) {
       console.log('');

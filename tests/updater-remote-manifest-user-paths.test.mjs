@@ -153,6 +153,100 @@ console.log('\n🧪 Testing rejectUserLayerPaths (fetched manifest vs local user
   }
 }
 
+// The two holes review found in the first version. Both need explicit probes,
+// because the rule for an entry inside a user directory turns on local state
+// rather than on the path's shape.
+const TRACKED = new Set(['writing-samples/README.md', 'documents/README.md']);
+const ON_DISK = new Set([...TRACKED, 'data/applications.md', 'interview-prep/story-bank.md']);
+const UPSTREAM = ['data/outcomes/posting.md', 'documents/README.md', 'modes/pdf/hm-audit.md'];
+const probes = {
+  tracked: (p) => TRACKED.has(p),
+  exists: (p) => ON_DISK.has(p),
+  claimsSubtree: (p) => p.endsWith('/')
+    || UPSTREAM.some((f) => f.startsWith(`${p.replace(/\/$/, '')}/`)),
+};
+
+{
+  // Given: the SAME claims spelled without a trailing slash. `git checkout <ref>
+  // -- documents` and `-- documents/` name one tree, so a rule keyed on the slash
+  // is bypassed by dropping one character (CodeRabbit, PR #3947).
+  const remote = ['documents', 'data', 'modes', 'interview-prep'];
+
+  // When: the manifest is split
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
+
+  // Then: every one is refused, exactly as its slashed spelling would be
+  if (refused.length === remote.length && kept.length === 0) {
+    pass('slashless user-directory entries are refused (documents, data, modes, interview-prep)');
+  } else {
+    fail(`slashless entries must be refused — kept=${JSON.stringify(kept)}`);
+  }
+}
+
+{
+  // Given: a directory nested in user territory, spelled without a slash. Its
+  // directory-ness is knowable only from the tree being checked out.
+  const remote = ['data/outcomes'];
+
+  // When: the manifest is split
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
+
+  // Then: refused — a subtree claim is open-ended, so it cannot be adjudicated once
+  if (refused.includes('data/outcomes') && kept.length === 0) {
+    pass('a slashless nested directory is refused via the upstream tree');
+  } else {
+    fail(`a slashless nested directory must be refused — kept=${JSON.stringify(kept)}`);
+  }
+}
+
+{
+  // Given: single files inside user directories that are the USER's own work —
+  // untracked and present. Path shape cannot tell these from a system-owned doc.
+  const remote = ['data/applications.md', 'interview-prep/story-bank.md'];
+
+  // When: the manifest is split
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
+
+  // Then: refused. Untracked-and-present is precisely the unrecoverable case —
+  // no .bak, nothing in the stash, nothing on the backup branch.
+  if (refused.length === remote.length && kept.length === 0) {
+    pass('an untracked user file inside a user directory is refused');
+  } else {
+    fail(`an untracked user file must be refused — kept=${JSON.stringify(kept)}`);
+  }
+}
+
+{
+  // Given: a system-owned doc inside a user directory, tracked by this install
+  const remote = ['writing-samples/README.md', 'documents/README.md'];
+
+  // When: the manifest is split
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
+
+  // Then: kept — git can restore it, and refusing it is the #958 non-arrival
+  if (kept.length === remote.length && refused.length === 0) {
+    pass('a tracked system-owned doc inside a user directory is kept');
+  } else {
+    fail(`a tracked system doc must be kept — refused=${JSON.stringify(refused)}`);
+  }
+}
+
+{
+  // Given: a new upstream file inside a user directory, absent from this install
+  const remote = ['documents/GUIDE.md'];
+
+  // When: the manifest is split
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
+
+  // Then: kept — there is nothing local to lose, so refusing it would only stop
+  // new upstream files from ever arriving (#958)
+  if (kept.includes('documents/GUIDE.md') && refused.length === 0) {
+    pass('a new upstream file absent from this install is kept');
+  } else {
+    fail(`a new absent upstream file must be kept — refused=${JSON.stringify(refused)}`);
+  }
+}
+
 {
   // Given: an empty fetched manifest, the older-target fallback path where
   // extractArrayFromSource() found nothing
