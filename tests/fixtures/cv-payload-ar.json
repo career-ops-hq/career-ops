@@ -1,0 +1,50 @@
+{
+  "_comment": "Arabic CV payload for tests/cv-quality-gates-i18n.test.mjs — the RTL case, and the only fixture whose numbers are written in Arabic-Indic digits (٤٥, ٢٢, ١٨٪). Those exercise foldDigits() together with the noun lexicon end to end: the digits must fold to ASCII AND the noun must resolve, or the count is not checked. Keep the counts in sync with cv-source-ar.md.",
+  "lang": "ar",
+  "page_format": "a4",
+  "candidate": {
+    "name": "ليلى الحسن",
+    "phone": "+971 50 123 4567",
+    "email": "laila.alhassan@example.ae",
+    "location": "دبي، الإمارات"
+  },
+  "sections": {
+    "summary": "نبذة",
+    "competencies": "الكفاءات الأساسية",
+    "experience": "الخبرة المهنية",
+    "projects": "المشاريع",
+    "education": "التعليم",
+    "certifications": "الشهادات",
+    "skills": "المهارات"
+  },
+  "summary": "مديرة عمليات بخبرة ١٥ سنة في إدارة سلاسل التوريد الدولية وبناء الفرق في الأسواق المنظمة.",
+  "competencies": ["إدارة سلاسل التوريد", "بناء الفرق", "تحسين العمليات"],
+  "experience": [
+    {
+      "company": "شركة الشمال للخدمات اللوجستية",
+      "role": "مديرة العمليات",
+      "location": "دبي",
+      "dates": "٢٠١٩ - حتى الآن",
+      "bullets": [
+        "قيادة ٦ مديرين و ٢٢ موظفا في ٣ مواقع.",
+        "خدمة ٤٠ عميلا في ١٢ دولة مع خفض التكاليف بنسبة ١٨٪.",
+        "إطلاق نظام تخطيط جديد خلال ٩ أشهر."
+      ]
+    }
+  ],
+  "education": [
+    {
+      "title": "بكالوريوس إدارة الأعمال",
+      "org": "الجامعة الأمريكية في دبي",
+      "year": "٢٠٠٩",
+      "description": "تخصص الخدمات اللوجستية وبحوث العمليات."
+    }
+  ],
+  "certifications": [
+    { "title": "محترف معتمد في سلاسل التوريد", "org": "ASCM", "year": "٢٠٢١" }
+  ],
+  "skills": [
+    { "category": "المنهجيات", "items": "لين، ستة سيجما، تخطيط المبيعات والعمليات" },
+    { "category": "الأنظمة", "items": ["SAP", "Power BI"] }
+  ]
+}

@@ -16,6 +16,7 @@ import { existsSync, readFileSync } from 'fs';
 import { isAbsolute, join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { metricNounIndex, isUnspacedScript } from './cv-lexicons.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SOURCES = ['cv.md', 'article-digest.md'];
@@ -59,6 +60,14 @@ const METRIC_NOUNS = [
   'staff', 'personnel', 'people', 'technicians', 'operators', 'contractors',
   'vendors', 'scientists', 'researchers', 'volunteers', 'students', 'patients',
   'crew',
+  // Same headcount claim, but counted by the direct reports' own job title
+  // rather than a generic noun ("a team of 6 Commercial Project Managers"
+  // vs. "a team of 6 employees") — a phrasing at least as common on a
+  // management CV as the generic nouns above, and silently unmatched
+  // without these (#cv-drift-check).
+  'managers', 'directors', 'leads', 'specialists', 'analysts', 'coordinators',
+  'supervisors', 'administrators', 'consultants', 'developers', 'designers',
+  'architects', 'associates', 'representatives',
   // Physical assets and scale, for the same reason.
   'facilities', 'sites', 'buildings', 'rooms', 'labs', 'laboratories', 'plants',
   'machines', 'devices', 'instruments', 'vehicles', 'units', 'locations',
@@ -90,7 +99,7 @@ const METRIC_NOUNS = [
 // Four covers the phrasings seen in real CVs ("live Cloud Run deployments",
 // "active monthly paying customers"). Widening cannot hide an invented number:
 // it only ever extracts MORE claims, on both sides. A number is a hard barrier
-// for the chain — modifiers are alphabetic only — so a wider window still
+// for the chain — modifiers are letters only — so a wider window still
 // cannot jump across an intervening figure to bind an unrelated noun.
 const MODIFIER_WINDOW = 4;
 // The number capture takes an immediately-adjacent magnitude suffix (50k, 1.5M)
@@ -103,6 +112,58 @@ const MODIFIER_WINDOW = 4;
 // `[kKmMbB]\b` requires the suffix to END the token, so "50 million users" (space,
 // handled by the modifier window) and "50kg users" (k not at a boundary) both keep
 // their existing behaviour and still normalize to "50".
+// A year is not a count. "Led the 2024 migration" is the shape of one and none
+// of its meaning, and every CV has several. Declared here rather than beside
+// the coverage diagnostic because the CLAIM extractor needs it too: in ja/zh/ko
+// a date IS "number + duration noun" ("2024年" = the year 2024), so without
+// this guard every CJK date would extract as a fabricated "2024 years" claim.
+const YEAR_LIKE = /^(?:19|20)\d{2}$/;
+
+// Non-English surface forms, keyed to the canonical English noun they count.
+// See cv-lexicons.mjs for why the table is organised by concept rather than by
+// language: the CV and cv.md need not be in the same language, so "15 Jahren"
+// and "15 years" have to normalize to the same claim.
+const FOREIGN_NOUNS = metricNounIndex();
+// Two branches, because a word boundary is not a universal concept. In
+// "45名の社員" the character after the noun is itself a letter, so ANY trailing
+// boundary assertion fails and every CJK/Hangul count goes unread; in "3 tests"
+// dropping the boundary would let "tests" match inside "testsuites". So the
+// forms are split by script and each gets the assertion that is true for it.
+// cv-lexicons.mjs keeps the ambiguous single-character CJK counters out of the
+// table precisely because the unspaced branch cannot lean on a boundary.
+const FOREIGN_FORMS = [...FOREIGN_NOUNS.keys()];
+const UNSPACED_NOUNS = FOREIGN_FORMS.filter(isUnspacedScript);
+const SPACED_NOUNS = [...METRIC_NOUNS, ...FOREIGN_FORMS.filter(form => !isUnspacedScript(form))];
+// Escapes for ALTERNATION context, so `-` is deliberately not in the class: it
+// needs no escaping outside a character class, and under the `u` flag `\-` is a
+// SyntaxError — a hyphenated noun ("savoir-faire") would throw at import time
+// rather than simply not match.
+const escapeAlt = (list) => list.map(form => form.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+// Modifiers are matched with \p{L}, not [A-Za-z]. The window is what lets a
+// number reach past adjectives to the noun it counts ("6 Commercial Project
+// Managern", "22 fest angestellten Mitarbeitenden"), and an ASCII-only class
+// silently shortened it to zero the moment a modifier carried an accent — so
+// the reach a CV gets depended on whether it was written in English.
+// Both apostrophes are in the class for Romance elision ("d'ingénieurs",
+// "l’équipe"), which is a modifier token like any other. The separator is a
+// plain \s: it already matches NBSP and the narrow NBSP, both Space_Separator.
+const MODIFIER_TOKEN = String.raw`[\p{L}][\p{L}\p{M}'’-]*\s+`;
+// CJK writes the classifier flush against the number and the noun ("3个站点",
+// "45名"), so the unspaced branch gets its own tiny window in place of the
+// whitespace-delimited one above. Capped at two characters, so it can bridge a
+// classifier without wandering to an unrelated noun.
+//
+// GREEDY here, the opposite of the spaced branch, because a CJK classifier is
+// usually itself a countable noun: in "45名员工" the counter 名 (people) sits
+// between the number and 员工 (employees). Lazy bound 45 to the classifier and
+// read "45 people", which is symmetric within one Chinese document but does not
+// match an English cv.md saying "45 employees" — so a truthful translation
+// blocked. Greedy prefers the outer noun and falls back to the classifier when
+// nothing follows it, which is the reading a human gets.
+//
+// The optional whitespace is for Korean, which attaches the counter to the
+// number but still spaces its words ("3개 거점", "45명의 직원").
+const CJK_CLASSIFIER = String.raw`\s*[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]{0,2}\s*`;
 const COUNT_CLAIM_RE = new RegExp(
   // LAZY (`{0,N}?`), so the number binds to the NEAREST noun in the window
   // rather than the farthest. Greedy, the quantifier consumed as many filler
@@ -123,8 +184,23 @@ const COUNT_CLAIM_RE = new RegExp(
   // one a human reads. #2279's wide-window cases are unaffected — "~5 live
   // Cloud Run deployments" still yields "5 deployments", because there is only
   // one noun to bind to.
-  String.raw`\b(\d[\d,.]*(?:[kKmMbB]\b)?)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}?(${METRIC_NOUNS.join('|')})\b`,
-  'gi'
+  //
+  // The leading assertion splits for the same reason the trailing one does.
+  // `\b` is defined on [A-Za-z0-9_], so it says nothing about a number sitting
+  // against Cyrillic, Arabic or CJK text; `(?<![\p{L}\p{N}])` says the right
+  // thing for every script that puts spaces between words, and agrees with `\b`
+  // on every ASCII case, so English behaviour is unchanged.
+  //
+  // It is the WRONG rule for the unspaced branch, though: in "3拠点で45名" the
+  // second number is preceded by で, a letter, so a shared lookbehind rejected
+  // every count after the first and a Japanese CV extracted almost nothing.
+  // That branch therefore only refuses a preceding DIGIT — which would mean the
+  // match started mid-number — and relies on its noun being CJK/Hangul to keep
+  // it from firing inside Latin text at all.
+  String.raw`(?<![\p{L}\p{N}])(\d[\d,.]*(?:[kKmMbB]\b)?)\s*\+?\s*` +
+  String.raw`(?:${MODIFIER_TOKEN}){0,${MODIFIER_WINDOW}}?(${escapeAlt(SPACED_NOUNS).join('|')})(?![\p{L}\p{N}])` +
+  String.raw`|(?<!\p{N})(\d[\d,.]*)${CJK_CLASSIFIER}(${escapeAlt(UNSPACED_NOUNS).join('|')})`,
+  'giu'
 );
 const NOUN_SYNONYMS = new Map([
   ['repos', 'repositories'],
@@ -137,6 +213,13 @@ const NOUN_SYNONYMS = new Map([
   // restating a source's "20 staff" is a paraphrase, not a fabrication.
   ['personnel', 'staff'],
   ['labs', 'laboratories'],
+  // Every Romance language counts customers with one word (clientes, clients,
+  // clienti), so the lexicon has a single canonical for them. Unifying the two
+  // English spellings here rather than picking a winner keeps that mapping from
+  // silently changing what an English-only CV means: "50 clients" and "50
+  // customers" are the same paraphrase relationship as personnel/staff above,
+  // and the NUMBER still has to match either way.
+  ['clients', 'customers'],
 ]);
 const SIMPLE_CLAIM_PATTERNS = [
   /\b\d+(?:\.\d+)?\s?%/g,
@@ -550,11 +633,29 @@ function clauseAround(text, index) {
 function countMatches(clean) {
   COUNT_CLAIM_RE.lastIndex = 0;
   return [...clean.matchAll(COUNT_CLAIM_RE)].filter((match) => {
-    if (!TIME_NOUNS.has(match[2].toLowerCase())) return true;
+    // Groups 1-2 are the boundary-delimited branch, 3-4 the unspaced (CJK) one.
+    // TIME_NOUNS holds canonical English nouns, so fold the matched form first.
+    if (!TIME_NOUNS.has(canonicalNoun((match[2] ?? match[4]).toLowerCase()))) return true;
     const lead = clean.slice(Math.max(0, match.index - 40), match.index);
     if (!HORIZON_LEAD_RE.test(lead)) return true;
     return !FORWARD_MARKER_RE.test(clauseAround(clean, match.index));
   });
+}
+
+/**
+ * Fold a matched noun to the canonical English noun its claim is stated in.
+ *
+ * Two hops, foreign form first: a lexicon entry already names an English
+ * canonical, and that canonical may itself have an English synonym
+ * ("personnel" -> "staff"), so both tables have to apply for a German CV's
+ * count to compare equal to the English cv.md phrasing of the same fact.
+ *
+ * @param {string} noun lowercased surface form as it appeared
+ * @returns {string}
+ */
+function canonicalNoun(noun) {
+  const base = FOREIGN_NOUNS.get(noun) ?? noun;
+  return NOUN_SYNONYMS.get(base) ?? base;
 }
 
 /** Extract metric-like claims that require source evidence. */
@@ -565,23 +666,41 @@ export function metricClaims(text) {
     for (const match of clean.matchAll(pattern)) claims.add(normalizeClaim(match[0]));
   }
   for (const match of countMatches(clean)) {
-    const noun = match[2].toLowerCase();
-    claims.add(normalizeClaim(`${match[1]} ${NOUN_SYNONYMS.get(noun) ?? noun}`));
+    // Groups 1-2 are the boundary-delimited branch, 3-4 the unspaced (CJK) one;
+    // exactly one pair participates in any match.
+    const number = match[1] ?? match[3];
+    const canonical = canonicalNoun((match[2] ?? match[4]).toLowerCase());
+    // "2024年" is the year 2024, not a duration — see YEAR_LIKE. Restricted to
+    // the duration concept so an ordinary count that happens to be four digits
+    // ("2019 users") is still checked.
+    if (canonical === 'years' && YEAR_LIKE.test(number.replace(/[,.]/g, ''))) continue;
+    claims.add(normalizeClaim(`${number} ${canonical}`));
   }
   return claims;
 }
 
 // A number counting a word, in ANY script — the language-agnostic SHAPE of the
-// claims COUNT_CLAIM_RE recognises only when the noun happens to be English.
-// Used solely to answer "were there count claims this gate could not read?",
-// never to build a claim: it has no lexicon, so it cannot say what was counted.
+// claims COUNT_CLAIM_RE recognises only when the noun is in the lexicon. Used
+// solely to answer "were there count claims this gate could not read?", never
+// to build a claim: it has no lexicon, so it cannot say what was counted.
+//
+// The second alternative is the CJK tail. The first requires >= 3 letters after
+// the number, which "45名" (one character) never satisfies, so before this the
+// detector was blind to exactly the scripts most likely to be missing from the
+// lexicon — a ja/zh CV reached 'pass' with neither a claim nor a warning. The
+// lexicon now covers those languages, but this is the backstop for the counter
+// it does not yet know, so it has to see them too.
+//
+// The two alternatives carry their own leading assertion for the same reason
+// COUNT_CLAIM_RE's do: in "3隻の船と45羽の鳥" the second number is preceded by と,
+// a letter, so a shared `(?<![\p{L}\p{N}])` finds only the first count and the
+// two-span floor below is never reached.
 const GENERIC_COUNT_RE = new RegExp(
-  String.raw`(?<![\p{L}\p{N}])(\d[\d,.]*)\s*\+?\s*(?:[\p{L}][\p{L}\p{M}-]*[\s]+){0,${MODIFIER_WINDOW}}([\p{L}][\p{L}\p{M}]{2,})`,
+  String.raw`(?<![\p{L}\p{N}])(\d[\d,.]*)\s*\+?\s*` +
+  String.raw`(?:[\p{L}][\p{L}\p{M}-]*[\s]+){0,${MODIFIER_WINDOW}}([\p{L}][\p{L}\p{M}]{2,})` +
+  String.raw`|(?<!\p{N})(\d[\d,.]*)\s*([\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]{1,3})`,
   'giu',
 );
-// A year is not a count. "Led the 2024 migration" is the shape above and none
-// of its meaning, and every CV has several.
-const YEAR_LIKE = /^(?:19|20)\d{2}$/;
 
 /**
  * Count-shaped spans in `text`, whatever language it is written in.
@@ -606,11 +725,13 @@ function countShapedSpans(text) {
 
   const out = [];
   for (const m of clean.matchAll(GENERIC_COUNT_RE)) {
-    if (YEAR_LIKE.test(m[1].replace(/[,.]/g, ''))) continue;
+    // Groups 1-2 are the spaced branch, 3-4 the CJK one; one pair per match.
+    const number = m[1] ?? m[3];
+    if (YEAR_LIKE.test(number.replace(/[,.]/g, ''))) continue;
     // The digits are what a simple pattern would have claimed, so test their
     // position, not the span's — the span starts at the number either way, but
     // a currency match starts one character earlier, at the symbol.
-    if (alreadyChecked(m.index) || alreadyChecked(m.index + m[0].indexOf(m[1]))) continue;
+    if (alreadyChecked(m.index) || alreadyChecked(m.index + m[0].indexOf(number))) continue;
     out.push(m[0].trim());
   }
   return out;
@@ -619,29 +740,24 @@ function countShapedSpans(text) {
 /**
  * Whether this document contains count claims the extractor could not read.
  *
- * METRIC_NOUNS is an English word list, and COUNT_CLAIM_RE's modifier window is
- * `[A-Za-z]`. Percentages, currency and multipliers are language-neutral and
- * still checked everywhere — but a COUNT is checked only in English, and this
- * file's own METRIC_NOUNS comment names counts as the class that gets inflated:
- * "Managed 45 staff against a source saying 20 passed the gate silently, which
- * is the exact fabrication class this script exists to catch."
+ * THE BACKSTOP, not the answer. cv-lexicons.mjs supplies noun forms for every
+ * language with a mode set, so counts in those languages are extracted and
+ * compared like English ones — this fires for what the lexicon does NOT reach:
+ * a language shipping no mode set (fi, el, vi, ...), or a noun nobody has added
+ * to the table yet. Percentages, currency and multipliers were always
+ * language-neutral and are checked everywhere regardless.
  *
- * For a CV written in one of the market languages the project ships modes for,
- * that sentence is true of EVERY count, not only the ones outside the list:
- *
- *   ES  "Gestioné 45 empleados en 3 instalaciones."  -> 0 count claims, pass
- *   DE  "Leitete 45 Mitarbeiter an 3 Standorten."    -> 0 count claims, pass
- *   JA  "3拠点で45名のスタッフを管理。"                   -> 0 count claims, pass
- *
- * AGENTS.md makes non-English output a first-class case (`language.output`
- * governs "reports, tracker notes, PDFs, cover letters ... any user-visible
- * prose"), so this is not an edge.
+ * It exists because a count is the class this file's own METRIC_NOUNS comment
+ * names as the one that gets inflated: "Managed 45 staff against a source
+ * saying 20 passed the gate silently, which is the exact fabrication class this
+ * script exists to catch." When the extractor cannot read a document, the
+ * verdict has to say so rather than report a clean scan.
  *
  * Reporting it rather than blocking is the same choice jd-skill-gap.mjs's
  * diagnoseExtraction() and story-provenance-check.mjs's diagnose() make, and
  * for the reason story-provenance states outright: so "an empty/near-empty
  * result isn't misread as 'scanned and clean'". Blocking instead would fail
- * every non-English document, trading a silent gap for a wall.
+ * every document in an uncovered language, trading a silent gap for a wall.
  *
  * DELIBERATELY CONSERVATIVE. It fires only when the document has two or more
  * count-shaped spans and the extractor produced NO count claim at all — a
@@ -649,22 +765,12 @@ function countShapedSpans(text) {
  * the language it was written in. Under-reporting is the right direction for a
  * signal added to a gate every generated document already runs.
  *
- * TWO KNOWN BLIND SPOTS, stated rather than implied:
- *
- *   - Coincidental coverage. French "3 sites" matches the English noun, so one
- *     recognised count silences the warning for a French CV whose other counts
- *     are invisible.
- *   - CJK. This detector needs whitespace: it locates a count by a digit run
- *     that is not preceded by a letter and is followed by one. Japanese and
- *     Chinese put digits flush against the surrounding text ("3拠点で45名"),
- *     so the second number is preceded by a letter and is not seen at all.
- *     Relaxing the lookbehind to fix that would match digits inside Latin
- *     identifiers, so it needs script-aware segmentation rather than a looser
- *     regex — separate work, and the reason this is a partial answer.
- *
- * So this closes the silent pass for space-delimited languages (de, es, tr, pt,
- * it, pl, ru, ...). A ja/zh CV can still reach 'pass' unchecked, which is why
- * the real answer is a lexicon those languages are in, not a better detector.
+ * ONE KNOWN BLIND SPOT, stated rather than implied: coincidental coverage. A
+ * single recognised count silences the warning for the whole document, so an
+ * uncovered language that happens to share one noun with a covered one (or with
+ * English) reports nothing about its remaining counts. The lexicon shrank how
+ * often that matters — it no longer describes every non-English CV — but the
+ * shape of the limitation is unchanged.
  *
  * @param {string} targetText
  * @returns {{reason: string, message: string, spans: string[]}|null}
@@ -683,10 +789,12 @@ export function diagnoseCoverage(targetText) {
   return {
     reason: 'no-count-claims-recognized',
     message:
-      `${spans.length} count-like claims are present but none matched the metric extractor, whose noun ` +
-      'list is English-only — so no count in this document was checked against your sources. ' +
-      'Percentages, currency and multipliers were still checked. Verify the counts by hand, or add ' +
-      'them to allow_metrics in config/cv-facts.json once confirmed.',
+      `${spans.length} count-like claims are present but none matched the metric extractor, so no ` +
+      'count in this document was checked against your sources. The noun tables in cv-lexicons.mjs ' +
+      'cover English plus every language with a mode set under modes/; this document appears to use ' +
+      'nouns outside them. Percentages, currency and multipliers were still checked. Verify the ' +
+      'counts by hand, add the nouns to cv-lexicons.mjs, or list them in allow_metrics in ' +
+      'config/cv-facts.json once confirmed.',
     spans,
   };
 }

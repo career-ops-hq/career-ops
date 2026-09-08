@@ -1,0 +1,50 @@
+{
+  "_comment": "German CV payload for tests/cv-quality-gates-i18n.test.mjs. Mirrors what pdf mode emits for a DACH application: lang: 'de' plus the documented `sections` overrides, so both quality gates see the real generated markup rather than a hand-rolled approximation. The counts in the bullets are the ones verify-cv-facts.mjs must extract; keep them in sync with cv-source-de.md.",
+  "lang": "de",
+  "page_format": "a4",
+  "candidate": {
+    "name": "Andrea Hoffmann",
+    "phone": "+49 151 2345 6789",
+    "email": "andrea.hoffmann@example.de",
+    "location": "München, Deutschland"
+  },
+  "sections": {
+    "summary": "Profil",
+    "competencies": "Kernkompetenzen",
+    "experience": "Berufserfahrung",
+    "projects": "Projekte",
+    "education": "Ausbildung",
+    "certifications": "Zertifizierungen",
+    "skills": "Kenntnisse"
+  },
+  "summary": "Operations-Leiterin mit 15 Jahren Erfahrung in der Steuerung internationaler Lieferketten und im Aufbau von Teams in regulierten Märkten.",
+  "competencies": ["Supply-Chain-Steuerung", "Teamaufbau", "Prozessoptimierung"],
+  "experience": [
+    {
+      "company": "Nordwind Logistik GmbH",
+      "role": "Head of Operations",
+      "location": "München",
+      "dates": "2019 - heute",
+      "bullets": [
+        "Führung von 6 Commercial Project Managern und insgesamt 22 Mitarbeitenden an 3 Standorten.",
+        "Betreuung von 40 Kunden in 12 Ländern bei einer Kostensenkung von 18%.",
+        "Einführung eines Planungssystems über 9 Monate hinweg."
+      ]
+    }
+  ],
+  "education": [
+    {
+      "title": "Diplom-Betriebswirtin",
+      "org": "Ludwig-Maximilians-Universität München",
+      "year": "2009",
+      "description": "Schwerpunkt Logistik und Operations Research."
+    }
+  ],
+  "certifications": [
+    { "title": "Certified Supply Chain Professional", "org": "ASCM", "year": "2021" }
+  ],
+  "skills": [
+    { "category": "Methoden", "items": "Lean, Six Sigma, S&OP" },
+    { "category": "Systeme", "items": ["SAP", "Power BI"] }
+  ]
+}

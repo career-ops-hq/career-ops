@@ -23,7 +23,9 @@
 import { readFileSync, statSync } from 'fs';
 import { isAbsolute, join, basename } from 'path';
 import { fileURLToPath } from 'url';
-import { isMainModule } from './lib/is-main-module.mjs'; 
+import { isMainModule } from './lib/is-main-module.mjs';
+import { asciiFold } from './lib/ascii-fold.mjs';
+import { SUPPORTED_LANGUAGES, headingPatterns, languageFromHtml } from './cv-lexicons.mjs';
 
 const DEFAULT_MIN_SCORE = 70;
 
@@ -43,6 +45,22 @@ const WEIGHTS = {
 const TEXT_MIN_CHARS = 300;      // below this, the CV likely has no real text layer
 const TEXT_LOW_WITH_IMG = 800;   // images + this little text ⇒ text probably baked in
 
+// Both thresholds above count CHARACTERS, which is not a language-neutral
+// measure of how much text a document holds. A Japanese or Chinese CV states
+// the same content in roughly a third of the characters — the two fixtures in
+// tests/fixtures/ carry identical content and come out at 884 (de) and 392
+// (ja) — so an ordinary CJK CV looks to these checks like a nearly empty one:
+// it tripped the "text baked into images" critical outright, and a shorter one
+// would trip "very little selectable text" as well.
+//
+// So each CJK/Hangul character counts for CJK_CHAR_WEIGHT. 3 is what makes the
+// two fixtures comparable (173 + 219x3 = 830, against the German 884) and sits
+// inside the usual 2.5-3x range for CJK information density. It is deliberately
+// not higher: a CJK document still needs ~100 real characters to clear
+// TEXT_MIN_CHARS, so a genuinely image-based CV is still caught.
+const CJK_CHAR_WEIGHT = 3;
+const CJK_CHAR_RE = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]/gu;
+
 // Fonts that ATS PDF text extractors handle reliably (all widely available and
 // embeddable). Lowercased. Anything outside this list (and the generic families
 // below) is flagged — not because it always fails, but because it is a risk worth
@@ -59,6 +77,14 @@ const ATS_SAFE_FONTS = new Set([
   'noto sans cjk jp', 'noto sans jp', 'meiryo', 'ms pgothic', 'pingfang sc',
   'hiragino sans gb', 'microsoft yahei', 'noto sans cjk sc', 'noto sans sc',
   'source han sans sc',
+  // Korean and Traditional-Chinese fallbacks. The list above stopped at the
+  // Japanese and Simplified-Chinese stacks, so templates/cv-template.html's own
+  // ko / zh-TW rules were reported as non-standard fonts on every CV that
+  // loaded them — the same false positive as the section headings, in the font
+  // check.
+  'apple sd gothic neo', 'malgun gothic', 'noto sans cjk kr', 'noto sans kr',
+  'nanum gothic', 'pingfang tc', 'microsoft jhenghei', 'noto sans cjk tc',
+  'noto sans tc', 'source han sans tc',
 ]);
 
 // Generic CSS families — always valid, never "non-standard", so skip them.
@@ -126,6 +152,20 @@ function extractVisibleText(html) {
       // and then into "<", double-unescaping text that was never an entity.
       .replace(/&amp;/gi, '&')
   );
+}
+
+/**
+ * Text volume in units comparable across scripts: plain character count, with
+ * each CJK/Hangul character weighted by CJK_CHAR_WEIGHT. Used for the two
+ * "is there real text here?" thresholds, never for anything user-facing that
+ * claims to be a literal character count.
+ *
+ * @param {string} text
+ * @returns {number}
+ */
+function weightedTextLength(text) {
+  const cjk = (text.match(CJK_CHAR_RE) || []).length;
+  return text.length + cjk * (CJK_CHAR_WEIGHT - 1);
 }
 
 /**
@@ -222,6 +262,51 @@ function extractHeadings(html) {
 }
 
 /**
+ * Which language's heading vocabulary to check this document against.
+ *
+ * English is always included — a CV may keep English headings whatever language
+ * its prose is in, and including it can only ever RECOGNISE a section, never
+ * cause one to be reported missing.
+ *
+ * `<html lang>` is the primary signal and is authoritative when present:
+ * build-cv-html.mjs writes it from the payload's `lang` field on every CV this
+ * tool generates, so the common case is exact. Falling back to every supported
+ * language for a document that declares none is deliberate — hand-authored HTML
+ * with no `lang` was the case that produced "[critical] Missing standard
+ * section heading(s): Experience, Education, Skills" on a perfectly good German
+ * CV. The cost of the wide net is that a genuinely missing section can be
+ * matched by an unrelated language's stem; the cost of the narrow one was
+ * failing every non-English CV, which is far worse for a check whose whole
+ * purpose is to flag real parse risks.
+ *
+ * @param {string} html
+ * @returns {string[]}
+ */
+function headingLanguages(html) {
+  const declared = languageFromHtml(html);
+  if (declared) return declared === 'en' ? ['en'] : ['en', declared];
+  return SUPPORTED_LANGUAGES;
+}
+
+/**
+ * Whether any of `patterns` matches the heading blob.
+ *
+ * Tested against the raw blob AND an asciiFold()ed copy, so Latin-script
+ * lexicon entries can be written accent-free ("experience" matching
+ * "Expérience", "egitim" matching "Eğitim") while Cyrillic, Arabic, Devanagari,
+ * CJK and Hangul entries — which asciiFold() folds away entirely — still match
+ * the raw text.
+ *
+ * @param {RegExp[]} patterns
+ * @param {string} raw lowercased heading blob
+ * @param {string} folded asciiFold(raw)
+ * @returns {boolean}
+ */
+function matchesHeading(patterns, raw, folded) {
+  return patterns.some(re => re.test(raw) || (folded && re.test(folded)));
+}
+
+/**
  * Build the target keyword set for the advisory coverage check. `--keywords` is
  * split on commas; `--role` is split only on commas, slashes, and the word
  * "and", so a plain title like "Senior Backend Engineer" stays a single phrase
@@ -269,27 +354,38 @@ function auditAts(html, opts = {}) {
 
   const add = (severity, message) => issues.push({ severity, message });
 
-  // 1. Real, selectable text.
-  if (text.length >= TEXT_MIN_CHARS) {
+  // 1. Real, selectable text. Measured script-weighted, so a CJK CV is not
+  // mistaken for an empty one — see CJK_CHAR_WEIGHT.
+  const textVolume = weightedTextLength(text);
+  const volumeNote = textVolume === text.length
+    ? `${text.length} chars`
+    : `${text.length} chars, ${textVolume} script-weighted`;
+  if (textVolume >= TEXT_MIN_CHARS) {
     score += WEIGHTS.text;
   } else {
-    add('critical', `Very little selectable text (${text.length} chars, expected >= ${TEXT_MIN_CHARS}). The CV may be image-based or rasterized; ATS parsers need a real text layer.`);
+    add('critical', `Very little selectable text (${volumeNote}, expected >= ${TEXT_MIN_CHARS}). The CV may be image-based or rasterized; ATS parsers need a real text layer.`);
   }
 
-  // 2. Standard section headings.
+  // 2. Standard section headings, in the document's own language. The patterns
+  // used to be English regex literals, so "Berufserfahrung / Ausbildung /
+  // Kenntnisse" — the correct German headings, emitted by build-cv-html.mjs's
+  // own `sections` payload field — scored 0 of 15 and raised a critical. Every
+  // German CV this tool generated failed its own ATS check on a false positive.
   const headingBlob = extractHeadings(html).join(' | ');
+  const foldedBlob = asciiFold(headingBlob);
+  const languages = headingLanguages(html);
   const required = [
-    { name: 'Experience', re: /experience|work history|employment/ },
-    { name: 'Education', re: /education|academic/ },
-    { name: 'Skills', re: /skills|competenc|proficienc/ },
+    { name: 'Experience', concept: 'experience' },
+    { name: 'Education', concept: 'education' },
+    { name: 'Skills', concept: 'skills' },
   ];
   const missing = [];
   for (const s of required) {
-    if (s.re.test(headingBlob)) score += 5;
+    if (matchesHeading(headingPatterns(s.concept, languages), headingBlob, foldedBlob)) score += 5;
     else missing.push(s.name);
   }
-  const bonus = [/summary|profile|objective/, /projects/, /certificat|licenses/]
-    .filter(re => re.test(headingBlob)).length;
+  const bonus = ['summary', 'projects', 'certifications']
+    .filter(concept => matchesHeading(headingPatterns(concept, languages), headingBlob, foldedBlob)).length;
   score += Math.min(5, bonus * 2);
   if (missing.length) {
     add(missing.length >= 2 ? 'critical' : 'warning',
@@ -348,13 +444,18 @@ function auditAts(html, opts = {}) {
   }
   score += Math.max(0, layout);
 
-  // 5. No CV text baked into images.
+  // 5. No CV text baked into images. Scanned over the CONTENT regions only:
+  // templates/cv-template.html documents its optional profile photo in a CSS
+  // comment that contains the literal text "<img>", so a scan of the raw HTML
+  // found a phantom image in every CV the tool generates — a permanent -5 and a
+  // warning nobody could act on, which escalated to a critical on a CJK CV
+  // because the low-text threshold was also being missed (above).
   let imageScore = WEIGHTS.images;
-  const imgs = [...html.matchAll(/<img\b[^>]*>/gi)].map(m => m[0]);
+  const imgs = [...stripNonContentRegions(html).matchAll(/<img\b[^>]*>/gi)].map(m => m[0]);
   const contentImgs = imgs.filter(tag => !/class\s*=\s*(?:"[^"]*\bcv-photo\b[^"]*"|'[^']*\bcv-photo\b[^']*')/i.test(tag));
-  if (contentImgs.length > 0 && text.length < TEXT_LOW_WITH_IMG) {
+  if (contentImgs.length > 0 && textVolume < TEXT_LOW_WITH_IMG) {
     imageScore = 0;
-    add('critical', `Found ${contentImgs.length} content image(s) with little surrounding text (${text.length} chars). Text baked into images is invisible to ATS.`);
+    add('critical', `Found ${contentImgs.length} content image(s) with little surrounding text (${volumeNote}). Text baked into images is invisible to ATS.`);
   } else if (contentImgs.length > 0) {
     imageScore -= 5;
     add('warning', `Found ${contentImgs.length} non-photo image(s). Ensure no CV text (skills, headings, contact) is baked into images — ATS cannot read image text.`);
@@ -366,7 +467,19 @@ function auditAts(html, opts = {}) {
   const families = new Set();
   for (const blob of styleBlobs) {
     for (const m of blob.matchAll(/font-family\s*:\s*([^;{}]+)/gi)) {
-      for (const raw of m[1].split(',')) {
+      // Drop the `var(--name` head of a custom-property reference before
+      // splitting on commas. `font-family: var(--font-family, 'Liberation
+      // Sans', …)` is one declaration whose fallback list is already the real
+      // font stack, but a naive comma split turned the reference itself into a
+      // font named "var(--font-family" and reported it as non-standard — twice,
+      // once per spelling, costing all 10 font points on every generated CV.
+      //
+      // No real coverage is lost. The pattern above has no boundary before
+      // `font-family`, so it matches the custom property's own DEFINITION
+      // (`--font-family: "Liberation Sans", …`) as well, and that declaration
+      // names the same fonts; what is dropped here is only the reference token.
+      const declaration = m[1].replace(/\bvar\(\s*--[\w-]+\s*,?/gi, ' ').replace(/\)/g, ' ');
+      for (const raw of declaration.split(',')) {
         const fam = raw.replace(/['"]/g, '').trim().toLowerCase();
         if (fam && !GENERIC_FAMILIES.has(fam)) families.add(fam);
       }

@@ -1,0 +1,50 @@
+{
+  "_comment": "Japanese CV payload for tests/cv-quality-gates-i18n.test.mjs — the non-Latin, non-space-delimited case. CJK is where both gates broke differently from German: headings share no Latin stem at all, and counts sit flush against the surrounding text ('3拠点で45名'), which is why COUNT_CLAIM_RE needed a second branch. Counts here must stay in sync with cv-source-ja.md.",
+  "lang": "ja",
+  "page_format": "a4",
+  "candidate": {
+    "name": "山田 太郎",
+    "phone": "+81 90 1234 5678",
+    "email": "taro.yamada@example.jp",
+    "location": "東京都"
+  },
+  "sections": {
+    "summary": "職務要約",
+    "competencies": "コアスキル",
+    "experience": "職務経歴",
+    "projects": "プロジェクト",
+    "education": "学歴",
+    "certifications": "資格",
+    "skills": "スキル"
+  },
+  "summary": "15年の経験を持つオペレーション責任者。3拠点で45名の従業員を管理し、国際的なサプライチェーンを統括。",
+  "competencies": ["サプライチェーン管理", "チームビルディング", "業務改善"],
+  "experience": [
+    {
+      "company": "北風物流株式会社",
+      "role": "オペレーション部長",
+      "location": "東京",
+      "dates": "2019年 - 現在",
+      "bullets": [
+        "3拠点で45名の従業員と6名のマネージャーを管理。",
+        "12か国の40社の顧客を担当し、コストを18%削減。",
+        "9ヶ月かけて新しい計画システムを導入。"
+      ]
+    }
+  ],
+  "education": [
+    {
+      "title": "経営学士",
+      "org": "東京大学",
+      "year": "2009年",
+      "description": "物流およびオペレーションズリサーチ専攻。"
+    }
+  ],
+  "certifications": [
+    { "title": "サプライチェーン管理士", "org": "ASCM", "year": "2021年" }
+  ],
+  "skills": [
+    { "category": "手法", "items": "リーン、シックスシグマ、S&OP" },
+    { "category": "システム", "items": ["SAP", "Power BI"] }
+  ]
+}
