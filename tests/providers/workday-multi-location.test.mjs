@@ -12,7 +12,8 @@
 import { pass, fail, ROOT, captureConsoleErrors } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { execFileSync } from 'child_process';
+import { spawnSync } from 'child_process';
+import { buildPostingAgeFilter, buildPostedDateFilter } from '../../scan.mjs';
 
 console.log('\nProvider — workday multi-location placeholders');
 
@@ -225,21 +226,32 @@ process.stdout.write(JSON.stringify([
   postedAtFromDetail({ jobPostingInfo: { startDate: '2026-09-04T08:30:00Z' } }),
   postedAtFromDetail({ jobPostingInfo: { startDate: '2026-09-04T08:30:00' } }),
 ]));`;
+  // spawnSync instead of execFileSync so a throwing child produces a fail()
+  // line and lets the rest of the suite run, rather than aborting the whole
+  // file with an uncaught exception.
   const zones = ['UTC', 'America/New_York', 'Asia/Tokyo'];
-  const results = zones.map((tz) => execFileSync(process.execPath, ['--input-type=module', '-e', script], {
-    env: { ...process.env, TZ: tz }, encoding: 'utf8',
-  }));
-  if (new Set(results).size === 1) {
-    pass(`postedAtFromDetail() returns the same timestamps in ${zones.join(', ')}`);
+  const spawnResults = zones.map((tz) => spawnSync(
+    process.execPath, ['--input-type=module', '-e', script],
+    { env: { ...process.env, TZ: tz }, encoding: 'utf8', timeout: 30_000 },
+  ));
+  const tzFailed = spawnResults.findIndex((r) => r.status !== 0 || r.error);
+  if (tzFailed !== -1) {
+    const r = spawnResults[tzFailed];
+    fail(`TZ child (${zones[tzFailed]}) failed: status=${r.status} error=${r.error?.message} stderr=${r.stderr}`);
   } else {
-    fail(`postedAtFromDetail() is timezone-dependent: ${zones.map((tz, i) => `${tz}=${results[i]}`).join(' ')}`);
-  }
-  // And specifically: the zoneless form is the one that would have moved, so it
-  // must come back unparsed rather than "consistent by luck".
-  if (JSON.parse(results[0])[2] === null) {
-    pass('postedAtFromDetail() refuses a date-time that states no offset');
-  } else {
-    fail(`zoneless date-time parsed to ${JSON.parse(results[0])[2]}`);
+    const results = spawnResults.map((r) => r.stdout);
+    if (new Set(results).size === 1) {
+      pass(`postedAtFromDetail() returns the same timestamps in ${zones.join(', ')}`);
+    } else {
+      fail(`postedAtFromDetail() is timezone-dependent: ${zones.map((tz, i) => `${tz}=${results[i]}`).join(' ')}`);
+    }
+    // And specifically: the zoneless form is the one that would have moved, so it
+    // must come back unparsed rather than "consistent by luck".
+    if (JSON.parse(results[0])[2] === null) {
+      pass('postedAtFromDetail() refuses a date-time that states no offset');
+    } else {
+      fail(`zoneless date-time parsed to ${JSON.parse(results[0])[2]}`);
+    }
   }
 }
 
@@ -457,4 +469,321 @@ for (const [label, detailImpl] of [
   }, { maxPages: 1 }));
   if (detailRequests === 0) pass('workday.fetch() skips placeholder resolution for a ctx.maxPages probe');
   else fail(`a ctx.maxPages probe spent ${detailRequests} detail requests`);
+}
+
+// ─── ITEM 2: inter-page delay is pinned ──────────────────────────────────────
+//
+// The line `if (attempted > 1) await sleep(INTER_PAGE_DELAY_MS, ctx)` spaces
+// the detail GETs the same way the pagination loop spaces page requests — one
+// delay per posting AFTER the first, i.e. `attempted - 1` calls in total.
+// Without a counting sleep in the ctx the assertion would stay green even if
+// that line were deleted, because the default `sleep: async () => {}` never
+// records anything. The ctx `extra` argument carries the counting sleep so the
+// assertion is driven by the real production code path.
+//
+// INTER_PAGE_DELAY_MS is 250 (workday.mjs). That value is not re-exported, but
+// the test can infer it from the observed calls: every call must be exactly 250.
+{
+  const EXPECTED_DELAY_MS = 250; // matches INTER_PAGE_DELAY_MS in workday.mjs
+  // Four placeholder postings: first costs zero sleeps, the next three each cost
+  // one, for a total of three sleep calls — one fewer than the number attempted.
+  const PAGE_WITH_PLACEHOLDERS = {
+    total: 4,
+    jobPostings: Array.from({ length: 4 }, (_, i) => ({
+      title: `Engineer ${i}`,
+      externalPath: `/job/USA---Sunnyvale-CA/Engineer-${i}_R2000${i}`,
+      locationsText: '3 Locations',
+      postedOn: 'Posted Today',
+    })),
+  };
+  const sleepCalls = [];
+  await captureConsoleErrors(() => workday.fetch(ENTRY, mkCtx(async (url) => {
+    if (url.endsWith('/jobs')) return PAGE_WITH_PLACEHOLDERS;
+    return DETAIL;
+  }, {
+    sleep: async (ms) => { sleepCalls.push(ms); },
+  })));
+  // Four postings attempted → three inter-posting delays (one before each
+  // posting after the first). Deleting the `if (attempted > 1) await sleep(...)`
+  // production line causes `sleepCalls` to be empty, turning this red.
+  if (sleepCalls.length === 3) {
+    pass('workday.fetch() sleeps between detail requests: one fewer sleep than postings attempted');
+  } else {
+    fail(`expected 3 inter-detail sleeps for 4 placeholder postings, got ${sleepCalls.length}`);
+  }
+  if (sleepCalls.every((ms) => ms === EXPECTED_DELAY_MS)) {
+    pass(`each inter-detail sleep is exactly INTER_PAGE_DELAY_MS (${EXPECTED_DELAY_MS}ms)`);
+  } else {
+    fail(`inter-detail sleep values were ${JSON.stringify(sleepCalls)}, expected all ${EXPECTED_DELAY_MS}`);
+  }
+}
+
+// ─── ITEM 1: "Posted 30+ Days Ago" dating tradeoff is pinned ─────────────────
+//
+// Background: parsePostedOn returns `undefined` for "Posted 30+ Days Ago" (the
+// label is unbounded, so no usable date can be derived from it). Without
+// enrichment the posting carries no `postedAt` and passes any age-based filter
+// in scan.mjs — the "don't penalize missing data" rule is a fallback for
+// IGNORANCE, not a policy of inclusion. Once startDate is fetched from the
+// detail document, the real date is available and filters apply correctly.
+//
+// The acknowledged asymmetry: a posting with `locationsText: "3 Locations"` and
+// `postedOn: "Posted 30+ Days Ago"` gets its detail fetched (because of the
+// placeholder) and ends up accurately dated. An otherwise-identical posting on
+// the SAME board with a single location never gets its detail fetched, so it
+// stays undated (postedAt: undefined) and passes every age filter. The
+// inconsistency is one of KNOWLEDGE, not policy — we only know the 30+ posting's
+// real date because we were already paying for a detail GET for the location.
+//
+// Flipping this behaviour (keeping postedAt undefined even when startDate is
+// present) is a one-assertion change in workday.mjs's enrichment block; the
+// comment there and the assertion below are the record of why the current
+// semantics were chosen over that alternative.
+{
+  const OLD_DATE = '2026-05-01'; // well outside a 30-day window from 2026-09-08
+  const OLD_DATE_MS = Date.parse(OLD_DATE);
+
+  // A board with one "30+ Days Ago" placeholder and one ordinary single-location
+  // posting that also has a stale postedOn. The ordinary posting is never fetched
+  // in detail, so it stays undated (postedAt: undefined).
+  const PAGE_WITH_OLD_PLACEHOLDER = {
+    total: 2,
+    jobPostings: [
+      {
+        title: 'Engineer III, Cloud Native',
+        externalPath: '/job/USA---Sunnyvale-CA/Engineer-III_R23456',
+        locationsText: '3 Locations',
+        postedOn: 'Posted 30+ Days Ago', // parsePostedOn returns undefined for this
+      },
+      {
+        title: 'Technical Writer',
+        externalPath: '/job/USA---Austin-TX/Technical-Writer_R23457',
+        locationsText: 'USA - Austin, TX',
+        postedOn: 'Posted 30+ Days Ago', // single location — detail never fetched
+      },
+    ],
+  };
+  const OLD_DETAIL = {
+    jobPostingInfo: {
+      id: 'R23456',
+      location: 'USA - Sunnyvale, CA',
+      additionalLocations: ['USA - Austin, TX', 'USA - Redmond, WA'],
+      startDate: OLD_DATE,
+    },
+  };
+
+  // (b) Assert that before enrichment, a "30+ Days Ago" label yields undefined.
+  // parsePostedOn is not exported (and the brief says not to export it just for
+  // this), so we confirm the behaviour via the actual posting object produced by
+  // a board where the detail document carries NO date — the posting stays undated.
+  {
+    const noDateDetail = { jobPostingInfo: { location: 'USA - Sunnyvale, CA', additionalLocations: [] } };
+    const jobs = await workday.fetch(ENTRY, mkCtx(async (url) => {
+      if (url.endsWith('/jobs')) return PAGE_WITH_OLD_PLACEHOLDER;
+      return noDateDetail;
+    }));
+    const old = jobs.find((j) => j.url.endsWith('Engineer-III_R23456'));
+    if (old && old.postedAt === undefined) {
+      pass('a "Posted 30+ Days Ago" posting carries no postedAt before startDate enrichment (parsePostedOn returns undefined for the 30+ bucket)');
+    } else {
+      fail(`expected postedAt undefined for un-enriched 30+ posting, got ${JSON.stringify(old?.postedAt)}`);
+    }
+  }
+
+  // (a+c) Drive through the real workday.fetch() with a detail document carrying
+  // the old startDate. Assert postedAt comes out as Date.parse('2026-05-01').
+  const jobs = await captureConsoleErrors(() => workday.fetch(ENTRY, mkCtx(async (url) => {
+    if (url.endsWith('/jobs')) return PAGE_WITH_OLD_PLACEHOLDER;
+    if (url.endsWith('Engineer-III_R23456')) return OLD_DETAIL;
+    throw new Error(`unexpected url: ${url}`);
+  }))).then(({ result }) => result);
+
+  const oldPlaceholder = jobs.find((j) => j.url.endsWith('Engineer-III_R23456'));
+  if (oldPlaceholder && oldPlaceholder.postedAt === OLD_DATE_MS) {
+    pass(`workday.fetch() dates a "30+ Days Ago" placeholder from jobPostingInfo.startDate (${OLD_DATE} → ${OLD_DATE_MS})`);
+  } else {
+    fail(`"30+ Days Ago" posting postedAt was ${JSON.stringify(oldPlaceholder?.postedAt)}, expected ${OLD_DATE_MS}`);
+  }
+
+  const singleLoc = jobs.find((j) => j.url.endsWith('Technical-Writer_R23457'));
+  if (singleLoc && singleLoc.postedAt === undefined) {
+    pass('the single-location "30+ Days Ago" posting stays undated (detail never fetched — the knowledge asymmetry)');
+  } else {
+    fail(`single-location 30+ posting had unexpected postedAt: ${JSON.stringify(singleLoc?.postedAt)}`);
+  }
+
+  // (d) Pin the downstream consequence explicitly so the tradeoff is recorded
+  // rather than implied. The real filters from scan.mjs are used here, not stubs.
+  //
+  // The "undated passes" rule is a fallback for ignorance: a posting with no
+  // postedAt is not penalized because the scanner does not know its date. Once
+  // the real date is in hand, the filter decision is accurate — and a posting
+  // dated accurately to four months ago is legitimately outside a 30-day window.
+  //
+  // Accepted inconsistency: the single-location 30+ posting (above) stays
+  // undated and therefore passes the same filter. That posting's real date may
+  // also be outside the window, but we never fetched its detail, so the fallback
+  // rule applies. The inconsistency is one of knowledge, not policy.
+  {
+    const NOW_MS = Date.now();
+    const ageFilter30 = buildPostingAgeFilter(30, NOW_MS);
+    // Accurately dated 30+ posting — OUTSIDE the 30-day window.
+    if (!ageFilter30(OLD_DATE_MS)) {
+      pass('an accurately dated 30+ posting is excluded from a 30-day window (deliberate: see comment — the "undated passes" rule is a fallback for ignorance, not a policy of inclusion)');
+    } else {
+      fail(`buildPostingAgeFilter(30) passed a posting from ${OLD_DATE}, which is outside a 30-day window`);
+    }
+    // Undated posting (undefined postedAt) — passes because missing data is not penalized.
+    if (ageFilter30(undefined)) {
+      pass('an undated posting passes a 30-day window filter (missing data is not penalized)');
+    } else {
+      fail('buildPostingAgeFilter(30) rejected an undated posting — that breaks the "undated passes" contract');
+    }
+    // Confirm via buildPostedDateFilter too, since scan.mjs can use either.
+    const cutoffDate = new Date(NOW_MS - 30 * 86_400_000).toISOString().split('T')[0];
+    const dateFilter = buildPostedDateFilter(cutoffDate, null);
+    if (!dateFilter(OLD_DATE_MS)) {
+      pass('buildPostedDateFilter also excludes the accurately dated 30+ posting from a 30-day window');
+    } else {
+      fail(`buildPostedDateFilter(${cutoffDate}) passed a posting from ${OLD_DATE}`);
+    }
+    if (dateFilter(undefined)) {
+      pass('buildPostedDateFilter passes an undated posting (missing data is not penalized)');
+    } else {
+      fail('buildPostedDateFilter rejected an undated posting — that breaks the "undated passes" contract');
+    }
+  }
+}
+
+// ─── ITEM 3: enrichment runs on the FINAL job list, after the split/dedup ────
+//
+// The comment at workday.mjs:827 claims enrichment runs after the facet split
+// has deduped its overlapping slices, so the same posting is only enriched once
+// regardless of how many slices it appeared in. This test pins that claim: a
+// board that clamps and splits into two facet slices where the same placeholder
+// posting appears in both slices must cause the detail endpoint to be called
+// exactly once for that posting.
+//
+// If enrichment were moved before the split/dedup (i.e., `placeholders` built
+// from `root.jobs` instead of the final `jobs`), the duplicate posting would not
+// be in root.jobs (it only appears in the slices), so the detail endpoint would
+// be called zero times — and the assertion below would go red.
+//
+// Fixture design: the root query reports total=20 (one page, terminates quickly)
+// with facets that sum to 3002 (> WORKDAY_OFFSET_CEILING=2000), triggering the
+// clamp. Two facet slices are produced: sliceA has the duplicate placeholder
+// and one ordinary posting; sliceB also has the duplicate placeholder. Root's
+// jobPostings contain only the ordinary posting (no placeholder), so the
+// duplicate is absent from root.jobs.
+{
+  const DUPE_PATH = '/job/USA---Sunnyvale-CA/Engineer-Dupe_R99999';
+  // The job's public URL (jobBase + externalPath) is what appears in the returned
+  // job objects. The detail GET is issued against the CXS host instead, so the
+  // transport URL differs from the job URL — the count lookup below uses the CXS
+  // detail URL, and the job lookup uses the public URL.
+  const DUPE_JOB_URL = `${JOB_BASE}${DUPE_PATH}`;
+  const DUPE_DETAIL_URL = `${CXS_BASE}${DUPE_PATH}`;
+
+  // A facet with two values whose counts sum to 3002 > 2000. Both values need
+  // an `id` (string) and a `count` (integer) for chooseSplitFacet to pick them.
+  const CLAMPED_FACETS = [{
+    facetParameter: 'jobFamily',
+    descriptor: 'Job Family',
+    values: [
+      { id: 'f1', descriptor: 'Engineering', count: 1501 },
+      { id: 'f2', descriptor: 'Operations', count: 1501 },
+    ],
+  }];
+
+  const ROOT_PAGE = {
+    total: 20, // one page, clamped (total<=2000 and facets sum=3002>2000)
+    facets: CLAMPED_FACETS,
+    jobPostings: [{
+      title: 'Ordinary Posting',
+      externalPath: '/job/USA---Austin-TX/Ordinary_R88888',
+      locationsText: 'USA - Austin, TX',
+      postedOn: 'Posted Today',
+    }],
+  };
+
+  const SLICE_A_PAGE = {
+    total: 20,
+    facets: [], // no further split
+    jobPostings: [
+      {
+        title: 'Engineer Dupe',
+        externalPath: DUPE_PATH,
+        locationsText: '3 Locations',
+        postedOn: 'Posted Today',
+      },
+      {
+        title: 'Other A',
+        externalPath: '/job/USA---Seattle-WA/Other-A_R77777',
+        locationsText: 'USA - Seattle, WA',
+        postedOn: 'Posted Today',
+      },
+    ],
+  };
+
+  const SLICE_B_PAGE = {
+    total: 20,
+    facets: [],
+    jobPostings: [
+      {
+        title: 'Engineer Dupe', // same posting as in slice A
+        externalPath: DUPE_PATH,
+        locationsText: '3 Locations',
+        postedOn: 'Posted Today',
+      },
+    ],
+  };
+
+  const DUPE_DETAIL = {
+    jobPostingInfo: {
+      id: 'R99999',
+      location: 'USA - Sunnyvale, CA',
+      additionalLocations: ['USA - Austin, TX', 'USA - Seattle, WA'],
+      startDate: '2026-09-05',
+    },
+  };
+
+  // Count detail GETs per URL in the mock transport.
+  const detailGetsByUrl = {};
+  const { result: splitJobs } = await captureConsoleErrors(() => workday.fetch(
+    ENTRY,
+    mkCtx(async (url, opts) => {
+      if (url.endsWith('/jobs')) {
+        // Distinguish root query from slice queries by the request body.
+        const body = JSON.parse(opts?.body || '{}');
+        const appliedFacets = body.appliedFacets || {};
+        if (Object.keys(appliedFacets).length === 0) return ROOT_PAGE;
+        if (appliedFacets.jobFamily?.[0] === 'f1') return SLICE_A_PAGE;
+        if (appliedFacets.jobFamily?.[0] === 'f2') return SLICE_B_PAGE;
+        throw new Error(`unexpected facets: ${JSON.stringify(appliedFacets)}`);
+      }
+      // Detail GET — count by URL.
+      detailGetsByUrl[url] = (detailGetsByUrl[url] || 0) + 1;
+      return DUPE_DETAIL;
+    }),
+  ));
+
+  const dupeDetailCount = detailGetsByUrl[DUPE_DETAIL_URL] || 0;
+  // The duplicate placeholder appeared in both sliceA and sliceB, but the
+  // final deduplicated job list contains it only once. Enrichment runs on that
+  // deduplicated list, so the detail endpoint is called exactly once.
+  // If enrichment ran on root.jobs instead (the "moved before split/dedup"
+  // mutation), root.jobs does not contain this posting and the count would be
+  // zero — this assertion would go red.
+  if (dupeDetailCount === 1) {
+    pass('workday.fetch() calls the detail endpoint exactly once for a posting that appeared in multiple facet slices (enrichment runs after split/dedup)');
+  } else {
+    fail(`expected 1 detail GET for the duplicate placeholder, got ${dupeDetailCount} (detailGetsByUrl: ${JSON.stringify(detailGetsByUrl)})`);
+  }
+
+  const dupeJob = splitJobs.find((j) => j.url === DUPE_JOB_URL);
+  if (dupeJob && dupeJob.location === 'USA - Sunnyvale, CA · USA - Austin, TX · USA - Seattle, WA') {
+    pass('the deduplicated placeholder is enriched with the real places from its one detail fetch');
+  } else {
+    fail(`deduplicated placeholder location was ${JSON.stringify(dupeJob?.location)}`);
+  }
 }

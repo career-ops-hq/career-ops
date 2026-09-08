@@ -389,7 +389,7 @@ const MULTI_LOCATION_PLACEHOLDER_RE = /^\s*\d+\s+locations?\s*$/i;
 
 /**
  * True when a Workday list location is the count-placeholder rather than a place.
- * Exported for tests/providers/workday.test.mjs, which pins the boundary cases.
+ * Exported for tests/providers/workday-multi-location.test.mjs, which pins the boundary cases.
  *
  * @param {unknown} location - `locationsText` as the list endpoint returned it.
  * @returns {boolean}
@@ -463,6 +463,15 @@ export function locationsFromDetail(detail) {
  * `resolveEffectiveAfter` truncates the cutoff to a date and
  * `buildPostedDateFilter` parses it as UTC midnight too (scan.mjs), so both
  * sides of the comparison are day-aligned.
+ *
+ * A second direction applies to the "Posted 30+ Days Ago" bucket.
+ * `parsePostedOn` returns `undefined` for that label, so without enrichment the
+ * posting carries no `postedAt` and passes any age-based filter
+ * ("don't penalize missing data"). Once `startDate` provides the real date, the
+ * posting is accurately dated and a `max_posting_age_days: 30` window can now
+ * legitimately exclude it. The "undated passes" rule is a fallback for
+ * ignorance, not a policy of inclusion; once the real date is in hand the filter
+ * decision is correct, not stricter.
  *
  * @param {unknown} detail - Parsed detail document.
  * @returns {number|undefined} Epoch ms, or undefined when there is no usable date.
