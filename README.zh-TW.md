@@ -22,7 +22,7 @@
   <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20%E7%94%A8%20CAREER-OPS%20%E6%89%BE%E5%88%B0%E5%B7%A5%E4%BD%9C&suffix=%20%E4%BA%BA%E5%B7%B2%E9%A9%97%E8%AD%89&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="用 career-ops 找到工作：已驗證人數"></a>
 </p>
 
-<p align="center"><sub>你也上岸了嗎？<a href="https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml">分享你的故事 →</a> · 你的卡片會讓還在找的人看見：出路真的存在。</sub></p>
+<p align="center"><sub>你也上岸了嗎？<a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">分享你的故事 →</a> · 你的卡片會讓還在找的人看見：出路真的存在。</sub></p>
 
 <p align="center">
   <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="最近三則成功入職的故事" width="800"></a>

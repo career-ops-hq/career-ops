@@ -2,6 +2,7 @@
   "#": "num",
   "num": "num",
   "date": "date",
+  "fecha": "date",
   "company": "company",
   "empresa": "company",
   "via": "via",

@@ -62,6 +62,9 @@ version: 1.0.0
   }
 
   .contact-row {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
     font-family: var(--font-family);
     font-size: 10.5px;
     line-height: 1.6;
@@ -75,8 +78,7 @@ version: 1.0.0
   }
 
   .contact-row .separator {
-    color: #ccc;
-    margin: 0 6px;
+    display: none;
   }
 
   /* SECTIONS */
@@ -463,11 +465,11 @@ version: 1.0.0
   <div class="header">
     <h1>{{NAME}}</h1>
     <div class="contact-row">
-      <div><a href="tel:{{PHONE}}">{{PHONE}}</a></div>
-      <div><a href="mailto:{{EMAIL}}">{{EMAIL}}</a></div>
-      <div><a href="{{LINKEDIN_URL}}">{{LINKEDIN_DISPLAY}}</a></div>
-      <div><a href="{{PORTFOLIO_URL}}">{{PORTFOLIO_DISPLAY}}</a></div>
-      <div><span>{{LOCATION}}</span></div>
+      <a href="tel:{{PHONE}}">{{PHONE}}</a>
+      <a href="mailto:{{EMAIL}}">{{EMAIL}}</a>
+      <a href="{{LINKEDIN_URL}}">{{LINKEDIN_DISPLAY}}</a>
+      <a href="{{PORTFOLIO_URL}}">{{PORTFOLIO_DISPLAY}}</a>
+      <span>{{LOCATION}}</span>
     </div>
   </div>
 

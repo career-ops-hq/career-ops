@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import readline from 'node:readline';
 import * as yaml from 'js-yaml';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
+import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import {
   formatReportNumber, releaseReportNumbers, reserveReportNumbers,
 } from './reserve-report-num.mjs';
@@ -42,8 +43,14 @@ let activeModel = null;
 // ---------------------------------------------------------------------------
 // .env loader
 // ---------------------------------------------------------------------------
-const envPath = path.join(__dirname, '.env');
-if (fs.existsSync(envPath)) {
+// Lazy: only runs when this file is the CLI entry point (`node
+// openrouter-runner.mjs ...`). Importing the module (e.g. for buildSystemPrompt
+// in test-all.mjs) must NOT mutate process.env — a module-level loader here
+// leaked every .env key (including CAREER_OPS_CLI) into the importing process
+// and broke later CLI-resolution tests.
+function loadEnvFile() {
+  const envPath = path.join(__dirname, '.env');
+  if (!fs.existsSync(envPath)) return;
   for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
     const m = line.trim().match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
     if (m && process.env[m[1]] === undefined) {
@@ -715,12 +722,12 @@ async function cmdEvaluate(input, ctx) {
     const reportLink  = `[${numStr}](reports/${numStr}-${slug}-${today}.md)`;
     const tsvLine     = `${num}\t${today}\t${companyName}\t(see report)\tEvaluated\t${scoreStr}\t❌\t${reportLink}\t\n`;
     const tsvFile     = `batch/tracker-additions/or-${numStr}-${slug}.tsv`;
-    // AGENTS.md: a tracker-addition TSV is a SINGLE data line of 9 tab-separated
-    // columns. merge-tracker.mjs reads the whole file as ONE record (no line
-    // splitting), so a leading header row makes parts[4]/parts[5] the literal
-    // "status"/"score" and the evaluation is skipped ("cannot tell score from
-    // status"). Write only the data line.
-    writeFile(tsvFile, tsvLine);
+    // Header row, then the single data row. merge-tracker.mjs resolves the
+    // fields by NAME when the header is present (#3517), so this row cannot be
+    // read into the wrong columns. (Headerless files still work; they are the
+    // legacy form, and they are the ones that can hit the undecidable
+    // score-vs-status case.)
+    writeFile(tsvFile, `${TSV_ADDITION_HEADER}\n${tsvLine}`);
 
     console.log(`\n✅ Report saved: ${relPath}`);
     console.log('\n─── EVALUATION ──────────────────────────────────────\n');
@@ -833,6 +840,7 @@ async function cmdApply(ref, ctx) {
 // module can be imported (e.g. by test-all.mjs) without executing a command.
 const invokedDirectly = isMainModule(import.meta.url);
 const [,, command, ...args] = invokedDirectly ? process.argv : [];
+if (invokedDirectly) loadEnvFile();
 const ctx = invokedDirectly ? loadContext() : null;
 
 // Load free models list before running any AI command (skip when a model is pinned)

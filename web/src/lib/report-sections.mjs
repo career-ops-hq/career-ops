@@ -75,6 +75,38 @@ export function authorLetter(heading) {
 }
 
 /**
+ * Whether a heading marks the block the viewer should lead with as a Verdict
+ * callout.
+ *
+ * The letter is NOT the signal. `report-view.tsx` used to read "whatever is
+ * lettered F" as the verdict, but no mode has ever written a Verdict block:
+ * the callout landed in #1535 when `modes/oferta.md` already read
+ * `## F) Interview Plan`, so every report has rendered the Interview Plan
+ * table into a callout built for one sentence (#3416). All eighteen localized
+ * modes write Interview Plan at F too, so this was never an English-only slip.
+ * Counted by the property rather than the filename — `grep -rlE "^## F\\)" modes/`
+ * returns 19 (18 localized + canonical). Only eight of those are named
+ * `oferta.md`; the rest are `fursah.md`, `angebot.md`, `offre.md`, `naukri.md`,
+ * `lowongan.md`, `annuncio.md`, `kyujin.md`, `gonggo.md`, `vacature.md`,
+ * `is-ilani.md`. A sweep by expected filename misses exactly those.
+ *
+ * The marker is what the core actually promises: `cleanHeading` has always
+ * stripped a trailing `(lead)` / `(verdict)`, which is a deliberate authoring
+ * signal and is language-independent — a Spanish `## F) Veredicto (lead)`
+ * reads the same as an English one. The bare English word is accepted as well
+ * so a block titled plainly `## Verdict` is not missed.
+ *
+ * When nothing matches, there is no callout and every block renders through
+ * the normal progressive disclosure — which is the correct outcome today.
+ * @param {string} heading
+ * @returns {boolean}
+ */
+export function isVerdictHeading(heading) {
+  if (/\((?:lead|verdict)\)\s*$/i.test(heading.trim())) return true;
+  return /^verdict$/i.test(cleanHeading(heading));
+}
+
+/**
  * Split a report body on `## ` headings. Everything before the first one is
  * the intro.
  * @param {string} body

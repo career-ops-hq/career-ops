@@ -179,7 +179,13 @@ try {
         fetchText: async (url, opts) => { textCalls.push({ url, opts }); return env; },
         fetchJson: async (url, opts) => {
           const params = new URLSearchParams(JSON.parse(opts.body).params);
-          const call = { url, opts, query: params.get('query'), hitsPerPage: params.get('hitsPerPage') };
+          const call = {
+            url,
+            opts,
+            query: params.get('query'),
+            hitsPerPage: params.get('hitsPerPage'),
+            filters: params.get('filters'),
+          };
           jsonCalls.push(call);
           return hitsFor(call);
         },
@@ -250,9 +256,93 @@ try {
   } catch (err) { noQueriesErr = err.message; }
   // Assert the message, not just that something threw — an unrelated crash must not pass.
   if (noQueriesErr.includes('wttj: the WTTJ board is global')) {
-    pass('wttj.fetch() throws without an explicit wttj.queries config (never scans the whole board)');
+    pass('wttj.fetch() throws with neither wttj.queries nor wttj.filters (never scans the whole board)');
   } else {
     fail(`wttj.fetch() missing-queries error = ${JSON.stringify(noQueriesErr) || 'did not throw'}`);
+  }
+
+  // --- Server-side filters (#wttj-filters) -------------------------------
+  // A keyword query cannot narrow a global board: Algolia's relevance ranking
+  // picks which max_hits results come back, and the scanner's own title/location
+  // filters only run on what already arrived. `filters` shrinks the result set
+  // server-side instead, which is what makes a scan exhaustive.
+  const FILTER = 'offices.country_code:FR AND contract_type:full_time';
+
+  const filtered = mkCtx(ENV_OK, () => ({ hits: [mkHit('job-f', 'Product Manager')] }));
+  const filteredJobs = await wttj.fetch(
+    { name: 'WTTJ', provider: 'wttj', wttj: { filters: FILTER } },
+    filtered.ctx,
+  );
+  if (filtered.jsonCalls.length === 1 && filtered.jsonCalls[0].filters === FILTER && filteredJobs.length === 1) {
+    pass('wttj.fetch() passes wttj.filters through to Algolia');
+  } else {
+    fail(`wttj.fetch() filters = ${JSON.stringify(filtered.jsonCalls.map((c) => c.filters))}`);
+  }
+
+  // filters alone → the empty query means "everything that passes the filter".
+  if (filtered.jsonCalls[0].query === '') {
+    pass('wttj.fetch() uses the empty query when only filters are configured');
+  } else {
+    fail(`wttj.fetch() filters-only query = ${JSON.stringify(filtered.jsonCalls[0].query)}`);
+  }
+
+  // filters + queries → the filter applies to every query, not just the first.
+  const both = mkCtx(ENV_OK, () => ({ hits: [] }));
+  await wttj.fetch(
+    { name: 'WTTJ', provider: 'wttj', wttj: { filters: FILTER, queries: ['a', 'b'] } },
+    both.ctx,
+  );
+  if (both.jsonCalls.length === 2 && both.jsonCalls.every((c) => c.filters === FILTER)
+      && both.jsonCalls.map((c) => c.query).join(',') === 'a,b') {
+    pass('wttj.fetch() applies wttj.filters to every configured query');
+  } else {
+    fail(`wttj.fetch() filters+queries = ${JSON.stringify(both.jsonCalls.map((c) => [c.query, c.filters]))}`);
+  }
+
+  // No filters → the 200 cap stands (an unfiltered query can match the whole board).
+  const unfilteredCap = mkCtx(ENV_OK, () => ({ hits: [] }));
+  await wttj.fetch({ name: 'WTTJ', provider: 'wttj', wttj: { queries: ['x'], max_hits: 5000 } }, unfilteredCap.ctx);
+  if (unfilteredCap.jsonCalls[0].hitsPerPage === '200') {
+    pass('wttj.fetch() still caps max_hits at 200 when no filters are configured');
+  } else {
+    fail(`wttj.fetch() unfiltered max_hits=5000 → hitsPerPage=${unfilteredCap.jsonCalls[0].hitsPerPage}`);
+  }
+
+  // With filters → the cap rises to Algolia's per-request ceiling for this index.
+  const filteredCap = mkCtx(ENV_OK, () => ({ hits: [] }));
+  await wttj.fetch(
+    { name: 'WTTJ', provider: 'wttj', wttj: { filters: FILTER, max_hits: 5000 } },
+    filteredCap.ctx,
+  );
+  if (filteredCap.jsonCalls[0].hitsPerPage === '1000') {
+    pass('wttj.fetch() raises the max_hits cap to 1000 when filters narrow the board');
+  } else {
+    fail(`wttj.fetch() filtered max_hits=5000 → hitsPerPage=${filteredCap.jsonCalls[0].hitsPerPage}`);
+  }
+
+  // A blank/whitespace filters value must not silently unlock the higher cap.
+  const blankFilter = mkCtx(ENV_OK, () => ({ hits: [] }));
+  await wttj.fetch(
+    { name: 'WTTJ', provider: 'wttj', wttj: { filters: '   ', queries: ['x'], max_hits: 5000 } },
+    blankFilter.ctx,
+  );
+  if (blankFilter.jsonCalls[0].hitsPerPage === '200' && blankFilter.jsonCalls[0].filters === null) {
+    pass('wttj.fetch() treats a blank wttj.filters as absent (cap stays 200, no filters param sent)');
+  } else {
+    fail(`wttj.fetch() blank filters → hitsPerPage=${blankFilter.jsonCalls[0].hitsPerPage}, filters=${JSON.stringify(blankFilter.jsonCalls[0].filters)}`);
+  }
+
+  let longFilterErr = '';
+  try {
+    await wttj.fetch(
+      { name: 'WTTJ', provider: 'wttj', wttj: { filters: 'a'.repeat(1001) } },
+      mkCtx(ENV_OK, () => ({ hits: [] })).ctx,
+    );
+  } catch (err) { longFilterErr = err.message; }
+  if (longFilterErr.includes('wttj: `filters` is too long')) {
+    pass('wttj.fetch() rejects an over-long filters expression');
+  } else {
+    fail(`wttj.fetch() long-filters error = ${JSON.stringify(longFilterErr) || 'did not throw'}`);
   }
 
   let badShapeErr = '';

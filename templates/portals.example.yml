@@ -31,6 +31,30 @@
 # scan_history:
 #   recheck_after_days: 30
 
+# -- Location-aware duplicate roles (optional, opt-in) --
+# By default two postings that share a company and a title are ONE role, however
+# many cities they name: an employer that opens one req per city would otherwise
+# leak a city variant into your pipeline on every scan.
+#
+# Set dedup_include_location: true to keep the city in that comparison, so
+# "Staff Engineer — London" and "Staff Engineer — Dublin" are two entries rather
+# than whichever one the ATS happened to return first. Turn it on when your
+# eligibility is location-bound (work authorization, relocation, an office you
+# must be near): location_filter cannot choose for you when it allows both
+# cities, and the arbitrary survivor may be the one you cannot take.
+# Expect more entries per scan at large multi-country employers.
+#
+# Rows that record no location (a tracker without a Location column, a processed
+# pipeline entry) still match every city, so a role you already applied to never
+# comes back city by city.
+#
+# A posting that names SEVERAL cities in one location field is compared as the
+# set of those cities, so a board that re-orders its own list ("London | Dublin"
+# becoming "Dublin | London") does not re-add a posting you already have.
+#
+# scan_history:
+#   dedup_include_location: true
+
 # -- Interamt.de searches (optional, German public sector) --
 # Read by scan-interamt.mjs (`npm run scan:interamt`), a separate Playwright
 # scanner for Interamt.de, a portal for German federal, state, and municipal
@@ -515,6 +539,39 @@ title_filter:
     - "Head"
     - "Director"
 
+# -- Title filter overrides (optional, scan-ats-full.mjs only) --
+# The reverse ATS sweep (scan-ats-full.mjs) applies ONE global title_filter
+# to every company in the public dataset it walks. Some employers legitimately
+# deserve a WIDER title net than everyone else, without loosening the global
+# filter for the rest of the sweep. title_filter_overrides lets specific
+# companies (matched by an explicit slug list) OR extra positive keywords
+# into their own title match, for that scan run only.
+#
+# `companies` matches the company/tenant slug the scanner already derives
+# from the job-board-aggregator dataset entry (e.g. for a Workday tenant at
+# https://uwaterloo.wd3.myworkdayjobs.com/..., the slug is "uwaterloo" — the
+# same value scan-ats-full.mjs logs as the board name on fetch errors).
+# `positive_extra` keywords are ADDITIVE to (never a replacement for)
+# title_filter.positive above, and the global `negative` list still applies.
+#
+# v1 keeps matching simple and explicit: a literal slug list, no
+# company-type inference and no domain heuristics. A company not listed in
+# any entry here is completely unaffected — this is opt-in per company.
+#
+# Example: broaden the net for a few university/college employers so
+# general campus-admin roles surface alongside EdTech/ID-focused titles.
+# Add your own institutions/companies the same way.
+#
+# title_filter_overrides:
+#   - companies: ["uwaterloo", "ubc", "fanshawec"]
+#     positive_extra:
+#       - "Administrator"
+#       - "Coordinator"
+#       - "Assistant"
+#       - "Program Administrator"
+#       - "Registrar"
+#       - "Student Services"
+
 # -- Search queries --
 # Each query triggers a WebSearch. Use site: to filter by portal.
 # The scanner extracts title, URL, and company from results.
@@ -906,7 +963,10 @@ search_queries:
 #   eightfold       <tenant>.eightfold.ai  (Eightfold AI talent-acquisition boards; a branded CNAME like
 #                   careers.<company>.com is NOT matched — point at the eightfold.ai host. Optional domain:
 #                   for multi-brand tenants. Page size is server-capped at 10, so bound big boards with max_pages)
-#   gem             jobs.gem.com/<boardId>
+#   gem             jobs.gem.com/<boardId>; or explicit api:
+#                   https://api.gem.com/job_board/v0/<vanity_path>/job_posts/
+#                   (copy the vanity path from the employer's public Gem URL;
+#                   do not guess it from the company name)
 #   join            join.com/companies/<slug>  (SSR __NEXT_DATA__ parse, no separate API)
 #   icims           careers-<tenant>.icims.com / *.icims.com
 #
@@ -926,7 +986,8 @@ search_queries:
 # URL to detect, so they must be selected with an explicit `provider:`
 # field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
 # himalayas, ibm, jobbankca, jobicy, jobstreet, justjoin, landingjobs, mycareersfuture, nofluffjobs, remoteok, remotive, senjob,
-# manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent. Examples for every built-in provider are below.
+# manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent,
+# telegram-channel. Examples for every built-in provider are below.
 
 # ── Built-in provider examples ────────────────────────────────────
 # One commented stanza per provider in providers/. Uncomment one and adjust.
@@ -942,6 +1003,11 @@ search_queries:
 #
 # - name: Example BambooHR Co
 #   careers_url: https://exampleco.bamboohr.com/careers   # any *.bamboohr.com host
+#   enabled: true
+#
+# - name: Example Collage HR Co
+#   careers_url: https://secure.collage.co/jobs/exampleco      # explicit job-site address
+#   # Or pin the API directly: api: https://api.collage.co/v1/positions/exampleco
 #   enabled: true
 #
 # - name: Example Breezy Co
@@ -1280,6 +1346,13 @@ search_queries:
 #   careers_url: https://solid.jobs/public-api/offers/engineering
 #   enabled: true
 #
+# - name: Telegram @jobforjunior          # public Telegram channel, read via its t.me/s/ web preview
+#   provider: telegram-channel            # no detect() — only reachable via provider:
+#   channel: jobforjunior # handle without the @ (5-32 letters, digits, underscores)
+#   since_days: 30        # optional window; pages are walked back until it (default 30)
+#   max_pages: 10         # optional page cap (20 posts/page, default 10, max 10)
+#   enabled: true
+#
 # -- Remote-job feeds  (→ job_boards:; set provider: plus any provider-specific fields) --
 # title_filter / location_filter defined above still apply.
 #
@@ -1445,9 +1518,10 @@ search_queries:
 # scan-history, an aggregator's clusters are indistinguishable by shape from
 # legitimate ones (both around 2 sightings over 2 dates). See #2703.
 #
-# Scanning is unaffected — the postings are real and worth finding. Only the
-# repost inference over them is meaningless. Companies with no flag are
-# untouched, so leaving this out changes nothing.
+# Scanning keeps every posting: on a flagged entry the intra-scan company+role
+# dedup is skipped (two identical titles under the board's name are two jobs)
+# and only the URL dedups. Companies with no flag are untouched, so leaving
+# this out changes nothing.
 #
 #   - name: SomeBoard
 #     careers_url: https://jobs.lever.co/someboard
@@ -1539,6 +1613,12 @@ tracked_companies:
     careers_url: https://jobs.gem.com/retool
     provider: gem
     notes: "London. Popularized Deployed Engineer role."
+    enabled: true
+
+  - name: Gem
+    api: https://api.gem.com/job_board/v0/gem/job_posts/
+    provider: gem
+    notes: "San Francisco. Recruiting platform — example of Gem's documented REST Job Board API (verified vanity path, not guessed from the company name)."
     enabled: true
 
   - name: Airtable
@@ -2429,6 +2509,28 @@ tracked_companies:
 # Same title/location filtering and dedup apply.
 
 job_boards:
+
+  # ── Telegram channels (public) ─────────────────────────────────────
+  # Public web preview at https://t.me/s/<channel>: no API key, no login.
+  # 20 posts per page, walked back until since_days (default 30) or max_pages
+  # (cap 10; a cut-short window is warned about). A private channel is
+  # reported, not skipped.
+  #
+  # A post is emitted only when it names an employer AND links to a vacancy
+  # (Source Indexing Policy, rules 1-2): company = that employer, url = that
+  # link, the t.me permalink rides in the description as "Source:". Posts
+  # with a contact handle and no employer, digests, forms, shorteners and
+  # hidden employers are dropped, so pick channels whose posts carry a
+  # "Компания:" / "Company:" line or "Title @ Employer" plus an ATS or board
+  # link. Measured 2026-09-03: HR-curated channels pass 32-77% of posts,
+  # community channels of free-text posts pass almost none.
+
+  - name: "Telegram @jobforjunior"
+    provider: telegram-channel
+    channel: jobforjunior     # handle without the @
+    since_days: 14
+    enabled: false
+    notes: "Junior/entry RU tech roles, posts carry 'Компания:' + a geekjob.ru/ATS link; 21 jobs emitted at this 14-day window (35% of 60 posts read), measured live 2026-09-05. title_filter runs on each post's FIRST LINE; content_filter only narrows that set."
 
   # ── SolidJobs (Polish market) ──────────────────────────────────────
   # Public API — no auth needed. Division in URL path, campaign=career-ops for tracking.

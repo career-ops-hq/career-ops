@@ -22,6 +22,7 @@ import { localToday } from './lib/local-today.mjs';
 // Import the deterministic provider
 import hnProvider from './providers/hackernews.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 
 // ── Configuration ────────────────────────────────────────────────────
 // Imported from scan.mjs so it honors CAREER_OPS_PORTALS and the data root (#3510).
@@ -115,8 +116,15 @@ async function main() {
   if (newOffers.length > 0) {
     await appendToPipeline(newOffers);
     await appendToScanHistory(newOffers, localToday(), 'added');
-    console.log(`\n🎉 Success: ${newOffers.length} offers added.`);
   }
+
+  // Printed on every run, including the zero-match one. This scanner used to
+  // end in silence when nothing matched, which reads identically to a run that
+  // died at the fetch — the summary is what tells those apart (#3560).
+  printScanSummaryHeader('HN Scan', localToday());
+  console.log(`Postings fetched:   ${rawJobs.length}`);
+  console.log(`New offers:         ${newOffers.length}`);
+  if (newOffers.length > 0) console.log(`\n🎉 Success: ${newOffers.length} offers added.`);
 }
 
 if (isMainModule(import.meta.url)) {

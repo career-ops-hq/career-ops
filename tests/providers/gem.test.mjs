@@ -14,6 +14,7 @@ console.log('\nProvider — gem');
 try {
   const gemModule = await import(pathToFileURL(join(ROOT, 'providers/gem.mjs')).href);
   const gem = gemModule.default;
+  const { parseRestResponse } = gemModule;
 
   if (gem.id === 'gem') pass('gem.id is "gem"');
   else fail(`gem.id is ${JSON.stringify(gem.id)}`);
@@ -38,6 +39,136 @@ try {
     pass('gem.detect() returns null for missing / null / non-string careers_url');
   } else {
     fail('gem.detect() should return null when careers_url is absent or non-string');
+  }
+
+  // The documented REST endpoint is supported when an operator pins the
+  // exact vanity path discovered from the employer's public careers page.
+  const restHit = gem.detect({
+    name: 'Gem REST',
+    api: 'https://api.gem.com/job_board/v0/example-company/job_posts/',
+  });
+  if (restHit?.url === 'https://api.gem.com/job_board/v0/example-company/job_posts/') {
+    pass('gem.detect() accepts an explicitly pinned documented REST Job Board URL');
+  } else {
+    fail(`gem.detect() REST URL = ${JSON.stringify(restHit)}`);
+  }
+  if (gem.detect({ name: 'Spoof', api: 'https://evil.example/job_board/v0/acme/job_posts/' }) === null
+      && gem.detect({ name: 'Wrong path', api: 'https://api.gem.com/v0/acme/jobs' }) === null) {
+    pass('gem.detect() rejects REST URLs with an untrusted host or path');
+  } else {
+    fail('gem.detect() must reject untrusted REST URLs');
+  }
+  const restRows = parseRestResponse([
+    {
+      title: 'Instructional Designer',
+      absolute_url: 'https://jobs.gem.com/example-company/123',
+      location: { name: 'Toronto, Canada' },
+      first_published_at: '2026-09-01T10:00:00Z',
+      content_plain: 'Design learning experiences & enable teams.',
+      requisition_id: 'REQ-123',
+    },
+    { title: 'Bad URL', absolute_url: 'https://evil.example/jobs/2' },
+    { title: '', absolute_url: 'https://jobs.gem.com/example-company/3' },
+  ], 'Gem REST');
+  if (restRows.length === 1
+      && restRows[0].title === 'Instructional Designer'
+      && restRows[0].location === 'Toronto, Canada'
+      && restRows[0].description === 'Design learning experiences & enable teams.'
+      && restRows[0].postedAt === Date.parse('2026-09-01T10:00:00Z')) {
+    pass('parseRestResponse() normalizes title, canonical jobs.gem.com URL, location, description, and publication date');
+  } else {
+    fail(`parseRestResponse() = ${JSON.stringify(restRows)}`);
+  }
+
+  // Canonical posting path is exactly `/{vanity_path}/{id}` (two nonempty
+  // segments) — an off-path URL on the trusted host (e.g. the board's own
+  // /login page, or a posting URL with an extra trailing segment) must not
+  // be read as a job.
+  const offPathRows = parseRestResponse([
+    { title: 'Not a job (one segment)', absolute_url: 'https://jobs.gem.com/login' },
+    { title: 'Not a job (three segments)', absolute_url: 'https://jobs.gem.com/example-company/456/apply' },
+    { title: 'Real job', absolute_url: 'https://jobs.gem.com/example-company/456' },
+  ], 'Gem REST');
+  if (offPathRows.length === 1 && offPathRows[0].title === 'Real job') {
+    pass('parseRestResponse() rejects jobs.gem.com URLs off the canonical /{vanity_path}/{id} posting path');
+  } else {
+    fail(`parseRestResponse() off-path = ${JSON.stringify(offPathRows)}`);
+  }
+
+  // The Gem REST board's canonical id isn't always numeric — an opaque
+  // alphanumeric id must still be accepted as a valid two-segment posting
+  // path, not dropped by an over-narrow digit-only matcher.
+  const opaqueIdRows = parseRestResponse([
+    { title: 'Opaque ID Role', absolute_url: 'https://jobs.gem.com/example-company/aBc-123_XYZ' },
+  ], 'Gem REST');
+  if (opaqueIdRows.length === 1 && opaqueIdRows[0].title === 'Opaque ID Role') {
+    pass('parseRestResponse() accepts a canonical posting URL with an opaque, nonnumeric id');
+  } else {
+    fail(`parseRestResponse() opaque id = ${JSON.stringify(opaqueIdRows)}`);
+  }
+
+  // job_posts-wrapped envelope — the alternate documented shape.
+  const wrappedRows = parseRestResponse({
+    job_posts: [{ title: 'Wrapped Role', absolute_url: 'https://jobs.gem.com/example-company/789' }],
+  }, 'Gem REST');
+  if (wrappedRows.length === 1 && wrappedRows[0].title === 'Wrapped Role') {
+    pass('parseRestResponse() reads the job_posts-wrapped envelope shape');
+  } else {
+    fail(`parseRestResponse() wrapped = ${JSON.stringify(wrappedRows)}`);
+  }
+
+  // Empty/contentless envelopes are a legitimate empty board, not an error.
+  let emptyEnvelopesOk = true;
+  for (const body of [[], {}, null, undefined]) {
+    const rows = parseRestResponse(body, 'Gem REST');
+    if (!Array.isArray(rows) || rows.length !== 0) {
+      emptyEnvelopesOk = false;
+      fail(`parseRestResponse(${JSON.stringify(body)}) = ${JSON.stringify(rows)}, expected []`);
+      break;
+    }
+  }
+  if (emptyEnvelopesOk) pass('parseRestResponse() returns [] for empty/contentless envelopes ([], {}, null, undefined)');
+
+  // Any OTHER nonempty, non-array, non-job_posts object shape is undocumented
+  // and must be rejected loudly — silently reading it as zero jobs would make
+  // a changed Gem response look like an empty board.
+  try {
+    parseRestResponse({ error: 'rate limited' }, 'Gem REST');
+    fail('parseRestResponse() should throw for an unsupported nonempty envelope shape');
+  } catch (e) {
+    if (/unsupported REST response envelope/.test(e.message)) {
+      pass('parseRestResponse() throws a descriptive error for an unsupported nonempty envelope shape');
+    } else {
+      fail(`parseRestResponse() unsupported-envelope error = ${e.message}`);
+    }
+  }
+
+  // REST content fallback (when content_plain is absent): entities must be
+  // decoded BEFORE tags are stripped, or a double-encoded tag like
+  // "&lt;strong&gt;" survives stripping and then decodes into what looks like
+  // real markup in the plain-text output.
+  const restContentFallbackRows = parseRestResponse([{
+    title: 'Content Fallback Role',
+    absolute_url: 'https://jobs.gem.com/example-company/999',
+    content: '<p>Own &amp; ship the roadmap.</p> Escaped: &lt;strong&gt;Role&lt;/strong&gt;',
+  }], 'Gem REST');
+  if (restContentFallbackRows[0]?.description === 'Own & ship the roadmap. Escaped: Role') {
+    pass('parseRestResponse() falls back to content, decoding entities before stripping tags');
+  } else {
+    fail(`parseRestResponse() content fallback description = ${JSON.stringify(restContentFallbackRows[0]?.description)}`);
+  }
+
+  let restUrl = null;
+  let restOptions = null;
+  const fetchedRest = await gem.fetch(
+    { name: 'Gem REST', api: 'https://api.gem.com/job_board/v0/example-company/job_posts/' },
+    { fetchJson: async (url, opts) => { restUrl = url; restOptions = opts; return [{ title: 'Role', absolute_url: 'https://jobs.gem.com/example-company/1' }]; } },
+  );
+  if (restUrl === 'https://api.gem.com/job_board/v0/example-company/job_posts/'
+      && restOptions?.redirect === 'error' && fetchedRest.length === 1) {
+    pass('gem.fetch() reads the pinned REST endpoint with redirect:"error" and makes one request');
+  } else {
+    fail(`gem.fetch() REST url=${JSON.stringify(restUrl)} opts=${JSON.stringify(restOptions)} rows=${JSON.stringify(fetchedRest)}`);
   }
 
   // js/incomplete-url-substring-sanitization — a raw regex/substring match
