@@ -177,6 +177,23 @@ for (const path of timestampedBackupProbes) {
   else fail(`${path}: git check-ignore could not answer — ${stderr}`);
 }
 
+// safe-write.ts uses a hidden same-directory temporary file while replacing a
+// user-layer file. Both the web writer's former suffix and the canonical core
+// writer's shape are covered so a failed rename cannot leave PII stageable.
+const temporaryWriteProbes = [
+  'cv.md.tmp-4821-12345678-1234-1234-1234-123456789abc',
+  '.cv.md.4821.1754412908641.12345678-1234-1234-1234-123456789abc.tmp',
+  'config/profile.yml.tmp-4821-12345678-1234-1234-1234-123456789abc',
+  'portals.yml.tmp-4821-12345678-1234-1234-1234-123456789abc',
+];
+
+for (const path of temporaryWriteProbes) {
+  const { verdict, stderr } = checkIgnore(path);
+  if (verdict === 'ignored') pass(`${path} is git-ignored`);
+  else if (verdict === 'not-ignored') fail(`${path} is NOT git-ignored — a failed atomic write could expose PII`);
+  else fail(`${path}: git check-ignore could not answer — ${stderr}`);
+}
+
 // The tracker's DERIVED SQLite index (tracker.mjs, #918), which carries the
 // same content as the markdown it indexes — company, role, score, status,
 // notes.

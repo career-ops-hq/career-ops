@@ -103,6 +103,8 @@ reports/*-RESERVED.md
 # form, which for cv.md or portals.yml leaves a file holding the same PII as the
 # original sitting untracked in the repo root. Trailing `*` covers both.
 *.bak*
+# Temporary files created by atomic user-layer writes.
+*.tmp*
 
 # The tracker and its follow-ups file in the LEGACY ROOT LAYOUT. resolveTrackerPath()
 # documents its own fallback chain — CAREER_OPS_TRACKER > <root>/data/applications.md

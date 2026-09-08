@@ -13,9 +13,17 @@ import { randomUUID } from "node:crypto";
 
 export function atomicWrite(file: string, content: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}-${randomUUID()}`;
-  fs.writeFileSync(tmp, content, "utf8");
-  fs.renameSync(tmp, file);
+  const tmp = path.join(
+    path.dirname(file),
+    `.${path.basename(file)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`,
+  );
+  try {
+    fs.writeFileSync(tmp, content, "utf8");
+    fs.renameSync(tmp, file);
+  } catch (err) {
+    fs.rmSync(tmp, { force: true });
+    throw err;
+  }
 }
 
 /** Snapshot the file (if it has content) to a timestamped .bak before a write. */
