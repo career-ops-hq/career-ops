@@ -254,6 +254,43 @@ console.log('\n🧪 Testing rejectUserLayerPaths (fetched manifest vs local user
 }
 
 {
+  // Given: entries that MEAN the user layer without spelling it that way.
+  // `git checkout <ref> -- ./data` resolves to the same directory as `data/`,
+  // and the checkout does not pass --literal-pathspecs, so `:(glob)` magic is
+  // honoured too. Every comparison in the rule is literal segment work, so each
+  // of these matches nothing and would sail through (CodeRabbit, PR #3947).
+  const remote = [
+    './data/', './documents', './/data', 'data//', 'documents/./',
+    '..\\data', ':(glob)data/**', '/data/', 'data/../data/',
+  ];
+
+  // When: the manifest is split
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
+
+  // Then: all of them are refused as malformed, before any overlap check
+  if (refused.length === remote.length && kept.length === 0) {
+    pass('non-canonical manifest spellings are refused as malformed');
+  } else {
+    fail(`non-canonical spellings must be refused — kept=${JSON.stringify(kept)}`);
+  }
+}
+
+{
+  // Given: the ordinary canonical spellings the real manifest actually ships
+  const remote = ['modes/pdf/', 'scan.mjs', 'lib/context-budget.mjs', 'docs/FAQ.md'];
+
+  // When: the manifest is split
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
+
+  // Then: the canonicality check refuses none of them
+  if (refused.length === 0 && kept.length === remote.length) {
+    pass('canonical system paths are unaffected by the malformed-path check');
+  } else {
+    fail(`canonical paths must pass — refused=${JSON.stringify(refused)}`);
+  }
+}
+
+{
   // Given: an empty fetched manifest, the older-target fallback path where
   // extractArrayFromSource() found nothing
   const remote = [];

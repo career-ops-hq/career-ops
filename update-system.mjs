@@ -714,6 +714,34 @@ export function manifestProbes({ trackedOutput, upstreamOutput, root = ROOT }) {
 }
 
 /**
+ * Is this manifest entry a plain, canonical, repo-relative path?
+ *
+ * Every comparison the guard makes is literal string work on segments, so a path
+ * that means the user layer without spelling it that way slips past all of it:
+ * `./data/` is not `data/`, yet `git checkout <ref> -- ./data` resolves to the
+ * same directory. Backslashes, doubled separators, a leading `/`, and git's own
+ * pathspec magic (`:(glob)`, `:!`) do the same in their own ways — and the
+ * checkout does not pass --literal-pathspecs, so magic would be honoured.
+ *
+ * Normalizing instead of refusing would mean reimplementing git's pathspec
+ * resolution and staying bug-compatible with it. A manifest entry has no reason
+ * to be spelled any way but plainly, so anything else is refused as malformed.
+ * Every entry the real manifest ships is canonical, so nothing legitimate is lost.
+ *
+ * @param {string} path - Raw manifest entry, trailing slash allowed.
+ * @returns {boolean} True when the entry is a plain relative path.
+ */
+function isCanonicalManifestPath(path) {
+  if (typeof path !== 'string' || path === '') return false;
+  // Windows separators, absolute paths, and git pathspec magic (a leading colon).
+  if (path.includes('\\') || path.startsWith('/') || path.startsWith(':')) return false;
+  // One trailing slash is the directory spelling this file uses; anything else
+  // empty is a doubled separator.
+  const segments = (path.endsWith('/') ? path.slice(0, -1) : path).split('/');
+  return !segments.some((segment) => segment === '' || segment === '.' || segment === '..');
+}
+
+/**
  * Split a manifest into entries apply() may write and entries it must refuse.
  *
  * A manifest entry naming a user path is a data-loss bug regardless of intent: the
@@ -788,6 +816,13 @@ export function rejectUserLayerPaths(manifestPaths, userPaths, probes = {}) {
   const kept = [];
   const refused = [];
   for (const path of manifestPaths) {
+    // Before any comparison: a non-canonical spelling means the same tree while
+    // matching none of the checks below, so it is refused as malformed rather
+    // than normalized.
+    if (!isCanonicalManifestPath(path)) {
+      refused.push(path);
+      continue;
+    }
     const entry = trimSlash(path);
     // Names a user path, or stands above one and would sweep it up.
     if (declared.some((userPath) => entry === userPath || isUnder(userPath, entry))) {
