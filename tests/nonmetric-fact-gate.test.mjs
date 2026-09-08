@@ -301,6 +301,28 @@ try {
     }
   }
 
+  // A determiner LATER in a list leads one fragment, not the whole capture.
+  // The check ran on the raw capture before the split, so "React and our
+  // playbook" lost React, and an unsupported "kubernetes" in that position
+  // stopped being blocked at all. A determiner immediately after the trigger
+  // is different and still drops the clause: that marks the trigger as
+  // ordinary English ("worked with the team in London"), which the prose guard
+  // above depends on.
+  const mixedList = factClaims('Built with React and our playbook.').filter(claim => claim.kind === 'tool');
+  if (mixedList.some(claim => claim.value === 'react')
+      && !mixedList.some(claim => claim.value.includes('playbook'))) {
+    pass('#4004 a determiner in one fragment does not discard its siblings');
+  } else {
+    fail(`#4004 a determiner-led fragment took the whole list with it: ${JSON.stringify(mixedList)}`);
+  }
+
+  const mixedListFailClosed = factClaims('Shipped it using kubernetes and our stack.').filter(claim => claim.kind === 'tool');
+  if (mixedListFailClosed.some(claim => claim.value === 'kubernetes')) {
+    pass('#4004 an unsupported name beside a determiner-led fragment is still claimed');
+  } else {
+    fail(`#4004 a determiner-led sibling suppressed a claim that must block: ${JSON.stringify(mixedListFailClosed)}`);
+  }
+
   // The other direction: an explicit declaration is still a declaration.
   const declaredTools = factClaims('Technologies: React, Postgres');
   if (declaredTools.some(claim => claim.kind === 'tool' && claim.value === 'react')
