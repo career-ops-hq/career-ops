@@ -105,9 +105,9 @@ try {
     ...process.env,
     CAREER_OPS_ROOT: sandbox,
     CAREER_OPS_DATA_DIR: '',
-    // set-status.mjs resolves its root from the codebase, not from
-    // CAREER_OPS_ROOT, so without this the probe would read and write the
-    // developer's own tracker.
+    // set-status.mjs resolves the tracker from CAREER_OPS_ROOT since #3867; the
+    // explicit CAREER_OPS_TRACKER is kept as a belt-and-braces so the probe can
+    // never touch the developer's own tracker even if that resolution regresses.
     CAREER_OPS_TRACKER: tracker,
     // verify-portals.mjs reads portals.yml relative to the codebase root, and
     // a real one would put this probe on the network. Point it at a path that

@@ -21,7 +21,7 @@
  */
 
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, chmodSync, utimesSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, chmodSync, utimesSync, realpathSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
@@ -1419,6 +1419,48 @@ for (const bad of ['correction', 'backfill', 'cell-edit', 'nonsense']) {
       if (r.code !== 0) pass('#3075: Notes is a fallback only — a populated Report cell wins');
       else fail('#3075: a Notes link overrode a populated Report cell');
     } finally { rmSync(sb.dir, { recursive: true, force: true }); }
+  }
+}
+
+// ── #3867: the tracker resolves from the configured data root, not the code dir ──
+//    A split checkout points CAREER_OPS_DATA_DIR at a data-only directory and
+//    leaves no tracker beside the code. set-status.mjs used to resolve its
+//    tracker from `dirname(import.meta.url)` (the code dir), so every command
+//    failed with "No tracker found". It must honour the data root for user data
+//    while still reading templates/states.yml from the codebase.
+{
+  const dataDir = mkdtempSync(join(tmpdir(), 'co-setstatus-dataroot-'));
+  mkdirSync(join(dataDir, 'data'), { recursive: true });
+  const tracker = join(dataDir, 'data', 'applications.md');
+  writeFileSync(tracker, TRACKER_9);
+  const lock = join(dataDir, 'career-ops-merge-tracker-test.lock');
+  const env = {
+    ...process.env,
+    CAREER_OPS_DATA_DIR: dataDir,
+    // getCareerOpsRoot() reads CAREER_OPS_ROOT before CAREER_OPS_DATA_DIR, so a
+    // value inherited from the dev/CI environment would win and point the probe
+    // at the wrong tree. Clear it, mirroring web-core-argv-contract's clearing
+    // of CAREER_OPS_DATA_DIR when it drives the root the other way.
+    CAREER_OPS_ROOT: '',
+    CAREER_OPS_TRACKER: '',       // no explicit override — force root resolution
+    CAREER_OPS_TRACKER_LOCK: lock,
+  };
+  try {
+    const r = execFileSync(NODE, [join(ROOT, 'set-status.mjs'), '2', 'Interview', '--dry-run', '--json'], {
+      cwd: ROOT, env, encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const out = JSON.parse(r);
+    // set-status canonicalizes the tracker path (realpath); do the same on the
+    // expected side so a /var → /private/var symlink on macOS is not a failure.
+    if (out.tracker === realpathSync(tracker)) {
+      pass('#3867: set-status resolves the tracker from CAREER_OPS_DATA_DIR/data/applications.md');
+    } else {
+      fail(`#3867: expected tracker ${realpathSync(tracker)}, got ${out.tracker}`);
+    }
+  } catch (e) {
+    fail(`#3867: set-status failed under a split checkout: ${(e.stderr || e.message || '').split('\n')[0]}`);
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
   }
 }
 

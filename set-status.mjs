@@ -95,13 +95,21 @@ import { fileURLToPath } from 'url';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import {
   rebuildRow, resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
   normalizeCompany, cell, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli,
 } from './tracker-utils.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
+// The tracker (and its status-log.tsv / follow-ups.md siblings) is USER data —
+// resolve it from the configured data root (CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR
+// / .career-ops-data), so a split checkout finds the tracker instead of looking
+// for it beside the code (#3867). templates/states.yml is a SYSTEM file and
+// stays bound to the codebase directory — same split as merge-tracker.mjs and
+// normalize-statuses.mjs (#3500).
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
+const STATES_FILE = join(CODE_ROOT, 'templates/states.yml');
 
 // LOCK_TIMEOUT is not destructured here — that exit path is raised inside
 // acquireTrackerLockForCli() itself (tracker-utils.mjs), via CLI_EXIT.LOCK_TIMEOUT.
@@ -260,7 +268,7 @@ if (!newStatus) {
 
 // ── tracker access ───────────────────────────────────────────────
 
-const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+const APPS_FILE = resolveTrackerPath(DATA_ROOT);
 if (!existsSync(APPS_FILE)) {
   failWith(EXIT_NOT_FOUND, 'no-tracker', `No tracker found at ${APPS_FILE}`);
 }
