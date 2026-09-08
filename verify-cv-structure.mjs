@@ -42,6 +42,7 @@ import { isAbsolute, join, dirname, basename } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SOURCE = 'cv.md';
@@ -247,6 +248,10 @@ export function verifyStructure(payload, cvMdText) {
 
 function resolveInputPath(path, cwd = process.cwd()) {
   return isAbsolute(path) ? path : join(cwd, path);
+}
+
+function resolveSourcePath(path) {
+  return isAbsolute(path) ? path : join(getCareerOpsRoot(), path);
 }
 
 function usage() {
@@ -464,6 +469,11 @@ function runSelfTest() {
       writeFileSync(nullEntryPayloadPath, JSON.stringify({ experience: [null, ...correctOrder] }), 'utf-8');
       const nonArrayExperiencePath = join(selfTestDir, 'non-array-experience-payload.json');
       writeFileSync(nonArrayExperiencePath, JSON.stringify({ experience: null }), 'utf-8');
+      const dataRoot = join(selfTestDir, 'data-root');
+      mkdirSync(dataRoot);
+      writeFileSync(join(dataRoot, 'cv.md'), cvMd, 'utf-8');
+      const decoyCwd = join(selfTestDir, 'decoy-cwd');
+      mkdirSync(decoyCwd);
 
       const origError = console.error;
       const origWarn = console.warn;
@@ -471,13 +481,21 @@ function runSelfTest() {
       console.error = () => {};
       console.warn = () => {};
       console.log = () => {};
-      let nullExit, dirSourceExit, nullEntryExit, nonArrayExperienceExit;
+      let nullExit, dirSourceExit, nullEntryExit, nonArrayExperienceExit, dataRootSourceExit;
+      const origCwd = process.cwd();
+      const origDataRoot = process.env.CAREER_OPS_ROOT;
       try {
         nullExit = runCli([nullPayloadPath, '--source', cvMdPath]);
         dirSourceExit = runCli([validPayloadPath, '--source', dirAsSourcePath]);
         nullEntryExit = runCli([nullEntryPayloadPath, '--source', cvMdPath]);
         nonArrayExperienceExit = runCli([nonArrayExperiencePath, '--source', cvMdPath]);
+        process.env.CAREER_OPS_ROOT = dataRoot;
+        process.chdir(decoyCwd);
+        dataRootSourceExit = runCli([validPayloadPath, '--source', 'cv.md']);
       } finally {
+        process.chdir(origCwd);
+        if (origDataRoot === undefined) delete process.env.CAREER_OPS_ROOT;
+        else process.env.CAREER_OPS_ROOT = origDataRoot;
         console.error = origError;
         console.warn = origWarn;
         console.log = origLog;
@@ -486,6 +504,7 @@ function runSelfTest() {
       equal('CLI rejects an unreadable (directory) --source instead of throwing', dirSourceExit, 1);
       equal('CLI rejects a null entry inside payload.experience instead of throwing', nullEntryExit, 1);
       equal('CLI rejects a non-array payload.experience instead of a false pass', nonArrayExperienceExit, 1);
+      equal('CLI resolves a relative --source from the configured data root, not cwd', dataRootSourceExit, 0);
     } finally {
       rmSync(selfTestDir, { recursive: true, force: true });
     }
@@ -539,7 +558,7 @@ export function runCli(args = process.argv.slice(2)) {
     console.error(`ERROR: payload not found: ${targetArg}`);
     return 1;
   }
-  const srcPath = resolveInputPath(sourcePath);
+  const srcPath = resolveSourcePath(sourcePath);
   if (!existsSync(srcPath)) {
     console.error(`ERROR: source not found: ${sourcePath}`);
     return 1;
