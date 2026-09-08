@@ -323,6 +323,16 @@ try {
     fail(`#4004 a determiner-led sibling suppressed a claim that must block: ${JSON.stringify(mixedListFailClosed)}`);
   }
 
+  // A determiner can be the WHOLE fragment, not just its lead: the `for`
+  // lookahead ends the capture at "that", and the split can leave one standing
+  // alone. Requiring trailing whitespace missed both.
+  const bareDeterminer = factClaims('Built this using that for the migration.').filter(claim => claim.kind === 'tool');
+  if (bareDeterminer.length === 0) {
+    pass('#4004 a determiner standing alone is not a tool claim');
+  } else {
+    fail(`#4004 a bare determiner was extracted as a tool: ${JSON.stringify(bareDeterminer)}`);
+  }
+
   // The whole-clause drop is about PROSE triggers: a determiner after "using"
   // or "worked with" says the trigger is ordinary English. A determiner after
   // "Technologies:" says no such thing, because that trigger is a declaration
