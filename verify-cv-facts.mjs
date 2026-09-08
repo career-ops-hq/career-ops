@@ -392,7 +392,14 @@ export function factClaims(text, sourceNormalized = null) {
     for (const match of clean.matchAll(pattern)) {
       const rawText = kind === 'tool' ? match[1].trim() : '';
       const rawValues = kind === 'tool'
-        ? (DETERMINER_LEAD_RE.test(rawText) ? [] : rawText.split(/,|\band\b|\bwith\b|\bin\b/i))
+        // A determiner immediately after the trigger means the trigger is being
+        // used in its ordinary English sense, so the whole clause is prose:
+        // "worked with the team in London" must not yield London. A determiner
+        // LATER in the list taints only its own fragment, so filtering after the
+        // split keeps its siblings, including a name the gate has to block (#4004).
+        ? (DETERMINER_LEAD_RE.test(rawText)
+          ? []
+          : rawText.split(/,|\band\b|\bwith\b|\bin\b/i).filter(raw => !DETERMINER_LEAD_RE.test(raw.trim())))
         : [match[1] || match[2]];
       for (const raw of rawValues) {
         const value = normalizeFact(raw);
