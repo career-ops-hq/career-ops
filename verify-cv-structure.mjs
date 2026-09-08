@@ -10,9 +10,9 @@
  * order are all internally consistent with cv.md's own facts, just not
  * faithful to its structure.
  *
- * Non-blocking by design: the one header shape this understands
- * (`### Company — Location[ · descriptor]`) is a documented personal
- * convention, not a system-wide cv.md spec, so a hard gate here would
+ * Non-blocking by design: the header shapes this understands
+ * (`### Company {—|--|-} Location[ · descriptor]`) are common conventions,
+ * not a system-wide cv.md spec, so a hard gate here would
  * enforce a habit nobody agreed to rather than a real contract. Findings
  * are surfaced as a warning the user reviews, not a failure that stops the
  * pipeline.
@@ -24,9 +24,10 @@
  * entries out of chronological order — none of which verify-cv-facts.mjs
  * is designed to catch, so all three PDFs passed that gate anyway.
  *
- * Only understands one cv.md dialect: `### Company — Location[ · descriptor]`
- * headers (em dash). That shape is a documented personal convention, not a
- * system-wide cv.md spec, so a cv.md written any other way parses to zero
+ * Understands `## Experience` and `## Work Experience` sections whose entry
+ * headers use an em dash, double hyphen, or single hyphen between company and
+ * location. These are common conventions, not a system-wide cv.md spec, so a
+ * cv.md written another way parses to zero
  * entries — with nothing to compare against, this reports UNVERIFIED (exit 0)
  * rather than a false "passed", so a format mismatch warns instead of either
  * silently no-opping or blocking every user whose cv.md looks different.
@@ -36,7 +37,7 @@
  *   node verify-cv-structure.mjs --self-test
  */
 
-import { existsSync, readFileSync, mkdtempSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { isAbsolute, join, dirname, basename } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
@@ -46,11 +47,12 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SOURCE = 'cv.md';
 
 /**
- * Parse cv.md's `## Experience` entries from its `### Company — Location[
- * · descriptor]` headers, in file order (which IS the ground-truth
+ * Parse cv.md's `## Experience` or `## Work Experience` entries from its
+ * `### Company {—|--|-} Location[ · descriptor]` headers, in file order
+ * (which IS the ground-truth
  * chronological order — cv.md is user-authored, never generated).
  *
- * Scoped to the `## Experience` section only, up to the next level-2
+ * Scoped to the recognized Experience section only, up to the next level-2
  * heading: a `### University — City, ST`-shaped header under `## Education`
  * (or any other section) would otherwise parse as a phantom experience
  * entry, capable of triggering a false order/descriptor warning if its name
@@ -61,7 +63,7 @@ const DEFAULT_SOURCE = 'cv.md';
  */
 export function parseCvMdExperience(cvMdText) {
   const entries = [];
-  const sectionHeadingRe = /^##\s+Experience\s*$/m;
+  const sectionHeadingRe = /^##\s+(?:Work\s+)?Experience\s*$/mi;
   const sectionMatch = sectionHeadingRe.exec(cvMdText);
   if (!sectionMatch) return entries;
   const sectionStart = sectionMatch.index + sectionMatch[0].length;
@@ -69,7 +71,7 @@ export function parseCvMdExperience(cvMdText) {
   const rest = cvMdText.slice(sectionStart);
   const nextSectionMatch = nextSectionRe.exec(rest);
   const section = nextSectionMatch ? rest.slice(0, nextSectionMatch.index) : rest;
-  const headerRe = /^###\s+(.+?)\s+—\s+(.+)$/gm;
+  const headerRe = /^###\s+(.+?)\s+(?:—|--|-)\s+(.+)$/gm;
   let match;
   while ((match = headerRe.exec(section))) {
     entries.push({ company: match[1].trim(), location: match[2].trim() });
@@ -107,15 +109,27 @@ function companiesMatch(payloadCompany, cvMdCompany) {
  * match) instead of its own "Acme Labs" entry, letting a genuinely swapped
  * "Acme"/"Acme Labs" pair slip past the order check.
  *
- * @param {{company: string}[]} entries
- * @param {string} company
+ * A fuzzy candidate is rejected when its name has an exact match on the
+ * source side. That prevents an omitted "Acme" from borrowing the retained
+ * "Acme Labs" payload entry when cv.md contains both companies; "Acme Labs"
+ * belongs to its own exact source entry. Expansion forms such as
+ * "Early Career — Acme, Globex" still fall back because no source entry owns
+ * that full expanded name.
+ *
+ * @param {{company: string}[]} entries entries on the side being searched
+ * @param {string} company company name from the source side
+ * @param {{company: string}[]} sourceEntries all entries on the source side
  * @returns {number} index in entries, or -1 if nothing matches
  */
-function findCompanyIndex(entries, company) {
+function findCompanyIndex(entries, company, sourceEntries = []) {
   const target = normalizeCompany(company);
   const exactIndex = entries.findIndex((e) => normalizeCompany(e.company) === target);
   if (exactIndex !== -1) return exactIndex;
-  return entries.findIndex((e) => companiesMatch(company, e.company));
+  const sourceExactNames = new Set(sourceEntries.map((e) => normalizeCompany(e.company)));
+  return entries.findIndex((e) => {
+    const candidate = normalizeCompany(e.company);
+    return companiesMatch(company, e.company) && !sourceExactNames.has(candidate);
+  });
 }
 
 /**
@@ -130,7 +144,7 @@ function findCompanyIndex(entries, company) {
  */
 export function checkExperienceOrder(payloadExperience, cvMdExperience) {
   const violations = [];
-  const cvMdIndexOf = (company) => findCompanyIndex(cvMdExperience, company);
+  const cvMdIndexOf = (company) => findCompanyIndex(cvMdExperience, company, payloadExperience);
   const resolved = payloadExperience
     .map((e, payloadIndex) => ({ payloadIndex, company: e.company, cvMdIndex: cvMdIndexOf(e.company) }))
     .filter((e) => e.cvMdIndex !== -1);
@@ -165,7 +179,7 @@ export function checkLocationDescriptors(payloadExperience, cvMdExperience) {
     const descriptorMatch = cvMdEntry.location.match(/·\s*(.+)$/);
     if (!descriptorMatch) continue; // cv.md itself has no descriptor for this entry — nothing to lose
     const descriptor = descriptorMatch[1].trim();
-    const payloadIndex = findCompanyIndex(payloadExperience, cvMdEntry.company);
+    const payloadIndex = findCompanyIndex(payloadExperience, cvMdEntry.company, cvMdExperience);
     const payloadEntry = payloadIndex === -1 ? undefined : payloadExperience[payloadIndex];
     if (!payloadEntry) continue; // entry omitted entirely from this tailored CV — a legitimate choice, not this check's concern
     const payloadLocation = String(payloadEntry.location || '');
@@ -179,10 +193,10 @@ export function checkLocationDescriptors(payloadExperience, cvMdExperience) {
 /**
  * Run both structural checks against a tailored CV JSON payload.
  *
- * This gate only understands one cv.md dialect: `### Company — Location[ ·
- * descriptor]` headers (em dash, optional middle-dot descriptor suffix). That
- * is a documented personal convention (modes/_custom.md), not a system-wide
- * cv.md spec — AGENTS.md only requires "clean markdown, standard sections."
+ * This gate understands `## Experience` and `## Work Experience` sections
+ * whose `### Company {—|--|-} Location[ · descriptor]` headers use an em dash,
+ * double hyphen, or single hyphen. Those are common conventions, not a
+ * system-wide cv.md spec — AGENTS.md only requires "clean markdown, standard sections."
  * A cv.md written any other way parses to zero entries, and with nothing to
  * compare the payload against, both checks trivially find no violations. A
  * bare 'pass' there would be a false "verified" — the gate ran, found
@@ -253,10 +267,10 @@ file, invalid JSON, or a malformed payload shape (a non-object payload, or a
 non-array/non-object payload.experience) exit 1 instead: those mean the
 check itself could not run, not that it found something to review.
 
-Only understands cv.md Experience headers of the exact shape
-"### Company — Location[ · descriptor]" (em dash). A cv.md written any other
-way parses to zero entries; the check then reports UNVERIFIED rather than a
-false "passed".`;
+Understands "## Experience" and "## Work Experience" sections whose company
+headers use an em dash, double hyphen, or single hyphen before the location.
+A cv.md written another way parses to zero entries; the check then reports
+UNVERIFIED rather than a false "passed".`;
 }
 
 function runSelfTest() {
@@ -342,9 +356,9 @@ function runSelfTest() {
   equal('an entry cv.md never gave a descriptor has nothing to check',
     verifyStructure({ experience: noDescriptorInSource }, cvMd).verdict, 'pass');
 
-  // A cv.md that doesn't use this gate's one recognized header shape (a plain
-  // "-" instead of "—", a different heading level, prose instead of headers,
-  // or simply no Experience section at all) parses to zero entries. With
+  // A cv.md that doesn't use a recognized header shape (a different heading
+  // level, prose instead of headers, or simply no Experience section at all)
+  // parses to zero entries. With
   // nothing to compare against, a bare 'pass' would be a false "verified" —
   // this must report 'unverified' instead, and never fabricate a violation
   // against entries it never actually saw.
@@ -354,6 +368,25 @@ function runSelfTest() {
     unverifiedResult.verdict, 'unverified');
   equal('unverified result names no violations (nothing was actually checked)',
     unverifiedResult.orderViolations.length + unverifiedResult.descriptorViolations.length, 0);
+
+  // The example CV is the format shipped to users: "## Work Experience" and
+  // double-hyphen company/location separators. It must be checked rather than
+  // producing the default-input UNVERIFIED warning.
+  const shippedCvMd = readFileSync(join(ROOT, 'examples', 'cv-example.md'), 'utf-8');
+  const shippedEntries = parseCvMdExperience(shippedCvMd);
+  equal('shipped example parses both Work Experience entries',
+    shippedEntries.map((e) => e.company), ['TechFin Corp', 'DataStartup Inc']);
+  equal('shipped example format produces a real structural verdict',
+    verifyStructure({ experience: shippedEntries }, shippedCvMd).verdict, 'pass');
+
+  const singleHyphenCvMd = [
+    '## Experience',
+    '',
+    '### Single Hyphen Co - Remote · developer tools',
+  ].join('\n');
+  equal('single-hyphen company/location separator is recognized',
+    parseCvMdExperience(singleHyphenCvMd),
+    [{ company: 'Single Hyphen Co', location: 'Remote · developer tools' }]);
 
   // A "### Company — Location" header outside the Experience section (e.g.
   // a degree entry under Education) must not be parsed as an experience
@@ -392,45 +425,70 @@ function runSelfTest() {
     prefixCollisionResult.orderViolations,
     ['"Acme Corp" is rendered before "Acme", but cv.md has them in the opposite order']);
 
+  // A fuzzy candidate that has its own exact source entry is unavailable to
+  // an omitted sibling. Without this guard, omitted "Acme" borrows retained
+  // "Acme Labs" and reports a descriptor that was never dropped.
+  const omittedPrefixCvMd = [
+    '## Experience',
+    '',
+    '### Acme — City One, ST · consumer marketplace',
+    '',
+    '**Engineer** · Jan 2018 – Jan 2020',
+    '',
+    '### Acme Labs — City Two, ST · AI tooling',
+    '',
+    '**Senior Engineer** · Jan 2020 – present',
+  ].join('\n');
+  const onlyAcmeLabs = [
+    { company: 'Acme Labs', location: 'City Two, ST · AI tooling' },
+  ];
+  equal('omitted Acme does not fuzzy-match retained Acme Labs',
+    verifyStructure({ experience: onlyAcmeLabs }, omittedPrefixCvMd),
+    { verdict: 'pass', orderViolations: [], descriptorViolations: [] });
+
   // CLI-level regression tests: the null-payload and unreadable-source
   // guards live in runCli(), not verifyStructure(), so exercise them
   // in-process against real temp files rather than as in-memory unit tests.
   {
     const selfTestDir = mkdtempSync(join(tmpdir(), 'verify-cv-structure-selftest-'));
-    const cvMdPath = join(selfTestDir, 'cv.md');
-    writeFileSync(cvMdPath, cvMd, 'utf-8');
-    const nullPayloadPath = join(selfTestDir, 'null-payload.json');
-    writeFileSync(nullPayloadPath, 'null', 'utf-8');
-    const validPayloadPath = join(selfTestDir, 'valid-payload.json');
-    writeFileSync(validPayloadPath, JSON.stringify({ experience: correctOrder }), 'utf-8');
-    const dirAsSourcePath = join(selfTestDir, 'a-directory-not-a-file');
-    mkdirSync(dirAsSourcePath);
-    const nullEntryPayloadPath = join(selfTestDir, 'null-entry-payload.json');
-    writeFileSync(nullEntryPayloadPath, JSON.stringify({ experience: [null, ...correctOrder] }), 'utf-8');
-    const nonArrayExperiencePath = join(selfTestDir, 'non-array-experience-payload.json');
-    writeFileSync(nonArrayExperiencePath, JSON.stringify({ experience: null }), 'utf-8');
-
-    const origError = console.error;
-    const origWarn = console.warn;
-    const origLog = console.log;
-    console.error = () => {};
-    console.warn = () => {};
-    console.log = () => {};
-    let nullExit, dirSourceExit, nullEntryExit, nonArrayExperienceExit;
     try {
-      nullExit = runCli([nullPayloadPath, '--source', cvMdPath]);
-      dirSourceExit = runCli([validPayloadPath, '--source', dirAsSourcePath]);
-      nullEntryExit = runCli([nullEntryPayloadPath, '--source', cvMdPath]);
-      nonArrayExperienceExit = runCli([nonArrayExperiencePath, '--source', cvMdPath]);
+      const cvMdPath = join(selfTestDir, 'cv.md');
+      writeFileSync(cvMdPath, cvMd, 'utf-8');
+      const nullPayloadPath = join(selfTestDir, 'null-payload.json');
+      writeFileSync(nullPayloadPath, 'null', 'utf-8');
+      const validPayloadPath = join(selfTestDir, 'valid-payload.json');
+      writeFileSync(validPayloadPath, JSON.stringify({ experience: correctOrder }), 'utf-8');
+      const dirAsSourcePath = join(selfTestDir, 'a-directory-not-a-file');
+      mkdirSync(dirAsSourcePath);
+      const nullEntryPayloadPath = join(selfTestDir, 'null-entry-payload.json');
+      writeFileSync(nullEntryPayloadPath, JSON.stringify({ experience: [null, ...correctOrder] }), 'utf-8');
+      const nonArrayExperiencePath = join(selfTestDir, 'non-array-experience-payload.json');
+      writeFileSync(nonArrayExperiencePath, JSON.stringify({ experience: null }), 'utf-8');
+
+      const origError = console.error;
+      const origWarn = console.warn;
+      const origLog = console.log;
+      console.error = () => {};
+      console.warn = () => {};
+      console.log = () => {};
+      let nullExit, dirSourceExit, nullEntryExit, nonArrayExperienceExit;
+      try {
+        nullExit = runCli([nullPayloadPath, '--source', cvMdPath]);
+        dirSourceExit = runCli([validPayloadPath, '--source', dirAsSourcePath]);
+        nullEntryExit = runCli([nullEntryPayloadPath, '--source', cvMdPath]);
+        nonArrayExperienceExit = runCli([nonArrayExperiencePath, '--source', cvMdPath]);
+      } finally {
+        console.error = origError;
+        console.warn = origWarn;
+        console.log = origLog;
+      }
+      equal('CLI rejects a null JSON payload instead of throwing', nullExit, 1);
+      equal('CLI rejects an unreadable (directory) --source instead of throwing', dirSourceExit, 1);
+      equal('CLI rejects a null entry inside payload.experience instead of throwing', nullEntryExit, 1);
+      equal('CLI rejects a non-array payload.experience instead of a false pass', nonArrayExperienceExit, 1);
     } finally {
-      console.error = origError;
-      console.warn = origWarn;
-      console.log = origLog;
+      rmSync(selfTestDir, { recursive: true, force: true });
     }
-    equal('CLI rejects a null JSON payload instead of throwing', nullExit, 1);
-    equal('CLI rejects an unreadable (directory) --source instead of throwing', dirSourceExit, 1);
-    equal('CLI rejects a null entry inside payload.experience instead of throwing', nullEntryExit, 1);
-    equal('CLI rejects a non-array payload.experience instead of a false pass', nonArrayExperienceExit, 1);
   }
 
   // verifyStructure() itself must not silently coerce a present, non-array
@@ -523,8 +581,8 @@ export function runCli(args = process.argv.slice(2)) {
   const result = verifyStructure(payload, cvMdText);
   if (result.verdict === 'unverified') {
     console.warn(`⚠️  CV structure check UNVERIFIED: ${basename(targetPath)}`);
-    console.warn(`Could not find any "### Company — Location" headers in ${sourcePath} — nothing was checked.`);
-    console.warn('This gate only understands that one cv.md format; review the tailored CV structure manually.');
+    console.warn(`Could not find supported company/location headers in ${sourcePath} — nothing was checked.`);
+    console.warn('Expected an Experience or Work Experience section with em-dash or hyphen-separated headers; review the tailored CV structure manually.');
     return 0;
   }
   if (result.verdict === 'pass') {
