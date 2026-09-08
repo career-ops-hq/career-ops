@@ -139,7 +139,50 @@ console.log('\n🧪 Local user-paths declaration file (#2421)\n');
   }
 }
 
-// ── 8. Absolute paths and parent-directory escapes are refused ──
+// ── 8. An ancestor of a SYSTEM_PATHS entry is refused too ──
+//    A local declaration is consumed as a protected path later in apply().
+//    Declaring `modes/` used to pass this validation because the manifest
+//    lists its children, then made the later manifest guard reject every
+//    shipped child instead of reporting the bad declaration here.
+{
+  const collisions = [
+    ['modes/', 'a system-directory ancestor'],
+    ['modes', 'the same ancestor without its directory marker'],
+    ['merge-tracker.mjs/child', 'a child below a system file'],
+    ['te\u017Fts/', 'a Unicode case-folded alias of a system directory'],
+  ];
+  const survivors = [];
+  for (const [path, shape] of collisions) {
+    let threw = null;
+    try {
+      localUserPaths(root(`${path}\n`));
+    } catch (err) {
+      threw = err;
+    }
+    if (!threw || !threw.message.includes(path)) survivors.push(`${shape} → ${path}`);
+  }
+  if (survivors.length === 0) {
+    pass('system-path ancestors and descendants are refused at declaration time');
+  } else {
+    fail(`#8 accepted system overlaps: ${survivors.join('; ')}`);
+  }
+
+  const neighbours = ['modes-local/', 'merge-tracker.mjs.local'];
+  let problem = null;
+  try {
+    const got = localUserPaths(root(`${neighbours.join('\n')}\n`));
+    if (!eq(got, neighbours)) problem = `returned ${JSON.stringify(got)}`;
+  } catch (err) {
+    problem = err.message;
+  }
+  if (!problem) {
+    pass('prefix-sharing but non-overlapping local declarations remain valid');
+  } else {
+    fail(`#8 rejected valid system-path neighbours: ${problem}`);
+  }
+}
+
+// ── 9. Absolute paths and parent-directory escapes are refused ──
 //    The declaration is a repo-relative statement about this checkout. A path
 //    that leaves it can only widen the "never touch" set over files the
 //    updater does not own.
@@ -328,13 +371,11 @@ console.log('\n🧪 Local user-paths declaration file (#2421)\n');
 
 // ── 19. Non-canonical spellings of a system path are refused ──
 //
-// The collision check compares strings exactly (`path === sys`), and
-// userLayerViolations() later compares against git's changed-path format, which
-// is always canonical. A declaration written as `./merge-tracker.mjs` therefore
-// matches NEITHER: the collision check waves it through, and the safety check
-// never recognises it as the file it names. The declaration silently protects
-// nothing and the updater overwrites the file — the exact data loss #2421
-// exists to prevent, reachable from a plausible typo.
+// userLayerViolations() compares against git's changed-path format, which is
+// always canonical. A declaration written as `./merge-tracker.mjs` is never
+// recognised as the file it names when the safety check runs. The declaration
+// silently protects nothing and the updater overwrites the file — the exact
+// data loss #2421 exists to prevent, reachable from a plausible typo.
 //
 // Canonical syntax is REQUIRED rather than normalised, because normalising
 // would quietly accept several spellings for one path and leave this file

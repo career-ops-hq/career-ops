@@ -10,7 +10,12 @@
 import { readFileSync, existsSync, rmSync } from 'fs';
 import { execFileSync, spawnSync } from 'child_process';
 import { dirname } from 'path';
-import { createReexecMarker, consumeReexecMarker } from './update-system.mjs';
+import {
+  MANIFEST_USER_PATH_OVERLAPS,
+  createReexecMarker,
+  consumeReexecMarker,
+  isSafeManifestPath,
+} from './update-system.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -275,12 +280,20 @@ const twoPassManifestChecks = [
     pattern: /CAREER_OPS_UPDATE_REEXEC/,
   },
   {
-    name: 'apply resolves the re-exec checkout closure from FETCH_HEAD (#1245)',
-    pattern: /resolveReexecCheckout\('FETCH_HEAD',\s*'update-system\.mjs'\)/,
+    name: 'apply resolves the re-exec checkout closure from the durable paired target (#1245)',
+    pattern: /resolveReexecCheckout\(targetRef,\s*'update-system\.mjs'\)/,
   },
   {
-    name: 'apply checks out the resolved re-exec files from FETCH_HEAD (#1245)',
-    pattern: /git\('checkout',\s*'FETCH_HEAD',\s*'--',\s*\.\.\.reexecFiles\)/,
+    name: 'apply checks out the resolved re-exec files literally from the durable paired target (#1245)',
+    pattern: /git\('--literal-pathspecs',\s*'checkout',\s*targetRef,\s*'--',\s*\.\.\.reexecFiles\)/,
+  },
+  {
+    name: 'apply validates the self-bootstrap import closure against protected user paths',
+    pattern: /const reexecFiles = assertSafeManifestPaths\([\s\S]{0,240}?resolveReexecCheckout\(targetRef,\s*'update-system\.mjs'\)[\s\S]{0,240}?'Target updater import closure'/,
+  },
+  {
+    name: 'apply rejects self-bootstrap files outside the validated merged manifest',
+    pattern: /uncoveredReexecFiles = reexecFiles\.filter\([\s\S]{0,200}?pathMatchesManifest\(file, path\)[\s\S]{0,240}?uncoveredReexecFiles\.length > 0/,
   },
   {
     name: 're-exec fallback still covers the skill-entrypoints import (#1245)',
@@ -292,11 +305,15 @@ const twoPassManifestChecks = [
   },
   {
     name: 'apply carries the original backup branch across re-exec',
-    pattern: /CAREER_OPS_UPDATE_BACKUP_BRANCH/,
+    pattern: /CAREER_OPS_UPDATE_BACKUP_BRANCH:\s*backupBranch/,
   },
   {
-    name: 'apply reads the target updater manifest from FETCH_HEAD',
-    pattern: /git\('show',\s*'FETCH_HEAD:update-system\.mjs'\)/,
+    name: 'authenticated re-exec consumes the inherited backup branch instead of generating another',
+    pattern: /const inheritedBackupBranch = process\.env\.CAREER_OPS_UPDATE_BACKUP_BRANCH[^;]*;[\s\S]{0,160}?const backupBranch = isReexec \? inheritedBackupBranch : updateBackupBranchName\(local\)/,
+  },
+  {
+    name: 'apply reads the target updater manifest from the durable paired target',
+    pattern: /git\('show',\s*`\$\{targetRef\}:update-system\.mjs`\)/,
   },
   {
     name: 'apply extracts SYSTEM_PATHS from the target updater',
@@ -319,8 +336,20 @@ const twoPassManifestChecks = [
     pattern: /git\('commit',\s*'-m',[^)]+'--',\s*\.\.\.expandedPathsToStage\)/,
   },
   {
-    name: 'rollback commit is scoped to expanded backup files, not directories (#3504)',
-    pattern: /git\('commit',\s*'-m',[^)]+'--',\s*\.\.\.expandedRollbackPaths\)/,
+    name: 'rollback expands backup and target manifests to safe concrete tree files',
+    pattern: /const backupFiles = manifestTreeFiles\(restoreCandidates, latest,[\s\S]{0,1400}?targetFiles = manifestTreeFiles\(safeTargetPaths, targetRef/,
+  },
+  {
+    name: 'rollback restores and stages only concrete backup files',
+    pattern: /if \(restored\.length > 0\) addPaths\(restored\)/,
+  },
+  {
+    name: 'rollback removes only concrete target files absent from the backup tree',
+    pattern: /targetFiles\.filter\(\(file\) => !backupFileSet\.has\(file\)\)/,
+  },
+  {
+    name: 'rollback commit is scoped to concrete restore/removal files under literal pathspecs (#3504)',
+    pattern: /git\('--literal-pathspecs',\s*'commit',\s*'-m',[^)]*'--',\s*\.\.\.concreteRollbackPaths\)/,
   },
   {
     name: 'apply captures uncommitted work via git stash create before branching (#915)',
@@ -331,7 +360,7 @@ const twoPassManifestChecks = [
     // paths, so everything added upstream since is silently absent and apply
     // still printed "Update complete" (#1998).
     name: 'apply verifies the target manifest materialized before claiming success (#1998)',
-    pattern: /missingFromTargetManifest\(remoteSystemPaths\)/,
+    pattern: /missingFromTargetManifest\(remoteSystemPaths,\s*targetRef\)/,
   },
   {
     name: 'an incomplete apply exits non-zero instead of reporting success (#1998)',
@@ -343,13 +372,13 @@ const twoPassManifestChecks = [
     // The trailing spread is the #2337 preserve-exclusions; the property this
     // pins is the runner (gitQuiet, not git) and the ref, not the arity.
     name: 'per-path checkout pipes stderr so expected skips stay quiet (#1998)',
-    pattern: /gitQuiet\('checkout',\s*'FETCH_HEAD',\s*'--',\s*path(?:,\s*\.\.\.\w+)?\)/,
+    pattern: /gitQuiet\('checkout',\s*targetRef,\s*'--',\s*path(?:,\s*\.\.\.\w+)?\)/,
   },
   {
     // #2337: a system file this install edited must be listed and backed up
     // before the checkout, not overwritten in silence.
     name: 'locally edited system files are detected before checkout (#2337)',
-    pattern: /const atRisk = locallyModifiedSystemFiles\(updatePaths, 'FETCH_HEAD'\)/,
+    pattern: /const atRisk = locallyModifiedSystemFiles\(updatePaths, targetRef\)/,
   },
   {
     name: 'the local copy is saved as .bak before any overwrite (#2337)',
@@ -374,13 +403,14 @@ const twoPassManifestChecks = [
   {
     // existsSync on a pre-existing directory (docs/) would call it materialized
     // even when the target added files under it — the verification must recurse
-    // into directory entries against FETCH_HEAD (#1998 CodeRabbit review).
+    // into directory entries against the durable paired target (#1998
+    // CodeRabbit review).
     name: 'manifest verification recurses into directory entries via ls-tree (#1998)',
-    pattern: /ls-tree', '-r', '--name-only', 'FETCH_HEAD'[\s\S]{0,400}?treeFiles\.some\(f => !existsSync/,
+    pattern: /ls-tree', '-r', '--name-only', targetRef[\s\S]{0,400}?treeFiles\.some\(f => !existsSync/,
   },
   {
     // A checkout failure is only an expected skip when the path is truly absent
-    // from FETCH_HEAD; timeouts/permission errors must rethrow, not report
+    // from the durable paired target; timeouts/permission errors must rethrow, not report
     // success (#1998 CodeRabbit review).
     name: 'a checkout failure only skips when the path is absent upstream, else rethrows (#1998)',
     pattern: /catch \{ absentUpstream = true; \}\s*if \(!absentUpstream\) throw err;/,
@@ -425,6 +455,73 @@ for (const check of twoPassManifestChecks) {
   else fail(check.name);
 }
 
+function appearsInOrder(text, tokens) {
+  let cursor = 0;
+  for (const token of tokens) {
+    const index = text.indexOf(token, cursor);
+    if (index === -1) return false;
+    cursor = index + token.length;
+  }
+  return true;
+}
+
+const applyStart = source.indexOf('async function apply()');
+const rollbackMarker = source.indexOf('// ── ROLLBACK', applyStart);
+const rollbackStart = source.indexOf('function rollback()', rollbackMarker);
+const dismissMarker = source.indexOf('// ── DISMISS', rollbackStart);
+const applySource = applyStart >= 0 && rollbackMarker > applyStart
+  ? source.slice(applyStart, rollbackMarker)
+  : '';
+const rollbackSource = rollbackStart >= 0 && dismissMarker > rollbackStart
+  ? source.slice(rollbackStart, dismissMarker)
+  : '';
+
+const fetchCall = "git('fetch', CANONICAL_REPO, 'main');";
+const pairCall = "git('update-ref', targetRef, 'FETCH_HEAD');";
+const fetchAt = applySource.indexOf(fetchCall);
+const pairAt = applySource.indexOf(pairCall, fetchAt + fetchCall.length);
+const gitBetweenFetchAndPair = fetchAt >= 0 && pairAt >= 0
+  ? /\b(?:git|gitQuiet|gitShowRaw|runGit|gitIn|gitRawIn)\(/.test(
+      applySource.slice(fetchAt + fetchCall.length, pairAt),
+    )
+  : true;
+if (appearsInOrder(applySource, [
+  fetchCall,
+  'const targetRef = targetRefForBackup(backupBranch);',
+  pairCall,
+]) && !gitBetweenFetchAndPair) {
+  pass('apply pins FETCH_HEAD to the backup-paired target ref immediately after the canonical fetch');
+} else {
+  fail('apply does not pin the canonical fetch to its backup-paired target before another git operation');
+}
+
+if (appearsInOrder(applySource, [
+  pairCall,
+  "remoteUpdaterSource = git('show', `${targetRef}:update-system.mjs`);",
+  "remoteSystemPaths = assertSafeManifestPaths(remoteSystemPaths, manifestUserPaths, 'Target SYSTEM_PATHS');",
+  'const updatePaths = assertSafeManifestPaths(',
+  "'Merged updater manifest',",
+  "resolveReexecCheckout(targetRef, 'update-system.mjs')",
+  "'Target updater import closure',",
+  'uncoveredReexecFiles.length > 0',
+  "git('--literal-pathspecs', 'checkout', targetRef, '--', ...reexecFiles)",
+])) {
+  pass('apply validates target and merged manifests before any self-bootstrap checkout');
+} else {
+  fail('apply does not validate target and merged manifests before self-bootstrap checkout');
+}
+
+if (appearsInOrder(rollbackSource, [
+  'targetRef = targetRefForBackup(latest);',
+  "git('show-ref', '--verify', '--quiet', targetRef);",
+  "git('show', `${targetRef}:update-system.mjs`);",
+  'manifestTreeFiles(safeTargetPaths, targetRef, userPaths,',
+]) && !/\b(?:git|gitQuiet|gitShowRaw)\([^)]*\bFETCH_HEAD\b[^)]*\)/s.test(rollbackSource)) {
+  pass('rollback derives target removals only from the durable backup-paired ref, never FETCH_HEAD');
+} else {
+  fail('rollback can derive target removals from a mutable or unpaired ref');
+}
+
 // #1706: update-system.mjs must be self-loading — no static (top-level) relative
 // imports. A pre-#1245 client's apply() self-reexec checks out ONLY
 // update-system.mjs before re-execing it, so any top-level `import ... from
@@ -443,30 +540,20 @@ for (const userPath of ['cv.md', 'config/profile.yml', 'modes/_profile.md', 'por
   else fail(`USER_PATHS missing ${userPath}`);
 }
 
-const allowedSystemUserOverlap = new Set([
-  'writing-samples/README.md',
-  // System-owned scaffold inside the user-layer interview-prep/ dir (#1242):
-  // the updater ships these two, but never the real session files alongside them.
-  'interview-prep/sessions/.gitkeep',
-  'interview-prep/sessions/README.md',
-  // Same pattern for the user-layer documents/ intake dir (#1723): the
-  // updater ships the scaffold, never the user's source documents.
-  'documents/.gitkeep',
-  'documents/README.md',
-]);
-let hasSystemUserCollision = false;
+for (const overlap of MANIFEST_USER_PATH_OVERLAPS) {
+  if (systemPaths.includes(overlap)) pass(`SYSTEM_PATHS includes documented user-layer scaffold ${overlap}`);
+  else fail(`SYSTEM_PATHS missing documented user-layer scaffold ${overlap}`);
+}
+
+let hasUnsafeSystemPath = false;
 for (const systemPath of systemPaths) {
-  const overlapsUserPath = userPaths.some((userPath) => {
-    if (allowedSystemUserOverlap.has(systemPath)) return false;
-    return systemPath === userPath || systemPath.startsWith(userPath);
-  });
-  if (overlapsUserPath) {
-    hasSystemUserCollision = true;
-    fail(`SYSTEM_PATHS must not update user path ${systemPath}`);
+  if (!isSafeManifestPath(systemPath, userPaths)) {
+    hasUnsafeSystemPath = true;
+    fail(`SYSTEM_PATHS must not update unsafe or protected path ${systemPath}`);
   }
 }
-if (!hasSystemUserCollision) {
-  pass('SYSTEM_PATHS does not collide with USER_PATHS');
+if (!hasUnsafeSystemPath) {
+  pass('SYSTEM_PATHS passes the production canonical path policy');
 }
 
 if (failed > 0) {

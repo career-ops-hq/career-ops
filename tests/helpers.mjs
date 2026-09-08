@@ -601,24 +601,26 @@ export async function captureConsoleErrors(fn) {
 }
 
 /**
- * Build a throwaway git repository for the two updater suites that drive git
- * through the `gitIn` seam (`updater-add-paths`, `updater-is-tracked`). Only
- * the first asserts on ignore RESOLUTION; the second writes its own .gitignore
- * and then asks about index membership, which is a different question.
+ * Build a throwaway git repository for the updater suites that drive git
+ * through the `gitIn` seam (`updater-add-paths`, `updater-is-tracked`, and
+ * `updater-rollback-target-manifest`). The first asserts on ignore RESOLUTION;
+ * the second writes its own .gitignore and asks about index membership; the
+ * third builds real backup/target commits and invokes the rollback CLI.
  *
  * The pins below are the reason this is shared rather than copied, but they are
- * not all load-bearing for both callers, and this docstring should not imply
+ * not all load-bearing for every caller, and this docstring should not imply
  * otherwise. Mutation-tested by dropping each pin under a GIT_CONFIG_GLOBAL it
  * exists to neutralise:
  *
  *   - `commit.gpgsign=false` and `core.hooksPath` → an empty dir. Either one
  *     inherited from the environment breaks every commit the fixtures make.
- *     Dropping either reddens BOTH suites.
+ *     Dropping either reddens all three suites.
  *   - `core.excludesFile` → an empty file. A global ignore rule silently alters
  *     what is measured (the failure mode reported in #2269). Dropping it reddens
  *     updater-add-paths only: updater-is-tracked writes its own .gitignore and
- *     then reads index membership, which a global rule does not move. Kept for
- *     both as a defensive pin, proven by one.
+ *     then reads index membership, while updater-rollback-target-manifest stages
+ *     snapshots with `git add -A`. Kept for all three as a defensive pin,
+ *     proven by one.
  *
  * Point `core.excludesFile` at an empty file rather than /dev/null: git on
  * Windows maps that to `nul` and dies with "fatal: cannot use nul as an
