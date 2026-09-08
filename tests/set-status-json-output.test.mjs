@@ -154,6 +154,5 @@ try {
   }
 
 } finally {
-  console.log(`Temporary test directory: ${work}`);
-  // rmSync(work, { recursive: true, force: true });    uncomment it for auto cleanup of files
+  rmSync(work, { recursive: true, force: true });
 }
