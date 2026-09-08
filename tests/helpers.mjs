@@ -656,6 +656,7 @@ export function makeUpdaterRepo(gitIn, { prefix = 'co-updater-', includeRoot = f
   const dir = mkdtempSync(join(tmpdir(), prefix));
   const g = (...args) => gitIn(dir, ...args);
   g('init', '-q', '-b', 'main', '.');
+  g('config', 'core.autocrlf', 'false');
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
   const emptyExcludes = join(dir, '.git', 'co-empty-excludes');
