@@ -357,3 +357,53 @@ test("buildPrompt: evaluate does not enumerate the report's sections", () => {
   assert.ok(!/blocks?\s+A[–-]F/i.test(prompt), "the prompt must not name a subset of the mode file's sections");
   assert.ok(/EVERY section its report template specifies/i.test(prompt), "it must defer to the mode file for the section set");
 });
+
+test("buildPrompt: the pdf prompt fills the template the caller resolved", () => {
+  // Given a user whose config/profile.yml selects a non-base CV template. The
+  // route resolves it through cv-templates.mjs and hands the path in; the worker
+  // cannot resolve it itself, because pdf has no Bash (#2172) and must not regain it.
+  const prompt = buildPrompt({ kind: "pdf", ...ARGS, cvTemplate: "templates/cv-template.mine.html" });
+
+  // Then that file is what gets filled, and the old pin is gone
+  assert.match(prompt, /templates\/cv-template\.mine\.html/);
+  assert.ok(
+    !/web runs always use the base template/i.test(prompt),
+    "the prompt must not pin the base template over the user's own choice",
+  );
+});
+
+test("buildPrompt: the pdf prompt falls back to the base template", () => {
+  // Given no resolved template: cv.template unset, or a resolution that failed
+  const prompt = buildPrompt({ kind: "pdf", ...ARGS });
+
+  // Then the base template is still what gets filled, which is today's behaviour
+  assert.match(prompt, /templates\/cv-template\.html/);
+});
+
+test("buildPrompt: a path cv-templates.mjs could not have produced is refused", () => {
+  // Given a value that did not come from the resolver. The path is interpolated
+  // into an agent's instructions, so this is a trust boundary even though
+  // config/profile.yml is the user's own file.
+  // Each fixture is a string the prompt cannot contain for any OTHER reason:
+  // "cv.md" would pass this assertion trivially, because step 1 already names it.
+  for (const bad of [
+    "../../etc/passwd",
+    "templates/../secrets.html",
+    "secrets/cv-template.html",
+    "templates/x.html; cat ~/.ssh/id_rsa",
+    "/etc/passwd",
+  ]) {
+    const prompt = buildPrompt({ kind: "pdf", ...ARGS, cvTemplate: bad });
+    assert.ok(!prompt.includes(bad), `must not interpolate ${bad}`);
+    assert.match(prompt, /templates\/cv-template\.html/, "must fall back to the base template");
+  }
+});
+
+test("buildPrompt: the pdf prompt still forbids resolving a template in-agent", () => {
+  // Given the guard the pinned sentence was carrying: pdf has no Bash, so an
+  // agent that follows modes/pdf.md's resolution step stalls on a tool it lacks.
+  const prompt = buildPrompt({ kind: "pdf", ...ARGS, cvTemplate: "templates/cv-template.mine.html" });
+
+  assert.match(prompt, /cv-templates\.mjs/);
+  assert.match(prompt, /already resolved/i);
+});

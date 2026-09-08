@@ -51,7 +51,30 @@ const SAFE_COMPANY_NAME = /^[\p{L}\p{N} .,&'()+/-]+$/u;
 /** ISO calendar date, the only form the dashboard's POSTED column parses. */
 const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
 
-export function buildPrompt({ kind, input, memory, today, postedAt, lang }) {
+/** The CV template every run falls back to, relative to the career-ops root. */
+export const BASE_CV_TEMPLATE = "templates/cv-template.html";
+
+/**
+ * Shapes cv-templates.mjs can produce: a flat `templates/cv-template.<name>.html`
+ * or a file inside a template pack (#3202). Anything else is not a template this
+ * prompt should name.
+ */
+const CV_TEMPLATE_RE = /^templates\/[A-Za-z0-9][A-Za-z0-9._/-]*\.html$/;
+
+/**
+ * The template path is interpolated into an agent's instructions, so it is a
+ * trust boundary even though config/profile.yml is the user's own file: a path
+ * that never went through the resolver has no business reaching a worker. An
+ * unrecognized value falls back to the base template rather than throwing,
+ * because a CV the user can still send beats a run that dies on their config.
+ */
+function safeCvTemplate(value) {
+  return typeof value === "string" && !value.includes("..") && CV_TEMPLATE_RE.test(value)
+    ? value
+    : BASE_CV_TEMPLATE;
+}
+
+export function buildPrompt({ kind, input, memory, today, postedAt, lang, cvTemplate }) {
   // AGENTS.md's "Output Language vs Market Modes" composition rule. The CLI
   // picks this up by reading AGENTS.md interactively; a one-shot headless
   // prompt has no such chance, so the rule has to be stated in the prompt or a
@@ -85,10 +108,10 @@ Target: ${input}`;
     // cv.md or data/applications.md. The agent now emits the CV inline and the
     // backend (a plain Node process, no CLI sandbox) writes and renders it, so
     // pdf mode runs with no write tool at all.
-    return `You are tailoring the user's ATS-optimized CV for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode's CONTENT step: follow modes/pdf.md's TAILORING rules exactly (do not improvise your own scoring or format). Apply its CONTENT rules — keyword injection, ordering, the competency grid, project selection, and its never-invent-a-skill rule. Its steps that shell out (the jd-skill-gap.mjs check, template resolution) and its build/save/render steps are NOT performed on web runs; the platform handles output itself.
+    return `You are tailoring the user's ATS-optimized CV for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode's CONTENT step: follow modes/pdf.md's TAILORING rules exactly (do not improvise your own scoring or format). Apply its CONTENT rules — keyword injection, ordering, the competency grid, project selection, and its never-invent-a-skill rule. Its steps that shell out (the jd-skill-gap.mjs check) and its build/save/render steps are NOT performed on web runs; the platform handles output itself.
 1. Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at reports/${input}-*.md (for the JD keywords + analysis).
 2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
-3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content. Use that template even though modes/pdf.md resolves one via cv-templates.mjs: web runs always use the base template. ${CV_ENVELOPE_INSTRUCTION}
+3. Fill ${safeCvTemplate(cvTemplate)}'s {{...}} placeholders with the tailored content. Use that exact file: the platform already resolved it from cv.template through cv-templates.mjs, so do NOT run modes/pdf.md's own template-resolution step. ${CV_ENVELOPE_INSTRUCTION}
 4. Emit the envelope EXACTLY ONCE. The platform writes the HTML, renders the PDF, and updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
 
 After the envelope, end with EXACTLY one final line: VERDICT: {5 if the complete HTML envelope was emitted, else 1}/5 — {a one-line summary, ≤12 words}`;
