@@ -186,6 +186,107 @@ const BARE = companyRoleDedupKey(CO, ROLE);
   }
 }
 
+// ── 3d. `or` splits places, it does not eat a US state code ───────────────
+// Follow-up to the #3751 review: the separator matched `or` as a bare word, so
+// it also fired on the two-letter state code that ENDS "Portland, OR". Oregon's
+// code is the English word, and it is the only state code that is — which is
+// what makes this quiet: "Portland, ME" was never affected.
+//
+// The damage is a collision, not a crash. "Portland, OR" keyed as `portland`,
+// the same key a Portland written with no state gets, so two postings in two
+// different Portlands became one and the second was dropped as already seen —
+// exactly the per-city collapse the location component was added to stop.
+//
+// Whitespace on both sides is not sufficient on its own: the state code is
+// whitespace-delimited too as soon as anything follows it, so `\s+or\s+` still
+// takes " OR " as the leftmost match in "Portland, OR or Seattle, WA" and the
+// resulting set stops surviving a re-ordering — the property section 3b gates.
+// Case is the signal that actually holds (upper-case code, lower-case
+// conjunction), with upper-case `OR` still separating anywhere a state code
+// cannot start: any position but directly after a comma.
+{
+  const key = loc => companyRoleDedupKey(CO, ROLE, undefined, loc);
+  const places = loc => key(loc).split('@@')[1];
+  const show = t => JSON.stringify(t);
+
+  if (places('Portland, OR') === 'portland or') {
+    pass('"Portland, OR" is one place — the state code stays inside it');
+  } else {
+    fail(`state code eaten: location component = ${places('Portland, OR')}`);
+  }
+
+  // The collision itself, stated as the property that matters.
+  const DISTINCT = [
+    ['Portland, OR', 'Portland', 'a bare city name'],
+    ['Portland, OR', 'Portland, ME', 'the other Portland'],
+    ['Portland, OR', 'Portland, UK', 'Portland, Dorset'],
+  ];
+  for (const [a, b, label] of DISTINCT) {
+    if (key(a) !== key(b)) pass(`"${a}" and "${b}" are two keys — ${label}`);
+    else fail(`"${a}" and "${b}" collapsed to one key (${key(a)})`);
+  }
+
+  // …and `or` still separates when it IS separating two places — with the state
+  // code kept on both sides, and the set still independent of the order, which
+  // is what rules out simply requiring whitespace around the word.
+  const WANT = 'portland or+seattle wa';
+  const SPLIT = [
+    ['Portland, OR or Seattle, WA', 'lower-case conjunction after a state code'],
+    ['Portland, OR OR Seattle, WA', 'upper-case conjunction after a state code'],
+    ['Portland, OR Or Seattle, WA', 'title-cased conjunction'],
+    ['Portland, OR\nor Seattle, WA', 'conjunction across a newline'],
+    ['Portland, OR, or Seattle, WA', 'Oxford comma before the conjunction'],
+  ];
+  for (const [value, label] of SPLIT) {
+    const rev = 'Seattle, WA or Portland, OR';
+    if (places(value) === WANT && key(value) === key(rev)) {
+      pass(`${show(value)} → both places, order-independently — ${label}`);
+    } else {
+      fail(`${show(value)} → ${places(value)} (expected ${WANT})`);
+    }
+  }
+
+  // A place whose FIRST word is "Or" is a place, not a separator either — Or
+  // Yehuda is a real city, and a bare `\bor\b` split it into '' and the rest.
+  if (places('Or Yehuda, IL') === 'or yehuda il') {
+    pass('"Or Yehuda, IL" survives as one place');
+  } else {
+    fail(`leading "Or" eaten: ${places('Or Yehuda, IL')}`);
+  }
+
+  // Every other separator is untouched by the narrowing, including next to a
+  // state code — where `\s+or\s+` would have eaten the space before the slash.
+  const PUNCT = [
+    ['Portland, OR; Seattle, WA', 'semicolon'],
+    ['Portland, OR | Seattle, WA', 'pipe'],
+    ['Portland, OR / Seattle, WA', 'slash'],
+    ['Portland, OR · Seattle, WA', '" · "'],
+  ];
+  for (const [value, label] of PUNCT) {
+    if (places(value) === WANT) pass(`${label} still separates, next to a state code`);
+    else fail(`${label}: ${show(value)} → ${places(value)}`);
+  }
+}
+
+// ── 3e. Round trip: an Oregon history row no longer suppresses the twin ────
+// The collision has to be gone across the file boundary too, not just in the
+// key helper: a scan-history row for the Oregon posting must leave a posting in
+// a different Portland eligible, while still suppressing itself.
+{
+  const history = `${HISTORY_HEADER}\nhttps://ex.com/a/1\t2026-07-18\tgreenhouse\t${ROLE}\t${CO}\tadded\tPortland, OR\n`;
+  const seen = collectSeenCompanyRoles({ scanHistoryText: history }, {}, undefined, { includeLocation: true });
+  if (seen.has(companyRoleDedupKey(CO, ROLE, undefined, 'Portland, OR'))) {
+    pass('the Oregon row still suppresses its own re-scan');
+  } else {
+    fail(`Oregon row did not seed its own key — seeded [${[...seen].join(', ')}]`);
+  }
+  if (!seen.has(companyRoleDedupKey(CO, ROLE, undefined, 'Portland, ME'))) {
+    pass('a "Portland, ME" posting is still eligible against a "Portland, OR" history row');
+  } else {
+    fail('the Oregon history row wrongly suppressed the Maine twin');
+  }
+}
+
 // ── 4. collectSeenCompanyRoles: default is byte-identical ───────────────────
 {
   const history = `${HISTORY_HEADER}\nhttps://ex.com/a/1\t2026-07-18\tgreenhouse\t${ROLE}\t${CO}\tadded\tLondon, UK\n`;

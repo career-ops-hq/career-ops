@@ -1854,13 +1854,38 @@ export function normalizeRoleForDedup(role) {
  * extra cities into the string themselves, `' · '`-joined, in whatever order the
  * upstream array happened to arrive in.
  *
+ * The `or` branch is narrower than the other separators, because one US state
+ * code IS the English word: Oregon's. A bare `\bor\b` (what this matched at
+ * first) fires on the end of "Portland, OR" and keys that posting as `portland`
+ * — which is also the key of a Portland written with no state, so an Oregon
+ * posting and a "Portland, ME" one collapse into one key and the second is
+ * dropped as already seen: the per-city collapse this component exists to stop.
+ * Reported by @santifer reviewing #3751.
+ *
+ * Demanding whitespace on both sides (`\s+or\s+`) fixes the terminal case but
+ * not the one that matters here, because the state code is whitespace-delimited
+ * too the moment anything follows it. In "Portland, OR or Seattle, WA" the
+ * leftmost match is " OR ", giving {portland, or seattle wa} — while the same
+ * posting written the other way round gives {seattle wa, portland or}. That is
+ * the order-dependence the set-valued key was introduced to remove, so it would
+ * trade one duplicate-per-scan for another. ("Portland, OR / Seattle, WA" splits
+ * wrong for the same reason: `\s+or\s+` consumes the space before the slash.)
+ *
+ * Case is what actually separates the two, and boards are consistent about it:
+ * the state code is upper-case `OR`, the conjunction is lower-case `or` (or
+ * `Or` when the value is title-cased). So an upper-case `OR` counts as a
+ * separator only where a state code cannot be — anywhere but directly after the
+ * comma that would introduce one. Known limitation, and the genuinely ambiguous
+ * shape: an upper-case conjunction in that one position ("London, UK, OR
+ * Dublin") reads exactly like a state code and is kept as one place.
+ *
  * `,` is deliberately NOT a separator. It is the city/region delimiter INSIDE a
  * place ("London, UK"), so splitting on it would shatter every ordinary location
  * into fragments and make "London, UK" and "Dublin, UK" share the fragment `uk`.
  *
  * Used only by {@link normalizeLocationForDedup}; nothing else parses the field.
  */
-const LOCATION_LIST_SEPARATOR_RE = /\s*(?:[;|\u00b7/]|\bor\b)\s*/iu;
+const LOCATION_LIST_SEPARATOR_RE = /\s*[;|\u00b7/]\s*|\s+[Oo]r\s+|(?<!,)\s+OR\s+/u;
 
 /**
  * Normalize a posting location into a dedupe-key component.
