@@ -1,6 +1,6 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { careerOpsCodeRoot } from "@/lib/career-ops";
 
 /**
  * ACL for the core's tracker lock (`tracker-utils.mjs`).
@@ -41,7 +41,7 @@ type LockDirFn = (trackerPath: string) => string;
 const modCache = new Map<string, { acquire: AcquireFn; lockDirFor: LockDirFn }>();
 
 async function loadCoreLock() {
-  const file = path.join(careerOpsRoot(), "tracker-utils.mjs");
+  const file = path.join(careerOpsCodeRoot(), "tracker-utils.mjs");
   const cached = modCache.get(file);
   if (cached) return cached;
   const mod = await import(/* webpackIgnore: true */ pathToFileURL(file).href);

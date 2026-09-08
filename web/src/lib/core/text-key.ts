@@ -1,6 +1,6 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { careerOpsCodeRoot } from "@/lib/career-ops";
 import { normalizeTextKey as fallbackKey } from "./normalize-text-key.mjs";
 
 /**
@@ -14,7 +14,7 @@ import { normalizeTextKey as fallbackKey } from "./normalize-text-key.mjs";
  * evaluated" — a job the user never saw, with no signal.
  *
  * We can't `import` it statically: the core lives in the USER's checkout,
- * resolved at runtime via careerOpsRoot(), and is not a build dependency of this
+ * resolved at runtime via careerOpsCodeRoot(), and is not a build dependency of this
  * app. So we import it dynamically per resolved root and cache the module —
  * keyed by path, and NEVER caching a failure (the lesson from #2590, where a
  * cached fallback pinned stale definitions for the process lifetime).
@@ -36,7 +36,7 @@ let warned = false;
 
 /** Resolve the core's normalizeTextKey for the current root, or the fallback. */
 export async function getNormalizeTextKey(): Promise<NormalizeTextKey> {
-  const file = path.join(careerOpsRoot(), "tracker-parse.mjs");
+  const file = path.join(careerOpsCodeRoot(), "tracker-parse.mjs");
   const hit = modCache.get(file);
   if (hit) return hit;
   try {

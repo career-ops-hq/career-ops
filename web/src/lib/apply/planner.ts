@@ -1,5 +1,6 @@
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import type { CliSpec } from "@/lib/clis";
+import { careerOpsEnv } from "@/lib/career-ops";
 
 /**
  * planner.ts - spawn the read-only planner CLI and collect what it wrote.
@@ -63,7 +64,7 @@ export function runPlanner(opts: {
   return new Promise<PlannerRun>((resolve) => {
     // spawnHeadlessCli closes stdin right after spawning, so the CLI doesn't
     // wait on piped input that will never arrive.
-    const child = spawnHeadlessCli(binPath, args, { cwd, env: process.env });
+    const child = spawnHeadlessCli(binPath, args, { cwd, env: careerOpsEnv() });
     let buf = "";
     let firstByteAt = 0;
     const hb = setInterval(() => {

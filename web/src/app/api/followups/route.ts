@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { careerOpsEnv, careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { selectDueFollowups, pickNextUpcoming } from "@/lib/core/followup-view.mjs";
 
 export const runtime = "nodejs";
@@ -16,7 +16,7 @@ export async function GET(req: Request) {
   const script = rootScript("followup-cadence");
   if (!fs.existsSync(script)) return Response.json({ available: false, metadata: null, entries: [], nextUpcoming: null });
   const stdout = await new Promise<string>((resolve) => {
-    execFile("node", [script, "--json"], { cwd: careerOpsRoot(), timeout: 12_000 }, (err, out) => resolve(err ? "" : out || ""));
+    execFile("node", [script, "--json"], { cwd: careerOpsRoot(), env: careerOpsEnv(), timeout: 12_000 }, (err, out) => resolve(err ? "" : out || ""));
   });
   try {
     const start = stdout.indexOf("{");

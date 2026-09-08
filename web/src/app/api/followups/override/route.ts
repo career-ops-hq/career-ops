@@ -34,7 +34,7 @@ export async function POST(req: Request) {
 
   const file = followupsLogPath();
   try {
-    return await withFollowupsWrite(() => {
+    return await withFollowupsWrite(file, () => {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       let existing = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "# Follow-ups\n\n";
       // Supersede: drop any previous pin lines for this application (the parser
@@ -67,7 +67,7 @@ export async function DELETE(req: Request) {
   const file = followupsLogPath();
   if (!fs.existsSync(file)) return Response.json({ error: "no follow-up log" }, { status: 404 });
   try {
-    return await withFollowupsWrite(() => {
+    return await withFollowupsWrite(file, () => {
       const lines = fs.readFileSync(file, "utf8").split("\n");
       const kept = lines.filter((line) => !pinRe(appNum).test(line));
       if (kept.length === lines.length) {
