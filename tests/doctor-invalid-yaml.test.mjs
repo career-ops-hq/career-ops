@@ -62,7 +62,11 @@ function runDoctor(root, { json = true, target = root, cwd = root, env = {}, ext
   const result = spawnSync(process.execPath, [join(ROOT, 'doctor.mjs'), '--cli', 'codex',
     ...(json ? ['--json'] : []), ...(target ? ['--target', target] : []), ...extra], {
     cwd, encoding: 'utf8', timeout: 60_000,
-    env: { ...process.env, HOME: root, USERPROFILE: root, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '', ...env },
+    env: {
+      ...process.env, HOME: root, USERPROFILE: root, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '', ...env,
+      // Keep YAML checks independent of installed browsers, including Windows' LOCALAPPDATA cache.
+      PLAYWRIGHT_BROWSERS_PATH: join(root, 'playwright-browsers'),
+    },
   });
   assert.equal(result.error, undefined, result.error?.message);
   assert.equal(result.stderr, '');
@@ -112,7 +116,7 @@ for (const source of ['scan:\n  extractor: cli\n', '', '# Empty configuration is
     const human = runDoctor(root, { json: false });
     for (const path of YAML_PATHS) assert.ok(human.stdout.includes(`✓ ${path} found`), human.stdout);
     assert.ok(human.stdout.includes(`✓ Scan extractor: ${source.startsWith('scan:') ? 'cli' : 'mcp'}`), human.stdout);
-    // Other prerequisites (e.g. installed Chromium) depend on the host.
+    // These cases check YAML; unrelated prerequisites may still fail.
     assert.ok(!human.stdout.includes('invalid YAML'), human.stdout);
   });
 }
