@@ -2327,8 +2327,12 @@ async function apply() {
     // One `ls-files` and one `ls-tree` for the whole manifest rather than one per
     // entry: the merged list is ~340 paths, and the per-path defaults would spawn
     // git that many times each.
-    const trackedFiles = new Set(git('ls-files').split('\n').filter(Boolean));
-    const upstreamFiles = git('ls-tree', '-r', '--name-only', 'FETCH_HEAD').split('\n').filter(Boolean);
+    // -z on both, for the reason expandStagingPaths documents: core.quotePath
+    // quotes a non-ASCII name, and both probes below key on exact membership and
+    // prefix. A quoted name would read as untracked, so a tracked system doc
+    // inside a user directory would be refused instead of updated.
+    const trackedFiles = new Set(git('ls-files', '-z').split('\0').filter(Boolean));
+    const upstreamFiles = git('ls-tree', '-r', '--name-only', '-z', 'FETCH_HEAD').split('\0').filter(Boolean);
     const { kept: updatePaths, refused } = rejectUserLayerPaths(
       mergePathLists(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS),
       effectiveUserPaths(),
@@ -2342,6 +2346,7 @@ async function apply() {
         },
       },
     );
+    const refusedSet = new Set(refused);
     if (refused.length > 0) {
       console.log('');
       console.log(`Refused ${refused.length} manifest entry(ies) naming the user layer:`);
@@ -2740,7 +2745,14 @@ async function apply() {
     // Re-running apply fixes it (the first pass did update update-system.mjs
     // itself, so the second pass uses the target manifest) — but only if the
     // user is told, instead of being shown "Update complete" (#1998).
-    const unmaterialized = missingFromTargetManifest(remoteSystemPaths);
+    // Refused entries were never checked out, so verifying them would report a
+    // gap this run deliberately created and exit 1 with advice to re-run — which
+    // refuses the same entry and fails identically, forever. That would turn a
+    // manifest mistake into a permanently dead updater, the opposite of the
+    // refuse-loudly-do-not-abort contract at 3a.
+    const unmaterialized = missingFromTargetManifest(
+      remoteSystemPaths.filter((path) => !refusedSet.has(path)),
+    );
     if (unmaterialized.length > 0) {
       console.error(`\nUpdate incomplete: v${local} → v${remote}`);
       console.error(`${unmaterialized.length} path(s) from the target manifest were not checked out:`);

@@ -3,11 +3,12 @@
  * guard on the FETCHED manifest.
  *
  * apply() reads SYSTEM_PATHS out of the updater it just fetched and merges it
- * into updatePaths. That list decides what the checkout overwrites AND, through
- * `updatePaths.includes(file)` in userLayerViolations(), what is excused from
- * the user-layer safety check — so an upstream entry naming a user path both
- * causes the damage and waives the check written to catch it. The guard is
- * disabled by the same entry that triggers it.
+ * into updatePaths, the list the per-path `git checkout FETCH_HEAD -- <path>`
+ * walks. An entry naming user territory therefore writes upstream's content over
+ * the user's own, and an UNTRACKED local file is invisible to the diff-based
+ * #2337 detector — so it gets no .bak, is not preserved, and is then deleted by
+ * the abort path as an addition HEAD lacks, while the run prints "your content
+ * was NOT overwritten". Refusing the entry is what stops that sequence starting.
  *
  * rejectUserLayerPaths() is pure and exported for the same reason
  * userLayerViolations() is: apply() is ROOT-bound and full of side effects, so
@@ -36,6 +37,24 @@ const USER_PATHS = [
   'writing-samples/',
 ];
 
+// Deterministic stand-ins for the three local-state questions the rule asks.
+// Every block passes these: without them rejectUserLayerPaths falls back to a
+// real `git ls-files` and existsSync against whatever checkout the suite happens
+// to run in, which makes the outcome depend on the developer's tree and throws
+// outright where there is no git. The values below deliberately DISAGREE with
+// this repo — documents/GUIDE.md and data/outcomes/posting.md do not exist here —
+// so a regression to the real probes cannot keep these assertions green.
+const TRACKED = new Set(['writing-samples/README.md', 'documents/README.md',
+  'documents/.gitkeep', 'interview-prep/sessions/.gitkeep']);
+const ON_DISK = new Set([...TRACKED, 'data/applications.md', 'interview-prep/story-bank.md']);
+const UPSTREAM = ['data/outcomes/posting.md', 'documents/README.md', 'modes/pdf/hm-audit.md'];
+const probes = {
+  tracked: (p) => TRACKED.has(p),
+  exists: (p) => ON_DISK.has(p),
+  claimsSubtree: (p) => p.endsWith('/')
+    || UPSTREAM.some((f) => f.startsWith(`${p.replace(/\/$/, '')}/`)),
+};
+
 console.log('\n🧪 Testing rejectUserLayerPaths (fetched manifest vs local user layer)...');
 
 {
@@ -43,7 +62,7 @@ console.log('\n🧪 Testing rejectUserLayerPaths (fetched manifest vs local user
   const remote = ['modes/oferta.md', 'cv.md'];
 
   // When: the manifest is split against the local user layer
-  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS);
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
 
   // Then: the user file is refused and never reaches the checkout list
   if (refused.includes('cv.md') && !kept.includes('cv.md')) {
@@ -59,7 +78,7 @@ console.log('\n🧪 Testing rejectUserLayerPaths (fetched manifest vs local user
   const remote = ['documents/'];
 
   // When: the manifest is split
-  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS);
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
 
   // Then: the directory entry is refused
   if (refused.includes('documents/') && kept.length === 0) {
@@ -75,7 +94,7 @@ console.log('\n🧪 Testing rejectUserLayerPaths (fetched manifest vs local user
   const remote = ['data/outcomes/'];
 
   // When: the manifest is split
-  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS);
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
 
   // Then: it is refused too — the overlap test runs in both directions
   if (refused.includes('data/outcomes/') && kept.length === 0) {
@@ -91,7 +110,7 @@ console.log('\n🧪 Testing rejectUserLayerPaths (fetched manifest vs local user
   const remote = ['modes/'];
 
   // When: the manifest is split
-  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS);
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
 
   // Then: refused, because the overlap is checked in the containing direction
   if (refused.includes('modes/') && kept.length === 0) {
@@ -112,7 +131,7 @@ console.log('\n🧪 Testing rejectUserLayerPaths (fetched manifest vs local user
   ];
 
   // When: the manifest is split
-  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS);
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
 
   // Then: every one is kept. Refusing them is the #958 silent-non-arrival bug.
   if (refused.length === 0 && kept.length === remote.length) {
@@ -128,7 +147,7 @@ console.log('\n🧪 Testing rejectUserLayerPaths (fetched manifest vs local user
   const remote = ['documents/GUIDE.md'];
 
   // When: the manifest is split
-  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS);
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
 
   // Then: it is allowed through, so new upstream files still arrive
   if (kept.includes('documents/GUIDE.md') && refused.length === 0) {
@@ -143,7 +162,7 @@ console.log('\n🧪 Testing rejectUserLayerPaths (fetched manifest vs local user
   const remote = ['modes/pdf/', 'modes/de/interview/', 'scan.mjs', 'AGENTS.md'];
 
   // When: the manifest is split
-  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS);
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
 
   // Then: it passes through untouched, in input order
   if (refused.length === 0 && kept.join('\n') === remote.join('\n')) {
@@ -152,19 +171,6 @@ console.log('\n🧪 Testing rejectUserLayerPaths (fetched manifest vs local user
     fail(`an ordinary manifest must pass through unchanged — kept=${JSON.stringify(kept)}`);
   }
 }
-
-// The two holes review found in the first version. Both need explicit probes,
-// because the rule for an entry inside a user directory turns on local state
-// rather than on the path's shape.
-const TRACKED = new Set(['writing-samples/README.md', 'documents/README.md']);
-const ON_DISK = new Set([...TRACKED, 'data/applications.md', 'interview-prep/story-bank.md']);
-const UPSTREAM = ['data/outcomes/posting.md', 'documents/README.md', 'modes/pdf/hm-audit.md'];
-const probes = {
-  tracked: (p) => TRACKED.has(p),
-  exists: (p) => ON_DISK.has(p),
-  claimsSubtree: (p) => p.endsWith('/')
-    || UPSTREAM.some((f) => f.startsWith(`${p.replace(/\/$/, '')}/`)),
-};
 
 {
   // Given: the SAME claims spelled without a trailing slash. `git checkout <ref>
@@ -253,7 +259,7 @@ const probes = {
   const remote = [];
 
   // When: the manifest is split
-  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS);
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
 
   // Then: both sides are empty and the caller falls back as before
   if (kept.length === 0 && refused.length === 0) {

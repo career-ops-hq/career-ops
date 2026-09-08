@@ -328,7 +328,16 @@ const twoPassManifestChecks = [
     // defaults inside the guard are per-path git calls; the call site batches them,
     // and a regression that drops either seam silently disables half the rule.
     name: 'the guard probes tracked state and the upstream tree from real git output',
-    pattern: /git\('ls-files'\)[\s\S]{0,400}?git\('ls-tree',\s*'-r',\s*'--name-only',\s*'FETCH_HEAD'\)[\s\S]{0,600}?claimsSubtree:/,
+    pattern: /git\('ls-files',\s*'-z'\)[\s\S]{0,500}?git\('ls-tree',\s*'-r',\s*'--name-only',\s*'-z',\s*'FETCH_HEAD'\)[\s\S]{0,700}?claimsSubtree:/,
+  },
+  {
+    // A refused entry was never checked out, so verifying it would report a gap
+    // this run created on purpose, exit 1, and advise a re-run that refuses the
+    // same entry and fails identically — a manifest mistake turned into a
+    // permanently dead updater, which is the opposite of refusing loudly without
+    // aborting. Subtracting the refused set is what keeps that contract.
+    name: 'the completeness check skips entries the guard refused',
+    pattern: /missingFromTargetManifest\(\s*remoteSystemPaths\.filter\(\(path\) => !refusedSet\.has\(path\)\),\s*\)/,
   },
   {
     name: 'apply checks out the merged manifest instead of only the local manifest',
@@ -355,7 +364,11 @@ const twoPassManifestChecks = [
     // paths, so everything added upstream since is silently absent and apply
     // still printed "Update complete" (#1998).
     name: 'apply verifies the target manifest materialized before claiming success (#1998)',
-    pattern: /missingFromTargetManifest\(remoteSystemPaths\)/,
+    // The TARGET manifest is what must be verified — verifying the local one
+    // would re-introduce #1998, since a client whose manifest predates the
+    // target's is exactly the case this check exists for. Which entries are
+    // subtracted before the comparison is pinned separately below.
+    pattern: /missingFromTargetManifest\(\s*remoteSystemPaths/,
   },
   {
     name: 'an incomplete apply exits non-zero instead of reporting success (#1998)',
