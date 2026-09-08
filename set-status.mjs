@@ -235,6 +235,9 @@ const failWith = makeCliFailWith(flags.json);
 function failUsage(message) {
   const msg = message ?? 'Expected 2 arguments: <report#|company> <state>';
   if (rawArgs.includes('--json')) {
+    // CONTRACT: The JSON document must be the last thing printed on stdout.
+    // web/src/lib/parseCliJson reads it back and expects nothing after the closing brace.
+    // See tests/set-status-json-last-stdout.test.mjs (#3855).
     console.log(JSON.stringify({ error: msg, code: 'usage' }));
     console.error(`❌ ${msg}`);
   } else {
@@ -649,6 +652,9 @@ const result = {
 };
 
 if (flags.json) {
+  // CONTRACT: The JSON document must be the last thing printed on stdout.
+  // web/src/lib/parseCliJson reads it back and expects nothing after the closing brace.
+  // See tests/set-status-json-last-stdout.test.mjs (#3855).
   console.log(JSON.stringify(result, null, 2));
 } else {
   const verb = flags.dryRun ? 'would set' : changed ? 'set' : 'already';
