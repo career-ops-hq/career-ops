@@ -192,7 +192,11 @@ try {
 // exempt: git checkout of a directory pathspec tolerates content drift
 // inside it. Add an entry to ALLOWED_MISSING_ENTRIES only with a comment
 // justifying why it may legitimately be absent.
-const ALLOWED_MISSING_ENTRIES = new Set([]);
+const ALLOWED_MISSING_ENTRIES = new Set([
+  // Kept in SYSTEM_PATHS for one release so staleSystemFiles() prunes the
+  // retired suite during upgrades after it moved into tests/.
+  'lib/context-budget.test.mjs',
+]);
 for (const [listName, entries] of [['SYSTEM_PATHS', systemPaths], ['BOOTSTRAP_PATHS', bootstrapPaths]]) {
   for (const entry of entries) {
     if (entry.endsWith('/')) continue;

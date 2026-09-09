@@ -13,7 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail } from './helpers.mjs';
-import { gitIn, locallyModifiedSystemFiles } from '../update-system.mjs';
+import { gitIn, locallyModifiedSystemFiles, pathFullyPreserved } from '../update-system.mjs';
 
 // A repo with an `upstream` branch standing in for FETCH_HEAD, and `main` as
 // the install. Both start from a shared base commit, which is what gives
@@ -263,6 +263,108 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
     pass('a fully-excluded pathspec errors — hence the skip in apply() (#2337)');
   } else {
     fail(`#9 errored=${errored} content=${JSON.stringify(content)}`);
+  }
+}
+
+// ── 9b. pathFullyPreserved: a single-file match skips WITHOUT an upstream
+//    lookup ── The reported bug: every one of the reporter's 12 preserved
+//    files (AGENTS.md, fonts/*.ttf, cv-template.*.html, ...) is a single
+//    SYSTEM_PATHS entry, not a directory. The old code still ran an
+//    unnecessary `ls-tree` round-trip to "confirm" what the string match (`f
+//    === path`) had already proven, and when that lookup failed to return the
+//    expected result, execution fell through into the exact cancel-out
+//    checkout case 9 shows fails. Assert no git call happens at all for this
+//    case, so a future regression that reintroduces the lookup is caught even
+//    if the lookup itself would have "worked" in a normal test repo.
+{
+  let gitCalls = 0;
+  const spyCtx = { git: (...args) => { gitCalls++; throw new Error(`unexpected git call: ${args.join(' ')}`); } };
+
+  const preservedPaths = ['AGENTS.md'];
+  const preservedSet = new Set(preservedPaths);
+  const result = pathFullyPreserved('AGENTS.md', preservedPaths, preservedSet, spyCtx);
+
+  if (result === true && gitCalls === 0) {
+    pass('a single-file preserved path is skipped without any upstream lookup');
+  } else {
+    fail(`#9b expected true/0 calls, got result=${result} gitCalls=${gitCalls}`);
+  }
+}
+
+// ── 9c. pathFullyPreserved: a path unrelated to any preserved file is never
+//    skipped, and costs no git call either ──
+{
+  let gitCalls = 0;
+  const spyCtx = { git: (...args) => { gitCalls++; throw new Error(`unexpected git call: ${args.join(' ')}`); } };
+
+  const preservedPaths = ['AGENTS.md'];
+  const preservedSet = new Set(preservedPaths);
+  const result = pathFullyPreserved('modes/pdf.md', preservedPaths, preservedSet, spyCtx);
+
+  if (result === false && gitCalls === 0) {
+    pass('an unrelated path is never skipped, and needs no upstream lookup');
+  } else {
+    fail(`#9c expected false/0 calls, got result=${result} gitCalls=${gitCalls}`);
+  }
+}
+
+// ── 9d. pathFullyPreserved: a directory entirely made of preserved files IS
+//    skipped — the pre-existing behaviour this fix must not regress ──
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  // pathFullyPreserved's ls-tree branch reads FETCH_HEAD, same ref apply()
+  // fetches into for real. Populate it here by fetching the local `upstream`
+  // branch into this repo's own FETCH_HEAD.
+  repo.g('fetch', '.', 'upstream');
+  const preservedPaths = ['modes/pdf.md', 'modes/cover.md'];
+  const preservedSet = new Set(preservedPaths);
+  const ctx = { git: (...args) => gitIn(repo.dir, ...args) };
+
+  const result = pathFullyPreserved('modes/', preservedPaths, preservedSet, ctx);
+  if (result === true) {
+    pass('a directory whose entire upstream content is preserved is skipped (ls-tree path)');
+  } else {
+    fail(`#9d expected true, got ${result}`);
+  }
+}
+
+// ── 9e. pathFullyPreserved: a directory only PARTLY preserved is NOT skipped
+//    — the rest of the directory still needs a real checkout ──
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  repo.g('fetch', '.', 'upstream'); // populate FETCH_HEAD, see #9d
+  const preservedPaths = ['modes/cover.md']; // pdf.md is NOT preserved here
+  const preservedSet = new Set(preservedPaths);
+  const ctx = { git: (...args) => gitIn(repo.dir, ...args) };
+
+  const result = pathFullyPreserved('modes/', preservedPaths, preservedSet, ctx);
+  if (result === false) {
+    pass('a directory only partly preserved is not skipped');
+  } else {
+    fail(`#9e expected false, got ${result}`);
+  }
+}
+
+// ── 9f. pathFullyPreserved: an unreadable upstream lookup degrades to "not
+//    fully preserved" for a directory, never throws ──
+{
+  const preservedPaths = ['modes/pdf.md'];
+  const preservedSet = new Set(preservedPaths);
+  const throwingCtx = { git: () => { throw new Error('unreadable ref'); } };
+
+  let threw = false;
+  let result = null;
+  try {
+    result = pathFullyPreserved('modes/', preservedPaths, preservedSet, throwingCtx);
+  } catch {
+    threw = true;
+  }
+  if (!threw && result === false) {
+    pass('an unreadable directory lookup degrades to "not fully preserved" instead of throwing');
+  } else {
+    fail(`#9f threw=${threw} result=${result}`);
   }
 }
 

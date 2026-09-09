@@ -506,39 +506,42 @@ Design rules:
 - White background, 0.6in margins.
 - Keep the output readable and ATS-safe.
 
-### Step 5 — Tracker TSV Line
+### Step 5 — Tracker TSV Row
 
-Write exactly one TSV line to:
+Write exactly two TSV lines — a header row, then one data row — to:
 
 ```text
 batch/tracker-additions/{{ID}}.tsv
 ```
 
-Format, no header, 9 tab-separated columns plus an optional trailing `url`:
+Format: a header row of column labels, then exactly one data row.
 
 ```text
+num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
 {{REPORT_NUM}}\t{{DATE}}\t{company}\t{role}\t{status}\t{score}/5\t{pdf_emoji}\t[{{REPORT_NUM}}](reports/{{REPORT_NUM}}-{company-slug}-{{DATE}}.md)\t{one_sentence_note}\t{url}
 ```
 
-Column order is important:
+Write the header line exactly as shown. `merge-tracker.mjs` then resolves each field by NAME, so nothing depends on the order the fields happen to be in:
 
-| # | Field | Type | Example |
-|---|-------|------|---------|
-| 1 | num | integer | `647` |
-| 2 | date | YYYY-MM-DD | `2026-03-14` |
-| 3 | company | string | `Datadog` |
-| 4 | role | string | `Staff AI Engineer` |
-| 5 | status | canonical | `Evaluated` |
-| 6 | score | X.X/5 | `4.5/5` |
-| 7 | pdf | emoji | `✅` or `❌` |
-| 8 | report | markdown link | `[647](reports/647-...)` |
-| 9 | notes | string | one concise sentence |
+| Field | Type | Example |
+|-------|------|---------|
+| num | integer | `647` |
+| date | YYYY-MM-DD | `2026-03-14` |
+| company | string | `Datadog` |
+| role | string | `Staff AI Engineer` |
+| status | canonical | `Evaluated` |
+| score | X.X/5 | `4.5/5` |
+| pdf | emoji | `✅` or `❌` |
+| report | markdown link | `[647](reports/647-...)` |
+| notes | string | one concise sentence |
 
-**Important:** TSV order has status BEFORE score. `applications.md` displays score before status. `merge-tracker.mjs` handles the conversion.
+**Important:** emit exactly one data row under the header, and never emit a value order that contradicts the labels. A file with two data rows, a missing required label, a repeated label, or a `score` value that is not `X.X/5` (or the sentinels `N/A` / `—` / `-`) is skipped, and the evaluation does not reach the tracker.
+
+Headerless files in the legacy 9-column order (`num date company role status score pdf report notes`) are still accepted, but do not write them: without labels, `merge-tracker.mjs` has to tell score from status by content, and a discarded, never-scored row (`—` in both) has no answer (#3517).
 
 **Posting date in notes:** when the pipeline entry for this offer carries a `| posted: {YYYY-MM-DD}` segment (the scanner writes it from the provider's `offer.postedAt`, see `modes/pipeline.md`), carry it into `notes` as its own trailing segment — `…the sentence; posted: 2026-08-07`. It is the only path by which requisition age reaches the tracker, and the dashboard's POSTED column reads it from there. Copy the date verbatim; never infer one when the pipeline entry has no segment, and never write today's date as a stand-in — an absent date renders as `—`, which is honest, while a guessed one silently reports a stale req as fresh. Keep it a segment (`;`-separated, `posted:` first): prose like "recruiter posted an update 2026-07-20" is a contact date, not a posting date, and is read as such.
 
-**Optional fields (column ≥ 10):** if the offer came through an agency/recruiter (#1596), append a labeled field `via={Agency}` (for example `via=Hays`) — never positional; the label is mandatory. One extra unlabeled field is interpreted as the legacy location column. If the end employer is unknown, use `?` as company and add the descriptor in notes (for example `fintech, Leeds`). `merge-tracker.mjs` rejects ambiguous extras (two unlabeled extras, or two `via=` fields).
+**Optional fields:** if the offer came through an agency/recruiter (#1596), add a `via` column to the header and put the agency name (for example `Hays`) in it. In a headerless file the same value travels as a labeled trailing field `via={Agency}` — never positional; the label is mandatory. One extra unlabeled field is interpreted as the legacy location column. If the end employer is unknown, use `?` as company and add the descriptor in notes (for example `fintech, Leeds`). `merge-tracker.mjs` rejects ambiguous extras (two unlabeled extras, or two `via=` fields).
 
 Valid canonical statuses are defined in `templates/states.yml`: `Evaluated`, `Applied`, `Responded`, `Interview`, `Offer`, `Rejected`, `Discarded`, `SKIP`.
 

@@ -127,6 +127,9 @@ file's header comment must name the target list (reference:
   (see section 3).
 - If the whole URL is assembled by the provider from a fixed literal host, no
   allowlist is needed, but `redirect: 'error'` still is.
+- `jobvite` and `telegram-channel` pass `redirect: 'manual'` instead: no hop
+  is followed either, and the thrown error carries the `Location`, so a 302
+  to a login page reads as a named failure rather than a generic one.
 
 ### Defensive parsing
 
@@ -353,6 +356,16 @@ constant.
 A provider reads only open APIs/feeds with no login. Sending the user's data
 (CV, pipeline) to an external service is out of core (see
 [`../CONTRIBUTING.md`](../CONTRIBUTING.md), "What we do NOT accept").
+
+### Browser-based scanners (standalone scripts only)
+
+Some sources have no reachable API and render their listings in the browser (`scan-interamt.mjs` is the precedent; Dayforce career sites are the same shape). A scanner that drives a real browser (Playwright) is accepted as its own top-level script, never as a `providers/*.mjs` module, and under three conditions:
+
+1. **Standalone.** It ships as `scan-<source>.mjs` with its own npm script, tests, `SUPPORTED_JOB_BOARDS.md` row, `portals.example.yml` stanza and `SYSTEM_PATHS` entry. `providers/` stays fetch-only.
+2. **Public pages only.** It reads what any visitor sees: no login, no session or cookies of a real user, no authenticated area.
+3. **No bypass.** It never solves or relays a CAPTCHA, and never spoofs another client's cookies, tokens or headers. If a source puts an interactive challenge in front of its public listings, the scanner reports that as a named error and stops; it does not work around it.
+
+A browser scanner is slower and more fragile than a provider (markup changes break it), so say in the PR what was measured live: which pages, how many listings, and what the source answers to a bare `fetch`, so the reviewer can see why a provider was not enough.
 
 ## 3. Tests
 

@@ -10,6 +10,7 @@
      original hardcoded values, so a profile without a `style:` block is unchanged. */
   :root {
     --accent-color: hsl(187 74% 32%);
+    --secondary-color: hsl(270, 70%, 45%);
     --font-family: "Liberation Sans", 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
     --font-size: 11px;
     /* Matches generate-pdf.mjs's PDF_PAGE_MARGIN — the actual PDF page margin
@@ -85,7 +86,7 @@
 
   .header-gradient {
     height: 2px;
-    background: linear-gradient(to right, var(--accent-color), hsl(270, 70%, 45%));
+    background: linear-gradient(to right, var(--accent-color), var(--secondary-color));
     border-radius: 1px;
     margin-bottom: 10px;
   }
@@ -199,7 +200,7 @@
     font-family: var(--font-family);
     font-size: 12.5px;
     font-weight: 600;
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
   }
 
   .job-period {
@@ -245,7 +246,7 @@
     font-family: var(--font-family);
     font-size: 11.5px;
     font-weight: 600;
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
   }
 
   .project-title a {
@@ -299,7 +300,7 @@
   }
 
   .edu-org {
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
     font-weight: 500;
   }
 
@@ -307,6 +308,11 @@
     font-size: 10px;
     color: #777;
     white-space: nowrap;
+  }
+
+  .edu-location {
+    font-size: 10px;
+    color: #888;
   }
 
   .edu-desc {
@@ -339,7 +345,7 @@
   }
 
   .cert-org {
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
     white-space: nowrap;
   }
 
@@ -377,7 +383,7 @@
   }
 
   .award-org {
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
     white-space: nowrap;
   }
 
@@ -452,6 +458,7 @@
   .job-company,
   .job-role,
   .job-location,
+  .edu-location,
   .project-title {
     break-after: avoid;
     page-break-after: avoid;
@@ -483,7 +490,7 @@
   }
 
   html[lang="ar"] .header-gradient {
-    background: linear-gradient(to left, var(--accent-color), hsl(270, 70%, 45%));
+    background: linear-gradient(to left, var(--accent-color), var(--secondary-color));
   }
 
   html[lang="ar"] .job ul {

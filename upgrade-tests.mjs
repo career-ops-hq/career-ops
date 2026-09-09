@@ -420,7 +420,7 @@ function localPathsLeg() {
 
     let exitCode = 0, output = '';
     try {
-      output = execFileSync(process.execPath, ['update-system.mjs', 'apply'], {
+      output = execFileSync(process.execPath, ['update-system.mjs', 'apply', '--confirm'], {
         cwd: install, encoding: 'utf-8', timeout: 300000,
         env: hermeticEnv(cfg),
       });

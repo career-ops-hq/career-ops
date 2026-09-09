@@ -22,7 +22,7 @@
   <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20verified&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: verified count"></a>
 </p>
 
-<p align="center"><sub>आपको भी मिल गई? <a href="https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml">अपनी कहानी share करें →</a> · आपका card किसी ऐसे व्यक्ति को दिखाएगा जो अभी तलाश में है — कि आगे बढ़ने का रास्ता मौजूद है।</sub></p>
+<p align="center"><sub>आपको भी मिल गई? <a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">अपनी कहानी share करें →</a> · आपका card किसी ऐसे व्यक्ति को दिखाएगा जो अभी तलाश में है — कि आगे बढ़ने का रास्ता मौजूद है।</sub></p>
 
 <p align="center">
   <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="सबसे हाल की तीन नौकरी मिलने की कहानियाँ" width="800"></a>

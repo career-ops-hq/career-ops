@@ -22,6 +22,12 @@
 /ARCHITECTURE.md       @santifer
 /.github/CODEOWNERS    @santifer
 
+# Coding-agent configuration (instructions, agent profiles, setup job):
+# a change here rewrites what an autonomous session is allowed to do.
+/.github/copilot-instructions.md  @santifer
+/.github/agents/                  @santifer
+/.github/instructions/            @santifer
+
 # Agent behavior & the multi-CLI contract (prompt layer — CI-blind)
 /CLAUDE.md             @santifer
 /AGENTS.md             @santifer
