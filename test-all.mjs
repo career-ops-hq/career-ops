@@ -2480,29 +2480,29 @@ if (
 // empty string rather than on the thing it asserts.
 const batchTrackerStep = batchPrompt.match(/### Step 5 \u2014 [^\n]*[\s\S]*?### Step 6 \u2014 Final JSON/)?.[0] ?? '';
 // The rule protected here is the #749 race: parallel workers must never compute
-// `max+1` themselves. Asserting that by the ABSENCE of one exact phrase made the
-// gate satisfiable by rewording the very thing it forbids — "Calculate the next
-// tracker number yourself" does not match `Compute \`{next_num}\`` and passed
-// (#3937). Absence of one spelling is not the property; the property is that the
-// step SAYS where the number comes from.
+// `max+1` themselves. Absence of one spelling is not that property — rewording
+// the forbidden instruction passed the old literal check (#3937) — so the
+// load-bearing assertion is positive: the step must SAY the coordinator
+// reserved the number, in either word order and not negated ("the coordinator
+// does not reserve this number" states the opposite contract).
 //
-// So the load-bearing assertion is now positive: the step must state that the
-// coordinator reserved the number. A prompt that says that cannot also be
-// telling workers to derive their own and stay coherent, and a rewrite that
-// drops the sentence fails here loudly instead of passing silently.
-//
-// A negative pattern was considered and rejected: the sentence that satisfies
-// this gate is itself a negated instruction ("...so do not calculate a local
-// `max+1`"), so any "reject wording about calculating" rule flags the correct
-// prompt. The original literal is kept as a cheap extra — it still catches the
-// exact historical regression — but it is no longer what the gate rests on.
-const batchNumIsReserved = /coordinator[^.\n]{0,60}\breserv/i.test(batchTrackerStep);
+// The mirror-image guard on *calculate* wording is deliberately absent: the
+// sentence satisfying this gate is itself negated ("...so do not calculate a
+// local `max+1`"), so such a rule would flag the correct prompt. `reserve` is
+// never negated in the real prompt, so it carries no such trap. The original
+// literal stays as a cheap extra, but the gate no longer rests on it.
+const batchTrackerRowShape = /\{\{REPORT_NUM\}\}\\t\{\{DATE\}\}/.test(batchTrackerStep);
+const batchNumIsReserved =
+  /(?:coordinator[^.\n]{0,60}\breserv|\breserv[^.\n]{0,60}coordinator)/i.test(batchTrackerStep) &&
+  !/(?:\bnot\b|\bnever\b|n't)\s+(?:\w+\s+){0,2}reserv/i.test(batchTrackerStep);
 if (
-  /\{\{REPORT_NUM\}\}\\t\{\{DATE\}\}/.test(batchTrackerStep) &&
+  batchTrackerRowShape &&
   batchNumIsReserved &&
   !/Compute `\{next_num\}`/.test(batchTrackerStep)
 ) {
   pass('batch workers use the coordinator-reserved tracker number');
+} else if (!batchTrackerRowShape) {
+  fail('batch Step 5 no longer shows the `{{REPORT_NUM}}\\t{{DATE}}` tracker row');
 } else if (!batchNumIsReserved) {
   fail('batch Step 5 no longer states that the coordinator reserves the tracker number');
 } else {
