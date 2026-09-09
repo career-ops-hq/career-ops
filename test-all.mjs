@@ -2479,8 +2479,32 @@ if (
 // gained a header row, #3517) left this matching nothing and failing on the
 // empty string rather than on the thing it asserts.
 const batchTrackerStep = batchPrompt.match(/### Step 5 \u2014 [^\n]*[\s\S]*?### Step 6 \u2014 Final JSON/)?.[0] ?? '';
-if (/\{\{REPORT_NUM\}\}\\t\{\{DATE\}\}/.test(batchTrackerStep) && !/Compute `\{next_num\}`/.test(batchTrackerStep)) {
+// The rule protected here is the #749 race: parallel workers must never compute
+// `max+1` themselves. Asserting that by the ABSENCE of one exact phrase made the
+// gate satisfiable by rewording the very thing it forbids — "Calculate the next
+// tracker number yourself" does not match `Compute \`{next_num}\`` and passed
+// (#3937). Absence of one spelling is not the property; the property is that the
+// step SAYS where the number comes from.
+//
+// So the load-bearing assertion is now positive: the step must state that the
+// coordinator reserved the number. A prompt that says that cannot also be
+// telling workers to derive their own and stay coherent, and a rewrite that
+// drops the sentence fails here loudly instead of passing silently.
+//
+// A negative pattern was considered and rejected: the sentence that satisfies
+// this gate is itself a negated instruction ("...so do not calculate a local
+// `max+1`"), so any "reject wording about calculating" rule flags the correct
+// prompt. The original literal is kept as a cheap extra — it still catches the
+// exact historical regression — but it is no longer what the gate rests on.
+const batchNumIsReserved = /coordinator[^.\n]{0,60}\breserv/i.test(batchTrackerStep);
+if (
+  /\{\{REPORT_NUM\}\}\\t\{\{DATE\}\}/.test(batchTrackerStep) &&
+  batchNumIsReserved &&
+  !/Compute `\{next_num\}`/.test(batchTrackerStep)
+) {
   pass('batch workers use the coordinator-reserved tracker number');
+} else if (!batchNumIsReserved) {
+  fail('batch Step 5 no longer states that the coordinator reserves the tracker number');
 } else {
   fail('batch workers still compute tracker numbers independently');
 }
