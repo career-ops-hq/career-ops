@@ -138,10 +138,11 @@ export function parseEploySitemap(xml, origin, company) {
     try { parsed = new URL(decodeEntities(rawLoc.trim())); } catch { continue; }
     if (!isAllowedJobUrl(parsed, origin)) continue;
     const path = parsed.pathname.match(JOB_PATH_RE);
-    if (!path || seen.has(parsed.href)) continue;
+    const vacancyId = path?.[1];
+    if (!vacancyId || seen.has(vacancyId)) continue;
     const title = titleFromSlug(path[2]);
     if (!title) continue;
-    seen.add(parsed.href);
+    seen.add(vacancyId);
     jobs.push({ title, url: parsed.href, company, location: '' });
   }
   return jobs;

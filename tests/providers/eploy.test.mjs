@@ -70,6 +70,16 @@ try {
     pass('parser permits canonical tenant.eploy.net links and drops unsafe/off-pattern loc values');
   } else fail(`hosted parse=${JSON.stringify(hosted)}`);
 
+  const duplicateVacancy = mod.parseEploySitemap(`<?xml version="1.0"?>
+    <urlset>
+      <url><loc>https://careers.example.com/vacancies/301/learning-designer.html</loc></url>
+      <url><loc>https://exampletenant.eploy.net/vacancies/301/learning-designer.html/</loc></url>
+    </urlset>`, origin, 'Acme');
+  if (duplicateVacancy.length === 1
+      && duplicateVacancy[0].url === 'https://careers.example.com/vacancies/301/learning-designer.html') {
+    pass('parser deduplicates one vacancy ID across branded and tenant hosts');
+  } else fail(`duplicate vacancy parse=${JSON.stringify(duplicateVacancy)}`);
+
   if (mod.parseEploySitemap('', origin, 'Acme').length === 0
       && mod.parseEploySitemap('<?xml version="1.0"?><urlset></urlset>', origin, 'Acme').length === 0) {
     pass('empty body and valid empty urlset return []');
