@@ -259,9 +259,13 @@ console.log('\n🧪 Testing rejectUserLayerPaths (fetched manifest vs local user
   // and the checkout does not pass --literal-pathspecs, so `:(glob)` magic is
   // honoured too. Every comparison in the rule is literal segment work, so each
   // of these matches nothing and would sail through (CodeRabbit, PR #3947).
+  // A NUL is included deliberately: child_process rejects the argument with
+  // ERR_INVALID_ARG_VALUE before git starts, so an unrefused one kills apply()
+  // with an opaque runtime error rather than naming the bad entry.
   const remote = [
     './data/', './documents', './/data', 'data//', 'documents/./',
     '..\\data', ':(glob)data/**', '/data/', 'data/../data/',
+    `data${String.fromCharCode(0)}entry`,
   ];
 
   // When: the manifest is split

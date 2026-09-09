@@ -733,6 +733,11 @@ export function manifestProbes({ trackedOutput, upstreamOutput, root = ROOT }) {
  */
 function isCanonicalManifestPath(path) {
   if (typeof path !== 'string' || path === '') return false;
+  // A NUL never reaches git: child_process rejects the argument with
+  // ERR_INVALID_ARG_VALUE first, so apply() would die on an opaque runtime error
+  // instead of naming the malformed entry. It is also the delimiter both probes
+  // parse their git output on, so such a path could never match anything anyway.
+  if (path.includes('\0')) return false;
   // Windows separators, absolute paths, and git pathspec magic (a leading colon).
   if (path.includes('\\') || path.startsWith('/') || path.startsWith(':')) return false;
   // One trailing slash is the directory spelling this file uses; anything else
