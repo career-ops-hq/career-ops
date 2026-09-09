@@ -67,7 +67,7 @@ try {
   if (hosted.length === 1
       && hosted[0].title === 'Implementation Consultant - HCM'
       && hosted[0].url === 'https://exampletenant.eploy.net/vacancies/201/implementation-consultant--hcm.html') {
-    pass('parser permits canonical tenant.eploy.net links and drops unsafe/off-pattern loc values');
+    pass('parser permits canonical tenant.eploy.net links and drops off-host, suffix-spoofed, and off-pattern loc values');
   } else fail(`hosted parse=${JSON.stringify(hosted)}`);
 
   const duplicateVacancy = mod.parseEploySitemap(`<?xml version="1.0"?>
