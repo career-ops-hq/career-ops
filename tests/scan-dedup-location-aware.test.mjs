@@ -246,6 +246,34 @@ const BARE = companyRoleDedupKey(CO, ROLE);
     }
   }
 
+  // Irregular spacing does not reopen the hole. The lookbehind is tested at the
+  // START of the `\s+` run, so a bare `(?<!,)` would simply match one space
+  // later in "Portland,  OR or Seattle, WA" — where the preceding character is
+  // the other space, not the comma — and eat the state code exactly as the
+  // original `\bor\b` did (CodeRabbit on #4036). Boards double-space, tab and
+  // wrap this field, so this is not a synthetic input.
+  const SPACING = [
+    ['Portland,  OR or Seattle, WA', 'two spaces after the comma'],
+    ['Portland,   OR or Seattle, WA', 'three spaces after the comma'],
+    ['Portland,\tOR or Seattle, WA', 'a tab after the comma'],
+    ['Portland,  OR  or  Seattle, WA', 'double spacing throughout'],
+    ['Portland,\nOR or Seattle, WA', 'a newline after the comma'],
+  ];
+  for (const [value, label] of SPACING) {
+    if (places(value) === WANT) pass(`state code survives irregular spacing — ${label}`);
+    else fail(`${show(value)} → ${places(value)} (expected ${WANT})`);
+  }
+
+  // …and the single-place form of the same spacing stays one place, distinct
+  // from a stateless Portland. This is the collision, re-checked under spacing.
+  for (const value of ['Portland,  OR', 'Portland,\tOR', 'Portland,\nOR']) {
+    if (places(value) === 'portland or' && key(value) !== key('Portland')) {
+      pass(`${show(value)} is still one place, and still not "Portland"`);
+    } else {
+      fail(`${show(value)} → ${places(value)}`);
+    }
+  }
+
   // A place whose FIRST word is "Or" is a place, not a separator either — Or
   // Yehuda is a real city, and a bare `\bor\b` split it into '' and the rest.
   if (places('Or Yehuda, IL') === 'or yehuda il') {

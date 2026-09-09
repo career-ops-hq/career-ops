@@ -1875,9 +1875,16 @@ export function normalizeRoleForDedup(role) {
  * the state code is upper-case `OR`, the conjunction is lower-case `or` (or
  * `Or` when the value is title-cased). So an upper-case `OR` counts as a
  * separator only where a state code cannot be — anywhere but directly after the
- * comma that would introduce one. Known limitation, and the genuinely ambiguous
- * shape: an upper-case conjunction in that one position ("London, UK, OR
- * Dublin") reads exactly like a state code and is kept as one place.
+ * comma that would introduce one. The lookbehind excludes whitespace as well as
+ * the comma itself, because it is tested at the START of the `\s+` run: with a
+ * bare `(?<!,)` a value spaced "Portland,  OR or Seattle, WA" simply matches one
+ * space later, where the preceding character is the other space rather than the
+ * comma, and eats the state code exactly as before (CodeRabbit on #4036).
+ * `\s+` is greedy from the first whitespace character, so rejecting whitespace
+ * there costs nothing: a legitimate separator run still matches from its start.
+ * Known limitation, and the genuinely ambiguous shape: an upper-case conjunction
+ * directly after a comma ("London, UK, OR Dublin") reads exactly like a state
+ * code and is kept as one place.
  *
  * `,` is deliberately NOT a separator. It is the city/region delimiter INSIDE a
  * place ("London, UK"), so splitting on it would shatter every ordinary location
@@ -1885,7 +1892,7 @@ export function normalizeRoleForDedup(role) {
  *
  * Used only by {@link normalizeLocationForDedup}; nothing else parses the field.
  */
-const LOCATION_LIST_SEPARATOR_RE = /\s*[;|\u00b7/]\s*|\s+[Oo]r\s+|(?<!,)\s+OR\s+/u;
+const LOCATION_LIST_SEPARATOR_RE = /\s*[;|\u00b7/]\s*|\s+[Oo]r\s+|(?<![,\s])\s+OR\s+/u;
 
 /**
  * Normalize a posting location into a dedupe-key component.
