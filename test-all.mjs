@@ -2483,18 +2483,31 @@ const batchTrackerStep = batchPrompt.match(/### Step 5 \u2014 [^\n]*[\s\S]*?### 
 // `max+1` themselves. Absence of one spelling is not that property — rewording
 // the forbidden instruction passed the old literal check (#3937) — so the
 // load-bearing assertion is positive: the step must SAY the coordinator
-// reserved the number, in either word order and not negated ("the coordinator
-// does not reserve this number" states the opposite contract).
+// reserved the tracker number.
+//
+// It is scoped to one SENTENCE that names the coordinator, a reservation, and
+// the number, because each part checked independently over the whole step is
+// satisfiable by text that means the opposite: "The coordinator reserves the
+// meeting room. Calculate the tracker number yourself." reserves something
+// else, and "The coordinator does not, in fact, reserve this number" negates
+// the claim past any fixed-width negation guard. Word order is free, so
+// "reserved by the coordinator" reads the same as "coordinator reserves".
 //
 // The mirror-image guard on *calculate* wording is deliberately absent: the
 // sentence satisfying this gate is itself negated ("...so do not calculate a
-// local `max+1`"), so such a rule would flag the correct prompt. `reserve` is
-// never negated in the real prompt, so it carries no such trap. The original
-// literal stays as a cheap extra, but the gate no longer rests on it.
+// local `max+1`"), so such a rule would flag the correct prompt. Negation is
+// therefore only rejected when it precedes `reserv` inside that sentence. The
+// original literal stays as a cheap extra, but the gate no longer rests on it.
 const batchTrackerRowShape = /\{\{REPORT_NUM\}\}\\t\{\{DATE\}\}/.test(batchTrackerStep);
+const batchReserveSentence = batchTrackerStep
+  .split(/(?<=[.\n])/)
+  .find((sentence) =>
+    /coordinator/i.test(sentence) &&
+    /\breserv/i.test(sentence) &&
+    /\b(?:numbers?|tracker|REPORT_NUM)\b/i.test(sentence));
 const batchNumIsReserved =
-  /(?:coordinator[^.\n]{0,60}\breserv|\breserv[^.\n]{0,60}coordinator)/i.test(batchTrackerStep) &&
-  !/(?:\bnot\b|\bnever\b|n't)\s+(?:\w+\s+){0,2}reserv/i.test(batchTrackerStep);
+  batchReserveSentence !== undefined &&
+  !/\b(?:not|never|n't)\b[^.]{0,40}\breserv/i.test(batchReserveSentence);
 if (
   batchTrackerRowShape &&
   batchNumIsReserved &&
