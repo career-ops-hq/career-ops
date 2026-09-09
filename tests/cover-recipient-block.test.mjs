@@ -78,6 +78,28 @@ test('a recipient with no usable fields renders empty rather than an empty wrapp
   assert.ok(!html.includes('class="recipient"'));
 });
 
+test('whitespace-only recipient fields are empty, not content', () => {
+  // filter(Boolean) keeps "   ", so a recipient whose fields are all spaces
+  // produced a wrapper full of blank divs: a visibly indented gap above the Re:
+  // line, on a letter with no addressee. The empty-object case below passes
+  // without this, which is what made it easy to miss.
+  const html = buildHtml(base({ name: '   ', title: '\t', company: '\n', address_lines: ['  ', ''] }), packTemplate());
+
+  assert.ok(!html.includes('class="recipient"'), 'a whitespace-only recipient emits no wrapper');
+  assert.ok(!html.includes('{{RECIPIENT_BLOCK}}'), 'the slot is still substituted');
+});
+
+test('a partially blank recipient keeps only its real lines', () => {
+  // The trim must not become a reason to drop a recipient that has some content.
+  const html = buildHtml(base({ name: '  ', title: 'Director of Talent', company: '   ' }), packTemplate());
+
+  assert.match(html, /<div class="recipient">/);
+  assert.match(html, /<div>Director of Talent<\/div>/);
+  // Bare `<div>` counts content lines only: the wrapper is `<div class="recipient">`
+  // and does not match. Exactly one line survives, so the two blank fields are gone.
+  assert.equal((html.match(/<div>/g) || []).length, 1, 'only the non-blank field renders a line');
+});
+
 test('recipient values are HTML-escaped', () => {
   // The recipient comes from a payload an agent wrote from a job posting, which
   // is untrusted content by the project's own rule.
