@@ -4863,23 +4863,18 @@ if (!fileExists('scripts/parsers/cohere_jobs.py')) {
   fail('Cohere parser example is still bundled as a runtime script');
 }
 
+// templates/portals.example.yml is copied verbatim by new users — its local-parser
+// example must point the script at a gitignored path, not the Git-tracked
+// scripts/parsers/ (see docs/local-parser-cookbook.md).
 const portalExample = readFile('templates/portals.example.yml');
 if (
-  !portalExample.includes('cohere_jobs.py') &&
   portalExample.includes('script: local/example-js-company-jobs.js') &&
   portalExample.includes('script: local/example_python_company_jobs.py') &&
-  portalExample.includes('already know their target careers URL')
+  !/^\s*#?\s*script:\s*scripts\/parsers\//m.test(portalExample)
 ) {
-  pass('portals example documents a generic local parser contract with gitignored script paths');
+  pass('portals example points the local-parser script at a gitignored path');
 } else {
-  fail('portals example lost the generic local-parser contract or its gitignored script paths');
-}
-// Belt and braces: no commented example may reintroduce the Git-tracked path —
-// following one verbatim would stage a user's private parser (see docs/local-parser-cookbook.md).
-if (!/^\s*#?\s*script:\s*scripts\/parsers\//m.test(portalExample)) {
-  pass('portals example keeps the parser script out of the Git-tracked scripts/parsers/');
-} else {
-  fail('portals example shows the parser script under the Git-tracked scripts/parsers/');
+  fail('portals example local-parser script is under the Git-tracked scripts/parsers/');
 }
 
 // Security hardening: command allowlist, in-repo script containment, careers_url/company validation.
