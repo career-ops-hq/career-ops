@@ -4870,7 +4870,7 @@ const portalExample = readFile('templates/portals.example.yml');
 if (
   portalExample.includes('script: local/example-js-company-jobs.js') &&
   portalExample.includes('script: local/example_python_company_jobs.py') &&
-  !/^\s*#?\s*script:\s*scripts\/parsers\//m.test(portalExample)
+  !/^\s*#?\s*script:\s*['"]?scripts\/parsers\//m.test(portalExample)
 ) {
   pass('portals example points the local-parser script at a gitignored path');
 } else {
