@@ -129,6 +129,36 @@ function buildDateline(letter) {
   return parts.join(" &nbsp;&nbsp; ");
 }
 
+/**
+ * Build the optional recipient address block for a business letter.
+ *
+ * The pack authoring contract places {{RECIPIENT_BLOCK}} bare and expects the
+ * filler to emit its own wrapper, so this returns a complete
+ * `<div class="recipient">` or an empty string, never a bare fragment. Each
+ * line is its own `<div>` rather than a `<br>` join, which is what the packs'
+ * own CSS targets.
+ *
+ * A partial recipient is normal and renders as far as it goes: a company with
+ * no named individual, or a name with no street address, are both ordinary
+ * states for a cover letter. Only a recipient with nothing usable in it, or no
+ * recipient at all, yields the empty string, so a letter without an addressee
+ * still renders instead of failing.
+ *
+ * Accepts `address_lines` (array, the contract's shape) or `address` (string).
+ */
+function buildRecipientBlock(letter) {
+  const r = letter.recipient;
+  if (!r || typeof r !== "object") return "";
+  const addressLines = Array.isArray(r.address_lines)
+    ? r.address_lines
+    : r.address
+      ? [r.address]
+      : [];
+  const lines = [r.name, r.title, r.company, ...addressLines].filter(Boolean).map(escapeHtml);
+  if (!lines.length) return "";
+  return `<div class="recipient">\n${lines.map((l) => `    <div>${l}</div>`).join("\n")}\n  </div>`;
+}
+
 /** Build the optional achievements list for the letter body. */
 function buildAchievementsBlock(achievements) {
   if (!achievements || !achievements.length) return "";
@@ -226,6 +256,7 @@ export function buildHtml(payload, templatePath) {
     "{{CREDENTIALS_BLOCK}}": buildCredentialsBlock(candidate),
     "{{ROLE_TITLE}}": escapeHtml(letter.role_title),
     "{{DATELINE}}": buildDateline(letter),
+    "{{RECIPIENT_BLOCK}}": buildRecipientBlock(letter),
     "{{GREETING_BLOCK}}": greetingBlock,
     "{{OPENING}}": escapeHtml(letter.opening),
     "{{PROFILE_INTRO}}": escapeHtml(letter.profile_intro),
