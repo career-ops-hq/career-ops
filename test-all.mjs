@@ -57,7 +57,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { pass, fail, warn, run, runAcrossUtcDay, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
-import { collectMjsFiles, isNestedCheckout } from './lib/mjs-files.mjs';
+import { collectMjsFiles, isNestedCheckout, isUnderNestedCheckout } from './lib/mjs-files.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -112,8 +112,18 @@ function discoverTests(dir) {
   const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   for (const entry of entries) {
     const full = join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...discoverTests(full));
-    else if (entry.name.endsWith('.test.mjs')) out.push(full);
+    if (entry.isDirectory()) {
+      // A worktree under tests/ is a second checkout of this repository, and
+      // this walker does not merely read what it finds — it hands the files to
+      // the runner. Without this guard a stale checkout's suites execute
+      // against the current tree and the run prints "safe to push/merge" for
+      // them (#3762). `git worktree add` accepts any path, so nothing but this
+      // check keeps one out. Tested on children only: TESTS_DIR is never itself
+      // a checkout root, and the root exemption in `collectMjsFiles` exists for
+      // a case that cannot arise here.
+      if (isNestedCheckout(full)) continue;
+      out.push(...discoverTests(full));
+    } else if (entry.name.endsWith('.test.mjs')) out.push(full);
   }
   return out;
 }
@@ -2759,7 +2769,14 @@ if (shared.includes('_profile.md')) {
   // alone can't catch.
   const writingRefRe = /_shared\.md[^.\n]{0,40}(Voice DNA|Writing Style|Professional Writing)|(Voice DNA|Writing Style|Professional Writing)[^.\n]{0,40}_shared\.md/;
   const stale = [];
-  for (const f of readdirSync(join(ROOT, 'modes'), { recursive: true }).filter(p => typeof p === 'string' && p.endsWith('.md'))) {
+  // `{ recursive: true }` descends on Node's side, so there is no per-directory
+  // decision to guard — a checkout under modes/ is filtered out of the RESULT
+  // instead. Verified: a worktree there made this check fail naming that other
+  // tree's file as a stale reference of ours (#3762).
+  const modeDocs = readdirSync(join(ROOT, 'modes'), { recursive: true })
+    .filter(p => typeof p === 'string' && p.endsWith('.md'))
+    .filter(p => !isUnderNestedCheckout(join(ROOT, 'modes'), p));
+  for (const f of modeDocs) {
     const src = readFile(`modes/${f.split(/[\\/]/).join('/')}`);
     if (writingRefRe.test(src)) stale.push(f);
   }
@@ -4006,7 +4023,7 @@ if (
 // loudly otherwise), so the list can only shrink. Denominator asserted: the
 // locale walk must find the known files, or the whole check is blind.
 {
-  const FROZEN_OFERTA = new Set(['da', 'es', 'pl', 'pt', 'ru', 'ua']);
+  const FROZEN_OFERTA = new Set(['da', 'es', 'pl', 'pt', 'ua']);
   const REQUIRED_HEADINGS = ['## A)', '## B)', '## C)', '## D)', '## E)', '## F)', '## G)', '## Risk Summary', '## H)'];
   const REQUIRED_LABELS = ['**Date:**', '**URL:**', '**Archetype:**', '**Score:**', '**Legitimacy:**', '**PDF:**'];
   const withOferta = readdirSync(join(ROOT, 'modes'), { withFileTypes: true })
@@ -9793,6 +9810,84 @@ try {
     fail(`headless evaluators still carry private max+1 allocators: ${unmigratedEvaluators.join(', ')}`);
   }
 
+  // Same family, second contract (#3707): every headless evaluator persists its
+  // evaluation as a TSV in batch/tracker-additions, so merge-tracker.mjs applies
+  // dedup, status validation, report-link normalization and the tracker lock
+  // (AGENTS.md Pipeline Integrity rule 1). openai-eval/ollama-eval used to print
+  // a markdown row for the user to paste into data/applications.md instead --
+  // 8 cells against a 9-column tracker, which every reader's width guard drops
+  // as a non-data line, so the pasted evaluation vanished and verify-pipeline
+  // still reported the tracker clean.
+  //
+  // The sink is expressed as the #3706 contract rather than as per-file patterns:
+  // a write call whose payload interpolates a header constant, a newline, then
+  // the row. Patterns naming each file's own variables went stale the moment
+  // #3706 rewrote gemini-eval and openrouter-runner to emit TSV_ADDITION_HEADER
+  // -- they reported "bypasses the tracker-addition path" against a tree where
+  // both persist correctly, a false alarm on files this PR does not own. Keying
+  // on the shared contract means the check tracks the contract, not the spelling.
+  // Presence of the string "tracker-additions" is deliberately NOT the test: a
+  // comment satisfies that.
+  const writeSinkRe = /write(?:File|FileSync)\([\s\S]{0,200}?\$\{[A-Za-z0-9_]*(?:HEADER|Header)\}\\n\$\{([^}]+)\}/;
+  // ...and the payload has to BE the row. Accepting any identifier let a mutation
+  // that replaced `${trackerFields.join('\t')}` with `${placeholder}` pass, which
+  // is the failure-wearing-a-pass this check exists to stop. Either the join is
+  // inline, or the named variable's own definition is tab-separated
+  // (openrouter-runner builds `tsvLine` a line earlier).
+  // Comments are stripped first: a commented-out writeFileSync block still
+  // matches the raw source, so the harness would pass while the evaluator wrote
+  // nothing -- the failure-wearing-a-pass this check exists to stop. Only
+  // whole-line comments are removed, deliberately: a naive `//`-to-end-of-line
+  // strip also eats the `//` inside every `https://` string literal, which is
+  // its own way of misreading the file. Commented-out code is whole lines.
+  const executable = (source) => source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter(line => !/^\s*\/\//.test(line))
+    .join('\n');
+  const writesTheRow = (rawSource) => {
+    const source = executable(rawSource);
+    const sink = source.match(writeSinkRe);
+    if (!sink) return false;
+    const payload = sink[1].trim();
+    if (/\.join\('\\t'\)$/.test(payload)) return true;
+    const defined = source.match(new RegExp(`const\\s+${payload.replace(/[^A-Za-z0-9_]/g, '')}\\s*=[^;]*`));
+    return Boolean(defined && defined[0].includes('\\t'));
+  };
+  const pastedRowRe = /Tracker entry \(add to|console\.log\(`[^`]*\|\s*\$\{num\}\s*\|/;
+  const unpersistedEvaluators = evaluatorSources
+    .filter(([, source]) => !writesTheRow(source) || pastedRowRe.test(source))
+    .map(([name]) => name);
+  if (unpersistedEvaluators.length === 0) {
+    pass('all headless evaluators write their addition to disk, none dictates a hand-pasted row');
+  } else {
+    fail(`headless evaluators bypass the tracker-addition path: ${unpersistedEvaluators.join(', ')}`);
+  }
+
+  // The addition itself must carry all nine columns in the TSV contract's order
+  // (status BEFORE score) -- the two evaluators converted in #3707 build the row
+  // from a literal, so pin the field list rather than only the directory.
+  const nineFieldRe = new RegExp([
+    'const trackerFields = \\[',
+    "String\\(parseInt\\(num, 10\\)\\),",
+    'today,',
+    'tsvSafe\\(company\\),',
+    'tsvSafe\\(role\\),',
+    "'Evaluated',",
+    'normalizedTrackerScore\\(score\\),',
+    "'❌',",
+    '`\\[\\$\\{num\\}\\]\\(reports/\\$\\{filename\\}\\)`,',
+    'tsvSafe\\(`[^`]*\\$\\{modelName\\}[^`]*`\\),',
+    '\\];',
+  ].join('\\s*'));
+  const wrongShape = ['openai-eval.mjs', 'ollama-eval.mjs']
+    .filter(name => !nineFieldRe.test(readFile(name)));
+  if (wrongShape.length === 0) {
+    pass('openai-eval and ollama-eval build the nine-column addition with status before score');
+  } else {
+    fail(`tracker addition fields wrong or reordered in: ${wrongShape.join(', ')}`);
+  }
+
   // Same family, second contract (#3795): every headless evaluator writes
   // `**URL:**` into its report header, per AGENTS.md Pipeline Integrity rule 3.
   // The report is where the posting URL survives the posting, and it is the only
@@ -9806,15 +9901,24 @@ try {
   // receive a posting URL from. Absent one, `(pasted)` is the honest value and
   // keeps the field present; normalizeUrl derives no key from it, so it cannot
   // hand every pasted row the same key.
-  const urlHeaderRe  = /\*\*URL:\*\*/;
+  // Both halves run over comment-stripped source (`executable`, above), and the
+  // header must carry an INTERPOLATED value rather than a bare literal: a
+  // comment mentioning `**URL:**`, or a hardcoded line with nothing substituted
+  // into it, would otherwise satisfy a raw-source scan while the report shipped
+  // no URL -- a failure wearing a pass. Every writer today interpolates
+  // (`**URL:** ${postingUrl || '(pasted)'}`, `**URL:** ${url}`), so requiring it
+  // ties the header to a value reaching the report write path.
+  const urlHeaderRe  = /\*\*URL:\*\*[^\n]*\$\{/;
   const urlSourceRe  = /--posting-url|\bpostingUrl\b|\$\{input \|\| '\(pasted\)'\}/;
-  // openai-eval.mjs and ollama-eval.mjs gain the same header in #3797, which
-  // owns those two files. Named rather than skipped, and the list is asserted
-  // to be EXACTLY the files still missing the header: once #3797 lands this
-  // fails until the names are removed, so the exemption cannot outlive its
-  // reason and quietly become permanent coverage loss.
-  const pendingUrlHeader = ['openai-eval.mjs', 'ollama-eval.mjs'];
+  // Empty since #3797 landed the header in openai-eval.mjs and ollama-eval.mjs,
+  // the two files it exempted. The list is asserted to be EXACTLY the files still
+  // missing the header, so leaving the names here would fail as a stale
+  // exemption -- which is what that guard is for. Kept rather than deleted: the
+  // next evaluator added without a URL header has somewhere to be named
+  // deliberately, instead of the check being quietly weakened to accommodate it.
+  const pendingUrlHeader = [];
   const missingUrlHeader = evaluatorSources
+    .map(([name, source]) => [name, executable(source)])
     .filter(([, source]) => !urlHeaderRe.test(source) || !urlSourceRe.test(source))
     .map(([name]) => name);
   const staleExemptions = pendingUrlHeader.filter(name => !missingUrlHeader.includes(name));
@@ -15232,6 +15336,11 @@ try {
   const walkMjs = (d) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const fp = join(d, e.name);
+      // NO nested-checkout guard here, deliberately — see the EXEMPT map in
+      // tests/mjs-files.test.mjs. This is a security scan over third-party
+      // code, so skipping a directory that carries a `.git` marker would let a
+      // plugin drop a `.git` file beside its sources and opt straight out of
+      // the deny-list. Same reasoning as plugins/_lock.mjs (#3762).
       if (e.isDirectory()) walkMjs(fp);
       else if (e.name.endsWith('.mjs')) allPluginMjs.push(fp);
     }
@@ -16084,7 +16193,9 @@ try {
         const webTestsRoot = join(ROOT, 'web', 'tests');
         const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
           const p = join(dir, e.name);
-          if (e.isDirectory()) return walk(p);
+          // A checkout under web/tests/ holds another tree's suites; reporting
+          // them as ungated web suites is a false failure (#3762).
+          if (e.isDirectory()) return isNestedCheckout(p) ? [] : walk(p);
           return e.isFile() && e.name.endsWith('.test.mjs') ? [p] : [];
         });
         if (existsSync(webTestsRoot)) {
