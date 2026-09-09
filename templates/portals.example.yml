@@ -906,13 +906,19 @@ search_queries:
 # already know their target careers URL. `args` are optional and can help the
 # parser author (reuse across companies, debug flags, JSON snapshots, etc.).
 #
+# The script must resolve inside the repo root (security boundary in
+# providers/local-parser.mjs). Keep a private, non-contributed parser under a
+# gitignored path — `local/` is ignored by default — so it is never staged;
+# `portals.yml` itself is already gitignored. Use `scripts/parsers/` only for a
+# parser you intend to upstream. See docs/local-parser-cookbook.md.
+#
 # JavaScript parser:
 # - name: Example JS Company
 #   careers_url: https://example.com/careers
 #   scan_method: local_parser
 #   parser:
 #     command: node
-#     script: scripts/parsers/example-js-company-jobs.js
+#     script: local/example-js-company-jobs.js
 #     format: jobs-json-v1
 #   enabled: true
 #
@@ -922,7 +928,7 @@ search_queries:
 #   scan_method: local_parser
 #   parser:
 #     command: python3
-#     script: scripts/parsers/example_python_company_jobs.py
+#     script: local/example_python_company_jobs.py
 #     format: jobs-json-v1
 #   enabled: true
 

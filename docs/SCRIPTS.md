@@ -622,11 +622,13 @@ For custom SSR pages, configure a tracked company with `scan_method: local_parse
 ```yaml
 parser:
   command: node
-  script: scripts/parsers/example-company-jobs.js
+  script: local/example-company-jobs.js
   format: jobs-json-v1
 ```
 
 Use `args` only for reusable parsers that intentionally accept runtime parameters such as `{careers_url}` or `{company}`.
+
+The script must resolve inside the repo root (security boundary in `providers/local-parser.mjs`). Keep a private, non-contributed parser under a gitignored path — `local/` is ignored by default — so it is never staged; `portals.yml` itself is already gitignored. Use `scripts/parsers/` only for a parser you intend to upstream. See [local-parser-cookbook.md](local-parser-cookbook.md).
 
 If a parser writes full extraction artifacts for debugging or audit, store them under `data/parser-output/{company}/`. `scan.mjs` reads stdout and does not require those JSON files after parsing. Keep generated JSON artifacts out of git; `.gitkeep` placeholders are the only exception for preserving directory structure.
 
