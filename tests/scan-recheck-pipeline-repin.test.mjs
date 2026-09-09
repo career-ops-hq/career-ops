@@ -18,7 +18,7 @@
 // to the TTL, and only when scan-history is what released it. A pipeline-only
 // URL has no scan-history row to have released it, so it stays pinned whatever
 // its checkbox says.
-import { pass, fail, finish } from './helpers.mjs';
+import { pass, fail } from './helpers.mjs';
 import { collectSeenUrls } from '../scan.mjs';
 
 console.log('\nscan.mjs — recheck_after_days survives the pipeline.md pass');
@@ -29,6 +29,7 @@ const OPEN = 'https://boards.greenhouse.io/acme/jobs/2';
 const PROCESSED = 'https://jobs.lever.co/beta/3';
 const PIPELINE_ONLY = 'https://jobs.ashbyhq.com/gamma/4';
 const FRESH = 'https://boards.greenhouse.io/delta/5';
+const PROCESSED_CHILD = 'https://jobs.lever.co/beta/6';
 
 // today = 2026-08-07, window = 30d. The 2026-01-01 rows are past it; the
 // 2026-08-01 row is inside it.
@@ -41,6 +42,7 @@ const SOURCES = {
     `${OPEN}\t2026-01-01\tgreenhouse\tTrader\tAcme\tadded\tNY`,
     `${PROCESSED}\t2026-01-01\tlever\tSRE\tBeta\tadded\tBerlin`,
     `${FRESH}\t2026-08-01\tgreenhouse\tAnalyst\tDelta\tadded\tRemote`,
+    `${PROCESSED_CHILD}\t2026-01-01\tlever\tOps\tBeta\tadded\tBerlin`,
     '',
   ].join('\n'),
   pipelineText: [
@@ -55,6 +57,8 @@ const SOURCES = {
     '## Processed',
     '',
     `- [ ] ${PROCESSED} | Beta | SRE | Berlin`,
+    '### Archived by retry wave',
+    `- [ ] ${PROCESSED_CHILD} | Beta | Ops | Berlin`,
     '',
   ].join('\n'),
   applicationsText: '',
@@ -72,6 +76,12 @@ if (!seen.has(PROCESSED)) {
   pass('a row under ## Processed is released too, whatever its checkbox says');
 } else {
   fail('a row under ## Processed is still pinned: the heading is not being read');
+}
+
+if (!seen.has(PROCESSED_CHILD)) {
+  pass('a row under a child heading of ## Processed is still released');
+} else {
+  fail('a row under a child heading of ## Processed was pinned: nested processed headings are not being retained');
 }
 
 if (seen.has(OPEN)) {
@@ -92,10 +102,10 @@ if (seen.has(FRESH)) {
   fail('a row inside the recheck window was released');
 }
 
-if (recheckEligible === 2) {
-  pass('the counter reports the 2 rows that are genuinely rescannable, not the 3 released');
+if (recheckEligible === 3) {
+  pass('the counter reports the 3 rows that are genuinely rescannable, not the 4 released');
 } else {
-  fail(`recheckEligible is ${recheckEligible}, want 2 — it must be counted against the finished set, after pipeline.md and applications.md have had their say`);
+  fail(`recheckEligible is ${recheckEligible}, want 3 — it must be counted against the finished set, after pipeline.md and applications.md have had their say`);
 }
 
 // applications.md pins unconditionally: an applied job must never be re-offered,
@@ -104,10 +114,8 @@ const applied = collectSeenUrls(
   { ...SOURCES, applicationsText: `| 1 | 2026-02-01 | Acme | Quant | 4/5 | Applied | ✅ | [1](reports/001.md) | ${DONE} |` },
   POLICY,
 );
-if (applied.seen.has(DONE) && applied.recheckEligible === 1) {
+if (applied.seen.has(DONE) && applied.recheckEligible === 2) {
   pass('a released row that applications.md pins is neither rescanned nor counted as eligible');
 } else {
-  fail(`applications.md pin leaked: seen=${applied.seen.has(DONE)} eligible=${applied.recheckEligible} (want true/1)`);
+  fail(`applications.md pin leaked: seen=${applied.seen.has(DONE)} eligible=${applied.recheckEligible} (want true/2)`);
 }
-
-finish();

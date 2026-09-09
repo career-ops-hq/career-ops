@@ -1575,9 +1575,19 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   // the scan-history TTL is allowed to govern it alone. Release also requires the
   // URL to be a recheck candidate, so a pipeline-only URL is never un-pinned.
   let inProcessed = false;
+  let processedHeadingLevel = 0;
   for (const line of pipelineText.split('\n')) {
-    const heading = line.match(/^#+\s+(.*)$/);
-    if (heading) inProcessed = /^processed\b/i.test(heading[1].trim());
+    const heading = line.match(/^(#+)\s+(.*)$/);
+    if (heading) {
+      const level = heading[1].length;
+      if (/^processed\b/i.test(heading[2].trim())) {
+        inProcessed = true;
+        processedHeadingLevel = level;
+      } else if (inProcessed && level <= processedHeadingLevel) {
+        inProcessed = false;
+        processedHeadingLevel = 0;
+      }
+    }
     const url = extractPipelineUrl(line);
     if (!url) continue;
     const key = normalizeUrlForDedup(url);
