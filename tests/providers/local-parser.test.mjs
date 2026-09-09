@@ -129,6 +129,38 @@ try {
     fail(`Envelope extraction failed: ${JSON.stringify(envJobs[0])}`);
   }
 
+  // 7b. Fetch - Optional postedAt coercion
+  const postedEntry = {
+    careers_url: 'https://example.com/careers',
+    parser: {
+      command: 'node',
+      script: 'tests/providers/_fixture-local-parser.mjs',
+      args: ['posted-at']
+    }
+  };
+  const postedJobs = await localParser.fetch(postedEntry);
+  const byTitle = Object.fromEntries(postedJobs.map(j => [j.title, j]));
+
+  if (postedJobs.length === 5) {
+    pass('localParser.fetch() keeps rows whose postedAt is bad or absent');
+  } else {
+    fail(`localParser.fetch() returned ${postedJobs.length} posted-at rows, expected 5`);
+  }
+
+  if (byTitle['ISO date']?.postedAt === Date.parse('2026-09-08')
+    && byTitle['Epoch ms']?.postedAt === 1757289600000
+    && byTitle['Snake case']?.postedAt === Date.parse('2026-01-15T10:00:00Z')) {
+    pass('localParser.fetch() coerces ISO / epoch-ms / posted_at into postedAt');
+  } else {
+    fail(`postedAt coercion = ${JSON.stringify(postedJobs.map(j => [j.title, j.postedAt]))}`);
+  }
+
+  if (!('postedAt' in byTitle['Bad date']) && !('postedAt' in byTitle['No date'])) {
+    pass('localParser.fetch() omits postedAt for an unparseable or missing date');
+  } else {
+    fail(`postedAt should be absent: ${JSON.stringify([byTitle['Bad date'], byTitle['No date']])}`);
+  }
+
   // 8. Fetch - Invalid JSON
   try {
     await localParser.fetch({
