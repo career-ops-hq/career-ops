@@ -2496,8 +2496,10 @@ const batchTrackerStep = batchPrompt.match(/### Step 5 \u2014 [^\n]*[\s\S]*?### 
 // The mirror-image guard on *calculate* wording is deliberately absent: the
 // sentence satisfying this gate is itself negated ("...so do not calculate a
 // local `max+1`"), so such a rule would flag the correct prompt. Negation is
-// therefore only rejected when it precedes `reserv` inside that sentence. The
-// original literal stays as a cheap extra, but the gate no longer rests on it.
+// therefore only rejected when it precedes `reserv` inside that sentence — the
+// whole prefix, and with no \b before `n't` so contractions ("doesn't reserve")
+// are caught. The original literal stays as a cheap extra, but the gate no
+// longer rests on it.
 const batchTrackerRowShape = /\{\{REPORT_NUM\}\}\\t\{\{DATE\}\}/.test(batchTrackerStep);
 const batchReserveSentence = batchTrackerStep
   .split(/(?<=[.\n])/)
@@ -2507,7 +2509,7 @@ const batchReserveSentence = batchTrackerStep
     /\b(?:numbers?|tracker|REPORT_NUM)\b/i.test(sentence));
 const batchNumIsReserved =
   batchReserveSentence !== undefined &&
-  !/\b(?:not|never|n't)\b[^.]{0,40}\breserv/i.test(batchReserveSentence);
+  !/(?:\bnot\b|\bnever\b|n't)[^.]*\breserv/i.test(batchReserveSentence);
 if (
   batchTrackerRowShape &&
   batchNumIsReserved &&
