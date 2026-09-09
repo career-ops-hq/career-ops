@@ -140,7 +140,7 @@ function buildDateline(letter) {
  *
  * A partial recipient is normal and renders as far as it goes: a company with
  * no named individual, or a name with no street address, are both ordinary
- * states for a cover letter. Only a recipient with nothing usable in it, or no
+ * states for a cover letter. Only a recipient with nothing usable in it (blank or whitespace-only fields included), or no
  * recipient at all, yields the empty string, so a letter without an addressee
  * still renders instead of failing.
  *
@@ -154,7 +154,12 @@ function buildRecipientBlock(letter) {
     : r.address
       ? [r.address]
       : [];
-  const lines = [r.name, r.title, r.company, ...addressLines].filter(Boolean).map(escapeHtml);
+  // Trim before filtering: `filter(Boolean)` alone keeps "   ", which renders as
+  // a blank line inside the wrapper rather than as the absent field it is.
+  const lines = [r.name, r.title, r.company, ...addressLines]
+    .map((v) => (typeof v === "string" ? v.trim() : v))
+    .filter(Boolean)
+    .map(escapeHtml);
   if (!lines.length) return "";
   return `<div class="recipient">\n${lines.map((l) => `    <div>${l}</div>`).join("\n")}\n  </div>`;
 }
