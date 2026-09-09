@@ -22,7 +22,7 @@
  * looks exactly like upstream not having changed those files, which is #958.
  */
 
-import { pass, fail } from './helpers.mjs';
+import { pass, fail, ROOT } from './helpers.mjs';
 import { rejectUserLayerPaths, manifestProbes } from '../update-system.mjs';
 
 // A stand-in for effectiveUserPaths() covering both declaration forms: a
@@ -266,6 +266,10 @@ console.log('\n🧪 Testing rejectUserLayerPaths (fetched manifest vs local user
     './data/', './documents', './/data', 'data//', 'documents/./',
     '..\\data', ':(glob)data/**', '/data/', 'data/../data/',
     `data${String.fromCharCode(0)}entry`,
+    // Wildcards are magic without the announcing `:`, and the checkout cannot
+    // pass --literal-pathspecs because it relies on :(exclude) specs. A default
+    // pathspec wildcard matches `/` too, so `modes/*` claims modes/_profile.md.
+    'modes/*', 'modes/?_profile.md', 'modes/[_]profile.md', 'mode*/',
   ];
 
   // When: the manifest is split
@@ -379,8 +383,10 @@ console.log('\n🧪 Testing manifestProbes (git output -> the rule\'s three ques
 }
 
 {
-  // Given: a root the exists probe should resolve against
-  const probes = manifestProbes({ trackedOutput: '', upstreamOutput: '', root: process.cwd() });
+  // Given: the repo root, derived from import.meta.url by helpers.mjs rather
+  // than from process.cwd(), so the case does not depend on where the suite
+  // was launched from
+  const probes = manifestProbes({ trackedOutput: '', upstreamOutput: '', root: ROOT });
 
   // When/Then: it reports on the real filesystem under that root
   if (probes.exists('update-system.mjs') && !probes.exists('no-such-file-xyz.md')) {

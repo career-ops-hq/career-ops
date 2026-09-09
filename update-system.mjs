@@ -740,6 +740,13 @@ function isCanonicalManifestPath(path) {
   if (path.includes('\0')) return false;
   // Windows separators, absolute paths, and git pathspec magic (a leading colon).
   if (path.includes('\\') || path.startsWith('/') || path.startsWith(':')) return false;
+  // Wildcards are pathspec magic too, without the `:` that announces it, and the
+  // checkout cannot defuse them: it builds :(exclude) specs for preserved paths,
+  // so --literal-pathspecs would disable the very magic it depends on. A default
+  // pathspec wildcard also matches `/`, so `modes/*` claims modes/_profile.md
+  // while matching none of the segment comparisons below. Refusing here is the
+  // only place this can be stopped.
+  if (/[*?[]/.test(path)) return false;
   // One trailing slash is the directory spelling this file uses; anything else
   // empty is a doubled separator.
   const segments = (path.endsWith('/') ? path.slice(0, -1) : path).split('/');
