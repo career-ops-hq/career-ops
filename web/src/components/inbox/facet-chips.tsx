@@ -74,7 +74,7 @@ export function FacetChips({
               type="button"
               onClick={() => setWithin(within === w.days ? null : w.days)}
               className={cn(
-                "rounded-md px-2.5 text-xs font-medium transition-colors max-sm:min-h-[44px]",
+                "rounded-md px-2.5 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px]",
                 within === w.days ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground",
               )}
             >
@@ -130,7 +130,7 @@ function Pill({ on, onClick, children }: { on: boolean; onClick: () => void; chi
       type="button"
       onClick={onClick}
       className={cn(
-        "shrink-0 rounded-full border px-2.5 text-xs font-medium transition-colors max-sm:min-h-[44px]",
+        "shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px]",
         on ? "border-brand/40 bg-brand-soft text-brand" : "border-border text-muted hover:text-foreground",
       )}
     >
