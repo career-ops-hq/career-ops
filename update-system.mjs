@@ -738,8 +738,14 @@ function isCanonicalManifestPath(path) {
   // instead of naming the malformed entry. It is also the delimiter both probes
   // parse their git output on, so such a path could never match anything anyway.
   if (path.includes('\0')) return false;
-  // Windows separators, absolute paths, and git pathspec magic (a leading colon).
-  if (path.includes('\\') || path.startsWith('/') || path.startsWith(':')) return false;
+  // Windows separators and absolute paths.
+  if (path.includes('\\') || path.startsWith('/')) return false;
+  // Any colon, not just a leading one. It is git pathspec magic at the front
+  // (`:(glob)`, `:!`), a drive on Windows whether absolute (`C:/x`) or
+  // drive-relative (`C:x`), and an NTFS alternate data stream in the middle
+  // (`file.txt:stream`). A colon is not legal in a Windows filename either, and
+  // no entry the manifest ships contains one, so the whole character goes.
+  if (path.includes(':')) return false;
   // Wildcards are pathspec magic too, without the `:` that announces it, and the
   // checkout cannot defuse them: it builds :(exclude) specs for preserved paths,
   // so --literal-pathspecs would disable the very magic it depends on. A default

@@ -270,6 +270,10 @@ console.log('\n🧪 Testing rejectUserLayerPaths (fetched manifest vs local user
     // pass --literal-pathspecs because it relies on :(exclude) specs. A default
     // pathspec wildcard matches `/` too, so `modes/*` claims modes/_profile.md.
     'modes/*', 'modes/?_profile.md', 'modes/[_]profile.md', 'mode*/',
+    // A colon is magic at the front (`:(glob)`), a Windows drive whether
+    // absolute or drive-relative, and an NTFS alternate data stream in the
+    // middle. None is a repo-relative path, and no shipped entry has one.
+    'C:/user/file', 'C:foo', 'D:/data/applications.md', 'file.txt:stream',
   ];
 
   // When: the manifest is split
