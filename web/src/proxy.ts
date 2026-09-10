@@ -6,10 +6,11 @@ import {
   parseAllowedOrigins,
 } from "@/lib/origin-guard.mjs";
 
-// Single choke point over the API surface. Every /api request is gated on the
-// same-origin + loopback guard before it can reach a route handler (which may
-// spawn a child process or write the user's files). See origin-guard.mjs for
-// the two-layer rationale (F1 drive-by CSRF, F2 LAN reachability).
+// Single choke point over everything the dashboard serves. Every request is
+// gated on the same-origin + loopback guard before it can reach a route handler
+// (which may spawn a child process or write the user's files) or a page (which
+// renders the user's CV, pipeline and reports). See origin-guard.mjs for the
+// two-layer rationale (F1 drive-by CSRF, F2 LAN reachability).
 //
 // Opt in to extra hosts (e.g. a trusted LAN box) with a comma/space separated
 // CAREER_OPS_WEB_ALLOWED_HOSTS; unset means loopback only.
@@ -33,4 +34,12 @@ export function proxy(req: NextRequest) {
   return NextResponse.next();
 }
 
-export const config = { matcher: "/api/:path*" };
+// Everything except build assets. Scoping this to /api left every page route
+// ungated, which loopback does not cover: a page that re-resolves its own domain
+// to 127.0.0.1 (DNS rebinding) fetches /pipeline same-origin from the user's own
+// browser, and force-dynamic pages read the tracker off disk on each request.
+// The Host header carries the attacker's domain there, so the guard refuses it —
+// but only if it runs. Build assets stay out: they are the same for every user,
+// carry nothing of theirs, and a caller who cannot read a page has no use for
+// the chunk that renders it.
+export const config = { matcher: "/((?!_next/static|_next/image|favicon.ico).*)" };
