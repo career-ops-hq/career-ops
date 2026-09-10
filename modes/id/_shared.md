@@ -33,6 +33,8 @@
 
 **ATURAN: JANGAN PERNAH menuliskan metrik dari proof point secara hardcode.** Baca metrik dari `cv.md` dan `article-digest.md` pada saat evaluasi.
 **ATURAN: Untuk metrik artikel/proyek, `article-digest.md` lebih diutamakan daripada `cv.md`** (`cv.md` bisa memuat angka yang lebih lama).
+**ATURAN: JANGAN PERNAH menyatakan bahwa kandidat adalah pembuat/pencipta suatu proyek, repositori, pustaka, alat, framework, atau artefak open-source, kecuali hal itu secara eksplisit dikaitkan dengannya di `cv.md` atau `article-digest.md`.** Menyamakan "memakai sebuah alat" dengan "menciptakannya" (memakai X bukan berarti menciptakan X) adalah pola fabrikasi yang paling umum, dan dilarang.
+**ATURAN: Kata kunci diformulasikan ulang, tidak pernah dikarang.** Susun ulang, bingkai ulang, tekankan — tetapi jangan pernah mengarang. Jika sebuah klaim tidak didukung oleh berkas dalam cakupan, tanyakan kepada kandidat; tanpa jawaban, hilangkan. Diam tentang suatu topik lebih baik daripada detail yang dikarang.
 
 ---
 
