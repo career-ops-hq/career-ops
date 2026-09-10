@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { writeTempPortals, cleanupTempPortals } from "./portals";
+import { parseScanJsonStdout } from "./scan-json.mjs";
 import { ATS_SOURCES, type DiscoveredOffer, type ExploreFilters, type ScanEvent } from "@/lib/explore";
 
 export type { DiscoveredOffer, ScanEvent, AtsSource } from "@/lib/explore";
@@ -112,13 +113,16 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
     let errBuf = "";
     let jsonOut = ""; // --json mode: the single stdout object accumulates here
 
+    // Workday paginates per tenant; 230s used to SIGTERM the child while it was
+    // still on Workday, before --json wrote stdout — the live counter showed
+    // matches, then the parse got nothing and Discover bounced back to empty.
     const killer = setTimeout(() => {
       try {
         child.kill("SIGTERM");
       } catch {
         /* ignore */
       }
-    }, 230_000);
+    }, 12 * 60 * 1000);
 
     // Live progress (atsStart / progress / atsDone) — in --json mode these human
     // lines arrive on STDERR; in legacy mode on STDOUT (handled inside handleLine).
@@ -224,12 +228,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
       clearTimeout(killer);
       cleanupTempPortals(tempPortals);
       if (useJson) {
-        let j: ScanJson | null = null;
-        try {
-          j = JSON.parse(jsonOut.trim()) as ScanJson;
-        } catch {
-          j = null;
-        }
+        const j = parseScanJsonStdout(jsonOut) as ScanJson | null;
         if (j && Array.isArray(j.offers)) {
           for (const o of j.offers) {
             const url = (o.url || "").trim();
