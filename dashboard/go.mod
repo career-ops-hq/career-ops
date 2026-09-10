@@ -3,8 +3,8 @@ module github.com/santifer/career-ops/dashboard
 go 1.25.0
 
 require (
-	github.com/charmbracelet/bubbletea v1.3.10
-	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/charmbracelet/bubbletea/v2 v2.0.9
+	github.com/charmbracelet/lipgloss/v2 v2.0.6
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/muesli/termenv v0.16.0
 	golang.org/x/sys v0.47.0
