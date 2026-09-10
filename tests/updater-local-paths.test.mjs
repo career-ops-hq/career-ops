@@ -9,8 +9,8 @@
  * moves that statement OUT of the system layer.
  *
  * What is pinned here is the property that makes the feature safe to ship:
- * absent file changes nothing, and a declaration that would silently stop a
- * system file from updating is refused instead of honored.
+ * absent file changes nothing, a declaration is honored, and one that would
+ * stop a system file from updating says so out loud instead of doing it quietly.
  */
 
 import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, rmSync } from 'fs';
@@ -25,6 +25,7 @@ import {
   localUserPaths,
   effectiveUserPaths,
   userLayerViolations,
+  staleSystemFiles,
 } from '../update-system.mjs';
 
 /** A throwaway root with an optional declaration file already written. */
@@ -106,36 +107,66 @@ console.log('\n🧪 Local user-paths declaration file (#2421)\n');
   }
 }
 
-// ── 6. A SYSTEM_PATHS collision is refused, loudly, naming the path ──
-//    Honoring it would be worse than refusing: the user would stop receiving
-//    updates for a system file and get no signal that it happened.
-{
-  let threw = null;
+/** Run `fn` with console.error captured, returning [result, capturedText]. */
+function withStderr(fn) {
+  const original = console.error;
+  const lines = [];
+  console.error = (...args) => lines.push(args.join(' '));
   try {
-    localUserPaths(root('merge-tracker.mjs\n'));
-  } catch (err) {
-    threw = err;
-  }
-  if (threw && threw.message.includes('merge-tracker.mjs')) {
-    pass('declaring a SYSTEM_PATHS entry throws and names the path');
-  } else {
-    fail(`#6 expected a throw naming merge-tracker.mjs, got ${threw ? threw.message : 'no throw'}`);
+    return [fn(), lines.join('\n')];
+  } finally {
+    console.error = original;
   }
 }
 
-// ── 7. A collision inside a SYSTEM_PATHS *directory* is refused too ──
-//    'modes/' is a directory entry; modes/pdf.md is shipped by it.
+// ── 6. A SYSTEM_PATHS collision is HONORED, and warns, naming the path ──
+//    This refused until a fork hit the real failure: refusing assumed a
+//    SYSTEM_PATHS match proves upstream ships the path, and it does not. An
+//    exact entry can be stale (naming a file the fetched tree no longer has),
+//    so the refusal fired on a fork's OWN file and left it undeclarable — after
+//    which the stale-file prune in apply() deleted it as a dropped system file.
+//    The rationale was about silence, not refusal, so the warning carries it.
 {
-  let threw = null;
-  try {
-    localUserPaths(root('modes/pdf.md\n'));
-  } catch (err) {
-    threw = err;
-  }
-  if (threw && threw.message.includes('modes/pdf.md')) {
-    pass('a file inside a system directory is refused too');
+  const [declared, stderr] = withStderr(() => localUserPaths(root('merge-tracker.mjs\n')));
+  if (declared.includes('merge-tracker.mjs') && stderr.includes('merge-tracker.mjs')) {
+    pass('declaring a SYSTEM_PATHS entry is honored and warns, naming the path');
   } else {
-    fail(`#7 expected a throw naming modes/pdf.md, got ${threw ? threw.message : 'no throw'}`);
+    fail(`#6 expected it honored + warned, got declared=${JSON.stringify(declared)} stderr=${JSON.stringify(stderr)}`);
+  }
+}
+
+// ── 7. A path inside a SYSTEM_PATHS *directory* is honored and warns too ──
+//    'providers/' is the case that matters: it covers upstream's greenhouse.mjs
+//    and a provider that exists only in this fork, so the prefix cannot tell
+//    them apart. Honoring both is what keeps the fork's file alive; the warning
+//    is what stops a genuine fork-of-a-shipped-file being silent.
+{
+  const [declared, stderr] = withStderr(() => localUserPaths(root('providers/my-own-board.mjs\n')));
+  if (declared.includes('providers/my-own-board.mjs') && stderr.includes('providers/')) {
+    pass('a file inside a system directory is honored and warns');
+  } else {
+    fail(`#7 expected it honored + warned, got declared=${JSON.stringify(declared)} stderr=${JSON.stringify(stderr)}`);
+  }
+}
+
+// ── 7b. The prune must not delete a declared fork-local file ──
+//    The regression this whole change exists for: a fork's provider/skill/doc
+//    under an owned prefix is absent upstream, so staleSystemFiles() saw it as
+//    a system file upstream had dropped. Protection must not depend on the file
+//    having uncommitted edits, which is all that used to spare it.
+{
+  const declaredRoot = root('providers/my-own-board.mjs\n');
+  const [userPaths] = withStderr(() => effectiveUserPaths(declaredRoot));
+  const stale = staleSystemFiles(
+    ['providers/my-own-board.mjs', 'providers/dropped-upstream.mjs'],
+    ['providers/greenhouse.mjs'],          // upstream ships neither of the above
+    ['providers/'],
+    userPaths,
+  );
+  if (!stale.includes('providers/my-own-board.mjs') && stale.includes('providers/dropped-upstream.mjs')) {
+    pass('a declared fork-local file survives the prune; an undeclared stale one still goes');
+  } else {
+    fail(`#7b expected only dropped-upstream.mjs pruned, got ${JSON.stringify(stale)}`);
   }
 }
 
