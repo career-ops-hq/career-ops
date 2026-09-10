@@ -1799,8 +1799,17 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
   const reportNum = opts.reportNum || '';
   const inputPath = opts.inputPath || '';
   // Every render path converges here, so the manifest's kind is decided here
-  // too rather than in each caller (#3887).
+  // too rather than in each caller (#3887). A null kind means the caller
+  // declared one this manifest cannot key on: the CLI and the batch loop
+  // validate before rendering, but a direct renderHtmlToPdf() caller has
+  // nothing else in front of it, and applyManifestRow() reads null as 'cv' —
+  // so an unrecognized kind would evict the report's real CV row and hand the
+  // apply flow the wrong document. Rejected here, before the page renders, so
+  // a mislabelled artifact never reaches disk either.
   const { kind: artifactKind } = resolveArtifactKind(opts.kind, outputPath);
+  if (!artifactKind) {
+    throw new Error(`Invalid artifact kind "${opts.kind}". Use: ${ARTIFACT_KINDS.join(', ')}`);
+  }
 
   // Reject an escaping destination before creating directories, launching
   // Chromium, or writing any renderer temporary files (#2844).
