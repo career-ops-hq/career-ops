@@ -358,6 +358,7 @@ const scripts = [
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'story-provenance-check.mjs --self-test', expectExit: 0 },
+  { name: 'cv-title-check.mjs --self-test', expectExit: 0 },
   { name: 'verify-cv-facts.mjs --self-test', expectExit: 0 },
   { name: 'verify-ats.mjs --self-test', expectExit: 0 },
   { name: 'contacts.mjs --self-test', expectExit: 0 },
