@@ -7772,6 +7772,9 @@ try {
     fail('remote-title rescue changed behavior for non-remote or malformed titles');
   }
 
+  // location_filter.strict coverage lives in tests/location-filter-strict.test.mjs.
+  // Keep this central harness focused on broad scan integration behavior.
+
   if (
     shouldDedupScanHistoryRow({ firstSeen: '2026-06-01', status: 'added' }, { recheckAfterDays: 30, today: '2026-06-10' }) === true &&
     shouldDedupScanHistoryRow({ firstSeen: '2026-05-01', status: 'added' }, { recheckAfterDays: 30, today: '2026-06-10' }) === false &&
