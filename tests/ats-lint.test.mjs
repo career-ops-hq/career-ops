@@ -187,6 +187,50 @@ test('standard-section-headers: must not flag the standard or additive headers',
   assert.deepEqual(ids(lint('<body><div class="section-title">WORK EXPERIENCE</div></body>')), []);
 });
 
+test('standard-section-headers: an entity-escaped sanctioned header is not a rename', () => {
+  // "Awards & Honors" is sanctioned, and HTML writes that ampersand as `&amp;`.
+  // Reading the heading as tags-stripped-only left the literal `Awards &amp;
+  // Honors`, which is in no accepted set, so writing the header the normal way
+  // was reported as an invented synonym.
+  assert.deepEqual(ids(lint('<body><div class="section-title">Awards &amp; Honors</div></body>')), []);
+  // Same shape, different entity: `&nbsp;` between the two words of a heading.
+  assert.deepEqual(ids(lint('<body><div class="section-title">Work&nbsp;Experience</div></body>')), []);
+  // Decoding must not turn the detector into a pass: a heading the doc does not
+  // sanction still fires when it is written with an entity, and is reported in
+  // its decoded form rather than as the escape the author typed.
+  const result = lint('<body><div class="section-title">Awards &amp; Highlights</div></body>');
+  assert.deepEqual(ids(result), ['standard-section-headers']);
+  assert.match(result.findings[0].detail, /Awards & Highlights/);
+});
+
+test('standard-section-headers: a decorative empty element does not hide the heading', () => {
+  // An icon span carries no text, so it cannot change what a heading SAYS —
+  // but it closes early, and a capture that stops at the first `</` ended at
+  // the icon instead of the heading. The text went missing and the heading was
+  // skipped as empty: a non-standard heading passing as clean, which is the
+  // one failure mode a linter must not have.
+  const icon = '<body><div class="section-title"><span class="icon"></span>Career Highlights</div></body>';
+  assert.deepEqual(ids(lint(icon)), ['standard-section-headers']);
+  assert.match(lint(icon).findings[0].detail, /Career Highlights/);
+  // The same idiom nested, which is how icon fonts are actually written.
+  const nested = '<body><div class="section-title"><span class="icon"><i class="fa"></i></span>Career Highlights</div></body>';
+  assert.deepEqual(ids(lint(nested)), ['standard-section-headers']);
+  // And the must-not-flag half: decoration around a SANCTIONED header stays
+  // quiet. Without this the rule could "pass" by flagging everything.
+  assert.deepEqual(
+    ids(lint('<body><div class="section-title"><span class="icon"></span>Work Experience</div></body>')),
+    []
+  );
+});
+
+test('standard-section-headers: one heading is reported once', () => {
+  // An element carrying both a heading tag and the class is matched by both
+  // passes, and reported the same finding twice.
+  const result = lint('<body><h2 class="section-title">Career Highlights</h2></body>');
+  assert.deepEqual(ids(result), ['standard-section-headers']);
+  assert.equal(result.findings.length, 1, 'one heading, one finding');
+});
+
 test('standard-section-headers: does not run for cover letters', () => {
   const html = '<body><h1>Dear Hiring Manager</h1></body>';
   assert.deepEqual(ids(lint(html, 'cv')), ['standard-section-headers']);

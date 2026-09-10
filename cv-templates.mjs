@@ -9,6 +9,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { decodeEntities } from './providers/_html-entities.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TEMPLATES_DIR = resolve(__dirname, 'templates');
@@ -252,8 +253,50 @@ function stripNonContent(html) {
     .replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, ' ');
 }
 
+// Tags out, then entities in. The order is not cosmetic: decoding first would
+// turn `&lt;b&gt;` into markup the tag-stripper then deletes, inventing a tag
+// out of text the author escaped precisely so it would stay text. Every
+// provider that reads raw HTML strips then decodes for the same reason.
+//
+// Decoding at all matters because the accepted headers include `Awards &
+// Honors`, and HTML writes that ampersand as `&amp;` — comparing against the
+// raw escape flagged the sanctioned spelling as an invented synonym. The
+// decoder is the shared one under providers/, not a local table: private
+// copies of it have drifted out of sync four separate times (see the header of
+// providers/_html-entities.mjs), and a fifth here would be the same mistake.
 function textOf(fragment) {
-  return fragment.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  return decodeEntities(fragment.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+}
+
+// An element with nothing but whitespace inside it — the decorative icon span
+// (`<span class="icon"></span>`, `<i class="fa"></i>`) that sits before a
+// heading's text. It carries no text, so removing it cannot change what any
+// heading SAYS, which is what makes this safe to do to the whole document.
+//
+// It is removed because of what it does to the heading scan below, whose
+// capture ends at the first `</`. An empty element closes before the heading's
+// own text starts, so the capture ended at the decoration, `textOf` returned
+// nothing, and the heading was skipped as empty — a non-standard heading
+// reported clean, the one direction of error a linter cannot afford.
+//
+// Deleting the construct is preferred over bounding the element more precisely
+// (a tag backreference): matching an element by its own closing tag makes the
+// OUTERMOST element win, so `<body>…</body>` swallows the document in a single
+// lazy match and the scan finds no headings at all in any real template. The
+// loop is for the nested case (`<span class="icon"><i class="fa"></i></span>`),
+// which is how icon fonts are actually written; it terminates because every
+// pass replaces at least seven characters with one.
+const EMPTY_ELEMENT = /<([a-z][a-z0-9]*)\b[^>]*>\s*<\/\1\s*>/gi;
+function stripEmptyElements(html) {
+  let prev;
+  let out = html;
+  do {
+    prev = out;
+    // A space, not '', because that is exactly what textOf would have done to
+    // this markup had the capture reached it — the strip has to be invisible.
+    out = out.replace(EMPTY_ELEMENT, ' ');
+  } while (out !== prev);
+  return out;
 }
 
 // A `<table>` opened while another is still open. Depth never exceeds 1 for a
@@ -299,11 +342,16 @@ function detectHiddenText(html) {
 function detectStandardSectionHeaders(html, rule) {
   const accepted = new Set((rule.headers || []).map((h) => h.toLowerCase()));
   if (accepted.size === 0) return [];
-  const body = stripNonContent(html);
-  const headings = [
+  const body = stripEmptyElements(stripNonContent(html));
+  // Deduplicated because the two passes overlap: an element carrying both a
+  // heading tag and the class (`<h2 class="section-title">`) is matched by
+  // each, and reported the same finding twice. Deduplicating the TEXT rather
+  // than the matches also collapses a heading genuinely written twice, which
+  // is the same warning either way.
+  const headings = [...new Set([
     ...body.matchAll(/<[^>]*class\s*=\s*(?:"[^"]*\bsection-title\b[^"]*"|'[^']*\bsection-title\b[^']*')[^>]*>([\s\S]*?)<\//gi),
     ...body.matchAll(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/gi),
-  ].map((m) => textOf(m[1]));
+  ].map((m) => textOf(m[1])))];
 
   const out = [];
   for (const heading of headings) {
