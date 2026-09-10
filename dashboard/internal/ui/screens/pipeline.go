@@ -1947,6 +1947,44 @@ func previewOutcome(app model.CareerApplication) string {
 	return outcome
 }
 
+// sanitizeFlash neutralizes control characters in the flash line.
+//
+// Every flash reaches the terminal through the single lipgloss.Render below,
+// and lipgloss wraps the string it is given without escaping it. Most of what
+// the flash line carries is not the program's own words: a tracker URL or a
+// manifest path read out of a file, or the last line a failed child process
+// printed. A control byte in any of those reaches the terminal as an
+// instruction rather than as text, which is how a cell that renders correctly
+// everywhere else can still move the cursor or repaint the help bar.
+//
+// The range is the one tracker-utils.mjs strips at the tracker write path
+// (CONTROL_CHARS, #3892): C0, DEL and C1. It differs deliberately in one
+// respect. cell() keeps \t, \r and \n because it has already folded them to a
+// space and dropping them there would glue words together; the help bar is a
+// single line, so they are folded to a space here instead of being kept.
+//
+// Stripping at the write path stops new bytes entering the tracker. It cannot
+// speak for a report header, a scan TSV, or a child process's stderr, none of
+// which pass through cell() -- and the flash renders all three.
+//
+// Text from those sources need not be valid UTF-8. strings.Map hands the
+// mapping function utf8.RuneError for a byte it cannot decode and writes
+// U+FFFD, so a raw 0x9b -- the byte an 8-bit terminal reads as CSI -- is
+// replaced rather than passed through. That is the property the guard needs;
+// it shows as a replacement character rather than disappearing, which is the
+// honest rendering of a byte nothing can decode.
+func sanitizeFlash(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r':
+			return ' '
+		case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f:
+			return -1
+		}
+		return r
+	}, s)
+}
+
 func (m PipelineModel) renderHelp() string {
 	style := lipgloss.NewStyle().
 		Foreground(m.theme.Subtext).
@@ -1963,7 +2001,7 @@ func (m PipelineModel) renderHelp() string {
 			Background(m.theme.Surface).
 			Width(m.width).
 			Padding(0, 1)
-		return flashStyle.Render(m.flash)
+		return flashStyle.Render(sanitizeFlash(m.flash))
 	}
 
 	if m.colPicker {
