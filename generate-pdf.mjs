@@ -4,7 +4,7 @@
  * generate-pdf.mjs — HTML → PDF via Playwright
  *
  * Usage:
- *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages] [--skip-fact-check]
+ *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages] [--skip-fact-check] [--running-footer]
  *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--max-pages=N] [--strict-pages]
  *
  * --batch renders every document in a JSON manifest (an array of
@@ -28,6 +28,13 @@
  * The actual page count is checked after Chromium writes the PDF; overflow
  * warns with trimming guidance by default. --strict-pages turns that warning
  * into a hard rejection without publishing the render as successful.
+ *
+ * --running-footer adds a small footer to every rendered page but the first —
+ * name, a contact method, and "N of TOTAL" — so a page separated from the
+ * rest of a multi-page CV can still be traced back and the reader knows one
+ * is missing. Page 1 is skipped because the visible header already carries
+ * that information there. Off by default (single-CV path only, not --batch).
+ * A single-page CV never shows it at all — nothing to exclude page 1 from.
  *
  * Requires: @playwright/test (or playwright) installed.
  * Uses Chromium headless to render the HTML and produce a clean, ATS-parseable PDF.
@@ -187,7 +194,15 @@ function normalizeTextForATS(html) {
     t = t.replace(/[\u2018\u2019\u201A\u201B]/g, () => { bump('smart-single-quote', 1); return "'"; });
     t = t.replace(/\u2026/g, () => { bump('ellipsis', 1); return '...'; });
     t = t.replace(/[\u200B\u200C\u200D\u2060\uFEFF]/g, () => { bump('zero-width', 1); return ''; });
-    t = t.replace(/\u00A0/g, () => { bump('nbsp', 1); return ' '; });
+    // A stray/pasted NBSP is flattened to a normal space (some ATS text
+    // extractors mis-tokenize U+00A0 as a non-space, gluing the words either
+    // side of it together) \u2014 EXCEPT immediately before :;!? , which is French
+    // typographic convention (espace ins\u00E9cable) and must reach Chromium's
+    // layout engine intact: this pass runs on the raw HTML string before
+    // page.setContent(), so a stripped-to-plain-space NBSP here can never be
+    // un-stripped later \u2014 it was never "unbreakable" at all by the time the
+    // browser paginates the page.
+    t = t.replace(/\u00A0(?![:;!?])/g, () => { bump('nbsp', 1); return ' '; });
     // Arrows often stripped by PDF text extractors \u2014 replace with ASCII for ATS safety.
     // Consume surrounding whitespace to avoid double-spacing in output.
     t = t.replace(/\s*\u2192\s*/g, () => { bump('right-arrow', 1); return ' to '; });
@@ -1212,6 +1227,7 @@ async function generatePDF() {
   // Parse arguments
   let inputPath, outputPath, format = 'a4', reportNum = '', allowReorder = false;
   let maxPages = 2, maxPagesInput = '2', strictPages = false, batchManifestPath = null;
+  let runningFooter = false;
 
   for (const arg of args) {
     if (arg.startsWith('--format=')) {
@@ -1229,6 +1245,8 @@ async function generatePDF() {
       strictPages = true;
     } else if (arg === '--skip-fact-check') {
       skipFactCheck = true;
+    } else if (arg === '--running-footer') {
+      runningFooter = true;
     } else if (!inputPath) {
       inputPath = arg;
     } else if (!outputPath) {
@@ -1258,7 +1276,7 @@ async function generatePDF() {
   }
 
   if (!inputPath || !outputPath) {
-    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages]');
+    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages] [--running-footer]');
     console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--max-pages=N] [--strict-pages]');
     console.error('');
     console.error('Batch mode renders every document in the JSON manifest (an array of');
@@ -1308,6 +1326,7 @@ async function generatePDF() {
   console.log(`📁 Output: ${outputPath}`);
   console.log(`📏 Format: ${format.toUpperCase()}`);
   console.log(`📐 Page budget: ${maxPages}${strictPages ? ' (strict)' : ' (warning only)'}`);
+  if (runningFooter) console.log('🦶 Running footer: on (every page but the first)');
 
   let html = await readFile(inputPath, 'utf-8');
   let cvMarkdown = '';
@@ -1374,6 +1393,7 @@ async function generatePDF() {
     inputPath,
     maxPages,
     strictPages,
+    runningFooter,
     styleTokens: readStyleTokens(resolve(workspaceRoot, 'config', 'profile.yml')),
   });
 }
@@ -1630,6 +1650,7 @@ export async function inlineLocalFonts(html) {
  *   workspaceRoot?: string,
  *   maxPages?: number,
  *   strictPages?: boolean,
+ *   runningFooter?: boolean,
  *   launchBrowser?: (options: {headless: boolean}) => Promise<import('playwright').Browser>
  * }} [opts]
  * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
@@ -1671,7 +1692,8 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
  *   inputPath?: string,
  *   maxPages?: number,
  *   strictPages?: boolean,
- *   styleTokens?: object
+ *   styleTokens?: object,
+ *   runningFooter?: boolean
  * }} [opts]
  * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
  */
@@ -1751,24 +1773,121 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
     // Wait for fonts and images to settle
     await page.evaluate(() => document.fonts.ready);
 
-    // Generate PDF
-    const pdfBuffer = await page.pdf({
-      printBackground: true,
-      margin: {
-        top: '0',
-        right: '0',
-        bottom: '0',
-        left: '0',
-      },
-      preferCSSPageSize: true,
-    });
+    // Running footer (opt-in, #3961): "page lost off a desk/inbox" recovery —
+    // name, a contact method, and N of TOTAL on every page but the first (the
+    // visible header already carries that on page 1) so a stray page can be
+    // reunited with the rest.
+    //
+    // Chromium's print engine applies one header/footer template uniformly to
+    // every page — there is no per-page conditional inside headerTemplate/
+    // footerTemplate, so "skip page 1" cannot be expressed in a single render
+    // call. Instead this renders the document TWICE with identical page
+    // geometry (same `margin`, so pagination is guaranteed to break in the
+    // same places both times) — once with a blank footer, once with the real
+    // one — and keeps page 1 from the blank render and every later page from
+    // the real one, stitched together with pdf-lib.
+    //
+    // knownPageCount short-circuits the page-tree count below for the merged
+    // case: countRenderedPdfPages() finds /Type /Catalog by pattern-matching
+    // classic "N 0 obj ... endobj" text, which is how Chromium writes a PDF
+    // but not how pdf-lib writes the one it produces (different object/xref
+    // layout) — so re-parsing a pdf-lib buffer the same way finds nothing.
+    // The page count was already established (and cross-checked between both
+    // Chromium passes) while building it, so re-deriving it from the merged
+    // bytes would be redundant even where it did work.
+    let pdfBuffer;
+    let knownPageCount = null;
+    if (opts.runningFooter) {
+      const identity = await page.evaluate(() => {
+        const name = document.querySelector('.header h1')?.textContent?.trim() || '';
+        const email = document.querySelector('.contact-row a[href^="mailto:"]')?.textContent?.trim() || '';
+        const phone = document.querySelector('.contact-row a[href^="tel:"]')?.textContent?.trim() || '';
+        const lang = document.documentElement.getAttribute('lang') || '';
+        return { name, email, phone, lang };
+      });
+      const identityLine = [identity.name, identity.email, identity.phone].filter(Boolean).join(' &middot; ');
+      // "N of TOTAL" localized off the rendered document's own <html lang="">
+      // (set from payload.lang) rather than a CLI flag, so it always matches
+      // whatever language the CV body itself was actually written in.
+      const PAGE_OF_WORD = { fr: 'sur' };
+      const ofWord = PAGE_OF_WORD[identity.lang.slice(0, 2).toLowerCase()] || 'of';
+      const footerTemplate = `<div style="font-family: Arial, Helvetica, sans-serif; font-size: 8px; color: #888; width: 100%; padding: 0 ${PDF_PAGE_MARGIN}; display: flex; justify-content: space-between; box-sizing: border-box;"><span>${identityLine}</span><span><span class="pageNumber"></span> ${ofWord} <span class="totalPages"></span></span></div>`;
+      // Reserve room for the footer band on BOTH passes, even the blank one —
+      // the reserved margin (not the template content) is what determines
+      // where content wraps to the next page, so an unequal margin between
+      // the two passes would let them paginate differently and break apart
+      // when merged. @page's own CSS margin (read via preferCSSPageSize)
+      // still governs the body content's margin on every other edge.
+      const sharedMargin = { top: '0', right: '0', bottom: '0.35in', left: '0' };
+      const blankBuffer = await page.pdf({
+        printBackground: true,
+        margin: sharedMargin,
+        preferCSSPageSize: true,
+        displayHeaderFooter: true,
+        headerTemplate: '<span></span>',
+        footerTemplate: '<span></span>',
+      });
+      const pageCount = countRenderedPdfPages(blankBuffer);
+      if (pageCount <= 1) {
+        // Nothing to exclude page 1 from — a single page never needs the
+        // footer at all, so the blank-footer render is already the answer.
+        pdfBuffer = blankBuffer;
+        knownPageCount = pageCount;
+      } else {
+        const footerBuffer = await page.pdf({
+          printBackground: true,
+          margin: sharedMargin,
+          preferCSSPageSize: true,
+          displayHeaderFooter: true,
+          headerTemplate: '<span></span>',
+          footerTemplate,
+        });
+        const footerPageCount = countRenderedPdfPages(footerBuffer);
+        if (footerPageCount !== pageCount) {
+          // Same content, same geometry — this should be unreachable. If the
+          // two passes ever disagree, merging page-by-page would misalign
+          // content, so fall back to the footer-on-every-page render (still
+          // correct, just not page-1-excluded) rather than produce a broken
+          // PDF.
+          console.warn(`⚠️  Running-footer passes disagreed on page count (${pageCount} vs ${footerPageCount}); showing the footer on every page instead of excluding page 1.`);
+          pdfBuffer = footerBuffer;
+          knownPageCount = footerPageCount;
+        } else {
+          const { PDFDocument } = await import('pdf-lib');
+          const finalDoc = await PDFDocument.create();
+          const blankDoc = await PDFDocument.load(blankBuffer);
+          const footerDoc = await PDFDocument.load(footerBuffer);
+          const [firstPage] = await finalDoc.copyPages(blankDoc, [0]);
+          finalDoc.addPage(firstPage);
+          const restIndices = Array.from({ length: pageCount - 1 }, (_, i) => i + 1);
+          const restPages = await finalDoc.copyPages(footerDoc, restIndices);
+          for (const restPage of restPages) finalDoc.addPage(restPage);
+          pdfBuffer = Buffer.from(await finalDoc.save());
+          knownPageCount = pageCount;
+        }
+      }
+    } else {
+      pdfBuffer = await page.pdf({
+        printBackground: true,
+        margin: {
+          top: '0',
+          right: '0',
+          bottom: '0',
+          left: '0',
+        },
+        preferCSSPageSize: true,
+      });
+    }
 
     // Write PDF only after rendering has completed. Renderer cleanup still runs
     // if an injected browser fails before producing a buffer.
     await writeFile(outputPath, pdfBuffer);
 
     // Read the root page-tree count so page-like text in streams is ignored.
-    const pageCount = countRenderedPdfPages(pdfBuffer);
+    // Skipped when a running-footer pass already established it (see
+    // knownPageCount above) — re-parsing a pdf-lib-produced buffer with the
+    // same Chromium-oriented pattern match would find nothing.
+    const pageCount = knownPageCount ?? countRenderedPdfPages(pdfBuffer);
 
     // Strict overflow leaves the draft on disk but stops before success logs
     // and manifest publication. Default overflow warns and continues.

@@ -56,6 +56,7 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
     - The rendered PDF has a two-page warning threshold by default. `--max-pages=N` accepts a positive integer; pass `--max-pages=1` when the user or market prefers a one-page CV.
     - If the rendered PDF exceeds its threshold, generation warns loudly with the actual and allowed page counts plus trimming guidance, then reports and indexes the unchanged PDF so existing longer-CV flows keep working.
     - Pass `--strict-pages` only when the user or market requires a hard limit. Strict overflow leaves the draft available for inspection but does not report or index it as successful; trim lower-priority content and rerun.
+    - Pass `--running-footer` when the user wants a page-loss-recovery footer (name, a contact method, "N of TOTAL") on every rendered page but the first — useful for a CV that's more than one page and travels through a forwarding chain (recruiter → account manager → client) where a page could go missing. Off by default. Page 1 is skipped because the visible header already carries that information there; a CV that renders to a single page shows no footer at all. The "of" wording follows the CV's own `lang` (payload `lang`, rendered as `<html lang="...">`): `fr` → "sur" (e.g. `2 sur 3`), everything else → "of".
 22. Report: PDF path, number of pages, keyword coverage %, and any skill gaps from Step 4 still unaddressed
 
 ## ATS Rules (clean parsing)
@@ -155,7 +156,8 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
     "education": "Education",
     "certifications": "Certifications",
     "awards": "Awards & Honors",
-    "skills": "Skills"
+    "skills": "Skills",
+    "engagements": "Selected engagements"
   },
   "summary": "Personalized summary with JD keywords injected (honest vs cv.md).",
   "competencies": ["RAG Pipelines", "LLMOps", "Kubernetes & Docker"],
@@ -165,7 +167,11 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
       "role": "Job Title",
       "location": "Remote",
       "dates": "June 2022 - Present",
-      "bullets": ["Achievement bullet with JD keywords injected", "Another quantified-impact bullet"]
+      "bullets": ["Achievement bullet with JD keywords injected", "Another quantified-impact bullet"],
+      "engagements": [
+        { "name": "Client Org", "detail": " (2020–2021): what was delivered there" }
+      ],
+      "keepTogether": false
     }
   ],
   "projects": [
@@ -202,15 +208,18 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | `candidate.location` | string | From `profile.yml`. |
 | `candidate.photo` | string | Opt-in profile photo (#264): a local path or `data:` URL. Empty/absent emits **no `<img>`**, rendering pixel-for-pixel identical to the photoless layout (US/UK/many-market ATS penalize photos; opt in for DACH/European markets). |
 | `candidate.photo_style` | string | Optional photo framing: `rounded` (default), `circle`, or `square`. Read it from `candidate.photo_style` in `config/profile.yml`; invalid values fail before HTML is written. |
-| `sections` | object | Optional localized section titles; any omitted key falls back to the English default shown above. |
-| `summary` | string | Personalized summary with keywords. Supports `**…**` emphasis (see **Markdown bold** below). |
+| `sections` | object | Optional localized section titles; any omitted key falls back to the English default shown above. `sections.engagements` (default `"Selected engagements"`) is the same override mechanism, applied to the `experience[].engagements` sub-label described below — set it for any non-English CV (e.g. `"Mandats sélectionnés"` for `fr`). |
+| `summary` | string | Personalized summary with keywords. Supports `**…**` emphasis (see **Markdown bold** below) and a literal `\n`/`\n\n` for line/paragraph breaks (see **Multi-paragraph summary** above). |
 | `competencies` | string[] | 6-8 keyword phrases → competency tags. |
-| `experience[]` | object | `company`, `role`, `location` (optional), `dates`, `bullets` (reordered, keyword-injected; `**…**` emphasis supported). Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Only for candidates with no professional history to list (students, new graduates, career changers); never drop it to hide a gap. |
+| `experience[]` | object | `company`, `role`, `location` (optional), `dates`, `bullets` (reordered, keyword-injected; `**…**` emphasis supported), `engagements` (optional, see below), `keepTogether` (optional, see below). Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Only for candidates with no professional history to list (students, new graduates, career changers); never drop it to hide a gap. |
+| `experience[].engagements` | object[] | Optional (#3961 follow-up). A "Selected engagements" sub-list for a role that bundles several named client/project engagements under one umbrella employer — e.g. an independent-consulting or fractional entry with multiple retained clients. Each item is `{ name, detail }`: `name` renders in bold, `detail` renders immediately after it verbatim (write your own leading punctuation/spacing — `" (2020–2021): what was delivered"`, not `"2020–2021 what was delivered"`). Renders below the entry's own bullets, under a plain (non-bulleted) "Selected engagements" label; the engagements themselves ARE bulleted. Omit the key, or leave it `[]`, for an entry with no sub-engagements — most entries. |
+| `experience[].keepTogether` | boolean | Optional (#3961 follow-up), default `false`. Forces that one entry to stay whole across a page break instead of the template's normal behavior of letting a multi-bullet role flow across pages to pack tighter. Reach for it when trimming leaves the LAST entry on a CV split awkwardly mid-bullet — pushing it whole onto the next page reads better there than a mostly-empty gap above a stranded bullet fragment. Not a general-purpose fix: setting it on every entry defeats the packing this template deliberately does by default, and can itself push a CV over its page budget (see `--max-pages`/`--strict-pages` in Step 21). |
 | `projects[]` | object | `name`, `url` (optional project/repo link), `badge` (optional), `tech` (optional), `description` (a `bullets` array is also accepted and joined into the description line). |
 | `education[]` | object | `title` (degree), `org` (institution), `location` (optional, city/state), `year`, `description` (optional). |
 | `certifications[]` | object | `title`, `org`, `year`. |
 | `awards[]` | object | `title` (award name), `org` (issuing body, optional), `year` (optional). Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Use it for competitive or academic distinctions (olympiad medals, hackathon wins, dean's list) that carry more signal than a thin experience section. |
-| `skills[]` | object | `items` (**required**): a non-blank comma-separated string, or a non-empty array of non-blank strings — every element must be text, since the builder joins the whole array. `category` (optional): omitted, the line renders without its prefix. |
+| `skills[]` | object | `items` (**required**): a non-blank comma-separated string, or a non-empty array of non-blank strings — every element must be text, since the builder joins the whole array. A **string** `items` also supports a literal `\n`/`\n\n` for line/paragraph breaks (see **Multi-paragraph summary** below); an `items` **array** is always comma-joined into one line, so it has no newlines to convert. `category` (optional): omitted, the line renders without its prefix. `note` (optional): see the row below. |
+| `skills[].note` | string | Optional (#3961 follow-up). A qualifier line rendered under that category's items as its own indented, muted `.skill-note` block — the honest place for "which of these is working familiarity rather than depth" (`"**Working familiarity:** Kubernetes, Terraform, Azure"`). **Prefer this over a `\n` inside `items`** for a qualifier: a bare line break is indistinguishable from an accidental wrap once the items line is long enough to wrap on its own, which it routinely is in any language that runs longer than English (a French CV is ~15% longer for the same content). |
 
 `build-cv-html.mjs` errors out (non-zero exit) if any template placeholder is left unresolved, so a malformed payload fails loudly instead of shipping a broken CV. Run `node build-cv-html.mjs --test` for a self-test render.
 
@@ -221,6 +230,16 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 - **A top-level section name the builder does not read → warning**, naming the nearest known key. A payload with `educations` instead of `education` used to validate clean and drop the section silently; it now says so.
 
 Do **not** substitute the LaTeX builder's vocabulary — `institution`/`degree`/`dates`/`coursework` is the `modes/latex.md` education schema, **not** this one — nor `employer` for a company or `name` for a certification. Such an entry used to render as an empty block while the report still said `"valid": true`, and CVs went out with no education section at all. It is now rejected by name. When in doubt, check `counts.educationEntries` (and its siblings) in the JSON report: a zero there means the section is empty in the PDF.
+
+### Multi-paragraph summary
+
+Write a literal newline in `summary` to break it into paragraphs — a single `\n` becomes one `<br>` line break, a blank line (`\n\n`) becomes a paragraph gap (`<br><br>`). Every other field stays single-block text except `skills[].items` (string form), which gets the same `\n`/`\n\n` handling — see the `skills[]` row above (#3961 follow-up — a summary that runs 3-4 dense lines with no break reads as a wall of text in the six-second scan, and a dense skills category runs into the same problem).
+
+```json
+"summary": "**Role Title — Domain Focus.** Languages spoken, availability.\n\nOpening paragraph leading with the strongest quantified proof point.\n\nSecond paragraph: location and availability."
+```
+
+Escaping runs first here too (same ordering as `**…**` below): a literal `<` typed into the summary stays escaped even once it sits next to a real `<br>`.
 
 ### Markdown bold
 
