@@ -2479,8 +2479,47 @@ if (
 // gained a header row, #3517) left this matching nothing and failing on the
 // empty string rather than on the thing it asserts.
 const batchTrackerStep = batchPrompt.match(/### Step 5 \u2014 [^\n]*[\s\S]*?### Step 6 \u2014 Final JSON/)?.[0] ?? '';
-if (/\{\{REPORT_NUM\}\}\\t\{\{DATE\}\}/.test(batchTrackerStep) && !/Compute `\{next_num\}`/.test(batchTrackerStep)) {
+// The rule protected here is the #749 race: parallel workers must never compute
+// `max+1` themselves. Absence of one spelling is not that property — rewording
+// the forbidden instruction passed the old literal check (#3937) — so the
+// load-bearing assertion is positive: the step must SAY the coordinator
+// reserved the tracker number.
+//
+// It is scoped to one SENTENCE that names the coordinator, a reservation, and
+// the number, because each part checked independently over the whole step is
+// satisfiable by text that means the opposite: "The coordinator reserves the
+// meeting room. Calculate the tracker number yourself." reserves something
+// else, and "The coordinator does not, in fact, reserve this number" negates
+// the claim past any fixed-width negation guard. Word order is free, so
+// "reserved by the coordinator" reads the same as "coordinator reserves".
+//
+// The mirror-image guard on *calculate* wording is deliberately absent: the
+// sentence satisfying this gate is itself negated ("...so do not calculate a
+// local `max+1`"), so such a rule would flag the correct prompt. Negation is
+// therefore only rejected when it precedes `reserv` inside that sentence — the
+// whole prefix, and with no \b before `n't` so contractions ("doesn't reserve")
+// are caught. The original literal stays as a cheap extra, but the gate no
+// longer rests on it.
+const batchTrackerRowShape = /\{\{REPORT_NUM\}\}\\t\{\{DATE\}\}/.test(batchTrackerStep);
+const batchReserveSentence = batchTrackerStep
+  .split(/(?<=[.\n])/)
+  .find((sentence) =>
+    /coordinator/i.test(sentence) &&
+    /\breserv/i.test(sentence) &&
+    /\b(?:numbers?|tracker|REPORT_NUM)\b/i.test(sentence));
+const batchNumIsReserved =
+  batchReserveSentence !== undefined &&
+  !/(?:\bnot\b|\bnever\b|n't)[^.]*\breserv/i.test(batchReserveSentence);
+if (
+  batchTrackerRowShape &&
+  batchNumIsReserved &&
+  !/Compute `\{next_num\}`/.test(batchTrackerStep)
+) {
   pass('batch workers use the coordinator-reserved tracker number');
+} else if (!batchTrackerRowShape) {
+  fail('batch Step 5 no longer shows the `{{REPORT_NUM}}\\t{{DATE}}` tracker row');
+} else if (!batchNumIsReserved) {
+  fail('batch Step 5 no longer states that the coordinator reserves the tracker number');
 } else {
   fail('batch workers still compute tracker numbers independently');
 }
