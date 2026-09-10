@@ -2,7 +2,7 @@
   "name": "@career-ops/web",
   "version": "0.10.0",
   "private": true,
-  "description": "Official web experience for career-ops \u2014 local-first.",
+  "description": "Official web experience for career-ops — local-first.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
