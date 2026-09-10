@@ -38,6 +38,7 @@ These files contain your personal data, customizations, and work product. Update
 | `data/dead-boards.tsv` | Boards that returned three consecutive 404s during mass reverse ATS sweeps (written by `scan-ats-full.mjs`; unlike `data/portal-health.tsv`, this does not track the user's configured portals; re-probed after 30 days — safe to delete, the next sweep rebuilds it) |
 | `data/follow-ups.md` | Your follow-up history |
 | `data/active-interviews.md` | Your active interview processes, incl. inline `[process-friction]` notes (read by `process-quality.mjs`) |
+| `data/next-actions.json` | Durable candidate-action proposals, ownership, evidence, timing, application references and revision history. One canonical writer: `next-actions.mjs` / `next-actions-core.mjs`; schema version 1; state and history commit together. Missing means empty, malformed means error. Same-source retries never reopen tasks. Task acceptance/completion never changes the tracker or status ledger. Always under Data Root, independently of tracker override. See [Next actions](docs/NEXT_ACTIONS.md). |
 | `data/agent-inbox.md` | Your append-only request queue drained at session start (written by `agent-inbox.mjs`) |
 | `data/reply-candidates.json` | Your normalized employer-reply candidates (subject, body, sender, signal — read by `reply-watch.mjs`) |
 | `data/pdf-index.tsv` | PDF↔report linkage manifest (written by `generate-pdf.mjs`, read by `find.mjs`, the dashboard, and the `email` mode) |
