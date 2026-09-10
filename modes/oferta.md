@@ -14,8 +14,24 @@ When the candidate pastes a **URL** (not JD text), confirm the posting is still 
    - **closed posting evidence:** expired/closed/"no longer accepting applications", missing JD with only nav/footer, hard redirect to a generic careers/search page, or 404/410
 3. If the posting appears closed, **stop before Block A**: tell the candidate the link is dead, and if the entry came from `data/pipeline.md`, mark it `- [x] ~~Company | Role~~ — oferta nieaktywna`. Do not generate an evaluation, report, or CV.
 4. If the candidate pasted JD text (no URL), liveness cannot be verified — note that and proceed; there is no link to check.
+5. **Headless batch exception:** Playwright is unavailable in headless pipe mode. Fall back to WebFetch and mark the report header `**Verification:** unconfirmed (batch mode)`, so the candidate can verify by hand later. This is the one place a search-tool result stands in for a browser, and it is labelled as such in the report rather than passing silently as verified.
 
 Do not continue to Block A until this gate is resolved. The snapshot captured here is reused by Block G's freshness signals.
+
+### Aggregator listings: confirm at the employer
+
+Job aggregators keep stale, filled and ghost listings live long after the employer closed the req. A closed role's aggregator page still renders a title, a description and an Apply button, so step 2 above reads it as **active** and `check-liveness.mjs` agrees: the aggregator page itself proves nothing. **A listing sourced from an aggregator is UNCONFIRMED by default: it is not a real opening until the employer says so.** This covers Wellfound / LinkedIn / Instahyre / Cutshort / Internshala / Naukri and similar, however the listing arrived — pasted, scanned, or found via WebSearch.
+
+Measured on 9 Wellfound listings checked one by one against the employer's own page (#2572): 5 were dead — two returned HTTP 410 Gone, one mirror said "Position Closed", one company had 7 openings posted and none was this one — 1 was live, and 3 were unverifiable. **All 9 passed the liveness check above.** In one case the careers link pointed back at the aggregator, making the verification circular.
+
+**Before an aggregator listing is evaluated, applied to, or presented to the candidate as live:**
+
+1. Identify the employer, then locate the same role on the **employer's own careers page / ATS** (Greenhouse, Lever, Ashby, Workday, or the company's `/careers`). Same Playwright discipline as step 1 above.
+2. **Found at the employer → the employer URL is canonical.** Use it as the report `**URL:**` and apply direct, never through the aggregator.
+3. **Not found at the employer → treat as stale.** Do not apply and do not present it as live. Mark it in `data/scan-history.tsv` or on the tracker row — never silently delete the record, since that is what stops it being re-added as new on the next scan.
+4. **Employer unidentifiable** (some aggregator and agency posts hide the company) → that is a **Block G posting-legitimacy signal**, not a research gap. Report it and stop. NEVER infer, guess, or invent the employer.
+
+This is a confirmation step, not a replacement for `check-liveness.mjs`: run the liveness checker against the **employer** URL once you have it. The headless-batch exception in step 5 still applies.
 
 ## Blacklist gate (#1742)
 
