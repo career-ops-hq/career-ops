@@ -138,18 +138,10 @@ Examples:
   node set-status.mjs --row 7 Discarded --dry-run`;
 
 /**
- * Render the canonical states for `--help`.
+ * Render the canonical states from states.yml for `--help`.
  *
- * The states live in templates/states.yml, and before this the usage block only
- * NAMED that file — so the one question a caller actually has at the prompt
- * ("which states may I pass?") was answerable only by opening another file, or
- * by guessing wrong and reading the rejection. The list is already loaded at
- * runtime for that rejection message; printing it up front costs nothing.
- *
- * Help must never be the thing that fails, so an unreadable or malformed
- * states.yml degrades to the static pointer instead of throwing: a broken
- * states file is a real error, but it belongs to the run that tries to WRITE a
- * state, not to `--help`.
+ * A broken states.yml degrades to a pointer rather than throwing: that failure
+ * belongs to the run that tries to WRITE a state, not to `--help`.
  *
  * @returns {string} The states section, or a pointer line when unreadable.
  */
@@ -187,15 +179,9 @@ const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row':
 /**
  * Is the caller asking for help, rather than passing "--help" as a VALUE?
  *
- * Scanned before the main loop so help wins over a "missing operand" error and
- * over an invalid flag value — a caller reaching for --help after a failed run
- * usually still has the bad arguments on the line, and re-rejecting them
- * instead of answering is the behavior this exists to remove.
- *
- * Value positions are skipped, so `--note "--help"` records a note and does not
- * silently turn a write into a help screen that exits 0. Values are only
- * skipped here, never validated: validation stays in the main loop so its
- * error messages and exit codes remain the single source of truth.
+ * Runs before the main loop so help answers a line that still carries the bad
+ * arguments from a failed run. Value positions are skipped but never validated
+ * — validation stays in the loop, which owns the error messages and exit codes.
  *
  * @param {string[]} args - argv slice.
  * @returns {boolean}
@@ -203,17 +189,13 @@ const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row':
 function wantsHelp(args) {
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a in VALUE_FLAGS) { i++; continue; } // skip this flag's value
+    if (Object.hasOwn(VALUE_FLAGS, a)) { i++; continue; } // skip this flag's value
     if (a === '--help' || a === '-h') return true;
   }
   return false;
 }
 
-// Exits 0: asking for help is a successful outcome, and a non-zero exit breaks
-// `cmd --help || true` idioms and CI smoke checks. Previously --help fell
-// through to the unknown-flag branch and exited 1, and a bare invocation exited
-// 1 as a missing-operand error, so there was no exit-0 path to the help text at
-// all (#3857 fixed the same class in plugin-install.mjs).
+// Exits 0 so `cmd --help` works in CI smoke checks and `|| true` idioms.
 if (wantsHelp(rawArgs)) {
   console.log(`${USAGE}\n${renderStatesSection()}`);
   process.exit(EXIT_OK);

@@ -1,25 +1,10 @@
 // tests/set-status-help-flag.test.mjs — set-status.mjs must answer --help/-h
 // with the canonical states, exit 0, and never touch the tracker.
 //
-// Before this fix, `node set-status.mjs --help` fell through to the unknown
-// flag branch and exited 1 — the same "a flag the caller obviously meant is
-// rejected instead of answered" class already fixed in plugin-install.mjs
-// (#3857), scan.mjs (#2270) and scan-ats-full.mjs (#1633/#1635). Bare
-// invocation printed usage but exited 1 as a missing-operand error, so there
-// was no exit-0 path to the help text at all, which breaks `cmd --help` in CI
-// smoke checks and `|| true` idioms.
-//
-// The usage block also only NAMED templates/states.yml rather than listing it,
-// so the one question a caller has at the prompt ("which states may I pass?")
-// required opening another file. The list is already loaded to build the
-// invalid-state rejection; these tests pin that it is printed up front too.
-//
 // HERMETIC: every run pins CAREER_OPS_TRACKER at a path that does not exist.
 // If --help were NOT handled before the tracker check, the run would reach
 // "No tracker found" instead of exiting on the flag itself — so that message
-// doubles as proof the tracker was consulted. Each assertion also checks the
-// subprocess actually ran (no spawn error, no signal), so a timeout cannot
-// pass silently.
+// doubles as proof the tracker was consulted.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -98,17 +83,14 @@ test('--help never consults the tracker', () => {
 });
 
 test('--help wins over otherwise-invalid arguments', () => {
-  // A caller reaching for help after a failed run often still has the bad
-  // arguments on the line. Help must answer, not re-reject them.
   const r = runSetStatus('--report', 'not-a-number', 'Bogus', '--help');
   assert.equal(r.status, 0, `--help should win over invalid args, got ${r.status}: ${r.all}`);
   assert.match(r.all, /Usage: node set-status\.mjs/);
 });
 
 test('"--help" in a VALUE position is not a help request', () => {
-  // `--note --help` must stay the pre-existing "never consume a flag as a
-  // value" error. Printing help and exiting 0 here would turn a refused write
-  // into a silent success for any script that checks only the exit code.
+  // Must stay the pre-existing "never consume a flag as a value" error: a help
+  // screen exiting 0 would read as success to a script checking only the code.
   const r = runSetStatus('--report', '1', 'Applied', '--note', '--help');
   assert.equal(r.status, 1, `--note --help should exit 1, got ${r.status}: ${r.all}`);
   assert.match(r.all, /Missing value for --note/);
@@ -123,7 +105,6 @@ test('an unrecognized flag still exits 1 and does not print help', () => {
 });
 
 test('bare invocation still reports a usage error rather than succeeding', () => {
-  // Missing operands are a real error; only --help/-h is a successful exit.
   const r = runSetStatus();
   assert.equal(r.status, 1, `bare invocation should exit 1, got ${r.status}`);
   assert.match(r.all, /Usage: node set-status\.mjs/);

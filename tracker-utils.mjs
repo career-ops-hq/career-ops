@@ -700,12 +700,9 @@ export function writeFileAtomic(path, content) {
  * their aliases. Parsing it here (instead of hardcoding the list) means a new
  * state or alias lands in one file and every consumer follows.
  *
- * `description` and `terminal` are passed through so a caller can EXPLAIN the
- * states rather than just list them — `set-status.mjs --help` prints the
- * one-line description beside each label, which is what distinguishes the two
- * states a user is most likely to confuse (`Discarded`, chosen by the
- * candidate, from `SKIP`, never applied for). Both default rather than throw:
- * a states.yml entry that omits them is still a usable state.
+ * `description` and `terminal` are passed through for callers that EXPLAIN the
+ * states rather than list them (set-status.mjs --help). Both default rather
+ * than throw: an entry omitting them is still a usable state.
  *
  * @param {string} statesPath - Path to templates/states.yml.
  * @returns {{id:string,label:string,aliases:string[],description:string,terminal:boolean}[]} Parsed state entries.
