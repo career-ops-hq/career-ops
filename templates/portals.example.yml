@@ -1346,15 +1346,15 @@ search_queries:
 #   careers_url: https://solid.jobs/public-api/offers/engineering
 #   enabled: true
 #
+# -- Remote-job feeds  (→ job_boards:; set provider: plus any provider-specific fields) --
+# title_filter / location_filter defined above still apply.
+#
 # - name: Telegram @jobforjunior          # public Telegram channel, read via its t.me/s/ web preview
 #   provider: telegram-channel            # no detect() — only reachable via provider:
 #   channel: jobforjunior # handle without the @ (5-32 letters, digits, underscores)
 #   since_days: 30        # optional window; pages are walked back until it (default 30)
 #   max_pages: 10         # optional page cap (20 posts/page, default 10, max 10)
 #   enabled: true
-#
-# -- Remote-job feeds  (→ job_boards:; set provider: plus any provider-specific fields) --
-# title_filter / location_filter defined above still apply.
 #
 # - name: Himalayas
 #   provider: himalayas
@@ -2520,17 +2520,22 @@ job_boards:
   # (Source Indexing Policy, rules 1-2): company = that employer, url = that
   # link, the t.me permalink rides in the description as "Source:". Posts
   # with a contact handle and no employer, digests, forms, shorteners and
-  # hidden employers are dropped, so pick channels whose posts carry a
-  # "Компания:" / "Company:" line or "Title @ Employer" plus an ATS or board
-  # link. Measured 2026-09-03: HR-curated channels pass 32-77% of posts,
-  # community channels of free-text posts pass almost none.
+  # hidden employers are dropped. Supported employer shapes: a "Компания:" /
+  # "Company:" field, "Title @ Employer", "Title | Employer", a second line
+  # "в Employer —" / "at Employer", or a hashtag-only first line followed by
+  # a bare employer name and a title. That bare name must not read as a role
+  # such as "Product Owner" or "QA". Hashtag-first title selection skips the
+  # matched employer name and recognized employer metadata, plus tags and bare
+  # links. Each post still needs an ATS or board vacancy link. Measured
+  # 2026-09-03: HR-curated channels pass 32-77% of posts, community channels of
+  # free-text posts pass almost none.
 
   - name: "Telegram @jobforjunior"
     provider: telegram-channel
     channel: jobforjunior     # handle without the @
     since_days: 14
     enabled: false
-    notes: "Junior/entry RU tech roles, posts carry 'Компания:' + a geekjob.ru/ATS link; 21 jobs emitted at this 14-day window (35% of 60 posts read), measured live 2026-09-05. title_filter runs on each post's FIRST LINE; content_filter only narrows that set."
+    notes: "Junior/entry RU tech roles, posts carry 'Компания:' + a geekjob.ru/ATS link; 21 jobs emitted at this 14-day window (35% of 60 posts read), measured live 2026-09-05. title_filter runs on the derived job title, skipping tags, the matched employer name, recognized employer metadata and bare links for hashtag-first posts; content_filter only narrows that set."
 
   # ── SolidJobs (Polish market) ──────────────────────────────────────
   # Public API — no auth needed. Division in URL path, campaign=career-ops for tracking.
