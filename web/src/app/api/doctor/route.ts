@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { careerOpsEnv, careerOpsRoot, rootScript } from "@/lib/career-ops";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +15,7 @@ export async function GET() {
     return Response.json({ available: false, onboardingNeeded: false, missing: [], warnings: [] });
   }
   const stdout = await new Promise<string>((resolve) => {
-    execFile("node", [doctor, "--json"], { cwd: root, timeout: 10_000 }, (_err, out) => resolve(out || ""));
+    execFile("node", [doctor, "--json"], { cwd: root, env: careerOpsEnv(), timeout: 10_000 }, (_err, out) => resolve(out || ""));
   });
   try {
     const last = stdout.trim().split("\n").pop() || "{}";

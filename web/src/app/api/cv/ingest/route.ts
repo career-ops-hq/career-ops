@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { careerOpsEnv, careerOpsCodeRoot, careerOpsRoot } from "@/lib/career-ops";
 
 // Parse a CV (pasted text or an uploaded PDF) into clean cv.md markdown by running
 // the USER'S OWN CLI headless — the web never ships a heavyweight parser, and the
@@ -19,7 +19,7 @@ export const maxDuration = 300;
 // (exactly how the explore route handles a missing discover.md).
 function readCanonicalMode(): string | null {
   try {
-    return fs.readFileSync(path.join(careerOpsRoot(), "modes", "cv-ingest.md"), "utf8");
+    return fs.readFileSync(path.join(careerOpsCodeRoot(), "modes", "cv-ingest.md"), "utf8");
   } catch {
     return null;
   }
@@ -119,7 +119,7 @@ export async function POST(req: Request) {
 
   let child;
   try {
-    child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+    child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: careerOpsEnv() });
   } catch (e) {
     if (tempFile) cleanupTemp(tempFile); // never leak the CV temp if spawn throws sync
     return Response.json({ error: e instanceof Error ? e.message : "failed to start the CLI" }, { status: 500 });

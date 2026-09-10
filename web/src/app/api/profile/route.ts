@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { careerOpsCodeRoot, careerOpsRoot } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 
 export const runtime = "nodejs";
@@ -74,7 +74,7 @@ export async function POST(req: Request) {
   // malformed" (NEVER overwrite — that would silently destroy the user's data).
   if (!fs.existsSync(file)) {
     try {
-      base = (yaml.load(fs.readFileSync(path.join(root, "config", "profile.example.yml"), "utf8")) as Record<string, unknown>) || {};
+      base = (yaml.load(fs.readFileSync(path.join(careerOpsCodeRoot(), "config", "profile.example.yml"), "utf8")) as Record<string, unknown>) || {};
       seeded = Object.keys(base).length > 0;
     } catch {
       base = {};

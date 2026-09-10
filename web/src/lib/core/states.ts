@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { careerOpsCodeRoot } from "@/lib/career-ops";
 import { CANONICAL_STATES } from "@/lib/format";
 
 /**
@@ -54,7 +54,7 @@ const FALLBACK: CanonicalState[] = CANONICAL_STATES.map((label) => ({
 const statesCache = new Map<string, { mtimeMs: number; size: number; states: CanonicalState[] }>();
 
 export function readCanonicalStates(): CanonicalState[] {
-  const file = path.join(careerOpsRoot(), "templates", "states.yml");
+  const file = path.join(careerOpsCodeRoot(), "templates", "states.yml");
   try {
     const { mtimeMs, size } = fs.statSync(file);
     const cached = statesCache.get(file);
