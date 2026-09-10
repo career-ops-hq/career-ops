@@ -64,6 +64,8 @@
 * **tracker:** sort the applications table by # ascending on write ([#3515](https://github.com/career-ops-hq/career-ops/issues/3515)) ([372cd04](https://github.com/career-ops-hq/career-ops/commit/372cd043b35e8d07cd522fec955a65252c0906db))
 * **triage:** fall back to Playwright when WebFetch finds nothing ([#3571](https://github.com/career-ops-hq/career-ops/issues/3571)) ([10b93a5](https://github.com/career-ops-hq/career-ops/commit/10b93a5f6e4444332243fefaef65b8b153835fc1))
 * **update-system:** apply() cannot commit when a path it stages is ignored or never tracked ([ae6909f](https://github.com/career-ops-hq/career-ops/commit/ae6909f718c9316a0d1424379e1688f438a07706))
+* **update-system:** retain rollback target refs only while their paired backup branch exists, and validate that pair before branch creation
+* **update-system:** migrate redundant local declarations already covered by `USER_PATHS`; replace broad mixed paths such as `config/` or `modes/` with precise fork-owned entries
 * **update:** point the updater at the repository's new home ([9063495](https://github.com/career-ops-hq/career-ops/commit/9063495036e253668e42d6bbbd4234e750b25782))
 * **updater:** back up self-bootstrap edits before checkout ([#3474](https://github.com/career-ops-hq/career-ops/issues/3474)) ([203c90b](https://github.com/career-ops-hq/career-ops/commit/203c90b79e632209e3a55068499f8ca5cbea489e))
 * **updater:** scope commits to shipped files ([#3688](https://github.com/career-ops-hq/career-ops/issues/3688)) ([455bf37](https://github.com/career-ops-hq/career-ops/commit/455bf375a84508a955acd58819392fa9f7a07bd0))
