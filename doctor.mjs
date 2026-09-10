@@ -466,11 +466,33 @@ function prereqPresent(root, path) {
   return existsSync(join(root, ...path.split('/')));
 }
 
-function checkPrereq({ path, fix }) {
-  if (prereqPresent(projectRoot, path)) {
-    return { pass: true, label: `${path} found` };
+function checkPrereq(root, { path, fix }) {
+  if (!prereqPresent(root, path)) {
+    return { warn: true, label: `${path} not found (user setup required)`, fix };
   }
-  return { warn: true, label: `${path} not found (user setup required)`, fix };
+  if (path.endsWith('.yml')) {
+    let source;
+    try {
+      source = readFileSync(join(root, ...path.split('/')), 'utf8');
+    } catch {
+      return { pass: false, label: `${path}: YAML file could not be read` };
+    }
+    try {
+      // load() rejects empty/comment-only input in js-yaml 5. Allow an empty
+      // configuration while keeping the runtime's single-document contract.
+      if (yaml.loadAll(source).length > 1) {
+        return { pass: false, label: `${path}: invalid YAML (expected a single document)` };
+      }
+    } catch (err) {
+      // Parser messages, reasons and snippets can expose profile values (even
+      // an unknown alias/tag name). Only report fixed text and numeric positions.
+      const { line, column } = err?.mark || {};
+      const position = Number.isInteger(line) && line >= 0 && Number.isInteger(column) && column >= 0
+        ? ` (line ${line + 1}, column ${column + 1})` : '';
+      return { pass: false, label: `${path}: invalid YAML${position}` };
+    }
+  }
+  return { pass: true, label: `${path} found` };
 }
 
 function checkFonts() {
@@ -645,6 +667,7 @@ async function main() {
   console.log('================\n');
 
   const { cli: activeCli, source: cliSource, warning: cliWarning } = resolveActiveCli();
+  const prereqChecks = new Map(USER_LAYER_PREREQS.map((prereq) => [prereq.path, checkPrereq(projectRoot, prereq)]));
 
   const checks = [
     checkNodeVersion(),
@@ -656,8 +679,10 @@ async function main() {
     checkTrackedBakFiles(projectRoot),
     await checkPlaywright(),
     checkPlaywrightMcp(projectRoot, activeCli),
-    checkScanExtractor(projectRoot),
-    ...USER_LAYER_PREREQS.map(checkPrereq),
+    // An unreadable profile falls back to MCP in the runtime loader; that is
+    // not a successful configuration check when diagnosing a broken file.
+    prereqChecks.get('config/profile.yml').pass !== false && checkScanExtractor(projectRoot),
+    ...prereqChecks.values(),
     checkFonts(),
     checkPersonalization(projectRoot),
     checkAutoDir('data'),
@@ -668,7 +693,7 @@ async function main() {
   ].filter(Boolean);
 
   // Network-bound portals.yml reachability probe — only under --strict.
-  if (STRICT) {
+  if (STRICT && prereqChecks.get('portals.yml').pass !== false) {
     checks.push(await checkPortalSlugs(projectRoot));
   }
 
@@ -822,10 +847,12 @@ function onboardingState(root) {
   const mcpCheck = checkPlaywrightMcp(root, activeCli);
   const unpersonalized = unpersonalizedFiles(root);
   const bakCheck = checkTrackedBakFiles(root);
+  const prereqChecks = USER_LAYER_PREREQS.map((prereq) => checkPrereq(root, prereq));
   const warnings = [
     ...(cliWarning ? [cliWarning] : []),
     ...(mcpCheck?.warn ? [`${mcpCheck.label}\n→ ${[].concat(mcpCheck.fix || []).join('\n  ')}`] : []),
     ...(bakCheck.warn ? [`${bakCheck.label}\n→ ${[].concat(bakCheck.fix || []).join('\n  ')}`] : []),
+    ...prereqChecks.filter((check) => check.pass === false).map((check) => check.label),
     ...unpersonalized.map((u) => `${u.path} ${u.reason} — ${u.impact}\n→ Personalize it from cv.md before running evaluations.`),
   ];
 
