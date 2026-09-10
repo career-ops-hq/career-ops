@@ -7,8 +7,16 @@
 // letter to an employer as the tailored CV. The manifest could not say what a
 // row was, so the eviction had nothing but the report number to key on. The
 // kind column is that key; these cases pin both halves of it.
-import { pass, fail } from './helpers.mjs';
-import { applyManifestRow, resolveArtifactKind, ARTIFACT_KINDS } from '../generate-pdf.mjs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { pass, fail, rmSync } from './helpers.mjs';
+import {
+  applyManifestRow,
+  resolveArtifactKind,
+  renderHtmlToPdf,
+  ARTIFACT_KINDS,
+} from '../generate-pdf.mjs';
 
 console.log('\nPDF manifest keys on report number and artifact kind (#3887)');
 
@@ -133,4 +141,70 @@ for (const [explicit, path, wantKind, wantSource, label] of kindCases) {
   ARTIFACT_KINDS.includes('cv') && ARTIFACT_KINDS.includes('cover') && ARTIFACT_KINDS.length === 2
     ? pass('ARTIFACT_KINDS names exactly the kinds the manifest keys on')
     : fail(`ARTIFACT_KINDS = ${JSON.stringify(ARTIFACT_KINDS)}`);
+}
+
+// ...and the render path has to act on that null. The --kind flag and the batch
+// manifest both validate before rendering, which leaves the exported
+// renderHtmlToPdf() as the one way an unrecognized kind reaches the manifest: it
+// resolved to null, applyManifestRow() read null as 'cv', and the render
+// silently evicted the report's real CV row. Rejecting it here also keeps the
+// PDF from being written at all, so a mislabelled artifact never reaches apply.
+{
+  const sandbox = realpathSync(mkdtempSync(join(tmpdir(), 'career-ops-kind-guard-')));
+  const manifestPath = join(sandbox, 'pdf-index.tsv');
+  const before = `${HEADER}\n${cvRow}\n`;
+  writeFileSync(manifestPath, before, 'utf-8');
+
+  const previousIndex = process.env.CAREER_OPS_PDF_INDEX;
+  process.env.CAREER_OPS_PDF_INDEX = manifestPath;
+
+  let rendered = false;
+  const launchBrowser = async () => {
+    return {
+      async newPage() {
+        rendered = true;
+        return {
+          async goto() {},
+          async evaluate() {},
+          async pdf() {
+            return Buffer.from(
+              '%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n'
+              + '2 0 obj\n<< /Type /Pages /Count 1 >>\nendobj\n%%EOF',
+            );
+          },
+        };
+      },
+      async close() {},
+    };
+  };
+
+  const outputPath = join(sandbox, 'resume-acme.pdf');
+  let thrown = null;
+  try {
+    await renderHtmlToPdf('<!doctype html><html><body>x</body></html>', outputPath, {
+      reportNum: '7',
+      kind: 'resume',
+      workspaceRoot: sandbox,
+      styleTokens: {},
+      launchBrowser,
+    });
+  } catch (err) {
+    thrown = err;
+  } finally {
+    if (previousIndex === undefined) delete process.env.CAREER_OPS_PDF_INDEX;
+    else process.env.CAREER_OPS_PDF_INDEX = previousIndex;
+  }
+
+  const after = readFileSync(manifestPath, 'utf-8');
+  thrown && /resume/.test(thrown.message) && /cv/.test(thrown.message) && /cover/.test(thrown.message)
+    ? pass('renderHtmlToPdf rejects an unrecognized kind instead of filing it as a CV')
+    : fail(`unrecognized kind was not rejected: ${thrown ? thrown.message : 'no error thrown'}`);
+  !rendered && !existsSync(outputPath)
+    ? pass('an unrecognized kind is rejected before the PDF is rendered')
+    : fail('an unrecognized kind rendered a PDF before it was rejected');
+  after === before
+    ? pass("a rejected kind leaves the report's existing CV manifest row untouched")
+    : fail(`a rejected kind rewrote the manifest: ${JSON.stringify(after)}`);
+
+  rmSync(sandbox, { recursive: true, force: true });
 }
