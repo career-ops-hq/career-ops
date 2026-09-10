@@ -1530,6 +1530,20 @@ search_queries:
 
 tracked_companies:
 
+  # GO Jobs is protected by an interactive Radware challenge. Save rendered
+  # search results manually under data/gojobs/, then enable this offline parser.
+  # See docs/local-parser-cookbook.md#bot-protected-source-ontario-go-jobs.
+  # - name: Ontario Public Service
+  #   careers_url: https://www.gojobs.gov.on.ca/Search.aspx
+  #   scan_method: local_parser
+  #   parser:
+  #     command: node
+  #     script: parse-gojobs-html.mjs
+  #     # Relative capture paths resolve from CAREER_OPS_ROOT.
+  #     args: [data/gojobs]
+  #     format: jobs-json-v1
+  #   enabled: true
+
   # -- AI Labs & LLM providers --
 
   - name: Anthropic
