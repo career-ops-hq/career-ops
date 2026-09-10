@@ -24,6 +24,13 @@
 //   entry-level field names (COMPANY, PERIOD, ROLE, etc.). When no partial file
 //   is found the built-in fallback builder is used, preserving full backward
 //   compatibility.
+//
+// Section completeness (#3852):
+//   A template's manifest may declare the sections it owns (`sections: all`,
+//   or a list — see lib/template-manifest.mjs). A declared section
+//   never falls back: a missing, malformed, or empty partial fails the render
+//   with the file named. Templates that declare nothing keep the silent
+//   fallback above.
 
 import { readFile, writeFile, stat, mkdir } from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
@@ -33,6 +40,7 @@ import { tmpdir } from 'os';
 import { stripEmptySections } from './cv-sections-core.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { hasRequiredFields, validatePayload } from './lib/cv-payload-schema.mjs';
+import { PARTIAL_SECTIONS, declaredSections, parseMeta } from './lib/template-manifest.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -302,25 +310,61 @@ function fillEntry(entryTemplate, blocks, fields, blockValues) {
 
 // Load section partials from the sections/ directory co-located with the
 // template. Returns a Map<sectionName, { entryTemplate, blocks }> for each
-// partial file found. Sections with no partial file are absent from the map
-// and fall back to the built-in builders.
+// partial file found.
+//
+// Two contracts, chosen by the template's manifest (#3852):
+//
+//   - A section the manifest declares (`sections: all`, or a list) is owned by
+//     the template. Its partial must exist, parse, and carry a non-empty ENTRY
+//     zone, or this throws and the render fails. Falling back would emit the
+//     built-in DOM the pack exists to replace, with nothing in the output
+//     saying so: a typo in experience.html produced a CV that rendered,
+//     validated, and passed the placeholder check with the two-column markup
+//     the pack was written to avoid.
+//   - A section the manifest does not declare keeps the original contract:
+//     absent from the map when there is no partial or the partial is
+//     malformed, so the built-in builder renders it.
+//
+// Every problem is collected before throwing so one run names them all.
 function loadSectionPartials(templatePath) {
   const sectionsDir = join(dirname(templatePath), 'sections');
+  let declared;
+  try {
+    declared = declaredSections(parseMeta(templatePath));
+  } catch (err) {
+    throw new Error(`Template ${templatePath}: ${err.message}`);
+  }
+  const owned = declared || new Set();
   const partials = new Map();
-  if (!existsSync(sectionsDir)) return partials;
+  const problems = [];
 
-  const sectionNames = [
-    'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'skills',
-  ];
-  for (const name of sectionNames) {
+  for (const name of PARTIAL_SECTIONS) {
     const partialPath = join(sectionsDir, `${name}.html`);
-    if (!existsSync(partialPath)) continue;
-    try {
-      const source = readFileSync(partialPath, 'utf-8');
-      partials.set(name, parsePartial(source));
-    } catch {
-      // Silently skip malformed partial files — fall back to built-in builder.
+    const rel = `sections/${name}.html`;
+    if (!existsSync(partialPath)) {
+      if (owned.has(name)) problems.push(`${rel} is declared but does not exist`);
+      continue;
     }
+    let parsed;
+    try {
+      parsed = parsePartial(readFileSync(partialPath, 'utf-8'));
+    } catch (err) {
+      if (owned.has(name)) problems.push(`${rel} is declared but malformed: ${err.message}`);
+      continue; // undeclared: fall back to the built-in builder, as before
+    }
+    if (owned.has(name) && !parsed.entryTemplate) {
+      problems.push(`${rel} is declared but its ENTRY zone is empty`);
+      continue;
+    }
+    partials.set(name, parsed);
+  }
+
+  if (problems.length) {
+    throw new Error(
+      `Template ${templatePath} declares sections it cannot render:\n`
+        + problems.map((p) => `  - ${p}`).join('\n')
+        + '\nA declared section must ship a partial that parses — fix the file, or drop it from the manifest\'s "sections" list.'
+    );
   }
   return partials;
 }
@@ -744,7 +788,11 @@ async function main() {
     console.error('  the builder loads per-section HTML partial files from it');
     console.error('  (e.g. sections/experience.html). Partials control the DOM');
     console.error('  structure, tag names, and class names for each section.');
-    console.error('  When no partial file is found the built-in builder is used.');
+    console.error('  When no partial file is found the built-in builder is used —');
+    console.error('  unless the template manifest declares the section (#3852):');
+    console.error('  `sections: all` or `sections: experience, education` in the');
+    console.error('  <!-- career-ops-template --> block makes a missing or malformed');
+    console.error('  partial fail the build instead of falling back.');
     process.exit(args.includes('--help') ? 0 : 1);
   }
 

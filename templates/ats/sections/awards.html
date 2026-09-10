@@ -1,0 +1,26 @@
+<!--
+  awards.html — ATS section partial for Awards & Honors.
+
+  Field placeholders filled per entry:
+    TITLE      — award name
+    ORG_BLOCK  — conditional: award-org span with the issuing body when present;
+                 falls back to an empty award-org span (ORG_EMPTY) so every row has the same cells
+    YEAR_BLOCK — conditional: award-year span with year text when present;
+                 falls back to an empty award-year span (YEAR_EMPTY) for the same reason
+
+  Mirrors certifications.html: one row per award, inline-block cells, no table
+  and no flex.
+
+  Template packs: edit tag names, class names, and field order freely inside the ENTRY zone.
+-->
+<!--ENTRY-->
+<div class="award-item">
+  <span class="award-title">{{TITLE}}</span>
+  {{ORG_BLOCK}}
+  {{YEAR_BLOCK}}
+</div>
+<!--ORG_BLOCK--><span class="award-org">{{ORG}}</span><!--/ORG_BLOCK-->
+<!--ORG_EMPTY--><span class="award-org"></span><!--/ORG_EMPTY-->
+<!--YEAR_BLOCK--><span class="award-year">{{YEAR}}</span><!--/YEAR_BLOCK-->
+<!--YEAR_EMPTY--><span class="award-year"></span><!--/YEAR_EMPTY-->
+<!--/ENTRY-->
