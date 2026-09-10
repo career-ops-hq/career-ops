@@ -3,6 +3,7 @@ import path from "node:path";
 import * as yaml from "js-yaml";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { parseApplications } from "@/lib/tracker-table.mjs";
+import { parseApplicationDatesFromStatusLog, resolveApplicationAppliedDate } from "@/lib/application-dates.mjs";
 // One definition of the `{n}-RESERVED.md` convention, shared with
 // run-cli-support.mjs — see report-files.mjs for why it lives there.
 import { isReservedReportFile } from "@/lib/report-files.mjs";
@@ -133,7 +134,10 @@ export function readScanDates(): Map<string, string> {
 
 export type Application = {
   n: string;
+  /** Date the role was evaluated and entered into the tracker. */
   date: string;
+  /** Date the application was submitted; empty when no submission event is recorded. */
+  appliedDate: string;
   company: string;
   /** Intermediary channel (#1596): agency/recruiter firm, "—" for direct, "" when the tracker has no Via column. */
   via: string;
@@ -155,7 +159,11 @@ export type Application = {
 export function readApplications(): Application[] {
   const md = read("data/applications.md");
   if (!md) return [];
-  return parseApplications(md, careerOpsRoot());
+  const statusLogDates = parseApplicationDatesFromStatusLog(read("data/status-log.tsv"));
+  return parseApplications(md, careerOpsRoot()).map((application) => ({
+    ...application,
+    appliedDate: resolveApplicationAppliedDate(application, statusLogDates),
+  }));
 }
 
 /** Resolve the report-number cell in data/pdf-index.tsv for a given report id.
