@@ -22,11 +22,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { localToday } from '../lib/local-today.mjs';
-import { isNestedCheckout } from '../lib/mjs-files.mjs';
+import { walkTree } from '../lib/walk-tree.mjs';
 import { shouldDedupScanHistoryRow } from '../scan.mjs';
 import { parseScanHistory, detectReposts } from '../detect-reposts.mjs';
 
@@ -505,26 +505,21 @@ function topLevelArgs({ list, isCode }) {
 }
 
 /** Every .mjs source file in the repo, at any depth. */
-function sourceFiles(dir, acc = []) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+function sourceFiles(dir) {
+  return walkTree(dir, {
     // Vendored code, build output, and the suite's own scratch copy of the repo
     // (test-all.mjs mkdtemps it under ROOT) would otherwise be walked.
-    if (entry.isDirectory()) {
-      if (/^(node_modules|\.git|\.next|coverage|dist|build)$/.test(entry.name)) continue;
-      if (entry.name.startsWith('.tmp-script-test-')) continue;
-      // ...and so would git's OWN scratch copy of the repo. The `\.git` above
-      // matches a directory NAME, which a linked worktree does not have — it
-      // marks itself with a `.git` file. This gate read the worktree's stale
-      // sources as repo source and failed, naming files that are correct on the
-      // branch under test (#3499). Same hazard as the line above it, different
-      // author of the second copy.
-      if (isNestedCheckout(join(dir, entry.name))) continue;
-      sourceFiles(join(dir, entry.name), acc);
-    } else if (entry.name.endsWith('.mjs') && !entry.name.endsWith('.test.mjs')) {
-      acc.push(join(dir, entry.name));
-    }
-  }
-  return acc;
+    //
+    // Git's OWN scratch copy is walkTree's job, not this list's: the `\.git`
+    // below matches a directory NAME, which a linked worktree does not have —
+    // it marks itself with a `.git` file. This gate read a worktree's stale
+    // sources as repo source and failed, naming files that are correct on the
+    // branch under test (#3499).
+    skip: (entry) => entry.isDirectory() && (
+      /^(node_modules|\.git|\.next|coverage|dist|build)$/.test(entry.name)
+      || entry.name.startsWith('.tmp-script-test-')
+    ),
+  }).filter((f) => f.endsWith('.mjs') && !f.endsWith('.test.mjs'));
 }
 
 // The census above is only as good as its scanner, and every shape below was

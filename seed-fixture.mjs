@@ -16,26 +16,18 @@ import { tmpdir } from 'os';
 import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { isNestedCheckout } from './lib/mjs-files.mjs';
+import { walkTree, isNestedCheckout } from './lib/walk-tree.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(ROOT, 'test-fixtures', 'upgrade');
 export const DEFAULT_STATE = 'state-v1.18';
 
-function walk(dir, base = dir, out = []) {
-  // Sort so files[] and the manifest key order are deterministic across
-  // platforms (readdirSync returns filesystem order, which varies).
-  for (const name of readdirSync(dir).sort()) {
-    const p = join(dir, name);
-    // A checkout under a fixture state is another tree, not fixture content:
-    // seeding it would copy a whole second repository into the install under
-    // test and put its files in the manifest (#3762).
-    if (statSync(p).isDirectory()) {
-      if (isNestedCheckout(p)) continue;
-      walk(p, base, out);
-    } else out.push(relative(base, p).split(sep).join('/'));
-  }
-  return out;
+function walk(dir, base = dir) {
+  // walkTree sorts every level, so files[] and the manifest key order are
+  // deterministic across platforms (readdir returns filesystem order, which
+  // varies). `links: 'follow'` keeps the statSync semantics this had.
+  return walkTree(dir, { links: 'follow' })
+    .map((p) => relative(base, p).split(sep).join('/'));
 }
 
 export function listStates() {
@@ -43,11 +35,12 @@ export function listStates() {
   // Sort for deterministic state ordering across platforms (readdirSync
   // returns filesystem order, which varies).
   //
-  // A checkout under test-fixtures/upgrade/ is excluded HERE, not only in
-  // walk(): this list is the state allowlist, and walk() starts AT the state
-  // directory, where the child-only guard cannot see it (the walk root is
-  // deliberately exempt). Leaving it in would make a whole second repository an
-  // allowlisted fixture state and seed it into the install under test (#3762).
+  // A nested checkout is filtered here rather than by walkTree, because these
+  // entries are not walked — each becomes a walk ROOT, which walkTree
+  // deliberately never tests (a gate run from inside a worktree must check that
+  // worktree). A stray clone or worktree parked among the fixture states would
+  // otherwise become an allowlisted `--state` value pointing at a whole second
+  // repository (#3762).
   return readdirSync(FIXTURES).sort()
     .filter((n) => statSync(join(FIXTURES, n)).isDirectory() && !isNestedCheckout(join(FIXTURES, n)));
 }

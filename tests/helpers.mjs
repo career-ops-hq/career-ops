@@ -2,11 +2,11 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync as _rmSync, symlinkSync, writeFileSync } from 'fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync as _rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join, dirname } from 'path';
+import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
-import { isNestedCheckout } from '../lib/mjs-files.mjs';
+import { walkTree } from '../lib/walk-tree.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
@@ -386,24 +386,12 @@ export function fileExists(path) { return existsSync(join(ROOT, path)); }
  * @returns {string[]} Absolute paths, parents before children.
  */
 export function walkFiles(dir, match, skipDirs = new Set()) {
+  // The missing-dir contract is this function's, not walkTree's: walkTree
+  // throws on an absent root on purpose, so a gate can never report "0 files"
+  // and pass. Callers here want to make that report themselves.
   if (!existsSync(dir)) return [];
-  const out = [];
-  const entries = readdirSync(dir, { withFileTypes: true })
-    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  for (const entry of entries) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      // A linked worktree carries a `.git` FILE, so a caller's `skipDirs` set —
-      // which matches by NAME — never fires on one, and the walk descends into a
-      // whole second checkout of this repository (#3499, #3762). The caller's
-      // own set stays authoritative for everything else.
-      if (isNestedCheckout(full)) continue;
-      if (!skipDirs.has(entry.name)) out.push(...walkFiles(full, match, skipDirs));
-    } else if (match.test(entry.name)) {
-      out.push(full);
-    }
-  }
-  return out;
+  return walkTree(dir, { skip: (entry) => entry.isDirectory() && skipDirs.has(entry.name) })
+    .filter((f) => match.test(basename(f)));
 }
 
 /**

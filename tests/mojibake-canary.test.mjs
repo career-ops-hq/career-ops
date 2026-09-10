@@ -9,10 +9,10 @@
 //
 // Run:  node test-all.mjs --only mojibake-canary
 
-import { readFileSync, readdirSync } from 'fs';
-import { join } from 'path';
-import { isNestedCheckout } from '../lib/mjs-files.mjs';
+import { readFileSync } from 'fs';
+import { join, relative, sep } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
+import { walkTree } from '../lib/walk-tree.mjs';
 
 console.log('\nmojibake-canary — double-encoded UTF-8 detection in templates/ and modes/');
 
@@ -195,29 +195,19 @@ let filesScanned = 0;
 let filesWithMojibake = 0;
 
 /**
- * Recursively walk a directory and check every file for mojibake.
+ * Walk a directory and check every file for mojibake.
  * @param {string} dir - Directory to walk.
- * @param {string} relativePath - Relative path for error reporting.
+ * @param {string} relativePath - Prefix for error reporting.
  */
 function walkAndCheck(dir, relativePath = '') {
-  const entries = readdirSync(dir, { withFileTypes: true });
-  
-  for (const entry of entries) {
-    const fullPath = join(dir, entry.name);
-    const entryRelativePath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
-    
-    if (entry.isDirectory()) {
-      // A checkout placed under templates/ or modes/ is another tree's content,
-      // and mojibake in it is not this repository's defect to report (#3762).
-      // Unlikely there — but "unlikely" is the assumption that let a worktree
-      // under tests/ run its own suites as ours.
-      if (isNestedCheckout(fullPath)) continue;
-      walkAndCheck(fullPath, entryRelativePath);
-    } else if (entry.isFile()) {
+  walkTree(dir, {
+    onFile: (fullPath) => {
+      const rel = relative(dir, fullPath).split(sep).join('/');
+      const entryRelativePath = relativePath ? `${relativePath}/${rel}` : rel;
       filesScanned++;
       const content = readFileSync(fullPath, 'utf-8');
       const lines = content.split('\n');
-      
+
       for (let i = 0; i < lines.length; i++) {
         if (containsMojibake(lines[i])) {
           filesWithMojibake++;
@@ -227,8 +217,8 @@ function walkAndCheck(dir, relativePath = '') {
           break;
         }
       }
-    }
-  }
+    },
+  });
 }
 
 for (const tree of treesToScan) {
