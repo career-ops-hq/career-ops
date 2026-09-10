@@ -21,7 +21,7 @@
  */
 
 import { execFile, execFileSync, execSync } from 'child_process';
-import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, lstatSync, mkdtempSync, realpathSync } from 'fs';
+import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, lstatSync, statSync, mkdtempSync, realpathSync } from 'fs';
 import { join, dirname, basename, resolve, posix as pathPosix } from 'path';
 import { tmpdir } from 'os';
 import { randomBytes, timingSafeEqual } from 'crypto';
@@ -651,6 +651,219 @@ export function userLayerViolations(changedFiles, updatePaths, userPaths) {
     }
   }
   return violations;
+}
+
+/**
+ * Does the ref ship files BENEATH this path, i.e. is the entry a directory?
+ *
+ * The manifest's own spelling cannot answer this — `documents` and `documents/`
+ * are the same pathspec to git — and the update is about to check this path out
+ * of `ref`, so `ref` is the authority on what it actually is.
+ *
+ * -z and --literal-pathspecs for the reasons expandStagingPaths documents: raw
+ * NUL-separated names survive core.quotePath, and no name is reinterpreted as a
+ * glob. An unreadable ref answers "not a subtree" rather than throwing — the
+ * caller then falls back to the single-file rule, which is the stricter branch.
+ *
+ * @param {string} path - Manifest entry, without a trailing slash.
+ * @param {string} [ref='FETCH_HEAD'] - Tree to interrogate.
+ * @returns {boolean} True when at least one file sits strictly under `path`.
+ */
+function upstreamShipsUnder(path, ref = 'FETCH_HEAD') {
+  try {
+    const listed = gitQuiet('--literal-pathspecs', 'ls-tree', '-r', '--name-only', '-z', ref, '--', path);
+    return listed.split('\0').filter(Boolean).some((file) => file.startsWith(`${path}/`));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Build the local-state probes rejectUserLayerPaths() asks its three questions of.
+ *
+ * Extracted and exported rather than inlined at the call site for the reason
+ * userLayerViolations() gives for being pure: apply() is ROOT-bound and full of
+ * side effects, so anything left inside it can only be checked by pattern-matching
+ * the source — and a source pattern cannot tell `trackedFiles.has(path)` from
+ * `() => true`. Gutting the probes that way disables the whole named-file half of
+ * the guard while every structural check still passes, which is precisely what
+ * happened before this was pulled out.
+ *
+ * Takes raw git output rather than parsed collections so the NUL parsing is part
+ * of what gets tested: `-z` is what makes a non-ASCII name survive
+ * core.quotePath, and both probes key on exact membership and prefix.
+ *
+ * @param {object} args
+ * @param {string} args.trackedOutput - Raw `git ls-files -z` output.
+ * @param {string} args.upstreamOutput - Raw `git ls-tree -r --name-only -z <ref>` output.
+ * @param {string} [args.root=ROOT] - Checkout the `exists` probe resolves against.
+ * @returns {{tracked: Function, exists: Function, claimsSubtree: Function}}
+ */
+export function manifestProbes({ trackedOutput, upstreamOutput, root = ROOT }) {
+  const trackedFiles = new Set(String(trackedOutput).split('\0').filter(Boolean));
+  const upstreamFiles = String(upstreamOutput).split('\0').filter(Boolean);
+  return {
+    tracked: (path) => trackedFiles.has(path),
+    exists: (path) => existsSync(join(root, path)),
+    claimsSubtree: (path) => {
+      if (path.endsWith('/')) return true;
+      const prefix = `${path}/`;
+      return upstreamFiles.some((file) => file.startsWith(prefix));
+    },
+  };
+}
+
+/**
+ * Is this manifest entry a plain, canonical, repo-relative path?
+ *
+ * Every comparison the guard makes is literal string work on segments, so a path
+ * that means the user layer without spelling it that way slips past all of it:
+ * `./data/` is not `data/`, yet `git checkout <ref> -- ./data` resolves to the
+ * same directory. Backslashes, doubled separators, a leading `/`, and git's own
+ * pathspec magic (`:(glob)`, `:!`) do the same in their own ways — and the
+ * checkout does not pass --literal-pathspecs, so magic would be honoured.
+ *
+ * Normalizing instead of refusing would mean reimplementing git's pathspec
+ * resolution and staying bug-compatible with it. A manifest entry has no reason
+ * to be spelled any way but plainly, so anything else is refused as malformed.
+ * Every entry the real manifest ships is canonical, so nothing legitimate is lost.
+ *
+ * @param {string} path - Raw manifest entry, trailing slash allowed.
+ * @returns {boolean} True when the entry is a plain relative path.
+ */
+function isCanonicalManifestPath(path) {
+  if (typeof path !== 'string' || path === '') return false;
+  // A NUL never reaches git: child_process rejects the argument with
+  // ERR_INVALID_ARG_VALUE first, so apply() would die on an opaque runtime error
+  // instead of naming the malformed entry. It is also the delimiter both probes
+  // parse their git output on, so such a path could never match anything anyway.
+  if (path.includes('\0')) return false;
+  // Windows separators and absolute paths.
+  if (path.includes('\\') || path.startsWith('/')) return false;
+  // Any colon, not just a leading one. It is git pathspec magic at the front
+  // (`:(glob)`, `:!`), a drive on Windows whether absolute (`C:/x`) or
+  // drive-relative (`C:x`), and an NTFS alternate data stream in the middle
+  // (`file.txt:stream`). A colon is not legal in a Windows filename either, and
+  // no entry the manifest ships contains one, so the whole character goes.
+  if (path.includes(':')) return false;
+  // Wildcards are pathspec magic too, without the `:` that announces it, and the
+  // checkout cannot defuse them: it builds :(exclude) specs for preserved paths,
+  // so --literal-pathspecs would disable the very magic it depends on. A default
+  // pathspec wildcard also matches `/`, so `modes/*` claims modes/_profile.md
+  // while matching none of the segment comparisons below. Refusing here is the
+  // only place this can be stopped.
+  if (/[*?[]/.test(path)) return false;
+  // One trailing slash is the directory spelling this file uses; anything else
+  // empty is a doubled separator.
+  const segments = (path.endsWith('/') ? path.slice(0, -1) : path).split('/');
+  return !segments.some((segment) => segment === '' || segment === '.' || segment === '..');
+}
+
+/**
+ * Split a manifest into entries apply() may write and entries it must refuse.
+ *
+ * A manifest entry naming a user path is a data-loss bug regardless of intent: the
+ * per-path `git checkout FETCH_HEAD -- <dir>` writes upstream's files over the user's,
+ * and an UNTRACKED user file the install has no history for is invisible to the
+ * #2337 local-edit detector, so it gets no .bak and is not preserved. The abort path
+ * then deletes it as an addition HEAD lacks, while reporting "your content was NOT
+ * overwritten". Refusing the entry up front is what keeps that sequence from starting.
+ *
+ * Apply this to the MERGED manifest, never to the fetched half alone. apply()
+ * self-bootstraps — it checks the fetched update-system.mjs out and re-execs it — so
+ * by the time the merge runs, the SYSTEM_PATHS constant in this file IS upstream's
+ * list. There is no local half left to trust, and filtering only `remoteSystemPaths`
+ * lets the identical entry back in through the "local" one.
+ *
+ * Comparison is on path SEGMENTS, and a trailing slash carries no meaning here.
+ * `git checkout <ref> -- documents` and `-- documents/` name the same tree, so a
+ * rule keyed on the slash is bypassed by omitting one character. Two claims are
+ * refused however they are spelled: an entry equal to a declared user path, and an
+ * entry that is an ANCESTOR of one (`modes` would claim the user's
+ * modes/_profile.md; `documents` would claim everything under documents/).
+ *
+ * An entry INSIDE a user directory splits two ways. A SUBTREE claim is refused
+ * outright: its contents are whatever upstream decides, now and in every later
+ * release, so it is an open-ended claim over user territory that cannot be
+ * adjudicated once. Directory-ness is read from upstream's own tree rather than a
+ * trailing slash, for the same reason the slash is ignored above.
+ *
+ * A single FILE inside a user directory cannot be judged by shape at all:
+ * writing-samples/README.md is a system-owned doc that must keep arriving, while
+ * interview-prep/story-bank.md is the user's own work. So the test is recoverability
+ * rather than intent — refuse only when the entry would land on a file this install
+ * does not track. Untracked-and-present is exactly the case the update cannot undo:
+ * the #2337 detector is diff-based and never sees such a file, so no .bak is written,
+ * `git stash create` captures nothing, and the backup branch holds only committed
+ * state. A tracked file is restorable from git, and a path absent locally has nothing
+ * to lose — refusing that one would block new upstream files, which is #958.
+ *
+ * @param {string[]} manifestPaths - The merged manifest apply() is about to write.
+ * @param {string[]} userPaths - User-layer paths, normally effectiveUserPaths().
+ * @param {object} [probes] - Seams for the three state questions, so the rule stays
+ *   unit-testable without a repo. Default to the real checkout and FETCH_HEAD.
+ * @param {(path: string) => boolean} [probes.tracked] - Is the path in the index?
+ * @param {(path: string) => boolean} [probes.exists] - Is it on disk?
+ * @param {(path: string) => boolean} [probes.claimsSubtree] - Does upstream ship files
+ *   beneath it, i.e. is this entry a directory rather than a single file?
+ * @returns {{kept: string[], refused: string[]}} Entries to check out, and entries to
+ *   report and drop. Order within each list follows the input.
+ */
+export function rejectUserLayerPaths(manifestPaths, userPaths, probes = {}) {
+  const tracked = probes.tracked || ((path) => isTracked(path));
+  const exists = probes.exists || ((path) => existsSync(join(ROOT, path)));
+  // Default to the tree apply() is about to check out. A path that is a directory
+  // on disk counts too, so an entry naming a user directory the install already has
+  // is refused even when upstream ships nothing under it yet.
+  const claimsSubtree = probes.claimsSubtree || ((path) => {
+    if (path.endsWith('/')) return true;
+    try {
+      if (existsSync(join(ROOT, path)) && statSync(join(ROOT, path)).isDirectory()) return true;
+    } catch { /* unreadable: fall through to the upstream tree */ }
+    return upstreamShipsUnder(path);
+  });
+  // A trailing slash is a spelling, not a fact about the path — strip it on both
+  // sides so `documents` and `documents/` are the same claim.
+  const trimSlash = (path) => (path.endsWith('/') ? path.slice(0, -1) : path);
+  // Segment-boundary containment: `cv` must not claim `cv.md`, and `cv.md` must
+  // not claim `cv.md.bak` (the over-match userLayerViolations documents at :655).
+  const isUnder = (child, parent) => child.startsWith(`${parent}/`);
+  const declared = userPaths.map(trimSlash);
+  const declaredDirs = userPaths.filter((path) => path.endsWith('/')).map(trimSlash);
+
+  const kept = [];
+  const refused = [];
+  for (const path of manifestPaths) {
+    // Before any comparison: a non-canonical spelling means the same tree while
+    // matching none of the checks below, so it is refused as malformed rather
+    // than normalized.
+    if (!isCanonicalManifestPath(path)) {
+      refused.push(path);
+      continue;
+    }
+    const entry = trimSlash(path);
+    // Names a user path, or stands above one and would sweep it up.
+    if (declared.some((userPath) => entry === userPath || isUnder(userPath, entry))) {
+      refused.push(path);
+      continue;
+    }
+    if (declaredDirs.some((dir) => isUnder(entry, dir))) {
+      // A subtree claim inside user territory is open-ended — upstream decides its
+      // contents in this release and every later one — so it cannot be adjudicated
+      // once and is refused outright.
+      if (claimsSubtree(path)) {
+        refused.push(path);
+        continue;
+      }
+      // A single file is a bounded claim: keep it only if losing it is recoverable.
+      if (!tracked(entry) && exists(entry)) {
+        refused.push(path);
+        continue;
+      }
+    }
+    kept.push(path);
+  }
+  return { kept, refused };
 }
 
 function parseVersionFile(raw) {
@@ -2191,7 +2404,37 @@ async function apply() {
 
     // 3a. Keep bootstrap paths as a fallback for very old targets, but the
     // target updater's SYSTEM_PATHS is now the source of truth for new files.
-    const updatePaths = mergePathLists(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS);
+    // Being the source of truth stops at the user layer. The filter runs over the
+    // MERGED list, not just remoteSystemPaths: by the time this code executes it is
+    // itself the fetched updater (apply() self-bootstraps and re-execs, step 2), so
+    // the local SYSTEM_PATHS constant above is upstream's list too. Filtering only
+    // the remote half would leave the identical entry to walk in through the "local"
+    // one. Refuse loudly rather than aborting — one bad manifest entry must not
+    // brick every install's updates, but staying silent is what would keep the
+    // mistake invisible.
+    // One `ls-files` and one `ls-tree` for the whole manifest rather than one per
+    // entry: the merged list is ~340 paths, and the per-path defaults would spawn
+    // git that many times each.
+    // -z on both, for the reason expandStagingPaths documents: core.quotePath
+    // quotes a non-ASCII name, and both probes key on exact membership and
+    // prefix. A quoted name would read as untracked, so a tracked system doc
+    // inside a user directory would be refused instead of updated.
+    const { kept: updatePaths, refused } = rejectUserLayerPaths(
+      mergePathLists(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS),
+      effectiveUserPaths(),
+      manifestProbes({
+        trackedOutput: git('ls-files', '-z'),
+        upstreamOutput: git('ls-tree', '-r', '--name-only', '-z', 'FETCH_HEAD'),
+      }),
+    );
+    const refusedSet = new Set(refused);
+    if (refused.length > 0) {
+      console.log('');
+      console.log(`Refused ${refused.length} manifest entry(ies) naming the user layer:`);
+      for (const path of refused) console.log(`  ${path}`);
+      console.log('Your files were NOT touched. Please report this — it is a manifest error.');
+      console.log('');
+    }
 
     // 3b. Local edits to system files (#2337). The checkout is a raw overwrite,
     // so anything this install fixed locally and upstream has not adopted is
@@ -2583,7 +2826,14 @@ async function apply() {
     // Re-running apply fixes it (the first pass did update update-system.mjs
     // itself, so the second pass uses the target manifest) — but only if the
     // user is told, instead of being shown "Update complete" (#1998).
-    const unmaterialized = missingFromTargetManifest(remoteSystemPaths);
+    // Refused entries were never checked out, so verifying them would report a
+    // gap this run deliberately created and exit 1 with advice to re-run — which
+    // refuses the same entry and fails identically, forever. That would turn a
+    // manifest mistake into a permanently dead updater, the opposite of the
+    // refuse-loudly-do-not-abort contract at 3a.
+    const unmaterialized = missingFromTargetManifest(
+      remoteSystemPaths.filter((path) => !refusedSet.has(path)),
+    );
     if (unmaterialized.length > 0) {
       console.error(`\nUpdate incomplete: v${local} → v${remote}`);
       console.error(`${unmaterialized.length} path(s) from the target manifest were not checked out:`);
