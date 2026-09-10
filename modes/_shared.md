@@ -99,6 +99,7 @@ The evaluation scores five dimensions, integrated into one global score of 1-5. 
 5. **If evidence contradicts the `require` criteria** → **cap this dimension at 2/5**, and add an explicit line to Block A's Culture Screen field (see `oferta.md`) naming what's missing or contradicted. Do not let a strong CV-match score silently compensate for this — surface it, don't bury it.
 6. **If no evidence exists for any `require` criterion** → score 3 by default, unless `culture_screen.deprioritize_if_absent: true` is set, in which case **cap this dimension at 2/5**.
 7. A role scoring 4.5+ overall but 2 or below on Cultural signals must carry an explicit warning in the report: "High technical fit, unconfirmed/poor culture fit — verify before applying."
+8. If `modes/oferta.md`'s Block A "PcD-quota check" fired a match (🟢 PcD-Quota flag line present), treat it as a positive contributor to this dimension — a legally mandated quota opening is a genuine hiring-process advantage. It never overrides a `culture_screen` contradiction (rule 5 above still caps the dimension at 2/5 if evidence contradicts required criteria); it only adds weight when the dimension isn't otherwise capped.
 
 ## Posting Legitimacy (Block G)
 
