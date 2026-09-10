@@ -982,6 +982,12 @@ search_queries:
 # origin (the /widgets endpoint lives on that same origin, so no separate
 # `api:` is needed).
 #
+# Eploy is also explicit-only: standard tenants use unrelated branded domains,
+# so a URL cannot be distinguished safely from a non-Eploy careers site. Set
+# `provider: eploy`; the provider reads the public `/live-jobs.xml` on that
+# origin. A custom frontend merely handing applications to Eploy (for example,
+# Specsavers' Attrax jobs page) is not the same protocol and is not supported.
+#
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
 # field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
@@ -1116,6 +1122,16 @@ search_queries:
 #   max_pages: 200         # optional page cap. The API caps a page at 10 rows
 #                          # no matter what, so 200 pages ≈ 2000 postings
 #                          # (default 200, max 1000). Raise it for a huge board.
+#   enabled: true
+#
+# - name: Example Eploy Co
+#   # Standard Eploy career site on a branded domain. The provider reads the
+#   # complete public /live-jobs.xml inventory in one anonymous request.
+#   careers_url: https://careers.exampleco.com/vacancies/
+#   provider: eploy              # required — branded domains cannot auto-detect
+#   eploy:                       # optional detail-page enrichment
+#     fetchDetails: false        # default false; sitemap-only is one request
+#     detailLimit: 25            # 1..100; ignored unless fetchDetails is true
 #   enabled: true
 #
 # - name: Example Phenom Co
