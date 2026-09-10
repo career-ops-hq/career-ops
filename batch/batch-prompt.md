@@ -256,6 +256,18 @@ Assess whether the posting appears real and worth pursuing.
 
 Batch mode limitation: Playwright is not available, so exact apply-button state and freshness cannot be directly verified. Mark those signals as `unverified (batch mode)`.
 
+#### Verdict (lead)
+
+Write a `## Verdict (lead)` block directly after Block G and before `## Risk Summary`. It restates `final_decision` as one human sentence and never introduces a different call: if the sentence and the field disagree, the field is right. The bolded call is that field's value (Apply, Consider, Research first, Skip), followed by one reason drawn from what the report already established. No re-scoring, no new evidence.
+
+The `(lead)` marker is what the web report view promotes into the page's lead callout, and it is identified by the marker rather than by a heading word, so a translated heading resolves identically. Translate the noun, never `(lead)`, and never letter this block.
+
+```markdown
+## Verdict (lead)
+
+**Apply.** Strong match on the role's core axis with no hard stops, and Block G returned High Confidence.
+```
+
 #### Risk Summary (after Block G)
 
 Close the report body with a `## Risk Summary` block directly after Block G's section — one row per risk signal, fixed order, three states per row: `✅ {clear verdict}` / `⚠️ {finding}` / `— not evaluated`. **Aggregation only, zero new judgment:** each row quotes the verdict already produced by its source signal; it never re-scores or overrides.
@@ -450,6 +462,7 @@ Then include:
 - `## E) Personalization Plan`
 - `## F) Interview Plan`
 - `## G) Posting Legitimacy`
+- `## Verdict (lead)`
 - `## Risk Summary`
 - `## Extracted Keywords`
 

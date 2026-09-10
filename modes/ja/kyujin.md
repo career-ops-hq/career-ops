@@ -222,6 +222,26 @@ I am happy to discuss further at your convenience.
 
 ---
 
+## Verdict (lead)
+
+ブロック G の直後、`## Risk Summary` の前に `## Verdict (lead)` ブロックを書く。読者がレポートを開いた唯一の問い、すなわち「応募すべきか」に答えるブロックである。
+
+**派生であり、判断を新たに生まない。** 唯一の情報源は `## Machine Summary` の `final_decision`。本ブロックは同じ判断を人間の一文で言い直すだけで、別の判断を持ち込まない。文とフィールドが食い違う場合はフィールドが正しく、本ブロックが欠陥である。太字の判断はそのフィールドの値、すなわち Apply、Consider、Research first、Skip のいずれか。
+
+**`(lead)` マーカーは機能を担い、意図的に言語非依存である。** Web のレポート表示は、見出し語やブロック文字ではなくこのマーカーによって当該ブロックを冒頭の要点として引き上げる。したがって各言語は自国語の名詞と同じ括弧書きを保つ（`## Verdict (lead)`、`## Вердикт (lead)`）。`(lead)` は翻訳せず、本ブロックに文字も付けない。A–H の系列外である。
+
+**新しい判断を加えない。** ここを書く時点で入力はすべて揃っている。判断と、レポートが既に確立した内容に基づく理由を一つ述べる。再採点も証拠の追加も行わない。
+
+ブロック形式:
+
+```markdown
+## Verdict (lead)
+
+**Apply.** 職務の中核軸で強く一致し、ハードストップなし。ブロック G は High Confidence。
+```
+
+---
+
 ## Risk Summary (ブロック G の後)
 
 レポート本文は、ブロック G の直後・ブロック H の前に `## Risk Summary` ブロックで締めくくります。リスクシグナルごとに1行、順序は固定です。これにより、候補者が実際に知りたいこと（「この会社は入って安全か？」）が、ブロック A・ブロック G・外部ファイルを頭の中で突き合わせることなく、1画面で分かります。
@@ -300,6 +320,9 @@ Full evaluation を `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` に保存す�
 
 ## G) Posting Legitimacy
 (full content of block G)
+
+## Verdict (lead)
+(応募可否の判断を一文で — `final_decision` の言い直し、上記 Verdict セクションを参照)
 
 ## Risk Summary
 (リスクシグナルごとに1行、順序は固定 — 上記の Risk Summary セクションを参照)
