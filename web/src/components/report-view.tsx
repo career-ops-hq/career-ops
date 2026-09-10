@@ -12,6 +12,7 @@ import { ScoreMethodology } from "@/components/score-methodology";
 import { GeneratePdfButton } from "@/components/generate-pdf-button";
 import { ApplyButton } from "@/components/apply-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
+import { ApplicationQuestions } from "@/components/answers/application-questions";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
 
 // Progressive disclosure of the report. The core writes prose blocks
@@ -223,6 +224,11 @@ export function ReportView({
               </div>
             );
           })()}
+          {/* Follow-up questions the application asks. Deliberately outside the
+              report prose: it is an editable working surface, not a rendered
+              block, and it must work even when the apply flow cannot open the
+              employer's form. */}
+          <ApplicationQuestions n={id} />
           <ScoreMethodology />
         </>
       ) : (

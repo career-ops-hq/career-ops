@@ -26,6 +26,8 @@ export type PlannerField = {
   label: string;
   required?: boolean;
   options?: string[];
+  /** Word ceiling the field states about itself ("under 150 words"), when it states one. */
+  maxWords?: number;
 };
 
 /**
