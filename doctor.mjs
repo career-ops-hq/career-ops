@@ -14,6 +14,7 @@ import * as yaml from 'js-yaml';
 import dotenv from 'dotenv';
 import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { validateProfile, EXAMPLE_PATH } from './validate-profile.mjs';
 import { resolveExtractorMode } from './browser-extract.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
@@ -640,6 +641,34 @@ function checkPlugins(root) {
   return fixes.length ? { warn: true, label, fix: fixes } : { pass: true, label };
 }
 
+// profile.yml steers scoring targets, output language, spend tier, CV format and
+// location policy — and the existence check above is all that ever looked at it.
+// Every reader does `profile?.language?.output` and takes the fallback when the
+// key is missing, which is indistinguishable from the key being MISSPELLED. So
+// `langauge: {output: ja}` produces English output and no signal anywhere.
+//
+// WARN, never FAIL, like the plugin check below it: an unknown key is a typo,
+// not a broken install, and refusing to run would be a worse answer than naming
+// it.
+function checkProfileShape(root) {
+  const profilePath = process.env.CAREER_OPS_PROFILE || join(root, 'config', 'profile.yml');
+  if (!existsSync(profilePath)) return null;   // the prereq check owns "absent"
+  let findings;
+  try {
+    const example = existsSync(EXAMPLE_PATH) ? readFileSync(EXAMPLE_PATH, 'utf-8') : '';
+    findings = validateProfile(readFileSync(profilePath, 'utf-8'), example).findings;
+  } catch (err) {
+    return { warn: true, label: `config/profile.yml could not be read (${err.message})` };
+  }
+  const actionable = findings.filter((f) => f.level !== 'info');
+  if (actionable.length === 0) return { pass: true, label: 'config/profile.yml: shape OK' };
+  return {
+    warn: true,
+    label: `config/profile.yml: ${actionable.length} issue${actionable.length === 1 ? '' : 's'} — settings under an unrecognized key have no effect`,
+    fix: actionable.map((f) => f.message),
+  };
+}
+
 async function main() {
   console.log('\ncareer-ops doctor');
   console.log('================\n');
@@ -660,6 +689,7 @@ async function main() {
     ...USER_LAYER_PREREQS.map(checkPrereq),
     checkFonts(),
     checkPersonalization(projectRoot),
+    checkProfileShape(projectRoot),
     checkAutoDir('data'),
     checkPipelineFile(),
     checkAutoDir('output'),
