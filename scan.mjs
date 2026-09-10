@@ -2386,8 +2386,16 @@ export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } 
 // appendFileSync is not atomic, so a concurrent append can interleave mid-line.
 // Both surface as rows that silently stop counting, because every reader skips
 // a malformed line quietly.
-export async function appendToScanHistory(offers, date, status = 'added') {
-  await withPipelineLock(SCAN_HISTORY_PATH, () => {
+//
+// `alreadyLocked` is for the one caller whose APPEND is decided by a READ of
+// this same file — check-liveness's expired-verdict recorder, which must hold
+// the lock across both or its plan is a check-then-act (a concurrent scanner
+// appending in between makes it write a row that is no longer needed). The
+// lock is not reentrant, so that caller cannot simply wrap this call; it takes
+// the lock itself and passes true. Everything else must leave it alone: true
+// with no lock actually held reintroduces both races described above.
+export async function appendToScanHistory(offers, date, status = 'added', { alreadyLocked = false } = {}) {
+  const write = () => {
     // Ensure file + header exist. The header names every column the row writer
     // (formatScanHistoryRow) emits, in the same order: the original 7 positional
     // cols (url…location) plus the append-only trailing cols added since —
@@ -2406,7 +2414,10 @@ export async function appendToScanHistory(offers, date, status = 'added') {
     const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
 
     appendFileSync(SCAN_HISTORY_PATH, lines, 'utf-8');
-  });
+  };
+
+  if (alreadyLocked) write();
+  else await withPipelineLock(SCAN_HISTORY_PATH, write);
 }
 
 // ── Company blacklist (#1742) ───────────────────────────────────────

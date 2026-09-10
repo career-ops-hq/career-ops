@@ -194,3 +194,72 @@ export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '',
 
   return { result: 'uncertain', code: 'no_apply_control', reason: 'content present but no visible apply control found' };
 }
+
+// A scan-history status that already carries a death certificate for its row:
+// `skipped_expired` (what scan.mjs writes) and the legacy `added (expired)`
+// suffix older histories carry. Deliberately NOT the other `skipped_*` states —
+// skipped_dup / skipped_title / skipped_no_apply_control say "this row is not a
+// fresh match", which is a different claim from "this posting is gone".
+const EXPIRED_HISTORY_STATUS = /expired/i;
+
+/**
+ * Plan the `skipped_expired` scan-history rows for a batch of liveness verdicts.
+ *
+ * The pure half of recording a liveness sweep (#3891). Kept here rather than in
+ * the CLI so its three invariants are testable without a browser:
+ *
+ *   - **Only `expired`.** `uncertain` is a timeout or a bot wall, never a death
+ *     certificate; recording it would bury a live posting behind a network
+ *     hiccup, a strictly worse failure than the one this closes.
+ *   - **Only URLs the history already knows.** A liveness sweep is not a
+ *     discovery channel: a URL scan-history never saw has no row to retire, and
+ *     inventing one would put a posting nothing surfaced into the dedup set.
+ *   - **Once each.** A URL already carrying an expired row is left alone, so
+ *     re-running the sweep is idempotent.
+ *
+ * A planned row is emitted under the history's OWN spelling of the URL, not the
+ * caller's: the web feed keys its dedup on the verbatim `url` cell, so a row
+ * written under a different spelling would not line up with the `added` row it
+ * exists to retire. Matching is done through the injected `normalizeUrl` (the
+ * scanner's `normalizeUrlForDedup`) rather than an import, so this module stays
+ * free of scan.mjs — liveness-browser.mjs imports it.
+ *
+ * @param {string} scanHistoryText - Raw data/scan-history.tsv contents ('' when absent).
+ * @param {{url: string, result: string}[]} verdicts - One entry per checked URL.
+ * @param {(url: string) => string} [normalizeUrl] - Dedup-key normalizer.
+ * @returns {{url: string, source: string, title: string, company: string, location: string, fingerprint: string}[]}
+ *   Offer-shaped rows for `appendToScanHistory(rows, date, 'skipped_expired')`.
+ */
+export function planExpiredHistoryRows(scanHistoryText = '', verdicts = [], normalizeUrl = (url) => url) {
+  const knownByKey = new Map(); // dedup key -> Map(verbatim url -> row fields)
+  const recorded = new Set();   // verbatim urls that already carry an expired row
+
+  // slice(1) skips the header, the same convention collectSeenUrls uses.
+  for (const line of String(scanHistoryText ?? '').split('\n').slice(1)) {
+    const [url, , portal = '', title = '', company = '', status = '', location = ''] = line.split('\t');
+    if (!url) continue;
+    const key = normalizeUrl(url);
+    if (!knownByKey.has(key)) knownByKey.set(key, new Map());
+    // fingerprint is pinned empty rather than carried: it is discovery-time JD
+    // content, it still lives on the row being retired, and a stale copy on a
+    // dead row is only noise for the cross-listing check.
+    knownByKey.get(key).set(url, { url, source: portal, title, company, location, fingerprint: '' });
+    if (EXPIRED_HISTORY_STATUS.test(status)) recorded.add(url);
+  }
+
+  const rows = [];
+  const claimed = new Set();
+  for (const verdict of verdicts ?? []) {
+    if (verdict?.result !== 'expired') continue;
+    const candidate = typeof verdict.url === 'string' ? verdict.url.trim() : '';
+    if (!candidate) continue;
+    const known = knownByKey.get(normalizeUrl(candidate));
+    if (!known) continue;
+    for (const [url, fields] of known) {
+      if (recorded.has(url) || claimed.has(url)) continue;
+      claimed.add(url);
+      rows.push(fields);
+    }
+  }
+  return rows;
+}
