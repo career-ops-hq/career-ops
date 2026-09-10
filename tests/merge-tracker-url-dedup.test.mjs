@@ -12,6 +12,9 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { normalizeUrl } from '../url-key.mjs';
+// The written cell is a markdown link since #3516; the KEY is its href, so the
+// assertions below read the href and check the rendering separately.
+import { extractCellUrl } from '../tracker-parse.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MERGE = join(HERE, '..', 'merge-tracker.mjs');
@@ -91,6 +94,10 @@ function urlCell(row) {
   // split() yields a leading and trailing empty from the surrounding pipes.
   return cells[cells.length - 2] ?? '';
 }
+/** The posting URL the row keys on, whichever form the cell is written in. */
+function urlHref(row) {
+  return extractCellUrl(urlCell(row));
+}
 const cleanup = (env) => rmSync(env.base, { recursive: true, force: true });
 
 console.log('\nmerge-tracker — deterministic URL dedup');
@@ -118,7 +125,11 @@ ok('a NEW row is written WITH its URL (the key must exist to ever match)', () =>
     runMerge(env);
     const rows = trackerRows(env);
     assert.equal(rows.length, 1);
-    assert.equal(urlCell(rows[0]), url, 'new row carries its posting URL');
+    assert.equal(urlHref(rows[0]), url, 'new row carries its posting URL');
+    // ...and carries it as a labelled link (#3516) rather than a bare 141-char
+    // URL. The label is derived, so it is asserted exactly: a hand-rolled one
+    // could contain a pipe and shift every later column.
+    assert.equal(urlCell(rows[0]), `[greenhouse](${url})`, 'new row renders the URL as a labelled markdown link');
 
     // …and the key is live immediately: a second TSV for a DIFFERENT posting at
     // the same company, with a fuzzy-matching title, must not collapse into it.
@@ -142,7 +153,10 @@ ok('THE REGRESSION: a 9-col re-eval UPDATES a URL-bearing row, never duplicates 
     const rows = trackerRows(env);
     assert.equal(rows.length, 1, `expected the row to be UPDATED, got ${rows.length} rows (duplicate)`);
     assert.ok(rows[0].includes('4.4/5'), 're-eval score written through');
-    assert.equal(urlCell(rows[0]), url, 'the row kept its key');
+    // The row was written in the PRE-#3516 bare form and the addition carries
+    // no url at all: the key must survive both the missing field and the cell's
+    // change of form.
+    assert.equal(urlHref(rows[0]), url, 'the row kept its key');
   } finally { cleanup(env); }
 });
 
@@ -178,7 +192,7 @@ ok('an update keeps the URL cell (key survives a re-eval)', () => {
     runMerge(env);
     const rows = trackerRows(env);
     assert.equal(rows.length, 1);
-    assert.equal(urlCell(rows[0]), url, 'update path did not blank the URL cell');
+    assert.equal(urlHref(rows[0]), url, 'update path did not blank the URL cell');
     assert.ok(rows[0].includes('4.4/5'), 're-eval score written through');
   } finally { cleanup(env); }
 });

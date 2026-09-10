@@ -175,7 +175,9 @@ const urlCell = (text, n) => {
     } else {
       fail(`already-set short row left unreadable: ${rowFor(text, 7).trim()}`);
     }
-    if (parsed && urlCell(text, 7) === 'https://example.com/j/7') {
+    // The cell is rendered as a markdown link since #3516; what must survive
+    // the padding is the HREF, which is the dedup key.
+    if (parsed && urlCell(text, 7) === '[example.com](https://example.com/j/7)') {
       pass('padding an already-set row preserves its URL');
     } else {
       fail(`already-set row lost its URL: ${JSON.stringify(urlCell(text, 7))}`);
