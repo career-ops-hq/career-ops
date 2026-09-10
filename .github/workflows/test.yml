@@ -57,7 +57,7 @@ jobs:
         with:
           node-version: '24'
       - name: Install deterministic CJK and PDF extraction dependencies
-        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk poppler-utils
+        run: sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google* ; sudo apt-get update || true ; sudo apt-get install -y fonts-noto-cjk poppler-utils
       - run: npm install --ignore-scripts
       - run: npx playwright install chromium --with-deps
       - run: npm run test:cv-visual
