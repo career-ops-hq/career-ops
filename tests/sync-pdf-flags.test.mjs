@@ -136,3 +136,305 @@ try {
     rmSync(work, { recursive: true, force: true });
   }
 }
+
+// ---------------------------------------------------------------------------
+// Prune mode tests (#3893)
+// ---------------------------------------------------------------------------
+
+{
+  // A manifest with one row whose PDF exists and one whose PDF is deleted.
+  // --prune dry run (default): manifest unchanged, output names the missing file.
+  const work = mkdtempSync(join(tmpdir(), 'cops-prune-dryrun-'));
+  try {
+    const tracker = join(work, 'applications.md');
+    const pdfIndex = join(work, 'pdf-index.tsv');
+    const outputDir = join(work, 'output');
+    mkdirSync(outputDir, { recursive: true });
+
+    // Only report 1's PDF is present on disk; report 2's is not.
+    writeFileSync(join(outputDir, '1-acme-cv.pdf'), 'pdf-content');
+
+    const manifest = [
+      '# report\tpdf\thtml\tformat\tdate',
+      '1\toutput/1-acme-cv.pdf\toutput/1-acme.html\ta4\t2026-01-01',
+      '2\toutput/2-gone-cv.pdf\toutput/2-gone.html\ta4\t2026-01-02',
+      '',
+    ].join('\n');
+
+    writeFileSync(tracker, TRACKER_HEADER);
+    writeFileSync(pdfIndex, manifest);
+
+    const result = spawnSync(NODE, [join(ROOT, 'sync-pdf-flags.mjs'), '--prune', '--json'], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_PDF_INDEX: pdfIndex },
+    });
+
+    const manifestAfter = readFileSync(pdfIndex, 'utf-8');
+    const json = (() => { try { return JSON.parse(result.stdout); } catch { return null; } })();
+
+    if (result.status === 0 && json && json.pruned === 1 && json.kept === 1 && json.dryRun === true) {
+      pass('sync-pdf-flags --prune reports one stale row in dry-run JSON');
+    } else {
+      fail(`--prune dry-run JSON wrong: status=${result.status}, stdout=${result.stdout.trim()}`);
+    }
+
+    if (manifestAfter === manifest) {
+      pass('sync-pdf-flags --prune dry run does not write the manifest');
+    } else {
+      fail('--prune dry run mutated the manifest without --write');
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+{
+  // --prune --write removes the stale row and keeps the live one.
+  const work = mkdtempSync(join(tmpdir(), 'cops-prune-write-'));
+  try {
+    const tracker = join(work, 'applications.md');
+    const pdfIndex = join(work, 'pdf-index.tsv');
+    const outputDir = join(work, 'output');
+    mkdirSync(outputDir, { recursive: true });
+
+    writeFileSync(join(outputDir, '1-acme-cv.pdf'), 'pdf-content');
+
+    const manifest = [
+      '# report\tpdf\thtml\tformat\tdate',
+      '1\toutput/1-acme-cv.pdf\toutput/1-acme.html\ta4\t2026-01-01',
+      '2\toutput/2-gone-cv.pdf\toutput/2-gone.html\ta4\t2026-01-02',
+      '',
+    ].join('\n');
+
+    writeFileSync(tracker, TRACKER_HEADER);
+    writeFileSync(pdfIndex, manifest);
+
+    const result = spawnSync(NODE, [join(ROOT, 'sync-pdf-flags.mjs'), '--prune', '--write', '--json'], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_PDF_INDEX: pdfIndex },
+    });
+
+    const manifestAfter = readFileSync(pdfIndex, 'utf-8');
+    const json = (() => { try { return JSON.parse(result.stdout); } catch { return null; } })();
+
+    if (result.status === 0 && json && json.pruned === 1 && json.kept === 1 && json.dryRun === false) {
+      pass('sync-pdf-flags --prune --write reports correct counts and dryRun:false');
+    } else {
+      fail(`--prune --write JSON wrong: status=${result.status}, stdout=${result.stdout.trim()}`);
+    }
+
+    if (!manifestAfter.includes('2-gone-cv.pdf') && manifestAfter.includes('1-acme-cv.pdf')) {
+      pass('sync-pdf-flags --prune --write removes the stale row and keeps the live row');
+    } else {
+      fail(`--prune --write manifest content wrong:\n${manifestAfter}`);
+    }
+
+    // The comment header must be preserved.
+    if (manifestAfter.startsWith('#')) {
+      pass('sync-pdf-flags --prune --write preserves the manifest comment header');
+    } else {
+      fail('--prune --write dropped the manifest comment header');
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+{
+  // --prune with all PDFs present: manifest unchanged, pruned:0.
+  const work = mkdtempSync(join(tmpdir(), 'cops-prune-noop-'));
+  try {
+    const tracker = join(work, 'applications.md');
+    const pdfIndex = join(work, 'pdf-index.tsv');
+    const outputDir = join(work, 'output');
+    mkdirSync(outputDir, { recursive: true });
+
+    writeFileSync(join(outputDir, '1-acme-cv.pdf'), 'pdf-content');
+    writeFileSync(join(outputDir, '2-globex-cv.pdf'), 'pdf-content');
+
+    const manifest = [
+      '# report\tpdf\thtml\tformat\tdate',
+      '1\toutput/1-acme-cv.pdf\toutput/1-acme.html\ta4\t2026-01-01',
+      '2\toutput/2-globex-cv.pdf\toutput/2-globex.html\ta4\t2026-01-02',
+      '',
+    ].join('\n');
+
+    writeFileSync(tracker, TRACKER_HEADER);
+    writeFileSync(pdfIndex, manifest);
+
+    const result = spawnSync(NODE, [join(ROOT, 'sync-pdf-flags.mjs'), '--prune', '--write', '--json'], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_PDF_INDEX: pdfIndex },
+    });
+
+    const manifestAfter = readFileSync(pdfIndex, 'utf-8');
+    const json = (() => { try { return JSON.parse(result.stdout); } catch { return null; } })();
+
+    if (result.status === 0 && json && json.pruned === 0 && json.kept === 2) {
+      pass('sync-pdf-flags --prune is a no-op when all PDFs are on disk');
+    } else {
+      fail(`--prune all-live JSON wrong: status=${result.status}, stdout=${result.stdout.trim()}`);
+    }
+
+    if (manifestAfter === manifest) {
+      pass('sync-pdf-flags --prune does not rewrite manifest when nothing is pruned');
+    } else {
+      fail('--prune rewrote an already-clean manifest');
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+{
+  // --write without --prune is an unknown option.
+  const work = mkdtempSync(join(tmpdir(), 'cops-prune-write-only-'));
+  try {
+    const tracker = join(work, 'applications.md');
+    const pdfIndex = join(work, 'pdf-index.tsv');
+    writeFileSync(tracker, TRACKER_HEADER);
+    writeFileSync(pdfIndex, PDF_MANIFEST);
+
+    const result = spawnSync(NODE, [join(ROOT, 'sync-pdf-flags.mjs'), '--write', '--json'], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_PDF_INDEX: pdfIndex },
+    });
+
+    if (result.status === 1 && /unknown option.*--write/i.test(result.stderr)) {
+      pass('sync-pdf-flags rejects --write outside of --prune mode');
+    } else {
+      fail(`--write without --prune should fail: status=${result.status}, stderr=${result.stderr.trim()}`);
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+{
+  // --prune with no manifest file is a silent no-op (exit 0, pruned:0).
+  const work = mkdtempSync(join(tmpdir(), 'cops-prune-no-manifest-'));
+  try {
+    const tracker = join(work, 'applications.md');
+    const pdfIndex = join(work, 'pdf-index.tsv'); // does not exist
+
+    writeFileSync(tracker, TRACKER_HEADER);
+
+    const result = spawnSync(NODE, [join(ROOT, 'sync-pdf-flags.mjs'), '--prune', '--json'], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_PDF_INDEX: pdfIndex },
+    });
+
+    const json = (() => { try { return JSON.parse(result.stdout); } catch { return null; } })();
+
+    if (result.status === 0 && json && json.pruned === 0) {
+      pass('sync-pdf-flags --prune is a no-op when no manifest exists');
+    } else {
+      fail(`--prune no-manifest wrong: status=${result.status}, stdout=${result.stdout.trim()}`);
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+{
+  // --dry-run combined with --write ignores --write (dry-run wins).
+  const work = mkdtempSync(join(tmpdir(), 'cops-prune-dryrun-write-'));
+  try {
+    const tracker = join(work, 'applications.md');
+    const pdfIndex = join(work, 'pdf-index.tsv');
+    const outputDir = join(work, 'output');
+    mkdirSync(outputDir, { recursive: true });
+
+    writeFileSync(join(outputDir, '1-acme-cv.pdf'), 'pdf-content');
+
+    const manifest = [
+      '# report\tpdf\thtml\tformat\tdate',
+      '1\toutput/1-acme-cv.pdf\toutput/1-acme.html\ta4\t2026-01-01',
+      '2\toutput/2-gone-cv.pdf\toutput/2-gone.html\ta4\t2026-01-02',
+      '',
+    ].join('\n');
+
+    writeFileSync(tracker, TRACKER_HEADER);
+    writeFileSync(pdfIndex, manifest);
+
+    const result = spawnSync(NODE, [join(ROOT, 'sync-pdf-flags.mjs'), '--prune', '--dry-run', '--write', '--json'], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_PDF_INDEX: pdfIndex },
+    });
+
+    const manifestAfter = readFileSync(pdfIndex, 'utf-8');
+    const json = (() => { try { return JSON.parse(result.stdout); } catch { return null; } })();
+
+    if (result.status === 0 && json && json.pruned === 1 && json.kept === 1 && json.dryRun === true) {
+      pass('sync-pdf-flags --dry-run --write forces dry-run behavior');
+    } else {
+      fail(`--dry-run --write JSON wrong: status=${result.status}, stdout=${result.stdout.trim()}`);
+    }
+
+    if (manifestAfter === manifest) {
+      pass('sync-pdf-flags --dry-run --write does not mutate manifest');
+    } else {
+      fail('--dry-run --write mutated the manifest');
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+{
+  // Path traversal guard: absolute paths or ../ paths outside the workspace are pruned.
+  const work = mkdtempSync(join(tmpdir(), 'cops-prune-traversal-'));
+  const outOfBounds = mkdtempSync(join(tmpdir(), 'cops-prune-outofbounds-'));
+  try {
+    const tracker = join(work, 'applications.md');
+    const pdfIndex = join(work, 'pdf-index.tsv');
+    const outputDir = join(work, 'output');
+    mkdirSync(outputDir, { recursive: true });
+
+    // The files exist, but one is outside the workspace.
+    writeFileSync(join(outputDir, '1-acme-cv.pdf'), 'pdf-content');
+    const externalPdf = join(outOfBounds, 'outside.pdf');
+    writeFileSync(externalPdf, 'pdf-content');
+
+    const manifest = [
+      '# report\tpdf\thtml\tformat\tdate',
+      '1\toutput/1-acme-cv.pdf\toutput/1-acme.html\ta4\t2026-01-01',
+      `2\t${externalPdf.replace(/\\/g, '/')}\toutput/2-gone.html\ta4\t2026-01-02`,
+      '3\toutput/../../outside.pdf\toutput/3-gone.html\ta4\t2026-01-02',
+      '',
+    ].join('\n');
+
+    writeFileSync(tracker, TRACKER_HEADER);
+    writeFileSync(pdfIndex, manifest);
+
+    const result = spawnSync(NODE, [join(ROOT, 'sync-pdf-flags.mjs'), '--prune', '--write', '--json'], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_PDF_INDEX: pdfIndex },
+    });
+
+    const manifestAfter = readFileSync(pdfIndex, 'utf-8');
+    const json = (() => { try { return JSON.parse(result.stdout); } catch { return null; } })();
+
+    if (result.status === 0 && json && json.pruned === 2 && json.kept === 1) {
+      pass('sync-pdf-flags --prune prunes paths outside the workspace');
+    } else {
+      fail(`path traversal JSON wrong: status=${result.status}, stdout=${result.stdout.trim()}`);
+    }
+
+    if (!manifestAfter.includes('outside.pdf') && manifestAfter.includes('1-acme-cv.pdf')) {
+      pass('sync-pdf-flags --prune removes out-of-bounds files from manifest');
+    } else {
+      fail(`path traversal manifest content wrong:\n${manifestAfter}`);
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+    rmSync(outOfBounds, { recursive: true, force: true });
+  }
+}
