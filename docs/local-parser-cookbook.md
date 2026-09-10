@@ -57,7 +57,7 @@ The parser must print one of these JSON shapes to stdout:
 }
 ```
 
-`title` and `url` are required. `company` is optional; when omitted, the scanner uses the `tracked_companies` entry name. Relative URLs are resolved against `careers_url`.
+`title` and `url` are required. `company` is optional; when omitted, the scanner uses the `tracked_companies` entry name. `location` is optional. `postedAt` is optional — an epoch-milliseconds number or a `Date.parse`-able string (`"2026-09-08"`, an ISO timestamp); `posted_at` / `publishedAt` / `published_at` are accepted as aliases. It feeds `--posted-after` / `--since` and the scan output's posting-date column; an unparseable value is dropped and the row is still kept. Relative URLs are resolved against `careers_url`.
 
 ## Artifact Storage
 
