@@ -974,18 +974,60 @@ export function buildSalaryFilter(salaryFilter) {
   };
 }
 
+// CJK/Korean corporate-form markers (#2570), kept as a list local to this
+// file rather than folded into invite-match.mjs's LEGAL_SUFFIXES. Two reasons
+// they can't share one list: LEGAL_SUFFIXES strips a *trailing, space-
+// delimited* word (`\s${suffix}$`), but these scripts don't delimit words
+// with spaces at all — 株式会社 mostly shows up as an unspaced *prefix*
+// (株式会社メルカリ) and sometimes an unspaced suffix (メルカリ株式会社), so
+// reusing LEGAL_SUFFIXES's anchor would never fire either way. And
+// invite-match.mjs's normalizeCompanyName is deliberately stricter than
+// companyMatch (loosely-quoted email text vs. an identity key that must never
+// merge two different companies) — folding a CJK list into that stricter
+// normalizer risks loosening its callers too, which the "splits, never
+// merges" rule #2445/#2569 protects was written to prevent.
+const CORPORATE_FORMS = [
+  '株式会社', '合同会社', '有限会社',   // Japanese
+  '股份有限公司', '有限公司',           // Chinese (longer form first)
+  '주식회사',                           // Korean
+];
+
+// Strip one leading or trailing corporate-form marker from an already
+// normalizeTextKey'd string. No space anchor — unlike LEGAL_SUFFIXES, these
+// forms are never separated from the company name by a space, which is
+// exactly why the \b-based approach can't reach them. At most one strip: a
+// name is not expected to carry two forms, and checking longer forms first
+// (股份有限公司 before 有限公司) avoids leaving a dangling 股份 behind.
+function stripCorporateForm(key) {
+  for (const form of CORPORATE_FORMS) {
+    if (key.startsWith(form)) return key.slice(form.length);
+    if (key.endsWith(form)) return key.slice(0, -form.length);
+  }
+  return '';
+}
+
 export function companyMatch(jobCompany, windowCompany) {
   // Unicode-aware (#2393 family): the [a-z0-9] strip this used to carry erased
   // non-Latin scripts outright, so 株式会社アカネ and 合同会社ゾロ both cleaned
   // to '' and the equality check below reported two unrelated companies as the
   // same one. The empty guard is part of the fix, not decoration — "no usable
   // signal on either side" must never read as "identical".
-  const c1NoSpaces = normalizeTextKey(jobCompany);
-  const c2NoSpaces = normalizeTextKey(windowCompany);
+  //
+  // Corporate-form stripping (#2570) happens right here, before either the
+  // equality check or the containment fallback below, so both benefit: a
+  // stripped-to-empty result (a name that IS just the marker, e.g. "株式会社"
+  // alone) falls back to the unstripped key rather than handing either check
+  // an empty "no signal" string.
+  const rawC1NoSpaces = normalizeTextKey(jobCompany);
+  const rawC2NoSpaces = normalizeTextKey(windowCompany);
+  const c1NoSpaces = stripCorporateForm(rawC1NoSpaces) || rawC1NoSpaces;
+  const c2NoSpaces = stripCorporateForm(rawC2NoSpaces) || rawC2NoSpaces;
   if (c1NoSpaces && c1NoSpaces === c2NoSpaces) return true;
 
-  const c1WithSpaces = normalizeTextKey(jobCompany, ' ');
-  const c2WithSpaces = normalizeTextKey(windowCompany, ' ');
+  const rawC1WithSpaces = normalizeTextKey(jobCompany, ' ');
+  const rawC2WithSpaces = normalizeTextKey(windowCompany, ' ');
+  const c1WithSpaces = stripCorporateForm(rawC1WithSpaces) || rawC1WithSpaces;
+  const c2WithSpaces = stripCorporateForm(rawC2WithSpaces) || rawC2WithSpaces;
   if (!c1WithSpaces || !c2WithSpaces) return false;
 
   // Containment: a short window name should still match a longer official one
@@ -1003,12 +1045,11 @@ export function companyMatch(jobCompany, windowCompany) {
   // कंपनी mid-word — the key and its boundaries have to agree on what a letter
   // is, or they drift the way #2397 and #2445 fixed elsewhere.
   //
-  // Non-Latin containment does not fire here (株式会社メルカリ vs メルカリ): the
-  // lookbehind sees 社, a letter, so there is no boundary to assert, and
-  // Japanese is not space-delimited so no anchor rule recovers it. Note this
-  // pair DID match before this change, but only via the '' === '' collision
-  // that erased both names — not through this path. Making it match on purpose
-  // needs corporate-form normalisation, tracked separately in #2570.
+  // 株式会社メルカリ vs メルカリ never reaches this containment fallback at
+  // all now (#2570): the corporate-form strip above already resolves it via
+  // the equality check, since 社 being a letter still means no anchor rule
+  // here could have matched it directly — Japanese isn't space-delimited, so
+  // no boundary exists for the lookbehind to find.
   //
   // compileLocationKeyword() above reached for lookarounds too, for a related
   // reason ("\b behaves surprisingly at a punctuation edge"); its escape set is
