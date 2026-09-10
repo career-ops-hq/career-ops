@@ -46,6 +46,28 @@ const HEADING_PREFIX = /^\s*(?:Block\s+([A-Z])(?:[).:]\s*|\s+(?:[—–-]+\s*)?)
 const HEADING_LETTER = /^(?:Block\s+([A-Z])(?:[).:]|\s)|([A-Z])[).:])/i;
 
 /**
+ * Remove the core's own HTML marker lines from a report before it is rendered.
+ *
+ * The core anchors machine-readable sections with comments like
+ * `<!-- career-ops:draft-answers -->` (#3889) because a comment is invisible
+ * wherever HTML is interpreted, and a marker beats a heading name that is
+ * translated in 15 of the 19 evaluation modes. It is invisible on GitHub. It is
+ * NOT invisible here: `report-view.tsx` renders with react-markdown and no
+ * `rehype-raw`, so raw HTML is ESCAPED rather than interpreted, and the reader
+ * sees `&lt;!-- career-ops:draft-answers --&gt;` printed above their own drafts.
+ * Measured, not assumed — renderToStaticMarkup on the real dependency.
+ *
+ * Scoped to the `career-ops:` namespace on purpose: a comment someone wrote in
+ * their own report is their content, and this is not a general HTML stripper.
+ *
+ * @param {string} md
+ * @returns {string}
+ */
+export function stripCoreMarkers(md) {
+  return String(md ?? "").replace(/^[ \t]*<!--\s*career-ops:[\s\S]*?-->[ \t]*\r?\n?/gm, "");
+}
+
+/**
  * @typedef {{ heading: string, letter: string | null, content: string }} Section
  */
 

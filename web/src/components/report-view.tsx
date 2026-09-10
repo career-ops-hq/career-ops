@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm";
 import type { Application } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { scoreTone, scoreNum, legitimacyTone, parseReport } from "@/lib/format";
-import { cleanHeading, isVerdictHeading, splitSections } from "@/lib/report-sections.mjs";
+import { cleanHeading, isVerdictHeading, splitSections, stripCoreMarkers } from "@/lib/report-sections.mjs";
 import { StatusSelect } from "@/components/status-select";
 import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
@@ -133,13 +133,16 @@ export function ReportView({
       {report ? (
         <>
           {(() => {
-            const { intro, sections } = splitSections(meta?.body ?? report);
+            // One strip, at the single point the report enters the view: everything
+            // below is derived from `body`, so no renderer needs to know about markers.
+            const body = stripCoreMarkers(meta?.body ?? report);
+            const { intro, sections } = splitSections(body);
             // Tolerant fallback: unrecognized layout → render the whole body as
             // before, so an old/odd report never loses content.
             if (sections.length === 0) {
               return (
                 <article className="report-prose mt-8">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{meta?.body ?? report}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
                 </article>
               );
             }

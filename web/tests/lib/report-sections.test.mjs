@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cleanHeading, authorLetter, isVerdictHeading, splitSections } from "../../src/lib/report-sections.mjs";
+import { cleanHeading, authorLetter, isVerdictHeading, splitSections, stripCoreMarkers } from "../../src/lib/report-sections.mjs";
 
 test("strips the author letter from the blocks the core has always written", () => {
   assert.equal(cleanHeading("A) Role Summary"), "Role Summary");
@@ -165,4 +165,43 @@ test("the authoring marker names the verdict, in any language", () => {
   assert.equal(isVerdictHeading("B) Verdict"), true);
   // ...but a heading that merely mentions the word is not the verdict block.
   assert.equal(isVerdictHeading("D) Verdict rationale and caveats"), false);
+});
+
+// ── the core's markers must not reach the reader (#3889) ────────────────────
+// A comment is invisible wherever HTML is interpreted, which is why the core
+// picked it: a marker survives the 15 of 19 evaluation modes that translate the
+// heading. It is NOT invisible in report-view, which renders with react-markdown
+// and no rehype-raw — raw HTML is ESCAPED, so without this the reader sees
+// `&lt;!-- career-ops:draft-answers --&gt;` printed above their own drafts.
+
+test("stripCoreMarkers removes a career-ops marker line, leaving the content", () => {
+  const md = "## H) Draft Application Answers\n<!-- career-ops:draft-answers -->\n\n**Q:** why us?\n";
+  const out = stripCoreMarkers(md);
+  assert.ok(!out.includes("career-ops:draft-answers"), "the marker must not survive into the rendered body");
+  assert.ok(out.includes("## H) Draft Application Answers"), "the heading stays");
+  assert.ok(out.includes("**Q:** why us?"), "the content stays");
+  assert.ok(!/\n\n\n/.test(out), "removing the line must not leave a blank-line scar");
+});
+
+test("stripCoreMarkers leaves the reader's own HTML comments alone", () => {
+  // Scoped to the career-ops namespace: someone else's comment is their content.
+  const md = "## A) Role Summary\n<!-- my own note to self -->\n\ntext\n";
+  assert.ok(stripCoreMarkers(md).includes("my own note to self"), "only career-ops: markers are ours to remove");
+});
+
+test("stripCoreMarkers survives a marker the core spells differently later", () => {
+  // The namespace is the contract, not the exact slug — a future
+  // `career-ops:machine-summary` must be stripped by the same rule.
+  const md = "<!--   career-ops:something-we-have-not-invented-yet   -->\nbody\n";
+  const out = stripCoreMarkers(md);
+  assert.equal(out.trim(), "body");
+});
+
+test("splitSections on a marked report keeps the marker out of the content", () => {
+  const md = "## G) Posting Legitimacy\nok\n\n## H) Draft Application Answers\n<!-- career-ops:draft-answers -->\n\n**Q:** a\n";
+  const { sections } = splitSections(stripCoreMarkers(md));
+  const h = sections.find((s) => s.letter === "H");
+  assert.ok(h, "section H is still found after stripping");
+  assert.ok(!h.content.includes("career-ops:"), "no marker reaches the rendered section content");
+  assert.ok(h.content.includes("**Q:** a"), "the drafts themselves survive");
 });
