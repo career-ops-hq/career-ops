@@ -128,7 +128,54 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
 
   Tracker row IDs and report IDs are separate counters that diverge permanently
   once any row exists without a report. Prefer --row/--report (or the company
-  name) over a bare number, and prefer any of them over --force.`;
+  name) over a bare number, and prefer any of them over --force.
+
+Examples:
+  node set-status.mjs --report 12 Applied
+  node set-status.mjs --report 12 Interview --note "recruiter screen booked"
+  node set-status.mjs "Acme Corp" Rejected --on 2026-08-01
+  node set-status.mjs "Acme Corp" Applied --role "Platform Engineer"
+  node set-status.mjs --row 7 Discarded --dry-run`;
+
+/**
+ * Render the canonical states for `--help`.
+ *
+ * The states live in templates/states.yml, and before this the usage block only
+ * NAMED that file — so the one question a caller actually has at the prompt
+ * ("which states may I pass?") was answerable only by opening another file, or
+ * by guessing wrong and reading the rejection. The list is already loaded at
+ * runtime for that rejection message; printing it up front costs nothing.
+ *
+ * Help must never be the thing that fails, so an unreadable or malformed
+ * states.yml degrades to the static pointer instead of throwing: a broken
+ * states file is a real error, but it belongs to the run that tries to WRITE a
+ * state, not to `--help`.
+ *
+ * @returns {string} The states section, or a pointer line when unreadable.
+ */
+function renderStatesSection() {
+  let states;
+  try {
+    states = loadCanonicalStates(STATES_FILE);
+  } catch {
+    return `\nCanonical states: see ${STATES_FILE}`;
+  }
+  if (!states.length) return `\nCanonical states: see ${STATES_FILE}`;
+  const width = Math.max(...states.map(st => st.label.length));
+  const lines = states.map((st) => {
+    const terminal = st.terminal ? '  (terminal)' : '';
+    const desc = st.description ? `  ${st.description}` : '';
+    return `  ${st.label.padEnd(width)}${desc}${terminal}`;
+  });
+  return [
+    '',
+    'Canonical states (aliases also accepted — see templates/states.yml):',
+    ...lines,
+    '',
+    '  A terminal state ends the application. Discarded is YOUR decision or a',
+    '  closed req; Rejected is theirs; SKIP means never applied for.',
+  ].join('\n');
+}
 
 // ── argument parsing ─────────────────────────────────────────────
 
@@ -136,6 +183,41 @@ const rawArgs = process.argv.slice(2);
 const positional = [];
 const flags = { note: null, role: null, on: null, row: null, report: null, source: null, force: false, dryRun: false, json: false };
 const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--source': 'source' };
+
+/**
+ * Is the caller asking for help, rather than passing "--help" as a VALUE?
+ *
+ * Scanned before the main loop so help wins over a "missing operand" error and
+ * over an invalid flag value — a caller reaching for --help after a failed run
+ * usually still has the bad arguments on the line, and re-rejecting them
+ * instead of answering is the behavior this exists to remove.
+ *
+ * Value positions are skipped, so `--note "--help"` records a note and does not
+ * silently turn a write into a help screen that exits 0. Values are only
+ * skipped here, never validated: validation stays in the main loop so its
+ * error messages and exit codes remain the single source of truth.
+ *
+ * @param {string[]} args - argv slice.
+ * @returns {boolean}
+ */
+function wantsHelp(args) {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a in VALUE_FLAGS) { i++; continue; } // skip this flag's value
+    if (a === '--help' || a === '-h') return true;
+  }
+  return false;
+}
+
+// Exits 0: asking for help is a successful outcome, and a non-zero exit breaks
+// `cmd --help || true` idioms and CI smoke checks. Previously --help fell
+// through to the unknown-flag branch and exited 1, and a bare invocation exited
+// 1 as a missing-operand error, so there was no exit-0 path to the help text at
+// all (#3857 fixed the same class in plugin-install.mjs).
+if (wantsHelp(rawArgs)) {
+  console.log(`${USAGE}\n${renderStatesSection()}`);
+  process.exit(EXIT_OK);
+}
 
 // Who is driving this write. A caller that delegates here instead of touching
 // the tracker itself — the web status route — needs its ledger rows to stay
@@ -171,7 +253,7 @@ for (let i = 0; i < rawArgs.length; i++) {
   else if (a === '--force') { flags.force = true; }
   else if (a === '--dry-run') { flags.dryRun = true; }
   else if (a === '--json') { flags.json = true; }
-  else if (a.startsWith('--')) { failUsage(`Unknown flag: ${a}`); }
+  else if (a === '-h' || a.startsWith('--')) { failUsage(`Unknown flag: ${a}`); }
   else { positional.push(a); }
 }
 
