@@ -30,18 +30,38 @@ export function pickSoleInstalled(
   return installed.length === 1 ? installed[0].id : null;
 }
 
-/** Saved Config cliId, or the only installed CLI (and persist that pick). */
+/**
+ * Saved Config cliId if it is still installed, otherwise the only installed CLI
+ * (and persist that pick). Returns null when neither resolves — the caller then
+ * shows the "open Config" message rather than launching a run that 404s.
+ *
+ * The saved id is validated against /api/clis, not trusted blind: an install
+ * swapped from one CLI to another leaves a stale id in localStorage, and
+ * `resolveCli()` on the server returns null for it, so every run fails with
+ * `CLI '<id>' not found` until Config is reopened (#4012).
+ */
 export async function resolveCliId(): Promise<string | null> {
   const saved = readSavedCliId();
-  if (saved) return saved;
+  let clis: { id: string; installed?: boolean }[] | undefined;
   try {
     const r = await fetch("/api/clis");
-    const d = (await r.json()) as { clis?: { id: string; installed?: boolean }[] };
-    const sole = pickSoleInstalled(d.clis);
-    if (!sole) return null;
-    persistCliId(sole);
-    return sole;
+    if (r.ok) {
+      const d = (await r.json()) as { clis?: { id: string; installed?: boolean }[] };
+      clis = d.clis;
+    }
   } catch {
-    return null;
+    // network error — fall through to the not-an-array guard below
   }
+  if (!Array.isArray(clis)) {
+    // /api/clis unreachable, errored, or malformed — can't check. Trust the
+    // saved id rather than stranding a working setup on a transient failure.
+    return saved;
+  }
+  if (saved && clis.some((c) => c.id === saved && c.installed)) {
+    return saved;
+  }
+  const sole = pickSoleInstalled(clis);
+  if (!sole) return null;
+  persistCliId(sole);
+  return sole;
 }

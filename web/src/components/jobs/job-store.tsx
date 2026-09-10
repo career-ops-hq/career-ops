@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { scoreTone } from "@/lib/format";
-import { readSavedCliId, resolveCliId } from "@/lib/saved-cli";
+import { resolveCliId } from "@/lib/saved-cli";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
 export type JobResult = { score: number | null; summary: string; tone: "good" | "warn" | "bad" | "muted" };
@@ -109,7 +109,10 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       setJobs((js) => [job, ...js]);
 
       (async () => {
-        const cliId = readSavedCliId() || (await resolveCliId());
+        // resolveCliId() validates the saved id against what is installed; a
+        // bare readSavedCliId() here would short-circuit that check and launch
+        // a run against an uninstalled CLI (#4012).
+        const cliId = await resolveCliId();
         if (!cliId) {
           patch(id, (j) => ({
             ...j,
