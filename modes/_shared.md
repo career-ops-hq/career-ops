@@ -74,7 +74,7 @@ Every other reference to tier elsewhere in the modes (batch.md, pipeline.md, etc
 
 ## Scoring System
 
-The evaluation scores five dimensions, integrated into one global score of 1-5. (These are the scoring dimensions, not the report's blocks — the report structure is A-H and lives in `modes/oferta.md`.)
+The evaluation scores six dimensions, integrated into one global score of 1-5. (These are the scoring dimensions, not the report's blocks — the report structure is A-H and lives in `modes/oferta.md`.)
 
 | Dimension | What it measures |
 |-----------|-----------------|
@@ -82,8 +82,9 @@ The evaluation scores five dimensions, integrated into one global score of 1-5. 
 | North Star alignment | How well the role fits the user's target archetypes (from _profile.md) |
 | Comp | Salary vs market (5=top quartile, 1=well below) |
 | Cultural signals | Company culture, growth, stability, remote policy |
+| Interview process | Practicality of the hiring process (take-home/pairing/system-design vs. multiple LeetCode-style rounds), scored against `culture_screen.require` |
 | Red flags | Blockers, warnings (negative adjustments) |
-| **Global** | Holistic judgment integrating the five dimensions above (no arithmetic formula) |
+| **Global** | Holistic judgment integrating the six dimensions above (no arithmetic formula) |
 
 **Score interpretation:**
 - 4.5+ → Strong match, recommend applying immediately
@@ -99,6 +100,14 @@ The evaluation scores five dimensions, integrated into one global score of 1-5. 
 5. **If evidence contradicts the `require` criteria** → **cap this dimension at 2/5**, and add an explicit line to Block A's Culture Screen field (see `oferta.md`) naming what's missing or contradicted. Do not let a strong CV-match score silently compensate for this — surface it, don't bury it.
 6. **If no evidence exists for any `require` criterion** → score 3 by default, unless `culture_screen.deprioritize_if_absent: true` is set, in which case **cap this dimension at 2/5**.
 7. A role scoring 4.5+ overall but 2 or below on Cultural signals must carry an explicit warning in the report: "High technical fit, unconfirmed/poor culture fit — verify before applying."
+
+**How to score the "Interview process" dimension:**
+1. Find the interview-process line in `culture_screen.require` (e.g., "Practical interview processes (take-home, pair programming, system design) rather than multiple LeetCode rounds"). If `culture_screen` is missing or has no interview-process line, skip the structural capping and score qualitatively from any interview-stage description in the JD.
+2. Look for evidence in the JD's interview-process description and Block D/G company research (counts toward the same Bounded Research Budget — do not spend extra queries beyond that cap solely for this dimension): named stages ("take-home project", "pairing session", "system design interview", "onsite algorithm rounds", "multiple technical rounds").
+3. **Evidence describes take-home/pairing/system-design as the primary technical stage(s)** → score 4-5.
+4. **No interview-process detail is given anywhere** → score 3 by default, unless `culture_screen.deprioritize_if_absent: true` is set, in which case cap this dimension at 2/5.
+5. **Evidence describes multiple LeetCode/algorithm-style rounds as the primary technical stage(s)** → cap this dimension at 2/5, and name the specific stages found in Block A's row for this dimension — do not let a strong CV-match score silently compensate for this.
+6. A role scoring 4.5+ overall but 2 or below on Interview process must carry an explicit warning in the report: "High technical fit, LeetCode-heavy interview process — confirm you want to prep for that before applying."
 
 ## Posting Legitimacy (Block G)
 
