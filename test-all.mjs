@@ -16169,13 +16169,13 @@ try {
         if (existsSync(join(ROOT, 'web', 'tests', 'lib'))) {
           fail('web/tests/lib contains no *.test.mjs — the #2185 unit suites are not being gated');
         }
-      } else if (run(NODE, ['--test', ...webUnits], { timeout: 180000 }) !== null) {
+      } else if (run(NODE, ['--experimental-strip-types', '--test', ...webUnits], { timeout: 180000 }) !== null) {
         pass('web pdf write-scope unit suites pass (#2185)');
       } else {
         // The signal distinguishes a timeout/kill from an assertion failure —
         // run()'s default 30s is short for six suites in one child process.
         const killed = lastRunFailure()?.signal;
-        fail(`web pdf write-scope unit suites failed${killed ? ` (killed: ${killed})` : ''} (run: node --test ${webUnits.join(' ')})`);
+        fail(`web pdf write-scope unit suites failed${killed ? ` (killed: ${killed})` : ''} (run: node --experimental-strip-types --test ${webUnits.join(' ')})`);
       }
 
       // Parity: everything web/package.json would run must be something we DO run.
