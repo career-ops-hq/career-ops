@@ -518,6 +518,7 @@ if (summaryMatch) {
 // ---------------------------------------------------------------------------
 if (saveReport) {
   let reservedNumbers = [];
+  let saveStage = 'report directory';
   try {
     if (!existsSync(PATHS.reports)) {
       mkdirSync(PATHS.reports, { recursive: true });
@@ -530,6 +531,13 @@ if (saveReport) {
     const filename    = `${num}-${companySlug}-${today}.md`;
     const reportPath  = join(PATHS.reports, filename);
 
+    // Preserve the actual input, not a model's reconstruction of the posting.
+    // The report-number prefix is the existing jd-capture.mjs lookup contract.
+    saveStage = 'JD archive';
+    const jdsDir = join(DATA_ROOT, 'jds');
+    mkdirSync(jdsDir, { recursive: true });
+    writeFileSync(join(jdsDir, filename), jdText, { encoding: 'utf8', flag: 'wx' });
+    saveStage = 'report';
     const reportContent = `# Evaluation: ${company} — ${role}
 
 **Date:** ${today}
@@ -556,6 +564,7 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
     // Field order is the TSV contract's -- status BEFORE score; merge-tracker
     // swaps them into the tracker's own column order, resolved by name.
     const additionName = `${num}-${companySlug}.tsv`;
+    saveStage = 'tracker addition';
     const trackerFields = [
       String(parseInt(num, 10)),
       today,
@@ -584,7 +593,8 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
     console.log(`\n📊  Tracker addition saved: batch/tracker-additions/${additionName}`);
     console.log('    Run `node merge-tracker.mjs` to merge it into the tracker.');
   } catch (err) {
-    console.warn(`⚠️   Could not save report: ${err.message}`);
+    console.warn(`⚠️   Could not save evaluation (${saveStage}): ${err.message}`);
+    process.exitCode = 1;
   } finally {
     if (reservedNumbers.length > 0) {
       try {
