@@ -46,6 +46,9 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { TokenAccumulator, formatBreakdown } from './utils/token-tracker.mjs';
+import {
+  isPostingUrl, normalizedTrackerScore, slugifyCompany, tsvSafe,
+} from './lib/tracker-addition.mjs';
 
 const tracker = new TokenAccumulator();
 tracker.recordZeroToken('scan');
@@ -284,66 +287,6 @@ function validateEvaluationShape(text) {
   if (issues.length > 0) {
     throw new Error(`Gemini returned an invalid career-ops report: ${issues.join('; ')}`);
   }
-}
-
-function slugifyCompany(value) {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '') || 'unknown';
-}
-
-/**
- * Whether a value is a complete http(s) URL, and so can become a dedup key.
- * @param {string} value - Candidate posting URL.
- * @returns {boolean} True only for a parseable http/https URL with a host.
- */
-function isPostingUrl(value) {
-  try {
-    const parsed = new URL(value);
-    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname !== '';
-  } catch {
-    return false;
-  }
-}
-
-function tsvSafe(value) {
-  return String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
-}
-
-/**
- * Normalize a model-reported score into the tracker's score cell.
- *
- * `extract('SCORE')` returns the whole rest of the SCORE line, while
- * `validateEvaluationShape` only checks its numeric prefix -- so
- * `SCORE: 4.2 (strong fit)` passes validation and arrives here intact.
- *
- * @param {string} value - Score as extracted from the model's summary block.
- * @returns {string} `X.X/5`, or the documented `N/A` sentinel (#1799).
- */
-function normalizedTrackerScore(value) {
-  const clean = tsvSafe(value);
-  // Parse, do not pattern-match the string. Two bugs lived in the old guard:
-  // `/n\/?a/i` was unanchored with an optional slash, so bare `na` matched and a
-  // real score with trailing prose -- `4.2 (final)`, `4.2 (internal)`,
-  // `4.5 - strong signal` -- was recorded as `N/A`; and the `/5` early return kept
-  // the whole string, so `4.2/10` became `4.2/5` and merged as a genuine score.
-  // Trailing prose is tolerated because models produce it; a denominator that is
-  // not 5, or a value outside 0..5, is refused rather than reinterpreted.
-  const parsed = clean.match(/^(\d+(?:\.\d+)?)/);
-  if (!parsed) return 'N/A';
-  const score = parseFloat(parsed[1]);
-  // The denominator is load-bearing wherever it sits. Requiring it immediately
-  // after the number read `4.2 (strong fit)/10` -- a ten-point score with an
-  // annotation -- as a bare 4.2 and wrote `4.2/5`, the same wrong number
-  // `8/10` used to produce. The first denominator in the cell is taken and must
-  // be 5; absent one, the scale is the contract's. A cell that puts an unrelated
-  // fraction first (`4.2 (fit 3/4 axes)`) is refused rather than guessed at --
-  // N/A is recoverable, a wrong score is not.
-  const denominator = clean.match(/\/\s*(\d+(?:\.\d+)?)/);
-  const scale = denominator ? parseFloat(denominator[1]) : 5;
-  if (!Number.isFinite(score) || scale !== 5 || score < 0 || score > 5) return 'N/A';
-  return `${score}/5`;
 }
 
 // Lazy import — only used when saving
