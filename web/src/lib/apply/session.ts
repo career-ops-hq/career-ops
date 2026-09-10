@@ -3,6 +3,7 @@ import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
 import { statusBlock, dismissConsent, tryApplyTrigger, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, type ApplyIssue } from "./diagnose";
 import { agentInterpretForm } from "./agent-interpret";
+import { isSensitiveQuestion } from "./sensitive-questions.mjs";
 
 /** The frame with the most interactive controls — where the agentic interpreter
  *  should look when deterministic extraction found nothing usable. */
@@ -417,11 +418,23 @@ export async function fillSession(
     const value = (raw ?? "").toString();
     if (!meta || value === "") continue;
     if (meta.type === "file") continue; // handled above (CV) — never auto-fill other uploads
-    // Defense-in-depth: NEVER auto-tick a legal consent/agreement checkbox — the
-    // human must affirmatively accept. (The planner already flags these
-    // needs_confirmation; this guarantees it even if it slips.)
-    if (meta.type === "checkbox" && /\b(i (have )?read|i agree|i consent|i accept|consent to|privacy notice|terms|gdpr|data protection)\b/i.test(meta.label || "")) {
-      steps.push({ fieldId: fid, label: `${meta.label} — you confirm`, ok: false, thumb: undefined });
+    // Defense-in-depth: NEVER put a generated answer into a legal, visa,
+    // work-authorization, salary or demographic field. The human answers those.
+    //
+    // The planner is told to refuse them and to return needs_confirmation, but
+    // that is the planner agreeing to refuse. A planner that instead returns a
+    // fluent, confident, entirely invented sentence about the candidate's
+    // immigration status sets needs_confirmation false, and the only thing then
+    // standing between that value and a real employer's form was the
+    // `value === ""` check above. An invented answer is not an empty one.
+    //
+    // Was a regex matching consent-worded CHECKBOX labels only. The same
+    // reasoning covers every field type, and the shared predicate states it once
+    // so the policy has one home instead of one per call site. Consent wording
+    // is still covered: it is the predicate's `consent` category, unchanged in
+    // meaning.
+    if (isSensitiveQuestion(meta.label || "")) {
+      steps.push({ fieldId: fid, label: `${meta.label} (yours to answer)`, ok: false, thumb: undefined });
       continue;
     }
     let ok = false;
