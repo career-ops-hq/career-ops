@@ -26,6 +26,12 @@ const TOOL_PROSE_WORDS = new Set([
   'improving', 'in', 'of', 'on', 'on-time', 'operations', 'production', 'project',
   'recurring', 'resolving', 'submission', 'team', 'the', 'to', 'using', 'with',
 ]);
+// A leading determiner marks ordinary reference, not a product list: "using
+// that campaign", "using our playbook". The class is closed, so unlike
+// TOOL_PROSE_WORDS it cannot turn into a list that grows by one word per bug
+// report (#4004).
+const DETERMINER_LEAD_RE = /^(?:the|that|this|these|those|our|your|their|its|his|her|my)(?:\s+|$)/i;
+const DECLARED_TOOL_TRIGGER_RE = /^(?:technologies?|tech stack)\s*:/i;
 const TOOL_PHRASE_PATTERN = /^(?=.{1,80}$)[\p{L}\p{N}.][\p{L}\p{N}+#./-]*(?:\s+[\p{L}\p{N}.][\p{L}\p{N}+#./-]*){0,2}$/u;
 const DELEGATED_PARTY_RE = /\b(?:vendors?|agenc(?:y|ies)|contractors?|consultanc(?:y|ies)|consultants?|external teams?|outsourc(?:ed|ing)|implementation partners?)\b/i;
 const DELEGATION_RE = /\b(?:commissioned|coordinated|directed|engaged|hired|managed|oversaw|partnered with|supervised)\b/i;
@@ -304,11 +310,16 @@ function looksToolShaped(rawValue) {
  * in cv.md must still pass, and rejecting it on casing alone would just trade
  * one false-positive class for another.
  *
- * A fragment that is neither tool-shaped nor source-backed is still retained
- * by default, preserving the gate's fail-closed behavior for lowercase names.
- * Only exact words observed as prose false positives are rejected through
- * `TOOL_PROSE_WORDS`; morphological suffixes are deliberately not used
- * because real products such as Spring, Unity, and Processing share them.
+ * A fragment whose every word already occurs in the source is dropped: that
+ * is the document's own vocabulary reworded, and tailoring rewords "using"
+ * sentences by design. A name the source never mentions is unaffected, so
+ * "kubernetes" in a CV that never says it stays fail-closed.
+ *
+ * Anything left is retained by default, preserving that fail-closed behavior
+ * for lowercase names. Only exact words observed as prose false positives are
+ * rejected through `TOOL_PROSE_WORDS`; morphological suffixes are deliberately
+ * not used because real products such as Spring, Unity, and Processing share
+ * them.
  */
 function isLikelyTool(value, sourceNormalized) {
   const normalized = normalizeFact(value);
@@ -317,6 +328,12 @@ function isLikelyTool(value, sourceNormalized) {
   if (!TOOL_PHRASE_PATTERN.test(value.trim())) return false;
   if (looksToolShaped(value)) return true;
   if (sourceNormalized != null && sourceContainsFact(sourceNormalized, normalized)) return true;
+  // Every word of the fragment already occurs in the source: this is the
+  // document's own vocabulary reworded, not a technology the source never
+  // mentions. Tailoring rewords "using" sentences by design, so without this
+  // the only thing between ordinary prose and a tool claim is
+  // TOOL_PROSE_WORDS (#4004).
+  if (sourceNormalized != null && words.every(word => sourceContainsFact(sourceNormalized, word))) return false;
   return !words.some(word => TOOL_PROSE_WORDS.has(word));
 }
 
@@ -375,8 +392,18 @@ export function factClaims(text, sourceNormalized = null) {
   for (const [kind, pattern] of patterns) {
     for (const match of clean.matchAll(pattern)) {
       const rawText = kind === 'tool' ? match[1].trim() : '';
+      // "Technologies:" and "tech stack:" declare a list whatever follows them.
+      // The prose triggers do not: a determiner straight after "using" or
+      // "worked with" means the trigger is ordinary English, so the whole clause
+      // is prose and "worked with the team in London" must not yield London.
+      const declaredList = kind === 'tool' && DECLARED_TOOL_TRIGGER_RE.test(match[0]);
       const rawValues = kind === 'tool'
-        ? (/^the\s+/i.test(rawText) ? [] : rawText.split(/,|\band\b|\bwith\b|\bin\b/i))
+        // A determiner LATER in a list taints only its own fragment, so filter
+        // after the split and keep its siblings, including a name the gate has
+        // to block (#4004).
+        ? ((!declaredList && DETERMINER_LEAD_RE.test(rawText))
+          ? []
+          : rawText.split(/,|\band\b|\bwith\b|\bin\b/i).filter(raw => !DETERMINER_LEAD_RE.test(raw.trim())))
         : [match[1] || match[2]];
       for (const raw of rawValues) {
         const value = normalizeFact(raw);
