@@ -665,7 +665,14 @@ Defaults are unchanged, so a single-lane setup needs none of this. Note that the
 
 ## scan:full
 
-Reverse ATS discovery scanner. Where `scan.mjs` scans the companies you track in `portals.yml`, this inverts the direction: it walks public directories of companies per ATS (Greenhouse, Lever, Ashby, Workday) and surfaces fresh postings matching your `portals.yml` `title_filter` / `location_filter` — no manual company curation. Company directories come from the public [job-board-aggregator](https://github.com/Feashliaa/job-board-aggregator) dataset, cached in `data/cache/` for 24 hours.
+Reverse ATS discovery scanner. Where `scan.mjs` scans the companies you track in `portals.yml`, this inverts the direction: it walks public directories of companies per ATS (Greenhouse, Lever, Ashby, Workday, iCIMS) and surfaces fresh postings matching your `portals.yml` `title_filter` / `location_filter` — no manual company curation. Company directories come from the public [job-board-aggregator](https://github.com/Feashliaa/job-board-aggregator) dataset, cached in `data/cache/` for 24 hours.
+
+Every normal run also derives board seeds locally from posting URLs already in
+the user's tracker and `data/scan-history.tsv`. Known ATS hosts route to the
+matching installed provider; an unknown host remains its hostname rather than
+being discarded. Known vendor labels become scannable automatically if a
+matching provider is added later. This is read-only input: no tracker column or
+apply-time browser capture is required, and history is never uploaded or pooled.
 
 Postings without a usable publish date are skipped — a reverse scan is only useful for fresh postings. New matches are appended to `data/pipeline.md` and `data/scan-history.tsv` in the same format as `scan.mjs`.
 
@@ -691,6 +698,7 @@ Same detection logic applies to `scan.mjs` (the standard portal scanner) — the
 npm run scan:full                              # all ATS directories, last 3 days
 node scan-ats-full.mjs --since 7               # postings from the last 7 days
 node scan-ats-full.mjs --ats greenhouse,workday # subset of sources
+node scan-ats-full.mjs --ats successfactors     # history-derived SF boards only
 node scan-ats-full.mjs --limit 200             # max companies per ATS
 node scan-ats-full.mjs --dry-run               # preview without writing
 node scan-ats-full.mjs --liveness              # Playwright-verify matches first
