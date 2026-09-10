@@ -413,44 +413,34 @@ try {
   // Streamed /api/chat is newline-delimited JSON: one object per token, the last carrying
   // done:true and the token counts.
   let acc = '', buf = '', promptCount = 0, evalCount = 0;
-  const decoder = new TextDecoder();
+  let completed = false;
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  const consumeLine = line => {
+    if (!line.trim()) return;
+    const obj = JSON.parse(line);
+    if (obj.error) throw new Error(String(obj.error));
+    if (completed) throw new Error('Unexpected data after completed evaluation');
+    if (obj.message?.content) acc += obj.message.content;
+    if (obj.done === true) {
+      if (obj.done_reason && obj.done_reason !== 'stop') {
+        throw new Error(`Incomplete evaluation: done_reason=${obj.done_reason}`);
+      }
+      completed = true;
+      promptCount = obj.prompt_eval_count ?? 0;
+      evalCount = obj.eval_count ?? 0;
+    }
+  };
   for await (const chunk of res.body) {
     buf += decoder.decode(chunk, { stream: true });
     let nl;
     while ((nl = buf.indexOf('\n')) !== -1) {
       const line = buf.slice(0, nl).trim();
       buf = buf.slice(nl + 1);
-      if (!line) continue;
-      let obj;
-      try { obj = JSON.parse(line); } catch { continue; }
-      if (obj.error) {
-        console.error(`❌  Ollama error: ${obj.error}`);
-        process.exit(1);
-      }
-      if (obj.message?.content) acc += obj.message.content;
-      if (obj.done) {
-        promptCount = obj.prompt_eval_count ?? 0;
-        evalCount = obj.eval_count ?? 0;
-      }
+      consumeLine(line);
     }
   }
-  // Flush a final line that arrived without a trailing newline. Ollama terminates every
-  // chunk with one, but a body that ends mid-line would otherwise be dropped silently.
-  const tail = buf.trim();
-  if (tail) {
-    try {
-      const obj = JSON.parse(tail);
-      if (obj.error) {
-        console.error(`❌  Ollama error: ${obj.error}`);
-        process.exit(1);
-      }
-      if (obj.message?.content) acc += obj.message.content;
-      if (obj.done) {
-        promptCount = obj.prompt_eval_count ?? promptCount;
-        evalCount = obj.eval_count ?? evalCount;
-      }
-    } catch { /* a truncated final line is not recoverable; the empty-response check below reports it */ }
-  }
+  consumeLine(buf + decoder.decode());
+  if (!completed) throw new Error('Incomplete evaluation: stream ended before done:true');
   evaluationText = acc.trim();
   // Native /api/chat reports tokens as prompt_eval_count / eval_count, not an
   // OpenAI-shaped `usage` object; map them through the shared normalizer.
