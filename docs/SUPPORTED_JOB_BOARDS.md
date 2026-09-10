@@ -68,6 +68,7 @@ are shared helpers and are not loaded as providers.
 | Personio | Parser | Auto-detects `<slug>.jobs.personio.de` or `.com` hosts and parses the public XML jobs feed; falls back to scraping the careers page HTML for tenants that have disabled the XML feed. |
 | Phenom People | API | Not auto-detected — every tenant runs on its own branded domain (e.g. `careers.allianz.com`), so select with an explicit `provider: phenom`. Posts to the public, no-auth `/widgets` CareerConnect endpoint on that branded host; paginates via offset up to `max_pages` (default 20, 100 results/page, max 300), warning if a tenant's postings exceed the cap. |
 | Pinpoint | API | Auto-detects `<slug>.pinpointhq.com` boards and reads the public zero-auth `/postings.json` per-tenant feed. |
+| PrevueAPS | API | Auto-detects `<tenant>.prevueaps.ca` careers pages (Canadian credit unions, colleges, and public-sector employers). Fetches the tenant's `/jobs/` page once to resolve its numeric `domainId`, then reads the public zero-auth `/core/jobs/{domainId}` JSON endpoint. |
 | Radancy | Parser | Reads Radancy (TalentBrew) career sites (e.g. `careers.munichre.com`) via the server-rendered `/{lang}/search-jobs?p={N}` results page (1-based pagination). Select with `provider: radancy`. |
 | Recruitee | API | Auto-detects `<slug>.recruitee.com` boards and uses the public per-tenant offers API. |
 | RemoteOK | API | Reads the board-wide `https://remoteok.com/api` JSON feed; scanner filters decide which rows are relevant. |
