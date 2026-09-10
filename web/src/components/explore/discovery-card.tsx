@@ -101,6 +101,19 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
             · matched <span className="text-brand/80">{offer.matchedKeyword}</span>
           </span>
         )}
+        {offer.fit && (
+          <span
+            className={cn(
+              "rounded border px-1 py-0.5 text-[11px] font-medium",
+              offer.fit.band === "strong"
+                ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                : "text-faint",
+            )}
+            title="Free keyword-level estimate: posting title vs your profile's target roles (config/profile.yml). Not an evaluation — Evaluate still gives the real A–F fit score."
+          >
+            · {offer.fit.band} fit
+          </span>
+        )}
       </div>
 
       {offer.why && (

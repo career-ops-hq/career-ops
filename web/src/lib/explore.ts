@@ -40,6 +40,10 @@ export const DEFAULT_FILTERS: ExploreFilters = {
   limitPerAts: 150,
 };
 
+/** Banded title-vs-profile overlap (web/src/lib/title-fit.mjs). Words, not
+ *  numbers, so it can't be mistaken for the evaluation's real 1–5 / A–F. */
+export type FitBand = "strong" | "related" | "weak";
+
 export type DiscoveredOffer = {
   url: string;
   company: string;
@@ -51,6 +55,11 @@ export type DiscoveredOffer = {
   source: string;
   /** which positive keyword matched the title (transparency, e.g. "ai" in "Nail") */
   matchedKeyword?: string;
+  /** free, zero-token triage hint computed at discovery time from the posting
+   *  TITLE vs config/profile.yml target roles (#3260). Recommendation layer
+   *  only — never filters or orders anything; Evaluate gives the real A–F.
+   *  Scan offers only; AI offers already carry why + confidence. */
+  fit?: { band: FitBand; score: number };
   /** optional free-text ranking signal preserved to pipeline.md by the canonical
    *  writer (scan.mjs formatPipelineOffer). Generic and source-agnostic — an
    *  importer can attach a note; the deterministic scan omits it. */
