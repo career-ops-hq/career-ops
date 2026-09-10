@@ -11,7 +11,7 @@ database, no server. If you never run it, nothing about your CLI workflow change
 
 ## Quick start
 
-Requires Node 22+ (see [Tests](#tests) — `npm test`'s glob discovery needs it).
+Requires Node 22.6+ (see [Tests](#tests) — `npm test` needs glob discovery, and `--experimental-strip-types` for the suites that import `.ts` modules directly; the flag landed in 22.6.0).
 
 ```bash
 cd web
