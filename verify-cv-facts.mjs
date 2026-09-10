@@ -496,6 +496,39 @@ const HORIZON_LEAD_RE = /\b(?:the|my|our|your)?\s*(?:first|next)\s+$/i;
 // clause scope below carries the weight rather than this test alone.
 const FORWARD_MARKER_RE = /\b(?:would|will|shall|should)\b|['\u2019]d\b(?!\s+[A-Za-z]+ed\b)|['\u2019]ll\b|\b(?:plan|plans|planning|intend|intends)\s+to\b|\bgoing to\b|\blooking forward\b/i;
 
+// A DISCLOSED REQUIREMENT is a number the candidate cites from the POSTING
+// itself, in order to disclaim a gap against it -- nothing about the candidate
+// is being asserted:
+//
+//   "my background is at the individual-contributor level, without the 7+
+//   years of progressive L&D leadership ... this role's scope calls for"
+//
+// COUNT_CLAIM_RE reads that as the candidate personally claiming "7 years",
+// which cv.md never says, and the fact gate blocks generation over a number
+// that was only ever cited to be disclaimed (#3915).
+//
+// Two signals, EITHER of which is sufficient alone, mirroring the two-signal
+// design of the plan-horizon exception above -- but here each signal stands on
+// its own, because each already names a THIRD PARTY's threshold rather than
+// merely gesturing at time:
+//
+//   - a REQUIREMENT CITATION anywhere in the same clause as the number,
+//     naming what the posting/role/position/job asks for ("this role's scope
+//     calls for", "the posting requires", "this position calls for", "this
+//     job wants").
+//   - a NEGATION LEAD immediately before the number ("without (the)",
+//     "lacking", "don't have (the)", "doesn't have (the)", "do not have
+//     (the)") -- the candidate stating what they do NOT have.
+//
+// Clause-scoped for the same reason as the plan-horizon exception: a citation
+// elsewhere in the letter must not silence an unrelated number. A genuine
+// personal claim carries NEITHER signal -- "I have 12 years of experience" has
+// no negation lead and no role/posting/position/job citation nearby, and
+// "I bring 7+ years of L&D leadership" is the same shape -- so both are left
+// alone and still get checked against the sources.
+const REQUIREMENT_CITATION_RE = /\b(?:role|posting|position|job)\b[^.,;:!?\n]{0,30}\b(?:calls?\s+for|requires?|asks?\s+for|wants?)\b/gi;
+const NEGATION_LEAD_RE = /\b(?:without(?:\s+the)?|lack(?:ing)?(?:\s+the)?|don['\u2019]?t\s+have(?:\s+the)?|doesn['\u2019]?t\s+have(?:\s+the)?|do\s+not\s+have(?:\s+the)?)\s*$/i;
+
 /**
  * The CLAUSE of `text` containing `index`.
  *
@@ -509,7 +542,7 @@ const FORWARD_MARKER_RE = /\b(?:would|will|shall|should)\b|['\u2019]d\b(?!\s+[A-
  * @param {number} index
  * @returns {string}
  */
-function clauseAround(text, index) {
+function clauseBounds(text, index) {
   const isBoundary = (i) => {
     const c = text[i];
     if (c === '\n') return true;
@@ -533,9 +566,83 @@ function clauseAround(text, index) {
   if (/^\s*(?:and|or|then|plus)\b/i.test(text.slice(start, end))) {
     let sentenceStart = 0;
     for (let i = start - 1; i >= 0; i--) if (isSentenceEnd(i)) { sentenceStart = i + 1; break; }
-    return text.slice(sentenceStart, end);
+    return { start: sentenceStart, end };
   }
+  return { start, end };
+}
+
+/**
+ * The CLAUSE of `text` containing `index`.
+ *
+ * Bounded by `. ! ? , ; :` and by a newline, so a marker in a neighbouring
+ * clause cannot reach the number: "grew in the first 99 months, and I would be
+ * glad to repeat it" keeps its claim, and so does the same pair soft-wrapped
+ * across two lines. A separator BETWEEN DIGITS is not a boundary, or the clause
+ * around "1.5 years" would end inside the number and lose its own marker.
+ *
+ * @param {string} text
+ * @param {number} index
+ * @returns {string}
+ */
+function clauseAround(text, index) {
+  const { start, end } = clauseBounds(text, index);
   return text.slice(start, end);
+}
+
+/**
+ * Whether `match` is a number the candidate is citing from the posting's own
+ * stated requirement (to disclaim a gap against it), rather than a personal
+ * claim about themself. See the REQUIREMENT_CITATION_RE / NEGATION_LEAD_RE
+ * commentary above for the two independent signals this checks.
+ *
+ * `allMatches` is every COUNT_CLAIM_RE hit in the document, not just this one.
+ * A citation names ONE requirement, and when two numbers share an undivided
+ * clause with no comma/semicolon between them -- "I have 12 years of
+ * experience but this role requires 7 years" -- testing the citation against
+ * the WHOLE clause would suppress BOTH, quietly waving through a genuinely
+ * fabricated "12 years" personal claim alongside the correctly-cited "7
+ * years" (flagged in review of #3917). Instead, each citation is bound
+ * directionally: an immediately preceding count in "7 years this role
+ * requires" belongs to the citation; otherwise bind the first count after the
+ * citation phrase, falling back to the nearest preceding count when none
+ * follows. Here that binds "7", while "12" gets no citation match and is left
+ * to the normal source check like any other claim.
+ *
+ * @param {string} clean
+ * @param {RegExpMatchArray} match
+ * @param {RegExpMatchArray[]} allMatches
+ * @returns {boolean}
+ */
+function isDisclosedRequirement(clean, match, allMatches) {
+  const lead = clean.slice(Math.max(0, match.index - 40), match.index);
+  if (NEGATION_LEAD_RE.test(lead)) return true;
+
+  const { start, end } = clauseBounds(clean, match.index);
+  const clause = clean.slice(start, end);
+  REQUIREMENT_CITATION_RE.lastIndex = 0;
+  const citations = [...clause.matchAll(REQUIREMENT_CITATION_RE)];
+  if (!citations.length) return false;
+
+  const numbersInClause = allMatches.filter((m) => m.index >= start && m.index < end);
+  if (!numbersInClause.length) return false;
+
+  return citations.some((citation) => {
+    const citationStart = start + citation.index;
+    const citationEnd = start + citation.index + citation[0].length;
+    const preceding = numbersInClause.filter((m) => m.index < citationStart).at(-1);
+    const precedingEnd = preceding ? preceding.index + preceding[0].length : citationStart;
+    const precedingGap = clean.slice(precedingEnd, citationStart);
+    const precedesCitation = preceding && (
+      /^\s*(?:this|that|the)?\s*$/i.test(precedingGap)
+      || (
+        /\b(?:this|that)\s*$/i.test(precedingGap)
+        && !/[,;:]|\b(?:and|but)\b/i.test(precedingGap)
+      )
+    );
+    const following = numbersInClause.find((m) => m.index >= citationEnd);
+    const cited = precedesCitation ? preceding : (following ?? preceding);
+    return cited?.index === match.index;
+  });
 }
 
 /**
@@ -549,7 +656,9 @@ function clauseAround(text, index) {
  */
 function countMatches(clean) {
   COUNT_CLAIM_RE.lastIndex = 0;
-  return [...clean.matchAll(COUNT_CLAIM_RE)].filter((match) => {
+  const allMatches = [...clean.matchAll(COUNT_CLAIM_RE)];
+  return allMatches.filter((match) => {
+    if (isDisclosedRequirement(clean, match, allMatches)) return false;
     if (!TIME_NOUNS.has(match[2].toLowerCase())) return true;
     const lead = clean.slice(Math.max(0, match.index - 40), match.index);
     if (!HORIZON_LEAD_RE.test(lead)) return true;
