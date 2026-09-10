@@ -73,6 +73,19 @@ const METRIC_NOUNS = [
   'graduates', 'alumni', 'teachers', 'instructors', 'educators', 'faculty',
   'schools', 'districts', 'campuses', 'classrooms', 'programs', 'programmes',
   'workshops', 'assessments', 'exams',
+  // Indonesian. An Indonesian-language CV names none of the nouns above, so
+  // every count in it fell out of the extractor and the checker reported "no
+  // count in this document was checked" — a silent hole exactly where an
+  // inflated number would sit. Measured 2026-09-04 on an admin/procurement CV.
+  // Ordered as the list above: people, then documents and records, then
+  // physical/organisational units, then time.
+  'karyawan', 'pegawai', 'staf', 'anggota', 'peserta', 'pelamar', 'kandidat',
+  'mahasiswa', 'siswa', 'pelanggan', 'klien', 'vendor', 'pemasok', 'mitra',
+  'dokumen', 'berkas', 'arsip', 'laporan', 'transaksi', 'pesanan', 'faktur',
+  'invoice', 'data', 'formulir',
+  'barang', 'item', 'unit', 'gudang', 'cabang', 'kantor', 'proyek', 'kegiatan',
+  'acara', 'divisi', 'tim', 'perusahaan',
+  'jam', 'hari', 'minggu', 'bulan', 'tahun',
 ];
 // How many words may sit between a number and the noun it counts. The same
 // regex parses the generated CV and the sources, so the window is symmetric by
@@ -683,8 +696,10 @@ export function diagnoseCoverage(targetText) {
   return {
     reason: 'no-count-claims-recognized',
     message:
-      `${spans.length} count-like claims are present but none matched the metric extractor, whose noun ` +
-      'list is English-only — so no count in this document was checked against your sources. ' +
+      `${spans.length} count-like claims are present but none matched the metric extractor, so no ` +
+      'count in this document was checked against your sources. This is expected when the numbers ' +
+      'are identifiers rather than counts (a GPA, a test score, a school number), and it also ' +
+      'happens when the CV is in a language whose counted nouns are missing from METRIC_NOUNS. ' +
       'Percentages, currency and multipliers were still checked. Verify the counts by hand, or add ' +
       'them to allow_metrics in config/cv-facts.json once confirmed.',
     spans,

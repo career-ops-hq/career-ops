@@ -113,7 +113,10 @@ if (existsSync(PATHS.profileYml)) {
         console.warn(`⚠️   modes_dir "${customModesDir}" escapes project root; using default modes/`);
       } else {
         if (existsSync(dirPath)) {
-          const candidateFiles = ['oferta.md', 'angebot.md', 'offre.md', 'kyujin.md', 'is-ilani.md', 'naukri.md'];
+          // modes/id names its evaluation mode lowongan.md, so it was missing from
+          // this list and every Indonesian profile silently fell back to the English
+          // modes/oferta.md - the localisation shipped but could never be selected.
+          const candidateFiles = ['oferta.md', 'lowongan.md', 'angebot.md', 'offre.md', 'kyujin.md', 'is-ilani.md', 'naukri.md'];
           const found = candidateFiles.find((file) => existsSync(join(dirPath, file)));
           if (found) {
             modesDir = customModesDir;
