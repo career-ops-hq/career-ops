@@ -814,7 +814,23 @@ Maintained the internal Fabrikam-SDK build.
 
 // ── Main ─────────────────────────────────────────────────────────────
 
+// Derived from the flags this file actually accepts, so `--help` cannot
+// describe an option that does not exist.
+const USAGE = `Usage:
+  node jd-skill-gap.mjs <jd-file> [--summary] [--self-test]
+
+  --summary    human-readable output instead of JSON
+  --self-test  run the built-in checks
+  --help, -h   print this and exit`;
+
 if (isMainModule(import.meta.url)) {
+  // BEFORE any work. Unhandled, `--help` fell through to the analysis: this
+  // script printed a full report for it, which is not what the flag asks for
+  // and hides that it was never recognised.
+  if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
 if (selfTestMode) {
   runSelfTest();
 } else {
