@@ -202,7 +202,7 @@ W polskich ofertach i negocjacjach pojawiają się terminy, które nie istnieją
 7. Bądź bezpośredni i konkretny -- bez gadania
 8. Naturalny, techniczny język polski dla generowanych tekstów. Krótkie zdania, czasowniki czynności, unikaj strony biernej. Nie tłumacz na siłę terminów technicznych (stack, pipeline, deployment, embedding)
 8b. **URL-e case studies w Professional Summary PDF-a:** Jeśli PDF wspomina case studies lub dema, URL-e MUSZĄ pojawić się w pierwszym akapicie (Professional Summary). Rekruterzy często czytają tylko summary. Wszystkie URL-e w HTML z `white-space: nowrap`
-9. **Wpisy do trackera w TSV** -- NIGDY nie edytuj applications.md bezpośrednio dla nowych dodań. Zapisz TSV do `batch/tracker-additions/`, `merge-tracker.mjs` zarządza scalaniem
+9. **Wpisy do trackera w TSV** -- NIGDY nie edytuj applications.md bezpośrednio dla nowych dodań. Zapisz TSV do `batch/tracker-additions/`, `merge-tracker.mjs` zarządza scalaniem. Najpierw wiersz **nazw kolumn**, a pod nim dokładnie jeden wiersz danych (zob. AGENTS.md, „TSV Format for Tracker Additions"). To ten wiersz nazw pozwala `merge-tracker.mjs` rozpoznawać pola po NAZWIE, zamiast zgadywać, która kolumna to score, a która status
 10. **`**URL:**` w każdym nagłówku reportu** -- między Score a PDF
 
 ### Narzędzia

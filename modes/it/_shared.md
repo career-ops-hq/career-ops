@@ -204,7 +204,7 @@ Negli annunci e nelle trattative in Italia si usano termini e tutele specifici c
 7. Essere diretti e concreti -- nessun giro di parole
 8. Italiano tech naturale per i testi generati. Frasi brevi, verbi d'azione, evitare il passivo. Non tradurre forzatamente i termini tecnici (stack, pipeline, deployment, embedding, ecc.)
 8b. **URL dei case study nel Professional Summary del PDF:** Se il PDF menziona demo o case study, i relativi URL DEVONO comparire nel primo paragrafo (Professional Summary) -- i recruiter spesso leggono solo quello. Tutti gli URL in HTML con `white-space: nowrap`
-9. **Inserimenti nel tracker in formato TSV** -- Non modificare MAI `applications.md` direttamente per nuovi inserimenti. Scrivere il file TSV in `batch/tracker-additions/`, sarà `merge-tracker.mjs` a gestire la fusione
+9. **Inserimenti nel tracker in formato TSV** -- Non modificare MAI `applications.md` direttamente per nuovi inserimenti. Scrivere il file TSV in `batch/tracker-additions/`, sarà `merge-tracker.mjs` a gestire la fusione. Scrivere prima una riga con i **nomi delle colonne** e sotto esattamente una riga di dati (vedi AGENTS.md, «TSV Format for Tracker Additions»). È la riga dei nomi a permettere a `merge-tracker.mjs` di risolvere i campi per NOME invece di indovinare quale colonna sia score e quale status
 10. **`**URL:**` in ogni intestazione di report** -- inserito tra Score e PDF
 
 ### Strumenti

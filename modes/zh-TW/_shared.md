@@ -172,7 +172,7 @@
 6. 完成評估後，即時記錄到 tracker 紀錄簿。
 7. 產生的內容與 JD 的語言保持一致（預設使用英文，中文 JD 使用中文）。
 8. 產生繁體中文技術文本（求職信、LinkedIn 話術等）時：使用自然道地的台灣科技業中文習慣。多用短句、主動語態，避免生硬的西式被動句。常見的通用產業術語（如 stack, pipeline, deployment, embedding）不需勉強中譯，保留英文即可。
-9. **向 tracker 新增紀錄時必須使用 TSV 格式** — 嚴禁直接編輯 `applications.md`，將 TSV 檔寫入 `batch/tracker-additions/` 目錄，由 `merge-tracker.mjs` 統一合併。
+9. **向 tracker 新增紀錄時必須使用 TSV 格式** — 嚴禁直接編輯 `applications.md`，將 TSV 檔寫入 `batch/tracker-additions/` 目錄，由 `merge-tracker.mjs` 統一合併。先寫一行**欄位名稱**，其下正好一行資料（參見 AGENTS.md 的 "TSV Format for Tracker Additions"）。有了這行欄位名稱，`merge-tracker.mjs` 才能依名稱解析各欄位，而不必猜測哪一欄是 score、哪一欄是 status。
 10. **每一份評估報告的開頭，必須包含 `**URL:**` 欄位。**
 
 ---
