@@ -53,6 +53,7 @@ export function ReportView({
   report,
   canDelete = false,
   pdfReadyFromIndex = false,
+  coverReady = false,
 }: {
   id: string;
   app: Application | null;
@@ -62,6 +63,10 @@ export function ReportView({
   file?: string | null;
   canDelete?: boolean;
   pdfReadyFromIndex?: boolean;
+  /** A tailored cover letter for THIS application exists in output/ (resolved by
+   *  the page, see resolveTailoredCover). View only — covers are never generated
+   *  from here. */
+  coverReady?: boolean;
 }) {
   const meta = report ? parseReport(report) : null;
   const field = (label: string) => meta?.fields.find((f) => f.label === label)?.value;
@@ -104,6 +109,16 @@ export function ReportView({
           {app && <StatusSelect n={id} current={app.status} />}
           <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={pdfReady} />
           <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} pdfReady={pdfReady} />
+          {coverReady && (
+            <a
+              href={`/api/cover-pdf?application=${encodeURIComponent(id)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400 max-sm:min-h-[44px]"
+            >
+              <FileText className="size-3.5" /> View cover
+            </a>
+          )}
         </div>
 
         {app && canDelete && (
