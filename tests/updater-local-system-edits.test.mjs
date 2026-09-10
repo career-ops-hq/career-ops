@@ -282,7 +282,7 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
 
   const preservedPaths = ['AGENTS.md'];
   const preservedSet = new Set(preservedPaths);
-  const result = pathFullyPreserved('AGENTS.md', preservedPaths, preservedSet, spyCtx);
+  const result = pathFullyPreserved('AGENTS.md', preservedPaths, preservedSet, 'FETCH_HEAD', spyCtx);
 
   if (result === true && gitCalls === 0) {
     pass('a single-file preserved path is skipped without any upstream lookup');
@@ -299,7 +299,7 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
 
   const preservedPaths = ['AGENTS.md'];
   const preservedSet = new Set(preservedPaths);
-  const result = pathFullyPreserved('modes/pdf.md', preservedPaths, preservedSet, spyCtx);
+  const result = pathFullyPreserved('modes/pdf.md', preservedPaths, preservedSet, 'FETCH_HEAD', spyCtx);
 
   if (result === false && gitCalls === 0) {
     pass('an unrelated path is never skipped, and needs no upstream lookup');
@@ -313,15 +313,16 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
 {
   const repo = makeRepo();
   upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
-  // pathFullyPreserved's ls-tree branch reads FETCH_HEAD, same ref apply()
-  // fetches into for real. Populate it here by fetching the local `upstream`
-  // branch into this repo's own FETCH_HEAD.
+  // pathFullyPreserved's ls-tree branch reads the ref its caller passes. apply()
+  // passes the SHA it pinned FETCH_HEAD to (#3052); pinning is out of scope
+  // here, so drive the branch with the pseudo-ref itself. Populate it by
+  // fetching the local `upstream` branch into this repo's own FETCH_HEAD.
   repo.g('fetch', '.', 'upstream');
   const preservedPaths = ['modes/pdf.md', 'modes/cover.md'];
   const preservedSet = new Set(preservedPaths);
   const ctx = { git: (...args) => gitIn(repo.dir, ...args) };
 
-  const result = pathFullyPreserved('modes/', preservedPaths, preservedSet, ctx);
+  const result = pathFullyPreserved('modes/', preservedPaths, preservedSet, 'FETCH_HEAD', ctx);
   if (result === true) {
     pass('a directory whose entire upstream content is preserved is skipped (ls-tree path)');
   } else {
@@ -339,7 +340,7 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
   const preservedSet = new Set(preservedPaths);
   const ctx = { git: (...args) => gitIn(repo.dir, ...args) };
 
-  const result = pathFullyPreserved('modes/', preservedPaths, preservedSet, ctx);
+  const result = pathFullyPreserved('modes/', preservedPaths, preservedSet, 'FETCH_HEAD', ctx);
   if (result === false) {
     pass('a directory only partly preserved is not skipped');
   } else {
@@ -357,7 +358,7 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
   let threw = false;
   let result = null;
   try {
-    result = pathFullyPreserved('modes/', preservedPaths, preservedSet, throwingCtx);
+    result = pathFullyPreserved('modes/', preservedPaths, preservedSet, 'FETCH_HEAD', throwingCtx);
   } catch {
     threw = true;
   }
