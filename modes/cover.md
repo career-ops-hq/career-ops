@@ -294,6 +294,12 @@ or `block` verdict. Advisory `warn_phrases` do not stop PDF generation; a
 `block` verdict does, so add the missing evidence or obtain a verified
 allowlist exception first.
 
+The same call also checks for AI-resume-sameness — stock filler phrasing in
+the opening/closing and task-only sentences with no outcome shown — and
+surfaces it as an advisory `warn`, never a `block`. See **Genericity Check**
+in `modes/_shared.md` for how to walk the user through a flagged sentence
+before finalizing.
+
 Assemble the JSON payload:
 
 ```json

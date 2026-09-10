@@ -232,3 +232,40 @@ A mode may tell you to run work in a background subagent (e.g. `scan`, or parall
 - Working demo + metrics > perfection
 - Apply sooner > learn more
 - 80/20 approach, timebox everything
+
+## Genericity Check (AI-Resume-Sameness)
+
+`verify-cv-facts.mjs` answers "is this true?" — it never answers "does this
+bullet tell a recruiter anything, or would it fit almost any candidate in this
+role?" A first AI draft can pass every fact check and still read as
+interchangeable filler: a stock phrase that makes no checkable claim at all
+("results-driven professional with a proven track record"), or a bullet that
+only lists a responsibility with no stated outcome ("Responsible for
+stakeholder communication and project coordination."). `genericityFindings()`
+(exported from `verify-cv-facts.mjs`) flags both, and is wired in as an
+advisory, non-blocking `warn` — never a `block` — on the two candidate-facing
+paths where it matters: the `pdf` mode's fact-gate step (Step 19,
+`node verify-cv-facts.mjs {html-path}`, on by default) and every cover letter
+PDF (`generate-cover-letter.mjs`).
+
+**When a run surfaces a genericity warning** (`generic phrase: "..."` or
+`task-only bullet, no outcome/scope shown: "..."` in the fact-gate output),
+do not silently rewrite the bullet and do not silently leave it — walk the
+user through it the same way an unconfirmed `story-bank.md` figure gets
+confirmed (see the Confirmation UX invariant in `AGENTS.md`): present the
+flagged bullet plainly and offer four distinct outcomes, never just
+confirm/cut:
+
+- **(a) It's accurate and specific enough as written** — keep it.
+- **(b) Make it concrete** — ask what changed, who was affected, or what the
+  scope was (the article's own prompts apply: where did this happen, what did
+  you personally own, what changed because you were involved, is there a
+  number that helps), and rewrite using only what the user confirms — never
+  invent the missing detail yourself.
+- **(c) It's narrative/context, not a claim that needs specificity** — leave
+  it as-is, deliberately.
+- **(d) Cut it** — a generic bullet that cannot be made specific is weaker
+  than no bullet at all.
+
+Never treat a genericity warning as a reason to block or delay handing over
+the PDF; it is a prompt for a two-minute conversation, not a gate.
