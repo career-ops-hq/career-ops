@@ -114,6 +114,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `templates/cv-template.tex` | LaTeX/Overleaf template for CVs |
 | `article-digest.md` | Compact proof points from portfolio (optional) |
 | `interview-prep/story-bank.md` | Accumulated STAR+R stories |
+| `interview-prep/ats-score.md` | Dated history of candidate ATS self-scores (see `ats-score` mode) |
 | `interview-prep/{company}-{role}.md` | Company-specific interview intel |
 | `generate-pdf.mjs` | Playwright: HTML to PDF |
 | `generate-latex.mjs` | LaTeX CV validator + pdflatex compiler |
