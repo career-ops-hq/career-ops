@@ -11,7 +11,7 @@
 // "Posted 5 Days Ago", "Posted 30+ Days Ago"); postedAt is derived from it
 // and omitted for the unbounded "30+ Days Ago" form.
 
-import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, sleep } from './_http.mjs';
 
 const PAGE_SIZE = 20;
 
@@ -223,11 +223,6 @@ export function chooseSplitFacet(facets, { exclude = [], locationHints } = {}) {
   }
 
   return best ? { facetParameter: best.facetParameter, values: best.values } : null;
-}
-
-function sleep(ms, ctx) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**

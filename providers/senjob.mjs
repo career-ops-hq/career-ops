@@ -33,7 +33,7 @@
 // silent-zero failure is the whole risk of scraping and the reason for
 // `assertParsedSomething` below.
 
-import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 
 const TRUSTED_HOST = 'senjob.com';
@@ -61,12 +61,6 @@ const POSTING_ANCHOR_RE =
 
 /** The machine-readable publication date, hidden next to its localized form. */
 const HIDDEN_ISO_DATE_RE = /display:\s*none;?\s*"?>\s*(\d{4}-\d{2}-\d{2})\s*</i;
-
-/** @param {any} ctx @param {number} ms */
-function sleep(ctx, ms) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((r) => setTimeout(r, ms));
-}
 
 /** @param {string} url */
 function assertSenjobUrl(url) {
@@ -205,7 +199,7 @@ export default {
     const seen = new Set();
 
     for (let page = 1; page <= maxPages; page++) {
-      if (page > 1) await sleep(ctx, INTER_PAGE_DELAY_MS);
+      if (page > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
 
       const url = assertSenjobUrl(buildListUrl(page));
       const html = await fetchTextWithRetry(ctx, url, {

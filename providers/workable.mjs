@@ -35,7 +35,7 @@
 // stalling on it.
 
 import { decodeEntities } from './_html-entities.mjs';
-import { BROWSER_LIKE_USER_AGENT, isRetryableError, parseRetryAfterMs } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, isRetryableError, parseRetryAfterMs, sleep } from './_http.mjs';
 
 const ALLOWED_WORKABLE_HOSTS = new Set(['apply.workable.com']);
 
@@ -67,11 +67,6 @@ const RETRY_MAX_DELAY_MS = 8_000;
 // on the widget API immediately and fall through to the markdown feed instead
 // of stalling the scan for it.
 const GIVE_UP_RETRY_AFTER_MS = 30_000;
-
-function sleep(ms, ctx) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 /**
  * Runs `fn`, retrying transient failures with backoff + jitter. Gives up
