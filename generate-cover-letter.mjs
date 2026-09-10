@@ -124,9 +124,20 @@ function buildCredentialsBlock(candidate) {
 }
 
 /** Build the escaped company, city, and date line for the letter. */
-function buildDateline(letter) {
-  const parts = [letter.company, letter.city, letter.date].filter(Boolean).map(escapeHtml);
-  return parts.join(" &nbsp;&nbsp; ");
+function buildDateline(letter, hasRecipientBlock = false) {
+  // The pack contract gives {{DATELINE}} the date and leaves the company and
+  // city to the address block directly beneath it, so joining all three prints
+  // the company twice, three lines apart.
+  //
+  // Gated on the block actually RENDERING, not on `letter.recipient` merely
+  // being set. An empty or whitespace-only recipient produces no address block,
+  // and dropping company and city for it would lose them with nothing taking
+  // their place. The shipped base template has no address block at all, so it
+  // keeps the full join exactly as before.
+  const parts = hasRecipientBlock
+    ? [letter.date]
+    : [letter.company, letter.city, letter.date];
+  return parts.filter(Boolean).map(escapeHtml).join(" &nbsp;&nbsp; ");
 }
 
 /**
@@ -255,13 +266,14 @@ export function buildHtml(payload, templatePath) {
   // valediction. The <br> is emitted around escaped values, never inside one.
   const signatureBlock = buildSignatureBlock(letter.signature, candidate.name);
 
+  const recipientBlock = buildRecipientBlock(letter);
   const replacements = {
     "{{NAME}}": escapeHtml(candidate.name),
     "{{CONTACT_LINE}}": buildContactLine(candidate),
     "{{CREDENTIALS_BLOCK}}": buildCredentialsBlock(candidate),
     "{{ROLE_TITLE}}": escapeHtml(letter.role_title),
-    "{{DATELINE}}": buildDateline(letter),
-    "{{RECIPIENT_BLOCK}}": buildRecipientBlock(letter),
+    "{{DATELINE}}": buildDateline(letter, Boolean(recipientBlock)),
+    "{{RECIPIENT_BLOCK}}": recipientBlock,
     "{{GREETING_BLOCK}}": greetingBlock,
     "{{OPENING}}": escapeHtml(letter.opening),
     "{{PROFILE_INTRO}}": escapeHtml(letter.profile_intro),
