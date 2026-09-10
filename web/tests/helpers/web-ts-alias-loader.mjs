@@ -19,7 +19,11 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 // register() re-imports THIS file in a separate loader realm to install the
-// resolve() hook below — guard so repeated imports only register once.
+// resolve() hook below. The flag is an observable, not a guard: that realm gets
+// its own globalThis, so it re-enters this branch and calls register() again on
+// the hooks thread — harmlessly, the resolve chain gains no second link. Within
+// one realm there is nothing to dedupe either; ESM caches this module, so its
+// body runs once however many times it is imported.
 if (!globalThis.__careerOpsWebAliasRegistered) {
   globalThis.__careerOpsWebAliasRegistered = true;
   register(import.meta.url, import.meta.url);

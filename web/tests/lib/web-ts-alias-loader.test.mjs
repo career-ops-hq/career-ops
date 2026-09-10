@@ -17,12 +17,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WEB = path.join(HERE, "..", "..");
-const LOADER = path.join(HERE, "..", "helpers", "web-ts-alias-loader.mjs");
+// A file:// URL, not the path: an absolute path is only a usable ESM specifier
+// where it starts with "/". On Windows it starts with a drive letter, which
+// Node reads as a URL scheme ("d:") and refuses. See the file:// URL test below.
+const LOADER = pathToFileURL(path.join(HERE, "..", "helpers", "web-ts-alias-loader.mjs")).href;
 
 /** Run one ESM snippet in a fresh Node process. Never throws; reports the failure. */
 function run(src) {
@@ -81,14 +84,34 @@ test("a non-@/ specifier is left to Node", () => {
   assert.equal(r.out, "function function");
 });
 
-test("importing the loader twice registers the hook once", () => {
-  // register() re-imports the module in a separate realm; without the guard a
-  // second import stacks another resolver.
+test("importing the loader twice still resolves, and leaves its flag set", () => {
+  // Named for what it measures. It is NOT evidence that the hook registered
+  // once: ESM caches this module, so the second import never re-runs its body,
+  // and the flag it reads is set in this realm whether or not the loader realm
+  // registered again on its own.
   const r = run(`${IMPORT_LOADER}${IMPORT_LOADER}
     const m = await import("@/lib/career-ops");
     console.log(globalThis.__careerOpsWebAliasRegistered === true, typeof m.careerOpsRoot);`);
   assert.equal(r.ok, true, `a second import must not break resolution:\n${r.err}`);
   assert.equal(r.out, "true function");
+});
+
+test("the hook is injected as a file:// URL, not a bare absolute path", () => {
+  // POSITIVE CONTROL, so this is not a vacuous string check: an absolute path
+  // is only importable where it starts with "/". A Windows one does not — Node
+  // parses "D:\…" as protocol "d:" and refuses it, on every platform.
+  const control = run(`await import(${JSON.stringify("D:\\tmp\\hook.mjs")});`);
+  assert.equal(control.ok, false, "a drive-letter path must not be importable");
+  assert.match(control.err, /ERR_UNSUPPORTED_ESM_URL_SCHEME/);
+
+  // So every case above, which installs the hook by handing its path to a child
+  // as a specifier, fails on Windows and only on Windows — POSIX resolves the
+  // same construction because its absolute paths happen to be valid URL paths.
+  assert.match(
+    IMPORT_LOADER,
+    /^await import\("file:\/\//,
+    `the hook must reach the child as a file:// URL; got: ${IMPORT_LOADER}`,
+  );
 });
 
 test("an unresolvable @/ specifier still reports the alias it could not find", () => {
