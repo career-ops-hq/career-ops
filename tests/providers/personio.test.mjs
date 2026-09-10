@@ -22,6 +22,33 @@ try {
     fail(`personio.detect() returned ${JSON.stringify(hit)}`);
   }
 
+  // Explicit tenant pin — companies commonly embed the Personio tenant as an
+  // iframe on a branded careers page, so careers_url is not on the feed host.
+  const pinned = personio.detect({
+    name: 'Acme',
+    provider: 'personio',
+    personio: 'acme',
+    careers_url: 'https://www.acme.example/careers/',
+  });
+  if (pinned && pinned.url === 'https://acme.jobs.personio.de/xml') {
+    pass('personio.detect() resolves an explicit personio: <slug> pin');
+  } else {
+    fail(`personio.detect() with slug pin returned ${JSON.stringify(pinned)}`);
+  }
+
+  // The pin must not become an injection point for an arbitrary host.
+  const badPin = personio.detect({
+    name: 'Evil',
+    provider: 'personio',
+    personio: 'evil.example/../x',
+    careers_url: 'https://www.acme.example/careers/',
+  });
+  if (badPin === null) {
+    pass('personio.detect() rejects a slug pin containing non-slug characters');
+  } else {
+    fail(`personio.detect() accepted a malformed slug pin: ${JSON.stringify(badPin)}`);
+  }
+
   // detect: the .com TLD variant is also accepted
   const comHit = personio.detect({ name: 'Acme', careers_url: 'https://acme.jobs.personio.com/jobs' });
   if (comHit && comHit.url === 'https://acme.jobs.personio.com/xml') {
