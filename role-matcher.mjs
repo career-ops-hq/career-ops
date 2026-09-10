@@ -251,6 +251,7 @@ export function roleFuzzyMatch(a, b) {
   const lvlA = extractLevels(a);
   const lvlB = extractLevels(b);
   if (lvlA.size > 0 && lvlB.size > 0 && ![...lvlA].some(l => lvlB.has(l))) return false;
+  const oneSidedLevel = (lvlA.size > 0) !== (lvlB.size > 0);
 
   const wordsA = [...new Set(roleTokens(a))];
   const wordsB = [...new Set(roleTokens(b))];
@@ -265,6 +266,20 @@ export function roleFuzzyMatch(a, b) {
   // engineer] are not the same opening.
   const discriminating = overlap.filter(w => !BASELINE_TOKENS.has(w));
   if (discriminating.length === 0) return false;
+
+  // A level on one side alone is deliberately compatible with a loose rewrite
+  // when the content title is otherwise the same ("Specialist" vs
+  // "Specialist II"). It is not enough to collapse two already-different
+  // non-subset titles, though: if each side also carries content the other
+  // lacks, the stated level is an additional distinction rather than the only
+  // variation. Treat that combination conservatively so overlapping sibling
+  // roles cannot claim each other through Jaccard alone (#4058).
+  if (oneSidedLevel) {
+    const setA = new Set(wordsA);
+    const aHasUniqueToken = wordsA.some(w => !setB.has(w));
+    const bHasUniqueToken = wordsB.some(w => !setA.has(w));
+    if (aHasUniqueToken && bHasUniqueToken) return false;
+  }
 
   // A generic base title carries no suffix of its own to counterbalance a
   // specialized sibling's extra word, so the shared tokens alone can cross the

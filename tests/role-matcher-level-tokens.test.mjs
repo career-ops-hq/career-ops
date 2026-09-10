@@ -18,7 +18,10 @@
 // rewrite of one opening ("Engineer" vs "Senior Engineer"), not evidence of
 // two. Roman and arabic forms fold onto one number. Nothing about the
 // tokenizer changes, so every existing behaviour is asserted unchanged below.
-import { pass, fail, ROOT } from './helpers.mjs';
+import { pass, fail, ROOT, rmSync } from './helpers.mjs';
+import { execFileSync } from 'child_process';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
@@ -65,6 +68,11 @@ try {
     'Insurance Specialist', 'Insurance Specialist II');
   same('nor in the other order',
     'Registered Nurse 3', 'Registered Nurse');
+  distinct('a one-sided level plus distinct qualifiers keeps sibling roles apart (#4058)',
+    'Front Desk Assistant (Summer Housing)',
+    'Administrative Assistant II (Housing Front Desk)');
+  same('a one-sided level does not reject a proper-subset baseline rewrite',
+    'Data Engineer', 'Data Platform Engineer II');
 
   // ── 4. What is NOT a level ──
   same('a digit glued to a letter is not a level (5G)',
@@ -98,6 +106,53 @@ try {
     'Full Stack Engineer, Foundation', 'Full Stack Engineer, Guarded Releases');
   same('an exact-title repost still matches',
     'Senior Analytics Engineer', 'Senior Analytics Engineer');
+
+  // The matcher is merge-tracker's last-resort identity tier when neither a
+  // posting URL nor a req number exists. Prove the #4058 pair reaches the
+  // recoverable outcome there: two rows, rather than the new application
+  // overwriting or being skipped behind the old rejected one.
+  const work = mkdtempSync(join(tmpdir(), 'co-role-level-4058-'));
+  try {
+    const tracker = join(work, 'applications.md');
+    const additions = join(work, 'additions');
+    mkdirSync(additions);
+    writeFileSync(tracker, [
+      '# Applications Tracker',
+      '',
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+      '|---|------|---------|------|-------|--------|-----|--------|-------|',
+      '| 101 | 2026-04-23 | Example University | Front Desk Assistant (Summer Housing) | 3.2/5 | Rejected | ❌ | [101](../reports/101-summer-housing.md) | old application |',
+      '',
+    ].join('\n'));
+    writeFileSync(join(additions, '2009-example.tsv'), [
+      'num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes',
+      '2009\t2026-09-09\tExample University\tAdministrative Assistant II (Housing Front Desk)\tApplied\t4.1/5\t✅\t[2009](reports/2009-admin-assistant.md)\tnew application',
+      '',
+    ].join('\n'));
+
+    execFileSync(process.execPath, [join(ROOT, 'merge-tracker.mjs')], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        CAREER_OPS_ROOT: work,
+        CAREER_OPS_TRACKER: tracker,
+        CAREER_OPS_ADDITIONS: additions,
+        CAREER_OPS_BATCH_STATE: join(work, 'batch-state.tsv'),
+      },
+    });
+    const merged = readFileSync(tracker, 'utf8');
+    const rows = merged.split('\n').filter(line => /^\|\s*\d+\s*\|/.test(line));
+    if (rows.length === 2
+        && rows.some(line => line.includes('| 101 |') && line.includes('| Rejected |') && line.includes('[101]('))
+        && rows.some(line => line.includes('| 2009 |') && line.includes('| Applied |') && line.includes('[2009]('))) {
+      pass('merge-tracker adds the #4058 sibling opening without mutating the rejected row');
+    } else {
+      fail(`merge-tracker collapsed the #4058 sibling openings: ${rows.join(' / ')}`);
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 } catch (error) {
   fail(`role-matcher level tests could not run: ${error.message}`);
 }
