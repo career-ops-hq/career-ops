@@ -20,8 +20,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, existsSync, realpa
 import { spawnSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { pass, fail, NODE, ROOT, rmSync, hermeticGitEnv } from './helpers.mjs';
-import { gitIn, gitToplevelMismatch } from '../update-system.mjs';
+import { pass, fail, NODE, ROOT, rmSync, hermeticGitEnv, makeHermeticGitRunner } from './helpers.mjs';
+import { gitToplevelMismatch } from '../update-system.mjs';
 
 console.log('\n🧪 Testing updater nested-checkout guard (#3334)...');
 
@@ -31,7 +31,7 @@ const canonicalize = realpathSync.native ?? realpathSync;
 // as vendored content — the layout the ZIP install produces.
 function makeNestedFixture() {
   const dir = mkdtempSync(join(tmpdir(), 'co-nested-'));
-  const g = (...args) => gitIn(dir, ...args);
+  const g = makeHermeticGitRunner(dir);
   g('init', '-q', '-b', 'main', '.');
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
