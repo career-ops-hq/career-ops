@@ -57,13 +57,26 @@ export function canonicalizeTrackerPath(path) {
  * @returns {string} Canonical absolute path to the tracker file
  */
 export function resolveTrackerPath(rootDir) {
+  return canonicalizeTrackerPath(rawTrackerPath(rootDir));
+}
+
+/**
+ * The tracker path before canonicalization: the lexical location, with no
+ * symlink along the path resolved. resolveTrackerPath() realpaths this for the
+ * lock key, but workspace derivation uses the raw form instead (see
+ * resolveWorkspaceRootFor) so a symlinked `data/` does not realpath the
+ * workspace out of the repo (#3169).
+ *
+ * @param {string} rootDir The career-ops data root directory
+ * @returns {string} Uncanonicalized tracker path
+ */
+export function rawTrackerPath(rootDir) {
   const env = process.env.CAREER_OPS_TRACKER?.trim();
-  const raw = env
+  return env
     ? env
     : existsSync(join(rootDir, 'data/applications.md'))
       ? join(rootDir, 'data/applications.md')
       : join(rootDir, 'applications.md');
-  return canonicalizeTrackerPath(raw);
 }
 
 /**
