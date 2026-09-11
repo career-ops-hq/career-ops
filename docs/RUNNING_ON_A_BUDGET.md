@@ -238,7 +238,7 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 > OPENAI_API_KEY=your_key \
 > node openai-eval.mjs --file ./jds/job.txt
 > ```
-> Requesty (`https://router.requesty.ai/v1`) is another OpenAI-compatible router that works the same way — one key across OpenAI, Anthropic, Google, DeepSeek and others, with the same `cache_control` prompt caching the OpenRouter path uses:
+> Requesty (`https://router.requesty.ai/v1`) is another OpenAI-compatible router that works the same way — one key across OpenAI, Anthropic, Google, DeepSeek and others. Prompt caching depends on the model: Anthropic models honor the `cache_control` breakpoints the script already sends, while OpenAI models such as `gpt-4o-mini` cache automatically on the provider side without any request changes:
 > ```bash
 > OPENAI_BASE_URL=https://router.requesty.ai/v1 \
 > OPENAI_MODEL=openai/gpt-4o-mini \
