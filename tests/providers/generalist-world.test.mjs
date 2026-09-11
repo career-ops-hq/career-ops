@@ -125,40 +125,62 @@ try {
   if (job && !('salary' in job) && !('postedAt' in job)) pass('normalizeGeneralistWorldCard() never attaches salary or postedAt (free-text salary tag, no list-level date)');
   else fail('normalizeGeneralistWorldCard() must not attach salary or postedAt');
 
+  const ACME = '<div class="gw-job-company">Acme</div>';
   const minimal = normalizeGeneralistWorldCard(card('data-region="remote" href="/jobs/founders-associate-acme/"',
-    '<div class="gw-job-title">Founder\'s Associate</div>'));
-  if (minimal && minimal.company === '' && minimal.location === 'Remote' && !('description' in minimal)) {
-    pass('normalizeGeneralistWorldCard() falls back to data-region for location, empty company, and omits description when absent');
+    `${ACME}<div class="gw-job-title">Founder\'s Associate</div>`));
+  if (minimal && minimal.company === 'Acme' && minimal.location === 'Remote' && !('description' in minimal)) {
+    pass('normalizeGeneralistWorldCard() falls back to data-region for location and omits description when absent');
   } else {
     fail(`normalizeGeneralistWorldCard() minimal card returned ${JSON.stringify(minimal)}`);
   }
-  const regionOnly = normalizeGeneralistWorldCard(card('data-region="eu" href="/jobs/x-acme/"', '<div class="gw-job-title">Ops Lead</div>'));
+  const regionOnly = normalizeGeneralistWorldCard(card('data-region="eu" href="/jobs/x-acme/"', `${ACME}<div class="gw-job-title">Ops Lead</div>`));
   if (regionOnly && regionOnly.location === 'EU') pass('normalizeGeneralistWorldCard() upper-cases a non-remote data-region (eu → EU)');
   else fail(`normalizeGeneralistWorldCard() region-only card returned ${JSON.stringify(regionOnly)}`);
-  const noRegion = normalizeGeneralistWorldCard(card('href="/jobs/x-acme/"', '<div class="gw-job-title">Ops Lead</div>'));
+  const noRegion = normalizeGeneralistWorldCard(card('href="/jobs/x-acme/"', `${ACME}<div class="gw-job-title">Ops Lead</div>`));
   if (noRegion && noRegion.location === '') pass('normalizeGeneralistWorldCard() yields an empty location when neither tag nor data-region is present');
   else fail(`normalizeGeneralistWorldCard() no-region card returned ${JSON.stringify(noRegion)}`);
 
-  const titleless = normalizeGeneralistWorldCard(card('href="/jobs/x-acme/"', '<div class="gw-job-company">Acme</div>'));
+  const titleless = normalizeGeneralistWorldCard(card('href="/jobs/x-acme/"', ACME));
   if (titleless === null) pass('normalizeGeneralistWorldCard() drops a card with no title');
   else fail(`normalizeGeneralistWorldCard() title-less card returned ${JSON.stringify(titleless)}`);
-  const blankTitle = normalizeGeneralistWorldCard(card('href="/jobs/x-acme/"', '<div class="gw-job-title"> &nbsp; </div>'));
+  const blankTitle = normalizeGeneralistWorldCard(card('href="/jobs/x-acme/"', `${ACME}<div class="gw-job-title"> &nbsp; </div>`));
   if (blankTitle === null) pass('normalizeGeneralistWorldCard() drops a card whose title is whitespace / nbsp only');
   else fail(`normalizeGeneralistWorldCard() blank-title card returned ${JSON.stringify(blankTitle)}`);
+  const companyless = normalizeGeneralistWorldCard(card('data-region="us" href="/jobs/x-acme/"', '<div class="gw-job-title">Ops Lead</div>'));
+  if (companyless === null) pass('normalizeGeneralistWorldCard() drops a card with no employer (listings must be attributed to an identifiable employer)');
+  else fail(`normalizeGeneralistWorldCard() company-less card returned ${JSON.stringify(companyless)}`);
+  const blankCompany = normalizeGeneralistWorldCard(card('href="/jobs/x-acme/"', '<div class="gw-job-company"> &nbsp; </div><div class="gw-job-title">Ops Lead</div>'));
+  if (blankCompany === null) pass('normalizeGeneralistWorldCard() drops a card whose employer is whitespace / nbsp only');
+  else fail(`normalizeGeneralistWorldCard() blank-company card returned ${JSON.stringify(blankCompany)}`);
 
   for (const href of ['https://evil.example/jobs/x/', '/jobs/../wp-admin/', '/jobs/x/?y=1', '/about/', 'javascript:alert(1)']) {
-    const bad = normalizeGeneralistWorldCard(card(`href="${href}"`, '<div class="gw-job-title">Ops Lead</div>'));
+    const bad = normalizeGeneralistWorldCard(card(`href="${href}"`, `${ACME}<div class="gw-job-title">Ops Lead</div>`));
     if (bad === null) pass(`normalizeGeneralistWorldCard() drops a card whose href is ${href}`);
     else fail(`normalizeGeneralistWorldCard() accepted href ${href}: ${JSON.stringify(bad)}`);
   }
-  const noHref = normalizeGeneralistWorldCard(card('data-region="us"', '<div class="gw-job-title">Ops Lead</div>'));
+  const noHref = normalizeGeneralistWorldCard(card('data-region="us"', `${ACME}<div class="gw-job-title">Ops Lead</div>`));
   if (noHref === null) pass('normalizeGeneralistWorldCard() drops a card with no href');
   else fail(`normalizeGeneralistWorldCard() href-less card returned ${JSON.stringify(noHref)}`);
 
-  const notCard = normalizeGeneralistWorldCard('<a class="gw-job-card-top" href="/jobs/x-acme/"><div class="gw-job-title">Ops Lead</div></a>');
+  // Attribute names must be whole: data-class= / data-href= / data-data-region=
+  // are not class= / href= / data-region=.
+  const prefixedAttrs = normalizeGeneralistWorldCard(`<a data-class="gw-job-card" data-href="/jobs/x-acme/">${ACME}<div class="gw-job-title">Ops Lead</div></a>`);
+  if (prefixedAttrs === null) pass('normalizeGeneralistWorldCard() ignores an anchor whose only class/href are data-class= / data-href= (whole attribute names)');
+  else fail(`normalizeGeneralistWorldCard() accepted a data-class/data-href anchor: ${JSON.stringify(prefixedAttrs)}`);
+  const dataHrefOnly = normalizeGeneralistWorldCard(card('data-href="/jobs/x-acme/"', `${ACME}<div class="gw-job-title">Ops Lead</div>`));
+  if (dataHrefOnly === null) pass('normalizeGeneralistWorldCard() does not read data-href= as href=');
+  else fail(`normalizeGeneralistWorldCard() accepted data-href as href: ${JSON.stringify(dataHrefOnly)}`);
+  const prefixedRegion = normalizeGeneralistWorldCard(card('data-data-region="remote" href="/jobs/x-acme/"', `${ACME}<div class="gw-job-title">Ops Lead</div>`));
+  if (prefixedRegion && prefixedRegion.location === '') pass('normalizeGeneralistWorldCard() does not read data-data-region= as data-region=');
+  else fail(`normalizeGeneralistWorldCard() prefixed-region card returned ${JSON.stringify(prefixedRegion)}`);
+  const prefixedInner = normalizeGeneralistWorldCard(card('href="/jobs/x-acme/"', `${ACME}<div data-class="gw-job-title">Not a title</div><div class="gw-job-title">Ops Lead</div>`));
+  if (prefixedInner && prefixedInner.title === 'Ops Lead') pass('normalizeGeneralistWorldCard() skips a data-class="gw-job-title" element and reads the real title');
+  else fail(`normalizeGeneralistWorldCard() prefixed-inner card returned ${JSON.stringify(prefixedInner)}`);
+
+  const notCard = normalizeGeneralistWorldCard(`<a class="gw-job-card-top" href="/jobs/x-acme/">${ACME}<div class="gw-job-title">Ops Lead</div></a>`);
   if (notCard === null) pass('normalizeGeneralistWorldCard() requires the whole gw-job-card class token (gw-job-card-top is not a card)');
   else fail(`normalizeGeneralistWorldCard() accepted a non-card anchor: ${JSON.stringify(notCard)}`);
-  const multiClass = normalizeGeneralistWorldCard('<a class="featured gw-job-card is-new" href="/jobs/x-acme/"><div class="gw-job-title">Ops Lead</div></a>');
+  const multiClass = normalizeGeneralistWorldCard(`<a class="featured gw-job-card is-new" href="/jobs/x-acme/">${ACME}<div class="gw-job-title">Ops Lead</div></a>`);
   if (multiClass && multiClass.title === 'Ops Lead') pass('normalizeGeneralistWorldCard() matches gw-job-card anywhere in the class list');
   else fail(`normalizeGeneralistWorldCard() multi-class card returned ${JSON.stringify(multiClass)}`);
 
@@ -171,7 +193,7 @@ try {
 
   // Entity handling goes through the shared decoder (rss-entity-decoding.test
   // guards the source); check the provider agrees with it on an odd input.
-  const nulTitle = normalizeGeneralistWorldCard(card('href="/jobs/x-acme/"', '<div class="gw-job-title">A&#0;B &amp;amp; C</div>'));
+  const nulTitle = normalizeGeneralistWorldCard(card('href="/jobs/x-acme/"', `${ACME}<div class="gw-job-title">A&#0;B &amp;amp; C</div>`));
   const wantNul = decodeEntities(decodeEntities('A&#0;B &amp;amp; C')).replace(/\s+/g, ' ').trim();
   if (nulTitle && nulTitle.title === wantNul) pass('normalizeGeneralistWorldCard() title decoding agrees with the shared decodeEntities() helper (incl. &#0; and double-encoding)');
   else fail(`normalizeGeneralistWorldCard() title decoded to ${JSON.stringify(nulTitle && nulTitle.title)}, shared helper gives ${JSON.stringify(wantNul)}`);
@@ -186,9 +208,10 @@ try {
   const c2 = card('data-region="us" href="/jobs/ops-lead-acme/"',
     '<div class="gw-job-company">Acme</div><div class="gw-job-title">Ops Lead</div><span class="gw-job-meta-tag gw-location">Austin, TX</span>');
   const c3 = card('data-region="eu" href="/jobs/broken-acme/"', '<div class="gw-job-company">Acme</div>'); // no title
-  const jobs = parseGeneralistWorldJobs(page({ featured: c1, main: c1 + c2 + c3 }));
+  const c4 = card('data-region="eu" href="/jobs/orphan-role/"', '<div class="gw-job-title">Ops Lead</div>'); // no employer
+  const jobs = parseGeneralistWorldJobs(page({ featured: c1, main: c1 + c2 + c3 + c4 }));
   if (jobs.length === 2 && jobs[0].url.endsWith('/chief-of-staff-exampleco/') && jobs[1].url.endsWith('/ops-lead-acme/')) {
-    pass('parseGeneralistWorldJobs() reads featured + main cards, dedups the repeated URL, and skips the title-less card (3 cards + 1 repeat → 2 jobs)');
+    pass('parseGeneralistWorldJobs() reads featured + main cards, dedups the repeated URL, and skips the title-less and employer-less cards (4 cards + 1 repeat → 2 jobs)');
   } else {
     fail(`parseGeneralistWorldJobs() fixture returned ${JSON.stringify(jobs)}`);
   }
@@ -214,6 +237,28 @@ try {
   }
   if (structureThrew) pass('parseGeneralistWorldJobs() throws a descriptive error on a non-empty page with no cards and no listing container');
   else fail('parseGeneralistWorldJobs() should throw when the page has neither cards nor the listing container');
+
+  // The container marker has to be a real opening tag, not the words in text,
+  // CSS or script: those pages are not the board and must still throw.
+  const nearMisses = [
+    ['<html><body>gw-jobs-section data-jobs-container</body></html>', 'marker words in body text'],
+    ['<html><head><style>.gw-jobs-section{display:grid} [data-jobs-container]{gap:1rem}</style></head><body><p>Maintenance</p></body></html>', 'marker words in CSS only'],
+    ['<html><body><script>var sel = ".gw-jobs-section"; var attr = "data-jobs-container";</script></body></html>', 'marker words in script only'],
+    ['<html><body><div class="gw-jobs-section-legacy"></div><div data-jobs-container-old></div></body></html>', 'prefixed look-alike class / attribute'],
+    ['<html><body><div data-class="gw-jobs-section"></div></body></html>', 'data-class= instead of class='],
+  ];
+  for (const [html, label] of nearMisses) {
+    let threw = false;
+    try { parseGeneralistWorldJobs(html); } catch (e) {
+      if (e instanceof Error && e.message.includes('page structure likely changed')) threw = true;
+      else throw e;
+    }
+    if (threw) pass(`parseGeneralistWorldJobs() still throws when the container marker appears only as ${label}`);
+    else fail(`parseGeneralistWorldJobs() treated ${label} as an empty board`);
+  }
+  const attrOnly = parseGeneralistWorldJobs('<html><body><section data-jobs-container><p>No roles right now</p></section></body></html>');
+  if (Array.isArray(attrOnly) && attrOnly.length === 0) pass('parseGeneralistWorldJobs() accepts a real <section data-jobs-container> tag with zero cards as an empty board');
+  else fail(`parseGeneralistWorldJobs() attribute-only container returned ${JSON.stringify(attrOnly)}`);
 
   // ---- fetch() ------------------------------------------------------------
   const calls = [];

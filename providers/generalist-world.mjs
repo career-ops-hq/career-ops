@@ -25,7 +25,8 @@ import { htmlToText } from './_html-to-text.mjs';
 //   </a>
 //
 // Field mapping: title / company / location straight off the card, with the
-// anchor's data-region as the location fallback; the teaser becomes
+// anchor's data-region as the location fallback (a card missing its title or
+// employer is skipped); the teaser becomes
 // `description` (it is in the list payload, so it costs no extra request).
 // The salary tag is free text ("$1,500/mo retainer + ...") and is not turned
 // into figures, so no `salary` is attached. No posted date is exposed at list
@@ -46,19 +47,24 @@ const TRUSTED_HOSTS = new Set(['generalist.world', 'www.generalist.world']);
 // One card = one anchor whose class list carries the gw-job-card token (a
 // whole token: gw-job-card-top is a child div, not a card). Cards never nest
 // another <a>, so the lazy match ends at the card's own closing tag.
-const CARD_SRC = '<a\\b([^>]*\\bclass="(?:[^"]*\\s)?gw-job-card(?:\\s[^"]*)?"[^>]*)>([\\s\\S]*?)<\\/a>';
+// The captured attribute string starts at the tag's first whitespace, so
+// every attribute name is preceded by whitespace (a `\b` alone would also
+// match the tail of data-class= / data-href=); class tokens are matched whole.
+const CARD_SRC = '<a(\\s(?:[^>]*?\\s)?class="(?:[^"]*\\s)?gw-job-card(?:\\s[^"]*)?"[^>]*)>([\\s\\S]*?)<\\/a>';
 const CARDS_RE = new RegExp(CARD_SRC, 'g');
 const ONE_CARD_RE = new RegExp(CARD_SRC);
-const HREF_RE = /\bhref="([^"]*)"/;
-const REGION_RE = /\bdata-region="([^"]*)"/;
-const TITLE_RE = /class="gw-job-title"[^>]*>([\s\S]*?)<\/div>/;
-const COMPANY_RE = /class="gw-job-company"[^>]*>([\s\S]*?)<\/div>/;
-const LOCATION_RE = /class="(?:[^"]*\s)?gw-location(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/span>/;
-const DESCRIPTION_RE = /class="gw-job-description"[^>]*>([\s\S]*?)<\/p>/;
-// The listing container. It is part of the page template, so it is present
-// even when nothing is posted; that separates "alive, empty board" from
-// "not the page this parser knows".
-const BOARD_MARKER_RE = /gw-jobs-section|data-jobs-container/;
+const HREF_RE = /\shref="([^"]*)"/;
+const REGION_RE = /\sdata-region="([^"]*)"/;
+const TITLE_RE = /<div\s(?:[^>]*?\s)?class="gw-job-title"[^>]*>([\s\S]*?)<\/div>/;
+const COMPANY_RE = /<div\s(?:[^>]*?\s)?class="gw-job-company"[^>]*>([\s\S]*?)<\/div>/;
+const LOCATION_RE = /<span\s(?:[^>]*?\s)?class="(?:[^"]*\s)?gw-location(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/span>/;
+const DESCRIPTION_RE = /<p\s(?:[^>]*?\s)?class="gw-job-description"[^>]*>([\s\S]*?)<\/p>/;
+// The listing container, `<div class="gw-jobs-section" data-jobs-container>`.
+// It is part of the page template, so it is present even when nothing is
+// posted; that separates "alive, empty board" from "not the page this parser
+// knows". Matched as an opening tag carrying the class token or the
+// attribute, so the words appearing in text, CSS or script do not count.
+const BOARD_MARKER_RE = /<[a-zA-Z][^\s>]*\s(?:[^>]*?\s)?(?:class="(?:[^"]*\s)?gw-jobs-section(?:\s[^"]*)?"|data-jobs-container(?=[\s>\/=]))[^>]*>/;
 
 // The href is host-controlled and becomes a URL path segment, so it is held
 // to a strict slug charset instead of being encoded: anything that is not
@@ -115,7 +121,11 @@ function cardToJob(attrs, inner) {
   if (!url) return null;
   const title = htmlToText(TITLE_RE.exec(inner)?.[1]);
   if (!title) return null;
+  // A board listing has to be attributed to an identifiable employer (Source
+  // Indexing Policy); every live card carries one, so a card without it is
+  // malformed rather than a real posting.
   const company = htmlToText(COMPANY_RE.exec(inner)?.[1]);
+  if (!company) return null;
   const location = htmlToText(LOCATION_RE.exec(inner)?.[1]) || regionLabel(REGION_RE.exec(attrs)?.[1]);
   /** @type {Job} */
   const job = { title, url, company, location };
@@ -126,8 +136,8 @@ function cardToJob(attrs, inner) {
 
 /**
  * Normalize one `<a class="gw-job-card" …>…</a>` fragment into the shared
- * Job shape, or null when it is not a card or lacks a usable title / link.
- * Exported for tests.
+ * Job shape, or null when it is not a card or lacks a usable title, employer
+ * or link. Exported for tests.
  * @param {unknown} cardHtml
  * @returns {Job | null}
  */
