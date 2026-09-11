@@ -1,7 +1,8 @@
 // tests/providers/ats-ssrf-hardening.test.mjs — moved verbatim from test-all.mjs (#1440).
-// _http.mjs defaults to redirect:'follow', so a server-side redirect from any
-// of these ATS APIs to an internal address is an SSRF vector. Every other GET
-// provider passes redirect:'error'; these two were missing it.
+// _http.mjs used to default to redirect:'follow' (it now defaults to
+// redirect:'error', see providers/_http.mjs), so a server-side redirect from
+// any of these ATS APIs to an internal address was an SSRF vector. Every other
+// GET provider passes redirect:'error' explicitly; these two were missing it.
 // (workday's redirect:'error' coverage lives in its own "Provider — workday"
 // section, checked across every paginated request, not just the first.)
 import { pass, fail, ROOT } from '../helpers.mjs';
