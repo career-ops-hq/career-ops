@@ -392,7 +392,23 @@ const SYSTEM_PATHS = [
   'DATA_CONTRACT.md',
   'MANIFESTO.md',
   'manifesto.mjs',
-  'SIGNATURES.md',
+  // SIGNATURES.md cannot join SYSTEM_PATHS: unlike every other system file it
+  // is a pure append-only ledger of who signed the manifesto, and it churns
+  // far faster than the code it would ship beside (49 commits in the 30 days
+  // before this was written). Nothing on an install reads it — manifesto.mjs
+  // parses MANIFESTO.md and never opens it — so shipping it buys an install
+  // nothing, while listing it here puts it in the pathspec check() diffs via
+  // systemTreeDiffers, which turns every new signature into a
+  // system-files-changed report on every install in the world that no apply
+  // can clear for long (#4062: the third independent cause of the #3149 class
+  // of permanent update-available, after the SHA-vs-content bug of #2630 and
+  // the ignore-rule route of #2756). Its repo-only coverage is declared in
+  // validate-system-paths-coverage.mjs, and the behaviour is pinned by
+  // tests/updater-signature-ledger-drift.test.mjs.
+  //
+  // Keep this comment free of straight quotes: updater-migration-tests.mjs
+  // parses this array with a comment-blind regex, so an apostrophe here
+  // becomes a phantom manifest entry.
   'CONTRIBUTING.md',
   'MAINTAINERS.md',
   'ARCHITECTURE.md',
