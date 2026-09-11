@@ -45,10 +45,10 @@ function packTemplate() {
 const FULL = {
   candidate: {
     name: 'A Candidate',
-    email: 'candidate@example.com',
-    phone: '+1 555 0100',
+    email: 'CANDIDATE-EMAIL-SENTINEL@example.com',
+    phone: '+1 555 0100 PHONE-SENTINEL',
     location: 'Boston, MA',
-    linkedin: 'linkedin.com/in/example',
+    linkedin: 'linkedin.com/in/LINKEDIN-SENTINEL',
     website: 'example.com',
     credentials: ['CRED-ONE', 'CRED-TWO'],
   },
@@ -86,6 +86,12 @@ test('core fills every slot the contract declares', () => {
   assert.deepEqual(unfilled, [], `core left contract slots unsubstituted: ${unfilled.join(', ')}`);
 });
 
+function slotHtml(html, slot) {
+  const match = html.match(new RegExp(`<div data-slot="${slot}">([\\s\\S]*?)</div>`));
+  assert.ok(match, `rendered letter does not contain data-slot="${slot}"`);
+  return match[1];
+}
+
 test('every value the payload supplies reaches the letter', () => {
   // Substitution alone is not enough: {{ACHIEVEMENTS_BLOCK}} was "filled" with
   // empty <li> elements for the whole life of the achievements-shape bug.
@@ -94,8 +100,16 @@ test('every value the payload supplies reaches the letter', () => {
   for (const v of ['A Candidate', 'Head of Marketing', 'Jane Reviewer', 'Director of Talent',
                    '100 Example Street', 'OPENING-TEXT', 'PROFILE-INTRO-TEXT', 'ACH-LEAD',
                    'ACH-IMPACT', 'PROBLEMS-TEXT', 'CLOSING-TEXT', 'LANGUAGE-CLOSING-TEXT',
-                   'CRED-ONE', 'FOOTNOTE-ONE', 'September 11, 2026']) {
+                   'FOOTNOTE-ONE', 'September 11, 2026']) {
     assert.ok(html.includes(v), `the payload supplied "${v}" and the letter does not carry it`);
+  }
+
+  for (const v of ['CANDIDATE-EMAIL-SENTINEL@example.com', '+1 555 0100 PHONE-SENTINEL',
+                   'linkedin.com/in/LINKEDIN-SENTINEL']) {
+    assert.ok(slotHtml(html, 'CONTACT_LINE').includes(v), `CONTACT_LINE does not carry "${v}"`);
+  }
+  for (const v of ['CRED-ONE', 'CRED-TWO']) {
+    assert.ok(slotHtml(html, 'CREDENTIALS_BLOCK').includes(v), `CREDENTIALS_BLOCK does not carry "${v}"`);
   }
 });
 
