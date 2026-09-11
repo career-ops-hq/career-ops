@@ -39,11 +39,13 @@ export function resolveListUrl(entry) {
   const raw = entry.api || entry.careers_url || '';
   try {
     const u = new URL(raw);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
     const host = u.host.toLowerCase();
     if (host !== 'rheinmetall.com' && !host.endsWith('.rheinmetall.com')) return null;
-    // The apex 301s to www (same registrable domain, https both ends). Pin it
-    // here so the transport's redirect:'error' never refuses a host detect() accepts.
+    // The apex 301s to www and http 301s to https (same registrable domain). Pin
+    // both here so the transport's redirect:'error' never refuses a URL detect() accepts.
     if (host === 'rheinmetall.com') u.host = 'www.rheinmetall.com';
+    u.protocol = 'https:';
     if (/\/career\/vacancies\/?$/.test(u.pathname)) return `${u.origin}${u.pathname.replace(/\/$/, '')}`;
     // Any other rheinmetall.com URL (e.g. the branded career hub) → EN default.
     return `${u.origin}/en/career/vacancies`;
