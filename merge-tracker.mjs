@@ -554,6 +554,68 @@ let COLMAP = LEGACY_COLMAP;
 // width implied by COLMAP.
 let HEADER_WIDTH = null;
 
+/**
+ * Append one cell to a Markdown table line without reparsing its existing
+ * cells. The URL schema migration is user-data work, so preserving every byte
+ * before the old closing delimiter keeps custom columns and hand-tuned values
+ * out of the migration's reach.
+ *
+ * @param {string} line - Header, separator, or data row with a closing pipe.
+ * @param {string} value - New cell value (empty for data rows).
+ * @param {boolean} separator - Whether this is the table separator row.
+ * @returns {string|null} The widened line, or null when it cannot be widened safely.
+ */
+function appendTrailingTableCell(line, value = '', separator = false) {
+  const eol = line.endsWith('\r') ? '\r' : '';
+  const body = eol ? line.slice(0, -1) : line;
+  const match = body.match(/^(.*\|)([ \t]*)$/);
+  if (!match) return null;
+  const cellText = separator ? '-----' : value ? ` ${value} ` : ' ';
+  return `${match[1]}${cellText}|${match[2]}${eol}`;
+}
+
+/**
+ * Explicitly add a trailing URL column to a recognized tracker table. Only
+ * --backfill-urls calls this; ordinary merges retain the legacy no-URL layout.
+ * The caller writes the widened table together with the backfilled values in
+ * one atomic write.
+ *
+ * @param {string[]} lines - applications.md split into lines.
+ * @returns {{added: boolean, reason?: string}}
+ */
+function addMissingUrlColumn(lines) {
+  const headerIdx = lines.findIndex(line => isHeaderRow(line));
+  if (headerIdx < 0) return { added: false, reason: 'no recognizable header row' };
+
+  const currentMap = detectColumns(lines);
+  if (currentMap?.url != null) return { added: false };
+
+  const separatorIdx = headerIdx + 1;
+  if (!SEPARATOR_ROW_RE.test(lines[separatorIdx] || '')) {
+    return { added: false, reason: 'no separator row directly after the tracker header' };
+  }
+
+  const widenedHeader = appendTrailingTableCell(lines[headerIdx], 'URL');
+  const widenedSeparator = appendTrailingTableCell(lines[separatorIdx], '', true);
+  if (widenedHeader == null || widenedSeparator == null) {
+    return { added: false, reason: 'the tracker table is missing a closing pipe' };
+  }
+
+  const widenedRows = [];
+  for (let i = separatorIdx + 1; i < lines.length && lines[i].startsWith('|'); i++) {
+    const widened = appendTrailingTableCell(lines[i]);
+    if (widened == null) return { added: false, reason: `table row ${i + 1} is missing a closing pipe` };
+    widenedRows.push([i, widened]);
+  }
+
+  // Apply only after every line has been validated. A malformed row must not
+  // leave the in-memory document half-migrated, even during a dry run.
+  lines[headerIdx] = widenedHeader;
+  lines[separatorIdx] = widenedSeparator;
+  for (const [i, widened] of widenedRows) lines[i] = widened;
+  return { added: true };
+}
+
 // Build a tracker row string matching the detected layout. Every field
 // career-ops knows about is placed at ITS OWN detected index, and any column
 // the header declares but career-ops has no value for becomes '—'.
@@ -1151,6 +1213,16 @@ function sortTrackerRowsInPlace(lines) {
 }
 
 const appLines = appContent.split('\n');
+let urlColumnAdded = false;
+if (BACKFILL_URLS) {
+  const migration = addMissingUrlColumn(appLines);
+  if (migration.reason) {
+    console.error(`❌ --backfill-urls: cannot add the URL column safely (${migration.reason}).`);
+    trackerLock.release();
+    process.exit(1);
+  }
+  urlColumnAdded = migration.added;
+}
 // Detect the tracker's column layout via header names so parsing and writing
 // both work whether the table uses the original 9-column layout or a customized
 // one (e.g. with a Location column after Role). Falls back to the legacy layout.
@@ -1202,7 +1274,7 @@ for (const line of appLines) {
 // Run with: node merge-tracker.mjs --backfill-urls [--dry-run]
 if (BACKFILL_URLS) {
   if (COLMAP.url == null) {
-    console.error('❌ --backfill-urls: this tracker has no URL column. Add a `URL` header column first (additive), then re-run.');
+    console.error('❌ --backfill-urls: could not detect a URL column after migration.');
     trackerLock.release();
     process.exit(1);
   }
@@ -1247,10 +1319,13 @@ if (BACKFILL_URLS) {
   });
   const summary = `${filled} filled, ${already} already set, ${noReport} no/missing report, ${noUrl} report has no **URL:**`;
   if (DRY_RUN) {
-    console.log(`🔎 Backfill URLs (dry-run): would fill ${filled} row(s). (${summary})`);
+    const action = urlColumnAdded
+      ? `would add the URL column and fill ${filled} row(s)`
+      : `would fill ${filled} row(s)`;
+    console.log(`🔎 Backfill URLs (dry-run): ${action}. (${summary})`);
   } else {
     writeFileAtomic(APPS_FILE, backfilled.join('\n'));
-    console.log(`✅ Backfill URLs: ${summary}.`);
+    console.log(`✅ Backfill URLs: ${urlColumnAdded ? 'added the URL column; ' : ''}${summary}.`);
   }
   trackerLock.release();
   process.exit(0);
