@@ -18,6 +18,9 @@ try {
   else fail('rheinmetall.resolveListUrl() should keep /de/career/vacancies');
   if (resolveListUrl({ careers_url: 'https://www.rheinmetall.com/en/career' }) === 'https://www.rheinmetall.com/en/career/vacancies') pass('rheinmetall.resolveListUrl() defaults non-list URLs to /en/career/vacancies');
   else fail('rheinmetall.resolveListUrl() should default to the EN list');
+  // The apex 301s to www; with redirect:'error' as the transport default it has to be pinned, not followed.
+  if (resolveListUrl({ api: 'https://rheinmetall.com/en/career/vacancies' }) === 'https://www.rheinmetall.com/en/career/vacancies') pass('rheinmetall.resolveListUrl() pins the apex host to www');
+  else fail(`rheinmetall.resolveListUrl() should pin the apex to www: ${resolveListUrl({ api: 'https://rheinmetall.com/en/career/vacancies' })}`);
   if (resolveListUrl({ careers_url: 'https://evil.com/x.rheinmetall.com' }) === null) pass('rheinmetall.resolveListUrl() rejects path-spoofed host');
   else fail('rheinmetall.resolveListUrl() should reject path-spoofed host');
   if (rheinmetall.detect({ careers_url: 'https://rheinmetall.com.evil.com/en/career/vacancies' }) === null) pass('rheinmetall.detect() rejects suffix-spoofed host');

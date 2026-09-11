@@ -12,6 +12,9 @@ try {
   if (hk.id === 'hecklerkoch') pass('hecklerkoch.id is "hecklerkoch"');
   else fail(`hecklerkoch.id is ${JSON.stringify(hk.id)}`);
 
+  // The apex 301s to www; with redirect:'error' as the transport default it has to be pinned, not followed.
+  if (hkListUrl({ api: 'https://heckler-koch.com/de/Karriere/Stellenangebote' }) === 'https://www.heckler-koch.com/de/Karriere/Stellenangebote') pass('hecklerkoch.resolveListUrl() pins the apex host to www');
+  else fail(`hecklerkoch.resolveListUrl() should pin the apex to www: ${hkListUrl({ api: 'https://heckler-koch.com/de/Karriere/Stellenangebote' })}`);
   if (hkListUrl({ careers_url: 'https://www.heckler-koch.com/en/Career' }) === 'https://www.heckler-koch.com/de/Karriere/Stellenangebote') pass('hecklerkoch.resolveListUrl() defaults to the Stellenangebote list');
   else fail(`hecklerkoch.resolveListUrl() default wrong: ${hkListUrl({ careers_url: 'https://www.heckler-koch.com/en/Career' })}`);
   if (hk.detect({ careers_url: 'https://evil.com/x.heckler-koch.com' }) === null && hk.detect({ careers_url: 'https://heckler-koch.com.evil.com/x' }) === null) {
