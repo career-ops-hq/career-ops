@@ -30,6 +30,7 @@ const PROCESSED = 'https://jobs.lever.co/beta/3';
 const PIPELINE_ONLY = 'https://jobs.ashbyhq.com/gamma/4';
 const FRESH = 'https://boards.greenhouse.io/delta/5';
 const PROCESSED_CHILD = 'https://jobs.lever.co/beta/6';
+const NESTED_IN_PENDING = 'https://boards.greenhouse.io/epsilon/7';
 
 // today = 2026-08-07, window = 30d. The 2026-01-01 rows are past it; the
 // 2026-08-01 row is inside it.
@@ -43,6 +44,7 @@ const SOURCES = {
     `${PROCESSED}\t2026-01-01\tlever\tSRE\tBeta\tadded\tBerlin`,
     `${FRESH}\t2026-08-01\tgreenhouse\tAnalyst\tDelta\tadded\tRemote`,
     `${PROCESSED_CHILD}\t2026-01-01\tlever\tOps\tBeta\tadded\tBerlin`,
+    `${NESTED_IN_PENDING}\t2026-01-01\tgreenhouse\tWriter\tEpsilon\tadded\tRemote`,
     '',
   ].join('\n'),
   pipelineText: [
@@ -53,6 +55,10 @@ const SOURCES = {
     `- [ ] ${OPEN} | Acme | Trader | NY`,
     `- [x] ${DONE} | Acme | Quant | NY`,
     `- [ ] ${PIPELINE_ONLY} | Gamma | Researcher | Remote`,
+    // A subdivision inside ## Pending whose name happens to start with
+    // "Processed". It is still Pending: the rows under it are queued work.
+    '### Processed last week, still to file',
+    `- [ ] ${NESTED_IN_PENDING} | Epsilon | Writer | Remote`,
     '',
     '## Processed',
     '',
@@ -82,6 +88,12 @@ if (!seen.has(PROCESSED_CHILD)) {
   pass('a row under a child heading of ## Processed is still released');
 } else {
   fail('a row under a child heading of ## Processed was pinned: nested processed headings are not being retained');
+}
+
+if (seen.has(NESTED_IN_PENDING)) {
+  pass('a `### Processed…` subdivision inside ## Pending does not release its rows');
+} else {
+  fail('a row under a nested `### Processed…` heading inside ## Pending was released: the heading level is being ignored, so queued work is handed back to the scanner and duplicated');
 }
 
 if (seen.has(OPEN)) {

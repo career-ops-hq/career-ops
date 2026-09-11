@@ -1574,19 +1574,20 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   // under `## Processed`, is finished work: no queue entry can be duplicated, so
   // the scan-history TTL is allowed to govern it alone. Release also requires the
   // URL to be a recheck candidate, so a pipeline-only URL is never un-pinned.
+  // Sections are `##` in PIPELINE_SKELETON — `# Pipeline` is the document title,
+  // `## Pending` and `## Processed` are the sections. So only a level-2 heading
+  // opens or closes one; anything deeper is a subdivision INSIDE the current
+  // section and must leave the section alone. Matching `Processed` at any depth
+  // breaks both ways: `### Processed leftovers` under `## Pending` would release
+  // rows that are still queued for work — the exact duplication this function
+  // exists to prevent — while `### August` under `## Processed` has to keep the
+  // section open.
+  const SECTION_LEVEL = 2;
   let inProcessed = false;
-  let processedHeadingLevel = 0;
   for (const line of pipelineText.split('\n')) {
     const heading = line.match(/^(#+)\s+(.*)$/);
-    if (heading) {
-      const level = heading[1].length;
-      if (/^processed\b/i.test(heading[2].trim())) {
-        inProcessed = true;
-        processedHeadingLevel = level;
-      } else if (inProcessed && level <= processedHeadingLevel) {
-        inProcessed = false;
-        processedHeadingLevel = 0;
-      }
+    if (heading && heading[1].length === SECTION_LEVEL) {
+      inProcessed = /^processed\b/i.test(heading[2].trim());
     }
     const url = extractPipelineUrl(line);
     if (!url) continue;
