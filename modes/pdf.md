@@ -70,6 +70,12 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 - Distributed JD keywords: Summary (top 5), first bullet of each role, Skills section
 - No hidden text, keyword stuffing, or white-font tricks. Optimize for parseability plus human review.
 
+The bullets above are the rules. `templates/ats-rules.yml` is the same rules as data — it carries the severity of each and, for each, the **"must not flag"** contract: what a check for that rule must stay quiet about. Read it before changing a rule or reading a lint finding; a rule cannot be added, removed, or silenced without that file changing, and each entry quotes the bullet above that it enforces, so the two cannot drift apart.
+
+**Optional template lint:** `node cv-templates.mjs lint cv [template-name]` checks a CV or cover-letter template against those rules and prints findings as JSON. Advisory, never a blocker: it exits 0 whatever it finds, and it never gates a render. Three rules are implemented today — nested tables, hidden text, and the standard-header enumeration. The rest are in the YAML with no detector, reported under `skipped` with the reason, and they are open items rather than passes.
+
+**What the lint cannot catch** (also in the YAML, under `cannot_catch`): it reads a template's HTML, so nothing about the *rendered text layer* is in scope. Two measured classes sit entirely outside it, and both satisfy every bullet above — CSS `::before` generated content combined with `position:absolute` (the marker glyph never enters the text stream), and `letter-spacing` / `font-variant: small-caps` fragmenting a heading into separate glyph runs (`PROFESSIONAL SUMMARY` extracts as `P R O F E S S I O N A L S U M M A RY`). Catching those needs a rendered PDF and a text extractor; this project extracts with `pdftotext -layout`. A clean lint is not an ATS pass.
+
 **Optional parseability check:** after generating the HTML you can score it for ATS-friendliness with `node verify-ats.mjs output/cv-{candidate}-{company}.html` (see `modes/ats.md`). This is deterministic, read-only, and advisory — it reports a 0-100 score plus concrete issues but never blocks generation (unlike the `verify-cv-facts.mjs` fact gate in Step 18).
 
 ## Recruiter Review Gates

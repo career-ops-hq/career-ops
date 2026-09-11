@@ -1,0 +1,192 @@
+# Career-Ops — ATS Lint Rules
+# Source of truth for atsLint() in cv-templates.mjs.
+#
+# Rule: the ATS rules live in modes/pdf.md as prose. This file is the machine-
+# readable half of the SAME rules — it owns the rule set, the severities and the
+# "must not flag" contract. It does NOT invent policy: every rule's `source`
+# quotes the modes/pdf.md bullet it enforces, verbatim, and
+# tests/ats-lint.test.mjs fails when a quote no longer appears in that file.
+#
+# Quotes, not line numbers, on purpose. The citations in issue #3109 were
+# written as `modes/pdf.md:62-69`, and a single bullet inserted by #2504 moved
+# five of seven of them. A line number is a coordinate that drifts silently; a
+# quote either matches the doc or fails a test.
+#
+# Detection stays in code. `detect` names a detector registered in
+# cv-templates.mjs and dispatched by rule id; `detect: null` marks a rule that
+# is agreed policy but has no detector yet, and carries
+# `unimplemented_because` saying what has to be settled first. Those are the
+# open items — a rule cannot be added, removed or silenced without this file
+# changing, and a null detector cannot be mistaken for a passing check because
+# atsLint reports it under `skipped`, never under `findings`.
+#
+# Severity is `warning` throughout, by design. An adventurous template is a
+# choice; an unknowing one is a bug. atsLint never blocks a render.
+#
+# See `cannot_catch` at the bottom before trusting a clean result.
+
+source_doc: modes/pdf.md
+
+rules:
+  - id: single-column-layout
+    rule: Single-column layout
+    description: Page structure is one top-level content column, so extraction order matches reading order
+    severity: warning
+    detect: null
+    unimplemented_because: >-
+      Telling a layout table from a data table, and a genuine second column from
+      a multi-column block inside one logical section, is a heuristic rather than
+      a pattern. Open item on #3109; shipping it wrong is worse than not shipping
+      it, because a lint that fires on a correct template teaches people to
+      ignore it.
+    source:
+      - 'Single-column layout (no sidebars, no parallel columns)'
+    must_not_flag: >-
+      A table used for genuine tabular data; multiple columns inside a single
+      logical section.
+
+  - id: standard-section-headers
+    rule: Standard section headers
+    description: Literal section headings are ones an ATS maps to known fields, not invented synonyms
+    severity: warning
+    detect: standard-section-headers
+    kinds: [cv]
+    source:
+      - 'Standard headers: "Professional Summary", "Work Experience", "Education", "Skills", "Certifications", "Projects"'
+      - 'Optional sections (Core Competencies, Work Experience, Projects, Education, Certifications, Awards & Honors, Skills) are dropped entirely — header included — when their array is empty or absent'
+    # Every name below appears inside the quotes above; the test asserts it, so
+    # this list cannot grow a header the doc does not sanction.
+    headers:
+      - Professional Summary
+      - Work Experience
+      - Education
+      - Skills
+      - Certifications
+      - Projects
+      - Core Competencies
+      - Awards & Honors
+    must_not_flag: >-
+      A heading that is a {{PLACEHOLDER}} — every shipped template writes
+      {{SECTION_EXPERIENCE}} and friends, and both the wording and the language
+      are decided by the render payload, not by the template. Localised headers
+      when lang is not en: a template declares lang="{{LANG}}", so a template-time
+      check cannot know the language and must not guess. Extra sections that are
+      additive rather than renames.
+
+  - id: no-image-text
+    rule: No text in images or SVGs
+    description: Text that exists only as vector or raster art never reaches the text layer
+    severity: warning
+    detect: null
+    unimplemented_because: >-
+      "An <img> whose only content role is a rendered heading" is a judgment
+      about intent, not a pattern. The <svg><text> half encodes cleanly and could
+      ship alone; it is held with its sibling so the rule lands whole rather than
+      half-true. Open item on #3109.
+    source:
+      - 'No text in images/SVGs'
+    must_not_flag: >-
+      A decorative SVG carrying no text; icons; a raster used for a photo or a
+      logo.
+
+  - id: no-critical-info-in-page-furniture
+    rule: Nothing critical in PDF headers or footers
+    description: Name, contact details and links live in the body, because ATS parsers drop page furniture
+    severity: warning
+    detect: null
+    unimplemented_because: >-
+      Deciding that a fixed-position block *is* a running header, and that what
+      it carries is load-bearing rather than a page number, needs the render
+      payload. A template's @page margin boxes are visible statically, but a
+      fixed-position contact block is indistinguishable from a fixed-position
+      decoration without knowing what fills it. Open item on #3109.
+    source:
+      - 'No critical info in PDF headers/footers (ATS ignores them)'
+    must_not_flag: >-
+      A page number; a footer carrying nothing load-bearing.
+
+  - id: selectable-text
+    rule: Selectable text
+    description: The document body is real text, not a picture of text
+    severity: warning
+    detect: null
+    unimplemented_because: >-
+      "A template whose body content is a single raster image" is decidable, but
+      the rule as written invites the reading that a passing template has a sound
+      text layer, and it does not — see cannot_catch below, where every entry
+      satisfies this rule. Held until the wording separates "selectable" from
+      "correctly tokenised". Open item on #3109.
+    source:
+      - 'UTF-8, selectable text (not rasterized)'
+    must_not_flag: >-
+      A raster used for a photo or a logo. And note the measured case: the
+      shipped cv-template.html renders 25 list items and emits zero U+2022 glyphs
+      into its text layer — 0 under `pdftotext -layout` (4721 chars extracted) and
+      0 under raw `pdftotext` (3927 chars) — because a native ::marker draws no
+      glyph in the text stream. Any rule shaped "list items carry their marker
+      into the text" fires on this project's own default template.
+
+  - id: no-nested-tables
+    rule: No nested tables
+    description: A table inside a table scrambles cell order in most ATS text extractors
+    severity: warning
+    detect: nested-table
+    source:
+      - 'No nested tables'
+    must_not_flag: >-
+      A single flat table.
+
+  - id: no-hidden-text
+    rule: No hidden text or white-font tricks
+    description: Keywords the reader cannot see are penalised by ATS vendors and by recruiters reading the extracted text
+    severity: warning
+    detect: hidden-text
+    source:
+      - 'No hidden text, keyword stuffing, or white-font tricks. Optimize for parseability plus human review.'
+    must_not_flag: >-
+      A stylesheet rule. Detection is on inline style attributes only, which is
+      where the stuffing trick actually lives, and it is a measured boundary
+      rather than a cautious one: the shipped templates/ats/cv-template.ats.html
+      hides a decorative separator with `.contact-row .separator { display: none }`,
+      so a stylesheet-wide scan fires on the template literally named "ats".
+      verify-ats.mjs already draws this same line for white text and says why.
+      Also not flagged: aria-hidden on decoration; @media print hiding a
+      screen-only control.
+
+# What this lint cannot catch. Read this before treating a clean result as an
+# ATS pass.
+#
+# atsLint is a static check on a template file: it reads HTML and CSS that has
+# not been rendered, filled or laid out. Everything below needs a rendered PDF
+# and a text extractor, and every entry SATISFIES all seven rules above —
+# single-column, table-free, selectable, nothing hidden, standard headers.
+#
+# Both classes were measured on #3109 with a rendered PDF, not argued from a CSS
+# value. Which extractor read the PDF changes the answer, so each entry names
+# one: this project extracts with `pdftotext -layout` (cv-visual.spec.mjs,
+# intake.mjs), and a construct that is clean under pdftotext is NOT thereby
+# clean under whatever a given ATS uses.
+cannot_catch:
+  - id: css-generated-content-positioned
+    summary: >-
+      CSS ::before generated content combined with position:absolute. The marker
+      glyph is absent from the text stream entirely when the list item is not
+      itself positioned — 0 occurrences under both pdftotext -layout and pypdf.
+      The same ::before content WITHOUT position:absolute survives extraction, so
+      a rule aimed at ::before itself would fire on templates that are fine.
+    needs: a rendered PDF and a text extractor
+
+  - id: glyph-run-fragmentation
+    summary: >-
+      letter-spacing and font-variant:small-caps fragment a heading into separate
+      glyph runs, so the heading is present, selectable and unreadable to a
+      tokeniser. Measured here on the shipped templates rendered through
+      generate-pdf.mjs and read back with `pdftotext -layout`: of six heading
+      tokens, cv-template.{leadership,modern,jake}.html each keep 3 while
+      cv-template.html and cv-template.{executive,compact}.html keep 6 —
+      "PROFESSIONAL SUMMARY" comes out of the leadership template as
+      "P R O F E S S I O N A L S U M M A RY". jake's mechanism is different:
+      small-caps is synthesized as runs at two font sizes ("P rofessional
+      summary"), so a fix aimed at a tracking value leaves it standing. None of
+      this is visible in the template's HTML, and all of it satisfies rules 1-7.
+    needs: a rendered PDF and a text extractor
