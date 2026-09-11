@@ -207,3 +207,32 @@ if (isRefusedRedirectError(transportFailure) === false) {
     globalThis.fetch = realFetch;
   }
 }
+
+// The default redirect policy is the SSRF guard's second half (#4079): the
+// ip guard checks the host that was asked for, and only redirect:'error'
+// stops a 3xx from pointing the follow-up request somewhere else. It has to
+// be the default, not something every provider remembers to pass.
+{
+  const { fetchText, fetchJson } = await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
+  const realFetch = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, init) => {
+    seen.push({ url: String(url), redirect: init?.redirect });
+    return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    await fetchText('https://example.test/list');
+    await fetchJson('https://example.test/api');
+    await fetchText('https://example.test/legacy', { redirect: 'follow' });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  if (seen.length === 3 && seen[0].redirect === 'error' && seen[1].redirect === 'error') {
+    pass("fetchText/fetchJson default to redirect:'error'");
+  } else {
+    fail(`fetchText/fetchJson should default to redirect:'error' — got ${JSON.stringify(seen)}`);
+  }
+  if (seen[2]?.redirect === 'follow') pass("an explicit redirect option still passes through");
+  else fail(`explicit redirect:'follow' should pass through — got ${JSON.stringify(seen[2])}`);
+}
+
