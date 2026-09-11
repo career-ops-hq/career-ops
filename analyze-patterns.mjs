@@ -1678,6 +1678,28 @@ if (isMainModule(import.meta.url)) {
     requireOperand: true,
   });
 
+  const validateIntegerFlag = (flag, raw, { positive }) => {
+    const requirement = positive ? 'a positive integer' : 'a non-negative integer';
+    const valid = raw !== undefined
+      && /^\d+$/.test(String(raw))
+      && Number.isSafeInteger(Number(raw))
+      && (!positive || Number(raw) > 0);
+    if (!valid) {
+      console.error(`Error: ${flag} requires ${requirement}, got "${raw}"`);
+      process.exit(2);
+    }
+  };
+
+  const rawMinThreshold = flagValue(args, '--min-threshold');
+  if (rawMinThreshold !== undefined) {
+    validateIntegerFlag('--min-threshold', rawMinThreshold, { positive: false });
+  }
+
+  const rawMinVendorN = flagValue(args, '--min-vendor-n');
+  if (rawMinVendorN !== undefined) {
+    validateIntegerFlag('--min-vendor-n', rawMinVendorN, { positive: true });
+  }
+
   if (args.includes('--self-test')) {
     runSelfTest();
   }
