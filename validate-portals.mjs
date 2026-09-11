@@ -224,46 +224,53 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     add(errors, 'search_queries', 'search_queries must be an array when set');
   }
 
-  const companies = config.tracked_companies;
-  if (companies !== undefined && !Array.isArray(companies)) {
-    add(errors, 'tracked_companies', 'tracked_companies must be an array when set');
-  }
-
+  // tracked_companies and job_boards share one entry schema (name / careers_url /
+  // api / provider / parser) and one dedup namespace downstream, so validate them
+  // in a single pass. seenEnabledNames spans both lists: a board and a company
+  // that share a name would still collide in the scanner's reporting.
   const seenEnabledNames = new Map();
-  if (Array.isArray(companies)) {
-    for (const [idx, company] of companies.entries()) {
-      const base = `tracked_companies[${idx}]`;
-      if (!isObject(company)) {
-        add(errors, base, 'company entry must be an object');
+  const validateEntryList = (list, key, noun) => {
+    if (list === undefined) return;
+    if (!Array.isArray(list)) {
+      add(errors, key, `${key} must be an array when set`);
+      return;
+    }
+    for (const [idx, entry] of list.entries()) {
+      const base = `${key}[${idx}]`;
+      if (!isObject(entry)) {
+        add(errors, base, `${noun} entry must be an object`);
         continue;
       }
-      if (company.enabled === false) continue;
+      if (entry.enabled === false) continue;
 
-      if (typeof company.name !== 'string' || company.name.trim() === '') {
-        add(errors, `${base}.name`, 'enabled company must have a non-empty string name');
+      if (typeof entry.name !== 'string' || entry.name.trim() === '') {
+        add(errors, `${base}.name`, `enabled ${noun} must have a non-empty string name`);
       } else {
-        const normalized = normalizeName(company.name);
+        const normalized = normalizeName(entry.name);
         if (seenEnabledNames.has(normalized)) {
-          add(warnings, `${base}.name`, `duplicate enabled company name also seen at ${seenEnabledNames.get(normalized)}`);
+          add(warnings, `${base}.name`, `duplicate enabled ${noun} name also seen at ${seenEnabledNames.get(normalized)}`);
         } else {
           seenEnabledNames.set(normalized, `${base}.name`);
         }
       }
 
-      validateUrl(company.careers_url, `${base}.careers_url`, errors);
-      validateUrl(company.api, `${base}.api`, errors);
+      validateUrl(entry.careers_url, `${base}.careers_url`, errors);
+      validateUrl(entry.api, `${base}.api`, errors);
 
-      if (company.provider !== undefined) {
-        if (typeof company.provider !== 'string' || company.provider.trim() === '') {
+      if (entry.provider !== undefined) {
+        if (typeof entry.provider !== 'string' || entry.provider.trim() === '') {
           add(errors, `${base}.provider`, 'provider must be a non-empty string when set');
-        } else if (!providerIds.has(company.provider)) {
-          add(errors, `${base}.provider`, `unknown provider "${company.provider}"`);
+        } else if (!providerIds.has(entry.provider)) {
+          add(errors, `${base}.provider`, `unknown provider "${entry.provider}"`);
         }
       }
 
-      validateParser(company.parser, `${base}.parser`, errors);
+      validateParser(entry.parser, `${base}.parser`, errors);
     }
-  }
+  };
+
+  validateEntryList(config.tracked_companies, 'tracked_companies', 'company');
+  validateEntryList(config.job_boards, 'job_boards', 'job board');
 
   return { errors, warnings };
 }

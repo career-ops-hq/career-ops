@@ -48,8 +48,9 @@ import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { LIVENESS_CONTEXT_OPTIONS, rejectPrivateOrInvalid } from './liveness-browser.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
-import { resolveAtsApi } from './liveness-api.mjs';
+import { resolveAtsApi, JD_TEXT_API_ATS } from './liveness-api.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
+import { isWorkModelOnly } from './providers/greenhouse.mjs';
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -258,6 +259,325 @@ async function fetchWorkdayJd(apiUrl, postingUrl, textCap, timeoutMs) {
 }
 
 /**
+ * Shape one Ashby board entry into a jd-mode result. Pure, so the field
+ * mapping is unit-testable without a network round trip.
+ *
+ * Ashby's public API is ORG-level (the whole board), not per-job, so the job
+ * is selected here by a case-insensitive `id` compare — mirroring
+ * classifyAshbyBoard's match logic without importing it, since that function
+ * returns a liveness verdict, not a job record.
+ *
+ * `descriptionPlain` is already plain text, so it needs no jdHtmlToText pass.
+ * The metadata header carries what the rendered page shows and the description
+ * does not, same rationale as normalizeWorkdayJob.
+ *
+ * @param {any} json - parsed board response body
+ * @param {string} jobId - the {jobId} path segment from the posting URL
+ * @param {string} postingUrl
+ * @param {number} [textCap]
+ */
+export function normalizeAshbyJob(json, jobId, postingUrl, textCap = JD_TEXT_CAP) {
+  const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
+  const target = String(jobId ?? '').toLowerCase();
+  const job = jobs.find((j) => typeof j?.id === 'string' && j.id.toLowerCase() === target);
+  if (!job) return null;
+
+  const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
+  const body = str(job.descriptionPlain);
+  if (!body) return null;
+
+  const meta = [];
+  if (str(job.location)) meta.push(`Location: ${str(job.location)}`);
+  if (Array.isArray(job.secondaryLocations)) {
+    const extra = job.secondaryLocations.map((l) => str(l?.location)).filter(Boolean);
+    if (extra.length) meta.push(`Additional locations: ${extra.join(' | ')}`);
+  }
+  if (str(job.employmentType)) meta.push(`Type: ${str(job.employmentType)}`);
+  // Remote work model, same precedence providers/ashby.mjs:160 settled on:
+  // `workplaceType` wins whenever present and `isRemote` is only the fallback.
+  // The two disagree constantly — 52 of 60 sampled ramp postings carry
+  // `isRemote: true` beside `workplaceType: "Hybrid"` — so trusting isRemote
+  // alone labels office-anchored roles Remote. The fallback still earns its
+  // place: `workplaceType` is absent on 41 of 60 sampled openai postings.
+  const workplaceType = str(job.workplaceType);
+  if (workplaceType) meta.push(`Work model: ${workplaceType}`);
+  else if (job.isRemote === true) meta.push('Work model: Remote');
+  if (job.isListed === false) meta.push('Not currently listed (isListed: false)');
+
+  return {
+    url: postingUrl,
+    title: compactText(str(job.title), 300),
+    text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
+  };
+}
+
+/**
+ * Fetch + shape one Ashby posting from its org's job-board API. Returns null
+ * for ANY inconclusive outcome (blocked host, non-200, unparseable body, job
+ * not found on the board, timeout) so the caller falls through to the browser
+ * path, same contract as fetchWorkdayJd.
+ *
+ * Ashby's public API is ORG-level (the whole board), not per-job — this fetches
+ * the board once and picks out `jobId`, mirroring classifyAshbyBoard's match
+ * logic (case-insensitive `id` compare) without importing it, since that
+ * function returns a liveness verdict, not a job record.
+ *
+ * @param {string} apiUrl - the org board URL (`resolveAtsApi(url).apiUrl`)
+ * @param {string} jobId - the {jobId} path segment from the original URL
+ * @param {string} postingUrl
+ * @param {number} textCap
+ * @param {number} timeoutMs
+ */
+async function fetchAshbyJd(apiUrl, jobId, postingUrl, textCap, timeoutMs) {
+  if (rejectPrivateOrInvalid(apiUrl)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(apiUrl, {
+      headers: { accept: 'application/json', 'user-agent': DEFAULT_USER_AGENT },
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return normalizeAshbyJob(json, jobId, postingUrl, textCap);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Shape one Greenhouse per-job payload into a jd-mode result. Pure, same
+ * contract as normalizeWorkdayJob/normalizeAshbyJob.
+ *
+ * `content` is HTML (and HTML-escaped at that), so it goes through
+ * jdHtmlToText exactly like Workday's `jobDescription`. `requisition_id` is
+ * carried for the tracker's same-title disambiguation rule.
+ *
+ * `location.name` is the PRIMARY location field and `offices[]` is enrichment
+ * — the same precedence providers/greenhouse.mjs:196 applies, reusing its
+ * exported isWorkModelOnly so the two cannot drift. Some boards put the work
+ * model ("Hybrid", "Distributed") in `location.name` and keep the actual city
+ * only in `offices[]`; for exactly those the two are joined, and everywhere
+ * else `location.name` stands alone rather than being shadowed by a
+ * near-duplicate office entry (a live figma posting carries
+ * `location.name: "Berlin, Germany"` beside `offices[0].name: "Berlin, DE "`).
+ * Reading `offices[]` alone — as this did before — dropped the `Location:`
+ * line entirely for any job whose offices array is empty, which is 7 of 20
+ * sampled gitlab postings.
+ *
+ * The provider pays a separate /offices request for this because the boards
+ * LIST endpoint omits offices; the per-job endpoint here returns them inline,
+ * so the enrichment is free and can also serve as the fallback when a board
+ * ships no `location.name` at all.
+ *
+ * @param {any} json - parsed boards-api response body
+ * @param {string} postingUrl
+ * @param {number} [textCap]
+ */
+export function normalizeGreenhouseJob(json, postingUrl, textCap = JD_TEXT_CAP) {
+  const body = jdHtmlToText(json?.content);
+  if (!body) return null;
+
+  const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
+  const meta = [];
+  const offices = Array.isArray(json?.offices) ? json.offices.map((o) => str(o?.name)).filter(Boolean) : [];
+  let location = str(json?.location?.name);
+  if (offices.length && (!location || isWorkModelOnly(location))) {
+    location = [location, ...offices].filter(Boolean).join(' · ');
+  }
+  if (location) meta.push(`Location: ${location}`);
+  if (str(json?.requisition_id)) meta.push(`Req ID: ${str(json.requisition_id)}`);
+
+  return {
+    url: postingUrl,
+    title: compactText(str(json?.title), 300),
+    text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
+  };
+}
+
+/**
+ * Fetch + shape one Greenhouse posting from its per-job boards-api endpoint.
+ * Same failure contract as fetchWorkdayJd/fetchAshbyJd.
+ *
+ * `content=true` is required — without it the endpoint omits the JD body
+ * entirely (same query param providers/greenhouse.mjs uses for its list scan).
+ * `content` comes back as HTML, so it goes through jdHtmlToText like Workday's
+ * `jobDescription`.
+ *
+ * @param {string} apiUrl - `resolveAtsApi(url).apiUrl` (no query string)
+ * @param {string} postingUrl
+ * @param {number} textCap
+ * @param {number} timeoutMs
+ */
+async function fetchGreenhouseJd(apiUrl, postingUrl, textCap, timeoutMs) {
+  const withContent = `${apiUrl}?content=true`;
+  if (rejectPrivateOrInvalid(withContent)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(withContent, {
+      headers: { accept: 'application/json', 'user-agent': DEFAULT_USER_AGENT },
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return normalizeGreenhouseJob(json, postingUrl, textCap);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Shape one Lever posting into a jd-mode result. Pure, same contract as the
+ * other normalizers.
+ *
+ * `descriptionPlain` is already plain text but is only the first slice of the
+ * JD. `lists` carries the labeled sections ("Requirements", "Nice to have")
+ * as separate HTML blocks, and `additionalPlain` the trailing "Life at …" /
+ * benefits / comp copy — both appended in the order the rendered page shows
+ * them, or the JD loses its requirements and its comp entirely. The share is
+ * not marginal: on a sampled gopuff posting `descriptionPlain` is 760 chars
+ * against 938 in `additionalPlain`, and `additionalPlain` is never contained
+ * in `descriptionPlain` (checked over 10 postings on two boards). Do NOT also
+ * append `openingPlain` / `descriptionBodyPlain`: `descriptionPlain` already
+ * equals their concatenation, so adding them duplicates the description.
+ *
+ * Order is the contract, since compactText truncates the TAIL — a lowered
+ * `--max-chars` has to drop boilerplate, not requirements.
+ *
+ * There is no closed-state check. The public v0 endpoint 404s a closed posting
+ * (liveness-api.mjs:91) and emits no `state` field at all on a live one
+ * (verified over 10 postings on two boards), so the fetcher's non-OK guard is
+ * the whole of it.
+ *
+ * @param {any} json - parsed postings-api response body
+ * @param {string} postingUrl
+ * @param {number} [textCap]
+ */
+export function normalizeLeverJob(json, postingUrl, textCap = JD_TEXT_CAP) {
+  if (!json || typeof json !== 'object') return null;
+
+  const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
+  const lists = Array.isArray(json.lists)
+    ? json.lists
+        .map((l) => {
+          const heading = str(l?.text);
+          const content = jdHtmlToText(l?.content);
+          return content ? `${heading ? `${heading}\n` : ''}${content}` : '';
+        })
+        .filter(Boolean)
+        .join('\n\n')
+    : '';
+  const body = [str(json.descriptionPlain), lists, str(json.additionalPlain)].filter(Boolean).join('\n\n');
+  if (!body) return null;
+
+  const meta = [];
+  if (str(json?.categories?.location)) meta.push(`Location: ${str(json.categories.location)}`);
+  if (str(json?.categories?.team)) meta.push(`Team: ${str(json.categories.team)}`);
+
+  return {
+    url: postingUrl,
+    title: compactText(str(json.text), 300),
+    text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
+  };
+}
+
+/**
+ * Fetch + shape one Lever posting from its per-job postings endpoint. Same
+ * failure contract as fetchWorkdayJd/fetchAshbyJd/fetchGreenhouseJd.
+ *
+ * `descriptionPlain` is already plain text (no HTML stripping needed, unlike
+ * Greenhouse/Workday). `lists` carries the JD's labeled sections (e.g.
+ * "Requirements", "Nice to have") as separate HTML blocks — appended after
+ * the main description the same way the rendered page shows them.
+ *
+ * @param {string} apiUrl - `resolveAtsApi(url).apiUrl`
+ * @param {string} postingUrl
+ * @param {number} textCap
+ * @param {number} timeoutMs
+ */
+async function fetchLeverJd(apiUrl, postingUrl, textCap, timeoutMs) {
+  if (rejectPrivateOrInvalid(apiUrl)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(apiUrl, {
+      headers: { accept: 'application/json', 'user-agent': DEFAULT_USER_AGENT },
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return normalizeLeverJob(json, postingUrl, textCap);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * ats id → fetcher. THE routing table `fetchJdViaKnownApi` dispatches through,
+ * exported so the owned test can assert its key set IS `JD_TEXT_API_ATS`.
+ *
+ * A `switch` could not carry that guarantee: deleting `case 'lever'` leaves a
+ * test that only re-derives ids from `resolveAtsApi` green, because such a
+ * test never touches the dispatcher. A map's keys ARE the dispatcher, so the
+ * same deletion reddens it.
+ *
+ * Every entry takes the same `(resolved, url, textCap, timeoutMs)` shape so
+ * dispatch stays a lookup; Ashby's extra `parts.jobId` argument is unpacked
+ * inside its own entry rather than widening the shared signature.
+ */
+export const JD_FETCHERS = {
+  workday: (resolved, url, textCap, timeoutMs) =>
+    fetchWorkdayJd(resolved.apiUrl, url, textCap, timeoutMs),
+  ashby: (resolved, url, textCap, timeoutMs) =>
+    fetchAshbyJd(resolved.apiUrl, resolved.parts.jobId, url, textCap, timeoutMs),
+  greenhouse: (resolved, url, textCap, timeoutMs) =>
+    fetchGreenhouseJd(resolved.apiUrl, url, textCap, timeoutMs),
+  lever: (resolved, url, textCap, timeoutMs) =>
+    fetchLeverJd(resolved.apiUrl, url, textCap, timeoutMs),
+};
+
+/**
+ * Try every known JD-text-capable ATS API for one posting URL before anyone
+ * reaches for a browser. This is the single dispatch point both this script's
+ * own CLI (jd mode) and `fetch-jd.mjs` (the bash-callable front door) call —
+ * one copy of the routing table, so the interactive and headless paths cannot
+ * drift on which ATS is API-fetchable.
+ *
+ * @param {string} url
+ * @param {number} [textCap]
+ * @param {number} [timeoutMs]
+ * @returns {Promise<{url: string, title: string, text: string, ats: string}|null>}
+ *   null = not a JD_TEXT_API_ATS host, or the fetch/parse was inconclusive —
+ *   caller should fall through to a browser-backed read.
+ */
+export async function fetchJdViaKnownApi(url, textCap = JD_TEXT_CAP, timeoutMs = WORKDAY_TIMEOUT_MS) {
+  const resolved = resolveAtsApi(url);
+  if (!resolved || !JD_TEXT_API_ATS.has(resolved.ats)) return null;
+  const fetcher = JD_FETCHERS[resolved.ats];
+  if (!fetcher) return null;
+
+  // `resolveAtsApi` carries a per-ATS timeout for the APIs that need one
+  // (Ashby: 20 s, liveness-api.mjs:113); without it a slow Ashby board that
+  // liveness waits for falls through here on the generic 15 s both callers
+  // pass. Same precedence liveness-api.mjs:357 applies to the same field —
+  // the resolved value wins, the argument is the fallback for every ATS that
+  // declares none.
+  const budgetMs = resolved.timeoutMs || timeoutMs;
+  const result = await fetcher(resolved, url, textCap, budgetMs);
+  return result ? { ...result, ats: resolved.ats } : null;
+}
+
+/**
  * Write a jd-mode result to stdout, or fail with `empty_text` when the
  * extraction came back empty enough to be useless.
  *
@@ -444,17 +764,17 @@ async function main() {
     process.exit(1);
   }
 
-  // Workday first: its JD lives behind a client-side render the DOM read can't
-  // reach, and the CXS endpoint answers with the full body and no browser at
-  // all. Inconclusive -> fall through to Playwright, unchanged.
+  // Known-ATS API first: Workday, Ashby, Greenhouse, and Lever all ship the
+  // full JD body in a public JSON endpoint (see fetchJdViaKnownApi), so a
+  // browser is never needed for those hosts. Workday additionally hydrates its
+  // JD into a virtualized DOM the readDom() below cannot see at all, so this
+  // isn't just an optimization for it — it's the only path that works.
+  // Inconclusive -> fall through to Playwright, unchanged.
   if (mode === 'jd') {
-    const cxs = workdayCxsUrl(url);
-    if (cxs) {
-      const workdayResult = await fetchWorkdayJd(cxs, url, maxChars, timeout);
-      if (workdayResult) {
-        emitJd(workdayResult, maxChars);
-        return;
-      }
+    const apiResult = await fetchJdViaKnownApi(url, maxChars, timeout);
+    if (apiResult) {
+      emitJd(apiResult, maxChars);
+      return;
     }
   }
 

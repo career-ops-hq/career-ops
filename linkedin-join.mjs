@@ -496,7 +496,7 @@ export function parseKnownContacts(content) {
  */
 export function secondDegreeSearchUrl(company) {
   const q = encodeURIComponent(String(company || '').trim());
-  return `https://www.linkedin.com/search/people/?keywords=${q}&network=%5B%22S%22%5D`;
+  return `https://www.linkedin.com/search/results/people/?keywords=${q}&network=%5B%22S%22%5D`;
 }
 
 // --- Join ------------------------------------------------------------------
@@ -790,7 +790,7 @@ function selfTest() {
   check('2nd-degree url encodes the company', url.includes('keywords=Acme%20%26%20Co'));
   check('2nd-degree url filters to 2nd degree', url.includes('network=%5B%22S%22%5D'));
   check('2nd-degree url is linkedin people search',
-    url.startsWith('https://www.linkedin.com/search/people/?'));
+    url.startsWith('https://www.linkedin.com/search/results/people/?'));
 
   const placeholders = parseTrackerTargets([
     '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',

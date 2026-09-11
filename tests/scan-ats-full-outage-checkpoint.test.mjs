@@ -206,3 +206,52 @@ function sweep(dir, dnsCode, extraArgs = []) {
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+// --- retired boards are reported separately, not as scanned companies ---
+{
+  const dir = makeSandbox();
+  try {
+    writeFileSync(
+      join(dir, 'data', 'dead-boards.tsv'),
+      `ats\tboard\tmisses\tlast_checked\ngreenhouse\thttps://job-boards.greenhouse.io/sandbox-co-0\t3\t${new Date().toISOString()}\n`,
+      'utf-8',
+    );
+    const out = sweep(dir, 'ENOTFOUND');
+    if (out === null) {
+      fail(`retired-board count sweep did not complete${formatRunFailure()}`);
+    } else {
+      const result = JSON.parse(out);
+      if (result.companiesScanned === COMPANIES - 1 && result.retiredBoardsSkipped === 1) {
+        pass(`retired boards are excluded from companiesScanned (${result.companiesScanned}) and reported separately`);
+      } else {
+        fail(`retired-board counts are wrong: companiesScanned=${result.companiesScanned}, retiredBoardsSkipped=${result.retiredBoardsSkipped}`);
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// --- dead-board cache failures do not discard the sweep ---
+{
+  const dir = makeSandbox();
+  try {
+    // Force saveDeadBoards() to fail at its temporary-file write. The scanner
+    // should keep its matches and summary even when this optional cache cannot
+    // be persisted.
+    mkdirSync(join(dir, 'data', 'dead-boards.tsv.tmp'));
+    const out = sweep(dir, 'ENOTFOUND');
+    if (out === null) {
+      fail(`dead-board cache failure aborted the sweep${formatRunFailure()}`);
+    } else if (
+      JSON.parse(out).companiesScanned === COMPANIES
+      && !existsSync(join(dir, 'data', 'dead-boards.tsv'))
+    ) {
+      pass('dead-board cache failure is best-effort and does not abort the sweep');
+    } else {
+      fail(`dead-board cache failure changed the scan count: ${JSON.parse(out).companiesScanned}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}

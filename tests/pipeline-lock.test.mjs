@@ -22,12 +22,17 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   acquirePipelineLock, LockTimeoutError, OWNERLESS_GRACE_MS,
   lockRecoveryVerdict, RECOVER_STALE, RECOVER_VANISHED, RECOVER_LIVE,
+  createLockWaitPolicy,
 } from '../pipeline-lock.mjs';
+import { collectMjsFiles } from '../lib/mjs-files.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const SELF = fileURLToPath(import.meta.url);
+const REPO_ROOT = dirname(dirname(SELF));
 
 // Occupies `lockDir` continuously while handing it to a fresh owner every
 // `everyMs`, the way a queue of short writers does. The swap runs inside one
@@ -596,4 +601,125 @@ test('release(): a holder whose lock was reclaimed by another process must not d
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// The wait ceiling belongs to the policy, not to each caller (#3895)
+// ---------------------------------------------------------------------------
+//
+// createLockWaitPolicy clamps the jittered retry against a ceiling, but the
+// ceiling itself used to arrive from outside: three lock modules each wrote
+// `hardDeadline: Date.now() + timeoutMs * 10` at their own call site. Copies of
+// an invariant stay correct only until one is edited, and NOTHING FAILED when
+// they diverged — a wrong ceiling changes retry timing, which no test asserted
+// and no user reports. These are the assertions that make that divergence
+// detectable, so moving the clamp inside the policy is a fix rather than a
+// relocation of a silent invariant.
+
+test('createLockWaitPolicy: the wait ceiling is the policy\'s own, so a caller need not supply one (#3895)', () => {
+  const root = fixtureRoot();
+  try {
+    const lockDir = join(root, 'data', 'pipeline.md.lock');
+    // retryMs far above the ceiling, so the jittered retry never wins the
+    // Math.min and backoffMs() reports the remaining ceiling itself.
+    const policy = createLockWaitPolicy(lockDir, {
+      timeoutMs: 200, retryMs: 1_000_000, deadline: Date.now() + 200,
+    });
+
+    const remaining = policy.backoffMs();
+    assert.ok(
+      Number.isFinite(remaining),
+      `backoffMs() returned ${remaining}: with no ceiling the clamp is Math.min(x, NaN) === NaN, `
+      + 'and setTimeout(NaN) fires immediately — the retry loop spins hot instead of waiting',
+    );
+    // 2000ms is the 10x multiple of timeoutMs each of the three lock modules
+    // used to write out for itself. A literal on purpose: a test that reads the
+    // constant back out of the module cannot notice that constant moving.
+    assert.ok(
+      Math.abs(remaining - 2_000) <= 100,
+      `default ceiling is ~${remaining}ms away, expected ~2000ms (10 x timeoutMs)`,
+    );
+    assert.equal(policy.ceilingReached(), false, 'the ceiling cannot already be reached at t=0');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('createLockWaitPolicy: the policy-supplied ceiling actually expires, so waiting stays bounded (#3895)', async () => {
+  const root = fixtureRoot();
+  try {
+    const lockDir = join(root, 'data', 'pipeline.md.lock');
+    const policy = createLockWaitPolicy(lockDir, {
+      timeoutMs: 5, retryMs: 1, deadline: Date.now() + 5,
+    });
+
+    await sleep(120); // well past 10 x 5ms, so this is not a race against the clock
+
+    assert.equal(
+      policy.ceilingReached(), true,
+      'ceilingReached() never fires without a ceiling (Date.now() > undefined is always false), '
+      + 'so a caller waits unboundedly on a lock that never frees',
+    );
+    assert.equal(policy.backoffMs(), 0, 'past the ceiling there is nothing left to sleep');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('createLockWaitPolicy: a hardDeadline that is not a number is refused, not silently turned into NaN (#3895)', () => {
+  const root = fixtureRoot();
+  try {
+    const lockDir = join(root, 'data', 'pipeline.md.lock');
+    const timing = { timeoutMs: 100, retryMs: 10, deadline: Date.now() + 100 };
+
+    for (const bad of ['in a bit', NaN, {}]) {
+      assert.throws(
+        () => createLockWaitPolicy(lockDir, { ...timing, hardDeadline: bad }),
+        /hardDeadline/,
+        `hardDeadline: ${String(bad)} must be refused — as a ceiling it silently becomes NaN, `
+        + 'and a NaN backoff is a hot spin rather than an error anyone can see',
+      );
+    }
+
+    // null is "nothing supplied", the same as omitting the key, so it takes the
+    // policy default rather than throwing. Pinned because `??` is what draws
+    // that line, and a later switch to `||` or a truthiness test would move it.
+    const viaNull = createLockWaitPolicy(lockDir, { ...timing, hardDeadline: null });
+    assert.ok(Number.isFinite(viaNull.backoffMs()), 'a null ceiling means "use the default", not NaN');
+
+    // Infinity is a legitimate, explicit "no ceiling": acquirePipelineLock
+    // passes it for maxWaitMs: Infinity. The check must not swallow it.
+    const unbounded = createLockWaitPolicy(lockDir, { ...timing, hardDeadline: Infinity });
+    assert.ok(unbounded.backoffMs() > 0, 'an unbounded ceiling still yields a real jittered retry');
+    assert.equal(unbounded.ceilingReached(), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('no lock module re-derives the wait ceiling — the policy holds the only copy (#3895)', () => {
+  const policyModule = join(REPO_ROOT, 'pipeline-lock.mjs');
+  const sources = collectMjsFiles(REPO_ROOT).filter((f) => f !== SELF && f !== policyModule);
+
+  // A guard that cannot look must never pass: an empty or tiny scan means the
+  // walk failed, not that the repository is clean.
+  assert.ok(
+    sources.length > 100,
+    `only ${sources.length} .mjs files scanned — this guard could not inspect the tree`,
+  );
+
+  // Comments are stripped first: naming the parameter while explaining why it
+  // is NOT passed is exactly what the three call sites now do, and a guard that
+  // fires on prose gets silenced rather than obeyed.
+  const withoutComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+  const offenders = sources
+    .filter((f) => withoutComments(readFileSync(f, 'utf-8')).includes('hardDeadline'))
+    .map((f) => f.slice(REPO_ROOT.length + 1).replace(/\\/g, '/'));
+
+  assert.deepEqual(
+    offenders, [],
+    'these modules name hardDeadline themselves, which means they are bounding the wait '
+    + 'instead of letting createLockWaitPolicy do it — the duplicated invariant #3895 removed. '
+    + 'A ceiling belongs to the policy; a copy of it stays correct only until someone edits one side',
+  );
 });

@@ -155,7 +155,7 @@ test('people already in the phonebook are marked, not re-suggested', () => {
 
 test('every target carries a second-degree link the user opens themselves (#2679 criterion 3)', () => {
   const url = secondDegreeSearchUrl('Acme & Co');
-  assert.ok(url.startsWith('https://www.linkedin.com/search/people/?'));
+  assert.ok(url.startsWith('https://www.linkedin.com/search/results/people/?'));
   assert.ok(url.includes('keywords=Acme%20%26%20Co'));
   assert.ok(url.includes('network=%5B%22S%22%5D'), 'must filter to 2nd degree');
 });

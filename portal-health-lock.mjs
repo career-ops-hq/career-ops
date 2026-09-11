@@ -121,10 +121,12 @@ export async function acquirePortalHealthLock(filePath, options = {}) {
   // from the definition: waiters woke in lockstep and re-raced, and a caller
   // waiting on a healthy lock being handed round briskly was killed anyway.
   //
-  // maxWaitMs has no separate knob here, so the ceiling is the same multiple
-  // of timeoutMs the definition defaults to.
+  // maxWaitMs has no separate knob here, so no hardDeadline is passed and the
+  // policy applies its own ceiling. Writing one out here would put a fourth
+  // copy of that bound in the tree, and a copy that drifts changes retry timing
+  // silently — nothing fails, so nothing reports it (#3895).
   const { backoffMs, holderStillWedged, noteWaiting, ceilingReached } = createLockWaitPolicy(lockDir, {
-    timeoutMs, retryMs, deadline, hardDeadline: Date.now() + timeoutMs * 10,
+    timeoutMs, retryMs, deadline,
   });
 
   // A fresh install may not have data/ yet, and appendPortalHealth() creates

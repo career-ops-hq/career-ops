@@ -179,27 +179,32 @@ export default {
 const COUNTRY_NAMES = { US: 'United States', CA: 'Canada' };
 
 // From flattened JSON-LD nodes, build "Locality, Region, Country" out of the
-// first JobPosting's first jobLocation address. Partial addresses are kept:
-// the country alone is already enough for location_filter to decide.
+// first jobLocation entry (across all JobPosting nodes) that yields any usable
+// parts. Some tenants emit an all-UNAVAILABLE entry ahead of the real address,
+// so reading only the first entry would return no location even though a
+// later one has one. Partial addresses are kept: the country alone is already
+// enough for location_filter to decide.
 function pickLocation(nodes) {
   for (const node of nodes) {
     if (!node || typeof node !== 'object' || !node.jobLocation) continue;
-    const place = Array.isArray(node.jobLocation) ? node.jobLocation[0] : node.jobLocation;
-    const addr = place?.address;
-    if (!addr || typeof addr !== 'object') continue;
-    const clean = v => {
-      const s = String(v ?? '').trim();
-      // iCIMS writes the literal string UNAVAILABLE into fields it has no value
-      // for, so an unchecked join yields "UNAVAILABLE, MD, United States".
-      return !s || /^unavailable$/i.test(s) ? '' : s;
-    };
-    const country = clean(addr.addressCountry);
-    const parts = [
-      clean(addr.addressLocality),
-      clean(addr.addressRegion),
-      COUNTRY_NAMES[country.toUpperCase()] || country,
-    ].filter(Boolean);
-    if (parts.length) return parts.join(', ');
+    const places = Array.isArray(node.jobLocation) ? node.jobLocation : [node.jobLocation];
+    for (const place of places) {
+      const addr = place?.address;
+      if (!addr || typeof addr !== 'object') continue;
+      const clean = v => {
+        const s = String(v ?? '').trim();
+        // iCIMS writes the literal string UNAVAILABLE into fields it has no value
+        // for, so an unchecked join yields "UNAVAILABLE, MD, United States".
+        return !s || /^unavailable$/i.test(s) ? '' : s;
+      };
+      const country = clean(addr.addressCountry);
+      const parts = [
+        clean(addr.addressLocality),
+        clean(addr.addressRegion),
+        COUNTRY_NAMES[country.toUpperCase()] || country,
+      ].filter(Boolean);
+      if (parts.length) return parts.join(', ');
+    }
   }
   return null;
 }

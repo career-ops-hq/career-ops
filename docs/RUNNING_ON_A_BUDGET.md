@@ -257,6 +257,37 @@ Running 32B or 70B models locally requires substantial system resources:
 
 > 💡 **Budget Tip**: For most users, running **DeepSeek V3** or **Qwen 2.5 Coder 72B** via a cheap hosted API (like DeepSeek directly or OpenRouter) is far more efficient and cost-effective than investing in local hardware, costing only a few cents for dozens of evaluations.
 
+### Ollama + OpenCode Quick-Start (Verified)
+For users who want a completely local setup on Apple Silicon, Ollama can be used with OpenCode without an API key.
+
+The following setup was verified on an Apple Silicon Mac with 16 GB unified memory.
+
+1. Install Ollama and make sure it is running.
+2. Pull the model:
+
+   ```bash
+   ollama pull command-r7b
+   ```
+3. Verify that the model is available:
+   ```bash
+   ollama list
+   ```
+4. Launch OpenCode with the local model:
+
+    ```bash
+    ollama launch opencode --model command-r7b
+    ```
+5. From OpenCode, point the agent at your Career-Ops checkout and run a simple repository task to confirm that the model can interact with the repository.
+
+- **Verified hardware:** Apple M4, 16 GB unified memory
+- **Model:** `command-r7b` (7B parameters)
+- **Inference:** Local through Ollama
+- **API key:** Not required
+- **API cost:** $0
+
+Observed result: OpenCode launched successfully with `command-r7b`. A simple prompt completed in approximately 57 seconds. The model produced a reasonable high-level README summary, but it did not reliably read repository files through OpenCode during testing. For complex repository tasks, larger models may provide better accuracy.
+
+> **Performance and quality note:** Smaller local models can be useful on memory-constrained hardware, but they may be less reliable than larger hosted models for complex Career-Ops evaluations, repository analysis, and resume tailoring. Use this setup when local execution and zero API cost are more important than maximum output quality.
 ---
 
 ## 6. Token-Saving Best Practices
@@ -283,6 +314,15 @@ To prevent unnecessary API costs or hitting rate limits, implement the following
    ```bash
    npm run scan -- --verify
    ```
+
+
+### Cap interactive sessions (~10 roles)
+
+Evaluating many roles in one interactive session degrades the output well before the quota runs out. At 40+ evaluations in a single session, reports started mixing job titles and dates, and CV PDFs came out wrong. Cap an interactive session at about ten role evaluations, then `/clear` or start a fresh session.
+
+The real limit is tokens of accumulated job text, not a hard role count. When descriptions are long, cut the batch roughly in half.
+
+To evaluate more than that in one go, use `batch/batch-runner.sh`. It reuses one worker instead of letting context pile up across interactive turns. Source: [discussion #1089](https://github.com/career-ops-hq/career-ops/discussions/1089).
 
 ---
 

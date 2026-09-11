@@ -246,21 +246,43 @@ export function lockRecoveryVerdict(lockDir, staleMs) {
  * previous fingerprint and a re-armable window.
  *
  * @param {string} lockDir - The lock directory this caller is waiting on.
- * @param {{timeoutMs: number, retryMs: number, deadline: number, hardDeadline: number}} timing
+ * @param {{timeoutMs: number, retryMs: number, deadline: number, hardDeadline?: number}} timing
+ *   `hardDeadline` is OPTIONAL: omit it and the policy applies its own default
+ *   ceiling, DEFAULT_MAX_WAIT_FACTOR x timeoutMs from now. Pass one only when
+ *   the caller has a real knob of its own (acquirePipelineLock's `maxWaitMs`).
  * @returns {{backoffMs: () => number, holderStillWedged: () => boolean}}
  */
 export function createLockWaitPolicy(lockDir, { timeoutMs, retryMs, deadline, hardDeadline }) {
   let perHolderDeadline = deadline;
   let lastFingerprint;
 
+  // The ceiling is the policy's, not each caller's (#3895). Three lock modules
+  // used to write `Date.now() + timeoutMs * 10` at their own call sites, so the
+  // bound the clamp below applies existed in four places. Copies of an
+  // invariant stay correct only until one is edited, and a wrong ceiling fails
+  // silently — it changes retry timing, which nothing asserts and nobody
+  // reports. Deriving it here leaves one copy for them all.
+  const ceiling = hardDeadline ?? Date.now() + timeoutMs * DEFAULT_MAX_WAIT_FACTOR;
+  // A ceiling that is not a number is not a ceiling, and it fails INVISIBLY:
+  // Math.min(x, NaN) is NaN, Math.max(0, NaN) is NaN, and setTimeout(NaN) fires
+  // immediately — so a caller that got this wrong would spin hot through the
+  // retry loop rather than raise anything. Infinity is a deliberate, legible
+  // "no ceiling" (acquirePipelineLock passes it for maxWaitMs: Infinity) and is
+  // kept; NaN and non-numbers are mistakes and are refused where they are made.
+  if (typeof ceiling !== 'number' || Number.isNaN(ceiling)) {
+    throw new TypeError(
+      `createLockWaitPolicy: hardDeadline must be a number or omitted, got ${String(hardDeadline)}`,
+    );
+  }
+
   // Jittered backoff, never sleeping past the ceiling. An uncapped sleep can
-  // cross hardDeadline and let the NEXT mkdir succeed, returning a lock after
+  // cross the ceiling and let the NEXT mkdir succeed, returning a lock after
   // the documented absolute limit — an overshoot of up to 1.5x retryMs. Waking
   // exactly at the ceiling means the check at the top of the loop is what
   // decides, rather than whichever of the two happened to be later.
   const backoffMs = () => Math.max(0, Math.min(
     retryMs * (0.5 + Math.random()),
-    hardDeadline - Date.now(),
+    ceiling - Date.now(),
   ));
 
   // The per-holder deadline, evaluated the SAME way everywhere: an expired
@@ -300,7 +322,7 @@ export function createLockWaitPolicy(lockDir, { timeoutMs, retryMs, deadline, ha
   // this at the top of its loop; the three copies had no ceiling at all before
   // they adopted the progress rule, and adopting it without this would trade a
   // premature timeout for an unbounded wait.
-  const ceilingReached = () => Date.now() > hardDeadline;
+  const ceilingReached = () => Date.now() > ceiling;
 
   return { backoffMs, holderStillWedged, noteWaiting, ceilingReached };
 }

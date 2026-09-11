@@ -986,12 +986,20 @@ function printSummary(result) {
 
 // ── CLI flags + help ────────────────────────────────────────────────
 
-const KNOWN_FLAGS = ['--summary', '--overdue-only', '--applied-days', '--help', '-h'];
+// --json is the DEFAULT output form, not a mode switch: it names what the
+// script already does with no flag at all. It is listed here because callers
+// pass it explicitly — web/src/app/api/followups/route.ts and
+// web/src/app/api/followups/cadence/route.ts both spawn `[script, '--json']`
+// — and validateFlags() rejects any flag not on this list, so omitting it
+// made both routes exit 1 and read as "no follow-ups" (#3196 added the
+// validation without the flag the web already passed).
+const KNOWN_FLAGS = ['--summary', '--json', '--overdue-only', '--applied-days', '--help', '-h'];
 const VALUE_FLAGS = ['--applied-days'];
 
 const USAGE = `Usage:
   node followup-cadence.mjs                    # full JSON analysis to stdout
-  node followup-cadence.mjs --summary          # human-readable dashboard
+  node followup-cadence.mjs --json             # same as above, JSON is the default
+  node followup-cadence.mjs --summary          # human-readable dashboard (wins over --json)
   node followup-cadence.mjs --overdue-only     # only show overdue/urgent entries
   node followup-cadence.mjs --applied-days 10  # override applied_first cadence (days)
   node followup-cadence.mjs --help|-h          # print this usage block and exit`;
@@ -1016,6 +1024,8 @@ if (isMainModule(import.meta.url)) {
 
   const result = analyze();
 
+  // --summary wins when both are given: it is the flag that asks for something
+  // other than the default, so it is the one carrying an intention.
   if (summaryMode) {
     printSummary(result);
   } else {

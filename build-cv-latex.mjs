@@ -8,6 +8,7 @@ import { tmpdir } from 'os';
 import { escapeLatex, sanitizeUrl } from './lib/latex-escape.mjs';
 import { resolveTemplate } from './cv-templates.mjs';
 import { stripEmptySections } from './cv-sections-core.mjs';
+import { hasRequiredFields, hasText, validatePayload } from './lib/cv-payload-schema.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.tex');
@@ -61,7 +62,7 @@ function buildEducation(entries) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
   const blocks = [];
   for (const e of entries) {
-    if (!e) continue;
+    if (!hasRequiredFields(e, 'education', 'tex')) continue;
     let block = `    \\resumeSubheading\n      {${escapeLatex(e.institution)}}{${escapeLatex(e.location)}}\n      {${escapeLatex(e.degree)}}{${escapeLatex(e.dates)}}`;
     if (Array.isArray(e.coursework) && e.coursework.length > 0) {
       const courses = e.coursework.map(c => escapeLatexBullet(c)).join(', ');
@@ -82,7 +83,7 @@ function buildExperience(entries) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
   const blocks = [];
   for (const e of entries) {
-    if (!e) continue;
+    if (!hasRequiredFields(e, 'experience', 'tex')) continue;
     const bullets = Array.isArray(e.bullets) ? e.bullets.map(b => `            \\resumeItem{${escapeLatexBullet(b)}}`).join('\n') : '';
     blocks.push(`    \\resumeSubheading\n      {${escapeLatex(e.company)}}{${escapeLatex(e.dates)}}\n      {${escapeLatex(e.role)}}{${escapeLatex(e.location)}}\n      \\resumeItemListStart\n${bullets}\n      \\resumeItemListEnd`);
   }
@@ -102,7 +103,7 @@ function buildProjects(entries) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
   const blocks = [];
   for (const e of entries) {
-    if (!e) continue;
+    if (!hasRequiredFields(e, 'projects', 'tex')) continue;
     const context = e.context ? ` \\emph{$|$ ${escapeLatex(e.context)}}` : '';
     const url = sanitizeUrl(e.url);
     const nameFormatted = url
@@ -122,7 +123,7 @@ function buildAwards(entries) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
   const blocks = [];
   for (const e of entries) {
-    if (!e) continue;
+    if (!hasRequiredFields(e, 'awards', 'tex')) continue;
     const org = e.org ? ` \\emph{$|$ ${escapeLatex(e.org)}}` : '';
     blocks.push(`    \\resumeProjectHeading\n      {\\textbf{${escapeLatex(e.title)}}${org}}{${escapeLatex(e.year)}}`);
   }
@@ -132,9 +133,13 @@ function buildAwards(entries) {
 function buildSkills(categories) {
   if (!Array.isArray(categories) || categories.length === 0) return '';
   return categories.map(c => {
-    if (!c) return '';
+    if (!hasRequiredFields(c, 'skills', 'tex')) return '';
     const items = Array.isArray(c.items) ? c.items.join(', ') : (c.items || '');
-    return `        \\textbf{${escapeLatex(c.category)}}{: ${escapeLatex(items)}} \\\\`;
+    // category is optional (the spec requires only items), so an entry without
+    // one must not render an empty bold group and a leading ": " — the HTML
+    // builder drops the prefix the same way.
+    const prefix = hasText(c.category) ? `\\textbf{${escapeLatex(c.category)}}{: }` : '';
+    return `        ${prefix}{${escapeLatex(items)}} \\\\`;
   }).filter(Boolean).join('\n');
 }
 
@@ -177,6 +182,15 @@ async function main() {
     console.error(`Failed to parse input JSON: ${err.message}`);
     process.exit(1);
   }
+
+  const { errors, warnings } = validatePayload(payload, 'tex');
+  if (errors.length) {
+    console.error('Invalid CV payload:');
+    for (const message of errors) console.error(`  - ${message}`);
+    console.error(JSON.stringify({ valid: false, errors, warnings }, null, 2));
+    process.exit(1);
+  }
+  for (const message of warnings) console.error(`Warning: ${message}`);
 
   // Honor a selected .tex template variant (cv.template default or --template=<name>),
   // falling back to the base cv-template.tex when no variant exists.
@@ -263,6 +277,7 @@ async function main() {
         return ex.length + pr.length;
       })(),
     },
+    warnings,
     valid: true,
   };
 
@@ -311,6 +326,163 @@ async function runSelfTest() {
       { category: 'Frameworks', items: 'FastAPI, React, PyTorch' },
     ],
   };
+
+  // Guard the payload key contract (#3523). The LaTeX and HTML templates do
+  // NOT share an education schema — this one is {institution, degree, dates,
+  // coursework}, the HTML one is {title, org, year, description} — so a payload
+  // written for the wrong builder must be rejected by name, not rendered as a
+  // \resumeSubheading full of empty braces.
+  const htmlStyleEducation = [{
+    title: 'Bachelor of Science in Computer Science',
+    org: 'Test University',
+    year: '2024',
+    description: 'Coursework: Data Structures.',
+  }];
+  const wrongKeys = validatePayload({ ...sample, education: htmlStyleEducation }, 'tex');
+  if (wrongKeys.errors.length === 0) {
+    console.error('Self-test failed: education entry using the HTML key names was accepted');
+    process.exit(1);
+  }
+  if (!wrongKeys.errors[0].includes('education[0]')
+      || !wrongKeys.errors[0].includes('institution')
+      || !wrongKeys.errors[0].includes('title')) {
+    console.error(`Self-test failed: unhelpful error for wrong education keys: ${wrongKeys.errors[0]}`);
+    process.exit(1);
+  }
+  if (buildEducation(htmlStyleEducation) !== '') {
+    console.error('Self-test failed: buildEducation emitted a block for an entry with no institution/degree');
+    process.exit(1);
+  }
+
+  // The valid sample must stay clean: no errors, no warnings.
+  const clean = validatePayload(sample, 'tex');
+  if (clean.errors.length || clean.warnings.length) {
+    console.error(`Self-test failed: valid sample payload reported ${JSON.stringify(clean)}`);
+    process.exit(1);
+  }
+
+  // A payload root that is not an object must be rejected.
+  for (const badRoot of [[], null, 'x']) {
+    if (validatePayload(badRoot, 'tex').errors.length === 0) {
+      console.error(`Self-test failed: payload root ${JSON.stringify(badRoot)} was accepted`);
+      process.exit(1);
+    }
+  }
+
+  // skills[].items accepts a string or a non-empty array; nothing else renders.
+  for (const items of ['Python, JavaScript', ['FastAPI', 'React']]) {
+    const ok = validatePayload({ ...sample, skills: [{ category: 'L', items }] }, 'tex');
+    if (ok.errors.length) {
+      console.error(`Self-test failed: valid skills items ${JSON.stringify(items)} rejected`);
+      process.exit(1);
+    }
+  }
+  for (const items of [[], ['  '], '', {}, null]) {
+    if (validatePayload({ ...sample, skills: [{ category: 'L', items }] }, 'tex').errors.length === 0) {
+      console.error(`Self-test failed: unrenderable skills items ${JSON.stringify(items)} accepted`);
+      process.exit(1);
+    }
+  }
+  if (buildSkills([{ label: 'Languages', values: ['JS'] }]) !== '') {
+    console.error('Self-test failed: buildSkills emitted markup for an unrenderable entry');
+    process.exit(1);
+  }
+
+  // A mistyped SECTION name must be reported, not silently dropped.
+  const typoSection = validatePayload({ ...sample, educations: sample.education }, 'tex');
+  if (!typoSection.warnings.some(w => w.includes('educations')) || typoSection.errors.length !== 0) {
+    console.error(`Self-test failed: mistyped section name not reported: ${JSON.stringify(typoSection)}`);
+    process.exit(1);
+  }
+  if (validatePayload(sample, 'tex').warnings.length !== 0) {
+    console.error('Self-test failed: valid sample warned about its own root keys');
+    process.exit(1);
+  }
+
+  // One non-text element is enough to break the joined line.
+  if (validatePayload({ ...sample, skills: [{ category: 'L', items: ['JS', {}] }] }, 'tex').errors.length === 0) {
+    console.error('Self-test failed: skills items array with a non-text element was accepted');
+    process.exit(1);
+  }
+
+  // category is optional, and its absence must not leave an empty bold group
+  // and a dangling ": " on the line.
+  const noCategory = buildSkills([{ items: 'Docker, K8s' }]);
+  if (noCategory.includes('textbf{}') || noCategory.includes('{: }')) {
+    console.error(`Self-test failed: category-less skills line renders an empty prefix: ${noCategory}`);
+    process.exit(1);
+  }
+  if (!noCategory.includes('Docker, K8s')) {
+    console.error('Self-test failed: category-less skills line lost its items');
+    process.exit(1);
+  }
+
+  // One key, one warning: a section the .tex template cannot render is both
+  // absent from KNOWN_ROOT_KEYS and listed in UNRENDERED_SECTIONS, and used to
+  // collect a message from each path.
+  const certWarnings = validatePayload({ ...sample, certifications: [{ title: 'CKA' }] }, 'tex').warnings
+    .filter(w => w.startsWith('certifications:'));
+  if (certWarnings.length !== 1) {
+    console.error(`Self-test failed: expected exactly 1 certifications warning, got ${certWarnings.length}: ${JSON.stringify(certWarnings)}`);
+    process.exit(1);
+  }
+  // The surviving one must be the specific message, not the typo-style guess.
+  if (!certWarnings[0].includes('has no certifications section')) {
+    console.error(`Self-test failed: the wrong certifications warning survived: ${certWarnings[0]}`);
+    process.exit(1);
+  }
+  // An object-valued unknown key counts as populated here too.
+  if (!validatePayload({ ...sample, educations: { institution: 'U' } }, 'tex').warnings.some(w => w.includes('educations'))) {
+    console.error('Self-test failed: object-valued unknown root key was not reported');
+    process.exit(1);
+  }
+
+  // An unsupported section given a scalar value must warn too: the .tex
+  // template drops summary whatever shape it arrives in.
+  for (const scalar of [2026, 0, true, false, 'hi']) {
+    if (!validatePayload({ ...sample, summary: scalar }, 'tex').warnings.some(w => w.startsWith('summary:'))) {
+      console.error(`Self-test failed: scalar unsupported section ${JSON.stringify(scalar)} was not reported`);
+      process.exit(1);
+    }
+  }
+  for (const empty of [null, undefined, '', '   ']) {
+    if (validatePayload({ ...sample, summary: empty }, 'tex').warnings.some(w => w.startsWith('summary:'))) {
+      console.error(`Self-test failed: empty unsupported section ${JSON.stringify(empty)} warned`);
+      process.exit(1);
+    }
+  }
+
+  // Every list section carries the guard, not just education.
+  for (const [section, bad] of [
+    ['education', [{ school: 'Test University', qualification: 'BSc' }]],
+    ['experience', [{ employer: 'Acme', title: 'Engineer' }]],
+    ['projects', [{ project_name: 'Thing' }]],
+    ['awards', [{ award: 'Gold Medal' }]],
+  ]) {
+    if (validatePayload({ ...sample, [section]: bad }, 'tex').errors.length === 0) {
+      console.error(`Self-test failed: ${section} entry with wrong key names was accepted`);
+      process.exit(1);
+    }
+  }
+
+  // escapeLatex() returns '' for anything that is not a string, so a
+  // non-string required field must fail like an absent one.
+  for (const badInstitution of [{}, [], 0, true, null]) {
+    const bad = [{ institution: badInstitution, degree: 'BSc' }];
+    if (validatePayload({ ...sample, education: bad }, 'tex').errors.length === 0) {
+      console.error(`Self-test failed: education institution ${JSON.stringify(badInstitution)} was accepted as text`);
+      process.exit(1);
+    }
+  }
+
+  // A section the .tex template cannot render must warn rather than vanish:
+  // certifications exist in the HTML template only.
+  const certWarn = validatePayload({ ...sample, certifications: [{ title: 'CKA' }] }, 'tex');
+  if (certWarn.errors.length !== 0
+      || !certWarn.warnings.some(w => w.includes('certifications'))) {
+    console.error(`Self-test failed: certifications passed to the tex builder did not warn: ${JSON.stringify(certWarn)}`);
+    process.exit(1);
+  }
 
   const testOutput = join(tmpdir(), 'build-cv-latex-test.tex');
   const raw = JSON.stringify(sample, null, 2);

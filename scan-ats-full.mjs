@@ -14,6 +14,12 @@
  * list do not have to double as the filter for every public board. Absent,
  * `title_filter` is used exactly as before.
  *
+ * Optional `title_filter_overrides` broadens the title net further still,
+ * but scoped to specific companies (matched by slug) rather than the whole
+ * sweep — e.g. letting known university/college employers surface general
+ * campus-admin postings without loosening the net for everyone else. See
+ * scan.mjs's buildTitleFilterOverrides()/buildTitleFilterWithOverrides().
+ *
  * Company directories come from the public job-board-aggregator dataset
  * (github.com/Feashliaa/job-board-aggregator), cached in data/cache/ for 24h.
  *
@@ -48,12 +54,14 @@ import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
 import workday from './providers/workday.mjs';
 import icims from './providers/icims.mjs';
-import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays, PORTALS_PATH, PIPELINE_PATH } from './scan.mjs';
+import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays, PORTALS_PATH, PIPELINE_PATH } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { boardKey, loadDeadBoards, recordBoardResult, saveDeadBoards, shouldSkipDeadBoard } from './dead-boards.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
@@ -103,6 +111,7 @@ const RESOLVER_FAILURE_LIMIT = 50;
 // mode --resume exists to prevent.
 const CHECKPOINT_PATH = path.join(DATA_ROOT, 'data/cache/ats-full-checkpoint.json');
 const CHECKPOINT_EVERY = 500;
+const DEAD_BOARDS_PATH = path.join(DATA_ROOT, 'data/dead-boards.tsv');
 
 export function loadCheckpoint(file = CHECKPOINT_PATH) {
   if (!existsSync(file)) return null;
@@ -152,6 +161,19 @@ function writeCheckpoint(cp) {
     return true;
   } catch (err) {
     console.error(`\n⚠ checkpoint write failed (${err.message}) — sweep continues, --resume unavailable`);
+    return false;
+  }
+}
+
+// Dead-board memory is useful resumability metadata, but a cache write must
+// never discard the matches from a long-running sweep. Keep it best-effort,
+// just like the main checkpoint write above.
+function saveDeadBoardsBestEffort(rows) {
+  try {
+    saveDeadBoards(DEAD_BOARDS_PATH, rows);
+    return true;
+  } catch (err) {
+    console.error(`\n⚠ dead-board cache write failed (${err.message}) — sweep continues`);
     return false;
   }
 }
@@ -439,8 +461,8 @@ export function resolveTitleFilterConfig(config) {
 // pure, exported helper keeps the content_filter.by_title_keyword wiring
 // (#1846) unit-testable without mocking providers or duplicating the rule
 // order in two places for the caller that doesn't need per-stage counts.
-export function passesFilters(job, { titleFilter, locationFilter, contentFilter, titleFilterConfig }) {
-  if (!titleFilter(job.title)) return false;
+export function passesFilters(job, { titleFilter, locationFilter, contentFilter, titleFilterConfig, companySlug }) {
+  if (!titleFilter(job.title, companySlug)) return false;
   // job.url is passed so the location filter can fall back to the URL's own
   // location segment when the provider reports a rolled-up "N Locations" string;
   // job.title so a title-stated remote role survives a city-only location.
@@ -560,6 +582,7 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
         titleFilter: opts.titleFilter,
         locationFilter: opts.locationFilter,
         contentFilter: opts.contentFilter,
+        companySlug: entry.name,
         titleFilterConfig: opts.titleFilterConfig,
       })) continue;
       // provider is always one of SEED_PROVIDERS (greenhouse/lever/ashby) here —
@@ -687,7 +710,11 @@ async function main() {
   }
   const config = yaml.load(readFileSync(PORTALS_PATH, 'utf-8'));
   const fullTitleFilterConfig = resolveTitleFilterConfig(config);
-  const titleFilter = buildTitleFilter(fullTitleFilterConfig);
+  // title_filter_overrides is independent of title_filter_full: it broadens
+  // the net for specific companies on top of whichever title filter config
+  // (title_filter or title_filter_full) this run is already using.
+  const titleFilterOverrides = buildTitleFilterOverrides(config?.title_filter_overrides);
+  const titleFilter = buildTitleFilterWithOverrides(fullTitleFilterConfig, titleFilterOverrides);
   const locationFilter = buildLocationFilter(config?.location_filter);
   // Same content_filter (incl. by_title_keyword scoping) scan.mjs applies —
   // see #1846. Built once here from the same portals.yml config.
@@ -733,7 +760,13 @@ async function main() {
   // here for the user to edit, so "raise max_pages on this entry" would be
   // inactionable. It used to infer that from sinceMs being set, which stopped
   // being true once #2418 taught scan.mjs --since to set it too (#2495).
-  const ctx = { ...makeHttpCtx(), sinceMs: cutoff, includeUndated: opts.includeUndated, syntheticEntries: true };
+  const ctx = {
+    ...makeHttpCtx(),
+    sinceMs: cutoff,
+    includeUndated: opts.includeUndated,
+    syntheticEntries: true,
+    locationHints: config?.location_filter,
+  };
   // The LOCAL calendar day, not the UTC one. This value lands in
   // scan-history.tsv's first_seen, which shouldDedupScanHistoryRow measures the
   // recheck window against using the local day (#3070). Stamping it in UTC put
@@ -763,6 +796,7 @@ async function main() {
   let totalCompaniesScanned = cc.totalCompaniesScanned || 0;
   let totalCompaniesAvailable = 0;
   let totalErrors = cc.totalErrors || 0;
+  let totalRetiredBoardsSkipped = cc.totalRetiredBoardsSkipped || 0;
   let droppedNoDate = cc.droppedNoDate || 0;
   let droppedContent = cc.droppedContent || 0;
   let capHit = false;
@@ -780,7 +814,8 @@ async function main() {
   const datasetStatus = {};
 
   const snapshotCounters = () => ({
-    totalCompaniesScanned, totalErrors, droppedNoDate, droppedContent,
+    totalCompaniesScanned, totalErrors, totalRetiredBoardsSkipped,
+    droppedNoDate, droppedContent,
     noDateSkipCompanies, noDateSkipJobs, cappedBoards,
   });
   const checkpointBase = () => ({
@@ -797,7 +832,7 @@ async function main() {
   // Per-job filter chain, shared by the parallel sweep, the truncation retry
   // pass (workday), and date enrichment (icims). Closure over the filters and
   // counters so both passes update the same run totals.
-  const processJobs = async (jobs, sourceName, provider) => {
+  const processJobs = async (jobs, sourceName, provider, companySlug) => {
     for (const job of jobs) {
       if (!job.url || !job.title) continue;
       // Confirmed-stale postings are always dropped. Undated postings are
@@ -818,13 +853,13 @@ async function main() {
       // posting stale, --since was silently ignored for the entire source.
       // Enrich first, then let the undated policy decide.
       if (dateClass === 'undated' && provider.enrichDate
-          && titleFilter(job.title) && locationFilter(job.location, job.url, job.title)) {
+          && titleFilter(job.title, companySlug) && locationFilter(job.location, job.url, job.title)) {
         try { await provider.enrichDate(job, ctx); } catch { /* stays undated */ }
         dateClass = classifyPostingDate(job, cutoff);
       }
       if (dateClass === 'stale') continue;
       if (dateClass === 'undated' && !opts.includeUndated) { droppedNoDate++; continue; }
-      if (!titleFilter(job.title)) continue;
+      if (!titleFilter(job.title, companySlug)) continue;
       // job.url is passed so the location filter can fall back to the URL's own
       // location segment when the provider reports a rolled-up "N Locations" string;
       // job.title so a title-stated remote role survives a city-only location.
@@ -875,6 +910,8 @@ async function main() {
     log(`\n⚙  ${name} — ${entriesAll.length} companies${status !== 'ok' ? ` (dataset: ${status})` : ''}${startAt ? ` — resuming at ${startAt}` : ''}`);
 
     let errors = 0;
+    let deadBoardsSkipped = 0;
+    const deadBoards = loadDeadBoards(DEAD_BOARDS_PATH);
     let consecutiveResolverFailures = 0;
     let resolverOutage = false;
     // The board whose failure tripped the breaker. `name` is only the ATS
@@ -888,12 +925,18 @@ async function main() {
     let lastResumeAt = 0;
     const truncated = [];
     await parallelEach(entries, source.concurrency ?? CONCURRENCY, async (entry) => {
+      const deadBoard = boardKey(entry);
+      if (shouldSkipDeadBoard(deadBoards, name, deadBoard)) {
+        deadBoardsSkipped++;
+        return;
+      }
       try {
         // The whole per-company unit — fetch AND processJobs (which may issue
         // per-job detail-page requests via provider.enrichDate) — runs inside
         // one watchdog, so enrichment latency can't blow past COMPANY_TIMEOUT_MS.
         await withTimeout((async () => {
           const jobs = await source.provider.fetch(entry, ctx);
+          recordBoardResult(deadBoards, name, deadBoard, 200);
           consecutiveResolverFailures = 0;
           if (jobs.workdayTruncated) truncated.push(entry);
           if (jobs.icimsTruncated) {
@@ -901,12 +944,13 @@ async function main() {
             if (opts.verbose) console.error(`  ⚠ ${name}/${entry.name}: hit the page cap — later postings not scanned`);
           }
           if (jobs.workdayNoDateSkip) { noDateSkipCompanies++; noDateSkipJobs += jobs.length; }
-          await processJobs(jobs, name, source.provider);
+          await processJobs(jobs, name, source.provider, entry.name);
         })(), COMPANY_TIMEOUT_MS, `${name}/${entry.name}`);
       } catch (err) {
         // Mostly defunct boards in the public dataset — expected noise, so the
         // default stays quiet; --verbose surfaces per-board failures.
         errors++;
+        recordBoardResult(deadBoards, name, deadBoard, err?.status);
         // A dead board and a dead resolver look identical one at a time; only
         // the *consecutive* run tells them apart, so any non-resolver outcome
         // resets the count (#2229).
@@ -930,21 +974,28 @@ async function main() {
         progress(`  ${done}/${entries.length} scanned, ${newOffers.length} total matches\r`);
       }
       if (done % CHECKPOINT_EVERY === 0 && !opts.dryRun) {
+        saveDeadBoardsBestEffort(deadBoards);
         writeCheckpoint({
           ...checkpointBase(),
           current: { name, resumeAt: startAt + resumeAt, datasetLen: list.length, datasetHash },
           counters: {
             ...snapshotCounters(),
+            totalRetiredBoardsSkipped: totalRetiredBoardsSkipped + deadBoardsSkipped,
             // totalCompaniesScanned was bumped by the FULL entries.length up
             // front; a checkpoint must store only work actually attempted, or
             // a resumed run (which re-adds its own slice) double-counts the
-            // completed portion in the final summary.
-            totalCompaniesScanned: totalCompaniesScanned - (entries.length - done),
+            // completed portion in the final summary. Retired boards were not
+            // attempted and must not be counted as scanned either.
+            totalCompaniesScanned: totalCompaniesScanned - (entries.length - done) - deadBoardsSkipped,
             totalErrors: totalErrors + errors,
           },
         });
       }
     }, () => resolverOutage);
+    // parallelEach reports a completed callback even when a retired board was
+    // skipped, so remove those entries from the live scan total after the
+    // source pass. The retired count remains visible separately.
+    totalCompaniesScanned -= deadBoardsSkipped;
     // Second chance for boards the parallel sweep truncated: retry alone on a
     // quiet line. Re-processing the full board is safe — seenUrls already
     // holds every match from the partial first pass.
@@ -956,7 +1007,8 @@ async function main() {
         try {
           await withTimeout((async () => {
             const jobs = await source.provider.fetch(entry, ctx);
-            await processJobs(jobs, name, source.provider);
+            recordBoardResult(deadBoards, name, boardKey(entry), 200);
+            await processJobs(jobs, name, source.provider, entry.name);
             if (jobs.workdayTruncated) {
               errors++; // still truncated on a quiet line — genuine board problem, move on
               if (opts.verbose) console.error(`  ✗ ${name}/${entry.name}: still truncated after sequential retry`);
@@ -964,11 +1016,14 @@ async function main() {
           })(), COMPANY_TIMEOUT_MS, `${name}/${entry.name} (retry)`);
         } catch (err) {
           errors++;
+          recordBoardResult(deadBoards, name, boardKey(entry), err?.status);
           if (opts.verbose) console.error(`  ✗ ${name}/${entry.name} (retry): ${err.message}`);
         }
       }
     }
     totalErrors += errors;
+    totalRetiredBoardsSkipped += deadBoardsSkipped;
+    if (!opts.dryRun) saveDeadBoardsBestEffort(deadBoards);
     if (resolverOutage) {
       // Deliberately before completedSources/checkpoint: this source did NOT
       // finish, and marking it done would make --resume skip the rest of it.
@@ -1008,7 +1063,7 @@ async function main() {
     if (!opts.dryRun) {
       writeCheckpoint({ ...checkpointBase(), current: null, counters: snapshotCounters() });
     }
-    log(`\n  done (${errors} unreachable boards skipped)`);
+    log(`\n  done (${errors} unreachable boards, ${deadBoardsSkipped} retired boards skipped)`);
   }
 
   // ── VC portfolio seed sources (--seeds flag) ───────────────────────
@@ -1029,9 +1084,7 @@ async function main() {
   if (offers.length && opts.liveness) offers = await filterLive(offers);
   offers.sort((a, b) => (b.postedAt || 0) - (a.postedAt || 0));
 
-  log(`\n${'━'.repeat(45)}`);
-  log(`Reverse ATS Scan — ${date}`);
-  log(`${'━'.repeat(45)}`);
+  printScanSummaryHeader('Reverse ATS Scan', date, log);
   log(`Companies scanned:  ${totalCompaniesScanned}${capHit ? ` of ${totalCompaniesAvailable} (capped)` : ''}`);
   log(`Unreachable boards: ${totalErrors}`);
   if (cappedBoards) log(`Page-capped boards: ${cappedBoards} (partial coverage — later postings not scanned)`);
@@ -1133,6 +1186,7 @@ async function main() {
       postingsAnnotatedBlacklisted: blacklistResult.annotatedBlacklisted,
       postingsDroppedContent: droppedContent,
       unreachableBoards: totalErrors,
+      retiredBoardsSkipped: totalRetiredBoardsSkipped,
       cappedBoards,
       dnsPacing: { delayed: pacing.delayed, waitedMs: Math.round(pacing.waitedMs) },
       saved,

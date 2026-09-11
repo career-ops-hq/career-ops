@@ -42,6 +42,7 @@ import { dirname, extname, join, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { isNestedCheckout } from './lib/mjs-files.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -203,7 +204,7 @@ function listSourceFiles() {
     realDirs.add(real);
     for (const entry of readDir(dir)) {
       if (entry.name.startsWith('.')) continue;
-      if (entry.isDirectory()) claimRealDirs(join(dir, entry.name));
+      if (entry.isDirectory() && !isNestedCheckout(join(dir, entry.name))) claimRealDirs(join(dir, entry.name));
     }
   };
   claimRealDirs(DOCS_DIR);
@@ -242,6 +243,10 @@ function listSourceFiles() {
           try { target = realpathSync(abs); } catch { continue; }
           if (realDirs.has(target)) continue;
         }
+        // A repository someone cloned into documents/ is not a document they
+        // dropped in: every source file in it would be offered as intake
+        // material for the profile (#3762).
+        if (isNestedCheckout(abs)) continue;
         walk(abs);
       } else if (isFile) out.push(abs);
     }

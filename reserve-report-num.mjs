@@ -301,6 +301,19 @@ async function runCli() {
   const [,, cmd, arg] = process.argv;
   const options = {};
 
+  if (cmd === '--help' || cmd === '-h') {
+    process.stdout.write([
+      'Usage: node reserve-report-num.mjs [--count <1-N>] [--release <NNN>[-<MMM>]] [--gc]',
+      '',
+      '  (no flags)                Reserve 1 report number (default)',
+      `  --count <1-${MAX_COUNT}>            Reserve N report numbers, printed as a range`,
+      '  --release <NNN>[-<MMM>]  Release a previously reserved number or range',
+      '  --gc                      Garbage-collect stale reservation sentinels',
+      '',
+    ].join('\n'));
+    return 0;
+  }
+
   if (cmd === '--release') {
     const match = (arg || '').match(/^(\d+)(?:-(\d+))?$/);
     if (!match) {
