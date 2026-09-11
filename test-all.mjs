@@ -422,7 +422,15 @@ try {
     // matched by basename ONLY at the repo root, so nested fixture subdirs such
     // as test-fixtures/upgrade/state-*/data and .../reports still get copied.
     if (dirname(src) === ROOT && exclude.includes(name)) return;
-    const stat = statSync(src);
+    // readdir→stat race: the harness (or a test) deleted the entry between
+    // listing it and reaching it. Same tolerance the walker below applies.
+    let stat;
+    try {
+      stat = statSync(src);
+    } catch (err) {
+      if (err?.code === 'ENOENT') return;
+      throw err;
+    }
     if (stat.isDirectory()) {
       // A linked worktree is a whole second checkout of this repo and carries a
       // `.git` FILE, not a directory, so the name-based exclusion above never
@@ -434,10 +442,24 @@ try {
       if (src !== ROOT && isNestedCheckout(src)) return;
       mkdirSync(dest, { recursive: true });
       for (const entry of readdirSync(src)) {
+        // AppleDouble (`._foo`) sidecars: macOS resource-fork metadata written
+        // by SMB/AFP mounts (a NAS). Not repo content, unreadable to copyfile
+        // (EACCES) on this mount, and regenerated the moment they are deleted.
+        if (entry.startsWith('._')) continue;
         copyDirSync(join(src, entry), join(dest, entry), exclude);
       }
     } else {
-      copyFileSync(src, dest);
+      try {
+        copyFileSync(src, dest);
+      } catch (err) {
+        // Runtime-state files (agent harness logs, session records) can be
+        // unreadable to copyfile while the suite runs — especially on a NAS
+        // mount where another process holds them open. They are not repo
+        // source; nothing in the throwaway tree reads them. Skip and go on
+        // rather than abort the whole section on one log file.
+        if (err?.code === 'EACCES' || err?.code === 'EPERM') return;
+        throw err;
+      }
     }
   };
 
@@ -450,6 +472,11 @@ try {
     '.career-ops-web',
     '.playwright-mcp',
     '.agents',
+    // OMC runtime state: session transcripts, hook checkpoints, cron job
+    // records — written and re-written by the agent harness WHILE the suite
+    // runs. Nothing in the throwaway copy reads them, and a NAS-mounted
+    // checkout can deny copyfile on files another process holds (EACCES).
+    '.omc',
     'cdp-diff.patch',
     'cdp-diff-focused.patch',
     'test_diff.patch',
@@ -17387,7 +17414,16 @@ try {
     for (const name of readdirSync(dir)) {
       if (name === 'node_modules' || name.startsWith('.')) continue;
       const p = join(dir, name);
-      const statResult = statSync(p);
+      // statSync follows symlinks, so a DANGLING one (e.g. chloe-home ->
+      // a path that only exists on its author's Mac) throws ENOENT and
+      // crashed the whole drift-guard into one meaningless failure. A
+      // symlink is never a repo script; skip it either way.
+      let statResult;
+      try {
+        statResult = statSync(p);
+      } catch {
+        continue;
+      }
       if (statResult.isDirectory()) continue;
       if (!name.endsWith('.mjs')) continue;
       if (/-tests?\.mjs$/.test(name) || /\.test\.mjs$/.test(name)) continue;
