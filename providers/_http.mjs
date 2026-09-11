@@ -27,7 +27,11 @@ async function fetchWithTimeout(url, opts = {}, consume) {
   return providerFetchContext.run({ url: String(url) }, () => fetchInContext(url, opts, consume));
 }
 
-async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow' } = {}, consume) {
+// redirect defaults to 'error': a provider fetch must never follow a 3xx, or a
+// server-side redirect could point the request at a private address after the
+// ip guard already passed the original host (#4079). Callers that really need
+// to follow redirects opt in explicitly.
+async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'error' } = {}, consume) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -118,8 +122,8 @@ export async function fetchText(url, opts = {}) {
 // Returns a Response (after the timeout + non-2xx guard) so providers that need
 // response headers — csod.mjs reads Set-Cookie to prime the session its search
 // API requires — can route through ctx instead of re-implementing fetch. Pass
-// redirect:'error' like every other provider call so a 3xx can't be followed to
-// a private IP.
+// redirect:'error' is the default here like everywhere else, so a 3xx can't be
+// followed to a private IP.
 //
 // The body is read here, inside the timer window, and handed back as an
 // equivalent Response. Two reasons: returning the live Response would let a
