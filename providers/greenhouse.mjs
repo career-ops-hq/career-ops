@@ -9,6 +9,7 @@
 // it every Greenhouse board passed those filters blind.
 
 import { htmlToText } from './_html-to-text.mjs';
+import { coerceId } from './_ids.mjs';
 
 const ALLOWED_GREENHOUSE_HOSTS = new Set([
   'boards-api.greenhouse.io',
@@ -210,6 +211,11 @@ export default {
         title: j.title || '',
         url: j.absolute_url,
         company: entry.name,
+        // Native identifiers, captured verbatim at ingest. `requisition_id` is the
+        // employer's own req id and is what survives a repost or an ATS host move
+        // (schema.org/JobPosting `identifier`); `id` is the board-post id.
+        externalId: coerceId(j.id),
+        requisitionId: coerceId(j.requisition_id),
         location,
         // Omitted entirely when the board ships no body — same shape as
         // cryptocurrencyjobs/remotli, so "no signal" stays distinguishable

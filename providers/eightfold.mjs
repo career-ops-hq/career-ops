@@ -38,6 +38,7 @@
 // User-Agent is sent to reduce (not eliminate) the friction.
 
 import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry } from './_http.mjs';
+import { coerceId } from './_ids.mjs';
 
 const EIGHTFOLD_HOST_RE = /^[a-z0-9-]+\.eightfold\.ai$/i;
 
@@ -237,6 +238,20 @@ export function parseEightfoldResponse(json, tenant, companyName) {
     };
     const postedAt = epochSecondsToMs(p.t_create) ?? epochSecondsToMs(p.t_update);
     if (postedAt !== undefined) job.postedAt = postedAt;
+
+    // ATS-native identifier capture. Eightfold's own position id, plus
+    // the customer's upstream-ATS id when the tenant exposes one. Type-guarded
+    // like every other provider here — an unguarded String() coerced a tenant
+    // returning an object into the literal "[object Object]" and wrote that
+    // into the req: segment as though it were an id.
+    // ats_job_id is deliberately NOT in this chain. It is the customer's upstream
+    // REQ id, which is many-to-one with postings (see requisitionId in _types.js),
+    // so falling back to it would hand a consumer asking for per-posting identity a
+    // key that two sibling postings share. No posting id is better than a wrong one.
+    const ext = coerceId(p.id ?? p.position_id);
+    if (ext) job.externalId = ext;
+    const req = coerceId(p.ats_job_id);
+    if (req) job.requisitionId = req;
 
     out.push(job);
   }
