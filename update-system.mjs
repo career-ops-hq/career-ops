@@ -278,6 +278,7 @@ const SYSTEM_PATHS = [
   'cv-sync-check.mjs',
   'verify-cv-facts.mjs',
   'verify-ats.mjs',
+  'cv-lexicons.mjs',
   'update-system.mjs',
   'path-resolver.mjs',
 
