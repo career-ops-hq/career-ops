@@ -70,11 +70,18 @@ plugins.lock
 .resolved-prompt-*
 node_modules/
 bun.lock
+# Working copy the test suite makes under the repo root (test-all.mjs
+# `mkdtempSync(join(ROOT, '.tmp-script-test-'))`). A clean run deletes it; a
+# run interrupted mid-way leaves ~650MB of duplicated repo behind, which a
+# reflexive `git add .` would then stage as ~1000 new files.
+.tmp-script-test-*/
+
 # Report-number reservation sentinels (ephemeral, created by reserve-report-num.mjs)
 reports/*-RESERVED.md
 
-# Backup files written by normalize-statuses.mjs / dedup-tracker.mjs
-*.bak
+# Backup files written by normalize-statuses.mjs / dedup-tracker.mjs and
+# web/src/lib/core/safe-write.ts (timestamped user-layer snapshots).
+*.bak*
 
 # OpenRouter runner — generated data (personal, never commit)
 data/model-blacklist.json

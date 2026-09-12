@@ -1,6 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { safeEncodeURIComponent } from './_safe-url.mjs';
+
 // Arbeitsagentur (Bundesagentur für Arbeit) provider — hits the public Jobsuche
 // REST API (the same endpoint arbeitsagentur.de uses), so it lives in-process
 // alongside the other JSON-API providers (greenhouse/ashby shape). One or more
@@ -109,6 +111,11 @@ export function normalizeJob(job) {
   const refnr = job && job.referenznummer;
   const title = String((job && job.stellenangebotsTitel) || '').trim();
   if (!refnr || !title) return null;
+  // A lone surrogate in refnr would throw URIError out of encodeURIComponent and
+  // abort the per-job loop in fetch(); refnr is also the dedup key (byRef), so a
+  // degraded-but-kept value would collide malformed postings. Drop this one.
+  const encodedRefnr = safeEncodeURIComponent(refnr);
+  if (encodedRefnr === null) return null;
   return {
     title,
     url: DETAIL_BASE + encodeURIComponent(String(refnr)),
