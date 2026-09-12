@@ -46,12 +46,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import { renameSyncWithRetry } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CANDIDATES_PATH = process.env.CAREER_OPS_REPLY_CANDIDATES
-  || path.join(__dirname, 'data', 'reply-candidates.json');
+const DATA_ROOT = getCareerOpsRoot();
+export const CANDIDATES_PATH = process.env.CAREER_OPS_REPLY_CANDIDATES
+  || path.join(DATA_ROOT, 'data', 'reply-candidates.json');
 
 
 /**

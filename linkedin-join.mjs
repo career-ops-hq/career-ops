@@ -78,12 +78,12 @@ import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-par
 import { asciiFold } from './lib/ascii-fold.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
 const DEFAULT_CSV = join(DATA_ROOT, 'data/Connections.csv');
-const TRACKER_PATH = join(DATA_ROOT, 'data/applications.md');
+export const TRACKER_PATH = resolveTrackerPath(DATA_ROOT);
 const PORTALS_PATH = join(DATA_ROOT, 'portals.yml');
 const CONTACTS_PATH = join(DATA_ROOT, 'data/contacts.tsv');
 

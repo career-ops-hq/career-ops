@@ -88,7 +88,7 @@ try {
 const parseYaml = yaml.load;
 
 // ── Config ──────────────────────────────────────────────────────────
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
 
@@ -107,7 +107,7 @@ const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(DATA_ROOT, 'con
 // anchored one (#3510). One resolution, imported, cannot drift.
 export const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(DATA_ROOT, 'data/scan-history.tsv');
 export const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data/pipeline.md');
-const APPLICATIONS_PATH = path.join(DATA_ROOT, 'data/applications.md');
+export const APPLICATIONS_PATH = resolveTrackerPath(DATA_ROOT);
 const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 
 // Ensure required directories exist (fresh setup). Stays rooted in the user-data
