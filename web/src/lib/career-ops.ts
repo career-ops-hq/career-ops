@@ -247,7 +247,7 @@ export type LifecyclePhase = "first-run" | "in-between" | "established";
  *   - established → all 4 prereqs present.
  * onboardingNeeded mirrors doctor.mjs: true if ANY prereq is missing → show banner.
  */
-export function doctorState(): {
+export function doctorState(snapshot?: Pick<PipelineSummary, "applications" | "inbox">): {
   phase: LifecyclePhase;
   onboardingNeeded: boolean;
   missing: string[];
@@ -269,7 +269,10 @@ export function doctorState(): {
   ];
   const missing = prereqs.filter(([rel]) => !has(rel)).map(([, label]) => label);
   const hasCv = has("cv.md");
-  const hasData = readApplications().length > 0 || readInbox().some((j) => !j.done);
+  // Home already reads these files. Reuse that snapshot so its setup check
+  // neither parses the tracker twice nor disagrees with the rendered queue.
+  const hasData = (snapshot?.applications ?? readApplications()).length > 0 ||
+    (snapshot?.inbox ?? readInbox()).some((j) => !j.done);
   const onboardingNeeded = missing.length > 0;
   const phase: LifecyclePhase = !hasCv && !hasData ? "first-run" : onboardingNeeded ? "in-between" : "established";
   return { phase, onboardingNeeded, missing, hasCv, hasData };
