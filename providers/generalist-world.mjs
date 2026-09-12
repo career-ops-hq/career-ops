@@ -66,36 +66,108 @@ const DESCRIPTION_RE = /<p\s(?:[^>]*?\s)?class="gw-job-description"[^>]*>([\s\S]
 // attribute, so the words appearing in text, CSS or script do not count.
 const BOARD_MARKER_RE = /<[a-zA-Z][^\s>]*\s(?:[^>]*?\s)?(?:class="(?:[^"]*\s)?gw-jobs-section(?:\s[^"]*)?"|data-jobs-container(?=[\s>\/=]))[^>]*>/;
 // Content the browser never renders as markup: comments, the raw-text
-// elements and inert <template> subtrees. A tag-shaped literal inside one
-// (a JS or theme template, a CSS content: string, a commented-out block)
-// must neither produce a job nor count as the listing container, so these
-// are removed before either match. On the live page they hold only inlined
-// CSS and analytics (about 120 KB of the 300 KB response) and no card
-// markup.
-const NON_RENDERED_RE = /<!--[\s\S]*?-->|<(script|style|textarea)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
-const TEMPLATE_TAG_RE = /<(\/?)template\b[^>]*>/gi;
+// elements (script, style, textarea) and inert <template> subtrees. A
+// tag-shaped literal inside one (a JS or theme template, a CSS content:
+// string, a commented-out block) must neither produce a job nor count as
+// the listing container, so these are removed before either match. The
+// walk goes tag by tag the way the HTML tokenizer does, so a marker inside
+// a quoted attribute value (`data-copy="<template>"`) belongs to that
+// attribute and never opens or closes anything. On the live page the
+// removed blocks hold only inlined CSS and analytics (about 120 KB of the
+// 300 KB response) and no card markup.
+const TAG_START_RE = /<(\/?)([a-zA-Z][^\s/>]*)/y;
+const RAW_TEXT_END = new Map([
+  ['script', /<\/script(?=[\s/>])[^>]*>/gi],
+  ['style', /<\/style(?=[\s/>])[^>]*>/gi],
+  ['textarea', /<\/textarea(?=[\s/>])[^>]*>/gi],
+]);
+const TAG_WHITESPACE = ' \t\n\r\f';
 
 /**
- * Remove every <template>…</template> subtree, including nested ones (unlike
- * script/style, template content is parsed markup and may nest). A stray
- * closing tag is ignored; an unclosed template swallows the rest of the
- * document, which is the conservative reading.
+ * Index just past the `>` that ends the tag whose name ends at `from`.
+ * Quotes delimit a value only after `=`, as in the tokenizer's attribute
+ * states, so a stray quote inside an attribute name cannot swallow the
+ * rest of the page. An unterminated tag runs to the end of the document.
  * @param {string} html
+ * @param {number} from
  */
-function stripTemplates(html) {
-  let out = '';
-  let depth = 0;
-  let last = 0;
-  for (const m of html.matchAll(TEMPLATE_TAG_RE)) {
-    if (!m[1]) {
-      if (depth === 0) out += html.slice(last, m.index);
-      depth++;
-    } else if (depth > 0) {
-      depth--;
-      if (depth === 0) last = m.index + m[0].length;
+function tagEnd(html, from) {
+  let quote = '';
+  let afterEquals = false;
+  for (let i = from; i < html.length; i++) {
+    const ch = html[i];
+    if (quote) {
+      if (ch === quote) quote = '';
+    } else if (ch === '>') {
+      return i + 1;
+    } else if (ch === '=') {
+      afterEquals = true;
+    } else if ((ch === '"' || ch === "'") && afterEquals) {
+      quote = ch;
+      afterEquals = false;
+    } else if (!TAG_WHITESPACE.includes(ch)) {
+      afterEquals = false;
     }
   }
-  if (depth === 0) out += html.slice(last);
+  return html.length;
+}
+
+/**
+ * Drop comments, raw-text elements and <template> subtrees (nested ones
+ * included: template content is parsed markup, unlike script or style).
+ * Raw text ends at the element's own closing tag wherever it appears, as in
+ * a browser; a stray </template> is ignored; an unclosed comment, raw-text
+ * element or template swallows the rest of the document, which is the
+ * conservative reading.
+ * @param {string} html
+ */
+function stripNonRendered(html) {
+  let out = '';
+  let kept = 0; // start of the rendered run not yet copied to `out`
+  let depth = 0; // open <template> elements
+  let i = 0;
+  while (i < html.length) {
+    const lt = html.indexOf('<', i);
+    if (lt < 0) break;
+    let stop; // index just past this construct
+    let drop = false;
+    if (html.startsWith('<!--', lt)) {
+      const end = html.indexOf('-->', lt + 4);
+      stop = end < 0 ? html.length : end + 3;
+      drop = true;
+    } else {
+      TAG_START_RE.lastIndex = lt;
+      const tag = TAG_START_RE.exec(html);
+      if (!tag) {
+        i = lt + 1;
+        continue;
+      }
+      const closing = tag[1] === '/';
+      const name = tag[2].toLowerCase();
+      stop = tagEnd(html, TAG_START_RE.lastIndex);
+      const rawEnd = closing ? undefined : RAW_TEXT_END.get(name);
+      if (rawEnd) {
+        rawEnd.lastIndex = stop;
+        const end = rawEnd.exec(html);
+        stop = end ? end.index + end[0].length : html.length;
+        drop = true;
+      } else if (name === 'template') {
+        if (!closing) {
+          if (depth === 0) out += html.slice(kept, lt);
+          depth++;
+        } else if (depth > 0) {
+          depth--;
+          if (depth === 0) kept = stop;
+        }
+      }
+    }
+    if (drop && depth === 0) {
+      out += `${html.slice(kept, lt)} `;
+      kept = stop;
+    }
+    i = stop;
+  }
+  if (depth === 0) out += html.slice(kept);
   return out;
 }
 
@@ -192,7 +264,7 @@ export function normalizeGeneralistWorldCard(cardHtml) {
  */
 export function parseGeneralistWorldJobs(html) {
   if (typeof html !== 'string' || !html.trim()) return [];
-  const rendered = stripTemplates(html.replace(NON_RENDERED_RE, ' '));
+  const rendered = stripNonRendered(html);
   /** @type {Job[]} */
   const jobs = [];
   const seen = new Set();

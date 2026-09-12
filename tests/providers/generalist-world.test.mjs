@@ -280,8 +280,35 @@ try {
   } else {
     fail(`parseGeneralistWorldJobs() template fixture returned ${JSON.stringify(templated.map((j) => j.url))}`);
   }
+  // Markers inside quoted attribute values are attribute text, not tags: a
+  // quoted opener must not swallow the cards that follow it and a quoted
+  // closer must not expose the inert content around it.
+  const quotedMarkers = [
+    [`<div data-copy="<template>"></div>${c1}`, 'a quoted <template> opener before the card'],
+    [`<div data-copy="<script>"></div>${c1}<script>track()</script>`, 'a quoted <script> opener before the card and a real script after it'],
+    [`<div data-copy="<!--"></div>${c1}<!-- footer -->`, 'a quoted comment opener before the card and a real comment after it'],
+    [`<template><div data-copy="</template>"></div>${cardLiteral}</template>${c1}`, 'a quoted </template> closer inside a template'],
+    [`<template data-x="a>b">${cardLiteral}</template>${c1}`, 'a > inside a template opener attribute'],
+    [`<script data-x="a>b">${cardLiteral}</script>${c1}`, 'a > inside a script opener attribute'],
+    [`<script>var s = "</template>";</script><template>${cardLiteral}</template>${c1}`, 'a </template> literal inside a script string'],
+  ];
+  for (const [main, label] of quotedMarkers) {
+    const got = parseGeneralistWorldJobs(page({ main }));
+    if (got.length === 1 && got[0].url.endsWith('/chief-of-staff-exampleco/')) {
+      pass(`parseGeneralistWorldJobs() keeps exactly the rendered card with ${label}`);
+    } else {
+      fail(`parseGeneralistWorldJobs() with ${label} returned ${JSON.stringify(got.map((j) => j.url))}`);
+    }
+  }
   const container = '<div class="gw-jobs-section" data-jobs-container></div>';
+  const quotedOpenerBoard = parseGeneralistWorldJobs(`<html><body><div data-copy="<template>"></div>${container}</body></html>`);
+  if (Array.isArray(quotedOpenerBoard) && quotedOpenerBoard.length === 0) {
+    pass('parseGeneralistWorldJobs() still sees the empty board when a quoted <template> opener precedes the container');
+  } else {
+    fail(`parseGeneralistWorldJobs() quoted-opener board returned ${JSON.stringify(quotedOpenerBoard)}`);
+  }
   const hiddenContainers = [
+    [`<html><body><template data-x="a>b">${container}</template><p>Maintenance</p></body></html>`, 'a <template> whose opener carries a quoted >'],
     [`<html><body><template>${container}</template><p>Maintenance</p></body></html>`, 'a <template>'],
     [`<html><body><template><div><template>${container}</template></div>${container}</template><p>Maintenance</p></body></html>`, 'nested <template>s'],
     [`<html><body><script>document.body.innerHTML = '${container}';</script><p>Maintenance</p></body></html>`, 'a script string'],
