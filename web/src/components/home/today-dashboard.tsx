@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Bell, CircleHelp, Sparkles, ArrowRight } from "lucide-react";
@@ -14,6 +14,9 @@ import { DecisionCard } from "@/components/home/decision-card";
 import { QuickEvaluate } from "@/components/quick-evaluate";
 import { scoreNum } from "@/lib/format";
 import { pickAwaitingDecision } from "@/lib/home/awaiting.mjs";
+import { parseTodayFollowups, parseTodayMatches, pendingInboxCount, summarizeToday } from "@/lib/home/today-state.mjs";
+
+type LoadState = { status: "loading" | "ready" | "error"; error: string | null };
 
 // The retention "Today": a dual-loop action queue (the maintainer's
 // "N new matches this week · M follow-ups due"). SUPPLY loop = fresh free-scan
@@ -26,7 +29,7 @@ export function TodayDashboard({
   inBetween,
 }: {
   applications: Application[];
-  inbox: InboxJob[];
+  inbox: Pick<InboxJob, "url" | "done">[];
   inBetween: boolean;
 }) {
   const [followups, setFollowups] = useState<FollowUp[]>([]);
@@ -34,31 +37,46 @@ export function TodayDashboard({
   const [nextUpcoming, setNextUpcoming] = useState<FollowUp | null>(null);
   const [fresh, setFresh] = useState<DiscoveredOffer[]>([]);
   const [freshCount, setFreshCount] = useState(0);
+  const [followupState, setFollowupState] = useState<LoadState>({ status: "loading", error: null });
+  const [freshState, setFreshState] = useState<LoadState>({ status: "loading", error: null });
+  const activeRequest = useRef<AbortController | null>(null);
   const router = useRouter();
   const dateLabel = useMemo(() => new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" }), []);
 
   const refetch = useCallback(() => {
-    fetch("/api/followups")
-      .then((r) => r.json())
-      .then((d) => {
-        // /api/followups already filters to urgency 'urgent'/'overdue' — due
-        // now, never 'waiting'/'cold' (#86). Both count toward "due"; a
-        // missing metadata.overdue must read as 0 due, never as "every entry
-        // is overdue" (the old `?? d.entries?.length` fallback).
-        setFollowups(Array.isArray(d.entries) ? d.entries : []);
-        setOverdue((d.metadata?.overdue ?? 0) + (d.metadata?.urgent ?? 0));
-        setNextUpcoming(d.nextUpcoming ?? null);
+    // An earlier request can finish after a worker event or a saved follow-up.
+    // Cancel it and check its signal before applying any result or error.
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    const { signal } = controller;
+    setFollowupState({ status: "loading", error: null });
+    setFreshState({ status: "loading", error: null });
+    fetch("/api/followups", { signal, cache: "no-store" })
+      .then(async (r) => parseTodayFollowups(r.ok, await r.json().catch(() => null)))
+      .then((data) => {
+        if (signal.aborted) return;
+        setFollowups(data.entries);
+        setOverdue(data.due);
+        setNextUpcoming(data.nextUpcoming);
+        setFollowupState({ status: "ready", error: null });
       })
-      .catch(() => {});
-    fetch("/api/whats-new")
-      .then((r) => r.json())
-      .then((d) => {
-        const offers = Array.isArray(d.offers) ? d.offers : [];
-        const count = Number(d.count);
-        setFresh(offers);
-        setFreshCount(Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : offers.length);
+      .catch((error) => {
+        if (signal.aborted) return;
+        setFollowupState({ status: "error", error: error instanceof TypeError ? "Could not reach the server. Check your connection and retry." : error instanceof Error ? error.message : "Could not load follow-ups." });
+      });
+    fetch("/api/whats-new", { signal, cache: "no-store" })
+      .then(async (r) => parseTodayMatches(r.ok, await r.json().catch(() => null)))
+      .then((data) => {
+        if (signal.aborted) return;
+        setFresh(data.offers);
+        setFreshCount(data.count);
+        setFreshState({ status: "ready", error: null });
       })
-      .catch(() => {});
+      .catch((error) => {
+        if (signal.aborted) return;
+        setFreshState({ status: "error", error: error instanceof TypeError ? "Could not reach the server. Check your connection and retry." : error instanceof Error ? error.message : "Could not load fresh matches." });
+      });
   }, []);
 
   useEffect(() => {
@@ -71,16 +89,29 @@ export function TodayDashboard({
       refetch();
     };
     window.addEventListener("co-job-done", onDone);
-    return () => window.removeEventListener("co-job-done", onDone);
+    return () => {
+      window.removeEventListener("co-job-done", onDone);
+      activeRequest.current?.abort();
+    };
   }, [refetch, router]);
 
   // Awaiting decision: scored (Evaluated) but no terminal status yet. The
   // ordering lives in lib/home/awaiting.mjs so it can be tested — see the file
   // for why "first six in the array" was a bug waiting for #3529.
-  const awaiting = useMemo(() => pickAwaitingDecision(applications, scoreNum), [applications]);
+  const awaiting = useMemo(() => pickAwaitingDecision(applications, scoreNum, Infinity), [applications]);
 
-  const newThisWeek = freshCount;
-  const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0;
+  const pendingCount = useMemo(() => pendingInboxCount(inbox), [inbox]);
+  const summary = summarizeToday({
+    freshCount,
+    // The route returns only due entries. Metadata can be absent, but a
+    // visible due card still means there is work to do.
+    dueCount: Math.max(overdue, followups.length),
+    decisionCount: awaiting.length,
+    inboxCount: pendingCount,
+    followupState: followupState.status,
+    freshState: freshState.status,
+  });
+  const { allClear } = summary;
   const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
 
   return (
@@ -94,38 +125,30 @@ export function TodayDashboard({
             <span className="text-faint">//</span> today · <span className="tabular-nums">{dateLabel}</span>
           </p>
           <h1 className={`${instrumentSerif.className} mt-3 text-4xl leading-[1.05] text-landing md:text-5xl`}>
-            {allClear ? (
-              <>You&apos;re all caught up.</>
-            ) : (
-              <>
-                {newThisWeek > 0 && (
-                  <>
-                    <span className="text-brand tabular-nums">{newThisWeek}</span> new match{newThisWeek === 1 ? "" : "es"} this week
-                  </>
-                )}
-                {newThisWeek > 0 && overdue > 0 && <span className="text-faint"> · </span>}
-                {overdue > 0 && (
-                  <>
-                    <span className="text-brand tabular-nums">{overdue}</span> follow-up{overdue === 1 ? "" : "s"} due
-                  </>
-                )}
-              </>
-            )}
+            {summary.items.length ? summary.items.map((item, index) => (
+              <Fragment key={item.label}>
+                {index > 0 && <span className="text-faint"> · </span>}
+                <span className="text-brand tabular-nums">{item.count}</span>{" "}{item.label}
+              </Fragment>
+            )) : summary.emptyHeading}
           </h1>
           <p className="mt-4 max-w-xl text-sm text-muted">
-            {allClear ? "I'll keep scanning the market in the background and surface anything that fits." : "Your action queue for today — discovery and follow-ups, in one place."}
+            {allClear ? "Run a free scan when you want to find more roles." : "Review jobs, make application decisions, and track follow-ups in one place."}
           </p>
           <div className="mt-6 flex flex-wrap gap-2.5">
             <Link href="/explore" className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground transition hover:bg-brand-200 max-sm:min-h-[44px]">
               Find new roles <ArrowRight className="size-4" />
             </Link>
             <Link href="/pipeline" className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]">
-              Open pipeline
+              {pendingCount > 0 ? `Review inbox (${pendingCount})` : "Open pipeline"}
             </Link>
           </div>
           {inBetween && <QuickEvaluate />}
         </div>
       </section>
+
+      <LoadNotice label="Follow-ups" state={followupState} onRetry={refetch} />
+      <LoadNotice label="Fresh matches" state={freshState} onRetry={refetch} />
 
       {/* A. Follow-ups due (demand loop) */}
       {followups.length > 0 ? (
@@ -157,10 +180,11 @@ export function TodayDashboard({
       {awaiting.length > 0 && (
         <Section icon={CircleHelp} title="Awaiting your decision" hint="Scored — apply or skip">
           <div className="grid gap-2.5 sm:grid-cols-2">
-            {awaiting.map((a) => (
-              <DecisionCard key={a.n} app={a} />
+            {awaiting.slice(0, 6).map((a) => (
+              <DecisionCard key={a.n} app={a} onSaved={refetch} />
             ))}
           </div>
+          {awaiting.length > 6 && <Link href="/pipeline?tab=EVALUATED" className="mt-3 inline-flex text-sm text-muted hover:text-brand max-sm:min-h-[44px]">Review all {awaiting.length} decisions →</Link>}
         </Section>
       )}
 
@@ -188,6 +212,20 @@ export function TodayDashboard({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+function LoadNotice({ label, state, onRetry }: { label: string; state: LoadState; onRetry: () => void }) {
+  if (state.status === "ready") return null;
+  if (state.status === "loading") return <p role="status" className="mt-4 text-sm text-muted">Checking {label.toLowerCase()}…</p>;
+  return (
+    <div role="alert" className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-red-500/25 bg-surface/40 px-4 py-3 text-sm">
+      <div className="min-w-0 flex-1">
+        <p className="font-medium text-foreground">{label} could not be updated.</p>
+        <p className="mt-1 text-muted">{state.error} Any items shown may be out of date.</p>
+      </div>
+      <button type="button" onClick={onRetry} className="rounded-md border border-border px-3 py-1.5 text-foreground hover:text-brand max-sm:min-h-[44px]">Retry {label.toLowerCase()}</button>
     </div>
   );
 }
