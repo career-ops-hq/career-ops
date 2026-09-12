@@ -165,3 +165,6 @@ public commit with a stated reason.
 - @prasta1 | patrick ruster | 2026-09-08 | id:155988469 | src:https://github.com/career-ops-hq/career-ops/discussions/4022 | n:117
 - @krishnaS137 | 2026-09-08 | "Hiring has become automated and seeing the increasing amount of competition in the field and the rate at which we are expected to level up. We should also have the leverage to use automated pipelines…" | id:127772632 | src:https://github.com/career-ops-hq/career-ops/discussions/4025 | n:118
 - @nastya-uiux | Anastasiya Dvindenko | 2026-09-08 | "I want hiring to value thoughtful design, real skills, and human potential." | id:202688373 | src:https://github.com/career-ops-hq/career-ops/discussions/4031 | n:119
+- @E-Lucid-At0r | Ashwin Ravikumar | 2026-09-09 | id:95267475 | src:https://github.com/career-ops-hq/career-ops/discussions/4044 | n:120
+- @7datawin-arch | 2026-09-10 | id:292077187 | src:https://github.com/career-ops-hq/career-ops/discussions/4061 | n:121
+- @colincomstock | Colin Comstock | 2026-09-10 | id:95597475 | src:https://github.com/career-ops-hq/career-ops/discussions/4063 | n:122
