@@ -110,15 +110,15 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
     let unreachable = 0;
     let outBuf = "";
     let errBuf = "";
-    let jsonOut = ""; // --json mode: the single stdout object accumulates here
-
+    let killedByTimeout = false;
     const killer = setTimeout(() => {
+      killedByTimeout = true;
       try {
         child.kill("SIGTERM");
       } catch {
         /* ignore */
       }
-    }, 230_000);
+    }, 540_000);
 
     // Live progress (atsStart / progress / atsDone) — in --json mode these human
     // lines arrive on STDERR; in legacy mode on STDOUT (handled inside handleLine).
@@ -261,7 +261,9 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
             }
           }
         }
-        if (j && Array.isArray(j.offers)) {
+        if (killedByTimeout) {
+          onEvent({ kind: "error", message: "Discovery scan timed out before completing all sources. Try scanning specific ATS sources or reducing the time window." });
+        } else if (j && Array.isArray(j.offers)) {
           for (const o of j.offers) {
             const url = (o.url || "").trim();
             if (!url || seen.has(url) || !o.company || !o.title) continue;

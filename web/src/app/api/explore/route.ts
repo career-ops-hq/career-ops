@@ -8,7 +8,7 @@ import { scannerMissingBody, SCANNER_MISSING_STATUS } from "@/lib/explore-error.
 // Discovery is HTTP-bound across many ATS boards; give it room. It is FREE —
 // zero LLM tokens (the scanner only does HTTP + JSON, and --dry-run writes nothing).
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 600;
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
