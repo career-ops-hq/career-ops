@@ -26,8 +26,10 @@ import { spawn } from "node:child_process";
  * @param {string[]} args
  * @param {import("node:child_process").SpawnOptionsWithoutStdio} options
  */
-export function spawnHeadlessCli(binPath, args, options) {
-  const child = spawn(binPath, args, options);
+export function spawnHeadlessCli(binPath, args, options = {}) {
+  const isCmdOrBat = process.platform === "win32" && /\.(cmd|bat)$/i.test(binPath);
+  const opts = isCmdOrBat && options?.shell === undefined ? { ...options, shell: true } : options;
+  const child = spawn(binPath, args, opts);
   child.stdin?.end();
   return child;
 }

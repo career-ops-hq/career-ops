@@ -225,14 +225,41 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
       cleanupTempPortals(tempPortals);
       if (useJson) {
         let j: ScanJson | null = null;
-        try {
-          const raw = jsonOut.trim();
-          const braceIdx = raw.indexOf("{");
-          const lastBraceIdx = raw.lastIndexOf("}");
-          const jsonStr = braceIdx !== -1 && lastBraceIdx > braceIdx ? raw.slice(braceIdx, lastBraceIdx + 1) : raw;
-          j = JSON.parse(jsonStr) as ScanJson;
-        } catch {
-          j = null;
+        const raw = jsonOut.trim();
+        if (raw) {
+          try {
+            j = JSON.parse(raw) as ScanJson;
+          } catch {
+            /* multi-line or prefixed stdout */
+          }
+          if (!j) {
+            const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+            for (let i = lines.length - 1; i >= 0; i--) {
+              const line = lines[i];
+              if (line.startsWith("{") && line.endsWith("}")) {
+                try {
+                  const parsed = JSON.parse(line) as ScanJson;
+                  if (parsed && typeof parsed === "object" && (Array.isArray(parsed.offers) || typeof parsed.companiesScanned === "number")) {
+                    j = parsed;
+                    break;
+                  }
+                } catch {
+                  /* continue searching */
+                }
+              }
+            }
+          }
+          if (!j) {
+            const lastBraceIdx = raw.lastIndexOf("{");
+            const lastCloseIdx = raw.lastIndexOf("}");
+            if (lastBraceIdx !== -1 && lastCloseIdx > lastBraceIdx) {
+              try {
+                j = JSON.parse(raw.slice(lastBraceIdx, lastCloseIdx + 1)) as ScanJson;
+              } catch {
+                j = null;
+              }
+            }
+          }
         }
         if (j && Array.isArray(j.offers)) {
           for (const o of j.offers) {
