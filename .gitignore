@@ -165,6 +165,8 @@ data/model-blacklist.json
 .claude/memory/
 .opencode/settings.local.json
 .opencode/memory/
+.antigravity/
+.antigravitycli/
 # OpenCode project config (often holds personal MCP/model/per-machine prefs).
 opencode.json
 # Claude Code project-level MCP server config — commonly ends up holding

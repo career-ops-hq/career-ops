@@ -17,7 +17,7 @@ test('Gemini AI Integration Smoke Test', { skip: !process.env.GEMINI_API_KEY }, 
   });
 
   const sampleText = "Hiring at Stripe for an Engineer in Dublin.";
-  const prompt = `--- BEGIN UNTRUSTED DATA ---\n${sampleText}\n--- END UNTRUSTED DATA ---`;
+  const prompt = `Extract company and location from this text into YAML format with keys 'company' and 'location':\n${sampleText}\nOutput ONLY YAML:`;
 
   try {
     const result = await model.generateContent(prompt);

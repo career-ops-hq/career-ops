@@ -704,11 +704,16 @@ async function main() {
   // one.
   const progress = (s) => { if (opts.json) process.stderr.write(s); else process.stdout.write(s); };
 
-  if (!existsSync(PORTALS_PATH)) {
-    console.error('Error: portals.yml not found. Run onboarding first — the reverse scan reuses its title_filter/location_filter.');
-    process.exit(1);
+  let config = {};
+  try {
+    config = yaml.load(readFileSync(PORTALS_PATH, 'utf-8')) || {};
+  } catch (err) {
+    if (/expected a document, but the input is empty/i.test(err.message)) {
+      config = {};
+    } else {
+      throw err;
+    }
   }
-  const config = yaml.load(readFileSync(PORTALS_PATH, 'utf-8'));
   const fullTitleFilterConfig = resolveTitleFilterConfig(config);
   // title_filter_overrides is independent of title_filter_full: it broadens
   // the net for specific companies on top of whichever title filter config

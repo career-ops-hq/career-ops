@@ -42,5 +42,8 @@ export function serializePortals(f) {
     out += block("allow", f.allow);
     out += block("block", f.block);
   }
+  if (!f.positive.length && !f.negative.length && !f.blockHard.length && !f.allow.length && !f.block.length && !f.alwaysAllow.length) {
+    out += "title_filter: {}\n";
+  }
   return out;
 }

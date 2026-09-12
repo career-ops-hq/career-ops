@@ -2882,8 +2882,12 @@ async function main() {
   try {
     rawConfig = parseYaml(readFileSync(PORTALS_PATH, 'utf-8'));
   } catch (err) {
-    console.error(`Error: failed to parse ${PORTALS_PATH}: ${err.message}`);
-    process.exit(1);
+    if (/expected a document, but the input is empty/i.test(err.message)) {
+      rawConfig = {};
+    } else {
+      console.error(`Error: failed to parse ${PORTALS_PATH}: ${err.message}`);
+      process.exit(1);
+    }
   }
   const config = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
   const companies = Array.isArray(config.tracked_companies) ? config.tracked_companies : [];
