@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -23,6 +23,14 @@ function workspace(t, { dataLayout = false, header = LEGACY_HEADER, separator = 
 
 function run(env, args = ['--backfill-urls']) {
   return execFileSync(process.execPath, [MERGE, ...args], {
+    cwd: env.root,
+    encoding: 'utf8',
+    env: { ...process.env, CAREER_OPS_TRACKER: env.tracker, CAREER_OPS_ADDITIONS: env.additions },
+  });
+}
+
+function runResult(env, args = ['--backfill-urls']) {
+  return spawnSync(process.execPath, [MERGE, ...args], {
     cwd: env.root,
     encoding: 'utf8',
     env: { ...process.env, CAREER_OPS_TRACKER: env.tracker, CAREER_OPS_ADDITIONS: env.additions },
@@ -118,4 +126,31 @@ test('ordinary merge leaves a legacy tracker schema unchanged until explicit mig
   const after = readFileSync(env.tracker, 'utf8');
   assert.equal(tableLine(after, '| # |'), LEGACY_HEADER);
   assert.doesNotMatch(tableLine(after, '| 5 |'), /https:\/\//);
+});
+
+test('--backfill-urls rejects a short legacy row before changing the tracker', t => {
+  const env = workspace(t, {
+    rows: ['| 6 | 2026-09-11 | Acme | Designer | 4.0/5 | Applied | ✅ | [6](reports/006-acme.md) |'],
+  });
+  const before = readFileSync(env.tracker, 'utf8');
+
+  const result = runResult(env);
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /table row 5 has the wrong number of cells/);
+  assert.equal(readFileSync(env.tracker, 'utf8'), before);
+});
+
+test('--backfill-urls rejects a short separator before changing the tracker', t => {
+  const env = workspace(t, {
+    separator: '|---|------|---------|------|-------|--------|-----|--------|',
+    rows: ['| 7 | 2026-09-11 | Acme | Designer | 4.0/5 | Applied | ✅ | [7](reports/007-acme.md) | note |'],
+  });
+  const before = readFileSync(env.tracker, 'utf8');
+
+  const result = runResult(env);
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /table separator row 4 has the wrong number of cells/);
+  assert.equal(readFileSync(env.tracker, 'utf8'), before);
 });

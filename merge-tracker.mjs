@@ -595,6 +595,11 @@ function addMissingUrlColumn(lines) {
     return { added: false, reason: 'no separator row directly after the tracker header' };
   }
 
+  const expectedCellCount = lines[headerIdx].split('|').length;
+  if (lines[separatorIdx].split('|').length !== expectedCellCount) {
+    return { added: false, reason: `table separator row ${separatorIdx + 1} has the wrong number of cells` };
+  }
+
   const widenedHeader = appendTrailingTableCell(lines[headerIdx], 'URL');
   const widenedSeparator = appendTrailingTableCell(lines[separatorIdx], '', true);
   if (widenedHeader == null || widenedSeparator == null) {
@@ -605,6 +610,9 @@ function addMissingUrlColumn(lines) {
   for (let i = separatorIdx + 1; i < lines.length && lines[i].startsWith('|'); i++) {
     const widened = appendTrailingTableCell(lines[i]);
     if (widened == null) return { added: false, reason: `table row ${i + 1} is missing a closing pipe` };
+    if (lines[i].split('|').length !== expectedCellCount) {
+      return { added: false, reason: `table row ${i + 1} has the wrong number of cells` };
+    }
     widenedRows.push([i, widened]);
   }
 
