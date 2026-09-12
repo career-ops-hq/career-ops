@@ -108,6 +108,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
     let pending: Omit<DiscoveredOffer, "url"> | null = null;
     let companiesScanned = 0;
     let unreachable = 0;
+    let jsonOut = "";
     let outBuf = "";
     let errBuf = "";
     let killedByTimeout = false;

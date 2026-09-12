@@ -127,7 +127,16 @@ export async function POST(req: Request) {
   // A CLI with its own structured stream gets the argv that turns it on, so its
   // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
   // envelope-parsing routes rely on.
-  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt);
+  // Antigravity CLI requires --dangerously-skip-permissions so it doesn't prompt for tool
+  // approval on every call. Without it, agy halts waiting for stdin approval that never
+  // comes (stdin is closed by spawnHeadlessCli), producing no output. The assistant route
+  // already applies the same flag for the same reason (#2507).
+  const isAntigravity = cliId === "antigravity";
+  const args = isClaude
+    ? claudeCliArgs({ kind, prompt })
+    : isAntigravity
+      ? ["--dangerously-skip-permissions", "-p", prompt]
+      : (spec.streamArgs ?? spec.args)(prompt);
 
   // For write-needing kinds, snapshot reports/ so we can verify the worker
   // actually persisted (non-Claude CLIs lack Write auth and silently no-op).
