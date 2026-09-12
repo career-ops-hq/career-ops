@@ -256,6 +256,36 @@ try {
     if (threw) pass(`parseGeneralistWorldJobs() still throws when the container marker appears only as ${label}`);
     else fail(`parseGeneralistWorldJobs() treated ${label} as an empty board`);
   }
+  // Non-rendered blocks are dropped before either match: a card literal in a
+  // script template, a comment or a textarea is not a job, and a container
+  // tag that only appears there does not make the page an empty board.
+  const cardLiteral = c1.replace('chief-of-staff-exampleco', 'ghost-exampleco');
+  const nonRenderedCards = parseGeneralistWorldJobs(page({
+    main: `<script type="text/template">${cardLiteral}</script><!-- ${cardLiteral} --><textarea>${cardLiteral}</textarea>`
+      + `<style>.x::before{content:'${cardLiteral}'}</style>` + c1,
+  }));
+  if (nonRenderedCards.length === 1 && nonRenderedCards[0].url.endsWith('/chief-of-staff-exampleco/')) {
+    pass('parseGeneralistWorldJobs() ignores card literals inside script / comment / textarea / style and keeps the rendered card');
+  } else {
+    fail(`parseGeneralistWorldJobs() non-rendered card fixture returned ${JSON.stringify(nonRenderedCards.map((j) => j.url))}`);
+  }
+  const container = '<div class="gw-jobs-section" data-jobs-container></div>';
+  const hiddenContainers = [
+    [`<html><body><script>document.body.innerHTML = '${container}';</script><p>Maintenance</p></body></html>`, 'a script string'],
+    [`<html><body><!-- ${container} --><p>Maintenance</p></body></html>`, 'an HTML comment'],
+    [`<html><head><style>.x::after{content:'${container}'}</style></head><body><p>Maintenance</p></body></html>`, 'a CSS content string'],
+    [`<html><body><textarea>${container}</textarea></body></html>`, 'a textarea'],
+    [`<html><body><SCRIPT>var t = '${container}';</SCRIPT></body></html>`, 'an upper-case SCRIPT block'],
+  ];
+  for (const [html, label] of hiddenContainers) {
+    let threw = false;
+    try { parseGeneralistWorldJobs(html); } catch (e) {
+      if (e instanceof Error && e.message.includes('page structure likely changed')) threw = true;
+      else throw e;
+    }
+    if (threw) pass(`parseGeneralistWorldJobs() still throws when the container tag appears only inside ${label}`);
+    else fail(`parseGeneralistWorldJobs() treated a container inside ${label} as an empty board`);
+  }
   const attrOnly = parseGeneralistWorldJobs('<html><body><section data-jobs-container><p>No roles right now</p></section></body></html>');
   if (Array.isArray(attrOnly) && attrOnly.length === 0) pass('parseGeneralistWorldJobs() accepts a real <section data-jobs-container> tag with zero cards as an empty board');
   else fail(`parseGeneralistWorldJobs() attribute-only container returned ${JSON.stringify(attrOnly)}`);

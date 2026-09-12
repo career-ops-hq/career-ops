@@ -65,6 +65,13 @@ const DESCRIPTION_RE = /<p\s(?:[^>]*?\s)?class="gw-job-description"[^>]*>([\s\S]
 // knows". Matched as an opening tag carrying the class token or the
 // attribute, so the words appearing in text, CSS or script do not count.
 const BOARD_MARKER_RE = /<[a-zA-Z][^\s>]*\s(?:[^>]*?\s)?(?:class="(?:[^"]*\s)?gw-jobs-section(?:\s[^"]*)?"|data-jobs-container(?=[\s>\/=]))[^>]*>/;
+// Content the browser never renders as markup: comments and the raw-text
+// elements. A tag-shaped literal inside one (a JS template, a CSS content:
+// string, a commented-out block) must neither produce a job nor count as
+// the listing container, so these are removed before either match. On the
+// live page they hold only inlined CSS and analytics (about 120 KB of the
+// 300 KB response) and no card markup.
+const NON_RENDERED_RE = /<!--[\s\S]*?-->|<(script|style|textarea)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
 
 // The href is host-controlled and becomes a URL path segment, so it is held
 // to a strict slug charset instead of being encoded: anything that is not
@@ -148,7 +155,8 @@ export function normalizeGeneralistWorldCard(cardHtml) {
 }
 
 /**
- * Parse the board page. An empty body, or a page that still carries the
+ * Parse the board page. Comments, script, style and textarea blocks are
+ * dropped first. An empty body, or a page that still carries the
  * listing container but no cards, is an alive-but-empty board and yields [].
  * A body with neither throws, so a redesign or a challenge page surfaces as
  * an error instead of a board that quietly reads 0 forever. Exported for
@@ -158,16 +166,17 @@ export function normalizeGeneralistWorldCard(cardHtml) {
  */
 export function parseGeneralistWorldJobs(html) {
   if (typeof html !== 'string' || !html.trim()) return [];
+  const rendered = html.replace(NON_RENDERED_RE, ' ');
   /** @type {Job[]} */
   const jobs = [];
   const seen = new Set();
-  for (const m of html.matchAll(CARDS_RE)) {
+  for (const m of rendered.matchAll(CARDS_RE)) {
     const job = cardToJob(m[1], m[2]);
     if (!job || seen.has(job.url)) continue;
     seen.add(job.url);
     jobs.push(job);
   }
-  if (jobs.length === 0 && !BOARD_MARKER_RE.test(html)) {
+  if (jobs.length === 0 && !BOARD_MARKER_RE.test(rendered)) {
     throw new Error(
       'generalist-world: no gw-job-card anchors and no listing container in the response; the page structure likely changed',
     );
