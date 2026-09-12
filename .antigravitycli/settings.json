@@ -1,9 +1,14 @@
 {
   "permissions": {
     "allow": [
+      "command",
+      "command(*)",
+      "run_command",
+      "run_command(*)",
       "read_file",
       "read_file(*)",
-      "run_command(*)",
+      "write_file",
+      "write_file(*)",
       "view_file",
       "grep_search",
       "find_by_name"
