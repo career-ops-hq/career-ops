@@ -714,10 +714,10 @@ try {
     '2-acme.tsv': `2\t2026-09-09\tAcme Health\t${ROLE_A}\tEvaluated\t4.1/5\t❌\t[2](reports/2-acme.md)\t\n`,
   }, { rows: SEED_4058 });
   const repostRows = dataRows(repost.tracker);
-  if (repostRows.length === 1) {
+  if (repost.exitCode === 0 && repost.killedBy === null && repostRows.length === 1) {
     pass('merge-tracker still merges a true same-role repost to one row (#4058 control)');
   } else {
-    fail(`merge-tracker split a true repost: ${repostRows.join(' // ')}`);
+    fail(`merge-tracker same-role repost control failed: exit=${repost.exitCode} killedBy=${repost.killedBy ?? 'none'} rows=${repostRows.length}: ${repostRows.join(' // ')} | ${repost.output.trim()}`);
   }
 } catch (e) {
   fail(`merge-tracker #4058 tests crashed: ${e.message}`);
