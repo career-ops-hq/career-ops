@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { scoreTone } from "@/lib/format";
 import { readSavedCliId, resolveCliId } from "@/lib/saved-cli";
+import { readJobStream } from "@/lib/job-stream.mjs";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
 export type JobResult = { score: number | null; summary: string; tone: "good" | "warn" | "bad" | "muted" };
@@ -161,45 +162,27 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             finish("error", e.error || "Failed to start");
             return;
           }
-          const reader = res.body.getReader();
-          const dec = new TextDecoder();
-          let buf = "";
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buf += dec.decode(value, { stream: true });
-            let nl: number;
-            while ((nl = buf.indexOf("\n")) !== -1) {
-              const line = buf.slice(0, nl).trim();
-              buf = buf.slice(nl + 1);
-              if (!line) continue;
-              try {
-                const ev = JSON.parse(line);
-                if (ev.type === "tool") {
-                  steps.push({ kind: "tool", label: ev.name, ts: Date.now() });
-                  patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "tool", label: ev.name, ts: Date.now() }] }));
-                } else if (ev.type === "status") {
-                  steps.push({ kind: "status", label: ev.label, ts: Date.now() });
-                  patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "status", label: ev.label, ts: Date.now() }] }));
-                } else if (ev.type === "text") {
-                  const full = text + ev.text;
-                  const vm = full.match(/VERDICT:[^\n]*/i);
-                  if (vm) verdictLine = vm[0];
-                  text = full.slice(-8000);
-                  patch(id, (j) => ({ ...j, text }));
-                } else if (ev.type === "done") {
-                  // finish happens on stream-close; capture the per-run cost it carries
-                  if (typeof ev.tokens === "number") doneTokens = ev.tokens;
-                  if (typeof ev.costUsd === "number") doneCostUsd = ev.costUsd;
-                } else if (ev.type === "error") {
-                  finish("error", ev.msg || "Error");
-                  return;
-                }
-              } catch {
-                /* skip */
-              }
+          const completion = await readJobStream(res.body, (ev) => {
+            if (ev.type === "tool") {
+              steps.push({ kind: "tool", label: ev.name, ts: Date.now() });
+              patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "tool", label: ev.name, ts: Date.now() }] }));
+            } else if (ev.type === "status") {
+              steps.push({ kind: "status", label: ev.label, ts: Date.now() });
+              patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "status", label: ev.label, ts: Date.now() }] }));
+            } else if (ev.type === "text") {
+              const full = text + ev.text;
+              const vm = full.match(/VERDICT:[^\n]*/i);
+              if (vm) verdictLine = vm[0];
+              text = full.slice(-8000);
+              patch(id, (j) => ({ ...j, text }));
             }
+          });
+          if (completion.status === "error") {
+            finish("error", completion.message);
+            return;
           }
+          doneTokens = completion.tokens ?? 0;
+          doneCostUsd = completion.costUsd ?? null;
           finish("done", "Done");
         } catch {
           finish("error", "Connection error");
