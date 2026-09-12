@@ -227,6 +227,71 @@ try {
     fail(`single vs batch render diverged: single=${single.status} batch=${singleBatch.status}\n${single.output.trim()}\n${singleBatch.output.trim()}`);
   }
 
+  // A terminal's working directory must not select the candidate's theme.
+  // Capture the HTML passed to Chromium via the stub PDF's Marker field.
+  const workspaceConfig = join(sandbox, 'config');
+  const otherCwd = join(sandbox, 'other-cwd');
+  mkdirSync(workspaceConfig, { recursive: true });
+  mkdirSync(join(otherCwd, 'config'), { recursive: true });
+  writeFileSync(join(workspaceConfig, 'profile.yml'), 'style:\n  accent_color: "#123456"\n  font_family: "Georgia, serif"\n  font_size: "12pt"\n  margin: "0.4in"\n');
+  writeFileSync(join(otherCwd, 'config', 'profile.yml'), 'style:\n  accent_color: "#abcdef"\n  font_family: "Arial, sans-serif"\n  margin: "1in"\n');
+  const themedManifest = join(sandbox, 'themed-batch.json');
+  writeFileSync(themedManifest, JSON.stringify([
+    { input: 'single.html', output: 'out/themed-batch.pdf' },
+    { input: 'single.html', output: 'out/themed-batch-second.pdf' },
+  ]));
+  const themedEnv = { CAREER_OPS_TRACKER: join(sandbox, 'data', 'applications.md') };
+  writeFileSync(themedEnv.CAREER_OPS_TRACKER, '# Applications Tracker\n');
+  const themedSingle = run([join(sandbox, 'single.html'), join(sandbox, 'out', 'themed-single.pdf')], { cwd: otherCwd, env: themedEnv });
+  const themedBatch = run([`--batch=${themedManifest}`], { cwd: otherCwd, env: themedEnv });
+  const renderedHtml = (name) => {
+    const marker = readFileSync(join(sandbox, 'out', name), 'latin1').match(/\/Marker \(([^)]+)\)/)?.[1];
+    return Buffer.from(marker || '', 'base64').toString('utf-8');
+  };
+  const expectedTheme = (html) => html.includes('--accent-color: #123456;')
+    && html.includes('--font-family: Georgia, serif;')
+    && html.includes('--font-size: 12pt;')
+    && html.includes('--page-margin: 0.4in;')
+    && !html.includes('#abcdef');
+  if (themedSingle.status === 0 && themedBatch.status === 0
+      && expectedTheme(renderedHtml('themed-single.pdf'))
+      && renderedHtml('themed-single.pdf') === renderedHtml('themed-batch.pdf')
+      && renderedHtml('themed-batch.pdf') === renderedHtml('themed-batch-second.pdf')) {
+    pass('single and batch renders use the workspace theme from a different working directory');
+  } else {
+    fail(`workspace theme differs between single and batch: single=${themedSingle.status} batch=${themedBatch.status}\n${themedSingle.output}\n${themedBatch.output}`);
+  }
+
+  // Imported callers, including cover-letter generation, share the fallback.
+  // An explicit token map still wins, and {} deliberately disables the theme.
+  const directRunner = join(sandbox, 'render-themed.mjs');
+  writeFileSync(directRunner, `
+import { renderHtmlToPdf } from './generate-pdf.mjs';
+const [outputPath, root, tokens] = process.argv.slice(2);
+await renderHtmlToPdf(${JSON.stringify(htmlDoc('Solo CV'))}, outputPath, {
+  workspaceRoot: root,
+  ...(tokens === undefined ? {} : { styleTokens: JSON.parse(tokens) }),
+});
+`);
+  for (const [label, tokens, accepts] of [
+    ['default', undefined, expectedTheme],
+    ['explicit', { '--accent-color': '#654321' }, (html) => html.includes('--accent-color: #654321;') && !html.includes('#123456')],
+    ['disabled', {}, (html) => !html.includes('career-ops-dynamic-theme')],
+  ]) {
+    const outputName = `themed-direct-${label}.pdf`;
+    const result = spawnSync(NODE, [directRunner, join(sandbox, 'out', outputName), sandbox,
+      ...(tokens === undefined ? [] : [JSON.stringify(tokens)])], {
+      cwd: otherCwd, encoding: 'utf-8', timeout: 30_000,
+      env: { ...process.env, ...themedEnv },
+    });
+    if (result.status === 0 && accepts(renderedHtml(outputName))) {
+      pass(`imported PDF rendering honors ${label} theme selection from a different working directory`);
+    } else {
+      fail(`imported ${label} theme failed: status=${result.status}\n${result.stdout}\n${result.stderr}`);
+    }
+  }
+  rmSync(workspaceConfig, { recursive: true, force: true });
+
   // --- Test 3: an all-success batch exits 0 ---
   const okManifest = join(sandbox, 'ok-batch.json');
   writeFileSync(okManifest, JSON.stringify([
