@@ -231,13 +231,21 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 | **Kimi K2.5** | Moonshot AI | API pricing applies | Verified with OpenCode using the Moonshot OpenAI-compatible endpoint. Produces structured Markdown suitable for Career-Ops evaluations. See the verified OpenCode recipe below. |
 
 
-> **Standalone evaluator (no CLI config needed):** every OpenAI-compatible provider above (DeepSeek, Qwen, GLM, Together, Groq, OpenRouter, …) works directly through `node openai-eval.mjs` — just set a base URL, model, and key:
+> **Standalone evaluator (no CLI config needed):** every OpenAI-compatible provider above (DeepSeek, Qwen, GLM, Together, Groq, OpenRouter, Requesty, …) works directly through `node openai-eval.mjs` — just set a base URL, model, and key:
 > ```bash
 > OPENAI_BASE_URL=https://openrouter.ai/api/v1 \
 > OPENAI_MODEL=deepseek/deepseek-chat \
 > OPENAI_API_KEY=your_key \
 > node openai-eval.mjs --file ./jds/job.txt
 > ```
+> Requesty (`https://router.requesty.ai/v1`) is another OpenAI-compatible router that works the same way — one key across OpenAI, Anthropic, Google, DeepSeek and others. Prompt caching depends on the model: Anthropic models honor the `cache_control` breakpoints the script already sends, while OpenAI models such as `gpt-4o-mini` cache automatically on the provider side without any request changes:
+> ```bash
+> OPENAI_BASE_URL=https://router.requesty.ai/v1 \
+> OPENAI_MODEL=openai/gpt-4o-mini \
+> OPENAI_API_KEY=your_requesty_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+>
 > Run `node openai-eval.mjs --help` for per-provider examples. For 100% local/private use, point `--url` at a local server (LM Studio / llama.cpp / vLLM) or use `node ollama-eval.mjs`.
 
 > NVIDIA NIM also works (hosted `https://integrate.api.nvidia.com/v1` or a self-hosted container's `/v1`), e.g. `--model meta/llama-3.3-70b-instruct`. The hosted free tier can queue for minutes, so raise `OPENAI_TIMEOUT_MS` above the 300s default.
