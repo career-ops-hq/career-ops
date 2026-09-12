@@ -4,7 +4,7 @@
 # max 5 per run) with Claude Code headless on an explicit tool allowlist, then syncs HubSpot.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-export PATH="/Users/prasta/.local/share/fnm/node-versions/v24.15.0/installation/bin:/Users/prasta/.local/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="$HOME/.local/share/fnm/node-versions/v24.15.0/installation/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 echo "=== $(date '+%Y-%m-%dT%H:%M:%S') evaluate run ==="
 node rank-pipeline.mjs --limit 20
 claude -p "$(cat <<'PROMPT'
