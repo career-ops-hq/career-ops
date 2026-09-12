@@ -226,7 +226,11 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
       if (useJson) {
         let j: ScanJson | null = null;
         try {
-          j = JSON.parse(jsonOut.trim()) as ScanJson;
+          const raw = jsonOut.trim();
+          const braceIdx = raw.indexOf("{");
+          const lastBraceIdx = raw.lastIndexOf("}");
+          const jsonStr = braceIdx !== -1 && lastBraceIdx > braceIdx ? raw.slice(braceIdx, lastBraceIdx + 1) : raw;
+          j = JSON.parse(jsonStr) as ScanJson;
         } catch {
           j = null;
         }
