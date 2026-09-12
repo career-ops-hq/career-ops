@@ -233,7 +233,9 @@ export async function POST(req: Request) {
           codexResultFile!,
           prompt,
         ]
-      : spec.args(prompt);
+      : cliId === "antigravity"
+        ? ["-p", prompt, "--dangerously-skip-permissions"]
+        : spec.args(prompt);
 
   // POSIX detached children become process-group leaders. Keeping stdio
   // piped means Node still tracks the Codex process normally.
