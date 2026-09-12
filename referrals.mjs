@@ -42,7 +42,8 @@
  *
  *   messages        5 per doubling of total messages, capped at 25
  *   twoWay          15 when both of you have written
- *   recency         20 x 0.5^(months since last message / 12)
+ *   recency         20 x 0.5^(months since last message / 12), only when
+ *                   two-way: an unanswered message is not a relationship
  *   recommendation  20 when they wrote you a recommendation
  *   endorsement     3 per distinct endorsed skill, capped at 10
  *   inviteNote      3 when the connection invite carried a note
@@ -51,9 +52,16 @@
  *   tenure          1 per full year connected, capped at 5
  *
  * Tiers: close >= 40, warm >= 20, light >= 8, cold < 8. "dormant" = last
- * message more than 18 months ago. The ask approach follows from both:
- * direct-ask (close/warm, not dormant), reconnect-first (light, or dormant),
- * peer-no-ask (cold: the contacto peer rule - no job ask in a first message).
+ * message more than 18 months ago. The ask approach follows from both, plus
+ * evidence of a real relationship: direct-ask (close/warm, not dormant, AND a
+ * two-way conversation or a recommendation), reconnect-first (any other
+ * close/warm/light), peer-no-ask (cold: the contacto peer rule - no job ask in
+ * a first message).
+ *
+ * Tracker rows and queries whose company name has no distinctive tokens
+ * ("Stealth Startup", "Confidential") never match anyone, mirroring
+ * linkedin-join.mjs parseTrackerTargets: the same generic words typed as an
+ * employer say nothing about whether it is the same company.
  *
  * LIMITS OF THE DATA, stated rather than papered over: the export carries only
  * each connection's CURRENT employer, so "shared employer" means "works today
@@ -205,14 +213,14 @@ export function exportDateFromName(name) {
 }
 
 /**
- * Newest export directory under `root`/{linkedin,documents}, or null.
- * Ordered by the date in the folder name, then by mtime, so a re-download of an
- * older export cannot shadow a newer one just by being touched later.
+ * Newest export directory directly under any of `bases` (default: linkedin/ and
+ * documents/ under the data root), or null. Ordered by the date in the folder
+ * name, then by mtime, so a re-download of an older export cannot shadow a newer
+ * one just by being touched later.
  */
-export function findExportDir(root) {
+export function findExportDir(bases = EXPORT_PARENTS.map(p => join(DATA_ROOT, p))) {
   const candidates = [];
-  for (const parent of EXPORT_PARENTS) {
-    const base = join(root, parent);
+  for (const base of bases) {
     let entries;
     try {
       entries = readdirSync(base, { withFileTypes: true });
@@ -233,29 +241,23 @@ export function findExportDir(root) {
   return candidates[0] || null;
 }
 
-function resolveExportDir(dirFlag) {
+/**
+ * The export to read: --dir (an export, or a folder holding exports), else the
+ * newest one found by default discovery. With `optional`, a missing default
+ * export returns null instead of failing; an explicit --dir is always required.
+ */
+function resolveExportDir(dirFlag, { optional = false } = {}) {
   if (dirFlag) {
     const dir = resolve(dirFlag);
     if (existsSync(join(dir, 'Connections.csv'))) {
       return { dir, date: exportDateFromName(dir) };
     }
-    const nested = findExportDir(dir) || (() => {
-      // --dir may also point at a parent that directly holds export folders.
-      try {
-        const sub = readdirSync(dir, { withFileTypes: true })
-          .filter(e => e.isDirectory() && existsSync(join(dir, e.name, 'Connections.csv')))
-          .map(e => ({ dir: join(dir, e.name), date: exportDateFromName(e.name) }))
-          .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
-        return sub[0] || null;
-      } catch {
-        return null;
-      }
-    })();
+    const nested = findExportDir([dir]);
     if (nested) return nested;
-    throw new CliError(`No LinkedIn export at --dir ${dir} (expected a Connections.csv in it or in a subfolder).`);
+    throw new CliError(`No LinkedIn export at --dir ${dir} (expected a Connections.csv in it or in a LinkedIn export subfolder).`);
   }
-  const found = findExportDir(DATA_ROOT);
-  if (!found) {
+  const found = findExportDir();
+  if (!found && !optional) {
     throw new CliError('No LinkedIn data export found.\n'
       + 'LinkedIn -> Settings -> Data Privacy -> Get a copy of your data, unzip it into linkedin/ '
       + '(gitignored), or pass --dir <path>.');
@@ -478,7 +480,7 @@ export function warmth(sig, nowMs) {
   const total = (sig.sent || 0) + (sig.received || 0);
   if (total) c.messages = Math.min(W.messagesMax, round1(W.messagesPerDoubling * Math.log2(1 + total)));
   if (sig.sent && sig.received) c.twoWay = W.twoWay;
-  if (sig.lastMs != null) {
+  if (c.twoWay && sig.lastMs != null) {
     const months = Math.max(0, monthsBetween(sig.lastMs, nowMs));
     c.recency = round1(W.recencyMax * 0.5 ** (months / W.recencyHalfLifeMonths));
   }
@@ -497,11 +499,17 @@ export function warmth(sig, nowMs) {
   return { score, tier, components: c, dormant };
 }
 
-/** How to approach: drives which contacto draft variant is written. */
+/**
+ * How to approach: drives which contacto draft variant is written. A direct
+ * ask needs a close/warm score that is not dormant AND evidence the other side
+ * engaged (a two-way conversation or a recommendation); a high score built from
+ * one-way messages, endorsements, or tenure alone reads as reconnect-first.
+ */
 export function askApproach(w) {
   if (w.tier === 'cold') return 'peer-no-ask';
-  if (w.dormant || w.tier === 'light') return 'reconnect-first';
-  return 'direct-ask';
+  const engaged = Boolean(w.components.twoWay || w.components.recommendation);
+  if ((w.tier === 'close' || w.tier === 'warm') && !w.dormant && engaged) return 'direct-ask';
+  return 'reconnect-first';
 }
 
 const RECRUITER_RE = /\b(recruit(?:er|ers|ing|ment)?|talent|sourc(?:er|ing)|headhunt(?:er|ing)?|staffing|hr business partner|people partner)\b/i;
@@ -693,8 +701,15 @@ export function companiesMatch(a, b, groups) {
   return companyVariants(a, groups).some(v => isSame(matchCompany(v.tokens, tb)));
 }
 
-/** People whose current employer matches `query` (or one of its aliases). */
+/** No distinctive tokens: an anonymized or placeholder name with no identity. */
+export const isPlaceholderCompany = (name) => !companyTokens(name).distinctive.length;
+
+/**
+ * People whose current employer matches `query` (or one of its aliases). A
+ * placeholder query matches no one.
+ */
 export function matchPeople(people, query, { groups = [], includeWeak = false } = {}) {
+  if (isPlaceholderCompany(query)) return [];
   const variants = companyVariants(query, groups);
   const out = [];
   for (const p of people) {
@@ -867,6 +882,9 @@ function companyAnswer(ctx, query, opts) {
 
 function roleAnswer(ctx, selector, opts) {
   const { row, others } = resolveRole(ctx.tracker, selector, opts.groups);
+  if (isPlaceholderCompany(row.company)) {
+    throw new CliError(`Tracker row #${row.num} company "${row.company}" has no identifying words to match on (placeholder / anonymized). Use \`node referrals.mjs company "<real name>"\` once the employer is known.`);
+  }
   const wanted = roleTokens(row.role);
   const hits = matchPeople(ctx.people, row.company, opts).map(h => {
     const have = roleTokens(h.person.title);
@@ -909,7 +927,10 @@ function roleAnswer(ctx, selector, opts) {
 }
 
 function pipelineAnswer(ctx, opts) {
-  const rows = ctx.tracker.filter(r => opts.allStatuses || ACTIVE_STATUSES.has(String(r.status).trim().toLowerCase()));
+  const inScope = ctx.tracker.filter(r => opts.allStatuses || ACTIVE_STATUSES.has(String(r.status).trim().toLowerCase()));
+  const rows = inScope.filter(r => !isPlaceholderCompany(r.company));
+  const skippedRows = inScope.filter(r => isPlaceholderCompany(r.company))
+    .map(r => ({ num: r.num, company: r.company, reason: 'placeholder / no identifying tokens' }));
   const out = rows.map((r) => {
     const hits = matchPeople(ctx.people, r.company, opts);
     const top = hits[0];
@@ -919,9 +940,10 @@ function pipelineAnswer(ctx, opts) {
       role: r.role,
       status: r.status,
       connections: hits.length,
-      // Ready to ask = close/warm AND not dormant (approach direct-ask). A warm
-      // but dormant contact needs a reconnect message first, so it is counted
-      // separately rather than inflating the ask-ready number.
+      // Ready to ask = approach direct-ask (close/warm, not dormant, two-way or
+      // a recommendation). A dormant or one-way contact needs a reconnect
+      // message first, so it is counted separately rather than inflating the
+      // ask-ready number.
       readyToAsk: hits.filter(h => h.person.approach === 'direct-ask').length,
       reconnectFirst: hits.filter(h => h.person.approach === 'reconnect-first').length,
       byTier: tierCounts(hits),
@@ -938,6 +960,7 @@ function pipelineAnswer(ctx, opts) {
     rowsToReconnect: out.filter(r => !r.readyToAsk && r.reconnectFirst > 0).length,
     rowsWithAnyConnection: out.filter(r => r.connections > 0).length,
     pipeline: out,
+    skippedRows,
     next: out.length
       ? ['node referrals.mjs role <#> --summary   (who to ask for one row)']
       : ['no tracker rows in scope: evaluate a role first, or pass --all-statuses'],
@@ -1125,6 +1148,9 @@ function renderSummary(result) {
         out.push(`  #${String(r.num).padStart(3)} ${r.company} - ${r.role} [${r.status}]`);
         out.push(`        ${r.readyToAsk} ready to ask · ${r.reconnectFirst} reconnect first · ${r.connections} total · ${best}${r.asksLogged ? ` · asks ${r.asksLogged}` : ''}`);
       }
+      if (result.skippedRows.length) {
+        out.push('', `  Skipped (${result.skippedRows.length}): ${result.skippedRows.map(r => `#${r.num} ${r.company} (${r.reason})`).join('; ')}`);
+      }
       break;
     }
     case 'recruiters': {
@@ -1154,13 +1180,13 @@ function renderSummary(result) {
     default:
       return JSON.stringify(result, null, 2);
   }
-  if (result.meta) {
+  if (result.meta?.quality) {
     const q = result.meta.quality;
     out.push('', `Export ${result.meta.exportDate || '?'} · ${q.connections.parsed} connections · ${q.messages.connectionsWithMessages} with messages · ${result.meta.elapsedMs} ms`);
     if (q.missingFiles.length) out.push(`  ! missing files (signal counts as zero): ${q.missingFiles.join(', ')}`);
     if (!q.messages.selfDetected && !q.missingFiles.includes('messages.csv')) out.push('  ! could not identify your own profile in messages.csv; message signals are zero');
-    if (result.meta.aliasError) out.push(`  ! ${result.meta.aliasError}`);
   }
+  if (result.meta?.aliasError) out.push(`  ! ${result.meta.aliasError}`);
   if (result.next?.length) out.push('', `Next: ${result.next.join('\n      ')}`);
   return out.join('\n');
 }
@@ -1216,16 +1242,18 @@ function main(args) {
   if (['company', 'role', 'promote', 'log-ask'].includes(command) && !operand) {
     throw new CliError(`${command} needs an operand. See --help.`);
   }
-  if (command === 'company' && !companyTokens(operand).distinctive.length) {
+  if (command === 'company' && isPlaceholderCompany(operand)) {
     throw new CliError(`"${operand}" has no identifying words to match on (all generic terms). Give a more specific company name.`);
   }
 
   const started = Date.now();
-  const exp = resolveExportDir(flagValue(args, '--dir'));
-  const built = buildPeople(loadExport(exp.dir), isoToMs(today));
+  // asks never reads the export; log-ask uses it only to look up a name, so it
+  // still logs (with an empty name) after the export has been deleted.
+  const exp = command === 'asks' ? null : resolveExportDir(flagValue(args, '--dir'), { optional: command === 'log-ask' });
+  const built = exp ? buildPeople(loadExport(exp.dir), isoToMs(today)) : null;
   const asksParsed = parseAsks(readOrNull(ASKS_PATH));
   const ctx = {
-    people: built.people,
+    people: built?.people || [],
     tracker: trackerRows(readOrNull(resolveTrackerPath(DATA_ROOT))),
     known: parseKnownContacts(readOrNull(CONTACTS_PATH) || ''),
     asks: asksParsed.asks,
@@ -1246,12 +1274,11 @@ function main(args) {
   } else result = pipelineAnswer(ctx, opts);
 
   result.meta = {
-    exportDir: exp.dir,
-    exportDate: exp.date,
+    exportDir: exp?.dir ?? null,
+    exportDate: exp?.date ?? null,
     today,
     elapsedMs: Date.now() - started,
-    history: built.history,
-    quality: built.quality,
+    ...(built ? { history: built.history, quality: built.quality } : {}),
     ...(aliases.error ? { aliasError: aliases.error } : {}),
   };
   console.log(opts.summary ? renderSummary(result) : JSON.stringify(result, null, 2));
@@ -1380,6 +1407,15 @@ function selfTest() {
   check('score is the rounded component sum', w1.score === Math.round(Object.values(w1.components).reduce((a, b) => a + b, 0)));
   check('messages component capped', warmth({ sent: 5000, received: 5000 }, NOW).components.messages === WEIGHTS.messagesMax);
 
+  // A relationship needs replies: an unanswered message scores no recency and
+  // never earns a direct ask, even when other signals lift it to warm.
+  const oneWay = warmth({ sent: 1, received: 0, lastMs: NOW - DAY_MS, connectedMs: null }, NOW);
+  check('one-way message: no recency', oneWay.components.recency === undefined && oneWay.components.messages === 5);
+  check('one-way message: not direct-ask', askApproach(oneWay) !== 'direct-ask');
+  const oneWayWarm = warmth({ sent: 1, received: 0, lastMs: NOW - DAY_MS, endorsedSkills: 4, sharedEmployer: 'X', connectedMs: isoToMs('2020-01-01') }, NOW);
+  check('one-way but warm score -> reconnect-first', oneWayWarm.tier === 'warm' && askApproach(oneWayWarm) === 'reconnect-first');
+  check('two-way (Ada) stays direct-ask', ada.approach === 'direct-ask' && ada.warmth.components.recency > 0);
+
   // Company matching + aliases.
   const { groups } = parseAliases('BigBank: [BigBank Securities, BB Markets]\n');
   check('aliases parsed', groups.length === 1 && groups[0].length === 3);
@@ -1422,6 +1458,26 @@ function selfTest() {
   check('pipeline: ready-to-ask excludes dormant', pipe.pipeline[0].readyToAsk === 2
     && pipe.pipeline[0].reconnectFirst === 1 && pipe.pipeline[0].connections === 4);
 
+  // A placeholder employer ("Stealth Startup") typed identically on a tracker
+  // row and a connection says nothing about it being the same company.
+  const stealth = buildPeople({
+    'Connections.csv': [
+      'First Name,Last Name,URL,Email Address,Company,Position,Connected On',
+      'Sam,Stealth,https://www.linkedin.com/in/sam-stealth,,Stealth Startup,Engineer,01 Jan 2020',
+    ].join('\n'),
+  }, NOW);
+  const stealthCtx = {
+    ...roleCtx,
+    people: stealth.people,
+    tracker: [{ num: 2, company: 'Stealth Startup', role: 'Engineer', status: 'Applied', score: '4.0/5', report: '' }],
+  };
+  check('placeholder query matches no one', matchPeople(stealth.people, 'Stealth Startup').length === 0);
+  const stealthPipe = pipelineAnswer(stealthCtx, roleOpts);
+  check('pipeline: placeholder row skipped and reported', stealthPipe.rows === 0 && stealthPipe.pipeline.length === 0
+    && stealthPipe.skippedRows.length === 1 && stealthPipe.skippedRows[0].company === 'Stealth Startup');
+  check('role: placeholder row is a CliError naming the row',
+    (() => { try { roleAnswer(stealthCtx, '2', roleOpts); return false; } catch (e) { return e instanceof CliError && e.message.includes('#2'); } })());
+
   // Ask log + warnings.
   const { asks, quality: askQ } = parseAsks([
     ASKS_HEADER,
@@ -1450,14 +1506,20 @@ function selfTest() {
   // null when nothing is there.
   const tmp = mkdtempSync(join(tmpdir(), 'referrals-selftest-'));
   try {
-    check('no export -> null', findExportDir(tmp) === null);
+    const bases = [join(tmp, 'linkedin'), join(tmp, 'documents')];
+    check('no export -> null', findExportDir(bases) === null);
     for (const name of ['Basic_LinkedInDataExport_01-02-2026', 'Basic_LinkedInDataExport_09-12-2026', 'Basic_LinkedInDataExport_12-31-2025']) {
       mkdirSync(join(tmp, 'linkedin', name), { recursive: true });
       writeFileSync(join(tmp, 'linkedin', name, 'Connections.csv'), 'First Name,Company\n');
     }
     mkdirSync(join(tmp, 'linkedin', 'Basic_LinkedInDataExport_10-01-2026'), { recursive: true }); // no Connections.csv
-    const found = findExportDir(tmp);
+    const found = findExportDir(bases);
     check('newest export with Connections.csv wins', found && found.date === '2026-09-12');
+    check('--dir at a parent of exports resolves the newest', resolveExportDir(join(tmp, 'linkedin')).date === '2026-09-12');
+    check('--dir at an export resolves it directly',
+      resolveExportDir(join(tmp, 'linkedin', 'Basic_LinkedInDataExport_01-02-2026')).date === '2026-01-02');
+    check('--dir with no export is a CliError, even when optional',
+      (() => { try { resolveExportDir(join(tmp, 'documents'), { optional: true }); return false; } catch (e) { return e instanceof CliError; } })());
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
