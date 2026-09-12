@@ -1,8 +1,10 @@
 "use client";
 
-import { Loader2, Wand2, Asterisk, Paperclip, Sparkles, ArrowUpRight, ShieldCheck, RotateCcw, FileCheck2, AlertTriangle, Terminal, Check, ScanLine, PenLine, CheckCircle2, Info, ExternalLink, MousePointerClick } from "lucide-react";
+import { Loader2, Wand2, Asterisk, Paperclip, Sparkles, ArrowUpRight, ShieldCheck, RotateCcw, FileCheck2, AlertTriangle, Terminal, Check, ScanLine, PenLine, CheckCircle2, Info, ExternalLink, MousePointerClick, ArrowLeft, ClipboardCheck } from "lucide-react";
+import { useRouter } from "next/navigation";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { useApply } from "@/components/apply/apply-provider";
+import { needsLeaveConfirmation, resolveReturnPath } from "@/lib/apply/exit.mjs";
 import type { ApplyField } from "@/lib/apply/extract";
 import { cn } from "@/lib/cn";
 import { Fragment, useEffect, useRef, useState } from "react";
@@ -64,6 +66,9 @@ export function ApplyView() {
             </div>
           </div>
         )}
+        {/* A session that failed still has a row and an origin behind it, so the
+            way back and the way to record it must survive the failure. */}
+        {a.status === "error" && <ApplyExitBar />}
       </div>
     );
   }
@@ -230,6 +235,129 @@ export function ApplyView() {
           )}
         </div>
       )}
+
+      {/* the way out: back out of the form, or record that you sent it */}
+      <ApplyExitBar />
+    </div>
+  );
+}
+
+// ── Leaving the page: back out, or record that you applied ─────────────────
+// You submit the real form yourself on the employer's site, so the moment you
+// apply happens outside career-ops — this is where you tell the tracker about
+// it. The write goes through /api/status, the same route the tracker's own
+// status control uses, so there is only ever one writer to the table.
+function ApplyExitBar() {
+  const a = useApply();
+  const router = useRouter();
+  const [confirming, setConfirming] = useState(false);
+  const [marking, setMarking] = useState(false);
+  const [error, setError] = useState("");
+  // The status write outlives this bar when the user navigates while it is in
+  // flight. The write still lands; what must not happen is dragging them back
+  // off whatever page they moved on to once it returns.
+  // Set on mount as well as cleared on unmount: React re-runs an effect after
+  // its cleanup (StrictMode does this on every mount in development), so a
+  // cleanup-only flag latches false while the bar is still on screen.
+  const onPage = useRef(true);
+  useEffect(() => {
+    onPage.current = true;
+    return () => {
+      onPage.current = false;
+    };
+  }, []);
+
+  // reset() also closes the headless form session on the user's machine —
+  // navigating away without it strands the browser this page opened. The
+  // destination is read before reset() clears the origin it comes from.
+  //
+  // The staleness check comes FIRST, before reset(). By the time a late status
+  // response gets here the user may have started a different application, and
+  // reset() is not addressed to a particular session: it would close whichever
+  // one is open now, taking a form the user is in the middle of with it.
+  // Leaving that session alone is the same outcome as navigating away from the
+  // page by any other route.
+  function leave() {
+    if (!onPage.current) return;
+    const target = resolveReturnPath(a.from);
+    a.reset();
+    router.push(target);
+    router.refresh();
+  }
+
+  async function markApplied() {
+    setMarking(true);
+    setError("");
+    try {
+      const res = await fetch("/api/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ n: a.n, status: "Applied" }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        if (!onPage.current) return; // moved on already; the row is unchanged
+        setError(d.error || "Couldn't mark it applied — the tracker row is unchanged.");
+        setMarking(false);
+        return;
+      }
+      leave();
+    } catch {
+      if (!onPage.current) return; // moved on already
+      // The route writes the tracker before it answers, so a connection that
+      // drops on the way back leaves the write's fate genuinely unknown —
+      // claiming the row is untouched here would be a guess.
+      setError("Couldn't confirm the update — check the row in your tracker before relying on it.");
+      setMarking(false);
+    }
+  }
+
+  if (confirming) {
+    return (
+      <div className="co-rise mt-8 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 backdrop-blur-sm">
+        <p className="text-sm font-medium text-foreground">Leave this application?</p>
+        <p className="mt-1 text-xs text-muted">Your drafted answers live only on this page. Going back discards them and closes the form.</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            onClick={leave}
+            className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-600 max-sm:min-h-[44px]"
+          >
+            <ArrowLeft className="size-3.5" /> Leave and discard
+          </button>
+          <button
+            onClick={() => setConfirming(false)}
+            className="rounded-md border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:text-foreground max-sm:min-h-[44px]"
+          >
+            Stay here
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-8 border-t border-border/70 pt-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          onClick={() => (needsLeaveConfirmation({ status: a.status, answers: a.answers }) ? setConfirming(true) : leave())}
+          className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-2 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+        >
+          <ArrowLeft className="size-4" /> Back
+        </button>
+        {a.n && (
+          <button
+            onClick={markApplied}
+            disabled={marking}
+            title={`Set tracker row #${a.n} to Applied and go back`}
+            className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-500/20 disabled:opacity-50 dark:text-emerald-400 max-sm:min-h-[44px]"
+          >
+            {marking ? <Loader2 className="size-4 animate-spin" /> : <ClipboardCheck className="size-4" />}
+            {marking ? "Updating your tracker…" : "Mark applied"}
+          </button>
+        )}
+        {a.n && <span className="text-xs text-muted">Click this once you have submitted the real form yourself.</span>}
+      </div>
+      {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
     </div>
   );
 }

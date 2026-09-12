@@ -1,6 +1,7 @@
 // Pure JS helper for the assistant console's <<act:ID {json}>> envelope parser
 // (assistant-console.tsx). No TypeScript types so it can be imported by both the
-// component and test-act-envelope.mjs (which can't import .tsx without a runner).
+// component and tests/lib/act-envelope.test.mjs (which can't import .tsx
+// without a runner).
 //
 // parseEnvelopes only hides an incomplete envelope once the opener regex
 // `<<act:([a-zA-Z]+)[ \t]+` fully matches — i.e. `<<act:`, the id letters, AND

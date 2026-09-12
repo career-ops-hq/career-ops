@@ -6,7 +6,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cleanChips } from "../../src/lib/clean-chips.mjs";
+import { readFileSync } from "node:fs";
+import * as yaml from "js-yaml";
+import { cleanChips, CHIP_CAP } from "../../src/lib/clean-chips.mjs";
 
 /** Split a raw input string the same way filter-builder's commit() does —
  *  on unambiguous item separators only (never bare spaces). */
@@ -83,10 +85,34 @@ test("multi-word entries preserved: 'Costa Rica, South Africa, United States' �
   assert.deepEqual(cleanChips(parts), ["Costa Rica", "South Africa", "United States"]);
 });
 
-test("cap at 16: 20 comma-separated countries → 16 chips", () => {
-  const countries = Array.from({ length: 20 }, (_, i) => `Country${i + 1}`);
+test("a pathological paste is still bounded", () => {
+  const countries = Array.from({ length: CHIP_CAP + 40 }, (_, i) => `Country${i + 1}`);
   const parts = split(countries.join(","));
-  assert.equal(cleanChips(parts).length, 16);
+  assert.equal(cleanChips(parts).length, CHIP_CAP);
+});
+
+// ── the cap must not be smaller than the config it carries ───────────────────
+
+test("the shipped portals.example.yml round-trips without losing keywords", () => {
+  // The regression this pair of tests exists for. The cap was 16 and the
+  // template ships 37 positives, so seedExploreFilters() read the project's own
+  // default and handed the scanner fewer than half of it — while the CLI, on
+  // the same file, used all 37. One config, two different searches, no warning.
+  const yml = readFileSync(new URL("../../../templates/portals.example.yml", import.meta.url), "utf8");
+  const positive = yaml.load(yml)?.title_filter?.positive ?? [];
+  assert.ok(positive.length > 16, "template should still be the realistic size this guards");
+  assert.equal(cleanChips(positive).length, positive.length);
+});
+
+test("adding one chip to an over-16 list appends instead of truncating", () => {
+  // filter-builder's commit() cleans [...existing, ...pasted], so the cap
+  // applied to a MERGE: at 37 chips, one keystroke kept 16, silently discarded
+  // 21, and did not even add the new chip.
+  const existing = Array.from({ length: 37 }, (_, i) => `Keyword${i + 1}`);
+  const next = cleanChips([...existing, "Inference"]);
+  assert.equal(next.length, existing.length + 1);
+  assert.ok(next.includes("Inference"), "the chip the user just typed must be there");
+  for (const k of existing) assert.ok(next.includes(k), `dropped an existing chip: ${k}`);
 });
 
 test("'12345' → 1 chip (has digits)", () => {

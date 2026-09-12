@@ -2,11 +2,11 @@
 // Imports directly from act-envelope.mjs (the single source of truth) so the
 // test and production code can never drift.
 //
-// Run:  node --test test-act-envelope.mjs
+// Run:  node --test tests/lib/act-envelope.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pendingActOpenerStart } from "./src/lib/act-envelope.mjs";
+import { pendingActOpenerStart } from "../../src/lib/act-envelope.mjs";
 
 test("every trailing partial opener is caught as the stream builds `<<act:navigate `", () => {
   // Char-by-char up to (but not including) the space the regex requires: each

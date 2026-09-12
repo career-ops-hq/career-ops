@@ -14,7 +14,9 @@ function readVersion(): string {
   const candidates = [path.join(process.cwd(), "..", "VERSION"), path.join(process.cwd(), "VERSION")];
   for (const p of candidates) {
     try {
-      const v = fs.readFileSync(p, "utf8").split(/\s+/)[0].trim();
+      // Candidate roots differ between `next dev` and the packaged app. They
+      // are runtime probes; asking Turbopack to trace `p` includes the project.
+      const v = fs.readFileSync(/* turbopackIgnore: true */ p, "utf8").split(/\s+/)[0].trim();
       if (v) return v;
     } catch {
       /* next candidate */
