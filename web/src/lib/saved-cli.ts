@@ -30,18 +30,19 @@ export function pickSoleInstalled(
   return installed.length === 1 ? installed[0].id : null;
 }
 
-/** Saved Config cliId, or the only installed CLI (and persist that pick). */
+/** Saved Config cliId if installed, or the first installed CLI on this machine (and persist that pick). */
 export async function resolveCliId(): Promise<string | null> {
-  const saved = readSavedCliId();
-  if (saved) return saved;
   try {
     const r = await fetch("/api/clis");
     const d = (await r.json()) as { clis?: { id: string; installed?: boolean }[] };
-    const sole = pickSoleInstalled(d.clis);
-    if (!sole) return null;
-    persistCliId(sole);
-    return sole;
+    const list = d.clis || [];
+    const installed = list.filter((c) => c.installed);
+    const saved = readSavedCliId();
+    if (saved && installed.some((c) => c.id === saved)) return saved;
+    const pick = installed[0]?.id || null;
+    if (pick) persistCliId(pick);
+    return pick;
   } catch {
-    return null;
+    return readSavedCliId();
   }
 }
