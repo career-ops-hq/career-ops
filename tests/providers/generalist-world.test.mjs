@@ -291,6 +291,9 @@ try {
     [`<template data-x="a>b">${cardLiteral}</template>${c1}`, 'a > inside a template opener attribute'],
     [`<script data-x="a>b">${cardLiteral}</script>${c1}`, 'a > inside a script opener attribute'],
     [`<script>var s = "</template>";</script><template>${cardLiteral}</template>${c1}`, 'a </template> literal inside a script string'],
+    [`<!-->${c1}<!-- footer -->`, 'an abrupt empty comment <!--> before the card and a real comment after it'],
+    [`<!--->${c1}<!-- footer -->`, 'an abrupt <!---> comment before the card and a real comment after it'],
+    [`<!-- ${cardLiteral} --!>${c1}<!-- footer -->`, 'an incorrectly closed --!> comment before the card and a real comment after it'],
   ];
   for (const [main, label] of quotedMarkers) {
     const got = parseGeneralistWorldJobs(page({ main }));

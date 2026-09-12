@@ -82,6 +82,10 @@ const RAW_TEXT_END = new Map([
   ['textarea', /<\/textarea(?=[\s/>])[^>]*>/gi],
 ]);
 const TAG_WHITESPACE = ' \t\n\r\f';
+// Every sequence the tokenizer accepts as the end of a comment: `-->`, the
+// incorrectly closed `--!>`, and the abrupt `<!-->` / `<!--->` (searched
+// from just after `<!` so the opener's own dashes count).
+const COMMENT_END_RE = /--!?>/g;
 
 /**
  * Index just past the `>` that ends the tag whose name ends at `from`.
@@ -132,8 +136,9 @@ function stripNonRendered(html) {
     let stop; // index just past this construct
     let drop = false;
     if (html.startsWith('<!--', lt)) {
-      const end = html.indexOf('-->', lt + 4);
-      stop = end < 0 ? html.length : end + 3;
+      COMMENT_END_RE.lastIndex = lt + 2;
+      const end = COMMENT_END_RE.exec(html);
+      stop = end ? end.index + end[0].length : html.length;
       drop = true;
     } else {
       TAG_START_RE.lastIndex = lt;
