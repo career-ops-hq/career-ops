@@ -64,7 +64,6 @@ try {
   if (traversal[0].url === 'https://careers.garena.com/sg%2F..%2F..%2Fevil/careers/J7%2F..%2F..%2Fadmin') pass('parseGarenaResponse escapes separators in office and id');
   else fail(`traversal[0].url = ${JSON.stringify(traversal[0]?.url)}`);
 
-  // Dot segments survive percent-encoding, so they are rejected instead.
   // Dot segments survive percent-encoding, so they can't reach the path.
   // `office` is config — a malformed one is a config bug and throws. `id` is
   // per-posting remote data inside the parse loop, so a bad one drops just
@@ -74,12 +73,6 @@ try {
     try { parseGarenaResponse({ jobs: [{ id: 'J8', title: 'Dot office', tags: {} }] }, { garena: { office: bad } }); } catch { rejected = true; }
     if (rejected) pass(`parseGarenaResponse rejects office ${JSON.stringify(bad)}`);
     else fail(`parseGarenaResponse should reject office ${JSON.stringify(bad)}`);
-
-    let idRejected = false;
-    try { parseGarenaResponse({ jobs: [{ id: bad, title: 'Dot id', tags: {} }] }, {}); } catch { idRejected = true; }
-    if (idRejected) pass(`parseGarenaResponse rejects id ${JSON.stringify(bad)}`);
-    else fail(`parseGarenaResponse should reject id ${JSON.stringify(bad)}`);
-  }
 
     let threw = false, out;
     try { out = parseGarenaResponse({ jobs: [{ id: bad, title: 'Dot id', tags: {} }, { id: 'J9', title: 'Good', tags: {} }] }, {}); } catch { threw = true; }

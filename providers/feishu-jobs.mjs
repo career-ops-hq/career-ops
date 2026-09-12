@@ -102,8 +102,6 @@ export function parseFeishuJobsResponse(json, companyName, origin) {
     jobs.push({
       title,
       url: origin === 'https://jobs.bytedance.com'
-        ? `${origin}/experienced/position/${encodeURIComponent(id)}/detail`
-        : `${origin}/index/position/${encodeURIComponent(id)}/detail`,
         ? `${origin}/experienced/position/${encodedId}/detail`
         : `${origin}/index/position/${encodedId}/detail`,
       company: companyName,

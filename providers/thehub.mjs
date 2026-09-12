@@ -86,7 +86,6 @@ export function normalizeHubJob(j, fallbackCompany) {
 
   const id = typeof j.id === 'string' ? j.id.trim() : '';
   if (!id) return null;
-  const url = `https://${TRUSTED_HOST}/jobs/${encodeURIComponent(id)}`;
   // A lone surrogate in id would throw URIError out of encodeURIComponent and
   // abort the caller's pagination loop; id is also the dedup key (byUrl). Drop
   // this one.

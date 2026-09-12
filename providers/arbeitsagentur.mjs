@@ -118,7 +118,7 @@ export function normalizeJob(job) {
   if (encodedRefnr === null) return null;
   return {
     title,
-    url: DETAIL_BASE + encodeURIComponent(String(refnr)),
+    url: DETAIL_BASE + encodedRefnr,
     company: String((job && job.firma) || '').trim(),
     location: buildLocation(job && job.stellenlokationen),
     refnr: String(refnr),
