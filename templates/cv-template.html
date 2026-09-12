@@ -11,6 +11,9 @@
   :root {
     --accent-color: hsl(187 74% 32%);
     --secondary-color: hsl(270, 70%, 45%);
+    --tag-color: hsl(187, 74%, 28%);
+    --tag-bg: hsl(187, 40%, 95%);
+    --tag-border: hsl(187, 40%, 88%);
     --font-family: "Liberation Sans", 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
     --font-size: 11px;
     /* Matches generate-pdf.mjs's PDF_PAGE_MARGIN — the actual PDF page margin
@@ -176,11 +179,11 @@
     font-family: var(--font-family);
     font-size: 10px;
     font-weight: 500;
-    color: hsl(187, 74%, 28%);
-    background: hsl(187, 40%, 95%);
+    color: var(--tag-color);
+    background: var(--tag-bg);
     padding: 4px 10px;
     border-radius: 3px;
-    border: 1px solid hsl(187, 40%, 88%);
+    border: 1px solid var(--tag-border);
   }
 
   /* === WORK EXPERIENCE === */
@@ -262,7 +265,7 @@
     font-size: 9px;
     font-weight: 500;
     color: var(--accent-color);
-    background: hsl(187, 40%, 95%);
+    background: var(--tag-bg);
     padding: 1px 6px;
     border-radius: 2px;
     margin-left: 6px;
