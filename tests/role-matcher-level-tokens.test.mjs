@@ -98,6 +98,16 @@ try {
     'Full Stack Engineer, Foundation', 'Full Stack Engineer, Guarded Releases');
   same('an exact-title repost still matches',
     'Senior Analytics Engineer', 'Senior Analytics Engineer');
+
+  // ── 7. A one-sided level PLUS a two-sided vocabulary difference (#4058) ──
+  // Section 3's loose-rewrite rule holds because a lone level is not a content
+  // token: the pair tokenizes identically. When each title ALSO carries a word
+  // the other lacks, the level compounds a role disagreement instead.
+  distinct('a one-sided level with a unique word on each side splits',
+    'Front Desk Assistant (Summer Housing)',
+    'Administrative Assistant II (Housing Front Desk)');
+  same('a one-sided level with identical tokens still matches',
+    'Administrative Assistant', 'Administrative Assistant II');
 } catch (error) {
   fail(`role-matcher level tests could not run: ${error.message}`);
 }
