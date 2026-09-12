@@ -65,13 +65,39 @@ const DESCRIPTION_RE = /<p\s(?:[^>]*?\s)?class="gw-job-description"[^>]*>([\s\S]
 // knows". Matched as an opening tag carrying the class token or the
 // attribute, so the words appearing in text, CSS or script do not count.
 const BOARD_MARKER_RE = /<[a-zA-Z][^\s>]*\s(?:[^>]*?\s)?(?:class="(?:[^"]*\s)?gw-jobs-section(?:\s[^"]*)?"|data-jobs-container(?=[\s>\/=]))[^>]*>/;
-// Content the browser never renders as markup: comments and the raw-text
-// elements. A tag-shaped literal inside one (a JS template, a CSS content:
-// string, a commented-out block) must neither produce a job nor count as
-// the listing container, so these are removed before either match. On the
-// live page they hold only inlined CSS and analytics (about 120 KB of the
-// 300 KB response) and no card markup.
+// Content the browser never renders as markup: comments, the raw-text
+// elements and inert <template> subtrees. A tag-shaped literal inside one
+// (a JS or theme template, a CSS content: string, a commented-out block)
+// must neither produce a job nor count as the listing container, so these
+// are removed before either match. On the live page they hold only inlined
+// CSS and analytics (about 120 KB of the 300 KB response) and no card
+// markup.
 const NON_RENDERED_RE = /<!--[\s\S]*?-->|<(script|style|textarea)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
+const TEMPLATE_TAG_RE = /<(\/?)template\b[^>]*>/gi;
+
+/**
+ * Remove every <template>…</template> subtree, including nested ones (unlike
+ * script/style, template content is parsed markup and may nest). A stray
+ * closing tag is ignored; an unclosed template swallows the rest of the
+ * document, which is the conservative reading.
+ * @param {string} html
+ */
+function stripTemplates(html) {
+  let out = '';
+  let depth = 0;
+  let last = 0;
+  for (const m of html.matchAll(TEMPLATE_TAG_RE)) {
+    if (!m[1]) {
+      if (depth === 0) out += html.slice(last, m.index);
+      depth++;
+    } else if (depth > 0) {
+      depth--;
+      if (depth === 0) last = m.index + m[0].length;
+    }
+  }
+  if (depth === 0) out += html.slice(last);
+  return out;
+}
 
 // The href is host-controlled and becomes a URL path segment, so it is held
 // to a strict slug charset instead of being encoded: anything that is not
@@ -155,8 +181,8 @@ export function normalizeGeneralistWorldCard(cardHtml) {
 }
 
 /**
- * Parse the board page. Comments, script, style and textarea blocks are
- * dropped first. An empty body, or a page that still carries the
+ * Parse the board page. Comments, script, style, textarea and template
+ * blocks are dropped first. An empty body, or a page that still carries the
  * listing container but no cards, is an alive-but-empty board and yields [].
  * A body with neither throws, so a redesign or a challenge page surfaces as
  * an error instead of a board that quietly reads 0 forever. Exported for
@@ -166,7 +192,7 @@ export function normalizeGeneralistWorldCard(cardHtml) {
  */
 export function parseGeneralistWorldJobs(html) {
   if (typeof html !== 'string' || !html.trim()) return [];
-  const rendered = html.replace(NON_RENDERED_RE, ' ');
+  const rendered = stripTemplates(html.replace(NON_RENDERED_RE, ' '));
   /** @type {Job[]} */
   const jobs = [];
   const seen = new Set();

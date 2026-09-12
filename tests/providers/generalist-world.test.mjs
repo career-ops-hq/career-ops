@@ -269,8 +269,21 @@ try {
   } else {
     fail(`parseGeneralistWorldJobs() non-rendered card fixture returned ${JSON.stringify(nonRenderedCards.map((j) => j.url))}`);
   }
+  const ghost2 = c1.replace('chief-of-staff-exampleco', 'ghost-two-exampleco');
+  const templated = parseGeneralistWorldJobs(page({
+    main: `<template id="card-tpl">${cardLiteral}</template>`
+      + `<TEMPLATE><template>${ghost2}</template>${cardLiteral}</TEMPLATE>`
+      + `</template>` + c1 + `<template>${ghost2}`,
+  }));
+  if (templated.length === 1 && templated[0].url.endsWith('/chief-of-staff-exampleco/')) {
+    pass('parseGeneralistWorldJobs() ignores card literals inside <template>, nested templates, a stray </template>, and an unclosed trailing template');
+  } else {
+    fail(`parseGeneralistWorldJobs() template fixture returned ${JSON.stringify(templated.map((j) => j.url))}`);
+  }
   const container = '<div class="gw-jobs-section" data-jobs-container></div>';
   const hiddenContainers = [
+    [`<html><body><template>${container}</template><p>Maintenance</p></body></html>`, 'a <template>'],
+    [`<html><body><template><div><template>${container}</template></div>${container}</template><p>Maintenance</p></body></html>`, 'nested <template>s'],
     [`<html><body><script>document.body.innerHTML = '${container}';</script><p>Maintenance</p></body></html>`, 'a script string'],
     [`<html><body><!-- ${container} --><p>Maintenance</p></body></html>`, 'an HTML comment'],
     [`<html><head><style>.x::after{content:'${container}'}</style></head><body><p>Maintenance</p></body></html>`, 'a CSS content string'],
