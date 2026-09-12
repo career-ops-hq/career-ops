@@ -9,7 +9,7 @@ console.log('\nProvider — personio');
 try {
   const personioModule = await import(pathToFileURL(join(ROOT, 'providers/personio.mjs')).href);
   const personio = personioModule.default;
-  const { parsePersonioXml } = personioModule;
+  const { parsePersonioXml, parsePersonioHtml } = personioModule;
 
   if (personio.id === 'personio') pass('personio.id is "personio"');
   else fail(`personio.id is ${JSON.stringify(personio.id)}`);
@@ -187,6 +187,121 @@ try {
   } catch (e) {
     if (/cannot derive feed URL for NoFeed/.test(e.message)) {
       pass('personio.fetch() throws "cannot derive feed URL" for underivable entries');
+    } else {
+      fail(`personio.fetch() threw the wrong error: ${e.message}`);
+    }
+  }
+
+  // parsePersonioHtml — real page markup shape served when /xml is disabled.
+  const HTML_HOST = 'acme.jobs.personio.de';
+  const htmlSample = `<ul><li>
+    <a class="page_job__haA3E job-box" href="/job/2378948"><div class="page_jobHeaderContent__c_2JP">
+      <h3 class="page_jobTitle__K0ilk jb-title">ML-QA Engineer</h3>
+      <div class="page_jobMeta__GhU10 jb-description">
+        <div class="page_jobMetaItem__olmVi"><span class="page_jobMetaText__5yzux">Berlin AI Campus, Munich</span></div>
+        <div class="page_jobMetaItem__olmVi"><span class="page_jobMetaText__5yzux">Vollzeit</span></div>
+      </div>
+    </div></a>
+  </li><li>
+    <a class="page_job__haA3E job-box" href="/job/2540715?language=en"><div class="page_jobHeaderContent__c_2JP">
+      <h3 class="page_jobTitle__K0ilk jb-title">Senior Engineer (m/f/d) &amp; Lead</h3>
+      <div class="page_jobMeta__GhU10 jb-description">
+        <div class="page_jobMetaItem__olmVi"><span class="page_jobMetaText__5yzux">Remote</span></div>
+      </div>
+    </div></a>
+  </li><li>
+    <a class="nav-link" href="/privacy-policy">Datenschutzerklärung</a>
+  </li></ul>`;
+  const htmlJobs = parsePersonioHtml(htmlSample, 'Acme', HTML_HOST);
+
+  if (htmlJobs.length === 2) pass('parsePersonioHtml keeps 2 job-box anchors (ignores unrelated links)');
+  else fail(`parsePersonioHtml returned ${htmlJobs.length} jobs (expected 2)`);
+
+  if (htmlJobs[0]?.title === 'ML-QA Engineer' && htmlJobs[0]?.url === 'https://acme.jobs.personio.de/job/2378948') {
+    pass('parsePersonioHtml extracts title + builds url from host + numeric id');
+  } else {
+    fail(`row 0 = ${JSON.stringify(htmlJobs[0])}`);
+  }
+
+  if (htmlJobs[0]?.location === 'Berlin AI Campus, Munich' && htmlJobs[0]?.company === 'Acme') {
+    pass('parsePersonioHtml extracts the first jobMetaText span as location');
+  } else {
+    fail(`row 0 location/company = ${JSON.stringify({ location: htmlJobs[0]?.location, company: htmlJobs[0]?.company })}`);
+  }
+
+  if (htmlJobs[1]?.title === 'Senior Engineer (m/f/d) & Lead') {
+    pass('parsePersonioHtml decodes &amp; in the title');
+  } else {
+    fail(`row 1 title = ${JSON.stringify(htmlJobs[1]?.title)}`);
+  }
+
+  if (htmlJobs[1]?.url === 'https://acme.jobs.personio.de/job/2540715') {
+    pass('parsePersonioHtml strips a ?language=en query string from href, keeping the numeric id');
+  } else {
+    fail(`row 1 url = ${JSON.stringify(htmlJobs[1]?.url)}`);
+  }
+
+  if (htmlJobs.every((j) => j.postedAt === undefined)) {
+    pass('parsePersonioHtml never sets postedAt (not exposed on the listing page)');
+  } else {
+    fail('parsePersonioHtml should never set postedAt');
+  }
+
+  // href before class on the anchor must still match (attribute order isn't
+  // guaranteed across tenants).
+  const hrefFirstSample = `<a href="/job/999001" class="job-box page_job__haA3E"><h3>Ops Lead</h3></a>`;
+  const hrefFirstJobs = parsePersonioHtml(hrefFirstSample, 'Acme', HTML_HOST);
+  if (hrefFirstJobs.length === 1 && hrefFirstJobs[0]?.title === 'Ops Lead' && hrefFirstJobs[0]?.url === 'https://acme.jobs.personio.de/job/999001') {
+    pass('parsePersonioHtml matches an anchor with href before class');
+  } else {
+    fail(`href-before-class variant: ${JSON.stringify(hrefFirstJobs)}`);
+  }
+
+  if (parsePersonioHtml('', 'X', HTML_HOST).length === 0 && parsePersonioHtml(null, 'X', HTML_HOST).length === 0) {
+    pass('parsePersonioHtml: empty / non-string page → empty result (no crash)');
+  } else {
+    fail('parsePersonioHtml: empty / non-string page should yield empty result');
+  }
+
+  // fetch() falls back to HTML scraping when /xml 404s.
+  {
+    const calls = [];
+    const jobsFromFallback = await personio.fetch(
+      { name: 'Acme', careers_url: 'https://acme.jobs.personio.de/' },
+      {
+        fetchText: async (url, opts) => {
+          calls.push(url);
+          if (url.endsWith('/xml')) {
+            const err = new Error('HTTP 404 Not Found');
+            err.status = 404;
+            throw err;
+          }
+          return htmlSample;
+        },
+      },
+    );
+    if (calls.length === 2 && calls[0].endsWith('/xml') && calls[1] === 'https://acme.jobs.personio.de/?language=en') {
+      pass('personio.fetch() falls back to the careers page (?language=en) after a 404 on /xml');
+    } else {
+      fail(`personio.fetch() fallback calls = ${JSON.stringify(calls)}`);
+    }
+    if (jobsFromFallback.length === 2) {
+      pass('personio.fetch() returns jobs parsed from the HTML fallback');
+    } else {
+      fail(`personio.fetch() fallback returned ${jobsFromFallback.length} jobs`);
+    }
+  }
+
+  // fetch() re-throws non-404 errors from the /xml feed (no silent fallback).
+  try {
+    await personio.fetch(
+      { name: 'Acme', careers_url: 'https://acme.jobs.personio.de/' },
+      { fetchText: async () => { const err = new Error('HTTP 500 Internal Server Error'); err.status = 500; throw err; } },
+    );
+    fail('personio.fetch() should re-throw non-404 errors instead of falling back');
+  } catch (e) {
+    if (/HTTP 500/.test(e.message)) {
+      pass('personio.fetch() re-throws non-404 errors without falling back to HTML');
     } else {
       fail(`personio.fetch() threw the wrong error: ${e.message}`);
     }

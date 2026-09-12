@@ -5,7 +5,19 @@ import { Check, Clock, FileText, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CompanyLogo } from "@/components/company-logo";
 
-export type FollowUp = { num?: number; company: string; role?: string; status?: string; appliedDate?: string; notes?: string };
+export type FollowUp = {
+  num?: number;
+  company: string;
+  role?: string;
+  status?: string;
+  appliedDate?: string;
+  notes?: string;
+  // Raw pass-through from followup-cadence.mjs — 'urgent'/'overdue' entries
+  // are due now, 'waiting'/'cold' are not (#86).
+  urgency?: "urgent" | "overdue" | "waiting" | "cold";
+  nextFollowupDate?: string | null;
+  daysUntilNext?: number | null;
+};
 
 // One-tap overdue follow-up row (demand loop). "Mark followed up" appends a
 // table row to data/follow-ups.md (append-only) so the core cadence advances;

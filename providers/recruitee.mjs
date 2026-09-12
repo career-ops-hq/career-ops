@@ -7,6 +7,8 @@
 // regex match on `<safe-slug>.recruitee.com` rather than a static
 // allowlist.
 
+import { htmlToText } from './_html-to-text.mjs';
+
 const RECRUITEE_HOST_RE = /^[a-z0-9][a-z0-9-]*\.recruitee\.com$/;
 
 function assertRecruiteeUrl(url) {
@@ -71,10 +73,14 @@ export default {
  *   dropped (empty string returned per the Job contract).
  * - location: prefer the explicit `location` field; else assemble from
  *   city/country, appending "Remote" when `remote` is true.
+ * - description: Recruitee's list payload embeds each offer's full HTML body
+ *   for free (same request — verified against a live board), so it is
+ *   stripped to plain text here and feeds scan.mjs's content_filter /
+ *   visa_filter. Omitted when the offer carries no usable body.
  *
  * @param {any} json
  * @param {string} companyName
- * @returns {Array<{title: string, url: string, company: string, location: string}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, description?: string}>}
  */
 export function parseRecruiteeResponse(json, companyName) {
   const offers = json?.offers;
@@ -84,6 +90,7 @@ export function parseRecruiteeResponse(json, companyName) {
     const country = j.country || '';
     const remote = j.remote ? 'Remote' : '';
     const location = j.location || [city, country, remote].filter(Boolean).join(', ');
+    const description = htmlToText(j.description);
 
     // Resolve offer URL. Recruitee tenants commonly publish postings on their
     // own custom domain (e.g. careers.hostaway.com), so the per-offer URL is
@@ -109,6 +116,7 @@ export function parseRecruiteeResponse(json, companyName) {
       url,
       location,
       company: companyName,
+      ...(description ? { description } : {}),
     };
   });
 }

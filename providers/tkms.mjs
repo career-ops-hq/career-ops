@@ -21,6 +21,13 @@
 // Detection: jobs.tkmsgroup.com is the only known host, and it carries no
 // generic platform token, so detect() claims that host explicitly.
 
+// Titles arrive HTML-escaped, so the tag strip below is not enough on its own:
+// an undecoded "R&amp;D Engineer" fails the user's own title_filter positive
+// "r&d" and is silently dropped, and a negative like "sales & marketing" never
+// vetoes "Sales &amp; Marketing Lead". Shared decoder, same as softgarden and
+// radancy (#2487, #2921).
+import { decodeEntities } from './_html-entities.mjs';
+
 const MAX_PAGES = 60; // safety cap on request count (60*20 = 1200 postings)
 const MAX_JOBS = 1000; // cap total postings pulled
 const PAGE_DELAY_MS = 150; // polite pacing between page requests
@@ -102,7 +109,7 @@ export function parseQuery(json, cfg) {
     const d = item?.data;
     if (!d) continue;
     const id = d.id != null ? String(d.id) : '';
-    const title = String(d.title || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const title = decodeEntities(String(d.title || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
     if (!id || !title) continue;
     rows.push({
       id,

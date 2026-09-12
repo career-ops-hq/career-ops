@@ -38,7 +38,7 @@ Record the outcome of an application conversationally, archive per-application a
 Run the helper script:
 
 ```bash
-node outcome.mjs <report#|company> <outcome_type> [--stage "..."] [--feedback "..."] [--note "..."] [--role "..."]
+node outcome.mjs <report#|company> <outcome_type> [--stage "..."] [--feedback "..."] [--note "..."] [--role "..."] [--clean-output]
 ```
 
 ### Script CLI Options
@@ -52,6 +52,7 @@ node outcome.mjs <report#|company> <outcome_type> [--stage "..."] [--feedback ".
 - `--cv "..."`: Custom CV file path (defaults to `cv.md`)
 - `--cover "..."`: Custom cover letter file path (if available)
 - `--url "..."`: Job posting URL (overrides auto-detection from tracker notes)
+- `--clean-output`: Once the tailored CV is archived, remove its generated PDF/HTML from `output/` (see below)
 - `--dry-run`: Preview outcome logging steps and tracker updates without writing files
 - `--json`: Format the stdout output as machine-readable JSON
 
@@ -70,3 +71,18 @@ Each invocation creates or appends to `data/outcomes/{num}_{company_slug}_{role_
 2. **Append-Only History:** `outcome.md` and tracker notes are strictly append-only. Re-running for an updated stage adds a new entry section without modifying previous logs.
 3. **Idempotency:** Re-running the same command with identical arguments produces clean, duplicate-safe output and safe tracker updates.
 4. **Posting Archiving Stub:** If the live job posting URL cannot be reached or is un-archivable, an explicit stub `posting_missing.md` is created documenting the attempt.
+
+## `output/` Cleanup (`--clean-output`, opt-in, #2653)
+
+`output/` accumulates the tailored PDF/HTML generated at evaluation time for every application, including ones that have since concluded. Passing `--clean-output` removes the tailored PDF/HTML for *this* row from `output/` once its outcome has been recorded — but only after the archive is verified, never as a bare delete:
+
+1. Archives the CV PDF to `submitted_cv.pdf` (already happens by default) and, only when `--clean-output` is set, the companion HTML to `submitted_cv.html`.
+2. Verifies each archived copy exists in `data/outcomes/{num}_{company_slug}_{role_slug}/` and matches the `output/` original **byte-for-byte (sha256)** — a size check alone can't tell two same-length renders apart, so this hashes both files the same way `tracker.mjs` and `seed-fixture.mjs` already do.
+3. Only then deletes the `output/` original. If verification fails or the archived copy is missing, the `output/` file is left in place and reported as refused — never deleted on an unverified archive.
+4. `--dry-run --clean-output` lists the exact files that would be archived-then-removed without touching anything.
+
+**Permanently opt-in, not a default-on candidate.** `output/*` is user layer (`DATA_CONTRACT.md`) — the system never deletes it unless explicitly asked, every single time. This is deliberate: `outcome.mjs` deletes nothing without `--clean-output`, and a `--no-clean-output` escape hatch would not help, since whoever needed it would only find out after the file was already gone.
+
+**Eligibility is the `output/` boundary, not which flag resolved the path.** A PDF is a cleanup candidate whenever it resolves *inside* `output/` — whether `outcome.mjs` auto-detected it from the tracker's PDF column, from `data/pdf-index.tsv`, or the user pointed at it explicitly with `--cv`. An explicit `--cv` pointing anywhere *outside* `output/` (e.g. a path in the user's home directory) is never touched — `--cv` accepts any path, so without that boundary the blast radius would stop being "the output directory" and become "wherever the user pointed." The `cv.md` fallback (no PDF resolved at all) is likewise never eligible.
+
+The containment check itself uses `path.relative()` plus Node's own `path.isAbsolute()` (platform-independent — works the same on POSIX and Windows separators, including Windows drive-absolute and UNC paths) rather than a hand-rolled string-prefix comparison, and it is applied separately to **both** the PDF and its manifest-sourced HTML companion. `data/pdf-index.tsv` is host-writable data, not a trusted boundary in itself — a malformed or manipulated `html` column is never treated as inside `output/` just because its paired PDF is; each path is checked independently before either can become a deletion candidate.

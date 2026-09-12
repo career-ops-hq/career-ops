@@ -38,11 +38,13 @@
 
 <p align="center"><strong>740+ ofertas evaluadas · 100+ CVs personalizados · 1 trabajo soñado conseguido</strong></p>
 
+<p align="center"><sub>Creado y mantenido por <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
+
 <p align="center">
   <a href="https://warpchart.dev/hq">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://warpchart.dev/api/chart?theme=dark&v=3">
-      <img alt="Live star telemetry of santifer/career-ops" src="https://warpchart.dev/api/chart?theme=light&v=3" loading="lazy">
+      <img alt="Live star telemetry of career-ops-hq/career-ops" src="https://warpchart.dev/api/chart?theme=light&v=3" loading="lazy">
     </picture>
   </a>
 </p>
@@ -78,7 +80,7 @@
 
 career-ops convierte cualquier CLI de IA en un centro de mando de búsqueda de empleo. En vez de trackear aplicaciones en un spreadsheet, tienes un pipeline AI que:
 
-- **Evalúa ofertas** con una evaluación estructurada A-F (cinco dimensiones que alimentan una puntuación de 1.0-5.0)
+- **Evalúa ofertas** con una evaluación estructurada A-H (cinco dimensiones que alimentan una puntuación de 1-5)
 - **Genera PDFs personalizados** -- CVs ATS-optimizados por oferta
 - **Escanea portales** automaticamente (Greenhouse, Ashby, Lever, webs de empresas)
 - **Procesa en batch** -- evalúa 10+ ofertas en paralelo con sub-agentes
@@ -95,14 +97,14 @@ Construido por alguien que lo usó para evaluar 740+ ofertas, generar 100+ CVs p
 | Feature                    | Descripción                                                                                                                    |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | **Auto-Pipeline**          | Pega una URL, obtiene evaluación + PDF + entrada en tracker                                                                    |
-| **Evaluación A-F**         | Resumen del rol, match con CV, estrategia de nivel, research de comp, personalización, prep de entrevista (STAR+R) -- más una verificación de legitimidad de la oferta (Bloque G) que detecta estafas y ofertas fantasma |
+| **Evaluación A-H**         | Resumen del rol, match con CV, estrategia de nivel, research de comp, personalización, prep de entrevista (STAR+R) -- más una verificación de legitimidad de la oferta (Bloque G) que detecta estafas y ofertas fantasma |
 | **Banco de historias**     | Acumula historias STAR+Reflexión entre evaluaciones -- 5-10 historias maestras que responden cualquier pregunta behavioral     |
 | **Scripts de negociación** | Frameworks de negociación salarial, pushback de descuentos geográficos, leverage de ofertas competidoras                       |
 | **PDFs ATS**               | CVs con keywords inyectados, diseño Space Grotesk + DM Sans                                                                    |
 | **Scanner de portales**    | 45+ empresas pre-configuradas (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + queries en Ashby, Greenhouse, Lever, Wellfound |
 | **Batch**                  | Evaluación en paralelo con workers `claude -p`                                                                                 |
 | **Dashboard TUI**          | Terminal UI para navegar, filtrar y ordenar tu pipeline                                                                        |
-| **Human-in-the-Loop**      | La IA evalúa y recomienda, tú decides y actuas. El sistema nunca envía una aplicación -- tú siempre tienes la última palabra   |
+| **Human-in-the-Loop**      | La IA evalúa y recomienda, tú decides y actúas. El sistema nunca envía una candidatura: tú siempre tienes la última palabra <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->   |
 | **Integridad de pipeline** | Merge automático, dedup, normalización de estados, health checks                                                               |
 
 ## Inicio rápido
@@ -128,7 +130,7 @@ claude   # o gemini / codex / qwen / opencode — abre tu CLI de IA aquí
 <summary><b>¿Prefieres instalarlo manualmente? (git clone)</b></summary>
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # solo para generar PDFs
 claude   # abre tu CLI de IA — te guiará en el primer arranque
@@ -183,7 +185,7 @@ Pegas una URL o descripción de oferta
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  Evaluación A-F  │  Match, gaps, comp research, historias STAR
+│  Evaluación A-H  │  Match, gaps, comp research, historias STAR
 │  (lee cv.md)     │
 └────────┬─────────┘
          │

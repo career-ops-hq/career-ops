@@ -19,16 +19,17 @@
 import path from 'path';
 import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 import {
   discoverPlugins, pluginRoots, loadPluginConfig, pluginStatus,
-  runHook, loadDotenvOnce, HOOK_KINDS, loadSkill, resolveSuccessorIds,
+  runHook, filterResultsForId, loadDotenvOnce, HOOK_KINDS, loadSkill, resolveSuccessorIds,
 } from './plugins/_engine.mjs';
 import { loadRegistry, findInRegistry, classifySource, sourceBadge, successorFor } from './plugins/_registry.mjs';
 import { readLock, writeLockEntry, removeLockEntry, hashPluginTree, consentSurface } from './plugins/_lock.mjs';
 import { installFromRepo, scaffoldNew, parseRepoArg } from './plugin-install.mjs';
 import { appendToPipeline } from './scan.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const APPLICATIONS_PATH = path.join(ROOT, 'data', 'applications.md');
@@ -154,7 +155,7 @@ async function cmdRun(args) {
   if (hook === 'ingest' || hook === 'search') {
     const payload = hook === 'search' ? positional.slice(hookArgStart).join(' ') : undefined;
     if (hook === 'search' && !payload) { console.error(`search needs a query: node plugins.mjs run ${id} search "<query>"`); process.exit(1); }
-    const results = await runHook(hook, payload, { root: ROOT, dryRun });
+    const results = filterResultsForId(await runHook(hook, payload, { root: ROOT, dryRun, pluginId: id }), id);
     const found = results.filter(r => r.ok && Array.isArray(r.result)).flatMap(r => r.result).map(sanitizeJob).filter(Boolean);
     // Additive de-dup: never re-add a URL already in the pipeline.
     const known = existingPipelineUrls();
@@ -168,7 +169,17 @@ async function cmdRun(args) {
 
   if (hook === 'export') {
     const snapshot = buildSnapshot();
-    const results = await runHook('export', snapshot, { root: ROOT, dryRun });
+    // Export upserts one-by-one over the network (query + create/update per
+    // row), so the default 15s hook timeout only covers a handful of rows.
+    // Scale with tracker size so a growing applications.md doesn't age out.
+    // applications.length only: the bundled Notion export hook reads
+    // snapshot.applications exclusively, and snapshot.pipeline is parsed from
+    // data/pipeline.md's `- [ ]` checklist format by a table parser that can
+    // never match it (a pre-existing, separate bug in buildSnapshot() — always
+    // reads as empty), so counting it here would silently do nothing anyway.
+    const rowCount = snapshot.applications.length;
+    const timeoutMs = Math.min(120_000, Math.max(15_000, rowCount * 3_000));
+    const results = filterResultsForId(await runHook('export', snapshot, { root: ROOT, dryRun, timeoutMs, pluginId: id }), id);
     for (const r of results) {
       if (r.ok) console.log(`${r.id} export: pushed ${r.result?.pushed ?? 0} record(s).`);
       else console.log(`${r.id} export: failed — ${r.error}`);
@@ -178,7 +189,7 @@ async function cmdRun(args) {
 
   if (hook === 'notify') {
     const message = positional.slice(hookArgStart).join(' ') || '(career-ops notification)';
-    const results = await runHook('notify', { message }, { root: ROOT, dryRun });
+    const results = filterResultsForId(await runHook('notify', { message }, { root: ROOT, dryRun, pluginId: id }), id);
     for (const r of results) console.log(r.ok ? `${r.id} notify: sent.` : `${r.id} notify: failed — ${r.error}`);
     return;
   }
@@ -188,12 +199,66 @@ function findManifest(id) {
   return discoverPlugins(pluginRoots(ROOT), resolveSuccessorIds(ROOT)).find(m => m.id === id) || null;
 }
 
+/**
+ * Parse an existing config/plugins.yml into the object setEnabled merges into.
+ *
+ * Split out and exported so the guard below is testable without driving the CLI
+ * at a real config file.
+ *
+ * THROWS rather than returning {} when the file will not parse. setEnabled's
+ * contract is "merging (never clobbering the user's other plugins or non-secret
+ * settings)", and a merge is only a merge if the read succeeded: a swallowed
+ * parse error left cfg as {}, and the write put that empty object back over the
+ * file. Every other plugin's enabled state and settings went with it, including
+ * any non-secret value stored there, and nothing was printed.
+ *
+ * The trigger is a YAML typo — the most likely reason a hand-edited config does
+ * not parse, and precisely when the file is most in need of not being replaced.
+ * config/plugins.yml is a USER path in update-system.mjs, so there is no copy to
+ * restore from.
+ *
+ * @param {string|null} raw - File contents, or null when the file does not exist.
+ * @param {string} file - Path, for the error message only.
+ * @returns {object} Parsed config; {} for an absent file.
+ */
+export function parsePluginConfig(raw, file) {
+  // Absent is not unreadable: no file means a first enable, which is the whole
+  // point of the function. Only an existing-but-unparseable file is a refusal.
+  if (raw == null) return {};
+  // An empty or comment-only file is "no config yet", not a corrupt one, and it
+  // must take the same path as an absent one. Decided from the text rather than
+  // from what the parser does with it: js-yaml 4 returns undefined for an empty
+  // document and js-yaml 5 throws "expected a document, but the input is empty",
+  // so inferring it from the parser would make this refuse to write over a
+  // comment-only config on one major and not the other.
+  const hasContent = raw.split('\n').some((line) => {
+    const t = line.trim();
+    return t !== '' && !t.startsWith('#');
+  });
+  if (!hasContent) return {};
+  let cfg;
+  try {
+    cfg = yaml.load(raw);
+  } catch (err) {
+    throw new Error(
+      `${file} is not valid YAML (${String(err.message).split('\n')[0]}) — refusing to overwrite it. `
+      + 'Fix the file and re-run; nothing was changed.',
+    );
+  }
+  if (cfg == null) return {};   // empty file: same as absent
+  // A scalar or a list parses cleanly and is still not a config. Spreading one
+  // below would discard it just as silently as the empty object did.
+  if (typeof cfg !== 'object' || Array.isArray(cfg)) {
+    throw new Error(`${file} does not contain a YAML mapping — refusing to overwrite it. Nothing was changed.`);
+  }
+  return cfg;
+}
+
 // Write enabled:true/false into config/plugins.yml, merging (never clobbering
 // the user's other plugins or non-secret settings).
 function setEnabled(id, on, settings) {
   const file = path.join(ROOT, 'config', 'plugins.yml');
-  let cfg = {};
-  if (existsSync(file)) { try { cfg = yaml.load(readFileSync(file, 'utf8')) || {}; } catch {} }
+  const cfg = parsePluginConfig(existsSync(file) ? readFileSync(file, 'utf8') : null, file);
   if (!cfg.plugins || typeof cfg.plugins !== 'object') cfg.plugins = {};
   const prev = (cfg.plugins[id] && typeof cfg.plugins[id] === 'object') ? cfg.plugins[id] : {};
   cfg.plugins[id] = { ...prev, ...(settings || {}), enabled: on };
@@ -292,8 +357,19 @@ function cmdRemove(args) {
   const dir = path.join(ROOT, 'plugins.local', id);
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
   removeLockEntry(ROOT, id);
-  try { setEnabled(id, false); } catch {}
-  console.log(`✓ Removed ${id} (plugins.local + lock + disabled).`);
+  // The files and the lock entry are already gone, so a config problem must not
+  // fail the command — but it must not be invisible either. This catch used to
+  // swallow nothing worth seeing; now it can catch a real, actionable one, and
+  // a user told "disabled" while the config still says enabled: true has been
+  // told the wrong thing.
+  let disabled = true;
+  try {
+    setEnabled(id, false);
+  } catch (err) {
+    disabled = false;
+    console.error(`⚠ ${id} was removed, but config/plugins.yml could not be updated: ${err.message}`);
+  }
+  console.log(`✓ Removed ${id} (plugins.local + lock${disabled ? ' + disabled' : ''}).`);
 }
 
 function cmdNew(args) {
@@ -361,6 +437,6 @@ async function main() {
   }
 }
 
-if (import.meta.url === (await import('url')).pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main().catch(err => { console.error('Fatal:', err.message); process.exit(1); });
 }

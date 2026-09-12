@@ -7,9 +7,13 @@
 //
 // The search API is public but wants a bearer token. The career-site home page
 // is a small (~5 KB) bootstrap document that embeds an ANONYMOUS JWT as
-// `"token":"eyJ…"` — no login, no session cookies needed. Flow per fetch:
+// `"token":"eyJ…"` — no login needed. It ALSO sets session cookies, and some
+// tenants (verified live on careers-kln) reject the search call with
+// "HTTP 401 CSOD Unauthorized" unless those cookies come back alongside the
+// token, so both halves of the bootstrap response matter. Flow per fetch:
 //
-//   1. GET  {origin}/ux/ats/careersite/{siteId}/home?c={corpName}   → extract token
+//   1. GET  {origin}/ux/ats/careersite/{siteId}/home?c={corpName}
+//                                          → extract token AND session cookies
 //   2. POST {origin}/services/x/career-site/v1/search               → page through
 //      body: {careerSiteId, careerSitePageId, pageNumber (1-based), pageSize,
 //             cultureId, cultureName, searchText:"", …empty facet arrays}
@@ -22,6 +26,13 @@
 // Detection: *.csod.com hosts auto-claim when the path carries the careersite
 // shape; the branded corporate page goes in careers_url and the csod.com URL in
 // `api:` (same convention as workday/successfactors).
+
+// Titles arrive HTML-escaped, so the tag strip below is not enough on its own:
+// an undecoded "R&amp;D Engineer" fails the user's own title_filter positive
+// "r&d" and is silently dropped, and a negative like "sales & marketing" never
+// vetoes "Sales &amp; Marketing Lead". Shared decoder, same as softgarden and
+// radancy (#2487, #2921).
+import { decodeEntities } from './_html-entities.mjs';
 
 const PAGE_SIZE = 25; // server default; verified OHB serves exactly 25/page
 const MAX_PAGES = 40; // safety cap on request count (40*25 = 1000 postings)
@@ -41,7 +52,9 @@ export function resolveConfig(entry) {
   } catch {
     return null;
   }
-  if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+  // HTTPS only: the bootstrap Set-Cookie values are replayed on the search
+  // request, so an http: entry would put session cookies on the wire in clear.
+  if (u.protocol !== 'https:') return null;
   const host = u.host.toLowerCase();
   if (host !== 'csod.com' && !host.endsWith('.csod.com')) return null;
   const m = u.pathname.match(/\/ux\/ats\/careersite\/(\d+)\//i) || u.pathname.match(/\/ux\/ats\/careersite\/(\d+)$/i);
@@ -55,6 +68,27 @@ export function resolveConfig(entry) {
     homeUrl: `${u.origin}/ux/ats/careersite/${siteId}/home?c=${encodeURIComponent(corpName)}`,
     searchApi: `${u.origin}/services/x/career-site/v1/search`,
   };
+}
+
+/**
+ * Build a `Cookie` request header from the bootstrap response's Set-Cookie
+ * headers. Only the leading name=value pair is meaningful on a request;
+ * attributes (path/HttpOnly/Secure/SameSite/Expires) describe storage rules for
+ * a browser jar and are dropped. A repeated name takes its last definition,
+ * mirroring jar semantics. Returns '' when nothing usable was set, which the
+ * caller treats as "send no cookie header at all".
+ * @param {string[]} setCookies @returns {string}
+ */
+export function cookieHeaderFrom(setCookies) {
+  const jar = new Map();
+  for (const raw of Array.isArray(setCookies) ? setCookies : []) {
+    if (typeof raw !== 'string') continue;
+    const pair = raw.split(';', 1)[0].trim();
+    const eq = pair.indexOf('=');
+    if (eq <= 0) continue; // no '=', or an empty name — not a cookie
+    jar.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+  }
+  return [...jar].map(([name, value]) => `${name}=${value}`).join('; ');
 }
 
 /**
@@ -110,7 +144,7 @@ export function parseRequisitions(json, cfg) {
   for (const r of list) {
     if (!r || typeof r !== 'object') continue;
     const id = r.requisitionId != null ? String(r.requisitionId) : '';
-    const title = String(r.displayJobTitle || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const title = decodeEntities(String(r.displayJobTitle || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
     if (!id || !title) continue;
     out.push({
       id,
@@ -146,7 +180,29 @@ export default {
     const cfg = resolveConfig(entry);
     if (!cfg) throw new Error(`csod: cannot resolve careersite URL for ${entry.name}`);
 
-    const html = await ctx.fetchText(cfg.homeUrl, { headers: { accept: 'text/html' } });
+    // The bootstrap page yields two things, not one: the anonymous bearer
+    // token, and — on some tenants — the session cookies the search API
+    // insists on. careers-kln rejects an otherwise valid token+body with
+    // "HTTP 401 CSOD Unauthorized" until those cookies come back with it, so
+    // the token alone is not a sufficient credential. Prefer ctx.fetchResponse
+    // to see Set-Cookie; fall back to fetchText when the caller's ctx predates
+    // it (older embedders and test mocks), which keeps the pre-cookie
+    // behaviour intact for tenants that never needed it.
+    //
+    // cfg.homeUrl and cfg.searchApi are both built from the same parsed
+    // origin, so replaying these cookies cannot reach a third-party host.
+    // redirect:'error' on the bootstrap keeps that true: origin validation
+    // covers the URL we ask for, not wherever a 3xx would send us.
+    let html;
+    let cookie = '';
+    if (typeof ctx.fetchResponse === 'function') {
+      const res = await ctx.fetchResponse(cfg.homeUrl, { redirect: 'error', headers: { accept: 'text/html' } });
+      const setCookies = typeof res?.headers?.getSetCookie === 'function' ? res.headers.getSetCookie() : [];
+      cookie = cookieHeaderFrom(setCookies);
+      html = await res.text();
+    } else {
+      html = await ctx.fetchText(cfg.homeUrl, { redirect: 'error', headers: { accept: 'text/html' } });
+    }
     const token = extractToken(html);
     if (!token) throw new Error(`csod: no anonymous token on ${cfg.homeUrl}`);
 
@@ -165,6 +221,7 @@ export default {
           'content-type': 'application/json',
           accept: 'application/json',
           authorization: `Bearer ${token}`,
+          ...(cookie ? { cookie } : {}),
         },
         body: JSON.stringify({
           careerSiteId: cfg.siteId,

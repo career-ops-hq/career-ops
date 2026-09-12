@@ -10,6 +10,7 @@ import { CompanyLogo } from "@/components/company-logo";
 import { canonStatus, scoreNum, scoreTone, statusDot } from "@/lib/format";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { cn } from "@/lib/cn";
+import { companyPresentation, companySearchText } from "@/lib/company-presentation.mjs";
 
 // INBOX (the triage queue) is the default tab; the rest filter the tracker.
 const TABS = [
@@ -102,7 +103,7 @@ export function PipelineView({
     }
     if (q.trim()) {
       const needle = q.toLowerCase();
-      rows = rows.filter((r) => `${r.company} ${r.role}`.toLowerCase().includes(needle));
+      rows = rows.filter((r) => companySearchText(r).toLowerCase().includes(needle));
     }
     return [...rows].sort((a, b) => {
       if (sort.key === "score") {
@@ -112,12 +113,14 @@ export function PipelineView({
         const bv = Number.isNaN(bn) ? -Infinity : bn;
         return (av - bv) * sort.dir;
       }
-      return (a[sort.key] || "").localeCompare(b[sort.key] || "") * sort.dir;
+      const aValue = sort.key === "company" ? companyPresentation(a).label : a[sort.key] || "";
+      const bValue = sort.key === "company" ? companyPresentation(b).label : b[sort.key] || "";
+      return aValue.localeCompare(bValue) * sort.dir;
     });
   }, [applications, tab, q, sort, minFilter]);
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-8 max-sm:pb-24">
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24">
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl tracking-tight text-landing">Pipeline</h1>
@@ -154,7 +157,9 @@ export function PipelineView({
               key={t}
               onClick={() => setParams({ tab: t === "INBOX" ? null : t })}
               className={cn(
-                "-mb-px inline-flex items-center justify-center border-b-2 px-3 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
+                // gap-1, not a whitespace text node: flex containers drop
+                // whitespace-only anonymous items, which rendered "INBOX0".
+                "-mb-px inline-flex items-center justify-center gap-1 border-b-2 px-3 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
                 tab === t
                   ? "border-brand text-foreground"
                   : "border-transparent text-muted hover:text-foreground",
@@ -189,15 +194,19 @@ export function PipelineView({
           <InboxEmpty count={0} filtered={false} />
         )
       ) : filtered.length > 0 ? (
-        /* ── Tracker table ── */
-        <div className="mt-4 overflow-hidden rounded-2xl border border-border">
-          <table className="w-full text-sm">
+        /* ── Tracker table ──
+           overflow-x-auto, not overflow-hidden: the rounded corners still clip,
+           but a table too wide for the viewport can now be scrolled to instead
+           of being silently cut off. min-w keeps the columns readable rather
+           than letting w-full crush them on a phone. */
+        <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
+          <table className="w-full min-w-[44rem] text-sm">
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr>
                 {SORT_KEYS.map((k) => (
                   <th
                     key={k}
-                    className="cursor-pointer select-none px-4 py-2.5 font-medium hover:text-foreground"
+                    className="cursor-pointer select-none whitespace-nowrap px-4 py-2.5 font-medium hover:text-foreground"
                     onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
                   >
                     <span className="inline-flex items-center gap-1">
@@ -209,29 +218,32 @@ export function PipelineView({
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filtered.map((r, i) => (
-                <tr key={`${r.n}-${i}`} className="group transition-colors hover:bg-surface/40">
-                  <td className="px-4 py-3 font-medium">
-                    <Link href={`/pipeline/${r.n}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
-                      <CompanyLogo name={r.company} size={20} />
-                      {r.company}
-                    </Link>
-                  </td>
+              {filtered.map((r, i) => {
+                const company = companyPresentation(r);
+                return (
+                  <tr key={`${r.n}-${i}`} className="group transition-colors hover:bg-surface/40">
+                    <td className="px-4 py-3 font-medium">
+                      <Link href={`/pipeline/${r.n}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
+                        <CompanyLogo name={company.logoName} size={20} />
+                        {company.label}
+                      </Link>
+                    </td>
                   <td className="px-4 py-3 text-muted">
                     <Link href={`/pipeline/${r.n}`}>{r.role}</Link>
                   </td>
                   <td className="px-4 py-3">
                     <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
                   </td>
-                  <td className="px-4 py-3 text-muted">
+                  <td className="whitespace-nowrap px-4 py-3 text-muted">
                     <span className="inline-flex items-center gap-1.5">
                       <span className={cn("size-1.5 shrink-0 rounded-full", statusDot(r.status))} />
                       {r.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-faint tabular-nums">{r.date}</td>
-                </tr>
-              ))}
+                  <td className="whitespace-nowrap px-4 py-3 text-faint tabular-nums">{r.date}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

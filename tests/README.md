@@ -16,13 +16,26 @@ Node.js (`tests/helpers.mjs`).
   `fail`, `warn`, plus `ROOT` (repo root), `QUICK` (`--quick` flag), and
   `NODE` (current Node binary).
 - `providers/{name}.test.mjs` — one file per scanner provider (see
-  [providers/README.md](../providers/README.md) for the test pattern), plus
-  shared cross-provider tests such as `ats-ssrf-hardening.test.mjs`.
+  [providers/ADDING_A_PROVIDER.md](../providers/ADDING_A_PROVIDER.md) for the
+  test pattern), plus shared cross-provider tests such as
+  `ats-ssrf-hardening.test.mjs`.
   Underscore-prefixed files (e.g. `_html-entities.test.mjs`) test shared
   helper modules.
 - Other `*.test.mjs` files at this level (e.g. `stats.test.mjs`) cover root
   scripts. Note: standalone `*.test.mjs` files in the repo root are run by
   `test-all.mjs`'s inline script list, not by this directory's discovery.
+
+**Web tests do not live here.** `web/` runs its own `npm test` over
+`web/tests/**/*.test.mjs` (see [../web/README.md](../web/README.md)); this
+directory is for the core. The two suites also differ in style on purpose: web
+suites use `node:test`, while suites here use the `pass`/`fail` helpers because
+this suite must run on a bare clone with no framework — "not even `node:test`"
+(#1440). Don't carry either style across the boundary.
+
+The one exception to the split is a guard *about* web's layout —
+`web-test-layout.test.mjs` lives here on purpose, because `web-ci.yml` is
+informative by design and never blocks a merge, while `test-all.mjs` runs on
+every PR as a required check.
 
 ## Running
 

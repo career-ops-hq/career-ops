@@ -3,19 +3,22 @@
 /**
  * verify-portals.mjs — ATS slug validator for portals.yml.
  *
- * When a company is added to portals.yml, its ATS slug (the path segment in
+ * When an entry is added to portals.yml, its ATS slug (the path segment in
  * `careers_url`, e.g. `jobs.lever.co/<slug>`) is easy to guess wrong — and a
- * wrong slug 404s silently on every future scan, so the company never appears
- * in results and the mistake is invisible. This script probes the public
- * Greenhouse / Ashby / Lever endpoints for a company's slug (or for candidate
- * slugs derived from its name) and reports which resolve.
+ * wrong slug 404s silently on every future scan, so the entry never appears in
+ * results and the mistake is invisible. This script probes each entry and
+ * reports which resolve, in two tiers (see verifyCompanies() below):
+ *   1. Greenhouse / Ashby / Lever — the URL carries a parseable slug, hit
+ *      directly; `--add` also cross-probes candidate slugs derived from a name.
+ *   2. Every other host (Workday, SmartRecruiters, the aggregator feeds …) —
+ *      routed through the same provider plugins the scanner uses.
  *
  * A 200 that returns an empty job list is reported as 'live but empty' — a
  * legitimate state during between-hires periods — kept distinct from an
  * unresolved (404/wrong) slug so a quiet board isn't mistaken for a typo.
  *
  * Usage:
- *   node verify-portals.mjs                 # sweep tracked_companies in portals.yml
+ *   node verify-portals.mjs                 # sweep tracked_companies + job_boards in portals.yml
  *   node verify-portals.mjs --add cursor    # probe slug variants for one name
  *   node verify-portals.mjs --strict        # exit non-zero if any slug is unresolved
  *   node verify-portals.mjs --file <path>   # use a specific portals file
@@ -27,11 +30,14 @@
 
 import { existsSync, readFileSync } from 'fs';
 import { dirname, resolve } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import { fileURLToPath } from 'url';
+import * as yaml from 'js-yaml';
 
-import { fetchJson as defaultFetchJson, makeHttpCtx } from './providers/_http.mjs';
+import { fetchJson as defaultFetchJson, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
+import { decodeEntities } from './providers/_html-entities.mjs';
+import { asciiFold } from './lib/ascii-fold.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
 
@@ -47,17 +53,32 @@ export const ATS = {
     probeUrl: (slug) =>
       `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`,
     jobCount: (json) => (Array.isArray(json?.jobs) ? json.jobs.length : null),
+    // The board root publishes its owner: {"name":"Stripe","content":""}. The
+    // Ashby and Lever posting APIs answer no such question, so those two read
+    // their owner off the board page <title> instead (see below).
+    ownerUrl: (slug) => `https://boards-api.greenhouse.io/v1/boards/${slug}`,
+    ownerKind: 'json',
+    ownerName: (json) => (typeof json?.name === 'string' ? json.name.trim() : null),
   },
   ashby: {
     probeUrl: (slug) =>
       `https://api.ashbyhq.com/posting-api/job-board/${slug}?includeCompensation=true`,
     jobCount: (json) => (Array.isArray(json?.jobs) ? json.jobs.length : null),
+    // The posting API returns only {jobs, apiVersion}; the board page titles
+    // itself with the owner ('deepset Jobs'), which is the only name either
+    // Ashby or Lever exposes publicly (#3019).
+    ownerUrl: (slug) => `https://jobs.ashbyhq.com/${slug}`,
+    ownerKind: 'html',
+    ownerName: (html) => boardTitleOwner(html),
   },
   lever: {
     // EU boards (jobs.eu.lever.co) resolve to api.eu.lever.co, mirroring the
     // provider's resolveApiUrl; the default is the base instance.
     probeUrl: (slug, { eu = false } = {}) => `https://api.${eu ? 'eu.' : ''}lever.co/v0/postings/${slug}`,
     jobCount: (json) => (Array.isArray(json) ? json.length : null),
+    ownerUrl: (slug, { eu = false } = {}) => `https://jobs.${eu ? 'eu.' : ''}lever.co/${slug}`,
+    ownerKind: 'html',
+    ownerName: (html) => boardTitleOwner(html),
   },
 };
 
@@ -121,22 +142,44 @@ export function parseAtsSlug(url) {
  * boards use just the brand, e.g. 'Acme Corp' → 'acme'). Order is deterministic
  * and duplicates are removed so `--add` probes each distinct candidate once.
  *
+ * SUFFIXES ON THE FIRST WORD ARE PROBE-ONLY (#2937). Every other candidate here
+ * either reformats the whole name ('nimbus-data'), abbreviates it without
+ * adding anything ('nimbus'), or extends it ('nimbusdataai'). Building a suffix
+ * on the FIRST WORD is the one rule that both drops part of the name AND
+ * substitutes a token for what it dropped, so what comes out is not a form of
+ * this company's name, it is a different company's: 'Nimbus Data' yields
+ * 'nimbusai', 'nimbustech', 'nimbuslabs'. The rule has no legitimate yield to
+ * lose either. When the name already ends in a suffix word ('Scale AI'), it
+ * just reproduces words.join('') and is deduped away, so every candidate it
+ * contributes uniquely belongs to somebody else.
+ *
+ * Offering those to `--add` is fine: an operator reads the slug beside the
+ * company name and picks one, and a wrong guess costs a 404. Offering them to
+ * discoverAlternates is not. That result is attached as `suggested`, and
+ * `fix-slugs --fix` writes it into portals.yml with no further identity check,
+ * after which scan.mjs labels the other employer's postings with this
+ * company's name. Pass `firstWordSuffixes: false` on any path that writes.
+ *
+ * The bare first word stays on both paths deliberately: many boards really are
+ * just the brand ('Acme Corp' → 'acme'), and it adds no token that the company
+ * does not have. It is a narrower risk than this change addresses, not a
+ * blessed one.
+ *
  * @param {string} name - Company display name.
+ * @param {{firstWordSuffixes?: boolean}} [opts] - `false` omits the suffix
+ *   variants built on the first word alone.
  * @returns {string[]} Distinct candidate slugs, most-specific first.
  */
 const SLUG_SUFFIXES = ['ai', 'tech', 'io', 'hq', 'labs'];
 
-export function deriveSlugCandidates(name) {
-  const lower = String(name || '')
-    .toLowerCase()
-    .trim();
-  if (!lower) return [];
-  const words = lower
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .filter(Boolean);
+export function deriveSlugCandidates(name, { firstWordSuffixes = true } = {}) {
+  if (!String(name ?? '').trim()) return [];
+  // ASCII-fold BEFORE splitting. The previous `[^a-z0-9\s]` pass turned an
+  // accented letter into a SEPARATOR, so "Telefónica" became the two words
+  // "telef nica" and never produced "telefonica" — the slug the board actually
+  // uses — while "Société Générale" shattered into four fragments and even the
+  // first-word heuristic above yielded "soci" (#2930).
+  const words = asciiFold(name).split(' ').filter(Boolean);
   if (words.length === 0) return [];
   const candidates = [
     words.join(''), // acmecorp
@@ -144,7 +187,7 @@ export function deriveSlugCandidates(name) {
     words.join('_'), // acme_corp
     words[0], // acme
   ];
-  const bases = [words.join(''), words[0]].filter(Boolean);
+  const bases = (firstWordSuffixes ? [words.join(''), words[0]] : [words.join('')]).filter(Boolean);
   for (const base of bases) {
     for (const suf of SLUG_SUFFIXES) candidates.push(`${base}${suf}`);
     candidates.push(`${base}.tech`, `${base}.io`);
@@ -234,10 +277,151 @@ export async function probeSlug(
   }
 }
 
-/** Probe slug variants across all ATSes; prefer live boards over empty ones. */
-async function discoverAlternates(name, { fetchJson }) {
+/**
+ * Pull the board owner's name out of a careers page <title>.
+ *
+ * Both providers title the board after its owner and append a jobs suffix:
+ * 'deepset Jobs' on Ashby, 'Diabolocom' or 'Lever Demo 2' on Lever. The suffix is
+ * stripped when present; everything else is left for canonicalNameTokens to judge.
+ *
+ * @param {string} html - The head of the board page.
+ * @returns {string|null} The owner name, or null when no title is present.
+ */
+export function boardTitleOwner(html) {
+  const m = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(String(html || ''));
+  if (!m) return null;
+  // Decode before collapsing whitespace: `&nbsp;` is a space once decoded, and
+  // collapsing first would leave it as literal text in the middle of a name.
+  const title = decodeEntities(m[1]).replace(/\s+/g, ' ').trim();
+  if (!title) return null;
+  return title.replace(/\s+jobs$/i, '').trim() || null;
+}
+
+// Tokens that carry no identity. A leading article and a trailing legal designator
+// can differ between how a company writes its name and how its ATS board is titled,
+// so they are dropped before comparing. Nothing else is: 'Systems', 'AI', 'Airlines'
+// and 'Grumman' are exactly what distinguishes Mercury Systems from Mercury.
+const NAME_ARTICLES = new Set(['the']);
+const NAME_DESIGNATORS = new Set([
+  'inc', 'incorporated', 'llc', 'llp', 'lp', 'ltd', 'limited', 'plc', 'corp',
+  'corporation', 'co', 'company', 'gmbh', 'ag', 'kg', 'sa', 'sas', 'sarl', 'srl',
+  'spa', 'bv', 'nv', 'ab', 'as', 'oy', 'aps', 'pty', 'pte', 'kk', 'kft',
+]);
+
+/**
+ * Reduce a company or board name to the tokens that actually identify it.
+ *
+ * Accents fold through the shared `asciiFold` (Café -> cafe), which also carries
+ * the Latin letters NFD does not decompose — Işık -> isik, Møller -> moller,
+ * Großmann -> grossmann, Đại -> dai — where a bare strip-the-marks pass deletes
+ * the letter outright (#2930).
+ *
+ * THE AMPERSAND RULE RUNS BEFORE THE FOLD, AND THE ORDER IS LOAD-BEARING.
+ * A spaced ampersand is a word ('Hims & Hers' -> hims and hers); an unspaced one
+ * is punctuation ('AT&T' -> att). Only the raw string still tells them apart:
+ * `asciiFold` has resolved every '&' by the time it returns, whichever
+ * `punctuation` mode it ran in. Fold first and 'Hims & Hers' silently loses its
+ * 'and' under 'delete', or 'AT&T' splits into two tokens under 'space'.
+ *
+ * `punctuation: 'delete'` because these tokens are compared for EQUALITY, never
+ * substring-matched, so a hyphen or apostrophe must keep joining its word
+ * ("L'Oréal" -> loreal) exactly as the inline strip this replaced did.
+ * Whitespace is collapsed to single spaces first, so 'delete' — which removes a
+ * tab rather than collapsing it — cannot weld two words together.
+ *
+ * A leading article and any trailing legal designators are dropped afterwards.
+ *
+ * @param {string} name
+ * @returns {string[]} Canonical identifying tokens.
+ */
+function canonicalNameTokens(name) {
+  const spaced = String(name || '').replace(/\s+/g, ' ');
+  const words = asciiFold(spaced.replace(/\s+&\s+/g, ' and '), { punctuation: 'delete' })
+    .split(' ')
+    .filter(Boolean);
+  let start = 0;
+  if (words.length > 1 && NAME_ARTICLES.has(words[0])) start = 1;
+  let end = words.length;
+  while (end - start > 1 && NAME_DESIGNATORS.has(words[end - 1])) end -= 1;
+  return words.slice(start, end);
+}
+
+/**
+ * Does a discovered board's owner name refer to the company we are repairing?
+ *
+ * Canonical equality, deliberately not a prefix. A shorter tracked name is not
+ * evidence that a longer board name is the same company: Mercury and Mercury
+ * Systems, Scale and Scale AI, Northrop and Northrop Grumman are all real and
+ * distinct. A prefix-only match ('Nimbus Data' against a board named 'Nimbus')
+ * may well be the same company, but this path writes portals.yml unreviewed, so
+ * it goes to `--add` where a human can judge it rather than being adopted here.
+ *
+ * @param {string} companyName - The tracked company being repaired.
+ * @param {string} boardName - The name the ATS reports for the probed board.
+ * @returns {boolean} True only when both canonicalize to the same tokens.
+ */
+export function boardIdentityMatches(companyName, boardName) {
+  const a = canonicalNameTokens(companyName);
+  const b = canonicalNameTokens(boardName);
+  if (!a.length || !b.length) return false;
+  return a.length === b.length && a.every((tok, i) => tok === b[i]);
+}
+
+/**
+ * Confirm a candidate board belongs to this company before it can be written.
+ *
+ * Fails CLOSED for any ATS that publishes an owner, and does not distinguish
+ * "owned by someone else" from "could not ask": both mean unconfirmed, and an
+ * unconfirmed board must not be written into portals.yml unreviewed. A missed
+ * suggestion costs an operator one `--add`, where the slug is shown beside the
+ * company name; a wrong one relabels another employer's postings in scan.mjs.
+ * The reason is recorded so a transient outage is not read as a mismatch.
+ *
+ * Every ATS in the table above publishes an owner, so all three are confirmed
+ * here. The `no-owner-endpoint` pass-through is a guard for a FUTURE entry that
+ * defines no `ownerUrl`: it keeps this function total instead of throwing on
+ * one. Such an entry would need its own identity signal before boards found on
+ * it could be adopted, so the reason is returned rather than swallowed.
+ */
+async function ownerConfirmed(ats, slug, companyName, { fetchJson, fetchText, eu = false, cache }) {
+  const spec = ATS[ats];
+  if (!spec?.ownerUrl) return { ok: true, reason: 'no-owner-endpoint' };
+  const key = `${ats}|${eu ? 'eu' : 'base'}|${slug}`;
+  if (cache?.has(key)) return cache.get(key);
+  let out;
+  try {
+    const url = spec.ownerUrl(slug, { eu });
+    const raw = spec.ownerKind === 'html' ? await fetchText(url) : await fetchJson(url);
+    const boardName = spec.ownerName(raw);
+    if (!boardName) out = { ok: false, reason: 'owner-unnamed' };
+    else if (boardIdentityMatches(companyName, boardName)) out = { ok: true, reason: 'owner-match', boardName };
+    else out = { ok: false, reason: 'owner-mismatch', boardName };
+  } catch (err) {
+    // A 404 here means the board root is gone; anything else (429, 5xx, network)
+    // means we could not ask. Neither confirms identity, but they are different
+    // facts and the summary should not report an outage as somebody else's board.
+    out = { ok: false, reason: classifyFetchError(err) === 'slug_gone' ? 'owner-absent' : 'owner-unreachable' };
+  }
+  cache?.set(key, out);
+  return out;
+}
+
+/**
+ * Probe slug variants across all ATSes; prefer live boards over empty ones.
+ *
+ * No first-word suffix variants (#2937). Nothing downstream re-checks identity:
+ * the winner is attached as `suggested` and `fix-slugs --fix` writes it into
+ * portals.yml, so 'Nimbus Data' adopting the live board 'nimbusai' silently
+ * relabels Nimbus AI's postings. Those candidates are never this company's name
+ * to begin with, so dropping them here costs nothing and they stay available to
+ * `--add`, where an operator sees the slug beside the name before adopting it.
+ */
+async function discoverAlternates(name, { fetchJson, fetchText }) {
   let bestEmpty = null;
-  for (const slug of deriveSlugCandidates(name)) {
+  // One owner lookup per (ats, eu, slug) per company, so the added identity check
+  // cannot multiply requests when candidates repeat across the probe order.
+  const cache = new Map();
+  for (const slug of deriveSlugCandidates(name, { firstWordSuffixes: false })) {
     for (const ats of Object.keys(ATS)) {
       // Lever no longer has a separate 'lever-eu' registry key (unified into a
       // single 'lever' + eu flag), so both instances must be probed explicitly
@@ -245,8 +429,11 @@ async function discoverAlternates(name, { fetchJson }) {
       const euVariants = ats === 'lever' ? [false, true] : [false];
       for (const eu of euVariants) {
         const r = await probeSlug(ats, slug, { fetchJson, eu });
+        if (r.status !== 'live' && r.status !== 'empty') continue;
+        const owner = await ownerConfirmed(ats, slug, name, { fetchJson, fetchText, eu, cache });
+        if (!owner.ok) continue;
         if (r.status === 'live') return r;
-        if (r.status === 'empty' && !bestEmpty) bestEmpty = r;
+        if (!bestEmpty) bestEmpty = r;
       }
     }
   }
@@ -301,9 +488,9 @@ function boundedProbeCtx(base) {
 }
 
 /**
- * Probe one non-ATS company through the provider plugin the scanner would use.
+ * Probe one non-ATS entry through the provider plugin the scanner would use.
  *
- * @param {object} entry - tracked_companies entry.
+ * @param {object} entry - portals.yml entry (tracked_companies or job_boards).
  * @param {import('./providers/_types.js').Provider} provider
  * @param {import('./providers/_types.js').Context} baseCtx
  * @returns {Promise<{provider,status,jobCount?,partial?,httpStatus?,errorKind?,reason?}>}
@@ -343,7 +530,7 @@ export async function probeProvider(entry, provider, baseCtx) {
 }
 
 /**
- * Verify each enabled tracked company's board is reachable.
+ * Verify each enabled portals.yml entry's board is reachable.
  *
  * Two tiers, cheapest first:
  *   1. Greenhouse/Ashby/Lever slugs are probed directly (one JSON request each),
@@ -352,18 +539,18 @@ export async function probeProvider(entry, provider, baseCtx) {
  *      uses (Workday, SuccessFactors, SmartRecruiters, Avature, …), bounded to
  *      a few requests. This catches broken non-ATS boards that used to be
  *      reported as an un-actionable "skipped".
- * A company reaches `skipped` only when no provider claims it. Probing is
+ * An entry reaches `skipped` only when no provider claims it. Probing is
  * sequential to stay gentle on rate limits.
  *
- * @param {Array<object>} companies - tracked_companies entries.
+ * @param {Array<object>} companies - portals.yml entries (tracked_companies and/or job_boards).
  * @param {{fetchJson?: Function, providers?: Map, httpCtx?: object}} [deps]
  *   `providers`/`httpCtx` enable tier 2; omit them (as the ATS unit tests do) to
  *   get tier-1-only behavior where non-ATS entries stay `skipped`.
- * @returns {Promise<Array<object>>} One result row per company.
+ * @returns {Promise<Array<object>>} One result row per entry.
  */
 export async function verifyCompanies(
   companies,
-  { fetchJson = defaultFetchJson, providers = null, httpCtx = null } = {},
+  { fetchJson = defaultFetchJson, fetchText = defaultFetchText, providers = null, httpCtx = null } = {},
 ) {
   const list = Array.isArray(companies) ? companies : [];
   const results = [];
@@ -381,7 +568,7 @@ export async function verifyCompanies(
       }
       // Wrong slug or ATS migration — cross-probe only for slug/unknown failures.
       if (probe.errorKind === 'slug_gone' || probe.errorKind === 'unknown') {
-        const suggested = await discoverAlternates(name, { fetchJson });
+        const suggested = await discoverAlternates(name, { fetchJson, fetchText });
         if (suggested) {
           results.push({ name, ...probe, suggested });
           continue;
@@ -413,7 +600,7 @@ export async function verifyCompanies(
 }
 
 /**
- * Read a portals file and verify its tracked companies' slugs.
+ * Read a portals file and verify its tracked_companies and job_boards slugs.
  *
  * @param {string} filePath - Path to a portals.yml.
  * @param {{fetchJson?: Function}} [deps]
@@ -426,10 +613,14 @@ export async function verifyPortalsFile(
 ) {
   if (!existsSync(filePath)) return { found: false, results: [] };
   const config = yaml.load(readFileSync(filePath, 'utf-8'));
-  const companies = Array.isArray(config?.tracked_companies)
-    ? config.tracked_companies
-    : [];
-  const results = await verifyCompanies(companies, { fetchJson, providers, httpCtx });
+  // tracked_companies and job_boards carry the same entry shape and both feed the
+  // scanner, so sweep both — a job board going dark is exactly as worth surfacing
+  // as a company board 404ing.
+  const entries = [
+    ...(Array.isArray(config?.tracked_companies) ? config.tracked_companies : []),
+    ...(Array.isArray(config?.job_boards) ? config.job_boards : []),
+  ];
+  const results = await verifyCompanies(entries, { fetchJson, providers, httpCtx });
   return { found: true, results };
 }
 
@@ -469,7 +660,18 @@ function printResults(results) {
 async function runAdd(name, { fetchJson }) {
   const candidates = deriveSlugCandidates(name);
   if (candidates.length === 0) {
-    console.error('verify-portals: --add needs a company name');
+    // Distinguish "you gave me nothing" from "nothing sluggable survived".
+    // A CJK/Cyrillic/Greek name folds to '' because ATS slugs are ASCII, and
+    // reporting that as a missing argument told the user they had omitted an
+    // argument they did supply (#2930).
+    if (!String(name ?? '').trim()) {
+      console.error('verify-portals: --add needs a company name');
+    } else {
+      console.error(
+        `verify-portals: no ASCII slug can be derived from '${name}' — ` +
+        'ATS slugs are ASCII, so pass the latinized brand name (or add the board URL to portals.yml directly).',
+      );
+    }
     process.exit(1);
   }
   console.log(
@@ -563,7 +765,7 @@ async function main() {
 
 // Only run main() when invoked directly (`node verify-portals.mjs`), not when
 // imported by tests. `|| ''` guards `node -e` invocations with no script arg.
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`verify-portals failed: ${err.message}`);
     process.exit(1);

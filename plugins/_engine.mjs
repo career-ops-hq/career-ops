@@ -24,7 +24,7 @@
  * all reuse it with no prod-vs-test drift.
  */
 
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { resolveAndValidate } from './_net.mjs';
@@ -110,8 +110,13 @@ export async function loadPluginConfig(root) {
   const file = pluginsConfigPath(root);
   if (!existsSync(file)) return {};
   try {
-    const yaml = (await import('js-yaml')).default;
-    const parsed = yaml.load(readFileSync(file, 'utf8'));
+    // Named, not `.default`: js-yaml 5 ships a native ESM build with no default
+    // export, so `.default` is undefined there and `yaml.load` throws straight
+    // into the catch below. That catch fails OPEN — it returns {}, so every
+    // configured plugin silently stops loading and the only trace is one ⚠️ line
+    // that reads like a malformed config. The named form resolves on 4.x and 5.x.
+    const { load } = await import('js-yaml');
+    const parsed = load(readFileSync(file, 'utf8'));
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch (err) {
     warnSkip('config/plugins.yml', `unreadable, ignoring — ${err.message}`);
@@ -199,6 +204,7 @@ export function validateManifest(m, dir, dirName) {
     skill = m.skill;
   }
 
+
   return {
     id: m.id,
     apiVersion: 1,
@@ -248,8 +254,24 @@ export function discoverPlugins(roots, overrideIds = new Set()) {
       warnSkip(root, `unreadable — ${err.message}`);
       continue;
     }
+    // A symlink to a plugin repo is a directory for our purposes: plugins.local/
+    // exists so a developer can work on a plugin from its own checkout, and
+    // linking it in is the natural way to do that. Dirent.isDirectory() is false
+    // for a symlink, so those were silently skipped -- no warning, the plugin
+    // simply never appeared in `plugins.mjs list`. statSync resolves the link;
+    // a broken one throws and is treated as not-a-directory rather than crashing
+    // discovery for every other plugin.
+    const isDirLike = (e) => {
+      if (e.isDirectory()) return true;
+      if (!e.isSymbolicLink()) return false;
+      try {
+        return statSync(path.join(root, e.name)).isDirectory();
+      } catch {
+        return false;
+      }
+    };
     const dirs = entries
-      .filter(e => e.isDirectory() && !e.name.startsWith('_') && !e.name.startsWith('.'))
+      .filter(e => isDirLike(e) && !e.name.startsWith('_') && !e.name.startsWith('.'))
       .map(e => e.name)
       .sort();
     for (const name of dirs) {
@@ -572,9 +594,10 @@ export function lockGate(manifest, root) {
   }
 }
 
-export async function loadPlugins(kind, { root, dryRun = false }) {
+export async function loadPlugins(kind, { root, dryRun = false, pluginId = null }) {
   const cfg = await loadPluginConfig(root);
-  const manifests = discoverPlugins(pluginRoots(root), resolveSuccessorIds(root)).filter(m => m.hooks.includes(kind));
+  let manifests = discoverPlugins(pluginRoots(root), resolveSuccessorIds(root)).filter(m => m.hooks.includes(kind));
+  if (pluginId) manifests = manifests.filter(m => m.id === pluginId);
   const out = [];
   for (const manifest of manifests) {
     if (!pluginStatus(manifest, cfg).enabled) continue;
@@ -609,12 +632,12 @@ export async function loadDotenvOnce() {
  *
  * @param {string} kind
  * @param {*} payload   For provider this is unused; for ingest none; search a query; export a snapshot; notify a payload.
- * @param {{ root: string, dryRun?: boolean, timeoutMs?: number }} opts
+ * @param {{ root: string, dryRun?: boolean, timeoutMs?: number, pluginId?: string }} opts
  * @returns {Promise<Array<{ id: string, ok: boolean, result?: any, error?: string }>>}
  */
-export async function runHook(kind, payload, { root, dryRun = false, timeoutMs = DEFAULT_HOOK_TIMEOUT_MS }) {
+export async function runHook(kind, payload, { root, dryRun = false, timeoutMs = DEFAULT_HOOK_TIMEOUT_MS, pluginId = null }) {
   await loadDotenvOnce();
-  const loaded = await loadPlugins(kind, { root, dryRun });
+  const loaded = await loadPlugins(kind, { root, dryRun, pluginId });
   const results = [];
   for (const { id, hook, ctx } of loaded) {
     const invoke = kind === 'search'
@@ -635,6 +658,10 @@ export async function runHook(kind, payload, { root, dryRun = false, timeoutMs =
     }
   }
   return results;
+}
+
+export function filterResultsForId(results, id) {
+  return results.filter(r => r.id === id);
 }
 
 /**

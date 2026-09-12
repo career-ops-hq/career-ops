@@ -106,44 +106,32 @@ try {
   if (normalizeEchojobsJob({ title: 'X' }) === null) pass('normalizeEchojobsJob drops an item with no url');
   else fail('url-less item should be dropped');
 
-  // fetch() — pagination: accumulates across pages, stops on a short page, and
-  // pins the feed request to echojobs.io with redirect:'error'.
-  const page1 = { jobs: Array.from({ length: 100 }, (_, i) => ({ title: `Job ${i}`, url: `https://jobs.ashbyhq.com/acme/${i}`, company_name: 'Acme' })) };
-  const page2 = { jobs: [{ title: 'Last', url: 'https://jobs.ashbyhq.com/acme/last', company_name: 'Acme' }] };
-  const calls = [];
+  // fetch() — retired (#2976): throws immediately, names the cause, and never
+  // touches the network (the feed sits behind a bot-protection checkpoint, and
+  // career-ops does not work around bot protection).
+  let networkCalls = 0;
   const ctx = {
     transport: 'http',
-    fetchJson: async (url, options) => {
-      calls.push(url);
-      if (options?.redirect !== 'error') throw new Error(`fetchJson without redirect:'error': ${JSON.stringify(options)}`);
-      if (new URL(url).hostname !== 'echojobs.io') throw new Error(`fetchJson off-host: ${url}`);
-      return new URL(url).searchParams.get('page') === '1' ? page1 : page2;
+    fetchJson: async (url) => {
+      networkCalls++;
+      throw new Error(`fetchJson should not be called, got: ${url}`);
     },
-    fetchText: async () => { throw new Error('fetchText should not be called'); },
+    fetchText: async () => {
+      networkCalls++;
+      throw new Error('fetchText should not be called');
+    },
   };
-  const jobs = await echojobs.fetch({ name: 'EchoJobs', provider: 'echojobs' }, ctx);
-  if (jobs.length === 101) pass('echojobs.fetch() accumulates across pages and stops on the short page (100 + 1)');
-  else fail(`echojobs.fetch() returned ${jobs.length} jobs, expected 101`);
-  if (calls.length === 2) pass('echojobs.fetch() stopped after the short second page (2 requests)');
-  else fail(`echojobs.fetch() made ${calls.length} page requests, expected 2`);
-
-  // max_pages override caps pagination
-  const cappedCalls = [];
-  await echojobs.fetch(
-    { name: 'EchoJobs', provider: 'echojobs', max_pages: 1 },
-    { transport: 'http', fetchJson: async (u) => { cappedCalls.push(u); return page1; }, fetchText: async () => {} },
-  );
-  if (cappedCalls.length === 1) pass('echojobs.fetch() respects max_pages (stops after 1 page)');
-  else fail(`echojobs.fetch() max_pages=1 made ${cappedCalls.length} page calls`);
-
-  // unexpected shape throws
-  let threw = false;
+  let fetchErr = null;
   try {
-    await echojobs.fetch({ name: 'EchoJobs', provider: 'echojobs' },
-      { transport: 'http', fetchJson: async () => ({ oops: true }), fetchText: async () => {} });
-  } catch { threw = true; }
-  if (threw) pass('echojobs.fetch() throws on an unexpected API response shape');
-  else fail('echojobs.fetch() should throw when the response has no jobs array');
+    await echojobs.fetch({ name: 'EchoJobs', provider: 'echojobs' }, ctx);
+  } catch (e) {
+    fetchErr = e;
+  }
+  if (networkCalls === 0 && fetchErr && /this feed is gone/i.test(fetchErr.message) && /#2976/.test(fetchErr.message)) {
+    pass('echojobs.fetch() throws a retirement message naming the cause (#2976) without touching the network');
+  } else {
+    fail(`echojobs.fetch() should throw a retirement message with zero network calls, got: networkCalls=${networkCalls}, error=${fetchErr ? fetchErr.message : '(did not throw)'}`);
+  }
 
 } catch (e) {
   fail(`echojobs provider tests crashed: ${e.message}`);

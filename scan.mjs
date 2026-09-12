@@ -29,12 +29,34 @@
  *   node scan.mjs --verify --throttle          # jittered ~5-10s gap between checks (stay under rate limits)
  *   node scan.mjs --verify --throttle=8000     # custom base gap in ms (waits base..2*base)
  *   node scan.mjs --include-blacklisted        # let data/blacklist.md matches through (annotated)
+ *   node scan.mjs --since 7                    # postings from the last 7 days
+ *   node scan.mjs --posted-after 2026-07-01    # absolute lower bound on posting date
+ *   node scan.mjs --posted-before 2026-08-01   # absolute upper bound on posting date
+ *   node scan.mjs --rediscover-404             # re-verify tracked URLs that 404/410 (rides on --verify)
+ *   node scan.mjs --quiet                      # suppress the manifesto footer
+ *   node scan.mjs --help                       # print this usage block and exit
  */
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
-import { pathToFileURL, fileURLToPath } from 'url';
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  fchmodSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'fs';
+import { randomUUID } from 'crypto';
+import { fileURLToPath } from 'url';
 import path from 'path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 import { makeHttpCtx } from './providers/_http.mjs';
 import { buildTrustValidator } from './providers/_trust-validator.mjs';
@@ -42,11 +64,17 @@ import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { mergeProviderPlugins } from './plugins/_engine.mjs';
 import { classifyFetchError } from './verify-portals.mjs';
 import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter } from './title-keywords.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { promoteKnownFragmentIdentity } from './url-key.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -60,18 +88,81 @@ try {
 const parseYaml = yaml.load;
 
 // ── Config ──────────────────────────────────────────────────────────
+import { getCareerOpsRoot } from './path-resolver.mjs';
+const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 
-const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
-const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || 'config/profile.yml';
-const SCAN_HISTORY_PATH = 'data/scan-history.tsv';
-const PIPELINE_PATH = 'data/pipeline.md';
-const APPLICATIONS_PATH = 'data/applications.md';
-const PROVIDERS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'providers');
+export const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
+const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(DATA_ROOT, 'config/profile.yml');
+// Overridable for the same reason the two inputs above are (#2271). A second
+// search lane - a bridge/income track, a career-change track, a partner sharing
+// the checkout - already gets its own portals.yml and profile, but without these
+// two it still writes into the one inbox and the one dedup history. That is not
+// just untidy: scan-history.tsv IS the dedup source, so a posting surfaced in
+// lane A is silently counted as a duplicate in lane B and never shown at all.
+// Exported because scan-ats-full.mjs, scan-interamt.mjs and scan-hn.mjs write to
+// these same files through appendToPipeline/appendToScanHistory. They each used
+// to carry their own bare-relative copy, so a sibling could check existence and
+// create data/pipeline.md in the cwd, then append the actual results to the
+// anchored one (#3510). One resolution, imported, cannot drift.
+export const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(DATA_ROOT, 'data/scan-history.tsv');
+export const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data/pipeline.md');
+const APPLICATIONS_PATH = path.join(DATA_ROOT, 'data/applications.md');
+const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 
-// Ensure required directories exist (fresh setup)
-mkdirSync('data', { recursive: true });
+// Ensure required directories exist (fresh setup). Stays rooted in the user-data
+// directory; override parents are created by their writers before first write.
+const targetDataDir = path.join(DATA_ROOT, 'data');
+try {
+  mkdirSync(targetDataDir, { recursive: true });
+} catch (err) {
+  console.error(`ERROR: Could not create data directory at "${targetDataDir}": ${err.message}`);
+  process.exit(1);
+}
 
 const CONCURRENCY = 10;
+
+export function isIgnorableDirectoryFsyncError(err, platform = process.platform) {
+  return ['EINVAL', 'ENOTSUP', 'ENOSYS'].includes(err?.code)
+    || (platform === 'win32' && ['EACCES', 'EPERM'].includes(err?.code));
+}
+
+export function atomicWriteFile(filePath, text) {
+  const fileStat = lstatSync(filePath, { throwIfNoEntry: false });
+  const targetPath = fileStat?.isSymbolicLink() ? realpathSync(filePath) : filePath;
+  const tempPath = `${targetPath}.tmp-${process.pid}-${randomUUID()}`;
+  let fd = null;
+  let directoryFd = null;
+  try {
+    const existingMode = existsSync(targetPath) ? statSync(targetPath).mode & 0o7777 : null;
+    fd = openSync(tempPath, 'wx', 0o600);
+    if (existingMode !== null) fchmodSync(fd, existingMode);
+    writeFileSync(fd, text, 'utf-8');
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = null;
+    renameSync(tempPath, targetPath);
+    try {
+      directoryFd = openSync(path.dirname(targetPath), 'r');
+      fsyncSync(directoryFd);
+    } catch (err) {
+      if (!isIgnorableDirectoryFsyncError(err)) throw err;
+    } finally {
+      if (directoryFd !== null) closeSync(directoryFd);
+      directoryFd = null;
+    }
+  } catch (err) {
+    if (fd !== null) closeSync(fd);
+    if (directoryFd !== null) closeSync(directoryFd);
+    try { unlinkSync(tempPath); } catch { /* best effort */ }
+    throw err;
+  }
+}
+
+export function emitJsonReceipt(receipt, exitCode) {
+  process.stdout.write(`${JSON.stringify(receipt)}\n`);
+  process.exitCode = exitCode;
+}
 
 // Provider loading + routing live in providers/_registry.mjs so the portal
 // health check (verify-portals.mjs) can reuse the exact same layer without
@@ -79,35 +170,88 @@ const CONCURRENCY = 10;
 
 // ── Title filter ────────────────────────────────────────────────────
 
-// Compile a lowercased keyword into a matcher. Short all-letter acronyms
-// (2-3 chars: cfo, coo, sdr, bdr, gsi…) match on WORD BOUNDARIES so "COO" no
-// longer matches "Coordinator", "SDR" no longer matches anything mid-word, etc.
-// Multi-word phrases and keywords containing non-letters (".NET", "SAP ",
-// "L&D") keep fast, permissive substring matching.
-export function compileKeyword(kw) {
-  if (/^[a-z]{2,3}$/.test(kw)) {
-    const re = new RegExp(`\\b${kw}\\b`);
-    return (lower) => re.test(lower);
+// How a keyword matches text lives in title-keywords.mjs, because
+// openrouter-runner.mjs filters titles too and cannot import this file (scan.mjs
+// creates data/ at import time). It called a second, hand-kept copy of this
+// logic until the two drifted; there is now one implementation and this file
+// re-exports it, so existing importers — scan-ats-full.mjs and test-all.mjs's
+// sections 11b and 44 among them — keep resolving it from here.
+// compileContentKeyword shares the `word:`/`stem:` prefix machinery but skips
+// the title filter's short-acronym auto-anchor (#3274).
+export { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter };
+
+// ── Title filter overrides (per-company broadened title net) ───────
+// Optional. `title_filter_overrides` in portals.yml lets specific companies
+// (matched by an explicit slug list — the company/tenant slug the scanner
+// already derives from the job-board-aggregator dataset entry, e.g. the
+// Workday tenant "uwaterloo") opt into a WIDER positive keyword net than the
+// global `title_filter.positive`, without loosening the global filter for
+// every other company in the sweep. Distinct from (and composes cleanly
+// with) `content_filter.by_title_keyword`, which scopes a stricter
+// description-level check to specific title keywords — this scopes a
+// broader title-level net to specific companies.
+//
+// Shape:
+//   title_filter_overrides:
+//     - companies: ["uwaterloo", "ubc", "fanshawec"]
+//       positive_extra:
+//         - "Administrator"
+//         - "Coordinator"
+//
+// v1 keeps matching simple and explicit: a literal (case-insensitive) slug
+// list, no fuzzy company-type inference, no domain heuristics.
+export function buildTitleFilterOverrides(overrides) {
+  const map = new Map();
+  if (!Array.isArray(overrides)) return map;
+  for (const entry of overrides) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const companies = Array.isArray(entry.companies) ? entry.companies : [];
+    const extraRaw = Array.isArray(entry.positive_extra) ? entry.positive_extra : [];
+    // compilePositiveKeyword (not compileKeyword) so positive_extra supports
+    // the same AND-groups / `word:`/`stem:` prefixes as title_filter.positive —
+    // it's an additive positive list, so it should behave like one.
+    const matchers = extraRaw
+      .filter(k => typeof k === 'string')
+      .map(k => k.trim().toLowerCase())
+      .filter(k => k.length > 0)
+      .map(compilePositiveKeyword);
+    if (matchers.length === 0) continue; // nothing to add — skip the entry entirely
+    for (const slug of companies) {
+      if (typeof slug !== 'string' || !slug.trim()) continue;
+      const key = slug.trim().toLowerCase();
+      map.set(key, (map.get(key) || []).concat(matchers));
+    }
   }
-  return (lower) => lower.includes(kw);
+  return map;
 }
 
-export function buildTitleFilter(titleFilter) {
-  // Normalize defensively: a malformed title_filter (a null, numeric, or otherwise
-  // non-string entry in the YAML) must not crash the scan via k.toLowerCase().
+// Wraps buildTitleFilter() with per-company overrides from
+// buildTitleFilterOverrides(). Returns (title, companySlug) => boolean:
+//   - if the global title_filter already matches, pass (companySlug unused)
+//   - else, if companySlug has override entries, pass when any of its
+//     positive_extra keywords match AND no global negative keyword matches
+//   - a company with no override entry behaves EXACTLY like the plain
+//     buildTitleFilter(titleFilter) — the mechanism is a strict no-op for
+//     everyone not explicitly listed.
+export function buildTitleFilterWithOverrides(titleFilter, overridesMap) {
+  const base = buildTitleFilter(titleFilter);
+  const overrides = overridesMap instanceof Map ? overridesMap : new Map();
+  if (overrides.size === 0) return (title) => base(title);
+
   const normalize = (arr) => (Array.isArray(arr) ? arr : [])
     .filter(k => typeof k === 'string')
     .map(k => k.trim().toLowerCase())
     .filter(k => k.length > 0)
     .map(compileKeyword);
-  const positive = normalize(titleFilter?.positive);
   const negative = normalize(titleFilter?.negative);
 
-  return (title) => {
-    const lower = (title || '').toLowerCase();
-    const hasPositive = positive.length === 0 || positive.some(m => m(lower));
-    const hasNegative = negative.some(m => m(lower));
-    return hasPositive && !hasNegative;
+  return (title, companySlug) => {
+    if (base(title)) return true;
+    const extra = overrides.get(String(companySlug ?? '').trim().toLowerCase());
+    if (!extra || extra.length === 0) return false;
+    const lower = String(title ?? '').toLowerCase();
+    if (negative.some(m => m(lower))) return false;
+    return extra.some(m => m(lower));
   };
 }
 
@@ -121,7 +265,7 @@ function compiledPositiveMatchers(positiveList) {
   if (compiledPositiveCache.has(positiveList)) return compiledPositiveCache.get(positiveList);
   const compiled = positiveList
     .filter(k => typeof k === 'string' && k.trim().length > 0)
-    .map(k => ({ raw: k, match: compileKeyword(k.trim().toLowerCase()) }));
+    .map(k => ({ raw: k, match: compilePositiveKeyword(k.trim().toLowerCase()) }));
   compiledPositiveCache.set(positiveList, compiled);
   return compiled;
 }
@@ -129,6 +273,8 @@ function compiledPositiveMatchers(positiveList) {
 // Returns the raw (as-written in portals.yml) `title_filter.positive` keywords
 // that matched a given title — used to scope `content_filter.by_title_keyword`
 // overrides to only the categories that opted into a stricter content check.
+// "Raw" includes a `word:` prefix if the entry carries one, so a
+// `by_title_keyword` key must be written exactly as the positive entry is.
 export function matchedTitleKeywords(title, titleFilter) {
   const raw = Array.isArray(titleFilter?.positive) ? titleFilter.positive : [];
   const lower = (title || '').toLowerCase();
@@ -142,9 +288,14 @@ export function matchedTitleKeywords(title, titleFilter) {
 // Semantics (case-insensitive substring, in this order):
 //   - Empty / whitespace-only / non-string location → pass (don't penalize
 //     missing or malformed provider data)
+//   - `block_hard` matches → reject (the only tier `always_allow` cannot
+//     override; for country-level terms that are never a false rejection)
 //   - `always_allow` matches → pass (takes precedence over `block` — lets a
 //     multi-location string like "Remote, Belgium or France" through because
-//     the home region is an option, even though "france" is blocked)
+//     the home region is an option, even though "france" is blocked). When
+//     always_allow names the US as a country (united states / usa / u.s. /
+//     u.s.a.), USPS state names and 2-letter codes are additional always_allow
+//     matches, so block: [Dublin] does not drop "Dublin, OH".
 //   - `block` matches → reject
 //   - `allow` empty → pass (already cleared block)
 //   - `allow` non-empty → must match at least one keyword, OR the TITLE carries
@@ -194,6 +345,78 @@ function compileLocationKeywordList(value) {
   return normalizeKeywordList(value).map(compileLocationKeyword);
 }
 
+// Frozen USPS state-name + abbreviation table. Not a world gazetteer: only
+// consulted when always_allow already names the United States as a country,
+// so EU-targeted configs (no US token) keep their previous semantics.
+const US_COUNTRY_ALWAYS_ALLOW = new Set(['united states', 'usa', 'u.s.', 'u.s.a.']);
+const USPS_STATES = Object.freeze([
+  Object.freeze(['alabama', 'al']),
+  Object.freeze(['alaska', 'ak']),
+  Object.freeze(['arizona', 'az']),
+  Object.freeze(['arkansas', 'ar']),
+  Object.freeze(['california', 'ca']),
+  Object.freeze(['colorado', 'co']),
+  Object.freeze(['connecticut', 'ct']),
+  Object.freeze(['delaware', 'de']),
+  Object.freeze(['florida', 'fl']),
+  Object.freeze(['georgia', 'ga']),
+  Object.freeze(['hawaii', 'hi']),
+  Object.freeze(['idaho', 'id']),
+  Object.freeze(['illinois', 'il']),
+  Object.freeze(['indiana', 'in']),
+  Object.freeze(['iowa', 'ia']),
+  Object.freeze(['kansas', 'ks']),
+  Object.freeze(['kentucky', 'ky']),
+  Object.freeze(['louisiana', 'la']),
+  Object.freeze(['maine', 'me']),
+  Object.freeze(['maryland', 'md']),
+  Object.freeze(['massachusetts', 'ma']),
+  Object.freeze(['michigan', 'mi']),
+  Object.freeze(['minnesota', 'mn']),
+  Object.freeze(['mississippi', 'ms']),
+  Object.freeze(['missouri', 'mo']),
+  Object.freeze(['montana', 'mt']),
+  Object.freeze(['nebraska', 'ne']),
+  Object.freeze(['nevada', 'nv']),
+  Object.freeze(['new hampshire', 'nh']),
+  Object.freeze(['new jersey', 'nj']),
+  Object.freeze(['new mexico', 'nm']),
+  Object.freeze(['new york', 'ny']),
+  Object.freeze(['north carolina', 'nc']),
+  Object.freeze(['north dakota', 'nd']),
+  Object.freeze(['ohio', 'oh']),
+  Object.freeze(['oklahoma', 'ok']),
+  Object.freeze(['oregon', 'or']),
+  Object.freeze(['pennsylvania', 'pa']),
+  Object.freeze(['rhode island', 'ri']),
+  Object.freeze(['south carolina', 'sc']),
+  Object.freeze(['south dakota', 'sd']),
+  Object.freeze(['tennessee', 'tn']),
+  Object.freeze(['texas', 'tx']),
+  Object.freeze(['utah', 'ut']),
+  Object.freeze(['vermont', 'vt']),
+  Object.freeze(['virginia', 'va']),
+  Object.freeze(['washington', 'wa']),
+  Object.freeze(['west virginia', 'wv']),
+  Object.freeze(['wisconsin', 'wi']),
+  Object.freeze(['wyoming', 'wy']),
+]);
+
+// 2-letter codes: comma-state (", OH" / ",OH, USA") or a trailing token
+// ("Dublin OH", Workday URL hint "dublin oh"). Not a generic word-boundary —
+// English "in"/"or"/"me" in "Remote, Belgium or France" must not impersonate
+// Indiana/Oregon/Maine. State *names* still use compileLocationKeyword.
+function compileUsStateAbbrev(abbr) {
+  const escaped = abbr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(?:,\\s*${escaped}(?![a-z0-9])|(?:^|[^a-z0-9])${escaped}[^a-z0-9]*$)`);
+  return (lower) => re.test(lower);
+}
+
+const US_STATE_ALWAYS_ALLOW_MATCHERS = USPS_STATES.flatMap(([name, abbr]) => [
+  compileLocationKeyword(name),
+  compileUsStateAbbrev(abbr),
+]);
+
 // Some providers report a rolled-up display string ("5 Locations", "2 Locations")
 // while the canonical URL still names the real primary location. Workday is the
 // common case: .../job/Hyderabad-Telangana-India/Network-Engineer_R-65193-1 shows
@@ -203,17 +426,18 @@ function compileLocationKeywordList(value) {
 // Deliberately narrow: only the post-`/job/` segment is inspected, never the whole
 // URL. Scanning the full URL would match company slugs and ATS subdomains by
 // accident (a "china" or "india" substring inside an unrelated path). Providers
-// without the `/job/{location}/` convention (Greenhouse, Lever, Ashby) yield no
-// hint and keep their previous behaviour exactly.
+// without the Workday hostname convention yield no hint and keep their previous
+// behaviour exactly, even if their own routes also contain `/job/{id}`.
 export function locationHintFromUrl(url) {
   if (typeof url !== 'string' || url.trim() === '') return '';
-  let pathname;
+  let parsed;
   try {
-    pathname = new URL(url).pathname;
+    parsed = new URL(url);
   } catch {
     return '';
   }
-  const segments = pathname.split('/').filter(Boolean);
+  if (!parsed.hostname.toLowerCase().endsWith('.myworkdayjobs.com')) return '';
+  const segments = parsed.pathname.split('/').filter(Boolean);
   const jobIdx = segments.lastIndexOf('job');
   if (jobIdx === -1 || jobIdx === segments.length - 1) return '';
   let segment = segments[jobIdx + 1];
@@ -276,9 +500,18 @@ export function titleSignalsRemote(title) {
 // location-only semantics, which is what the existing unit tests exercise.
 export function buildLocationFilter(locationFilter) {
   if (!locationFilter) return () => true;
-  const alwaysAllow = compileLocationKeywordList(locationFilter.always_allow);
+  const alwaysAllowKeywords = normalizeKeywordList(locationFilter.always_allow);
+  const alwaysAllow = alwaysAllowKeywords.map(compileLocationKeyword);
+  // US-targeted configs list the country in always_allow and foreign cities
+  // in block. "Dublin, OH" does not contain "United States", so without this
+  // expansion block: [Dublin] rejects a real US job. Opt-in on the country
+  // token — configs with no US always_allow entry are unchanged.
+  if (alwaysAllowKeywords.some(k => US_COUNTRY_ALWAYS_ALLOW.has(k))) {
+    alwaysAllow.push(...US_STATE_ALWAYS_ALLOW_MATCHERS);
+  }
   const allow = compileLocationKeywordList(locationFilter.allow);
   const block = compileLocationKeywordList(locationFilter.block);
+  const blockHard = compileLocationKeywordList(locationFilter.block_hard);
 
   return (location, url, title) => {
     const lower = typeof location === 'string' ? location.trim().toLowerCase() : '';
@@ -286,6 +519,21 @@ export function buildLocationFilter(locationFilter) {
     // Nothing to judge on either field → pass (don't penalize missing data).
     if (lower === '' && hint === '') return true;
     const matches = (m) => (lower !== '' && m(lower)) || (hint !== '' && m(hint));
+    // `block_hard` is the ONE tier always_allow cannot override. It exists because
+    // a European city name can be a whole word inside a non-European location, so
+    // word-boundary matching (#2087) does not catch it and always_allow's
+    // unconditional win silently discards the user's own block entry:
+    //
+    //   "Porto Alegre, Rio Grande do Sul, Brazil"  always_allow "Porto" beats block "Brazil"
+    //   "USA - New York - Malta"                   always_allow "Malta" beats block "USA"
+    //
+    // Both configs already listed the country under `block`. Plain `block` cannot
+    // be promoted wholesale — always_allow was added in #650 precisely so a
+    // multi-location posting survives one blocked city ("Stockholm · London ·
+    // Madrid" must not die on a London entry) — so the user marks the entries
+    // that are country-level and therefore never a false rejection. Opt-in and
+    // additive: a config without `block_hard` behaves exactly as before.
+    if (blockHard.length > 0 && blockHard.some(matches)) return false;
     // always_allow still wins over block, and may be satisfied by either field:
     // a genuinely US role whose display string says "United States" is never
     // rejected because of what its URL happens to contain.
@@ -446,6 +694,14 @@ export function buildPostedDateFilter(afterIso, beforeIso) {
 //   - `positive` empty → pass (already cleared negatives)
 //   - `positive` non-empty → at least one keyword must be present
 //
+// A keyword may opt in to boundary-anchored matching with a `word:` or `stem:`
+// prefix (identical to `title_filter` — see title-keywords.mjs). Without a
+// prefix an entry is a plain substring, so a bare negative `java` rejects every
+// posting mentioning "JavaScript" and `ios` rejects "curiosity"; `word:java` /
+// `stem:ios` fix that one entry while leaving the rest of the list untouched
+// (#3274). The substring default is deliberate and unchanged: flipping it would
+// silently narrow every configured install.
+//
 // `content_filter.by_title_keyword` (optional): scopes a stricter positive/
 // negative pair to only the jobs whose title matched a specific
 // `title_filter.positive` keyword, so e.g. an "AI Engineer" title-match can
@@ -456,23 +712,32 @@ export function buildPostedDateFilter(afterIso, beforeIso) {
 // global `positive`/`negative` pair is the fallback for jobs whose matched
 // keyword(s) have no override entry.
 //
-// Provider support: only providers whose list API ships the description for
-// free (no extra per-job request, which would break the zero-token design)
-// populate `job.description`. Lever (`descriptionPlain`) does today; others
-// leave it empty and therefore always pass this filter.
+// Provider support: `job.description` is populated only when the provider's
+// list API returns the description body without a per-job request (the
+// zero-token constraint). Providers that don't supply one leave it empty, and
+// those jobs always pass this filter. The set shifts as providers are updated
+// — check it with `grep -l 'description:' providers/*.mjs`.
+
+// Normalize a keyword list (lowercase/trim/drop-empties) and compile each
+// survivor into a matcher, so a `word:`/`stem:` prefix is honoured and a bare
+// keyword keeps its substring behaviour. The `.length` checks downstream still
+// read as "did the user configure any keyword here".
+function compileContentKeywordList(value) {
+  return normalizeKeywordList(value).map(compileContentKeyword);
+}
 
 export function buildContentFilter(contentFilter) {
   if (!contentFilter) return () => true;
-  const positive = normalizeKeywordList(contentFilter.positive);
-  const negative = normalizeKeywordList(contentFilter.negative);
+  const positive = compileContentKeywordList(contentFilter.positive);
+  const negative = compileContentKeywordList(contentFilter.negative);
 
   const byTitleKeyword = new Map();
   if (contentFilter.by_title_keyword && typeof contentFilter.by_title_keyword === 'object' && !Array.isArray(contentFilter.by_title_keyword)) {
     for (const [kw, rule] of Object.entries(contentFilter.by_title_keyword)) {
       if (typeof kw !== 'string' || !kw.trim()) continue;
       byTitleKeyword.set(kw.trim().toLowerCase(), {
-        positive: normalizeKeywordList(rule?.positive),
-        negative: normalizeKeywordList(rule?.negative),
+        positive: compileContentKeywordList(rule?.positive),
+        negative: compileContentKeywordList(rule?.negative),
       });
     }
   }
@@ -488,15 +753,15 @@ export function buildContentFilter(contentFilter) {
 
     if (overrides.length > 0) {
       return overrides.some(rule => {
-        if (rule.negative.length > 0 && rule.negative.some(k => lower.includes(k))) return false;
+        if (rule.negative.length > 0 && rule.negative.some(m => m(lower))) return false;
         if (rule.positive.length === 0) return true;
-        return rule.positive.some(k => lower.includes(k));
+        return rule.positive.some(m => m(lower));
       });
     }
 
-    if (negative.length > 0 && negative.some(k => lower.includes(k))) return false;
+    if (negative.length > 0 && negative.some(m => m(lower))) return false;
     if (positive.length === 0) return true;
-    return positive.some(k => lower.includes(k));
+    return positive.some(m => m(lower));
   };
 }
 
@@ -576,8 +841,9 @@ export function buildCountryEligibilityFilter(countryEligibilityFilter, candidat
 // Surfaces roles that sponsor a work visa (H-1B / H-1B1 / O-1 for the US, plus
 // the generic "visa sponsorship" wording) and drops roles that explicitly
 // refuse sponsorship. Like content_filter it reads the job DESCRIPTION text, so
-// it only has signal for providers whose list API ships a description (Lever
-// today); jobs without one fall back to the require_mention rule below.
+// it only has signal for providers that populate job.description (see the
+// content_filter header above); jobs without one fall back to the
+// require_mention rule below.
 //
 // Semantics (case-insensitive substring):
 //   - any `negative` keyword present → reject (an explicit "no sponsorship")
@@ -709,19 +975,51 @@ export function buildSalaryFilter(salaryFilter) {
 }
 
 export function companyMatch(jobCompany, windowCompany) {
-  const cleanNoSpaces = (str) => String(str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const c1NoSpaces = cleanNoSpaces(jobCompany);
-  const c2NoSpaces = cleanNoSpaces(windowCompany);
-  if (c1NoSpaces === c2NoSpaces) return true;
+  // Unicode-aware (#2393 family): the [a-z0-9] strip this used to carry erased
+  // non-Latin scripts outright, so 株式会社アカネ and 合同会社ゾロ both cleaned
+  // to '' and the equality check below reported two unrelated companies as the
+  // same one. The empty guard is part of the fix, not decoration — "no usable
+  // signal on either side" must never read as "identical".
+  const c1NoSpaces = normalizeTextKey(jobCompany);
+  const c2NoSpaces = normalizeTextKey(windowCompany);
+  if (c1NoSpaces && c1NoSpaces === c2NoSpaces) return true;
 
-  const cleanWithSpaces = (str) => String(str || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-  const c1WithSpaces = cleanWithSpaces(jobCompany);
-  const c2WithSpaces = cleanWithSpaces(windowCompany);
+  const c1WithSpaces = normalizeTextKey(jobCompany, ' ');
+  const c2WithSpaces = normalizeTextKey(windowCompany, ' ');
   if (!c1WithSpaces || !c2WithSpaces) return false;
 
-  const regex1 = new RegExp('\\b' + c2WithSpaces.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&') + '\\b');
-  const regex2 = new RegExp('\\b' + c1WithSpaces.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&') + '\\b');
-  return regex1.test(c1WithSpaces) || regex2.test(c2WithSpaces);
+  // Containment: a short window name should still match a longer official one
+  // ("Acme" vs "Acme Corp"), bounded so "Acme" does not match "Acmetric".
+  //
+  // The anchors are lookarounds, not \b: JS defines \b against ASCII \w even
+  // under the u flag. Keeping the accent (rather than stripping it to a space,
+  // as the [a-z0-9] filter did before) means '\bnestlé\b' can never hold —
+  // neither side of the trailing anchor is a word character — so Nestlé
+  // Deutschland vs Nestlé would silently stop matching. Same for Ørsted, Zoë
+  // and every other name whose first or last letter is non-ASCII.
+  //
+  // The anchor class is the one normalizeTextKey keeps, deliberately. An anchor
+  // class without \p{M} would treat a Devanagari matra as a boundary and split
+  // कंपनी mid-word — the key and its boundaries have to agree on what a letter
+  // is, or they drift the way #2397 and #2445 fixed elsewhere.
+  //
+  // Non-Latin containment does not fire here (株式会社メルカリ vs メルカリ): the
+  // lookbehind sees 社, a letter, so there is no boundary to assert, and
+  // Japanese is not space-delimited so no anchor rule recovers it. Note this
+  // pair DID match before this change, but only via the '' === '' collision
+  // that erased both names — not through this path. Making it match on purpose
+  // needs corporate-form normalisation, tracked separately in #2570.
+  //
+  // compileLocationKeyword() above reached for lookarounds too, for a related
+  // reason ("\b behaves surprisingly at a punctuation edge"); its escape set is
+  // reused here because '\-' is an invalid identity escape under u. Both
+  // operands are already normalizeTextKey output — letters, marks, digits and
+  // spaces only — so the escape is defensive, not load-bearing.
+  const bounded = (name) => new RegExp(
+    `(?<![\\p{L}\\p{M}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{M}\\p{N}])`,
+    'u',
+  );
+  return bounded(c2WithSpaces).test(c1WithSpaces) || bounded(c1WithSpaces).test(c2WithSpaces);
 }
 
 export function addDays(dateStr, days) {
@@ -936,7 +1234,13 @@ function daysBetweenIsoDates(start, end) {
   return Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
 }
 
-export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { recheckAfterDays = null, today = new Date().toISOString().slice(0, 10) } = {}) {
+// `today` defaults to the LOCAL calendar day, not the UTC one. This function
+// gates a COOLDOWN (`today < cooldownUntil`) — the user asked not to see a
+// posting until a date — and the UTC day is tomorrow for a west-of-Greenwich
+// evening run, so the cooldown opened a day early (#3070). The recheck window
+// below reads one day high the same way. Callers may still pass `today`
+// explicitly; only the default moves.
+export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { recheckAfterDays = null, today = localToday() } = {}) {
   if (PERMANENT_SCAN_HISTORY_STATUSES.has(status)) return true;
   if (status.startsWith('cooldown:')) {
     const parts = status.split(':');
@@ -956,6 +1260,28 @@ function scanHistoryPolicy(config = {}) {
   return {
     recheckAfterDays: Number.isFinite(parsed) && parsed >= 0 ? parsed : null,
   };
+}
+
+/**
+ * Read the opt-in `scan_history.dedup_include_location` switch.
+ *
+ * Collapsing every city of one role into a single pipeline entry is deliberate
+ * (see `collectSeenCompanyRoles`) and stays the default: companies that open one
+ * req per city would otherwise leak a city variant per scan. But the survivor is
+ * whichever twin the provider returned first, which is wrong for anyone whose
+ * eligibility is location-bound — an EU-based candidate's `location_filter`
+ * passes both "London, UK" and "Dublin, IE", so the filter cannot choose between
+ * them and dedupe silently keeps the city he cannot legally work in.
+ *
+ * Strict boolean `true` only: a stray string or number is a typo, and the safe
+ * reading of a typo is the default behavior, not a pipeline full of city
+ * variants the user never asked for.
+ *
+ * @param {object} [config] - Parsed portals.yml.
+ * @returns {boolean} Whether the location joins the company+role dedupe key.
+ */
+export function resolveDedupIncludeLocation(config = {}) {
+  return config.scan_history?.dedup_include_location === true;
 }
 
 // Query params that carry no identity information for a job posting — safe to
@@ -1009,43 +1335,258 @@ export function normalizeUrlForDedup(url) {
       parsed.searchParams.delete(param);
     }
   }
+  promoteKnownFragmentIdentity(parsed);
   parsed.hash = '';
   parsed.pathname = parsed.pathname.replace(/\/+$/, '').toLowerCase() || '/';
   return parsed.toString();
 }
 
-export function loadSeenUrls(policy = {}) {
+/**
+ * The leading checkbox marker of a `data/pipeline.md` entry.
+ *
+ * Only ` ` and `x` are recognized, matching the pre-existing gates: `- [!]`
+ * marks a URL that could not be fetched, which is not evidence a posting was
+ * surfaced.
+ *
+ * Anchored, because the URL it guards is then matched anywhere in the entry: a
+ * hand-written note that happens to contain checkbox syntax mid-sentence and a
+ * link would otherwise seed that link and silently bury a live posting. Leading
+ * whitespace is tolerated so an indented entry still dedupes, as it did when the
+ * URL had to sit immediately after the checkbox.
+ */
+const PIPELINE_CHECKBOX_RE = /^\s*- \[[ x]\]\s+/;
+
+/**
+ * As `PIPELINE_CHECKBOX_RE`, but rejecting indentation.
+ *
+ * The company/role gate stays exactly as strict as the `^- \[` anchor it
+ * replaces: widening it would seed *more* role keys, and one role key suppresses
+ * every other posting that shares it.
+ */
+const PIPELINE_CHECKBOX_STRICT_RE = /^- \[[ x]\]\s+/;
+
+/**
+ * A labeled trailing segment of a pipeline entry, as written by the two writers
+ * that emit one: `formatPipelineOffer` here (`posted:`, `trust:`, `note:`) and
+ * `appendRankAnnotation` in `rank-pipeline.mjs` (`rank:`).
+ *
+ * Labeled segments are appended after the positional columns, so one slides into
+ * the location column whenever an offer has neither a location nor a
+ * compensation. Used only to reject such a cell as a location.
+ *
+ * The label set is an ALLOW-LIST, not the shape `\p{L}[\p{L}\p{N} _-]*:` it
+ * replaces. "Any word followed by a colon" is not a property that separates
+ * metadata from locations: a location is free text on the board's side, and
+ * `Remote: EMEA` / `Remote: Southeast US` (live Neo4j postings) are ordinary
+ * values of that field. Reading one as metadata drops it to the bare wildcard
+ * key, which then suppresses every city-specific variant of the same role —
+ * exactly the collapse `dedup_include_location` exists to prevent, reintroduced
+ * through the parser instead of the key.
+ *
+ * Deliberately NOT in the list: `score:`. `rank-pipeline.mjs` uses that word
+ * only inside the prompt it sends an LLM ("score: 0-5, where 5 is an excellent
+ * match"); the segment it actually writes to pipeline.md is `rank: {n}/5 — …`.
+ * Prompt text is not a serialization format. Extend this list only alongside a
+ * writer that really emits the label.
+ *
+ * Case-insensitive because the shape it replaces was (`\p{L}` spans both cases)
+ * and because the two directions are not symmetric: failing to recognize a real
+ * segment invents a city for a role and lets it resurface, while a genuine
+ * location beginning `Posted: ` / `Rank: ` does not occur.
+ */
+const PIPELINE_LABELED_SEGMENT_RE = /^(?:posted|trust|note|rank):\s/iu;
+
+/**
+ * The `~~…~~` wrapper an expired entry is written with.
+ *
+ * Matched only at the start of the entry body, never searched for line-wide.
+ * `~` is a legal URL character and a documented `note:` column may carry its own
+ * strikethrough, so treating `~` as a global signal both truncates real URLs and
+ * strips live entries of their pair. Expiry is a property of the entry, so it is
+ * read at the entry boundary.
+ */
+const PIPELINE_STRIKETHROUGH_RE = /^~~([\s\S]*?)~~/;
+
+/**
+ * A URL inside a pipeline entry.
+ *
+ * Terminates on whitespace and `|` only. `|` cannot appear unencoded in a URL
+ * and is this format's cell separator, so it is the one safe boundary; every
+ * other character stays legal. `~` (RFC 3986 unreserved) and `)` (a sub-delim)
+ * in particular must not terminate the match — excluding them truncated `~user`
+ * paths and parenthesised region suffixes, and a truncated URL both stops
+ * deduping and seeds a bare-origin key that everything else on that host then
+ * false-matches against.
+ *
+ * `local:` entries are deliberately not matched — the gates this feeds have
+ * always been http(s)-only.
+ */
+const PIPELINE_URL_RE = /https?:\/\/[^\s|]+/;
+
+/**
+ * Split a `data/pipeline.md` checkbox line into its entry body and expiry state.
+ *
+ * The body is whatever follows the checkbox, unwrapped when the entry is struck
+ * out, so every caller parses the same cell sequence either way. An unclosed
+ * wrapper still reads as expired: the opening `~~` is the marker.
+ *
+ * @param {string} line - One raw line of `data/pipeline.md`.
+ * @param {RegExp} checkboxRe - Which checkbox anchor this gate accepts.
+ * @returns {{body: string, expired: boolean}|null} Null when the line is not an
+ *   entry at all.
+ */
+function pipelineEntry(line, checkboxRe) {
+  const checkbox = line.match(checkboxRe);
+  if (!checkbox) return null;
+
+  const rest = line.slice(checkbox[0].length);
+  if (!rest.startsWith('~~')) return { body: rest, expired: false };
+
+  const closed = rest.match(PIPELINE_STRIKETHROUGH_RE);
+  return { body: closed ? closed[1] : rest.slice(2), expired: true };
+}
+
+/**
+ * Extract the job URL from a `data/pipeline.md` checkbox line, wherever it sits.
+ *
+ * Six line shapes are documented across the modes, and only the one
+ * `appendToPipeline` writes leads with the URL. The others lead with a report
+ * number (`#NNN`, `modes/pipeline.md`), a report link
+ * (`[NNN](reports/…)`, `reconcile-pipeline.mjs`), a pre-screen marker (`#--`,
+ * `modes/pipeline.md`), or a strikethrough (`~~…~~`, `modes/pipeline.md` and
+ * `modes/oferta.md`). Anchoring the URL to the checkbox missed all five.
+ *
+ * An expired entry still seeds a URL key; only its company/role pair is withheld
+ * (see `extractPipelineCompanyRole`).
+ *
+ * @param {string} line - One raw line of `data/pipeline.md`.
+ * @returns {string|null} The URL, or null when the line carries none.
+ */
+function extractPipelineUrl(line) {
+  const entry = pipelineEntry(line, PIPELINE_CHECKBOX_RE);
+  if (!entry) return null;
+
+  const match = entry.body.match(PIPELINE_URL_RE);
+  return match ? match[0] : null;
+}
+
+/**
+ * Extract the company/role pair from a `data/pipeline.md` checkbox line.
+ *
+ * Company and role are the two cells *after* the URL cell, not cells 1 and 2 —
+ * see `extractPipelineUrl` for why the URL is not always first.
+ *
+ * Two shapes deliberately yield nothing, mirroring the `status !== 'added'`
+ * rule the scan-history branch of `collectSeenCompanyRoles` already applies:
+ *
+ * - **Expired entries** (`~~…~~`). Strikethrough is how the pipeline records the
+ *   same state scan-history records as `skipped_expired`; seeding a dead
+ *   posting's role key would let a dead SF URL bury a live NY req. Read at the
+ *   entry boundary, so a `note:` column containing its own strikethrough leaves
+ *   a live entry's pair intact.
+ * - **Pre-screen discards** (`#-- | {url} | skipped (…)`). The cell after the
+ *   URL is a discard reason, not a company.
+ *
+ * The third cell after the URL is reported as `location` only where it really is
+ * one, because that column is positional and means different things per shape:
+ *
+ * - Only in the URL-first shape (`urlIndex === 0`) — the one `appendToPipeline`
+ *   writes — is it the location. A report-led processed entry (`#143 | {url} |
+ *   … | 4.2/5 | PDF ✅`) puts the SCORE in that position, and keying on it would
+ *   invent a city for an already-processed role.
+ * - A labeled segment (`posted:` / `trust:` / `note:` / `rank:`) slides into that
+ *   position when the offer carried no location and no compensation, so it is
+ *   skipped too. Only those four labels count — see
+ *   {@link PIPELINE_LABELED_SEGMENT_RE} for why a bare `word:` prefix does not.
+ *
+ * Both fall back to `''` (location unknown), which `companyRoleDedupKey` reads as
+ * "matches every city" — the conservative direction.
+ *
+ * @param {string} line - One raw line of `data/pipeline.md`.
+ * @returns {{company: string, role: string, location: string}|null} The pair plus
+ *   its location (`''` when unknown), or null when the line has none to contribute.
+ */
+function extractPipelineCompanyRole(line) {
+  const entry = pipelineEntry(line, PIPELINE_CHECKBOX_STRICT_RE);
+  if (!entry || entry.expired) return null;
+
+  const cells = entry.body.split('|').map(cell => cell.trim());
+  if (cells[0].startsWith('#--')) return null;
+
+  const urlIndex = cells.findIndex(cell => PIPELINE_URL_RE.test(cell));
+  if (urlIndex === -1) return null;
+
+  const [company = '', role = '', third = ''] = cells.slice(urlIndex + 1);
+  const location = urlIndex === 0 && !PIPELINE_LABELED_SEGMENT_RE.test(third) ? third : '';
+  return { company, role, location };
+}
+
+/**
+ * Build the seen-URL set from already-read source texts. An absent file is
+ * passed as '' (the readIfExists convention shared with
+ * `collectSeenCompanyRoles`) — every parse below yields nothing on ''.
+ *
+ * `extraTokensFor(url, portal)` (optional) lets a caller add provider-scoped
+ * dedup tokens alongside the plain normalized-URL one — e.g. a Workday
+ * requisition served under several tenant sites (#3439): a historical row
+ * recorded under site A's URL wouldn't otherwise match a fresh job fetched
+ * from site B, since normalizeUrlForDedup compares URLs verbatim. Only
+ * scan-history.tsv rows carry a `portal` column (the pipeline.md/
+ * applications.md sources don't record which scanner/provider produced a
+ * URL), so the hook only fires there. Return a string, an array of strings,
+ * or a falsy value for "nothing extra".
+ */
+export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = {}) {
+  const { scanHistoryText = '', pipelineText = '', applicationsText = '' } = sources;
   const seen = new Set();
   let recheckEligible = 0;
 
   // scan-history.tsv
-  if (existsSync(SCAN_HISTORY_PATH)) {
-    const lines = readFileSync(SCAN_HISTORY_PATH, 'utf-8').split('\n');
-    for (const line of lines.slice(1)) { // skip header
-      const [url, firstSeen, , , , status = 'added'] = line.split('\t');
-      if (!url) continue;
-      if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) seen.add(normalizeUrlForDedup(url));
-      else recheckEligible++;
-    }
+  for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
+    const [url, firstSeen, portal, , , status = 'added'] = line.split('\t');
+    if (!url) continue;
+    if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
+      seen.add(normalizeUrlForDedup(url));
+      if (extraTokensFor) {
+        for (const token of [].concat(extraTokensFor(url, portal) || [])) {
+          if (token) seen.add(token);
+        }
+      }
+    } else recheckEligible++;
   }
 
-  // pipeline.md — extract URLs from checkbox lines
-  if (existsSync(PIPELINE_PATH)) {
-    const text = readFileSync(PIPELINE_PATH, 'utf-8');
-    for (const match of text.matchAll(/- \[[ x]\] (https?:\/\/\S+)/g)) {
-      seen.add(normalizeUrlForDedup(match[1]));
-    }
+  // pipeline.md — extract URLs from checkbox lines, wherever the URL sits in the
+  // line (see extractPipelineUrl: five of the six documented shapes lead with a
+  // report number, a report link, or a strikethrough rather than the URL).
+  for (const line of pipelineText.split('\n')) {
+    const url = extractPipelineUrl(line);
+    if (url) seen.add(normalizeUrlForDedup(url));
   }
 
   // applications.md — extract URLs from report links and any inline URLs
-  if (existsSync(APPLICATIONS_PATH)) {
-    const text = readFileSync(APPLICATIONS_PATH, 'utf-8');
-    for (const match of text.matchAll(/https?:\/\/[^\s|)]+/g)) {
-      seen.add(normalizeUrlForDedup(match[0]));
-    }
+  for (const match of applicationsText.matchAll(/https?:\/\/[^\s|)]+/g)) {
+    seen.add(normalizeUrlForDedup(match[0]));
   }
 
   return { seen, recheckEligible };
+}
+
+// Path options mirror mergeIntoPipeline's seam below: the defaults are the
+// CAREER_OPS_ROOT-anchored module constants, and a caller with its own lane
+// (or a test with a fixture) passes explicit paths. Before CAREER_OPS_ROOT the
+// defaults were cwd-relative strings, so callers could retarget them by
+// chdir'ing; an anchored default needs a real parameter instead.
+export function loadSeenUrls(policy = {}, {
+  scanHistoryPath = SCAN_HISTORY_PATH,
+  pipelinePath = PIPELINE_PATH,
+  applicationsPath = APPLICATIONS_PATH,
+  extraTokensFor,
+} = {}) {
+  return collectSeenUrls({
+    scanHistoryText: readIfExists(scanHistoryPath),
+    pipelineText: readIfExists(pipelinePath),
+    applicationsText: readIfExists(applicationsPath),
+  }, policy, { extraTokensFor });
 }
 
 /**
@@ -1277,13 +1818,87 @@ function isRoleLocationSuffix(tag) {
  * @returns {string} Normalized role key.
  */
 export function normalizeRoleForDedup(role) {
-  let title = String(role ?? '').toLowerCase();
+  // NFKC up front so full-width brackets fold to their ASCII forms while the
+  // suffix loop can still see them: "Engineer （Remote）" now strips the same
+  // way "Engineer (Remote)" always did.
+  //
+  // This does NOT make the loop understand non-Latin suffixes — the tag itself
+  // is still matched against the English-only ROLE_LOCATION_SUFFIXES set via
+  // normalizeRoleSuffixTag(), which carries its own [a-z0-9] strip. So
+  // "エンジニア（東京）" and "エンジニア（大阪）" remain two keys. Teaching the
+  // suffix vocabulary other scripts is a separate change (new vocabulary, not
+  // a key fix) and is deliberately out of scope here.
+  let title = String(role ?? '').normalize('NFKC').toLowerCase();
   while (true) {
     const match = title.match(/\s*[\[(]([^[\]()]+)[\])]\s*$/);
     if (!match || !isRoleLocationSuffix(match[1])) break;
     title = title.slice(0, match.index).trimEnd();
   }
-  return title.replace(/[^a-z0-9]+/g, ' ').trim();
+  // Unicode-aware (#2393 family): the [a-z0-9] strip this used to carry keyed
+  // every non-Latin title to '', so バックエンドエンジニア and フロントエンド
+  // エンジニア at one company shared a dedupe key and the scan dropped the
+  // second as already-seen. Space separator keeps the word-collapsing shape.
+  return normalizeTextKey(title, ' ');
+}
+
+/**
+ * The separators a provider or a board uses to pack SEVERAL places into the one
+ * free-text location field.
+ *
+ * The field is not reliably a single place, and the packing is not done one way.
+ * Sampled across live Greenhouse boards, a multi-location value uses `;`, the
+ * word `or`, `|` or `/`, and a single value mixes two of them — Anthropic ships
+ * `"Boston, MA; Remote-Friendly (Travel-Required) | San Francisco, CA | Seattle,
+ * WA | New York City, NY; Washington, DC"`. The scanner's own providers add a
+ * fifth: greenhouse/ashby/eightfold/gem/ibm/echojobs all fold a multi-site role's
+ * extra cities into the string themselves, `' · '`-joined, in whatever order the
+ * upstream array happened to arrive in.
+ *
+ * `,` is deliberately NOT a separator. It is the city/region delimiter INSIDE a
+ * place ("London, UK"), so splitting on it would shatter every ordinary location
+ * into fragments and make "London, UK" and "Dublin, UK" share the fragment `uk`.
+ *
+ * Used only by {@link normalizeLocationForDedup}; nothing else parses the field.
+ */
+const LOCATION_LIST_SEPARATOR_RE = /\s*(?:[;|\u00b7/]|\bor\b)\s*/iu;
+
+/**
+ * Normalize a posting location into a dedupe-key component.
+ *
+ * Each place is keyed by the same rule as the role (`normalizeTextKey`,
+ * space-separated) so "London, UK" and "London  UK" are one city and no second
+ * private strip has to exist. A missing, blank or non-string location yields ''
+ * — see {@link companyRoleDedupKey} for what that means.
+ *
+ * A value carrying several places is reduced to the SET of them, sorted, rather
+ * than keyed as the verbatim string. Keying the string verbatim is stable only
+ * while the employer lists the cities in a constant order, and nothing holds
+ * that order still: the value is free text on the board's side, and on ours the
+ * providers listed above build it from an upstream array. Re-order the list and
+ * the verbatim key changes, so a posting already in scan-history reads as new
+ * and re-enters the pipeline — the same duplicate-per-scan failure the location
+ * key exists to avoid, arriving from the other direction. Sorting the set makes
+ * the key depend on WHICH places a posting names and not on the order it names
+ * them in, and deduplicating it absorbs the boards that repeat a city.
+ *
+ * A single-place value is unaffected: it splits into one segment and joins back
+ * to exactly the string this function returned before, so keys already seeded
+ * from single-place rows keep matching.
+ *
+ * @param {unknown} location - Raw location label from a provider or a data file.
+ * @returns {string} Normalized location key, or '' when unknown.
+ */
+export function normalizeLocationForDedup(location) {
+  if (typeof location !== 'string') return '';
+  const places = new Set();
+  for (const segment of location.split(LOCATION_LIST_SEPARATOR_RE)) {
+    const place = normalizeTextKey(segment, ' ');
+    if (place) places.add(place);
+  }
+  // `+` cannot appear inside a component: normalizeTextKey keeps only letters,
+  // marks and digits, so the join is unambiguous and two different sets can
+  // never render as one string.
+  return [...places].sort().join('+');
 }
 
 /**
@@ -1293,13 +1908,36 @@ export function normalizeRoleForDedup(role) {
  * check so those two code paths cannot drift. `canonicalize` defaults to plain
  * lowercase/trim behavior when no alias map is configured.
  *
+ * `location` is the opt-in fourth component (`scan_history.dedup_include_location`,
+ * see `resolveDedupIncludeLocation`). Callers that omit it — every caller before
+ * the flag existed — get the identical `company::role` string they always did,
+ * which is what makes the flag inert by default.
+ *
+ * A key with NO location is deliberately a wildcard rather than a fourth
+ * component that happens to be empty: the seed sources do not all record a
+ * location (applications.md usually has no Location column, and a report-led
+ * pipeline row puts a score where a pending row puts the city), so a bare key
+ * has to keep matching every city. Losing that would let a role the user has
+ * already applied to resurface once per city the moment the flag went on.
+ *
+ * The location component is the canonical SET of the places the posting names
+ * (see {@link normalizeLocationForDedup}), not the provider's display string, so
+ * a board that re-orders a multi-city list does not turn one posting into two.
+ *
  * @param {unknown} company - Raw company label.
  * @param {unknown} role - Raw role title.
  * @param {(name: unknown) => string} [canonicalize] - Company canonicalizer.
- * @returns {string} Stable dedupe key in `company::role` form.
+ * @param {unknown} [location] - Optional posting location. Blank/absent/non-string
+ *   → the bare two-component key.
+ * @returns {string} Stable dedupe key: `company::role`, or `company::role@@places`.
  */
-export function companyRoleDedupKey(company, role, canonicalize = defaultCompanyNormalizer) {
-  return `${canonicalize(company)}::${normalizeRoleForDedup(role)}`;
+export function companyRoleDedupKey(company, role, canonicalize = defaultCompanyNormalizer, location = undefined) {
+  const base = `${canonicalize(company)}::${normalizeRoleForDedup(role)}`;
+  const places = normalizeLocationForDedup(location);
+  // `@@` and not a third `::`: normalizeTextKey strips punctuation, so neither
+  // the role nor the location component can ever contain the separator, and a
+  // company alias carrying one cannot forge a located key out of a bare one.
+  return places ? `${base}@@${places}` : base;
 }
 
 /**
@@ -1334,47 +1972,76 @@ export function companyRoleDedupKey(company, role, canonicalize = defaultCompany
  *   recheck policy, shared with `loadSeenUrls`.
  * @param {(name: unknown) => string} [canonicalize=defaultCompanyNormalizer] -
  *   Company canonicalizer shared with scan-side dedupe.
+ * @param {{includeLocation?: boolean, locatedBases?: Set<string>|null}} [options] -
+ *   When `includeLocation` is true (`scan_history.dedup_include_location`), each
+ *   row seeds a location-qualified key wherever its source records a location, and
+ *   the bare wildcard key where it does not. Default false = the historical keys,
+ *   byte for byte. `locatedBases`, when a Set is supplied, additionally collects
+ *   the BARE key of every row that seeded a located one — see
+ *   {@link loadDedupSnapshot} for what reads it.
  * @returns {Set<string>} Existing company+role dedupe keys.
  */
-export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer) {
+export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer, { includeLocation = false, locatedBases = null } = {}) {
   const { applicationsText = '', scanHistoryText = '', pipelineText = '' } = sources;
   const seen = new Set();
-  const add = (company, role) => {
+  const add = (company, role, location) => {
     const c = String(company ?? '').trim();
     const r = String(role ?? '').trim();
     if (!c || !r) return;
     // Header and markdown-separator cells are not roles.
     if (c.toLowerCase() === 'company') return;
     if (/^[-:]+$/.test(c) || /^[-:]+$/.test(r)) return;
-    seen.add(companyRoleDedupKey(c, r, canonicalize));
+    const key = companyRoleDedupKey(c, r, canonicalize, includeLocation ? location : undefined);
+    seen.add(key);
+    // Reverse index, recorded where the key is BUILT rather than by splitting a
+    // finished key back apart. `defaultCompanyNormalizer` only trims and
+    // lowercases, so a company label may legitimately contain the `@@`
+    // separator; a parsed base would then be wrong for exactly the rows that
+    // matter. Skipped entirely when the flag is off — no key can carry a
+    // location, so the set stays empty and every reader of it is inert.
+    if (locatedBases && includeLocation) {
+      const base = companyRoleDedupKey(c, r, canonicalize);
+      if (key !== base) locatedBases.add(base);
+    }
   };
 
   // applications.md — header-aware parse (tracker-parse.mjs, #954). The old
   // positional regex captured the wrong cells on customized layouts (e.g. with a
   // Location column), so the seen-set keyed on garbage and dedup misfired.
+  //
+  // `row.location` is present only when the user's tracker actually has a
+  // Location column; the default layout has none, so an applied role seeds the
+  // wildcard and no city variant of it can resurface.
   if (applicationsText) {
     const lines = applicationsText.split('\n');
     const colmap = resolveColumns(lines);
     for (const line of lines) {
       const row = parseTrackerRow(line, colmap);
       if (!row) continue;
-      add(row.company, row.role);
+      add(row.company, row.role, row.location);
     }
   }
 
-  // scan-history.tsv — url, first_seen, portal, title, company, status, location
+  // scan-history.tsv — url, first_seen, portal, title, company, status, location.
+  // This is the source that carries a location for every scanned posting, and so
+  // the one that makes the opt-in key discriminate between two cities of one role.
   for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
-    const [url, firstSeen, , title, company, status = 'added'] = line.split('\t');
+    const [url, firstSeen, , title, company, status = 'added', location] = line.split('\t');
     if (!url) continue;
     if (status !== 'added') continue;
     if (!shouldDedupScanHistoryRow({ firstSeen, status }, policy)) continue;
-    add(company, title);
+    add(company, title, location);
   }
 
-  // pipeline.md — "- [ ] {url} | {company} | {title}" plus optional trailing
-  // columns (location, compensation, posted:/trust:/note: segments).
-  for (const match of pipelineText.matchAll(/^- \[[ x]\]\s+\S+\s*\|\s*([^|\n]+?)\s*\|\s*([^|\n]+?)\s*(?:\|[^\n]*)?$/gm)) {
-    add(match[1], match[2]);
+  // pipeline.md — company/title are the two cells after the URL cell, plus
+  // optional trailing columns (location, compensation, posted:/trust:/note:
+  // segments). The URL is not always first, and expired/pre-screen shapes
+  // contribute no pair at all — see extractPipelineCompanyRole. Same failure the
+  // applications.md branch above fixed in #954: a positional regex read the
+  // wrong cells, so the seen-set keyed on garbage.
+  for (const line of pipelineText.split('\n')) {
+    const pair = extractPipelineCompanyRole(line);
+    if (pair) add(pair.company, pair.role, pair.location);
   }
 
   return seen;
@@ -1404,18 +2071,23 @@ function readIfExists(filePath) {
  *   Scan-history recheck policy, shared with `loadSeenUrls`.
  * @param {string} [options.scanHistoryPath=SCAN_HISTORY_PATH] - Scan-history path.
  * @param {string} [options.pipelinePath=PIPELINE_PATH] - Pipeline inbox path.
+ * @param {boolean} [options.includeLocation=false] - Opt-in location-aware keys,
+ *   forwarded to {@link collectSeenCompanyRoles}.
+ * @param {Set<string>|null} [options.locatedBases=null] - Optional reverse-index
+ *   sink, forwarded to {@link collectSeenCompanyRoles} so the two seed paths
+ *   cannot drift.
  * @returns {Set<string>} Existing company+role dedupe keys.
  */
 export function loadSeenCompanyRoles(
   appsPath = APPLICATIONS_PATH,
   canonicalize = defaultCompanyNormalizer,
-  { policy = {}, scanHistoryPath = SCAN_HISTORY_PATH, pipelinePath = PIPELINE_PATH } = {},
+  { policy = {}, scanHistoryPath = SCAN_HISTORY_PATH, pipelinePath = PIPELINE_PATH, includeLocation = false, locatedBases = null } = {},
 ) {
   return collectSeenCompanyRoles({
     applicationsText: readIfExists(appsPath),
     scanHistoryText: readIfExists(scanHistoryPath),
     pipelineText: readIfExists(pipelinePath),
-  }, policy, canonicalize);
+  }, policy, canonicalize, { includeLocation, locatedBases });
 }
 
 // ── Pipeline writer ─────────────────────────────────────────────────
@@ -1572,16 +2244,16 @@ export function formatScanHistoryRow(offer, date, status = 'added') {
 }
 
 /**
- * Read scan-history.tsv rows that carry a fingerprint, for the cross-listing
- * check. Older rows without the 8th column simply never match.
+ * Parse scan-history.tsv rows that carry a fingerprint, for the cross-listing
+ * check. Older rows without the 8th column simply never match. Takes the file
+ * text ('' for an absent file), like its `collect*` siblings.
  *
- * @param {string} [historyPath] - Override for tests.
+ * @param {string} [scanHistoryText] - Full scan-history.tsv contents.
  * @returns {Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}
  */
-export function loadFingerprintHistory(historyPath = SCAN_HISTORY_PATH) {
-  if (!existsSync(historyPath)) return [];
+export function collectFingerprintHistory(scanHistoryText = '') {
   const rows = [];
-  for (const line of readFileSync(historyPath, 'utf-8').split('\n')) {
+  for (const line of scanHistoryText.split('\n')) {
     const cols = line.split('\t');
     // Skip the header row. Older 7-col headers fall out of the `cols.length < 8`
     // guard below on their own, but the 12-col header names col 7 `fingerprint`
@@ -1598,6 +2270,55 @@ export function loadFingerprintHistory(historyPath = SCAN_HISTORY_PATH) {
     });
   }
   return rows;
+}
+
+/**
+ * Filesystem wrapper over {@link collectFingerprintHistory}.
+ *
+ * @param {string} [historyPath] - Override for tests.
+ */
+export function loadFingerprintHistory(historyPath = SCAN_HISTORY_PATH) {
+  return collectFingerprintHistory(readIfExists(historyPath));
+}
+
+/**
+ * Read the three dedup sources once and derive every per-run dedup structure
+ * from that single read (#2382). A scan run used to parse scan-history.tsv
+ * three times and pipeline.md/applications.md twice each — at 50k history rows
+ * that is ~600 ms of redundant parsing per run.
+ *
+ * The snapshot is deliberately per-run: callers hold the returned object in
+ * run-scoped locals and nothing is cached at module level, so a later run
+ * always re-reads the files. Dedup state is therefore frozen at run start;
+ * rows appended by a concurrent process mid-run are picked up by the next run
+ * (the previous re-read at the cross-listing step could not safely observe
+ * them anyway — scan-history appends are not locked).
+ *
+ * @param {{recheckAfterDays?: number|null, today?: string}} [policy] -
+ *   Scan-history recheck policy, shared by the URL and company+role sets.
+ * @param {(name: unknown) => string} [canonicalize=defaultCompanyNormalizer] -
+ *   Company canonicalizer for the role keys.
+ * @returns {{seen: Set<string>, recheckEligible: number, seenCompanyRoles: Set<string>, seenCompanyRoleBases: Set<string>, fingerprintHistory: Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}}
+ */
+// Same path seam as loadSeenUrls/appendToPipeline: anchored defaults, explicit
+// paths for a caller with its own lane or a test with a fixture.
+export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNormalizer, {
+  scanHistoryPath = SCAN_HISTORY_PATH,
+  pipelinePath = PIPELINE_PATH,
+  applicationsPath = APPLICATIONS_PATH,
+  includeLocation = false,
+} = {}) {
+  const scanHistoryText = readIfExists(scanHistoryPath);
+  const pipelineText = readIfExists(pipelinePath);
+  const applicationsText = readIfExists(applicationsPath);
+  const { seen, recheckEligible } = collectSeenUrls({ scanHistoryText, pipelineText, applicationsText }, policy);
+  // Companion index: the bare key of every seeded row that carried a location.
+  // It makes the wildcard rule symmetric in O(1) — see the dedupe check in
+  // main() for the direction it closes. Empty whenever the flag is off.
+  const seenCompanyRoleBases = new Set();
+  const seenCompanyRoles = collectSeenCompanyRoles({ applicationsText, scanHistoryText, pipelineText }, policy, canonicalize, { includeLocation, locatedBases: seenCompanyRoleBases });
+  const fingerprintHistory = collectFingerprintHistory(scanHistoryText);
+  return { seen, recheckEligible, seenCompanyRoles, seenCompanyRoleBases, fingerprintHistory };
 }
 
 // Standard skeleton created on fresh install — matches the format documented
@@ -1619,16 +2340,16 @@ const PROCESSED_MARKERS = ['## Processed', '## Procesadas'];
 // Locked (pipeline-lock.mjs) so scan.mjs, scan-ats-full.mjs, and plugins.mjs
 // (pipeline mode) — the three current callers — can never interleave their
 // read-modify-write and silently drop each other's offers.
-export async function appendToPipeline(offers) {
+// Same seam as loadSeenUrls above: the default is the CAREER_OPS_ROOT-anchored
+// module constant; a caller with its own lane (or a fixture) passes the path.
+export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } = {}) {
   if (offers.length === 0) return;
 
-  await withPipelineLock(PIPELINE_PATH, async () => {
+  await withPipelineLock(pipelinePath, async () => {
     // Auto-create with standard skeleton if missing (fresh-install guard).
-    if (!existsSync(PIPELINE_PATH)) {
-      writeFileSync(PIPELINE_PATH, PIPELINE_SKELETON, 'utf-8');
-    }
-
-    let text = readFileSync(PIPELINE_PATH, 'utf-8');
+    let text = existsSync(pipelinePath)
+      ? readFileSync(pipelinePath, 'utf-8')
+      : PIPELINE_SKELETON;
 
     const marker = PENDING_MARKERS.find(m => text.includes(m)) ?? null;
     const idx = marker !== null ? text.indexOf(marker) : -1;
@@ -1652,34 +2373,50 @@ export async function appendToPipeline(offers) {
       text = text.slice(0, insertAt) + block + text.slice(insertAt);
     }
 
-    writeFileSync(PIPELINE_PATH, text, 'utf-8');
+    atomicWriteFile(pipelinePath, text);
   });
 }
 
-export function appendToScanHistory(offers, date, status = 'added') {
-  // Ensure file + header exist. The header names every column the row writer
-  // (formatScanHistoryRow) emits, in the same order: the original 7 positional
-  // cols (url…location) plus the append-only trailing cols added since —
-  // fingerprint (7), posted_at (8), trust_score (9), trust_flags (10),
-  // normalized_company (11). Written ONLY on fresh-file creation; existing files
-  // (including headerless legacy files and older 7-col-header files) are never
-  // rewritten. All readers either skip line 0 unconditionally, detect the header
-  // by its `url\t` prefix, or skip non-URL col-0 rows, so widening it stays
-  // backward-compatible. `status` is parameterized so callers can record verify
-  // outcomes (`skipped_expired`, etc.) without the legacy `(expired)` suffix.
-  if (!existsSync(SCAN_HISTORY_PATH)) {
-    mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
-    writeFileSync(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\n', 'utf-8');
-  }
+// data/scan-history.tsv has exactly the same set of concurrent writers as
+// data/pipeline.md — scan.mjs, scan-ats-full.mjs, scan-interamt.mjs and
+// plugins.mjs — so it takes the same lock appendToPipeline does, on its own
+// path. Unlocked, two writers race in two places: the create branch below is a
+// check-then-write, and its writeFileSync truncates, so a scanner that loses
+// the race erases rows the winner already appended; and a multi-row
+// appendFileSync is not atomic, so a concurrent append can interleave mid-line.
+// Both surface as rows that silently stop counting, because every reader skips
+// a malformed line quietly.
+export async function appendToScanHistory(offers, date, status = 'added') {
+  await withPipelineLock(SCAN_HISTORY_PATH, () => {
+    // Ensure file + header exist. The header names every column the row writer
+    // (formatScanHistoryRow) emits, in the same order: the original 7 positional
+    // cols (url…location) plus the append-only trailing cols added since —
+    // fingerprint (7), posted_at (8), trust_score (9), trust_flags (10),
+    // normalized_company (11). Written ONLY on fresh-file creation; existing files
+    // (including headerless legacy files and older 7-col-header files) are never
+    // rewritten. All readers either skip line 0 unconditionally, detect the header
+    // by its `url\t` prefix, or skip non-URL col-0 rows, so widening it stays
+    // backward-compatible. `status` is parameterized so callers can record verify
+    // outcomes (`skipped_expired`, etc.) without the legacy `(expired)` suffix.
+    if (!existsSync(SCAN_HISTORY_PATH)) {
+      mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
+      atomicWriteFile(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\n');
+    }
 
-  const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
+    const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
 
-  appendFileSync(SCAN_HISTORY_PATH, lines, 'utf-8');
+    appendFileSync(SCAN_HISTORY_PATH, lines, 'utf-8');
+  });
 }
 
 // ── Company blacklist (#1742) ───────────────────────────────────────
 
-const BLACKLIST_PATH = 'data/blacklist.md';
+// User Layer, so it follows the data root like every other input this file reads
+// (#3510). It was a bare relative string, i.e. resolved against process.cwd(),
+// which meant a user with a data root configured got whatever blacklist happened
+// to sit in the directory they ran from — usually none, so their do-not-apply
+// list was silently empty while the run reported no filtering at all.
+const BLACKLIST_PATH = path.join(DATA_ROOT, 'data/blacklist.md');
 
 /**
  * Parse the user's do-not-apply list (data/blacklist.md, user layer, opt-in).
@@ -1728,18 +2465,63 @@ export function loadBlacklist(filePath = BLACKLIST_PATH) {
 
 // ── Scan-run persistence (#1604) ────────────────────────────────────
 
-const SCAN_RUNS_PATH = 'data/scan-runs.tsv';
+// Anchored for the same reason (#3510), and with a reader to agree with:
+// stats.mjs:36 reads join(DATA_ROOT, 'data', 'scan-runs.tsv'). While this was
+// cwd-relative the writer and the reader could name different files, and the
+// trend stats simply under-reported whatever landed elsewhere.
+const SCAN_RUNS_PATH = path.join(DATA_ROOT, 'data/scan-runs.tsv');
 
 // One row of run counters per non-dry scan — today these numbers are printed
 // once in the summary and lost when the terminal scrolls. Full ISO timestamp
-// (two scans in one day must not collapse). `status` is reserved: always
-// 'completed' in v1; a follow-up wires failure-path writes so trend stats can
-// exclude survivorship bias. Consumers MUST parse by header name, never by
-// position — columns may be appended in later versions.
+// (two scans in one day must not collapse). `status` is 'completed' for a
+// finished run; a run that dies after the sweep starts records 'failed' via
+// writeRunFailureRow (#2643) so trend stats can exclude survivorship bias.
+// Consumers MUST parse by header name, never by position — columns may be
+// appended in later versions.
 export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\tfiltered_visa\tfiltered_posted_date\tfiltered_country_eligibility\n';
 
+// Failure-path writes (#2643). main() registers a snapshot closure once the
+// sweep's counters exist (never on --dry-run, never before the sweep starts —
+// a config error is not a run). The fatal catch and the SIGINT handler both
+// call writeRunFailureRow; the snapshot is consumed on first use so the two
+// signals can never double-write. Best-effort by design: a failure to record
+// the failure must not mask the original error, so everything is swallowed.
+let runFailureSnapshot = null;
+
+export function registerRunFailureSnapshot(fn) {
+  runFailureSnapshot = typeof fn === 'function' ? fn : null;
+}
+
+export function writeRunFailureRow(status = 'failed', filePath = SCAN_RUNS_PATH) {
+  const snapshot = runFailureSnapshot;
+  runFailureSnapshot = null;
+  if (!snapshot) return false;
+  try {
+    appendScanRunSummary({ ...snapshot(), status }, filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
-  if (!existsSync(filePath)) writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
+  // The header is written only on first creation, so a release that appends or inserts a counter
+  // leaves existing files with a header that no longer describes the rows below it. Nothing
+  // migrates it and nothing notices: stats.mjs reads by column NAME, so it silently returns a
+  // neighbouring counter. Surface the mismatch here rather than papering over it — rewriting the
+  // header in place would misalign every historical row instead.
+  if (!existsSync(filePath)) {
+    atomicWriteFile(filePath, SCAN_RUNS_HEADER);
+  } else {
+    const onDisk = (readFileSync(filePath, 'utf-8').split('\n', 1)[0] || '') + '\n';
+    if (onDisk !== SCAN_RUNS_HEADER) {
+      console.error(
+        `Warning: ${filePath} header has ${onDisk.trim().split('\t').length} columns but this build writes `
+        + `${SCAN_RUNS_HEADER.trim().split('\t').length}. Rows below the header are positionally offset and `
+        + `stats.mjs will exclude them. Move ${filePath} aside to start a fresh file — deleting only the header does NOT recover it, because the file still exists and the next run would read the first data row as the header.`,
+      );
+    }
+  }
   const row = [
     c.timestamp, c.status ?? 'completed', c.companies, c.boards, c.found,
     c.filteredTitle, c.filteredTier, c.filteredLocation, c.filteredPostingAge,
@@ -1760,7 +2542,18 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
 
 // ── Portal health persistence (#1744) ───────────────────────────────
 
-const PORTAL_HEALTH_PATH = 'data/portal-health.tsv';
+// Anchored to the data root (#3510), read by stats.mjs:39 at the same anchor.
+//
+// This path has moved twice. It was dirname(fileURLToPath(import.meta.url)) —
+// the script's own directory — until 96c578b made it cwd-relative, because a
+// sandboxed run was writing fixture rows into the live data/portal-health.tsv of
+// whatever checkout owned scan.mjs. That problem was real; the mechanism traded
+// one unanchored path for another, and left this file with two different rules
+// for where user data lives. Isolation now comes from CAREER_OPS_ROOT, which is
+// how the rest of the suite already sandboxes writes — see
+// tests/portal-health-path.test.mjs, which still asserts the checkout's own data
+// directory is never touched.
+const PORTAL_HEALTH_PATH = path.join(DATA_ROOT, 'data/portal-health.tsv');
 export const PORTAL_HEALTH_HEADER = 'timestamp\tcompany\tstatus\n';
 
 // Locked (portal-health-lock.mjs) so a concurrent read-modify-write of this
@@ -1769,7 +2562,7 @@ export const PORTAL_HEALTH_HEADER = 'timestamp\tcompany\tstatus\n';
 export async function appendPortalHealth(healthRecords, filePath = PORTAL_HEALTH_PATH) {
   await withPortalHealthLock(filePath, async () => {
     mkdirSync(path.dirname(filePath), { recursive: true });
-    if (!existsSync(filePath)) writeFileSync(filePath, PORTAL_HEALTH_HEADER, 'utf-8');
+    if (!existsSync(filePath)) atomicWriteFile(filePath, PORTAL_HEALTH_HEADER);
     let lines = '';
     for (const r of healthRecords) {
       lines += [r.timestamp, r.company, r.status].join('\t') + '\n';
@@ -1950,9 +2743,47 @@ function guardStatusFor(code) {
   return 'skipped_invalid_url';
 }
 
+// ── CLI args ────────────────────────────────────────────────────────
+// #2270: `node scan.mjs --help` used to run a full live scan and write to
+// pipeline.md/scan-history.tsv instead of printing usage — the flag was
+// never checked at all. Same shape as scan-ats-full.mjs (#1633/#1635),
+// reply-watch.mjs (#2743/#2745) and dedup-tracker.mjs (#2744/#2746), shared
+// via lib/cli-flags.mjs's validateFlags() (#2775).
+const KNOWN_FLAGS = [
+  '--dry-run', '--verify', '--headed-fallback', '--throttle', '--rediscover-404',
+  '--include-blacklisted', '--company', '--posted-after', '--posted-before',
+  '--since', '--quiet', '--json', '--help', '-h',
+];
+
+// Flags whose space-separated value is the NEXT argv token (the `--flag=value`
+// form is self-contained and never needs this). --throttle is deliberately
+// excluded: only its bare and `--throttle=<ms>` forms are read below, so a
+// following token is never its value.
+const VALUE_FLAGS = ['--company', '--posted-after', '--posted-before', '--since'];
+
+const USAGE = `Usage:
+  node scan.mjs                              # scan all enabled companies
+  node scan.mjs --dry-run                    # preview without writing files
+  node scan.mjs --company Cohere             # scan a single company
+  node scan.mjs --verify                     # Playwright-check each new URL; drop expired postings
+  node scan.mjs --verify --headed-fallback   # retry anti-bot-blocked URLs in a headed browser (needs a display)
+  node scan.mjs --verify --throttle          # jittered ~5-10s gap between checks (stay under rate limits)
+  node scan.mjs --verify --throttle=8000     # custom base gap in ms (waits base..2*base)
+  node scan.mjs --rediscover-404             # re-verify tracked URLs that 404/410 (rides on --verify)
+  node scan.mjs --include-blacklisted        # let data/blacklist.md matches through (annotated)
+  node scan.mjs --since 7                    # postings from the last 7 days
+  node scan.mjs --posted-after 2026-07-01    # absolute lower bound on posting date
+  node scan.mjs --posted-before 2026-08-01   # absolute upper bound on posting date
+  node scan.mjs --json                       # emit one machine-readable receipt on stdout
+  node scan.mjs --quiet                      # suppress the manifesto footer
+  node scan.mjs --help                       # print this usage block and exit`;
+
 async function main() {
   const args = process.argv.slice(2);
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   const dryRun = args.includes('--dry-run');
+  const jsonMode = args.includes('--json');
+  if (jsonMode) console.log = console.error.bind(console);
   const verify = args.includes('--verify');
   // Opt-in: on an anti-bot challenge (e.g. pracuj.pl Cloudflare wall), retry the
   // URL in a headed browser. Off by default — headed Chromium needs a display, so
@@ -1969,8 +2800,25 @@ async function main() {
   // --include-blacklisted: bypass the data/blacklist.md filter for auditing.
   // Matching postings flow through annotated instead of being counted out.
   const includeBlacklisted = args.includes('--include-blacklisted');
-  const companyFlag = args.indexOf('--company');
-  const filterCompany = companyFlag !== -1 ? args[companyFlag + 1]?.toLowerCase() : null;
+  // flagValue reads both `--flag value` and `--flag=value`; a bare indexOf misses
+  // the second form entirely and silently falls back to the unfiltered default.
+  //
+  // flagValue alone cannot tell an ABSENT flag from one passed with no operand —
+  // both give undefined — so it is paired with hasFlag, per cli-flags.mjs's own
+  // guidance. Without that, a trailing `--posted-after` would fall back to "no
+  // bound" and scan everything: the same silent-default failure this fixes.
+  const requireValue = (flag) => {
+    const value = flagValue(args, flag);
+    if (value === undefined || value === '') {
+      if (hasFlag(args, flag)) {
+        console.error(`Error: ${flag} requires a value`);
+        process.exit(1);
+      }
+      return null;
+    }
+    return value;
+  };
+  const filterCompany = requireValue('--company')?.toLowerCase() ?? null;
   // --posted-after / --posted-before <YYYY-MM-DD>: absolute-date bounds on the
   // employer's real posting date (job.postedAt), gated against a typo since a
   // silently-ignored bound would look like "no jobs matched" instead of an error.
@@ -1979,10 +2827,8 @@ async function main() {
     const d = new Date(`${s}T00:00:00Z`);
     return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
   };
-  const postedAfterFlag = args.indexOf('--posted-after');
-  const postedAfter = postedAfterFlag !== -1 ? args[postedAfterFlag + 1] : null;
-  const postedBeforeFlag = args.indexOf('--posted-before');
-  const postedBefore = postedBeforeFlag !== -1 ? args[postedBeforeFlag + 1] : null;
+  const postedAfter = requireValue('--posted-after');
+  const postedBefore = requireValue('--posted-before');
   if (postedAfter != null && !isValidIsoDate(postedAfter)) {
     console.error(`Error: --posted-after expects YYYY-MM-DD, got "${postedAfter}"`);
     process.exit(1);
@@ -2131,15 +2977,22 @@ async function main() {
   // empty Map = the filter below never fires.
   const blacklist = loadBlacklist();
 
-  // 4. Load dedup sets
+  // 4. Load dedup sets — one read per source file for the whole run (#2382).
   const historyPolicy = scanHistoryPolicy(config);
-  const seenUrlState = loadSeenUrls(historyPolicy);
-  const seenUrls = seenUrlState.seen;
   const canonicalizeCompany = buildCompanyCanonicalizer(config.company_aliases);
-  const seenCompanyRoles = loadSeenCompanyRoles(APPLICATIONS_PATH, canonicalizeCompany, { policy: historyPolicy });
+  const dedupIncludeLocation = resolveDedupIncludeLocation(config);
+  const dedupSnapshot = loadDedupSnapshot(historyPolicy, canonicalizeCompany, { includeLocation: dedupIncludeLocation });
+  const seenUrls = dedupSnapshot.seen;
+  const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
+  const seenCompanyRoleBases = dedupSnapshot.seenCompanyRoleBases ?? new Set();
 
   // 5. Fetch from each target
-  const date = new Date().toISOString().slice(0, 10);
+  // LOCAL day. This one value does two things that both care which day it is:
+  // it is the `today` buildCooldownFilter compares against, and it is the
+  // firstSeen date written into scan-history.tsv. On the UTC day a
+  // west-of-Greenwich evening scan opened cooldowns early AND stamped history
+  // rows with tomorrow, which then read one day old on the next recheck (#3070).
+  const date = localToday();
   const windows = loadReApplyWindows();
   const cooldownFilter = buildCooldownFilter(windows, date);
   let totalFilteredCooldown = 0;
@@ -2161,6 +3014,32 @@ async function main() {
   const errors = [...resolveErrors];
   const emptyTargets = [];
 
+  // Arm the failure-path row (#2643) now that the sweep is about to start and
+  // every counter it reads is in scope. new_added is hardcoded 0 on a failed
+  // run even if the sweep added postings before dying (the count isn't settled
+  // mid-sweep). Excluded from trend averages so it can't skew them, but a
+  // raw-TSV reader should treat that 0 as a sentinel, not a true count.
+  if (!dryRun) {
+    registerRunFailureSnapshot(() => ({
+      timestamp: new Date().toISOString(),
+      companies: targets.filter(t => !t._isBoard).length,
+      boards: targets.filter(t => t._isBoard).length,
+      found: totalFound, filteredTitle: totalFilteredTitle, filteredTier: totalFilteredTier,
+      filteredLocation: totalFilteredLocation, filteredPostingAge: totalFilteredPostingAge,
+      filteredSalary: totalFilteredSalary, filteredContent: totalFilteredContent,
+      filteredCooldown: totalFilteredCooldown, dupes: totalDupes, newAdded: 0,
+      errors: errors.length, filteredBlacklist: totalFilteredBlacklist,
+      filteredVisa: totalFilteredVisa, filteredPostedDate: totalFilteredPostedDate,
+      filteredCountryEligibility: totalFilteredCountryEligibility,
+    }));
+    // Ctrl-C mid-sweep is the common abort. Best effort: record, then die
+    // with the conventional SIGINT code.
+    process.once('SIGINT', () => {
+      writeRunFailureRow('failed');
+      process.exit(130);
+    });
+  }
+
   const tasks = targets.map(company => async () => {
     let provider = company._provider;
     // includeUndated is deliberately ALWAYS true, independent of the window.
@@ -2177,7 +3056,12 @@ async function main() {
     // postings on later pages go unfetched. Documented in modes/scan.md; the
     // fix belongs in workday.mjs, where closing it costs the optimisation on
     // every tenant that mixes.
-    const ctx = { ...makeHttpCtx(), sinceMs: earlyStopSinceMs, includeUndated: true };
+    const ctx = {
+      ...makeHttpCtx(),
+      sinceMs: earlyStopSinceMs,
+      includeUndated: true,
+      locationHints: config.location_filter,
+    };
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
     try {
       let jobs;
@@ -2273,8 +3157,49 @@ async function main() {
           totalDupes++;
           continue;
         }
-        const key = companyRoleDedupKey(job.company, job.title, canonicalizeCompany);
-        if (seenCompanyRoles.has(key)) {
+        // Three lookups, not one, when the location joins the key. A bare key is
+        // a wildcard (see companyRoleDedupKey) and a wildcard has to match in
+        // BOTH directions, but the two directions are stored differently:
+        //
+        //   1. seed bare → candidate located. A source that recorded no location
+        //      (applications.md rarely has a Location column) contributed
+        //      `company::role`; a candidate keyed `company::role@@london` must
+        //      still be suppressed by it. That is the `has(baseKey)` lookup.
+        //   2. seed located → candidate bare. The reverse: history holds
+        //      `company::role@@london` and a provider now returns the same role
+        //      with its location field empty, so the candidate's own key IS
+        //      `baseKey` and matches neither stored entry. Without the third
+        //      lookup it is added as new — an already-applied role resurfacing,
+        //      which is the very thing the wildcard exists to stop.
+        //
+        // Case 2 is answered from a prebuilt index rather than by scanning
+        // seenCompanyRoles for the `${baseKey}@@` prefix: that set holds one
+        // entry per historical posting (thousands on an established install) and
+        // a prefix scan would walk all of them for every candidate of every
+        // company — O(candidates x history) added to a zero-token scan people
+        // run daily. seenCompanyRoleBases answers it in one hash lookup.
+        //
+        // Guarded on `key === baseKey` so it fires only for a locationless
+        // candidate: two candidates with DIFFERENT cities must stay distinct.
+        // `key === baseKey` whenever the flag is off, and the index is empty in
+        // that case, so the default path is unchanged.
+        //
+        // An aggregator feed (portals.yml `aggregator: true`) names itself as
+        // the company, so two same-titled posts are two employers' jobs: only
+        // the URL dedups there, and the key is null.
+        const baseKey = companyRoleDedupKey(job.company, job.title, canonicalizeCompany);
+        const key = company.aggregator === true
+          ? null
+          : (dedupIncludeLocation
+            ? companyRoleDedupKey(job.company, job.title, canonicalizeCompany, job.location)
+            : baseKey);
+        if (
+          key !== null && (
+            seenCompanyRoles.has(key) ||
+            seenCompanyRoles.has(baseKey) ||
+            (key === baseKey && seenCompanyRoleBases.has(baseKey))
+          )
+        ) {
           totalDupes++;
           continue;
         }
@@ -2287,9 +3212,15 @@ async function main() {
           });
           continue;
         }
-        // Mark as seen to avoid intra-scan dupes
+        // Mark as seen to avoid intra-scan dupes. The index is maintained in the
+        // same breath as the set it indexes, so a role first surfaced with a
+        // city THIS run also suppresses a locationless twin later in the run —
+        // not only across runs.
         seenUrls.add(dedupUrl);
-        seenCompanyRoles.add(key);
+        if (key !== null) {
+          seenCompanyRoles.add(key);
+          if (key !== baseKey) seenCompanyRoleBases.add(baseKey);
+        }
         // Tag with the company's careers domain so verify can offer a 404/410
         // rediscovery fallback. A null domain (no careers_url) marks the offer
         // as broad-discovery — ineligible for the fallback, per the issue scope.
@@ -2340,12 +3271,15 @@ async function main() {
   for (const offer of verifiedOffers) {
     offer.fingerprint = fingerprintText(offer.description);
   }
-  const crossListings = findCrossListings(verifiedOffers, loadFingerprintHistory());
+  // History rows come from the run-start snapshot: nothing has appended to
+  // scan-history.tsv yet at this point in the run (all writes happen below),
+  // so this sees the same bytes a re-read would — minus the third full parse.
+  const crossListings = findCrossListings(verifiedOffers, dedupSnapshot.fingerprintHistory);
 
   // 6. Write results
   if (!dryRun && verifiedOffers.length > 0) {
     await appendToPipeline(verifiedOffers);
-    appendToScanHistory(verifiedOffers, date);
+    await appendToScanHistory(verifiedOffers, date);
   }
   if (!dryRun && cooldownOffers.length > 0) {
     const cooldownGroups = {};
@@ -2356,7 +3290,7 @@ async function main() {
       cooldownGroups[item.status].push(item.job);
     }
     for (const [status, group] of Object.entries(cooldownGroups)) {
-      appendToScanHistory(group, date, status);
+      await appendToScanHistory(group, date, status);
     }
   }
   // Expired postings — plus the old URLs of migrated offers — are recorded as
@@ -2366,12 +3300,12 @@ async function main() {
     ...migratedOffers.map(o => ({ ...o, url: o.previousUrl })),
   ];
   if (!dryRun && expiredForHistory.length > 0) {
-    appendToScanHistory(expiredForHistory, date, 'skipped_expired');
+    await appendToScanHistory(expiredForHistory, date, 'skipped_expired');
   }
   // Pages that loaded but had no Apply control: record so we don't re-verify
   // them next scan, but never let them reach pipeline.md.
   if (!dryRun && droppedOffers.length > 0) {
-    appendToScanHistory(droppedOffers, date, 'skipped_no_apply_control');
+    await appendToScanHistory(droppedOffers, date, 'skipped_no_apply_control');
   }
   // Guard-rejected URLs (invalid / unsupported protocol / blocked host) are
   // recorded with a precise status so subsequent scans dedup-skip them via
@@ -2385,14 +3319,12 @@ async function main() {
       byStatus.get(status).push(o);
     }
     for (const [status, group] of byStatus) {
-      appendToScanHistory(group, date, status);
+      await appendToScanHistory(group, date, status);
     }
   }
 
   // 7. Print summary
-  console.log(`\n${'━'.repeat(45)}`);
-  console.log(`Portal Scan — ${date}`);
-  console.log(`${'━'.repeat(45)}`);
+  printScanSummaryHeader('Portal Scan', date);
   const summaryCompanies = targets.filter(t => !t._isBoard).length;
   const summaryBoards = targets.filter(t => t._isBoard).length;
   console.log(`Companies scanned:     ${summaryCompanies}`);
@@ -2449,7 +3381,7 @@ async function main() {
     console.log(`  If one side is an agency, apply through ONE channel only — a double submission burns both (#1596).`);
   }
   if (historyPolicy.recheckAfterDays != null) {
-    console.log(`Recheck eligible:      ${seenUrlState.recheckEligible} old scan-history URL(s)`);
+    console.log(`Recheck eligible:      ${dedupSnapshot.recheckEligible} old scan-history URL(s)`);
   }
   if (verify) {
     console.log(`Expired (verified):    ${expiredOffers.length} dropped`);
@@ -2597,9 +3529,31 @@ async function main() {
       filteredCountryEligibility: totalFilteredCountryEligibility,
     });
   }
+  // The run completed (or was a dry run) — disarm the failure row.
+  registerRunFailureSnapshot(null);
 
   console.log(`\n→ Run /career-ops pipeline to evaluate new offers.`);
   console.log('→ Share results and get help: https://discord.gg/8pRpHETxa4');
+
+  if (jsonMode) {
+    const filtered = totalFilteredTitle + totalFilteredTier + totalFilteredLocation
+      + totalFilteredPostingAge + totalFilteredPostedDate + totalFilteredSalary
+      + totalFilteredContent + totalFilteredCountryEligibility + totalFilteredBlacklist
+      + totalFilteredVisa + totalFilteredCooldown;
+    emitJsonReceipt({
+      version: 'careerops.scan.receipt@1',
+      date,
+      scanned: targets.length,
+      skipped: skippedCount,
+      found: totalFound,
+      filtered,
+      duplicates: totalDupes,
+      added: verifiedOffers.length,
+      added_urls: verifiedOffers.map(offer => offer.url),
+      errors: errors.map(({ company, error }) => ({ company, error })),
+      dry_run: dryRun,
+    }, errors.length > 0 ? 2 : 0);
+  }
 
   // One-time-ever manifesto note: first successful REAL run only. The state
   // file keeps it from ever repeating; --dry-run must leave no trace, and a
@@ -2621,9 +3575,10 @@ async function main() {
 
 // Only run main() when invoked directly (`node scan.mjs`), not when imported by tests.
 // `|| ''` guards the case where Node is invoked without a script arg (e.g. `node -e`).
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main().catch(err => {
     console.error('Fatal:', err.message);
-    process.exit(1);
+    writeRunFailureRow('failed');
+    process.exitCode = 1;
   });
 }
