@@ -11,6 +11,7 @@
 import type { Application, InboxJob } from "@/lib/career-ops";
 import type { Job } from "@/components/jobs/job-store";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
+import { coercePersonalization, SECTIONS } from "@/lib/personalization.mjs";
 
 export const AUTO_FIRE_MAX = 3; // fire ≤3 evaluations silently; confirm above that
 export const BATCH_CAP = 12; // hard ceiling on a single fan-out
@@ -46,6 +47,7 @@ export type ActionCtx = {
   applyExplore?: (patch: Record<string, unknown>, opts?: { merge?: boolean; run?: boolean }) => void; // build a FREE discovery search
   writeProfile?: (patch: Record<string, unknown>) => void; // merge-safe config/profile.yml write
   writePortals?: (roles: string[], location?: string[]) => void; // merge-safe portals.yml title_filter write
+  writePersonalization?: (patch: Record<string, unknown>) => void; // section-safe modes/_profile.md write
 };
 
 export type ProfilePatch = {
@@ -322,6 +324,29 @@ const ACTIONS: Record<string, ActionDef> = {
           ctx.writeProfile!(p as Record<string, unknown>);
           if (p.roles?.length) ctx.writePortals?.(p.roles, p.location ? [p.location] : undefined);
           return { note: "Profile saved — your matches will sharpen." };
+        },
+      };
+    },
+  },
+
+  // Propose the user's PERSONALIZATION (modes/_profile.md: archetypes, framing,
+  // exit narrative, comp/location policy) → on confirm, section-safe write.
+  // This is the fourth onboarding prerequisite; without it doctor keeps warning
+  // that evaluations score against the template author's targeting.
+  setPersonalization: {
+    sideEffect: "write",
+    run: (raw, ctx) => {
+      if (!ctx.writePersonalization) return { status: "ignored", note: "personalization write unavailable here" };
+      const p = coercePersonalization(raw) as Record<string, unknown>;
+      const ids = Object.keys(p);
+      if (ids.length === 0) return { status: "ignored", note: "nothing to save" };
+      const labels = SECTIONS.filter((s) => ids.includes(s.id)).map((s) => s.heading.replace(/^## Your /, "").toLowerCase());
+      return {
+        status: "confirm",
+        summary: `Save your personalization? (${labels.join(", ")})`,
+        run: () => {
+          ctx.writePersonalization!(p);
+          return { note: "Personalization saved — evaluations now score against YOUR targeting." };
         },
       };
     },

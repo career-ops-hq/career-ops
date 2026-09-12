@@ -5,7 +5,8 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Send, X, Loader2, Settings, RotateCcw, ArrowUpRight, Sparkles } from "lucide-react";
+import { Send, X, Loader2, Settings, RotateCcw, ArrowUpRight, Sparkles, Maximize2, Minimize2, History, Trash2, Pencil, Check } from "lucide-react";
+import { newChatId, deriveTitle, stripSessionMarkers } from "@/lib/chats.mjs";
 import { CoMark } from "@/components/co-mark";
 import { useJobs } from "@/components/jobs/job-store";
 import { usePipeline } from "@/components/pipeline/pipeline-provider";
@@ -30,6 +31,28 @@ type Msg = { role: "user" | "assistant"; parts: Part[] };
 
 const CONFIG_KEY = "career-ops:config";
 const CHAT_KEY = "career-ops:chat";
+const SIZE_KEY = "career-ops:assistant-size";
+// Conversations live on disk (/api/chats → .career-ops-web/chats/); the browser
+// only remembers WHICH one is open. CHAT_KEY is the pre-history single
+// conversation, migrated into the first file once and then removed.
+const CURRENT_KEY = "career-ops:chat-current";
+type ChatRow = { id: string; title: string; updatedAt: number; count: number };
+
+// Panel size. The 400×600 default is fine for a question; an onboarding
+// conversation or a long evaluation debrief is not a 400px-wide affair. Three
+// fixed steps rather than free drag: predictable on touch and small screens,
+// one click to cycle, remembered per browser.
+type PanelSize = "compact" | "wide" | "full";
+const SIZE_ORDER: PanelSize[] = ["compact", "wide", "full"];
+const PANEL_CLASS: Record<PanelSize, string> = {
+  compact: "bottom-5 right-5 h-[600px] max-h-[80vh] w-[400px] max-w-[calc(100vw-2.5rem)]",
+  wide: "bottom-5 right-5 h-[85vh] w-[720px] max-w-[calc(100vw-2.5rem)]",
+  full: "inset-4 h-auto w-auto",
+};
+// The composer grows with its content (a pasted CV, a long answer) up to a cap
+// that scales with the panel, instead of staying a one-line box that scrolls.
+const INPUT_MAX_PX: Record<PanelSize, number> = { compact: 128, wide: 240, full: 360 };
+const SIZE_LABEL: Record<PanelSize, string> = { compact: "Wider", wide: "Full screen", full: "Compact" };
 // back-compat shims — the old directives still work, mapped onto the registry
 const NAV_RE = /<<\s*go:\s*(\/[a-z0-9/_-]*)\s*>>/gi;
 const REMEMBER_RE = /<<\s*remember:\s*([^>]+?)\s*>>/gi;
@@ -159,6 +182,39 @@ export function AssistantConsole() {
   const handledRef = useRef<Set<string>>(new Set());
   const confirmRuns = useRef<Map<string, () => DoneInfo>>(new Map());
 
+  // panel size: restored on mount (client-only, so SSR markup never mismatches),
+  // persisted on change
+  const [size, setSize] = useState<PanelSize>("compact");
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SIZE_KEY) as PanelSize | null;
+      if (raw && SIZE_ORDER.includes(raw)) setSize(raw);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  function cycleSize() {
+    const next = SIZE_ORDER[(SIZE_ORDER.indexOf(size) + 1) % SIZE_ORDER.length];
+    setSize(next);
+    try {
+      localStorage.setItem(SIZE_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // composer auto-grow: height follows content up to the per-size cap; clearing
+  // the input (after send) shrinks it back to one line. Done in an effect, AFTER
+  // React has applied the style prop — an imperative height set inside onChange
+  // is wiped by the very next render.
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    if (input) el.style.height = `${Math.min(el.scrollHeight, INPUT_MAX_PX[size])}px`;
+  }, [input, size, open]);
+
   // selected CLI from Config (reacts to changes in other tabs)
   useEffect(() => {
     function read() {
@@ -174,27 +230,172 @@ export function AssistantConsole() {
     return () => window.removeEventListener("storage", read);
   }, []);
 
-  // restore + persist conversation
-  useEffect(() => {
+  // ── conversations on disk ──────────────────────────────────────────────────
+  const [chatId, setChatId] = useState<string | null>(null);
+  const [chats, setChats] = useState<ChatRow[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  // Claude's own session for this conversation (--resume). Ref so send() reads
+  // the latest value without a re-render race; state so it persists with the chat.
+  const sessionRef = useRef<string | null>(null);
+  const loadedRef = useRef(false);
+  // The current conversation's title as stored (a rename must survive the next
+  // save) and the last payload written (so reopening a chat does not re-save it
+  // and bump it to the top of the list).
+  const chatTitleRef = useRef<string | null>(null);
+  const lastSavedRef = useRef<string>("");
+
+  const serializable = (ms: Msg[]) =>
+    ms.map((m) => ({ role: m.role, parts: m.parts.filter((p) => p.type !== "confirm" || p.state !== "pending") }));
+
+  async function refreshList() {
     try {
-      const raw = localStorage.getItem(CHAT_KEY);
-      const m = raw ? migrate(JSON.parse(raw)) : null;
-      if (m && m.length) setMessages(m);
+      const r = await fetch("/api/chats");
+      const d = await r.json();
+      if (Array.isArray(d.chats)) setChats(d.chats);
+    } catch {
+      /* offline list is fine */
+    }
+  }
+
+  async function persistChat(id: string, ms: Msg[]) {
+    const messages = serializable(ms);
+    const payload = JSON.stringify({ id, title: chatTitleRef.current ?? deriveTitle(ms), cliId, claudeSessionId: sessionRef.current, messages });
+    if (payload === lastSavedRef.current) return;
+    try {
+      await fetch(`/api/chats/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: payload });
+      lastSavedRef.current = payload;
+    } catch {
+      /* a failed save loses at most this turn; nothing else depends on it */
+    }
+  }
+
+  async function openChat(id: string) {
+    try {
+      const r = await fetch(`/api/chats/${id}`);
+      if (!r.ok) return false;
+      const { chat } = await r.json();
+      const ms = migrate(chat.messages) ?? [];
+      setMessages(ms.length ? ms : [{ role: "assistant", parts: [{ type: "text", text: GREETING }] }]);
+      sessionRef.current = chat.claudeSessionId ?? null;
+      chatTitleRef.current = typeof chat.title === "string" && chat.title ? chat.title : null;
+      // mark the just-loaded content as saved so the persist effect stays quiet
+      lastSavedRef.current = JSON.stringify({ id, title: chatTitleRef.current ?? deriveTitle(ms), cliId, claudeSessionId: sessionRef.current, messages: serializable(ms) });
+      setChatId(id);
+      confirmRuns.current.clear();
+      try {
+        localStorage.setItem(CURRENT_KEY, id);
+      } catch {
+        /* ignore */
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function startNewChat(initial?: Msg[]) {
+    const id = newChatId();
+    const ms = initial ?? [{ role: "assistant", parts: [{ type: "text", text: GREETING }] }];
+    sessionRef.current = null;
+    chatTitleRef.current = null;
+    lastSavedRef.current = "";
+    setMessages(ms);
+    setChatId(id);
+    confirmRuns.current.clear();
+    try {
+      localStorage.setItem(CURRENT_KEY, id);
     } catch {
       /* ignore */
     }
-  }, []);
+    // A conversation is only written once it holds a user message (the persist
+    // effect does that), so "New chat" never litters the list with empty files.
+    // A migrated legacy chat already has one → save it right away.
+    if (initial?.some((m) => m.role === "user")) void persistChat(id, ms).then(refreshList);
+    return id;
+  }
+
+  // restore: list → (one-time migration of the old single localStorage chat) →
+  // reopen the conversation that was open, else the newest, else a fresh one
   useEffect(() => {
-    if (!messages.length) return;
+    if (loadedRef.current) return;
+    loadedRef.current = true;
+    (async () => {
+      let list: ChatRow[] = [];
+      try {
+        const r = await fetch("/api/chats");
+        const d = await r.json();
+        if (Array.isArray(d.chats)) list = d.chats;
+      } catch {
+        /* keep going with an empty list */
+      }
+      setChats(list);
+      let legacy: Msg[] | null = null;
+      try {
+        const raw = localStorage.getItem(CHAT_KEY);
+        legacy = raw ? migrate(JSON.parse(raw)) : null;
+      } catch {
+        legacy = null;
+      }
+      if (legacy && legacy.some((m) => m.role === "user")) {
+        // pre-history conversation → becomes the first file, then the key goes
+        startNewChat(legacy);
+        try {
+          localStorage.removeItem(CHAT_KEY);
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      let current: string | null = null;
+      try {
+        current = localStorage.getItem(CURRENT_KEY);
+      } catch {
+        /* ignore */
+      }
+      if (current && list.some((c) => c.id === current) && (await openChat(current))) return;
+      if (list.length && (await openChat(list[0].id))) return;
+      startNewChat();
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // persist after each completed turn (never mid-stream) and keep the list fresh
+  useEffect(() => {
+    if (busy || !chatId || !messages.some((m) => m.role === "user")) return;
+    const t = setTimeout(() => {
+      void persistChat(chatId, messages).then(refreshList);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [messages, busy, chatId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function renameChat(id: string, title: string) {
+    const t = title.trim();
+    setRenaming(null);
+    if (!t) return;
+    if (id === chatId) chatTitleRef.current = t; // so the next save keeps the new name
     try {
-      const serializable = messages
-        .slice(-30)
-        .map((m) => ({ role: m.role, parts: m.parts.filter((p) => p.type !== "confirm" || p.state !== "pending") }));
-      localStorage.setItem(CHAT_KEY, JSON.stringify(serializable));
+      await fetch(`/api/chats/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: t }) });
     } catch {
       /* ignore */
     }
-  }, [messages]);
+    void refreshList();
+  }
+
+  async function removeChat(id: string) {
+    setConfirmDelete(null);
+    try {
+      await fetch(`/api/chats/${id}`, { method: "DELETE" });
+    } catch {
+      /* ignore */
+    }
+    const rest = chats.filter((c) => c.id !== id);
+    setChats(rest);
+    if (id === chatId) {
+      if (rest.length) await openChat(rest[0].id);
+      else startNewChat();
+    }
+  }
 
   useEffect(() => {
     if (open && messages.length === 0) setMessages([{ role: "assistant", parts: [{ type: "text", text: GREETING }] }]);
@@ -281,6 +482,15 @@ export function AssistantConsole() {
       writePortals: (roles, location) => {
         fetch("/api/portals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roles, location }) }).catch(() => {});
       },
+      writePersonalization: (patch) => {
+        fetch("/api/personalization", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) })
+          .then(() => {
+            router.refresh();
+            // The onboarding panel listens for this to refetch section state.
+            window.dispatchEvent(new CustomEvent("co-onboarding-changed"));
+          })
+          .catch(() => {});
+      },
     };
   }
 
@@ -352,7 +562,7 @@ export function AssistantConsole() {
       const res = await fetch("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, cliId, history, pageContext: describePage(pathname) + pipelineContext() + applyContext() }),
+        body: JSON.stringify({ message: text, cliId, history, resumeId: sessionRef.current, pageContext: describePage(pathname) + pipelineContext() + applyContext() }),
       });
       if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({}));
@@ -383,6 +593,10 @@ export function AssistantConsole() {
           shimRems.push(String(f).trim());
           return "";
         });
+        // the server's <<session:…>> marker: remember Claude's session for --resume, never show it
+        const stripped = stripSessionMarkers(display);
+        display = stripped.text;
+        if (stripped.sessionId) sessionRef.current = stripped.sessionId;
         setStreamText(display.trimStart());
 
         for (const e of complete) {
@@ -422,14 +636,11 @@ export function AssistantConsole() {
     }
   }
 
+  // "New chat" no longer deletes anything: the current conversation stays on disk
+  // in the history list; a fresh one (fresh Claude session) becomes current.
   function resetChat() {
-    setMessages([{ role: "assistant", parts: [{ type: "text", text: GREETING }] }]);
-    confirmRuns.current.clear();
-    try {
-      localStorage.removeItem(CHAT_KEY);
-    } catch {
-      /* ignore */
-    }
+    setShowHistory(false);
+    startNewChat();
   }
 
   // Other surfaces (e.g. the onboarding banner) can open the assistant and kick
@@ -490,13 +701,27 @@ export function AssistantConsole() {
       )}
 
       {open && (
-        <div className="fixed bottom-5 right-5 z-50 flex h-[600px] max-h-[80vh] w-[400px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
+        <div className={cn("fixed z-50 flex flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl", PANEL_CLASS[size])}>
           <header className="flex items-center gap-2.5 border-b border-border px-4 py-3">
             <CoMark size={26} />
             <div className="flex-1">
               <div className="text-sm font-semibold tracking-tight">Assistant</div>
               <div className="text-xs text-faint">{cliId ? `via ${cliId}` : "no CLI configured"}</div>
             </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowHistory((v) => !v)}
+              className={cn("text-muted", showHistory && "text-foreground")}
+              aria-label="Conversation history"
+              aria-pressed={showHistory}
+              title={`History (${chats.length})`}
+            >
+              <History className="size-4" />
+            </Button>
+            <Button variant="ghost" size="icon" onClick={cycleSize} className="text-muted" aria-label={SIZE_LABEL[size]} title={SIZE_LABEL[size]}>
+              {size === "full" ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            </Button>
             <Button variant="ghost" size="icon" onClick={resetChat} className="text-muted" aria-label="New chat" title="New chat">
               <RotateCcw className="size-4" />
             </Button>
@@ -504,6 +729,79 @@ export function AssistantConsole() {
               <X className="size-4" />
             </Button>
           </header>
+
+          {showHistory && (
+            <div className="border-b border-border bg-surface/60 px-3 py-2" aria-label="Conversation history">
+              <div className="mb-1.5 flex items-center justify-between px-1">
+                <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-faint">conversations · on this machine</span>
+                <button onClick={resetChat} className="text-xs text-muted transition-colors hover:text-foreground">+ New</button>
+              </div>
+              <ul className="max-h-56 space-y-0.5 overflow-y-auto">
+                {chats.length === 0 && <li className="px-2 py-1.5 text-xs text-faint">No saved conversations yet.</li>}
+                {chats.map((c) => (
+                  <li
+                    key={c.id}
+                    className={cn(
+                      "group flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-surface-hover",
+                      c.id === chatId && "bg-surface-hover",
+                    )}
+                  >
+                    {renaming?.id === c.id ? (
+                      <input
+                        autoFocus
+                        value={renaming.title}
+                        onChange={(e) => setRenaming({ id: c.id, title: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") void renameChat(c.id, renaming.title);
+                          if (e.key === "Escape") setRenaming(null);
+                        }}
+                        onBlur={() => void renameChat(c.id, renaming.title)}
+                        className="flex-1 rounded-md border border-border bg-surface px-2 py-0.5 text-sm outline-none focus:border-brand/50"
+                        aria-label="Conversation title"
+                      />
+                    ) : (
+                      <button
+                        onClick={() => {
+                          void openChat(c.id);
+                          setShowHistory(false);
+                        }}
+                        className="flex min-w-0 flex-1 items-baseline gap-2 text-left"
+                        title={new Date(c.updatedAt).toLocaleString()}
+                      >
+                        <span className="truncate">{c.title}</span>
+                        <span className="ml-auto shrink-0 font-mono text-[10px] text-faint">{c.count}</span>
+                      </button>
+                    )}
+                    {confirmDelete === c.id ? (
+                      <>
+                        <button onClick={() => void removeChat(c.id)} className="text-xs text-red-400 hover:text-red-300" aria-label="Confirm delete">
+                          Delete
+                        </button>
+                        <button onClick={() => setConfirmDelete(null)} className="text-xs text-muted hover:text-foreground" aria-label="Cancel delete">
+                          Keep
+                        </button>
+                      </>
+                    ) : (
+                      <span className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                        {renaming?.id === c.id ? (
+                          <button onClick={() => void renameChat(c.id, renaming.title)} className="p-1 text-muted hover:text-foreground" aria-label="Save title">
+                            <Check className="size-3.5" />
+                          </button>
+                        ) : (
+                          <button onClick={() => setRenaming({ id: c.id, title: c.title })} className="p-1 text-muted hover:text-foreground" aria-label="Rename">
+                            <Pencil className="size-3.5" />
+                          </button>
+                        )}
+                        <button onClick={() => setConfirmDelete(c.id)} className="p-1 text-muted hover:text-foreground" aria-label="Delete">
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
             {messages.map((m, i) => {
@@ -563,6 +861,7 @@ export function AssistantConsole() {
           <div className="border-t border-border p-3">
             <div className="flex items-end gap-2">
               <textarea
+                ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -574,7 +873,8 @@ export function AssistantConsole() {
                 placeholder={cliId ? "Ask anything…" : "Configure a CLI first"}
                 rows={1}
                 disabled={!cliId}
-                className="max-h-32 flex-1 resize-none rounded-xl border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 disabled:opacity-50"
+                style={{ maxHeight: INPUT_MAX_PX[size] }}
+                className="flex-1 resize-none rounded-xl border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 disabled:opacity-50"
               />
               <button
                 onClick={() => send()}
