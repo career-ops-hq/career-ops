@@ -127,6 +127,19 @@ test('generated CV uses the linked report identity when its application number d
 
     writeFileSync(first.paths.finalPdf, 'stub-pdf-bytes');
     assert.equal(await resolveTailoredCv('Acme'), first.paths.finalPdf);
+
+    // Use the real core path resolver in this fixture, without a platform-
+    // dependent symlink or a second implementation of its manifest rules.
+    writeFileSync(join(root, 'tracker-utils.mjs'),
+      `export { resolveTrackerPath, resolvePdfIndexPath } from ${JSON.stringify(new URL('../../../tracker-utils.mjs', import.meta.url).href)};\n`);
+    writeFileSync(second.paths.finalPdf, 'second-role-pdf-bytes');
+    writeFileSync(join(root, 'data', 'pdf-index.tsv'), [
+      '# report\tpdf\thtml\tformat\tdate',
+      `018\toutput/${basename(first.paths.finalPdf)}\t\tletter\t2026-07-26`,
+      `019\toutput/${basename(second.paths.finalPdf)}\t\tletter\t2026-07-26`,
+    ].join('\n'));
+    assert.equal(await resolveTailoredCv(undefined, '309'), first.paths.finalPdf);
+    assert.equal(await resolveTailoredCv(undefined, '310'), second.paths.finalPdf);
   });
 });
 
