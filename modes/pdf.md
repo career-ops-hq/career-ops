@@ -14,7 +14,8 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 1. Read `cv.md` as the source of truth
 2. Ask the user for the JD if it is not in context (text or URL)
 3. Extract 15-20 keywords from the JD
-4. Run the zero-LLM skill-gap check before drafting anything: write the JD to a scratch file (e.g. `jds/{slug}.md`) if it isn't already one, then `node jd-skill-gap.mjs jds/{slug}.md --summary`. This classifies the JD's explicit requirements against `cv.md` into three buckets — never surface `result.gap` items as if the candidate has them:
+4. Run the zero-LLM skill-gap check before drafting anything: **always** write the JD to `jds/{slug}.md` first — required, not conditional, even when a report for this application already exists — then `node jd-skill-gap.mjs jds/{slug}.md --summary`. This classifies the JD's explicit requirements against `cv.md` into three buckets — never surface `result.gap` items as if the candidate has them:
+   - **JD archival (required, #2789):** this write doubles as the JD archive for this application. A `**URL:**` header alone is a live pointer, not an archive — it rots once the posting closes. When this run is part of a full `oferta` evaluation, the report's own `## Job Description (archived verbatim)` section is the primary archive and this `jds/{slug}.md` write is a secondary copy; when `pdf` is run standalone (no report), this file IS the archive, so prefer naming/keying it to the report with `archive-posting.mjs --report={num}` when a report number exists. `check-jd-archive.mjs` validates every report has one form or the other. If a posting date is visible anywhere in the source — URL-scraped page text, pasted JD text, or a screenshot being transcribed — include it as the first line of the file: `Posted: {date or relative string as shown}`, or `Posted: not visible in source` when absent. Never substitute the report file's own filesystem mtime/creation time for this — it records when the candidate processed the JD, not when the employer posted it.
    - `existing` — already a named skill in cv.md's Skills section, safe to lead with
    - `supportedByResume` — not a named skill yet, but cv.md's prose already demonstrates it; legitimate candidates for the Skills section in the user's own words (Step 13's competency grid draws from here first)
    - `gap` — cv.md has no trace of it at all. **Tell the user explicitly which skills are gaps before generating the CV.** Never paper over a gap by inventing a claim, and never silently drop it from the conversation — the user decides whether to proceed, address it in the cover letter/interview, or skip the role
@@ -61,12 +62,15 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 
 - Single-column layout (no sidebars, no parallel columns)
 - Standard headers: "Professional Summary", "Work Experience", "Education", "Skills", "Certifications", "Projects"
+- Optional sections (Core Competencies, Work Experience, Projects, Education, Certifications, Awards & Honors, Skills) are dropped entirely — header included — when their array is empty or absent
 - No text in images/SVGs
 - No critical info in PDF headers/footers (ATS ignores them)
 - UTF-8, selectable text (not rasterized)
 - No nested tables
 - Distributed JD keywords: Summary (top 5), first bullet of each role, Skills section
 - No hidden text, keyword stuffing, or white-font tricks. Optimize for parseability plus human review.
+
+**Optional parseability check:** after generating the HTML you can score it for ATS-friendliness with `node verify-ats.mjs output/cv-{candidate}-{company}.html` (see `modes/ats.md`). This is deterministic, read-only, and advisory — it reports a 0-100 score plus concrete issues but never blocks generation (unlike the `verify-cv-facts.mjs` fact gate in Step 18).
 
 ## Recruiter Review Gates
 
@@ -165,10 +169,10 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
     }
   ],
   "projects": [
-    { "name": "Project Name", "badge": "Open Source", "tech": "Python, FastAPI", "description": "What it does." }
+    { "name": "Project Name", "url": "https://github.com/...", "badge": "Open Source", "tech": "Python, FastAPI", "description": "What it does." }
   ],
   "education": [
-    { "title": "B.S. Computer Science", "org": "University Name", "year": "2022", "description": "Optional line." }
+    { "title": "B.S. Computer Science", "org": "University Name", "location": "City, ST", "year": "2022", "description": "Optional line." }
   ],
   "certifications": [
     { "title": "Certified Kubernetes Administrator", "org": "CNCF", "year": "2024" }
@@ -199,16 +203,42 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | `candidate.photo` | string | Opt-in profile photo (#264): a local path or `data:` URL. Empty/absent emits **no `<img>`**, rendering pixel-for-pixel identical to the photoless layout (US/UK/many-market ATS penalize photos; opt in for DACH/European markets). |
 | `candidate.photo_style` | string | Optional photo framing: `rounded` (default), `circle`, or `square`. Read it from `candidate.photo_style` in `config/profile.yml`; invalid values fail before HTML is written. |
 | `sections` | object | Optional localized section titles; any omitted key falls back to the English default shown above. |
-| `summary` | string | Personalized summary with keywords. |
+| `summary` | string | Personalized summary with keywords. Supports `**…**` emphasis (see **Markdown bold** below). |
 | `competencies` | string[] | 6-8 keyword phrases → competency tags. |
-| `experience[]` | object | `company`, `role`, `location` (optional), `dates`, `bullets` (reordered, keyword-injected). |
-| `projects[]` | object | `name`, `badge` (optional), `tech` (optional), `description` (a `bullets` array is also accepted and joined into the description line). |
-| `education[]` | object | `title` (degree), `org` (institution), `year`, `description` (optional). |
+| `experience[]` | object | `company`, `role`, `location` (optional), `dates`, `bullets` (reordered, keyword-injected; `**…**` emphasis supported). Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Only for candidates with no professional history to list (students, new graduates, career changers); never drop it to hide a gap. |
+| `projects[]` | object | `name`, `url` (optional project/repo link), `badge` (optional), `tech` (optional), `description` (a `bullets` array is also accepted and joined into the description line). |
+| `education[]` | object | `title` (degree), `org` (institution), `location` (optional, city/state), `year`, `description` (optional). |
 | `certifications[]` | object | `title`, `org`, `year`. |
 | `awards[]` | object | `title` (award name), `org` (issuing body, optional), `year` (optional). Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Use it for competitive or academic distinctions (olympiad medals, hackathon wins, dean's list) that carry more signal than a thin experience section. |
-| `skills[]` | object | `category` + `items` (comma-separated string or string array). |
+| `skills[]` | object | `items` (**required**): a non-blank comma-separated string, or a non-empty array of non-blank strings — every element must be text, since the builder joins the whole array. `category` (optional): omitted, the line renders without its prefix. |
 
 `build-cv-html.mjs` errors out (non-zero exit) if any template placeholder is left unresolved, so a malformed payload fails loudly instead of shipping a broken CV. Run `node build-cv-html.mjs --test` for a self-test render.
+
+**The key names above are enforced, not suggestions (#3523).** Every list section (`experience`, `projects`, `education`, `certifications`, `awards`, `skills`) is rendered from exactly the keys listed in this table. The payload root must be an object. Before rendering, `build-cv-html.mjs` validates each entry:
+
+- **Missing or blank required field → hard error, non-zero exit, no HTML written.** Required: `company` + `role` for experience, `name` for projects, `title` for education, certifications and awards, `items` for skills (a non-blank string or a non-empty array of them; `category` stays optional).
+- **A key no builder reads → warning on stderr and in the report's `warnings[]`;** the build proceeds and the key is ignored.
+- **A top-level section name the builder does not read → warning**, naming the nearest known key. A payload with `educations` instead of `education` used to validate clean and drop the section silently; it now says so.
+
+Do **not** substitute the LaTeX builder's vocabulary — `institution`/`degree`/`dates`/`coursework` is the `modes/latex.md` education schema, **not** this one — nor `employer` for a company or `name` for a certification. Such an entry used to render as an empty block while the report still said `"valid": true`, and CVs went out with no education section at all. It is now rejected by name. When in doubt, check `counts.educationEntries` (and its siblings) in the JSON report: a zero there means the section is empty in the PDF.
+
+### Markdown bold
+
+Wrap a span in `**…**` to emphasise it — typically the quantified result a recruiter should catch in the six-second scan:
+
+```json
+"bullets": ["Cut p99 latency from 840 ms to **120 ms** across 14 services"]
+```
+
+`generate-pdf.mjs` converts it to `<strong>` during ATS normalization (#1728), and the template styles it in both the summary and job bullets. On the HTML path the conversion walks every text node, so **any** field can carry `**…**`.
+
+**The LaTeX twin is narrower — check `modes/latex.md` before reusing a payload across both.** `build-cv-latex.mjs` renders `**…**` as `\textbf{…}` (#3351) only in what it emits inside a `\resumeItem`: `experience[].bullets`, `projects[].bullets`, and the `education[].coursework` line. It has no `summary` field at all, and `projects[].name`, `awards[].title` and the `skills[]` fields print `**` literally. Bullets emphasise the same way in both formats; nothing else is guaranteed to.
+
+**The escaping runs first, and that order is the safety property.** `build-cv-html.mjs` owns the HTML escaping, and only the `**` markers it left untouched are reinterpreted afterwards — a literal `<script>` typed into a bullet stays escaped inside the bold span. Only `**`-delimited spans are affected; single asterisks and unmatched markers stay literal.
+
+**A bold span cannot contain a `*`.** `**tripled *3x* throughput**` matches nothing and ships the asterisks literally — no error, no warning. Rewrite it as `**tripled 3x throughput**` rather than nesting emphasis.
+
+Emphasis is not a substitute for evidence — bold reorders attention, it does not add claims. The no-fabrication rule applies to bolded text exactly as it does to the rest of the bullet, and bolding every other phrase emphasises nothing.
 
 ### Profile photo (opt-in, market-specific)
 

@@ -16,7 +16,7 @@ Run `node update-system.mjs check` and parse the JSON output.
 Show the user what will change. Run:
 
 ```bash
-git fetch https://github.com/santifer/career-ops.git main || {
+git fetch https://github.com/career-ops-hq/career-ops.git main || {
   echo "Failed to fetch latest changes. Cannot generate an accurate diff preview."
   exit 1
 }
@@ -42,9 +42,13 @@ Present to the user as a clear summary:
 > - Other: {N} files changed
 >
 > **Changelog:**
-> {changelog from update-system.mjs check output}
+> [Render in {language.output}: {changelog from update-system.mjs check output}]
 >
 > Your personal files (CV, profile, tracker, reports) will NOT be touched.
+
+`changelog` can come back empty, either because the release carries no notes or because the check resolved the version without reading the releases API. Do not render the **Changelog:** line when that happens — a lone `> **Changelog:**` with nothing under it reads as a failure, and nothing failed. Use this in place of those two lines:
+
+> **Changelog:** not available for v{remote}. The release notes are at https://github.com/career-ops-hq/career-ops/releases
 
 If the user wants details on specific files, show the actual diff for those files using `git diff HEAD..FETCH_HEAD -- {path}`.
 
@@ -69,16 +73,19 @@ Ask the user for confirmation:
 If yes:
 1. Capture the current commit as a run-specific pre-update baseline before apply runs, e.g. `PRE_UPDATE_REF=$(git rev-parse HEAD)`. Don't rely on `backup-pre-update-{local}` alone — `update-system.mjs apply` reuses that branch if it already exists, so it may point at an older snapshot.
 2. **Save local CLAUDE.md additions.** `update-system.mjs apply` treats CLAUDE.md as a system file and resets it to the two-line template (`@AGENTS.md` + the local-additions comment). Before applying, read the current CLAUDE.md and save everything after that two-line header — it will need to be restored in step 4 below. If CLAUDE.md has nothing beyond the two-line header, note that there is nothing to restore.
-3. Run `node update-system.mjs apply`, capturing its exit code without stopping on failure yet — the restore in step 4 must run either way.
+3. Run `node update-system.mjs apply --confirm`, capturing its exit code without stopping on failure yet — the restore in step 4 must run either way. The `--confirm` flag is required so scheduled checks can never install files silently.
 4. **Restore local CLAUDE.md additions**, regardless of whether step 3 succeeded or failed. `apply` resets CLAUDE.md before it can fail partway through, so a failed apply still leaves CLAUDE.md at the blank two-line template. Re-read CLAUDE.md and append the content saved in step 2 after the two-line header.
 5. Now check the exit code captured in step 3:
    - If non-zero, treat apply as failed. Show the captured output and offer:
      > "⚠️ Update apply failed. Want me to show the full error, or try `/career-ops update rollback`?"
-   - Stop the flow here if apply failed — do not run doctor or reconciliation on a partially-applied update.
-6. Run `node doctor.mjs` to validate the installation
-   - If the command exits with a non-zero code, treat validation as failed. Show the captured output and offer:
+   - Stop the flow here if apply failed — do not run doctor, verify-pipeline, or reconciliation on a partially-applied update.
+6. Run `node doctor.mjs` to validate the installation.
+   - If it exits with a non-zero code, treat validation as failed. Show the captured output and offer:
      > "⚠️ Validation failed after update. Want me to show the full error, or roll back with `/career-ops update rollback`?"
-   - Stop the flow here if validation failed — do not run reconciliation or show the success message.
+   - Stop the flow here if validation failed — do not run verify-pipeline, reconciliation, or show the success message.
+   - Then run `node verify-pipeline.mjs` to check the data layer. Show its output, but treat it as informational only — never as a gate, and never with a rollback offer.
+     Reason: unlike doctor, verify-pipeline also fails on pre-existing tracker issues that have nothing to do with this update (a non-canonical status, a moved report file, a duplicate row number) — rolling back the release fixes none of those.
+     If it reports errors, note them separately (e.g. "verify-pipeline also flagged N pre-existing data issue(s) — unrelated to this update, worth a look separately") and continue to Step 7 regardless of its exit code.
 7. If Step 3 flagged archetype/scoring changes, reconcile `modes/_profile.md` against the new `modes/_shared.md`:
    - Read both the pre-update version (`git show $PRE_UPDATE_REF:modes/_shared.md`) and the post-update version of `modes/_shared.md`.
    - Extract the canonical archetype identifiers from each version (archetype headings/definitions, plus any slug/alias fields).
@@ -93,7 +100,7 @@ If yes:
      - For removals:
        > "Your _profile.md references archetype '{old_name}' which was removed in the new _shared.md. Want me to delete the reference or replace it with another archetype?"
 8. Show final status:
-   > "✅ Updated to v{version}. Run `node doctor.mjs` anytime to verify setup."
+   > "✅ Updated to v{version}. Run `node doctor.mjs` anytime to verify setup, or `node verify-pipeline.mjs` to check your data."
 
    If the updater's output ended with its note about the CareerOps Manifesto, relay it once (do not drop it when summarizing):
    > "One more thing: this project ships with the CareerOps Manifesto — a new way of job searching is taking shape, and you are already practicing it. Run `npm run manifesto` to read it and sign it if you want to help. No action needed."

@@ -16,6 +16,8 @@
  */
 
 /** @type {string[]} */
+import { asciiFold } from '../lib/ascii-fold.mjs';
+
 const DEFAULT_SUSPICIOUS_DOMAINS = [
   'bit.ly',
   'tinyurl.com',
@@ -102,6 +104,35 @@ export function matchesDomainList(hostname, domainList) {
   return false;
 }
 
+
+/**
+ * ASCII-fold a company name for comparison against a hostname.
+ *
+ * NFD is the right tool HERE and the wrong one in foldStatusInput()
+ * (tracker-utils.mjs, #2705). There the fold must not collapse distinct
+ * identities — Żubr must never become Zubr. Here we are deliberately comparing
+ * against an ASCII hostname, so folding to the ASCII base letter is the whole
+ * point: "societegenerale.com" IS the ASCII folding of "Société Générale".
+ *
+ * The previous `[^a-z0-9 ]` strip DELETED accented letters instead of folding
+ * them, so "Société Générale" became "socit gnrale" and matched neither the
+ * slug nor any word of its own domain (#2924).
+ *
+ * @param {string} company
+ * @returns {string} Lowercased, space-separated ASCII, or '' when nothing Latin remains.
+ */
+export function asciiFoldForHostname(company) {
+  // punctuation: 'delete', not the shared default of 'space'. Deliberate, and
+  // the reason this migration was not a straight swap (#3040): the word-level
+  // check below matches any word of 3+ chars, so turning punctuation into a
+  // separator would CREATE words that were never there —
+  // "Smith&Jones" -> [smith, jones], and `smith` substring-matches
+  // smithfield.com, so a mismatch that should be flagged silently is not.
+  // Fewer false penalties is the safe direction in general; on a legitimacy
+  // validator, the flag NOT firing is the failure that costs something.
+  return asciiFold(company, { punctuation: 'delete' });
+}
+
 /**
  * Heuristic: does the company name plausibly match the URL hostname?
  *
@@ -116,7 +147,12 @@ export function matchesDomainList(hostname, domainList) {
 export function companyMatchesHostname(company, hostname) {
   if (!company || !hostname) return true; // can't evaluate → no flag
 
-  const normalized = company.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+  const normalized = asciiFoldForHostname(company);
+  // Nothing Latin survived (a CJK, Cyrillic, Greek, … name). Deliberate, not
+  // an oversight: hostnames are effectively ASCII, so such a name can never
+  // appear in one and the absence of a match proves nothing. "Working" here
+  // would flag every non-Latin company posting on its own legitimate domain —
+  // trading a silent skip for a systematic false positive (#2924).
   if (!normalized) return true;
 
   // Full slug check (all spaces removed)

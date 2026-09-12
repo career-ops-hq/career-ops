@@ -20,21 +20,23 @@
 //       size: 100               # results per keyword (1–100, default 100)
 //       remoteNationwide: true  # also run a nationwide pass keeping remote-eligible hits
 //       remoteMatch: filter     # how that pass detects remote (default 'title'):
-//                               #   'filter' — server-side `homeoffice=nv_true` query + pagination, then one
-//                               #              detail call per hit to confirm `homeofficetyp: VOLLSTAENDIG`
-//                               #              (nv_true alone also returns hybrid roles). Recommended.
+//                               #   'filter' — server-side `homeoffice=nv_true` query + pagination to narrow
+//                               #              the set, then the same title check as 'title'. Recommended:
+//                               #              same standard of proof, applied to a far better candidate set.
+//                               #              (v4 confirmed `homeofficetyp: VOLLSTAENDIG` per hit via the
+//                               #              detail endpoint; v6 no longer serves it to this key — #2494.)
 //                               #   'title'  — regex on the job title only (cheap; misses body-level remote)
 //                               #   'off'    — skip the remote pass entirely
 //       remoteMaxPages: 10      # 'filter' mode: max pages to paginate (size each); default 1
 //     enabled: true
 
-const API_URL = 'https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobs';
+// v6. The v4 search and detail endpoints both 404 as of 2026-08-04 (#2494);
+// v5 does too. v6 keeps every query parameter this provider sends
+// (was/wo/umkreis/veroeffentlichtseit/angebotsart/homeoffice/page/size) but
+// renames the response fields — see normalizeJob().
+const API_URL = 'https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs';
 const API_KEY = 'jobboerse-jobsuche'; // public client key the arbeitsagentur.de UI uses
 const DETAIL_BASE = 'https://www.arbeitsagentur.de/jobsuche/jobdetail/';
-const DETAIL_API = 'https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobdetails/';
-// Verify in small batches so a wide remote pass can't fire hundreds of detail
-// requests at once.
-const VERIFY_BATCH = 5;
 const REMOTE_RE = /(remote|homeoffice|home[-\s]?office|ortsunabh|deutschlandweit|bundesweit|100\s*%|full[-\s]?remote|fully remote)/i;
 
 // Clamp a runtime integer into [min, max], falling back to `def` for NaN, so a
@@ -69,74 +71,71 @@ export function parseArbeitsagenturConfig(entry) {
 }
 
 /**
- * Assembles a human-readable location from the API's `arbeitsort` object. Most
+ * Assembles a human-readable location from v6's `stellenlokationen` array. Most
  * postings are in Germany; only a non-DE country is appended so the downstream
  * location_filter can act on it.
- * @param {any} arbeitsort
+ *
+ * v4 exposed a single `arbeitsort` object whose `region` was a display name, so
+ * it was joined onto the city. v6 nests the address one level deeper and its
+ * `region` is an uppercase federal-state enum (`BADEN_WUERTTEMBERG`), which
+ * would only add noise to a string the commute filter has to match — so the
+ * city stands alone. A posting may list several locations; the downstream shape
+ * is one string, so the first is used, as v4's single field effectively was.
+ * @param {any} lokationen
  */
-export function buildLocation(arbeitsort) {
-  if (!arbeitsort || typeof arbeitsort !== 'object') return '';
-  const loc = [arbeitsort.ort, arbeitsort.region].filter(Boolean).join(', ');
-  const land = arbeitsort.land;
-  if (land && !/deutschland|germany/i.test(land)) return loc ? `${loc}, ${land}` : land;
+export function buildLocation(lokationen) {
+  if (!Array.isArray(lokationen)) return '';
+  const adresse = lokationen[0] && lokationen[0].adresse;
+  if (!adresse || typeof adresse !== 'object') return '';
+  const loc = String(adresse.ort || '').trim();
+  const land = adresse.land;
+  if (land && !/deutschland|germany/i.test(land)) return loc ? `${loc}, ${land}` : String(land);
   return loc;
 }
 
 /**
  * Normalizes one raw Arbeitsagentur posting into a Job plus its `refnr` (kept
  * for dedup, stripped before the provider returns). Returns null when the
- * posting lacks a usable refnr or title.
+ * posting lacks a usable reference number or title.
+ *
+ * v6 renamed every field this reads — `refnr` → `referenznummer`, `titel` →
+ * `stellenangebotsTitel`, `arbeitgeber` → `firma`, `arbeitsort` →
+ * `stellenlokationen[]` (#2494). The public job-detail page still resolves by
+ * reference number, so the outgoing URL is unchanged.
  * @param {any} job
  * @returns {({title: string, url: string, company: string, location: string, refnr: string}) | null}
  */
 export function normalizeJob(job) {
-  const refnr = job && job.refnr;
-  const title = String((job && job.titel) || '').trim();
+  const refnr = job && job.referenznummer;
+  const title = String((job && job.stellenangebotsTitel) || '').trim();
   if (!refnr || !title) return null;
   return {
     title,
     url: DETAIL_BASE + encodeURIComponent(String(refnr)),
-    company: String((job && job.arbeitgeber) || '').trim(),
-    location: buildLocation(job && job.arbeitsort),
+    company: String((job && job.firma) || '').trim(),
+    location: buildLocation(job && job.stellenlokationen),
     refnr: String(refnr),
   };
 }
 
-/**
- * Confirms which of `jobs` are advertised as fully remote.
- *
- * The search response carries no home-office field, and the `homeoffice=nv_true`
- * query only means "home office is possible" — it also matches
- * `homeofficetyp: NACH_VEREINBARUNG` ("nach Absprache"), i.e. an office-anchored
- * hybrid role. Only the detail endpoint exposes `homeofficetyp`, so each
- * candidate is checked there before it may claim to be nationwide-remote.
- *
- * Fails closed: a posting whose lookup errors stays untagged, keeping its real
- * city so the downstream location_filter still applies.
- *
- * @param {Array<{refnr: string}>} jobs
- * @param {{ fetchJson: (url: string, opts?: object) => Promise<any> }} ctx
- * @returns {Promise<Set<string>>} refnrs confirmed `VOLLSTAENDIG`
- */
-export async function verifyFullyRemote(jobs, ctx) {
-  const confirmed = new Set();
-  for (let i = 0; i < jobs.length; i += VERIFY_BATCH) {
-    const batch = jobs.slice(i, i + VERIFY_BATCH);
-    await Promise.all(batch.map(async (job) => {
-      try {
-        const json = await ctx.fetchJson(DETAIL_API + Buffer.from(job.refnr).toString('base64'), {
-          headers: { 'X-API-Key': API_KEY, accept: 'application/json' },
-          redirect: 'error',
-          timeoutMs: 12_000,
-        });
-        if (String((json && json.homeofficetyp) || '') === 'VOLLSTAENDIG') confirmed.add(job.refnr);
-      } catch {
-        // Unverifiable → not confirmed. Never tag on optimism.
-      }
-    }));
-  }
-  return confirmed;
-}
+// What `remoteMatch: 'filter'` lost in the v6 move, and why it still exists.
+//
+// v4 proved a role was fully remote by reading `homeofficetyp: VOLLSTAENDIG`
+// from the detail endpoint, because the `homeoffice=nv_true` query alone also
+// returns `NACH_VEREINBARUNG` ("nach Absprache") — an office-anchored hybrid.
+// That proof is gone: v6's detail endpoint answers 403 to this public client
+// key, and the only home-office field on a v6 search hit is the boolean
+// `homeofficemoeglich`, which is exactly what nv_true already filtered on (a
+// sampled nv_true page was 100% `true`). A boolean that cannot separate
+// fully-remote from hybrid is not evidence.
+//
+// So 'filter' keeps the half that still works — the server-side query narrows
+// the candidate set far better than a nationwide sweep — and falls back to the
+// posting's own title for the proof, the same standard 'title' mode uses. A
+// candidate whose title makes no remote claim keeps its real city, which is the
+// fail-closed behaviour an unverifiable lookup had in v4: the `Deutschlandweit
+// (Homeoffice)` marker exempts a job from the commute location_filter, so
+// tagging on nv_true alone would smuggle every hybrid past it.
 
 /** @type {Provider} */
 export default {
@@ -170,7 +169,7 @@ export default {
         redirect: 'error',
         timeoutMs: 12_000,
       });
-      return Array.isArray(json && json.stellenangebote) ? json.stellenangebote : [];
+      return Array.isArray(json && json.ergebnisliste) ? json.ergebnisliste : [];
     };
 
     const byRef = new Map();
@@ -191,7 +190,9 @@ export default {
       }
       // Pass B (optional): a nationwide pass for remote roles hosted at a far HQ
       // (which the radius pass misses). Detection is config-driven via `remoteMatch`:
-      //   'filter' — server-side `homeoffice=nv_true` query + pagination (every hit is remote)
+      //   'filter' — server-side `homeoffice=nv_true` query + pagination, narrowing
+      //              the candidate set; the title still has to claim remote (see
+      //              the note on what v6 took away, above)
       //   'title'  — keep only nationwide hits whose title matches the remote regex
       // Its failure must NOT discard the primary results already fetched above.
       let wide = [];
@@ -200,7 +201,7 @@ export default {
           if (remoteMatch === 'filter') {
             // Server-side home-office filter: collect the candidates. `nv_true` only
             // means "home office is possible", so these are not yet known to be
-            // remote — verifyFullyRemote() confirms each below before tagging.
+            // remote — the title check below is what decides.
             for (let page = 1; page <= remoteMaxPages; page++) {
               const res = await fetchKeyword(kw, { homeoffice: 'nv_true', page: String(page) });
               wide.push(...res);
@@ -208,7 +209,7 @@ export default {
             }
           } else { // 'title'
             const nationwide = await fetchKeyword(kw);
-            wide = nationwide.filter(j => REMOTE_RE.test(String((j && j.titel) || '')));
+            wide = nationwide.filter(j => REMOTE_RE.test(String((j && j.stellenangebotsTitel) || '')));
           }
         } catch (err) {
           errors.push(`"${kw}" (remote pass): ${(err && err.message) || err}`);
@@ -225,12 +226,11 @@ export default {
       // smuggles an office-anchored hybrid past the distance check, so it may
       // only be applied on evidence:
       //   'title'  — the posting's own title claims remote; take it at face value.
-      //   'filter' — `homeoffice=nv_true` only means "home office possible" and
-      //              also returns NACH_VEREINBARUNG (hybrid) roles, so each
-      //              candidate's `homeofficetyp` is confirmed via the detail
-      //              endpoint. Unconfirmed ones keep their real city.
-      // Dedup by refnr before verifying: paginating a live index can return the same
-      // posting on two pages, and each duplicate would otherwise cost its own detail request.
+      //   'filter' — `homeoffice=nv_true` narrowed the set but only means "home
+      //              office possible", so the title is what proves it. Hits that
+      //              make no such claim keep their real city.
+      // Dedup by refnr first: paginating a live index can return the same posting
+      // on two pages.
       const wideJobs = [...new Map(
         wide
           .map(normalizeJob)
@@ -238,11 +238,8 @@ export default {
           .filter(job => !byRef.has(job.refnr))
           .map(job => [job.refnr, job]),
       ).values()];
-      const fullyRemote = remoteMatch === 'filter' && wideJobs.length
-        ? await verifyFullyRemote(wideJobs, ctx)
-        : null; // null = mode needs no per-job proof
       for (const job of wideJobs) {
-        if (!fullyRemote || fullyRemote.has(job.refnr)) {
+        if (remoteMatch !== 'filter' || REMOTE_RE.test(job.title)) {
           job.location = job.location ? `${job.location} · Deutschlandweit (Homeoffice)` : 'Deutschlandweit (Homeoffice)';
         }
         if (!byRef.has(job.refnr)) byRef.set(job.refnr, job);

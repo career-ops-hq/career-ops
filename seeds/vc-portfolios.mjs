@@ -24,6 +24,8 @@
  *   const companies = await fetchYCCompanies();
  */
 
+import { DEFAULT_USER_AGENT } from '../user-agent.mjs';
+
 // ── Constants ────────────────────────────────────────────────────────
 
 /**
@@ -33,7 +35,16 @@
 export const SLUG_RE = /^[A-Za-z0-9._-]+$/;
 
 const DEFAULT_TIMEOUT_MS = 20_000;
-const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; career-ops-seeds/1.0)';
+
+// Runaway guard for the YC pagination walk, NOT the stop condition: the walk
+// normally ends at the API's own `totalPages` (246 as of Aug 2026, 25 per page).
+// It exists only for the case where the API stops reporting pagination metadata
+// at all. Sized well clear of the real total on purpose - a ceiling that sits
+// close to today's page count stops being a guard and becomes a silent truncation
+// the day the catalogue grows past it, which is the exact failure this file was
+// fixed for. Exported so the walk is clamped to it as a hard ceiling and tests
+// can assert the contract.
+export const YC_MAX_PAGES = 500;
 
 /**
  * YC public company API.
@@ -307,19 +318,26 @@ export function toPortalEntry(company) {
  * Fetch the Y Combinator public company list and return parsed SeedCompany entries.
  *
  * Uses the public YC API (no auth, no API key). The response is a JSON object
- * with a `companies` array. We fetch page 1 with a large per_page to get the
- * most recent batch; subsequent pages can be fetched if needed (most users want
- * the latest batch anyway).
+ * with a `companies` array plus `page`/`totalPages` pagination fields. The API
+ * caps page size server-side (~30/page; `per_page` is ignored), so the whole
+ * portfolio is walked page by page, newest batches first.
  *
- * @param {{ timeoutMs?: number, maxPages?: number }} [opts]
+ * @param {{ timeoutMs?: number, maxPages?: number }} [opts] - `maxPages` is
+ *   clamped to YC_MAX_PAGES, which is a hard ceiling; pagination normally stops
+ *   at the API-reported last page.
  * @returns {Promise<SeedCompany[]>}
  */
-export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPages = 3 } = {}) {
+export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPages = YC_MAX_PAGES } = {}) {
   /** @type {SeedCompany[]} */
   const all = [];
   const seen = new Set();
 
-  for (let page = 1; page <= maxPages; page++) {
+  // YC_MAX_PAGES is a hard ceiling: clamp here so an explicit maxPages (or a
+  // stray Infinity) can never spin the walk past the runaway guard.
+  const limit = Math.min(maxPages, YC_MAX_PAGES);
+
+  let page = 1;
+  for (let fetched = 0; fetched < limit; fetched++) {
     const url = `https://api.ycombinator.com/v0.1/companies?page=${page}&per_page=1000`;
     let payload;
     try {
@@ -331,7 +349,7 @@ export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPage
     }
 
     const entries = parseYCPayload(payload);
-    if (entries.length === 0) break; // No more pages.
+    if (entries.length === 0) break; // No more companies.
 
     for (const e of entries) {
       if (!seen.has(e.slug)) {
@@ -340,13 +358,47 @@ export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPage
       }
     }
 
-    // The YC API pagination: stop when we receive fewer than 1000 companies.
+    // The API caps page size server-side (~30/page; per_page is ignored) and
+    // reports totalPages — follow its signal instead of guessing from batch size.
     const raw = /** @type {any} */ (payload);
-    const batchSize = Array.isArray(raw?.companies) ? raw.companies.length : 0;
-    if (batchSize < 1000) break;
+    if (Number.isInteger(raw?.totalPages) && raw.totalPages > 0) {
+      if (page >= raw.totalPages) break;
+      page += 1;
+      continue;
+    }
+    // When totalPages is absent, follow the nextPage target the API hands back
+    // rather than stopping — tolerating a bare number, a page=N fragment, or a
+    // full URL, and requiring forward progress so it can't spin. This is the
+    // case that bites the day YC changes the response shape again.
+    const next = parseYCNextPage(raw?.nextPage);
+    if (next == null || next <= page) break;
+    page = next;
   }
 
   return all;
+}
+
+/**
+ * Extract the next page number from the YC API's `nextPage` field, which may be
+ * a bare page number, a `page=N` query fragment, or a full URL carrying a
+ * `page=N` query param. Returns null when no forward page number can be read.
+ *
+ * @param {unknown} nextPage
+ * @returns {number | null}
+ */
+export function parseYCNextPage(nextPage) {
+  if (nextPage == null || nextPage === false) return null;
+  if (typeof nextPage === 'number') {
+    return Number.isInteger(nextPage) && nextPage > 0 ? nextPage : null;
+  }
+  if (typeof nextPage === 'string') {
+    const m = nextPage.match(/(?:^|[?&/])page[=/](\d+)/) || nextPage.match(/^\s*(\d+)\s*$/);
+    if (m) {
+      const n = Number(m[1]);
+      return Number.isInteger(n) && n > 0 ? n : null;
+    }
+  }
+  return null;
 }
 
 /**

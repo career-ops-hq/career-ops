@@ -85,6 +85,21 @@ blocked.result === 'uncertain' && blocked.code === 'access_blocked'
   ? pass('HTTP 503 still classifies as uncertain/access_blocked, not server_error')
   : fail(`HTTP 503 classified ${blocked.result}/${blocked.code}, expected uncertain/access_blocked`);
 
+// 429 is throttling, never evidence the posting is gone. Its body is a short
+// "Too Many Requests" — under MIN_CONTENT_CHARS — so before the guard covered it
+// the verdict fell through to insufficient_content and read as `expired`, which
+// scan-history records as skipped_expired and every later scan dedup-skips.
+const throttled = classifyLiveness({
+  status: 429,
+  requestedUrl: 'https://boards.greenhouse.io/acme/jobs/1234567',
+  finalUrl: 'https://boards.greenhouse.io/acme/jobs/1234567',
+  bodyText: 'Too Many Requests. Please retry after some time.',
+  applyControls: [],
+});
+throttled.result === 'uncertain' && throttled.code === 'access_blocked'
+  ? pass('HTTP 429 classifies as uncertain/access_blocked, not expired')
+  : fail(`HTTP 429 classified ${throttled.result}/${throttled.code}, expected uncertain/access_blocked`);
+
 // A real 404/410 is still authoritative expiry — both statuses, both halves.
 for (const status of [404, 410]) {
   const gone = classifyLiveness({
@@ -97,3 +112,27 @@ for (const status of [404, 410]) {
     ? pass(`HTTP ${status} still -> expired/http_gone`)
     : fail(`HTTP ${status} classified ${gone.result}/${gone.code}, expected expired/http_gone`);
 }
+
+console.log('\nliveness-core — Chinese application controls classify active postings');
+
+const chineseApply = classifyLiveness({
+  status: 200,
+  requestedUrl: 'https://careers.example.com/job/1234567',
+  finalUrl: 'https://careers.example.com/job/1234567',
+  bodyText: '岗位职责：负责模型研发、系统优化和跨团队协作。'.repeat(20),
+  applyControls: ['申请职位'],
+});
+chineseApply.result === 'active' && chineseApply.code === 'apply_control_visible'
+  ? pass('“申请职位” marks an otherwise valid Chinese posting active')
+  : fail(`“申请职位” classified ${chineseApply.result}/${chineseApply.code}, expected active/apply_control_visible`);
+
+const chineseSubmit = classifyLiveness({
+  status: 200,
+  requestedUrl: 'https://careers.example.com/job/7657115156241418501',
+  finalUrl: 'https://careers.example.com/job/7657115156241418501',
+  bodyText: '职位描述：负责安全系统、检测算法和工程平台建设。'.repeat(20),
+  applyControls: ['投递'],
+});
+chineseSubmit.result === 'active' && chineseSubmit.code === 'apply_control_visible'
+  ? pass('exact “投递” button marks a Feishu posting active')
+  : fail(`exact “投递” button classified ${chineseSubmit.result}/${chineseSubmit.code}, expected active/apply_control_visible`);

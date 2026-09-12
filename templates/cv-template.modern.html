@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<!-- career-ops-template
+name: Modern
+version: 1.0.0
+-->
+<html lang="{{LANG}}">
+<head>
+<meta charset="UTF-8">
+<title>{{NAME}} — CV</title>
+<style>
+  /* ── Modern ───────────────────────────────────────────────────────────────
+     Contemporary product/tech look: oversized name, accent bar section
+     headings, a tinted summary panel, and role titles carrying the accent
+     colour. More designed than "standard" without becoming decorative.
+
+     ATS discipline is identical to templates/cv-template.html and is NOT
+     negotiable: a static system font stack (never the bundled variable woff2
+     fonts, whose glyph advances make PDF extractors inject spaces inside words)
+     and ligatures disabled (headless Chromium otherwise emits U+FB01/FB02 and a
+     literal keyword search for "verification" misses "veriﬁcation").
+
+     Single-column by design — multi-column page layouts are the classic ATS
+     parse failure. All colour is decoration over a strictly top-to-bottom text
+     flow, so extraction order is unaffected. */
+
+  :root {
+    --accent-color: hsl(258 62% 48%);
+    --font-family: "Liberation Sans", 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    --font-size: 10.5px;
+    /* Must match generate-pdf.mjs's PDF_PAGE_MARGIN — the real @page margin is
+       appended later by injectPrintPageCss reading this same variable. */
+    --page-margin: 0.6in;
+  }
+  @page { margin: var(--page-margin); }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "clig" 0, "dlig" 0;
+  }
+
+  html {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body {
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    line-height: 1.5;
+    color: #16181d;
+    background: #ffffff;
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "clig" 0, "dlig" 0;
+  }
+
+  .page {
+    max-width: {{PAGE_WIDTH}};
+    margin: 0 auto;
+    background: #ffffff;
+  }
+
+  /* === PHOTO (opt-in, #264) === */
+  .cv-photo {
+    float: right;
+    width: 76px;
+    height: 76px;
+    object-fit: cover;
+    margin: 0 0 8px 14px;
+  }
+  .cv-photo.rounded { border-radius: 6px; }
+  .cv-photo.circle  { border-radius: 50%; }
+  .cv-photo.square  { border-radius: 0; }
+
+  /* === HEADER === */
+  .header {
+    margin-bottom: 15px;
+  }
+
+  .header h1 {
+    font-size: 31px;
+    font-weight: 700;
+    letter-spacing: -0.022em;
+    color: #0d0f13;
+    line-height: 1.02;
+  }
+
+  /* Short accent rule under the name, not a full-width gradient. */
+  .header-gradient {
+    width: 46px;
+    height: 3px;
+    background: var(--accent-color);
+    margin: 6px 0 6px 0;
+    border-radius: 2px;
+  }
+
+  .contact-row {
+    font-size: 9.5px;
+    color: #565e6b;
+    line-height: 1.65;
+  }
+
+  .contact-row a {
+    color: var(--accent-color);
+    text-decoration: none;
+    font-weight: 600;
+  }
+
+  .separator { margin: 0 6px; color: #c6ccd4; }
+
+  /* === SECTIONS === */
+  .section { margin-bottom: 14px; }
+
+  /* Accent bar sits to the left of the heading text via a pseudo-element, so
+     the heading remains a single inline text run for extraction. */
+  .section-title {
+    position: relative;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.13em;
+    color: #0d0f13;
+    padding-left: 10px;
+    margin-bottom: 8px;
+  }
+  .section-title::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 1px;
+    bottom: 1px;
+    width: 3px;
+    background: var(--accent-color);
+    border-radius: 2px;
+  }
+
+  .summary-text {
+    background: #f7f6fd;
+    border-left: 2px solid var(--accent-color);
+    padding: 7px 10px;
+    text-align: justify;
+    color: #262b33;
+  }
+
+  /* === COMPETENCIES === */
+  .competencies-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .competency-tag {
+    display: inline-block;
+    background: #ffffff;
+    border: 1px solid #ded9f5;
+    border-radius: 11px;
+    padding: 1.5px 8px;
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--accent-color);
+    white-space: nowrap;
+  }
+
+  /* === WORK EXPERIENCE === */
+  .job {
+    margin-bottom: 12px;
+    padding-left: 10px;
+    border-left: 1px solid #e6e3f4;
+  }
+  .job:last-child { margin-bottom: 0; }
+
+  .job-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .job-company {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #0d0f13;
+    letter-spacing: -0.008em;
+  }
+
+  .job-period {
+    font-size: 9px;
+    font-weight: 600;
+    color: #6b7280;
+    white-space: nowrap;
+  }
+
+  .job-role {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent-color);
+    margin-top: 1px;
+  }
+
+  .job-location {
+    font-size: 9px;
+    color: #7b8391;
+    margin-top: 0.5px;
+  }
+
+  .job ul {
+    margin-top: 5px;
+    padding-left: 14px;
+  }
+
+  .job li {
+    margin-bottom: 2.5px;
+    text-align: justify;
+  }
+  .job li::marker { color: var(--accent-color); }
+
+  /* === PROJECTS === */
+  .project {
+    margin-bottom: 8px;
+    padding-left: 10px;
+    border-left: 1px solid #e6e3f4;
+  }
+
+  .project-title {
+    font-size: 11.5px;
+    font-weight: 700;
+    color: #0d0f13;
+  }
+
+  .project-badge {
+    display: inline-block;
+    background: #f0edfb;
+    border-radius: 8px;
+    padding: 0.5px 6px;
+    font-size: 8px;
+    font-weight: 600;
+    color: var(--accent-color);
+    margin-left: 6px;
+  }
+
+  .project-desc { margin-top: 2px; text-align: justify; }
+
+  .project-tech {
+    font-size: 9px;
+    color: #6b7280;
+    margin-top: 1px;
+  }
+
+  /* === EDUCATION === */
+  .edu-item { margin-bottom: 7px; }
+
+  .edu-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .edu-title { font-weight: 700; color: #0d0f13; }
+
+  .edu-org { font-weight: 600; color: var(--accent-color); }
+
+  .edu-year {
+    font-size: 9px;
+    font-weight: 600;
+    color: #6b7280;
+    white-space: nowrap;
+  }
+
+  .edu-location { font-size: 9px; color: #7b8391; margin-top: 0.5px; }
+
+  .edu-desc { margin-top: 1.5px; text-align: justify; color: #3a4048; }
+
+  /* === CERTIFICATIONS === */
+  .cert-table,
+  .award-table { display: block; }
+
+  .cert-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 3px;
+  }
+
+  .cert-title { font-weight: 700; color: #0d0f13; }
+  .cert-org { flex: 1; color: #3a4048; }
+  .cert-year { font-size: 9px; font-weight: 600; color: #6b7280; white-space: nowrap; }
+
+  /* === SKILLS === */
+  .skills-grid { display: block; }
+
+  .skill-item {
+    margin-bottom: 3px;
+    padding-bottom: 3px;
+    border-bottom: 0.5px solid #f0f1f4;
+  }
+  .skill-item:last-child { border-bottom: none; }
+
+  .skill-category {
+    font-weight: 700;
+    color: var(--accent-color);
+  }
+
+  /* === PAGE BREAK CONTROL === */
+  .header,
+  .edu-item,
+  .cert-item,
+  .competency-tag,
+  .skill-item {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .section-title,
+  .job-company,
+  .job-role,
+  .job-location,
+  .edu-location,
+  .project-title {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  /* Keep a project's tech line attached to the description above it, so a bare
+     "Python | github.com/..." line is never stranded atop the next page. */
+  .project-tech {
+    break-before: avoid;
+    page-break-before: avoid;
+  }
+
+  /* === RTL (Arabic) support === */
+  html[lang="ar"] body {
+    direction: rtl;
+    text-align: right;
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+  }
+  html[lang="ar"] .section-title { padding-left: 0; padding-right: 10px; }
+  html[lang="ar"] .section-title::before { left: auto; right: 0; }
+  html[lang="ar"] .summary-text {
+    border-left: none;
+    border-right: 2px solid var(--accent-color);
+  }
+  html[lang="ar"] .job,
+  html[lang="ar"] .project {
+    padding-left: 0;
+    padding-right: 10px;
+    border-left: none;
+    border-right: 1px solid #e6e3f4;
+  }
+  html[lang="ar"] .job ul { padding-right: 14px; padding-left: 0; }
+  html[lang="ar"] .project-badge { margin-right: 6px; margin-left: 0; }
+  html[lang="ar"] .cv-photo { float: left; margin: 0 14px 8px 0; }
+  html[lang="ar"] .cert-year { text-align: left; }
+
+  /* === CJK fallback === */
+  html[lang="ja"] body {
+    font-family: "Liberation Sans", 'Helvetica Neue', Arial, 'Hiragino Sans',
+      'Yu Gothic', 'Noto Sans CJK JP', Meiryo, sans-serif;
+  }
+  html[lang="zh-CN"] body,
+  html[lang="zh"] body {
+    font-family: "Liberation Sans", 'Helvetica Neue', Arial, 'PingFang SC',
+      'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+    line-break: strict;
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+  html[lang="zh-CN"] .summary-text,
+  html[lang="zh"] .summary-text,
+  html[lang="zh-CN"] .job li,
+  html[lang="zh"] .job li { line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  {{PHOTO}}
+  <!-- HEADER -->
+  <div class="header">
+    <h1>{{NAME}}</h1>
+    <div class="header-gradient"></div>
+    <div class="contact-row">
+      <a href="tel:{{PHONE}}">{{PHONE}}</a>
+      <span class="separator">|</span>
+      <a href="mailto:{{EMAIL}}">{{EMAIL}}</a>
+      <span class="separator">|</span>
+      <a href="{{LINKEDIN_URL}}">{{LINKEDIN_DISPLAY}}</a>
+      <span class="separator">|</span>
+      <a href="{{PORTFOLIO_URL}}">{{PORTFOLIO_DISPLAY}}</a>
+      <span class="separator">|</span>
+      <span>{{LOCATION}}</span>
+    </div>
+  </div>
+
+  <!-- PROFESSIONAL SUMMARY -->
+  <div class="section">
+    <div class="section-title">{{SECTION_SUMMARY}}</div>
+    <div class="summary-text">{{SUMMARY_TEXT}}</div>
+  </div>
+
+  <!-- CORE COMPETENCIES -->
+  <div class="section">
+    <div class="section-title">{{SECTION_COMPETENCIES}}</div>
+    <div class="competencies-grid">
+      {{COMPETENCIES}}
+    </div>
+  </div>
+
+  <!-- WORK EXPERIENCE -->
+  <div class="section">
+    <div class="section-title">{{SECTION_EXPERIENCE}}</div>
+    {{EXPERIENCE}}
+  </div>
+
+  <!-- PROJECTS -->
+  <div class="section">
+    <div class="section-title">{{SECTION_PROJECTS}}</div>
+    {{PROJECTS}}
+  </div>
+
+  <!-- EDUCATION -->
+  <div class="section">
+    <div class="section-title">{{SECTION_EDUCATION}}</div>
+    {{EDUCATION}}
+  </div>
+
+  <!-- CERTIFICATIONS -->
+  <div class="section">
+    <div class="section-title">{{SECTION_CERTIFICATIONS}}</div>
+    <div class="cert-table">{{CERTIFICATIONS}}</div>
+  </div>
+
+  <!-- AWARDS -->
+  <div class="section">
+    <div class="section-title">{{SECTION_AWARDS}}</div>
+    <div class="award-table">{{AWARDS}}</div>
+  </div>
+
+  <!-- SKILLS -->
+  <div class="section">
+    <div class="section-title">{{SECTION_SKILLS}}</div>
+    {{SKILLS}}
+  </div>
+
+  <!-- END -->
+
+</div>
+</body>
+</html>

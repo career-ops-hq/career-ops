@@ -9,11 +9,17 @@
  * Usage:
  *   node archive-posting.mjs <url>
  *   node archive-posting.mjs <url> --company=Anthropic --role=senior-ai-engineer
+ *   node archive-posting.mjs <url> --report=042    Key the capture to report #42
  *   node archive-posting.mjs --pipeline          Archive pending URLs in data/pipeline.md
  *   node archive-posting.mjs --dry-run <url>     Preview filename without saving
  *
  * Output:    jds/YYYY-MM-DD_company-slug_role-slug.pdf
- * Reference: local:jds/YYYY-MM-DD_company-slug_role-slug.pdf  (paste into pipeline.md)
+ *            jds/NNN-YYYY-MM-DD_company-slug_role-slug.pdf   (with --report)
+ * Reference: local:jds/{filename}  (paste into pipeline.md)
+ *
+ * Prefer --report. Without it the capture can only be found again by rebuilding
+ * its filename from today's date and the scraped company and role, so it stops
+ * resolving the next day. outcome.mjs looks captures up by report number.
  */
 
 import { chromium } from 'playwright';
@@ -21,17 +27,23 @@ import { writeFile, readFile } from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { reportPrefix } from './jd-capture.mjs';
+import { rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
-const JDS_DIR = join(ROOT, 'jds');
-const PIPELINE_PATH = join(ROOT, 'data', 'pipeline.md');
+const DATA_ROOT = getCareerOpsRoot();
+const JDS_DIR = join(DATA_ROOT, 'jds');
+const PIPELINE_PATH = join(DATA_ROOT, 'data', 'pipeline.md');
+
+const KNOWN_FLAGS = ['--company', '--role', '--report', '--pipeline', '--dry-run', '--help', '-h'];
+const VALUE_FLAGS = ['--company', '--role', '--report'];
 
 // ── CLI parsing ──────────────────────────────────────────────────────────────
 
-const args = process.argv.slice(2);
-
-if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
-  console.log(`
+const HELP_TEXT = `
 ╔══════════════════════════════════════════════════════════════════╗
 ║           career-ops — Job Posting Archiver                     ║
 ╚══════════════════════════════════════════════════════════════════╝
@@ -47,53 +59,114 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
   OPTIONS
     --company <name>   Override auto-detected company name
     --role <title>     Override auto-detected role title
+    --report <num>     Key the capture to a report/tracker number (recommended)
     --pipeline         Archive all pending (- [ ]) entries in data/pipeline.md
     --dry-run          Preview filename without saving
     --help             Show this help
 
   OUTPUT
     jds/YYYY-MM-DD_company-slug_role-slug.pdf
+    jds/NNN-YYYY-MM-DD_company-slug_role-slug.pdf     with --report
+
+  WHY --report
+    Without it, a capture is only findable by rebuilding its filename from
+    today's date and the scraped company and role, so it stops resolving the
+    next day. outcome.mjs looks captures up by report number.
 
   PIPELINE REFERENCE (paste into pipeline.md or reports/)
-    local:jds/YYYY-MM-DD_company-slug_role-slug.pdf
+    local:jds/{filename}
 
   EXAMPLES
     node archive-posting.mjs "https://jobs.ashbyhq.com/anthropic/abc123"
     node archive-posting.mjs "https://boards.greenhouse.io/openai/jobs/456" --company=OpenAI
+    node archive-posting.mjs "https://jobs.lever.co/acme/xyz" --report=42
     node archive-posting.mjs --pipeline
     npm run archive -- "https://jobs.lever.co/elevenlabs/abc"
-`);
-  process.exit(0);
-}
+`;
 
 let targetUrl = null;
 let overrideCompany = null;
 let overrideRole = null;
 let pipelineMode = false;
 let dryRun = false;
+let reportNum = null;
 
-for (let i = 0; i < args.length; i++) {
-  const arg = args[i];
-  if (arg === '--pipeline') {
-    pipelineMode = true;
-  } else if (arg === '--dry-run') {
-    dryRun = true;
-  } else if (arg.startsWith('--company=')) {
-    overrideCompany = arg.slice('--company='.length).trim();
-  } else if (arg === '--company' && args[i + 1]) {
-    overrideCompany = args[++i].trim();
-  } else if (arg.startsWith('--role=')) {
-    overrideRole = arg.slice('--role='.length).trim();
-  } else if (arg === '--role' && args[i + 1]) {
-    overrideRole = args[++i].trim();
-  } else if (!arg.startsWith('--') && !targetUrl) {
-    targetUrl = arg;
+// Parsing lives in a function, not at module scope, so importing this file for
+// its exports doesn't read process.argv or call process.exit — the repo's
+// standard direct-run guard at the bottom is what invokes it.
+function parseCliArgs(args) {
+  // Reject a mistyped flag (--comany, --reprot) before any work, and handle
+  // --help/-h wherever they appear. Inside the function, not at module scope:
+  // this file is imported for its exports (test-all.mjs does), and a
+  // module-scope call would read the IMPORTER's argv and exit(1) on flags that
+  // are perfectly valid for it.
+  validateFlags(args, KNOWN_FLAGS, HELP_TEXT, {
+    valueFlags: VALUE_FLAGS,
+    requireOperand: true,
+  });
+
+  if (args.length === 0) {
+    console.log(HELP_TEXT);
+    process.exit(0);
   }
-}
 
-if (!pipelineMode && !targetUrl) {
-  console.error('No URL provided. Run with --help for usage.');
-  process.exit(1);
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--pipeline') {
+      pipelineMode = true;
+    } else if (arg === '--dry-run') {
+      dryRun = true;
+    } else if (arg.startsWith('--company=')) {
+      overrideCompany = arg.slice('--company='.length).trim();
+    } else if (arg === '--company') {
+      // The old `args[i + 1]` truthiness check consumed the NEXT flag as the
+      // company name whenever --company was given with no value (e.g.
+      // `--company --pipeline` set overrideCompany to "--pipeline" and left
+      // pipeline mode off, silently, at exit 0 (#3087)). A value that starts
+      // with `--` is another flag, not a company name.
+      if (args[i + 1] === undefined || args[i + 1].startsWith('--')) {
+        console.error('--company requires a value.');
+        process.exit(1);
+      }
+      overrideCompany = args[++i].trim();
+    } else if (arg.startsWith('--role=')) {
+      overrideRole = arg.slice('--role='.length).trim();
+    } else if (arg === '--role') {
+      if (args[i + 1] === undefined || args[i + 1].startsWith('--')) {
+        console.error('--role requires a value.');
+        process.exit(1);
+      }
+      overrideRole = args[++i].trim();
+    } else if (arg.startsWith('--report=')) {
+      reportNum = arg.slice('--report='.length).trim();
+    } else if (arg === '--report') {
+      // Consume the value explicitly. Left unconsumed it would fall through to the
+      // bare-argument branch below and be mistaken for the URL. Consume it even
+      // when absent: a trailing `--report` used to be dropped silently, archiving
+      // the posting with no report prefix — unfindable, which is the failure this
+      // flag exists to prevent. The empty string reaches the validator below and
+      // exits non-zero instead.
+      reportNum = args[++i]?.trim() ?? '';
+    } else if (!arg.startsWith('--') && !targetUrl) {
+      targetUrl = arg;
+    }
+  }
+
+  if (reportNum !== null) {
+    if (!/^\d+$/.test(reportNum) || Number(reportNum) <= 0) {
+      console.error(`Invalid --report value: "${reportNum}". Expected a positive report number.`);
+      process.exit(1);
+    }
+    if (pipelineMode) {
+      console.error('--report applies to a single posting; it cannot be combined with --pipeline.');
+      process.exit(1);
+    }
+  }
+
+  if (!pipelineMode && !targetUrl) {
+    console.error('No URL provided. Run with --help for usage.');
+    process.exit(1);
+  }
 }
 
 // ── Utilities ────────────────────────────────────────────────────────────────
@@ -109,6 +182,16 @@ function slugify(text) {
 
 function today() {
   return new Date().toISOString().split('T')[0];
+}
+
+/**
+ * Build the capture filename. With --report the name leads with the zero-padded
+ * report number, which is what makes the capture findable later: the date and
+ * the scraped company/role all change between runs, the report number does not.
+ */
+function captureFilename(company, role) {
+  const base = `${today()}_${slugify(company)}_${slugify(role)}.pdf`;
+  return reportNum ? `${reportPrefix(reportNum)}-${base}` : base;
 }
 
 /**
@@ -202,14 +285,63 @@ async function extractPipelineEntries() {
 
 // ── Core archive function ────────────────────────────────────────────────────
 
-async function archiveUrl(browser, url, { company: companyHint, role: roleHint } = {}) {
+/**
+ * Register the egress guard on a Playwright context.
+ *
+ * Registered on the *context* rather than the page: a route bound to a single
+ * page doesn't cover requests the flow makes outside it, and the context is
+ * what owns the whole navigation. Both layers of the shared guard run here —
+ * the literal-host check first (cheap, no network), then the DNS re-check that
+ * catches a public hostname resolving into private space.
+ *
+ * @param {import('playwright').BrowserContext} context - Context to guard.
+ */
+export async function installEgressGuard(context) {
+  await context.route('**/*', async (route) => {
+    const requestUrl = route.request().url();
+
+    const verdict = rejectPrivateOrInvalid(requestUrl);
+    if (verdict) {
+      console.warn(`   Blocked request to restricted destination: ${requestUrl} (${verdict.reason})`);
+      return route.abort('blockedbyclient');
+    }
+
+    try {
+      await validateUrlSecurity(requestUrl);
+      return route.continue();
+    } catch (err) {
+      console.warn(`   Blocked request to restricted destination (DNS): ${requestUrl} - ${err.message}`);
+      return route.abort('blockedbyclient');
+    }
+  });
+}
+
+export async function archiveUrl(browser, url, { company: companyHint, role: roleHint } = {}) {
   console.log(`\n🔗  ${url}`);
 
-  const page = await browser.newPage();
+  // Refuse before launching any navigation, so an obviously-internal target
+  // never reaches Playwright at all.
+  const preGuard = rejectPrivateOrInvalid(url);
+  if (preGuard) {
+    throw new Error(`refusing to archive restricted destination: ${preGuard.reason}`);
+  }
+
+  const context = await browser.newContext();
+  await installEgressGuard(context);
+  const page = await context.newPage();
 
   try {
     const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     const httpStatus = response?.status() ?? 0;
+
+    // Re-check where we actually landed. The route guard already inspects every
+    // redirect hop, so this is defence-in-depth: a first-hop-only check is the
+    // classic miss here, and asserting on the settled URL costs nothing.
+    const landedUrl = page.url();
+    const postGuard = rejectPrivateOrInvalid(landedUrl);
+    if (postGuard) {
+      throw new Error(`refusing to archive restricted destination after redirect: ${postGuard.reason}`);
+    }
 
     // Give SPAs (Ashby, Lever, Workday) time to hydrate
     await page.waitForTimeout(2000);
@@ -234,7 +366,7 @@ async function archiveUrl(browser, url, { company: companyHint, role: roleHint }
       console.log(`HTTP ${httpStatus} — page may be closed, archiving anyway`);
     }
 
-    const filename = `${today()}_${slugify(company)}_${slugify(role)}.pdf`;
+    const filename = captureFilename(company, role);
     const outputPath = join(JDS_DIR, filename);
     const reference = `local:jds/${filename}`;
 
@@ -258,7 +390,7 @@ async function archiveUrl(browser, url, { company: companyHint, role: roleHint }
     return { filename, reference, url, size: pdfBuffer.length };
 
   } finally {
-    await page.close();
+    await context.close();
   }
 }
 
@@ -291,7 +423,7 @@ async function main() {
       const urlCompany = extractCompanyFromUrl(url);
       const resolvedCompany = overrideCompany || company || urlCompany || 'unknown';
       const resolvedRole = overrideRole || role || 'job';
-      const filename = `${today()}_${slugify(resolvedCompany)}_${slugify(resolvedRole)}.pdf`;
+      const filename = captureFilename(resolvedCompany, resolvedRole);
       const reference = `local:jds/${filename}`;
       console.log(`\n🔗  ${url}`);
       console.log(`   Company: ${resolvedCompany}`);
@@ -342,7 +474,10 @@ async function main() {
   if (failed > 0) process.exit(1);
 }
 
-main().catch(err => {
-  console.error('❌  Fatal:', err.message);
-  process.exit(1);
-});
+if (isMainModule(import.meta.url)) {
+  parseCliArgs(process.argv.slice(2));
+  main().catch(err => {
+    console.error('❌  Fatal:', err.message);
+    process.exit(1);
+  });
+}

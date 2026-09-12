@@ -8,7 +8,7 @@ console.log('\nProvider — smartrecruiters');
 try {
   const smartrecruitersModule = await import(pathToFileURL(join(ROOT, 'providers/smartrecruiters.mjs')).href);
   const sr = smartrecruitersModule.default;
-  const { parseSmartRecruitersResponse } = smartrecruitersModule;
+  const { parseSmartRecruitersResponse, extractDescription } = smartrecruitersModule;
 
   if (sr.id === 'smartrecruiters') pass('smartrecruiters.id is "smartrecruiters"');
   else fail(`smartrecruiters.id is ${JSON.stringify(sr.id)}`);
@@ -236,6 +236,218 @@ try {
     pass('smartrecruiters.fetch() stops on the first empty page');
   } else {
     fail(`empty pagination: requests=${emptyPageRequests}, total=${emptyJobs.length}`);
+  }
+
+  // ── Description enrichment (#3175 phase 2) ──
+  // The list payload carries no body; opted-in boards fetch one detail JSON
+  // per posting. extractDescription() joins the four known jobAd sections in
+  // a fixed order (company context first, call-to-action last), then strips
+  // via the shared _html-to-text pipeline.
+  if (extractDescription(null) === '' && extractDescription({}) === ''
+      && extractDescription({ jobAd: {} }) === '' && extractDescription({ jobAd: { sections: 'nope' } }) === '') {
+    pass('extractDescription() returns "" for missing / malformed payloads');
+  } else {
+    fail('extractDescription() should return "" for missing or malformed payloads');
+  }
+
+  const joined = extractDescription({
+    jobAd: {
+      sections: {
+        additionalInformation: { text: '<p>Sponsorship: <strong>no</strong></p>' },
+        companyDescription: { text: '<p>Acme builds &amp; ships widgets</p>' },
+        someUnknownSection: { text: '<p>must be ignored</p>' },
+        qualifications: { text: '<ul><li>5+ years</li></ul>' },
+        jobDescription: { text: '<p>You will&nbsp;build robots</p>' },
+      },
+    },
+  });
+  if (joined === "Acme builds & ships widgets You will build robots 5+ years Sponsorship: no") {
+    pass('extractDescription() joins the four known sections in order, strips HTML, decodes entities');
+  } else {
+    fail(`extractDescription() = ${JSON.stringify(joined)}`);
+  }
+
+  if (extractDescription({ jobAd: { sections: { jobDescription: { text: '   ' } } } }) === '') {
+    pass('extractDescription() returns "" when every section is blank');
+  } else {
+    fail('extractDescription() should return "" for blank-only sections');
+  }
+
+  // fetch(): opt-in detail enrichment — hits the detail endpoint per posting,
+  // attaches the plain-text description, and strips the internal id.
+  {
+    const detailCalls = [];
+    const enriched = await sr.fetch(
+      {
+        name: 'DescCo',
+        careers_url: 'https://careers.smartrecruiters.com/desco',
+        smartrecruiters: { fetchDetails: true, detailLimit: 25 },
+      },
+      {
+        fetchJson: async (url) => {
+          detailCalls.push(url);
+          if (detailCalls.length === 1) {
+            return {
+              content: [
+                { id: 'A1', name: 'Role A' },
+                { id: 'B2', name: 'Role B' },
+              ],
+            };
+          }
+          const id = new URL(url).pathname.split('/').pop();
+          return {
+            jobAd: {
+              sections: id === 'A1'
+                ? { jobDescription: { text: '<p>Body of A1</p>' } }
+                : {},  // B2 has no usable sections → no description key
+            },
+          };
+        },
+      },
+    );
+    const listCallsOnly = detailCalls.filter((u) => u.includes('/postings?'));
+    const detailUrls = detailCalls.filter((u) => !u.includes('/postings?'));
+    if (listCallsOnly.length === 1
+        && detailUrls.length === 2
+        && detailUrls[0] === 'https://api.smartrecruiters.com/v1/companies/desco/postings/A1'
+        && detailUrls[1] === 'https://api.smartrecruiters.com/v1/companies/desco/postings/B2') {
+      pass('fetch(fetchDetails:true) requests one detail URL per posting, in list order');
+    } else {
+      fail(`detail calls: ${JSON.stringify(detailCalls)}`);
+    }
+    if (enriched[0]?.description === 'Body of A1' && !('id' in enriched[0])) {
+      pass("fetch(fetchDetails:true) attaches the description and strips the internal id");
+    } else {
+      fail(`row 0 = ${JSON.stringify(enriched[0])}`);
+    }
+    if (!('description' in enriched[1]) && !('id' in enriched[1])) {
+      pass('fetch(fetchDetails:true) omits the description key when the board ships no sections');
+    } else {
+      fail(`row 1 = ${JSON.stringify(enriched[1])}`);
+    }
+  }
+
+  // Default (no config): zero detail calls — the scanner stays zero-token.
+  {
+    let defaultModeDetailCalls = 0;
+    await sr.fetch(
+      { name: 'PlainCo', careers_url: 'https://careers.smartrecruiters.com/plainco' },
+      {
+        fetchJson: async (url) => {
+          if (!url.includes('/postings?')) defaultModeDetailCalls++;
+          return { content: [{ id: 'X1', name: 'Role X' }] };
+        },
+      },
+    );
+    if (defaultModeDetailCalls === 0) {
+      pass('fetch() without smartrecruiters.fetchDetails makes no per-posting requests');
+    } else {
+      fail(`expected 0 detail calls by default, saw ${defaultModeDetailCalls}`);
+    }
+  }
+
+  // Probing (verify-portals passes ctx.maxPages=1): enrichment must never
+  // spend budget a liveness check has no use for (same rule as vdab).
+  {
+    let probeDetailCalls = 0;
+    await sr.fetch(
+      {
+        name: 'ProbeCo',
+        careers_url: 'https://careers.smartrecruiters.com/probeco',
+        smartrecruiters: { fetchDetails: true },
+      },
+      {
+        maxPages: 1,
+        fetchJson: async (url) => {
+          if (!url.includes('/postings?')) probeDetailCalls++;
+          return { content: [{ id: 'Y1', name: 'Role Y' }] };
+        },
+      },
+    );
+    if (probeDetailCalls === 0) {
+      pass('fetch() skips detail enrichment while probing (ctx.maxPages set)');
+    } else {
+      fail(`expected 0 detail calls while probing, saw ${probeDetailCalls}`);
+    }
+  }
+
+  // ctx.maxPages also caps the listing walk itself, not just enrichment:
+  // a health probe reads one page even when the board keeps serving full pages.
+  {
+    const fullPage = {
+      content: Array.from({ length: 100 }, (_, i) => ({ id: `P${i}`, name: `Role ${i}` })),
+    };
+    let probeListCalls = 0;
+    await sr.fetch(
+      { name: 'CappedCo', careers_url: 'https://careers.smartrecruiters.com/cappedco' },
+      {
+        maxPages: 1,
+        fetchJson: async (url) => {
+          if (url.includes('/postings?')) probeListCalls++;
+          return fullPage;
+        },
+      },
+    );
+    if (probeListCalls === 1) {
+      pass('fetch() honors the ctx.maxPages hint and stops after one list page');
+    } else {
+      fail(`ctx.maxPages=1: ${probeListCalls} list calls (expected 1)`);
+    }
+  }
+
+  // detailLimit caps the per-sweep detail budget on a large board.
+  {
+    const bigBoardIds = Array.from({ length: 40 }, (_, i) => `ID-${i}`);
+    let bigBoardDetailCalls = 0;
+    await sr.fetch(
+      {
+        name: 'BigCo',
+        careers_url: 'https://careers.smartrecruiters.com/bigco',
+        smartrecruiters: { fetchDetails: true, detailLimit: 10 },
+      },
+      {
+        fetchJson: async (url) => {
+          if (url.includes('/postings?')) return { content: bigBoardIds.map((id) => ({ id, name: `Role ${id}` })) };
+          bigBoardDetailCalls++;
+          return { jobAd: { sections: { jobDescription: { text: `<p>body ${bigBoardDetailCalls}</p>` } } } };
+        },
+      },
+    );
+    if (bigBoardDetailCalls === 10) {
+      pass('fetch() caps detail calls at smartrecruiters.detailLimit (40 postings → 10 details)');
+    } else {
+      fail(`expected 10 detail calls (detailLimit=10), saw ${bigBoardDetailCalls}`);
+    }
+  }
+
+  // A failing detail fetch is an enrichment only — the listing result survives.
+  {
+    let resilientCalls = 0;
+    const survived = await sr.fetch(
+      {
+        name: 'FlakyCo',
+        careers_url: 'https://careers.smartrecruiters.com/flakyco',
+        smartrecruiters: { fetchDetails: true },
+      },
+      {
+        fetchJson: async (url) => {
+          if (url.includes('/postings?')) {
+            return { content: [{ id: 'OK-1', name: 'Fine Role' }, { id: 'BAD-2', name: 'Doomed Role' }] };
+          }
+          resilientCalls++;
+          if (new URL(url).pathname.endsWith('BAD-2')) throw new Error('HTTP 500');
+          return { jobAd: { sections: { jobDescription: { text: '<p>fine body</p>' } } } };
+        },
+      },
+    );
+    if (resilientCalls === 2 && survived.length === 2
+        && survived[0]?.description === 'fine body'
+        && !('description' in survived[1])
+        && survived[1]?.title === 'Doomed Role') {
+      pass('fetch() keeps the listing row and the rest of the batch when one detail request fails');
+    } else {
+      fail(`resilience: calls=${resilientCalls}, rows=${JSON.stringify(survived)}`);
+    }
   }
 
 } catch (e) {

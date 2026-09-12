@@ -47,13 +47,15 @@
 
 <p align="center" dir="rtl"><strong>أكثر من 740 عرض عمل تم تقييمه · أكثر من 100 سيرة ذاتية مخصصة وموجهة · 1 وظيفة أحلام تم الحصول عليها</strong></p>
 
+<p align="center" dir="rtl"><sub>أنشأه ويصونه <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
+
 <p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Join_the_community-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a></p>
 
 ## ما هو هذا المشروع؟ (What Is This)
 
 يقوم **career-ops** ([career-ops.org](https://career-ops.org)) بتحويل أي واجهة سطر أوامر للبرمجة بالذكاء الاصطناعي (AI coding CLI) إلى مركز قيادة كامل للبحث عن الوظائف. بدلًا من تتبع طلبات التوظيف يدويًا في جداول البيانات، تحصل على مسار عمل مدعوم بالذكاء الاصطناعي يقوم بـ:
 
-- **تقييم العروض الوظيفية** بنظام تقييم هيكلي من A إلى F (خمسة أبعاد تُنتج درجة من 1.0 إلى 5.0).
+- **تقييم العروض الوظيفية** بنظام تقييم هيكلي من A إلى H (خمسة أبعاد تُنتج درجة من 1 إلى 5).
 - **إنشاء سير ذاتية مخصصة وموجهة بصيغة PDF** متوافقة مع أنظمة تتبع المتقدمين (ATS).
 - **فحص بوابات التوظيف تلقائيًا** (مثل Greenhouse و Ashby و Lever وصفحات الشركات).
 - **المعالجة بالدفعة (Batch Processing)** لتقييم أكثر من 10 عروض عمل بالتوازي باستخدام وكلاء فرعيين.
@@ -81,7 +83,7 @@
 | **ماسح بوابات التوظيف** | معد مسبقًا لأكثر من 45 شركة رائدة (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) مع استعلامات مخصصة |
 | **المعالجة بالدفعات (Batch Processing)** | تقييم متوازي لعدة وظائف دفعة واحدة باستخدام وكلاء فرعيين يعملون بالتوازي |
 | **لوحة تحكم سطر الأوامر (TUI)** | واجهة طرفية تفاعلية لتصفح وفلترة وترتيب مسار وظائفك بمرونة فائقة |
-| **المرشح في قلب القرار (Human-in-the-Loop)** | يقوم الذكاء الاصطناعي بالتقييم والتوصية، بينما تتخذ أنت القرار النهائي وتنفذه. النظام لا يقوم بالتقديم التلقائي أبدًا دون إذنك |
+| **المرشح في قلب القرار (Human-in-the-Loop)** | يقوم الذكاء الاصطناعي بالتقييم والتوصية، بينما تتخذ أنت القرار النهائي وتنفذه. النظام لا يقوم أبدًا بإرسال أي طلب — القرار النهائي لك دائمًا <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. --> |
 | **سلامة وموثوقية البيانات** | دمج تلقائي، إزالة التكرار، توحيد الحالات المهنية، وفحوصات سلامة المسار البرمجي |
 
 ---
@@ -90,7 +92,7 @@
 
 ```bash
 # 1. استنساخ المشروع وتثبيت الاعتماديات
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # مطلوب لتوليد ملفات الـ PDF وسحب البيانات
 
@@ -194,7 +196,7 @@ npm run gemini:eval -- "نص تفاصيل الوظيفة هنا"
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  تقييم A-F       │  تحليل التوافق والفجوات، وبحث الرواتب، وتجميع قصص المقابلة
+│  تقييم A-H       │  تحليل التوافق والفجوات، وبحث الرواتب، وتجميع قصص المقابلة
 │ (قراءة cv.md)    │
 └────────┬─────────┘
          │
@@ -300,8 +302,8 @@ career-ops يعمل على ويندوز. إذا فشل تحميل المهارا
 
 نرحب بكافة المساهمات والمقترحات لتطوير هذا النظام ودعمه! انضم إلى مجتمعنا على Discord وشارك تجربتك وقصتك معنا.
 
-<a href="https://github.com/santifer/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=santifer/career-ops" alt="Contributors" />
+<a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" alt="Contributors" />
 </a>
 
-هل نجحت في الحصول على وظيفة أحلامك باستخدام هذا النظام؟ [شارك قصتك معنا لتلهم الآخرين!](https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml)
+هل نجحت في الحصول على وظيفة أحلامك باستخدام هذا النظام؟ [شارك قصتك معنا لتلهم الآخرين!](https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml)

@@ -24,9 +24,9 @@
 //
 // This test extracts the REAL emitter out of batch/batch-runner.sh and runs it,
 // rather than restating it, so the two cannot drift apart.
-import { pass, fail, getBash } from './helpers.mjs';
+import { pass, fail, rmSync, getBash } from './helpers.mjs';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';

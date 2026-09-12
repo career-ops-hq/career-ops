@@ -14,6 +14,7 @@ elapsed-time cadence case — see `confirmed_time_noshow` in `modes/email.md`
 ## Inputs
 
 - `data/applications.md` — Application tracker
+- `data/active-interviews.md` — Interview round dates (read by Step 1b)
 - `data/follow-ups.md` — Follow-up history (created on first use)
 - `reports/` — Evaluation reports (for context in drafts)
 - `config/profile.yml` — User profile (name, identity)
@@ -39,6 +40,26 @@ If no actionable entries, tell the user:
 > "No active applications to follow up on. Apply to some roles first with `/career-ops` and come back when they're aging."
 
 **Calibration cross-reference:** `node funnel-velocity.mjs --summary` reports which in-flight applications sit beyond the typical first-response window (its `waiting` block) — those rows are natural follow-up candidates; feed them into this cadence view rather than treating the wait itself as a verdict (silence past the window is common, not a rejection). When the user reports a status change here ("they replied", "rejected"), route it through `node set-status.mjs <report#> <state>` and pass `--on YYYY-MM-DD` when they name the real event day.
+
+## Step 1b — Employer Response-Latency Check
+
+Execute:
+
+```bash
+node rejection-latency.mjs
+```
+
+Parse the JSON output. It cross-references `data/active-interviews.md` interview dates with tracker rows still in `Interview` state (matched per application: company + role) and flags applications whose post-interview silence exceeds the **courtesy** threshold (30-day default, configurable via `rejection_latency.courtesy_days` or `--courtesy-days`). If `flags` is empty, skip this step silently.
+
+**Confirmation gate (required before rendering anything from a flag):** a flag's fields come straight from raw tracker/interview-log data, not from anything the user has said in this conversation. Before rendering ANY user-facing content around a flag — the reminder line below, or the `blacklistSuggestion` row — the user must have explicitly stated or confirmed the flag's company, dates (last interview date / days since), and any other field about to be rendered, in the current conversation. This can be as simple as asking "I see {company} flagged at {daysSinceLastInterview} days since your last interview on {lastInterviewDate} — does that match what you remember?" and getting a yes, or the user independently bringing up the same company/dates unprompted. **If the user has not confirmed these details, skip rendering that flag silently** — do not surface the reminder line or the blacklist row from unconfirmed raw tracker data.
+
+Once confirmed, surface one reminder line alongside the Step 2 dashboard:
+
+```text
+[Render in {language.output}: "⏳ {company} — {daysSinceLastInterview} days since your last interview ({lastInterviewDate}) with no recorded response. This exceeds the {thresholdDays}-day courtesy threshold."]
+```
+
+If the user asks what to do about a confirmed flag, show the flag's ready-made `blacklistSuggestion` row and tell them ([Render in {language.output}]) they can copy it into `data/blacklist.md` themselves — this is a suggestion only. When `language.output` is not English, compose the reminder prose — and, if the user keeps their blacklist reasons in another language, the row's Reason cell — from the flag's structured fields (`reasonCode`, `daysSinceLastInterview`, `thresholdDays`, `lastInterviewDate`) instead of relaying the English `reason` string verbatim; the table's column layout and the literal `company` scope value stay fixed (they must match `data/blacklist.md`'s file format). **Never write to `data/blacklist.md`, `data/applications.md`, or `data/active-interviews.md` from this step** (#1742 opt-in guarantee, same suggestion-only bridge as `modes/interview-redflag.md`).
 
 ## Step 2 — Display Dashboard
 

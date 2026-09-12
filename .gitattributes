@@ -1,0 +1,40 @@
+# Line-ending policy: LF in the repo and the working tree, on every platform.
+#
+# Without this file, each contributor's local core.autocrlf decides what gets
+# committed. That has already let one CRLF file into the index
+# (providers/jobspresso.mjs, renormalized alongside this file), and on a
+# default Windows checkout it turns any edited file into a whole-file
+# phantom diff. Explicit eol=lf keeps checkouts byte-identical everywhere;
+# bash entrypoints (cops) break outright under CRLF.
+
+* text=auto eol=lf
+
+# Source and config
+*.mjs   text eol=lf
+*.js    text eol=lf
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.go    text eol=lf
+*.sum   text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+*.html  text eol=lf
+*.tex   text eol=lf
+*.tsv   text eol=lf
+*.txt   text eol=lf
+*.svg   text eol=lf
+Dockerfile text eol=lf
+LICENSE    text eol=lf
+VERSION    text eol=lf
+cops       text eol=lf
+
+# Binary assets — never normalized
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.woff2 binary
+*.pdf   binary
