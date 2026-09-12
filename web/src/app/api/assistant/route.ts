@@ -108,7 +108,7 @@ export async function POST(req: Request) {
         "Bash,Write,Edit,NotebookEdit,Task",
       ]
     : cliId === "antigravity"
-      ? ["-p", prompt, "--dangerously-skip-permissions"]
+      ? ["--dangerously-skip-permissions", "-p", prompt]
       : spec.args(prompt);
 
   const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });

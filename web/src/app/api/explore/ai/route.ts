@@ -234,7 +234,7 @@ export async function POST(req: Request) {
           prompt,
         ]
       : cliId === "antigravity"
-        ? ["-p", prompt, "--dangerously-skip-permissions"]
+        ? ["--dangerously-skip-permissions", "-p", prompt]
         : spec.args(prompt);
 
   // POSIX detached children become process-group leaders. Keeping stdio
