@@ -14,6 +14,7 @@ import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.m
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
+import { resolveCvTemplate } from "@/lib/core/cv-template";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 
 export const runtime = "nodejs";
@@ -111,7 +112,12 @@ export async function POST(req: Request) {
     kind === "evaluate"
       ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
       : undefined;
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, lang });
+  // Which CV template the worker fills. Resolved HERE, for the same reason `lang`
+  // is: the worker has no Bash (#2172), so it cannot run cv-templates.mjs and the
+  // prompt used to name the base template outright, silently ignoring cv.template
+  // (#4034). Only pdf fills a template, so nothing else pays for the lookup.
+  const cvTemplate = kind === "pdf" ? await resolveCvTemplate() : undefined;
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, lang, cvTemplate });
 
   const isClaude = cliId === "claude";
   // Which tools each kind gets, and the whole claude argv, live in
