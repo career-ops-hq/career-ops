@@ -636,11 +636,6 @@ export async function captureConsoleErrors(fn) {
  * pins nothing. They are different fixtures that share a name, not copies of
  * this one.
  *
- * `gitIn` is injected rather than imported so this module keeps depending on
- * nothing but Node builtins — 57 of the 62 suites import it, and none of them
- * should pull in update-system.mjs as a side effect of asking for `pass`/`fail`.
- *
- * @param {(dir: string, ...args: string[]) => any} gitIn - Updater's git runner.
  * @param {object} [options]
  * @param {string} [options.prefix='co-updater-'] - mkdtemp prefix, so a leftover
  *   temp dir names the suite that made it.
@@ -650,9 +645,9 @@ export async function captureConsoleErrors(fn) {
  *   fixture. `isTracked` never reads it.
  * @returns {{dir: string, g: Function, ctx: {git: Function, root?: string}}}
  */
-export function makeUpdaterRepo(gitIn, { prefix = 'co-updater-', includeRoot = false } = {}) {
+export function makeUpdaterRepo({ prefix = 'co-updater-', includeRoot = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
-  const g = (...args) => gitIn(dir, ...args);
+  const g = makeHermeticGitRunner(dir);
   g('init', '-q', '-b', 'main', '.');
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
@@ -709,6 +704,29 @@ export function hermeticGitEnv(gitConfigPath, base = process.env) {
   delete env.GIT_CONFIG_PARAMETERS;
   delete env.GIT_CONFIG;
   return env;
+}
+
+/**
+ * Build a git runner whose every invocation uses hermeticGitEnv().
+ *
+ * The config path lives under .git so fixture `git add -A` calls cannot stage
+ * the pin itself. It may not exist for the initial `git init` or `git clone`;
+ * git treats a missing global/system config as empty, then the repository
+ * creation makes the parent directory available for later commands.
+ *
+ * @param {string} root - Fixture repository root.
+ * @param {object} [base=process.env] - Parent environment to seal.
+ * @returns {(...args: string[]) => string} Trimmed git stdout.
+ */
+export function makeHermeticGitRunner(root, base = process.env) {
+  const env = hermeticGitEnv(join(root, '.git', 'co-hermetic-gitconfig'), base);
+  return (...args) => execFileSync('git', args, {
+    cwd: root,
+    encoding: 'utf-8',
+    timeout: 30000,
+    env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
 }
 
 /**

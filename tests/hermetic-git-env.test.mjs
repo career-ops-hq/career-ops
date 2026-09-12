@@ -24,7 +24,7 @@ import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { pass, fail, hermeticGitEnv } from './helpers.mjs';
+import { pass, fail, hermeticGitEnv, makeUpdaterRepo } from './helpers.mjs';
 
 console.log('\nhermetic git env — ambient GIT_CONFIG* must not reach a fixture');
 
@@ -86,4 +86,49 @@ try {
   }
 } finally {
   rmSync(root, { recursive: true, force: true });
+}
+
+const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-updater-fixture-env-'));
+try {
+  const ambient = join(fixtureRoot, 'ambient-config');
+  const excludes = join(fixtureRoot, 'ambient-excludes');
+  writeFileSync(ambient, '[user]\n\tname = config-leak\n');
+  writeFileSync(excludes, '*\n');
+  const poisoned = {
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'core.excludesFile',
+    GIT_CONFIG_VALUE_0: excludes,
+    GIT_CONFIG_PARAMETERS: "'user.name=parameters-leak'",
+    GIT_CONFIG: ambient,
+    GIT_CONFIG_GLOBAL: ambient,
+    GIT_CONFIG_SYSTEM: ambient,
+  };
+  const previous = Object.fromEntries(Object.keys(poisoned).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, poisoned);
+  let fixture;
+  try {
+    fixture = makeUpdaterRepo({ prefix: 'co-hermetic-updater-regression-' });
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+
+  try {
+    writeFileSync(join(fixture.dir, 'seed.txt'), 'tracked\n');
+    fixture.g('add', '-A');
+    fixture.g('commit', '-qm', 'base');
+    const seenName = fixture.g('config', 'user.name');
+    const escaped = readFileSync(ambient, 'utf-8');
+    if (seenName === 'Test' && escaped === '[user]\n\tname = config-leak\n') {
+      pass('makeUpdaterRepo keeps every ambient GIT_CONFIG_* channel out of fixture git commands');
+    } else {
+      fail(`makeUpdaterRepo inherited ambient git configuration: user.name=${seenName}`);
+    }
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+} finally {
+  rmSync(fixtureRoot, { recursive: true, force: true });
 }
