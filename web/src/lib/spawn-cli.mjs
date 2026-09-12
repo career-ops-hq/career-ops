@@ -1,10 +1,33 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 
 // Plain .mjs (same pattern as tracker-table.mjs/clean-chips.mjs) so
 // tests/lib/spawn-cli.test.mjs can import it directly under Node. Import it with the
 // .mjs extension included (e.g. "@/lib/spawn-cli.mjs") — unlike .ts files,
 // which TypeScript resolves without an extension, ESM specifiers for plain
 // JS modules must be fully specified.
+
+/**
+ * On Windows, npm global CLIs install as .cmd shims wrapping a target .js file.
+ * Spawning .cmd via `shell: true` causes cmd.exe to strip quotes and mangle
+ * multi-line prompts (%* parameter corruption). Resolving the target .js file
+ * allows spawning `node target.js` directly via CreateProcessW with pristine arguments.
+ */
+function resolveNodeShim(binPath) {
+  if (process.platform !== "win32" || !binPath) return null;
+  try {
+    const content = fs.readFileSync(binPath, "utf8");
+    const m = content.match(/%dp0%\\([^\s"]+\.js)/i);
+    if (m) {
+      const targetJs = path.join(path.dirname(binPath), m[1]);
+      if (fs.existsSync(targetJs)) return targetJs;
+    }
+  } catch {
+    /* not readable or binary */
+  }
+  return null;
+}
 
 /**
  * Spawn a headless agent CLI with stdin closed.
@@ -27,9 +50,17 @@ import { spawn } from "node:child_process";
  * @param {import("node:child_process").SpawnOptionsWithoutStdio} options
  */
 export function spawnHeadlessCli(binPath, args, options = {}) {
+  const nodeTarget = resolveNodeShim(binPath);
+  if (nodeTarget) {
+    const child = spawn(process.execPath, [nodeTarget, ...args], options);
+    child.stdin?.end();
+    return child;
+  }
+
   const isCmdOrBat = process.platform === "win32" && /\.(cmd|bat)$/i.test(binPath);
   const opts = isCmdOrBat && options?.shell === undefined ? { ...options, shell: true } : options;
   const child = spawn(binPath, args, opts);
   child.stdin?.end();
   return child;
 }
+
