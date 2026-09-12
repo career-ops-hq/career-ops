@@ -17,6 +17,19 @@
 </p>
 
 <p align="center">
+  <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20%E9%80%9A%E8%BF%87%20CAREER-OPS%20%E6%88%90%E5%8A%9F%E5%85%A5%E8%81%8C&suffix=%20%E5%B7%B2%E9%AA%8C%E8%AF%81&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="使用 career-ops 成功入职：已验证人数"></a>
+</p>
+
+<p align="center"><sub>也走完了自己的求职路？<a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">分享你的故事 →</a> · 你的卡片会让还在找工作的人看到：出路是存在的。</sub></p>
+
+<p align="center">
+  <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="最近三条成功入职故事" width="800"></a>
+</p>
+
+<p align="center"><sub>每一个数字都是可以<a href="HIRED.md">审计 →</a>的公开故事 · 他们每一个人都曾站在你现在的位置。</sub></p>
+
+
+<p align="center">
   <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
   &nbsp;&nbsp;
   <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>

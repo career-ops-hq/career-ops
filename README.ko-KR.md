@@ -17,6 +17,18 @@
 </p>
 
 <p align="center">
+  <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20%F0%9F%8E%89%20CAREER-OPS%20%EB%A1%9C%20%EC%B7%A8%EC%97%85&suffix=%20%EA%B2%80%EC%A6%9D%EB%90%A8&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="career-ops 로 취업: 검증된 인원"></a>
+</p>
+
+<p align="center"><sub>합격하셨나요? <a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">이야기를 공유해 주세요 →</a> · 당신의 카드가 구직 중인 누군가에게 “출구는 있다”는 사실을 보여줍니다.</sub></p>
+
+<p align="center">
+  <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="최근 취업 스토리 3건" width="800"></a>
+</p>
+
+<p align="center"><sub>모든 숫자는 <a href="HIRED.md">감사 가능한 공개 스토리 →</a> · 그들도 모두 지금 당신이 있는 자리에서 시작했습니다.</sub></p>
+
+<p align="center">
   <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
   &nbsp;&nbsp;
   <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>

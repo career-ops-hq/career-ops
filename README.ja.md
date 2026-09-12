@@ -17,6 +17,18 @@
 </p>
 
 <p align="center">
+  <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20%F0%9F%8E%89%20CAREER-OPS%20%E3%81%A7%E5%86%85%E5%AE%9A&suffix=%20%E6%A4%9C%E8%A8%BC%E6%B8%88%E3%81%BF&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="career-ops で内定：検証済み件数"></a>
+</p>
+
+<p align="center"><sub>内定を勝ち取りましたか？<a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">ストーリーを共有 →</a> · あなたのカードが、検索中の誰かに「出口はある」と伝えます。</sub></p>
+
+<p align="center">
+  <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="最新の内定ストーリー 3 件" width="800"></a>
+</p>
+
+<p align="center"><sub>すべての数字は<a href="HIRED.md">監査可能な公開ストーリー →</a> · どの人も、いまのあなたの場所から始めました。</sub></p>
+
+<p align="center">
   <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
   &nbsp;&nbsp;
   <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
