@@ -113,8 +113,8 @@ function binCandidates(bin: string): string[] {
     // Only include extensions that `child_process.spawn()` can execute directly.
     .filter((e) => [".com", ".exe", ".bat", ".cmd"].includes(e.toLowerCase()));
 
-  // Try the bare name too (some environments provide an extensionless shim).
-  return [bin, ...exts.map((ext) => bin + ext)];
+  // On Windows, prioritize executable extensions over bare shims so spawn doesn't ENOENT.
+  return [...exts.map((ext) => bin + ext), bin];
 }
 
 export function findBin(bin: string, dirs = searchDirs()): string | null {
