@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.11.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.10.0...web-v0.11.0) (2026-09-12)
+
+
+### Features
+
+* **web:** opt-in origin allowlist for the local dashboard API ([#3597](https://github.com/career-ops-hq/career-ops/issues/3597)) ([0754973](https://github.com/career-ops-hq/career-ops/commit/075497329a55d7c1e5184cfffb21fd0efeaf13ba))
+
+
+### Bug Fixes
+
+* **tracker:** resolve addition columns by name so score and status cannot transpose ([00b0296](https://github.com/career-ops-hq/career-ops/commit/00b0296c6071eb955f38404e60a10ceaccad45b5))
+* **web:** don't let a failed fetch become a scored report ([#3826](https://github.com/career-ops-hq/career-ops/issues/3826)) ([10ede60](https://github.com/career-ops-hq/career-ops/commit/10ede60522f1abd71dfd8c93266f9176180213ac))
+* **web:** give grok a parser, and make the token fold per-CLI ([#2689](https://github.com/career-ops-hq/career-ops/issues/2689)) ([c7549fb](https://github.com/career-ops-hq/career-ops/commit/c7549fb3593f9ee456d7118beb80b0ee6e76747c))
+* **web:** identify the verdict block by its heading, not by the letter ([#3502](https://github.com/career-ops-hq/career-ops/issues/3502)) ([0ef1bfb](https://github.com/career-ops-hq/career-ops/commit/0ef1bfbe2385551af415e05858900710d0aadd23))
+* **web:** parseCliJson misses set-status.mjs's pretty-printed success ([#3602](https://github.com/career-ops-hq/career-ops/issues/3602)) ([848ca44](https://github.com/career-ops-hq/career-ops/commit/848ca440fb2d243ae08205ab3d0bc12903a36c65))
+
 ## [0.10.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.9.0...web-v0.10.0) (2026-09-03)
 
 
