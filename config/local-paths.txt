@@ -1,0 +1,9 @@
+# local-paths.txt - files this fork owns that upstream does not ship.
+# See config/local-paths.example.txt for the format and the refusal rules.
+#
+# Committed on purpose (git add -f): CI and the no-mistakes worktree check out
+# the repo without gitignored files, and without this declaration the
+# SYSTEM_PATHS coverage guard reports every path below as an orphan (#2991).
+
+# Warm referral paths from a full LinkedIn data export (builds on linkedin-join.mjs).
+referrals.mjs
