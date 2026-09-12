@@ -1161,21 +1161,27 @@ export function injectPrintPageCss(html, format = 'a4') {
  * Record a generated PDF in data/pdf-index.tsv so tools can map a tracker
  * report number to the exact PDF (and its source HTML for regeneration).
  *
- * Columns: report \t pdf \t html \t format \t date — paths relative to the
- * tracker workspace with forward slashes. One row per PDF path; when a report
- * number is given, older rows for that report are dropped too (regenerated
- * CVs supersede stale entries). The file is gitignored: it references
- * gitignored output/ artifacts and is meaningless on another machine.
+ * Columns: report \t pdf \t html \t format \t date \t kind — paths relative to
+ * the tracker workspace with forward slashes; kind is 'cv' or 'cover'. One row
+ * per PDF path; when a report number is given, an older row for that report is
+ * dropped only when it is the same kind, so a report can hold both its CV and
+ * its cover letter at once (#3967). A regenerated artifact still supersedes its
+ * own stale row. Readers key on the leading columns and ignore kind, so the
+ * trailing column is backward compatible; a legacy row with no kind reads as
+ * 'cv'. The file is gitignored: it references gitignored output/ artifacts and
+ * is meaningless on another machine.
  */
-function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
+export function updatePDFManifest(reportNum, pdfPath, htmlPath, format, kind = 'cv') {
   const manifestPath = resolvePdfIndexPath(trackerPath);
   const toRel = (p) => relative(workspaceRoot, p).split(sep).join('/');
   const relPDF = toRel(pdfPath);
   const relHTML = workspaceRelativeManifestPath(htmlPath, workspaceRoot);
   const date = new Date().toISOString().slice(0, 10);
+  const rowKind = kind === 'cover' ? 'cover' : 'cv';
   // "008" and "8" are the same report — zero-padded report-link form vs
   // unpadded tracker-# form. Normalize so replacement rows match.
   const normKey = (s) => (s || '').trim().replace(/^0+(?=\d)/, '');
+  const kindOf = (field) => ((field || '').trim() === 'cover' ? 'cover' : 'cv');
 
   let lines = [];
   if (existsSync(manifestPath)) {
@@ -1183,17 +1189,23 @@ function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
       if (!line.trim() || line.startsWith('#')) return false;
       const fields = line.split('\t');
       if (fields[1] === relPDF) return false;
-      if (reportNum && normKey(fields[0]) === normKey(reportNum)) return false;
+      if (
+        reportNum &&
+        normKey(fields[0]) === normKey(reportNum) &&
+        kindOf(fields[5]) === rowKind
+      ) {
+        return false;
+      }
       return true;
     });
   }
 
-  lines.push([reportNum || '', relPDF, relHTML, format, date].join('\t'));
+  lines.push([reportNum || '', relPDF, relHTML, format, date, rowKind].join('\t'));
 
   mkdirSync(dirname(manifestPath), { recursive: true });
   writeFileSync(
     manifestPath,
-    '# report\tpdf\thtml\tformat\tdate — written by generate-pdf.mjs, do not edit\n' +
+    '# report\tpdf\thtml\tformat\tdate\tkind — written by generate-pdf.mjs, do not edit\n' +
       lines.join('\n') + '\n'
   );
   return relPDF;
@@ -1626,6 +1638,7 @@ export async function inlineLocalFonts(html) {
  *   format?: 'a4'|'letter',
  *   baseDir?: string,
  *   reportNum?: string,
+ *   kind?: 'cv'|'cover',
  *   inputPath?: string,
  *   workspaceRoot?: string,
  *   maxPages?: number,
@@ -1668,6 +1681,7 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
  *   format?: 'a4'|'letter',
  *   baseDir?: string,
  *   reportNum?: string,
+ *   kind?: 'cv'|'cover',
  *   inputPath?: string,
  *   maxPages?: number,
  *   strictPages?: boolean,
@@ -1690,6 +1704,7 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
   ) ? requestedBaseDir : resolve(outputRoot);
   const reportNum = opts.reportNum || '';
   const inputPath = opts.inputPath || '';
+  const kind = opts.kind === 'cover' ? 'cover' : 'cv';
 
   // Reject an escaping destination before creating directories, launching
   // Chromium, or writing any renderer temporary files (#2844).
@@ -1782,7 +1797,7 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
     console.log(`📦 Size: ${(pdfBuffer.length / 1024).toFixed(1)} KB`);
 
     try {
-      updatePDFManifest(reportNum, outputPath, inputPath, format);
+      updatePDFManifest(reportNum, outputPath, inputPath, format, kind);
       console.log(`🔗 Manifest: data/pdf-index.tsv updated${reportNum ? ` (report ${reportNum})` : ' (no --report given)'}`);
     } catch (err) {
       // The PDF itself succeeded — never fail the run over manifest bookkeeping.
