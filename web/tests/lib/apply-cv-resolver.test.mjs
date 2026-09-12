@@ -128,10 +128,13 @@ test('generated CV uses the linked report identity when its application number d
     writeFileSync(first.paths.finalPdf, 'stub-pdf-bytes');
     assert.equal(await resolveTailoredCv('Acme'), first.paths.finalPdf);
 
-    // Use the real core path resolver in this fixture, without a platform-
-    // dependent symlink or a second implementation of its manifest rules.
-    writeFileSync(join(root, 'tracker-utils.mjs'),
-      `export { resolveTrackerPath, resolvePdfIndexPath } from ${JSON.stringify(new URL('../../../tracker-utils.mjs', import.meta.url).href)};\n`);
+    // Supply only this fixture's path endpoints. Web CI installs web dependencies
+    // alone; importing the full core here would require its separate packages.
+    // The application, report and manifest lookups still use the real web code.
+    writeFileSync(join(root, 'tracker-utils.mjs'), [
+      `export const resolveTrackerPath = () => ${JSON.stringify(join(root, 'data', 'applications.md'))};`,
+      `export const resolvePdfIndexPath = () => ${JSON.stringify(join(root, 'data', 'pdf-index.tsv'))};`,
+    ].join('\n'));
     writeFileSync(second.paths.finalPdf, 'second-role-pdf-bytes');
     writeFileSync(join(root, 'data', 'pdf-index.tsv'), [
       '# report\tpdf\thtml\tformat\tdate',
