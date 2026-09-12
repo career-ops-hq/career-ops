@@ -119,7 +119,94 @@ plan/
 # Web — runtime cache/history the dashboard writes locally; nothing here is tracked.
 .career-ops-web/
 
+linkedin/
+
+# Added by career-ops update-system.mjs.
+# System-owned ignore rules that were missing from this file. Your own rules
+# are never modified, reordered or removed: the updater only appends patterns
+# it cannot already find somewhere in this file. Reordering these lines, or
+# moving them elsewhere in the file, is safe and will not bring them back.
+# Deleting or commenting one out is not: they are system-owned, several of
+# them guard files holding personal data, and the next update re-adds any
+# that is no longer present as a live pattern.
+batch/batch-state-recovery.d/
+# Fork-local path declarations — this checkout's own files, read by
+# update-system.mjs. Gitignored on purpose: it describes THIS clone, not the
+# project, and must survive the sync that overwrites update-system.mjs (#2421).
+config/local-paths.txt
+voice-dna.md
+# Working copy the test suite makes under the repo root (test-all.mjs
+# `mkdtempSync(join(ROOT, '.tmp-script-test-'))`). A clean run deletes it; a
+# run interrupted mid-way leaves ~650MB of duplicated repo behind, which a
+# reflexive `git add .` would then stage as ~1000 new files.
+.tmp-script-test-*/
+# Backup files. Two shapes exist: `{file}.bak` (normalize-statuses.mjs,
+# dedup-tracker.mjs, tracker.mjs) and `{file}.bak-{ISO timestamp}`
+# (web/src/lib/core/safe-write.ts). A plain `*.bak` glob misses the timestamped
+# form, which for cv.md or portals.yml leaves a file holding the same PII as the
+# original sitting untracked in the repo root. Trailing `*` covers both.
+*.bak*
+# The tracker and its follow-ups file in the LEGACY ROOT LAYOUT. resolveTrackerPath()
+# documents its own fallback chain — CAREER_OPS_TRACKER > <root>/data/applications.md
+# > <root>/applications.md — and that third entry is a supported install shape, not a
+# mistake. data/ is covered by the blanket rule at the top of this file; the root
+# spelling was not covered by anything.
+#
+# The content is the user's whole job search: company, role, score, status, notes.
+# cv.md, portals.yml, article-digest.md and voice-dna.md are all ignored at the root
+# already, and #3469 ignores the derived .db index on the argument that it "holds the
+# same PII as the tracker" — while the tracker itself sat beside it, unignored.
+# Unanchored, like the .db rule below and for the same reason: getCareerOpsRoot()
+# resolves a relative CAREER_OPS_ROOT (or .career-ops-data marker) against the
+# codebase directory, so a data root configured as `career-data` puts these inside
+# the checkout, where an anchored rule would not reach them. The upgrade fixtures
+# that share these names stay tracked via the `!test-fixtures/**` rule further down,
+# which is a later pattern and therefore wins.
+applications.md
+follow-ups.md
+# The tracker's derived SQLite index (tracker.mjs, #918). It sits beside the
+# tracker markdown, so on the standard layout it lands in data/ and is already
+# covered by the rules above — but resolveTrackerPath() falls back to
+# `<root>/applications.md` when data/applications.md is absent, and the index
+# follows it there. That is the legacy install layout, and it is also every
+# fresh clone: `node test-all.mjs` leaves a 36KB applications.db in the repo
+# root, which `git add .` then stages.
+# Its content is the whole tracker — company, role, score, status, notes — so it
+# carries the same PII as the file it indexes, under a name none of the rules
+# above match. SQLite's -wal/-shm sidecars travel with it.
+# Deliberately not root-anchored. The index follows the tracker markdown, and
+# getCareerOpsRoot() resolves a relative CAREER_OPS_ROOT (or .career-ops-data
+# marker) against the codebase directory — so a data root configured as
+# `career-data` puts both inside the checkout, in neither of the two places an
+# anchored rule would cover. Nothing tracked in this repo ends in .db, and an
+# ignore rule cannot untrack a file that is already tracked, so the cost of the
+# wider glob is a `git add -f` on a .db fixture nobody has added yet; the cost
+# of the narrower one is this leak, for every non-default data root.
+*.db
+*.db-wal
+*.db-shm
+# IDE-specific local config
+.idea/
+.vscode/
+# Claude Code project-level MCP server config — commonly ends up holding
+# personal server credentials (e.g. a plugin's API token) once a user adds
+# an MCP server, same risk class as .env.
+.mcp.json
+# Profile intake sources (master CV / LinkedIn export / diplomas / references
+# — user PII, never commit). Ship only the system-owned scaffold. #1723
+documents/*
+!documents/.gitkeep
+!documents/README.md
+# Intake fingerprints — the recorded source filenames may themselves carry
+# PII (e.g. cv/jane-doe-master-cv.pdf). #1723
+data/intake-state.json
+
 # Upgrade-test fixtures are fictional system-layer data, never user data
 # (see DATA_CONTRACT.md). Re-include them past the unanchored user-layer
-# patterns above (cv.md, portals.yml).
+# patterns above (cv.md, portals.yml, applications.md, follow-ups.md).
+# Keep this LAST: a later ignore rule would win over the negation.
 !test-fixtures/**
+# This fork commits its local-paths declaration so CI and no-mistakes
+# worktrees see it (#2991). Un-ignored so the tracked copy is not flagged
+# as ignored User Layer data (tests/user-layer-untracked.test.mjs).
+!config/local-paths.txt
