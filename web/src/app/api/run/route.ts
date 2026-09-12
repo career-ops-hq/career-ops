@@ -111,7 +111,7 @@ export async function POST(req: Request) {
     kind === "evaluate"
       ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
       : undefined;
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, lang });
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, lang, reportFile: pdfPaths?.reportFile });
 
   const isClaude = cliId === "claude";
   // Which tools each kind gets, and the whole claude argv, live in
@@ -384,7 +384,7 @@ export async function POST(req: Request) {
             root: careerOpsRoot(),
             pdfPaths: paths,
             format,
-            reportNum: input,
+            reportNum: paths.reportNum,
           });
           if (result.kind === "render-failed") {
             send({ type: "error", msg: result.error.slice(0, 200) });

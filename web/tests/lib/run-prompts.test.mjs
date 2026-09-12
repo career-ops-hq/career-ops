@@ -357,3 +357,14 @@ test("buildPrompt: evaluate does not enumerate the report's sections", () => {
   assert.ok(!/blocks?\s+A[–-]F/i.test(prompt), "the prompt must not name a subset of the mode file's sections");
   assert.ok(/EVERY section its report template specifies/i.test(prompt), "it must defer to the mode file for the section set");
 });
+
+test("PDF tailoring reads the resolved report even when the application number differs", () => {
+  const prompt = buildPrompt({
+    kind: "pdf", ...ARGS, input: "309",
+    reportFile: "reports/18-example-2026-09-10.md",
+  });
+  assert.match(prompt, /application #309/);
+  assert.ok(prompt.includes('"reports/18-example-2026-09-10.md"'));
+  assert.ok(!prompt.includes("reports/309-"));
+  assert.ok(!prompt.includes("reports/018-"), "the exact unpadded filename must be retained");
+});
