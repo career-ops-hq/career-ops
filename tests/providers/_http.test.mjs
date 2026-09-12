@@ -174,3 +174,36 @@ if (isRefusedRedirectError(transportFailure) === false) {
     globalThis.fetch = realFetch;
   }
 }
+
+// redirect:'manual' — a 3xx is a non-ok response, not a followed hop and not a
+// thrown TypeError, so the error carries the status AND the Location. jobvite
+// and telegram-channel branch on exactly this shape (an empty board vs a
+// retired tenant; a private channel vs a network fault), and until now it was
+// only ever exercised through their mocks.
+{
+  const realFetch = globalThis.fetch;
+  try {
+    const { fetchText } = await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
+    globalThis.fetch = async () => new Response('', { status: 302, statusText: 'Found', headers: { location: 'https://t.me/gophersjob' } });
+    let err = null;
+    try { await fetchText('https://t.me/s/gophersjob', { redirect: 'manual' }); } catch (e) { err = e; }
+    if (err && err.status === 302 && err.location === 'https://t.me/gophersjob' && /HTTP 302/.test(err.message)) {
+      pass('fetchText(redirect:"manual") turns a 3xx into an error carrying status + location');
+    } else {
+      fail(`manual-redirect error shape wrong: ${JSON.stringify({ message: err?.message, status: err?.status, location: err?.location })}`);
+    }
+    if (err && isRetryableError(err) === false) pass('a manual-redirect 3xx is not retried');
+    else fail('a manual-redirect 3xx must not be retryable');
+    const { fetchTextWithRetry } = await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
+    let requests = 0;
+    const ctx = { fetchText: async (u, o) => { requests++; return fetchText(u, o); }, sleep: async () => {} };
+    let viaRetry = null;
+    try { await fetchTextWithRetry(ctx, 'https://t.me/s/gophersjob', { redirect: 'manual' }); } catch (e) { viaRetry = e; }
+    if (requests === 1 && viaRetry?.status === 302 && viaRetry.location === 'https://t.me/gophersjob') pass('fetchTextWithRetry makes exactly one request for a 3xx and rethrows it with status + location');
+    else fail(`fetchTextWithRetry on a 3xx: requests=${requests}, err=${JSON.stringify({ status: viaRetry?.status, location: viaRetry?.location })}`);
+  } catch (e) {
+    fail(`manual-redirect test threw: ${e.message}`);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}

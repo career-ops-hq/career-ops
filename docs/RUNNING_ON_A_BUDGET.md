@@ -315,6 +315,15 @@ To prevent unnecessary API costs or hitting rate limits, implement the following
    npm run scan -- --verify
    ```
 
+
+### Cap interactive sessions (~10 roles)
+
+Evaluating many roles in one interactive session degrades the output well before the quota runs out. At 40+ evaluations in a single session, reports started mixing job titles and dates, and CV PDFs came out wrong. Cap an interactive session at about ten role evaluations, then `/clear` or start a fresh session.
+
+The real limit is tokens of accumulated job text, not a hard role count. When descriptions are long, cut the batch roughly in half.
+
+To evaluate more than that in one go, use `batch/batch-runner.sh`. It reuses one worker instead of letting context pile up across interactive turns. Source: [discussion #1089](https://github.com/career-ops-hq/career-ops/discussions/1089).
+
 ---
 
 ## 7. Worked Example: Running the Pipeline Cheaply

@@ -127,6 +127,9 @@ file's header comment must name the target list (reference:
   (see section 3).
 - If the whole URL is assembled by the provider from a fixed literal host, no
   allowlist is needed, but `redirect: 'error'` still is.
+- `jobvite` and `telegram-channel` pass `redirect: 'manual'` instead: no hop
+  is followed either, and the thrown error carries the `Location`, so a 302
+  to a login page reads as a named failure rather than a generic one.
 
 ### Defensive parsing
 

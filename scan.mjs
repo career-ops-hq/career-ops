@@ -72,6 +72,7 @@ import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTit
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { promoteKnownFragmentIdentity } from './url-key.mjs';
 
@@ -3055,7 +3056,12 @@ async function main() {
     // postings on later pages go unfetched. Documented in modes/scan.md; the
     // fix belongs in workday.mjs, where closing it costs the optimisation on
     // every tenant that mixes.
-    const ctx = { ...makeHttpCtx(), sinceMs: earlyStopSinceMs, includeUndated: true };
+    const ctx = {
+      ...makeHttpCtx(),
+      sinceMs: earlyStopSinceMs,
+      includeUndated: true,
+      locationHints: config.location_filter,
+    };
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
     try {
       let jobs;
@@ -3177,14 +3183,22 @@ async function main() {
         // candidate: two candidates with DIFFERENT cities must stay distinct.
         // `key === baseKey` whenever the flag is off, and the index is empty in
         // that case, so the default path is unchanged.
+        //
+        // An aggregator feed (portals.yml `aggregator: true`) names itself as
+        // the company, so two same-titled posts are two employers' jobs: only
+        // the URL dedups there, and the key is null.
         const baseKey = companyRoleDedupKey(job.company, job.title, canonicalizeCompany);
-        const key = dedupIncludeLocation
-          ? companyRoleDedupKey(job.company, job.title, canonicalizeCompany, job.location)
-          : baseKey;
+        const key = company.aggregator === true
+          ? null
+          : (dedupIncludeLocation
+            ? companyRoleDedupKey(job.company, job.title, canonicalizeCompany, job.location)
+            : baseKey);
         if (
-          seenCompanyRoles.has(key) ||
-          seenCompanyRoles.has(baseKey) ||
-          (key === baseKey && seenCompanyRoleBases.has(baseKey))
+          key !== null && (
+            seenCompanyRoles.has(key) ||
+            seenCompanyRoles.has(baseKey) ||
+            (key === baseKey && seenCompanyRoleBases.has(baseKey))
+          )
         ) {
           totalDupes++;
           continue;
@@ -3203,8 +3217,10 @@ async function main() {
         // city THIS run also suppresses a locationless twin later in the run —
         // not only across runs.
         seenUrls.add(dedupUrl);
-        seenCompanyRoles.add(key);
-        if (key !== baseKey) seenCompanyRoleBases.add(baseKey);
+        if (key !== null) {
+          seenCompanyRoles.add(key);
+          if (key !== baseKey) seenCompanyRoleBases.add(baseKey);
+        }
         // Tag with the company's careers domain so verify can offer a 404/410
         // rediscovery fallback. A null domain (no careers_url) marks the offer
         // as broad-discovery — ineligible for the fallback, per the issue scope.
@@ -3308,9 +3324,7 @@ async function main() {
   }
 
   // 7. Print summary
-  console.log(`\n${'━'.repeat(45)}`);
-  console.log(`Portal Scan — ${date}`);
-  console.log(`${'━'.repeat(45)}`);
+  printScanSummaryHeader('Portal Scan', date);
   const summaryCompanies = targets.filter(t => !t._isBoard).length;
   const summaryBoards = targets.filter(t => t._isBoard).length;
   console.log(`Companies scanned:     ${summaryCompanies}`);

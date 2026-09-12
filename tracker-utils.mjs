@@ -79,6 +79,27 @@ export function normalizeCompany(name) {
 }
 
 /**
+ * Control characters that are invisible in every rendered view of the tracker.
+ *
+ * C0 and DEL and C1, minus the three whitespace controls: `\t` is ordinary
+ * whitespace inside a cell, and `\r`/`\n` are folded to a single space by
+ * cell() before this runs — stripping any of the three would glue words
+ * together instead of separating them.
+ *
+ * Deliberately NOT shared with the plugin token/display sanitizer, which strips
+ * the same idea but a different range: it collapses all whitespace first and so
+ * can take `\t`/`\r`/`\n` with the rest, which here would destroy word breaks.
+ * Two ranges that must differ are two constants; only the ranges that must
+ * agree are shared, which is the single export below.
+ *
+ * Exported because verify-pipeline.mjs has to recognize exactly what cell()
+ * removes: stripping only stops NEW bytes entering, and a second copy of this
+ * range would let the write path and the detector disagree about what counts.
+ */
+// eslint-disable-next-line no-control-regex
+export const CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g;
+
+/**
  * Neutralize characters that would corrupt the applications.md table.
  *
  * Tracker rows are read with a raw `line.split('|')`, so a literal pipe or a
@@ -87,11 +108,26 @@ export function normalizeCompany(name) {
  * on the inner pipe. Additive — normal cells are unchanged; only values that
  * would already break the table get sanitized.
  *
+ * Control characters (#3892) get the same treatment for the same reason, and
+ * here rather than in each writer: this is the one sanitizer every tracker
+ * writer passes through — merge-tracker's buildRow (and so the web, which
+ * dictates its rows through the same merge path), set-status's note. A guard
+ * added per writer is a guard the next writer is free to reintroduce the bug
+ * around. They are DELETED, not replaced with a space: the byte renders as
+ * nothing in markdown, on GitHub and in the dashboard, so a substitution would
+ * change text a human has already read. The asymmetry is the point — a byte
+ * that costs one regex to reject costs an unrelated arithmetic discrepancy
+ * much later to find, because every view of the table hides it.
+ *
  * @param {*} v - Free-text value headed for a table cell.
  * @returns {string} Table-safe value.
  */
 export function cell(v) {
-  return String(v ?? '').replace(/[\r\n]+/g, ' ').replace(/\s*\|\s*/g, ' / ').trim();
+  return String(v ?? '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(CONTROL_CHARS, '')
+    .replace(/\s*\|\s*/g, ' / ')
+    .trim();
 }
 
 /**
@@ -349,10 +385,12 @@ export async function acquireTrackerLock(lockDir, options = {}) {
   // from the definition: waiters woke in lockstep and re-raced, and a caller
   // waiting on a healthy lock being handed round briskly was killed anyway.
   //
-  // There is no separate maxWaitMs knob here, so the ceiling is the same
-  // multiple of timeoutMs the definition defaults to.
+  // There is no separate maxWaitMs knob here, so no hardDeadline is passed and
+  // the policy applies its own ceiling. Writing one out here would put a fourth
+  // copy of that bound in the tree, and a copy that drifts changes retry timing
+  // silently — nothing fails, so nothing reports it (#3895).
   const { backoffMs, holderStillWedged, noteWaiting, ceilingReached } = createLockWaitPolicy(lockDir, {
-    timeoutMs, retryMs, deadline: Date.now() + timeoutMs, hardDeadline: Date.now() + timeoutMs * 10,
+    timeoutMs, retryMs, deadline: Date.now() + timeoutMs,
   });
   for (;;) {
     if (holderStillWedged() || ceilingReached()) break;

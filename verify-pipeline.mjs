@@ -16,6 +16,9 @@
  * 11. Via channel consistency (see #1596)
  * 12. No # value reused across 2+ tracker rows (error — see #1704)
  * 13. applications.md <-> active-interviews.md status sync (see #1504)
+ * 14. data/follow-ups.md table schema (see #2971)
+ * 15. portals.yml entries no provider claims (see #3251)
+ * 16. No invisible control characters in tracker cells (error — see #3892)
  *
  * Run: node career-ops/verify-pipeline.mjs
  */
@@ -28,6 +31,7 @@ import {
   looksLikeScoreCell, isSeparatorRow, isHeaderRow, resolveColumns,
   normalizeTextKey, normalizeVia,
 } from './tracker-parse.mjs';
+import { CONTROL_CHARS } from './tracker-utils.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
 import { checkFollowupsSchema } from './stats.mjs';
 
@@ -566,6 +570,35 @@ if (!existsSync(PORTALS_FILE)) {
     warn(`Portal coverage check could not run: ${err.message}`);
   }
 }
+
+// --- Check 16: invisible control bytes already in tracker cells (#3892) ---
+// cell() in tracker-utils.mjs strips these on the way in, which stops new ones
+// entering but can do nothing about the ones already written. This is the only
+// place such a byte is visible at all: it shifts or truncates the positional
+// `split('|')` parse, so a row silently reads as a different row or drops out
+// of a count entirely, while every renderer of the table — markdown, GitHub,
+// the web dashboard — shows the cell as correct. The corruption surfaces much
+// later as an unrelated arithmetic discrepancy with no trail back to the cause.
+//
+// Read off the RAW lines rather than the parsed `entries`, so a byte in a
+// column this file has no field for is caught too, and reported with the file
+// line number: a shifted parse is exactly the situation where the row's own #
+// cell is the thing not to trust.
+//
+// CONTROL_CHARS is imported, never re-declared — a second copy of the range
+// would let the write path and this detector disagree about what counts.
+let controlByteRows = 0;
+for (let i = 0; i < lines.length; i++) {
+  if (!lines[i].startsWith('|')) continue;
+  // .match() with a /g regex resets lastIndex; .test() would not, and would
+  // then skip every other offending row.
+  const found = lines[i].match(CONTROL_CHARS);
+  if (!found) continue;
+  const points = [...new Set(found.map(c => `U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`))];
+  error(`applications.md line ${i + 1}: tracker row contains invisible control character(s) ${points.join(', ')} — delete them; they render as nothing in every view but shift the positional column parse`);
+  controlByteRows++;
+}
+if (controlByteRows === 0) ok('No control characters in tracker cells');
 
 // --- Summary ---
 console.log('\n' + '='.repeat(50));
