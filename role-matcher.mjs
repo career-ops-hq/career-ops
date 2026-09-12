@@ -283,6 +283,23 @@ export function roleFuzzyMatch(a, b) {
     if (extraTokens.some(w => !BASELINE_TOKENS.has(w))) return false;
   }
 
+  // A level on ONE side alone is usually a loose rewrite ("Insurance
+  // Specialist" vs "Insurance Specialist II" tokenize identically, since a
+  // level is not a content token) — unless each title also carries a word the
+  // other lacks. Then the one-sided level compounds a vocabulary difference
+  // instead of decorating an identical title: "Front Desk Assistant (Summer
+  // Housing)" vs "Administrative Assistant II (Housing Front Desk)" differ by
+  // "summer" vs "administrative" AND by the stated level, which is two
+  // disagreements, not a loose rewrite (#4058). Mirrors the subset guard
+  // above: baseline-only differences do not split.
+  if ((lvlA.size > 0) !== (lvlB.size > 0)) {
+    const setA = new Set(wordsA);
+    const uniqueA = wordsA.filter(w => !setB.has(w));
+    const uniqueB = wordsB.filter(w => !setA.has(w));
+    if (uniqueA.length > 0 && uniqueB.length > 0 &&
+        [...uniqueA, ...uniqueB].some(w => !BASELINE_TOKENS.has(w))) return false;
+  }
+
   // Use a true set-based Jaccard ratio. Dividing by the smaller title inflates
   // matches for roles that share a long generic prefix but differ in specialty.
   const union = new Set([...wordsA, ...wordsB]).size;
