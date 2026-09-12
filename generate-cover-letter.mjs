@@ -220,7 +220,21 @@ export function buildHtml(payload, templatePath) {
   // valediction. The <br> is emitted around escaped values, never inside one.
   const signatureBlock = buildSignatureBlock(letter.signature, candidate.name);
 
+  const lang = payload.lang || letter.lang || "en";
+  const labelMap = {
+    tr: "Ön Yazı",
+    de: "Motivationsschreiben",
+    fr: "Lettre de motivation",
+    es: "Carta de presentación",
+    ar: "خطاب التغطية",
+    ja: "カバーレター",
+    en: "Cover Letter",
+  };
+  const coverLetterLabel = payload.cover_letter_label || letter.cover_letter_label || labelMap[lang] || "Cover Letter";
+
   const replacements = {
+    "{{LANG}}": escapeHtml(lang),
+    "{{COVER_LETTER_LABEL}}": escapeHtml(coverLetterLabel),
     "{{NAME}}": escapeHtml(candidate.name),
     "{{CONTACT_LINE}}": buildContactLine(candidate),
     "{{CREDENTIALS_BLOCK}}": buildCredentialsBlock(candidate),
