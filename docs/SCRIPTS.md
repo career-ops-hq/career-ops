@@ -121,9 +121,17 @@ Merges batch tracker additions (`batch/tracker-additions/*.tsv`) into `applicati
 npm run merge                 # apply merge
 npm run merge -- --dry-run    # preview without writing
 npm run merge -- --verify     # merge then run verify-pipeline
+node merge-tracker.mjs --backfill-urls            # explicitly add/backfill the optional URL column
+node merge-tracker.mjs --backfill-urls --dry-run  # preview the schema migration and fills
 ```
 
 Processed TSVs are moved to `batch/tracker-additions/merged/`.
+
+`--backfill-urls` is an explicit, idempotent migration for legacy trackers. If
+the tracker has no `URL` header, it appends the column and empty cells first,
+then fills URLs that can be resolved from linked report metadata in the same
+atomic write. Unresolvable rows keep an empty URL cell. Normal merges do not
+add the column or otherwise change a legacy tracker's schema.
 
 **Exit codes:** `0` success, `1` verification errors (with `--verify`).
 
