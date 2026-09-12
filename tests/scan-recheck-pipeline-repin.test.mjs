@@ -31,6 +31,7 @@ const PIPELINE_ONLY = 'https://jobs.ashbyhq.com/gamma/4';
 const FRESH = 'https://boards.greenhouse.io/delta/5';
 const PROCESSED_CHILD = 'https://jobs.lever.co/beta/6';
 const NESTED_IN_PENDING = 'https://boards.greenhouse.io/epsilon/7';
+const AFTER_TOP_LEVEL = 'https://jobs.lever.co/zeta/8';
 
 // today = 2026-08-07, window = 30d. The 2026-01-01 rows are past it; the
 // 2026-08-01 row is inside it.
@@ -45,6 +46,7 @@ const SOURCES = {
     `${FRESH}\t2026-08-01\tgreenhouse\tAnalyst\tDelta\tadded\tRemote`,
     `${PROCESSED_CHILD}\t2026-01-01\tlever\tOps\tBeta\tadded\tBerlin`,
     `${NESTED_IN_PENDING}\t2026-01-01\tgreenhouse\tWriter\tEpsilon\tadded\tRemote`,
+    `${AFTER_TOP_LEVEL}\t2026-01-01\tlever\tDesigner\tZeta\tadded\tRemote`,
     '',
   ].join('\n'),
   pipelineText: [
@@ -65,6 +67,12 @@ const SOURCES = {
     `- [ ] ${PROCESSED} | Beta | SRE | Berlin`,
     '### Archived by retry wave',
     `- [ ] ${PROCESSED_CHILD} | Beta | Ops | Berlin`,
+    '',
+    // A level-1 heading outranks a section, so it ends ## Processed. The rows
+    // under it are a fresh queue, not leftovers of the released section.
+    '# Backlog',
+    '',
+    `- [ ] ${AFTER_TOP_LEVEL} | Zeta | Designer | Remote`,
     '',
   ].join('\n'),
   applicationsText: '',
@@ -94,6 +102,12 @@ if (seen.has(NESTED_IN_PENDING)) {
   pass('a `### Processed…` subdivision inside ## Pending does not release its rows');
 } else {
   fail('a row under a nested `### Processed…` heading inside ## Pending was released: the heading level is being ignored, so queued work is handed back to the scanner and duplicated');
+}
+
+if (seen.has(AFTER_TOP_LEVEL)) {
+  pass('a `#` heading ends ## Processed — a section cannot outlive a shallower heading');
+} else {
+  fail('a row under a `#` heading following ## Processed was released: the processed state leaked past a heading that outranks the section, so queued work is handed back to the scanner and duplicated');
 }
 
 if (seen.has(OPEN)) {

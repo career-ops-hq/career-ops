@@ -1575,19 +1575,29 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   // the scan-history TTL is allowed to govern it alone. Release also requires the
   // URL to be a recheck candidate, so a pipeline-only URL is never un-pinned.
   // Sections are `##` in PIPELINE_SKELETON — `# Pipeline` is the document title,
-  // `## Pending` and `## Processed` are the sections. So only a level-2 heading
-  // opens or closes one; anything deeper is a subdivision INSIDE the current
-  // section and must leave the section alone. Matching `Processed` at any depth
-  // breaks both ways: `### Processed leftovers` under `## Pending` would release
-  // rows that are still queued for work — the exact duplication this function
-  // exists to prevent — while `### August` under `## Processed` has to keep the
-  // section open.
+  // `## Pending` and `## Processed` are the sections. Heading depth decides what
+  // a heading does, in both directions:
+  //
+  //   deeper than a section (`###`)  a subdivision INSIDE it; changes nothing,
+  //                                  so `### August` under `## Processed` stays
+  //                                  released and `### Processed leftovers`
+  //                                  under `## Pending` releases nothing
+  //   at section level (`##`)        ends the previous section and opens this
+  //                                  one; released only if it is `Processed`
+  //   shallower (`#`)                outranks a section, so it ends it too — a
+  //                                  `# Backlog` after `## Processed` must not
+  //                                  inherit the released state
+  //
+  // Both failures are the same failure: a row that is still queued gets handed
+  // back to the scanner, which appends a second copy of a job already on the
+  // list. That duplication is what this function exists to prevent.
   const SECTION_LEVEL = 2;
   let inProcessed = false;
   for (const line of pipelineText.split('\n')) {
     const heading = line.match(/^(#+)\s+(.*)$/);
-    if (heading && heading[1].length === SECTION_LEVEL) {
-      inProcessed = /^processed\b/i.test(heading[2].trim());
+    if (heading && heading[1].length <= SECTION_LEVEL) {
+      inProcessed = heading[1].length === SECTION_LEVEL
+        && /^processed\b/i.test(heading[2].trim());
     }
     const url = extractPipelineUrl(line);
     if (!url) continue;
