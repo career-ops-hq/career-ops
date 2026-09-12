@@ -28,7 +28,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -61,6 +61,8 @@ register('data:text/javascript,' + encodeURIComponent(loaderSrc), pathToFileURL(
 
 const { resolveTailoredCv } = await import('../../src/lib/apply/cv.ts');
 const { sortNewestFirst } = await import('../../src/lib/apply/cv-match.mjs');
+const { findReportFile } = await import('../../src/lib/career-ops.ts');
+const { resolvePdfPaths } = await import('../../src/lib/pdf-paths.mjs');
 
 // Provision a throwaway career-ops root with an output/ dir, redirected via
 // the same CAREER_OPS_ROOT override career-ops.ts's careerOpsRoot() reads
@@ -84,6 +86,7 @@ async function withFixture(files, fn) {
   } finally {
     if (prev === undefined) delete process.env.CAREER_OPS_ROOT;
     else process.env.CAREER_OPS_ROOT = prev;
+    rmSync(root, { recursive: true, force: true });
   }
 }
 
@@ -95,6 +98,35 @@ test('resolveTailoredCv: a multi-word company does NOT match a file whose first 
     // application.
     const result = await resolveTailoredCv('Meta Platforms');
     assert.equal(result, null);
+  });
+});
+
+test('generated CV uses the linked report identity when its application number differs', async () => {
+  await withFixture([], async (outputDir) => {
+    const root = dirname(outputDir);
+    mkdirSync(join(root, 'data'));
+    mkdirSync(join(root, 'reports'));
+    writeFileSync(join(root, 'reports', '018-acme-2026-07-01.md'), '# Acme engineer\n');
+    writeFileSync(join(root, 'reports', '019-acme-2026-07-01.md'), '# Acme manager\n');
+    writeFileSync(join(root, 'data', 'applications.md'), [
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+      '|---|---|---|---|---|---|---|---|---|',
+      '| 309 | 2026-07-01 | Acme | Engineer | 4.5/5 | Evaluated | | [018](../reports/018-acme-2026-07-01.md) | |',
+      '| 310 | 2026-07-01 | Acme | Manager | 4.5/5 | Evaluated | | [019](../reports/019-acme-2026-07-01.md) | |',
+    ].join('\n'));
+
+    const first = resolvePdfPaths('309', '2026-07-26', root, findReportFile);
+    const padded = resolvePdfPaths('0309', '2026-07-26', root, findReportFile);
+    const second = resolvePdfPaths('310', '2026-07-26', root, findReportFile);
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.equal(first.paths.reportNum, '018');
+    assert.equal(second.paths.reportNum, '019');
+    assert.deepEqual(first, padded);
+    assert.notEqual(first.paths.finalPdf, second.paths.finalPdf);
+
+    writeFileSync(first.paths.finalPdf, 'stub-pdf-bytes');
+    assert.equal(await resolveTailoredCv('Acme'), first.paths.finalPdf);
   });
 });
 
