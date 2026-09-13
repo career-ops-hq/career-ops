@@ -1,0 +1,39 @@
+{
+  "resumeId": "operations-manager",
+  "targetRole": "Operations Manager",
+  "category": "operations",
+  "experienceLevel": "senior",
+  "expectedScore": [88, 98],
+  "rawText": "Christopher Vance\nOperations Manager\nChicago, IL | christopher.vance@email.com | +1 555-019-3311 | linkedin.com/in/cvance-ops\n\nPROFESSIONAL SUMMARY\nOperations Manager with 9 years of experience driving process improvement, supply chain optimization, team leadership, and cost reduction. Certified Lean Six Sigma Black Belt adept at KPI Management, vendor negotiations, and ERP system implementations. Achieved $850K in annual operational cost savings and increased team productivity by 32%.\n\nWORK EXPERIENCE\nOperations Manager | Global Logistics Corp | Chicago, IL | 2020 - Present\n- Managed daily operations for a 45,000 sq ft logistics facility and led a cross-functional team of 25 staff members.\n- Implemented Lean Six Sigma methodology across fulfillment workflows, reducing process cycle time by 40% and cutting operational expenses by $850K annually.\n- Overhauled SLA performance tracking, elevating customer order delivery SLA compliance from 91% to 99.4%.\n- Negotiated strategic vendor management contracts with 12 major freight carriers, saving 15% on logistics costs.\n- Spearheaded integration of SAP ERP software to streamline inventory management and real-time stock tracking.\n\nOperations Supervisor | Apex Manufacturing | Chicago, IL | 2015 - 2020\n- Supervised production scheduling, inventory control, and quality assurance protocols.\n- Introduced continuous process improvement initiatives that boosted overall team productivity by 32% within 12 months.\n- Reduced warehouse safety incidents to zero over a 2-year period.\n\nEDUCATION\nBachelor of Science in Industrial Engineering | Purdue University | 2011 - 2015\n\nCERTIFICATIONS & SKILLS\n- Certifications: Certified Lean Six Sigma Black Belt (LSSBB), APICS Certified in Production and Inventory Management (CPIM)\n- Core Competencies: Operations Management, Process Improvement, Lean, Six Sigma, KPI Management, Supply Chain, Vendor Management, Cost Optimization, Team Leadership, Advanced Excel, SAP ERP",
+  "jobDescriptionText": "Looking for an Operations Manager with 7-12 years experience in Operations Management, Process Improvement, Lean, Six Sigma, KPI Management, Supply Chain, Vendor Management, Cost Optimization, Team Leadership, Excel, and ERP. Proven ability to optimize SLA and reduce costs.",
+  "sections": ["summary", "experience", "education", "certifications", "skills"],
+  "skills": [
+    "Operations Management", "Process Improvement", "Lean", "Six Sigma", "KPI Management", "Supply Chain", "Vendor Management", "Cost Optimization", "Team Leadership", "Excel", "ERP"
+  ],
+  "keywords": [
+    "Operations Management", "Process Improvement", "Lean", "Six Sigma", "KPI Management", "Supply Chain", "Vendor Management", "Cost Optimization", "Team Leadership", "Excel", "ERP", "SAP"
+  ],
+  "achievementSignals": [
+    "$850K operational cost reduction",
+    "32% productivity increase",
+    "40% cycle time reduction",
+    "Managed team of 25",
+    "SLA compliance 91% to 99.4%",
+    "15% freight cost savings"
+  ],
+  "formattingSignals": {
+    "singleColumn": true,
+    "standardHeadings": true,
+    "tables": false,
+    "graphics": false,
+    "icons": false,
+    "readablePdfText": true
+  },
+  "qualitySignals": {
+    "quantifiedAchievements": true,
+    "actionVerbs": true,
+    "relevantKeywords": true,
+    "clearDates": true,
+    "careerProgression": true
+  }
+}
