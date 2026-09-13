@@ -89,13 +89,22 @@ If yes → `node update-system.mjs apply --confirm`. If no → `node update-syst
 
 ## What is career-ops
 
-AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (Claude Code, Cursor, Codex, OpenCode, Qwen, Copilot, Kimi, Antigravity CLI, Grok Build CLI). Legacy Gemini API evaluation remains via `gemini-eval.mjs`.
+AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (Claude Code, Cursor, Codex, OpenCode, Pi, Qwen, Copilot, Kimi, Antigravity CLI, Grok Build CLI). Legacy Gemini API evaluation remains via `gemini-eval.mjs`.
 
 ### Codex invocation
 
 - **Interactive:** run `codex` in the repo root; if `/career-ops` is unavailable, ask Codex to run the mode directly.
 - **Headless:** `codex exec "prompt"` for one-shot workers.
 - **Examples:** `Run career-ops scan mode`, `Run career-ops pipeline mode for data/pipeline.md`, `Run career-ops pdf mode`, `Run career-ops tracker mode`, `Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123`
+
+### Pi invocation
+
+- **Project context:** `pi` reads `AGENTS.md` from the repo root automatically; there is no wrapper file to keep in sync.
+- **Skill:** Pi discovers the shared router at `.agents/skills/career-ops/SKILL.md`, exposed as `/skill:career-ops`. If a Pi build gates project resources behind a trust decision, run `/trust` once in the repo (or start with `-a`).
+- **Interactive:** run `pi` in the repo root, then `/skill:career-ops <mode>`.
+- **Headless:** `pi -p "prompt"` for one-shot workers; `pi --mode json -p "prompt"` when the caller parses events.
+- **Examples:** `pi -p "Run career-ops tracker mode"`, `pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`
+
 
 ### Main Files
 
@@ -401,6 +410,7 @@ Headless worker command per CLI:
 |-----|---------|
 | Claude Code | `claude -p "prompt"` |
 | **OpenCode** | `opencode run "prompt"` |
+| Pi | `pi -p "prompt"` |
 | Copilot CLI | `copilot -p "prompt"` |
 | Codex | `codex exec "prompt"` |
 | Qwen | `qwen -p "prompt"` |

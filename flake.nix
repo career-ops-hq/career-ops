@@ -4,10 +4,19 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flakelight.url = "github:nix-community/flakelight";
+
+    # Pi (see docs/SUPPORTED_CLIS.md) needs its own nixpkgs: the CLI gained the
+    # `x-opencode-session` routing header OpenCode's API requires partway
+    # through its 0.8x line, and the nixpkgs this flake pins for the toolchain
+    # still carries 0.64, which the OpenCode Go endpoint rejects with
+    # "Request is missing x-opencode-session". A second input keeps Pi working
+    # without forcing a whole-nixpkgs bump (Node, Playwright browsers) on every
+    # contributor. Drop it once the pin above passes 0.85.
+    nixpkgs-pi.url = "github:NixOS/nixpkgs/nixos-unstable";
   };
 
   outputs =
-    { flakelight, nixpkgs, ... }:
+    { flakelight, nixpkgs, nixpkgs-pi, ... }:
     flakelight ./. {
 
       inputs.nixpkgs = nixpkgs;
@@ -24,10 +33,19 @@
       ];
 
       devShell.packages =
-        pkgs: with pkgs; [
+        pkgs:
+        with pkgs; [
 
           nodejs
           bun
+
+          # Pi coding agent host (docs/SUPPORTED_CLIS.md), in the shell so the
+          # integration runs without a global npm install:
+          #   pi            interactive
+          #   pi -p "…"     headless worker
+          # Taken from `nixpkgs-pi` (see the input comment): the toolchain pin
+          # carries 0.64, which the OpenCode Go endpoint rejects.
+          nixpkgs-pi.legacyPackages.${pkgs.stdenv.hostPlatform.system}.pi-coding-agent
 
           coreutils
 
