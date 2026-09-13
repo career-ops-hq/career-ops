@@ -36,6 +36,15 @@ if (stripMarkup('shipped **738** commits to env_keys.json') === 'shipped 738 com
   fail(`stripMarkup mangled an identifier: ${JSON.stringify(stripMarkup('shipped **738** commits to env_keys.json'))}`);
 }
 
+// A lone asterisk is not an emphasis delimiter: `2*` (a footnote/section marker)
+// must survive the strip. Collapsing it to `2` would mint a false `2 <noun>`
+// metric the source never asserted, weakening the gate the other way (#4085).
+if (stripMarkup('see note 2* below') === 'see note 2* below') {
+  pass('leaves a lone asterisk (2*) intact, so no false metric is minted');
+} else {
+  fail(`stripMarkup collapsed a lone asterisk: ${JSON.stringify(stripMarkup('see note 2* below'))}`);
+}
+
 // End to end: a CV that quotes a bolded metric from cv.md now clears the gate.
 const tmp = mkdtempSync(join(tmpdir(), 'career-ops-emphasis-facts-'));
 try {

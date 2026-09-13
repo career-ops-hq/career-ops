@@ -238,8 +238,12 @@ export function stripMarkup(text, { keepLineBreaks = false } = {}) {
     // reads as a claim and a truthful CV quoting cv.md is blocked as invented.
     // Run this AFTER the LaTeX pass above, which relies on `\cmd*`. Only
     // asterisks: underscores carry meaning here (snake_case, env-keys.json, file
-    // paths), and the markdown bold in these sources is asterisk-based.
-    .replace(/\*+/g, '')
+    // paths), and the markdown bold in these sources is asterisk-based. Strip
+    // only PAIRED emphasis, never a lone asterisk: a `2*` footnote marker must
+    // stay `2*`, not collapse to the false metric `2`. Bold before italic so the
+    // italic pass does not split a `**...**` run.
+    .replace(/\*\*([^\n]+?)\*\*/g, '$1')
+    .replace(/\*([^\n*]+?)\*/g, '$1')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     // keepLineBreaks preserves a newline as a CLAUSE boundary for the plan-horizon
