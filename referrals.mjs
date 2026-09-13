@@ -515,14 +515,34 @@ export function askApproach(w) {
 const RECRUITER_RE = /\b(recruit(?:er|ers|ing|ment)?|talent|sourc(?:er|ing)|headhunt(?:er|ing)?|staffing|hr business partner|people partner)\b/i;
 const HIRING_SIDE_RE = /\b(head|director|vp|svp|evp|vice president|chief|cto|ceo|coo|cio|founder|co-?founder|managing director|manager|lead|principal|partner)\b/i;
 const AGENCY_RE = /\b(recruit\w*|staffing|talent|search|headhunt\w*|resourcing|placement)\b/i;
+// Deliberately narrow. Seniority words (Vice President, Director, Principal)
+// appear on in-house bank recruiters too, so they are not an agency signal.
+const AGENCY_TITLE_RE = /\b(consultant|headhunt\w*|executive recruiter|executive search)\b/i;
 
 /**
- * Likely recruiting agency: agency words in the name, or recruiters make up at
- * least half of the (3+) people you know there.
+ * Likely recruiting agency, from the company name and the recruiters you know
+ * there (`recruiterTitles`) out of everyone you know there (`everyone`):
+ *
+ *   1. agency words in the name ("... Staffing", "... Search"), or
+ *   2. 3+ recruiters who are a strict majority of the people you know there, or
+ *   3. 3+ recruiters who are at least 25% of them, at least half with
+ *      agency-style titles ("Recruitment Consultant", "Headhunter").
+ *
+ * Calibrated on a 29k-connection export: rule 2 alone misses agencies where you
+ * also know account managers (a 20-recruiter agency at 29%), and a plain
+ * ">= half" flags small in-house teams (4 of 8 people at a quant fund, all
+ * "Talent Acquisition"). Rule 3 separates those two by title. "Likely" is the
+ * honest label: a small firm where you happen to know mostly recruiters can
+ * still trip rule 2.
  */
-export function isLikelyAgency(company, recruiters, everyone) {
+export function isLikelyAgency(company, recruiterTitles, everyone) {
   if (AGENCY_RE.test(String(company || ''))) return true;
-  return recruiters >= 3 && recruiters / Math.max(everyone, 1) >= 0.5;
+  const recruiters = recruiterTitles.length;
+  if (recruiters < 3) return false;
+  const share = recruiters / Math.max(everyone, recruiters);
+  if (share > 0.5) return true;
+  const agencyTitles = recruiterTitles.filter(t => AGENCY_TITLE_RE.test(String(t || ''))).length;
+  return share >= 0.25 && agencyTitles / recruiters >= 0.5;
 }
 
 /** recruiter | hiring-side (manager/lead-level) | peer, from the title alone. */
@@ -660,7 +680,11 @@ function loadExport(dir) {
  *   Meta: [Facebook]
  */
 export function parseAliases(text) {
-  if (!text) return { groups: [], error: null };
+  // No content lines (absent, empty, or only comments, like the commented-out
+  // starter file) means no aliases. js-yaml 5 throws "expected a document" on
+  // such input, which would otherwise surface as a false parse error.
+  const hasContent = String(text || '').split(/\r?\n/).some(l => l.trim() && !l.trim().startsWith('#'));
+  if (!hasContent) return { groups: [], error: null };
   let doc;
   try {
     doc = yaml.load(text);
@@ -974,9 +998,8 @@ function recruitersAnswer(ctx, opts) {
     pool = pool.filter(h => keys.has(h.person.key));
   }
   // Agencies are often named after a founder ("Jane Smith Associates"), so the
-  // name alone misses them. The shape of your network is the second signal: at a
-  // company where most of the people you know are recruiters, the company IS the
-  // recruiting business.
+  // name alone misses them. The shape of your network and the recruiters' titles
+  // are the other signals (see isLikelyAgency).
   const everyoneAt = new Map();
   for (const p of ctx.people) {
     const k = p.tokens.key || p.company;
@@ -989,7 +1012,7 @@ function recruitersAnswer(ctx, opts) {
     groups.get(k).hits.push(h);
   }
   for (const g of groups.values()) {
-    g.likelyAgency = isLikelyAgency(g.company, g.hits.length, everyoneAt.get(g.key) || g.hits.length);
+    g.likelyAgency = isLikelyAgency(g.company, g.hits.map(h => h.person.title), everyoneAt.get(g.key) || g.hits.length);
   }
   const list = [...groups.values()]
     .map(g => ({ ...g, hits: g.hits.sort((a, b) => b.person.warmth.score - a.person.warmth.score) }))
@@ -1155,7 +1178,7 @@ function renderSummary(result) {
     }
     case 'recruiters': {
       out.push(`Recruiters and talent people${result.company ? ` at "${result.company}"` : ''}`);
-      out.push(`  ${plural(result.recruiters, 'person', 'people')} across ${plural(result.companies, 'company', 'companies')} (${result.likelyAgencies} likely agencies)`, '');
+      out.push(`  ${plural(result.recruiters, 'person', 'people')} across ${plural(result.companies, 'company', 'companies')} (${plural(result.likelyAgencies, 'likely agency', 'likely agencies')})`, '');
       if (!result.recruiters) out.push('  None found.');
       for (const g of result.groups) {
         out.push(`  ${g.company}${g.likelyAgency ? '  (likely agency)' : ''} - ${g.count}`);
@@ -1421,6 +1444,9 @@ function selfTest() {
   check('aliases parsed', groups.length === 1 && groups[0].length === 3);
   check('alias list form parsed', parseAliases('- [Meta, Facebook]\n').groups[0][1] === 'Facebook');
   check('bad alias YAML reported, not thrown', parseAliases('a: [b').error !== null);
+  const commented = parseAliases('# Examples (uncomment and edit):\n# Meta: [Facebook]\n\n');
+  check('comment-only alias file is empty, not an error', commented.groups.length === 0 && commented.error === null);
+  check('blank alias file is empty, not an error', parseAliases('\n\n').error === null);
   const acme = matchPeople(built.people, 'Acme Trading');
   check('company match ranks by warmth', acme.length === 4 && acme[0].person.name === 'Ada Close');
   check('LLC suffix is a strong match', acme.some(h => h.person.name === 'Bo Dormant' && h.match === 'strong'));
@@ -1434,8 +1460,16 @@ function selfTest() {
   check('staff engineer is a peer', categorize('Staff Engineer') === 'peer');
   check('role tokens fold synonyms and drop seniority', [...roleTokens('Senior Quant Developer')].join(',') === 'quantitative,engineer');
 
-  check('agency by name', isLikelyAgency('Northwind Staffing', 1, 1));
-  check('agency by network shape', isLikelyAgency('Jane Smith Associates', 4, 6) && !isLikelyAgency('Acme Trading', 1, 4));
+  const inHouse = ['Talent Acquisition Specialist', 'Senior Talent Acquisition', 'Technical Recruiter', 'Campus Recruiter'];
+  const agencyStaff = (n) => Array.from({ length: n }, (_, i) => (i % 2 ? 'Recruitment Consultant' : 'Senior Recruitment Consultant'));
+  check('agency by name', isLikelyAgency('Northwind Staffing', ['Recruiter'], 1));
+  check('agency: recruiters are a strict majority', isLikelyAgency('Jane Smith Associates', inHouse, 6));
+  check('not agency: in-house team at exactly half', !isLikelyAgency('Quant Fund', inHouse, 8));
+  check('agency: minority, but consultant titles', isLikelyAgency('Smith Jennings', agencyStaff(20), 70));
+  check('not agency: same share, in-house titles', !isLikelyAgency('Big Prop Firm', Array(20).fill('Technical Recruiter'), 70));
+  check('not agency: under 25% even with consultant titles', !isLikelyAgency('Big Bank', agencyStaff(6), 74));
+  check('not agency: fewer than 3 recruiters', !isLikelyAgency('Acme Trading', ['Recruiter', 'Recruiter'], 2));
+  check('seniority words are not an agency signal', !isLikelyAgency('Bank', Array(4).fill('Vice President - Recruiter'), 12));
 
   // role: tier outranks title relevance. Cy's title matches the role better,
   // but Ada is close and Cy is cold.
