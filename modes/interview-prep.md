@@ -43,7 +43,7 @@ The inputs above are report-first, but a common path skips evaluation entirely: 
 
 **Trigger — both conditions required:**
 
-1. The user **explicitly asks to prep** and provides a JD URL (e.g. "prep me for this", "interview prep: <URL>", `/career-ops interview-prep <URL>`). A pasted URL alone is NOT enough — per AGENTS.md, a bare URL routes to `auto-pipeline`, not here.
+1. The user **explicitly asks to prep** and provides a JD URL (e.g. "prep me for this", "interview prep: <URL>", `/career-ops interview-prep <URL>`). A pasted URL alone is NOT enough — per AGENTS.md, a bare URL without a requested task or established preference needs an intent clarification before selecting a mode.
 2. **No matching report exists** in `reports/` for that company+role. If a report DOES exist, ignore the URL fetch and use the report — the report stays authoritative.
 
 **Fetch ladder** — same as `modes/oferta.md` and the AGENTS.md Offer Verification rule; JD fetching follows the same ladder:

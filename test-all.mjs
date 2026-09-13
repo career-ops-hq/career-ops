@@ -6307,7 +6307,8 @@ if (
 }
 
 const criticalRoutingContracts = [
-  ['paste-a-JD auto-pipeline', /Pastes JD or URL\s*\|\s*auto-pipeline/],
+  ['explicit full-pipeline request', /Requests the full pipeline for a JD or URL\s*\|\s*auto-pipeline/],
+  ['bare posting intent', /Pastes JD or URL\s*\|\s*Honor the requested task or an established user preference/],
   ['PDF mode', /generate CV\/PDF\s*\|\s*`pdf`/i],
   ['language modes_dir override', /language\.modes_dir:\s*modes\/(?:\{lang\}|de)/],
   ['doctor --json onboarding', /node doctor\.mjs --json/],
@@ -17153,7 +17154,7 @@ console.log('\n59c. The exported script budget matches the one run() enforces');
 
 // ── 61. INTERVIEW-PREP URL ENTRY (#1816) ────────────────────────
 // Prompt-level slice: prep for a role that was never evaluated. Pins the
-// disambiguation rule (bare URL still routes to auto-pipeline), the
+// disambiguation rule (bare URL requires task intent), the
 // report-stays-authoritative rule, the oferta fetch ladder, and the
 // read-only-on-the-pipeline scope guard.
 
@@ -17172,11 +17173,11 @@ try {
 
   if (
     prepFlat.includes('If a report DOES exist, ignore the URL fetch and use the report — the report stays authoritative') &&
-    prepFlat.includes('a bare URL routes to `auto-pipeline`, not here')
+    prepFlat.includes('a bare URL without a requested task or established preference needs an intent clarification before selecting a mode')
   ) {
-    pass('interview-prep URL entry: report stays authoritative, bare URL still routes to auto-pipeline');
+    pass('interview-prep URL entry: report stays authoritative, bare URL requires task intent');
   } else {
-    fail('interview-prep URL entry missing the report-stays-authoritative rule or the auto-pipeline disambiguation rule');
+    fail('interview-prep URL entry missing the report-stays-authoritative rule or the task-intent disambiguation rule');
   }
 
   if (

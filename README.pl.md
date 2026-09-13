@@ -136,7 +136,7 @@ career-ops to jedna komenda slash z wieloma trybami:
 
 ```text
 /career-ops                    → Pokaż wszystkie dostępne komendy
-/career-ops {wklej ofertę}     → Pełny auto-pipeline (ocena + PDF + tracker)
+/career-ops auto-pipeline {wklej ofertę}     → Pełny auto-pipeline (ocena + PDF + tracker)
 /career-ops scan               → Skanuj portale w poszukiwaniu nowych ofert
 /career-ops pdf                → Generuj CV zoptymalizowane pod ATS
 /career-ops batch              → Wsadowa ocena wielu ofert
