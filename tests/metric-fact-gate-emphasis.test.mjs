@@ -37,12 +37,15 @@ if (stripMarkup('shipped **738** commits to env_keys.json') === 'shipped 738 com
 }
 
 // A lone asterisk is not an emphasis delimiter: `2*` (a footnote/section marker)
-// must survive the strip. Collapsing it to `2` would mint a false `2 <noun>`
-// metric the source never asserted, weakening the gate the other way (#4085).
-if (stripMarkup('see note 2* below') === 'see note 2* below') {
-  pass('leaves a lone asterisk (2*) intact, so no false metric is minted');
-} else {
-  fail(`stripMarkup collapsed a lone asterisk: ${JSON.stringify(stripMarkup('see note 2* below'))}`);
+// must survive the strip, and two of them on one line must not pair with each
+// other. Collapsing either would mint a false `2 <noun>` metric the source never
+// asserted, weakening the gate the other way (#4085).
+for (const lone of ['see note 2* below', 'shipped 2* tests 3* commits']) {
+  if (stripMarkup(lone) === lone) {
+    pass(`leaves lone asterisks intact: ${JSON.stringify(lone)}`);
+  } else {
+    fail(`stripMarkup collapsed a lone asterisk: ${JSON.stringify(lone)} -> ${JSON.stringify(stripMarkup(lone))}`);
+  }
 }
 
 // End to end: a CV that quotes a bolded metric from cv.md now clears the gate.

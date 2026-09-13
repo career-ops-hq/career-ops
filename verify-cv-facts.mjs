@@ -239,11 +239,13 @@ export function stripMarkup(text, { keepLineBreaks = false } = {}) {
     // Run this AFTER the LaTeX pass above, which relies on `\cmd*`. Only
     // asterisks: underscores carry meaning here (snake_case, env-keys.json, file
     // paths), and the markdown bold in these sources is asterisk-based. Strip
-    // only PAIRED emphasis, never a lone asterisk: a `2*` footnote marker must
-    // stay `2*`, not collapse to the false metric `2`. Bold before italic so the
-    // italic pass does not split a `**...**` run.
-    .replace(/\*\*([^\n]+?)\*\*/g, '$1')
-    .replace(/\*([^\n*]+?)\*/g, '$1')
+    // only emphasis whose delimiters hug non-space (as markdown requires), never
+    // a lone asterisk: `2*` footnote markers must survive, and two of them on one
+    // line (`2* tests 3* commits`) must not pair with each other into a false
+    // metric. Requiring the content to start and end non-space rules both out.
+    // Bold before italic so the italic pass does not split a `**...**` run.
+    .replace(/\*\*(\S(?:.*?\S)?)\*\*/g, '$1')
+    .replace(/\*(\S(?:[^\n*]*\S)?)\*/g, '$1')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     // keepLineBreaks preserves a newline as a CLAUSE boundary for the plan-horizon
