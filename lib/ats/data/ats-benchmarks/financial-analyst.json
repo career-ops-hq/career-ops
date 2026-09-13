@@ -1,0 +1,37 @@
+{
+  "resumeId": "financial-analyst",
+  "targetRole": "Financial Analyst",
+  "category": "finance",
+  "experienceLevel": "mid-senior",
+  "expectedScore": [88, 98],
+  "rawText": "David Sterling\nFinancial Analyst\nNew York, NY | david.sterling@email.com | +1 555-012-7788 | linkedin.com/in/davidsterling-finance\n\nSUMMARY\nDetail-oriented Financial Analyst with 4 years of experience in corporate FP&A, financial modeling, budgeting, and variance analysis. Skilled in Excel, SQL, and Power BI with a proven track record of identifying $1.2M+ in cost savings and improving forecast accuracy.\n\nWORK EXPERIENCE\nFinancial Analyst | Vertex Financial Group | New York, NY | 2021 - Present\n- Built dynamic financial models in Excel and SQL to evaluate annual $45M operating budgets and multi-year revenue projections.\n- Automated monthly FP&A reporting dashboards using Power BI and SQL, saving 20 hours of manual data entry per month.\n- Conducted variance analysis against quarterly forecasts, identifying operational inefficiencies that led to $1.2M in annual cost savings.\n- Prepared executive financial statement packages and revenue analysis decks for C-suite decision-making.\n\nJunior Financial Analyst | Capital Partners LLC | New York, NY | 2019 - 2021\n- Performed financial modeling, discounted cash flow (DCF) valuation, and scenario analysis for prospective investments.\n- Improved financial forecasting accuracy from 82% to 94% by integrating historical sales data and trend indicators.\n- Managed quarterly expense reconciliation across 8 business departments.\n\nEDUCATION\nBachelor of Business Administration in Finance | New York University (NYU Stern) | 2015 - 2019\n- Cum Laude, Finance Society Vice President\n\nTECHNICAL SKILLS\n- Financial Analysis: Financial Modeling, Forecasting, Budgeting, Variance Analysis, FP&A, Financial Statements, Revenue Analysis\n- Tools & Software: Advanced Excel (VBA, Macros, PivotTables), SQL, Power BI, Tableau, SAP ERP, Bloomberg Terminal",
+  "jobDescriptionText": "Seeking a Financial Analyst with 3-5 years experience in Financial Modeling, FP&A, Forecasting, Budgeting, and Variance Analysis. Proficiency in Excel, SQL, Power BI, and Financial Statements required.",
+  "sections": ["summary", "experience", "education", "skills"],
+  "skills": [
+    "Financial Modeling", "Excel", "SQL", "Power BI", "Forecasting", "Budgeting", "Variance Analysis", "Financial Statements", "Revenue Analysis", "FP&A"
+  ],
+  "keywords": [
+    "Financial Modeling", "Excel", "SQL", "Power BI", "Forecasting", "Budgeting", "Variance Analysis", "Financial Statements", "Revenue Analysis", "FP&A", "VBA"
+  ],
+  "achievementSignals": [
+    "$1.2M cost savings",
+    "20 hours/month automated reporting",
+    "Forecast accuracy 82% to 94%",
+    "$45M operating budget managed"
+  ],
+  "formattingSignals": {
+    "singleColumn": true,
+    "standardHeadings": true,
+    "tables": false,
+    "graphics": false,
+    "icons": false,
+    "readablePdfText": true
+  },
+  "qualitySignals": {
+    "quantifiedAchievements": true,
+    "actionVerbs": true,
+    "relevantKeywords": true,
+    "clearDates": true,
+    "careerProgression": true
+  }
+}

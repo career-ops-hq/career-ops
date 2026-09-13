@@ -1,0 +1,38 @@
+{
+  "resumeId": "marketing-manager",
+  "targetRole": "Digital Marketing Manager",
+  "category": "marketing",
+  "experienceLevel": "mid-senior",
+  "expectedScore": [88, 98],
+  "rawText": "Samantha Hayes\nDigital Marketing Manager\nChicago, IL | samantha.hayes@email.com | +1 555-018-4432 | linkedin.com/in/samanthahayes-mktg\n\nPROFESSIONAL SUMMARY\nData-driven Digital Marketing Manager with 6 years of experience scaling customer acquisition, search engine optimization (SEO), paid advertising, and marketing automation. Track record of driving 120%+ organic traffic growth, optimizing ROAS, and generating over $2.4M in pipeline revenue.\n\nWORK EXPERIENCE\nDigital Marketing Manager | GrowthPulse Media | Chicago, IL | 2021 - Present\n- Managed a $1.5M annual ad spend across Google Ads and Meta Ads, achieving a 4.5x ROAS (up from 2.8x).\n- Spearheaded enterprise SEO and Content Marketing strategy, increasing organic website traffic by 120% year-over-year.\n- Optimized conversion funnel through rigorous A/B testing and GA4 web analytics, driving a 35% increase in conversion rates.\n- Implemented Hubspot CRM marketing automation workflows, reducing Customer Acquisition Cost (CAC) by 22%.\n\nPerformance Marketing Specialist | Nexa Digital | Chicago, IL | 2018 - 2021\n- Executed targeted SEM campaigns, email marketing drip series, and lead generation programs.\n- Analyzed user behavior using Google Analytics to refine landing page design, boosting organic lead sign-ups by 45%.\n- Managed email newsletter campaigns for 250,000+ subscribers with a 28% open rate and 4.2% CTR.\n\nEDUCATION\nBachelor of Science in Marketing | Northwestern University | 2014 - 2018\n\nSKILLS & COMPETENCIES\n- Digital Marketing: SEO, SEM, Google Ads, Meta Ads, Content Marketing, Email Marketing\n- Analytics & Optimization: Google Analytics, GA4, Conversion Rate Optimization (CRO), A/B Testing\n- Tools & CRM: HubSpot, Salesforce CRM, Marketing Automation, Mailchimp, WordPress, Semrush",
+  "jobDescriptionText": "Seeking a Digital Marketing Manager with 5+ years experience in SEO, SEM, Google Ads, Meta Ads, and GA4 analytics. Responsible for content marketing, email marketing, and conversion rate optimization (CRO) to lower CAC and scale ROAS.",
+  "sections": ["summary", "experience", "education", "skills"],
+  "skills": [
+    "SEO", "SEM", "Google Ads", "Meta Ads", "Google Analytics", "GA4", "Content Marketing", "Email Marketing", "Conversion Rate Optimization", "CRM", "Marketing Automation"
+  ],
+  "keywords": [
+    "SEO", "SEM", "Google Ads", "Meta Ads", "GA4", "Google Analytics", "Content Marketing", "Email Marketing", "CRO", "CRM", "Marketing Automation", "HubSpot"
+  ],
+  "achievementSignals": [
+    "4.5x ROAS achieved",
+    "120% organic traffic growth",
+    "35% conversion rate increase",
+    "22% CAC reduction",
+    "$2.4M pipeline revenue"
+  ],
+  "formattingSignals": {
+    "singleColumn": true,
+    "standardHeadings": true,
+    "tables": false,
+    "graphics": false,
+    "icons": false,
+    "readablePdfText": true
+  },
+  "qualitySignals": {
+    "quantifiedAchievements": true,
+    "actionVerbs": true,
+    "relevantKeywords": true,
+    "clearDates": true,
+    "careerProgression": true
+  }
+}

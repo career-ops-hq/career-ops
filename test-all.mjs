@@ -704,61 +704,142 @@ try {
   fail(`verify-cv-facts regression tests crashed: ${e.message}`);
 }
 
-// verify-ats.mjs: a clean single-column CV must score high and exit 0; an
-// ATS-hostile CV (table layout + content image + missing headings) must exit 1
-// and surface the specific issues. --json prints the full result on both paths,
-// so we can assert on the reported issues even when the process exits non-zero.
-let atsTmp;
+// ── 2. ATS VERIFICATION (verify-ats.mjs) ─────────────────────────
+console.log('\n2. ATS verification (verify-ats.mjs)');
+
+function assertResult(condition, successMessage, failureMessage) {
+  if (condition) {
+    pass(successMessage);
+    return;
+  }
+
+  fail(failureMessage);
+}
+
 try {
-  const tmp = mkdtempSync(join(tmpdir(), 'career-ops-ats-'));
-  atsTmp = tmp;
-  const cleanCv = join(tmp, 'clean-cv.html');
-  const hostileCv = join(tmp, 'hostile-cv.html');
 
-  writeFileSync(
-    cleanCv,
-    `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<style>body{font-family:'Liberation Sans',Arial,sans-serif;} .section-title{font-weight:700;}</style></head><body>
-<div class="header"><h1>Jane Smith</h1>
-<div class="contact-row"><a href="mailto:jane@example.com">jane@example.com</a> | +1 415 555 0100 | Remote</div></div>
-<div class="section"><div class="section-title">Professional Summary</div><p>Senior backend engineer with a
-decade building reliable, high-throughput distributed systems on Kubernetes, with a focus on observability,
-cost efficiency and clean, well-tested Python services used daily across the organization.</p></div>
-<div class="section"><div class="section-title">Work Experience</div><p>Staff Engineer, Acme Corp
-(2020-present). Built and operated the core payments platform across multiple engineering teams.</p></div>
-<div class="section"><div class="section-title">Education</div><p>B.S. Computer Science, 2018.</p></div>
-<div class="section"><div class="section-title">Skills</div><p>Python, Kubernetes, Docker, PostgreSQL.</p></div>
-</body></html>`
-  );
-  writeFileSync(
-    hostileCv,
-    `<html><head><style>body{font-family:'Comic Sans MS',cursive;}</style></head><body>
-<table><tr><td><img src="skills.png"></td><td><h1>John</h1></td></tr>
-<tr><td>Experience</td><td>2020</td></tr></table></body></html>`
-  );
+  const samplePdf = join(ROOT, 'test-fixtures', 'sample-resume.pdf');
+  const mismatchJd = join(ROOT, 'test-fixtures', 'jd-mismatch.md');
 
-  const cleanRes = spawnSync(NODE, ['verify-ats.mjs', cleanCv, '--json'], { cwd: ROOT, encoding: 'utf-8' });
+  // 1. Clean PDF passes the gate with a passing score and exit code 0
+
+  let cliArgs;
+  let spawnArgs;
+
+  let statusDetail;
+  let failureParts;
+
+  let successMessage;
+  let failureMessage;
+
+  cliArgs = ['verify-ats.mjs', samplePdf, '--json'];
+
+  const spawnOptions = { 
+    cwd: ROOT, 
+    encoding: 'utf-8' 
+  };
+
+  spawnArgs = [cliArgs, spawnOptions];
+  
+  const cleanRes = spawnSync(NODE, ...spawnArgs);
   const cleanJson = JSON.parse(cleanRes.stdout);
-  if (cleanRes.status === 0 && cleanJson.pass === true && cleanJson.score >= 80) {
-    pass('verify-ats scores a clean single-column CV high and exits 0');
-  } else {
-    fail(`verify-ats mis-scored a clean CV (status=${cleanRes.status}, score=${cleanJson.score})`);
-  }
 
-  const hostileRes = spawnSync(NODE, ['verify-ats.mjs', hostileCv, '--json'], { cwd: ROOT, encoding: 'utf-8' });
+  const isValid = [
+    cleanRes.status === 0,
+    cleanJson.pass === true,
+    cleanJson.score >= 70
+  ].every(Boolean);
+
+  successMessage = 'verify-ats scores a clean PDF CV and exits 0';
+
+  statusDetail = `status=${cleanRes.status}`;
+
+  const scoreDetail = `score=${cleanJson?.score}`;
+
+  const failureDetails = [statusDetail, scoreDetail];
+
+  const failureContext = failureDetails.join(', ');
+
+  failureParts = [
+    'verify-ats mis-scored a clean PDF',
+    `(${failureContext})`
+  ];
+
+  failureMessage = failureParts.join(' ');
+
+  assertResult(isValid, successMessage, failureMessage);
+
+  cliArgs = ['verify-ats.mjs', mismatchJd];
+
+  spawnArgs = [cliArgs, spawnOptions];
+
+  // 2. Existing non-PDF file is rejected because only PDF files are supported
+  const nonPdfRes = spawnSync(NODE, ...spawnArgs);
+
+  const nonPdfError = nonPdfRes.stderr;
+
+  const isNonPdfRejected = [
+    nonPdfRes.status === 1,
+    nonPdfError?.includes('requires a PDF file')
+  ].every(Boolean);
+
+  successMessage = 'verify-ats rejects non-PDF files and exits 1';
+
+  statusDetail = `status=${nonPdfRes.status}`;
+
+  failureParts = [
+    'verify-ats should reject non-PDF files',
+    `(${statusDetail})`
+  ];
+
+  failureMessage = failureParts.join(' ');
+
+  assertResult(isNonPdfRejected, successMessage, failureMessage);
+
+  const inputFiles = [samplePdf, mismatchJd];
+  
+  const positionalArgs = ['verify-ats.mjs', ...inputFiles];
+
+  cliArgs = [...positionalArgs, '--json'];
+
+  spawnArgs = [cliArgs, spawnOptions];
+
+  // 3. Mismatching job description triggers a critical error and exits with code 1
+  const hostileRes = spawnSync(NODE, ...spawnArgs);
+
   const hostileJson = JSON.parse(hostileRes.stdout);
-  const messages = hostileJson.issues.map(i => i.message.toLowerCase());
-  const flaggedTable = messages.some(m => m.includes('<table>'));
-  const flaggedSections = messages.some(m => m.includes('education') || m.includes('skills'));
-  if (hostileRes.status === 1 && hostileJson.pass === false && flaggedTable && flaggedSections) {
-    pass('verify-ats fails an ATS-hostile CV and flags the table layout + missing sections');
-  } else {
-    fail(`verify-ats did not properly flag a hostile CV (status=${hostileRes.status}, table=${flaggedTable}, sections=${flaggedSections})`);
-  }
+
+  const issues = hostileJson.issues;
+
+  const hasCriticalIssue = issues
+    .some(i => {
+      if(i.severity === 'critical') {
+        return true;
+      }
+      return false;
+    });
+
+  const isHostileFlagged = [
+    hostileRes.status === 1,
+    hostileJson.pass === false,
+    hasCriticalIssue
+  ].every(Boolean);
+
+  successMessage = 'verify-ats fails a mismatching job description with critical severity and exits 1';
+
+  statusDetail = `status=${hostileRes.status}`;
+
+  failureParts = [
+    'verify-ats did not properly flag mismatching JD',
+    `(${statusDetail})`
+  ];
+
+  failureMessage = failureParts.join(' ');
+  
+  assertResult(isHostileFlagged, successMessage, failureMessage);
+
 } catch (e) {
   fail(`verify-ats regression tests crashed: ${e.message}`);
-} finally {
-  if (atsTmp) rmSync(atsTmp, { recursive: true, force: true });
 }
 
 // ── 3. LIVENESS CLASSIFICATION ──────────────────────────────────

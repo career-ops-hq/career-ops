@@ -1,0 +1,40 @@
+{
+  "resumeId": "software-engineer",
+  "targetRole": "Senior Software Engineer",
+  "category": "technology",
+  "experienceLevel": "senior",
+  "expectedScore": [90, 100],
+  "rawText": "Alex Mercer\nSenior Software Engineer\nSan Francisco, CA | alex.mercer@email.com | +1 555-019-2834 | linkedin.com/in/alexmercer-dev | github.com/alexmercer\n\nPROFESSIONAL SUMMARY\nResults-driven Senior Software Engineer with over 8 years of experience building scalable backend microservices, high-throughput REST APIs, and cloud-native web applications. Proven track record in optimizing database queries, reducing service latency, and leading cross-functional engineering teams in fast-paced Agile environments.\n\nWORK EXPERIENCE\nSenior Software Engineer | CloudTech Solutions | San Francisco, CA | 2021 - Present\n- Architected and deployed high-throughput microservices using Node.js, TypeScript, and Docker on AWS EKS, supporting over 10M daily active users.\n- Reduced API response times by 45% by implementing Redis multi-level caching and optimizing complex PostgreSQL queries.\n- Led a team of 6 engineers to migrate monolithic backend architecture into event-driven microservices, improving system uptime from 99.2% to 99.99%.\n- Streamlined CI/CD deployment pipelines using GitHub Actions and Kubernetes, cutting deployment cycle times by 60%.\n\nSoftware Engineer | DataScale Systems | San Jose, CA | 2017 - 2021\n- Developed scalable web applications using Java, Spring Boot, and React, increasing platform user engagement by 35%.\n- Integrated RESTful APIs with third-party payment gateways and authentication systems, handling $15M+ in annual transactions.\n- Refactored legacy codebase and automated unit and end-to-end testing, boosting test coverage from 45% to 92%.\n- Partnered with Product and Design teams to deliver 12 major features ahead of quarterly schedule.\n\nEDUCATION\nBachelor of Science in Computer Science | University of California, Berkeley | 2013 - 2017\n- Magna Cum Laude, GPA: 3.85/4.0\n\nTECHNICAL SKILLS\n- Languages: JavaScript, TypeScript, Python, Java, SQL, HTML5, CSS3\n- Frameworks & Libraries: React, Node.js, Express, Spring Boot, Next.js\n- Infrastructure & Tools: AWS, Docker, Kubernetes, PostgreSQL, Redis, REST APIs, Microservices, CI/CD, Git\n- Methodologies: Agile, Scrum, System Architecture, Test-Driven Development (TDD)\n\nCERTIFICATIONS\n- AWS Certified Solutions Architect – Associate (2023)\n- Certified Kubernetes Application Developer (CKAD) (2022)",
+  "jobDescriptionText": "We are seeking a Senior Software Engineer to lead the design and implementation of cloud-native microservices. Requirements:\n- 7+ years software engineering experience with Node.js, TypeScript, or Java.\n- Strong expertise in REST APIs, PostgreSQL, Redis, and database performance tuning.\n- Hands-on experience with cloud platforms (AWS), containerization (Docker, Kubernetes), and CI/CD pipelines.\n- Experience working in Agile teams, driving architectural decisions, and mentoring junior engineers.",
+  "sections": ["summary", "experience", "education", "skills", "certifications"],
+  "skills": [
+    "Java", "Python", "JavaScript", "TypeScript", "React", "Node.js", "AWS", "Docker", "Kubernetes", "PostgreSQL", "REST APIs", "Microservices", "CI/CD", "Git"
+  ],
+  "keywords": [
+    "Node.js", "TypeScript", "Java", "React", "PostgreSQL", "Redis", "AWS", "Docker", "Kubernetes", "REST APIs", "Microservices", "CI/CD", "Agile", "System Architecture"
+  ],
+  "achievementSignals": [
+    "10M daily active users",
+    "45% response time reduction",
+    "99.99% uptime",
+    "60% deployment cycle reduction",
+    "35% user engagement increase",
+    "$15M+ annual transactions",
+    "92% test coverage"
+  ],
+  "formattingSignals": {
+    "singleColumn": true,
+    "standardHeadings": true,
+    "tables": false,
+    "graphics": false,
+    "icons": false,
+    "readablePdfText": true
+  },
+  "qualitySignals": {
+    "quantifiedAchievements": true,
+    "actionVerbs": true,
+    "relevantKeywords": true,
+    "clearDates": true,
+    "careerProgression": true
+  }
+}
