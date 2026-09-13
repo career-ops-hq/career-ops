@@ -168,3 +168,5 @@ public commit with a stated reason.
 - @E-Lucid-At0r | Ashwin Ravikumar | 2026-09-09 | id:95267475 | src:https://github.com/career-ops-hq/career-ops/discussions/4044 | n:120
 - @7datawin-arch | 2026-09-10 | id:292077187 | src:https://github.com/career-ops-hq/career-ops/discussions/4061 | n:121
 - @colincomstock | Colin Comstock | 2026-09-10 | id:95597475 | src:https://github.com/career-ops-hq/career-ops/discussions/4063 | n:122
+- @ddroid | Ahmad Munir | 2026-09-13 | id:142005659 | src:https://github.com/career-ops-hq/career-ops/discussions/4140 | n:123
+- @ttiimmothy | Timothy | 2026-09-13 | "Thanks for oss" | id:80472344 | src:https://github.com/career-ops-hq/career-ops/discussions/4141 | n:124

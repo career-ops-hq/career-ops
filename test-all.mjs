@@ -365,7 +365,23 @@ const scripts = [
   { name: 'invite-match.mjs --self-test', expectExit: 0 },
   { name: 'tracker-sync-check.mjs --self-test', expectExit: 0 },
   { name: 'updater-migration-tests.mjs', expectExit: 0 },
-  { name: 'tracker-columns-tests.mjs', expectExit: 0 },
+  // The second outlier, on the same grounds as tracker-writer-lock-tests.mjs
+  // below and measured the same way. It spawns five node subprocesses
+  // (merge-tracker, verify-pipeline) against throwaway mkdtempSync trees, and
+  // that cost is the behaviour under test rather than slack to be trimmed.
+  //
+  // Measured on windows-latest across six green runs: 10.9s, 11.7s, 11.9s,
+  // 12.0s, 12.4s, 13.8s, which makes it the SLOWEST script in this section
+  // there, a hair above tracker-writer-lock-tests.mjs at 11.6s on the same run.
+  // A seventh run ran past the 30s default and was killed mid-suite
+  // (`exit null, signal SIGTERM`) while ubuntu, macos and every other check on
+  // that commit passed (#4010, same shape as #2906). Locally on an idle box it
+  // is 4.2s, so the spread is Windows process creation under runner load.
+  //
+  // SLOW_SCRIPT_WARN_FRACTION could not have given notice: at a typical 12s of
+  // 30s this never reaches the 75% warning, so it goes from silent to killed
+  // with nothing in between. The ceiling is the only signal it has.
+  { name: 'tracker-columns-tests.mjs', expectExit: 0, timeoutMs: 180_000 },
   { name: 'agent-inbox-tests.mjs', expectExit: 0 },
   { name: 'followup-seed-tests.mjs', expectExit: 0 },
   { name: 'paste-reply-tests.mjs', expectExit: 0 },
