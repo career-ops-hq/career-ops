@@ -517,7 +517,12 @@ const HIRING_SIDE_RE = /\b(head|director|vp|svp|evp|vice president|chief|cto|ceo
 const AGENCY_RE = /\b(recruit\w*|staffing|talent|search|headhunt\w*|resourcing|placement)\b/i;
 // Deliberately narrow. Seniority words (Vice President, Director, Principal)
 // appear on in-house bank recruiters too, so they are not an agency signal.
-const AGENCY_TITLE_RE = /\b(consultant|headhunt\w*|executive recruiter|executive search)\b/i;
+// A bare "consultant" only counts when it is the role noun that opens the title
+// (agency style, e.g. "Consultant - HFT Tech Recruitment"); in-house forms like
+// "Talent Acquisition Consultant" or "HR Consultant" do not count. Measured on
+// the 29k-connection export: the same 92 companies flagged as with a bare
+// "consultant", and a Selby-Jennings-shaped agency (75% agency titles) still is.
+const AGENCY_TITLE_RE = /\b(recruit(?:ment|ing) consultant|search consultant|headhunt\w*|executive recruiter|executive search)\b|^\s*(?:senior |principal |associate |lead )?consultant\b/i;
 
 /**
  * Likely recruiting agency, from the company name and the recruiters you know
@@ -1470,6 +1475,13 @@ function selfTest() {
   check('not agency: under 25% even with consultant titles', !isLikelyAgency('Big Bank', agencyStaff(6), 74));
   check('not agency: fewer than 3 recruiters', !isLikelyAgency('Acme Trading', ['Recruiter', 'Recruiter'], 2));
   check('seniority words are not an agency signal', !isLikelyAgency('Bank', Array(4).fill('Vice President - Recruiter'), 12));
+  check('not agency: in-house consultant titles', !isLikelyAgency('Small Firm', Array(3).fill('Talent Acquisition Consultant'), 10));
+  for (const t of ['Recruitment Consultant', 'Consultant - HFT Tech Recruitment', 'Senior Consultant, Quant Recruitment', 'Executive Recruiter', 'Headhunter']) {
+    check(`agency-style title: ${t}`, isLikelyAgency('Small Firm', Array(3).fill(t), 10));
+  }
+  for (const t of ['Talent Acquisition Consultant', 'HR Consultant']) {
+    check(`in-house title: ${t}`, !isLikelyAgency('Small Firm', Array(3).fill(t), 10));
+  }
 
   // role: tier outranks title relevance. Cy's title matches the role better,
   // but Ada is close and Cy is cold.
