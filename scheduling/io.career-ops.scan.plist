@@ -6,8 +6,8 @@
 	<string>io.career-ops.scan</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/Users/prasta/.local/share/fnm/node-versions/v24.15.0/installation/bin/node</string>
-		<string>scan.mjs</string>
+		<string>/bin/bash</string>
+		<string>/Users/prasta/Projects/forks/fork-career-ops/scheduling/scan.sh</string>
 	</array>
 	<key>EnvironmentVariables</key>
 	<dict>
