@@ -170,3 +170,4 @@ public commit with a stated reason.
 - @colincomstock | Colin Comstock | 2026-09-10 | id:95597475 | src:https://github.com/career-ops-hq/career-ops/discussions/4063 | n:122
 - @ddroid | Ahmad Munir | 2026-09-13 | id:142005659 | src:https://github.com/career-ops-hq/career-ops/discussions/4140 | n:123
 - @ttiimmothy | Timothy | 2026-09-13 | "Thanks for oss" | id:80472344 | src:https://github.com/career-ops-hq/career-ops/discussions/4141 | n:124
+- @wpu3325 | Wilson Pu | 2026-09-13 | "wpu3325 I want hiring processes to be as intentional, unbiased, and fair as possible." | id:22037720 | src:https://github.com/career-ops-hq/career-ops/discussions/4163 | n:125
