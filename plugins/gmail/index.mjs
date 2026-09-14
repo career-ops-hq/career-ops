@@ -21,7 +21,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import {
   extractUrls, isCleanUrl, isAuthenticEmail, parseRoleAtCompany,
-  getMessageBody, companyFromUrl,
+  getMessageBody, companyFromUrl, parseLinkedInAlert,
 } from './_helpers.mjs';
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -125,7 +125,24 @@ export default {
       }
 
       const seed = parseRoleAtCompany(subject);
-      const cleanUrls = extractUrls(getMessageBody(msg.payload)).filter(isCleanUrl);
+      const body = getMessageBody(msg.payload);
+
+      // LinkedIn digests get their own parser. The generic path reads one email
+      // as one job, which is wrong here: a digest is ~6 unrelated postings, and
+      // its only per-job links carry a `trackingId` that isCleanUrl rejects. The
+      // result was every posting dropped and the surrounding chrome kept.
+      const alertJobs = parseLinkedInAlert(body);
+      if (alertJobs.length) {
+        for (const job of alertJobs) {
+          if (seenUrls.has(job.url)) continue;
+          seenUrls.add(job.url);
+          jobs.push(job);
+        }
+        processedIds.add(m.id);
+        continue;
+      }
+
+      const cleanUrls = extractUrls(body).filter(isCleanUrl);
       for (const url of cleanUrls) {
         if (seenUrls.has(url)) continue;
         seenUrls.add(url);

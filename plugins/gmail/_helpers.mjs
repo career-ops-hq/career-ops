@@ -42,6 +42,13 @@ export function isCleanUrl(url) {
       'newsletter', 'subscribe', 'w3.org', 'doubleclick', 'googlesyndication',
       'googleadservices', 'mailgun', 'mandrill', 'mjml', 'github.com/login',
       'linkedin.com/legal', 'linkedin.com/help', 'linkedin.com/settings',
+      // LinkedIn digest chrome: the header/footer/promo links every alert email
+      // carries. They are not postings, and unlike the real job cards they have
+      // no trackingId, so they sail through every other check.
+      'linkedin.com/comm/feed', 'linkedin.com/comm/messaging',
+      'linkedin.com/comm/mynetwork', 'linkedin.com/comm/notifications',
+      'linkedin.com/comm/widgets', 'linkedin.com/comm/jobs/alerts',
+      'linkedin.com/comm/jobs/search-results',
     ];
     if (badKeywords.some(kw => lowerUrl.includes(kw))) return false;
     // Page assets, not postings. Job-alert emails embed one company logo per job,
@@ -130,4 +137,76 @@ export function companyFromUrl(url) {
     }
   } catch { /* malformed → no company */ }
   return '';
+}
+
+/**
+ * Canonical LinkedIn posting URL, or '' if the URL is not a job view.
+ * `/comm/jobs/view/{id}/?trackingId=...` → `https://www.linkedin.com/jobs/view/{id}`.
+ * Dropping the query is what makes these usable: the tracking params differ per
+ * email, so two alerts for the same job would otherwise look like two leads, and
+ * `trackingId` trips isCleanUrl's 'track' keyword — which is why the real job
+ * cards were the one thing a digest never yielded.
+ * @param {string} url
+ * @returns {string}
+ */
+export function canonicalLinkedInJobUrl(url) {
+  const match = /^https?:\/\/(?:[\w-]+\.)*linkedin\.com\/(?:comm\/)?jobs\/view\/(\d+)/i.exec(url || '');
+  return match ? `https://www.linkedin.com/jobs/view/${match[1]}` : '';
+}
+
+/** Card badges LinkedIn prints under the location line ("Fast growing", etc.). */
+const LI_BADGE_RE =
+  /^(fast growing|actively recruiting|easy apply|promoted|viewed|be an early applicant|your profile matches|alum works here|school alum works here|\$|€|£)/i;
+
+/**
+ * Parse the job cards out of a LinkedIn job-alert digest's plain-text part.
+ *
+ * Each card is four lines and a link, separated by a rule:
+ *
+ *     Senior Manager, Center of Expertise
+ *     Veeam Software
+ *     United States
+ *     Fast growing                        <- optional badge lines
+ *     View job: https://www.linkedin.com/comm/jobs/view/4430024078/?trackingId=...
+ *     ---------------------------------------------------------
+ *
+ * Pulling title/company per card is the point: the subject line names only the
+ * first job, so seeding every URL in the email from it (what the generic path
+ * does) labels 20 unrelated postings with one company's name.
+ *
+ * @param {string} body Decoded message body (plain-text part included).
+ * @returns {Array<{ title: string, url: string, company: string, location: string }>}
+ */
+export function parseLinkedInAlert(body) {
+  if (!body) return [];
+  const jobs = [];
+  const seen = new Set();
+  for (const chunk of body.split(/^-{10,}\s*$/m)) {
+    const lines = chunk.split(/\r?\n/).map(l => l.trim());
+    const urlIdx = lines.findIndex(l => /https?:\/\/\S*\/jobs\/view\/\d+/i.test(l));
+    if (urlIdx === -1) continue;
+    const url = canonicalLinkedInJobUrl(
+      (/https?:\/\/\S+/.exec(lines[urlIdx]) || [''])[0].replace(/&amp;/g, '&'),
+    );
+    if (!url || seen.has(url)) continue;
+    // Drop the digest's own header ("Your job alert for ...") so the first card
+    // on the page does not inherit it as a title.
+    const before = lines
+      .slice(0, urlIdx)
+      .filter(Boolean)
+      .filter(l => !/^(your job alert|new jobs match|\d+ new jobs)/i.test(l));
+    if (!before.length) continue;
+    const [title, company = '', location = ''] = before;
+    seen.add(url);
+    jobs.push({
+      title,
+      url,
+      company: LI_BADGE_RE.test(company) ? '' : company,
+      // ponytail: positional — title/company/location in order, badges after.
+      // A card that omits its location would shift a badge into this slot, so
+      // badge-looking values are dropped rather than trusted.
+      location: LI_BADGE_RE.test(location) ? '' : location,
+    });
+  }
+  return jobs;
 }
