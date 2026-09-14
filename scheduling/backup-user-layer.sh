@@ -42,7 +42,10 @@ rsync -a --delete \
   "$SRC/" "$DST/"
 
 # Belt and braces: .env is excluded above, but refuse to commit if a token slipped in anyway.
-if grep -rIl -E 'pat-(na|eu)[0-9]-[0-9a-f]{8}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|ntn_[A-Za-z0-9]{20,}' "$DST" 2>/dev/null | grep -q .; then
+# GOCSPX-/1//0 are the Google OAuth client-secret and refresh-token shapes the
+# gmail plugin uses. Anchored tightly (1//0 + 20 chars) so a doubled slash in a
+# URL path cannot abort a backup on a false positive.
+if grep -rIl -E 'pat-(na|eu)[0-9]-[0-9a-f]{8}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|ntn_[A-Za-z0-9]{20,}|GOCSPX-[0-9A-Za-z_-]{20,}|1//0[0-9A-Za-z_-]{20,}' "$DST" 2>/dev/null | grep -q .; then
   echo "$(date '+%F %T') ABORT: token-like string found in mirror — not committing"; exit 2
 fi
 
