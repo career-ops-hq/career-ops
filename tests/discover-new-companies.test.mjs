@@ -8,7 +8,8 @@
  * never read or written.
  *
  * Covered:
- * - --help exits 0; missing history → nonzero exit; bad --since → nonzero exit
+ * - --help exits 0; missing history/value → nonzero exit; bad --since → nonzero exit
+ * - default user-layer inputs resolve through CAREER_OPS_ROOT, independent of cwd
  * - --json subtracts already-tracked companies (canonical-name + alias match,
  *   disabled entries count as tracked)
  * - --min-rows, --added-only, --since window (undated rows pass)
@@ -22,7 +23,7 @@
  * Issue #4181 — github.com/career-ops-hq/career-ops
  */
 
-import { writeFileSync, mkdtempSync, rmSync } from 'fs';
+import { writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -91,6 +92,72 @@ try {
   run([row({ company: 'Acme' })], {}, ['--since', '-5', '--json']);
 } catch (e) { badSinceExit = e.status; }
 ok('negative --since → nonzero exit', badSinceExit !== 0);
+
+for (const args of [['--since'], ['--since', '--json']]) {
+  let missingValueExit = 0;
+  try {
+    run([row({ company: 'Acme' })], {}, args);
+  } catch (e) { missingValueExit = e.status; }
+  ok(`${args.join(' ')} rejects a missing value`, missingValueExit !== 0);
+}
+
+{
+  const dataRoot = mkdtempSync(join(tmpdir(), 'discover-new-root-'));
+  const decoyCwd = mkdtempSync(join(tmpdir(), 'discover-new-cwd-'));
+  try {
+    mkdirSync(join(dataRoot, 'data'));
+    mkdirSync(join(decoyCwd, 'data'));
+    writeFileSync(join(dataRoot, 'data', 'scan-history.tsv'), HEADER
+      + [row({ company: 'DataRootCo' }), row({ company: 'DataRootCo' })].join('\n') + '\n');
+    writeFileSync(join(dataRoot, 'portals.yml'), '{}\n');
+    writeFileSync(join(decoyCwd, 'data', 'scan-history.tsv'), HEADER
+      + [row({ company: 'DecoyCo' }), row({ company: 'DecoyCo' })].join('\n') + '\n');
+    writeFileSync(join(decoyCwd, 'portals.yml'), '{}\n');
+
+    const out = execFileSync('node', [scriptPath, '--json'], {
+      encoding: 'utf-8', timeout: 15000, cwd: decoyCwd,
+      env: {
+        ...process.env,
+        CAREER_OPS_ROOT: dataRoot,
+        CAREER_OPS_DATA_DIR: '',
+        CAREER_OPS_SCAN_HISTORY: '',
+        CAREER_OPS_PORTALS: '',
+      },
+    });
+    eq('default inputs follow CAREER_OPS_ROOT instead of cwd',
+      JSON.parse(out).companies.map((company) => company.name), ['DataRootCo']);
+  } finally {
+    rmSync(dataRoot, { recursive: true, force: true });
+    rmSync(decoyCwd, { recursive: true, force: true });
+  }
+}
+
+{
+  const dataRoot = mkdtempSync(join(tmpdir(), 'discover-new-empty-root-'));
+  const decoyCwd = mkdtempSync(join(tmpdir(), 'discover-new-populated-cwd-'));
+  let missingDataExit = 0;
+  try {
+    mkdirSync(join(decoyCwd, 'data'));
+    writeFileSync(join(decoyCwd, 'data', 'scan-history.tsv'), HEADER
+      + [row({ company: 'DecoyCo' }), row({ company: 'DecoyCo' })].join('\n') + '\n');
+    execFileSync('node', [scriptPath, '--json'], {
+      encoding: 'utf-8', timeout: 15000, cwd: decoyCwd,
+      env: {
+        ...process.env,
+        CAREER_OPS_ROOT: dataRoot,
+        CAREER_OPS_DATA_DIR: '',
+        CAREER_OPS_SCAN_HISTORY: '',
+        CAREER_OPS_PORTALS: '',
+      },
+    });
+  } catch (e) {
+    missingDataExit = e.status;
+  } finally {
+    rmSync(dataRoot, { recursive: true, force: true });
+    rmSync(decoyCwd, { recursive: true, force: true });
+  }
+  ok('missing data directory fails cleanly instead of reading cwd', missingDataExit !== 0);
+}
 
 // ── 2. Subtract already-tracked ───────────────────────────────────────────────
 console.log('\n--- 2. Subtract already-tracked companies ---');
