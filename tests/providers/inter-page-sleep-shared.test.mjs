@@ -23,8 +23,10 @@ console.log('\nProviders — inter-page sleep routes through _http.mjs (#2723)')
 // (`const { sleep } = …`) has a brace after `const` and does not match.
 const LOCAL_SLEEP_DECL = /(?:function\s*\*?\s+sleep\s*\(|(?:const|let|var)\s+sleep\s*=)/;
 // The fallback shape itself, regardless of what (if anything) it is assigned
-// to: `ctx.sleep ? ctx.sleep(...) : new Promise(...setTimeout...)`.
-const SLEEP_FALLBACK_SHAPE = /ctx\.sleep\s*\?\s*ctx\.sleep\([^)]*\)\s*:\s*new Promise\([^;]*setTimeout/;
+// to: `ctx.sleep ? ctx.sleep(...) : new Promise(...setTimeout...)`, or the
+// same fallback guarded by `typeof ctx?.sleep === 'function'` (the exact
+// guard `_http.mjs`'s own `sleep()` uses, copyable verbatim into a provider).
+const SLEEP_FALLBACK_SHAPE = /(?:ctx\.sleep|typeof\s+ctx\??\.sleep\s*===\s*['"]function['"])\s*\?\s*ctx\.sleep\([^)]*\)\s*:\s*new Promise\([^;]*setTimeout/;
 const SHARED_SLEEP_IMPORT = /\bimport\s*\{[^}]*\bsleep\b[^}]*\}\s*from\s*['"]\.\/_http\.mjs['"]/;
 
 /** @returns {string|null} offender line, or null when the file is clean. */
@@ -57,6 +59,8 @@ const classify = (file, src) => {
     ['const wait = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));',
       'x.mjs (reimplements the ctx.sleep fallback instead of importing sleep from ./_http.mjs)'],
     ['await (ctx.sleep ? ctx.sleep(PAGE_DELAY_MS) : new Promise(r => setTimeout(r, PAGE_DELAY_MS)));',
+      'x.mjs (reimplements the ctx.sleep fallback instead of importing sleep from ./_http.mjs)'],
+    ["const wait = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));",
       'x.mjs (reimplements the ctx.sleep fallback instead of importing sleep from ./_http.mjs)'],
   ];
   const missed = planted.filter(([src, want]) => classify('x.mjs', src) !== want);
