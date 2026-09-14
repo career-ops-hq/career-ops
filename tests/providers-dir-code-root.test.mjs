@@ -1,25 +1,28 @@
-// tests/providers-dir-code-root.test.mjs — providers/ resolves from the CODEBASE,
-// never from the data root.
+// tests/providers-dir-code-root.test.mjs — system-layer paths resolve from the
+// CODEBASE, never from the data root.
 //
-// providers/ is system layer (DATA_CONTRACT.md): it ships with the checkout and
-// never travels to a user's data root. Two scripts anchored it to
-// getCareerOpsRoot() anyway, so with CAREER_OPS_ROOT (or a .career-ops-data
-// marker) pointing anywhere outside the checkout, loadProviders() read a
-// directory that does not exist, returned an EMPTY registry, and every enabled
-// portals.yml entry was then reported as claimed by no provider:
+// providers/ and the project CLI configs are system layer (DATA_CONTRACT.md):
+// they ship with the checkout and never travel to a user's data root. Three
+// scripts anchored them to getCareerOpsRoot() anyway, so with CAREER_OPS_ROOT
+// (or a .career-ops-data marker) pointing outside the checkout they read
+// directories that do not exist:
 //
-//   - verify-pipeline.mjs warned "no provider claims its careers_url —
-//     scan.mjs skips it on every run" for entries scan.mjs scans correctly,
-//     because scan.mjs anchors PROVIDERS_DIR to CODE_ROOT and was never
-//     affected. The advice was actionable and wrong.
+//   - verify-pipeline.mjs loaded an EMPTY provider registry and warned "no
+//     provider claims its careers_url — scan.mjs skips it on every run" for
+//     entries scan.mjs scans correctly. scan.mjs anchors PROVIDERS_DIR to
+//     CODE_ROOT and was never affected, so the advice was actionable and wrong.
 //   - audit-portals.mjs — the script whose whole job is catching that exact
 //     silent-skip state — reported "0 audited" and exited 0.
+//   - doctor.mjs looked for .mcp.json beside the user's cv.md and reported a
+//     correctly-configured Playwright MCP server as missing. The inverse was
+//     worse: a stray copy in the data directory, which no CLI reads, reported
+//     as configured.
 //
-// Both failures are invisible on the default layout, where the data root and
-// the codebase are the same directory. The regression only appears once they
+// All three are invisible on the default layout, where the data root and the
+// codebase are the same directory. The regression only appears once they
 // diverge, which is why this test forces them apart.
 import { pass, fail, run, lastRunFailure, formatRunFailure, ROOT, NODE } from './helpers.mjs';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
@@ -89,6 +92,32 @@ try {
     pass('audit-portals.mjs resolves providers/ from the codebase under CAREER_OPS_ROOT');
   } else {
     fail(`audit-portals.mjs PROVIDERS_DIR followed the data root: ${resolved}`);
+  }
+
+  // ── doctor: project CLI config is codebase-relative too ──
+  // .mcp.json is read by the CLI from the checkout it launches in, so a server
+  // configured there must be seen even when the data root is elsewhere. The
+  // inverse mattered just as much: a stray copy beside the user's cv.md, which
+  // no CLI ever reads, used to report as configured.
+  const mcpJson = JSON.stringify({
+    mcpServers: { playwright: { command: 'npx', args: ['-y', '@playwright/mcp@latest'] } },
+  });
+  const repoMcp = join(ROOT, '.mcp.json');
+  const hadRepoMcp = existsSync(repoMcp);
+  const savedRepoMcp = hadRepoMcp ? readFileSync(repoMcp, 'utf-8') : null;
+
+  try {
+    writeFileSync(repoMcp, mcpJson);
+    const seen = run(NODE, [join(ROOT, 'doctor.mjs'), '--json'], { env });
+    const parsed = seen ? JSON.parse(seen) : null;
+    if (parsed?.playwright_mcp?.claude === true) {
+      pass('doctor.mjs reads .mcp.json from the codebase under CAREER_OPS_ROOT');
+    } else {
+      fail('doctor.mjs missed a .mcp.json in the checkout — it followed the data root');
+    }
+  } finally {
+    if (hadRepoMcp) writeFileSync(repoMcp, savedRepoMcp);
+    else rmSync(repoMcp, { force: true });
   }
 } finally {
   rmSync(dataRoot, { recursive: true, force: true });

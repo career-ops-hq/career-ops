@@ -390,7 +390,13 @@ function checkPlaywrightMcp(root, activeCli) {
       ],
     };
   }
-  if (isPlaywrightMcpConfigured(root, activeCli)) {
+  // Project config, not user data: .mcp.json / .claude/settings.json /
+  // opencode.json are read by the CLI from the checkout it is launched in, so
+  // they resolve from the codebase directory. Against a data root set via
+  // CAREER_OPS_ROOT or .career-ops-data this looked in the data directory and
+  // reported a correctly-configured Playwright MCP server as missing — while a
+  // stray copy beside the user's cv.md, which no CLI reads, reported as present.
+  if (isPlaywrightMcpConfigured(__dirname, activeCli)) {
     return { pass: true, label: `Playwright MCP server configured (${activeCli})` };
   }
   // Active CLI is known (flag/env/.env) but its MCP isn't configured.
