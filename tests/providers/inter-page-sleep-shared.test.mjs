@@ -27,6 +27,10 @@ const LOCAL_SLEEP_DECL = /(?:function\s*\*?\s+sleep\s*\(|(?:const|let|var)\s+sle
 // same fallback guarded by `typeof ctx?.sleep === 'function'` (the exact
 // guard `_http.mjs`'s own `sleep()` uses, copyable verbatim into a provider).
 const SLEEP_FALLBACK_SHAPE = /(?:ctx\.sleep|typeof\s+ctx\??\.sleep\s*===\s*['"]function['"])\s*\?\s*ctx\.sleep\([^)]*\)\s*:\s*new Promise\([^;]*setTimeout/;
+// The same fallback expressed as an if/return guard rather than a ternary —
+// the exact shape `_http.mjs`'s own `sleep()` uses, copyable verbatim into a
+// provider under any name.
+const SLEEP_FALLBACK_BLOCK = /if\s*\(\s*typeof\s+ctx\??\.sleep\s*===\s*['"]function['"]\s*\)\s*return\s+ctx\.sleep\([^)]*\)[^;]*;[\s\S]{0,200}?return\s+new Promise\([^;]*setTimeout/;
 const SHARED_SLEEP_IMPORT = /\bimport\s*\{[^}]*\bsleep\b[^}]*\}\s*from\s*['"]\.\/_http\.mjs['"]/;
 
 /** @returns {string|null} offender line, or null when the file is clean. */
@@ -36,7 +40,7 @@ const classify = (file, src) => {
       ? `${file} (declares its own sleep alongside the shared import)`
       : `${file} (declares its own sleep and does not import it from ./_http.mjs)`;
   }
-  if (SLEEP_FALLBACK_SHAPE.test(src)) {
+  if (SLEEP_FALLBACK_SHAPE.test(src) || SLEEP_FALLBACK_BLOCK.test(src)) {
     return `${file} (reimplements the ctx.sleep fallback instead of importing sleep from ./_http.mjs)`;
   }
   return null;
@@ -61,6 +65,8 @@ const classify = (file, src) => {
     ['await (ctx.sleep ? ctx.sleep(PAGE_DELAY_MS) : new Promise(r => setTimeout(r, PAGE_DELAY_MS)));',
       'x.mjs (reimplements the ctx.sleep fallback instead of importing sleep from ./_http.mjs)'],
     ["const wait = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));",
+      'x.mjs (reimplements the ctx.sleep fallback instead of importing sleep from ./_http.mjs)'],
+    ["function wait(ms, ctx) { if (typeof ctx?.sleep === 'function') return ctx.sleep(ms); return new Promise((r) => setTimeout(r, ms)); }",
       'x.mjs (reimplements the ctx.sleep fallback instead of importing sleep from ./_http.mjs)'],
   ];
   const missed = planted.filter(([src, want]) => classify('x.mjs', src) !== want);
