@@ -1,17 +1,19 @@
-// tests/providers/inter-page-sleep-shared.test.mjs — providers/_http.mjs
-// exports the ctx-aware `sleep(ms, ctx)` helper, and every provider's
-// inter-page / inter-request pacing is meant to import it. #2723 predicted
-// that a hand-rolled local copy "arrives with the next provider" — it kept
-// recurring across 20+ providers until they were all routed through the
-// shared export. Prose in ADDING_A_PROVIDER.md ("don't hand-roll a local
-// copy") did not hold the line, so this guard fails the build on the next
-// one.
+// tests/providers/inter-page-sleep-shared.test.mjs — a lexical guard: every
+// provider's inter-page / inter-request pacing must go through the ctx-aware
+// `sleep(ms, ctx)` helper exported by _http.mjs, never a hand-rolled local
+// copy. A local copy has no ctx-based test-clock hook, so it wall-clock-waits
+// during tests and can silently skip pacing if mis-implemented.
 //
-// Two shapes are the offence: a provider declaring its own `sleep`
-// (function/const/let/var) instead of importing it, and a provider
-// reimplementing the `ctx.sleep ? ctx.sleep(ms) : new Promise(setTimeout)`
-// fallback under any other name (`wait`, or inlined at the `await` call site
-// with no name at all) — same duplication, just missed by a name-only search.
+// Two things are checked: a provider declaring its own `sleep` binding
+// (function/const/let/var) instead of importing it, and a provider calling
+// `setTimeout` directly anywhere outside `_http.mjs`. A hand-rolled
+// ctx.sleep-fallback, in any syntax (ternary, if/return, optional chaining,
+// typeof-guard, named helper or inlined), still bottoms out in a literal
+// `setTimeout` call — that call is the invariant checked, not the wrapper
+// around it. The one legitimate direct use is arming an abort timer
+// (`setTimeout(() => controller.abort(), ...)`, as in consider.mjs); anything
+// else calling `setTimeout` outside `_http.mjs` is reimplementing pacing that
+// belongs in the shared `sleep()`.
 import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
 import { readdirSync, readFileSync } from 'fs';
@@ -22,16 +24,9 @@ console.log('\nProviders — inter-page sleep routes through _http.mjs (#2723)')
 // `const sleep =`, `let sleep =`, `var sleep =`. A destructure
 // (`const { sleep } = …`) has a brace after `const` and does not match.
 const LOCAL_SLEEP_DECL = /(?:function\s*\*?\s+sleep\s*\(|(?:const|let|var)\s+sleep\s*=)/;
-// The fallback shape itself, regardless of what (if anything) it is assigned
-// to: `ctx.sleep ? ctx.sleep(...) : new Promise(...setTimeout...)`, or the
-// same fallback guarded by `typeof ctx?.sleep === 'function'` (the exact
-// guard `_http.mjs`'s own `sleep()` uses, copyable verbatim into a provider).
-const SLEEP_FALLBACK_SHAPE = /(?:ctx\.sleep|typeof\s+ctx\??\.sleep\s*===\s*['"]function['"])\s*\?\s*ctx\.sleep\([^)]*\)\s*:\s*new Promise\([^;]*setTimeout/;
-// The same fallback expressed as an if/return guard rather than a ternary —
-// the exact shape `_http.mjs`'s own `sleep()` uses, copyable verbatim into a
-// provider under any name.
-const SLEEP_FALLBACK_BLOCK = /if\s*\(\s*typeof\s+ctx\??\.sleep\s*===\s*['"]function['"]\s*\)\s*return\s+ctx\.sleep\([^)]*\)[^;]*;[\s\S]{0,200}?return\s+new Promise\([^;]*setTimeout/;
 const SHARED_SLEEP_IMPORT = /\bimport\s*\{[^}]*\bsleep\b[^}]*\}\s*from\s*['"]\.\/_http\.mjs['"]/;
+const SET_TIMEOUT_CALL = /setTimeout\s*\(/;
+const ABORT_TIMER_LINE = /\.abort\s*\(/;
 
 /** @returns {string|null} offender line, or null when the file is clean. */
 const classify = (file, src) => {
@@ -40,8 +35,11 @@ const classify = (file, src) => {
       ? `${file} (declares its own sleep alongside the shared import)`
       : `${file} (declares its own sleep and does not import it from ./_http.mjs)`;
   }
-  if (SLEEP_FALLBACK_SHAPE.test(src) || SLEEP_FALLBACK_BLOCK.test(src)) {
-    return `${file} (reimplements the ctx.sleep fallback instead of importing sleep from ./_http.mjs)`;
+  const rawTimeoutLine = src
+    .split('\n')
+    .find((line) => SET_TIMEOUT_CALL.test(line) && !ABORT_TIMER_LINE.test(line));
+  if (rawTimeoutLine) {
+    return `${file} (calls setTimeout directly instead of routing pacing through the shared sleep from ./_http.mjs)`;
   }
   return null;
 };
@@ -51,6 +49,7 @@ const classify = (file, src) => {
 // copy — plant the shapes this guard exists to catch and assert they fire.
 {
   const IMPORT_LINE = "import { BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';\n";
+  const FALLBACK_OFFENCE = 'x.mjs (calls setTimeout directly instead of routing pacing through the shared sleep from ./_http.mjs)';
   const planted = [
     ['function sleep(ms, ctx) { return ctx?.sleep?.(ms); }',
       'x.mjs (declares its own sleep and does not import it from ./_http.mjs)'],
@@ -60,18 +59,21 @@ const classify = (file, src) => {
       'x.mjs (declares its own sleep and does not import it from ./_http.mjs)'],
     [IMPORT_LINE + 'function sleep(ms, ctx) { return ctx?.sleep?.(ms); }',
       'x.mjs (declares its own sleep alongside the shared import)'],
-    ['const wait = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));',
-      'x.mjs (reimplements the ctx.sleep fallback instead of importing sleep from ./_http.mjs)'],
-    ['await (ctx.sleep ? ctx.sleep(PAGE_DELAY_MS) : new Promise(r => setTimeout(r, PAGE_DELAY_MS)));',
-      'x.mjs (reimplements the ctx.sleep fallback instead of importing sleep from ./_http.mjs)'],
-    ["const wait = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));",
-      'x.mjs (reimplements the ctx.sleep fallback instead of importing sleep from ./_http.mjs)'],
-    ["function wait(ms, ctx) { if (typeof ctx?.sleep === 'function') return ctx.sleep(ms); return new Promise((r) => setTimeout(r, ms)); }",
-      'x.mjs (reimplements the ctx.sleep fallback instead of importing sleep from ./_http.mjs)'],
+    // Every syntactic variant of the hand-rolled fallback — ternary,
+    // if/return, optional chaining, typeof-guard, named or inlined — still
+    // bottoms out in a literal `setTimeout` call, so one check catches all.
+    ['const wait = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));', FALLBACK_OFFENCE],
+    ['await (ctx.sleep ? ctx.sleep(PAGE_DELAY_MS) : new Promise(r => setTimeout(r, PAGE_DELAY_MS)));', FALLBACK_OFFENCE],
+    ["const wait = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));", FALLBACK_OFFENCE],
+    ["function wait(ms, ctx) { if (typeof ctx?.sleep === 'function') return ctx.sleep(ms); return new Promise((r) => setTimeout(r, ms)); }", FALLBACK_OFFENCE],
+    ['const wait = (ms) => (ctx?.sleep ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));', FALLBACK_OFFENCE],
+    // No ctx.sleep check at all — an unconditional wall-clock delay is
+    // flagged the same way as a fallback with a check.
+    ['await new Promise(resolve => setTimeout(resolve, 200));', FALLBACK_OFFENCE],
   ];
   const missed = planted.filter(([src, want]) => classify('x.mjs', src) !== want);
   if (missed.length === 0) {
-    pass('positive control: every known local-sleep shape is still detected');
+    pass('positive control: every known local-sleep / raw-setTimeout shape is still detected');
   } else {
     fail(`guard no longer fires on: ${JSON.stringify(missed.map(([src]) => src.slice(0, 60)))}`);
   }
@@ -84,13 +86,13 @@ const classify = (file, src) => {
     fail(`guard flags legitimate usage: ${classify('x.mjs', legitimate)}`);
   }
 
-  // Negative control: a `wait` helper with a different fallback (no real
-  // setTimeout pacing) is a different shape and stays out of scope.
-  const wait = 'const wait = (ms) => (ctx.sleep ? ctx.sleep(ms) : Promise.resolve());\n';
-  if (classify('x.mjs', wait) === null) {
-    pass('negative control: a `wait` helper with a non-setTimeout fallback is not flagged');
+  // Negative control: arming an abort timer is the one legitimate direct
+  // setTimeout use (consider.mjs, _http.mjs's own fetchInContext).
+  const abortTimer = 'const timer = setTimeout(() => controller.abort(), HANDSHAKE_TIMEOUT_MS);\n';
+  if (classify('x.mjs', abortTimer) === null) {
+    pass('negative control: an abort timer is not flagged as a sleep fallback');
   } else {
-    fail(`guard flags an out-of-scope helper: ${classify('x.mjs', wait)}`);
+    fail(`guard flags a legitimate abort timer: ${classify('x.mjs', abortTimer)}`);
   }
 }
 
