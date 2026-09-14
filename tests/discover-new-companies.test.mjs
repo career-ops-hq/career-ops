@@ -286,3 +286,33 @@ console.log('\n--- 5. Output shape ---');
   ok('default YAML is the companies:[{name}] shape discover-ats consumes',
     Array.isArray(doc.companies) && doc.companies[0] && doc.companies[0].name === 'Acme');
 }
+
+// ── 6. Headerless legacy history ──────────────────────────────────────────────
+// Legacy scan-history.tsv files predate the header row and are never rewritten
+// (appendToScanHistory in scan.mjs). An unconditional skip of line 0 would drop
+// the first company; the header must be detected, not assumed.
+console.log('\n--- 6. Headerless legacy history ---');
+
+{
+  const dir = mkdtempSync(join(tmpdir(), 'discover-new-headerless-'));
+  try {
+    const hist = join(dir, 'scan-history.tsv');
+    const portals = join(dir, 'portals.yml');
+    // No HEADER line: line 0 is a real company row that appears only once, so an
+    // unconditional skip of line 0 would drop FirstRowCo entirely.
+    writeFileSync(hist, [
+      row({ company: 'FirstRowCo' }),
+      row({ company: 'SecondCo' }),
+      row({ company: 'SecondCo' }),
+    ].join('\n') + '\n');
+    writeFileSync(portals, '{}\n');
+    const out = execFileSync('node', [scriptPath, '--min-rows', '1', '--json'], {
+      encoding: 'utf-8', timeout: 20000, cwd: dirname(scriptPath),
+      env: { ...process.env, CAREER_OPS_SCAN_HISTORY: hist, CAREER_OPS_PORTALS: portals },
+    });
+    const names = JSON.parse(out).companies.map((c) => c.name).sort();
+    eq('headerless file keeps its first company row', names, ['FirstRowCo', 'SecondCo']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}

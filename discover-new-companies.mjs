@@ -114,8 +114,14 @@ for (const entry of portalsRaw.tracked_companies || []) {
 }
 
 // ── Walk the history ────────────────────────────────────────────────────────
+// Legacy headerless scan-history.tsv files exist and are never rewritten (see
+// appendToScanHistory in scan.mjs), so detect the header instead of assuming
+// row 0 is one — the same guard parseScanHistory (detect-reposts.mjs) uses.
+// An unconditional skip would silently drop the first company in a headerless
+// file; when there is no header the column lookups fall back to legacy positions.
 const rows = readFileSync(HISTORY_PATH, 'utf-8').split('\n');
-const header = rows[0]?.split('\t') ?? [];
+const hasHeader = /^\s*url\s*\t/i.test(rows[0] ?? '');
+const header = hasHeader ? rows[0].split('\t') : [];
 const col = (n) => header.indexOf(n);
 const iCompany = col('company') === -1 ? 4 : col('company');
 const iFirstSeen = col('first_seen') === -1 ? 1 : col('first_seen');
@@ -128,7 +134,7 @@ const cutoffMs = SINCE_DAYS > 0 ? Date.now() - SINCE_DAYS * 86_400_000 : null;
 /** @type {Map<string, {name:string, rows:number, added:number, lastSeen:string, titles:Set<string>, hosts:Set<string>}>} */
 const found = new Map();
 
-for (let i = 1; i < rows.length; i++) {
+for (let i = hasHeader ? 1 : 0; i < rows.length; i++) {
   const cells = rows[i].split('\t');
   if (cells.length < 6) continue;
 
