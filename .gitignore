@@ -18,6 +18,10 @@ data/parser-output/**
 !data/parser-output/.gitkeep
 !data/parser-output/**/.gitkeep
 reports/*.md
+# Single-level glob above misses subdirectories (e.g. reports/superseded/).
+# Kept alongside it rather than replacing it, so update-system.mjs does not
+# re-append the original pattern as "missing".
+reports/**/*.md
 !reports/.gitkeep
 output/*
 !output/.gitkeep
