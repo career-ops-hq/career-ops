@@ -76,5 +76,32 @@ const base = `http://127.0.0.1:${server.address().port}`;
   else fail(`fetchJson happy path broken: ${JSON.stringify(ok)}`);
 }
 
+// 4. CAREER_OPS_HTTP_TIMEOUT_MS overrides the default budget.
+// A board that returns its whole catalogue in one response can outlast the 10s
+// default, and the abort surfaces as an unreachable portal rather than as a
+// timeout — so the board reads as broken instead of slow. Raising the budget is
+// a deployment concern, so it is an env var; an unusable value must fall back
+// rather than fail a scan at request time.
+{
+  const { resolveDefaultTimeoutMs } = await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
+  const eq = (label, actual, expected) => {
+    if (actual === expected) pass(label);
+    else fail(`${label} — got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);
+  };
+
+  // Every unusable shape falls back to the documented 10s default.
+  for (const [raw, label] of [
+    [undefined, 'unset'], [null, 'null'], ['', 'empty string'], ['   ', 'whitespace'],
+    ['abc', 'non-numeric'], ['0', 'zero'], ['-5', 'negative'],
+    ['Infinity', 'Infinity'], ['NaN', 'NaN'],
+  ]) {
+    eq(`CAREER_OPS_HTTP_TIMEOUT_MS ${label} → 10s default`, resolveDefaultTimeoutMs(raw), 10_000);
+  }
+
+  eq('a valid numeric string overrides the default', resolveDefaultTimeoutMs('30000'), 30_000);
+  eq('a valid number overrides the default', resolveDefaultTimeoutMs(45_000), 45_000);
+  eq('an explicit fallback is honored when the value is unusable', resolveDefaultTimeoutMs('nope', 7_000), 7_000);
+}
+
 for (const s of sockets) s.destroy();
 server.close();
