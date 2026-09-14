@@ -45,6 +45,10 @@ const has = (f) => args.includes(f);
 const val = (f, d = null) => {
   const i = args.indexOf(f);
   if (i === -1) return d;
+  if (args.indexOf(f, i + 1) !== -1) {
+    console.error(`ERROR: ${f} may only be specified once`);
+    process.exit(1);
+  }
   if (args[i + 1] === undefined || args[i + 1].startsWith('--')) {
     console.error(`ERROR: ${f} requires a value`);
     process.exit(1);

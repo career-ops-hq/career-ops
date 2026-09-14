@@ -101,6 +101,18 @@ for (const args of [['--since'], ['--since', '--json']]) {
   ok(`${args.join(' ')} rejects a missing value`, missingValueExit !== 0);
 }
 
+for (const args of [
+  ['--since', '30', '--since'],
+  ['--since', '30', '--since', '--json'],
+  ['--since', '30', '--since', '7', '--json'],
+]) {
+  let duplicateExit = 0;
+  try {
+    run([row({ company: 'Acme' })], {}, args);
+  } catch (e) { duplicateExit = e.status; }
+  ok(`${args.join(' ')} rejects a duplicate value option`, duplicateExit !== 0);
+}
+
 {
   const dataRoot = mkdtempSync(join(tmpdir(), 'discover-new-root-'));
   const decoyCwd = mkdtempSync(join(tmpdir(), 'discover-new-cwd-'));
