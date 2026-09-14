@@ -540,7 +540,11 @@ if (!existsSync(PORTALS_FILE)) {
       ...(Array.isArray(cfg.tracked_companies) ? cfg.tracked_companies : []),
       ...(Array.isArray(cfg.job_boards) ? cfg.job_boards : []),
     ];
-    const providers = await loadProviders(join(CAREER_OPS, 'providers'));
+    // providers/ is system layer — it ships with the codebase and never moves to
+    // the data root, so resolve it from CODE_ROOT. Against a data root set via
+    // CAREER_OPS_ROOT/.career-ops-data this loaded zero providers, and every
+    // enabled entry was then reported as unclaimed.
+    const providers = await loadProviders(join(CODE_ROOT, 'providers'));
     const { silent, handoff, unknownProvider } = findUnclaimedEntries(entries, providers);
 
     // findUnclaimedEntries silently skips an entry with no (or blank) `name` —

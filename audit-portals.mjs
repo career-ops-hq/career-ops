@@ -54,7 +54,8 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 
 import { makeHttpCtx } from './providers/_http.mjs';
@@ -70,7 +71,11 @@ import { isMainModule } from './lib/is-main-module.mjs';
 // providers and report every board as `no-provider`.
 const ROOT = getCareerOpsRoot();
 const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(ROOT, 'portals.yml');
-const PROVIDERS_DIR = join(ROOT, 'providers');
+// providers/ is system layer: it ships with the codebase and never moves to the
+// data root. Anchoring it to ROOT reintroduced the zero-providers failure the
+// comment above describes, this time for any data root set via CAREER_OPS_ROOT
+// or .career-ops-data — portals.yml is user layer and correctly stays on ROOT.
+export const PROVIDERS_DIR = join(dirname(fileURLToPath(import.meta.url)), 'providers');
 
 /** Boards at or under this many postings are worth a second look, not an error. */
 export const DEFAULT_SMALL_THRESHOLD = 5;
