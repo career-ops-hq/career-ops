@@ -374,12 +374,7 @@ Two separate axes:
 
 ## Offer Verification -- MANDATORY
 
-**NEVER trust WebSearch/WebFetch to verify if an offer is still active.** ALWAYS use Playwright:
-1. `browser_navigate` to the URL
-2. `browser_snapshot` to read content
-3. Only footer/navbar without JD = closed. Title + description + Apply = active.
-
-**Exception for batch workers (headless mode):** Playwright is unavailable in headless pipe mode. Use WebFetch as fallback and mark the report header `**Verification:** unconfirmed (batch mode)`; the user can verify manually later.
+Neither a WebSearch/WebFetch result nor an aggregator's own page proves a role is open: a filled listing keeps serving title, description and Apply long after the employer closed it. Verify with Playwright, and treat aggregator listings (Wellfound, LinkedIn, Instahyre, Naukri…) as UNCONFIRMED until the employer's own ATS says otherwise. Full procedure -- live/closed classification, employer confirmation, headless-batch fallback -- is the liveness gate in `modes/oferta.md`.
 
 ---
 
