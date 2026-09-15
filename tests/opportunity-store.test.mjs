@@ -40,6 +40,16 @@ try {
   assert.throws(() => store.confirmSubmitted(first.id, 'submitted'), /current verified/);
   store.recordVerifiedApplicationPdf(first.id, { path: 'output/example.pdf', sha256: 'new-pdf' });
   assert.equal(store.confirmSubmitted(first.id, 'submitted').applicationState, 'submitted');
+  assert.equal(store.application(first.id).status, 'applied');
+  assert.throws(() => store.transitionApplication(first.id, 'hired', { source: 'test' }), /Invalid application transition/);
+  assert.equal(store.transitionApplication(first.id, 'responded', { source: 'reply-watch', payload: { messageId: '1' } }).status, 'responded');
+  assert.equal(store.transitionApplication(first.id, 'interview', { source: 'reply-watch' }).status, 'interview');
+  assert.equal(store.applicationViews()[0].status, 'interview');
+  assert.equal(store.application(first.id).events.length, 3);
+  store.recordApplicationActivity(first.id, 'reply_suggested', { toStatus: 'offer' });
+  store.recordApplicationActivity(first.id, 'followup_sent', { channel: 'email' });
+  assert.equal(store.followupViews()[0].id, first.id);
+  assert.ok(store.followupViews()[0].lastFollowupAt);
   store.saveCheckpoint(first.id, 'research', 'input-hash', 'output-hash');
   assert.equal(store.checkpoint(first.id, 'research').output_hash, 'output-hash');
   assert.equal(store.claimDelivery(first.id, 'discord', 'abc'), true);

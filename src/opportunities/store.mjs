@@ -63,6 +63,18 @@ export async function openOpportunityStore(path) {
       opportunity_id INTEGER NOT NULL REFERENCES opportunities(id), contact_key TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY(opportunity_id, contact_key)
     );
+    CREATE TABLE IF NOT EXISTS application_lifecycle (
+      opportunity_id INTEGER PRIMARY KEY REFERENCES opportunities(id), status TEXT NOT NULL CHECK(status IN ('applied','responded','interview','offer','rejected','discarded','hired')),
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS application_events (
+      id INTEGER PRIMARY KEY, opportunity_id INTEGER NOT NULL REFERENCES opportunities(id), from_status TEXT,
+      to_status TEXT NOT NULL, source TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS application_activity (
+      id INTEGER PRIMARY KEY, opportunity_id INTEGER NOT NULL REFERENCES opportunities(id), type TEXT NOT NULL CHECK(type IN ('followup_sent','reply_suggested','outcome_recorded','offer_prepared')),
+      payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS opportunity_events (
       id INTEGER PRIMARY KEY, opportunity_id INTEGER NOT NULL REFERENCES opportunities(id),
       type TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -98,6 +110,24 @@ export async function openOpportunityStore(path) {
   const state = id => db.prepare('SELECT state FROM opportunities WHERE id = ?').get(id)?.state;
   const requireState = (id, expected) => {
     if (state(id) !== expected) throw new Error(`Opportunity ${id} must be ${expected}`);
+  };
+  const applicationStatus = id => db.prepare('SELECT status FROM application_lifecycle WHERE opportunity_id = ?').get(id)?.status ?? null;
+  const applicationStatuses = new Set(['applied', 'responded', 'interview', 'offer', 'rejected', 'discarded', 'hired']);
+  const lifecycleTransitions = {
+    applied: new Set(['responded', 'interview', 'offer', 'rejected', 'discarded']),
+    responded: new Set(['interview', 'offer', 'rejected', 'discarded']),
+    interview: new Set(['offer', 'rejected', 'discarded']),
+    offer: new Set(['hired', 'discarded']),
+  };
+  const transitionApplication = (id, toStatus, { source, payload = {} } = {}) => {
+    if (!applicationStatuses.has(toStatus)) throw new Error(`Invalid application status: ${toStatus}`);
+    if (!String(source || '').trim()) throw new Error('Application transition source is required');
+    const fromStatus = applicationStatus(id);
+    if (!fromStatus || !lifecycleTransitions[fromStatus]?.has(toStatus)) throw new Error(`Invalid application transition: ${fromStatus ?? 'none'} → ${toStatus}`);
+    db.prepare('UPDATE application_lifecycle SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE opportunity_id = ?').run(toStatus, id);
+    db.prepare('INSERT INTO application_events (opportunity_id, from_status, to_status, source, payload) VALUES (?, ?, ?, ?, ?)').run(id, fromStatus, toStatus, source, JSON.stringify(payload));
+    event(id, 'application_transitioned', { fromStatus, toStatus, source });
+    return { status: toStatus };
   };
   const identity = (company, role) => `${String(company).normalize('NFKC').trim().toLowerCase()}::${String(role).normalize('NFKC').trim().toLowerCase()}`;
   return {
@@ -210,8 +240,27 @@ export async function openOpportunityStore(path) {
       if (!db.prepare("SELECT 1 FROM artifacts rendered JOIN artifacts verified ON verified.opportunity_id = rendered.opportunity_id AND verified.path = rendered.path AND verified.sha256 = rendered.sha256 WHERE rendered.opportunity_id = ? AND rendered.kind = 'application-pdf' AND verified.kind = 'verified-application-pdf'").get(id)) throw new Error(`Opportunity ${id} requires a current verified application PDF`);
       const result = db.prepare("UPDATE opportunities SET application_state = 'submitted' WHERE id = ? AND state = 'evaluated' AND application_state = 'preparing'").run(id);
       if (!result.changes) throw new Error(`Opportunity ${id} must be in application preparation`);
+      db.prepare("INSERT INTO application_lifecycle (opportunity_id, status) VALUES (?, 'applied')").run(id);
+      db.prepare("INSERT INTO application_events (opportunity_id, to_status, source, payload) VALUES (?, 'applied', 'candidate-confirmed', '{}')").run(id);
       event(id, 'application_submitted');
       return this.opportunity(id);
+    },
+    application(id) {
+      const status = applicationStatus(id);
+      return status && { status, events: db.prepare('SELECT from_status AS fromStatus, to_status AS toStatus, source, payload, created_at AS createdAt FROM application_events WHERE opportunity_id = ? ORDER BY id').all(id).map(row => ({ ...row, payload: JSON.parse(row.payload) })) };
+    },
+    transitionApplication,
+    applicationViews() {
+      return db.prepare("SELECT o.id, o.company, o.role, l.status, l.updated_at AS updatedAt FROM application_lifecycle l JOIN opportunities o ON o.id = l.opportunity_id ORDER BY l.updated_at DESC, o.id DESC").all();
+    },
+    recordApplicationActivity(id, type, payload = {}) {
+      if (!['followup_sent', 'reply_suggested', 'outcome_recorded', 'offer_prepared'].includes(type)) throw new Error(`Invalid application activity: ${type}`);
+      if (!applicationStatus(id)) throw new Error(`Opportunity ${id} has no submitted application`);
+      db.prepare('INSERT INTO application_activity (opportunity_id, type, payload) VALUES (?, ?, ?)').run(id, type, JSON.stringify(payload));
+      event(id, type, payload);
+    },
+    followupViews() {
+      return db.prepare("SELECT o.id, o.company, o.role, l.status, l.updated_at AS lastTransitionAt, MAX(CASE WHEN a.type = 'followup_sent' THEN a.created_at END) AS lastFollowupAt FROM application_lifecycle l JOIN opportunities o ON o.id = l.opportunity_id LEFT JOIN application_activity a ON a.opportunity_id = o.id WHERE l.status IN ('applied', 'responded', 'interview') GROUP BY o.id, o.company, o.role, l.status, l.updated_at ORDER BY l.updated_at").all();
     },
     linkOutreachContact(id, contactKey) {
       if (!this.shortlist().some(opportunity => opportunity.id === id)) throw new Error(`Opportunity ${id} must be a shortlist opportunity`);

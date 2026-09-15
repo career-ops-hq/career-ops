@@ -207,6 +207,8 @@ const SYSTEM_PATHS = [
   'prepare-application.mjs',
   'application-artifacts.mjs',
   'application-workflow.mjs',
+  'application-lifecycle.mjs',
+  'application-outcome.mjs',
   'grounded-draft.mjs',
   'src/applications/context.mjs',
   'src/opportunities/store.mjs',

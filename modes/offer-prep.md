@@ -15,6 +15,10 @@ ratings, scores, or verdicts. It is a structured reading companion, not a
 contract reviewer, not legal advice, and not a substitute for an employment
 lawyer.
 
+For a tracked offer, resolve the canonical opportunity first and record only an `offer_prepared` activity after the candidate asks for preparation. The mode stays descriptive and draft-only; it never changes an offer state or gives a legal verdict.
+
+After delivering preparation, record it with `node application-lifecycle.mjs activity <opportunity-id> --type offer_prepared --confirmed --db "$CAREER_OPS_OPPORTUNITY_DB"`. This records preparation, never approval or acceptance.
+
 It is NOT:
 - a legal review — no enforceability opinions, ever.
 - `ofertas`: comparing multiple offers.

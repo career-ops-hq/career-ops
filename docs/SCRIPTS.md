@@ -863,6 +863,8 @@ These have no `npm run` binding — modes and agents call them with
 | `node generate-latex.mjs <input.tex> [output.pdf]` | Validate and compile a generated `.tex` CV via tectonic or pdflatex |
 | `node classify-tier.mjs` | Classify a job title into intern / entry / mid / senior |
 | `node grounded-draft.mjs --db <opportunities.db> --opportunity <id>` | Emits the canonical, draft-only context for cover, email, and outreach; `--link-contact <key> --confirmed` records a candidate-confirmed saved contact |
+| `node application-lifecycle.mjs view\|followups --db <opportunities.db>` | Derived application and follow-up views; explicit transitions and activities are recorded against canonical opportunity events |
+| `node application-outcome.mjs <opportunity-id> <outcome> --db <opportunities.db>` | Records a candidate-confirmed outcome and preserves its linked canonical artifacts without rewriting tracker Markdown |
 | `node plugins.mjs list\|run <id> [hook]` | CLI host for non-provider plugin hooks (see [PLUGINS.md](PLUGINS.md)) |
 | `node plugin-install.mjs` | Clone/scaffold/validate community plugins (allowlisted URLs, pinned SHA) |
 | `node plugin-audit.mjs` | Static safety scan for community/registry plugins |

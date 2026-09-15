@@ -62,6 +62,8 @@
     "prepare:application": "node prepare-application.mjs",
     "application:init": "node application-artifacts.mjs --init",
     "application": "node application-workflow.mjs",
+    "application:lifecycle": "node application-lifecycle.mjs",
+    "application:outcome": "node application-outcome.mjs",
     "draft:context": "node grounded-draft.mjs",
     "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps",
     "manifesto": "node manifesto.mjs"
