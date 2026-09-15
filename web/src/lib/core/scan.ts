@@ -39,6 +39,48 @@ function firstMatch(title: string, positives: string[]): string | undefined {
   return undefined;
 }
 
+function ingestJsonOffer(
+  o: JsonOffer,
+  currentAts: string,
+  filters: ExploreFilters,
+  seen: Set<string>,
+  offers: DiscoveredOffer[],
+  onEvent: (e: ScanEvent) => void,
+): void {
+  const url = (o.url || "").trim();
+  if (!url || seen.has(url) || !o.company || !o.title) return;
+  seen.add(url);
+  const source = o.source || `${currentAts}-full`;
+  const offer: DiscoveredOffer = {
+    company: o.company,
+    title: o.title,
+    location: o.location || "",
+    postedAt: o.postedAt || "",
+    ats: source.replace(/-full$/, ""),
+    source,
+    url,
+    matchedKeyword: firstMatch(o.title, filters.positive),
+  };
+  offers.push(offer);
+  onEvent({ kind: "offer", offer });
+}
+
+/** Mirrors `parseLiveOfferLine` in scan-ats-full.mjs — keep the two in sync. */
+function parseLiveOfferLine(line: string): JsonOffer | null {
+  const raw = line.trim();
+  const start = raw.indexOf("{");
+  if (start < 0) return null;
+  try {
+    const ev = JSON.parse(raw.slice(start)) as JsonOffer & { kind?: string };
+    if (ev?.kind !== "offer") return null;
+    const url = (ev.url || "").trim();
+    if (!url || !ev.company || !ev.title) return null;
+    return ev;
+  } catch {
+    return null;
+  }
+}
+
 function parseOfferLine(source: string, date: string, rest: string): Omit<DiscoveredOffer, "url"> | null {
   const fields = rest.split(" | ");
   if (fields.length < 2) return null;
@@ -123,21 +165,27 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
     // Live progress (atsStart / progress / atsDone) — in --json mode these human
     // lines arrive on STDERR; in legacy mode on STDOUT (handled inside handleLine).
     const handleProgressLine = (line: string) => {
+      const live = parseLiveOfferLine(line);
+      if (live) {
+        ingestJsonOffer(live, currentAts, filters, seen, offers, onEvent);
+        return true;
+      }
       const atsM = line.match(ATS_START_RE);
       if (atsM) {
         currentAts = atsM[1];
         onEvent({ kind: "atsStart", ats: atsM[1], companies: Number(atsM[2]) });
-        return;
+        return false;
       }
       const progM = line.match(PROGRESS_RE);
       if (progM) {
         onEvent({ kind: "progress", ats: currentAts, scanned: Number(progM[1]), total: Number(progM[2]), matches: Number(progM[3]) });
-        return;
+        return false;
       }
       const doneAtsM = line.match(ATS_DONE_RE);
       if (doneAtsM) {
         onEvent({ kind: "atsDone", ats: currentAts, unreachable: Number(doneAtsM[1]) });
       }
+      return false;
     };
 
     const handleLine = (line: string) => {
@@ -209,7 +257,10 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
       errBuf = parts.pop() ?? "";
       for (const p of parts) {
         if (!p.trim()) continue;
-        if (useJson) handleProgressLine(p); // human progress lives on stderr in --json mode
+        if (useJson) {
+          // human progress + live offer JSON live on stderr in --json mode
+          if (handleProgressLine(p)) continue;
+        }
         onEvent({ kind: "log", line: p.trim() });
       }
     });
@@ -232,22 +283,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
         }
         if (j && Array.isArray(j.offers)) {
           for (const o of j.offers) {
-            const url = (o.url || "").trim();
-            if (!url || seen.has(url) || !o.company || !o.title) continue;
-            seen.add(url);
-            const source = o.source || `${currentAts}-full`;
-            const offer: DiscoveredOffer = {
-              company: o.company,
-              title: o.title,
-              location: o.location || "",
-              postedAt: o.postedAt || "",
-              ats: source.replace(/-full$/, ""),
-              source,
-              url,
-              matchedKeyword: firstMatch(o.title, filters.positive),
-            };
-            offers.push(offer);
-            onEvent({ kind: "offer", offer });
+            ingestJsonOffer(o, currentAts, filters, seen, offers, onEvent);
           }
           onEvent({
             kind: "summary",

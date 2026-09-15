@@ -506,6 +506,53 @@ export function sampleCompanies(list, limit, shuffle = false) {
   return copy.slice(0, limit);
 }
 
+/** One stderr JSON line per kept offer in `--json` mode so Explore can paint
+ *  cards while the walk continues. Stdout stays the single summary object (#1199). */
+export function formatLiveOfferLine(job, source) {
+  let postedAt = null;
+  if (job?.postedAt) {
+    const d = new Date(job.postedAt);
+    if (!Number.isNaN(d.getTime())) postedAt = d.toISOString().slice(0, 10);
+  }
+  return JSON.stringify({
+    kind: 'offer',
+    company: job.company,
+    title: job.title,
+    url: job.url,
+    location: job.location || null,
+    postedAt,
+    source: source || job.source || '',
+  });
+}
+
+export function parseLiveOfferLine(line) {
+  const raw = String(line || '');
+  const start = raw.indexOf('{');
+  if (start < 0) return null;
+  let ev;
+  try {
+    ev = JSON.parse(raw.slice(start));
+  } catch {
+    return null;
+  }
+  if (!ev || ev.kind !== 'offer') return null;
+  const url = typeof ev.url === 'string' ? ev.url.trim() : '';
+  if (!url || !ev.company || !ev.title) return null;
+  return ev;
+}
+
+export function emitLiveOffer(job, source, { json } = {}) {
+  if (!json || !job?.url || !job.company || !job.title) return;
+  console.error(formatLiveOfferLine(job, source));
+}
+
+export function keepAndMaybeEmit(job, source, sink, blacklist, opts) {
+  const kept = { ...job, source, dateStatus: job.postedAt ? 'dated' : 'unknown' };
+  sink.push(kept);
+  const live = filterBlacklistedOffers([kept], blacklist, { includeBlacklisted: opts.includeBlacklisted });
+  if (live.offers.length) emitLiveOffer(live.offers[0], source, { json: opts.json });
+}
+
 // ── VC portfolio seed scan ──────────────────────────────────────────
 
 // ATS providers that can auto-detect from a careers_url, in probe order.
@@ -592,7 +639,7 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
       const dedupToken = dedupTokenFor(job, provider);
       if (seenUrls.has(dedupToken)) continue;
       seenUrls.add(dedupToken);
-      offers.push({ ...job, source: sourceName, dateStatus: job.postedAt ? 'dated' : 'unknown' });
+      keepAndMaybeEmit(job, sourceName, offers, opts.blacklist, opts);
     }
   });
 
@@ -702,7 +749,13 @@ async function main() {
   // either stream, and `--dry-run --json` has no checkpoint to fall back on
   // (dry runs write no state), so a long run was indistinguishable from a hung
   // one.
-  const progress = (s) => { if (opts.json) process.stderr.write(s); else process.stdout.write(s); };
+  // `--json` consumers parse stderr as newline-delimited lines. The human
+  // path overwrites one TTY row with `\r`; converting that to `\n` on stderr
+  // keeps progress ticks and live-offer JSON from gluing onto the same line.
+  const progress = (s) => {
+    if (opts.json) process.stderr.write(String(s).replace(/\r$/, '\n'));
+    else process.stdout.write(s);
+  };
 
   if (!existsSync(PORTALS_PATH)) {
     console.error('Error: portals.yml not found. Run onboarding first — the reverse scan reuses its title_filter/location_filter.');
@@ -748,6 +801,7 @@ async function main() {
     extraTokensFor: (url, portal) => providerForSource(portal)?.dedupKey?.({ url }),
   });
   const blacklist = loadBlacklist();
+  opts.blacklist = blacklist;
   // sinceMs and includeUndated let providers (currently only workday.mjs)
   // stop paginating a tenant early instead of always walking to max_pages:
   // sinceMs once postings are confidently past the --since window, and
@@ -868,7 +922,7 @@ async function main() {
       const dedupToken = dedupTokenFor(job, provider);
       if (seenUrls.has(dedupToken)) continue;
       seenUrls.add(dedupToken); // intra-scan dedup
-      newOffers.push({ ...job, source: `${sourceName}-full`, dateStatus: job.postedAt ? 'dated' : 'unknown' });
+      keepAndMaybeEmit(job, `${sourceName}-full`, newOffers, blacklist, opts);
     }
   };
 
