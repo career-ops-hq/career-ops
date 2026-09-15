@@ -1001,6 +1001,46 @@ export function isReferencedByPreservedFile(candidatePath, preservedPaths, readF
   });
 }
 
+// A stale-file prune candidate may never have been an upstream file at all.
+// `staleSystemFiles()` selects on "absent from upstream's CURRENT tree", which
+// cannot tell a file upstream retired from a file upstream never carried — a
+// provider, test or registry entry a fork added under one of the ~50
+// directory-prefix SYSTEM_PATHS entries (`providers/`, `tests/`, `templates/`,
+// `docs/`, `modes/*/`, ...). Both are "local, not in the new tree", and the
+// prune deleted both (#3971; same root cause as #3636 and #3696 on a third
+// surface, where no USER_PATHS carve-out applies because the file genuinely IS
+// system-layer, and no filename shape distinguishes it — a fork's
+// `providers/acme.mjs` is spelled exactly like a shipped provider).
+//
+// Upstream's HISTORY settles it, and `apply()` already fetched it: a path that
+// appears in no commit reachable from the fetched ref was never shipped, so its
+// absence from the current tree is not evidence of anything. A path that DOES
+// appear there, but is gone now, is a real removal and still prunes — including
+// the case of a file upstream MOVED (its old path is in history), which is why
+// this does not simply disable the feature.
+//
+// Fails safe: pruning requires positive proof the file was shipped. On a
+// shallow clone the walk returns empty, and on a broken ref it throws; both
+// answer "not proven", so the file is kept.
+// Keeping a retired file is a cosmetic regression (#2532); deleting a fork's
+// source file is not recoverable from the update itself.
+export function wasEverShippedUpstream(candidatePath, ref = 'FETCH_HEAD', revList = (...args) => gitQuiet(...args)) {
+  const file = normalizeRepoPath(candidatePath);
+  if (!file) return false;
+  try {
+    // --literal-pathspecs: `-- <path>` is a PATHSPEC, so a tracked filename
+    // containing glob metacharacters would be matched as a pattern. A local
+    // `modes/_share[a-z].md` matches upstream's `modes/_shared.md`, reads as
+    // "shipped", and is pruned — the exact deletion this function prevents.
+    return revList('--literal-pathspecs', 'rev-list', '--max-count=1', ref, '--', file) !== '';
+  } catch {
+    // No evidence either way. The caller prunes only on a TRUE return, so
+    // false is the safe answer: pruning requires positive proof the file was
+    // shipped, never the mere absence of a usable answer.
+    return false;
+  }
+}
+
 // Files the self-reexec stage must check out so the TARGET update-system.mjs
 // loads without a missing-module crash. Today this is the entry plus its only
 // local import; resolveReexecCheckout derives the real set from the fetched
@@ -2291,6 +2331,10 @@ async function apply() {
         for (const f of staleCandidates) {
           if (isReferencedByPreservedFile(f, preservedPaths)) {
             console.log(`Kept stale asset still referenced by a preserved file: ${f}`);
+            continue;
+          }
+          if (!wasEverShippedUpstream(f, 'FETCH_HEAD')) {
+            console.log(`Kept local file upstream has never shipped: ${f}`);
             continue;
           }
           try {
