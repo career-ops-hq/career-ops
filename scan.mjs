@@ -61,6 +61,8 @@ import { writePrescreenCache } from './lib/prescreen-cache.mjs';
 import { captureScanJds } from './lib/scan-jd.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { promoteKnownFragmentIdentity } from './url-key.mjs';
+import { openOpportunityStore } from './src/opportunities/store.mjs';
+import { ingestScanOffers } from './src/discovery/ingest.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -85,6 +87,7 @@ const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || 'config/profile.yml';
 // lane A is silently counted as a duplicate in lane B and never shown at all.
 const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || 'data/scan-history.tsv';
 const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || 'data/pipeline.md';
+const OPPORTUNITY_DB = process.env.CAREER_OPS_OPPORTUNITY_DB || null;
 const APPLICATIONS_PATH = 'data/applications.md';
 const PRESCREEN_CACHE_PATH = process.env.CAREER_OPS_PRESCREEN_CACHE || 'data/prescreen-cache';
 const PROVIDERS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'providers');
@@ -1886,6 +1889,18 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
   return { seen, recheckEligible, seenCompanyRoles, fingerprintHistory };
 }
 
+/** SQLite scans use the same URL identity without consulting legacy workflow files. */
+export async function loadDatabaseDedupSnapshot(databasePath, policy = {}, canonicalize = defaultCompanyNormalizer) {
+  const store = await openOpportunityStore(databasePath);
+  try {
+    const rows = store.dedupRows();
+    const seen = new Set(rows.filter(row => shouldDedupScanHistoryRow(row, policy)).map(row => normalizeUrlForDedup(row.url)));
+    const seenCompanyRoles = new Set(rows.filter(row => row.company && row.role && shouldDedupScanHistoryRow(row, policy))
+      .map(row => companyRoleDedupKey(row.company, row.role, canonicalize)));
+    return { seen, recheckEligible: rows.length - seen.size, seenCompanyRoles, fingerprintHistory: [] };
+  } finally { store.close(); }
+}
+
 // Standard skeleton created on fresh install — matches the format documented
 // in modes/pipeline.md and expected by /career-ops pipeline.
 const PIPELINE_SKELETON = `# Pipeline — Pending URLs
@@ -2506,7 +2521,9 @@ async function main() {
   // 4. Load dedup sets — one read per source file for the whole run (#2382).
   const historyPolicy = scanHistoryPolicy(config);
   const canonicalizeCompany = buildCompanyCanonicalizer(config.company_aliases);
-  const dedupSnapshot = loadDedupSnapshot(historyPolicy, canonicalizeCompany);
+  const dedupSnapshot = OPPORTUNITY_DB
+    ? await loadDatabaseDedupSnapshot(OPPORTUNITY_DB, historyPolicy, canonicalizeCompany)
+    : loadDedupSnapshot(historyPolicy, canonicalizeCompany);
   const seenUrls = dedupSnapshot.seen;
   const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
 
@@ -2753,10 +2770,14 @@ async function main() {
     const jdCapture = await captureScanJds(verifiedOffers);
     console.log('JD capture: ' + JSON.stringify(jdCapture));
     persistScanPrescreens(verifiedOffers);
-    await appendToPipeline(verifiedOffers);
-    await appendToScanHistory(verifiedOffers, date);
+    if (OPPORTUNITY_DB) {
+      await ingestScanOffers(OPPORTUNITY_DB, verifiedOffers);
+    } else {
+      await appendToPipeline(verifiedOffers);
+      await appendToScanHistory(verifiedOffers, date);
+    }
   }
-  if (!dryRun && cooldownOffers.length > 0) {
+  if (!dryRun && !OPPORTUNITY_DB && cooldownOffers.length > 0) {
     const cooldownGroups = {};
     for (const item of cooldownOffers) {
       if (!cooldownGroups[item.status]) {
@@ -2774,18 +2795,29 @@ async function main() {
     ...expiredOffers,
     ...migratedOffers.map(o => ({ ...o, url: o.previousUrl })),
   ];
-  if (!dryRun && expiredForHistory.length > 0) {
+  if (!dryRun && OPPORTUNITY_DB) {
+    const store = await openOpportunityStore(OPPORTUNITY_DB);
+    try {
+      store.recordScanOutcomes([
+        ...cooldownOffers.map(item => ({ ...item.job, status: item.status })),
+        ...expiredForHistory.map(offer => ({ ...offer, status: 'skipped_expired' })),
+        ...droppedOffers.map(offer => ({ ...offer, status: 'skipped_no_apply_control' })),
+        ...invalidOffers.map(offer => ({ ...offer, status: offer.status ?? 'invalid' })),
+      ]);
+    } finally { store.close(); }
+  }
+  if (!dryRun && !OPPORTUNITY_DB && expiredForHistory.length > 0) {
     await appendToScanHistory(expiredForHistory, date, 'skipped_expired');
   }
   // Pages that loaded but had no Apply control: record so we don't re-verify
   // them next scan, but never let them reach pipeline.md.
-  if (!dryRun && droppedOffers.length > 0) {
+  if (!dryRun && !OPPORTUNITY_DB && droppedOffers.length > 0) {
     await appendToScanHistory(droppedOffers, date, 'skipped_no_apply_control');
   }
   // Guard-rejected URLs (invalid / unsupported protocol / blocked host) are
   // recorded with a precise status so subsequent scans dedup-skip them via
   // loadSeenUrls, but they never reach pipeline.md.
-  if (!dryRun && invalidOffers.length > 0) {
+  if (!dryRun && !OPPORTUNITY_DB && invalidOffers.length > 0) {
     // Group by code so the TSV reflects the actual reason category.
     const byStatus = new Map();
     for (const o of invalidOffers) {
@@ -2984,13 +3016,13 @@ async function main() {
     if (dryRun) {
       console.log('\n(dry run — run without --dry-run to save results)');
     } else {
-      console.log(`\nResults saved to ${PIPELINE_PATH} and ${SCAN_HISTORY_PATH}`);
+      console.log(`\nResults saved to ${OPPORTUNITY_DB || `${PIPELINE_PATH} and ${SCAN_HISTORY_PATH}`}`);
     }
   }
 
   // Persist this run's counters (#1604) — guarded exactly like the other
   // writes; a --dry-run must leave no trace.
-  if (!dryRun) {
+  if (!dryRun && !OPPORTUNITY_DB) {
     await appendPortalHealth(healthRecords);
     appendScanRunSummary({
       timestamp: new Date().toISOString(), status: 'completed',

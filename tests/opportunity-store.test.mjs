@@ -1,0 +1,56 @@
+// Verifies one SQLite-backed opportunity lifecycle without legacy workflow files.
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { openOpportunityStore } from '../src/opportunities/store.mjs';
+import { ingestScanOffers } from '../src/discovery/ingest.mjs';
+import { loadDatabaseDedupSnapshot } from '../scan.mjs';
+import { companyRoleDedupKey } from '../scan.mjs';
+
+const directory = mkdtempSync(join(tmpdir(), 'career-ops-opportunity-'));
+try {
+  const store = await openOpportunityStore(join(directory, 'career-ops.db'));
+  await ingestScanOffers(join(directory, 'career-ops.db'), [{ url: 'https://jobs.example.com/scanned', company: 'Scanned', title: 'Engineer', source: 'ashby' }]);
+  assert.equal(store.claimNext('scanner-check').url, 'https://jobs.example.com/scanned');
+  const first = store.ingest({ url: 'https://jobs.example.com/42', company: 'Example', role: 'AI Engineer', source: 'greenhouse', payload: { id: 42 } });
+  assert.equal(store.ingest({ url: first.url, company: 'Changed', role: 'Changed', source: 'greenhouse', payload: {} }).id, first.id);
+  assert.equal(store.claim(first.id, 'worker-a'), true);
+  assert.equal(store.claim(first.id, 'worker-b'), false);
+  assert.equal(store.resume('worker-a').id, first.id);
+  assert.throws(() => store.recordEvaluation(first.id, { lower: 4.2, upper: 4.6, coverage: 1, reportHash: 'abc' }), /must be eligible/);
+  store.recordEligibility(first.id, { status: 'pass', evidence: { location: 'Shanghai' } });
+  store.recordEvaluation(first.id, { lower: 4.2, upper: 4.6, coverage: 1, reportHash: 'abc' });
+  store.recordArtifact(first.id, { kind: 'report', path: 'reports/example.md', sha256: 'abc' });
+  store.saveCheckpoint(first.id, 'research', 'input-hash', 'output-hash');
+  assert.equal(store.checkpoint(first.id, 'research').output_hash, 'output-hash');
+  assert.equal(store.claimDelivery(first.id, 'discord', 'abc'), true);
+  assert.equal(store.releaseDelivery(first.id, 'discord', 'abc'), true);
+  assert.equal(store.claimDelivery(first.id, 'discord', 'abc'), true);
+  assert.equal(store.completeDelivery(first.id, 'discord', 'abc'), true);
+  assert.equal(store.claimDelivery(first.id, 'discord', 'abc'), false);
+  assert.deepEqual(store.shortlist().map(row => row.id), [first.id]);
+  const rejected = store.ingest({ url: 'https://jobs.example.com/43', company: 'Example', role: 'Other', source: 'greenhouse', payload: {} });
+  assert.equal(store.claimNext('worker-a').id, rejected.id);
+  store.recordEligibility(rejected.id, { status: 'fail', evidence: { employment: 'contractor' } });
+  assert.deepEqual(store.shortlist().map(row => row.id), [first.id]);
+  assert.throws(() => store.recordEligibility(rejected.id, { status: 'pass', evidence: {} }), /must be evaluating/);
+  const stalled = store.ingest({ url: 'https://jobs.example.com/44', company: 'Example', role: 'Stalled', source: 'greenhouse', payload: {} });
+  assert.equal(store.claim(stalled.id, 'worker-c'), true);
+  assert.equal(store.resume('worker-c').id, stalled.id);
+  const next = store.ingest({ url: 'https://jobs.example.com/45', company: 'Example', role: 'Next', source: 'greenhouse', payload: {} });
+  assert.equal(store.resume('worker-c'), null);
+  assert.equal(store.claimNext('worker-c').id, next.id);
+  store.recordScanOutcomes([{ url: 'https://jobs.example.com/expired', status: 'skipped_expired' }]);
+  assert.ok(store.urls().includes('https://jobs.example.com/expired'));
+  const recheckable = store.ingest({ url: 'https://jobs.example.com/46', company: 'Example', role: 'Recheck', source: 'greenhouse', payload: {} });
+  const recheck = await loadDatabaseDedupSnapshot(join(directory, 'career-ops.db'), { recheckAfterDays: 0, today: '2099-01-01' });
+  assert.equal(recheck.seen.has(first.url), true);
+  assert.equal(recheck.seen.has(recheckable.url), false);
+  assert.equal(recheck.seen.has('https://jobs.example.com/expired'), true);
+  assert.ok(recheck.seenCompanyRoles.has(companyRoleDedupKey('Example', 'AI Engineer')));
+  assert.ok(store.events(first.id).some(event => event.type === 'evaluation_recorded'));
+  store.close();
+} finally {
+  rmSync(directory, { recursive: true, force: true });
+}

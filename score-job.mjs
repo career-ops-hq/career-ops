@@ -15,8 +15,10 @@ import { evaluatePrescreen } from './lib/prescreen-core.mjs';
 import { writePrescreenCache } from './lib/prescreen-cache.mjs';
 import { readShortlist, classifyOpportunity } from './scoring-decisions.mjs';
 import { SCORING_HEADINGS, calculateAttractiveness, scoreLabel, validateReport, validateReviewedReport } from './scoring-report.mjs';
+import { openOpportunityStore } from './src/opportunities/store.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
+const OPPORTUNITY_DB = process.env.CAREER_OPS_OPPORTUNITY_DB;
 export const hash = value => createHash('sha256').update(value).digest('hex');
 export function atomicWrite(path, value) {
   mkdirSync(dirname(path), { recursive: true });
@@ -65,6 +67,33 @@ export function selectJob(rows, states) {
 export async function prepare(root = ROOT, selectedUrl = null) {
   const sources = candidateSources(root);
   const fingerprint = hash(JSON.stringify(sources));
+  if (OPPORTUNITY_DB) {
+    const store = await openOpportunityStore(resolve(root, OPPORTUNITY_DB));
+    try {
+      const job = selectedUrl
+        ? store.claimUrl(selectedUrl, 'hermes-score')
+        : store.resume('hermes-score') ?? store.claimNext('hermes-score');
+      if (!job) return null;
+      const opportunity = store.opportunity(job.id);
+      const directory = resolve(root, 'data/pipeline-runs/score', `opportunity-${job.id}`, fingerprint.slice(0, 16));
+      const statePath = resolve(directory, 'state.json');
+      const previous = existsSync(statePath) ? json(statePath) : {};
+      for (const [id, content] of Object.entries(sources)) {
+        const path = resolve(directory, `${id}.txt`);
+        if (!existsSync(path)) atomicWrite(path, content);
+        if (readFileSync(path, 'utf8') !== content) throw new Error(`Modified frozen source: ${id}`);
+      }
+      const state = { ...previous, attempts: (previous.attempts ?? 0) + 1, status: 'running', started_at: new Date().toISOString(), opportunity_id: job.id };
+      save(resolve(directory, 'state.json'), state);
+      store.saveCheckpoint(job.id, 'prepare', fingerprint, hash(JSON.stringify(state)));
+      const scanSnapshot = opportunity.evidence.map(item => item.payload).find(payload => payload?.description)
+        ? { url: opportunity.url, text: opportunity.evidence.map(item => item.payload).find(payload => payload?.description).description }
+        : null;
+      const packet = { ...job, opportunity_id: job.id, directory, root, fingerprint, sources, scan_snapshot: scanSnapshot };
+      save(resolve(directory, 'packet.json'), packet);
+      return packet;
+    } finally { store.close(); }
+  }
   const pipeline = resolve(root, 'data/pipeline.md');
   return withPipelineLock(pipeline, () => {
     const text = readFileSync(pipeline, 'utf8');
@@ -156,6 +185,35 @@ export function renderReport(packet, evidence, assessment) {
 export async function publish(packet, { discard = null } = {}) {
   const { root, directory } = packet;
   if (hash(JSON.stringify(candidateSources(root))) !== packet.fingerprint) throw new Error('Candidate sources or rules changed; retry with new packet');
+  if (packet.opportunity_id) {
+    const store = await openOpportunityStore(resolve(root, OPPORTUNITY_DB));
+    try {
+      const state = json(resolve(directory, 'state.json'));
+      if (discard) {
+        store.discard(packet.opportunity_id, { evidence: { reason: discard }, checkpoint: { phase: 'discard', inputHash: packet.fingerprint, outputHash: hash(discard) } });
+        const result = { status: 'discarded', reason: discard };
+        save(resolve(directory, 'state.json'), { ...state, ...result, completed_at: new Date().toISOString() });
+        return result;
+      }
+      const report = readFileSync(resolve(directory, 'report.md'), 'utf8');
+      const review = json(resolve(directory, 'report.md.review.json'));
+      const score = validateReviewedReport(report, review, { root });
+      if (review.gates.liveness !== 'Pass') throw new Error('Live posting verification required');
+      const profile = load(packet.sources.profile);
+      const reportPath = `reports/opportunity-${packet.opportunity_id}-${hash(report).slice(0, 12)}.md`;
+      atomicWrite(resolve(root, reportPath), report);
+      save(resolve(root, `${reportPath}.review.json`), review);
+      store.publish(packet.opportunity_id, {
+        eligibility: review.gates,
+        evaluation: { lower: score.lower, upper: score.upper, coverage: score.coverage, reportHash: hash(report) },
+        artifact: { kind: 'report', path: reportPath, sha256: hash(report) },
+        checkpoint: { phase: 'publish', inputHash: packet.fingerprint, outputHash: hash(report) },
+      });
+      const result = { status: 'published', report: reportPath, action: classifyOpportunity(score, review.gates, profile.attractiveness.alert_line) };
+      save(resolve(directory, 'state.json'), { ...state, ...result, completed_at: new Date().toISOString() });
+      return result;
+    } finally { store.close(); }
+  }
   const pipeline = resolve(root, 'data/pipeline.md');
   return withPipelineLock(pipeline, async () => {
     const text = readFileSync(pipeline, 'utf8');
@@ -214,6 +272,33 @@ export async function publish(packet, { discard = null } = {}) {
   }, { timeoutMs: 1000, maxWaitMs: 1000 });
 }
 
+export async function claimDiscordDelivery(packet) {
+  if (!packet.opportunity_id) return { claimed: true };
+  const store = await openOpportunityStore(resolve(packet.root, OPPORTUNITY_DB));
+  try {
+    const report = readFileSync(resolve(packet.directory, 'report.md'), 'utf8');
+    return { claimed: store.claimDelivery(packet.opportunity_id, 'discord', hash(report)) };
+  } finally { store.close(); }
+}
+
+export async function releaseDiscordDelivery(packet) {
+  if (!packet.opportunity_id) return { released: false };
+  const store = await openOpportunityStore(resolve(packet.root, OPPORTUNITY_DB));
+  try {
+    const report = readFileSync(resolve(packet.directory, 'report.md'), 'utf8');
+    return { released: store.releaseDelivery(packet.opportunity_id, 'discord', hash(report)) };
+  } finally { store.close(); }
+}
+
+export async function completeDiscordDelivery(packet) {
+  if (!packet.opportunity_id) return { completed: true };
+  const store = await openOpportunityStore(resolve(packet.root, OPPORTUNITY_DB));
+  try {
+    const report = readFileSync(resolve(packet.directory, 'report.md'), 'utf8');
+    return { completed: store.completeDelivery(packet.opportunity_id, 'discord', hash(report)) };
+  } finally { store.close(); }
+}
+
 /** Browser handoffs append discoveries through the same short lock as the scanner and scorer. */
 export async function appendPending(lines, root = ROOT) {
   const additions = lines.split('\n').filter(s => s.trim());
@@ -256,6 +341,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       result = evaluatePrescreen(evidence.prescreen);
       writePrescreenCache(packet.url, evidence.prescreen, result, resolve(packet.root, 'data/prescreen-cache'));
     } else if (command === 'publish') result = await publish(packet);
+    else if (command === 'claim-discord') result = await claimDiscordDelivery(packet);
+    else if (command === 'release-discord') result = await releaseDiscordDelivery(packet);
+    else if (command === 'complete-discord') result = await completeDiscordDelivery(packet);
     else if (command === 'discard') {
       const evidence = json(resolve(path, 'evidence.json'));
       const screen = evaluatePrescreen(evidence.prescreen);

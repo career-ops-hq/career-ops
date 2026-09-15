@@ -49,6 +49,7 @@ def node(command, directory=None, timeout=15):
 def maybe_push(directory):
     """Push only gate-safe reports meeting the configured combined-score alert line."""
     directory = Path(directory)
+    claimed = False
     try:
         report_path = directory / 'report.md'
         report = report_path.read_text()
@@ -62,9 +63,13 @@ def maybe_push(directory):
         alert_line = float(yaml.safe_load((ROOT / 'config/profile.yml').read_text())['attractiveness']['alert_line'])
         if 'Fail' in review.get('gates', {}).values() or lower + (upper - lower) * coverage < alert_line:
             return
-        title = f'高分岗位 · {summary["company"]} · {summary["role"]} · 吸引力 {lower}–{upper}/5（覆盖率{coverage * 100:.0f}%）'
+        claimed = node('claim-discord', directory).get('claimed')
+        if not claimed:
+            return
+        packet = read(directory / 'packet.json') if (directory / 'packet.json').exists() else {}
+        title = f'[{packet.get("opportunity_id", "legacy")}:{hashlib.sha256(report.encode()).hexdigest()[:12]}] 高分岗位 · {summary["company"]} · {summary["role"]} · 吸引力 {lower}–{upper}/5（覆盖率{coverage * 100:.0f}%）'
         argv = [
-            'python3', '/Users/oii/.hermes/skills/automation/discord-thread-deliver/scripts/discord_thread_post.py',
+            'python3', str(ROOT / 'scripts/discord-idempotent-post.py'),
             '--channel', '1519136110515585184',
             '--title', (title[:97] + '…') if len(title) > 100 else title,
             '--file', str(report_path),
@@ -78,9 +83,15 @@ def maybe_push(directory):
             result = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True, timeout=40, env=proxy_env)
         if result.returncode:
             raise RuntimeError(result.stderr.strip() or f'Discord poster exited {result.returncode}')
+        node('complete-discord', directory)
         with (directory / 'worker.log').open('a') as log:
             log.write('Discord high-score push succeeded\n')
     except Exception as error:
+        if claimed:
+            try:
+                node('release-discord', directory)
+            except Exception:
+                pass
         with (directory / 'worker.log').open('a') as log:
             log.write(f'WARNING Discord high-score push failed: {str(error).replace(chr(10), " ")}\n')
 
