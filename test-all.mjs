@@ -17347,6 +17347,25 @@ try {
     fail(`computePortalStats auth/server streaks wrong: ${JSON.stringify(p2?.persistentlyDead)}`);
   }
 
+  // A streak from an entry that is no longer probed (moved to
+  // scan_method: websearch, provider dropped, renamed) must not stand as a
+  // permanent 🚨 — nothing it can write will ever clear it. Staleness is
+  // relative to the newest row in the file, not the wall clock.
+  const portalsYml3 = 'tracked_companies:\n  - name: MovedToWebsearch\n  - name: StillFailing\njob_boards: []';
+  const staleHealthTsv = 'timestamp\tcompany\tstatus\n' +
+    '2026-07-01\tMovedToWebsearch\tslug_gone\n' +
+    '2026-07-02\tMovedToWebsearch\tslug_gone\n' +
+    '2026-07-03\tMovedToWebsearch\tslug_gone\n' +
+    '2026-08-10\tStillFailing\tslug_gone\n' +
+    '2026-08-11\tStillFailing\tslug_gone\n' +
+    '2026-08-12\tStillFailing\tslug_gone\n';
+  const p3 = stats.computePortalStats(portalsYml3, null, [], staleHealthTsv);
+  if (p3 && p3.persistentlyDead === 1) {
+    pass('computePortalStats ignores failure streaks from entries no longer probed');
+  } else {
+    fail(`computePortalStats stale-streak gate wrong: ${JSON.stringify(p3?.persistentlyDead)}`);
+  }
+
   // scan.mjs computeConsecutiveFailures — same inverted rule at the source:
   // any non-healthy status increments, reachable/empty reset, and a legacy
   // 4-status TSV computes identical streaks to before the change.
