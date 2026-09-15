@@ -2,8 +2,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
-import { contactUid, parseContacts } from '../../contacts.mjs';
 import { openOpportunityStore } from '../opportunities/store.mjs';
+
+const contactKey = ({ name = '', company = '' }) => `${name.trim().toLowerCase()}::${company.trim().toLowerCase()}`;
 
 export async function loadGroundedApplicationContext(databasePath, opportunityId, root = process.cwd()) {
   const store = await openOpportunityStore(databasePath);
@@ -27,10 +28,13 @@ export async function loadGroundedApplicationContext(databasePath, opportunityId
 export async function linkGroundedContact(databasePath, opportunityId, contactKey, { confirmed = false, root = process.cwd() } = {}) {
   if (!confirmed) throw new Error('Contact linking requires explicit candidate confirmation');
   const contactsPath = join(root, 'data/contacts.tsv');
-  const known = existsSync(contactsPath) && parseContacts(readFileSync(contactsPath, 'utf8')).contacts.some(contact => contactKey === contactUid(contact));
+  const known = existsSync(contactsPath) && readFileSync(contactsPath, 'utf8').split('\n').some((line) => {
+    const [name, company] = line.split('\t');
+    return contactKey === contactKeyFor(name, company);
+  });
   if (!known) throw new Error('Contact key is not present in data/contacts.tsv');
   const store = await openOpportunityStore(databasePath);
   try { store.linkOutreachContact(opportunityId, contactKey); } finally { store.close(); }
 }
 
-export function contactKeyFor(name, company) { return contactUid({ name, company }); }
+export function contactKeyFor(name, company) { return contactKey({ name, company }); }
