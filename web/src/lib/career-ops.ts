@@ -3,6 +3,8 @@ import path from "node:path";
 import * as yaml from "js-yaml";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { parseApplications } from "@/lib/tracker-table.mjs";
+import { profileTargetKeywords, profileAuthorizedRegions, profileTargetSeniority } from "@/lib/profile-keywords.mjs";
+import type { Seniority } from "@/lib/inbox";
 // One definition of the `{n}-RESERVED.md` convention, shared with
 // run-cli-support.mjs — see report-files.mjs for why it lives there.
 import { isReservedReportFile } from "@/lib/report-files.mjs";
@@ -535,4 +537,30 @@ export function readLanguageConfig(): LanguageConfig {
     /* no profile yet, or malformed — defaults are correct */
   }
   return { output, modesDir, evalModeFile: resolveEvalModeFile(root, modesDir) };
+}
+
+export type TriageProfile = {
+  /** target-role keywords → the inbox stack-match hint */
+  keywords: string[];
+  /** regions the candidate may work from → the geo-eligibility hint */
+  authorizedRegions: string[];
+  /** least-senior level the candidate targets → the below-target flag */
+  targetSeniority: Seniority | null;
+};
+
+/** The candidate's own triage config from config/profile.yml, so the inbox's
+ *  zero-token hints (stack-match, geo-eligibility, seniority) reflect WHOEVER is
+ *  using the app — never a hardcoded profile. Best-effort: a bare checkout /
+ *  malformed profile yields empty signals (the hints simply don't render). */
+export function readTriageProfile(): TriageProfile {
+  try {
+    const parsed = yaml.load(fs.readFileSync(path.join(careerOpsRoot(), "config", "profile.yml"), "utf8"));
+    return {
+      keywords: profileTargetKeywords(parsed),
+      authorizedRegions: profileAuthorizedRegions(parsed),
+      targetSeniority: profileTargetSeniority(parsed) as Seniority | null,
+    };
+  } catch {
+    return { keywords: [], authorizedRegions: [], targetSeniority: null };
+  }
 }

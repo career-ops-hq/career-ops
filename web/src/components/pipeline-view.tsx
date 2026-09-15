@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, ChevronsUpDown, X, Compass, ArrowRight } from "lucide-react";
-import type { Application, InboxJob } from "@/lib/career-ops";
+import type { Application, InboxJob, TriageProfile } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { canonStatus, scoreNum, scoreTone, statusDot } from "@/lib/format";
@@ -34,9 +34,11 @@ type SortKey = (typeof SORT_KEYS)[number];
 export function PipelineView({
   applications,
   inbox,
+  triage,
 }: {
   applications: Application[];
   inbox: InboxJob[];
+  triage?: TriageProfile;
 }) {
   const params = useSearchParams();
   const router = useRouter();
@@ -189,7 +191,7 @@ export function PipelineView({
       {tab === "INBOX" ? (
         /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
         pendingInbox.length > 0 ? (
-          <InboxTriage inbox={pendingInbox} />
+          <InboxTriage inbox={pendingInbox} triage={triage} />
         ) : (
           <InboxEmpty count={0} filtered={false} />
         )
