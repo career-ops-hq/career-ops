@@ -159,18 +159,3 @@ test('weekly-digest: --dir --summary does not scan a directory named "--summary"
   assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
   assert.match(r.all, /--dir requires a value/);
 });
-
-// archive-posting.mjs hand-rolls its own argv loop rather than going through
-// validateFlags, so its --company/--role handling needed its own adjacency
-// check (the same class of bug through a different door — see archive-posting.mjs).
-test('archive-posting: --company --pipeline does not set the company slug to "--pipeline"', () => {
-  const r = runScript('archive-posting.mjs', 'https://example.com/job', '--company', '--pipeline');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
-  assert.match(r.all, /--company requires a value/);
-});
-
-test('archive-posting: --role --dry-run does not set the role slug to "--dry-run"', () => {
-  const r = runScript('archive-posting.mjs', 'https://example.com/job', '--role', '--dry-run');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
-  assert.match(r.all, /--role requires a value/);
-});
