@@ -29,10 +29,21 @@
 import { readFileSync, existsSync } from 'fs';
 import { canonicalize, extractSkills } from './skill-extract.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { join } from 'path';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const CV_PATH = 'cv.md';
+// From the data root, not the cwd. cv.md is a Source-of-Truth Boundary primary
+// file and lives wherever CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / the
+// .career-ops-data marker points; a bare relative path resolves against
+// whatever directory the process was started in.
+//
+// The error below already says "this is a user-layer file, create it first" —
+// advice that sends a user who HAS one to create a second copy in the wrong
+// place. Everything this script reports is a comparison against that file, so
+// without it there is nothing to say at all.
+const CV_PATH = join(getCareerOpsRoot(), 'cv.md');
 
 // ── JD skill extraction (regex, no LLM) ─────────────────────────────
 //
