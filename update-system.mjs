@@ -206,6 +206,7 @@ const SYSTEM_PATHS = [
   'jd-skill-gap.mjs',
   'prepare-application.mjs',
   'application-artifacts.mjs',
+  'application-workflow.mjs',
   'batch-evaluate-gemini.mjs',
   'providers/',
   'seeds/',

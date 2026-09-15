@@ -61,6 +61,7 @@
     "archive": "node archive-posting.mjs",
     "prepare:application": "node prepare-application.mjs",
     "application:init": "node application-artifacts.mjs --init",
+    "application": "node application-workflow.mjs",
     "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps",
     "manifesto": "node manifesto.mjs"
   },

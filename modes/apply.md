@@ -12,6 +12,18 @@ Prepare/Preparation Plan → Tailor/Reactive Resume → Review/Drafter-Reviewer 
 Verify/PDF-ATS → Submit (user only). If no specific Scored role is identified,
 ask which role to use before drafting.
 
+When `CAREER_OPS_OPPORTUNITY_DB` is configured, use `application-workflow.mjs`
+for the stateful handoff: `start` accepts only a shortlist opportunity,
+`render-resume` writes only its managed Reactive Resume copy, and
+`confirm-submitted --confirm submitted` records the candidate's explicit report
+that they submitted. Its safe browser helper fills text/select/file fields only;
+it has no submit or click operation.
+
+After `render-resume`, run `verify-pdf` with the candidate name and every
+expected rendered section as `--expect=...`; inspect the rendered PDF, then
+pass `--visual-confirmed`. Only that command records the verified-PDF evidence
+needed before an explicit submission confirmation can change the opportunity.
+
 Initialize its application bundle and read `preparation/plan.json`. The drafter writes answers and role-specific CV artifacts without changing `cv.md` or the configured Reactive Resume mother resume. A separate reviewer must produce `review/application-review.json` with:
 
 ```json

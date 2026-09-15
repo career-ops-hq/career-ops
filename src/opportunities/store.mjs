@@ -13,6 +13,7 @@ export async function openOpportunityStore(path) {
     CREATE TABLE IF NOT EXISTS opportunities (
       id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE, company TEXT NOT NULL,
       role TEXT NOT NULL, identity TEXT NOT NULL UNIQUE, source TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'discovered' CHECK(state IN ('discovered','evaluating','eligible','ineligible','evaluated')),
+      application_state TEXT NOT NULL DEFAULT 'none' CHECK(application_state IN ('none','preparing','submitted')),
       claimed_by TEXT, attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS source_evidence (
@@ -76,6 +77,7 @@ export async function openOpportunityStore(path) {
     BEGIN SELECT RAISE(ABORT, 'delivery requires evaluated opportunity'); END;
   `);
   if (!db.prepare('PRAGMA table_info(opportunities)').all().some(column => column.name === 'attempts')) db.exec('ALTER TABLE opportunities ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0');
+  if (!db.prepare('PRAGMA table_info(opportunities)').all().some(column => column.name === 'application_state')) db.exec("ALTER TABLE opportunities ADD COLUMN application_state TEXT NOT NULL DEFAULT 'none'");
   if (!db.prepare('PRAGMA table_info(opportunities)').all().some(column => column.name === 'identity')) {
     db.exec('ALTER TABLE opportunities ADD COLUMN identity TEXT');
     const used = new Set();
@@ -157,7 +159,7 @@ export async function openOpportunityStore(path) {
     healthRecords() { return db.prepare('SELECT checked_at AS timestamp, source AS company, status FROM source_health ORDER BY id').all(); },
     fingerprintHistory() { return db.prepare('SELECT o.url, substr(r.first_seen, 1, 10) AS dateStr, o.company, o.role AS title, r.fingerprint FROM repost_inputs r JOIN opportunities o ON o.id = r.opportunity_id').all(); },
     opportunity(id) {
-      const row = db.prepare('SELECT id, url, company, role, source, state FROM opportunities WHERE id = ?').get(id);
+      const row = db.prepare('SELECT id, url, company, role, source, state, application_state AS applicationState FROM opportunities WHERE id = ?').get(id);
       if (!row) return null;
       return { ...row, evidence: db.prepare('SELECT source, payload FROM source_evidence WHERE opportunity_id = ? ORDER BY id').all(id).map(item => ({ source: item.source, payload: JSON.parse(item.payload) })) };
     },
@@ -177,6 +179,32 @@ export async function openOpportunityStore(path) {
       requireState(id, 'evaluated');
       db.prepare('INSERT INTO artifacts (opportunity_id, kind, path, sha256) VALUES (?, ?, ?, ?) ON CONFLICT(opportunity_id, kind, path) DO UPDATE SET sha256 = excluded.sha256').run(id, kind, path, sha256);
       event(id, 'artifact_recorded', { kind, path });
+    },
+    startApplication(id) {
+      const result = db.prepare("UPDATE opportunities SET application_state = 'preparing' WHERE id = ? AND state = 'evaluated' AND application_state = 'none' AND EXISTS (SELECT 1 FROM eligibility WHERE opportunity_id = opportunities.id AND status = 'pass')").run(id);
+      if (!result.changes) throw new Error(`Opportunity ${id} must be an unstarted shortlist opportunity`);
+      event(id, 'application_started');
+      return this.opportunity(id);
+    },
+    recordApplicationArtifact(id, { kind, path, sha256 }) {
+      if (kind === 'verified-application-pdf') throw new Error('Use recordVerifiedApplicationPdf for verified PDFs');
+      if (state(id) !== 'evaluated' || db.prepare('SELECT application_state FROM opportunities WHERE id = ?').get(id)?.application_state !== 'preparing') throw new Error(`Opportunity ${id} must be in application preparation`);
+      db.prepare('INSERT INTO artifacts (opportunity_id, kind, path, sha256) VALUES (?, ?, ?, ?) ON CONFLICT(opportunity_id, kind, path) DO UPDATE SET sha256 = excluded.sha256').run(id, kind, path, sha256);
+      event(id, 'application_artifact_recorded', { kind, path, sha256 });
+    },
+    recordVerifiedApplicationPdf(id, { path, sha256 }) {
+      if (state(id) !== 'evaluated' || db.prepare('SELECT application_state FROM opportunities WHERE id = ?').get(id)?.application_state !== 'preparing') throw new Error(`Opportunity ${id} must be in application preparation`);
+      if (!db.prepare("SELECT 1 FROM artifacts WHERE opportunity_id = ? AND kind = 'application-pdf' AND path = ? AND sha256 = ?").get(id, path, sha256)) throw new Error(`Opportunity ${id} PDF must match its rendered application artifact`);
+      db.prepare('INSERT INTO artifacts (opportunity_id, kind, path, sha256) VALUES (?, ?, ?, ?) ON CONFLICT(opportunity_id, kind, path) DO UPDATE SET sha256 = excluded.sha256').run(id, 'verified-application-pdf', path, sha256);
+      event(id, 'application_pdf_verified', { path, sha256 });
+    },
+    confirmSubmitted(id, confirmation) {
+      if (confirmation !== 'submitted') throw new Error('Submission requires explicit confirmation: submitted');
+      if (!db.prepare("SELECT 1 FROM artifacts rendered JOIN artifacts verified ON verified.opportunity_id = rendered.opportunity_id AND verified.path = rendered.path AND verified.sha256 = rendered.sha256 WHERE rendered.opportunity_id = ? AND rendered.kind = 'application-pdf' AND verified.kind = 'verified-application-pdf'").get(id)) throw new Error(`Opportunity ${id} requires a current verified application PDF`);
+      const result = db.prepare("UPDATE opportunities SET application_state = 'submitted' WHERE id = ? AND state = 'evaluated' AND application_state = 'preparing'").run(id);
+      if (!result.changes) throw new Error(`Opportunity ${id} must be in application preparation`);
+      event(id, 'application_submitted');
+      return this.opportunity(id);
     },
     saveCheckpoint(id, phase, inputHash, outputHash) {
       if (!['evaluating', 'eligible', 'evaluated', 'ineligible'].includes(state(id))) throw new Error(`Opportunity ${id} cannot save a checkpoint`);
