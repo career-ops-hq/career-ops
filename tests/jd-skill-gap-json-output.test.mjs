@@ -9,8 +9,9 @@
 // modes/pdf.md Step 4 gates on — printed bare empty arrays that read exactly
 // like a clean bill of health.
 //
-// So this suite runs the real binary in a temp cwd and parses what it actually
-// prints. A fixture cv.md is required because the CLI exits 1 without one.
+// So this suite runs the real binary with CAREER_OPS_ROOT set and parses what
+// it actually prints. A fixture cv.md is required because the CLI exits 1
+// without one — but it must live in the data root, not in the cwd (#4209).
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -18,24 +19,32 @@ import { pass, fail, run, formatRunFailure, ROOT, NODE } from './helpers.mjs';
 
 console.log('\njd-skill-gap.mjs — JSON output branch');
 
-const dir = mkdtempSync(join(tmpdir(), 'co-jd-skill-gap-json-'));
+// cv.md resolves from the data root, not from process.cwd() (#4209). A
+// separate decoy cwd — different from the data root — proves the two paths
+// are distinguished: if the script still read from cwd, it would find nothing
+// and exit 1 before printing any JSON.
+const dataRoot = mkdtempSync(join(tmpdir(), 'co-jd-skill-gap-json-data-'));
+const decoyCwd = mkdtempSync(join(tmpdir(), 'co-jd-skill-gap-json-cwd-'));
 
 try {
-  writeFileSync(join(dir, 'cv.md'), '# Skills\nPython, Docker\n');
+  writeFileSync(join(dataRoot, 'cv.md'), '# Skills\nPython, Docker\n');
 
   // A JD with a recognized requirements section: conclusive run.
   writeFileSync(
-    join(dir, 'extractable.md'),
+    join(dataRoot, 'extractable.md'),
     '# Role\n\nYOU HAVE:\n- Experience with Python and Kubernetes\n'
   );
   // No requirements section at all: the check cannot run.
   writeFileSync(
-    join(dir, 'headerless.md'),
+    join(dataRoot, 'headerless.md'),
     '# Role\n\nWe are a fast-growing team and we would love to hear from you.\n'
   );
 
   const runJson = (fixture) => {
-    const out = run(NODE, [join(ROOT, 'jd-skill-gap.mjs'), fixture], { cwd: dir });
+    const out = run(NODE, [join(ROOT, 'jd-skill-gap.mjs'), join(dataRoot, fixture)], {
+      cwd: decoyCwd,
+      env: { ...process.env, CAREER_OPS_ROOT: dataRoot, CAREER_OPS_DATA_DIR: '' },
+    });
     if (out === null) return null;
     try {
       return JSON.parse(out);
@@ -92,6 +101,13 @@ try {
       fail('lowConfidence.message must be a non-empty string');
     }
   }
+
+  // #4209: cv.md is found via CAREER_OPS_ROOT, not cwd. The decoyCwd has no
+  // cv.md — if the script read from cwd it would have exited 1 above and every
+  // runJson() call would have returned null. Reaching this point proves it read
+  // from the data root instead.
+  pass('cv.md is resolved from CAREER_OPS_ROOT, not from process.cwd()');
 } finally {
-  rmSync(dir, { recursive: true, force: true });
+  rmSync(dataRoot, { recursive: true, force: true });
+  rmSync(decoyCwd, { recursive: true, force: true });
 }
