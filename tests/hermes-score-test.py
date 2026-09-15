@@ -138,3 +138,78 @@ with tempfile.TemporaryDirectory() as temporary:
     assert snapshot['text'] in captured[0]
     assert score.read(directory / 'browser-snapshot.json') == snapshot
 print('hermes-score: scan snapshot bypasses browser capture')
+
+
+# The production boundary is a scanned snapshot entering one worker attempt;
+# this fixture replaces only network/model side effects and records its outputs.
+def run_worker(prescreen_status):
+    with tempfile.TemporaryDirectory() as temporary, patch.dict(sys.modules, hermes_modules):
+        directory = Path(temporary)
+        snapshot = {'url': 'https://example.com/job', 'text': 'Complete JD', 'retrieved_at': '2026-09-12T00:00:00Z'}
+        score.save(directory / 'packet.json', {'url': snapshot['url'], 'sources': {}, 'scan_snapshot': snapshot})
+        phases, events, review_prompts = [], [], []
+        evidence = {'company': 'Example', 'role': 'Engineer', 'complete_jd': True,
+                    'assessment_complete': True, 'years': {'required': 0, 'verified': None, 'evidence': ''},
+                    'core_capabilities': [], 'credentials': [],
+                    'location': {}, 'employment': {}, 'compensation': {}, 'company_size': {},
+                    'liveness': 'active', 'liveness_reason': 'Apply is available'}
+
+        def agent(phase, prompt, *_):
+            phases.append(phase)
+            if phase == 'evidence': return evidence, 'evidence-session'
+            if phase == 'research': return {'sources': [], 'research': {'findings': []}}, 'research-session'
+            if phase == 'assessment': return {'dimensions': {}, 'sections': {}}, 'assessment-session'
+            review_prompts.append(prompt)
+            return {'verdict': 'approve', 'ready': True, 'checks': {}, 'gates': {}}, 'review-session'
+
+        def node(command, *_args, **_kwargs):
+            events.append(command)
+            if command == 'prescreen': return {'status': prescreen_status, 'missing': []}
+            if command == 'render': return {'report_sha256': 'integrity-hash'}
+            return {'status': command}
+
+        with patch.object(score, 'call_agent', side_effect=agent), \
+             patch.object(score, 'node', side_effect=node), \
+             patch.object(score, 'maybe_push', side_effect=lambda _path: events.append('push')), \
+             patch.object(score.subprocess, 'run', side_effect=AssertionError('unexpected browser or network subprocess')):
+            score.worker(directory)
+            first_phases, first_events = phases[:], events[:]
+            if prescreen_status == 'pass':
+                score.worker(directory)
+                assert phases == first_phases
+                assert score.read(directory / 'report.md.review.json')['report_sha256'] == 'integrity-hash'
+                assert 'integrity-hash' in review_prompts[0]
+        return first_phases, first_events
+
+
+phases, events = run_worker('pass')
+assert phases == ['evidence', 'research', 'assessment', 'review']
+assert events == ['prescreen', 'render', 'publish', 'push']
+phases, events = run_worker('fail')
+assert phases == ['evidence']
+assert events == ['prescreen', 'discard']
+print('hermes-score: scanned qualifying and rejected opportunities follow the isolated worker contract')
+
+
+# Alert delivery is purely a post-publication decision: no call below the line,
+# exactly one successful poster invocation at or above it.
+with tempfile.TemporaryDirectory() as temporary:
+    root, directory = Path(temporary), Path(temporary) / 'job'
+    directory.mkdir()
+    (root / 'config').mkdir()
+    (root / 'config/profile.yml').write_text('attractiveness:\n  alert_line: 4.5\n')
+    score.ROOT, original_root = root, score.ROOT
+    try:
+        calls = []
+        def post(argv, **_kwargs):
+            calls.append(argv)
+            return types.SimpleNamespace(returncode=0, stderr='')
+        with patch.object(score.subprocess, 'run', side_effect=post):
+            for lower, expected in ((4.0, 0), (4.5, 1)):
+                (directory / 'report.md').write_text('## Machine Summary\n\n```yaml\ncompany: Example\nrole: Engineer\nattractiveness:\n  lower: ' + str(lower) + '\n  upper: ' + str(lower) + '\n  coverage: 1\n```\n')
+                score.save(directory / 'report.md.review.json', {'gates': {}})
+                score.maybe_push(directory)
+                assert len(calls) == expected
+    finally:
+        score.ROOT = original_root
+print('hermes-score: Discord alert threshold sends exactly one post only for the high score')
