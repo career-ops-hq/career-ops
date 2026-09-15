@@ -1,6 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { sleep } from './_http.mjs';
+
 // Jobstreet / SEEK provider — hits the public SEEK v5 JobSearch REST API.
 //
 // Jobstreet (jobstreet.com, jobstreet.co.id, etc.) and SEEK (seek.com.au,
@@ -219,7 +221,7 @@ export default {
       if (data.length < pageSize) break;
 
       // Respect rate limits — small delay between pages
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await sleep(200, ctx);
     }
 
     return allJobs;
