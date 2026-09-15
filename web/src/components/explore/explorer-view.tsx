@@ -15,6 +15,7 @@ import { ExploreModeToggle } from "./explore-mode-toggle";
 import { AiSearchBox } from "./ai-search-box";
 import { ResultsList, type EnrichedOffer } from "./results-list";
 import { useExplore } from "./explore-provider";
+import { ScheduleJobAction } from "./schedule-job-action";
 
 // Same shape as core normalizeTextKey(s, " ") — never [^a-z0-9] (#2666).
 const norm = (s: string) => normalizeTextKey(s, " ");
@@ -176,7 +177,7 @@ export function ExplorerView({
               {refineOpen && (
                 <div className="space-y-4 border-t border-border p-4">
                   <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} />
-                  <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Re-cast (free)" />
+                  <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Re-cast (free)" filters={filters} />
                 </div>
               )}
             </div>
@@ -184,7 +185,7 @@ export function ExplorerView({
             <div className="mb-6 rounded-2xl border border-border bg-surface/30 p-5">
               <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} />
               <div className="mt-5">
-                <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Discover (free)" />
+                <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Discover (free)" filters={filters} />
               </div>
             </div>
           )}
@@ -246,7 +247,7 @@ export function ExplorerView({
   );
 }
 
-function DiscoverBar({ canDiscover, onDiscover, label }: { canDiscover: boolean; onDiscover: () => void; label: string }) {
+function DiscoverBar({ canDiscover, onDiscover, label, filters }: { canDiscover: boolean; onDiscover: () => void; label: string; filters: ExploreFilters }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
       <button
@@ -257,6 +258,7 @@ function DiscoverBar({ canDiscover, onDiscover, label }: { canDiscover: boolean;
       >
         <Compass className="size-4" /> {label}
       </button>
+      <ScheduleJobAction filters={filters} />
       <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
         <span className="size-1.5 rounded-full bg-emerald-500" />
         Evaluating a role later costs tokens. Discovering never does.
