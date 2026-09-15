@@ -14,7 +14,6 @@ try {
   writeFileSync(join(sessions, 'acme.md'), '---\ncompany: Acme\nrole: Engineer\ndate: 2026-09-15\n---\n');
   const result = spawnSync(process.execPath, [join(process.cwd(), 'interview-context.mjs'), String(row.id), '--db', db, '--sessions', sessions], { encoding: 'utf8' });
   assert.equal(result.status, 0); const out = JSON.parse(result.stdout); assert.equal(out.opportunity.id, row.id); assert.deepEqual(out.sessions, ['acme.md']); assert.ok(out.candidateFacts.includes('cv.md'));
-  for (const file of ['interview-prep.md', 'interview/plan.md', 'interview/practice.md', 'interview/debrief.md', 'interview-redflag.md']) assert.match(readFileSync(join(process.cwd(), 'modes', file), 'utf8'), /interview-context\.mjs/);
-  assert.match(readFileSync(join(process.cwd(), 'modes', 'interview.md'), 'utf8'), /not profile intake/);
+  assert.match(readFileSync(join(process.cwd(), '.agents/skills/career-ops/SKILL.md'), 'utf8'), /Interview preparation/);
   console.log('interview context: canonical opportunity, evidence, facts, and sessions passed');
 } finally { rmSync(root, { recursive: true, force: true }); }

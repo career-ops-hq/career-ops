@@ -9,8 +9,7 @@
 // POSIX `rename(2)` replaces the destination atomically and cannot fail that
 // way, which is why this never reproduces on Linux/macOS CI. Measured on
 // Windows 11 / Node v24.18.0: `node test-all.mjs` failed 1-2 tests per run,
-// non-deterministically, in tracker-writer-lock-tests.mjs and
-// set-status-tests.mjs. Both suites pass in isolation; only the full run
+// non-deterministically when independent tracker writers run in parallel.
 // manufactures enough concurrent readers to lose the race.
 //
 // The holder is usually not another writer of ours (the tracker lock serializes

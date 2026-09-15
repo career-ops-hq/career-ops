@@ -439,7 +439,7 @@ export function extractPlatform(text) {
  * HireVue match would be a guess, not a detection — see the comment above
  * PLATFORM_URL_PATTERNS. Deliberately a separate boolean helper rather than
  * a change to extractPlatform()'s return contract, so existing callers
- * (interview-prep.md's Platform field, analyzeInvite() below) keep working
+ * (the invitation Platform field, analyzeInvite() below) keep working
  * unmodified. Same "never guessed" discipline as extractPlatform(): pure
  * pattern matching against the same PLATFORM_URL_PATTERNS table, false when
  * nothing plausible — or nothing *confirmed* — is found.
