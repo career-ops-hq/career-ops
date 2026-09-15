@@ -5,6 +5,21 @@ import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { assembleDedupContext } from "@/lib/core/discover";
+import { CAPS } from "@/lib/worker-capabilities.mjs";
+import { scopeFrom } from "@/lib/claude-invocation.mjs";
+import { fencingReport } from "@/lib/cli-fencing.mjs";
+import { codexFencingSupported } from "@/lib/cli-fencing-probe.mjs";
+
+// Deny list DERIVED, never hand-written: every one of the six advisor argvs
+// that spelled its own omitted MultiEdit, which --permission-mode acceptEdits
+// then auto-approves (#2185, #2507).
+const ADVISOR_SCOPE = scopeFrom("Read,WebFetch,WebSearch,Glob,Grep");
+
+// Isolation and output flags this route adds to the exec argv itself — not
+// permission, so not fencing's (#2507), but a Codex build missing one breaks the
+// run just as thoroughly, so the capability gate below checks them too.
+const CODEX_ISOLATION_FLAGS = ["--strict-config", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check"];
+const CODEX_OUTPUT_FLAG = "--output-last-message";
 
 // AI search orchestrates modes/discover.md by running the USER'S configured CLI
 // headless (CLI-agnostic, like the assistant). Web hunting is slow → generous
@@ -13,108 +28,6 @@ import { assembleDedupContext } from "@/lib/core/discover";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 600;
-
-type CodexCapabilityCacheEntry = {
-  mtimeMs: number;
-  size: number;
-  probe: Promise<boolean>;
-};
-
-const codexCapabilityCache = new Map<string, CodexCapabilityCacheEntry>();
-
-function readCodexHelp(binPath: string, args: string[]): Promise<string> {
-  return new Promise((resolve) => {
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-
-    const finish = (output: string) => {
-      if (settled) return;
-      settled = true;
-      if (timeout) clearTimeout(timeout);
-      resolve(output);
-    };
-
-    const appendBounded = (current: string, chunk: Buffer) =>
-      (current + chunk.toString()).slice(-64_000);
-
-    const child = spawnHeadlessCli(binPath, args, {
-      env: { ...process.env, NO_COLOR: "1" },
-    });
-
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout = appendBounded(stdout, chunk);
-    });
-
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr = appendBounded(stderr, chunk);
-    });
-
-    child.on("error", () => finish(""));
-    child.on("close", () => finish(`${stdout}
-${stderr}`));
-
-    timeout = setTimeout(() => {
-      try {
-        child.kill("SIGTERM");
-      } catch {
-        /* best-effort capability-probe cleanup */
-      }
-      finish("");
-    }, 5_000);
-  });
-}
-
-function supportsSafeCodexExec(binPath: string): Promise<boolean> {
-  let mtimeMs: number;
-  let size: number;
-
-  try {
-    ({ mtimeMs, size } = fs.statSync(binPath));
-  } catch {
-    return Promise.resolve(false);
-  }
-
-  const cached = codexCapabilityCache.get(binPath);
-  if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
-    return cached.probe;
-  }
-
-  let entry: CodexCapabilityCacheEntry;
-  const probe = Promise.all([
-    readCodexHelp(binPath, ["--help"]),
-    readCodexHelp(binPath, ["exec", "--help"]),
-  ])
-    // Deliberately fail closed: help/flag drift means "unsupported", never a
-    // weaker Codex invocation that could bypass the required safety contract.
-    .then(([globalHelp, execHelp]) =>
-      globalHelp.includes("--ask-for-approval") &&
-      globalHelp.includes("--search") &&
-      execHelp.includes("--sandbox") &&
-      execHelp.includes("read-only") &&
-      execHelp.includes("--strict-config") &&
-      execHelp.includes("--ignore-user-config") &&
-      execHelp.includes("--ephemeral") &&
-      execHelp.includes("--skip-git-repo-check") &&
-      execHelp.includes("--output-last-message"),
-    )
-    .catch(() => false)
-    .then((supported) => {
-      // Only successes stay cached. A transient/negative probe retries next time,
-      // but must not delete a newer entry installed after the binary changed.
-      if (!supported && codexCapabilityCache.get(binPath) === entry) {
-        codexCapabilityCache.delete(binPath);
-      }
-      return supported;
-    });
-
-  // Concurrent cold requests share the same in-flight probe. mtime+size makes a
-  // Codex upgrade at the same path invalidate a previously successful result.
-  entry = { mtimeMs, size, probe };
-  codexCapabilityCache.set(binPath, entry);
-  return probe;
-}
 
 const OUTPUT_CONTRACT = `
 
@@ -163,7 +76,7 @@ export async function POST(req: Request) {
   const isClaude = cliId === "claude";
   const isCodex = cliId === "codex";
 
-  if (isCodex && !(await supportsSafeCodexExec(binPath))) {
+  if (isCodex && !(await codexFencingSupported(binPath, { alsoRequiresInExec: [...CODEX_ISOLATION_FLAGS, CODEX_OUTPUT_FLAG] }))) {
     return Response.json(
       {
         code: "CODEX_UNSUPPORTED",
@@ -212,24 +125,25 @@ export async function POST(req: Request) {
         "--include-partial-messages",
         "--permission-mode",
         "acceptEdits",
+        // --strict-mcp-config with no --mcp-config loads ZERO MCP servers, so the
+        // tool lists here describe everything this agent can reach. Required for a
+        // non-writing worker: without it a user MCP server could supply a write tool
+        // the capability record forbids, and cli-fencing refuses to certify that (#2507).
+        "--strict-mcp-config",
         "--allowedTools",
-        "Read,WebFetch,WebSearch,Glob,Grep", // WebSearch ADDED vs the read-only assistant
+        ADVISOR_SCOPE.allowed,
         "--disallowedTools",
-        "Bash,Write,Edit,NotebookEdit,Task", // proposer-not-writer, by construction
+        ADVISOR_SCOPE.disallowed,
       ]
     : isCodex
       ? [
-          "--ask-for-approval",
-          "never",
-          "--search",
+          // Isolation and output only. Approval policy, the sandbox and web
+          // access were spelled here by #2361 and now come from fencing, which
+          // applies them to every Codex spawn instead of the one route that
+          // remembered — and refuses this argv outright if it spells them again.
           "exec",
-          "--strict-config",
-          "--ignore-user-config",
-          "--sandbox",
-          "read-only",
-          "--ephemeral",
-          "--skip-git-repo-check",
-          "--output-last-message",
+          ...CODEX_ISOLATION_FLAGS,
+          CODEX_OUTPUT_FLAG,
           codexResultFile!,
           prompt,
         ]
@@ -240,12 +154,9 @@ export async function POST(req: Request) {
   const useCodexProcessGroup =
     isCodex && process.platform !== "win32";
 
-  const child = spawnHeadlessCli(binPath, args, {
-    cwd: childCwd,
-    env: process.env,
-    detached: useCodexProcessGroup,
-  });
-
+  // Declared BEFORE the spawn: fencing can refuse the argv, and the temporary
+  // workspace already exists by then. Without this the refusal path would leak
+  // one directory per rejected request.
   const cleanupChildCwd = () => {
     if (!isCodex) return;
     try {
@@ -254,6 +165,29 @@ export async function POST(req: Request) {
       /* best-effort temporary-directory cleanup */
     }
   };
+
+  // Proposer-not-writer, as the Claude branch above spells it: Read + WebFetch +
+  // WebSearch allowed, every write tool denied. Its web use is search-shaped —
+  // it hunts for postings rather than being handed a url to retrieve — so
+  // `search`, not the costlier `networkReadOnly`: that is what lets Codex keep
+  // the genuine read-only sandbox #2361 gave this route instead of trading it
+  // for a writable workspace. Claude is unaffected; its tools are not sandboxed
+  // and it still gets WebFetch (see ADVISOR_SCOPE).
+  let child;
+  try {
+    child = spawnHeadlessCli(
+      binPath,
+      args,
+      { cwd: childCwd, env: process.env, detached: useCodexProcessGroup },
+      { cliId, capabilities: CAPS.webSearchOnly },
+    );
+  } catch (e) {
+    // Fencing refuses an argv that contradicts the capability record. Report it
+    // in this route's own error shape rather than letting the throw escape POST
+    // as an unhandled rejection and an unstructured 500.
+    cleanupChildCwd();
+    return Response.json({ error: e instanceof Error ? e.message : "failed to start the CLI" }, { status: 500 });
+  }
 
   const encoder = new TextEncoder();
   // `closed` + kill timer in the OUTER scope so cancel() can flip `closed` before
@@ -350,6 +284,14 @@ export async function POST(req: Request) {
       const emit = (s: string) => {
         if (safeEnqueue(s)) emitted = true;
       };
+      // Same honesty as /api/run: a runtime with no verified fencing mechanism
+      // runs with its default access, and that must be visible rather than
+      // inferred from which CLI happens to be selected (#2507). This stream is
+      // plain text, so the notice is a leading line rather than an event.
+      const fencing = fencingReport({ cliId, cliName: spec.name, capabilities: CAPS.webSearchOnly });
+      if (fencing.notice) safeEnqueue(`⚠️ ${fencing.notice}
+
+`);
 
       child.stdout.on("data", (d: Buffer) => {
         if (closed) return;
