@@ -180,13 +180,113 @@ export const AND_SEPARATOR = /\s+\+\s+/;
  * @returns {(lower: string) => boolean}
  */
 export function compilePositiveKeyword(keyword) {
-  if (!AND_SEPARATOR.test(keyword)) return compileKeyword(keyword);
-  const terms = keyword.split(AND_SEPARATOR).map(t => t.trim()).filter(Boolean);
-  if (terms.length === 0) return compileKeyword(keyword);
   // Each term keeps compileKeyword's own rule, so a short term like "vp" is
   // still matched on a word boundary and cannot hit "vp" inside another word.
-  const matchers = terms.map(compileKeyword);
+  return compileAndGroup(keyword, compileKeyword);
+}
+
+// The " + " split, separated from the per-term rule because there are now two
+// kinds of keyword that share the group syntax and disagree only about how a
+// single term matches: a `title_filter.positive` entry (compileKeyword) and a
+// `domain_filter` entry (compileDomainKeyword, below). Reimplementing the split
+// for the second one is the drift this module exists to prevent, and leaving it
+// out is worse than it looks: a user who learned " + " on title_filter and
+// tried it on domain_filter would get an entry that silently never matches,
+// which in a board gate costs an entire board rather than one row.
+function compileAndGroup(keyword, compileTerm) {
+  if (!AND_SEPARATOR.test(keyword)) return compileTerm(keyword);
+  const terms = keyword.split(AND_SEPARATOR).map(t => t.trim()).filter(Boolean);
+  if (terms.length === 0) return compileTerm(keyword);
+  const matchers = terms.map(compileTerm);
   return (lower) => matchers.every(m => m(lower));
+}
+
+// Normalize defensively: a malformed keyword list (a null, numeric, or
+// otherwise non-string entry in the YAML) must not crash the scan via
+// k.toLowerCase(). Shared by both builders below — a second copy is how a
+// null entry ends up crashing one scanner and not the other.
+function normalizeKeywords(arr, compile) {
+  return (Array.isArray(arr) ? arr : [])
+    .filter(k => typeof k === 'string')
+    .map(k => k.trim().toLowerCase())
+    .filter(k => k.length > 0)
+    .map(compile);
+}
+
+/**
+ * Compile one `domain_filter` entry into a matcher.
+ *
+ * A domain keyword answers a different question from a title keyword — "is this
+ * employer in my industry" rather than "is this the right role" — and it is
+ * read at a different granularity: the board gate in scan-ats-full.mjs decides
+ * a whole catalogue on one match (#3105). The default differs for that reason.
+ *
+ * A plain entry here means `word:`. Measured over 546 reverse-sweep postings on
+ * 249 boards, a plain substring admitted 32 boards of which 28 were junk, and
+ * 25 of those came from `defi` landing inside a longer word. What the junk has
+ * in common is that the domain term STARTS that word, so only the right-hand
+ * anchor closes it:
+ *
+ *   defi   -> Deficiência, Defiance, Software Defined, Product Definition
+ *   solana -> Solanaceae          crypto -> Cryptography
+ *
+ * `stem:` reaches exactly one of those (Indefinido, where the term lands
+ * mid-word) and is the wrong default here, notwithstanding the "a domain list
+ * is a list of stems by nature" reasoning on #3105 that this corrects: the
+ * 4/7 split re-measured on #3297 is the same finding from the title side.
+ *
+ * The asymmetry is what settles it. A false positive admits an entire
+ * catalogue while a false negative costs one board, and the run summary counts
+ * skipped boards, so the loose direction is the one that fails silently.
+ *
+ * `word:` charges for that, and the charge is a real one: it drops "Digital
+ * AssetS", "Smart ContractS" and "CryptoCURRENCY", which are genuine finds
+ * rather than noise. An entry that needs a longer form asks for it with
+ * `stem:`, one entry at a time, the way `title_filter` asks for the opposite —
+ * and `stem:digital asset` carries no junk risk, because no unrelated word
+ * begins with it. Both prefixes are honoured here, so the vocabulary a user
+ * learned on title_filter is the same one; only which end of it is free
+ * changes.
+ *
+ * @param {string} kw - already trimmed and lowercased.
+ * @returns {(lower: string) => boolean}
+ */
+export function compileDomainKeyword(kw) {
+  return compileAndGroup(kw, compileDomainTerm);
+}
+
+function compileDomainTerm(term) {
+  if (term.startsWith(WORD_PREFIX) || term.startsWith(STEM_PREFIX)) return compileKeyword(term);
+  // Delegated rather than pattern-matched here on purpose: what `word:` MEANS
+  // is defined once, above, including the lookarounds that make it Unicode-safe
+  // (the whole reason "Deficiência" is a case this has to get right). This is a
+  // statement about which default a domain keyword gets, not a second
+  // implementation of the anchor. It also subsumes the 2-3 letter acronym rule
+  // — `evm` and `dao` were already anchored, and now agree with everything else
+  // rather than being an exception a reader has to hold.
+  return compileKeyword(WORD_PREFIX + term);
+}
+
+/**
+ * Compile a `domain_filter` list into one predicate, or null when the feature
+ * is off.
+ *
+ * Null rather than an always-true predicate: the gate is opt-in (#3105), and
+ * "no domain_filter configured" has to be distinguishable from "configured and
+ * everything matches" — the caller reports the gate in its run summary only
+ * when it actually ran, and an always-true predicate would make a config typo
+ * look like a working gate that happened to admit every board.
+ *
+ * @param {unknown} domainKeywords - the raw `domain_filter` value from portals.yml.
+ * @returns {((title: string) => boolean) | null}
+ */
+export function buildDomainFilter(domainKeywords) {
+  const matchers = normalizeKeywords(domainKeywords, compileDomainKeyword);
+  if (matchers.length === 0) return null;
+  return (title) => {
+    const lower = String(title ?? '').toLowerCase();
+    return matchers.some(m => m(lower));
+  };
 }
 
 /**
@@ -204,18 +304,11 @@ export function compilePositiveKeyword(keyword) {
  * @returns {(title: string) => boolean}
  */
 export function buildTitleFilter(titleFilter) {
-  // Normalize defensively: a malformed title_filter (a null, numeric, or otherwise
-  // non-string entry in the YAML) must not crash the scan via k.toLowerCase().
-  const normalize = (arr, compile) => (Array.isArray(arr) ? arr : [])
-    .filter(k => typeof k === 'string')
-    .map(k => k.trim().toLowerCase())
-    .filter(k => k.length > 0)
-    .map(compile);
   // AND-groups are a POSITIVE-side feature only. On the negative side an entry
   // is a veto, and " + " there would read as "reject when both appear", which
   // is a different and much easier thing to write as two entries.
-  const positive = normalize(titleFilter?.positive, compilePositiveKeyword);
-  const negative = normalize(titleFilter?.negative, compileKeyword);
+  const positive = normalizeKeywords(titleFilter?.positive, compilePositiveKeyword);
+  const negative = normalizeKeywords(titleFilter?.negative, compileKeyword);
 
   return (title) => {
     // String(), not `title || ''`: openrouter-runner used String(title ?? '')
