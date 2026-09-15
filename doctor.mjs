@@ -11,7 +11,6 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import dotenv from 'dotenv';
-import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
 import { resolveExtractorMode } from './browser-extract.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
@@ -266,9 +265,7 @@ function isPlaywrightMcpConfigured(root, activeCli) {
     return hasPlaywrightIn(readConfigIfPresent(file));
   });
   if (inProject) return true;
-  // Gated behind the project scan, so an already-configured project pays no
-  // extra I/O and non-plugin CLIs never touch the user config dir.
-  return entry.plugins === true && isPlaywrightMcpFromPlugin();
+  return false;
 }
 
 // CLI resolution: --cli flag > $CAREER_OPS_CLI > .env (CAREER_OPS_CLI=...) >
@@ -325,12 +322,10 @@ function checkPlaywrightMcp(root, activeCli) {
     warn: true,
     label: `Playwright MCP tools not detected (active CLI: ${activeCli})`,
     fix: [
-      entry.plugins
-        ? `No project-level MCP config, and no enabled plugin providing one, was detected for ${activeCli}.`
-        : `No project-level MCP config was detected for ${activeCli}.`,
+      `No project-level MCP config was detected for ${activeCli}.`,
       activeCli === 'opencode'
         ? 'Add the Playwright MCP server to opencode.json (see opencode.example.json) or pass --cli <name> if you actually run a different CLI.'
-        : `Add the Playwright MCP server to your ${activeCli} config, or install a plugin that provides it (e.g. /plugin install playwright@claude-plugins-official).`,
+        : `Add the Playwright MCP server to your ${activeCli} config.`,
     ],
   };
 }
@@ -504,32 +499,6 @@ function checkPipelineFile() {
   }
 }
 
-// Discover plugins + their non-secret config block, synchronously. Used by both
-// the human check and the --json onboarding state.
-function readPluginConfigSync(root) {
-  const cfgPath = join(root, 'config', 'plugins.yml');
-  if (!existsSync(cfgPath)) return {};
-  try { return yaml.load(readFileSync(cfgPath, 'utf8')) || {}; } catch { return {}; }
-}
-
-// Plugin layer health: list discovered plugins + whether each enabled one's keys
-// are present. WARN-not-FAIL so a half-configured plugin never blocks setup.
-function checkPlugins(root) {
-  let manifests;
-  try { manifests = discoverPlugins(pluginRoots(root)); } catch { return { pass: true, label: 'Plugins: none' }; }
-  if (manifests.length === 0) return { pass: true, label: 'Plugins: none installed' };
-  const cfg = readPluginConfigSync(root);
-  const lines = [];
-  const fixes = [];
-  for (const m of manifests) {
-    const s = pluginStatus(m, cfg);
-    lines.push(`${m.id} (${s.enabled ? 'enabled' : s.configured ? `missing ${s.missingEnv.join(', ')}` : 'off'})`);
-    if (s.configured && s.missingEnv.length) fixes.push(`${m.id}: add ${s.missingEnv.join(', ')} to .env`);
-  }
-  const label = `Plugins: ${lines.join(', ')}`;
-  return fixes.length ? { warn: true, label, fix: fixes } : { pass: true, label };
-}
-
 async function main() {
   console.log('\ncareer-ops doctor');
   console.log('================\n');
@@ -552,7 +521,6 @@ async function main() {
     checkPipelineFile(),
     checkAutoDir('output'),
     checkAutoDir('reports'),
-    checkPlugins(projectRoot),
   ].filter(Boolean);
 
   // Network-bound ATS slug probe — only under --strict.
@@ -593,10 +561,7 @@ async function main() {
     process.exit(1);
   } else {
     const warnNote = warnings > 0 ? ` (${warnings} warning${warnings === 1 ? '' : 's'} — see above)` : '';
-    console.log(`Result: All checks passed${warnNote}. You're ready to go! Run \`claude\` (or \`opencode\`) to start.`);
-    console.log('');
-    console.log('Join the community: https://discord.gg/8pRpHETxa4');
-    console.log('Read the manifesto: `npm run manifesto` — a new way of job searching is taking shape, and you are now part of it.');
+    console.log(`Result: All checks passed${warnNote}. You're ready to go.`);
     process.exit(0);
   }
 }
@@ -642,20 +607,11 @@ function onboardingState(root) {
     ? { [activeCli]: mcpCheck?.pass === true }
     : {};
 
-  let plugins = [];
-  try {
-    const cfg = readPluginConfigSync(root);
-    plugins = discoverPlugins(pluginRoots(root)).map((m) => {
-      const s = pluginStatus(m, cfg);
-      return { id: m.id, hooks: m.hooks, enabled: s.enabled, missingEnv: s.missingEnv };
-    });
-  } catch { plugins = []; }
   return {
     onboardingNeeded: missing.length > 0,
     missing,
     warnings,
     autoCopied,
-    plugins,
     playwright_mcp: playwrightMcp,
     active_cli: activeCli,
     cli_source: cliSource,
