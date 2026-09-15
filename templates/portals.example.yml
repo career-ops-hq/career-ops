@@ -969,6 +969,7 @@ search_queries:
 #                   do not guess it from the company name)
 #   join            join.com/companies/<slug>  (SSR __NEXT_DATA__ parse, no separate API)
 #   icims           careers-<tenant>.icims.com / *.icims.com
+#   pythonorg       python.org/jobs
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -1425,6 +1426,11 @@ search_queries:
 #
 # - name: LaraJobs                        # Laravel / PHP jobs (public RSS feed)
 #   provider: larajobs
+#   enabled: true
+#
+# - name: Python.org Jobs                 # Python Software Foundation jobs (public RSS feed)
+#   provider: pythonorg
+#   careers_url: https://www.python.org/jobs/
 #   enabled: true
 #
 # - name: Welcome to the Jungle           # global board via WTTJ's public Algolia index
@@ -2751,3 +2757,13 @@ job_boards:
   # - name: CryptocurrencyJobs             # curated Web3/crypto board (RSS, all-remote)
   #   provider: cryptocurrencyjobs
   #   enabled: true
+
+  # ── Python.org Jobs (Python / AI / Backend) ────────────────────────
+  # Official Python Software Foundation job board. Public RSS feed, zero-auth.
+  # Auto-detects from careers_url or provider: pythonorg.
+
+  - name: Python.org Jobs
+    provider: pythonorg
+    careers_url: https://www.python.org/jobs/
+    enabled: false
+    notes: "Official Python Software Foundation job board (public RSS feed)"
