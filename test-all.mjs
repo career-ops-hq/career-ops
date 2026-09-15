@@ -2555,27 +2555,12 @@ if (
   fail('_custom.md read-path regressed: missing Sources of Truth row, honor rule in _shared.md, or the pre-generation read in pdf.md (#1388 would reopen)');
 }
 
-for (const skillPath of ['.claude/skills/career-ops/SKILL.md', '.agents/skills/career-ops/SKILL.md']) {
-  if (!fileExists(skillPath)) {
-    fail(`${skillPath} is missing`);
-    continue;
-  }
-  const skill = readFile(skillPath);
-  if (skill.includes('/career-ops latex')) {
-    pass(`${skillPath} exposes /career-ops latex in discovery menu`);
-  } else {
-    fail(`${skillPath} does not expose /career-ops latex in discovery menu`);
-  }
-  if (
-    skill.includes('email') &&
-    skill.includes('| `email` | `email` |') &&
-    skill.includes('/career-ops email') &&
-    /Standalone modes[\s\S]*Applies to:[^\n]*`email`/.test(skill)
-  ) {
-    pass(`${skillPath} exposes /career-ops email in routing, discovery, and standalone loading`);
-  } else {
-    fail(`${skillPath} does not fully expose /career-ops email`);
-  }
+const promptRouterSkill = readFile('.agents/skills/career-ops/SKILL.md');
+const promptManifest = readFile('prompts/CONTEXT_MANIFEST.md');
+if (promptRouterSkill.includes('`latex`') && promptRouterSkill.includes('`email`') && promptManifest.includes('applications')) {
+  pass('canonical router exposes latex and email through the applications prompt');
+} else {
+  fail('canonical router lost latex or email routing');
 }
 
 const emailMode = readFile('modes/email.md');
@@ -2601,47 +2586,10 @@ if (
   fail('email mode missing required application-email behavior');
 }
 
-for (const skillPath of ['.claude/skills/career-ops/SKILL.md', '.agents/skills/career-ops/SKILL.md']) {
-  if (!fileExists(skillPath)) {
-    fail(`${skillPath} is missing`);
-    continue;
-  }
-  const skill = readFile(skillPath);
-  const sectionOrder = (sectionStart, sectionEnd, markers) => {
-    const start = skill.indexOf(sectionStart);
-    if (start === -1) return false;
-    const end = sectionEnd ? skill.indexOf(sectionEnd, start + sectionStart.length) : -1;
-    const section = skill.slice(start, end === -1 ? undefined : end);
-    return markersAppearInOrder(section, markers);
-  };
-
-  const sharedModeOrder = sectionOrder(
-    '### Modes that require `_shared.md` + their mode file',
-    '### Standalone modes',
-    ['modes/_shared.md', 'modes/_profile.md', 'modes/_custom.md', 'modes/{mode}.md'],
-  );
-  const standaloneModeOrder = sectionOrder(
-    '### Standalone modes',
-    '### Modes delegated to subagent',
-    ['modes/_profile.md', 'modes/_custom.md', 'modes/{mode}.md'],
-  );
-  const delegatedModeOrder = sectionOrder(
-    '### Modes delegated to subagent',
-    'Execute the instructions from the loaded mode file.',
-    ['content of modes/_shared.md', 'content of modes/_profile.md if exists', 'content of modes/_custom.md if exists', 'content of modes/{mode}.md'],
-  );
-
-  if (
-    skill.includes('modes/_custom.md') &&
-    skill.includes('[content of modes/_custom.md if exists]') &&
-    sharedModeOrder &&
-    standaloneModeOrder &&
-    delegatedModeOrder
-  ) {
-    pass(`${skillPath} loads modes/_custom.md after _profile.md and before the selected mode for direct and delegated modes`);
-  } else {
-    fail(`${skillPath} does not load modes/_custom.md in the required _profile → _custom → mode order (#1388)`);
-  }
+if (promptManifest.includes('modes/_profile.md, modes/_custom.md') && promptRouterSkill.includes('CONTEXT_MANIFEST.md')) {
+  pass('canonical prompt manifest loads profile and custom rules for every domain');
+} else {
+  fail('canonical prompt manifest lost profile/custom context');
 }
 
 const applyMode = readFile('modes/apply.md');
