@@ -1991,6 +1991,10 @@ const allowedFiles = [
   // Dashboard credit string
   'dashboard/internal/ui/screens/pipeline.go',
   'dashboard/internal/ui/screens/progress.go',
+  'dashboard/internal/ui/screens/stats.go',
+  // Hired Wall: credits the maintainer and documents the allowed link domains
+  'funding.json', '.codex-plugin/plugin.json', 'HIRED.md',
+  'hired-wall-build.mjs', 'tests/hired-wall.test.mjs', 'tests/project-identity.test.mjs',
 ];
 
 // Build pathspec for git grep — only scan tracked files matching these
@@ -2012,8 +2016,8 @@ for (const pattern of leakPatterns) {
   if (result) {
     for (const line of result.split('\n')) {
       const file = line.split(':')[0];
-      if (allowedFiles.some(a => file.includes(a))) continue;
-      if (file.includes('dashboard/go.mod')) continue;
+      if (allowedFiles.some(a => file === a || file.endsWith('/' + a))) continue;
+      if (file === 'dashboard/go.mod' || file.endsWith('/dashboard/go.mod')) continue;
       warn(`Possible personal data in ${file}: "${pattern}"`);
       leakFound = true;
     }
