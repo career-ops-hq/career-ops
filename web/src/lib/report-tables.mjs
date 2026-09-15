@@ -12,10 +12,26 @@ export function pipeCells(line) {
   if (!t.startsWith("|")) return [];
   const parts = [];
   let buf = "";
+  // GFM: a pipe is escaped only after an odd run of backslashes (`\|`).
+  // Even runs (`\\|`) are a literal backslash plus a real column delimiter.
   for (let i = 0; i < t.length; i++) {
-    if (t[i] === "\\" && t[i + 1] === "|") {
-      buf += "|";
-      i += 1;
+    if (t[i] === "\\") {
+      let n = 0;
+      while (i < t.length && t[i] === "\\") {
+        n += 1;
+        i += 1;
+      }
+      if (t[i] === "|") {
+        buf += "\\".repeat(Math.floor(n / 2));
+        if (n % 2 === 1) {
+          buf += "|";
+          continue;
+        }
+        i -= 1;
+        continue;
+      }
+      buf += "\\".repeat(n);
+      i -= 1;
       continue;
     }
     if (t[i] === "|") {

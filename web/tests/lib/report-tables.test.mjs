@@ -22,6 +22,12 @@ test("pipeCells keeps escaped pipes inside a cell", () => {
   assert.deepEqual(pipeCells("| Bash \\| PowerShell | Strong |"), ["Bash | PowerShell", "Strong"]);
 });
 
+test("pipeCells: odd backslashes escape the pipe, even runs do not", () => {
+  assert.deepEqual(pipeCells("| a \\| b | c |"), ["a | b", "c"]);
+  assert.deepEqual(pipeCells("| a \\\\| b | c |"), ["a \\", "b", "c"]);
+  assert.deepEqual(pipeCells("| a \\\\\\| b | c |"), ["a \\| b", "c"]);
+});
+
 test("isStarTableHeader requires S T A R plus a STAR-named column", () => {
   assert.equal(
     isStarTableHeader(["#", "JD requirement", "STAR+R story", "S", "T", "A", "R", "Reflection"]),
@@ -29,6 +35,16 @@ test("isStarTableHeader requires S T A R plus a STAR-named column", () => {
   );
   assert.equal(isStarTableHeader(["JD requirement", "Evidence (CV)", "Fit"]), false);
   assert.equal(isStarTableHeader(["Field", "Value"]), false);
+});
+
+test("parsePipeTable keeps STAR columns aligned across escaped pipes", () => {
+  const md = `| # | JD requirement | STAR+R story | S | T | A | R | Reflection |
+|---|----------------|--------------|---|---|---|---|------------|
+| 1 | req | story | sit | task | Bash \\| PowerShell | delivered | note |`;
+  const parsed = parsePipeTable(md);
+  assert.ok(parsed);
+  assert.equal(parsed.rows[0][5], "Bash | PowerShell");
+  assert.equal(parsed.rows[0][6], "delivered");
 });
 
 test("parsePipeTable reads a STAR+R grid", () => {
