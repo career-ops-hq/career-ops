@@ -2007,12 +2007,18 @@ export function reconcileGitignore(localText, upstreamText) {
   // pattern (only comments start with '#'), so membership answers both "does
   // this install already have this rule?" and "has this rationale block already
   // been copied by an earlier update?" with no second structure to keep in sync.
-  const seen = new Set(localText.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== ''));
+  const localLines = new Set(localText.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== ''));
+  const seen = new Set(localLines);
 
+  const upstreamLines = upstreamText.split(/\r?\n/);
   const block = [];
   const added = [];
+  // Where the FIRST newly appended pattern sits in upstream's own file. Upstream orders
+  // its negations against its patterns deliberately, and only a negation it places after
+  // one of these needs its position restored below.
+  let firstAddedIndex = -1;
   let pendingComments = [];
-  for (const raw of upstreamText.split(/\r?\n/)) {
+  for (const [index, raw] of upstreamLines.entries()) {
     const line = raw.trim();
     if (line === '') { pendingComments = []; continue; }
     if (line.startsWith('#')) { pendingComments.push([raw, line]); continue; }
@@ -2030,11 +2036,29 @@ export function reconcileGitignore(localText, upstreamText) {
     // corrupted by writing back the trimmed form used for matching.
     block.push(raw);
     added.push(line);
+    if (firstAddedIndex === -1) firstAddedIndex = index;
     // Guard against an upstream file that lists the same pattern twice.
     seen.add(line);
   }
 
   if (added.length === 0) return { text: localText, added };
+
+  // Restore the precedence upstream gave its own negations. `!test-fixtures/**` sits
+  // AFTER `applications.md` in upstream's .gitignore so that it wins; an install that
+  // already had the negation but not the newer pattern skipped the negation as present
+  // and got the pattern appended after it, which inverted that and re-ignored files
+  // upstream's own suite requires to be committed (#4127).
+  //
+  // Only a negation the local file ALREADY has needs this: one it lacks was appended by
+  // the loop above, in upstream's own order. Repeating a line is not the same as
+  // rewriting one, so the promise never to modify a local line still holds, and a
+  // duplicate negation is a no-op to git.
+  for (const [index, raw] of upstreamLines.entries()) {
+    if (index <= firstAddedIndex) continue;
+    const line = raw.trim();
+    if (!line.startsWith('!') || !localLines.has(line)) continue;
+    block.push(raw);
+  }
 
   // Match the local file's dominant line ending. A checkout on Windows under
   // `core.autocrlf=true` leaves CRLF on disk, and appending LF-only lines to it

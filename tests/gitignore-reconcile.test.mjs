@@ -131,6 +131,45 @@ const ok = (cond, msg) => (cond ? pass(msg) : fail(msg));
   eq(reconcileGitignore(text, 'cv.md\n').added.length, 0, 'and is idempotent from there');
 }
 
+// ── An upstream negation keeps the precedence upstream gave it ──────────────
+// Upstream orders its own negations deliberately: `!test-fixtures/**` sits AFTER
+// `applications.md` so it wins. An install that already had the negation but not the
+// newer pattern skipped the negation as present and got the pattern appended after it,
+// which inverted upstream's intent and re-ignored files upstream's own suite requires to
+// be committed (#4127). The user's line is still never touched; the negation is repeated,
+// which git treats as a no-op.
+{
+  const local = ['node_modules/', '!test-fixtures/**', '*.log'].join('\n') + '\n';
+  const upstream = ['node_modules/', 'applications.md', 'follow-ups.md', '!test-fixtures/**'].join('\n') + '\n';
+  const { text, added } = reconcileGitignore(local, upstream);
+  const lines = text.split('\n').map((l) => l.trim());
+
+  eq(added.join(','), 'applications.md,follow-ups.md', 'the two newer rules are appended');
+  const lastNegation = lines.lastIndexOf('!test-fixtures/**');
+  ok(lastNegation > lines.lastIndexOf('applications.md'), 'the negation ends up after applications.md');
+  ok(lastNegation > lines.lastIndexOf('follow-ups.md'), 'and after follow-ups.md');
+  // The promise this function makes is that it never rewrites a local line.
+  ok(text.startsWith(local), "the user's own file is still a verbatim prefix of the result");
+  eq(lines.indexOf('!test-fixtures/**'), 1, 'and their copy of the negation stays where they put it');
+
+  const second = reconcileGitignore(text, upstream);
+  eq(second.added.length, 0, 'reconciling again adds nothing');
+  eq(second.text, text, 'and is byte-identical, so an update does not rewrite the file forever');
+}
+
+// ── A negation upstream puts BEFORE the new rules is not re-appended ─────────
+// Precedence cuts both ways: repeating a negation upstream deliberately placed first
+// would hand it a win upstream never gave it.
+{
+  const local = ['!keep/**', 'node_modules/'].join('\n') + '\n';
+  const upstream = ['!keep/**', 'node_modules/', 'keep/secret.md'].join('\n') + '\n';
+  const { text, added } = reconcileGitignore(local, upstream);
+  const lines = text.split('\n').map((l) => l.trim());
+
+  eq(added.join(','), 'keep/secret.md', 'the new rule is appended');
+  eq(lines.filter((l) => l === '!keep/**').length, 1, 'the earlier negation is not repeated');
+}
+
 // ── The shipped .gitignore is self-consistent ────────────────────────────────
 // Reconciling the real file against itself must be a no-op. If it is not, the
 // reconciler would rewrite .gitignore on every single update forever.
