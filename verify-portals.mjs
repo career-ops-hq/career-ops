@@ -34,6 +34,14 @@ import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 
 import { fetchJson as defaultFetchJson, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
+
+// The portal probes are the one place that keeps following redirects: they hit
+// the ATS vendors' own hosts (a moved board answers with a 3xx that is the
+// signal), and `_http.mjs` now refuses redirects by default for provider
+// fetches (#4079). Opting in here keeps the probe results as they were.
+const followRedirects = (fetchFn) => (url, opts = {}) => fetchFn(url, { redirect: 'follow', ...opts });
+const probeFetchJson = followRedirects(defaultFetchJson);
+const probeFetchText = followRedirects(defaultFetchText);
 import { decodeEntities } from './providers/_html-entities.mjs';
 import { asciiFold } from './lib/ascii-fold.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
@@ -232,7 +240,7 @@ export function classifyFetchError(err) {
 export async function probeSlug(
   ats,
   slug,
-  { fetchJson = defaultFetchJson, eu = false } = {},
+  { fetchJson = probeFetchJson, eu = false } = {},
 ) {
   const spec = ATS[ats];
   if (!spec)
@@ -550,7 +558,7 @@ export async function probeProvider(entry, provider, baseCtx) {
  */
 export async function verifyCompanies(
   companies,
-  { fetchJson = defaultFetchJson, fetchText = defaultFetchText, providers = null, httpCtx = null } = {},
+  { fetchJson = probeFetchJson, fetchText = probeFetchText, providers = null, httpCtx = null } = {},
 ) {
   const list = Array.isArray(companies) ? companies : [];
   const results = [];
@@ -609,7 +617,7 @@ export async function verifyCompanies(
  */
 export async function verifyPortalsFile(
   filePath,
-  { fetchJson = defaultFetchJson, providers = null, httpCtx = null } = {},
+  { fetchJson = probeFetchJson, providers = null, httpCtx = null } = {},
 ) {
   if (!existsSync(filePath)) return { found: false, results: [] };
   const config = yaml.load(readFileSync(filePath, 'utf-8'));
@@ -707,7 +715,7 @@ async function runAdd(name, { fetchJson }) {
 async function main() {
   const args = process.argv.slice(2);
   const strict = args.includes('--strict');
-  const fetchJson = defaultFetchJson;
+  const fetchJson = probeFetchJson;
 
   const addFlag = args.indexOf('--add');
   if (addFlag !== -1) {
