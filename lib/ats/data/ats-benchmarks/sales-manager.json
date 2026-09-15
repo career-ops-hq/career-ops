@@ -1,0 +1,38 @@
+{
+  "resumeId": "sales-manager",
+  "targetRole": "Sales Manager",
+  "category": "sales",
+  "experienceLevel": "mid-senior",
+  "expectedScore": [88, 98],
+  "rawText": "Victoria Chen\nEnterprise Sales Manager\nNew York, NY | victoria.chen@email.com | +1 555-013-5577 | linkedin.com/in/vchen-sales\n\nPROFESSIONAL SUMMARY\nResults-driven B2B Enterprise Sales Manager with 8 years of experience scaling SaaS enterprise sales, pipeline management, account management, and team leadership. Consistently exceeded annual quotas (145% average attainment), delivering $4.2M+ in net-new ARR and closing 15+ six-figure deals.\n\nWORK EXPERIENCE\nEnterprise Sales Manager | CloudScale SaaS | New York, NY | 2021 - Present\n- Achieved 145% quota attainment in 2023, generating $4.2M in annual recurring revenue (ARR) from Fortune 500 accounts.\n- Expanded enterprise pipeline by 80% through strategic account management and lead generation initiatives in Salesforce CRM.\n- Closed 15+ six-figure enterprise SaaS contracts with average deal size of $280K.\n- Improved team deal win rate from 22% to 38% by introducing structured value-selling and contract negotiation frameworks.\n- Led and coached a team of 6 Enterprise Account Executives and BDRs.\n\nSenior Account Executive | SalesGrowth Tech | New York, NY | 2017 - 2021\n- Outperformed sales quota for 12 consecutive quarters, earning President's Club recognition twice.\n- Managed full sales cycle from initial cold outreach and discovery to executive demo, negotiation, and closing.\n- Developed accurate revenue forecasting models for executive leadership.\n\nEDUCATION\nBachelor of Science in Business Administration | Columbia University | 2013 - 2017\n\nSKILLS & COMPETENCIES\n- Sales Strategy: B2B Sales, Enterprise Sales, SaaS, Pipeline Management, Account Management, Lead Generation, Revenue Forecasting\n- Execution & Tools: Salesforce CRM, Negotiation, Solution Selling, Contract Closing, Prospecting, Outreach.io, Gong, Hubspot",
+  "jobDescriptionText": "Seeking a B2B Sales Manager / Enterprise Account Executive with 6-10 years experience in Enterprise Sales, SaaS, Salesforce CRM, Pipeline Management, Account Management, Negotiation, Forecasting, and Lead Generation. Proven track record of quota attainment and ARR expansion.",
+  "sections": ["summary", "experience", "education", "skills"],
+  "skills": [
+    "B2B Sales", "Enterprise Sales", "SaaS", "CRM", "Salesforce", "Pipeline Management", "Account Management", "Negotiation", "Forecasting", "Lead Generation"
+  ],
+  "keywords": [
+    "B2B Sales", "Enterprise Sales", "SaaS", "Salesforce", "Pipeline Management", "Account Management", "Negotiation", "Forecasting", "Lead Generation", "ARR", "Quota"
+  ],
+  "achievementSignals": [
+    "145% quota attainment",
+    "$4.2M net-new ARR",
+    "80% pipeline expansion",
+    "15+ six-figure deals",
+    "Win rate 22% to 38%"
+  ],
+  "formattingSignals": {
+    "singleColumn": true,
+    "standardHeadings": true,
+    "tables": false,
+    "graphics": false,
+    "icons": false,
+    "readablePdfText": true
+  },
+  "qualitySignals": {
+    "quantifiedAchievements": true,
+    "actionVerbs": true,
+    "relevantKeywords": true,
+    "clearDates": true,
+    "careerProgression": true
+  }
+}

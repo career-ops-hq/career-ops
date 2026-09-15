@@ -1,0 +1,38 @@
+{
+  "resumeId": "data-scientist",
+  "targetRole": "Data Scientist",
+  "category": "data",
+  "experienceLevel": "mid-senior",
+  "expectedScore": [88, 99],
+  "rawText": "Elena Rostova\nData Scientist\nBoston, MA | elena.rostova@email.com | +1 555-014-9921 | linkedin.com/in/elena-rostova-ds | github.com/erostova\n\nPROFESSIONAL SUMMARY\nData Scientist with 5 years of experience leveraging machine learning, statistical modeling, and deep learning algorithms to solve complex business challenges. Expertise in Python, SQL, NLP, predictive analytics, and A/B testing to drive revenue growth and operational efficiency.\n\nWORK EXPERIENCE\nSenior Data Scientist | Analytics Corp | Boston, MA | 2022 - Present\n- Built predictive customer churn models using Python, Scikit-learn, and XGBoost, increasing model accuracy by 14% and saving $1.2M in annual retention costs.\n- Designed and analyzed A/B tests across 4M active platform users, improving user conversion rates by 12%.\n- Developed NLP pipeline using PyTorch and Transformers to categorize user feedback sentiment, reducing manual processing time by 40 hours per week.\n- Automated interactive executive reporting dashboards in Tableau and Power BI, enabling real-time data-driven decision-making.\n\nData Scientist | Quant Insights | Cambridge, MA | 2019 - 2022\n- Processed and feature-engineered multi-terabyte datasets using SQL, Pandas, NumPy, and PySpark.\n- Implemented deep learning neural networks in TensorFlow for anomaly detection, reducing prediction error by 28%.\n- Formulated hypothesis tests and multivariate regression models to optimize marketing campaign spend.\n\nEDUCATION\nMaster of Science in Data Science | Massachusetts Institute of Technology (MIT) | 2017 - 2019\nBachelor of Science in Statistics | Boston University | 2013 - 2017\n\nTECHNICAL SKILLS\n- Programming: Python, SQL, R, Bash\n- ML & DL Frameworks: Scikit-learn, TensorFlow, PyTorch, XGBoost, Pandas, NumPy, SciPy\n- Data Visualization & Analytics: Tableau, Power BI, Matplotlib, Seaborn, A/B Testing, Statistics\n- Tools & Cloud: Git, Docker, AWS S3, Snowflake, Jupyter Notebooks",
+  "jobDescriptionText": "Seeking a Data Scientist with 4+ years of experience in Python, SQL, machine learning, and statistical analysis. Key requirements:\n- Expertise in Scikit-learn, TensorFlow, or PyTorch for building predictive models.\n- Strong background in A/B testing, statistical modeling, and NLP.\n- Experience visualizing data in Tableau or Power BI and presenting insights to executive stakeholders.",
+  "sections": ["summary", "experience", "education", "skills"],
+  "skills": [
+    "Python", "SQL", "Pandas", "NumPy", "Scikit-learn", "TensorFlow", "PyTorch", "Machine Learning", "Deep Learning", "NLP", "Statistics", "A/B Testing", "Tableau", "Power BI"
+  ],
+  "keywords": [
+    "Python", "SQL", "Scikit-learn", "TensorFlow", "PyTorch", "Machine Learning", "Deep Learning", "NLP", "A/B Testing", "Statistics", "Tableau", "Power BI", "Pandas", "NumPy"
+  ],
+  "achievementSignals": [
+    "14% model accuracy increase",
+    "$1.2M retention savings",
+    "12% conversion improvement",
+    "40 hours/week processing time reduced",
+    "28% prediction error reduction"
+  ],
+  "formattingSignals": {
+    "singleColumn": true,
+    "standardHeadings": true,
+    "tables": false,
+    "graphics": false,
+    "icons": false,
+    "readablePdfText": true
+  },
+  "qualitySignals": {
+    "quantifiedAchievements": true,
+    "actionVerbs": true,
+    "relevantKeywords": true,
+    "clearDates": true,
+    "careerProgression": true
+  }
+}

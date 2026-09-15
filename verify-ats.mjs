@@ -20,8 +20,8 @@
  * changes the structural score (it is advisory and only computed when supplied).
  */
 
-import { readFileSync, statSync } from 'fs';
-import { isAbsolute, join, basename } from 'path';
+import { readFileSync, statSync, existsSync } from 'fs';
+import { isAbsolute, join, basename, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs'; 
 
@@ -257,6 +257,92 @@ function gradeFor(score) {
  * @param {{keywords?: string|string[], role?: string}} [opts]
  * @returns {{score:number, grade:string, issues:{severity:string,message:string}[], keywordCoverage:null|{total:number,found:number,percent:number,missing:string[]}}}
  */
+
+let atsCheckerKeywords = null;
+try {
+  atsCheckerKeywords = await import('./lib/ats/keywords.ts');
+} catch (err) {
+  // Graceful fallback if ats library is not available
+}
+
+/**
+ * Apply Job Description keyword alignment analysis to an ATS score.
+ * - If no JD is provided: caps score at 98/100 because keyword alignment was not verified.
+ * - If JD is provided: evaluates keyword & skills match (can reach 100 or drop if poor match).
+ * @param {string} text
+ * @param {{jobDescription?: string, jd?: string}} opts
+ * @param {(severity: string, message: string) => void} add
+ * @returns {{penalty: number, cap: number, alignment: any, note?: string}}
+ */
+function evaluateJdAlignment(text, opts, add) {
+  const jdText = opts.jobDescription || opts.jd;
+  if (!jdText || jdText.trim().length < 20) {
+    return {
+      penalty: 0,
+      cap: 98,
+      alignment: null,
+      note: 'No job description provided for keyword and role alignment check. Score capped at 98/100 (Pass a job description to audit full keyword fit).'
+    };
+  }
+
+  let kwAnalysis;
+  if (atsCheckerKeywords && typeof atsCheckerKeywords.analyzeKeywords === 'function') {
+    kwAnalysis = atsCheckerKeywords.analyzeKeywords(text, jdText);
+  } else {
+    // Fallback keyword extraction
+    const words = [...new Set(jdText.toLowerCase().match(/\b[a-z0-9+#.-]{3,}\b/g) || [])];
+    const resumeLower = text.toLowerCase();
+    const matched = words.filter(w => resumeLower.includes(w));
+    const missing = words.filter(w => !resumeLower.includes(w));
+    const pct = words.length > 0 ? Math.round((matched.length / words.length) * 100) : 100;
+    kwAnalysis = {
+      score: pct,
+      matchedKeywords: matched,
+      missingKeywords: missing,
+      targetRole: '',
+      roleAlignment: pct >= 80 ? 'Strong' : pct >= 60 ? 'Good' : pct >= 40 ? 'Fair' : 'Weak'
+    };
+  }
+
+  const totalJdKeywords = kwAnalysis.matchedKeywords.length + kwAnalysis.missingKeywords.length;
+  const matchPercent = totalJdKeywords > 0
+    ? Math.round((kwAnalysis.matchedKeywords.length / totalJdKeywords) * 100)
+    : kwAnalysis.score;
+
+  let penalty = 0;
+  const missingCount = kwAnalysis.missingKeywords.length;
+
+  if (missingCount === 0 && matchPercent === 100) {
+    // 100% Match ONLY: All JD keywords matched, zero missing. Eligible for 100/100.
+    penalty = 0;
+    add('info', 'Perfect job description alignment (100% match). All detected skills and qualifications verified in resume.');
+  } else {
+    // Any missing keyword immediately deducts points based on the 40% ATS keyword/skills weight
+    const unachievedRatio = (100 - matchPercent) / 100;
+    penalty = Math.max(missingCount * 2, Math.round(unachievedRatio * 40));
+    
+    if (matchPercent < 50) {
+      penalty = Math.min(60, penalty + 10);
+      add('critical', `Low job description match (${matchPercent}%, -${penalty} pts). Resume lacks key required qualifications: ${kwAnalysis.missingKeywords.slice(0, 10).join(', ')}.`);
+    } else {
+      add('warning', `Incomplete job description match (${matchPercent}% match, -${penalty} pts). Missing keyword(s): ${kwAnalysis.missingKeywords.slice(0, 10).join(', ')}.`);
+    }
+  }
+
+  return {
+    penalty,
+    cap: 100,
+    alignment: {
+      matched: kwAnalysis.matchedKeywords,
+      missing: kwAnalysis.missingKeywords,
+      matchPercent,
+      targetRole: kwAnalysis.targetRole,
+      roleAlignment: kwAnalysis.roleAlignment,
+      keywordScore: kwAnalysis.score
+    }
+  };
+}
+
 function auditAts(html, opts = {}) {
   const text = extractVisibleText(html);
   const css = extractStyleText(html);
@@ -422,8 +508,17 @@ function auditAts(html, opts = {}) {
     };
   }
 
+  const jdEval = evaluateJdAlignment(text, opts, add);
+  if (jdEval.cap && score > jdEval.cap) {
+    score = jdEval.cap;
+    if (jdEval.note) add('info', jdEval.note);
+  }
+  if (jdEval.penalty > 0) {
+    score = Math.max(0, score - jdEval.penalty);
+  }
+
   score = Math.max(0, Math.min(100, Math.round(score)));
-  return { score, grade: gradeFor(score), issues, keywordCoverage };
+  return { score, grade: gradeFor(score), issues, keywordCoverage, jdAlignment: jdEval.alignment };
 }
 
 /**
@@ -433,7 +528,179 @@ function auditAts(html, opts = {}) {
  * @param {number} minScore
  * @returns {boolean}
  */
+
+/**
+ * Clean a PDF font name to its base family name for ATS safe font checking.
+ * Strips subset prefixes (e.g. "AAAAAA+"), weights/styles, and PS/MT suffixes.
+ * @param {string} rawName
+ * @returns {string}
+ */
+function cleanPdfFontName(rawName) {
+  let name = String(rawName || '').replace(/^[A-Z]{6}\+/, '').trim();
+  name = name.replace(/-(?:bold|italic|bolditalic|regular|roman|light|black|medium|semibold)$/i, '');
+  name = name.replace(/(?:psmt|ps|mt)$/i, '');
+  name = name.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+  return name.trim();
+}
+
+/**
+ * Score a PDF buffer for ATS-friendliness.
+ * @param {Uint8Array|Buffer} buffer
+ * @param {{keywords?: string|string[], role?: string}} [opts]
+ * @returns {Promise<{score:number, grade:string, issues:{severity:string,message:string}[], keywordCoverage:null|{total:number,found:number,percent:number,missing:string[]}, meta?:{pageCount:number, chars:number}}>}
+ */
+
+/**
+ * Score a PDF buffer for ATS-friendliness using the ATS scoring engine.
+ * Directly integrates extractPdf & analyzeResume modules.
+ * @param {Uint8Array|Buffer} buffer
+ * @param {{keywords?: string|string[], role?: string, jobDescription?: string, jd?: string, fileName?: string}} [opts]
+ * @returns {Promise<{score:number, grade:string, issues:{severity:string,message:string}[], keywordCoverage:any, jdAlignment:any, breakdown:any, meta:{pageCount:number, chars:number}}>}
+ */
+async function auditPdf(buffer, opts = {}) {
+  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const { analyzeResume } = await import('./lib/ats/analyzer.ts');
+
+  const data = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  const loadingTask = pdfjsLib.getDocument({
+    data,
+    useSystemFonts: true,
+    disableFontFace: true,
+    verbosity: 0,
+  });
+  const pdfDoc = await loadingTask.promise;
+  const pageCount = pdfDoc.numPages;
+
+  let fullText = '';
+  for (let i = 1; i <= pageCount; i++) {
+    const page = await pdfDoc.getPage(i);
+    const textContent = await page.getTextContent();
+    let pageText = '';
+    for (const item of textContent.items) {
+      if ('str' in item && typeof item.str === 'string') {
+        const str = item.str;
+        const hasEOL = Boolean(item.hasEOL);
+        pageText += str;
+        if (hasEOL) pageText += '\n';
+        else if (str && !str.endsWith(' ')) pageText += ' ';
+      }
+    }
+    fullText += pageText.trim() + '\n\n';
+  }
+
+  const rawLines = fullText
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean);
+
+  const lines = [];
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i];
+    const isBullet = /^[•\-\-\—\d.\)]/.test(line) || /^(?:Spearheaded|Implemented|Managed|Built|Engineered|Architected|Developed|Created|Led|Designed)\b/i.test(line);
+    if (isBullet) {
+      let combined = line;
+      while (i + 1 < rawLines.length) {
+        const next = rawLines[i + 1];
+        const isNextBullet = /^[•\-\-\—\d.\)]/.test(next) || /^(?:Spearheaded|Implemented|Managed|Built|Engineered|Architected|Developed|Created|Led|Designed)\b/i.test(next);
+        const isNextHeading = next.length <= 60 && !/[.?;]$/.test(next) && /^[A-Z0-9\s&—–|\-+#.:]{3,60}$/.test(next);
+        const isNextEntry = next.includes('|') || next.includes('IFF') || /(?:19|20)\d\d/.test(next);
+        if (!isNextBullet && !isNextHeading && !isNextEntry) {
+          combined += (combined.endsWith('-') ? '' : ' ') + next;
+          i++;
+        } else {
+          break;
+        }
+      }
+      lines.push(combined);
+    } else {
+      lines.push(line);
+    }
+  }
+
+  const words = fullText.split(/\s+/).filter(Boolean);
+  const parsed = {
+    text: lines.join('\n'),
+    lines,
+    words,
+    pageCount,
+    fileName: opts.fileName || 'resume.pdf',
+    fileType: 'application/pdf',
+    fileSize: buffer.length,
+    isImageBased: fullText.trim().length < 100,
+  };
+
+  const jdText = opts.jobDescription || opts.jd;
+  const analysis = analyzeResume(parsed, jdText);
+
+  // Map issues from ATS formatting & parsing warnings
+  const issues = [];
+  if (analysis.parsingWarning) {
+    issues.push({ severity: 'critical', message: analysis.parsingWarning });
+  }
+
+  for (const f of analysis.formatting) {
+    if (f.type !== 'info') {
+      issues.push({ severity: f.type, message: f.message });
+    }
+  }
+
+  let finalScore = analysis.totalScore;
+  let jdAlignment = null;
+
+  if (!jdText || jdText.trim().length < 20) {
+    // If no JD is provided, cap at 98/100
+    if (finalScore > 98) finalScore = 98;
+    issues.push({
+      severity: 'info',
+      message: 'No job description provided for keyword and role alignment check. Score capped at 98/100 (Pass a job description to audit full keyword fit).'
+    });
+  } else {
+    // JD provided: calculate exact alignment details from ATS analysis
+    const totalJd = analysis.keywords.matchedKeywords.length + analysis.keywords.missingKeywords.length;
+    const matchPercent = totalJd > 0
+      ? Math.round((analysis.keywords.matchedKeywords.length / totalJd) * 100)
+      : analysis.keywords.score;
+
+    jdAlignment = {
+      matched: analysis.keywords.matchedKeywords,
+      missing: analysis.keywords.missingKeywords,
+      matchPercent,
+      targetRole: analysis.keywords.targetRole,
+      roleAlignment: analysis.keywords.roleAlignment,
+      keywordScore: analysis.keywords.score,
+    };
+
+    if (analysis.keywords.missingKeywords.length === 0 && matchPercent === 100) {
+      issues.push({
+        severity: 'info',
+        message: 'Perfect job description alignment (100% match). All detected skills and qualifications verified in resume.'
+      });
+      // Allow reaching 100/100 if contact and structure are also top quality
+      if (analysis.contactInfo.email && analysis.contactInfo.phone && analysis.sections.filter(s => s.found).length >= 5) {
+        finalScore = Math.max(finalScore, 100);
+      }
+    } else {
+      const missingCount = analysis.keywords.missingKeywords.length;
+      issues.push({
+        severity: matchPercent < 50 ? 'critical' : 'warning',
+        message: `Incomplete job description match (${matchPercent}% match, ${missingCount} missing keywords). Missing: ${analysis.keywords.missingKeywords.slice(0, 8).join(', ')}.`
+      });
+    }
+  }
+
+  return {
+    score: finalScore,
+    grade: gradeFor(finalScore),
+    issues,
+    keywordCoverage: null,
+    jdAlignment,
+    breakdown: analysis.breakdown,
+    meta: { pageCount, chars: fullText.length }
+  };
+}
+
 function isPass(result, minScore) {
+
   return result.score >= minScore && !result.issues.some(i => i.severity === 'critical');
 }
 
@@ -441,6 +708,7 @@ export {
   extractVisibleText,
   extractHeadings,
   auditAts,
+  auditPdf,
   gradeFor,
   isPass,
   normalizeKeywords,
@@ -495,7 +763,7 @@ function buildCleanHtml(overrides = {}) {
  * summary. Exits with status 1 if any assertion fails.
  * @returns {void}
  */
-function runSelfTest() {
+async function runSelfTest() {
   let passed = 0, failed = 0;
   const check = (label, cond) => {
     if (cond) { passed++; } else { failed++; console.log(`  FAIL: ${label}`); }
@@ -607,6 +875,14 @@ function runSelfTest() {
   check('supplying keywords does not change the score', withKeywords.score === clean.score);
   check('no keyword coverage without --keywords/--role', clean.keywordCoverage === null);
 
+  // PDF audit test if sample PDF exists
+  if (existsSync('output/Vinicius_Rezende_CV_ATS_v3.pdf')) {
+    const pdfBuf = readFileSync('output/Vinicius_Rezende_CV_ATS_v3.pdf');
+    const pdfRes = await auditPdf(pdfBuf);
+    check('sample PDF scores >= 90', pdfRes.score >= 90);
+    check('sample PDF passes default gate', isPass(pdfRes, DEFAULT_MIN_SCORE));
+  }
+
   console.log(`\nverify-ats self-test: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
 }
@@ -629,6 +905,12 @@ function printHuman(result, file, minScore) {
     console.log('\nIssues:');
     for (const i of result.issues) console.log(`  [${i.severity}] ${i.message}`);
   }
+  if (result.jdAlignment) {
+    const j = result.jdAlignment;
+    console.log(`\nJob Description Alignment: ${j.matchPercent}% (${j.roleAlignment || 'Evaluated'})`);
+    if (j.matched.length) console.log(`  Matched (${j.matched.length}): ${j.matched.slice(0, 10).join(', ')}`);
+    if (j.missing.length) console.log(`  Missing (${j.missing.length}): ${j.missing.slice(0, 10).join(', ')}`);
+  }
   if (result.keywordCoverage) {
     const k = result.keywordCoverage;
     console.log(`\nKeyword coverage: ${k.found}/${k.total} (${k.percent}%)`);
@@ -644,16 +926,15 @@ if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
 
   if (args.includes('--self-test')) {
-    runSelfTest();
+    await runSelfTest();
   } else {
     let targetArg = '';
+    let jdArg = '';
     let keywords = '';
     let role = '';
     let minScore = DEFAULT_MIN_SCORE;
     let asJson = false;
 
-    // A value is "missing" if there is no next token or the next token is itself
-    // an option flag (e.g. `--keywords --json` must error, not swallow --json).
     const missingValue = (t) => t === undefined || t.startsWith('-');
 
     for (let i = 0; i < args.length; i++) {
@@ -680,6 +961,8 @@ if (isMainModule(import.meta.url)) {
         process.exit(1);
       } else if (!targetArg) {
         targetArg = arg;
+      } else if (!jdArg) {
+        jdArg = arg;
       } else {
         console.error(`ERROR: unexpected extra positional argument: ${arg}`);
         process.exit(1);
@@ -687,10 +970,24 @@ if (isMainModule(import.meta.url)) {
     }
 
     const helpRequested = args.includes('--help') || args.includes('-h');
+    if (!targetArg && !helpRequested) {
+      const outDir = join(process.cwd(), 'output');
+      if (existsSync(outDir)) {
+        const { readdirSync } = await import('fs');
+        const pdfs = readdirSync(outDir)
+          .filter(f => f.toLowerCase().endsWith('.pdf'))
+          .map(f => ({ name: f, time: statSync(join(outDir, f)).mtimeMs }))
+          .sort((a, b) => b.time - a.time);
+        if (pdfs.length > 0) {
+          targetArg = join('output', pdfs[0].name);
+          console.log(`Target: ${targetArg} (auto-detected latest PDF)\n`);
+        }
+      }
+    }
     if (!targetArg || helpRequested) {
-      console.log(`Usage: node verify-ats.mjs <generated-cv.html> [--keywords "a,b,c"] [--role "..."] [--min-score N] [--json]
+      console.log(`Usage: node verify-ats.mjs <generated-cv.pdf> [job-description.md] [--keywords "a,b,c"] [--role "..."] [--min-score N] [--json]
 
-Scores a generated CV's HTML for ATS parseability (0-100 + letter grade) and lists
+Scores a generated CV (PDF) for ATS parseability (0-100 + letter grade) and lists
 concrete, fixable issues. Deterministic, read-only. Exits 0 when score >= --min-score
 (default ${DEFAULT_MIN_SCORE}) and no critical issue is present, else 1.
 
@@ -699,16 +996,40 @@ Keyword coverage (--keywords / --role) is advisory and never changes the score.`
       process.exit(helpRequested ? 0 : 1);
     }
 
-    const targetPath = isAbsolute(targetArg) ? targetArg : join(process.cwd(), targetArg);
-    let html;
-    try {
-      if (!statSync(targetPath).isFile()) throw new Error('not a regular file');
-      html = readFileSync(targetPath, 'utf-8');
-    } catch (err) {
-      console.error(`ERROR: cannot read target file: ${targetArg} (${err.code || err.message})`);
+    const targetPath = resolve(process.cwd(), targetArg);
+    if (!existsSync(targetPath)) {
+      console.error(`Error: CV file not found: ${targetPath}`);
       process.exit(1);
     }
-    const result = auditAts(html, { keywords, role });
+    let fileBuffer;
+    try {
+      if (!statSync(targetPath).isFile()) throw new Error('not a regular file');
+      fileBuffer = readFileSync(targetPath);
+      const isPdf = targetPath.toLowerCase().endsWith('.pdf') || (fileBuffer.length >= 4 && fileBuffer.subarray(0, 4).toString() === '%PDF');
+      if (!isPdf) {
+        console.error(`Error: verify-ats requires a PDF file (.pdf). Provided: ${targetPath}`);
+        process.exit(1);
+      }
+    } catch (err) {
+      console.error(`Error: cannot read CV file: ${targetPath} (${err.code || err.message})`);
+      process.exit(1);
+    }
+    let jobDescription = '';
+    if (jdArg) {
+      const jdPath = resolve(process.cwd(), jdArg);
+      if (!existsSync(jdPath)) {
+        console.error(`Error: Job description file not found: ${jdPath}`);
+        process.exit(1);
+      }
+      try {
+        if (!statSync(jdPath).isFile()) throw new Error('not a regular file');
+        jobDescription = readFileSync(jdPath, 'utf8');
+      } catch (err) {
+        console.error(`Error: cannot read job description file: ${jdPath} (${err.code || err.message})`);
+        process.exit(1);
+      }
+    }
+    const result = await auditPdf(fileBuffer, { keywords, role, jobDescription });
     const pass = isPass(result, minScore);
     const file = basename(targetPath);
 

@@ -1,0 +1,37 @@
+{
+  "resumeId": "entry-level-engineer",
+  "targetRole": "Software Engineer",
+  "category": "technology",
+  "experienceLevel": "entry",
+  "expectedScore": [85, 96],
+  "rawText": "Jordan Taylor\nGraduate Software Engineer\nSeattle, WA | jordan.taylor@email.com | +1 555-015-8833 | linkedin.com/in/jordantaylor-dev | github.com/jordantaylor-dev\n\nOBJECTIVE\nMotivated Computer Science graduate seeking an entry-level Software Engineer position. Possesses strong foundation in Java, Python, JavaScript, React, SQL, Git, and Docker through software engineering internships, academic projects, and hands-on application development.\n\nEDUCATION\nBachelor of Science in Computer Science | University of Washington | 2020 - 2024\n- GPA: 3.8/4.0 | Dean's List (All Semesters)\n- Relevant Coursework: Data Structures & Algorithms, Web Development, Database Systems, Software Engineering, Operating Systems\n\nWORK EXPERIENCE\nSoftware Engineering Intern | TechStart Labs | Seattle, WA | June 2023 - Sept 2023\n- Developed frontend components using React, JavaScript, and CSS3, enhancing user interface responsiveness by 25%.\n- Built RESTful API endpoints in Python with FastAPI and SQL PostgreSQL database queries to handle user profile management.\n- Containerized microservice applications using Docker and Git for version control in an Agile development environment.\n- Fixed 15+ high-priority bug tickets reported during beta testing.\n\nKEY PROJECTS\nE-Commerce Microservice App | GitHub: github.com/jordantaylor-dev/shop-app | 2023\n- Built full-stack e-commerce application using React, Node.js, Express, PostgreSQL, and Docker.\n- Integrated Stripe API for payment processing and JWT for user authentication, serving 500+ test transactions.\n\nSmart Task Manager | GitHub: github.com/jordantaylor-dev/task-master | 2023\n- Created task tracking web application with Java, Spring Boot, and SQL, implementing real-time notifications.\n\nTECHNICAL SKILLS\n- Languages: Java, Python, JavaScript, TypeScript, SQL, HTML, CSS\n- Frameworks & Libraries: React, Node.js, Express, Spring Boot, FastAPI\n- Tools & Databases: Git, GitHub, Docker, PostgreSQL, MySQL, Postman, Linux\n\nCERTIFICATIONS\n- Meta Front-End Developer Professional Certificate (2023)\n- AWS Certified Cloud Practitioner (2024)",
+  "jobDescriptionText": "Seeking an Entry-Level or Graduate Software Engineer with a BS in Computer Science. Requirements: proficiency in Java, Python, JavaScript, React, SQL, Git, and Docker. Experience with internship or hands-on web development projects preferred.",
+  "sections": ["summary", "education", "experience", "projects", "skills", "certifications"],
+  "skills": [
+    "Java", "Python", "JavaScript", "React", "SQL", "Git", "Docker"
+  ],
+  "keywords": [
+    "Java", "Python", "JavaScript", "React", "SQL", "Git", "Docker", "PostgreSQL", "Node.js", "Rest APIs", "Spring Boot", "Data Structures"
+  ],
+  "achievementSignals": [
+    "3.8/4.0 GPA",
+    "25% responsiveness increase",
+    "15+ bug tickets fixed",
+    "500+ test transactions"
+  ],
+  "formattingSignals": {
+    "singleColumn": true,
+    "standardHeadings": true,
+    "tables": false,
+    "graphics": false,
+    "icons": false,
+    "readablePdfText": true
+  },
+  "qualitySignals": {
+    "quantifiedAchievements": true,
+    "actionVerbs": true,
+    "relevantKeywords": true,
+    "clearDates": true,
+    "careerProgression": true
+  }
+}
