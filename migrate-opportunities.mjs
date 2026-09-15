@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Inventories and, only when lossless, imports legacy discovery records into SQLite.
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -107,7 +107,7 @@ export async function applyMigration(plan, databasePath) {
   else rmSync(temporary, { force: true });
   const store = await openOpportunityStore(temporary);
   try {
-    for (const row of plan.mappings) {
+    for (const row of [...plan.mappings].sort((a, b) => Number(Boolean(b.evaluation)) - Number(Boolean(a.evaluation)))) {
       const opportunity = store.ingest({ url: row.url, company: row.company, role: row.role, source: 'migration', payload: { migration: 'scan-history', artifacts: row.artifacts, applications: row.applications } });
       for (const observation of row.observations) store.recordScanObservation(opportunity.id, { url: row.url, company: row.company, title: row.role, observedOn: observation.observedOn });
       if (row.evaluation) {
@@ -128,13 +128,37 @@ export async function applyMigration(plan, databasePath) {
   return { database: databasePath, backup, imported: plan.mappings.length };
 }
 
+export function discardUnmapped(root, plan) {
+  const scanUrls = new Set(plan.unmapped.filter(row => row.type === 'scan-metadata').map(row => row.url));
+  const pipelineUrls = new Set(plan.unmapped.filter(row => row.type === 'pipeline-url').map(row => row.url));
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const discard = (relativePath, urls) => {
+    if (!urls.size) return null;
+    const path = join(root, relativePath);
+    const original = readFileSync(path, 'utf8');
+    const backup = `${path}.cutover-${stamp}.bak`;
+    copyFileSync(path, backup);
+    if (sha256(path) !== sha256(backup)) throw new Error(`Backup verification failed: ${relativePath}`);
+    const retained = original.split('\n').filter(line => !urls.has(line.split('\t')[0]) && ![...urls].some(url => line.includes(url))).join('\n');
+    writeFileSync(path, retained);
+    return { path: relativePath, backup: backup.slice(root.length + 1), removed: original.split('\n').length - retained.split('\n').length };
+  };
+  return [discard('data/scan-history.tsv', scanUrls), discard('data/pipeline.md', pipelineUrls)].filter(Boolean);
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const apply = args.includes('--apply');
+  const discard = args.includes('--discard-unmapped');
   const dbIndex = args.indexOf('--db');
   const database = resolve(ROOT, dbIndex === -1 ? 'data/opportunities.db' : args[dbIndex + 1] || '');
   if (dbIndex !== -1 && !args[dbIndex + 1]) throw new Error('--db requires a path');
   const plan = buildMigrationPlan();
   if (!apply) console.log(JSON.stringify(plan, null, 2));
-  else console.log(JSON.stringify(await applyMigration(plan, database), null, 2));
+  else {
+    if (plan.unmapped.length && !discard) throw new Error('Migration has unmapped fields; rerun with --discard-unmapped only after review');
+    const result = await applyMigration({ ...plan, unmapped: discard ? [] : plan.unmapped }, database);
+    if (discard) result.discarded = discardUnmapped(ROOT, plan);
+    console.log(JSON.stringify(result, null, 2));
+  }
 }
