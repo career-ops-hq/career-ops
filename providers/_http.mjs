@@ -11,6 +11,8 @@ import { providerFetchContext } from './_ip-guard.mjs';
 
 export { BROWSER_LIKE_USER_AGENT, MACOS_BROWSER_LIKE_USER_AGENT };
 
+const MAX_TIMER_MS = 2_147_483_647; // setTimeout rewrites anything above this to 1ms
+
 /**
  * Resolve the default per-request timeout from the environment.
  *
@@ -23,6 +25,13 @@ export { BROWSER_LIKE_USER_AGENT, MACOS_BROWSER_LIKE_USER_AGENT };
  * Unusable values fall back to the default rather than failing a scan at
  * request time: a typo in an env var should not take the scanner down.
  *
+ * "Unusable" includes anything outside setTimeout's honored range, not just
+ * values that fail to parse. A delay below 1ms or above 2_147_483_647ms is
+ * silently rewritten to 1ms, so accepting one would abort every request almost
+ * immediately — the failure this variable exists to prevent, arrived at by a
+ * typo instead of a slow board. Falling back is the quieter outcome: a scan at
+ * the 10s default beats a scan where every portal reads as unreachable.
+ *
  * @param {unknown} raw - Raw env value (CAREER_OPS_HTTP_TIMEOUT_MS).
  * @param {number} [fallback=10_000] - Value used when `raw` is unusable.
  * @returns {number} Milliseconds.
@@ -30,7 +39,7 @@ export { BROWSER_LIKE_USER_AGENT, MACOS_BROWSER_LIKE_USER_AGENT };
 export function resolveDefaultTimeoutMs(raw, fallback = 10_000) {
   if (raw === undefined || raw === null || String(raw).trim() === '') return fallback;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > MAX_TIMER_MS) return fallback;
   return parsed;
 }
 
