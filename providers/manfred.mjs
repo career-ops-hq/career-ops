@@ -111,7 +111,7 @@ export function parseCompensation(offer) {
  * signal there is — and remote and hybrid are kept DISTINGUISHABLE rather than
  * collapsed into "Remote", because the emitted string is what `location_filter`
  * matches on: collapsing them makes a `block: ["Hybrid"]` rule unmatchable
- * (same failure as #2258 in the echojobs provider).
+ * (same failure mode as an earlier retired board provider).
  *
  * A placeless on-site offer (0%) keeps "", which passes the filter under the
  * scanner's "don't penalize missing data" convention.

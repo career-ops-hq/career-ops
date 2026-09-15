@@ -14,7 +14,6 @@ import dotenv from 'dotenv';
 import { resolveExtractorMode } from './browser-extract.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
-import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -136,7 +135,6 @@ function checkBillingSource() {
       'Intentional (you meant to use API credits)? Nothing to do.',
       `Not intentional: remove the export of ${which} from ~/.zshrc, ~/.bashrc, ~/.profile or a project .env, restart your terminal, and run /login.`,
       'Batch runs are the exception: `claude -p` workers do not use the interactive login, so they need `claude setup-token` exported as CLAUDE_CODE_OAUTH_TOKEN.',
-      'Details: docs/RUNNING_ON_A_BUDGET.md section 2b.',
     ],
   };
 }
@@ -358,7 +356,6 @@ const USER_LAYER_PREREQS = [
     path: 'cv.md',
     fix: [
       'Create cv.md in the project root with your CV in markdown',
-      'See examples/ for reference CVs',
     ],
   },
   {
@@ -371,8 +368,7 @@ const USER_LAYER_PREREQS = [
   {
     path: 'modes/_profile.md',
     fix: [
-      'Run: cp modes/_profile.template.md modes/_profile.md',
-      'Then customize your archetypes / targeting narrative',
+      'Create modes/_profile.md with your targeting narrative',
     ],
   },
   {
@@ -507,9 +503,6 @@ async function main() {
 
   const checks = [
     checkNodeVersion(),
-    // Devuelve null salvo que el CLI activo sea Gemini: el filter(Boolean) de
-    // abajo lo descarta, así que ningún otro usuario ve un check que no le toca.
-    geminiNodeFloor(activeCli, process.versions.node),
     checkBillingSource(),
     checkDependencies(),
     await checkPlaywright(),

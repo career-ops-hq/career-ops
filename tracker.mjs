@@ -555,7 +555,7 @@ async function main() {
   const fn = COMMANDS[command];
   if (!fn) {
     console.log('Usage: node tracker.mjs <sync|query|history|export|delete> [flags]');
-    console.log('See the header comment of this file for examples, or docs/SCRIPTS.md.');
+    console.log('See the header comment of this file for examples.');
     process.exit(command ? 1 : 0);
   }
   await fn(args);

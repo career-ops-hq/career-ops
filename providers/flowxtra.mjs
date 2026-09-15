@@ -10,7 +10,7 @@
 //
 // Public, no-auth, cross-tenant — one call lists live postings from every
 // company using Flowxtra as its ATS, so this is a board-wide aggregator like
-// arbeitnow/echojobs/thehub, not a per-company provider: scan.mjs's own
+// other board-wide sources, not a per-company provider: scan.mjs's own
 // title/location filters narrow the result afterwards.
 //
 // Wire in via a `job_boards:` entry with `provider: flowxtra`.

@@ -32,7 +32,7 @@ try {
 
   const detectMisses = [
     fourdayweek.detect({ name: 'X' }),
-    fourdayweek.detect({ name: 'Other', provider: 'echojobs', careers_url: 'https://4dayweek.io/jobs' }),
+    fourdayweek.detect({ name: 'Other', provider: 'other', careers_url: 'https://4dayweek.io/jobs' }),
     fourdayweek.detect({ name: 'Path spoof', careers_url: 'https://evil.example/4dayweek.io/jobs' }),
     fourdayweek.detect({ name: 'Suffix spoof', careers_url: 'https://4dayweek.io.evil.example/jobs' }),
     fourdayweek.detect({ name: 'HTTP', careers_url: 'http://4dayweek.io/jobs' }),
