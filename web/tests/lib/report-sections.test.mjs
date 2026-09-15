@@ -6,7 +6,18 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cleanHeading, authorLetter, isVerdictHeading, splitSections } from "../../src/lib/report-sections.mjs";
+import {
+  APPLY_LINE,
+  applyCtaQuiet,
+  applyLineLabel,
+  authorLetter,
+  cleanHeading,
+  firstProseParagraph,
+  isLeadSection,
+  isVerdictHeading,
+  splitSections,
+  verdictReason,
+} from "../../src/lib/report-sections.mjs";
 
 test("strips the author letter from the blocks the core has always written", () => {
   assert.equal(cleanHeading("A) Role Summary"), "Role Summary");
@@ -165,4 +176,54 @@ test("the authoring marker names the verdict, in any language", () => {
   assert.equal(isVerdictHeading("B) Verdict"), true);
   // ...but a heading that merely mentions the word is not the verdict block.
   assert.equal(isVerdictHeading("D) Verdict rationale and caveats"), false);
+});
+
+test("only Block B stays open as the lead section", () => {
+  assert.equal(isLeadSection({ letter: "B", heading: "Block B — CV Match" }), true);
+  assert.equal(isLeadSection({ letter: "A", heading: "Block A — Role Summary" }), false);
+  assert.equal(isLeadSection({ letter: "F", heading: "Block F — Interview Plan" }), false);
+  assert.equal(isLeadSection({ letter: null, heading: "Match with CV" }), true);
+});
+
+test("firstProseParagraph skips tables", () => {
+  assert.equal(
+    firstProseParagraph("| Field | Value |\n|-------|--------|\n| A | B |\n\nPHP is the gate."),
+    "PHP is the gate.",
+  );
+});
+
+test("verdictReason reads the header lede above ---", () => {
+  const report = [
+    "# Acme — Director of Engineering",
+    "",
+    "**Score:** 3.3 / 5",
+    "**Decision:** Consider",
+    "",
+    "Hands-on Director of Software Engineering. PHP keeps this from Apply.",
+    "",
+    "---",
+    "",
+    "## Block A — Role Summary",
+    "table here",
+  ].join("\n");
+  assert.match(verdictReason({ report, intro: "" }), /Hands-on Director/);
+  assert.match(
+    verdictReason({ intro: "", verdictContent: "Apply. PHP is a gate." }),
+    /Apply/,
+  );
+});
+
+test("applyLineLabel: 4.0 is the apply line", () => {
+  assert.equal(APPLY_LINE, 4.0);
+  assert.equal(applyLineLabel(4.0), "Recommended");
+  assert.equal(applyLineLabel("4.0/5"), "Recommended");
+  assert.equal(applyLineLabel(3.9), "Below the apply line");
+  assert.equal(applyLineLabel(null), null);
+});
+
+test("applyCtaQuiet: below the apply line or caution legitimacy", () => {
+  assert.equal(applyCtaQuiet({ score: 4.2 }), false);
+  assert.equal(applyCtaQuiet({ score: 3.3 }), true);
+  assert.equal(applyCtaQuiet({ score: 4.5, legitimacy: "Proceed with Caution" }), true);
+  assert.equal(applyCtaQuiet({ score: 4.5, legitimacy: "Legitimate" }), false);
 });

@@ -101,10 +101,10 @@ export function MobileNav() {
   };
 
   return (
-    <>
+    <div className="md:hidden">
       <style>{STYLE}</style>
 
-      <header className="co-mnav flex items-center gap-2 border-b border-border px-4 pb-3 md:hidden">
+      <header className="co-mnav flex items-center gap-2 border-b border-border px-4 pb-3">
         <Link href="/" className="flex min-h-[44px] items-center gap-2" aria-label="career-ops home">
           <CoMark size={26} />
           <span className={`${instrumentSerif.className} relative -top-px text-xl text-landing`}>career-ops</span>
@@ -124,7 +124,7 @@ export function MobileNav() {
         </div>
       </header>
 
-      <div className={cn("co-mscrim md:hidden", open && "open")} onClick={() => setOpen(false)} aria-hidden />
+      <div className={cn("co-mscrim", open && "open")} onClick={() => setOpen(false)} aria-hidden />
 
       <aside
         ref={panelRef}
@@ -132,7 +132,7 @@ export function MobileNav() {
         aria-modal="true"
         aria-label="Navigation menu"
         inert={!open}
-        className={cn("co-mdrawer border-l border-border bg-surface md:hidden", open && "open")}
+        className={cn("co-mdrawer border-l border-border bg-surface", open && "open")}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
@@ -187,6 +187,6 @@ export function MobileNav() {
           </div>
         </div>
       </aside>
-    </>
+    </div>
   );
 }
