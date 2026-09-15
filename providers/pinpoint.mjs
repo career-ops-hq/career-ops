@@ -69,6 +69,27 @@ export default {
   },
 };
 
+// Pinpoint serves a shared demo/onboarding tenant for any <slug> that has
+// never launched real postings — the API still answers 200 with well-formed,
+// plausible-looking job data (#4190). Verified live against 6 unrelated
+// companies with no Pinpoint board (Telefonica, NTT Data, Michael Page,
+// Robert Walters, Adevinta, TravelPerk): each returns one of two canned
+// postings ("Head of DEI - UK" / "Head of DEI - Belfast"), and both embed the
+// exact same malformed YouTube attachment in their description — a doubled
+// "/embed/https://www.youtube.com/embed/<id>" URL for video id pFxm6fszrpw,
+// byte-for-byte identical across every tenant probed. That specific artifact
+// is Pinpoint's own onboarding-video filler, not something any real
+// employer's job description would independently reproduce, so it is a safe,
+// low-false-positive marker for "this posting is seeded demo content, not a
+// real opening" — the title text alone ("Head of DEI - UK") is not used as
+// the signal, since a real employer could plausibly post that exact title.
+const PINPOINT_DEMO_VIDEO_MARKER = 'youtube.com/embed/https://www.youtube.com/embed/pFxm6fszrpw';
+
+function isPinpointDemoPosting(j) {
+  const description = typeof j?.description === 'string' ? j.description : '';
+  return description.includes(PINPOINT_DEMO_VIDEO_MARKER);
+}
+
 /**
  * Parse a Pinpoint /postings.json response. Exported for unit tests.
  *
@@ -88,7 +109,10 @@ export default {
  *               mirroring the recruitee provider.
  *
  * Rows missing a usable title or a valid `https:` URL are dropped — an empty
- * URL would corrupt the scanner's URL-based dedup key.
+ * URL would corrupt the scanner's URL-based dedup key. A row identified as
+ * Pinpoint's own seeded demo content (see isPinpointDemoPosting, #4190) is
+ * dropped too, so a tenant serving only demo postings resolves as empty
+ * rather than as a live board with fake jobs.
  *
  * @param {any} json
  * @param {string} companyName
@@ -99,6 +123,8 @@ export function parsePinpointResponse(json, companyName) {
   if (!Array.isArray(postings)) return [];
   return postings
     .map(j => {
+      if (isPinpointDemoPosting(j)) return null;
+
       const title = typeof j?.title === 'string' ? j.title.trim() : '';
       if (!title) return null;
 
