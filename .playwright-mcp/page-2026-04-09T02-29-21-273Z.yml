@@ -1,0 +1,336 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - link "Flex Logo" [ref=e5] [cursor=pointer]:
+        - /url: https://getflex.com/
+        - img "Flex Logo" [ref=e6]
+      - generic [ref=e7]:
+        - link "Back to jobs" [ref=e8] [cursor=pointer]:
+          - /url: https://job-boards.greenhouse.io/flex
+          - img [ref=e9]
+          - text: Back to jobs
+        - generic [ref=e12]:
+          - generic [ref=e13]:
+            - heading "Senior Software Development Engineer in Test (SDET)" [level=1] [ref=e14]
+            - generic [ref=e15]:
+              - img [ref=e16]
+              - generic [ref=e18]: Remote (U.S.)
+          - button "Apply" [ref=e19] [cursor=pointer]
+        - generic [ref=e20]:
+          - paragraph [ref=e22]: Flex is a growth-stage, NYC headquartered FinTech company that is creating the best rent payment experience. It’s hard to believe that it’s 2026 and paying rent on time is expensive, inflexible, and difficult. We’re here to change that! Flex enables our users to pay rent throughout the month on a schedule that better fits their finances and budget. Our mission is to empower as many renters as possible with flexibility over their most significant recurring expense. After deliberately keeping a stealth profile as we built up unprecedented investor support and an enthusiastic user base, we are looking for motivated individuals to help us keep our mission growing. Will you be a part of the team?
+          - generic [ref=e23]:
+            - heading "About the role" [level=3] [ref=e24]:
+              - strong [ref=e25]: About the role
+            - paragraph [ref=e26]: As a Senior SDET at Flex, you will own the test automation and quality efforts for entire product areas or major features. You will architect and optimize automation frameworks, lead test strategy for complex systems, and regularly collaborate across teams to deliver reliable and high-quality releases. This role offers the opportunity to mentor others, drive cross-functional quality improvements, and play a critical part in shaping the future of our engineering excellence.
+            - heading "What you’ll do" [level=3] [ref=e27]:
+              - strong [ref=e28]: What you’ll do
+            - list [ref=e29]:
+              - listitem [ref=e30]: Architect, implement, and optimize automated test frameworks for complex product areas, ensuring high reliability and maintainability
+              - listitem [ref=e31]: Design, develop, and maintain robust automated test suites for API, UI, and integration testing
+              - listitem [ref=e32]: Lead test strategy development and perform risk analysis for major features and systems
+              - listitem [ref=e33]: Integrate automated testing into CI/CD pipelines, supporting continuous integration and delivery processes
+              - listitem [ref=e34]: Proactively identify systemic quality issues and drive cross-team process improvements to increase coverage and efficiency
+              - listitem [ref=e35]: Analyze test coverage, identify gaps, and implement solutions to improve product quality
+              - listitem [ref=e36]: Collaborate closely with engineering, product, and quality leaders on cross-functional quality initiatives and release planning
+              - listitem [ref=e37]: Provide technical guidance and mentorship to junior SDETs and QA team members, fostering skill development and best practices
+              - listitem [ref=e38]: Review code and test cases contributed by other engineers for quality and maintainability
+              - listitem [ref=e39]: Maintain accurate and actionable test documentation, reports, and quality metrics for assigned product areas
+              - listitem [ref=e40]: Investigate and resolve complex defects and production issues through advanced debugging and root cause analysis
+              - listitem [ref=e41]: Advocate for quality and champion adoption of best practices within and across engineering teams
+              - listitem [ref=e42]: Proven ability to lead test strategy and risk analysis while making high-impact technical decisions amid ambiguity and prioritizing what matters most.
+            - heading "Key qualifications" [level=3] [ref=e43]:
+              - strong [ref=e44]: Key qualifications
+            - list [ref=e45]:
+              - listitem [ref=e46]: Bachelor’s degree in Computer Science or related field, or equivalent experience
+              - listitem [ref=e47]: 4+ years of experience in software development and test automation
+              - listitem [ref=e48]: Advanced proficiency in multiple programming languages and test automation frameworks
+              - listitem [ref=e49]: Deep experience designing, building, and maintaining automation frameworks (e.g., Playwright, Cypress, Selenium, RestAssured)
+              - listitem [ref=e50]: Strong expertise in API, UI, and integration testing
+              - listitem [ref=e51]: Proficient in CI/CD pipeline integration and optimization
+              - listitem [ref=e52]: Skilled in test strategy development, risk analysis, and test architecture
+              - listitem [ref=e53]: Advanced debugging, troubleshooting, and root cause analysis
+              - listitem [ref=e54]: Solid understanding of database systems and advanced SQL
+              - listitem [ref=e55]: Experience with observability and monitoring tools (e.g., DataDog, NewRelic)
+              - listitem [ref=e56]: Excellent cross-functional communication and mentorship skills
+              - listitem [ref=e57]: Strong written and verbal communication skills; able to collaborate across functions
+            - emphasis [ref=e59]: Flex takes a market-based approach to pay, and compensation may vary depending on your primary work location. Work locations are categorized into one of three tiers based on a cost of labor index for that geographic area. The successful candidate’s starting pay will be commensurate with their experience, qualifications, and Flex’s internal leveling guidelines and benchmarks.
+            - list [ref=e60]:
+              - listitem [ref=e61]:
+                - emphasis [ref=e62]:
+                  - strong [ref=e63]: "Tier A (NYC/SF):"
+                  - text: $136,000—$170,000 USD
+              - listitem [ref=e64]:
+                - emphasis [ref=e65]:
+                  - strong [ref=e66]: "Tier B:"
+                  - text: $122,400—$153,000 USD
+              - listitem [ref=e67]:
+                - emphasis [ref=e68]:
+                  - strong [ref=e69]: "Tier C:"
+                  - text: $115,600—$144,500 USD
+            - paragraph [ref=e70]:
+              - emphasis [ref=e71]: "#LI-Remote"
+          - generic [ref=e72]:
+            - heading "Life at Flex" [level=3] [ref=e73]:
+              - strong [ref=e74]: Life at Flex
+            - paragraph [ref=e75]: We understand that it takes a diverse team of highly intelligent, curious, determined, empathetic, and self aware people to grow a successful company. Our HQ is located in New York City, but we have employees located throughout the US, Australia, Canada and South America. We are growing quickly, but deliberately, with a focus on building an inclusive culture. Our dynamic team has incredible perspectives to share, just as we know you do, and we take great pride in being an equal opportunity workplace.
+            - paragraph [ref=e76]:
+              - strong [ref=e77]: Offices
+            - paragraph [ref=e78]: Roles posted in New York, San Francisco, and Salt Lake City are hybrid positions with on-site expectations of 2-3 days per week in our local offices. For candidates outside of these areas, you may be eligible for our relocation assistance program.
+            - paragraph [ref=e79]:
+              - strong [ref=e80]: Benefits
+            - paragraph [ref=e81]: "For full-time U.S. employees we offer:"
+            - list [ref=e82]:
+              - listitem [ref=e83]: Competitive medical, dental, and vision
+              - listitem [ref=e84]: Company equity
+              - listitem [ref=e85]: 401(k) plan with company match
+              - listitem [ref=e86]: Unlimited paid time off + 13 company paid holidays
+              - listitem [ref=e87]: Parental leave
+              - listitem [ref=e88]: "Flex Cares Program: Non-profit company match + pet adoption coverage"
+              - listitem [ref=e89]: Free Flex subscription
+            - paragraph [ref=e90]: "For full-time non-U.S. employees, we offer:"
+            - list [ref=e91]:
+              - listitem [ref=e92]: Competitive compensation + company equity
+              - listitem [ref=e93]: Unlimited PTO
+        - generic [ref=e94]:
+          - img [ref=e95]
+          - generic [ref=e97]:
+            - paragraph [ref=e98]: Create a Job Alert
+            - paragraph [ref=e99]: Interested in building your career at Flex? Get future opportunities sent straight to your email.
+            - button "Create alert" [ref=e100] [cursor=pointer]
+      - separator [ref=e101]
+      - generic [ref=e102]:
+        - generic [ref=e103]:
+          - generic [ref=e104]:
+            - heading "Apply for this job" [level=2] [ref=e106]
+            - generic [ref=e107]:
+              - paragraph [ref=e109]: "*"
+              - paragraph [ref=e110]: indicates a required field
+          - button "Autofill with MyGreenhouse" [ref=e113] [cursor=pointer]
+        - generic [ref=e114]:
+          - generic [ref=e115]:
+            - generic [ref=e118]:
+              - generic [ref=e119]: First Name*
+              - textbox "First Name" [ref=e120]
+            - generic [ref=e123]:
+              - generic [ref=e124]: Last Name*
+              - textbox "Last Name" [ref=e125]
+            - generic [ref=e128]:
+              - generic [ref=e129]: Email*
+              - textbox "Email" [ref=e130]
+            - group "Phone" [ref=e132]:
+              - generic [ref=e133]: Phone
+              - generic [ref=e136]:
+                - generic [ref=e137]: Country*
+                - generic [ref=e138]:
+                  - log [ref=e140]
+                  - generic [ref=e142]:
+                    - combobox "Country" [ref=e145]
+                    - button "Toggle flyout" [ref=e147] [cursor=pointer]:
+                      - img [ref=e148]
+                  - textbox
+              - generic [ref=e152]:
+                - generic [ref=e153]: Phone*
+                - textbox "Phone" [ref=e154]
+            - generic [ref=e155]:
+              - generic [ref=e157]:
+                - generic [ref=e158]: Location (City)*
+                - generic [ref=e159]:
+                  - log [ref=e161]
+                  - combobox "Location (City)" [ref=e166]
+                  - textbox
+              - button "Locate me" [ref=e167] [cursor=pointer]
+            - group "Resume/CV*" [ref=e169]:
+              - generic [ref=e170]: Resume/CV*
+              - generic [ref=e172]:
+                - generic [ref=e174]:
+                  - button "Attach" [ref=e175] [cursor=pointer]
+                  - generic [ref=e176]: Attach
+                  - button "Attach" [ref=e177]
+                - button "Dropbox" [ref=e179] [cursor=pointer]
+                - button "Google Drive" [ref=e181] [cursor=pointer]
+                - generic [ref=e183]:
+                  - button "Enter manually" [ref=e184] [cursor=pointer]
+                  - generic [ref=e185]: Enter manually
+                - paragraph [ref=e186]: "Accepted file types: pdf, doc, docx, txt, rtf"
+            - group "Cover Letter" [ref=e188]:
+              - generic [ref=e189]: Cover Letter
+              - generic [ref=e191]:
+                - generic [ref=e193]:
+                  - button "Attach" [ref=e194] [cursor=pointer]
+                  - generic [ref=e195]: Attach
+                  - button "Attach" [ref=e196]
+                - button "Dropbox" [ref=e198] [cursor=pointer]
+                - button "Google Drive" [ref=e200] [cursor=pointer]
+                - generic [ref=e202]:
+                  - button "Enter manually" [ref=e203] [cursor=pointer]
+                  - generic [ref=e204]: Enter manually
+                - paragraph [ref=e205]: "Accepted file types: pdf, doc, docx, txt, rtf"
+          - generic [ref=e206]:
+            - separator [ref=e207]
+            - generic [ref=e210]:
+              - generic [ref=e211]: LinkedIn Profile*
+              - textbox "LinkedIn Profile" [ref=e212]
+            - generic [ref=e215]:
+              - generic [ref=e216]: Website
+              - textbox "Website" [ref=e217]
+            - generic [ref=e218]:
+              - generic [ref=e220]:
+                - generic [ref=e221]: US Zip/Postal Code*
+                - textbox "US Zip/Postal Code" [ref=e222]
+              - paragraph [ref=e225]: To help us determine time zone alignment and potential work location eligibility, please provide your ZIP code if you are in the US. For international candidates, you may leave this blank.
+            - generic [ref=e226]:
+              - generic [ref=e228]:
+                - generic [ref=e229]: Will you be able to join our mandatory Flex-sponsored New Hire Onboarding (Mon-Wed of your first week) in person at our NYC headquarters?*
+                - generic [ref=e230]:
+                  - log [ref=e232]
+                  - generic [ref=e234]:
+                    - generic [ref=e235]:
+                      - generic [ref=e236]: Select...
+                      - combobox "Will you be able to join our mandatory Flex-sponsored New Hire Onboarding (Mon-Wed of your first week) in person at our NYC headquarters?" [ref=e238]
+                    - button "Toggle flyout" [ref=e240] [cursor=pointer]:
+                      - img [ref=e241]
+                  - textbox
+              - paragraph [ref=e245]: Travel and accommodations will be provided by Flex, as necessary
+            - generic [ref=e248]:
+              - generic [ref=e249]: Are you authorized to work in the United States?*
+              - generic [ref=e250]:
+                - log [ref=e252]
+                - generic [ref=e254]:
+                  - generic [ref=e255]:
+                    - generic [ref=e256]: Select...
+                    - combobox "Are you authorized to work in the United States?" [ref=e258]
+                  - button "Toggle flyout" [ref=e260] [cursor=pointer]:
+                    - img [ref=e261]
+                - textbox
+            - generic [ref=e265]:
+              - generic [ref=e266]: Will you now, or in the future, require sponsorship for employment visa status (e.g. H-1B visa status)?*
+              - generic [ref=e267]:
+                - log [ref=e269]
+                - generic [ref=e271]:
+                  - generic [ref=e272]:
+                    - generic [ref=e273]: Select...
+                    - combobox "Will you now, or in the future, require sponsorship for employment visa status (e.g. H-1B visa status)?" [ref=e275]
+                  - button "Toggle flyout" [ref=e277] [cursor=pointer]:
+                    - img [ref=e278]
+                - textbox
+            - generic [ref=e282]:
+              - generic [ref=e283]: Does your salary fall within our estimated range for this role? If not, please specify your salary request. *
+              - generic [ref=e284]:
+                - log [ref=e286]
+                - generic [ref=e288]:
+                  - generic [ref=e289]:
+                    - generic [ref=e290]: Select...
+                    - combobox "Does your salary fall within our estimated range for this role? If not, please specify your salary request." [ref=e292]
+                  - button "Toggle flyout" [ref=e294] [cursor=pointer]:
+                    - img [ref=e295]
+                - textbox
+            - generic [ref=e299]:
+              - generic [ref=e300]: Where have you worked most recently (current company)?*
+              - textbox "Where have you worked most recently (current company)?" [ref=e301]
+          - generic [ref=e302]:
+            - separator [ref=e303]
+            - generic [ref=e304]:
+              - heading "Voluntary Self-Identification" [level=2] [ref=e305]
+              - paragraph [ref=e306]: For government reporting purposes, we ask candidates to respond to the below self-identification survey. Completion of the form is entirely voluntary. Whatever your decision, it will not be considered in the hiring process or thereafter. Any information that you do provide will be recorded and maintained in a confidential file.
+              - paragraph [ref=e307]: As set forth in Flex’s Equal Employment Opportunity policy, we do not discriminate on the basis of any protected group status under any applicable law.
+            - generic [ref=e310]:
+              - generic [ref=e311]: Gender
+              - generic [ref=e312]:
+                - log [ref=e314]
+                - generic [ref=e316]:
+                  - generic [ref=e317]:
+                    - generic [ref=e318]: Select...
+                    - combobox "Gender" [ref=e320]
+                  - button "Toggle flyout" [ref=e322] [cursor=pointer]:
+                    - img [ref=e323]
+            - generic [ref=e325]:
+              - generic [ref=e327]:
+                - generic [ref=e328]: Are you Hispanic/Latino?
+                - generic [ref=e329]:
+                  - log [ref=e331]
+                  - generic [ref=e333]:
+                    - generic [ref=e334]:
+                      - generic [ref=e335]: Select...
+                      - combobox "Are you Hispanic/Latino?" [ref=e337]
+                    - button "Toggle flyout" [ref=e339] [cursor=pointer]:
+                      - img [ref=e340]
+              - link "Race & Ethnicity Definitions" [ref=e342] [cursor=pointer]:
+                - /url: https://job-boards.cdn.greenhouse.io/docs/2023/RaceEthnicityDefinitions.pdf
+            - generic [ref=e343]:
+              - paragraph [ref=e344]: "If you believe you belong to any of the categories of protected veterans listed below, please indicate by making the appropriate selection. As a government contractor subject to the Vietnam Era Veterans Readjustment Assistance Act (VEVRAA), we request this information in order to measure the effectiveness of the outreach and positive recruitment efforts we undertake pursuant to VEVRAA. Classification of protected categories is as follows:"
+              - paragraph [ref=e345]: "A \"disabled veteran\" is one of the following: a veteran of the U.S. military, ground, naval or air service who is entitled to compensation (or who but for the receipt of military retired pay would be entitled to compensation) under laws administered by the Secretary of Veterans Affairs; or a person who was discharged or released from active duty because of a service-connected disability."
+              - paragraph [ref=e346]: A "recently separated veteran" means any veteran during the three-year period beginning on the date of such veteran's discharge or release from active duty in the U.S. military, ground, naval, or air service.
+              - paragraph [ref=e347]: An "active duty wartime or campaign badge veteran" means a veteran who served on active duty in the U.S. military, ground, naval or air service during a war, or in a campaign or expedition for which a campaign badge has been authorized under the laws administered by the Department of Defense.
+              - paragraph [ref=e348]: An "Armed forces service medal veteran" means a veteran who, while serving on active duty in the U.S. military, ground, naval or air service, participated in a United States military operation for which an Armed Forces service medal was awarded pursuant to Executive Order 12985.
+            - generic [ref=e351]:
+              - generic [ref=e352]: Veteran Status
+              - generic [ref=e353]:
+                - log [ref=e355]
+                - generic [ref=e357]:
+                  - generic [ref=e358]:
+                    - generic [ref=e359]: Select...
+                    - combobox "Veteran Status" [ref=e361]
+                  - button "Toggle flyout" [ref=e363] [cursor=pointer]:
+                    - img [ref=e364]
+            - separator [ref=e366]
+            - generic [ref=e367]:
+              - heading "Voluntary Self-Identification of Disability" [level=2] [ref=e368]
+              - generic [ref=e369]:
+                - generic [ref=e370]:
+                  - generic [ref=e371]: Form CC-305
+                  - generic [ref=e372]: Page 1 of 1
+                - generic [ref=e373]:
+                  - generic [ref=e374]: OMB Control Number 1250-0005
+                  - generic [ref=e375]: Expires 04/30/2026
+              - strong [ref=e376]: Why are you being asked to complete this form?
+              - paragraph [ref=e377]: We are a federal contractor or subcontractor. The law requires us to provide equal employment opportunity to qualified people with disabilities. We have a goal of having at least 7% of our workers as people with disabilities. The law says we must measure our progress towards this goal. To do this, we must ask applicants and employees if they have a disability or have ever had one. People can become disabled, so we need to ask this question at least every five years.
+              - paragraph [ref=e378]:
+                - text: Completing this form is voluntary, and we hope that you will choose to do so. Your answer is confidential. No one who makes hiring decisions will see it. Your decision to complete the form and your answer will not harm you in any way. If you want to learn more about the law or this form, visit the U.S. Department of Labor’s Office of Federal Contract Compliance Programs (OFCCP) website at
+                - link "www.dol.gov/ofccp" [ref=e379] [cursor=pointer]:
+                  - /url: https://www.dol.gov/ofccp
+                - text: .
+              - strong [ref=e380]: How do you know if you have a disability?
+              - paragraph [ref=e381]:
+                - text: A disability is a condition that substantially limits one or more of your “major life activities.” If you have or have ever had such a condition, you are a person with a disability.
+                - strong [ref=e382]: "Disabilities include, but are not limited to:"
+              - list [ref=e383]:
+                - listitem [ref=e384]: Alcohol or other substance use disorder (not currently using drugs illegally)
+                - listitem [ref=e385]: Autoimmune disorder, for example, lupus, fibromyalgia, rheumatoid arthritis, HIV/AIDS
+                - listitem [ref=e386]: Blind or low vision
+                - listitem [ref=e387]: Cancer (past or present)
+                - listitem [ref=e388]: Cardiovascular or heart disease
+                - listitem [ref=e389]: Celiac disease
+                - listitem [ref=e390]: Cerebral palsy
+                - listitem [ref=e391]: Deaf or serious difficulty hearing
+                - listitem [ref=e392]: Diabetes
+                - listitem [ref=e393]: Disfigurement, for example, disfigurement caused by burns, wounds, accidents, or congenital disorders
+                - listitem [ref=e394]: Epilepsy or other seizure disorder
+                - listitem [ref=e395]: Gastrointestinal disorders, for example, Crohn's Disease, irritable bowel syndrome
+                - listitem [ref=e396]: Intellectual or developmental disability
+                - listitem [ref=e397]: Mental health conditions, for example, depression, bipolar disorder, anxiety disorder, schizophrenia, PTSD
+                - listitem [ref=e398]: Missing limbs or partially missing limbs
+                - listitem [ref=e399]: Mobility impairment, benefiting from the use of a wheelchair, scooter, walker, leg brace(s) and/or other supports
+                - listitem [ref=e400]: Nervous system condition, for example, migraine headaches, Parkinson’s disease, multiple sclerosis (MS)
+                - listitem [ref=e401]: Neurodivergence, for example, attention-deficit/hyperactivity disorder (ADHD), autism spectrum disorder, dyslexia, dyspraxia, other learning disabilities
+                - listitem [ref=e402]: Partial or complete paralysis (any cause)
+                - listitem [ref=e403]: Pulmonary or respiratory conditions, for example, tuberculosis, asthma, emphysema
+                - listitem [ref=e404]: Short stature (dwarfism)
+                - listitem [ref=e405]: Traumatic brain injury
+            - generic [ref=e408]:
+              - generic [ref=e409]: Disability Status
+              - generic [ref=e410]:
+                - log [ref=e412]
+                - generic [ref=e414]:
+                  - generic [ref=e415]:
+                    - generic [ref=e416]: Select...
+                    - combobox "Disability Status" [ref=e418]
+                  - button "Toggle flyout" [ref=e420] [cursor=pointer]:
+                    - img [ref=e421]
+            - paragraph [ref=e424]: "PUBLIC BURDEN STATEMENT: According to the Paperwork Reduction Act of 1995 no persons are required to respond to a collection of information unless such collection displays a valid OMB control number. This survey should take about 5 minutes to complete."
+          - button "Submit application" [ref=e426] [cursor=pointer]
+  - contentinfo [ref=e427]:
+    - generic [ref=e428]:
+      - paragraph [ref=e429]: Powered by
+      - link "Greenhouse logo" [ref=e430] [cursor=pointer]:
+        - /url: https://www.greenhouse.com
+        - img "Greenhouse logo" [ref=e431]

@@ -1,0 +1,229 @@
+- generic [active] [ref=e1]:
+  - img "Banner" [ref=e3]
+  - main [ref=e4]:
+    - generic [ref=e5]:
+      - heading "Current Openings at Dragos" [level=1] [ref=e6]
+      - generic [ref=e8]:
+        - img [ref=e9]
+        - generic [ref=e11]:
+          - paragraph [ref=e12]: Create a Job Alert
+          - paragraph [ref=e13]: Level-up your career by having opportunities at Dragos sent directly to your inbox.
+          - button "Create alert" [ref=e14] [cursor=pointer]
+      - generic [ref=e15]:
+        - generic [ref=e18]:
+          - generic [ref=e19]: Search
+          - textbox "Search" [ref=e20]
+        - generic [ref=e21]:
+          - heading "29 jobs" [level=2] [ref=e22]
+          - table [ref=e25]:
+            - rowgroup:
+              - row "Job":
+                - columnheader "Job" [ref=e26]:
+                  - paragraph [ref=e27]: Job
+            - rowgroup [ref=e28]:
+              - row "Associate Principal Consultant - ICS/OT Cybersecurity New United States" [ref=e29]:
+                - cell "Associate Principal Consultant - ICS/OT Cybersecurity New United States" [ref=e30]:
+                  - link "Associate Principal Consultant - ICS/OT Cybersecurity New United States" [ref=e31] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5160443008
+                    - paragraph [ref=e32]:
+                      - text: Associate Principal Consultant - ICS/OT Cybersecurity
+                      - generic [ref=e34]: New
+                    - paragraph [ref=e35]: United States
+              - row "Associate Principal Incident Responder Singapore" [ref=e36]:
+                - cell "Associate Principal Incident Responder Singapore" [ref=e37]:
+                  - link "Associate Principal Incident Responder Singapore" [ref=e38] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5152009008
+                    - paragraph [ref=e39]: Associate Principal Incident Responder
+                    - paragraph [ref=e40]: Singapore
+              - row "Associate Principal OT Penetration Tester New United States" [ref=e41]:
+                - cell "Associate Principal OT Penetration Tester New United States" [ref=e42]:
+                  - link "Associate Principal OT Penetration Tester New United States" [ref=e43] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5160432008
+                    - paragraph [ref=e44]:
+                      - text: Associate Principal OT Penetration Tester
+                      - generic [ref=e46]: New
+                    - paragraph [ref=e47]: United States
+              - row "Associate Principal Penetration Tester New United States" [ref=e48]:
+                - cell "Associate Principal Penetration Tester New United States" [ref=e49]:
+                  - link "Associate Principal Penetration Tester New United States" [ref=e50] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5175334008
+                    - paragraph [ref=e51]:
+                      - text: Associate Principal Penetration Tester
+                      - generic [ref=e53]: New
+                    - paragraph [ref=e54]: United States
+              - row "Associate Principal Resident Engineer Saudi Arabia" [ref=e55]:
+                - cell "Associate Principal Resident Engineer Saudi Arabia" [ref=e56]:
+                  - link "Associate Principal Resident Engineer Saudi Arabia" [ref=e57] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/4973690008
+                    - paragraph [ref=e58]: Associate Principal Resident Engineer
+                    - paragraph [ref=e59]: Saudi Arabia
+              - row "Director, Marketing Operations United States" [ref=e60]:
+                - cell "Director, Marketing Operations United States" [ref=e61]:
+                  - link "Director, Marketing Operations United States" [ref=e62] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5147933008
+                    - paragraph [ref=e63]: Director, Marketing Operations
+                    - paragraph [ref=e64]: United States
+              - row "Principal Strategic Alliances Manager - Accenture New United States" [ref=e65]:
+                - cell "Principal Strategic Alliances Manager - Accenture New United States" [ref=e66]:
+                  - link "Principal Strategic Alliances Manager - Accenture New United States" [ref=e67] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5152558008
+                    - paragraph [ref=e68]:
+                      - text: Principal Strategic Alliances Manager - Accenture
+                      - generic [ref=e70]: New
+                    - paragraph [ref=e71]: United States
+              - row "Principal Strategic Alliances Manager - Microsoft New United States" [ref=e72]:
+                - cell "Principal Strategic Alliances Manager - Microsoft New United States" [ref=e73]:
+                  - link "Principal Strategic Alliances Manager - Microsoft New United States" [ref=e74] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5160501008
+                    - paragraph [ref=e75]:
+                      - text: Principal Strategic Alliances Manager - Microsoft
+                      - generic [ref=e77]: New
+                    - paragraph [ref=e78]: United States
+              - row "Revenue Recognition Accounting Manager United States" [ref=e79]:
+                - cell "Revenue Recognition Accounting Manager United States" [ref=e80]:
+                  - link "Revenue Recognition Accounting Manager United States" [ref=e81] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5151390008
+                    - paragraph [ref=e82]: Revenue Recognition Accounting Manager
+                    - paragraph [ref=e83]: United States
+              - row "Senior AI Enablement Analyst United States" [ref=e84]:
+                - cell "Senior AI Enablement Analyst United States" [ref=e85]:
+                  - link "Senior AI Enablement Analyst United States" [ref=e86] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5137693008
+                    - paragraph [ref=e87]: Senior AI Enablement Analyst
+                    - paragraph [ref=e88]: United States
+              - row "Senior Equity Compensation Analyst United States" [ref=e89]:
+                - cell "Senior Equity Compensation Analyst United States" [ref=e90]:
+                  - link "Senior Equity Compensation Analyst United States" [ref=e91] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5149270008
+                    - paragraph [ref=e92]: Senior Equity Compensation Analyst
+                    - paragraph [ref=e93]: United States
+              - row "Senior Field Operations Engineer New United Kingdom" [ref=e94]:
+                - cell "Senior Field Operations Engineer New United Kingdom" [ref=e95]:
+                  - link "Senior Field Operations Engineer New United Kingdom" [ref=e96] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5161406008
+                    - paragraph [ref=e97]:
+                      - text: Senior Field Operations Engineer
+                      - generic [ref=e99]: New
+                    - paragraph [ref=e100]: United Kingdom
+              - row "Senior Front End Engineer United States" [ref=e101]:
+                - cell "Senior Front End Engineer United States" [ref=e102]:
+                  - link "Senior Front End Engineer United States" [ref=e103] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5075144008
+                    - paragraph [ref=e104]: Senior Front End Engineer
+                    - paragraph [ref=e105]: United States
+              - row "Senior Manager, OT Threat Hunting United States" [ref=e106]:
+                - cell "Senior Manager, OT Threat Hunting United States" [ref=e107]:
+                  - link "Senior Manager, OT Threat Hunting United States" [ref=e108] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5151496008
+                    - paragraph [ref=e109]: Senior Manager, OT Threat Hunting
+                    - paragraph [ref=e110]: United States
+              - row "Senior Order Operations Business Partner United Kingdom" [ref=e111]:
+                - cell "Senior Order Operations Business Partner United Kingdom" [ref=e112]:
+                  - link "Senior Order Operations Business Partner United Kingdom" [ref=e113] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/4962353008
+                    - paragraph [ref=e114]: Senior Order Operations Business Partner
+                    - paragraph [ref=e115]: United Kingdom
+              - row "Senior OT Penetration Tester New United States" [ref=e116]:
+                - cell "Senior OT Penetration Tester New United States" [ref=e117]:
+                  - link "Senior OT Penetration Tester New United States" [ref=e118] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5156911008
+                    - paragraph [ref=e119]:
+                      - text: Senior OT Penetration Tester
+                      - generic [ref=e121]: New
+                    - paragraph [ref=e122]: United States
+              - row "Senior OT Threat Hunter New Australia" [ref=e123]:
+                - cell "Senior OT Threat Hunter New Australia" [ref=e124]:
+                  - link "Senior OT Threat Hunter New Australia" [ref=e125] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5169386008
+                    - paragraph [ref=e126]:
+                      - text: Senior OT Threat Hunter
+                      - generic [ref=e128]: New
+                    - paragraph [ref=e129]: Australia
+              - row "Senior Pre-Sales Solution Architect (Federal) New United States" [ref=e130]:
+                - cell "Senior Pre-Sales Solution Architect (Federal) New United States" [ref=e131]:
+                  - link "Senior Pre-Sales Solution Architect (Federal) New United States" [ref=e132] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5170054008
+                    - paragraph [ref=e133]:
+                      - text: Senior Pre-Sales Solution Architect (Federal)
+                      - generic [ref=e135]: New
+                    - paragraph [ref=e136]: United States
+              - row "Senior Software Engineer New United States" [ref=e137]:
+                - cell "Senior Software Engineer New United States" [ref=e138]:
+                  - link "Senior Software Engineer New United States" [ref=e139] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5073929008
+                    - paragraph [ref=e140]:
+                      - text: Senior Software Engineer
+                      - generic [ref=e142]: New
+                    - paragraph [ref=e143]: United States
+              - row "Senior Software Engineer New United States" [ref=e144]:
+                - cell "Senior Software Engineer New United States" [ref=e145]:
+                  - link "Senior Software Engineer New United States" [ref=e146] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5023414008
+                    - paragraph [ref=e147]:
+                      - text: Senior Software Engineer
+                      - generic [ref=e149]: New
+                    - paragraph [ref=e150]: United States
+              - row "Senior Software Engineer - Backend United States" [ref=e151]:
+                - cell "Senior Software Engineer - Backend United States" [ref=e152]:
+                  - link "Senior Software Engineer - Backend United States" [ref=e153] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/4927711008
+                    - paragraph [ref=e154]: Senior Software Engineer - Backend
+                    - paragraph [ref=e155]: United States
+              - row "Senior Solution Architect United Arab Emirates" [ref=e156]:
+                - cell "Senior Solution Architect United Arab Emirates" [ref=e157]:
+                  - link "Senior Solution Architect United Arab Emirates" [ref=e158] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5150384008
+                    - paragraph [ref=e159]: Senior Solution Architect
+                    - paragraph [ref=e160]: United Arab Emirates
+              - row "Senior Technical Account Manager New Saudi Arabia" [ref=e161]:
+                - cell "Senior Technical Account Manager New Saudi Arabia" [ref=e162]:
+                  - link "Senior Technical Account Manager New Saudi Arabia" [ref=e163] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5161409008
+                    - paragraph [ref=e164]:
+                      - text: Senior Technical Account Manager
+                      - generic [ref=e166]: New
+                    - paragraph [ref=e167]: Saudi Arabia
+              - row "Senior Threat Intelligence Analyst United Kingdom" [ref=e168]:
+                - cell "Senior Threat Intelligence Analyst United Kingdom" [ref=e169]:
+                  - link "Senior Threat Intelligence Analyst United Kingdom" [ref=e170] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5134833008
+                    - paragraph [ref=e171]: Senior Threat Intelligence Analyst
+                    - paragraph [ref=e172]: United Kingdom
+              - row "Software Engineering Manager- Backend United States" [ref=e173]:
+                - cell "Software Engineering Manager- Backend United States" [ref=e174]:
+                  - link "Software Engineering Manager- Backend United States" [ref=e175] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5041697008
+                    - paragraph [ref=e176]: Software Engineering Manager- Backend
+                    - paragraph [ref=e177]: United States
+              - row "Staff Analytics Engineer United States" [ref=e178]:
+                - cell "Staff Analytics Engineer United States" [ref=e179]:
+                  - link "Staff Analytics Engineer United States" [ref=e180] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/4897029008
+                    - paragraph [ref=e181]: Staff Analytics Engineer
+                    - paragraph [ref=e182]: United States
+              - row "Staff Machine Learning Engineer United States" [ref=e183]:
+                - cell "Staff Machine Learning Engineer United States" [ref=e184]:
+                  - link "Staff Machine Learning Engineer United States" [ref=e185] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5079301008
+                    - paragraph [ref=e186]: Staff Machine Learning Engineer
+                    - paragraph [ref=e187]: United States
+              - row "Staff Protocol Dissection Engineer New United States" [ref=e188]:
+                - cell "Staff Protocol Dissection Engineer New United States" [ref=e189]:
+                  - link "Staff Protocol Dissection Engineer New United States" [ref=e190] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/5141758008
+                    - paragraph [ref=e191]:
+                      - text: Staff Protocol Dissection Engineer
+                      - generic [ref=e193]: New
+                    - paragraph [ref=e194]: United States
+              - row "Staff Software Engineer - Backend United States" [ref=e195]:
+                - cell "Staff Software Engineer - Backend United States" [ref=e196]:
+                  - link "Staff Software Engineer - Backend United States" [ref=e197] [cursor=pointer]:
+                    - /url: https://job-boards.greenhouse.io/dragos/jobs/4995126008
+                    - paragraph [ref=e198]: Staff Software Engineer - Backend
+                    - paragraph [ref=e199]: United States
+  - contentinfo [ref=e200]:
+    - generic [ref=e201]:
+      - paragraph [ref=e202]: Powered by
+      - link "Greenhouse logo" [ref=e203] [cursor=pointer]:
+        - /url: https://www.greenhouse.com
+        - img "Greenhouse logo" [ref=e204]

@@ -163,6 +163,7 @@ data/model-blacklist.json
 # CLI-specific local config
 .claude/settings.local.json
 .claude/memory/
+.claude/scheduled_tasks.lock
 .opencode/settings.local.json
 .opencode/memory/
 # OpenCode project config (often holds personal MCP/model/per-machine prefs).
