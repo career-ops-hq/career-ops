@@ -592,19 +592,23 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
   const r = runSetStatus(['2', 'Applied', '--json'], sb);
   let parsed = null;
   try { parsed = JSON.parse(r.stdout); } catch {}
-  if (parsed && parsed.num === 2 && parsed.company === 'Globex' && parsed.oldStatus === 'Evaluated'
+  const stdoutTrimmed = r.stdout.trim();
+  const isJsonLastOnStdout = stdoutTrimmed.endsWith('}');
+  if (isJsonLastOnStdout && parsed && parsed.num === 2 && parsed.company === 'Globex' && parsed.oldStatus === 'Evaluated'
       && parsed.newStatus === 'Applied' && parsed.changed === true && parsed.followupSeedCandidate === true) {
-    pass('json: full output shape + followupSeedCandidate on Applied');
+    pass('json: full output shape + followupSeedCandidate on Applied (JSON is last on stdout)');
   } else {
-    fail(`json: bad shape\n${r.stdout}${r.stderr}`);
+    fail(`json: bad shape or JSON not last on stdout\n${r.stdout}${r.stderr}`);
   }
   const r2 = runSetStatus(['1', 'Rejected', '--json'], sb);
   let parsed2 = null;
   try { parsed2 = JSON.parse(r2.stdout); } catch {}
-  if (parsed2 && parsed2.followupSeedCandidate === undefined) {
-    pass('json: no followupSeedCandidate on non-Applied transitions');
+  const stdout2Trimmed = r2.stdout.trim();
+  const isJson2LastOnStdout = stdout2Trimmed.endsWith('}');
+  if (isJson2LastOnStdout && parsed2 && parsed2.followupSeedCandidate === undefined) {
+    pass('json: no followupSeedCandidate on non-Applied transitions (JSON is last on stdout)');
   } else {
-    fail(`json: followupSeedCandidate leaked on Rejected\n${r2.stdout}`);
+    fail(`json: followupSeedCandidate leaked on Rejected or JSON not last on stdout\n${r2.stdout}`);
   }
   rmSync(sb.dir, { recursive: true, force: true });
 }
