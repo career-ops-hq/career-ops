@@ -566,9 +566,6 @@ async function main() {
 function onboardingState(root) {
   const autoCopied = [];
   const templates = [
-    { target: 'modes/_profile.md', template: 'modes/_profile.template.md' },
-    { target: 'modes/_custom.md', template: 'modes/_custom.template.md' },
-    { target: 'modes/_brief.md', template: 'modes/_brief.template.md' },
     { target: 'voice-dna.md', template: 'voice-dna.template.md' },
   ];
   for (const { target, template } of templates) {

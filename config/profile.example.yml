@@ -76,12 +76,12 @@ location:
   visa_status: "No sponsorship needed"
   # Countries/regions where you ALREADY hold work authorization (no sponsorship
   # needed there). Drives the Work-Authorization signal in job evaluation
-  # (modes/oferta.md → Block A "Work-authorization check"). Optional — omit or
+  # in evaluation. Optional — omit or
   # leave [] if not applicable; the free-text visa_status above still applies.
   authorized_in: ["United States"]
   # true if you need visa sponsorship for roles OUTSIDE authorized_in. When a JD
   # explicitly states it will not sponsor, that is a hard blocker (see
-  # modes/_profile.md "Your Location Policy"). Omit → treated as false.
+  # the profile location policy. Omit → treated as false.
   needs_sponsorship: false
   # For remote roles outside your country:
   # onsite_availability: "1 week/month in any city"
@@ -89,11 +89,8 @@ location:
 language:
   # Human-facing output language for reports, tracker notes, PDFs, cover
   # letters, outreach, and form answers. Use an ISO language code such as
-  # `en` or `zh-CN`; `zh-CN` also enables Chinese PDF typography rules.
-  # This is separate from language.modes_dir: modes_dir selects market
-  # vocabulary/rules, while output selects the prose language.
+  # `en` or `zh-CN`.
   output: en
-  # modes_dir: modes/de  # optional: use DACH market vocabulary while still writing in English
 
 # Optional follow-up cadence preferences for `node followup-cadence.mjs`.
 # CLI flags still win for one-off runs (for example `--applied-days 10`).
