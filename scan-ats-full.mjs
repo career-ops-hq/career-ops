@@ -546,7 +546,7 @@ export function emitLiveOffer(job, source, { json } = {}) {
   console.error(formatLiveOfferLine(job, source));
 }
 
-function keepAndMaybeEmit(job, source, sink, blacklist, opts) {
+export function keepAndMaybeEmit(job, source, sink, blacklist, opts) {
   const kept = { ...job, source, dateStatus: job.postedAt ? 'dated' : 'unknown' };
   sink.push(kept);
   const live = filterBlacklistedOffers([kept], blacklist, { includeBlacklisted: opts.includeBlacklisted });
