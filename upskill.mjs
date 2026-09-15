@@ -28,6 +28,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { parseScalarScore, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
+import { openOpportunityStore } from './src/opportunities/store.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -462,6 +463,22 @@ function analyze(minReports) {
   };
 }
 
+export function analyzeCanonicalReports(rows, minReports) {
+  const parsedReports = rows.map(row => {
+    const path = join(CAREER_OPS, row.reportPath);
+    if (!withinReports(path)) return null;
+    const content = readTextIfExists(path);
+    if (content === null) return null;
+    const { gapText, hasMachineSummary } = parseReportGaps(content);
+    return { id: row.id, score: row.score, gapText, hasMachineSummary };
+  }).filter(Boolean);
+  const scored = parsedReports.filter(row => Number.isFinite(row.score));
+  if (scored.length < minReports) return { error: `Not enough data: ${scored.length}/${minReports} scored reports. Evaluate more offers and come back.`, current: scored.length, threshold: minReports };
+  const knownSkills = extractSkills(knownSkillsText(readOptionalText(CV_FILE), readOptionalText(PROFILE_FILE), warnProfileUnparseable));
+  const { gaps, excludedAsKnown, totalLowFit } = aggregateGaps(scored, knownSkills);
+  return { schema_version: SCHEMA_VERSION, metadata: { canonical: true, reportsLinked: rows.length, reportsRead: parsedReports.length, reportsWithMachineSummary: parsedReports.filter(row => row.hasMachineSummary).length, reportsScored: scored.length, lowFitReports: totalLowFit, lowFitScoreThreshold: LOW_FIT_SCORE, knownSkillCount: knownSkills.size }, gaps, excludedAsKnown, knownSkills: [...knownSkills].sort() };
+}
+
 function printSummary(result) {
   if (result.error) {
     console.log(`upskill: ${result.error}`);
@@ -853,16 +870,17 @@ const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv
 // Handled via lib/cli-flags.mjs's validateFlags() (#2775), same shape as
 // doctor.mjs (#2874) — checked before --self-test/--url-text/--min-reports
 // are read, and before --help, so `--help --bogus` still errors.
-const KNOWN_FLAGS = ['--min-reports', '--summary', '--url-text', '--self-test', '--help', '-h'];
+const KNOWN_FLAGS = ['--min-reports', '--summary', '--url-text', '--db', '--self-test', '--help', '-h'];
 
 // Only --min-reports and --url-text take their value as the next argv token.
-const VALUE_FLAGS = ['--min-reports', '--url-text'];
+const VALUE_FLAGS = ['--min-reports', '--url-text', '--db'];
 
 const USAGE = `Usage:
   node upskill.mjs                        # aggregate skill-gap map (JSON)
   node upskill.mjs --summary              # human-readable table
   node upskill.mjs --min-reports <n>      # minimum scored reports required (default 5)
   node upskill.mjs --url-text <url|path>  # targeted gap analysis vs one JD (URL or local file)
+  node upskill.mjs --db <path>            # evaluated canonical opportunity reports
   node upskill.mjs <url>                  # same as --url-text <url>
   node upskill.mjs --self-test            # run the pure-function self-tests
   node upskill.mjs --help                 # show this message`;
@@ -1008,7 +1026,11 @@ if (isMain) {
       return Number.isNaN(n) || n < 1 ? 5 : n;
     })();
 
-    const result = analyze(MIN_REPORTS);
+    const dbPath = args.find(arg => arg === '--db' || arg.startsWith('--db='));
+    const dbValue = dbPath ? (dbPath === '--db' ? args[args.indexOf('--db') + 1] : dbPath.slice(5)) : null;
+    const store = dbValue ? await openOpportunityStore(dbValue) : null;
+    const result = store ? analyzeCanonicalReports(store.evaluatedInsights(), MIN_REPORTS) : analyze(MIN_REPORTS);
+    store?.close();
     if (args.includes('--summary')) {
       printSummary(result);
     } else {

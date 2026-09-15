@@ -48,6 +48,11 @@ export async function openOpportunityStore(path) {
     CREATE TABLE IF NOT EXISTS scan_runs (
       id INTEGER PRIMARY KEY, operation TEXT NOT NULL, summary TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS scan_observations (
+      id INTEGER PRIMARY KEY, opportunity_id INTEGER NOT NULL REFERENCES opportunities(id),
+      url TEXT NOT NULL, company TEXT NOT NULL, title TEXT NOT NULL, observed_on TEXT NOT NULL,
+      UNIQUE(url, observed_on)
+    );
     CREATE TABLE IF NOT EXISTS source_health (
       id INTEGER PRIMARY KEY, scan_run_id INTEGER NOT NULL REFERENCES scan_runs(id), source TEXT NOT NULL, status TEXT NOT NULL,
       checked_at TEXT NOT NULL
@@ -190,6 +195,10 @@ export async function openOpportunityStore(path) {
       for (const row of health) db.prepare('INSERT INTO source_health (scan_run_id, source, status, checked_at) VALUES (?, ?, ?, ?)').run(run.lastInsertRowid, row.company ?? row.source, row.status, row.timestamp);
       return Number(run.lastInsertRowid);
     },
+    recordScanObservation(id, { url, company, title, observedOn = new Date().toISOString().slice(0, 10) }) {
+      db.prepare('INSERT INTO scan_observations (opportunity_id, url, company, title, observed_on) VALUES (?, ?, ?, ?, ?) ON CONFLICT(url, observed_on) DO NOTHING').run(id, url, company, title, observedOn);
+    },
+    scanObservations() { return db.prepare('SELECT url, company, title, observed_on AS first_seen, \'added\' AS status FROM scan_observations ORDER BY observed_on, id').all(); },
     healthRecords() { return db.prepare('SELECT checked_at AS timestamp, source AS company, status FROM source_health ORDER BY id').all(); },
     fingerprintHistory() { return db.prepare('SELECT o.url, substr(r.first_seen, 1, 10) AS dateStr, o.company, o.role AS title, r.fingerprint FROM repost_inputs r JOIN opportunities o ON o.id = r.opportunity_id').all(); },
     opportunity(id) {
@@ -261,6 +270,20 @@ export async function openOpportunityStore(path) {
     },
     followupViews() {
       return db.prepare("SELECT o.id, o.company, o.role, l.status, l.updated_at AS lastTransitionAt, MAX(CASE WHEN a.type = 'followup_sent' THEN a.created_at END) AS lastFollowupAt FROM application_lifecycle l JOIN opportunities o ON o.id = l.opportunity_id LEFT JOIN application_activity a ON a.opportunity_id = o.id WHERE l.status IN ('applied', 'responded', 'interview') GROUP BY o.id, o.company, o.role, l.status, l.updated_at ORDER BY l.updated_at").all();
+    },
+    insightStats() {
+      return {
+        opportunities: db.prepare('SELECT COUNT(*) AS total, SUM(state = \'evaluated\') AS evaluated FROM opportunities').get(),
+        applications: db.prepare('SELECT status, COUNT(*) AS count FROM application_lifecycle GROUP BY status ORDER BY status').all(),
+        evaluations: db.prepare('SELECT AVG(lower_score) AS averageLower, MAX(upper_score) AS highestUpper FROM evaluations').get(),
+      };
+    },
+    insightCompany(company) {
+      const opportunities = db.prepare('SELECT id, role, url, state, application_state AS applicationState, created_at AS createdAt FROM opportunities WHERE lower(company) = lower(?) ORDER BY id').all(company);
+      return opportunities.map(opportunity => ({ ...opportunity, application: this.application(opportunity.id), events: this.events(opportunity.id), artifacts: this.artifacts(opportunity.id) }));
+    },
+    evaluatedInsights() {
+      return db.prepare("SELECT o.id, e.lower_score AS score, a.path AS reportPath FROM opportunities o JOIN evaluations e ON e.opportunity_id = o.id JOIN artifacts a ON a.opportunity_id = o.id AND a.kind = 'report' WHERE o.state = 'evaluated' ORDER BY o.id").all();
     },
     linkOutreachContact(id, contactKey) {
       if (!this.shortlist().some(opportunity => opportunity.id === id)) throw new Error(`Opportunity ${id} must be a shortlist opportunity`);

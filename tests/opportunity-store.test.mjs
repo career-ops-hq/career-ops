@@ -13,6 +13,9 @@ const directory = mkdtempSync(join(tmpdir(), 'career-ops-opportunity-'));
 try {
   const store = await openOpportunityStore(join(directory, 'career-ops.db'));
   await ingestScanOffers(join(directory, 'career-ops.db'), [{ url: 'https://jobs.example.com/scanned', company: 'Scanned', title: 'Engineer', source: 'ashby' }]);
+  assert.equal(store.scanObservations()[0].url, 'https://jobs.example.com/scanned');
+  await ingestScanOffers(join(directory, 'career-ops.db'), [{ url: 'https://jobs.example.com/scanned-repost', company: 'Scanned', title: 'Engineer', source: 'ashby', first_seen: '2026-09-16' }]);
+  assert.equal(store.scanObservations().filter(row => row.company === 'Scanned').length, 2);
   assert.equal(store.claimNext('scanner-check').url, 'https://jobs.example.com/scanned');
   const first = store.ingest({ url: 'https://jobs.example.com/42', company: 'Example', role: 'AI Engineer', source: 'greenhouse', payload: { id: 42, description: 'Job evidence', fingerprint: 'fingerprint-42' } });
   assert.equal(store.ingest({ url: first.url, company: 'Changed', role: 'Changed', source: 'greenhouse', payload: {} }).id, first.id);
@@ -50,6 +53,11 @@ try {
   store.recordApplicationActivity(first.id, 'followup_sent', { channel: 'email' });
   assert.equal(store.followupViews()[0].id, first.id);
   assert.ok(store.followupViews()[0].lastFollowupAt);
+  assert.equal(store.insightStats().opportunities.evaluated, 1);
+  assert.equal(store.insightStats().applications.find(row => row.status === 'interview').count, 1);
+  assert.equal(store.insightCompany('example')[0].id, first.id);
+  assert.equal(store.insightCompany('example')[0].application.status, 'interview');
+  assert.equal(store.evaluatedInsights()[0].reportPath, 'reports/example.md');
   store.saveCheckpoint(first.id, 'research', 'input-hash', 'output-hash');
   assert.equal(store.checkpoint(first.id, 'research').output_hash, 'output-hash');
   assert.equal(store.claimDelivery(first.id, 'discord', 'abc'), true);

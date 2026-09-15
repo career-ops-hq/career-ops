@@ -25,6 +25,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { parseScalarScore, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeStatus, analyzeFromContent } from './followup-cadence.mjs';
+import { openOpportunityStore } from './src/opportunities/store.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = join(ROOT, 'data', 'applications.md');
@@ -584,19 +585,29 @@ function printSummary(stats) {
 
 // ── CLI flags + help ────────────────────────────────────────────────
 
-const KNOWN_FLAGS = ['--summary', '--help', '-h'];
+const KNOWN_FLAGS = ['--summary', '--db', '--help', '-h'];
 
 const USAGE = `Usage:
   node stats.mjs             # full JSON stats to stdout
   node stats.mjs --summary   # human-readable table
+  node stats.mjs --db path   # canonical SQLite-backed stats
   node stats.mjs --help|-h   # print this usage block and exit`;
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2);
 
-  validateFlags(args, KNOWN_FLAGS, USAGE);
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: ['--db'], requireOperand: true });
 
-  const stats = computeAllStats();
-  if (args.includes('--summary')) printSummary(stats);
-  else console.log(JSON.stringify(stats, null, 2));
+  const dbArg = args.find(arg => arg === '--db' || arg.startsWith('--db='));
+  if (dbArg) {
+    const dbPath = dbArg === '--db' ? args[args.indexOf('--db') + 1] : dbArg.slice(5);
+    if (!dbPath) throw new Error('--db requires a path');
+    const store = await openOpportunityStore(dbPath);
+    try { console.log(JSON.stringify({ canonical: true, ...store.insightStats() }, null, 2)); }
+    finally { store.close(); }
+  } else {
+    const stats = computeAllStats();
+    if (args.includes('--summary')) printSummary(stats);
+    else console.log(JSON.stringify(stats, null, 2));
+  }
 }

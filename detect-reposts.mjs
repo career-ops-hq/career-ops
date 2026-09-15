@@ -66,6 +66,7 @@ import * as yaml from 'js-yaml';
 
 import { normalizeCompanyName } from './invite-match.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { openOpportunityStore } from './src/opportunities/store.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const SCAN_HISTORY_PATH = join(CAREER_OPS, 'data/scan-history.tsv');
@@ -89,14 +90,15 @@ const MIN_REPOST_SPAN_DAYS = 1;
 // the shape git merges most willingly: two branches can each add a flag here and
 // merge without a conflict, leaving whichever landed second working in every
 // file except this one. That is how --min-span arrived rejected (#2919).
-const KNOWN_FLAGS = ['--window', '--min-span', '--summary', '--self-test', '--help', '-h'];
-const VALUE_FLAGS = ['--window', '--min-span'];
+const KNOWN_FLAGS = ['--window', '--min-span', '--summary', '--self-test', '--db', '--help', '-h'];
+const VALUE_FLAGS = ['--window', '--min-span', '--db'];
 
 const USAGE = `Usage:
   node detect-reposts.mjs                       # full JSON repost clusters to stdout
   node detect-reposts.mjs --summary             # human-readable table
   node detect-reposts.mjs --window 60           # override the default 90-day window
   node detect-reposts.mjs --min-span 7          # override the default 1-day minimum span
+  node detect-reposts.mjs --db path             # use canonical SQLite scan observations
   node detect-reposts.mjs --self-test           # run the in-memory test suite
   node detect-reposts.mjs --help                # print this usage block and exit`;
 
@@ -805,7 +807,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     runSelfTest();
   }
 
-  const rows = loadScanHistory();
+  const dbPath = flagValue(args, '--db');
+  const store = dbPath ? await openOpportunityStore(dbPath) : null;
+  const rows = store ? store.scanObservations() : loadScanHistory();
   const aggregators = loadAggregatorCompanies();
   const clusters = detectReposts(rows, windowDays, minSpanDays, aggregators);
 
@@ -826,4 +830,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       clusters,
     }, null, 2));
   }
+  store?.close();
 }

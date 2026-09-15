@@ -58,6 +58,7 @@ import { normalizeCompanyName } from './invite-match.mjs';
 import { normalizeCompany, resolveTrackerPath } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { openOpportunityStore } from './src/opportunities/store.mjs';
 import {
   parseFollowups,
   parseAppliedDate,
@@ -98,13 +99,14 @@ const companyCollator = new Intl.Collator('en');
 const compareCompany = (a, b) => companyCollator.compare(String(a), String(b));
 
 // --- CLI args ---
-const KNOWN_FLAGS = ['--summary', '--self-test', '--company', '--silence-window', '--include-stale', '--scan-history', '--followups', '--emit-signal', '--help', '-h'];
-const VALUE_FLAGS = ['--company', '--silence-window', '--scan-history', '--followups'];
+const KNOWN_FLAGS = ['--summary', '--self-test', '--company', '--silence-window', '--include-stale', '--scan-history', '--followups', '--emit-signal', '--db', '--help', '-h'];
+const VALUE_FLAGS = ['--company', '--silence-window', '--scan-history', '--followups', '--db'];
 
 const USAGE = `Usage:
   node company-history.mjs                       # full JSON evidence cards to stdout
   node company-history.mjs --summary              # human-readable cards
   node company-history.mjs --company "Acme"       # single-card lookup
+  node company-history.mjs --company "Acme" --db path # canonical SQLite history
   node company-history.mjs --silence-window 21    # override the default silence window (days)
   node company-history.mjs --include-stale        # include facts older than 365d in label computation
   node company-history.mjs --self-test            # run the in-memory test suite
@@ -225,6 +227,7 @@ function parseArgs(argv) {
     includeStale: args.includes('--include-stale'),
     scanHistoryOverride: valueOf('--scan-history'),
     followupsOverride: valueOf('--followups'),
+    dbPath: valueOf('--db'),
     emitSignal,
   };
 }
@@ -1738,7 +1741,7 @@ async function runSelfTest() {
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const { summaryMode, selfTestMode, company, silenceWindowArg, includeStale, scanHistoryOverride, followupsOverride, emitSignal } =
+  const { summaryMode, selfTestMode, company, silenceWindowArg, includeStale, scanHistoryOverride, followupsOverride, emitSignal, dbPath } =
     parseArgs(process.argv);
 
   if (selfTestMode) {
@@ -1748,6 +1751,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     });
   } else {
     const run = async () => {
+      if (dbPath) {
+        if (!company) throw new Error('--db requires --company');
+        const store = await openOpportunityStore(dbPath);
+        try { console.log(JSON.stringify({ canonical: true, company, opportunities: store.insightCompany(company) }, null, 2)); }
+        finally { store.close(); }
+        return;
+      }
       const tracker = loadTrackerRows(CAREER_OPS);
       const followups = loadFollowupRows(CAREER_OPS, followupsOverride);
       const scanHistory = loadRepostClusters(CAREER_OPS, scanHistoryOverride);

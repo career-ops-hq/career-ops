@@ -17,13 +17,15 @@ export async function ingestScanOffers(databasePath, offers) {
   try {
     return offers.map(rawOffer => {
       const offer = normalizeDiscoveryOffer(rawOffer);
-      return store.ingest({
+      const row = store.ingest({
       url: offer.url,
       company: offer.company,
       role: offer.title,
       source: offer.source ?? 'scan',
       payload: offer,
       });
+      store.recordScanObservation(row.id, { url: offer.url, company: offer.company, title: offer.title, observedOn: offer.first_seen });
+      return row;
     });
   } finally {
     store.close();
