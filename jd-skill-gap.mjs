@@ -27,12 +27,20 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
 import { canonicalize, extractSkills } from './skill-extract.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
+//
+// cv.md is a user-layer file that lives at the data root, not at the
+// directory this script was launched from. getCareerOpsRoot() honours
+// CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / the .career-ops-data marker,
+// matching the resolution used by upskill.mjs and the scanner family
+// (same family as #4207 / #3511).
 
-const CV_PATH = 'cv.md';
+const CV_PATH = join(getCareerOpsRoot(), 'cv.md');
 
 // ── JD skill extraction (regex, no LLM) ─────────────────────────────
 //
@@ -824,7 +832,8 @@ if (selfTestMode) {
     process.exit(1);
   }
   if (!existsSync(CV_PATH)) {
-    console.error(`Error: ${CV_PATH} not found — this is a user-layer file, create it first.`);
+    console.error(`Error: cv.md not found at ${CV_PATH}`);
+    console.error('Set CAREER_OPS_ROOT (or CAREER_OPS_DATA_DIR, or a .career-ops-data marker) to point at your data directory.');
     process.exit(1);
   }
 
