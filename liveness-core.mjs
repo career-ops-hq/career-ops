@@ -26,6 +26,9 @@ const HARD_EXPIRED_PATTERNS = [
   // lookahead). Both guards avoid the worse error: reading a LIVE posting whose
   // copy says "once the application form has been filled…" as expired.
   /\b(?:job|jobs|position|role|posting|opening|vacancy|requisition|req|listing)\b[\s\S]{0,60}?(?<!\b(?:application|form)\s)has been filled\b(?!\s+out)/i,
+  // Jobstreet Indonesia (SEEK) serves a removed posting as HTTP 200 with this
+  // banner and no apply control — measured 2026-09-04 on two July postings.
+  /lowongan kerja ini tidak lagi diiklankan/i,
   /this job has expired/i,
   /job posting has expired/i,
   /no longer accepting applications/i,
@@ -94,6 +97,15 @@ const APPLY_PATTERNS = [
   // Chinese MokaHR and Feishu Jobs detail pages use these exact control texts.
   // Keep them narrow: bare “申请” appears in descriptive prose, while longer
   // labels containing “投递” can be status/history controls rather than Apply.
+  // Jobstreet Indonesia / Glints control labels. Measured 2026-09-04, a live
+  // Jobstreet posting exposes "Lamaran Cepat Kirim lamaran sebagai <role> di
+  // <company>" while a removed one exposes only "Cari lowongan kerja lain" —
+  // so these stay narrow phrases rather than a bare /lamar/, which would also
+  // fire on the "Lamaran kerja" footer link present on both.
+  /lamaran cepat/i,
+  /kirim lamaran/i,
+  /lamar sekarang/i,
+  /^lamar$/i,
   /^申请职位$/,
   /^投递$/,
 ];
