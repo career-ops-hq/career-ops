@@ -124,6 +124,15 @@ Frame the candidate as a technical builder whose positioning adapts to the role.
 
 Produce a table with: detected archetype, domain, function, seniority, remote/work mode, team size, TL;DR, and any user-profile caps or overrides applied.
 
+**Work-authorization classification (required):** Read `config/profile.yml` → `location.authorized_in` and `location.needs_sponsorship`, falling back conservatively to `location.visa_status`. Compare those rights with the role location and the JD's verbatim sponsorship language, then produce exactly one tier for Machine Summary `work_auth`:
+
+- ✅ **Sponsors** — the JD explicitly offers visa sponsorship or relocation for a role outside `authorized_in`.
+- ➖ **Not needed** — the role is within `authorized_in`, is genuinely location-agnostic remote from an authorized country, or `needs_sponsorship` is false.
+- ⚠️ **Unstated** — the role is outside `authorized_in` and the JD is silent; treat this as neutral, not a blocker.
+- ⛔ **No sponsorship** — the JD explicitly refuses sponsorship or requires existing authorization for a role outside `authorized_in`; this is the only hard-stop tier.
+
+Quote sponsorship evidence verbatim. If structured profile keys are absent, infer conservatively from `visa_status` and default to **Unstated** rather than guessing a blocker.
+
 #### Block B — CV Match
 
 One table, one row per significant JD requirement, mapped to exact evidence from `cv.md` or `article-digest.md`. Never emit a second matrix re-enumerating the same requirements — Block B *is* the requirement→evidence mapping.
@@ -252,9 +261,21 @@ Also include:
 
 #### Block G — Posting Legitimacy
 
-Assess whether the posting appears real and worth pursuing.
+Analyze whether the posting appears real and worth pursuing through these signals, in order:
 
 Batch mode limitation: Playwright is not available, so exact apply-button state and freshness cannot be directly verified. Mark those signals as `unverified (batch mode)`.
+
+1. **Posting Freshness** — mark page date, redirects, and apply-button state `unverified (batch mode)`.
+2. **Description Quality** — check specificity, realistic requirements, scope, compensation detail, boilerplate, and contradictions in the JD.
+3. **Company Hiring Signals** — use the bounded research already performed for layoffs, freezes, and same-department impact.
+4. **Reposting Detection** — check `data/scan-history.tsv` for the company plus a similar role title, and report count and period.
+5. **Role Market Context** — judge qualitatively whether the role fits the company's business and a plausible hiring timeline.
+6. **Employment Classification Risk** — `not evaluated` in batch; do not infer contractor or employee status.
+7. **AI-Buzzword vs. Infrastructure Mismatch** — flag only when at least two are present: buzzword/scope mismatch, a roughly five-person-or-smaller team owning broad transformation, or a legacy-heavy industry base rate.
+8. **Benefits/Employment Terminology Country Mismatch** — compare stated location with strong country-specific employment or benefits terms; generic terms alone do not trigger it.
+9. **Third-Party Platform Location Tag vs. Employer's Own Posting Mismatch** — compare only when both sources are available and a matching requisition/job ID confirms the same posting; flag different countries only.
+
+Use one tier: **High Confidence**, **Proceed with Caution**, or **Suspicious**. Present observations, not accusations, and explain thin evidence.
 
 #### Risk Summary (after Block G)
 
