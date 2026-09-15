@@ -136,3 +136,85 @@ const chineseSubmit = classifyLiveness({
 chineseSubmit.result === 'active' && chineseSubmit.code === 'apply_control_visible'
   ? pass('exact “投递” button marks a Feishu posting active')
   : fail(`exact “投递” button classified ${chineseSubmit.result}/${chineseSubmit.code}, expected active/apply_control_visible`);
+
+console.log('\nliveness-core — role/position "is closed" and bare "Job Expired" banners classify as expired');
+
+// Reported on agentic-engineering-jobs.com (111 of 111 uncertain postings
+// contain this exact phrase). Old pattern was /this job (listing )?is closed/i,
+// which hardcoded the noun "job"; "role" fell through to no_apply_control ->
+// uncertain, and uncertain postings never filter out of future scans, so a
+// dead board stayed live in scan-history forever.
+expired('We are sorry, this role is closed. Please check our other openings.') === 'expired'
+  ? pass('"This role is closed" -> expired (was: uncertain/no_apply_control)')
+  : fail('"This role is closed" NOT classified expired');
+
+// Same widening covers "position", per the reporter's suggested regex.
+expired('We are sorry, this position is closed. Please check our other openings.') === 'expired'
+  ? pass('"This position is closed" -> expired')
+  : fail('"This position is closed" NOT classified expired');
+
+// Regression: the original phrasings must keep matching after widening the noun.
+expired('This job is closed to new applicants.') === 'expired'
+  ? pass('"This job is closed" still -> expired (regression)')
+  : fail('"This job is closed" regressed');
+
+expired('This job listing is closed as of today.') === 'expired'
+  ? pass('"This job listing is closed" still -> expired (regression)')
+  : fail('"This job listing is closed" regressed');
+
+// Reported on nodesk.co: the closure banner comes back from innerText as
+// "JOB EXPIRED" (uppercase). The existing /this job has expired/i pattern
+// required a full sentence, so a bare banner missed. Widened with
+// /\bjob expired\b/i, which is case-insensitive.
+expired('JOB EXPIRED\nThis role was posted 90 days ago.') === 'expired'
+  ? pass('bare "JOB EXPIRED" banner -> expired (was: uncertain/no_apply_control)')
+  : fail('bare "JOB EXPIRED" banner NOT classified expired');
+
+expired('Notice: job expired on 2026-01-01.') === 'expired'
+  ? pass('lowercase "job expired" -> expired (case-insensitive)')
+  : fail('lowercase "job expired" NOT classified expired');
+
+// The reported failure mode is a page with a body but NO apply control (see
+// the "× 3" rows in the issue). Verify the fix also holds in that scenario:
+// body over MIN_CONTENT_CHARS, applyControls: [], the closure banner alone
+// must decide expired -- not fall through to insufficient_content or
+// no_apply_control.
+const padding = 'Job description follows. '.repeat(20);
+for (const { text, label } of [
+  { text: `This role is closed. ${padding}`, label: '"This role is closed" (no apply control, padded body)' },
+  { text: `JOB EXPIRED. ${padding}`, label: 'bare "JOB EXPIRED" (no apply control, padded body)' },
+]) {
+  const verdict = classifyLiveness({
+    status: 200,
+    finalUrl: 'https://careers.example.com/job/123',
+    bodyText: text,
+    applyControls: [],
+  });
+  verdict.result === 'expired' && verdict.code === 'expired_body'
+    ? pass(`${label} -> expired/expired_body`)
+    : fail(`${label} classified ${verdict.result}/${verdict.code}, expected expired/expired_body`);
+}
+
+// False-positive guard: real JD copy mentions "role" and "position"
+// constantly. The pattern anchors on "this ... is closed", so descriptive
+// use in an active posting must stay active.
+classifyLiveness({
+  status: 200,
+  finalUrl: 'https://careers.example.com/job/123',
+  bodyText: 'This role is a hands-on senior IC position on the platform team, based in Toronto. You will own reliability for the inference stack. Apply now.',
+  applyControls: ['Apply now'],
+}).result === 'active'
+  ? pass('active posting with "role"/"position" in descriptive prose stays active')
+  : fail('false positive: descriptive "role"/"position" prose read as expired');
+
+// False-positive guard for the "job expired" pattern: \b boundaries mean it
+// only matches those two words adjacent. Split across a sentence, an active
+// posting must stay active.
+classifyLiveness({
+  status: 200,
+  finalUrl: 'https://careers.example.com/job/123',
+  bodyText: 'This job is open to remote candidates. Applications from candidates whose visas have expired will still be considered.',
+  applyControls: ['Apply now'],
+}).result === 'active'
+  ? pass('active posting with non-adjacent "job" / "expired" stays active')
+  : fail('false positive: non-adjacent "job" / "expired" read as expired');
