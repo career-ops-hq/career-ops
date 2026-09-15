@@ -1130,6 +1130,46 @@ export function systemTreeDiffers(systemPaths, upstreamRef = 'FETCH_HEAD', ctx =
 }
 
 /**
+ * Pathspecs for systemTreeDiffers()'s drift diff, with the CLI skill
+ * entrypoints excluded (#3149, second cause).
+ *
+ * Upstream ships those entrypoints (`.claude/skills/career-ops/SKILL.md` and
+ * its siblings) as symlinks (git mode 120000) pointing at
+ * `.agents/skills/career-ops/SKILL.md`. On a filesystem without symlink
+ * support (core.symlinks=false — mostly Windows), apply() materializes a
+ * REAL copy of that file's content in their place and commits it (logged as
+ * "Materialized N skill entrypoint(s)..."), because the install genuinely
+ * needs a real file there — see ensureSkillEntrypoints(). That materialized
+ * blob's mode and content can then never equal upstream's symlink blob
+ * again: the two are, by design, different git objects forever after. A
+ * plain content diff over SYSTEM_PATHS therefore reported drift on every
+ * such install, on every check, permanently — the false positive never
+ * clears, unlike ordinary drift which a re-`apply()` resolves.
+ *
+ * Excluding these paths from the comparison hides nothing: the materialized
+ * content is a byte-for-byte copy of `.agents/skills/career-ops/SKILL.md`,
+ * which SYSTEM_PATHS already covers via the `.agents/` entry, so a genuine
+ * upstream change to the skill document still surfaces there. A change to
+ * the entrypoint MECHANISM itself (the pointer paths in
+ * scaffolder/bin/skill-entrypoints.mjs) is caught too, via the `scaffolder/`
+ * SYSTEM_PATHS entry.
+ *
+ * Uses git's `:(exclude)` pathspec magic rather than dropping the parent
+ * directory entries (e.g. `.claude/skills/`) wholesale, so a real change to
+ * some OTHER file added later under one of those directories still reports
+ * as drift.
+ *
+ * @param {string[]} systemPaths - SYSTEM_PATHS (or a test's substitute).
+ * @param {{path: string}[]} skillEntrypoints - SKILL_ENTRYPOINTS-shaped list.
+ * @returns {string[]} systemPaths with one `:(exclude)<path>` pathspec
+ *   appended per entrypoint.
+ */
+export function driftPathspecExcludingSkillEntrypoints(systemPaths, skillEntrypoints) {
+  const excludes = (skillEntrypoints || []).map((entry) => `:(exclude)${entry.path}`);
+  return [...systemPaths, ...excludes];
+}
+
+/**
  * System-layer files this install changed locally that the update is about to
  * overwrite (#2337).
  *
@@ -1876,7 +1916,16 @@ async function check() {
   if (localCommit && remoteCommit && localCommit !== remoteCommit) {
     try {
       gitQuiet('fetch', '--quiet', CANONICAL_REPO, 'main');
-      systemTreeDrift = systemTreeDiffers(SYSTEM_PATHS, 'FETCH_HEAD');
+      // Lazy import: keep update-system.mjs self-loading (see apply()'s note
+      // on the same import). Exclude the materialized CLI skill entrypoints
+      // from the drift diff — see driftPathspecExcludingSkillEntrypoints()
+      // for why (#3149, second cause: permanent false drift on a
+      // core.symlinks=false install).
+      const { SKILL_ENTRYPOINTS } = await import('./scaffolder/bin/skill-entrypoints.mjs');
+      systemTreeDrift = systemTreeDiffers(
+        driftPathspecExcludingSkillEntrypoints(SYSTEM_PATHS, SKILL_ENTRYPOINTS),
+        'FETCH_HEAD',
+      );
     } catch {
       systemTreeDrift = true;
     }
