@@ -15,18 +15,19 @@ It is NOT:
 **Never submit. Never send email. Never click send.** Draft only. The candidate
 must review and send manually.
 
+For a scored role, run `node grounded-draft.mjs --db "$CAREER_OPS_OPPORTUNITY_DB" --opportunity <id>` first. Its context is the sole canonical opportunity and candidate-fact input; do not independently parse tracker or report state.
+
 ---
 
 ## Invocation
 
 Supported inputs:
 
-1. `/career-ops email {report-number-or-slug}`
-   - Load the matching `reports/{NNN}-*.md`.
-   - Use the report header, score, archetype, PDF status, and evaluation content.
-   - If `data/pdf-index.tsv` contains a PDF for that report, mention it as the CV
-     attachment candidate. If no PDF is indexed, say that the CV should be
-     generated first via `/career-ops pdf {slug}` or attached manually.
+1. `/career-ops email {opportunity-id}`
+   - Resolve the shortlisted SQLite opportunity with `grounded-draft.mjs`.
+   - Use its evidence, evaluation, and artifact state.
+   - If the canonical opportunity has a verified PDF artifact, mention it as the CV
+     attachment candidate. Otherwise say that a verified PDF is required first.
 
 2. `/career-ops email {pasted JD}`
    - Use the pasted JD directly.
@@ -35,20 +36,19 @@ Supported inputs:
      generic.
 
 3. `/career-ops email`
-   - If there is a most recent evaluated tracker row, offer to draft from that
-     row.
-   - If no usable context exists, ask for a report number, slug, or JD.
+   - Offer the most recent shortlisted opportunity.
+   - If no usable context exists, ask for an opportunity ID or JD.
 
-4. `/career-ops email stuck {report-number-or-slug}`
-   - Load the matching `reports/{NNN}-*.md` for company and role context.
+4. `/career-ops email stuck {opportunity-id}`
+   - Load the grounded context for company and role context.
    - Draft a process-stuck recovery email (see the dedicated section below).
    - Also trigger this variant conversationally when the user describes a
      broken application step, e.g. "the ATS scheduling page is broken", "I
      can't submit the form", "the assessment link is dead", "the login loop
      won't let me back in". Confirm the variant before drafting if ambiguous.
 
-5. `/career-ops email noshow {report-number-or-slug}`
-   - Load the matching `reports/{NNN}-*.md` for company and role context.
+5. `/career-ops email noshow {opportunity-id}`
+   - Load the grounded context for company and role context.
    - Draft a confirmed-time no-show follow-up (see the dedicated section
      below).
    - Also trigger this variant conversationally when the user describes a
@@ -70,8 +70,7 @@ Read:
 - `modes/_profile.md` if it exists
 - `modes/_custom.md` if it exists
 - `voice-dna.md` if it exists, for writing style only
-- The selected report if invoked by report number or slug
-- `data/pdf-index.tsv` if present, to find generated PDF attachments
+- The selected grounded context for a scored opportunity
 
 Use `modes/_custom.md` only for procedural output preferences such as whether to
 include a contact block, whether to show an attachment checklist, or how concise
@@ -144,7 +143,7 @@ and follow the dedicated sections below instead of the Step 5 structures.
 
 ## Step 3 — Extract Fit Points
 
-From the report/JD and source-of-truth files, select 2-3 fit points:
+From the grounded context or pasted JD and source-of-truth files, select 2-3 fit points:
 
 - One role-to-profile match: stack, domain, workflow, product type, or delivery
   style.
@@ -155,7 +154,7 @@ From the report/JD and source-of-truth files, select 2-3 fit points:
 Use only facts from source-of-truth files. Reformulate keywords from the JD;
 never fabricate.
 
-If a report has a score:
+For a scored opportunity:
 - `>= 4.5`: confident, priority application.
 - `4.0-4.4`: good match, worth applying.
 - `< 4.0`: restrained; do not oversell. If below 4.0, warn the user before
@@ -360,8 +359,8 @@ Required, always ask for whatever is missing (do not invent any of these):
    do not scrape or guess it from a report.
 3. **Remaining same-day availability** the user wants to offer (a window,
    e.g. "before 4pm today" or "any time after 2:30").
-4. Company and role, for the subject line (from the linked report if one was
-   given, otherwise ask).
+4. Company and role, for the subject line (from the grounded opportunity if one
+   was given, otherwise ask).
 
 ### Draft structure
 
@@ -420,9 +419,7 @@ Best,
 
 ## Language
 
-- Match the JD/report language.
-- If the JD is Chinese, use Simplified Chinese.
-- If the company/recruiter language is unknown, default to the user's language.
+- Use `language.output` from the grounded context for every user-facing draft.
 - Keep the subject line in the same language as the body unless the user asks
   otherwise.
 
@@ -499,7 +496,7 @@ additions.
 Return in this order:
 
 1. Context line:
-   - `Source: report {NNN}` or `Source: pasted JD`
+   - `Source: opportunity {id}` or `Source: pasted JD`
    - Variant
    - Language
 2. Attachment checklist, unless disabled

@@ -62,8 +62,9 @@ const USAGE = `Usage:
   node contacts.mjs --self-test         # run the in-memory test suite
   node contacts.mjs --help              # print this usage block and exit`;
 
-const args = process.argv.slice(2);
-validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: ['--vcf'] });
+const isDirectInvocation = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
+const args = isDirectInvocation ? process.argv.slice(2) : [];
+if (isDirectInvocation) validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: ['--vcf'] });
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 const callerIdMode = args.includes('--caller-id');
@@ -479,6 +480,6 @@ function main() {
   }
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (isDirectInvocation) {
   main();
 }

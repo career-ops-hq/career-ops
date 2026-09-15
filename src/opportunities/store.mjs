@@ -59,6 +59,10 @@ export async function openOpportunityStore(path) {
     CREATE TABLE IF NOT EXISTS repost_inputs (
       opportunity_id INTEGER PRIMARY KEY REFERENCES opportunities(id), fingerprint TEXT NOT NULL, first_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS outreach_contacts (
+      opportunity_id INTEGER NOT NULL REFERENCES opportunities(id), contact_key TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY(opportunity_id, contact_key)
+    );
     CREATE TABLE IF NOT EXISTS opportunity_events (
       id INTEGER PRIMARY KEY, opportunity_id INTEGER NOT NULL REFERENCES opportunities(id),
       type TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -175,8 +179,11 @@ export async function openOpportunityStore(path) {
       db.prepare("UPDATE opportunities SET state = 'evaluated' WHERE id = ?").run(id);
       event(id, 'evaluation_recorded', { reportHash });
     },
+    evaluation(id) { return db.prepare('SELECT lower_score AS lower, upper_score AS upper, coverage, report_hash AS reportHash FROM evaluations WHERE opportunity_id = ?').get(id) || null; },
+    artifacts(id) { return db.prepare('SELECT kind, path, sha256 FROM artifacts WHERE opportunity_id = ? ORDER BY id').all(id); },
     recordArtifact(id, { kind, path, sha256 }) {
       requireState(id, 'evaluated');
+      if (kind === 'verified-application-pdf') throw new Error('Use recordVerifiedApplicationPdf for verified PDFs');
       db.prepare('INSERT INTO artifacts (opportunity_id, kind, path, sha256) VALUES (?, ?, ?, ?) ON CONFLICT(opportunity_id, kind, path) DO UPDATE SET sha256 = excluded.sha256').run(id, kind, path, sha256);
       event(id, 'artifact_recorded', { kind, path });
     },
@@ -206,6 +213,13 @@ export async function openOpportunityStore(path) {
       event(id, 'application_submitted');
       return this.opportunity(id);
     },
+    linkOutreachContact(id, contactKey) {
+      if (!this.shortlist().some(opportunity => opportunity.id === id)) throw new Error(`Opportunity ${id} must be a shortlist opportunity`);
+      if (!String(contactKey).trim()) throw new Error('contactKey is required');
+      const result = db.prepare('INSERT INTO outreach_contacts (opportunity_id, contact_key) VALUES (?, ?) ON CONFLICT DO NOTHING').run(id, contactKey);
+      if (result.changes) event(id, 'outreach_contact_linked', { contactKey });
+    },
+    outreachContacts(id) { return db.prepare('SELECT contact_key AS contactKey FROM outreach_contacts WHERE opportunity_id = ? ORDER BY contact_key').all(id); },
     saveCheckpoint(id, phase, inputHash, outputHash) {
       if (!['evaluating', 'eligible', 'evaluated', 'ineligible'].includes(state(id))) throw new Error(`Opportunity ${id} cannot save a checkpoint`);
       db.prepare("INSERT INTO checkpoints (opportunity_id, phase, input_hash, output_hash) VALUES (?, ?, ?, ?) ON CONFLICT(opportunity_id, phase) DO UPDATE SET input_hash = excluded.input_hash, output_hash = excluded.output_hash").run(id, phase, inputHash, outputHash);
