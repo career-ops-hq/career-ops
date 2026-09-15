@@ -33,6 +33,40 @@ try {
     fail(`greenhouse.detect(eu) returned ${JSON.stringify(hitEu)}`);
   }
 
+  // detect() — legacy boards[.eu].greenhouse.io host. It still 301s to
+  // job-boards[.eu] with the same slug, so an entry written in that form must
+  // resolve instead of being silently skipped as "no provider matched".
+  const legacyCases = [
+    ['https://boards.greenhouse.io/ritual', 'ritual'],
+    ['https://boards.greenhouse.io/openzeppelin/', 'openzeppelin'],
+    ['https://boards.greenhouse.io/fetchai/jobs/4012345', 'fetchai'],
+    ['https://boards.eu.greenhouse.io/euco?gh_src=x', 'euco'],
+    ['https://boards.greenhouse.io/embedded', 'embedded'],
+  ];
+  const legacyMisses = legacyCases.filter(([careers_url, slug]) =>
+    greenhouse.detect({ name: 'Legacy', careers_url })?.url !== `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`);
+  if (legacyMisses.length === 0) {
+    pass('greenhouse.detect() resolves legacy boards[.eu].greenhouse.io/<slug> careers_urls → boards-api jobs endpoint');
+  } else {
+    fail(`greenhouse.detect() missed legacy careers_urls: ${JSON.stringify(legacyMisses)}`);
+  }
+
+  // detect() — the legacy pattern must not claim a non-slug path: the iframe
+  // embed URL, or a boards-api URL given as careers_url (api: is where that goes).
+  const notSlugs = [
+    'https://boards.greenhouse.io/embed/job_app?token=4012345',
+    'https://boards.greenhouse.io/embed/job_board?for=acme',
+    'https://boards-api.greenhouse.io/v1/boards/acme/jobs',
+  ];
+  const wrongClaims = notSlugs
+    .map((careers_url) => [careers_url, greenhouse.detect({ name: 'X', careers_url })])
+    .filter(([, hit]) => hit !== null);
+  if (wrongClaims.length === 0) {
+    pass('greenhouse.detect() does not read "embed" or a boards-api careers_url as a board slug');
+  } else {
+    fail(`greenhouse.detect() claimed non-slug careers_urls: ${JSON.stringify(wrongClaims)}`);
+  }
+
   // detect() — api: takes precedence over careers_url and is used verbatim
   // when its host is on the allowlist.
   const hitApi = greenhouse.detect({

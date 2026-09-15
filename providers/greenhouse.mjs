@@ -38,7 +38,11 @@ function resolveApiUrl(entry) {
     return entry.api;
   }
   const url = entry.careers_url || '';
-  const match = url.match(/job-boards(?:\.eu)?\.greenhouse\.io\/([^/?#]+)/);
+  const match = url.match(/job-boards(?:\.eu)?\.greenhouse\.io\/([^/?#]+)/)
+    // Legacy board host, which still 301s to job-boards[.eu] with the same
+    // slug. The lookbehind stops it matching inside job-boards.greenhouse.io,
+    // and `embed` is the iframe path (embed/job_app?token=...), never a slug.
+    || url.match(/(?<![\w-])boards(?:\.eu)?\.greenhouse\.io\/(?!embed(?:[/?#]|$))([^/?#]+)/);
   if (match) return `https://boards-api.greenhouse.io/v1/boards/${match[1]}/jobs`;
   return null;
 }
