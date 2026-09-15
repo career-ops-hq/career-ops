@@ -124,9 +124,55 @@ function buildCredentialsBlock(candidate) {
 }
 
 /** Build the escaped company, city, and date line for the letter. */
-function buildDateline(letter) {
-  const parts = [letter.company, letter.city, letter.date].filter(Boolean).map(escapeHtml);
-  return parts.join(" &nbsp;&nbsp; ");
+function buildDateline(letter, hasRecipientBlock = false) {
+  // The pack contract gives {{DATELINE}} the date and leaves the company and
+  // city to the address block directly beneath it, so joining all three prints
+  // the company twice, three lines apart.
+  //
+  // Gated on the block actually RENDERING, not on `letter.recipient` merely
+  // being set. An empty or whitespace-only recipient produces no address block,
+  // and dropping company and city for it would lose them with nothing taking
+  // their place. The shipped base template has no address block at all, so it
+  // keeps the full join exactly as before.
+  const parts = hasRecipientBlock
+    ? [letter.date]
+    : [letter.company, letter.city, letter.date];
+  return parts.filter(Boolean).map(escapeHtml).join(" &nbsp;&nbsp; ");
+}
+
+/**
+ * Build the optional recipient address block for a business letter.
+ *
+ * The pack authoring contract places {{RECIPIENT_BLOCK}} bare and expects the
+ * filler to emit its own wrapper, so this returns a complete
+ * `<div class="recipient">` or an empty string, never a bare fragment. Each
+ * line is its own `<div>` rather than a `<br>` join, which is what the packs'
+ * own CSS targets.
+ *
+ * A partial recipient is normal and renders as far as it goes: a company with
+ * no named individual, or a name with no street address, are both ordinary
+ * states for a cover letter. Only a recipient with nothing usable in it (blank or whitespace-only fields included), or no
+ * recipient at all, yields the empty string, so a letter without an addressee
+ * still renders instead of failing.
+ *
+ * Accepts `address_lines` (array, the contract's shape) or `address` (string).
+ */
+function buildRecipientBlock(letter) {
+  const r = letter.recipient;
+  if (!r || typeof r !== "object") return "";
+  const addressLines = Array.isArray(r.address_lines)
+    ? r.address_lines
+    : r.address
+      ? [r.address]
+      : [];
+  // Trim before filtering: `filter(Boolean)` alone keeps "   ", which renders as
+  // a blank line inside the wrapper rather than as the absent field it is.
+  const lines = [r.name, r.title, r.company, ...addressLines]
+    .map((v) => (typeof v === "string" ? v.trim() : v))
+    .filter(Boolean)
+    .map(escapeHtml);
+  if (!lines.length) return "";
+  return `<div class="recipient">\n${lines.map((l) => `    <div>${l}</div>`).join("\n")}\n  </div>`;
 }
 
 /** Build the optional achievements list for the letter body. */
@@ -220,12 +266,14 @@ export function buildHtml(payload, templatePath) {
   // valediction. The <br> is emitted around escaped values, never inside one.
   const signatureBlock = buildSignatureBlock(letter.signature, candidate.name);
 
+  const recipientBlock = buildRecipientBlock(letter);
   const replacements = {
     "{{NAME}}": escapeHtml(candidate.name),
     "{{CONTACT_LINE}}": buildContactLine(candidate),
     "{{CREDENTIALS_BLOCK}}": buildCredentialsBlock(candidate),
     "{{ROLE_TITLE}}": escapeHtml(letter.role_title),
-    "{{DATELINE}}": buildDateline(letter),
+    "{{DATELINE}}": buildDateline(letter, Boolean(recipientBlock)),
+    "{{RECIPIENT_BLOCK}}": recipientBlock,
     "{{GREETING_BLOCK}}": greetingBlock,
     "{{OPENING}}": escapeHtml(letter.opening),
     "{{PROFILE_INTRO}}": escapeHtml(letter.profile_intro),
