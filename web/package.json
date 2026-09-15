@@ -11,7 +11,7 @@
     "test": "node --test \"tests/**/*.test.mjs\""
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.18.0"
   },
   "dependencies": {
     "@paper-design/shaders-react": "^0.0.80",
