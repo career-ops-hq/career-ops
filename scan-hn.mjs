@@ -17,13 +17,14 @@ import { readFileSync, existsSync } from 'fs';
 import { pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { appendToPipeline, appendToScanHistory, loadSeenUrls } from './scan.mjs';
-
-// Import the deterministic provider
-import hnProvider from './providers/hackernews.mjs';
+import { appendToPipeline, appendToScanHistory, companyRoleDedupKey, loadDatabaseDedupSnapshot, loadSeenUrls } from './scan.mjs';
+import { ingestScanOffers } from './src/discovery/ingest.mjs';
+import { discoveryProvider } from './src/discovery/registry.mjs';
 
 // ── Configuration ────────────────────────────────────────────────────
 const PORTALS_PATH = 'portals.yml';
+const OPPORTUNITY_DB = process.env.CAREER_OPS_OPPORTUNITY_DB || null;
+const USAGE = `Usage: node scan.mjs hn [--dry-run]\n\nFetch Hacker News hiring posts and write matching opportunities to the configured store.`;
 
 function loadKeywords() {
   const defaultKeywords = ["Software Engineer"];
@@ -64,15 +65,22 @@ export async function extractWithAI(rawText, model) {
 
 // ── Main Logic ───────────────────────────────────────────────────────
 
-async function main() {
+async function main(argv = process.argv.slice(2)) {
+  if (argv.includes('--help') || argv.includes('-h')) {
+    console.log(USAGE);
+    return;
+  }
+  const dryRun = argv.includes('--dry-run');
   const apiKey = process.env.GEMINI_API_KEY;
   const myKeywords = loadKeywords();
-  const { seen } = loadSeenUrls();
+  const dedupSnapshot = OPPORTUNITY_DB ? await loadDatabaseDedupSnapshot(OPPORTUNITY_DB) : { ...loadSeenUrls(), seenCompanyRoles: new Set() };
+  const seen = dedupSnapshot.seen;
+  const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
 
   console.log(`🔍 Fetching latest HN Hiring data...`);
   
   const ctx = { fetchJson: async (url) => (await fetch(url)).json() };
-  const rawJobs = await hnProvider.fetch({ name: 'HN' }, ctx);
+  const rawJobs = await discoveryProvider('hackernews').fetch({ name: 'HN' }, ctx);
 
   const newOffers = [];
 
@@ -87,7 +95,8 @@ async function main() {
     });
 
     for (const job of rawJobs) {
-      if (seen.has(job.url)) continue;
+      const roleKey = companyRoleDedupKey(job.company, job.title);
+      if (seen.has(job.url) || seenCompanyRoles.has(roleKey)) continue;
       
       const extracted = await extractWithAI(job.title + " " + (job.text || ""), model);
       if (extracted && extracted.company && extracted.title) {
@@ -95,12 +104,14 @@ async function main() {
         console.log(`  ✅ AI Match: ${extracted.company}`);
       }
       seen.add(job.url);
+      seenCompanyRoles.add(roleKey);
     }
   } else {
     // STEP 3: Fallback Mode (Deterministic/No-Key)
     console.log(`⚠️ No AI key. Using keyword filtering mode...`);
     for (const job of rawJobs) {
-      if (seen.has(job.url)) continue;
+      const roleKey = companyRoleDedupKey(job.company, job.title);
+      if (seen.has(job.url) || seenCompanyRoles.has(roleKey)) continue;
 
       const matches = myKeywords.some(k => job.title.toLowerCase().includes(k.toLowerCase()));
       if (matches) {
@@ -108,13 +119,26 @@ async function main() {
         console.log(`  ✅ Match: ${job.company}`);
       }
       seen.add(job.url);
+      seenCompanyRoles.add(roleKey);
     }
   }
 
-  if (newOffers.length > 0) {
-    await appendToPipeline(newOffers);
-    await appendToScanHistory(newOffers, new Date().toISOString().slice(0, 10), 'added');
+  if (newOffers.length > 0 && !dryRun) {
+    if (OPPORTUNITY_DB) {
+      await ingestScanOffers(OPPORTUNITY_DB, newOffers);
+    }
+    else {
+      await appendToPipeline(newOffers);
+      await appendToScanHistory(newOffers, new Date().toISOString().slice(0, 10), 'added');
+    }
     console.log(`\n🎉 Success: ${newOffers.length} offers added.`);
+  } else if (newOffers.length > 0) {
+    console.log(`\nDry run: ${newOffers.length} matching offers.`);
+  }
+  if (OPPORTUNITY_DB && !dryRun) {
+    const { openOpportunityStore } = await import('./src/opportunities/store.mjs');
+    const store = await openOpportunityStore(OPPORTUNITY_DB);
+    try { store.recordScanRun('hn', { found: newOffers.length }, [{ source: 'hackernews', status: 'completed', timestamp: new Date().toISOString() }]); } finally { store.close(); }
   }
 }
 

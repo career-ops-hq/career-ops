@@ -21,17 +21,17 @@ data/pipeline.md
 
 ## Usage
 
-### Via scan-ats-full.mjs (recommended)
+### Via the unified scan command (recommended)
 
 ```bash
 # Seed from Y Combinator portfolio, last 7 days
-node scan-ats-full.mjs --seeds yc --since 7
+node scan.mjs global --seeds yc --since 7
 
 # Seed from both YC and a16z, dry-run preview
-node scan-ats-full.mjs --seeds yc,a16z --dry-run
+node scan.mjs global --seeds yc,a16z --dry-run
 
 # Combine seeds + regular ATS sources
-node scan-ats-full.mjs --seeds yc --ats greenhouse,lever --since 5
+node scan.mjs global --seeds yc --ats greenhouse,lever --since 5
 
 # npm shortcuts
 npm run scan:seeds   # yc + a16z

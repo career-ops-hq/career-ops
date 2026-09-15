@@ -22,17 +22,11 @@
  * useful for fresh postings, and stale results would flood the pipeline.
  *
  * Usage:
- *   node scan-ats-full.mjs                      # scan all ATS directories, last 3 days
- *   node scan-ats-full.mjs --since 7            # postings from the last 7 days
- *   node scan-ats-full.mjs --ats greenhouse,workday  # subset of sources
- *   node scan-ats-full.mjs --limit 200          # max companies per ATS (default: all)
- *   node scan-ats-full.mjs --dry-run            # preview without writing files
- *   node scan-ats-full.mjs --liveness           # Playwright-verify matches before writing
- *   node scan-ats-full.mjs --include-blacklisted # audit: let data/blacklist.md matches through, annotated
- *   node scan-ats-full.mjs --verbose            # log per-board fetch failures
- *   node scan-ats-full.mjs --md-out <dir>       # also write a dated markdown digest to <dir>
- *   node scan-ats-full.mjs --resume             # continue an interrupted sweep from its checkpoint
- *   node scan-ats-full.mjs --help               # print this usage block and exit
+ *   node scan.mjs global                      # scan all ATS directories, last 3 days
+ *   node scan.mjs global --since 7            # postings from the last 7 days
+ *   node scan.mjs global --ats greenhouse,workday  # subset of sources
+ *   node scan.mjs global --limit 200          # max companies per ATS (default: all)
+ *   node scan.mjs global --dry-run            # preview without writing files
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'fs';
@@ -44,12 +38,9 @@ import { renameSyncWithRetry } from './tracker-utils.mjs';
 
 import { makeHttpCtx, fetchJson } from './providers/_http.mjs';
 import { isResolverFailure, dnsPacingStats } from './providers/_dns-cache.mjs';
-import greenhouse from './providers/greenhouse.mjs';
-import lever from './providers/lever.mjs';
-import ashby from './providers/ashby.mjs';
-import workday from './providers/workday.mjs';
-import icims from './providers/icims.mjs';
-import { buildTitleFilter, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays } from './scan.mjs';
+import { discoveryProvider } from './src/discovery/registry.mjs';
+import { buildTitleFilter, buildLocationFilter, buildContentFilter, companyRoleDedupKey, matchedTitleKeywords, loadDatabaseDedupSnapshot, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays } from './scan.mjs';
+import { ingestScanOffers } from './src/discovery/ingest.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
@@ -93,6 +84,7 @@ const RESOLVER_FAILURE_LIMIT = 50;
 // dead run (with its ORIGINAL date window) instead of restarting from zero.
 const CHECKPOINT_PATH = 'data/cache/ats-full-checkpoint.json';
 const CHECKPOINT_EVERY = 500;
+const OPPORTUNITY_DB = process.env.CAREER_OPS_OPPORTUNITY_DB || null;
 
 export function loadCheckpoint(file = CHECKPOINT_PATH) {
   if (!existsSync(file)) return null;
@@ -176,7 +168,7 @@ export function entryOnHost(name, careersUrl, isCanonicalHost) {
 // dataset entry into a synthetic PortalEntry the provider can detect/fetch.
 export const SOURCES = {
   greenhouse: {
-    provider: greenhouse,
+    provider: discoveryProvider('greenhouse'),
     // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
     concurrency: SINGLE_HOST_CONCURRENCY,
     dataset: `${DATASET_BASE}/greenhouse_companies.json`,
@@ -185,7 +177,7 @@ export const SOURCES = {
       : null,
   },
   lever: {
-    provider: lever,
+    provider: discoveryProvider('lever'),
     // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
     concurrency: SINGLE_HOST_CONCURRENCY,
     dataset: `${DATASET_BASE}/lever_companies.json`,
@@ -194,7 +186,7 @@ export const SOURCES = {
       : null,
   },
   ashby: {
-    provider: ashby,
+    provider: discoveryProvider('ashby'),
     // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
     concurrency: SINGLE_HOST_CONCURRENCY,
     dataset: `${DATASET_BASE}/ashby_companies.json`,
@@ -203,7 +195,7 @@ export const SOURCES = {
       : null,
   },
   workday: {
-    provider: workday,
+    provider: discoveryProvider('workday'),
     dataset: `${DATASET_BASE}/workday_companies.json`,
     // Dataset entries are "tenant|instance|site" triples.
     toEntry: (line) => {
@@ -217,7 +209,7 @@ export const SOURCES = {
     },
   },
   icims: {
-    provider: icims,
+    provider: discoveryProvider('icims'),
     dataset: `${DATASET_BASE}/icims_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://careers-${slug}.icims.com/jobs/search?ss=1&in_iframe=1`, h => h === `careers-${String(slug).toLowerCase()}.icims.com`)
@@ -238,17 +230,17 @@ const KNOWN_FLAGS = [
 const VALUE_FLAGS = ['--since', '--limit', '--ats', '--seeds', '--md-out'];
 
 const USAGE = `Usage:
-  node scan-ats-full.mjs                      # scan all ATS directories, last 3 days
-  node scan-ats-full.mjs --since 7            # postings from the last 7 days
-  node scan-ats-full.mjs --ats greenhouse,workday  # subset of sources
-  node scan-ats-full.mjs --limit 200          # max companies per ATS (default: all)
-  node scan-ats-full.mjs --dry-run            # preview without writing files
-  node scan-ats-full.mjs --liveness           # Playwright-verify matches before writing
-  node scan-ats-full.mjs --include-blacklisted # audit: let data/blacklist.md matches through, annotated
-  node scan-ats-full.mjs --verbose            # log per-board fetch failures
-  node scan-ats-full.mjs --md-out <dir>       # also write a dated markdown digest to <dir>
-  node scan-ats-full.mjs --resume             # continue an interrupted sweep from its checkpoint
-  node scan-ats-full.mjs --help               # print this usage block and exit`;
+  node scan.mjs global                      # scan all ATS directories, last 3 days
+  node scan.mjs global --since 7            # postings from the last 7 days
+  node scan.mjs global --ats greenhouse,workday  # subset of sources
+  node scan.mjs global --limit 200          # max companies per ATS (default: all)
+  node scan.mjs global --dry-run            # preview without writing files
+  node scan.mjs global --liveness           # Playwright-verify matches before writing
+  node scan.mjs global --include-blacklisted # audit: let data/blacklist.md matches through, annotated
+  node scan.mjs global --verbose            # log per-board fetch failures
+  node scan.mjs global --md-out <dir>       # also write a dated markdown digest to <dir>
+  node scan.mjs global --resume             # continue an interrupted sweep from its checkpoint
+  node scan.mjs global --help               # print this usage block and exit`;
 
 function parseArgs(argv) {
   const args = argv.slice(2);
@@ -458,7 +450,7 @@ export function sampleCompanies(list, limit, shuffle = false) {
 // ATS providers that can auto-detect from a careers_url, in probe order.
 // Workday is excluded: its URL format requires a tenant|instance|site triple
 // that can't be derived from a portfolio slug alone.
-const SEED_PROVIDERS = [greenhouse, lever, ashby];
+const SEED_PROVIDERS = ['greenhouse', 'lever', 'ashby'].map(discoveryProvider);
 
 /**
  * Scan a VC portfolio seed source and return matching job offers.
@@ -474,7 +466,7 @@ const SEED_PROVIDERS = [greenhouse, lever, ashby];
  * @param {string}   label       Human-readable source label for logs.
  * @returns {Promise<object[]>}  New job offers (same shape as ATS scan offers).
  */
-export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
+export async function runSeedScan(seedId, opts, ctx, seenUrls, seenCompanyRoles, label) {
   const source = SEED_SOURCES[seedId];
   if (!source) throw new Error(`runSeedScan: unknown seed "${seedId}"`);
 
@@ -532,8 +524,10 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
         titleFilterConfig: opts.titleFilterConfig,
       })) continue;
       const dedupUrl = normalizeUrlForDedup(job.url);
-      if (seenUrls.has(dedupUrl)) continue;
+      const dedupRole = companyRoleDedupKey(job.company, job.title);
+      if (seenUrls.has(dedupUrl) || seenCompanyRoles.has(dedupRole)) continue;
       seenUrls.add(dedupUrl);
+      seenCompanyRoles.add(dedupRole);
       offers.push({ ...job, source: sourceName, dateStatus: job.postedAt ? 'dated' : 'unknown' });
     }
   });
@@ -669,7 +663,9 @@ async function main() {
   const sourcesSummary = [atsSummary, seedsSummary].filter(Boolean).join(' | ');
   log(`Reverse ATS scan — ${sourcesSummary} | since ${opts.sinceDays}d${opts.limit < Infinity ? ` | limit ${opts.limit}/ats` : ''}${opts.shuffle ? ' | shuffled' : ''}${opts.includeUndated ? ' | +undated' : ''}${opts.liveness ? ' | liveness' : ''}${opts.dryRun ? ' | DRY RUN' : ''}`);
 
-  const { seen: seenUrls } = loadSeenUrls();
+  const dedupSnapshot = OPPORTUNITY_DB ? await loadDatabaseDedupSnapshot(OPPORTUNITY_DB) : { ...loadSeenUrls(), seenCompanyRoles: new Set() };
+  const seenUrls = dedupSnapshot.seen;
+  const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
   const blacklist = loadBlacklist();
   // sinceMs and includeUndated let providers (currently only workday.mjs)
   // stop paginating a tenant early instead of always walking to max_pages:
@@ -766,8 +762,10 @@ async function main() {
       if (!locationFilter(job.location, job.url, job.title)) continue;
       if (!contentFilter(job.description, matchedTitleKeywords(job.title, fullTitleFilterConfig))) { droppedContent++; continue; }
       const dedupUrl = normalizeUrlForDedup(job.url);
-      if (seenUrls.has(dedupUrl)) continue;
+      const dedupRole = companyRoleDedupKey(job.company, job.title);
+      if (seenUrls.has(dedupUrl) || seenCompanyRoles.has(dedupRole)) continue;
       seenUrls.add(dedupUrl); // intra-scan dedup
+      seenCompanyRoles.add(dedupRole);
       newOffers.push({ ...job, source: `${sourceName}-full`, dateStatus: job.postedAt ? 'dated' : 'unknown' });
     }
   };
@@ -950,7 +948,7 @@ async function main() {
   for (const seedId of opts.seeds) {
     const seedSource = SEED_SOURCES[seedId];
     log(`\n🌱 ${seedSource.label} (${seedId}-seed) — fetching portfolio...`);
-    const result = await runSeedScan(seedId, opts, ctx, seenUrls, seedSource.label);
+    const result = await runSeedScan(seedId, opts, ctx, seenUrls, seenCompanyRoles, seedSource.label);
     if (result && result.offers) {
       totalCompaniesScanned += result.total || 0;
       totalErrors += result.errors || 0;
@@ -1008,16 +1006,18 @@ async function main() {
   // Persist (unless dry-run, or nothing to save).
   let saved = false;
   if (offers.length && !opts.dryRun) {
-    // appendToPipeline assumes the file exists (onboarding creates it) — cover fresh setups.
-    if (!existsSync(PIPELINE_PATH)) {
-      mkdirSync(path.dirname(PIPELINE_PATH), { recursive: true });
-      writeFileSync(PIPELINE_PATH, '# Pipeline\n\n## Pendientes\n', 'utf-8');
+    if (OPPORTUNITY_DB) await ingestScanOffers(OPPORTUNITY_DB, offers);
+    else {
+      // appendToPipeline assumes the file exists (onboarding creates it) — cover fresh setups.
+      if (!existsSync(PIPELINE_PATH)) {
+        mkdirSync(path.dirname(PIPELINE_PATH), { recursive: true });
+        writeFileSync(PIPELINE_PATH, '# Pipeline\n\n## Pendientes\n', 'utf-8');
+      }
+      await appendToPipeline(offers);
+      await appendToScanHistory(offers, date);
     }
-    await appendToPipeline(offers);
-    await appendToScanHistory(offers, date);
     saved = true;
-    log(`\nResults saved to ${PIPELINE_PATH} and data/scan-history.tsv`);
-
+    log(`\nResults saved to ${OPPORTUNITY_DB || `${PIPELINE_PATH} and data/scan-history.tsv`}`);
     if (opts.mdOut) {
       try {
         mkdirSync(opts.mdOut, { recursive: true });
@@ -1037,6 +1037,18 @@ async function main() {
         console.error(`⚠️  Could not write markdown digest: ${err.message}`);
       }
     }
+  }
+
+  if (OPPORTUNITY_DB && !opts.dryRun) {
+    const { openOpportunityStore } = await import('./src/opportunities/store.mjs');
+    const store = await openOpportunityStore(OPPORTUNITY_DB);
+    try {
+      store.recordScanRun('global', { found: offers.length, errors: totalErrors, sources: opts.ats }, opts.ats.map(source => ({
+        source,
+        status: datasetStatus[source] === 'ok' ? 'completed' : (datasetStatus[source] || 'unknown'),
+        timestamp: new Date().toISOString(),
+      })));
+    } finally { store.close(); }
   }
 
   // Sweep completed — the checkpoint's job is done. A run the breaker stopped

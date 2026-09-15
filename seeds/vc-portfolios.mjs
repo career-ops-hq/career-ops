@@ -9,15 +9,15 @@
  * Design constraints:
  *  - Zero auth — public sources only, no login, no API keys.
  *  - Zero LLM tokens — pure HTTP + JSON / HTML.
- *  - Same SLUG_RE guard used by scan-ats-full.mjs for every slug that reaches
+ *  - Same SLUG_RE guard used by the global scanner for every slug that reaches
  *    URL interpolation — a tampered or malformed payload can never inject
  *    unexpected characters into a URL.
  *  - `parseSeedEntries()` is a pure, synchronous function (no network) so it
  *    can be unit-tested with inline fixtures without any mocking.
  *
- * Typical usage (via scan-ats-full.mjs --seeds flag):
- *   node scan-ats-full.mjs --seeds yc
- *   node scan-ats-full.mjs --seeds yc,a16z --since 7 --dry-run
+ * Typical usage (via scan.mjs global --seeds flag):
+ *   node scan.mjs global --seeds yc
+ *   node scan.mjs global --seeds yc,a16z --since 7 --dry-run
  *
  * Direct usage:
  *   import { fetchYCCompanies, fetchA16zCompanies } from './seeds/vc-portfolios.mjs';

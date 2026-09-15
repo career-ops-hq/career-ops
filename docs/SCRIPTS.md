@@ -27,8 +27,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run liveness` | `check-liveness.mjs` | 只读核验岗位存活；默认覆盖 Pending 与 Scored |
 | `npm run extract` | `browser-extract.mjs` | Headless read-only page extractor (opt-in `scan.extractor: cli`) — compact JSON for scan/JD |
 | `npm run scan` | `scan.mjs` | Zero-token portal scanner |
-| `npm run scan:full` | `scan-ats-full.mjs` | Reverse ATS discovery scanner |
-| `npm run company:funded` | `company-funded.mjs` | Review-first discovery of recently funded companies |
+| `npm run scan:full` | `scan.mjs global` | Reverse ATS discovery scanner |
 | `npm run validate:portals` | `validate-portals.mjs` | Validate portals.yml shape before scanning |
 | `npm run tracker` | `tracker.mjs` | SQLite derived index over applications.md — sync/query/history/export |
 | `npm run find` | `find.mjs` | Resolve a report#/tracker#/company query to its full pipeline identity |
@@ -598,7 +597,7 @@ Defaults are unchanged, so a single-lane setup needs none of this. Note that the
 
 ---
 
-## scan:full
+## scan global
 
 Reverse ATS discovery scanner. Where `scan.mjs` scans the companies you track in `portals.yml`, this inverts the direction: it walks public directories of companies per ATS (Greenhouse, Lever, Ashby, Workday) and surfaces fresh postings matching your `portals.yml` `title_filter` / `location_filter` — no manual company curation. Company directories come from the public [job-board-aggregator](https://github.com/Feashliaa/job-board-aggregator) dataset, cached in `data/cache/` for 24 hours.
 
@@ -623,14 +622,14 @@ How it works:
 Same detection logic applies to `scan.mjs` (the standard portal scanner) — the sub-section above is shared between both commands.
 
 ```bash
-npm run scan:full                              # all ATS directories, last 3 days
-node scan-ats-full.mjs --since 7               # postings from the last 7 days
-node scan-ats-full.mjs --ats greenhouse,workday # subset of sources
-node scan-ats-full.mjs --limit 200             # max companies per ATS
-node scan-ats-full.mjs --dry-run               # preview without writing
-node scan-ats-full.mjs --liveness              # Playwright-verify matches first
-node scan-ats-full.mjs --include-blacklisted   # audit blacklist matches instead of skipping
-node scan-ats-full.mjs --md-out notes/scans    # also write a dated markdown digest
+node scan.mjs global                            # all ATS directories, last 3 days
+node scan.mjs global --since 7                  # postings from the last 7 days
+node scan.mjs global --ats greenhouse,workday   # subset of sources
+node scan.mjs global --limit 200                # max companies per ATS
+node scan.mjs global --dry-run                  # preview without writing
+node scan.mjs global --liveness                 # Playwright-verify matches first
+node scan.mjs global --include-blacklisted      # audit blacklist matches instead of skipping
+node scan.mjs global --md-out notes/scans       # also write a dated markdown digest
 npm run scan:seeds                             # probe VC portfolio seed companies (--seeds yc,a16z)
 npm run scan:yc                                # Y Combinator portfolio only (--seeds yc)
 ```
@@ -651,36 +650,14 @@ How many upstream queries that becomes depends on the OS resolver: `dns.lookup()
 Cache hits and lookups that coalesce onto an in-flight one are free, so only uncached, non-coalesced lookup keys count against the ceiling — a hostname not in the cache, or a cached one requested with different resolver options (the cache key is hostname plus `family`/`all`/`hints`/`verbatim`).
 
 ```bash
-CAREER_OPS_DNS_LOOKUPS_PER_MIN=800 npm run scan:full   # raise the ceiling
-CAREER_OPS_DNS_LOOKUPS_PER_MIN=0 npm run scan:full     # no pacing (pre-#2229 behaviour)
-CAREER_OPS_NO_DNS_CACHE=1 npm run scan:full            # no DNS cache AND no pacing
+CAREER_OPS_DNS_LOOKUPS_PER_MIN=800 node scan.mjs global # raise the ceiling
+CAREER_OPS_DNS_LOOKUPS_PER_MIN=0 node scan.mjs global   # no pacing (pre-#2229 behaviour)
+CAREER_OPS_NO_DNS_CACHE=1 node scan.mjs global          # no DNS cache AND no pacing
 ```
 
 The cost is real: a full Workday + iCIMS sweep becomes DNS-bound at roughly 35 minutes. Raise the ceiling if your resolver has the budget — but if you see `fetch failed` in bulk from one ATS section, suspect the resolver before the boards.
 
 **Exit codes:** `0` scan completed, `1` configuration error (no portals.yml, unknown `--ats` source) or fatal scan error.
-
----
-
-## company:funded
-
-Review-first discovery for companies that recently raised funding. It reads structured public RSS/API sources and prints a candidate report for manual review. It never edits `portals.yml` and does not probe company websites.
-
-```bash
-npm run company:funded -- --dry-run --limit 20
-npm run company:funded -- --dry-run --limit 20 --months 3 --json
-npm run company:funded -- --dry-run --sort score --limit 20
-npm run company:funded -- --sources techcrunch,prnewswire,guardian,hn
-npm run company:funded -- --self-test
-```
-
-Defaults: last 3 months, `--sort date`, sources `techcrunch,prnewswire,guardian,hn`. `--sort score` ranks by source and funding-detail confidence instead.
-
-Runs without `--dry-run` write JSON under `output/` and a Markdown report under `reports/`.
-
-Source diagnostics are included in JSON output and surfaced in human output when a source has errors, is blocked, returns no items, or when no candidates are found.
-
-**Exit codes:** `0` discovery completed, `1` invalid arguments or fatal runtime error.
 
 ---
 

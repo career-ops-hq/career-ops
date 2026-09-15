@@ -7,14 +7,18 @@ import { openOpportunityStore } from '../src/opportunities/store.mjs';
 import { ingestScanOffers } from '../src/discovery/ingest.mjs';
 import { loadDatabaseDedupSnapshot } from '../scan.mjs';
 import { companyRoleDedupKey } from '../scan.mjs';
+import { DatabaseSync } from 'node:sqlite';
 
 const directory = mkdtempSync(join(tmpdir(), 'career-ops-opportunity-'));
 try {
   const store = await openOpportunityStore(join(directory, 'career-ops.db'));
   await ingestScanOffers(join(directory, 'career-ops.db'), [{ url: 'https://jobs.example.com/scanned', company: 'Scanned', title: 'Engineer', source: 'ashby' }]);
   assert.equal(store.claimNext('scanner-check').url, 'https://jobs.example.com/scanned');
-  const first = store.ingest({ url: 'https://jobs.example.com/42', company: 'Example', role: 'AI Engineer', source: 'greenhouse', payload: { id: 42 } });
+  const first = store.ingest({ url: 'https://jobs.example.com/42', company: 'Example', role: 'AI Engineer', source: 'greenhouse', payload: { id: 42, description: 'Job evidence', fingerprint: 'fingerprint-42' } });
   assert.equal(store.ingest({ url: first.url, company: 'Changed', role: 'Changed', source: 'greenhouse', payload: {} }).id, first.id);
+  assert.equal(store.fingerprintHistory()[0].fingerprint, 'fingerprint-42');
+  store.recordScanRun('configured', { found: 1 }, [{ timestamp: '2026-09-15T00:00:00Z', company: 'Example', status: 'reachable' }]);
+  assert.equal(store.healthRecords()[0].status, 'reachable');
   assert.equal(store.claim(first.id, 'worker-a'), true);
   assert.equal(store.claim(first.id, 'worker-b'), false);
   assert.equal(store.resume('worker-a').id, first.id);
@@ -53,4 +57,20 @@ try {
   store.close();
 } finally {
   rmSync(directory, { recursive: true, force: true });
+}
+
+const legacyDirectory = mkdtempSync(join(tmpdir(), 'career-ops-opportunity-legacy-'));
+try {
+  const databasePath = join(legacyDirectory, 'career-ops.db');
+  const legacy = new DatabaseSync(databasePath);
+  legacy.exec("CREATE TABLE opportunities (id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE, company TEXT NOT NULL, role TEXT NOT NULL, source TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'discovered', claimed_by TEXT, attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);");
+  legacy.prepare("INSERT INTO opportunities (url, company, role, source) VALUES (?, ?, ?, ?)").run('https://jobs.example.com/old-1', 'Acme', 'Engineer', 'legacy');
+  legacy.prepare("INSERT INTO opportunities (url, company, role, source) VALUES (?, ?, ?, ?)").run('https://jobs.example.com/old-2', 'Acme', 'Engineer', 'legacy');
+  legacy.close();
+  const store = await openOpportunityStore(databasePath);
+  assert.equal(store.ingest({ url: 'https://jobs.example.com/old-2', company: 'Acme', role: 'Engineer', source: 'greenhouse', payload: {} }).url, 'https://jobs.example.com/old-2');
+  assert.equal(store.ingest({ url: 'https://jobs.example.com/new', company: 'Acme', role: 'Engineer', source: 'greenhouse', payload: {} }).url, 'https://jobs.example.com/old-1');
+  store.close();
+} finally {
+  rmSync(legacyDirectory, { recursive: true, force: true });
 }

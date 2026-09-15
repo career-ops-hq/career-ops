@@ -38,13 +38,13 @@
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
+import { spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'url';
 import path from 'path';
 import * as yaml from 'js-yaml';
 
 import { makeHttpCtx } from './providers/_http.mjs';
 import { buildTrustValidator } from './providers/_trust-validator.mjs';
-import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { mergeProviderPlugins } from './plugins/_engine.mjs';
 import { classifyFetchError } from './verify-portals.mjs';
 import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
@@ -63,6 +63,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { promoteKnownFragmentIdentity } from './url-key.mjs';
 import { openOpportunityStore } from './src/opportunities/store.mjs';
 import { ingestScanOffers } from './src/discovery/ingest.mjs';
+import { discoveryOperations, loadProviders, resolveProvider } from './src/discovery/registry.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -1897,7 +1898,7 @@ export async function loadDatabaseDedupSnapshot(databasePath, policy = {}, canon
     const seen = new Set(rows.filter(row => shouldDedupScanHistoryRow(row, policy)).map(row => normalizeUrlForDedup(row.url)));
     const seenCompanyRoles = new Set(rows.filter(row => row.company && row.role && shouldDedupScanHistoryRow(row, policy))
       .map(row => companyRoleDedupKey(row.company, row.role, canonicalize)));
-    return { seen, recheckEligible: rows.length - seen.size, seenCompanyRoles, fingerprintHistory: [] };
+    return { seen, recheckEligible: rows.length - seen.size, seenCompanyRoles, fingerprintHistory: store.fingerprintHistory() };
   } finally { store.close(); }
 }
 
@@ -1958,7 +1959,7 @@ export async function appendToPipeline(offers) {
 }
 
 // data/scan-history.tsv has exactly the same set of concurrent writers as
-// data/pipeline.md — scan.mjs, scan-ats-full.mjs, scan-interamt.mjs and
+// data/pipeline.md — scan.mjs, scan-ats-full.mjs and
 // plugins.mjs — so it takes the same lock appendToPipeline does, on its own
 // path. Unlocked, two writers race in two places: the create branch below is a
 // check-then-write, and its writeFileSync truncates, so a scanner that loses
@@ -2307,6 +2308,11 @@ const VALUE_FLAGS = ['--company', '--posted-after', '--posted-before', '--since'
 
 const USAGE = `Usage:
   node scan.mjs                              # scan all enabled companies
+  node scan.mjs configured [flags]           # explicit configured-company operation
+  node scan.mjs global [flags]               # reverse public-ATS discovery
+  node scan.mjs resolve [flags]              # resolve companies to ATS boards
+  node scan.mjs resolve-company [flags]      # explicit resolve operation alias
+  node scan.mjs hn [--dry-run]               # Hacker News hiring discovery
   node scan.mjs --dry-run                    # preview without writing files
   node scan.mjs --company Cohere             # scan a single company
   node scan.mjs --verify                     # Playwright-check each new URL; drop expired postings
@@ -2560,7 +2566,7 @@ async function main() {
   // run even if the sweep added postings before dying (the count isn't settled
   // mid-sweep). Excluded from trend averages so it can't skew them, but a
   // raw-TSV reader should treat that 0 as a sentinel, not a true count.
-  if (!dryRun) {
+  if (!dryRun && !OPPORTUNITY_DB) {
     registerRunFailureSnapshot(() => ({
       timestamp: new Date().toISOString(),
       companies: targets.filter(t => !t._isBoard).length,
@@ -2957,7 +2963,10 @@ async function main() {
     healthRecords.push({ timestamp: nowStr, company: t.name, status });
   }
 
-  const pastHealth = loadPortalHealth();
+  const pastHealth = OPPORTUNITY_DB ? await (async () => {
+    const store = await openOpportunityStore(OPPORTUNITY_DB);
+    try { return store.healthRecords(); } finally { store.close(); }
+  })() : loadPortalHealth();
   const currentStreaks = computeConsecutiveFailures([...pastHealth, ...healthRecords]);
 
   const persistentlyDead = [];
@@ -3022,7 +3031,15 @@ async function main() {
 
   // Persist this run's counters (#1604) — guarded exactly like the other
   // writes; a --dry-run must leave no trace.
-  if (!dryRun && !OPPORTUNITY_DB) {
+  if (!dryRun && OPPORTUNITY_DB) {
+    const store = await openOpportunityStore(OPPORTUNITY_DB);
+    try {
+      store.recordScanRun('configured', {
+        companies: summaryCompanies, boards: summaryBoards, found: totalFound, dupes: totalDupes,
+        newAdded: verifiedOffers.length, errors: errors.length,
+      }, healthRecords);
+    } finally { store.close(); }
+  } else if (!dryRun) {
     await appendPortalHealth(healthRecords);
     appendScanRunSummary({
       timestamp: new Date().toISOString(), status: 'completed',
@@ -3065,9 +3082,16 @@ async function main() {
 // Only run main() when invoked directly (`node scan.mjs`), not when imported by tests.
 // `|| ''` guards the case where Node is invoked without a script arg (e.g. `node -e`).
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
-  main().catch(err => {
+  const [operation, ...args] = process.argv.slice(2);
+  if (discoveryOperations[operation]) {
+    const result = spawnSync(process.execPath, [discoveryOperations[operation], ...args], { stdio: 'inherit', env: process.env });
+    process.exitCode = result.status ?? 1;
+  } else {
+    if (operation === 'configured') process.argv.splice(2, 1);
+    main().catch(err => {
     console.error('Fatal:', err.message);
     writeRunFailureRow('failed');
     process.exit(1);
-  });
+    });
+  }
 }

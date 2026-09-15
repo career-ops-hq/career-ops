@@ -18,11 +18,9 @@
  * Input: a YAML file `companies: [{name, slug?, website?}]` (via --in), and/or
  * bare company names as positional CLI args.
  *
- * Run: node discover-ats.mjs --in companies.yml            (preview — writes nothing)
- *      node discover-ats.mjs --in companies.yml --write    (opt in: append to portals.yml)
- *      node discover-ats.mjs Stripe Ramp Mollie            (bare names)
- *      node discover-ats.mjs --in companies.yml --summary  (human table)
- *      node discover-ats.mjs --in companies.yml --vendors gh,ashby
+ * Run: node scan.mjs resolve-company --in companies.yml            (preview — writes nothing)
+ *      node scan.mjs resolve-company --in companies.yml --write    (opt in: append to portals.yml)
+ *      node scan.mjs resolve-company Stripe Ramp Mollie            (bare names)
  *      node discover-ats.mjs --self-test
  *
  * Probing hits live third-party APIs, so honor CAREER_OPS_PORTALS to point at a
@@ -38,18 +36,7 @@ import * as yaml from 'js-yaml';
 import { renameSyncWithRetry } from './tracker-utils.mjs';
 
 import { makeHttpCtx } from './providers/_http.mjs';
-import greenhouse from './providers/greenhouse.mjs';
-import ashby from './providers/ashby.mjs';
-import lever from './providers/lever.mjs';
-import workday from './providers/workday.mjs';
-import workable from './providers/workable.mjs';
-import smartrecruiters from './providers/smartrecruiters.mjs';
-import recruitee from './providers/recruitee.mjs';
-import breezy from './providers/breezy.mjs';
-import bamboohr from './providers/bamboohr.mjs';
-import pinpoint from './providers/pinpoint.mjs';
-import rippling from './providers/rippling.mjs';
-import joinProvider from './providers/join.mjs';
+import { discoveryProvider } from './src/discovery/registry.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(CAREER_OPS, 'portals.yml');
@@ -86,19 +73,19 @@ const DEFAULT_CONCURRENCY = 8;
 const lower = (s) => String(s).toLowerCase();
 
 const VENDORS = {
-  gh:    { id: 'greenhouse', provider: greenhouse, host: 'job-boards.greenhouse.io', buildUrl: (s) => `https://job-boards.greenhouse.io/${s}`, api: (s) => `https://boards-api.greenhouse.io/v1/boards/${s}/jobs` },
-  ashby: { id: 'ashby',      provider: ashby,      host: 'jobs.ashbyhq.com',        buildUrl: (s) => `https://jobs.ashbyhq.com/${s}` },
-  lever: { id: 'lever',      provider: lever,      host: 'jobs.lever.co',           buildUrl: (s) => `https://jobs.lever.co/${s}` },
+  gh:    { id: 'greenhouse', provider: discoveryProvider('greenhouse'), host: 'job-boards.greenhouse.io', buildUrl: (s) => `https://job-boards.greenhouse.io/${s}`, api: (s) => `https://boards-api.greenhouse.io/v1/boards/${s}/jobs` },
+  ashby: { id: 'ashby',      provider: discoveryProvider('ashby'),      host: 'jobs.ashbyhq.com',        buildUrl: (s) => `https://jobs.ashbyhq.com/${s}` },
+  lever: { id: 'lever',      provider: discoveryProvider('lever'),      host: 'jobs.lever.co',           buildUrl: (s) => `https://jobs.lever.co/${s}` },
 
   // Long tail, probed only after the three above miss (see VENDOR_ORDER).
-  workable:        { id: 'workable',        provider: workable,        host: 'apply.workable.com',          buildUrl: (s) => `https://apply.workable.com/${s}` },
-  smartrecruiters: { id: 'smartrecruiters', provider: smartrecruiters, host: 'careers.smartrecruiters.com', buildUrl: (s) => `https://careers.smartrecruiters.com/${s}` },
-  rippling:        { id: 'rippling',        provider: rippling,        host: 'ats.rippling.com',            buildUrl: (s) => `https://ats.rippling.com/${s}/jobs` },
-  join:            { id: 'join',            provider: joinProvider,            host: 'join.com',                    buildUrl: (s) => `https://join.com/companies/${s}` },
-  recruitee:       { id: 'recruitee',       provider: recruitee,       hostFor: (s) => `${lower(s)}.recruitee.com`,  buildUrl: (s) => `https://${lower(s)}.recruitee.com` },
-  breezy:          { id: 'breezy',          provider: breezy,          hostFor: (s) => `${lower(s)}.breezy.hr`,      buildUrl: (s) => `https://${lower(s)}.breezy.hr` },
-  bamboohr:        { id: 'bamboohr',        provider: bamboohr,        hostFor: (s) => `${lower(s)}.bamboohr.com`,   buildUrl: (s) => `https://${lower(s)}.bamboohr.com` },
-  pinpoint:        { id: 'pinpoint',        provider: pinpoint,        hostFor: (s) => `${lower(s)}.pinpointhq.com`, buildUrl: (s) => `https://${lower(s)}.pinpointhq.com` },
+  workable:        { id: 'workable',        provider: discoveryProvider('workable'),        host: 'apply.workable.com',          buildUrl: (s) => `https://apply.workable.com/${s}` },
+  smartrecruiters: { id: 'smartrecruiters', provider: discoveryProvider('smartrecruiters'), host: 'careers.smartrecruiters.com', buildUrl: (s) => `https://careers.smartrecruiters.com/${s}` },
+  rippling:        { id: 'rippling',        provider: discoveryProvider('rippling'),        host: 'ats.rippling.com',            buildUrl: (s) => `https://ats.rippling.com/${s}/jobs` },
+  join:            { id: 'join',            provider: discoveryProvider('join'),            host: 'join.com',                    buildUrl: (s) => `https://join.com/companies/${s}` },
+  recruitee:       { id: 'recruitee',       provider: discoveryProvider('recruitee'),       hostFor: (s) => `${lower(s)}.recruitee.com`,  buildUrl: (s) => `https://${lower(s)}.recruitee.com` },
+  breezy:          { id: 'breezy',          provider: discoveryProvider('breezy'),          hostFor: (s) => `${lower(s)}.breezy.hr`,      buildUrl: (s) => `https://${lower(s)}.breezy.hr` },
+  bamboohr:        { id: 'bamboohr',        provider: discoveryProvider('bamboohr'),        hostFor: (s) => `${lower(s)}.bamboohr.com`,   buildUrl: (s) => `https://${lower(s)}.bamboohr.com` },
+  pinpoint:        { id: 'pinpoint',        provider: discoveryProvider('pinpoint'),        hostFor: (s) => `${lower(s)}.pinpointhq.com`, buildUrl: (s) => `https://${lower(s)}.pinpointhq.com` },
 };
 // Slug-resolvable vendors, probed in order for each company (first match wins).
 // Probe order is also a cost decision. resolveCompany probes candidates in this
@@ -119,14 +106,14 @@ const VENDOR_ORDER = ['gh', 'ashby', 'lever', 'workable', 'smartrecruiters', 're
 const WORKDAY_INSTANCES = ['wd1', 'wd2', 'wd3', 'wd5', 'wd10', 'wd12', 'wd101', 'wd103'];
 
 const USAGE = `Usage:
-  node discover-ats.mjs --in companies.yml            # PREVIEW — resolve + print entries, write nothing
-  node discover-ats.mjs --in companies.yml --write    # opt in: append resolved entries to portals.yml
-  node discover-ats.mjs Stripe Ramp Mollie            # company names as positional args
-  node discover-ats.mjs --in companies.yml --summary  # human-readable table
-  node discover-ats.mjs --in companies.yml --vendors gh,ashby,lever  # restrict probes
-  node discover-ats.mjs --in companies.yml --vendors workday         # Workday only
-  node discover-ats.mjs --self-test                   # inline test suite
-  node discover-ats.mjs --help                        # print this usage block
+  node scan.mjs resolve-company --in companies.yml            # PREVIEW — resolve + print entries, write nothing
+  node scan.mjs resolve-company --in companies.yml --write    # opt in: append resolved entries to portals.yml
+  node scan.mjs resolve-company Stripe Ramp Mollie            # company names as positional args
+  node scan.mjs resolve-company --in companies.yml --summary  # human-readable table
+  node scan.mjs resolve-company --in companies.yml --vendors gh,ashby,lever  # restrict probes
+  node scan.mjs resolve-company --in companies.yml --vendors workday         # Workday only
+  node discover-ats.mjs --self-test                           # inline test suite
+  node scan.mjs resolve-company --help                        # print this usage block
 
 portals.yml is a user-layer file: this command NEVER writes it unless you pass
 --write. The default previews the entries it would add (see pendingEntries).
@@ -540,9 +527,9 @@ export async function resolveWorkday(company, coords, ctx) {
   for (const candidate of candidates) {
     tried.push(candidate.careers_url);
     const entry = { name: company.name, careers_url: candidate.careers_url };
-    if (!workday.detect(entry)) { lastError = 'no CXS endpoint derivable'; continue; }
+    if (!discoveryProvider('workday').detect(entry)) { lastError = 'no CXS endpoint derivable'; continue; }
     try {
-      const jobs = await workday.fetch(entry, probeCtx);
+      const jobs = await discoveryProvider('workday').fetch(entry, probeCtx);
       const jobCount = Array.isArray(jobs) ? jobs.length : 0;
       if (jobCount > 0) {
         return {

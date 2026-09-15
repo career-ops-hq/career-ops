@@ -1,6 +1,7 @@
 // SQLite source of truth for an opportunity from discovery through its outcome.
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { createHash } from 'node:crypto';
 
 export async function openOpportunityStore(path) {
   let DatabaseSync;
@@ -11,7 +12,7 @@ export async function openOpportunityStore(path) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS opportunities (
       id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE, company TEXT NOT NULL,
-      role TEXT NOT NULL, source TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'discovered' CHECK(state IN ('discovered','evaluating','eligible','ineligible','evaluated')),
+      role TEXT NOT NULL, identity TEXT NOT NULL UNIQUE, source TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'discovered' CHECK(state IN ('discovered','evaluating','eligible','ineligible','evaluated')),
       claimed_by TEXT, attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS source_evidence (
@@ -43,6 +44,20 @@ export async function openOpportunityStore(path) {
     CREATE TABLE IF NOT EXISTS scan_outcomes (
       url TEXT PRIMARY KEY, status TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS scan_runs (
+      id INTEGER PRIMARY KEY, operation TEXT NOT NULL, summary TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS source_health (
+      id INTEGER PRIMARY KEY, scan_run_id INTEGER NOT NULL REFERENCES scan_runs(id), source TEXT NOT NULL, status TEXT NOT NULL,
+      checked_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS page_evidence (
+      opportunity_id INTEGER PRIMARY KEY REFERENCES opportunities(id), content TEXT NOT NULL, content_hash TEXT NOT NULL,
+      captured_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS repost_inputs (
+      opportunity_id INTEGER PRIMARY KEY REFERENCES opportunities(id), fingerprint TEXT NOT NULL, first_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS opportunity_events (
       id INTEGER PRIMARY KEY, opportunity_id INTEGER NOT NULL REFERENCES opportunities(id),
       type TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -61,18 +76,34 @@ export async function openOpportunityStore(path) {
     BEGIN SELECT RAISE(ABORT, 'delivery requires evaluated opportunity'); END;
   `);
   if (!db.prepare('PRAGMA table_info(opportunities)').all().some(column => column.name === 'attempts')) db.exec('ALTER TABLE opportunities ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0');
+  if (!db.prepare('PRAGMA table_info(opportunities)').all().some(column => column.name === 'identity')) {
+    db.exec('ALTER TABLE opportunities ADD COLUMN identity TEXT');
+    const used = new Set();
+    for (const row of db.prepare('SELECT id, company, role FROM opportunities ORDER BY id').all()) {
+      const base = `${String(row.company).normalize('NFKC').trim().toLowerCase()}::${String(row.role).normalize('NFKC').trim().toLowerCase()}`;
+      const value = used.has(base) ? `${base}#${row.id}` : base;
+      used.add(base);
+      db.prepare('UPDATE opportunities SET identity = ? WHERE id = ?').run(value, row.id);
+    }
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS opportunities_identity ON opportunities(identity)');
+  }
   if (!db.prepare('PRAGMA table_info(deliveries)').all().some(column => column.name === 'status')) db.exec("ALTER TABLE deliveries ADD COLUMN status TEXT NOT NULL DEFAULT 'claimed'");
   const event = (id, type, payload = {}) => db.prepare('INSERT INTO opportunity_events (opportunity_id, type, payload) VALUES (?, ?, ?)').run(id, type, JSON.stringify(payload));
   const state = id => db.prepare('SELECT state FROM opportunities WHERE id = ?').get(id)?.state;
   const requireState = (id, expected) => {
     if (state(id) !== expected) throw new Error(`Opportunity ${id} must be ${expected}`);
   };
+  const identity = (company, role) => `${String(company).normalize('NFKC').trim().toLowerCase()}::${String(role).normalize('NFKC').trim().toLowerCase()}`;
   return {
     ingest({ url, company, role, source, payload }) {
-      db.prepare('INSERT INTO opportunities (url, company, role, source) VALUES (?, ?, ?, ?) ON CONFLICT(url) DO NOTHING').run(url, company, role, source);
-      const row = db.prepare('SELECT id, url FROM opportunities WHERE url = ?').get(url);
+      const key = identity(company, role);
+      db.prepare('INSERT INTO opportunities (url, company, role, identity, source) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING').run(url, company, role, key, source);
+      let row = db.prepare('SELECT id, url FROM opportunities WHERE url = ?').get(url);
+      if (!row) row = db.prepare("SELECT id, url FROM opportunities WHERE identity = ? OR substr(identity, 1, length(?) + 1) = ? || '#' ORDER BY id LIMIT 1").get(key, key, key);
       const exists = db.prepare('SELECT 1 FROM source_evidence WHERE opportunity_id = ? AND source = ?').get(row.id, source);
       if (!exists) { db.prepare('INSERT INTO source_evidence (opportunity_id, source, payload) VALUES (?, ?, ?)').run(row.id, source, JSON.stringify(payload)); event(row.id, 'discovered', { source }); }
+      if (typeof payload?.description === 'string' && payload.description.trim()) db.prepare('INSERT INTO page_evidence (opportunity_id, content, content_hash) VALUES (?, ?, ?) ON CONFLICT(opportunity_id) DO NOTHING').run(row.id, payload.description, createHash('sha256').update(payload.description).digest('hex'));
+      if (typeof payload?.fingerprint === 'string' && payload.fingerprint) db.prepare('INSERT INTO repost_inputs (opportunity_id, fingerprint) VALUES (?, ?) ON CONFLICT(opportunity_id) DO NOTHING').run(row.id, payload.fingerprint);
       return row;
     },
     claim(id, worker) {
@@ -118,6 +149,13 @@ export async function openOpportunityStore(path) {
     recordScanOutcomes(outcomes) {
       for (const { url, status, ...payload } of outcomes) db.prepare('INSERT INTO scan_outcomes (url, status, payload) VALUES (?, ?, ?) ON CONFLICT(url) DO UPDATE SET status = excluded.status, payload = excluded.payload').run(url, status, JSON.stringify(payload));
     },
+    recordScanRun(operation, summary, health = []) {
+      const run = db.prepare('INSERT INTO scan_runs (operation, summary) VALUES (?, ?)').run(operation, JSON.stringify(summary));
+      for (const row of health) db.prepare('INSERT INTO source_health (scan_run_id, source, status, checked_at) VALUES (?, ?, ?, ?)').run(run.lastInsertRowid, row.company ?? row.source, row.status, row.timestamp);
+      return Number(run.lastInsertRowid);
+    },
+    healthRecords() { return db.prepare('SELECT checked_at AS timestamp, source AS company, status FROM source_health ORDER BY id').all(); },
+    fingerprintHistory() { return db.prepare('SELECT o.url, substr(r.first_seen, 1, 10) AS dateStr, o.company, o.role AS title, r.fingerprint FROM repost_inputs r JOIN opportunities o ON o.id = r.opportunity_id').all(); },
     opportunity(id) {
       const row = db.prepare('SELECT id, url, company, role, source, state FROM opportunities WHERE id = ?').get(id);
       if (!row) return null;

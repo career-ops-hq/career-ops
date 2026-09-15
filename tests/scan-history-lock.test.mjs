@@ -1,7 +1,7 @@
 // tests/scan-history-lock.test.mjs — appendToScanHistory() must write
 // data/scan-history.tsv under the same lock appendToPipeline() uses.
 //
-// scan.mjs, scan-ats-full.mjs, scan-interamt.mjs and plugins.mjs all append to
+// scan.mjs, scan-ats-full.mjs and plugins.mjs all append to
 // this one file, which is why appendToPipeline() takes a lock. scan-history
 // took none, leaving two races (#2600):
 //
