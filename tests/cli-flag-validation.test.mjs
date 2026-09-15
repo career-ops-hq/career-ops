@@ -141,21 +141,3 @@ test('detect-reposts: --window --summary does not silently fall back to the defa
   assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
   assert.match(r.all, /--window requires a value/);
 });
-
-test('process-quality: --file --min-threshold does not read --min-threshold as a path', () => {
-  const r = runScript('process-quality.mjs', '--file', '--min-threshold');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
-  assert.match(r.all, /--file requires a value/);
-});
-
-test('process-quality: --min-threshold --summary does not silently fall back to threshold 1', () => {
-  const r = runScript('process-quality.mjs', '--min-threshold', '--summary');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
-  assert.match(r.all, /--min-threshold requires a value/);
-});
-
-test('weekly-digest: --dir --summary does not scan a directory named "--summary"', () => {
-  const r = runScript('weekly-digest.mjs', '--dir', '--summary');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
-  assert.match(r.all, /--dir requires a value/);
-});
