@@ -674,6 +674,15 @@ async function filterLive(offers) {
 
 // ── Main ────────────────────────────────────────────────────────────
 
+// A provider can hand back an unparseable postedAt; new Date(bad).toISOString()
+// throws on an invalid Date, which in the SIGTERM partial path would abort the
+// whole dump and lose every collected offer. Degrade one bad value to null.
+function isoDay(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
 async function main() {
   const opts = parseArgs(process.argv);
   let checkpoint = null;
@@ -813,6 +822,57 @@ async function main() {
   let cappedBoards = cc.cappedBoards || 0;
   const datasetStatus = {};
 
+  // Graceful stop for the web layer: it SIGTERMs us when its scan budget elapses
+  // (see web/src/lib/core/scan-timeout.mjs). A full sweep only prints its result
+  // at the very end, so a plain kill loses everything found so far. In --json mode
+  // we instead flush the matches collected up to this point as a well-formed but
+  // PARTIAL result (`stoppedEarly: true`) so the caller can still surface those
+  // roles. CLI/human runs keep the default terminate behavior (no handler).
+  // Live deltas for the partial (stoppedEarly) report, so a mid-source SIGTERM
+  // reports the work ACTUALLY done. totalCompaniesScanned is bumped by a whole
+  // source's planned entries up front, and its errors fold into totalErrors only
+  // once it finishes — the handler applies the same correction the checkpoint uses.
+  let curEntries = 0;
+  let curDone = 0;
+  let curErrors = 0;
+  let curDeadSkipped = 0;
+  if (opts.json) {
+    let flushed = false;
+    process.on('SIGTERM', () => {
+      if (flushed) return;
+      flushed = true;
+      try {
+        const partial = filterBlacklistedOffers(newOffers, blacklist, {
+          includeBlacklisted: opts.includeBlacklisted,
+        }).offers.map((o) => ({
+          company: o.company,
+          title: o.title,
+          url: o.url,
+          location: o.location || null,
+          postedAt: isoDay(o.postedAt),
+          dateStatus: o.dateStatus || (o.postedAt ? 'dated' : 'unknown'),
+          source: o.source,
+        }));
+        process.stdout.write(JSON.stringify({
+          date,
+          sources: opts.ats,
+          stoppedEarly: true,
+          companiesAvailable: totalCompaniesAvailable,
+          companiesScanned: Math.max(0, totalCompaniesScanned - (curEntries - curDone) - curDeadSkipped),
+          capHit,
+          datasetStatus,
+          postingsKept: partial.length,
+          postingsDroppedNoDate: droppedNoDate,
+          unreachableBoards: totalErrors + curErrors,
+          offers: partial,
+        }) + '\n', () => process.exit(0));
+      } catch {
+        process.exit(0);
+      }
+    });
+  }
+
+
   const snapshotCounters = () => ({
     totalCompaniesScanned, totalErrors, totalRetiredBoardsSkipped,
     droppedNoDate, droppedContent,
@@ -907,6 +967,7 @@ async function main() {
     }
     const entries = entriesAll.slice(startAt);
     totalCompaniesScanned += entries.length;
+    curEntries = entries.length; curDone = 0; curErrors = 0; curDeadSkipped = 0;
     log(`\n⚙  ${name} — ${entriesAll.length} companies${status !== 'ok' ? ` (dataset: ${status})` : ''}${startAt ? ` — resuming at ${startAt}` : ''}`);
 
     let errors = 0;
@@ -969,6 +1030,7 @@ async function main() {
       }
     }, ({ done, resumeAt }) => {
       lastDone = done;
+      curDone = done; curErrors = errors; curDeadSkipped = deadBoardsSkipped;
       lastResumeAt = resumeAt;
       if (done % 200 === 0 || done === entries.length) {
         progress(`  ${done}/${entries.length} scanned, ${newOffers.length} total matches\r`);
@@ -1060,6 +1122,9 @@ async function main() {
       break;
     }
     completedSources.add(name);
+    // Source finished and folded into the totals — clear the live deltas so a
+    // SIGTERM between sources reports the totals, not this source's slice twice.
+    curEntries = 0; curDone = 0; curErrors = 0; curDeadSkipped = 0;
     if (!opts.dryRun) {
       writeCheckpoint({ ...checkpointBase(), current: null, counters: snapshotCounters() });
     }
