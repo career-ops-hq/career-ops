@@ -237,6 +237,43 @@
     font-weight: 600;
   }
 
+  /* Opt-in via experience[].keepTogether (#3961 follow-up): stops a
+     bullet-heavy entry — usually the last one on a trimmed CV — from
+     splitting across a page boundary mid-bullet. Off by default; see
+     PAGE BREAK CONTROL below for why multi-bullet entries are otherwise
+     allowed to flow across pages. */
+  .job--keep-together {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Opt-in via experience[].engagements (#3961 follow-up): a "Selected
+     engagements" sub-list for a role that bundles several named
+     client/project engagements under one umbrella employer (e.g. an
+     independent-consulting entry). The label itself is not bulleted —
+     only the entries under it are — so it reads as a sub-heading, not
+     another bullet at the same level as the role's own achievements. */
+  .job .sub-label {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: #333;
+    margin-top: 6px;
+    margin-bottom: 4px;
+  }
+
+  .job .sub-list {
+    list-style: disc;
+    padding-left: 34px;
+    margin-top: 0;
+  }
+
+  .job .sub-list li {
+    font-size: 10.5px;
+    line-height: 1.6;
+    color: #333;
+    margin-bottom: 4px;
+  }
+
   /* === PROJECTS === */
   .project {
     margin-bottom: 12px;
@@ -419,6 +456,20 @@
     font-size: 10.5px;
   }
 
+  /* Optional qualifier line under a skill category — typically "which of these
+     is working familiarity rather than depth". Its own block, indented and
+     muted, so it reads as a deliberate annotation. A bare line break inside the
+     items text cannot do this job: once the items line wraps on its own (which
+     it routinely does in a language that runs longer than English) the reader
+     cannot tell the intentional break from the accidental one. */
+  .skill-note {
+    display: block;
+    padding-left: 14px;
+    color: #666;
+    font-size: 10px;
+    line-height: 1.5;
+  }
+
   /* === PRINT === */
   @media print {
     body {
@@ -442,7 +493,11 @@
   /* Only avoid breaking small atomic units (a cert row, an education line, the
      header, a single competency or skill).  Sections and multi-bullet roles are
      allowed to flow across a page boundary so content packs tight instead of
-     jumping wholesale and leaving large bottom gaps. */
+     jumping wholesale and leaving large bottom gaps. When a specific entry
+     needs the opposite — usually the last role on a trimmed CV, where an
+     awkward mid-bullet split reads worse than a mostly-empty page above it —
+     set that one entry's keepTogether instead of changing this default; see
+     .job--keep-together above. */
   .header,
   .edu-item,
   .cert-item,

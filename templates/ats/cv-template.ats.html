@@ -183,6 +183,36 @@ version: 1.0.0
     font-weight: 600;
   }
 
+  /* Opt-in via experience[].keepTogether (#3961 follow-up); see cv-template.html
+     for the full rationale. */
+  .job--keep-together {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Opt-in via experience[].engagements (#3961 follow-up); see
+     cv-template.html for the full rationale. */
+  .job .sub-label {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: #333;
+    margin-top: 6px;
+    margin-bottom: 4px;
+  }
+
+  .job .sub-list {
+    list-style: disc;
+    padding-left: 34px;
+    margin-top: 0;
+  }
+
+  .job .sub-list li {
+    font-size: 10.5px;
+    line-height: 1.6;
+    color: #333;
+    margin-bottom: 3px;
+  }
+
   /* PROJECTS */
   .project {
     margin-bottom: 10px;
@@ -309,6 +339,15 @@ version: 1.0.0
   .skill-category {
     font-weight: 600;
     color: #2c3e50;
+  }
+
+  /* Optional qualifier line under a skill category (see .skill-note in the base
+     template for why this is its own block rather than a line break inside the
+     items text). */
+  .skill-note {
+    display: block;
+    padding-left: 14px;
+    color: #555;
   }
 
   /* PAGE BREAK CONTROL */

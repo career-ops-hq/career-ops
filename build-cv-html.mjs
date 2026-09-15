@@ -61,12 +61,27 @@ const DEFAULT_SECTION_TITLES = {
   awards: 'Awards & Honors',
   interests: 'Interests',
   skills: 'Skills',
+  engagements: 'Selected engagements',
 };
 
 // Escape user text for HTML text/attribute context. Covers the five characters
 // that change meaning in markup so tailored bullets containing &, <, >, quotes
 // (e.g. "R&D", "scaled 10x < budget", 'the "north star" metric') render as
 // literal text instead of breaking the document or injecting tags.
+// Converts a literal newline in payload.summary into a <br> line break, so a
+// multi-paragraph summary can be written as plain text with a blank line
+// between paragraphs — "\n\n" becomes "<br><br>", a visible gap (#3961
+// follow-up). Escaping runs first, the same safety ordering already used for
+// the "**bold**" convention (see modes/pdf.md): only a literal newline the
+// agent typed is converted afterward, nothing already escaped is
+// re-interpreted.
+// Shared by SUMMARY_TEXT and skill-category items (#3961 follow-up, page-fit):
+// a literal "\n" becomes a line break, "\n\n" a paragraph gap, and escaping
+// runs first so a "<script>" typed into either field stays inert.
+function renderMultilineText(text) {
+  return escapeHtml(text).replace(/\n/g, '<br>');
+}
+
 function escapeHtml(text) {
   // Blank out only truly absent/structural values. A number or boolean scalar
   // (e.g. a payload with `year: 2024` instead of `"2024"`) must render its value,
@@ -346,7 +361,25 @@ function buildCompetencies(entries, partial) {
     .join('\n      ');
 }
 
-function buildExperience(entries, partial) {
+// Renders experience[].engagements — a "Selected engagements" sub-list for a
+// role that bundles several named client/project engagements under one
+// umbrella employer (e.g. an independent-consulting entry). Deliberately NOT
+// bulleted at this label line (matches the .job's own bullet list visually
+// outranking it); each engagement below it IS its own bulleted <li> with the
+// name in bold, styled by .sub-label/.sub-list (see the CV template CSS).
+// Returns '' when there is nothing to render, so callers can splice it in
+// unconditionally without an extra presence check.
+function buildEngagementsBlock(engagements, label = DEFAULT_SECTION_TITLES.engagements) {
+  if (!Array.isArray(engagements) || engagements.length === 0) return '';
+  const items = engagements
+    .filter(Boolean)
+    .map(en => `    <li><strong>${escapeHtml(en.name || '')}</strong>${escapeHtml(en.detail || '')}</li>`)
+    .join('\n');
+  if (!items) return '';
+  return `\n  <div class="sub-label">${escapeHtml(label)}</div>\n  <ul class="sub-list">\n${items}\n  </ul>`;
+}
+
+function buildExperience(entries, partial, engagementsLabel = DEFAULT_SECTION_TITLES.engagements) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
   if (!partial) {
     return entries.filter(e => hasRequiredFields(e, 'experience', 'html')).map(e => {
@@ -356,7 +389,14 @@ function buildExperience(entries, partial) {
       const location = e.location
         ? `\n    <div class="job-location">${escapeHtml(e.location)}</div>`
         : '';
-      return `<div class="job">
+      // keepTogether (opt-in, #3961 follow-up): stops a bullet-heavy entry —
+      // usually the last one on a trimmed CV — from splitting across a page
+      // boundary mid-bullet. Off by default: most entries are better packed
+      // tight than pushed whole onto the next page (see the CSS rule this
+      // class hooks).
+      const jobClass = e.keepTogether ? ' job--keep-together' : '';
+      const engagements = buildEngagementsBlock(e.engagements, engagementsLabel);
+      return `<div class="job${jobClass}">
     <div class="job-header">
       <span class="job-company">${escapeHtml(e.company)}</span>
       <span class="job-period">${escapeHtml(e.dates || e.period || '')}</span>
@@ -364,7 +404,7 @@ function buildExperience(entries, partial) {
     <div class="job-role">${escapeHtml(e.role)}</div>${location}
     <ul>
 ${bullets}
-    </ul>
+    </ul>${engagements}
   </div>`;
     }).join('\n  ');
   }
@@ -383,6 +423,8 @@ ${bullets}
       ROLE: escapeHtml(e.role || ''),
       LOCATION: escapeHtml(e.location || ''),
       BULLETS: bullets,
+      JOB_CLASS: e.keepTogether ? ' job--keep-together' : '',
+      ENGAGEMENTS: buildEngagementsBlock(e.engagements, engagementsLabel),
     }, blockValues);
   }).join('\n  ');
 }
@@ -564,7 +606,16 @@ function buildSkills(categories, partial) {
       const cat = c.category
         ? `<span class="skill-category">${escapeHtml(c.category)}:</span> `
         : '';
-      return `    <div class="skill-item">${cat}${escapeHtml(joinItems(c.items))}</div>`;
+      // note (opt-in): a qualifier line under the items — "which of these am I
+      // only working-familiar with". Rendered as its own indented, muted line
+      // rather than a bare "\n" inside items, because once the items line is
+      // long enough to wrap on its own (routinely, in a language that runs
+      // longer than English) a plain line break is indistinguishable from an
+      // accidental wrap. See .skill-note in the template CSS.
+      const note = c.note
+        ? `<span class="skill-note">${renderMultilineText(c.note)}</span>`
+        : '';
+      return `    <div class="skill-item">${cat}${renderMultilineText(joinItems(c.items))}${note}</div>`;
     }).join('\n');
     return `<div class="skills-grid">\n${items}\n  </div>`;
   }
@@ -575,10 +626,12 @@ function buildSkills(categories, partial) {
   const items = kept.map(c => {
     const blockValues = new Map([
       ['CATEGORY_BLOCK', { value: escapeHtml(c.category || ''), present: Boolean(c.category) }],
+      ['NOTE_BLOCK',     { value: renderMultilineText(c.note || ''), present: Boolean(c.note) }],
     ]);
     return fillEntry(entryTemplate, blocks, {
       CATEGORY:    escapeHtml(c.category || ''),
-      ITEMS_TEXT:  escapeHtml(joinItems(c.items)),
+      ITEMS_TEXT:  renderMultilineText(joinItems(c.items)),
+      NOTE:        renderMultilineText(c.note || ''),
     }, blockValues);
   }).join('\n');
   return `<div class="skills-grid">\n${items}\n  </div>`;
@@ -636,11 +689,11 @@ function renderReport(payload, partials) {
     PAGE_WIDTH: pageWidth,
     NAME: escapeHtml(candidate.name || ''),
     SECTION_SUMMARY: escapeHtml(sectionTitles.summary),
-    SUMMARY_TEXT: escapeHtml(payload.summary || ''),
+    SUMMARY_TEXT: renderMultilineText(payload.summary || ''),
     SECTION_COMPETENCIES: escapeHtml(sectionTitles.competencies),
     COMPETENCIES: buildCompetencies(payload.competencies, partials.get('competencies')),
     SECTION_EXPERIENCE: escapeHtml(sectionTitles.experience),
-    EXPERIENCE: buildExperience(payload.experience, partials.get('experience')),
+    EXPERIENCE: buildExperience(payload.experience, partials.get('experience'), sectionTitles.engagements),
     SECTION_PROJECTS: escapeHtml(sectionTitles.projects),
     PROJECTS: buildProjects(payload.projects, partials.get('projects')),
     SECTION_EDUCATION: escapeHtml(sectionTitles.education),
@@ -880,6 +933,62 @@ async function runSelfTest() {
     process.exit(1);
   }
 
+  // Guard renderMultilineText() via SUMMARY_TEXT (#3961 follow-up): a literal
+  // "\n\n" in the summary becomes a paragraph gap ("<br><br>"), a single "\n"
+  // becomes one line break, and escaping still runs first — a "<script>"
+  // typed into the summary must stay escaped even once it sits next to a
+  // real <br>.
+  const summaryHtml = renderHtml(template, {
+    ...sample,
+    summary: 'First line.\nSecond line, same paragraph.\n\nSecond paragraph opens with a <script> tag.',
+  }, TEMPLATE_PATH);
+  if (!summaryHtml.includes('First line.<br>Second line, same paragraph.<br><br>Second paragraph')) {
+    console.error('Self-test failed: summary newlines did not render as <br>/<br><br> line breaks');
+    process.exit(1);
+  }
+  // Case-insensitive and prefix-only: a regression that let through <SCRIPT>
+  // or <script src=…> must fail this assertion too, not just a bare <script>.
+  if (!summaryHtml.includes('&lt;script&gt; tag') || /<script/i.test(summaryHtml)) {
+    console.error('Self-test failed: summary escaping did not run before newline-to-<br> conversion');
+    process.exit(1);
+  }
+
+  // Guard renderMultilineText() via skill-category items (#3961 follow-up,
+  // page-fit): the same "\n" -> <br> conversion is available on a skill
+  // category's items string (not its array form — a joined array has no
+  // newlines to convert), letting a dense category wrap a caveat like
+  // "(working familiarity)" onto its own line instead of running one long
+  // line. The "**...**" stays literal here — that markdown-bold-to-<strong>
+  // pass runs later, in generate-pdf.mjs's ATS normalization, not here.
+  const skillsNewlineHtml = renderHtml(template, {
+    ...sample,
+    skills: [{ category: 'Cloud', items: 'Docker, Kubernetes\n**Working familiarity:** Terraform' }],
+  }, TEMPLATE_PATH);
+  if (!skillsNewlineHtml.includes('Docker, Kubernetes<br>**Working familiarity:** Terraform')) {
+    console.error('Self-test failed: skill-category items newline did not render as <br>');
+    process.exit(1);
+  }
+
+  // Guard skills[].note (#3961 follow-up, page-fit): an opt-in qualifier line
+  // rendered as its own indented .skill-note block, escaped like every other
+  // free-text field; absent (the base sample) renders no such block.
+  const skillsNoteHtml = renderHtml(template, {
+    ...sample,
+    skills: [{ category: 'Cloud', items: 'Docker, Coolify', note: '**Working familiarity:** Terraform <Cloud>' }],
+  }, TEMPLATE_PATH);
+  if (!skillsNoteHtml.includes('class="skill-note"')) {
+    console.error('Self-test failed: skills[].note did not render a .skill-note block');
+    process.exit(1);
+  }
+  if (!skillsNoteHtml.includes('**Working familiarity:** Terraform &lt;Cloud&gt;')) {
+    console.error('Self-test failed: skills[].note did not render escaped note text');
+    process.exit(1);
+  }
+  if (html.includes('class="skill-note"')) {
+    console.error('Self-test failed: .skill-note rendered when skills[].note was not set');
+    process.exit(1);
+  }
+
   // Guard buildInterests(): comma-joined, sentence-cased (only the first item
   // keeps its capital), and escaped like every other free-text field.
   if (!html.includes('Reading sci-fi &amp; fantasy, hiking, chess')) {
@@ -992,6 +1101,71 @@ async function runSelfTest() {
   }
   if (noLocHtml.includes('class="edu-location"')) {
     console.error('Self-test failed: edu-location block rendered when education location is absent');
+    process.exit(1);
+  }
+
+  // Guard experience[].keepTogether (#3961 follow-up): true adds the
+  // page-break-avoiding class; absent/false renders exactly like the base
+  // sample above (no stray class, no dangling space in the attribute).
+  const keepTogetherSample = {
+    ...sample,
+    experience: [{ ...sample.experience[0], keepTogether: true }],
+    projects: [],
+  };
+  const keepTogetherHtml = renderHtml(template, keepTogetherSample, TEMPLATE_PATH);
+  if (!keepTogetherHtml.includes('class="job job--keep-together"')) {
+    console.error('Self-test failed: experience[].keepTogether did not add the job--keep-together class');
+    process.exit(1);
+  }
+  if (html.includes('class="job job--keep-together"')) {
+    // Checked against markup usage, not a bare substring match — the
+    // stylesheet's own .job--keep-together rule definition is always present
+    // regardless of whether any entry uses it.
+    console.error('Self-test failed: job--keep-together class rendered when keepTogether was not set');
+    process.exit(1);
+  }
+
+  // Guard experience[].engagements (#3961 follow-up): renders a sub-label plus
+  // one bold-name <li> per engagement, HTML-escaped like every other free-text
+  // field; absent (the base sample) renders neither.
+  const engagementsSample = {
+    ...sample,
+    experience: [{
+      ...sample.experience[0],
+      engagements: [
+        { name: 'Acme <Co>', detail: ' (2020–2021): built the thing' },
+      ],
+    }],
+    projects: [],
+  };
+  const engagementsHtml = renderHtml(template, engagementsSample, TEMPLATE_PATH);
+  if (!engagementsHtml.includes('class="sub-label"') || !engagementsHtml.includes('Selected engagements')) {
+    console.error('Self-test failed: experience[].engagements did not render the sub-label');
+    process.exit(1);
+  }
+  if (!engagementsHtml.includes('<strong>Acme &lt;Co&gt;</strong> (2020–2021): built the thing')) {
+    console.error('Self-test failed: experience[].engagements did not render an escaped, bold-name sub-list item');
+    process.exit(1);
+  }
+  if (html.includes('class="sub-label"')) {
+    console.error('Self-test failed: sub-label rendered when experience[].engagements was not set');
+    process.exit(1);
+  }
+
+  // Guard payload.sections.engagements (#3961 follow-up, localization): the
+  // sub-label text is overridable the same way every other section title is,
+  // e.g. for a French-language CV ("Mandats sélectionnés" vs "Selected
+  // engagements") — same mechanism as SECTION_SUMMARY/SECTION_EXPERIENCE/etc.
+  const localizedEngagementsHtml = renderHtml(template, {
+    ...engagementsSample,
+    sections: { engagements: 'Mandats sélectionnés' },
+  }, TEMPLATE_PATH);
+  if (!localizedEngagementsHtml.includes('class="sub-label">Mandats sélectionnés<')) {
+    console.error('Self-test failed: payload.sections.engagements did not override the sub-label text');
+    process.exit(1);
+  }
+  if (localizedEngagementsHtml.includes('Selected engagements')) {
+    console.error('Self-test failed: default "Selected engagements" label leaked through a sections.engagements override');
     process.exit(1);
   }
 
