@@ -41,12 +41,17 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
-import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRootFor } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const trackerPath = resolveTrackerPath(getCareerOpsRoot());
-const workspaceRoot = resolveWorkspaceRoot(trackerPath);
+// Derive the workspace root from the uncanonicalized tracker path (#3169): a
+// repo that symlinks only its data/ out (the #524 workaround) must still resolve
+// cv.md, config/ and output/ inside the repo, not follow data/ to the symlink
+// target. resolveWorkspaceRootFor canonicalizes the derived root itself, so the
+// spelling the rest of the module compares against stays canonical as before.
+const workspaceRoot = resolveWorkspaceRootFor(getCareerOpsRoot());
 const PDF_PAGE_MARGIN = '0.6in';
 
 // Canonical tracker workspace: realpath so a symlinked ancestor (e.g. macOS
@@ -69,8 +74,12 @@ function refreshRootCache() {
   if (__rootCache.key !== key) {
     // Always re-derive: falling back to the import-time const when the variable
     // is unset would hand back the very value the poisoned import froze.
-    const root = resolveWorkspaceRoot(resolveTrackerPath(__dirname));
-    __rootCache = { key, root, canonical: realpathSync(root) };
+    // Same #3169 derivation as the import-time const. resolveWorkspaceRootFor
+    // already realpaths the derived root, so reuse it as the canonical form
+    // instead of realpathing again (a no-op on the happy path that would throw
+    // on a missing root).
+    const root = resolveWorkspaceRootFor(__dirname);
+    __rootCache = { key, root, canonical: root };
   }
   return __rootCache;
 }
