@@ -531,6 +531,7 @@ if (!existsSync(PORTALS_FILE)) {
   try {
     const { findUnclaimedEntries } = await import('./audit-portals.mjs');
     const { loadProviders } = await import('./providers/_registry.mjs');
+    const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
     const yaml = await import('js-yaml');
 
     const cfg = yaml.load(readFileSync(PORTALS_FILE, 'utf-8')) || {};
@@ -541,6 +542,13 @@ if (!existsSync(PORTALS_FILE)) {
       ...(Array.isArray(cfg.job_boards) ? cfg.job_boards : []),
     ];
     const providers = await loadProviders(join(CAREER_OPS, 'providers'));
+    // Merge enabled provider plugins, exactly as scan.mjs does before resolving.
+    // Without this the health check sees only providers/, so a portals.yml entry
+    // pointing at a plugin-supplied provider (plugins/ or plugins.local/) is
+    // reported as an unknown-provider ERROR while the scan it is meant to model
+    // resolves that same entry fine — a false red that gates "fix before
+    // proceeding" on nothing. Fail-open and inert when no plugins are configured.
+    await mergeProviderPlugins(providers, { root: CAREER_OPS });
     const { silent, handoff, unknownProvider } = findUnclaimedEntries(entries, providers);
 
     // findUnclaimedEntries silently skips an entry with no (or blank) `name` —
