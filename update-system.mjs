@@ -236,6 +236,7 @@ const SYSTEM_PATHS = [
   'lib/scan-summary-marker.mjs',
   'lib/is-main-module.mjs',
   'lib/mjs-files.mjs',
+  'lib/walk-tree.mjs',
   'lib/outcome-dir.mjs',
   'lib/outcome-types.mjs',
   'lib/latex-escape.mjs',
