@@ -25,9 +25,21 @@ var (
 	reArchetypeColon = regexp.MustCompile(`(?i)\*\*(?:Arquetipo|Archetype):\*\*\s*(.+)`)
 	reArchetypeYAML  = regexp.MustCompile(`(?m)^archetype:\s*"?([^"\n]+)"?\s*$`)
 	reReportURL      = regexp.MustCompile(`(?m)^\*\*URL:\*\*\s*(https?://\S+)`)
-	reBatchID        = regexp.MustCompile(`(?m)^\*\*Batch ID:\*\*\s*(\d+)`)
-	reDiscardReasons = regexp.MustCompile(`(?s)discard_reasons:\s*\n((?:\s*-\s*.+?\n)+)`)
-	reDiscardItem    = regexp.MustCompile(`\s*-\s*([^\n]+)`)
+	// The tracker's URL cell is written as a markdown link with a short label
+	// (#3516); trackers written before that, and rows no merge has rewritten
+	// since, still carry the bare URL. Both forms must yield the same href.
+	//
+	// Two patterns, tried in order. The first anchors to the WHOLE cell, which
+	// is the form merge-tracker emits, and so can let the href run to the
+	// cell's final ")" — that is what keeps a posting URL containing balanced
+	// parentheses intact. The second is the loose fallback for a cell carrying
+	// a link plus other text; it stops at the first ")", which can only ever
+	// under-read a paren-bearing URL the anchored pattern already handled.
+	reTrackerURLCell      = regexp.MustCompile(`^\[[^\]]*\]\(\s*<?(https?://\S*?)>?\s*\)$`)
+	reTrackerURLCellLoose = regexp.MustCompile(`\[[^\]]*\]\(\s*<?(https?://[^)>\s]+)>?\s*\)`)
+	reBatchID             = regexp.MustCompile(`(?m)^\*\*Batch ID:\*\*\s*(\d+)`)
+	reDiscardReasons      = regexp.MustCompile(`(?s)discard_reasons:\s*\n((?:\s*-\s*.+?\n)+)`)
+	reDiscardItem         = regexp.MustCompile(`\s*-\s*([^\n]+)`)
 )
 
 // resolveReportPath converts a report link from the tracker into a path
@@ -131,7 +143,7 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 			Date:    at("date"),
 			Company: at("company"),
 			Role:    at("role"),
-			JobURL:  at("url"),
+			JobURL:  extractCellURL(at("url")),
 			Status:  at("status"),
 			HasPDF:  strings.Contains(at("pdf"), "\u2705"),
 		}
@@ -624,6 +636,30 @@ func splitTrackerRow(line string) []string {
 		}
 	}
 	return fields
+}
+
+// extractCellURL returns the posting URL a tracker URL cell points at, in
+// either written form: the href of the first markdown link, or the cell
+// verbatim when it holds none (a bare URL on an older tracker, or a "—"/"N/A"
+// placeholder the callers already treat as absent).
+//
+// Mirrors extractCellUrl in tracker-parse.mjs. This reader is tier 0 of the
+// JobURL enrichment chain since #3452, and a markdown-wrapped cell it could not
+// read would not error — it would look like a row with no URL and silently fall
+// through to the report/scan-history tiers, which resolve a DIFFERENT posting
+// often enough to matter.
+func extractCellURL(cellValue string) string {
+	value := strings.TrimSpace(cellValue)
+	if value == "" {
+		return ""
+	}
+	if m := reTrackerURLCell.FindStringSubmatch(value); m != nil {
+		return m[1]
+	}
+	if m := reTrackerURLCellLoose.FindStringSubmatch(value); m != nil {
+		return m[1]
+	}
+	return value
 }
 
 // trackerHeaderAliases maps a lowercased header cell to a canonical field name.
