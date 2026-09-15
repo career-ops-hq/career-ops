@@ -81,6 +81,21 @@ version: 1.0.0
     line-height: 1.1;
   }
 
+  .header-title {
+    /* No own font-family: inherits from .header/body, so every locale
+       override below (ar, ja, AND zh/zh-CN/zh-TW, which only override body
+       and never declare an explicit .header h1 rule) reaches it for free.
+       Default value is identical to the stack this replaced, so unlocalized
+       output is unchanged (CodeRabbit, #3763). */
+    font-size: 16px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent-color, #1a1a2e);
+    margin-bottom: 8px;
+    line-height: 1.2;
+  }
+
   .header-gradient {
     height: 2px;
     background: linear-gradient(to right, hsl(187, 74%, 32%), var(--secondary-color));
@@ -704,6 +719,7 @@ version: 1.0.0
   <!-- HEADER -->
   <div class="header">
     <h1>{{NAME}}</h1>
+    {{TITLE_BLOCK}}
     <div class="header-gradient"></div>
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
