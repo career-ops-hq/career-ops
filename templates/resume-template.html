@@ -61,6 +61,9 @@
      `style:`, which the PDF pipeline injects as a later :root block. */
   :root {
     --secondary-color: hsl(270, 70%, 45%);
+    --tag-color: hsl(187, 74%, 28%);
+    --tag-bg: hsl(187, 40%, 95%);
+    --tag-border: hsl(187, 40%, 88%);
   }
 
   * {
@@ -205,11 +208,11 @@
     font-family: 'DM Sans', sans-serif;
     font-size: 10px;
     font-weight: 500;
-    color: hsl(187, 74%, 28%);
-    background: hsl(187, 40%, 95%);
+    color: var(--tag-color);
+    background: var(--tag-bg);
     padding: 4px 10px;
     border-radius: 3px;
-    border: 1px solid hsl(187, 40%, 88%);
+    border: 1px solid var(--tag-border);
   }
 
   /* === WORK EXPERIENCE === */
@@ -282,7 +285,7 @@
     font-size: 9px;
     font-weight: 500;
     color: hsl(187, 74%, 32%);
-    background: hsl(187, 40%, 95%);
+    background: var(--tag-bg);
     padding: 1px 6px;
     border-radius: 2px;
     margin-left: 6px;
