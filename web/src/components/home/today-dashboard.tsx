@@ -26,7 +26,7 @@ export function TodayDashboard({
   inBetween,
 }: {
   applications: Application[];
-  inbox: InboxJob[];
+  inbox: Pick<InboxJob, "url" | "done">[];
   inBetween: boolean;
 }) {
   const [followups, setFollowups] = useState<FollowUp[]>([]);
