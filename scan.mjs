@@ -286,8 +286,13 @@ export function matchedTitleKeywords(title, titleFilter) {
 // ── Location filter ─────────────────────────────────────────────────
 // Optional. If `location_filter` is absent from portals.yml, all locations pass.
 // Semantics (case-insensitive substring, in this order):
-//   - Empty / whitespace-only / non-string location → pass (don't penalize
-//     missing or malformed provider data)
+//   - Empty / whitespace-only / non-string location AND no URL hint → pass
+//     (don't penalize missing or malformed provider data), UNLESS
+//     `location_filter.strict: true` and a restricting tier (`allow`, `block`,
+//     or `block_hard`) is configured — then reject, because a location-
+//     restricted sweep against a provider that does not return locations
+//     (iCIMS) otherwise silently inverts into "everything, plus matches from
+//     everywhere else" (#3276). Opt-in and default-unchanged.
 //   - `block_hard` matches → reject (the only tier `always_allow` cannot
 //     override; for country-level terms that are never a false rejection)
 //   - `always_allow` matches → pass (takes precedence over `block` — lets a
@@ -512,12 +517,20 @@ export function buildLocationFilter(locationFilter) {
   const allow = compileLocationKeywordList(locationFilter.allow);
   const block = compileLocationKeywordList(locationFilter.block);
   const blockHard = compileLocationKeywordList(locationFilter.block_hard);
+  // Opt-in: fail closed when there is nothing to judge on. Only meaningful when
+  // a restricting tier is configured — `{ strict: true }` alone restricts
+  // nothing and must not reject every location-less posting (#3276).
+  const strict = locationFilter.strict === true
+    && (allow.length > 0 || block.length > 0 || blockHard.length > 0);
 
   return (location, url, title) => {
     const lower = typeof location === 'string' ? location.trim().toLowerCase() : '';
     const hint = locationHintFromUrl(url);
-    // Nothing to judge on either field → pass (don't penalize missing data).
-    if (lower === '' && hint === '') return true;
+    // Nothing to judge on either field → pass (don't penalize missing data),
+    // unless the config opted into strict mode: a location-restricted sweep
+    // against a provider that never returns a location would otherwise let
+    // every out-of-region posting through (#3276).
+    if (lower === '' && hint === '') return !strict;
     const matches = (m) => (lower !== '' && m(lower)) || (hint !== '' && m(hint));
     // `block_hard` is the ONE tier always_allow cannot override. It exists because
     // a European city name can be a whole word inside a non-European location, so
