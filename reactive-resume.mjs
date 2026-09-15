@@ -14,7 +14,6 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import * as yaml from 'js-yaml';
-import { isWorkspaceOutputPath, updatePDFManifest } from './generate-pdf.mjs';
 
 const PROVIDER = 'reactive-resume';
 const EMPTY_WEBSITE = { url: '', label: '', inlineLink: false };
@@ -171,8 +170,19 @@ function defaultMetadataPath(inputPath) {
 function isOutputArtifact(pathValue) {
   const outputRoot = resolve('output');
   const rel = relative(outputRoot, resolve(pathValue));
-  return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`)
-    && isWorkspaceOutputPath(pathValue);
+  return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`);
+}
+
+async function recordPdf(report, pdfPath, inputPath) {
+  const manifest = resolve('data/pdf-index.tsv');
+  const toRelative = (value) => relative(process.cwd(), value).split(sep).join('/');
+  const pdf = toRelative(pdfPath);
+  const lines = existsSync(manifest)
+    ? (await readFile(manifest, 'utf8')).split('\n').filter((line) => line && !line.startsWith('#') && !line.startsWith(`${report}\t`) && line.split('\t')[1] !== pdf)
+    : [];
+  lines.push([report, pdf, toRelative(inputPath), PROVIDER, new Date().toISOString().slice(0, 10)].join('\t'));
+  await mkdir(dirname(manifest), { recursive: true });
+  await writeFile(manifest, '# report\tpdf\tsource\tprovider\tdate\n' + lines.join('\n') + '\n');
 }
 
 export async function renderReactiveResume({
@@ -223,7 +233,7 @@ export async function renderReactiveResume({
   const pdf = await request(fetchImpl, baseUrl, apiKey, `/resumes/${encodeURIComponent(resumeId)}/pdf`);
   await mkdir(dirname(resolve(outputPath)), { recursive: true });
   await writeFile(resolve(outputPath), Buffer.from(pdf));
-  if (recordManifest) updatePDFManifest(report, resolve(outputPath), resolve(inputPath), PROVIDER);
+  if (recordManifest) await recordPdf(report, resolve(outputPath), resolve(inputPath));
   return { resumeId, metadataPath: resolve(metadataPath), outputPath: resolve(outputPath) };
 }
 

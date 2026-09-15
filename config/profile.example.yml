@@ -123,7 +123,7 @@ spend_tier: standard
 #   margin:       "0.5in"                # page margin (@page)
 
 cv:
-  output_format: "html" # "html" (default), "latex", or "reactive-resume"
+  output_format: "reactive-resume"
   # Local Reactive Resume output and managed job-specific copies.
   # Keep REACTIVE_RESUME_API_KEY in .env; never put it in this file.
   # reactive_resume:
