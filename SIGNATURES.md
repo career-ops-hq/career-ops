@@ -173,3 +173,4 @@ public commit with a stated reason.
 - @wpu3325 | Wilson Pu | 2026-09-13 | "wpu3325 I want hiring processes to be as intentional, unbiased, and fair as possible." | id:22037720 | src:https://github.com/career-ops-hq/career-ops/discussions/4163 | n:125
 - @jcalcan | 2026-09-15 | id:149669723 | src:https://github.com/career-ops-hq/career-ops/discussions/4196 | n:126
 - @manueldejodar | 2026-09-15 | id:329440006 | src:https://github.com/career-ops-hq/career-ops/discussions/4213 | n:127
+- @khushibansal0999-lang | Khushi Bansal | 2026-09-15 | id:291288340 | src:https://github.com/career-ops-hq/career-ops/discussions/4225 | n:128
