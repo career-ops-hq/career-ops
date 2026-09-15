@@ -190,6 +190,10 @@ test("firstProseParagraph skips tables", () => {
     firstProseParagraph("| Field | Value |\n|-------|--------|\n| A | B |\n\nPHP is the gate."),
     "PHP is the gate.",
   );
+  assert.equal(
+    firstProseParagraph("| Field | Value |\n|-------|--------|\n| A | B |\nPHP is the gate."),
+    "PHP is the gate.",
+  );
 });
 
 test("verdictReason reads the header lede above ---", () => {

@@ -153,11 +153,15 @@ export function isLeadSection(section) {
  * @returns {string}
  */
 export function firstProseParagraph(md) {
+  const withoutTables = String(md ?? "")
+    .split("\n")
+    .map((l) => (/^\s*\|/.test(l) ? "" : l))
+    .join("\n");
   return (
-    String(md ?? "")
+    withoutTables
       .split(/\n{2,}/)
       .map((p) => p.replace(/^#+\s+/, "").trim())
-      .find((p) => p && !p.startsWith("|") && !/^[-*]{3,}$/.test(p) && !/^\*\*[^*]+:\*\*/.test(p)) ?? ""
+      .find((p) => p && !/^[-*]{3,}$/.test(p) && !/^\*\*[^*]+:\*\*/.test(p)) ?? ""
   );
 }
 

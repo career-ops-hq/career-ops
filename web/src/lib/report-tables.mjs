@@ -10,8 +10,25 @@
 export function pipeCells(line) {
   const t = String(line ?? "").trim();
   if (!t.startsWith("|")) return [];
-  const inner = t.endsWith("|") ? t.slice(1, -1) : t.slice(1);
-  return inner.split("|").map((c) => c.trim());
+  const parts = [];
+  let buf = "";
+  for (let i = 0; i < t.length; i++) {
+    if (t[i] === "\\" && t[i + 1] === "|") {
+      buf += "|";
+      i += 1;
+      continue;
+    }
+    if (t[i] === "|") {
+      parts.push(buf);
+      buf = "";
+      continue;
+    }
+    buf += t[i];
+  }
+  parts.push(buf);
+  if (parts[0] === "") parts.shift();
+  if (parts.length && parts[parts.length - 1] === "") parts.pop();
+  return parts.map((c) => c.trim());
 }
 
 /**
@@ -115,4 +132,13 @@ export function colIndex(header, names) {
     if (i >= 0) return i;
   }
   return -1;
+}
+
+/**
+ * Exact "Fit" column only — never "outfit" / prose headers.
+ * @param {string[]} header
+ * @returns {number}
+ */
+export function fitColumnIndex(header) {
+  return (header || []).findIndex((h) => String(h).trim().toLowerCase() === "fit");
 }

@@ -7,6 +7,7 @@ import {
   parsePipeTable,
   pipeCells,
   splitPipeTables,
+  fitColumnIndex,
 } from "../../src/lib/report-tables.mjs";
 
 const STAR_MD = `| # | JD requirement | STAR+R story | S | T | A | R | Reflection |
@@ -15,6 +16,10 @@ const STAR_MD = `| # | JD requirement | STAR+R story | S | T | A | R | Reflectio
 
 test("pipeCells splits a GFM row", () => {
   assert.deepEqual(pipeCells("| Strong | Gap |"), ["Strong", "Gap"]);
+});
+
+test("pipeCells keeps escaped pipes inside a cell", () => {
+  assert.deepEqual(pipeCells("| Bash \\| PowerShell | Strong |"), ["Bash | PowerShell", "Strong"]);
 });
 
 test("isStarTableHeader requires S T A R plus a STAR-named column", () => {
@@ -51,6 +56,12 @@ test("fitTone only colors short Fit labels", () => {
   assert.equal(fitTone("Adequate"), "warn");
   assert.equal(fitTone("Acme: internal AI on Graph — Strong evidence of ops AI."), null);
   assert.equal(fitTone(""), null);
+});
+
+test("fitColumnIndex is the exact Fit column", () => {
+  assert.equal(fitColumnIndex(["JD requirement", "Evidence (CV)", "Fit"]), 2);
+  assert.equal(fitColumnIndex(["Field", "Value"]), -1);
+  assert.equal(fitColumnIndex(["outfit", "Fit"]), 1);
 });
 
 test("splitPipeTables keeps prose around a table", () => {

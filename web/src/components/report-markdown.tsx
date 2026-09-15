@@ -5,6 +5,7 @@ import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   colIndex,
+  fitColumnIndex,
   fitTone,
   isStarTableHeader,
   parsePipeTable,
@@ -21,17 +22,25 @@ function nodeText(node: ReactNode): string {
   return "";
 }
 
-const markdownComponents = {
-  td: ({ children, ...props }: React.TdHTMLAttributes<HTMLTableCellElement>) => {
-    const tone = fitTone(nodeText(children));
-    if (!tone) return <td {...props}>{children}</td>;
-    return (
-      <td {...props}>
-        <Badge tone={tone}>{children}</Badge>
-      </td>
-    );
-  },
-};
+function markdownComponents(fitCol: number) {
+  let tdIndex = 0;
+  return {
+    tr: ({ children, ...props }: React.HTMLAttributes<HTMLTableRowElement>) => {
+      tdIndex = 0;
+      return <tr {...props}>{children}</tr>;
+    },
+    td: ({ children, ...props }: React.TdHTMLAttributes<HTMLTableCellElement>) => {
+      const i = tdIndex++;
+      const tone = i === fitCol ? fitTone(nodeText(children)) : null;
+      if (!tone) return <td {...props}>{children}</td>;
+      return (
+        <td {...props}>
+          <Badge tone={tone}>{children}</Badge>
+        </td>
+      );
+    },
+  };
+}
 
 function StarCards({ header, rows }: { header: string[]; rows: string[][] }) {
   const iNum = colIndex(header, ["#"]);
@@ -99,9 +108,15 @@ export function ReportMarkdown({ children }: { children: string }) {
           if (parsed && isStarTableHeader(parsed.header)) {
             return <StarCards key={i} header={parsed.header} rows={parsed.rows} />;
           }
+          const fitCol = parsed ? fitColumnIndex(parsed.header) : -1;
+          return (
+            <ReactMarkdown key={i} remarkPlugins={[remarkGfm]} components={markdownComponents(fitCol)}>
+              {c.text}
+            </ReactMarkdown>
+          );
         }
         return (
-          <ReactMarkdown key={i} remarkPlugins={[remarkGfm]} components={markdownComponents}>
+          <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
             {c.text}
           </ReactMarkdown>
         );

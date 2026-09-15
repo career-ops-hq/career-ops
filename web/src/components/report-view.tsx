@@ -33,6 +33,11 @@ function isMachine(heading: string): boolean {
   return /machine summary|submitted|submit[-\s]?log/i.test(heading);
 }
 
+function httpUrl(url?: string | null): string | undefined {
+  if (!url) return undefined;
+  return /^https?:\/\//i.test(url) ? url : undefined;
+}
+
 function preview(md: string): string {
   const table = parsePipeTable(md);
   if (table && isStarTableHeader(table.header)) {
@@ -75,7 +80,7 @@ export function ReportView({
   const line = applyLineLabel(score ?? "");
   const recommended = line === "Recommended";
   const quietApply = applyCtaQuiet({ score, legitimacy: meta?.legitimacy });
-  const applyUrl = url && url.startsWith("http") ? url : undefined;
+  const applyUrl = httpUrl(url);
   const pdfReady = (app?.pdf ?? "").includes("✅") || pdfReadyFromIndex;
   const company = app ? companyPresentation(app) : null;
   const companyName = company?.label ?? app?.company ?? meta?.title ?? id;
@@ -132,13 +137,6 @@ export function ReportView({
         <>
           {(() => {
             const { intro, sections } = splitSections(meta?.body ?? report);
-            if (sections.length === 0) {
-              return (
-                <article className="report-prose mt-8">
-                  <ReportMarkdown>{meta?.body ?? report}</ReportMarkdown>
-                </article>
-              );
-            }
             const verdictSection = sections.find((s) => isVerdictHeading(s.heading));
             const rest = sections.filter((s) => s !== verdictSection);
             const machine = rest.filter((s) => isMachine(s.heading));
@@ -151,36 +149,48 @@ export function ReportView({
             const verdictClass = recommended
               ? "border-brand/25 bg-brand-soft/50"
               : "border-border bg-surface/50";
-
+            const callout = (
+              <div className={`rounded-2xl border px-5 py-5 ${verdictClass}`}>
+                <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-faint">Verdict</p>
+                <div className="mt-2 flex flex-wrap items-end gap-x-3 gap-y-1">
+                  {score ? (
+                    <p className="font-display text-4xl tabular-nums tracking-tight text-landing">{score}</p>
+                  ) : (
+                    <p className="text-sm text-muted">No score on this report.</p>
+                  )}
+                  <p className="pb-1 text-xs text-muted">Apply line is {APPLY_LINE.toFixed(1)}</p>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {score && <Badge tone={scoreTone(score)}>{score}</Badge>}
+                  {line && <Badge tone={recommended ? "good" : "muted"}>{line}</Badge>}
+                  {decision && <Badge tone="info">{decision}</Badge>}
+                  {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{meta.legitimacy}</Badge>}
+                </div>
+                {reason && <p className="mt-4 text-[15px] font-medium leading-relaxed text-foreground">{reason}</p>}
+                <div className="mt-4">
+                  <ApplyButton
+                    n={id}
+                    url={applyUrl}
+                    company={companyName}
+                    pdfReady={pdfReady}
+                    quiet={quietApply}
+                  />
+                </div>
+              </div>
+            );
+            if (sections.length === 0) {
+              return (
+                <div className="mt-8">
+                  {callout}
+                  <article className="report-prose mt-6">
+                    <ReportMarkdown>{meta?.body ?? report}</ReportMarkdown>
+                  </article>
+                </div>
+              );
+            }
             return (
               <div className="mt-8">
-                <div className={`rounded-2xl border px-5 py-5 ${verdictClass}`}>
-                  <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-faint">Verdict</p>
-                  <div className="mt-2 flex flex-wrap items-end gap-x-3 gap-y-1">
-                    {score ? (
-                      <p className="font-display text-4xl tabular-nums tracking-tight text-landing">{score}</p>
-                    ) : (
-                      <p className="text-sm text-muted">No score on this report.</p>
-                    )}
-                    <p className="pb-1 text-xs text-muted">Apply line is {APPLY_LINE.toFixed(1)}</p>
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {score && <Badge tone={scoreTone(score)}>{score}</Badge>}
-                    {line && <Badge tone={recommended ? "good" : "muted"}>{line}</Badge>}
-                    {decision && <Badge tone="info">{decision}</Badge>}
-                    {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{meta.legitimacy}</Badge>}
-                  </div>
-                  {reason && <p className="mt-4 text-[15px] font-medium leading-relaxed text-foreground">{reason}</p>}
-                  <div className="mt-4">
-                    <ApplyButton
-                      n={id}
-                      url={applyUrl}
-                      company={companyName}
-                      pdfReady={pdfReady}
-                      quiet={quietApply}
-                    />
-                  </div>
-                </div>
+                {callout}
 
                 {mainSections.map((s, i) => {
                   const expanded = isLeadSection(s);
