@@ -6,7 +6,7 @@
 // untracks a path git already has, so the update looks like it silently did
 // nothing (career-ops#2881) with no signal pointing at .bak. This pins the
 // doctor check that surfaces it instead of letting it stay silent.
-import { pass, fail, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, NODE, ROOT, makeHermeticGitRunner } from './helpers.mjs';
 import { execFileSync } from 'child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -29,24 +29,22 @@ function runDoctor(cwd) {
   }
 }
 
-function git(cwd, ...args) {
-  execFileSync('git', args, { cwd, stdio: 'ignore' });
-}
-
 function initRepo(dir) {
-  git(dir, 'init', '-q');
-  git(dir, 'config', 'user.email', 'test@example.com');
-  git(dir, 'config', 'user.name', 'Test');
+  const git = makeHermeticGitRunner(dir);
+  git('init', '-q');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'user.name', 'Test');
+  return git;
 }
 
 // 1. A tracked .bak file is reported as a warning naming the remedy.
 {
   const dir = mkdtempSync(join(tmpdir(), 'co-bak-2-'));
   try {
-    initRepo(dir);
+    const git = initRepo(dir);
     writeFileSync(join(dir, 'notes.md.bak'), 'stale backup\n', 'utf-8');
-    git(dir, 'add', 'notes.md.bak');
-    git(dir, 'commit', '-q', '-m', 'accidentally tracked backup');
+    git('add', 'notes.md.bak');
+    git('commit', '-q', '-m', 'accidentally tracked backup');
 
     const state = runDoctor(dir);
     if (state._error) {
@@ -73,10 +71,10 @@ function initRepo(dir) {
 {
   const dir = mkdtempSync(join(tmpdir(), 'co-bak-3-'));
   try {
-    initRepo(dir);
+    const git = initRepo(dir);
     writeFileSync(join(dir, 'cv.md'), '# CV\n', 'utf-8');
-    git(dir, 'add', 'cv.md');
-    git(dir, 'commit', '-q', '-m', 'add cv');
+    git('add', 'cv.md');
+    git('commit', '-q', '-m', 'add cv');
 
     const state = runDoctor(dir);
     if (state._error) {

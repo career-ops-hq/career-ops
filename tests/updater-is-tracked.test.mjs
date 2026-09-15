@@ -32,12 +32,12 @@
 import { writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, makeUpdaterRepo } from './helpers.mjs';
-import { gitIn, isTracked } from '../update-system.mjs';
+import { isTracked } from '../update-system.mjs';
 
 // Shared with updater-add-paths.test.mjs so the git-isolation pins live in one
 // body: dropping one has to redden both suites, not leave this one quietly
 // unprotected. `root` is omitted because isTracked never reads it.
-const makeRepo = () => makeUpdaterRepo(gitIn, { prefix: 'co-istracked-' });
+const makeRepo = () => makeUpdaterRepo({ prefix: 'co-istracked-' });
 
 console.log('\n🧪 Testing isTracked (ignored-but-tracked vs never-tracked)...');
 
