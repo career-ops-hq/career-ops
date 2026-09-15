@@ -141,7 +141,7 @@ career-opsは複数のモードを持つ単一のスラッシュコマンドで�
 
 ```
 /career-ops                → 利用可能なすべてのコマンドを表示
-/career-ops {求人票を貼る}  → 完全自動パイプライン（評価 + PDF + トラッカー）
+/career-ops auto-pipeline {求人票を貼る}  → 完全自動パイプライン（評価 + PDF + トラッカー）
 /career-ops scan           → ポータルをスキャンして新しい求人を探す
 /career-ops pdf            → ATS最適化CVを生成
 /career-ops batch          → 複数オファーをバッチ評価

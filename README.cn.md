@@ -185,7 +185,7 @@ career-ops 是一个单一斜杠命令，带有多种模式：
 
 ```
 /career-ops                → 显示所有可用命令
-/career-ops {粘贴职位描述}  → 完整自动管道（评估 + PDF + 追踪）
+/career-ops auto-pipeline {粘贴职位描述}  → 完整自动管道（评估 + PDF + 追踪）
 /career-ops scan           → 扫描平台上的新职位
 /career-ops pdf            → 生成 ATS 优化简历
 /career-ops batch          → 批量评估多个职位

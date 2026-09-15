@@ -136,7 +136,7 @@ career-ops er én slash-kommando med flere tilstande:
 
 ```text
 /career-ops                    → Vis alle tilgængelige kommandoer
-/career-ops {indsæt stilling}  → Fuld auto-pipeline (vurdering + PDF + tracker)
+/career-ops auto-pipeline {indsæt stilling}  → Fuld auto-pipeline (vurdering + PDF + tracker)
 /career-ops scan               → Skan portaler for nye stillinger
 /career-ops pdf                → Generér ATS-optimeret CV
 /career-ops batch              → Batch-vurdering af flere stillinger

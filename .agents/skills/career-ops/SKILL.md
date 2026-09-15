@@ -2,13 +2,13 @@
 name: career-ops
 description: >-
   AI job search command center -- evaluate offers, generate CVs, scan portals,
-  track applications. Use when the user pastes a job URL or JD, asks to scan
+  track applications. Use when the user asks to evaluate a job, scan
   portals, generate a CV/PDF, track applications, prepare for interviews, draft
   outreach/emails, or run any career-ops mode.
 arguments: mode
 user_invocable: true
 user-invocable: true
-argument-hint: "[scan | discover | deep | pdf | text | latex | latex-tex | cover | email | add | expand | eu-swe | oferta | ofertas | apply | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | offer-prep | titles | upskill | followup | reply-watch | outcome | update]"
+argument-hint: "[auto-pipeline | scan | discover | deep | pdf | text | latex | latex-tex | cover | email | add | expand | eu-swe | oferta | ofertas | apply | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | offer-prep | titles | upskill | followup | reply-watch | outcome | update]"
 license: MIT
 ---
 
@@ -23,7 +23,7 @@ Before reading any repo-relative path, derive `PROJECT_ROOT` from this loaded `S
 ## Invocation Notes
 
 - CLIs with slash-command registration can expose this router as `/career-ops`.
-- In Cursor, this skill lives at `.cursor/skills/career-ops/` and is auto-discovered; ask for a mode by name, or paste a JD/URL to trigger auto-pipeline.
+- In Cursor, this skill lives at `.cursor/skills/career-ops/` and is auto-discovered; ask for a mode by name, including `auto-pipeline` for the full workflow.
 - Interactive Codex sessions use `codex` in the repo root. Slash commands are not guaranteed in Codex, so ask Codex to run the same mode by name if `/career-ops` is unavailable.
 - Headless Codex workers use `codex exec "prompt"`.
 - The routing semantics below stay the same regardless of whether the entrypoint is a slash command or a natural-language prompt.
@@ -45,7 +45,8 @@ Determine the mode from `$mode`:
 | Input | Mode |
 |-------|------|
 | (empty / no args) | `discovery` -- Show command menu |
-| JD text or URL (no sub-command) | **`auto-pipeline`** |
+| `auto-pipeline` or an explicit full-pipeline request | `auto-pipeline` |
+| JD text or URL (no sub-command) | Honor the requested task or established user preference; ask the intended operation if neither is available |
 | `oferta` | `oferta` |
 | `ofertas` | `ofertas` |
 | `contacto` | `contacto` |
@@ -85,7 +86,7 @@ Determine the mode from `$mode`:
 | `update` | `update` |
 | `cover` | `cover` |
 
-**Auto-pipeline detection:** If `$mode` is not a known sub-command AND contains JD text (keywords: "responsibilities", "requirements", "qualifications", "about the role", "we're looking for", company name + role) or a URL to a JD, execute `auto-pipeline`.
+**Auto-pipeline intent:** Execute `auto-pipeline` only when the user requests the full workflow or an established user preference covers this input. A JD, URL, or matching keyword alone does not authorize report, PDF, or tracker creation. Honor narrower requests such as summarizing a posting, evaluating fit, or preparing for an interview. If an input has no requested operation or applicable preference, ask which operation to run before loading a mode or creating artifacts; do not ask again when the intent is already clear.
 
 If `$mode` is not a sub-command AND doesn't look like a JD, show discovery.
 
@@ -113,7 +114,7 @@ If your CLI supports `/career-ops`, show this menu. In Codex, surface the same o
 Concrete equivalents for Codex prompt-driven sessions:
 
 ```text
-/career-ops {JD}           ↔ "Evaluate this JD with career-ops auto-pipeline: {JD or URL}"
+/career-ops auto-pipeline {JD} ↔ "Evaluate this JD with career-ops auto-pipeline: {JD or URL}"
 /career-ops scan           ↔ "Run the career-ops scan mode and summarize new matches."
 /career-ops pipeline       ↔ "Run the career-ops pipeline mode for data/pipeline.md."
 /career-ops pdf            ↔ "Run the career-ops pdf mode for the latest evaluated role."
@@ -127,7 +128,7 @@ Show this menu:
 career-ops -- Command Center
 
 Available commands:
-  /career-ops {JD}      → AUTO-PIPELINE: evaluate + report + PDF + tracker (paste text or URL)
+  /career-ops auto-pipeline {JD} → AUTO-PIPELINE: evaluate + report + PDF + tracker (paste text or URL)
   /career-ops pipeline  → Process pending URLs from inbox (data/pipeline.md)
   /career-ops oferta    → Evaluation only A-F (no auto PDF)
   /career-ops ofertas   → Compare and rank multiple offers
@@ -165,7 +166,7 @@ Available commands:
   /career-ops update    → Update career-ops system files with diff preview + compat check
 
 Inbox: add URLs to data/pipeline.md → /career-ops pipeline
-Or paste a JD directly to run the full pipeline.
+For the full workflow, request auto-pipeline with a JD or URL.
 ```
 
 ---

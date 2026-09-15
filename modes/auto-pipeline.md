@@ -1,6 +1,8 @@
 # Mode: auto-pipeline — Full Automatic Pipeline
 
-When the user pastes a JD (text or URL) without an explicit sub-command, execute the ENTIRE pipeline in sequence:
+When the user requests `auto-pipeline`, explicitly asks for the full workflow, or has an established preference covering this JD or URL, execute the pipeline in sequence. A pasted JD or URL alone does not select this mode; honor any narrower requested task, and ask for the intended operation only when it is missing. Full-pipeline intent covers the report, PDF, and tracker steps below; it does not authorize application submission or sending messages.
+
+For an authorized full-pipeline request:
 
 ## Step 0 — Extract JD
 

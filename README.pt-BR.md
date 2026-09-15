@@ -141,7 +141,7 @@ career-ops é um único comando slash com múltiplos modos:
 
 ```
 /career-ops                → Mostrar todos os comandos disponíveis
-/career-ops {cole um JD}   → Auto-pipeline completo (avaliar + PDF + tracker)
+/career-ops auto-pipeline {cole um JD}   → Auto-pipeline completo (avaliar + PDF + tracker)
 /career-ops scan           → Escanear portais por novas vagas
 /career-ops pdf            → Gerar CV otimizado para ATS
 /career-ops batch          → Avaliar múltiplas vagas em lote

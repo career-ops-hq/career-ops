@@ -255,7 +255,7 @@ career-ops 是一個具有多種模式的單一斜線指令：
 
 ```
 /career-ops                → 顯示所有可用指令
-/career-ops {貼上職缺描述}  → 完整自動管道（評估 + PDF + 追蹤）
+/career-ops auto-pipeline {貼上職缺描述}  → 完整自動管道（評估 + PDF + 追蹤）
 /career-ops scan           → 掃描平台尋找新職缺
 /career-ops pdf            → 生成 ATS 最佳化履歷
 /career-ops batch          → 批次評估多份職缺

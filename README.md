@@ -192,7 +192,7 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 6. Start using
-# Paste a job URL or JD text to trigger auto-pipeline
+# Request auto-pipeline with a job URL or JD text
 # If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
 # In Codex, ask for the same mode in plain language, e.g.:
 # "Run the career-ops scan mode"
@@ -319,7 +319,7 @@ career-ops uses a shared command router. In CLIs that register slash commands, i
 
 ```
 /career-ops                → Show all available commands
-/career-ops {paste a JD}   → Full auto-pipeline (evaluate + PDF + tracker)
+/career-ops auto-pipeline {paste a JD}   → Full auto-pipeline (evaluate + PDF + tracker)
 /career-ops scan           → Scan portals for new offers
 /career-ops pdf            → Generate ATS-optimized CV
 /career-ops cover          → Cover letter generator (paste JD or /career-ops cover {slug})
@@ -335,7 +335,7 @@ career-ops uses a shared command router. In CLIs that register slash commands, i
 /career-ops project        → Evaluate a portfolio project
 ```
 
-Or just paste a job URL or description directly -- career-ops auto-detects it and runs the full pipeline.
+Request `auto-pipeline` with a job URL or description to run the full workflow. A pasted posting follows your requested task or an established preference; if neither is clear, career-ops asks which operation you want before creating artifacts.
 
 In Codex, slash commands are not guaranteed. Use the same mode names in a prompt instead, or call them from `codex exec`.
 

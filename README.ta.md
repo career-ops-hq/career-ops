@@ -286,7 +286,7 @@ career-ops, அனைத்து CLI-களுக்கும் பொது�
 
 ```text
 /career-ops                → கிடைக்கக்கூடிய அனைத்து கட்டளைகளையும் காண்பி
-/career-ops {paste a JD}   → முழு Auto-Pipeline (மதிப்பீடு + PDF + Tracker)
+/career-ops auto-pipeline {paste a JD}   → முழு Auto-Pipeline (மதிப்பீடு + PDF + Tracker)
 /career-ops scan           → புதிய வேலை வாய்ப்புகளை Scan செய்
 /career-ops pdf            → ATS-optimized CV உருவாக்கு
 /career-ops cover          → Cover Letter உருவாக்கு (JD அல்லது /career-ops cover {slug})

@@ -141,7 +141,7 @@ career-ops는 다양한 모드를 가진 하나의 슬래시 커맨드입니다:
 
 ```
 /career-ops                → 사용 가능한 모든 명령어 표시
-/career-ops {JD 붙여넣기}  → 전체 자동 파이프라인 (평가 + PDF + 트래커)
+/career-ops auto-pipeline {JD 붙여넣기}  → 전체 자동 파이프라인 (평가 + PDF + 트래커)
 /career-ops scan           → 포털에서 새 공고 스캔
 /career-ops pdf            → ATS 최적화 이력서 생성
 /career-ops batch          → 여러 공고 일괄 평가
