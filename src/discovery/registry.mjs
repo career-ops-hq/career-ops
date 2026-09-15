@@ -6,7 +6,6 @@ export const discoveryOperations = Object.freeze({
   global: 'scan-ats-full.mjs',
   resolve: 'discover-ats.mjs',
   'resolve-company': 'discover-ats.mjs',
-  hn: 'scan-hn.mjs',
 });
 
 const providers = await loadProviderModules(join(dirname(fileURLToPath(import.meta.url)), '../../providers'));
