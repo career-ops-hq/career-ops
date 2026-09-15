@@ -60,10 +60,10 @@ console.log('\n🔒 user-layer files are git-ignored');
 // Pull the declared user-layer paths straight out of AGENTS.md so the test tracks
 // the document rather than a hand-copied duplicate of it.
 const agents = readFileSync(join(ROOT, 'AGENTS.md'), 'utf-8');
-const line = agents.split(/\r?\n/).find(l => l.includes('**User Layer'));
+const line = agents.split(/\r?\n/).find(l => l.includes('Use `cv.md`'));
 
 if (!line) {
-  fail('AGENTS.md no longer contains a "**User Layer" line — update this test');
+  fail('AGENTS.md no longer contains the user-data source line — update this test');
 } else {
   // Backtick-quoted paths, minus the glob suffix: `data/*` -> data/
   const paths = [...line.matchAll(/`([^`]+)`/g)]
