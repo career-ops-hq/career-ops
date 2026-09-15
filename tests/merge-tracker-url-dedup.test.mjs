@@ -34,6 +34,16 @@ ok('two genuinely different postings stay different', () => {
     normalizeUrl('https://job-boards.greenhouse.io/doordashusa/jobs/8027044'),
     normalizeUrl('https://job-boards.greenhouse.io/doordashusa/jobs/8026972'));
 });
+ok('recognized hash-route job IDs stay distinct', () => {
+  assert.notEqual(
+    normalizeUrl('https://jobs.example.com/careers#/jobs/123'),
+    normalizeUrl('https://jobs.example.com/careers#/jobs/456'));
+});
+ok('cosmetic fragments still collapse onto the fragment-free key', () => {
+  assert.equal(
+    normalizeUrl('https://jobs.example.com/careers#apply'),
+    normalizeUrl('https://jobs.example.com/careers'));
+});
 ok('idempotent', () => {
   const once = normalizeUrl('https://X.com/a/?utm_source=y');
   assert.equal(once, normalizeUrl(once));

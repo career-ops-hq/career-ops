@@ -63,18 +63,27 @@ test("Moka fragment-routed jobs keep distinct identity in both core and web keys
   assert.equal(webKey(jobB), coreKey(jobB));
 });
 
-test("Moka fragment promotion stays limited to the exact host and route", () => {
+test("fragment promotion stays limited to recognized job routes", () => {
   const base = "https://app.mokahr.com/social-recruitment/high-flyer/140576";
   const job = `${base}#/job/abc-123`;
   const cases = [
     [`${job}?view=compact`, job, "fragment query state should not change job identity"],
     [`${base}#/job/abc-123/extra`, base, "unsupported route suffix must not be promoted"],
-    ["https://example.com/tenant#/job/abc-123", "https://example.com/tenant", "another host must not be promoted"],
+    ["https://example.com/tenant#apply", "https://example.com/tenant", "cosmetic fragments must not be promoted"],
   ];
   for (const [input, expectedInput, message] of cases) {
     assert.equal(webKey(input), webKey(expectedInput), message);
     assert.equal(webKey(input), coreKey(input), `root/web parity: ${input}`);
   }
+});
+
+test("generic hash-route jobs keep distinct identity in both core and web keys", () => {
+  const base = "https://jobs.example.com/careers";
+  const jobA = `${base}#/jobs/123`;
+  const jobB = `${base}#/jobs/456`;
+  assert.notEqual(webKey(jobA), webKey(jobB), "two distinct hash-route openings collapsed to one web dedup key");
+  assert.equal(webKey(jobA), coreKey(jobA));
+  assert.equal(webKey(jobB), coreKey(jobB));
 });
 
 test("host+pathname-only shape must not return (regression lock on the pre-fix canon())", () => {

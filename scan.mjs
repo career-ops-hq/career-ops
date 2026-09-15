@@ -1298,11 +1298,12 @@ const DEDUP_STRIP_PARAMS = new Set([
 /**
  * Normalize a job posting URL into a stable dedup key.
  *
- * Strips cosmetic query params (locale/tracking), drops a trailing slash,
- * and lowercases scheme, host, and path. Only used to compute the
- * *comparison* key — callers keep writing/displaying the original URL so
- * links stay clickable and scan-history/pipeline.md stay faithful to what
- * the provider returned.
+ * Strips cosmetic query params (locale/tracking), promotes recognized
+ * hash-route job IDs before dropping other fragments, drops a trailing slash,
+ * and lowercases scheme, host, and path. Only used to compute the *comparison*
+ * key — callers keep writing/displaying the original URL so links stay
+ * clickable and scan-history/pipeline.md stay faithful to what the provider
+ * returned.
  *
  * The path is lowercased because scan.mjs and scan-ats-full.mjs run as
  * separate processes and can independently produce different casing for the
