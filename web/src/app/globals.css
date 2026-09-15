@@ -135,7 +135,7 @@ html {
 
 /* ── Report / CV markdown prose (theme-aware) ───────────────────────────── */
 .report-prose {
-  color: color-mix(in srgb, var(--fg) 88%, transparent);
+  color: var(--fg);
   font-size: 0.95rem;
   line-height: 1.7;
 }
@@ -207,6 +207,7 @@ html {
   padding: 0.55rem 0.75rem;
   vertical-align: top;
   border-top: 1px solid var(--border);
+  color: var(--fg);
   /* overflow-wrap, not word-break: `word-break: break-word` makes every
      character a soft-wrap opportunity for min-content sizing, so columns
      collapsed and words split mid-syllable ("consisten/cy"). overflow-wrap
