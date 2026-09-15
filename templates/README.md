@@ -63,6 +63,23 @@ node cv-templates.mjs resolve cv modern  # absolute path to fill
 
 **Single column, always.** All colour in these variants is decoration over a strictly top-to-bottom text flow, so PDF extraction order is unaffected. Multi-column page layouts are the classic ATS parse failure and none of these use one.
 
+### Template packs
+
+A template that needs its own **DOM**, not just its own CSS, ships as a pack: a subdirectory of `templates/` holding `cv-template.<name>.html` next to its own `sections/`. `build-cv-html.mjs` resolves section partials relative to the template file, so a pack gets its own markup without touching the `templates/sections/` every flat template shares. The name still comes from the filename, never the directory, and a name claimed by both a flat file and a pack is an error at discovery (`cv-templates.mjs`).
+
+The one shipped so far is `templates/ats/` (`cv-template.ats.html`, name `ats`): single-column, no flex or grid anywhere, every section one block element per line, for ATS parsers that walk the DOM rather than the page.
+
+**Declare the sections a pack owns.** Partials cover seven sections — `competencies`, `experience`, `projects`, `education`, `certifications`, `awards`, `skills` — and any section a pack does not ship a partial for renders through the built-in builder, which emits the DOM the pack exists to replace. A malformed partial falls back the same way. Neither says anything in the output, so a pack's manifest can make ownership an explicit, checked claim:
+
+```html
+<!-- career-ops-template
+name: ATS Friendly
+sections: all
+-->
+```
+
+`sections: all` claims every section; `sections: experience, education` claims a subset. A declared section must exist (checked when the template resolves by name) and must parse with a non-empty `<!--ENTRY-->` zone (checked when the CV renders), or the build fails naming the file — it never falls back. Undeclared sections keep the silent fallback, so a pack written before this key exists behaves exactly as it did; a pack that declares nothing is simply a pack that has not made the claim. Prefer `sections: all` for a pack whose point is its DOM, as the ATS pack does: the alternative is being correct by a coincidence the pack never stated, which the next change to a built-in builder can end without any test noticing.
+
 ### resume-template.html
 
 Resume-branded variant of `cv-template.html` for US/industry job applications. Key differences from the CV template:

@@ -240,6 +240,7 @@ const SYSTEM_PATHS = [
   'lib/outcome-types.mjs',
   'lib/latex-escape.mjs',
   'lib/cv-payload-schema.mjs',
+  'lib/template-manifest.mjs',
   'scan-hn.mjs',
   'scripts/check-syntax.mjs',
   'scripts/export-ats-text.mjs',
