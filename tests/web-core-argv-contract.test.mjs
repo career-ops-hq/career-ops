@@ -14,7 +14,7 @@
 // real script.
 import { pass, fail, ROOT, NODE, rmSync, walkFiles } from './helpers.mjs';
 import { spawnSync } from 'child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, relative, sep } from 'path';
 
@@ -153,6 +153,16 @@ try {
   // web route — or a whole new route that spawns a script — cannot land
   // without going through a probe.
 
+  // web/ ships as its own release-please component and is excluded from
+  // SYSTEM_PATHS wholesale (validate-system-paths-coverage.mjs,
+  // EXCLUDE_PREFIXES = ['web/']), so `update-system.mjs apply` never installs
+  // it. An install created that way has no web/ at all, and the two checks
+  // below read the web sources unconditionally: readFileSync threw ENOENT and
+  // took the whole suite with it, so the argv probes above — which need only
+  // the core scripts and are the point of this file — reported nothing either.
+  if (!existsSync(join(ROOT, 'web', 'src'))) {
+    pass('web/src absent — static half skipped (web/ is a separate component)');
+  } else {
   // Every `"--flag"` literal in a listed source must appear in its argv here.
   // This covers the argv literals the routes write inline; it does NOT cover a
   // flag assembled at runtime from a variable or a template string.
@@ -183,6 +193,7 @@ try {
   const stale = [...listed].filter((f) => !spawners.includes(f));
   if (stale.length === 0) pass('no stale entries — every listed source still spawns a core script');
   else fail(`listed sources that no longer spawn a core script: ${stale.join(', ')}`);
+  }
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
 }
