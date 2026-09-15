@@ -24,12 +24,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isMainModule } from '../lib/is-main-module.mjs';
-import { isNestedCheckout } from '../lib/mjs-files.mjs';
+import { trackedFiles } from '../lib/mjs-files.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -199,35 +199,20 @@ const STATIC_RELATIVE_IMPORT = new RegExp(
 // is treated as code, which can only over-report, never under-report.
 const COMMENT_LINE = /^\s*(\/\/|\*|\/\*)/;
 
-const SKIP_DIRS = new Set([
-  'node_modules', '.git',
-  // User-layer / generated trees (gitignored, may hold arbitrary user files).
-  // batch/ is deliberately NOT here: its tracked scripts (aggregate-tokens.mjs)
-  // are entrypoints like any other and stay under enforcement.
-  'output', 'data', 'reports', 'jds', 'documents', 'interview-prep',
-]);
-
-function walk(dir, out = []) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name.startsWith('.')) continue; // .tmp-* probe dirs; no tracked dotdir ships .mjs
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (SKIP_DIRS.has(entry.name)) continue;
-      // A linked worktree is a second checkout of this repo at some other
-      // commit, and `.git` in SKIP_DIRS does not catch one — it marks itself
-      // with a `.git` FILE (#3499). The dot-prefix skip above happens to cover
-      // Claude Code's default `.claude/worktrees/`, but nothing keeps a
-      // worktree there; one at `wt/` would put a stale copy of every entrypoint
-      // under enforcement, and this gate would grade source the branch does not
-      // contain — passing or failing on the age of somebody's worktree.
-      if (isNestedCheckout(full)) continue;
-      walk(full, out);
-    } else if (entry.name.endsWith('.mjs')) {
-      out.push(full);
-    }
-  }
-  return out;
-}
+// The enforced set is what the repository TRACKS, enumerated once in
+// lib/mjs-files.mjs (#3890). This used to be a private walk with a
+// hand-maintained skip-list — `node_modules`, `.git`, `output`, `data`,
+// `reports`, `jds`, `documents`, `interview-prep`, every name starting with a
+// dot, plus an isNestedCheckout() call for the linked worktree the `.git` name
+// misses (#3499). Every one of those is a directory git already declines to
+// track, so the index answers the same question with no list to maintain and
+// nothing to forget: batch/'s tracked scripts stay under enforcement because
+// they are tracked, and a gitignored worktree drops out because it is not.
+//
+// A skip-list also narrows in silence, which is the failure #3419 is named
+// after: a newly tracked entrypoint under an excluded directory would sail past
+// this gate, and the run would look exactly as green as one that read it.
+const repoSources = () => trackedFiles(ROOT, (rel) => rel.endsWith('.mjs'));
 
 // Every exemption carries its reason; an unexplained entry is a review smell.
 const EXEMPT = new Map([
@@ -263,8 +248,14 @@ function entryRefViolations(src) {
 }
 
 test('no file outside the helper reads the process entry path', () => {
+  const files = repoSources();
+  // A gate that read nothing must never read as a gate that passed. trackedFiles
+  // already throws on an empty LISTING; this pins the enforced slice of it, so a
+  // filter typo cannot quietly take every entrypoint out of scope.
+  assert.ok(files.length > 100, `expected the tracked .mjs tree, got ${files.length} files`);
+
   const offenders = [];
-  for (const file of walk(ROOT)) {
+  for (const file of files) {
     const rel = relative(ROOT, file).split('\\').join('/');
     if (EXEMPT.has(rel)) continue;
     const hits = entryRefViolations(readFileSync(file, 'utf-8'));
