@@ -77,6 +77,9 @@ export function jitteredDelayMs(baseMs) {
 //      also be matched against the IPv4 block list.
 // `0.0.0.0` and the all-zeros IPv6 `::` both reach loopback on Linux and need
 // explicit entries; the original list omitted them.
+//
+// IPv6 ULA is fc00::/7 (RFC 4193): both fc00::/8 and fd00::/8. IPv6
+// link-local is fe80::/10 (RFC 4291): fe80–febf, not only the fe80: prefix.
 const PRIVATE_HOST_PATTERNS = [
   /^localhost$/,
   /^localhost\.localdomain$/,
@@ -88,8 +91,8 @@ const PRIVATE_HOST_PATTERNS = [
   /^169\.254\./,
   /^::1$/,
   /^::$/,
-  /^fc[0-9a-f]{2}:/,
-  /^fe80:/,
+  /^f[cd][0-9a-f]{2}:/,
+  /^fe[89ab][0-9a-f]:/,
 ];
 
 // Lowercase, strip IPv6 brackets, strip FQDN trailing dot. The `hostname`
