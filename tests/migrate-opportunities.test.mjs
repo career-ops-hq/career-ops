@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { applyMigration, buildMigrationPlan, discardUnmapped } from '../migrate-opportunities.mjs';
+import { applyMigration, buildMigrationPlan, discardUnmapped } from '../scripts/migrate/opportunities.mjs';
 import { openOpportunityStore } from '../src/opportunities/store.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'career-ops-migrate-'));

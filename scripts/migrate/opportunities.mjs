@@ -5,12 +5,12 @@ import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as yaml from 'js-yaml';
-import { parseScanHistory } from './detect-reposts.mjs';
-import { parseTrackerRow, resolveColumns } from './tracker-parse.mjs';
-import { openOpportunityStore } from './src/opportunities/store.mjs';
-import { validateReviewedReport } from './scoring-report.mjs';
+import { parseScanHistory } from '../../detect-reposts.mjs';
+import { parseTrackerRow, resolveColumns } from '../../tracker-parse.mjs';
+import { openOpportunityStore } from '../../src/opportunities/store.mjs';
+import { validateReviewedReport } from '../../scoring-report.mjs';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const sha256 = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 const urlFromPipeline = text => [...text.matchAll(/https?:\/\/[^\s|]+/g)].map(match => match[0]);
 const machineSummary = text => yaml.load(text.match(/## Machine Summary\s*\n\s*```yaml\s*\n([\s\S]*?)\n```/)?.[1] ?? '');
