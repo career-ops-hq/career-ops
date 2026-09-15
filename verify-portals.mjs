@@ -724,6 +724,13 @@ async function main() {
   // SuccessFactors, SmartRecruiters, …) get a real reachability probe instead
   // of an un-actionable "skipped".
   const providers = await loadProviders(PROVIDERS_DIR);
+  // Fold in enabled keyed/auth-gated provider plugins, exactly as scan.mjs does
+  // — without this the verifier resolves only providers/*.mjs and disagrees
+  // with the scanner on every plugin-provider entry (#4026). No-op for a
+  // plugin-free install (mergeProviderPlugins returns before config/plugins.yml
+  // is read when it is absent).
+  const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
+  await mergeProviderPlugins(providers, { root: dirname(PROVIDERS_DIR) });
   const httpCtx = makeHttpCtx();
   const { found, results } = await verifyPortalsFile(filePath, { fetchJson, providers, httpCtx });
   if (!found) {
