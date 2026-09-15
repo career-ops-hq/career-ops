@@ -315,6 +315,7 @@ const SYSTEM_PATHS = [
   'detect-reposts.mjs',
   'rank-pipeline.mjs',
   'discover-ats.mjs',
+  'discover-new-companies.mjs',
   'check-table-freshness.mjs',
   'check-jd-archive.mjs',
   'fingerprint-core.mjs',
