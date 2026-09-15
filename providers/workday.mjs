@@ -293,6 +293,43 @@ function resolveEndpoint(entry) {
   return null;
 }
 
+// Workday externalPath is `/job/{Location}/{Title-slug}_{REQ}(-{n})?`. The req token
+// is the ANCHORED trailing segment — that anchoring is the whole point.
+//
+// An earlier version corroborated bulletFields with `externalPath.includes(v)`, which
+// is unanchored, and externalPath always embeds the location slug — so bulletFields
+// ["Burbank"] against /job/Burbank/Sr-Analyst_10154966 was "corroborated" and returned
+// "Burbank" as the requisition id. Two unrelated Burbank reqs then shared an id. The
+// check certified exactly the value it was written to exclude.
+const WORKDAY_REQ_RE = /_([A-Za-z0-9][A-Za-z0-9.]*)(?:-\d+)?$/;
+
+// Position alone does not identify a req: plenty of Workday titles contain an
+// underscore, so the trailing segment of `/job/Remote/Data_Scientist` is the word
+// "Scientist", and `/job/NY/Sr_Manager_Ops` yields "Ops". Two unrelated postings
+// whose titles happen to end in the same word would then share a requisition id —
+// the same collision the location slug used to cause, one layer along.
+//
+// A Workday req id always carries at least one digit (R167982, 10154966, JR113711);
+// a title word never does. Validating the token's SHAPE is what separates them, and
+// it is why bulletFields corroboration is not needed: the format check is stronger
+// than a free-text match against a field with no guaranteed slot.
+const REQ_SHAPE_RE = /\d/;
+
+function reqTokenFromPath(externalPath) {
+  if (typeof externalPath !== 'string') return undefined;
+  const m = externalPath.match(WORKDAY_REQ_RE);
+  if (!m || m[1].length < 3) return undefined;
+  return REQ_SHAPE_RE.test(m[1]) ? m[1] : undefined;
+}
+
+// bulletFields is deliberately NOT consulted. It is tenant-configurable free text
+// (location, job family, req number, …) with no guaranteed slot, so it cannot
+// identify a req on its own — and as corroboration it added nothing the anchored
+// path match had not already established.
+function reqFromWorkday(j) {
+  return reqTokenFromPath(j.externalPath);
+}
+
 function parsePostedOn(label) {
   if (!label) return undefined;
   if (/posted\s+today/i.test(label)) return Date.now();
@@ -375,6 +412,13 @@ export function parseWorkdayResponse(json, entry) {
       title: j.title || '',
       url: jobBase + j.externalPath,
       company: entry.name,
+      // The req token, NOT the whole externalPath. externalPath embeds the title
+      // slug, so it changes on exactly the title drift this capture exists to survive
+      // (Adobe: "Associate--Corporate-Strategy_R167982" -> "Sr-Associate--…_R167982-1"
+      // — the path moved, R167982 did not). Abstain when no token is recoverable
+      // rather than emitting an unstable key, matching the Ashby/Lever precedent.
+      externalId: reqTokenFromPath(j.externalPath),
+      requisitionId: reqFromWorkday(j),
       location: j.locationsText || locationFromPath(j.externalPath),
       postedAt: parsePostedOn(j.postedOn),
     });

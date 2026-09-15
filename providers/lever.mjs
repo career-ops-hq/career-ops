@@ -1,5 +1,6 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
+import { coerceId } from './_ids.mjs';
 
 // Lever provider — hits the public postings endpoint.
 // Auto-detects from careers_url via jobs.(eu.)?lever.co/<slug>.
@@ -90,6 +91,9 @@ export default {
       // payload, no per-job request) — enables scan.mjs content_filter.
       description: typeof j.descriptionPlain === 'string' ? j.descriptionPlain : '',
       postedAt: typeof j.createdAt === 'number' ? j.createdAt : undefined,
+      // Lever's posting uuid; the v0 board API exposes no employer requisition
+      // field, so requisitionId stays unset rather than being inferred.
+      externalId: coerceId(j.id),
     }));
   },
 };
