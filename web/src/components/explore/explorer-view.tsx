@@ -106,7 +106,17 @@ export function ExplorerView({
   );
 
   const isAi = mode === "ai";
-  if (running) return isAi ? <AiHuntView cliName={cli.name} /> : <DiscoveringState />;
+  if (running && isAi) return <AiHuntView cliName={cli.name} />;
+  if (running) {
+    return (
+      <>
+        <DiscoveringState />
+        <div className="relative z-[1] mx-auto max-w-5xl px-5 pb-10 md:px-8">
+          <ResultsList offers={enriched} />
+        </div>
+      </>
+    );
+  }
 
   const canDiscover = filters.ats.length > 0;
   const isResults = phase === "results";
