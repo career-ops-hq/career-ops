@@ -209,6 +209,7 @@ const SYSTEM_PATHS = [
   'application-workflow.mjs',
   'application-lifecycle.mjs',
   'application-outcome.mjs',
+  'interview-context.mjs',
   'cv-maintenance.mjs',
   'grounded-draft.mjs',
   'src/applications/context.mjs',

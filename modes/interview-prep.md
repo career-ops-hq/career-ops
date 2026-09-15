@@ -1,5 +1,9 @@
 # Mode: interview-prep — Company-Specific Interview Intelligence
 
+Before research, resolve the shared context with `interview-context.mjs` as
+defined in `modes/interview.md`. Use its report artifact, candidate facts, and
+prior sessions; do not independently select a company or report.
+
 When the user asks to prep for an interview at a specific company+role, or when an evaluation scores 4.0+ and the user updates status to `Interview`, run this mode.
 
 ## Inputs

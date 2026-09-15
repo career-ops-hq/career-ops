@@ -64,6 +64,7 @@
     "application": "node application-workflow.mjs",
     "application:lifecycle": "node application-lifecycle.mjs",
     "application:outcome": "node application-outcome.mjs",
+    "interview:context": "node interview-context.mjs",
     "cv:maintain": "node cv-maintenance.mjs",
     "draft:context": "node grounded-draft.mjs",
     "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps",

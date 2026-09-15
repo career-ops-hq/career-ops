@@ -1,5 +1,9 @@
 # Mode: interview/debrief — Post-Interview Debrief
 
+Resolve `interview-context.mjs` first. This prompt may write the matching
+session and question-bank learning. Any story-bank addition still requires its
+existing provenance marker and explicit candidate confirmation.
+
 After a real interview, capture what was asked, assess what landed and what didn't, close gaps before the next round, and update the question bank.
 
 ---

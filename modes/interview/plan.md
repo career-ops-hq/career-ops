@@ -1,5 +1,9 @@
 # Mode: interview/plan — Interview Prep Planner
 
+Resolve `interview-context.mjs` first. This prompt produces only a time-boxed
+plan from that context; it does not rewrite candidate facts, sessions, or
+story-bank entries.
+
 Given a job description and interview date/time, build a structured, time-blocked preparation plan tailored to the candidate's specific gaps.
 
 ---
