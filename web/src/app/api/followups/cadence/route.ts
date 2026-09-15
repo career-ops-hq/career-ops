@@ -39,7 +39,9 @@ async function readCoreDefaults(): Promise<Partial<Record<ProfileCadenceKey, num
   const script = rootScript("followup-cadence");
   if (!fs.existsSync(script)) return null;
   const stdout = await new Promise<string>((resolve) => {
-    execFile("node", [script, "--json"], { cwd: careerOpsRoot(), timeout: 12_000 }, (_e, out) => resolve(out || ""));
+    // process.execPath + windowsHide: see api/doctor/route.ts — a stale inherited
+    // console kills every child with 0xC0000142 on Windows; never inherit one.
+    execFile(process.execPath, [script, "--json"], { cwd: careerOpsRoot(), timeout: 12_000, windowsHide: true }, (_e, out) => resolve(out || ""));
   });
   try {
     const start = stdout.indexOf("{");

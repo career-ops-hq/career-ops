@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { resolveNpmShim } from "./resolve-npm-shim.mjs";
 
 // Plain .mjs (same pattern as tracker-table.mjs/clean-chips.mjs) so
 // tests/lib/spawn-cli.test.mjs can import it directly under Node. Import it with the
@@ -27,7 +28,17 @@ import { spawn } from "node:child_process";
  * @param {import("node:child_process").SpawnOptionsWithoutStdio} options
  */
 export function spawnHeadlessCli(binPath, args, options) {
-  const child = spawn(binPath, args, options);
+  // An npm-installed CLI on Windows resolves to a shim that spawn() cannot run
+  // without a shell (#2375). Swap it for the real entrypoint here, at the one
+  // spawn boundary, so no route has to know shims exist — and `shell` stays off.
+  const { file, prefixArgs } = resolveNpmShim(binPath);
+  // windowsHide: on Windows a child normally attaches to the parent's console.
+  // A long-lived dev server whose console has gone stale then kills EVERY child
+  // at DLL init with 0xC0000142 (STATUS_DLL_INIT_FAILED) — measured: node.exe,
+  // cmd.exe and where.exe all failed identically, while the same spawns with
+  // windowsHide (CREATE_NO_WINDOW) or detached succeeded. Nothing here needs a
+  // console, so never inherit one. No-op on POSIX.
+  const child = spawn(file, [...prefixArgs, ...args], { ...options, windowsHide: true });
   child.stdin?.end();
   return child;
 }
