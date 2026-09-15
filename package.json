@@ -45,7 +45,7 @@
     "upskill": "node upskill.mjs",
     "prepare:role": "node preparation-plan.mjs",
     "prescreen": "node prescreen.mjs",
-    "add": "node add-entry.mjs",
+    "add": "node cv-maintenance.mjs",
     "reposts": "node detect-reposts.mjs",
     "digest": "node weekly-digest.mjs",
     "freshness": "node check-table-freshness.mjs",
@@ -64,6 +64,7 @@
     "application": "node application-workflow.mjs",
     "application:lifecycle": "node application-lifecycle.mjs",
     "application:outcome": "node application-outcome.mjs",
+    "cv:maintain": "node cv-maintenance.mjs",
     "draft:context": "node grounded-draft.mjs",
     "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps",
     "manifesto": "node manifesto.mjs"

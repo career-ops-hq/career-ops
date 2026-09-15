@@ -327,7 +327,7 @@ Two separate axes:
 | Wants to record application outcome & archive artifacts | `outcome` |
 | Wants to update the system | `update` |
 | Wants to queue a request for later / check the inbox between sessions | `agent-inbox` — append-only checklist drained next session; nothing auto-submits |
-| Wants to add a finished project, paper, or role to the CV | `add` — source-grounded preview, confirm-before-write; dedup + insertion via `add-entry.mjs` |
+| Wants to add a finished project, paper, or role to the CV | `add` — source-grounded preview and confirmation via `cv-maintenance.mjs` |
 
 ### CV Source of Truth
 
