@@ -106,7 +106,12 @@ function resolveMaxPages(entry) {
 // unfaceted crawl, and a board it could not finish keeps the workdayTruncated
 // tag rather than being reported as complete.
 
-/** Sum one facet's value counts; null when none of its values carry a count. */
+/**
+ * Sum one facet's value counts; null when none of its values carry a count.
+ *
+ * Reads a facet's own `values` only. Nested children are deliberately not
+ * summed — see the trap documented on `chooseSplitFacet()` (#3875).
+ */
 function facetCoverage(facet) {
   const values = Array.isArray(facet?.values) ? facet.values : [];
   let sum = 0;
@@ -152,6 +157,20 @@ export function trueTotalFromFacets(facets) {
  *
  * `exclude` carries the facet parameters already applied further up the split,
  * without which re-splitting a slice would keep re-deriving the same partition.
+ *
+ * Descending into those id-less headers' nested children looks like a free
+ * improvement — more values, a finer partition — and is a trap. On
+ * dickssportinggoods|wd1|dsg (measured 2026-08-28) `locationMainGroup` carries
+ * 2 group parents whose 938 nested children sum to 16,732 against a board of
+ * ~8,366: almost exactly 2.00x, because a requisition open in several locations
+ * is counted once per location. Every other counted facet on that board agrees
+ * within 0.9% and errs downward. Since `trueTotalFromFacets()` takes the
+ * maximum, recursing would double the true total, make every healthy board
+ * compare its honest `total` against it and read as offset-clamped, and hand
+ * `workdayTruncated` to boards that were complete — a silent failure that looks
+ * like success. The `id` filter below is what keeps that shut; it is
+ * load-bearing, not tidiness. See #3875; pinned by the nested-shape fixture in
+ * tests/providers/workday-facet-split.test.mjs.
  *
  * Exported for the test suite.
  */
