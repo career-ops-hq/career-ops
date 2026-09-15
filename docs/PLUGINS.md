@@ -110,11 +110,6 @@ Every community plugin in the registry is reviewed and pinned to an exact commit
 
 | Plugin | What it does | Hooks | Keys needed | Author |
 | --- | --- | --- | --- | --- |
-| [career-ops-plugin-tavily](https://github.com/Schlaflied/career-ops-plugin-tavily) | Tavily search/extract for job scanning, liveness checks, and company research. | search | `TAVILY_API_KEY` | @Schlaflied |
-| [career-ops-plugin-google-calendar](https://github.com/Schlaflied/career-ops-plugin-google-calendar) | Google Calendar ingest — detect upcoming interview events and surface them in the career-ops pipeline. | ingest | `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`, `GOOGLE_CALENDAR_REFRESH_TOKEN` | @Schlaflied |
-| [career-ops-plugin-linkedin-alerts](https://github.com/Schlaflied/career-ops-plugin-linkedin-alerts) | LinkedIn job alert ingest — parse LinkedIn alert emails from your Gmail inbox, normalize tracking links to canonical job URLs, and surface them in the career-ops pipeline. | ingest | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | @Schlaflied |
-| [career-ops-plugin-outlook-interviews](https://github.com/Schlaflied/career-ops-plugin-outlook-interviews) | Outlook interview ingest — detect interview invitation emails via Microsoft Graph, extract company / role / meeting link, and surface them in the career-ops pipeline. | ingest | `MSGRAPH_CLIENT_ID`, `MSGRAPH_REFRESH_TOKEN` (optional: `MSGRAPH_CLIENT_SECRET`) | @Schlaflied |
-| [career-ops-plugin-obsidian](https://github.com/Schlaflied/career-ops-plugin-obsidian) | Obsidian export — mirror the tracker into your vault as frontmatter notes queryable by Dataview/Bases; frontmatter belongs to the machine, the note body belongs to you. | export | None | @Schlaflied |
 
 To add your own plugin to the registry, follow the [Publishing + getting approved](#publishing--getting-approved) flow above.
 

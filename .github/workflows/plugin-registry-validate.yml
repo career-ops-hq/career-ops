@@ -59,5 +59,12 @@ jobs:
             echo "Migration PR (removes legacy plugins-registry.json) — one-plugin-per-PR gate not applicable."
             exit 0
           fi
-          CHANGED=$(git diff --name-only "origin/$BASE_REF"...HEAD -- 'plugins-registry/*.json' plugins-registry.json | wc -l)
+          # ADDED or MODIFIED only, which is what the message below actually
+          # describes. Counting deletions too made retiring dead entries
+          # impossible: `--deep` clones every remaining entry, so it stays red
+          # until the LAST dead entry is gone, while this gate refuses any PR
+          # that removes more than one. Neither a single PR nor a split series
+          # can be green (#4130). Registration PRs are unaffected — adding or
+          # bumping two entries still fails here.
+          CHANGED=$(git diff --name-only --diff-filter=AM "origin/$BASE_REF"...HEAD -- 'plugins-registry/*.json' plugins-registry.json | wc -l)
           if [ "$CHANGED" -gt 1 ]; then echo "A registry PR may add or bump exactly one plugins-registry/<id>.json file"; exit 1; fi
