@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { careerOpsEnv, careerOpsCodeRoot, careerOpsRoot, rootScript } from "@/lib/career-ops";
 import type { DiscoveredOffer } from "./scan";
 
 /**
@@ -41,7 +41,7 @@ export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResul
   }
 
   const scanUrl = pathToFileURL(rootScript("scan")).href;
-  const localTodayUrl = pathToFileURL(path.join(careerOpsRoot(), "lib", "local-today.mjs")).href;
+  const localTodayUrl = pathToFileURL(path.join(careerOpsCodeRoot(), "lib", "local-today.mjs")).href;
   const code = `
 import { appendToPipeline, appendToScanHistory } from ${JSON.stringify(scanUrl)};
 import { localToday } from ${JSON.stringify(localTodayUrl)};
@@ -67,7 +67,7 @@ process.stdin.on("end", async () => {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, ["--input-type=module", "-e", code], {
       cwd: careerOpsRoot(),
-      env: process.env,
+      env: careerOpsEnv(),
     });
     let out = "";
     let err = "";

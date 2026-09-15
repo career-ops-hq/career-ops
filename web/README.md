@@ -19,8 +19,10 @@ npm ci
 npm run dev
 ```
 
-Open http://localhost:3000. The app reads the career-ops checkout it lives in
-(the parent directory) — your existing CV, pipeline and reports appear as-is.
+Open http://localhost:3000. The app reads the same Data Root as the CLI — your
+existing CV, pipeline and reports appear as-is. By default this is the parent
+checkout; `CAREER_OPS_DATA_DIR` or its `.career-ops-data` marker can select a
+separate directory for user files.
 
 ## What works today
 
@@ -61,8 +63,24 @@ npx tsc --noEmit     # typecheck
 npm run build        # production build
 ```
 
-Set `CAREER_OPS_ROOT=/path/to/checkout` in `web/.env.local` to point the app at
-a different career-ops directory (useful for testing against sample data).
+Workspace settings can be placed in `web/.env.local`:
+
+- `CAREER_OPS_ROOT=/path/to/checkout` preserves the web's existing behavior:
+  select another checkout for both user files and core scripts.
+- Otherwise, `CAREER_OPS_DATA_DIR=/path/to/data` selects user files while core
+  scripts, templates and modes stay in the checkout hosting `web/`.
+- With neither variable set, `.career-ops-data` in the hosting checkout selects
+  the user directory. An empty or absent marker uses the checkout itself.
+
+Relative paths are resolved from the hosting checkout, not `web/`.
+`CAREER_OPS_ROOT` takes precedence over `CAREER_OPS_DATA_DIR` and the marker.
+An unreadable marker is an error; the web does not silently switch workspaces.
+
+Separate user directories work for viewing and configuration. AI evaluation,
+CV/PDF generation and portal repair still require a complete selected workspace
+with user files and core together: their prompts and renderer use one working
+directory. The existing run guard reports a missing mode or script before
+starting the agent.
 
 `/api` is gated by the same-origin + loopback guard in `src/lib/origin-guard.mjs`.
 Two opt-ins widen it, both unset by default and both in `web/.env.local`:

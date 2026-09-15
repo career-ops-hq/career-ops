@@ -48,8 +48,10 @@ export function withLogLock<T>(fn: () => T | Promise<T>): Promise<T> {
 // eats the timeout and a 409 — for a race the free in-process queue already
 // resolves. Every followups writer goes through here so no call site can get
 // the nesting wrong.
-export function withFollowupsWrite<T>(fn: () => T | Promise<T>): Promise<T> {
-  return withLogLock(() => withFollowupsLock(followupsLogPath(), fn));
+// Lock the same captured file the callback writes, even if the workspace
+// marker changes while this request waits in the queue.
+export function withFollowupsWrite<T>(file: string, fn: () => T | Promise<T>): Promise<T> {
+  return withLogLock(() => withFollowupsLock(file, fn));
 }
 
 // Map a throw from withFollowupsWrite onto an HTTP response, consistently across
