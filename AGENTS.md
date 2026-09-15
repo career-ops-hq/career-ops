@@ -280,6 +280,18 @@ Default modes are in `modes/` (English). Market-specific mode sets (each include
 | Japanese (Japan) | `modes/ja/` | `kyujin` / `oubo` | 正社員, 賞与, みなし残業, 年俸制, 36協定 |
 | Turkish (Turkey) | `modes/tr/` | `is-ilani` / `basvuru` | SGK, kıdem tazminatı, brüt/net maaş, BES |
 | Hindi (India) | `modes/hi/` | `naukri` / `aavedan` | CTC vs. in-hand, PF/EPF, Notice period/buyout, ESOPs |
+| Spanish (ES/LatAm) | `modes/es/` | `oferta` / `aplicar` | Contrato indefinido, convenio, pagas extra, Seguridad Social |
+| Portuguese (BR/PT) | `modes/pt/` | `oferta` / `aplicar` | CLT, PJ, FGTS, 13º, férias, vale-refeição |
+| Italian (Italy) | `modes/it/` | `annuncio` / `candidarsi` | CCNL, tempo indeterminato, tredicesima |
+| Dutch (NL/BE) | `modes/nl/` | `vacature` / `solliciteren` | vakantiegeld, proeftijd, opzegtermijn, pensioen |
+| Polish (Poland) | `modes/pl/` | `oferta` / `aplikuj` | Umowa o pracę, B2B, ZUS, okres wypowiedzenia, urlop |
+| Danish (Denmark) | `modes/da/` | `oferta` / `apply` | løn, opsigelsesvarsel, ferie, overenskomst, A-kasse |
+| Russian | `modes/ru/` | `oferta` / `apply` | ТК РФ, оклад, испытательный срок, самозанятый, ДМС |
+| Ukrainian (Ukraine) | `modes/ua/` | `oferta` / `apply` | ФОП, КЗпП, оклад, випробувальний термін |
+| Chinese, Simplified | `modes/zh/` | `oferta` / `apply` | 五险一金, 试用期, 年终奖, 劳动合同, 竞业 |
+| Chinese, Traditional | `modes/zh-TW/` | `oferta` / `apply` | 勞保, 試用期, 年終獎金, 勞動契約, 特休 |
+| Korean (South Korea) | `modes/ko/` | `gonggo` / `jiwon` | 정규직, 계약직, 퇴직금, 연봉 |
+| Indonesian (Indonesia) | `modes/id/` | `lowongan` / `melamar` | THR, BPJS, PKWT, pesangon, UMR |
 
 ### Output Language vs Market Modes
 
