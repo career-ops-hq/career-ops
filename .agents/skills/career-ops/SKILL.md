@@ -5,24 +5,17 @@ arguments: mode
 user-invocable: true
 ---
 
-# Career-ops router
+# Career Ops router
 
 Read `prompts/shared/contract.md`, resolve `language.output` from
-`config/profile.yml`, then read the domain prompt and inputs named in
-`prompts/CONTEXT_MANIFEST.md`. The manifest is the complete context contract.
+`config/profile.yml`, then load the matching row from
+`prompts/CONTEXT_MANIFEST.md`.
 
-Route `scan`, `discover`, `pipeline`, a pasted JD/URL, `oferta`, `evaluate`, and
-`shortlist`, `batch`, `ofertas`, `deep`, `triage`, `eu-swe`, and `eu-fintech`
-to evaluation; `apply`, `pdf`, `latex`, `latex-tex`, `cover`, `email`, and
-`contacto` to applications; all `interview*` commands to interviews; `add`,
-`expand`, and `intake` to CV; and `tracker`, `followup`, `reply-watch`,
-`outcome`, `offer-prep`, `patterns`, `titles`, `upskill`, `training`, and
-`project`, `agent-inbox`, `inbox`, and `update` to insights.
+- Discovery, evaluation, and shortlist requests use `evaluation`.
+- Drafting an application uses `applications`; never submit or send it.
+- Interview preparation uses `interviews`.
+- CV maintenance uses `cv` and requires confirmation before changing facts.
+- Tracker and retained evidence queries use `insights`.
 
-Use the employment rule for Mainland China, Hong Kong, or remote work that
-matches the opportunity. It supplies employment policy only; output language
-always follows `language.output`.
-
-For a missing/unknown command, show the available commands and ask for the
-user's intended workflow. Existing runtime commands and validators remain the
-source of executable behavior until their owning migration issues replace them.
+Use the applicable Mainland China, Hong Kong, or remote employment rule. It
+supplies policy only; all prose follows `language.output`.
