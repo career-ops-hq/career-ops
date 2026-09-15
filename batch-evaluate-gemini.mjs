@@ -20,6 +20,7 @@ import { execFileSync, execFile } from 'child_process';
 import { promisify } from 'util';
 import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 const execFileAsync = promisify(execFile);
 try {
@@ -293,7 +294,17 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
     mkdirSync(PATHS.trackerAdditions, { recursive: true });
 
     const num = await nextReportNumber();
-    const today = new Date().toISOString().split('T')[0];
+    // LOCAL calendar day (#3070). This one value becomes three things that have to
+    // agree with each other and with the user's calendar: the report FILENAME
+    // ({num}-{slug}-{today}.md), the report's own `**Date:**` header, and the date
+    // column of the tracker row written for it.
+    //
+    // On the UTC day an evaluation run on a Sunday evening in the Americas produces
+    // 042-acme-2026-08-18.md, dated the 18th, in a tracker row dated the 18th —
+    // while every other date the user sees, and every date the other scripts now
+    // stamp, says the 17th. The filename is the part that cannot be corrected
+    // later: reports are addressed by it.
+    const today = localToday();
     const companySlug = slugifyCompany(company);
     const filename = `${num}-${companySlug}-${today}.md`;
     const reportPath = join(PATHS.reports, filename);

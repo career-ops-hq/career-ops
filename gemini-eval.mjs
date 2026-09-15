@@ -74,6 +74,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 // Paths
 // ---------------------------------------------------------------------------
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
@@ -531,7 +532,17 @@ if (saveReport) {
 
       reservedNumbers   = await reserveReportNumbers(1, { rootDir: DATA_ROOT, reportsDir: PATHS.reports });
       const num         = formatReportNumber(reservedNumbers[0]);
-      const today       = new Date().toISOString().split('T')[0];
+      // LOCAL calendar day (#3070). This one value becomes three things that have to
+      // agree with each other and with the user's calendar: the report FILENAME
+      // ({num}-{slug}-{today}.md), the report's own `**Date:**` header, and the date
+      // column of the tracker row written for it.
+      //
+      // On the UTC day an evaluation run on a Sunday evening in the Americas produces
+      // 042-acme-2026-08-18.md, dated the 18th, in a tracker row dated the 18th —
+      // while every other date the user sees, and every date the other scripts now
+      // stamp, says the 17th. The filename is the part that cannot be corrected
+      // later: reports are addressed by it.
+      const today       = localToday();
       const companySlug = slugifyCompany(company);
       const filename    = `${num}-${companySlug}-${today}.md`;
       const reportPath  = join(PATHS.reports, filename);

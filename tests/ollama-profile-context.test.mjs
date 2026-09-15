@@ -37,6 +37,9 @@ for (const relativePath of [
   // reserve-report-num.mjs's main-guard comes from lib/is-main-module.mjs
   // (#3170), so a fixture that carries it has to carry the helper too.
   'lib/is-main-module.mjs',
+  // ollama-eval dates its report with localToday() rather than the UTC day,
+  // so the fixture has to carry that helper for the module to load at all.
+  'lib/local-today.mjs',
   'utils/token-tracker.mjs',
 ]) {
   copyIntoFixture(relativePath);
