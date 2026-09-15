@@ -200,3 +200,12 @@ documents/*
 # Intake fingerprints — the recorded source filenames may themselves carry
 # PII (e.g. cv/jane-doe-master-cv.pdf). #1723
 data/intake-state.json
+
+# --- Fork-local rules (this fork only; upstream's rules above are verbatim) ---
+# A full LinkedIn data export (third-party PII), read by referrals.mjs.
+linkedin/
+# This fork commits its local-paths declaration so CI and no-mistakes
+# worktrees see it (#2991). Un-ignored so the tracked copy is not flagged
+# as ignored User Layer data (tests/user-layer-untracked.test.mjs).
+# Must stay after upstream's config/local-paths.txt rule.
+!config/local-paths.txt
