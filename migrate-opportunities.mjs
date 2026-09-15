@@ -8,10 +8,16 @@ import * as yaml from 'js-yaml';
 import { parseScanHistory } from './detect-reposts.mjs';
 import { parseTrackerRow, resolveColumns } from './tracker-parse.mjs';
 import { openOpportunityStore } from './src/opportunities/store.mjs';
+import { validateReviewedReport } from './scoring-report.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const sha256 = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 const urlFromPipeline = text => [...text.matchAll(/https?:\/\/[^\s|]+/g)].map(match => match[0]);
+const machineSummary = text => yaml.load(text.match(/## Machine Summary\s*\n\s*```yaml\s*\n([\s\S]*?)\n```/)?.[1] ?? '');
+const browserUrl = (summary, root) => {
+  const source = summary?.sources?.find(item => item.id === 'browser');
+  try { return JSON.parse(readFileSync(join(root, source.path), 'utf8')).url ?? null; } catch { return null; }
+};
 
 export function buildMigrationPlan(root = ROOT) {
   const scanPath = join(root, 'data/scan-history.tsv');
@@ -41,25 +47,39 @@ export function buildMigrationPlan(root = ROOT) {
   }
   for (const row of scanRows) if (!row.company || !row.title) unmapped.push({ type: 'scan-metadata', url: row.url, missing: [!row.company && 'company', !row.title && 'title'].filter(Boolean) });
   for (const url of existsSync(pipelinePath) ? urlFromPipeline(readFileSync(pipelinePath, 'utf8')) : []) if (!byUrl.has(url)) unmapped.push({ type: 'pipeline-url', url, missing: ['company', 'role'] });
+  const artifacts = [];
+  const invalidReports = [];
+  for (const name of existsSync(reportsPath) ? readdirSync(reportsPath).filter(name => name.endsWith('.md')).sort() : []) {
+    const path = join(reportsPath, name);
+    files.push(path);
+    const text = readFileSync(path, 'utf8');
+    const summary = machineSummary(text);
+    const url = browserUrl(summary, root);
+    if (!url || !summary?.company || !summary?.role) {
+      unmapped.push({ type: 'report', path: `reports/${name}`, missing: ['frozen browser URL'] });
+      continue;
+    }
+    let target = mappings.find(row => row.url === url);
+    if (!target) {
+      target = { url, company: summary.company, role: summary.role, observations: [] };
+      mappings.push(target);
+    }
+    const artifact = { url, path: `reports/${name}`, sha256: sha256(path) };
+    artifacts.push(artifact);
+    try {
+      const review = JSON.parse(readFileSync(`${path}.review.json`, 'utf8'));
+      const score = validateReviewedReport(text, review, { root });
+      if (target.evaluation) invalidReports.push({ path: artifact.path, error: 'duplicate scored report for frozen URL' });
+      else target.evaluation = { ...score, reportHash: artifact.sha256, gates: review.gates };
+    } catch (error) { invalidReports.push({ path: artifact.path, error: error.message }); }
+  }
+  const groupedArtifacts = new Map();
+  for (const artifact of artifacts) groupedArtifacts.set(artifact.url, [...(groupedArtifacts.get(artifact.url) ?? []), artifact]);
   const byIdentity = new Map();
   for (const row of mappings) {
     const key = `${row.company}\u0000${row.role}`;
     byIdentity.set(key, [...(byIdentity.get(key) ?? []), row]);
   }
-  const artifacts = [];
-  for (const name of existsSync(reportsPath) ? readdirSync(reportsPath).filter(name => name.endsWith('.md')).sort() : []) {
-    const path = join(reportsPath, name);
-    files.push(path);
-    const match = readFileSync(path, 'utf8').match(/## Machine Summary\s*\n\s*```yaml\s*\n([\s\S]*?)\n```/);
-    const summary = match ? yaml.load(match[1]) : null;
-    const key = summary?.company && summary?.role ? `${summary.company}\u0000${summary.role}` : null;
-    const targets = key ? byIdentity.get(key) ?? [] : [];
-    if (targets.length === 0) unmapped.push({ type: 'report', path: `reports/${name}`, missing: ['exact URL mapping'] });
-    else if (targets.length > 1) collisions.push({ type: 'report-identity-conflict', path: `reports/${name}`, urls: targets.map(target => target.url) });
-    else artifacts.push({ url: targets[0].url, path: `reports/${name}`, sha256: sha256(path) });
-  }
-  const groupedArtifacts = new Map();
-  for (const artifact of artifacts) groupedArtifacts.set(artifact.url, [...(groupedArtifacts.get(artifact.url) ?? []), artifact]);
   const applicationLines = existsSync(applicationsPath) ? readFileSync(applicationsPath, 'utf8').split('\n') : [];
   const applications = applicationLines.map(line => parseTrackerRow(line, resolveColumns(applicationLines))).filter(Boolean);
   for (const application of applications) {
@@ -74,7 +94,8 @@ export function buildMigrationPlan(root = ROOT) {
     mappings: mappings.map(row => ({ ...row, artifacts: groupedArtifacts.get(row.url) ?? [], applications: row.applications ?? [] })),
     collisions,
     unmapped,
-    summary: { scanRecords: scanRows.length, applications: applications.length, mappings: mappings.length, collisions: collisions.length, unmapped: unmapped.length, reports: artifacts.length },
+    invalidReports,
+    summary: { scanRecords: scanRows.length, applications: applications.length, mappings: mappings.length, collisions: collisions.length, unmapped: unmapped.length, reports: artifacts.length, scoredReports: artifacts.length - invalidReports.length, invalidReports: invalidReports.length },
   };
 }
 
@@ -89,6 +110,13 @@ export async function applyMigration(plan, databasePath) {
     for (const row of plan.mappings) {
       const opportunity = store.ingest({ url: row.url, company: row.company, role: row.role, source: 'migration', payload: { migration: 'scan-history', artifacts: row.artifacts, applications: row.applications } });
       for (const observation of row.observations) store.recordScanObservation(opportunity.id, { url: row.url, company: row.company, title: row.role, observedOn: observation.observedOn });
+      if (row.evaluation) {
+        if (store.evaluation(opportunity.id)) continue;
+        if (!store.claim(opportunity.id, 'migration')) throw new Error(`Cannot import scored report for ${row.url}`);
+        store.recordEligibility(opportunity.id, { status: 'unknown', evidence: { migration: 'historical-review', gates: row.evaluation.gates } });
+        store.recordEvaluation(opportunity.id, row.evaluation);
+        for (const artifact of row.artifacts) store.recordArtifact(opportunity.id, { kind: 'report', path: artifact.path, sha256: artifact.sha256 });
+      }
     }
   } finally { store.close(); }
   const backup = existsSync(databasePath) ? `${databasePath}.backup-${new Date().toISOString().replace(/[:.]/g, '-')}` : null;

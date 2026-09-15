@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { applyMigration, buildMigrationPlan } from '../migrate-opportunities.mjs';
+import { openOpportunityStore } from '../src/opportunities/store.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'career-ops-migrate-'));
 mkdirSync(join(root, 'data'));
@@ -24,4 +25,17 @@ await assert.rejects(() => applyMigration(buildMigrationPlan(root), database), /
 writeFileSync(join(root, 'data/pipeline.md'), '- [ ] https://jobs.test/1\n');
 const repeated = await applyMigration(buildMigrationPlan(root), database);
 assert.ok(repeated.backup && existsSync(repeated.backup));
+const scoredDatabase = join(root, 'data/scored-opportunities.db');
+await applyMigration({ collisions: [], unmapped: [], mappings: [{
+  url: 'https://jobs.test/scored', company: 'Acme', role: 'Scored Engineer', observations: [], applications: [],
+  artifacts: [{ path: 'reports/scored.md', sha256: 'score-hash' }],
+  evaluation: { lower: 2.5, upper: 4.5, coverage: 0.5, reportHash: 'score-hash', gates: { location: 'Pass' } },
+}] }, scoredDatabase);
+const store = await openOpportunityStore(scoredDatabase);
+assert.equal(store.evaluation(1).lower, 2.5);
+assert.equal(store.evaluation(1).upper, 4.5);
+assert.equal(store.evaluation(1).coverage, 0.5);
+assert.equal(store.evaluation(1).reportHash, 'score-hash');
+assert.equal(store.artifacts(1)[0].path, 'reports/scored.md');
+store.close();
 console.log('migrate-opportunities: passed');
