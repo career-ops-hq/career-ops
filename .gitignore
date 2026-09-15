@@ -217,4 +217,4 @@ data/intake-state.json
 *.db
 *.db-wal
 *.db-shm
-
+data/agent-inbox.md
