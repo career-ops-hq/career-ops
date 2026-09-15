@@ -232,6 +232,20 @@ export function stripMarkup(text, { keepLineBreaks = false } = {}) {
     .replace(/<\/?(?:li|p|div|tr|h[1-6]|section|article|ul|ol|table|br)\b[^>\n]*>/gi, '. ')
     .replace(/<\/?[a-zA-Z][^>\n]*>/g, ' ')
     .replace(/\\[a-zA-Z]+\*?(?:\[[^\]]*\])?(?:\{([^}]*)\})?/g, ' $1 ')
+    // Markdown emphasis is markup too, and these sources bold nearly every
+    // metric. Left in, a closing `**` sits between the number and its noun, and
+    // metricClaims only tolerates whitespace there, so `**2,044** tests` never
+    // reads as a claim and a truthful CV quoting cv.md is blocked as invented.
+    // Run this AFTER the LaTeX pass above, which relies on `\cmd*`. Only
+    // asterisks: underscores carry meaning here (snake_case, env-keys.json, file
+    // paths), and the markdown bold in these sources is asterisk-based. Strip
+    // only emphasis whose delimiters hug non-space (as markdown requires), never
+    // a lone asterisk: `2*` footnote markers must survive, and two of them on one
+    // line (`2* tests 3* commits`) must not pair with each other into a false
+    // metric. Requiring the content to start and end non-space rules both out.
+    // Bold before italic so the italic pass does not split a `**...**` run.
+    .replace(/\*\*(\S(?:.*?\S)?)\*\*/g, '$1')
+    .replace(/\*(\S(?:[^\n*]*\S)?)\*/g, '$1')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     // keepLineBreaks preserves a newline as a CLAUSE boundary for the plan-horizon
