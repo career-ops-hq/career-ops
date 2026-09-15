@@ -1991,7 +1991,28 @@ const allowedFiles = [
   // Dashboard credit string
   'dashboard/internal/ui/screens/pipeline.go',
   'dashboard/internal/ui/screens/progress.go',
+  'dashboard/internal/ui/screens/stats.go',
 ];
+
+// Paths added for #4131, checked by EXACT match rather than folded into
+// allowedFiles above. allowedFiles.some(a => file.includes(a)) is a
+// substring test, which every pre-existing entry already relies on (a
+// nested path containing e.g. "README.md" is exempted too) — widening that
+// same list with plain root-relative basenames like 'funding.json' or
+// 'HIRED.md' would also silently exempt an unrelated tracked file that
+// merely shares a basename, such as a future fixtures/funding.json or
+// snapshots/tests/hired-wall.test.mjs (luochen211, #4144 review). These are
+// the ones this PR actually intends to allow, so they get the tighter
+// check instead of loosening the shared one.
+const exactAllowedFiles = new Set([
+  // GitHub Sponsors funding target + Codex plugin manifest (#4131) — same
+  // maintainer-credit shape as the .claude-plugin/.github/plugin ones above.
+  'funding.json', '.codex-plugin/plugin.json',
+  // Hired Wall: celebrates a hire with a link back to the project, and the
+  // scripts/tests that build and cover that feature necessarily carry the
+  // same URL (#4131).
+  'HIRED.md', 'hired-wall-build.mjs', 'tests/hired-wall.test.mjs', 'tests/project-identity.test.mjs',
+]);
 
 // Build pathspec for git grep — only scan tracked files matching these
 // extensions. This is what `grep -rn` was trying to do, but git-aware:
@@ -2004,15 +2025,27 @@ const grepPathspecs = scanExtensions.map(e => `*.${e}`);
 
 let leakFound = false;
 for (const pattern of leakPatterns) {
+  // --name-only -z NUL-delimits filenames only — no line number, no matching
+  // line, nothing but the path is ever needed here. A prior version used
+  // plain `-n -z` (path\0line\0matching-line\n) and split on '\n' first to
+  // recover records, but a tracked filename containing a literal embedded
+  // newline byte — legal on Linux and macOS — would then be truncated at
+  // that byte, before the real end of the record. A truncated name that
+  // happens to collide with an allowed one (or with the empty string) would
+  // then skip the warning for whatever the file actually leaks (CodeRabbit,
+  // #4144 review). `--name-only -z` sidesteps the ambiguity entirely: NUL is
+  // the only delimiter, so a raw newline inside a filename is preserved
+  // verbatim and splitting purely on '\0' recovers the exact path every time.
   const result = run(
     'git',
-    ['grep', '-n', pattern, '--', ...grepPathspecs],
+    ['grep', '--name-only', '-z', pattern, '--', ...grepPathspecs],
     { stdio: ['pipe', 'pipe', 'ignore'] }
   );
   if (result) {
-    for (const line of result.split('\n')) {
-      const file = line.split(':')[0];
+    for (const file of result.split('\0')) {
+      if (!file) continue;
       if (allowedFiles.some(a => file.includes(a))) continue;
+      if (exactAllowedFiles.has(file)) continue;
       if (file.includes('dashboard/go.mod')) continue;
       warn(`Possible personal data in ${file}: "${pattern}"`);
       leakFound = true;
