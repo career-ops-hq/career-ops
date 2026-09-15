@@ -99,9 +99,21 @@ import {
   rebuildRow, resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
   normalizeCompany, cell, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli,
 } from './tracker-utils.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
+// Two roots. CODE_ROOT holds templates/states.yml, which ships with the code;
+// DATA_ROOT is the user's, and getCareerOpsRoot() is the only thing that honours
+// CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / the .career-ops-data marker.
+//
+// One constant named CAREER_OPS did both, so resolveTrackerPath() looked inside
+// the checkout. AGENTS.md calls this script "the canonical (locked, validated,
+// atomic) write path" and #2901 converged the web layer's /api/status onto it —
+// so on any configured data root the one supported way to change a status
+// answered "No tracker found at <CHECKOUT>/applications.md", naming a file the
+// user never configured. Same defect #3715 fixed in the analysis scripts.
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
+const STATES_FILE = join(CODE_ROOT, 'templates/states.yml');
 
 // LOCK_TIMEOUT is not destructured here — that exit path is raised inside
 // acquireTrackerLockForCli() itself (tracker-utils.mjs), via CLI_EXIT.LOCK_TIMEOUT.
@@ -260,7 +272,7 @@ if (!newStatus) {
 
 // ── tracker access ───────────────────────────────────────────────
 
-const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+const APPS_FILE = resolveTrackerPath(DATA_ROOT);
 if (!existsSync(APPS_FILE)) {
   failWith(EXIT_NOT_FOUND, 'no-tracker', `No tracker found at ${APPS_FILE}`);
 }
