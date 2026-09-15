@@ -11,6 +11,12 @@ jobs:
       contents: read
       pull-requests: write
     steps:
+      # Check out the BASE revision (pull_request_target default): the labeler
+      # reads .github/labeler.yml from disk, so it never depends on the API
+      # fallback — which 404s for fork PRs whose head repo lacks the file and
+      # fails the run (e.g. #4142). Checking out base is safe here because no
+      # PR code is executed, only the config is read.
+      - uses: actions/checkout@v7
       - uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
