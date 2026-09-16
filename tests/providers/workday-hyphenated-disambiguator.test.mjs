@@ -1,30 +1,27 @@
-import { pass, fail, finish, ROOT } from '../helpers.mjs';
+import test from 'node:test';
+import assert from 'node:assert/strict';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
+import { ROOT } from '../helpers.mjs';
 
-console.log('\nProvider — workday hyphenated disambiguator');
+const { workdayDedupKey } = await import(pathToFileURL(join(ROOT, 'providers/workday.mjs')).href);
 
-try {
-  const { workdayDedupKey } = await import(pathToFileURL(join(ROOT, 'providers/workday.mjs')).href);
+const wd = (tail, site = 'careers') =>
+  workdayDedupKey({ url: `https://acme.wd5.myworkdayjobs.com/${site}/job/City/Some-Role_${tail}` });
+const keyOf = (tail) => `workday:acme.wd5.myworkdayjobs.com:${tail.toLowerCase()}`;
 
-  const wd = (tail, site = 'careers') =>
-    workdayDedupKey({ url: `https://acme.wd5.myworkdayjobs.com/${site}/job/City/Some-Role_${tail}` });
-  const keyOf = (tail) => `workday:acme.wd5.myworkdayjobs.com:${tail.toLowerCase()}`;
-
+test('workdayDedupKey collapses a hyphenated requisition base plus trailing -N to the unsuffixed base', () => {
   const hyphenatedBase = wd('JR26-39350');
   const hyphenatedCopy = wd('JR26-39350-2', 'indeed');
-  if (hyphenatedBase === keyOf('JR26-39350') && hyphenatedCopy === hyphenatedBase) {
-    pass('workdayDedupKey() collapses a hyphenated requisition base plus trailing `-N` to the unsuffixed base');
-  } else {
-    fail(`workdayDedupKey() did not collapse a hyphenated requisition base: ${JSON.stringify({ hyphenatedBase, hyphenatedCopy })}`);
-  }
+  assert.equal(hyphenatedBase, keyOf('JR26-39350'));
+  assert.equal(hyphenatedCopy, hyphenatedBase);
+});
 
-  if (wd('R-2593225') && wd('R-2592964') && wd('R-2593225') !== wd('R-2592964')) {
-    pass('workdayDedupKey() still keeps distinct R-NNNNNNN requisitions apart');
-  } else {
-    fail(`workdayDedupKey() regressed the R-NNNNNNN guard: ${wd('R-2593225')} vs ${wd('R-2592964')}`);
-  }
+test('workdayDedupKey still keeps distinct R-NNNNNNN requisitions apart', () => {
+  assert.notEqual(wd('R-2593225'), wd('R-2592964'));
+});
 
+test('workdayDedupKey keeps the existing fixture keys unchanged', () => {
   const existingFixtures = new Map([
     ['R11312', keyOf('R11312')],
     ['R11312-2', keyOf('R11312')],
@@ -45,14 +42,8 @@ try {
     ['R2026-01334', keyOf('R2026-01334')],
     ['R2026-01355', keyOf('R2026-01355')],
   ]);
-  const drifted = [...existingFixtures].filter(([tail, expected]) => wd(tail) !== expected);
-  if (drifted.length === 0) {
-    pass('workdayDedupKey() keeps the existing fixture keys unchanged');
-  } else {
-    fail(`workdayDedupKey() changed existing fixture keys: ${JSON.stringify(drifted.map(([tail, expected]) => ({ tail, actual: wd(tail), expected })) )}`);
+
+  for (const [tail, expected] of existingFixtures) {
+    assert.equal(wd(tail), expected, tail);
   }
-} catch (err) {
-  fail(`workday hyphenated disambiguator test crashed: ${err.stack || err.message}`);
-} finally {
-  finish();
-}
+});
