@@ -3,7 +3,7 @@
  * manifest-boundary coverage (#3782).
  *
  * The pure checks pin the canonical path policy and the concrete-file helper.
- * The final five cases execute the real rollback CLI in throwaway repositories:
+ * The final seven cases execute the real rollback CLI in throwaway repositories:
  * paired and missing target refs, ordinary and dangling symlinked parents, and
  * a target-only file replaced by a directory.
  */
@@ -324,13 +324,19 @@ function seedRollbackRepo(prefix, { paired, fetchTarget }) {
     'system/nested/',
     'writing-samples/README.md',
   ];
-  const targetManifest = [...commonManifest, 'target-only.mjs'];
+  const targetManifest = [
+    ...commonManifest,
+    ' pre-existing-outside-backup-manifest.mjs',
+    ' leading-target-only.mjs',
+    'target-only.mjs',
+  ];
 
   try {
     put(dir, 'update-system.mjs', sourceWithManifest(commonManifest));
     put(dir, 'system/root.txt', 'backup root\n');
     put(dir, 'system/nested/keep.txt', 'backup nested\n');
     put(dir, 'writing-samples/README.md', 'backup scaffold\n');
+    put(dir, ' pre-existing-outside-backup-manifest.mjs', 'pre-existing backup bytes\n');
     put(dir, 'writing-samples/private.md', 'user sibling base\n');
     put(dir, 'cv.md', 'user cv base\n');
     g('add', '-A');
@@ -342,6 +348,7 @@ function seedRollbackRepo(prefix, { paired, fetchTarget }) {
     put(dir, 'system/root.txt', 'target root\n');
     put(dir, 'system/nested/keep.txt', 'target nested\n');
     put(dir, 'system/nested/target-only.txt', 'target-only nested\n');
+    put(dir, ' leading-target-only.mjs', 'leading-space target-only\n');
     put(dir, 'target-only.mjs', 'target-only top-level\n');
     put(dir, 'writing-samples/README.md', 'target scaffold\n');
     g('add', '-A');
@@ -355,6 +362,7 @@ function seedRollbackRepo(prefix, { paired, fetchTarget }) {
     // them immediately and observably.
     put(dir, 'writing-samples/private.md', 'user sibling current\n');
     put(dir, 'cv.md', 'user cv current\n');
+    put(dir, 'leading-target-only.mjs', 'unrelated untracked bytes\n');
 
     // FETCH_HEAD is deliberately wrong for the paired case and maximally
     // tempting in the missing-pair case. Either way rollback's decision must be
@@ -363,7 +371,7 @@ function seedRollbackRepo(prefix, { paired, fetchTarget }) {
     g('branch', 'rollback-fetch-distractor', distractorCommit);
     g('fetch', '.', 'rollback-fetch-distractor');
 
-    return { ...fixture, backup, backupCommit, targetCommit };
+    return { ...fixture, backup, backupCommit, targetCommit, commonManifest };
   } catch (err) {
     rmSync(dir, { recursive: true, force: true });
     throw err;
@@ -418,6 +426,12 @@ function readMaybe(path) {
       'rollback left a target-only file behind or consulted the FETCH_HEAD distractor',
     );
     check(
+      !existsSync(join(dir, ' leading-target-only.mjs'))
+        && readMaybe(join(dir, 'leading-target-only.mjs')) === 'unrelated untracked bytes\n',
+      'NUL-delimited tree paths preserve leading whitespace and never alias an unrelated file',
+      'rollback trimmed a target path, removed the wrong file, or left the exact target behind',
+    );
+    check(
       userCv === 'user cv current\n' && userSibling === 'user sibling current\n',
       'rollback preserves changed user files and protected siblings byte-for-byte',
       `rollback changed user bytes: cv=${JSON.stringify(userCv)} sibling=${JSON.stringify(userSibling)}`,
@@ -427,7 +441,114 @@ function readMaybe(path) {
   }
 }
 
-// ── 7. Real CLI: no paired ref means warn + conservative leftovers ──
+// ── 7. Real CLI: complete backup-tree membership prevents false deletion ──
+{
+  const fixture = seedRollbackRepo('co-rollback-backup-membership-', {
+    paired: true,
+    fetchTarget: false,
+  });
+  const { dir, commonManifest } = fixture;
+  try {
+    // Simulate local/current manifest drift after apply. The file is covered by
+    // the paired target, but not by either updater consulted for restoration;
+    // its presence in the backup tree is the only proof that it is not new.
+    put(dir, 'update-system.mjs', sourceWithManifest(commonManifest));
+
+    const result = runRollback(dir);
+    check(
+      result.status === 0 && !result.error,
+      'real rollback succeeds when current and backup manifests omit a pre-existing target path',
+      `backup-membership rollback failed (status ${result.status}): ${outputOf(result)}`,
+    );
+    check(
+      readMaybe(join(dir, ' pre-existing-outside-backup-manifest.mjs'))
+        === 'pre-existing backup bytes\n',
+      'rollback retains a target-covered file that already existed in the complete backup tree',
+      'rollback deleted or changed a pre-existing file omitted from both restore manifests',
+    );
+    check(
+      !existsSync(join(dir, 'target-only.mjs')),
+      'complete backup membership still permits removal of genuinely target-only files',
+      'backup membership made target-only removal overly conservative',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 8. Real CLI: file/directory transitions are not misclassified as new ──
+{
+  const fixture = makeUpdaterRepo(gitIn, { prefix: 'co-rollback-tree-shape-' });
+  const { dir, g } = fixture;
+  const backup = 'backup-pre-update-1.2.3-20260907T140000Z';
+  const backupManifest = [
+    'update-system.mjs',
+    'shape-dir/',
+    'shape-leaf',
+    'CaseExisting.mjs',
+  ];
+  const targetManifest = [
+    'update-system.mjs',
+    'shape-dir',
+    'shape-leaf/new.txt',
+    'caseexisting.mjs',
+  ];
+  try {
+    put(dir, 'update-system.mjs', sourceWithManifest(backupManifest));
+    put(dir, 'shape-dir/backup.txt', 'backup directory child\n');
+    put(dir, 'shape-leaf', 'backup leaf\n');
+    put(dir, 'CaseExisting.mjs', 'backup alias bytes\n');
+    g('add', '-A');
+    g('commit', '-qm', 'backup shape state');
+    const backupCommit = g('rev-parse', 'HEAD');
+    g('branch', backup, backupCommit);
+
+    put(dir, 'update-system.mjs', sourceWithManifest(targetManifest));
+    rmSync(join(dir, 'shape-dir'), { recursive: true, force: true });
+    put(dir, 'shape-dir', 'target file\n');
+    rmSync(join(dir, 'shape-leaf'), { recursive: true, force: true });
+    put(dir, 'shape-leaf/new.txt', 'target directory child\n');
+    g('mv', 'CaseExisting.mjs', 'case-rename-temp.mjs');
+    g('mv', 'case-rename-temp.mjs', 'caseexisting.mjs');
+    put(dir, 'caseexisting.mjs', 'target alias bytes\n');
+    g('add', '-A');
+    g('commit', '-qm', 'target shape state');
+    g('update-ref', targetRefForBackup(backup), g('rev-parse', 'HEAD'));
+
+    // Both manifests accurately claim the transitioned paths. Unknown/private
+    // directory children make destructive type conversion unsafe, so rollback
+    // must retain the current shape with a warning instead of deleting it.
+    const result = runRollback(dir);
+    const output = outputOf(result);
+    check(
+      result.status === 0 && !result.error,
+      'real rollback degrades safely across file/directory shape transitions',
+      `tree-shape rollback failed (status ${result.status}): ${output}`,
+    );
+    check(
+      readMaybe(join(dir, 'shape-dir')) === 'target file\n'
+        && readMaybe(join(dir, 'shape-leaf/new.txt')) === 'target directory child\n',
+      'rollback does not delete target leaves that conflict with a pre-existing backup tree shape',
+      'rollback deleted a file/directory transition path as if it were wholly target-only',
+    );
+    check(
+      readMaybe(join(dir, 'CaseExisting.mjs')) === 'backup alias bytes\n',
+      'filesystem-equivalent target aliases cannot delete the restored backup path',
+      'case-only target removal deleted the restored backup alias',
+    );
+    check(
+      /conflicts with the backup tree/i.test(output)
+        && /filesystem-equivalent backup path/i.test(output)
+        && /non-directory parent|is now a directory/i.test(output),
+      'rollback visibly warns for tree-shape and filesystem-alias leftovers',
+      `tree-shape or alias warning was absent: ${JSON.stringify(output)}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 9. Real CLI: no paired ref means warn + conservative leftovers ──
 {
   const fixture = seedRollbackRepo('co-rollback-unpaired-', {
     paired: false,
@@ -479,7 +600,7 @@ function readMaybe(path) {
   }
 }
 
-// ── 8. Real CLI: symlinked parents cannot redirect rollback outside ROOT ──
+// ── 10. Real CLI: symlinked parents cannot redirect rollback outside ROOT ──
 {
   const fixture = seedRollbackRepo('co-rollback-symlink-', {
     paired: true,
@@ -526,7 +647,7 @@ function readMaybe(path) {
   }
 }
 
-// ── 9. Real CLI: a dangling symlinked parent is still left untouched ──
+// ── 11. Real CLI: a dangling symlinked parent is still left untouched ──
 {
   const fixture = seedRollbackRepo('co-rollback-broken-symlink-', {
     paired: true,
@@ -571,7 +692,7 @@ function readMaybe(path) {
   }
 }
 
-// ── 10. Real CLI: a target-only file replaced by a directory is preserved ──
+// ── 12. Real CLI: a target-only file replaced by a directory is preserved ──
 {
   const fixture = seedRollbackRepo('co-rollback-became-dir-', {
     paired: true,

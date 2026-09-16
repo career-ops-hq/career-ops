@@ -344,8 +344,8 @@ const twoPassManifestChecks = [
     pattern: /if \(restored\.length > 0\) addPaths\(restored\)/,
   },
   {
-    name: 'rollback removes only concrete target files absent from the backup tree',
-    pattern: /targetFiles\.filter\(\(file\) => !backupFileSet\.has\(file\)\)/,
+    name: 'rollback removes only concrete target files absent from the complete backup tree',
+    pattern: /const backupTreeFiles = targetPairAvailable[\s\S]{0,800}?gitRaw\([^)]*'ls-tree'[^)]*latest[\s\S]{0,3000}?const conflict = backupTreeConflict\(file\);[\s\S]{0,300}?removalCandidates\.push\(file\)/,
   },
   {
     name: 'rollback commit is scoped to concrete restore/removal files under literal pathspecs (#3504)',

@@ -934,6 +934,10 @@ function git(...args) {
   return gitIn(ROOT, ...args);
 }
 
+function gitRaw(...args) {
+  return gitRawIn(ROOT, ...args);
+}
+
 /**
  * git(), but with the child's stderr piped instead of inherited.
  *
@@ -1648,7 +1652,7 @@ export function isTracked(path, ctx = {}) {
  * @returns {string[]} De-duplicated file paths, never a directory.
  */
 export function expandToShippedFiles(paths, ref = 'FETCH_HEAD', ctx = {}) {
-  const runGit = ctx.git || git;
+  const runGit = ctx.git || gitRaw;
   const seen = new Set();
   const files = [];
   const take = (p) => { if (p && !seen.has(p)) { seen.add(p); files.push(p); } };
@@ -1678,7 +1682,7 @@ export function expandToShippedFiles(paths, ref = 'FETCH_HEAD', ctx = {}) {
  * that was never in the paired target would manufacture authority to remove it.
  */
 export function manifestTreeFiles(paths, ref, userPaths = USER_PATHS, ctx = {}) {
-  const runGit = ctx.git || git;
+  const runGit = ctx.git || gitRaw;
   const onRejected = ctx.onRejected || (() => {});
   const safePaths = filterSafeManifestPaths(paths, userPaths, onRejected);
   const seen = new Set();
@@ -2865,6 +2869,24 @@ function symlinkedAncestor(path, root = ROOT) {
   return null;
 }
 
+function nonDirectoryAncestor(path, root = ROOT) {
+  const segments = path.split('/');
+  let current = root;
+  for (let i = 0; i < segments.length - 1; i++) {
+    current = join(current, segments[i]);
+    try {
+      const stat = lstatSync(current);
+      if (!stat.isDirectory() && !stat.isSymbolicLink()) {
+        return segments.slice(0, i + 1).join('/');
+      }
+    } catch (err) {
+      if (err?.code === 'ENOENT') return null;
+      throw err;
+    }
+  }
+  return null;
+}
+
 function rollback() {
   // Same precondition as apply(): a nested .git-less install would look its
   // backup branches up — and check files out — in the enclosing repo (#3334).
@@ -2939,12 +2961,54 @@ function rollback() {
       console.error('Target-only system files may remain as leftovers; mutable FETCH_HEAD was not consulted.');
     }
 
+    // Restoration remains limited to safe manifest coverage, but deciding
+    // whether a target path is genuinely new requires the complete backup
+    // tree. A pre-existing tracked file can be absent from both the current
+    // and backup manifests after manifest drift; treating that omission as
+    // proof that the target introduced it would delete backup-owned bytes.
+    // Read the raw NUL-delimited tree before mutating the worktree and use it
+    // only as membership evidence, never as scope authority. Prefix membership
+    // is conservative across file/directory transitions: if either tree has a
+    // leaf where the other has descendants, that path was not wholly new.
+    const backupTreeFiles = targetPairAvailable
+      ? gitRaw('--literal-pathspecs', 'ls-tree', '-r', '--name-only', '-z', latest, '--')
+        .split('\0')
+        .filter(Boolean)
+      : [];
+    const backupTreeFileSet = new Set(backupTreeFiles);
+    const backupTreeFileKeySet = new Set();
+    const backupTreeDirectoryKeySet = new Set();
+    for (const file of backupTreeFiles) {
+      const segments = manifestPathSegments(file);
+      backupTreeFileKeySet.add(segments.join('/'));
+      for (let length = 1; length < segments.length; length++) {
+        backupTreeDirectoryKeySet.add(segments.slice(0, length).join('/'));
+      }
+    }
+    const backupTreeConflict = (file) => {
+      if (backupTreeFileSet.has(file)) return 'exact path';
+      const segments = manifestPathSegments(file);
+      const key = segments.join('/');
+      if (backupTreeFileKeySet.has(key)) return 'filesystem-equivalent backup path';
+      if (backupTreeDirectoryKeySet.has(key)) return 'backup directory at this path';
+      for (let length = segments.length - 1; length > 0; length--) {
+        const ancestor = segments.slice(0, length).join('/');
+        if (backupTreeFileKeySet.has(ancestor)) return `backup file at ancestor ${ancestor}`;
+      }
+      return '';
+    };
+
     const restored = [];
     for (const file of backupFiles) {
       try {
         const symlink = symlinkedAncestor(file);
         if (symlink) {
           console.error(`Rollback warning: ${file} has symlinked parent ${symlink}; leaving it untouched.`);
+          continue;
+        }
+        const nonDirectory = nonDirectoryAncestor(file);
+        if (nonDirectory) {
+          console.error(`Rollback warning: ${file} has non-directory parent ${nonDirectory}; leaving it untouched.`);
           continue;
         }
         if (existsSync(join(ROOT, file)) && lstatSync(join(ROOT, file)).isDirectory()) {
@@ -2958,10 +3022,17 @@ function rollback() {
       }
     }
 
-    const backupFileSet = new Set(backupFiles);
-    const removalCandidates = targetPairAvailable
-      ? targetFiles.filter((file) => !backupFileSet.has(file))
-      : [];
+    const removalCandidates = [];
+    if (targetPairAvailable) {
+      for (const file of targetFiles) {
+        const conflict = backupTreeConflict(file);
+        if (!conflict) {
+          removalCandidates.push(file);
+        } else if (conflict !== 'exact path') {
+          console.error(`Rollback warning: ${file} conflicts with the backup tree (${conflict}); leaving it untouched.`);
+        }
+      }
+    }
     const removed = [];
     for (const file of removalCandidates) {
       const absolute = join(ROOT, file);
