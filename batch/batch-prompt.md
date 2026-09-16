@@ -82,6 +82,17 @@ Conflict rule: `modes/_profile.md` wins over default system guidance because it 
 
 ---
 
+## Template Placeholders
+
+The HTML CV templates (`templates/cv-template.html`, `templates/resume-template.html`, and the five named variants) use placeholder tokens that `build-cv-html.mjs` fills from the JSON payload. The full list lives in `modes/pdf.md` under "JSON Input Schema"; the opt-in slots below are the ones a worker may set or leave empty without breaking the layout.
+
+| Placeholder | Source field | Opt-in? | Notes |
+|-------------|--------------|---------|-------|
+| `{{PHOTO}}` | `candidate.photo` | Yes | Off by default; US/UK/many-market ATS penalize photos. See #264. |
+| `{{CONSENT}}` | `consent` | Yes | Off by default; GDPR/RODO consent footer. Empty/absent renders no visible footer (the `.cv-consent:empty { display: none }` CSS rule hides the empty div). |
+
+---
+
 ## Pipeline
 
 Run these steps in order.
