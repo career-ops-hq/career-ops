@@ -469,10 +469,21 @@ const applyStart = source.indexOf('async function apply()');
 const rollbackMarker = source.indexOf('// ── ROLLBACK', applyStart);
 const rollbackStart = source.indexOf('function rollback()', rollbackMarker);
 const dismissMarker = source.indexOf('// ── DISMISS', rollbackStart);
-const applySource = applyStart >= 0 && rollbackMarker > applyStart
+const applySectionValid = applyStart >= 0 && rollbackMarker > applyStart;
+const rollbackSectionValid = applySectionValid
+  && rollbackStart > rollbackMarker
+  && dismissMarker > rollbackStart;
+
+if (applySectionValid) pass('apply source section boundaries are present');
+else fail('apply source section boundaries are present');
+
+if (rollbackSectionValid) pass('rollback source section boundaries are present');
+else fail('rollback source section boundaries are present');
+
+const applySource = applySectionValid
   ? source.slice(applyStart, rollbackMarker)
   : '';
-const rollbackSource = rollbackStart >= 0 && dismissMarker > rollbackStart
+const rollbackSource = rollbackSectionValid
   ? source.slice(rollbackStart, dismissMarker)
   : '';
 
