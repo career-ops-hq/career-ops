@@ -10,8 +10,10 @@
 // halves of that contract: the system rules arrive, and nothing the user wrote
 // is modified, reordered or removed.
 
-import { readFileSync } from 'fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
+import { execFileSync } from 'child_process';
 import { pass, fail, ROOT } from './helpers.mjs';
 import { reconcileGitignore } from '../update-system.mjs';
 
@@ -159,4 +161,86 @@ const ok = (cond, msg) => (cond ? pass(msg) : fail(msg));
   const body = src.match(/function gitShowRaw\([^)]*\) \{[\s\S]*?\n\}/);
   if (!body) fail('could not find gitShowRaw() in update-system.mjs — update this test');
   else ok(!/\.trim\(\)/.test(body[0]), 'gitShowRaw() does not trim, so the blob reaches the reconciler byte-exact');
+}
+
+// ── A directory re-inclusion negation is not silently defeated (#4189) ──────
+// A bare, unanchored appended pattern (`applications.md`) matches ANYWHERE in
+// the tree, including under a directory a negation re-includes. Appending it
+// at EOF, after `!test-fixtures/**`, makes the new pattern the LAST match for
+// every fixture path sharing that name — silently re-ignoring committed
+// upgrade-test fixtures on every update. The fix inserts new patterns before
+// the last directory negation instead; verified two ways: the appended
+// pattern's position in the text, and — the issue's own reproduction command
+// — `git check-ignore --no-index` actually resolving the fixture path as
+// NOT ignored.
+{
+  const local = [
+    'node_modules/',
+    '',
+    '!test-fixtures/**',
+    '',
+  ].join('\n');
+  const upstream = [
+    'node_modules/',
+    '',
+    'applications.md',
+    'follow-ups.md',
+    '',
+    '!test-fixtures/**',
+    '',
+  ].join('\n');
+  const { text, added } = reconcileGitignore(local, upstream);
+
+  eq(added.join(','), 'applications.md,follow-ups.md', 'both missing patterns are detected as added');
+
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const negationIndex = lines.lastIndexOf('!test-fixtures/**');
+  const appIndex = lines.indexOf('applications.md');
+  const followIndex = lines.indexOf('follow-ups.md');
+  ok(
+    appIndex !== -1 && followIndex !== -1 && appIndex < negationIndex && followIndex < negationIndex,
+    'both appended patterns land BEFORE !test-fixtures/**, not after it',
+  );
+  // The negation itself is untouched — same line, same position relative to
+  // whatever was already below it (nothing, here) — only NEW content moved.
+  eq(
+    lines.filter((l) => l === '!test-fixtures/**').length, 1,
+    '!test-fixtures/** appears exactly once — not duplicated by the insertion',
+  );
+
+  // The decisive check: does git itself now agree the fixture is tracked?
+  // `check-ignore` still needs SOME repository to run in (a bare standalone
+  // directory errors "fatal: not a git repository") — `--no-index` means
+  // something narrower: don't consult the INDEX for whether the path is
+  // already tracked, which is exactly the blind spot the issue's own report
+  // calls out ("plain git check-ignore reports nothing for an already-
+  // tracked file"). A throwaway `git init` supplies the repository context
+  // without ever staging or committing the fixture.
+  const dir = mkdtempSync(join(tmpdir(), 'co-gitignore-4189-'));
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    writeFileSync(join(dir, '.gitignore'), text);
+    mkdirSync(join(dir, 'test-fixtures', 'upgrade', 'data'), { recursive: true });
+    writeFileSync(join(dir, 'test-fixtures', 'upgrade', 'data', 'applications.md'), 'fixture\n');
+    let ignored = true;
+    try {
+      execFileSync('git', ['check-ignore', '--no-index', '-q', 'test-fixtures/upgrade/data/applications.md'], { cwd: dir });
+    } catch (e) {
+      // check-ignore exits 1 when the path is NOT ignored — the outcome
+      // this fix exists to restore.
+      if (e.status === 1) ignored = false;
+    }
+    ok(!ignored, 'git check-ignore --no-index confirms the fixture path is NOT ignored after reconciliation');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── Fallback: no directory negation present → unchanged EOF-append (#4189) ──
+{
+  const local = ['cv.md', 'my-scratch-notes/'].join('\n') + '\n';
+  const upstream = ['cv.md', 'my-scratch-notes/', 'applications.md'].join('\n') + '\n';
+  const { text } = reconcileGitignore(local, upstream);
+  ok(text.startsWith(local), 'with no directory negation to protect, the original file is still an unmodified prefix');
+  ok(text.trim().endsWith('applications.md'), 'and the new pattern still lands at EOF, exactly as before this fix');
 }

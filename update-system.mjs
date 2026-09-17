@@ -1989,12 +1989,29 @@ async function writeGitignoreAtomic(filePath, content) {
  * there is no way to tell a stale system rule from a user rule the same shape.
  * A redundant ignore rule is harmless; deleting a user's is not.
  *
- * Ordering caveat: missing patterns are appended at the end in upstream order,
- * which preserves each negation's position relative to the pattern it negates
+ * Ordering caveat: missing patterns are appended in upstream order, which
+ * preserves each negation's position relative to the pattern it negates
  * *within the appended block*. A user-authored negation earlier in the file can
  * still be overridden by a newly appended pattern, since later lines win in
  * .gitignore. That is the correct precedence for a system rule, and it is the
  * only ordering that does not require rewriting lines we do not own.
+ *
+ * One exception: a DIRECTORY re-inclusion negation (`!foo/` or `!foo/**`) —
+ * unlike a single-file `.gitkeep`/README re-include — exists specifically to
+ * keep a whole subtree tracked against a broader ignore rule, and this
+ * project ships exactly one, `!test-fixtures/**`, to keep the upgrade test
+ * fixtures committed despite sharing filenames (`applications.md`,
+ * `follow-ups.md`) with the bare, unanchored patterns this same reconciler
+ * appends. Appending after it silently defeats it — the fixtures become
+ * ignored again on every update (career-ops#4189) — which is a real
+ * regression, not the "correct precedence" case above: that case is about a
+ * NEWER system rule intentionally overriding something older, not the
+ * project's own protective rule losing to its own later addition. New
+ * patterns are inserted just before the LAST such directory negation
+ * instead of at EOF when the local file has one; otherwise the append is
+ * unchanged. This is a shape check (does the line end in `/` or `/**`?),
+ * not a name check, so it still finds the right line if the fixtures
+ * directory or its trailing pattern is ever renamed.
  *
  * @param {string} localText - Current .gitignore content.
  * @param {string} upstreamText - Upstream .gitignore content (FETCH_HEAD).
@@ -2044,15 +2061,48 @@ export function reconcileGitignore(localText, upstreamText) {
   const lfCount = (localText.match(/\n/g) || []).length - crlfCount;
   const eol = crlfCount > lfCount ? '\r\n' : '\n';
   const body = [...GITIGNORE_BLOCK_HEADER, ...block].join(eol);
-  // localText is concatenated verbatim, never trimmed. A local rule whose
-  // trailing space is backslash-escaped is significant, and stripping it would
-  // MODIFY a user's line, which is the one thing this function promises not to
-  // do. Only the separator varies: none for an empty file, one EOL when the
-  // file already ends in a newline, two when it does not.
-  const separator = localText === ''
-    ? ''
-    : (/\r?\n$/.test(localText) ? eol : `${eol}${eol}`);
-  return { text: `${localText}${separator}${body}${eol}`, added };
+
+  // Find the LAST directory re-inclusion negation (see the ordering-caveat
+  // comment above) so the new block can go before it instead of after.
+  // Splitting on a capturing (\r?\n) keeps every original line ending as its
+  // own array slot, so the file can be re-assembled byte-for-byte from the
+  // parts on either side of the chosen insertion point — this function's
+  // verbatim-preservation guarantee extends to lines it is not touching.
+  const DIR_NEGATION_RE = /^!.+\/(\*\*)?$/;
+  const parts = localText.split(/(\r?\n)/);
+  let insertAt = -1; // index into `parts` of the negation LINE (even slot)
+  for (let i = 0; i < parts.length; i += 2) {
+    if (DIR_NEGATION_RE.test(parts[i].trim())) insertAt = i;
+  }
+
+  if (insertAt === -1) {
+    // No directory negation to protect — unchanged behavior, append at EOF.
+    // localText is concatenated verbatim, never trimmed. A local rule whose
+    // trailing space is backslash-escaped is significant, and stripping it
+    // would MODIFY a user's line, which is the one thing this function
+    // promises not to do. Only the separator varies: none for an empty
+    // file, one EOL when the file already ends in a newline, two when it
+    // does not.
+    const separator = localText === ''
+      ? ''
+      : (/\r?\n$/.test(localText) ? eol : `${eol}${eol}`);
+    return { text: `${localText}${separator}${body}${eol}`, added };
+  }
+
+  // Byte offset where the negation line itself starts: the sum of every
+  // part before it, lines and their original EOLs alike.
+  const targetOffset = parts.slice(0, insertAt).join('').length;
+  const prefix = localText.slice(0, targetOffset);
+  const suffix = localText.slice(targetOffset);
+  // By construction, `prefix` is either empty (the negation is the very
+  // first line) or already ends in a real EOL. One blank line before the new
+  // block reads better than running the header straight into whatever
+  // precedes it — added only if the prefix is non-empty and does not already
+  // end in a blank line, same "don't manufacture a double blank" reasoning
+  // as the EOF-append separator above.
+  const prefixEndsInBlankLine = prefix === '' || /(\r?\n){2}$/.test(prefix);
+  const prefixSeparator = prefixEndsInBlankLine ? '' : eol;
+  return { text: `${prefix}${prefixSeparator}${body}${eol}${eol}${suffix}`, added };
 }
 
 // ── APPLY ───────────────────────────────────────────────────────
