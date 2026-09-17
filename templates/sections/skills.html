@@ -4,10 +4,12 @@
   Field placeholders filled per skill category:
     CATEGORY_BLOCK — conditional: category label span when category is present; omitted otherwise
     ITEMS_TEXT     — comma-joined items string
+    NOTE_BLOCK     — conditional: qualifier line under the items when note is present; omitted otherwise
 
   Template packs: edit tag names, class names, and field order freely inside the ENTRY zone.
 -->
 <!--ENTRY-->
-<div class="skill-item">{{CATEGORY_BLOCK}}{{ITEMS_TEXT}}</div>
+<div class="skill-item">{{CATEGORY_BLOCK}}{{ITEMS_TEXT}}{{NOTE_BLOCK}}</div>
 <!--CATEGORY_BLOCK--><span class="skill-category">{{CATEGORY}}: </span><!--/CATEGORY_BLOCK-->
+<!--NOTE_BLOCK--><span class="skill-note">{{NOTE}}</span><!--/NOTE_BLOCK-->
 <!--/ENTRY-->

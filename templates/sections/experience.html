@@ -7,11 +7,13 @@
     ROLE             — job title
     BULLETS          — rendered <li> tags
     LOCATION_BLOCK   — conditional: .job-location div when location present; omitted when absent
+    JOB_CLASS        — '' or ' job--keep-together' when entry.keepTogether is set (#3961 follow-up)
+    ENGAGEMENTS      — rendered "Selected engagements" sub-list, or '' when entry.engagements is absent
 
   Template packs: edit tag names, class names, and field order freely inside the ENTRY zone.
 -->
 <!--ENTRY-->
-<div class="job">
+<div class="job{{JOB_CLASS}}">
   <div class="job-header">
     <span class="job-company">{{COMPANY}}</span>
     <span class="job-period">{{PERIOD}}</span>
@@ -20,7 +22,7 @@
   {{LOCATION_BLOCK}}
   <ul>
     {{BULLETS}}
-  </ul>
+  </ul>{{ENGAGEMENTS}}
 </div>
 <!--LOCATION_BLOCK--><div class="job-location">{{LOCATION}}</div><!--/LOCATION_BLOCK-->
 <!--/ENTRY-->
