@@ -782,6 +782,13 @@ process_offer() {
   # could pre-create it as a symlink and redirect or clobber the write.
   local jd_file
   jd_file="$(mktemp "${TMPDIR:-/tmp}/batch-jd-${id}.XXXXXX")"
+  # The worker is a native process. Under Git Bash / MSYS the path above is a
+  # POSIX one (/tmp/... or /c/...) that a Windows binary cannot open, so every
+  # worker read "JD source unavailable" even when curl had filled the file.
+  # cygpath -m yields C:/... which both bash and the worker resolve.
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) command -v cygpath >/dev/null 2>&1 && jd_file="$(cygpath -m "$jd_file")" ;;
+  esac
 
   # Pre-populate $jd_file with a static curl fetch so the worker reads HTML
   # directly instead of always falling through to WebFetch (#2492). WebFetch is

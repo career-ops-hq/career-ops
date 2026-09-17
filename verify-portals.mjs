@@ -22,14 +22,23 @@
  *   node verify-portals.mjs --add cursor    # probe slug variants for one name
  *   node verify-portals.mjs --strict        # exit non-zero if any slug is unresolved
  *   node verify-portals.mjs --file <path>   # use a specific portals file
+ *   node verify-portals.mjs --help          # print this usage block and exit
  *
  * Network: only the sweep / --add paths hit the network. Importing the module
  * (for tests) runs nothing — main() is guarded — and all network access goes
  * through an injectable `fetchJson`, so the pure logic is testable offline.
+ * `--help`/`-h` and an unrecognized flag are both handled BEFORE that network
+ * work starts (#4250) — this script had never adopted `lib/cli-flags.mjs`'s
+ * `validateFlags()`, unlike its siblings (audit-portals.mjs, scan.mjs), so
+ * `--help` fell through main()'s argument checks untouched and ran the exact
+ * same full portals.yml sweep as no flags at all. On a config with ~170
+ * tracked companies that is minutes of sequential network probing with zero
+ * output until it finishes — indistinguishable from a genuine hang, which is
+ * exactly how it was reported: "`--help` behaves the same [as no args]".
  */
 
 import { existsSync, readFileSync } from 'fs';
-import { dirname, resolve } from 'path';
+import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 
@@ -38,8 +47,18 @@ import { decodeEntities } from './providers/_html-entities.mjs';
 import { asciiFold } from './lib/ascii-fold.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
+// getCareerOpsRoot() (not a bare 'portals.yml'): scan.mjs, scan-ats-full.mjs
+// and audit-portals.mjs all resolve their default portals.yml against the
+// Data Root (CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data —
+// AGENTS.md's Path Resolution Override & Precedence), so this script was the
+// one place still assuming the Data Root equals the current working
+// directory — the same split-checkout mismatch class as #3867, just for
+// this script's default path (CodeRabbit, #4254 review).
+const DATA_ROOT = getCareerOpsRoot();
+const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(DATA_ROOT, 'portals.yml');
 
 // The core providers/ directory — the SAME plugins the scanner loads. Resolved
 // from this file's location so it's independent of the caller's cwd.
@@ -704,26 +723,48 @@ async function runAdd(name, { fetchJson }) {
   }
 }
 
+const KNOWN_FLAGS = ['--add', '--strict', '--file', '--help', '-h'];
+const VALUE_FLAGS = ['--add', '--file'];
+
+const USAGE = `Usage:
+  node verify-portals.mjs                 # sweep tracked_companies + job_boards in portals.yml
+  node verify-portals.mjs --add cursor    # probe slug variants for one name
+  node verify-portals.mjs --strict        # exit non-zero if any slug is unresolved
+  node verify-portals.mjs --file <path>   # use a specific portals file
+  node verify-portals.mjs --help          # print this usage block and exit`;
+
 async function main() {
   const args = process.argv.slice(2);
-  const strict = args.includes('--strict');
+  // Before any network work: an unrecognized flag exits 1, --help/-h prints
+  // USAGE and exits 0. Neither used to be checked at all (#4250) — --help
+  // fell through untouched and triggered the exact same full portals.yml
+  // sweep as no flags, which on a large config can run for minutes with zero
+  // output and reads exactly like a hang.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+
+  const strict = hasFlag(args, '--strict');
   const fetchJson = defaultFetchJson;
 
-  const addFlag = args.indexOf('--add');
-  if (addFlag !== -1) {
-    await runAdd(args[addFlag + 1] || '', { fetchJson });
+  if (hasFlag(args, '--add')) {
+    await runAdd(flagValue(args, '--add') || '', { fetchJson });
     return;
   }
 
-  const fileFlag = args.indexOf('--file');
   const filePath = resolve(
-    fileFlag === -1 ? DEFAULT_PORTALS_PATH : args[fileFlag + 1] || '',
+    hasFlag(args, '--file') ? flagValue(args, '--file') || '' : DEFAULT_PORTALS_PATH,
   );
 
   // Load the scanner's provider plugins so non-ATS boards (Workday,
   // SuccessFactors, SmartRecruiters, …) get a real reachability probe instead
   // of an un-actionable "skipped".
   const providers = await loadProviders(PROVIDERS_DIR);
+  // Fold in enabled keyed/auth-gated provider plugins, exactly as scan.mjs does
+  // — without this the verifier resolves only providers/*.mjs and disagrees
+  // with the scanner on every plugin-provider entry (#4026). No-op for a
+  // plugin-free install (mergeProviderPlugins returns before config/plugins.yml
+  // is read when it is absent).
+  const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
+  await mergeProviderPlugins(providers, { root: dirname(PROVIDERS_DIR) });
   const httpCtx = makeHttpCtx();
   const { found, results } = await verifyPortalsFile(filePath, { fetchJson, providers, httpCtx });
   if (!found) {
