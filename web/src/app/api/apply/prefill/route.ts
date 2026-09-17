@@ -51,7 +51,17 @@ export async function POST(req: Request) {
           /* ignore */
         }
       };
+      // Idempotent, like the `closed` guard the sibling routes carry. fail() closes
+      // the controller, and there is more than one path to it: a fencing refusal
+      // reports through fail() and then resolves with an empty buffer, which the
+      // empty-output branch below reports through fail() a second time. Closing an
+      // already-closed controller throws "Invalid state", and that throw escapes
+      // the async start() as an unhandled rejection — a worse failure than the one
+      // being reported.
+      let failed = false;
       const fail = (m: string, raw?: string) => {
+        if (failed) return;
+        failed = true;
         log(`ERROR: ${m}`);
         emit({ t: "error", m, raw });
         controller.close();
@@ -73,7 +83,6 @@ export async function POST(req: Request) {
 
       log(`Form: "${s.title}" · ${s.fields.length} fields · prompt ${prompt.length} chars · memory ${mem.length} chars`);
       log(`Planner: ${cliId} (${binPath})`);
-
       const result = await runPlanner({
         cliId,
         spec,
@@ -84,6 +93,11 @@ export async function POST(req: Request) {
         t0,
         log,
       });
+
+      // Fencing refused to start the planner (#2507): runPlanner already logged
+      // the reason; report it as THE error, before the empty-output branch below
+      // turns it into an unrelated "produced no output".
+      if (result.refused) return fail(result.refused);
 
       log(`Planner exited code=${result.code} signal=${result.signal} · ${result.buf.length} chars total`);
       log(`output head: ${result.buf.slice(0, 100).replace(/\s+/g, " ") || "(empty)"}`);
