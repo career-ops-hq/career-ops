@@ -394,7 +394,7 @@ Guardar la evaluación completa en `reports/{###}-{company-slug}-{YYYY-MM-DD}.md
 ## Risk Summary
 (una fila por señal de riesgo, orden fijo — ver la sección Risk Summary arriba)
 
-## H) Borradores de respuestas para la candidatura
+## H) Borradores de respuestas para la candidatura (draft)
 (solo si score >= 4.5 — borradores de respuestas para el formulario)
 
 ---
