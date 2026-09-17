@@ -91,6 +91,11 @@ const APPLY_PATTERNS = [
   /panelu aplikowania/i,
   // Accent-free: apply controls go through normalizeForMatch too ("wyślij" → "wyslij").
   /wyslij (cv|aplikacj)/i,
+  // Chinese MokaHR and Feishu Jobs detail pages use these exact control texts.
+  // Keep them narrow: bare “申请” appears in descriptive prose, while longer
+  // labels containing “投递” can be status/history controls rather than Apply.
+  /^申请职位$/,
+  /^投递$/,
 ];
 
 const MIN_CONTENT_CHARS = 300;
@@ -129,8 +134,23 @@ export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '',
   if (botChallenge) {
     return { result: 'uncertain', code: 'bot_challenge', reason: `anti-bot challenge: ${botChallenge.source}` };
   }
-  if (status === 403 || status === 503) {
+  // 429 belongs with 403/503: rate limiting is the board throttling US, never
+  // evidence the posting is gone. Its body is a short "Too Many Requests", well
+  // under MIN_CONTENT_CHARS, so without this it fell through to
+  // insufficient_content and read as `expired` — and an expired result is
+  // written to scan-history as skipped_expired, whose URL every later scan
+  // dedup-skips (indefinitely, unless scan_history.recheck_after_days is set).
+  // Scanning harder is exactly what earns a 429, so this compounds.
+  if (status === 403 || status === 429 || status === 503) {
     return { result: 'uncertain', code: 'access_blocked', reason: `HTTP ${status} (access blocked, likely anti-bot)` };
+  }
+  // Any other 5xx is a transient origin error (502/504 gateway hiccups, 500s
+  // during deploys), not evidence the posting is gone. Without this guard the
+  // short error body ("502 Bad Gateway / nginx") falls through to the
+  // insufficient-content heuristic and reads as expired — and a false
+  // "expired" permanently dedup-filters a real job out of future scans.
+  if (status >= 500) {
+    return { result: 'uncertain', code: 'server_error', reason: `HTTP ${status} (transient server error)` };
   }
 
   const expiredUrl = firstMatch(EXPIRED_URL_PATTERNS, finalUrl);

@@ -13,7 +13,8 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { join, dirname, resolve } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
+import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PROVIDERS_DIR = join(ROOT, 'providers');
@@ -115,6 +116,8 @@ async function loadProviderIds() {
   return ids;
 }
 
+const TITLE_FILTER_FIELDS = ['positive', 'negative', 'seniority_boost'];
+
 export async function validatePortalsConfig(config, { providerIds = new Set() } = {}) {
   const errors = [];
   const warnings = [];
@@ -134,6 +137,31 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     }
   }
 
+  // Optional per-scanner override consumed only by scan-ats-full.mjs. Same
+  // shape as title_filter, so it gets the same structural checks — an
+  // unvalidated key would let a typo ("positve") silently resolve to a
+  // profile with no positive keywords, which matches every posting.
+  if (config.title_filter_full !== undefined) {
+    if (!isObject(config.title_filter_full)) {
+      add(errors, 'title_filter_full', 'title_filter_full must be an object');
+    } else {
+      // A misspelled field is the dangerous case, not a missing one:
+      // `positve:` leaves `positive` undefined, buildTitleFilter treats an
+      // empty positive list as "no positive constraint", and the sweep then
+      // matches every title on every board — the exact outcome this key
+      // exists to prevent. An unknown field is therefore an error, while
+      // `positive: []` stays valid as a deliberate choice.
+      for (const key of Object.keys(config.title_filter_full)) {
+        if (!TITLE_FILTER_FIELDS.includes(key)) {
+          add(errors, `title_filter_full.${key}`, `unknown title_filter_full field - expected one of ${TITLE_FILTER_FIELDS.join(', ')}`);
+        }
+      }
+      validateKeywordList(config.title_filter_full.positive, 'title_filter_full.positive', errors);
+      validateKeywordList(config.title_filter_full.negative, 'title_filter_full.negative', errors);
+      validateKeywordList(config.title_filter_full.seniority_boost, 'title_filter_full.seniority_boost', errors);
+    }
+  }
+
   if (config.location_filter !== undefined) {
     if (!isObject(config.location_filter)) {
       add(errors, 'location_filter', 'location_filter must be an object');
@@ -141,6 +169,7 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       validateKeywordList(config.location_filter.always_allow, 'location_filter.always_allow', errors);
       validateKeywordList(config.location_filter.allow, 'location_filter.allow', errors);
       validateKeywordList(config.location_filter.block, 'location_filter.block', errors);
+      validateKeywordList(config.location_filter.block_hard, 'location_filter.block_hard', errors);
     }
   }
 
@@ -195,46 +224,53 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     add(errors, 'search_queries', 'search_queries must be an array when set');
   }
 
-  const companies = config.tracked_companies;
-  if (companies !== undefined && !Array.isArray(companies)) {
-    add(errors, 'tracked_companies', 'tracked_companies must be an array when set');
-  }
-
+  // tracked_companies and job_boards share one entry schema (name / careers_url /
+  // api / provider / parser) and one dedup namespace downstream, so validate them
+  // in a single pass. seenEnabledNames spans both lists: a board and a company
+  // that share a name would still collide in the scanner's reporting.
   const seenEnabledNames = new Map();
-  if (Array.isArray(companies)) {
-    for (const [idx, company] of companies.entries()) {
-      const base = `tracked_companies[${idx}]`;
-      if (!isObject(company)) {
-        add(errors, base, 'company entry must be an object');
+  const validateEntryList = (list, key, noun) => {
+    if (list === undefined) return;
+    if (!Array.isArray(list)) {
+      add(errors, key, `${key} must be an array when set`);
+      return;
+    }
+    for (const [idx, entry] of list.entries()) {
+      const base = `${key}[${idx}]`;
+      if (!isObject(entry)) {
+        add(errors, base, `${noun} entry must be an object`);
         continue;
       }
-      if (company.enabled === false) continue;
+      if (entry.enabled === false) continue;
 
-      if (typeof company.name !== 'string' || company.name.trim() === '') {
-        add(errors, `${base}.name`, 'enabled company must have a non-empty string name');
+      if (typeof entry.name !== 'string' || entry.name.trim() === '') {
+        add(errors, `${base}.name`, `enabled ${noun} must have a non-empty string name`);
       } else {
-        const normalized = normalizeName(company.name);
+        const normalized = normalizeName(entry.name);
         if (seenEnabledNames.has(normalized)) {
-          add(warnings, `${base}.name`, `duplicate enabled company name also seen at ${seenEnabledNames.get(normalized)}`);
+          add(warnings, `${base}.name`, `duplicate enabled ${noun} name also seen at ${seenEnabledNames.get(normalized)}`);
         } else {
           seenEnabledNames.set(normalized, `${base}.name`);
         }
       }
 
-      validateUrl(company.careers_url, `${base}.careers_url`, errors);
-      validateUrl(company.api, `${base}.api`, errors);
+      validateUrl(entry.careers_url, `${base}.careers_url`, errors);
+      validateUrl(entry.api, `${base}.api`, errors);
 
-      if (company.provider !== undefined) {
-        if (typeof company.provider !== 'string' || company.provider.trim() === '') {
+      if (entry.provider !== undefined) {
+        if (typeof entry.provider !== 'string' || entry.provider.trim() === '') {
           add(errors, `${base}.provider`, 'provider must be a non-empty string when set');
-        } else if (!providerIds.has(company.provider)) {
-          add(errors, `${base}.provider`, `unknown provider "${company.provider}"`);
+        } else if (!providerIds.has(entry.provider)) {
+          add(errors, `${base}.provider`, `unknown provider "${entry.provider}"`);
         }
       }
 
-      validateParser(company.parser, `${base}.parser`, errors);
+      validateParser(entry.parser, `${base}.parser`, errors);
     }
-  }
+  };
+
+  validateEntryList(config.tracked_companies, 'tracked_companies', 'company');
+  validateEntryList(config.job_boards, 'job_boards', 'job board');
 
   return { errors, warnings };
 }
@@ -281,8 +317,11 @@ async function main() {
     return;
   }
 
-  const fileFlag = args.indexOf('--file');
-  const filePath = resolve(fileFlag === -1 ? DEFAULT_PORTALS_PATH : args[fileFlag + 1] || '');
+  // An explicit but empty `--file=` must reach the usage error below. Passing
+  // '' to resolve() would return the CURRENT DIRECTORY, and the script would
+  // then try to validate a directory and report a filesystem error instead.
+  const fileFlag = hasFlag(args, '--file') ? (flagValue(args, '--file') ?? '') : undefined;
+  const filePath = fileFlag === undefined ? resolve(DEFAULT_PORTALS_PATH) : (fileFlag ? resolve(fileFlag) : '');
   if (!filePath) {
     console.error('Usage: node validate-portals.mjs [--file portals.yml] [--self-test]');
     process.exit(1);

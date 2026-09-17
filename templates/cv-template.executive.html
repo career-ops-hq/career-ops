@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<!-- career-ops-template
+name: Executive
+version: 1.0.0
+-->
+<html lang="{{LANG}}">
+<head>
+<meta charset="UTF-8">
+<title>{{NAME}} — CV</title>
+<style>
+  /* ── Executive ────────────────────────────────────────────────────────────
+     A conservative, serif, print-first CV for senior/executive applications
+     (banks, funds, traditional enterprises). No colour fills, no tags, no
+     gradients — hierarchy comes from a centred header, ruled small-caps section
+     headings, and generous leading.
+
+     ATS discipline is identical to templates/cv-template.html and is NOT
+     negotiable: a static system font stack (never the bundled variable woff2
+     fonts, whose glyph advances make PDF extractors inject spaces inside words)
+     and ligatures disabled (headless Chromium otherwise emits U+FB01/FB02 and a
+     literal keyword search for "verification" misses "veriﬁcation"). */
+
+  :root {
+    --accent-color: hsl(215 30% 26%);
+    --font-family: "Liberation Serif", Georgia, 'Times New Roman', 'DejaVu Serif', serif;
+    --font-size: 11px;
+    /* Must match generate-pdf.mjs's PDF_PAGE_MARGIN — the real @page margin is
+       appended later by injectPrintPageCss reading this same variable. */
+    --page-margin: 0.6in;
+  }
+  @page { margin: var(--page-margin); }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "clig" 0, "dlig" 0;
+  }
+
+  html {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body {
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    line-height: 1.55;
+    color: #1a1a1a;
+    background: #ffffff;
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "clig" 0, "dlig" 0;
+  }
+
+  .page {
+    max-width: {{PAGE_WIDTH}};
+    margin: 0 auto;
+    background: #ffffff;
+  }
+
+  /* === PHOTO (opt-in, #264) === */
+  .cv-photo {
+    float: right;
+    width: 78px;
+    height: 78px;
+    object-fit: cover;
+    margin: 0 0 8px 14px;
+  }
+  .cv-photo.rounded { border-radius: 4px; }
+  .cv-photo.circle  { border-radius: 50%; }
+  .cv-photo.square  { border-radius: 0; }
+
+  /* === HEADER === */
+  .header {
+    text-align: center;
+    padding-bottom: 9px;
+    margin-bottom: 15px;
+    border-bottom: 1.5px solid var(--accent-color);
+  }
+
+  .header h1 {
+    font-size: 25px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent-color);
+    line-height: 1.15;
+  }
+
+  .contact-row {
+    margin-top: 6px;
+    font-size: 10px;
+    color: #3a3a3a;
+    line-height: 1.6;
+  }
+
+  .contact-row a {
+    color: #3a3a3a;
+    text-decoration: none;
+  }
+
+  .separator {
+    margin: 0 6px;
+    color: #999;
+  }
+
+  /* === SECTIONS === */
+  .section { margin-bottom: 13px; }
+
+  .section-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--accent-color);
+    border-bottom: 0.75px solid #c4ccd6;
+    padding-bottom: 2px;
+    margin-bottom: 7px;
+  }
+
+  .summary-text { text-align: justify; }
+
+  /* === COMPETENCIES ===
+     Rendered as a ruled inline list rather than pills — pills read as
+     decorative on an executive CV. */
+  .competencies-grid { line-height: 1.7; }
+
+  .competency-tag {
+    display: inline;
+    white-space: nowrap;
+  }
+  .competency-tag::after {
+    content: "  \00B7  ";
+    color: #9aa4b0;
+  }
+  .competency-tag:last-child::after { content: ""; }
+
+  /* === WORK EXPERIENCE === */
+  .job { margin-bottom: 11px; }
+
+  .job-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .job-company {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #14181f;
+  }
+
+  .job-period {
+    font-size: 10px;
+    color: #55606d;
+    white-space: nowrap;
+  }
+
+  .job-role {
+    font-size: 11.5px;
+    font-style: italic;
+    color: #2c3540;
+    margin-top: 1px;
+  }
+
+  .job-location {
+    font-size: 9.5px;
+    color: #6b7684;
+    margin-top: 1px;
+  }
+
+  .job ul {
+    margin-top: 4px;
+    padding-left: 17px;
+  }
+
+  .job li {
+    margin-bottom: 2.5px;
+    text-align: justify;
+  }
+
+  /* === PROJECTS === */
+  .project { margin-bottom: 7px; }
+
+  .project-title {
+    font-size: 11.5px;
+    font-weight: 700;
+    color: #14181f;
+  }
+
+  .project-badge {
+    font-size: 9px;
+    font-style: italic;
+    color: #55606d;
+    margin-left: 6px;
+  }
+
+  .project-desc { margin-top: 1px; text-align: justify; }
+
+  .project-tech {
+    font-size: 9.5px;
+    font-style: italic;
+    color: #55606d;
+    margin-top: 1px;
+  }
+
+  /* === EDUCATION === */
+  .edu-item { margin-bottom: 6px; }
+
+  .edu-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .edu-title { font-weight: 700; color: #14181f; }
+
+  .edu-org { font-weight: 400; font-style: italic; color: #2c3540; }
+
+  .edu-year {
+    font-size: 10px;
+    color: #55606d;
+    white-space: nowrap;
+  }
+
+  .edu-location { font-size: 9.5px; color: #6b7684; margin-top: 1px; }
+
+  .edu-desc { margin-top: 1px; text-align: justify; }
+
+  /* === CERTIFICATIONS === */
+  .cert-table,
+  .award-table { display: block; }
+
+  .cert-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 2.5px;
+  }
+
+  .cert-title { font-weight: 700; }
+  .cert-org { flex: 1; font-style: italic; color: #2c3540; }
+  .cert-year { font-size: 10px; color: #55606d; white-space: nowrap; }
+
+  /* === SKILLS === */
+  .skills-grid { display: block; }
+
+  .skill-item {
+    margin-bottom: 2.5px;
+    padding-left: 0;
+  }
+
+  .skill-category {
+    font-weight: 700;
+    color: #14181f;
+  }
+
+  /* === PAGE BREAK CONTROL ===
+     Only small atomic units are protected; sections and multi-bullet roles flow
+     across a page boundary so content packs tight instead of leaving gaps. */
+  .header,
+  .edu-item,
+  .cert-item,
+  .competency-tag,
+  .skill-item {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .section-title,
+  .job-company,
+  .job-role,
+  .job-location,
+  .edu-location,
+  .project-title {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  /* Keep a project's tech line attached to the description above it, so a bare
+     "Python | github.com/..." line is never stranded atop the next page. */
+  .project-tech {
+    break-before: avoid;
+    page-break-before: avoid;
+  }
+
+  /* === RTL (Arabic) support === */
+  html[lang="ar"] body {
+    direction: rtl;
+    text-align: right;
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+  }
+  html[lang="ar"] .job ul { padding-right: 17px; padding-left: 0; }
+  html[lang="ar"] .cv-photo { float: left; margin: 0 14px 8px 0; }
+  html[lang="ar"] .cert-year { text-align: left; }
+
+  /* === CJK fallback ===
+     The Latin serif stack stays first so ASCII keeps its serif face; the
+     browser's per-glyph fallback picks an installed CJK face for kana/kanji. */
+  html[lang="ja"] body {
+    font-family: "Liberation Serif", Georgia, 'Times New Roman', 'Hiragino Mincho ProN',
+      'Yu Mincho', 'Noto Serif CJK JP', 'MS PMincho', serif;
+  }
+  html[lang="zh-CN"] body,
+  html[lang="zh"] body {
+    font-family: "Liberation Serif", Georgia, 'Times New Roman', 'Songti SC',
+      'SimSun', 'Noto Serif CJK SC', serif;
+    line-break: strict;
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  {{PHOTO}}
+  <!-- HEADER -->
+  <div class="header">
+    <h1>{{NAME}}</h1>
+    <div class="contact-row">
+      <a href="tel:{{PHONE}}">{{PHONE}}</a>
+      <span class="separator">|</span>
+      <a href="mailto:{{EMAIL}}">{{EMAIL}}</a>
+      <span class="separator">|</span>
+      <a href="{{LINKEDIN_URL}}">{{LINKEDIN_DISPLAY}}</a>
+      <span class="separator">|</span>
+      <a href="{{PORTFOLIO_URL}}">{{PORTFOLIO_DISPLAY}}</a>
+      <span class="separator">|</span>
+      <span>{{LOCATION}}</span>
+    </div>
+  </div>
+
+  <!-- PROFESSIONAL SUMMARY -->
+  <div class="section">
+    <div class="section-title">{{SECTION_SUMMARY}}</div>
+    <div class="summary-text">{{SUMMARY_TEXT}}</div>
+  </div>
+
+  <!-- CORE COMPETENCIES -->
+  <div class="section">
+    <div class="section-title">{{SECTION_COMPETENCIES}}</div>
+    <div class="competencies-grid">
+      {{COMPETENCIES}}
+    </div>
+  </div>
+
+  <!-- WORK EXPERIENCE -->
+  <div class="section">
+    <div class="section-title">{{SECTION_EXPERIENCE}}</div>
+    {{EXPERIENCE}}
+  </div>
+
+  <!-- PROJECTS -->
+  <div class="section">
+    <div class="section-title">{{SECTION_PROJECTS}}</div>
+    {{PROJECTS}}
+  </div>
+
+  <!-- EDUCATION -->
+  <div class="section">
+    <div class="section-title">{{SECTION_EDUCATION}}</div>
+    {{EDUCATION}}
+  </div>
+
+  <!-- CERTIFICATIONS -->
+  <div class="section">
+    <div class="section-title">{{SECTION_CERTIFICATIONS}}</div>
+    <div class="cert-table">{{CERTIFICATIONS}}</div>
+  </div>
+
+  <!-- AWARDS -->
+  <div class="section">
+    <div class="section-title">{{SECTION_AWARDS}}</div>
+    <div class="award-table">{{AWARDS}}</div>
+  </div>
+
+  <!-- SKILLS -->
+  <div class="section">
+    <div class="section-title">{{SECTION_SKILLS}}</div>
+    {{SKILLS}}
+  </div>
+
+  <!-- END -->
+
+</div>
+</body>
+</html>

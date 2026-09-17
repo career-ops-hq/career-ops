@@ -4,13 +4,17 @@
  * fix-slugs.mjs — write verify-portals.mjs's suggested ATS slug fixes back
  * into portals.yml.
  *
- * verify-portals.mjs already probes every tracked company's ATS slug and, for
- * a failing Greenhouse/Ashby/Lever entry, cross-probes slug variants across
- * all three ATSes and attaches `suggested: { ats, slug }` when one resolves
- * (see discoverAlternates() in verify-portals.mjs). That tool is read-only —
- * this script is the write side: it reuses the SAME probe/suggestion logic
- * (no re-implementation, no HTML scraping, no hardcoded company list) and
- * patches the matching `tracked_companies` entry in portals.yml.
+ * verify-portals.mjs already probes every tracked company's ATS slug. Its
+ * "tier 1" fast path is hardcoded to the three ATSes whose board URL carries a
+ * parseable slug — Greenhouse, Ashby, Lever — and for a failing entry it
+ * cross-probes slug variants across those three, attaching
+ * `suggested: { ats, slug }` when one resolves (see discoverAlternates() in
+ * verify-portals.mjs). Any other host is a provider-plugin (tier 2) entry and
+ * never gets a `suggested`, so this script only ever rewrites Greenhouse / Ashby
+ * / Lever slugs. That tool is read-only — this is the write side: it reuses the
+ * SAME probe/suggestion logic (no re-implementation, no HTML scraping, no
+ * hardcoded company list) and patches the matching `tracked_companies` entry in
+ * portals.yml.
  *
  * Only entries verify-portals classifies as `missing` AND carries a
  * `suggested` alternate for are touched. Live/empty entries and genuinely
@@ -27,15 +31,28 @@
  *   node fix-slugs.mjs --fix         # write the resolved slugs back to portals.yml
  *   node fix-slugs.mjs --apply       # alias for --fix
  *   node fix-slugs.mjs --file <path> # use a specific portals file
+ *   node fix-slugs.mjs --help        # show this message (-h is an alias)
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
-import { pathToFileURL } from 'url';
 
 import { verifyPortalsFile } from './verify-portals.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
+
+const KNOWN_FLAGS = ['--apply', '--dry-run', '--file', '--fix', '--help', '-h'];
+const VALUE_FLAGS = ['--file'];
+
+const USAGE = `Usage:
+  node fix-slugs.mjs               # dry run (default, safe) — prints the diff, writes nothing
+  node fix-slugs.mjs --dry-run     # same as above, explicit
+  node fix-slugs.mjs --fix         # write the resolved slugs back to portals.yml
+  node fix-slugs.mjs --apply       # alias for --fix
+  node fix-slugs.mjs --file <path> # use a specific portals file
+  node fix-slugs.mjs --help        # show this message (-h is an alias)`;
 
 /** Matches a `tracked_companies` list-item start line: `  - name: Foo`. */
 const NAME_LINE_RE = /^([ \t]*)-\s*name:\s*(.+?)\s*$/;
@@ -320,11 +337,22 @@ function printDiff(fixes, { dryRun }) {
 
 async function main() {
   const args = process.argv.slice(2);
+
+  if (hasFlag(args, '--file')) {
+    const rawVal = flagValue(args, '--file');
+    if (rawVal === undefined || rawVal === '' || rawVal.startsWith('-')) {
+      console.error('Error: --file requires a value');
+      process.exit(1);
+    }
+  }
+
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+
   const fix = args.includes('--fix') || args.includes('--apply');
   const dryRun = !fix; // default is always safe — writing requires an explicit flag
 
-  const fileFlag = args.indexOf('--file');
-  const filePath = resolve(fileFlag === -1 ? DEFAULT_PORTALS_PATH : args[fileFlag + 1] || '');
+  const fileVal = flagValue(args, '--file');
+  const filePath = resolve(fileVal || DEFAULT_PORTALS_PATH);
 
   if (!existsSync(filePath)) {
     console.log(`fix-slugs: no portals file at ${filePath} — nothing to fix.`);
@@ -346,7 +374,7 @@ async function main() {
 }
 
 // Only run main() when invoked directly, not when imported by tests.
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`fix-slugs failed: ${err.message}`);
     process.exit(1);

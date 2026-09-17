@@ -107,7 +107,7 @@ These don't belong in the plugin layer — they're a different direction:
 - **Centralized infrastructure** the project would operate — hosted job
   aggregation, a shared matching service, proxies/Workers. That's a **separate,
   opt-in service**, discussed in
-  [Where career-ops is going (#904)](https://github.com/santifer/career-ops/discussions/904) —
+  [Where career-ops is going (#904)](https://github.com/career-ops-hq/career-ops/discussions/904) —
   not the open-core.
 - **Auto-submitting / blind-applying** to jobs. career-ops is a decision-support
   tool, not a spam bot — it drafts applications for **you** to review and submit.

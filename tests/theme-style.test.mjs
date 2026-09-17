@@ -15,10 +15,10 @@ try {
   } = await import(pathToFileURL(join(ROOT, 'theme-style.mjs')).href);
 
   // styleTokensFrom: recognized keys → css vars; ignore unknown/non-string/missing
-  const t = styleTokensFrom({ accent_color: '#2563eb', font_family: 'Outfit, sans-serif', font_size: '10pt', margin: '0.5in', nope: 'x', font_weight: 700 });
-  if (t['--accent-color'] === '#2563eb' && t['--font-family'] === 'Outfit, sans-serif' && t['--font-size'] === '10pt' && t['--page-margin'] === '0.5in'
-      && !('--font-weight' in t) && Object.keys(t).length === 4) {
-    pass('styleTokensFrom maps the 4 recognized keys and ignores unknown/non-string');
+  const t = styleTokensFrom({ accent_color: '#2563eb', secondary_color: '#111827', font_family: 'Outfit, sans-serif', font_size: '10pt', margin: '0.5in', nope: 'x', font_weight: 700 });
+  if (t['--accent-color'] === '#2563eb' && t['--secondary-color'] === '#111827' && t['--font-family'] === 'Outfit, sans-serif' && t['--font-size'] === '10pt' && t['--page-margin'] === '0.5in'
+      && !('--font-weight' in t) && Object.keys(t).length === 5) {
+    pass('styleTokensFrom maps the 5 recognized keys and ignores unknown/non-string');
   } else {
     fail(`styleTokensFrom => ${JSON.stringify(t)}`);
   }
@@ -42,6 +42,12 @@ try {
     const p2 = join(dir, 'nostyle.yml'); writeFileSync(p2, 'candidate:\n  full_name: X\n');
     if (Object.keys(readStyleTokens(p2)).length === 0) pass('readStyleTokens returns {} when there is no style block');
     else fail('readStyleTokens should return {} without a style block');
+    // secondary_color round-trips through readStyleTokens the same way accent_color does
+    const p3 = join(dir, 'secondary.yml');
+    writeFileSync(p3, 'candidate:\n  full_name: X\nstyle:\n  secondary_color: "#111827"\n');
+    const rt3 = readStyleTokens(p3);
+    if (rt3['--secondary-color'] === '#111827' && Object.keys(rt3).length === 1) pass('readStyleTokens reads secondary_color from a profile file');
+    else fail(`readStyleTokens secondary_color => ${JSON.stringify(rt3)}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -77,6 +83,23 @@ try {
   if (noHead.startsWith('<style id="career-ops-dynamic-theme"')) pass('injectThemeStyle prepends the block when there is no </head>');
   else fail(`injectThemeStyle no-head => ${noHead}`);
 
+  // secondary_color round-trips through buildThemeStyleBlock/injectThemeStyle
+  // the same way accent_color does (the CV template's second, previously
+  // un-themed hardcoded color — see issue for the "purple can't be
+  // recolored via style:" bug this token fixes).
+  const secondaryBlock = buildThemeStyleBlock({ '--secondary-color': '#111827' });
+  if (secondaryBlock.includes('id="career-ops-dynamic-theme"') && secondaryBlock.includes('--secondary-color: #111827;')) {
+    pass('buildThemeStyleBlock emits a :root block for --secondary-color');
+  } else {
+    fail(`buildThemeStyleBlock secondary_color => ${secondaryBlock}`);
+  }
+  const secondaryInjected = injectThemeStyle(html, { '--secondary-color': '#111827' });
+  if (secondaryInjected.includes('--secondary-color: #111827;') && secondaryInjected.indexOf('career-ops-dynamic-theme') < secondaryInjected.indexOf('</head>')) {
+    pass('injectThemeStyle inserts a --secondary-color override before </head>');
+  } else {
+    fail(`injectThemeStyle secondary_color => ${secondaryInjected}`);
+  }
+
   // Template guard: shipped templates read the vars with :root defaults, no circular refs
   for (const tpl of ['templates/cv-template.html', 'templates/cover-letter-template.html']) {
     const src = readFileSync(join(ROOT, tpl), 'utf-8');
@@ -85,6 +108,88 @@ try {
     const circular = /--(accent-color|font-family|font-size|page-margin):\s*var\(/.test(src);
     if (hasRoot && usesVars && !circular) pass(`${tpl} declares :root theme defaults and reads them via var() (no circular refs)`);
     else fail(`${tpl}: hasRoot=${hasRoot} usesVars=${usesVars} circular=${circular}`);
+  }
+
+  // Template guard (this fix): cv-template.html's second, previously hardcoded
+  // color (hsl(270, 70%, 45%), used for company/institution names and the
+  // header gradient's second stop) is now themeable via --secondary-color,
+  // with no leftover hardcoded occurrences and no circular var() default.
+  for (const tpl of ['templates/cv-template.html', 'templates/cv-template.zh-minimal.html', 'templates/resume-template.html']) {
+    const src = readFileSync(join(ROOT, tpl), 'utf-8');
+    const hasRoot = /:root\s*\{[^}]*--secondary-color:\s*hsl\(270, 70%, 45%\);/s.test(src);
+    const usesVar = src.includes('var(--secondary-color)');
+    const leftoverHardcoded = (src.match(/hsl\(270, 70%, 45%\)/g) || []).length > 1; // exactly one: the :root default
+    const circular = /--secondary-color:\s*var\(/.test(src);
+    if (hasRoot && usesVar && !leftoverHardcoded && !circular) {
+      pass(`${tpl} declares a --secondary-color :root default and reads it via var() everywhere (no leftover hardcoded purple)`);
+    } else {
+      fail(`${tpl}: hasRoot=${hasRoot} usesVar=${usesVar} leftoverHardcoded=${leftoverHardcoded} circular=${circular}`);
+    }
+  }
+  // Regression: localized CJK font stacks must honor the profile
+  // --font-family override while keeping their curated fallbacks active after it.
+  {
+    const tplSrc = readFileSync(join(ROOT, 'templates/cv-template.html'), 'utf-8');
+
+    const jaBody = tplSrc.match(/html\[lang="ja"\]\s+body\s*\{[^}]*\}/s)?.[0] || '';
+    const jaHeadings = tplSrc.match(/html\[lang="ja"\]\s+\.header h1,[\s\S]*?\{[^}]*\}/)?.[0] || '';
+    const zhBody = tplSrc.match(/html\[lang="zh-CN"\]\s+body,[\s\S]*?\{[^}]*\}/)?.[0] || '';
+    const zhHeadings = tplSrc.match(/html\[lang="zh-CN"\]\s+\.header h1,[\s\S]*?\{[^}]*\}/)?.[0] || '';
+    const hasActiveFallback = (src, firstFace) => src.includes(`font-family: var(--font-family), '${firstFace}'`)
+      && /font-family:[^;]*sans-serif;/.test(src);
+
+    const jaBodyCount = (tplSrc.match(/html\[lang="ja"\]\s+body\s*\{/g) || []).length;
+    const zhCnBodyCount = (tplSrc.match(/html\[lang="zh-CN"\]\s+body/g) || []).length;
+    const zhBodyCount = (tplSrc.match(/html\[lang="zh"\]\s+body/g) || []).length;
+
+    if (hasActiveFallback(jaBody, 'Hiragino Sans') && hasActiveFallback(jaHeadings, 'Hiragino Sans')
+        && hasActiveFallback(zhBody, 'PingFang SC') && hasActiveFallback(zhHeadings, 'PingFang SC')
+        && jaBodyCount === 1 && zhCnBodyCount === 1 && zhBodyCount === 1) {
+      pass('Japanese and Simplified Chinese font stacks keep CJK fallbacks after --font-family');
+    } else {
+      fail(`CJK font regression: jaBody=${hasActiveFallback(jaBody, 'Hiragino Sans')} jaHeadings=${hasActiveFallback(jaHeadings, 'Hiragino Sans')} zhBody=${hasActiveFallback(zhBody, 'PingFang SC')} zhHeadings=${hasActiveFallback(zhHeadings, 'PingFang SC')} jaCount=${jaBodyCount} zhCNCount=${zhCnBodyCount} zhCount=${zhBodyCount}`);
+    }
+  }
+
+  // Regression: the Korean locale must honor profile.style.font_family on the
+  // body and the prominent heading/contact surfaces. A duplicate selector or a
+  // fixed-only stack silently defeats the dynamic theme block.
+  {
+    const koSrc = readFileSync(join(ROOT, 'templates/cv-template.html'), 'utf-8');
+    const koBody = koSrc.match(/html\[lang="ko"\]\s+body\s*\{[^}]*\}/s)?.[0] || '';
+    const koHeadings = koSrc.match(/html\[lang="ko"\]\s+\.header h1,[\s\S]*?\{[^}]*\}/)?.[0] || '';
+    const hasActiveFallback = (src) => src.includes("font-family: var(--font-family), 'Apple SD Gothic Neo'")
+      && /font-family:[^;]*sans-serif;/.test(src);
+    const hasDuplicateBodySelector = /html\[lang="ko"\]\s+body\s*,\s*html\[lang="ko"\]\s+body\s*\{/.test(koSrc);
+    if (hasActiveFallback(koBody) && hasActiveFallback(koHeadings) && !hasDuplicateBodySelector) {
+      pass('Korean font stacks keep CJK fallbacks after --font-family without duplicate selector');
+    } else {
+      fail(`Korean theme contract: body=${hasActiveFallback(koBody)} headings=${hasActiveFallback(koHeadings)} duplicate=${hasDuplicateBodySelector}`);
+    }
+  }
+
+  // Regression (#3154 + CodeRabbit review on #3525): the Traditional Chinese
+  // block was the last CJK block on a fixed-only stack, with duplicated `body`
+  // and `.skill-category` selectors. It now uses the ATS-template idiom —
+  // `var(--font-family)` first (profile override / Latin :root default), then
+  // the curated TC faces in the font list, then `sans-serif`. The faces must
+  // NOT sit in `var(--font-family, …)`'s fallback slot: :root always defines
+  // --font-family, so that slot never resolves and the TC stack would be dead.
+  {
+    const src = readFileSync(join(ROOT, 'templates/cv-template.html'), 'utf-8');
+    const body = src.match(/html\[lang="zh-TW"\]\s+body[^{]*\{[^}]*\}/s)?.[0] || '';
+    const headings = src.match(/html\[lang="zh-TW"\]\s+\.header h1,[\s\S]*?\{[^}]*\}/)?.[0] || '';
+    // token first, then the TC faces, terminal sans-serif — not the dead-slot form
+    const wants = (s) => /font-family:\s*var\(--font-family\),\s*'PingFang TC'[\s\S]*'Source Han Sans TC',\s*sans-serif;/.test(s);
+    const deadSlot = /html\[lang="zh-TW"\][\s\S]*?font-family:\s*var\(--font-family,\s*'/.test(src);
+    const dupBody = /html\[lang="zh-TW"\]\s+body\s*,\s*html\[lang="zh-TW"\]\s+body\b/.test(src);
+    const dupSkillCat = /html\[lang="zh-TW"\]\s+\.skill-category,\s*html\[lang="zh-TW"\]\s+\.skill-category\s*\{/.test(src);
+    const bodyCount = (src.match(/html\[lang="zh-TW"\]\s+body\b/g) || []).length;
+    if (wants(body) && wants(headings) && !deadSlot && !dupBody && !dupSkillCat && bodyCount === 1) {
+      pass('Traditional Chinese block leads with var(--font-family), keeps the TC fallback faces, no duplicate selectors');
+    } else {
+      fail(`Traditional Chinese theme contract: body=${wants(body)} headings=${wants(headings)} deadSlot=${deadSlot} dupBody=${dupBody} dupSkillCat=${dupSkillCat} bodyCount=${bodyCount}`);
+    }
   }
 
   // Regression (post-review, #1837): injectPrintPageCss's @page rule used to

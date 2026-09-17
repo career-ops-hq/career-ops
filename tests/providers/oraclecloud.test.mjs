@@ -55,6 +55,75 @@ try {
     fail(`ocs variant returned ${JSON.stringify(ocsHit)}`);
   }
 
+  // ── numbered apex (oraclecloud<NN>.com) ─────────────────────────────
+  // Oracle issues newer tenants a numbered apex; the same three host shapes
+  // exist there. Before this was accepted, detect() returned null and the
+  // board scanned as zero jobs with no error.
+  const numberedShapes = [
+    ['plain', 'https://acme.fa.oraclecloud26.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs', 'acme.fa.oraclecloud26.com'],
+    ['<region>', 'https://acme.fa.us2.oraclecloud26.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs', 'acme.fa.us2.oraclecloud26.com'],
+    ['.ocs.', 'https://acme.fa.ocs.oraclecloud26.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs', 'acme.fa.ocs.oraclecloud26.com'],
+  ];
+  const numberedBad = numberedShapes.filter(([, url, host]) => {
+    const r = oc.detect({ name: 'X', careers_url: url });
+    return !(r && hostOf(r.url) === host);
+  });
+  if (numberedBad.length === 0) {
+    pass('oraclecloud.detect() handles the numbered apex (oraclecloud26.com) on all three host shapes');
+  } else {
+    fail(`numbered apex rejected for shape(s): ${numberedBad.map(([n]) => n).join(', ')}`);
+  }
+
+  // bounded family: 1..99 in, everything outside out. The regex is an SSRF
+  // pin — it must enumerate a finite apex set, never `oraclecloud<any>.com`.
+  const apexUrl = (apex) => `https://acme.fa.ocs.${apex}.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs`;
+  const acceptedApexes = ['oraclecloud', 'oraclecloud1', 'oraclecloud9', 'oraclecloud26', 'oraclecloud99'];
+  const rejectedApexes = ['oraclecloud0', 'oraclecloud01', 'oraclecloud100', 'oraclecloud26x', 'oraclecloudabc'];
+  const apexMisses = [
+    ...acceptedApexes.filter((a) => oc.detect({ name: 'X', careers_url: apexUrl(a) }) === null),
+    ...rejectedApexes.filter((a) => oc.detect({ name: 'X', careers_url: apexUrl(a) }) !== null),
+  ];
+  if (apexMisses.length === 0) {
+    pass('oraclecloud host pin is a BOUNDED apex family (1-99 accepted; 0, 01, 100, suffixed → null)');
+  } else {
+    fail(`apex boundary wrong for: ${apexMisses.join(', ')}`);
+  }
+
+  // numbered apex as a LABEL inside a hostile host → null (suffix spoof)
+  if (oc.detect({ name: 'Spoof3', careers_url: 'https://x.fa.ocs.oraclecloud26.evil.example/hcmUI/CandidateExperience/en/sites/CX_1/jobs' }) === null) {
+    pass('oraclecloud.detect() rejects a numbered apex used as a label of a hostile host');
+  } else {
+    fail('oraclecloud.detect() must reject oraclecloud26.<evil-domain>');
+  }
+
+  // numbered apex in the PATH, not the host → null
+  if (oc.detect({ name: 'Spoof4', careers_url: 'https://evil.example/x.fa.ocs.oraclecloud26.com/sites/CX_1/jobs' }) === null) {
+    pass('oraclecloud.detect() rejects a numbered apex placed in the path');
+  } else {
+    fail('oraclecloud.detect() must reject a path-spoofed numbered apex');
+  }
+
+  // numbered apex in USERINFO (before the @) → real host is evil → null
+  if (oc.detect({ name: 'Spoof5', careers_url: 'https://acme.fa.ocs.oraclecloud26.com@evil.example/hcmUI/CandidateExperience/en/sites/CX_1/jobs' }) === null) {
+    pass('oraclecloud.detect() rejects a numbered apex hidden in URL userinfo');
+  } else {
+    fail('oraclecloud.detect() must reject a userinfo-spoofed numbered apex');
+  }
+
+  // right label, wrong TLD → null
+  if (oc.detect({ name: 'Spoof6', careers_url: 'https://acme.fa.ocs.oraclecloud26.net/hcmUI/CandidateExperience/en/sites/CX_1/jobs' }) === null) {
+    pass('oraclecloud.detect() rejects the numbered apex on a non-.com TLD');
+  } else {
+    fail('oraclecloud.detect() must reject oraclecloud26.net');
+  }
+
+  // plaintext numbered apex → null (HTTPS-only, same as the unnumbered apex)
+  if (oc.detect({ name: 'X', careers_url: 'http://acme.fa.ocs.oraclecloud26.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs' }) === null) {
+    pass('oraclecloud.detect() rejects a plaintext numbered-apex URL');
+  } else {
+    fail('oraclecloud.detect() must reject http:// on the numbered apex');
+  }
+
   // default siteNumber CX_1 when no /sites/<n>/ in the path
   const noSite = oc.detect({ name: 'X', careers_url: 'https://acme.fa.oraclecloud.com/hcmUI/CandidateExperience/en/' });
   if (noSite && noSite.url.includes('siteNumber=CX_1,')) {

@@ -131,6 +131,35 @@ try {
     }
   }
 
+  // ── Description (#3175 phase 2) ──
+  // Recruitee's list payload embeds each offer's HTML body for free — same
+  // request, no per-job fetch. It must arrive as plain text (tags stripped,
+  // entities decoded), and offers without a body omit the key entirely.
+  const descOffers = parseRecruiteeResponse(
+    {
+      offers: [
+        {
+          title: 'With body',
+          careers_url: 'https://channable.recruitee.com/o/with-body',
+          description: '&lt;p&gt;Build &lt;strong&gt;pipelines&lt;/strong&gt; at Hostaway&amp;rsquo;s HQ&lt;/p&gt;&lt;script&gt;evil()&lt;/script&gt;',
+        },
+        { title: 'Without body', careers_url: 'https://channable.recruitee.com/o/no-body' },
+        { title: 'Empty body', description: '   ' },
+      ],
+    },
+    'Channable',
+  );
+  if (descOffers[0]?.description === "Build pipelines at Hostaway\u2019s HQ") {
+    pass('parseRecruiteeResponse double-decodes the offer body to plain text (tags + script gone)');
+  } else {
+    fail(`row 0 description = ${JSON.stringify(descOffers[0]?.description)}`);
+  }
+  if (!('description' in descOffers[1]) && !('description' in descOffers[2])) {
+    pass('parseRecruiteeResponse omits the description key when the offer has no usable body');
+  } else {
+    fail(`rows 1-2 = ${JSON.stringify(descOffers.slice(1))}`);
+  }
+
 } catch (e) {
   fail(`recruitee provider tests crashed: ${e.message}`);
 }

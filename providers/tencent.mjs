@@ -1,6 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { sleep } from './_http.mjs';
+
 // Tencent careers provider — hits the public careers.tencent.com JSON API.
 // Zero-token, no browser needed. Verified 2026-07: GET returns structured
 // JSON with title, location, BG, category, JD text and last-update time.
@@ -19,7 +21,7 @@ const DEFAULT_KEYWORDS = [''];  // empty keyword = the whole board, no topical b
 const DEFAULT_MAX_PAGES = 20;
 // Every request after the first pays it — across pages and keyword switches
 // (same idiom as avature/workday).
-const INTER_PAGE_DELAY_MS = 150;
+const INTER_PAGE_DELAY_MS = 250;
 
 /** Parse "2026年06月23日" → epoch ms. NaN-safe. */
 function parseCnDate(value) {
@@ -101,14 +103,13 @@ export default {
 
     /** @type {Map<string, import('./_types.js').Job>} */
     const seen = new Map();
-    const sleep = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     let firstRequest = true;
     let succeededOnce = false;
 
     for (const keyword of keywords) {
       for (let page = 1; page <= maxPages; page++) {
         if (firstRequest) firstRequest = false;
-        else await sleep(INTER_PAGE_DELAY_MS);
+        else await sleep(INTER_PAGE_DELAY_MS, ctx);
         let json;
         try {
           json = /** @type {any} */ (

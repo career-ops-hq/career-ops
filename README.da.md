@@ -36,6 +36,8 @@
 
 <p align="center"><strong>740+ vurderede stillinger · 100+ skræddersyede CV'er · 1 drømmerolle landet</strong></p>
 
+<p align="center"><sub>Skabt og vedligeholdt af <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
+
 <p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Bliv_en_del_af_fællesskabet-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a></p>
 
 <p align="center">
@@ -63,7 +65,7 @@
 
 career-ops ([career-ops.org](https://career-ops.org), også kendt som **careerops**) forvandler et hvilket som helst AI-CLI til en komplet kommandocentral for jobsøgning. I stedet for manuelt at spore ansøgninger i et regneark får du en AI-drevet pipeline, der:
 
-- **Vurderer stillinger** med et struktureret A–F-system (fem dimensioner, der giver en score på 1,0-5,0)
+- **Vurderer stillinger** med et struktureret A-H-system (fem dimensioner, der giver en score på 1-5)
 - **Genererer skræddersyede PDF'er** — ATS-optimerede CV'er tilpasset hver stilling
 - **Skanner portaler** automatisk (Greenhouse, Ashby, Lever, virksomheders karrieresider)
 - **Batch-behandler** — vurderer 10+ stillinger parallelt via sub-agenter
@@ -89,7 +91,7 @@ Bygget af en, der brugte det til at vurdere 740+ stillinger, generere 100+ skræ
 | **Portalskanner**              | 45+ virksomheder konfigureret (Anthropic, OpenAI, ElevenLabs, Retool, n8n…) + forespørgsler via Ashby, Greenhouse, Lever, Wellfound            |
 | **Batch-behandling**           | Parallel vurdering via `claude -p`-workers                                                                                                      |
 | **TUI-dashboard**              | Terminal-UI til at gennemse, filtrere og sortere pipelinen                                                                                       |
-| **Human-in-the-Loop**          | AI vurderer og anbefaler, du beslutter og handler. Systemet sender aldrig ansøgninger — det sidste ord er altid dit                            |
+| **Human-in-the-Loop**          | AI vurderer og anbefaler, du beslutter og handler. Systemet sender aldrig ansøgninger — det sidste ord er altid dit <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->                            |
 | **Pipeline-integritet**        | Automatisk merge, deduplikering, statusnormalisering, datakvalitetstjek                                                                          |
 
 ## Hurtig start
@@ -116,7 +118,7 @@ claude   # eller gemini / codex / qwen / opencode — åbn dit AI-CLI her
 <summary><b>Foretrækker du manuel opsætning? (git clone)</b></summary>
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # kun nødvendigt til PDF-generering
 claude   # åbn dit AI-CLI — første kørsel guider dig gennem onboarding
@@ -161,7 +163,7 @@ Du indsætter en stillings-URL eller -beskrivelse
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  A–F-vurdering   │  Match, mangler, lønundersøgelse, STAR-historier
+│  A-H-vurdering   │  Match, mangler, lønundersøgelse, STAR-historier
 │  (læser cv.md)   │
 └────────┬─────────┘
          │
@@ -267,9 +269,9 @@ Min portefølje og andre open source-projekter → [santifer.io](https://santife
 
 <a href="https://www.star-history.com/?repos=santifer%2Fcareer-ops&type=timeline&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
  </picture>
 </a>
 
@@ -286,11 +288,11 @@ Detaljer: [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md). Softwaren leveres under [M
 
 ## Bidragydere
 
-<a href="https://github.com/santifer/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=santifer/career-ops" alt="Bidragydere" />
+<a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" alt="Bidragydere" />
 </a>
 
-Fandt du job med career-ops? [Del din historie!](https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml)
+Fandt du job med career-ops? [Del din historie!](https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml)
 
 ## Licens og varemærke
 

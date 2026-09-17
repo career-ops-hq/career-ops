@@ -26,6 +26,14 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { acquireTrackerLock } from './tracker-utils.mjs';
+// The ledger date is the LOCAL calendar day (#2932). Computing the expected
+// value with toISOString() here would compare a local date against a UTC one
+// and fail for the hours of the day where they differ — a test that passes
+// only in part of the UTC day.
+import { localToday } from './lib/local-today.mjs';
+// Shared with tests/mark-pdf-ready.test.mjs so the two write-failure setups
+// cannot drift apart again (#3423).
+import { directoryDenyBinds } from './tests/helpers.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const NODE = process.execPath;
@@ -229,6 +237,126 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
     pass('role-mismatch: "c++ engineer" still matches a "C++ Engineer" row (#2009)');
   } else {
     fail(`role-mismatch symbol-equal: code=${r2.code}\n${r2.stdout}${r2.stderr}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── 1f. Non-Latin titles must not all collapse to the same role (#2670) ─
+// The equality normalizer stripped `[^a-z0-9]`, which deletes every non-Latin
+// LETTER, not just punctuation. Any title written entirely in Japanese, Arabic
+// or Cyrillic keyed to "", two different titles compared equal ("" === ""), and
+// the guard that exists to stop a status reaching the wrong row accepted the
+// mismatch and wrote. The repo ships modes/ja/, modes/ar/ and modes/ru/, so
+// these are shipped-market titles, not exotica. Company matching already used
+// the Unicode-aware normalizeTextKey; only the role guard was left ASCII-only.
+{
+  const TRACKER_CJK = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | リクルート | バックエンドエンジニア | 4.0/5 | Evaluated | ✅ | [1](../reports/001-recruit-2026-06-01.md) | — |
+`;
+  const sb = makeSandbox(TRACKER_CJK);
+  const before = readTracker(sb);
+  const r = runSetStatus(['リクルート', 'Rejected', '--role', 'フロントエンドエンジニア', '--json'], sb);
+  let parsed = null;
+  try { parsed = JSON.parse(r.stdout); } catch {}
+  if (r.code === 3 && parsed?.code === 'role-mismatch' && readTracker(sb) === before) {
+    pass('role-mismatch: a different Japanese title does not match (#2670)');
+  } else {
+    fail(`role-mismatch cjk: code=${r.code} json=${JSON.stringify(parsed)}\n${r.stdout}${r.stderr}`);
+  }
+
+  // Two titles differing ONLY by a parenthesised city — the fullwidth
+  // parentheses are punctuation and must still collapse, so what has to
+  // distinguish them is the city itself.
+  const sb2 = makeSandbox(`# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | リクルート | エンジニア（東京） | 4.0/5 | Evaluated | ✅ | [1](../reports/001-recruit-2026-06-01.md) | — |
+`);
+  const before2 = readTracker(sb2);
+  const r2 = runSetStatus(['リクルート', 'Rejected', '--role', 'エンジニア（大阪）', '--json'], sb2);
+  if (r2.code === 3 && readTracker(sb2) === before2) {
+    pass('role-mismatch: same Japanese title, different city does not match (#2670)');
+  } else {
+    fail(`role-mismatch cjk-city: code=${r2.code}\n${r2.stdout}${r2.stderr}`);
+  }
+
+  // The guard must not over-fire: the SAME non-Latin title still proceeds,
+  // including across a Unicode normalization form (NFD input vs NFC row).
+  const r3 = runSetStatus(['リクルート', 'Applied', '--role', 'バックエンドエンジニア'], sb);
+  if (r3.code === 0 && /\| 1 \|[^\n]*\| Applied \|/.test(readTracker(sb))) {
+    pass('role-mismatch: the same Japanese title still proceeds (#2670)');
+  } else {
+    fail(`role-mismatch cjk-equal: code=${r3.code}\n${r3.stdout}${r3.stderr}`);
+  }
+  const nfdRole = "バックエンドエンジニア".normalize('NFD');
+  if (nfdRole === "バックエンドエンジニア") {
+    fail("role-mismatch cjk-nfd: fixture is not actually decomposed — the case would prove nothing");
+  }
+  const r4 = runSetStatus(["リクルート", 'Responded', '--role', nfdRole], sb);
+  if (r4.code === 0 && /\| 1 \|[^\n]*\| Responded \|/.test(readTracker(sb))) {
+    pass('role-mismatch: a decomposed (NFD) Japanese title still matches (#2670)');
+  } else {
+    fail(`role-mismatch cjk-nfd: code=${r4.code}\n${r4.stdout}${r4.stderr}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+  rmSync(sb2.dir, { recursive: true, force: true });
+}
+
+// ── 1g. The same collapse hits Arabic and Cyrillic (#2670) ─
+// Not a CJK quirk: `[^a-z0-9]` deletes every letter outside the Latin range,
+// so modes/ar/ and modes/ru/ titles were equally unprotected.
+{
+  const sb = makeSandbox(`# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | Яндекс | Разработчик | 4.0/5 | Evaluated | ✅ | [1](../reports/001-yandex-2026-06-01.md) | — |
+`);
+  const before = readTracker(sb);
+  const r = runSetStatus(['Яндекс', 'Rejected', '--role', 'Тестировщик', '--json'], sb);
+  if (r.code === 3 && readTracker(sb) === before) {
+    pass('role-mismatch: a different Cyrillic title does not match (#2670)');
+  } else {
+    fail(`role-mismatch cyrillic: code=${r.code}\n${r.stdout}${r.stderr}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── 1h. Fullwidth C＃ / C＋＋ must not collapse together (#2670) ─
+// The symbol pre-map matches ASCII "#" and "++", but normalizeTextKey folds
+// NFKC AFTER it, so a fullwidth ＃/＋＋ reached the collapse still fullwidth, was
+// stripped as punctuation, and both titles keyed to "c engineer". Fullwidth
+// forms are ordinary Japanese typography, so this is the same shipped-market
+// surface as §1f. Pre-normalizing NFKC lets the ASCII pre-map see them.
+// The collision predates the #2670 fix — "[^a-z0-9]" dropped them too.
+{
+  const sb = makeSandbox(`# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | Contoso | C＋＋ Engineer | 4.0/5 | Evaluated | ✅ | [1](../reports/001-contoso-2026-06-01.md) | — |
+`);
+  const before = readTracker(sb);
+  const r = runSetStatus(['contoso', 'SKIP', '--role', 'C＃ Engineer', '--json'], sb);
+  let parsed = null;
+  try { parsed = JSON.parse(r.stdout); } catch {}
+  if (r.code === 3 && parsed?.code === 'role-mismatch' && readTracker(sb) === before) {
+    pass('role-mismatch: fullwidth C＃ does not match a fullwidth C＋＋ row (#2670)');
+  } else {
+    fail(`role-mismatch fullwidth: code=${r.code} json=${JSON.stringify(parsed)}\n${r.stdout}${r.stderr}`);
+  }
+
+  // Not over-firing: the ASCII spelling of the SAME title still matches, which
+  // is exactly what the NFKC folding buys.
+  const r2 = runSetStatus(['contoso', 'Applied', '--role', 'C++ Engineer'], sb);
+  if (r2.code === 0 && /\| 1 \|[^\n]*\| Applied \|/.test(readTracker(sb))) {
+    pass('role-mismatch: ASCII "C++ Engineer" matches the fullwidth row (#2670)');
+  } else {
+    fail(`role-mismatch fullwidth-equal: code=${r2.code}\n${r2.stdout}${r2.stderr}`);
   }
   rmSync(sb.dir, { recursive: true, force: true });
 }
@@ -644,6 +772,11 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
 {
   if (process.platform !== 'win32' && process.getuid?.() === 0) {
     pass('write-failure: skipped (running as root — directory permissions are not enforced)');
+  } else if (process.platform === 'win32' && !directoryDenyBinds()) {
+    // Same escape hatch as root above, for the platform whose privilege model
+    // most often bypasses a permission bit. Loud on purpose: it names what was
+    // measured, so nobody reads it as the write-failure path being exercised.
+    pass('write-failure: skipped (an icacls write-deny does not bind this token - elevated shell)');
   } else {
     const dir = mkdtempSync(join(tmpdir(), 'co-setstatus-wf-'));
     const roDir = join(dir, 'ro');
@@ -687,7 +820,7 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
 
   // real transition → one line, today's date, from/to states, source set-status
   const r1 = runSetStatus(['2', 'Applied', '--json'], sb);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   let log = '';
   try { log = readFileSync(logPath, 'utf-8'); } catch {}
   if (r1.code === 0 && log === `2\t${today}\tEvaluated\tApplied\tset-status\t\n`) {
@@ -786,6 +919,507 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
     fail(`ledger: append-failure contract broken (code=${r.code}, logged=${parsed?.statusLogged})\n${r.stderr}`);
   }
   rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// ── explicit --row / --report selectors (tracker-row-vs-report-id) ──
+//
+// Tracker row IDs and report IDs are independent counters sharing one number
+// space, so they diverge permanently once any row exists without a report.
+// This fixture is that state in miniature: row #7 links report #5, and an
+// unrelated row #5 also exists — so "5" alone names two different companies.
+{
+  const TRACKER_DIVERGED = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 5 | 2026-06-05 | Globex | Platform Engineer | 4.0/5 | Evaluated | ✅ | [4](../reports/004-globex-2026-06-05.md) | — |
+| 6 | 2026-06-06 | Initech | Data Engineer | 3.9/5 | Evaluated | ❌ | — | backfilled, no report |
+| 7 | 2026-06-07 | Acme | AI Engineer | 4.4/5 | Evaluated | ✅ | [5](../reports/005-acme-2026-06-07.md) | — |
+`;
+
+  const sandboxed = fn => {
+    const sandbox = makeSandbox(TRACKER_DIVERGED);
+    try { fn(sandbox); } finally { rmSync(sandbox.dir, { recursive: true, force: true }); }
+  };
+
+  // Negative control: without an explicit selector the ambiguity is real and
+  // the guard must still fire. If this ever passes, the tests below prove
+  // nothing — they would just be exercising an unguarded path.
+  sandboxed(sandbox => {
+    const r = runSetStatus(['5', 'Applied'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 3 || /report ID|mismatch/i.test(r.stderr)) {
+      pass('selectors: bare number on a diverged tracker is still guarded');
+    } else {
+      fail(`selectors: bare number should be guarded, got code=${r.code}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const r = runSetStatus(['--row', '5', 'Applied', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 0 && parsed?.company === 'Globex') {
+      pass('selectors: --row 5 selects tracker row #5 (Globex)');
+    } else {
+      fail(`selectors: --row 5 → code=${r.code} company=${parsed?.company}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  // The discriminating case: the SAME number through the two selectors must
+  // land on two different applications.
+  sandboxed(sandbox => {
+    const r = runSetStatus(['--report', '5', 'Applied', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 0 && parsed?.company === 'Acme') {
+      pass('selectors: --report 5 selects the row LINKING report #5 (Acme, row #7)');
+    } else {
+      fail(`selectors: --report 5 → code=${r.code} company=${parsed?.company}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const r = runSetStatus(['--row', '7', 'Applied'], sandbox);
+    if (r.code === 0 && /Acme/.test(r.stdout)) {
+      pass('selectors: --row bypasses the mismatch guard without --force');
+    } else {
+      fail(`selectors: --row 7 → code=${r.code}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--row', '5', '--report', '5', 'Applied'], sandbox);
+    if (r.code === 1 && readTracker(sandbox) === before) {
+      pass('selectors: --row + --report is rejected, tracker untouched');
+    } else {
+      fail(`selectors: --row + --report → code=${r.code}, tracker changed=${readTracker(sandbox) !== before}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--row', 'abc', 'Applied'], sandbox);
+    if (r.code === 1 && readTracker(sandbox) === before) {
+      pass('selectors: non-numeric --row is rejected before any write');
+    } else {
+      fail(`selectors: --row abc → code=${r.code}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--row', '5', 'Globex', 'Applied'], sandbox);
+    if (r.code === 1 && readTracker(sandbox) === before) {
+      pass('selectors: --row plus a positional selector is rejected');
+    } else {
+      fail(`selectors: --row + positional → code=${r.code}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const r = runSetStatus(['--report', '999', 'Applied'], sandbox);
+    if (r.code === 2) {
+      pass('selectors: --report with no linked row exits not-found (2)');
+    } else {
+      fail(`selectors: --report 999 → code=${r.code}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  // A row with no report link must not be reachable via --report at all.
+  sandboxed(sandbox => {
+    const r = runSetStatus(['--report', '6', 'Applied', '--json'], sandbox);
+    if (r.code === 2) {
+      pass('selectors: --report never matches a report-less row by its tracker #');
+    } else {
+      fail(`selectors: --report 6 should not match row #6, got code=${r.code}\n${r.stdout}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--row'], sandbox);
+    if (r.code === 1 && readTracker(sandbox) === before) {
+      pass('selectors: --row without a value exits 1 without writing');
+    } else {
+      fail(`selectors: bare --row → code=${r.code}`);
+    }
+  });
+
+  sandboxed(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--row', '5', 'Applied', '--dry-run'], sandbox);
+    if (r.code === 0 && readTracker(sandbox) === before) {
+      pass('selectors: --row honours --dry-run (no write)');
+    } else {
+      fail(`selectors: --row + --dry-run → code=${r.code}, changed=${readTracker(sandbox) !== before}`);
+    }
+  });
+}
+
+// ── report-less row blind spot (#2346) ───────────────────────────
+//
+// merge-tracker's "Tracker #N already used; assigning #M" fallback leaves a
+// backfilled row at #N while the evaluated row lands at #M keeping its [N]
+// report link. A stale numeric selector then lands on the report-less row,
+// which the report-link guard cannot compare against anything.
+{
+  const TRACKER_2346 = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | Acme | Engineer | 4.0/5 | Evaluated | ✅ | [1](../reports/001-acme-2026-06-01.md) | — |
+| 4 | 2026-06-04 | Umbrella | Coordinator | N/A | Applied | ❌ | — | backfilled, occupies #4 |
+| 5 | 2026-06-05 | Hooli | ML Engineer | 4.3/5 | Evaluated | ❌ | [4](../reports/004-hooli-2026-06-05.md) | pushed off #4 by the collision |
+`;
+
+  const boxed = fn => {
+    const sandbox = makeSandbox(TRACKER_2346);
+    try { fn(sandbox); } finally { rmSync(sandbox.dir, { recursive: true, force: true }); }
+  };
+
+  // The bug: "4" names row #4 (Umbrella) AND report #4 (Hooli). Before the
+  // fix this silently rewrote Umbrella.
+  boxed(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['4', 'Rejected', '--note', 'rejected per email'], sandbox);
+    if (r.code === 3 && readTracker(sandbox) === before) {
+      pass('#2346: bare number matching a report-less row is refused, tracker untouched');
+    } else {
+      fail(`#2346: expected exit 3 + no write, got code=${r.code} changed=${readTracker(sandbox) !== before}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  boxed(sandbox => {
+    const r = runSetStatus(['4', 'Rejected', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (parsed?.code === 'report-number-ambiguous' && parsed?.linkedBy?.[0]?.company === 'Hooli') {
+      pass('#2346: structured error names the row that links the report');
+    } else {
+      fail(`#2346: json payload = ${JSON.stringify(parsed)}`);
+    }
+  });
+
+  // Both escapes must still reach their intended, DIFFERENT rows.
+  boxed(sandbox => {
+    const r = runSetStatus(['--report', '4', 'Rejected', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 0 && parsed?.company === 'Hooli') {
+      pass('#2346: --report 4 reaches Hooli (the actually-rejected application)');
+    } else {
+      fail(`#2346: --report 4 → code=${r.code} company=${parsed?.company}`);
+    }
+  });
+
+  boxed(sandbox => {
+    const r = runSetStatus(['--row', '4', 'Rejected', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 0 && parsed?.company === 'Umbrella') {
+      pass('#2346: --row 4 still reaches Umbrella');
+    } else {
+      fail(`#2346: --row 4 → code=${r.code} company=${parsed?.company}`);
+    }
+  });
+
+  boxed(sandbox => {
+    const r = runSetStatus(['4', 'Rejected', '--force'], sandbox);
+    if (r.code === 0 && /Umbrella/.test(r.stdout)) {
+      pass('#2346: --force still overrides, unchanged escape hatch');
+    } else {
+      fail(`#2346: --force → code=${r.code}\n${r.stdout}${r.stderr}`);
+    }
+  });
+
+  // Negative control for the new check: a report-less row whose number NO other
+  // row links is unambiguous and must keep working. Without this, the fix could
+  // be over-broad (refusing every backfilled row) and the tests would not notice.
+  boxed(sandbox => {
+    const r2 = runSetStatus(['1', 'Rejected', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r2.stdout); } catch {}
+    if (r2.code === 0 && parsed?.company === 'Acme') {
+      pass('#2346: unambiguous bare number is still accepted (not over-broad)');
+    } else {
+      fail(`#2346: bare "1" should still work, got code=${r2.code} company=${parsed?.company}`);
+    }
+  });
+}
+
+// ── shared candidate resolution (#2348) ──────────────────────────
+//
+// The three selector paths delegate their match → narrow → refuse-to-guess
+// flow to resolveCandidates(). These pin the properties that must survive any
+// future edit to that helper: every path fails CLOSED on 2+ survivors (the
+// #1704 property, previously enforced in three separate copies), and --role
+// narrowing works from every path rather than only the two that had tests.
+{
+  // Two rows link the SAME report — reachable when a re-evaluation is filed
+  // against an existing report, or a report link is copied between rows.
+  const TRACKER_DUP_REPORT = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | Acme | Backend Engineer | 4.2/5 | Evaluated | ✅ | [9](../reports/009-acme-2026-06-01.md) | — |
+| 2 | 2026-06-02 | Globex | Data Engineer | 4.0/5 | Evaluated | ✅ | [9](../reports/009-globex-2026-06-02.md) | — |
+`;
+
+  const withDupReport = fn => {
+    const sandbox = makeSandbox(TRACKER_DUP_REPORT);
+    try { fn(sandbox); } finally { rmSync(sandbox.dir, { recursive: true, force: true }); }
+  };
+
+  // Previously untested: the --report path had no 2+ coverage at all, so a
+  // regression to first-match-wins there would have gone unnoticed.
+  withDupReport(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--report', '9', 'Applied', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 3 && parsed?.code === 'ambiguous' && parsed.candidates?.length === 2
+        && readTracker(sandbox) === before) {
+      pass('#2348: --report fails closed on 2+ linking rows, with candidates');
+    } else {
+      fail(`#2348: --report dup → code=${r.code} json=${JSON.stringify(parsed)}`);
+    }
+  });
+
+  // --role narrowing must serve the --report path too, not just the numeric
+  // and company paths that already had coverage.
+  withDupReport(sandbox => {
+    const r = runSetStatus(['--report', '9', 'Applied', '--role', 'Data Engineer', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 0 && parsed?.company === 'Globex') {
+      pass('#2348: --role narrows a --report match to the intended row');
+    } else {
+      fail(`#2348: --report + --role → code=${r.code} company=${parsed?.company}`);
+    }
+  });
+
+  // A --role that matches NEITHER candidate must not silently pick one; the
+  // helper falls through with the original list so both stay visible.
+  withDupReport(sandbox => {
+    const before = readTracker(sandbox);
+    const r = runSetStatus(['--report', '9', 'Applied', '--role', 'Site Reliability Engineer', '--json'], sandbox);
+    let parsed = null;
+    try { parsed = JSON.parse(r.stdout); } catch {}
+    if (r.code === 3 && parsed?.candidates?.length === 2 && readTracker(sandbox) === before) {
+      pass('#2348: a --role matching neither candidate still fails closed with both listed');
+    } else {
+      fail(`#2348: --report + unmatched --role → code=${r.code} json=${JSON.stringify(parsed)}`);
+    }
+  });
+
+  // Parity: the fail-closed contract is now enforced in ONE place, so assert
+  // it holds identically from every entry point. This is the test that would
+  // catch a future edit to resolveCandidates() that regressed one path.
+  {
+    const TRACKER_ALL_AMBIGUOUS = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 7 | 2026-06-01 | Initech | Backend Engineer | 4.2/5 | Evaluated | ✅ | [3](../reports/003-initech-2026-06-01.md) | — |
+| 7 | 2026-06-02 | Initech | Data Engineer | 4.0/5 | Evaluated | ✅ | [3](../reports/003-initech-2026-06-02.md) | — |
+`;
+    const paths = [
+      ['bare numeric', ['7', 'Applied', '--json']],
+      ['--row', ['--row', '7', 'Applied', '--json']],
+      ['--report', ['--report', '3', 'Applied', '--json']],
+      ['company', ['Initech', 'Applied', '--json']],
+    ];
+    const failures = [];
+    for (const [label, args] of paths) {
+      const sandbox = makeSandbox(TRACKER_ALL_AMBIGUOUS);
+      try {
+        const before = readTracker(sandbox);
+        const r = runSetStatus(args, sandbox);
+        let parsed = null;
+        try { parsed = JSON.parse(r.stdout); } catch {}
+        const ok = r.code === 3 && parsed?.candidates?.length === 2 && readTracker(sandbox) === before;
+        if (!ok) failures.push(`${label} (code=${r.code}, candidates=${parsed?.candidates?.length})`);
+      } finally {
+        rmSync(sandbox.dir, { recursive: true, force: true });
+      }
+    }
+    if (failures.length === 0) {
+      pass('#2348: all four selector paths fail closed on 2+ candidates, none written');
+    } else {
+      fail(`#2348: paths that did not fail closed: ${failures.join('; ')}`);
+    }
+  }
+}
+
+// ── --source: attribution for a caller that delegates here (#2900) ──────────
+// The web status route writes through this CLI rather than touching the tracker
+// itself, so the ledger row it produces has to stay distinguishable from a CLI
+// one. One value feeds the ledger; it must be legal there.
+{
+  const sb = makeSandbox(TRACKER_9);
+  const logPath = join(sb.dir, 'status-log.tsv');
+  const today = localToday();
+
+  const r = runSetStatus(['2', 'Applied', '--source', 'web', '--json'], sb);
+  let log = '';
+  try { log = readFileSync(logPath, 'utf-8'); } catch {}
+  if (r.code === 0 && log === `2\t${today}\tEvaluated\tApplied\tweb\t\n`) {
+    pass('--source web: ledger row carries web, not set-status');
+  } else {
+    fail(`--source web: expected web in the source column, got ${JSON.stringify(log)}\n${r.stdout}${r.stderr}`);
+  }
+}
+
+{
+  const sb = makeSandbox(TRACKER_9);
+  const logPath = join(sb.dir, 'status-log.tsv');
+  const today = localToday();
+  const r = runSetStatus(['2', 'Applied', '--json'], sb);
+  let log = '';
+  try { log = readFileSync(logPath, 'utf-8'); } catch {}
+  if (r.code === 0 && log === `2\t${today}\tEvaluated\tApplied\tset-status\t\n`) {
+    pass('--source omitted: still defaults to set-status');
+  } else {
+    fail(`--source default: expected set-status, got ${JSON.stringify(log)}`);
+  }
+}
+
+// Fails closed. The value is written to a file another tool parses positionally
+// and gates on an allow-list, so an unrecognized label would be persisted and
+// then silently dropped by the reader. Reject it at the boundary instead.
+for (const bad of ['correction', 'backfill', 'cell-edit', 'nonsense']) {
+  const sb = makeSandbox(TRACKER_9);
+  const r = runSetStatus(['2', 'Applied', '--source', bad, '--json'], sb);
+  let wrote = true;
+  try { readFileSync(join(sb.dir, 'status-log.tsv'), 'utf-8'); } catch { wrote = false; }
+  if (r.code !== 0 && !wrote) {
+    pass(`--source ${bad}: rejected non-zero and nothing written`);
+  } else {
+    fail(`--source ${bad}: expected rejection, got code=${r.code} wrote=${wrote}`);
+  }
+}
+
+// ── #2932: "today" is the LOCAL calendar day, never the UTC one ──────────
+{
+  // Auckland is always at or ahead of the UTC day, so for the first hours of
+  // its local day the UTC day is still yesterday. Comparing --on against the
+  // UTC day therefore rejected the user's own today:
+  //   TZ=Pacific/Auckland --on 2026-08-16  ->  "date is in the future"
+  const nzToday = execFileSync(NODE, ['-e',
+    "const d=new Date(),p=n=>String(n).padStart(2,'0');process.stdout.write(`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`)",
+  ], { env: { ...process.env, TZ: 'Pacific/Auckland' }, encoding: 'utf-8' }).trim();
+
+  const sandbox = makeSandbox(TRACKER_9);
+  try {
+    const r = runSetStatus(['Globex', 'Interview', '--on', nzToday, '--dry-run'], sandbox, { TZ: 'Pacific/Auckland' });
+    if (r.code === 0) pass('#2932: --on accepts the local today east of UTC');
+    else fail(`#2932: --on rejected Auckland's own today (${nzToday}): code=${r.code} ${(r.stderr || r.stdout).split('\n')[0]}`);
+  } finally {
+    rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+
+  // MUST NOT CHANGE: a genuinely future date is still refused. Without this,
+  // deleting the check entirely would pass the assertion above.
+  const sandbox2 = makeSandbox(TRACKER_9);
+  try {
+    const r = runSetStatus(['Globex', 'Interview', '--on', '2099-01-01', '--dry-run'], sandbox2, { TZ: 'Pacific/Auckland' });
+    if (r.code === 1) pass('#2932: a genuinely future --on is still rejected');
+    else fail(`#2932: future date not rejected (code=${r.code})`);
+  } finally {
+    rmSync(sandbox2.dir, { recursive: true, force: true });
+  }
+
+  // The west-of-UTC half, pinned to an instant so it does not depend on when
+  // the suite runs: at 01:30 UTC it is still the previous day in New York, and
+  // the UTC-day form would write tomorrow into status-log.tsv.
+  const probe = execFileSync(NODE, ['-e',
+    "const {localToday}=await import('./lib/local-today.mjs');" +
+    "const i=new Date('2026-08-16T01:30:00Z');" +
+    "process.stdout.write(localToday(i)+' '+i.toISOString().slice(0,10));",
+    '--input-type=module',
+  ], { cwd: ROOT, env: { ...process.env, TZ: 'America/New_York' }, encoding: 'utf-8' }).trim();
+  if (probe === '2026-08-15 2026-08-16') {
+    pass('#2932: localToday() resolves the local day west of UTC where the UTC day is tomorrow');
+  } else {
+    fail(`#2932: localToday() west-of-UTC probe returned "${probe}", want "2026-08-15 2026-08-16"`);
+  }
+
+  // MUST NOT CHANGE: the round-trip validity check is date PARSING on UTC
+  // midnight and is deliberately untouched, so a malformed date still fails.
+  const sandbox3 = makeSandbox(TRACKER_9);
+  try {
+    const r = runSetStatus(['Globex', 'Interview', '--on', '2026-02-30', '--dry-run'], sandbox3, { TZ: 'Pacific/Auckland' });
+    if (r.code === 1) pass('#2932: an impossible calendar date is still rejected');
+    else fail(`#2932: 2026-02-30 accepted (code=${r.code})`);
+  } finally {
+    rmSync(sandbox3.dir, { recursive: true, force: true });
+  }
+}
+
+// ── #3075: --report resolves a report link kept in Notes ────────────────────
+// merge-tracker learned this layout in 8668ac1 — a customized tracker with no
+// dedicated Report column keeps the link in Notes prose. set-status read only
+// the Report cell, so --report could not find a row merge-tracker linked
+// happily, and the error even advised --row for the wrong reason.
+{
+  const CUSTOM = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | Materials | Apply Link | Follow-up | Notes |
+|---|------|---------|------|-------|--------|-----------|------------|-----------|-------|
+| 7 | 2026-06-01 | Acme | Staff Eng | 4.2/5 | Applied | CV v3 | https://acme.example/jobs/7 | 2026-06-14 | strong fit; report [12](reports/012-acme-2026-06-01.md) |
+`;
+
+  {
+    const sb = makeSandbox(CUSTOM);
+    try {
+      const r = runSetStatus(['--report', '12', 'Interview', '--dry-run'], sb);
+      if (r.code === 0) pass('#3075: --report resolves a report link kept in the Notes cell');
+      else fail(`#3075: --report 12 failed on a custom layout (code=${r.code}) ${(r.stderr || r.stdout).split('\n')[0]}`);
+    } finally { rmSync(sb.dir, { recursive: true, force: true }); }
+  }
+
+  // MUST NOT CHANGE: a report nobody links is still not found. Without this,
+  // making the lookup match anything would pass the assertion above.
+  {
+    const sb = makeSandbox(CUSTOM);
+    try {
+      const r = runSetStatus(['--report', '99', 'Interview', '--dry-run'], sb);
+      if (r.code !== 0) pass('#3075: an unlinked report number is still not found');
+      else fail('#3075: --report 99 resolved a row nothing links');
+    } finally { rmSync(sb.dir, { recursive: true, force: true }); }
+  }
+
+  // MUST NOT CHANGE: Notes is prose, so the fallback is scoped to reports/.
+  // A job-posting URL and an unrelated markdown link both sit in Notes here.
+  {
+    const NOISY = CUSTOM.replace(
+      'strong fit; report [12](reports/012-acme-2026-06-01.md)',
+      'applied via https://acme.example/jobs/9 — see [9](../notes/9-thing.md)',
+    );
+    const sb = makeSandbox(NOISY);
+    try {
+      const r = runSetStatus(['--report', '9', 'Interview', '--dry-run'], sb);
+      if (r.code !== 0) pass('#3075: a non-report link in Notes does not claim a report number');
+      else fail('#3075: --report 9 matched a non-report markdown link in Notes');
+    } finally { rmSync(sb.dir, { recursive: true, force: true }); }
+  }
+
+  // MUST NOT CHANGE: a real Report cell still wins over anything in Notes.
+  {
+    const CONFLICT = TRACKER_9.replace(
+      '| 2 | 2026-06-02 | Globex | Platform Engineer | 4.0/5 | Evaluated | ✅ | [2](../reports/002-globex-2026-06-02.md) | — |',
+      '| 2 | 2026-06-02 | Globex | Platform Engineer | 4.0/5 | Evaluated | ✅ | [2](../reports/002-globex-2026-06-02.md) | also [77](reports/077-other.md) |',
+    );
+    const sb = makeSandbox(CONFLICT);
+    try {
+      const r = runSetStatus(['--report', '77', 'Interview', '--dry-run'], sb);
+      if (r.code !== 0) pass('#3075: Notes is a fallback only — a populated Report cell wins');
+      else fail('#3075: a Notes link overrode a populated Report cell');
+    } finally { rmSync(sb.dir, { recursive: true, force: true }); }
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

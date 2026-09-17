@@ -22,12 +22,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import readline from 'node:readline';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
+import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import {
   formatReportNumber, releaseReportNumbers, reserveReportNumbers,
 } from './reserve-report-num.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
+import { DEFAULT_USER_AGENT } from './user-agent.mjs';
+import { buildTitleFilter } from './title-keywords.mjs';
+import { appendToPipeline, appendToScanHistory } from './scan.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tracker = new TokenAccumulator();
@@ -36,8 +43,14 @@ let activeModel = null;
 // ---------------------------------------------------------------------------
 // .env loader
 // ---------------------------------------------------------------------------
-const envPath = path.join(__dirname, '.env');
-if (fs.existsSync(envPath)) {
+// Lazy: only runs when this file is the CLI entry point (`node
+// openrouter-runner.mjs ...`). Importing the module (e.g. for buildSystemPrompt
+// in test-all.mjs) must NOT mutate process.env — a module-level loader here
+// leaked every .env key (including CAREER_OPS_CLI) into the importing process
+// and broke later CLI-resolution tests.
+function loadEnvFile() {
+  const envPath = path.join(__dirname, '.env');
+  if (!fs.existsSync(envPath)) return;
   for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
     const m = line.trim().match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
     if (m && process.env[m[1]] === undefined) {
@@ -157,19 +170,30 @@ async function cmdModels() {
 // ---------------------------------------------------------------------------
 // File helpers
 // ---------------------------------------------------------------------------
+// Anchored to the career-ops data root, not to __dirname. scan.mjs resolves
+// every path it touches through getCareerOpsRoot(), so with CAREER_OPS_DATA_DIR
+// set this module was reading a DIFFERENT data/scan-history.tsv than the shared
+// writers it now delegates to — dedup would clear a URL the writer then found
+// present, or skip one it had never seen. The default is unchanged: with no
+// env and no .career-ops-data marker, getCareerOpsRoot() returns the same
+// directory __dirname did.
+const DATA_ROOT = getCareerOpsRoot();
+
 function readFile(relPath) {
-  try { return fs.readFileSync(path.join(__dirname, relPath), 'utf-8'); }
+  try { return fs.readFileSync(path.join(DATA_ROOT, relPath), 'utf-8'); }
   catch { return null; }
 }
 
 function writeFile(relPath, content) {
-  const full = path.join(__dirname, relPath);
+  const full = path.join(DATA_ROOT, relPath);
   fs.mkdirSync(path.dirname(full), { recursive: true });
   fs.writeFileSync(full, content, 'utf-8');
 }
 
 function fileExists(relPath) {
-  return fs.existsSync(path.join(__dirname, relPath));
+  // Same root as readFile() above: a fileExists that disagrees with the reader
+  // is a split-brain waiting to happen under CAREER_OPS_DATA_DIR.
+  return fs.existsSync(path.join(DATA_ROOT, relPath));
 }
 
 // ---------------------------------------------------------------------------
@@ -224,7 +248,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
         headers: {
           'Authorization': `Bearer ${key}`,
           'Content-Type':  'application/json',
-          'HTTP-Referer':  'https://github.com/santifer/career-ops',
+          'HTTP-Referer':  'https://github.com/career-ops-hq/career-ops',
           'X-Title':       'career-ops',
         },
         body,
@@ -285,7 +309,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
           headers: {
             'Authorization': `Bearer ${key}`,
             'Content-Type':  'application/json',
-            'HTTP-Referer':  'https://github.com/santifer/career-ops',
+            'HTTP-Referer':  'https://github.com/career-ops-hq/career-ops',
             'X-Title':       'career-ops',
           },
           body,
@@ -425,7 +449,7 @@ async function fetchJobPage(url) {
   // Plain HTTP fallback
   try {
     const r = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; career-ops/1.0)' }
+      headers: { 'User-Agent': DEFAULT_USER_AGENT }
     });
     if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
     const html = await r.text();
@@ -443,23 +467,26 @@ async function fetchJobPage(url) {
 // search-query companies are handled by the full /career-ops scan pipeline.
 // `rawOverride` lets tests feed YAML text directly (see test-all.mjs drift guard).
 // ---------------------------------------------------------------------------
-function normKeywords(v) {
-  if (!Array.isArray(v)) return [];
-  return v.map(x => String(x ?? '').toLowerCase().trim()).filter(Boolean);
-}
-
 export function parsePortals(rawOverride) {
   const raw = rawOverride ?? readFile('portals.yml');
   if (!raw) throw new Error('portals.yml not found');
   const config = yaml.load(raw) || {};
 
-  const tf = config.title_filter || {};
-  const positive = normKeywords(tf.positive);
-  const negative = normKeywords(tf.negative);
-  function titleMatches(title) {
-    const t = String(title ?? '').toLowerCase();
-    return positive.some(k => t.includes(k)) && !negative.some(k => t.includes(k));
-  }
+  // The shared predicate rather than a second copy of the matching rules. This
+  // path kept its own `includes` loop, and the two had drifted three ways: an
+  // empty positive list accepted every title in scan.mjs and rejected every
+  // title here, AND-groups worked only in scan.mjs, and a non-string YAML entry
+  // was dropped there but coerced into a live keyword here. A `word:` prefix
+  // would have become the fourth — read as literal text, it would have matched
+  // nothing, so the shipped `word:Intern` would stop rejecting "Operations
+  // Intern" here while still working in scan.mjs.
+  //
+  // Side effect worth naming, since it changes this path's verdicts rather than
+  // just its structure: it now also gets the 2-3 char rule. Measured over 2324
+  // real titles that moves one verdict, and it moves it the permissive way —
+  // the negative "iOS" had been matching inside "Biosamples". Nothing becomes
+  // newly rejected.
+  const titleMatches = buildTitleFilter(config.title_filter);
 
   // Companies with a direct JSON `api:` endpoint (the no-CLI scan path).
   const tracked = Array.isArray(config.tracked_companies) ? config.tracked_companies : [];
@@ -500,7 +527,24 @@ function markPipelineDone(url) {
   writeFile('data/pipeline.md', content);
 }
 
-function addToPipeline(entries) {
+// Both writes go through the shared writers in scan.mjs rather than this
+// module's own read-modify-write. Those writers hold pipeline-lock.mjs on the
+// file they touch, so this stops being a fourth, unlocked writer racing the
+// three appendToPipeline already names. The previous version read each file
+// whole, appended in memory, and wrote the whole thing back with a truncating
+// writeFileSync — so any row another scanner appended in between was erased,
+// silently, because every reader skips a malformed or missing row quietly.
+//
+// Delegating fixes three things at once that were all symptoms of hand-rolling
+// the write: the lock, the row format (formatScanHistoryRow emits all twelve
+// columns; this module wrote seven and created a seven-column header), and the
+// date (the shared path stamps the local day, this one stamped the UTC day —
+// the defect #3240/#3241 fixed in the other scanners, which this module escaped
+// because that census finds scanners by looking for appendToScanHistory calls).
+//
+// It also picks up CAREER_OPS_DATA_DIR support for free: the shared paths are
+// DATA_ROOT-anchored, while the __dirname-relative paths here ignored it.
+async function addToPipeline(entries) {
   const history = readFile('data/scan-history.tsv') ?? 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n';
   const seenUrls = new Set(history.split('\n').slice(1).map(l => l.split('\t')[0]).filter(Boolean));
 
@@ -523,17 +567,18 @@ function addToPipeline(entries) {
 
   if (newEntries.length === 0) return 0;
 
-  const today = new Date().toISOString().split('T')[0];
-  let pipeline = existingPipeline;
-  let hist = history;
+  // The shared writers take {url, company, title, location}; this module calls
+  // the title `role`.
+  const offers = newEntries.map(e => ({
+    url: e.url,
+    company: e.company,
+    title: e.role,
+    location: typeof e.location === 'string' ? e.location : '',
+    source: 'openrouter scan',
+  }));
 
-  for (const e of newEntries) {
-    pipeline += `- [ ] ${e.url} | ${e.company} | ${e.role}\n`;
-    hist     += `${e.url}\t${today}\tscan\t${e.role}\t${e.company}\tadded\t${e.location ?? ''}\n`;
-  }
-
-  writeFile('data/pipeline.md', pipeline);
-  writeFile('data/scan-history.tsv', hist);
+  await appendToPipeline(offers);
+  await appendToScanHistory(offers, localToday());
   return newEntries.length;
 }
 
@@ -592,7 +637,7 @@ async function cmdScan() {
     }
   }
 
-  const added = addToPipeline(found);
+  const added = await addToPipeline(found);
   console.log(`\n✅ Scan complete. ${found.length} matches, ${added} new entries added to pipeline.md.`);
   if (added > 0) {
     console.log('\n→  node openrouter-runner.mjs pipeline\n   to evaluate pending listings.\n');
@@ -659,7 +704,7 @@ async function cmdEvaluate(input, ctx) {
 
   try {
     // Save report
-    const today   = new Date().toISOString().split('T')[0];
+    const today   = localToday();
     const num     = reservedNumbers[0];
     const slug    = extractCompanySlug(jdText, typeof input === 'string' ? input : null);
     const numStr  = formatReportNumber(num);
@@ -677,7 +722,12 @@ async function cmdEvaluate(input, ctx) {
     const reportLink  = `[${numStr}](reports/${numStr}-${slug}-${today}.md)`;
     const tsvLine     = `${num}\t${today}\t${companyName}\t(see report)\tEvaluated\t${scoreStr}\t❌\t${reportLink}\t\n`;
     const tsvFile     = `batch/tracker-additions/or-${numStr}-${slug}.tsv`;
-    writeFile(tsvFile, `num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n${tsvLine}`);
+    // Header row, then the single data row. merge-tracker.mjs resolves the
+    // fields by NAME when the header is present (#3517), so this row cannot be
+    // read into the wrong columns. (Headerless files still work; they are the
+    // legacy form, and they are the ones that can hit the undecidable
+    // score-vs-status case.)
+    writeFile(tsvFile, `${TSV_ADDITION_HEADER}\n${tsvLine}`);
 
     console.log(`\n✅ Report saved: ${relPath}`);
     console.log('\n─── EVALUATION ──────────────────────────────────────\n');
@@ -788,9 +838,9 @@ async function cmdApply(ref, ctx) {
 // ---------------------------------------------------------------------------
 // Only run the CLI when invoked directly (`node openrouter-runner.mjs ...`), so the
 // module can be imported (e.g. by test-all.mjs) without executing a command.
-const invokedDirectly = process.argv[1] &&
-  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const invokedDirectly = isMainModule(import.meta.url);
 const [,, command, ...args] = invokedDirectly ? process.argv : [];
+if (invokedDirectly) loadEnvFile();
 const ctx = invokedDirectly ? loadContext() : null;
 
 // Load free models list before running any AI command (skip when a model is pinned)

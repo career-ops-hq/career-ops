@@ -13,11 +13,21 @@ console.log('\ndoctor.mjs — CLI-aware Playwright MCP detection');
 
 const DOCTOR = join(ROOT, 'doctor.mjs');
 
+// Claude Code can supply an MCP server from an installed plugin, which lives
+// under the user's config dir rather than the project root (#2752). Every
+// scenario therefore pins CLAUDE_CONFIG_DIR at an EMPTY dir by default, so a
+// developer's real machine can never decide the result - the same isolation
+// reasoning as the GIT_CONFIG_* pinning in test-all.mjs section 12c (#2569).
+// Scenarios that exercise the plugin path pass their own CLAUDE_CONFIG_DIR.
+const EMPTY_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'co-mcp-emptycfg-'));
+
 function runDoctor(cwd, args, env) {
   try {
     const out = execFileSync(NODE, [DOCTOR, '--json', '--target', cwd, ...args], {
       cwd,
-      env: { ...process.env, ...env },
+      // Order matters: the empty dir must override an ambient CLAUDE_CONFIG_DIR
+      // from the developer's own shell, while a scenario's explicit env still wins.
+      env: { ...process.env, CLAUDE_CONFIG_DIR: EMPTY_CONFIG_DIR, ...env },
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     }).trim();
@@ -25,6 +35,22 @@ function runDoctor(cwd, args, env) {
   } catch (e) {
     return { _error: e.message, _stderr: e.stderr ? String(e.stderr) : '' };
   }
+}
+
+// Build a fake Claude Code config dir: settings.json (enabledPlugins) plus
+// plugins/installed_plugins.json (installPath per plugin) plus each plugin's
+// own .mcp.json - the exact three-file shape doctor resolves.
+function makePluginHome({ key, enabled, mcpJson }) {
+  const dir = mkdtempSync(join(tmpdir(), 'co-mcp-home-'));
+  const installPath = join(dir, 'plugins', 'cache', 'marketplace', 'plugin', 'unknown');
+  mkdirSync(installPath, { recursive: true });
+  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ enabledPlugins: { [key]: enabled } }));
+  writeFileSync(
+    join(dir, 'plugins', 'installed_plugins.json'),
+    JSON.stringify({ version: 2, plugins: { [key]: [{ scope: 'user', installPath }] } }),
+  );
+  if (mcpJson !== null) writeFileSync(join(installPath, '.mcp.json'), mcpJson);
+  return dir;
 }
 
 function expectWarn(state, msg) {
@@ -336,6 +362,405 @@ try {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }
 
+  // 15. opencode.jsonc with comments AND a trailing comma → detected (#2252).
+  //     OpenCode accepts JSONC; JSON.parse throwing on it used to be swallowed
+  //     by the catch and reported as "no Playwright MCP server configured".
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-15-'));
+    try {
+      writeFileSync(join(dir, 'opencode.jsonc'), [
+        '{',
+        '  // Playwright drives the SPA job boards',
+        '  "mcp": {',
+        '    "playwright": {',
+        '      "type": "local",',
+        '      "command": ["npx", "@playwright/mcp", "--headless"], /* inline */',
+        '      "enabled": true,',
+        '    },',
+        '  },',
+        '}',
+      ].join('\n'));
+      const state = runDoctor(dir, ['--cli', 'opencode'], {});
+      if (!expectWarn(state, '#15 opencode.jsonc')) {
+        // already failed
+      } else if (state.playwright_mcp?.opencode === true
+          && Array.isArray(state.warnings)
+          && !state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('opencode.jsonc with comments + trailing commas → detected (#2252)');
+      } else {
+        fail(`#15 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+
+  // 16. A .json file keeps STRICT parsing: comments there are still malformed,
+  //     so the config reads as unconfigured exactly as before. The tolerance is
+  //     scoped to the extension that declares it, not granted repo-wide.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-16-'));
+    try {
+      writeFileSync(join(dir, 'opencode.json'),
+        '{\n  // not valid JSON\n  "mcp": { "playwright": { "command": ["npx", "@playwright/mcp"] } }\n}');
+      const state = runDoctor(dir, ['--cli', 'opencode'], {});
+      if (!expectWarn(state, '#16 commented .json')) {
+        // already failed
+      } else if (state.playwright_mcp?.opencode === false
+          && Array.isArray(state.warnings)
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('a commented opencode.json still reads as unconfigured — .json stays strict');
+      } else {
+        fail(`#16 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+
+  // 17. opencode.json still wins when both files exist and only it is valid —
+  //     adding .jsonc to the list must not shadow the original filename.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-17-'));
+    try {
+      writeFileSync(join(dir, 'opencode.json'),
+        JSON.stringify({ mcp: { playwright: { type: 'local', command: ['npx', '@playwright/mcp'] } } }));
+      writeFileSync(join(dir, 'opencode.jsonc'), '{ "mcp": {} }');
+      const state = runDoctor(dir, ['--cli', 'opencode'], {});
+      if (!expectWarn(state, '#17 both files')) {
+        // already failed
+      } else if (state.playwright_mcp?.opencode === true
+          && !state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('opencode.json is still read when an unrelated opencode.jsonc sits next to it');
+      } else {
+        fail(`#17 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+
+  // 18. A .jsonc that is malformed beyond comments/trailing commas must stay
+  //     unconfigured — the parser tolerates two extensions, it does not guess.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-18-'));
+    try {
+      writeFileSync(join(dir, 'opencode.jsonc'), '{ "mcp": { "playwright": { "command": [ }');
+      const state = runDoctor(dir, ['--cli', 'opencode'], {});
+      if (!expectWarn(state, '#18 malformed .jsonc')) {
+        // already failed
+      } else if (state.playwright_mcp?.opencode === false
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('a genuinely malformed opencode.jsonc still reads as unconfigured');
+      } else {
+        fail(`#18 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+
+  // ---------------------------------------------------------------------
+  // Plugin-provided MCP servers (#2752). A Claude Code plugin declares its
+  // servers in its own .mcp.json under the user config dir, so none of the
+  // project-root scenarios above can reach this path. Every case below points
+  // CLAUDE_CONFIG_DIR at a synthetic config dir; the project --target stays
+  // empty, so a pass can ONLY come from the plugin scan.
+  // ---------------------------------------------------------------------
+  const PLUGIN_KEY = 'playwright@claude-plugins-official';
+  const PLUGIN_MCP = JSON.stringify({ playwright: { command: 'npx', args: ['@playwright/mcp@latest'] } });
+
+  // 19. Enabled plugin whose .mcp.json is a BARE server map → detected.
+  //     This is the exact shape the official Playwright plugin ships, and the
+  //     case that regressed: doctor reported "not detected" on a machine where
+  //     Playwright MCP was installed, enabled and working.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-19-'));
+    const home = makePluginHome({ key: PLUGIN_KEY, enabled: true, mcpJson: PLUGIN_MCP });
+    try {
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: home });
+      if (!expectWarn(state, '#19 enabled plugin')) {
+        // already failed
+      } else if (state.playwright_mcp?.claude === true
+          && Array.isArray(state.warnings)
+          && !state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('enabled plugin with a bare-map .mcp.json → detected, no warning (#2752)');
+      } else {
+        fail(`#19 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  // 20. Installed but NOT enabled → still warns. The manifest is on disk and
+  //     the .mcp.json is readable, but a disabled plugin registers no server;
+  //     keying off installed_plugins.json alone would pass this wrongly.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-20-'));
+    const home = makePluginHome({ key: PLUGIN_KEY, enabled: false, mcpJson: PLUGIN_MCP });
+    try {
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: home });
+      if (!expectWarn(state, '#20 disabled plugin')) {
+        // already failed
+      } else if (state.playwright_mcp?.claude === false
+          && Array.isArray(state.warnings)
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('installed but DISABLED plugin → still warns (installed !== enabled)');
+      } else {
+        fail(`#20 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  // 21. Enabled plugin that provides some OTHER MCP server → warns. Guards
+  //     against "any enabled plugin with an .mcp.json counts".
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-21-'));
+    const home = makePluginHome({
+      key: 'notion@some-marketplace',
+      enabled: true,
+      mcpJson: JSON.stringify({ notion: { command: 'npx', args: ['@notionhq/mcp'] } }),
+    });
+    try {
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: home });
+      if (!expectWarn(state, '#21 unrelated plugin')) {
+        // already failed
+      } else if (state.playwright_mcp?.claude === false
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('enabled plugin providing a non-Playwright server → still warns');
+      } else {
+        fail(`#21 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  // 22. Malformed plugin .mcp.json → reads as unconfigured, no crash. Matches
+  //     how a malformed project config is already handled.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-22-'));
+    const home = makePluginHome({ key: PLUGIN_KEY, enabled: true, mcpJson: '{ "playwright": { "command": [ }' });
+    try {
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: home });
+      if (!expectWarn(state, '#22 malformed plugin .mcp.json')) {
+        // already failed
+      } else if (state.playwright_mcp?.claude === false
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('malformed plugin .mcp.json → unconfigured, doctor does not crash');
+      } else {
+        fail(`#22 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  // 23. Enabled plugin whose entry has NO .mcp.json at all → warns, no crash.
+  //     Most plugins ship only skills/commands; the file is optional.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-23-'));
+    const home = makePluginHome({ key: PLUGIN_KEY, enabled: true, mcpJson: null });
+    try {
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: home });
+      if (!expectWarn(state, '#23 plugin without .mcp.json')) {
+        // already failed
+      } else if (state.playwright_mcp?.claude === false
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('enabled plugin with no .mcp.json → warns, no crash');
+      } else {
+        fail(`#23 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  // 24. The plugin scan is scoped to CLIs that declare `plugins: true`. With
+  //     --cli opencode the very same enabled Playwright plugin must NOT
+  //     suppress the warning: OpenCode does not load Claude Code plugins.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-24-'));
+    const home = makePluginHome({ key: PLUGIN_KEY, enabled: true, mcpJson: PLUGIN_MCP });
+    try {
+      const state = runDoctor(dir, ['--cli', 'opencode'], { CLAUDE_CONFIG_DIR: home });
+      if (!expectWarn(state, '#24 opencode ignores claude plugins')) {
+        // already failed
+      } else if (state.playwright_mcp?.opencode === false
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w) && /active cli: opencode/i.test(w))) {
+        pass('--cli opencode ignores an enabled Claude Code plugin → still warns');
+      } else {
+        fail(`#24 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  // 25. An empty config dir (no settings.json, no installed_plugins.json) is
+  //     the default every other scenario runs under. Pin that it stays quiet
+  //     and warns rather than throwing, so the isolation added for #2752
+  //     cannot itself become a crash source on a machine with no plugins.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-25-'));
+    const home = mkdtempSync(join(tmpdir(), 'co-mcp-emptyhome-'));
+    try {
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: home });
+      if (!expectWarn(state, '#25 empty config dir')) {
+        // already failed
+      } else if (state.playwright_mcp?.claude === false
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('empty CLAUDE_CONFIG_DIR → warns cleanly, no crash');
+      } else {
+        fail(`#25 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  // 26. A literal `null` inside a plugin's entry array. This is valid JSON and
+  //     a half-written install can leave it behind, so doctor has to survive
+  //     it. Destructuring the entry threw a TypeError - `= {}` defaults only
+  //     for `undefined`, never for `null` - which killed the run before the
+  //     report printed, turning one unconfigured plugin into "career-ops is
+  //     broken here". The assertion is that doctor still WARNS: a crash and a
+  //     clean miss both leave playwright_mcp false, so only checking the flag
+  //     would pass on the bug.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-26-'));
+    const home = mkdtempSync(join(tmpdir(), 'co-mcp-nullentry-'));
+    try {
+      mkdirSync(join(home, 'plugins'), { recursive: true });
+      writeFileSync(join(home, 'settings.json'), JSON.stringify({ enabledPlugins: { [PLUGIN_KEY]: true } }));
+      writeFileSync(
+        join(home, 'plugins', 'installed_plugins.json'),
+        JSON.stringify({ version: 2, plugins: { [PLUGIN_KEY]: [null] } }),
+      );
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: home });
+      if (state._error) {
+        fail(`#26 null plugin entry crashed doctor: ${state._error}`);
+      } else if (state.playwright_mcp?.claude === false
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('null entry in installed_plugins.json → warns cleanly, no crash');
+      } else {
+        fail(`#26 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  // 27. Plugin enabled in project .claude/settings.json (not user config) (#3698).
+  //     Running `/plugin install playwright@claude-plugins-official` with project
+  //     scope writes enabledPlugins to `<project>/.claude/settings.json`.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-27-'));
+    const home = makePluginHome({ key: PLUGIN_KEY, enabled: false, mcpJson: PLUGIN_MCP });
+    try {
+      // Clear user-level enabledPlugins from home/settings.json
+      writeFileSync(join(home, 'settings.json'), JSON.stringify({}));
+      // Write project-level enabledPlugins
+      mkdirSync(join(dir, '.claude'), { recursive: true });
+      writeFileSync(join(dir, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { [PLUGIN_KEY]: true } }));
+
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: home });
+      if (!expectWarn(state, '#27 project-scoped enabled plugin')) {
+        // already failed
+      } else if (state.playwright_mcp?.claude === true
+          && Array.isArray(state.warnings)
+          && !state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('project-scoped enabled plugin (.claude/settings.json) → detected, no warning (#3698)');
+      } else {
+        fail(`#27 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  // 28. Plugin enabled in project .claude/settings.local.json (#3698).
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-28-'));
+    const home = makePluginHome({ key: PLUGIN_KEY, enabled: false, mcpJson: PLUGIN_MCP });
+    try {
+      writeFileSync(join(home, 'settings.json'), JSON.stringify({}));
+      mkdirSync(join(dir, '.claude'), { recursive: true });
+      writeFileSync(join(dir, '.claude', 'settings.local.json'), JSON.stringify({ enabledPlugins: { [PLUGIN_KEY]: true } }));
+
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: home });
+      if (!expectWarn(state, '#28 project-local enabled plugin')) {
+        // already failed
+      } else if (state.playwright_mcp?.claude === true
+          && Array.isArray(state.warnings)
+          && !state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('project-local enabled plugin (.claude/settings.local.json) → detected, no warning (#3698)');
+      } else {
+        fail(`#28 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  // 29. Plugin enabled globally in user config, but explicitly disabled in project (.claude/settings.json) (#3698).
+  //     Project config overrides user config.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-29-'));
+    const home = makePluginHome({ key: PLUGIN_KEY, enabled: true, mcpJson: PLUGIN_MCP });
+    try {
+      mkdirSync(join(dir, '.claude'), { recursive: true });
+      writeFileSync(join(dir, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { [PLUGIN_KEY]: false } }));
+
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: home });
+      if (!expectWarn(state, '#29 project disabled plugin overrides user')) {
+        // already failed
+      } else if (state.playwright_mcp?.claude === false
+          && Array.isArray(state.warnings)
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('project-level disable overrides user-level enable → warns (#3698)');
+      } else {
+        fail(`#29 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  // 30. Plugin enabled in project .claude/settings.json, but disabled in project .claude/settings.local.json (#3698).
+  //     Local project config overrides shared project config.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-30-'));
+    const home = makePluginHome({ key: PLUGIN_KEY, enabled: true, mcpJson: PLUGIN_MCP });
+    try {
+      mkdirSync(join(dir, '.claude'), { recursive: true });
+      writeFileSync(join(dir, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { [PLUGIN_KEY]: true } }));
+      writeFileSync(join(dir, '.claude', 'settings.local.json'), JSON.stringify({ enabledPlugins: { [PLUGIN_KEY]: false } }));
+
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: home });
+      if (!expectWarn(state, '#30 project-local disabled plugin overrides project shared')) {
+        // already failed
+      } else if (state.playwright_mcp?.claude === false
+          && Array.isArray(state.warnings)
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('project-local disable overrides project-shared enable → warns (#3698)');
+      } else {
+        fail(`#30 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
 } catch (e) {
   fail(`opencode-mcp-detection tests crashed: ${e.message}`);
+} finally {
+  rmSync(EMPTY_CONFIG_DIR, { recursive: true, force: true });
 }

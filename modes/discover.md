@@ -68,8 +68,13 @@ node discover-ats.mjs --in companies.yml --vendors gh,ashby  # restrict probes
 node discover-ats.mjs --in companies.yml --vendors workday   # Workday only
 ```
 
-Vendor keywords for `--vendors`: `gh`, `ashby`, `lever` (slug-resolvable) and
-`workday` (fires only for companies carrying a hint). Default is all four.
+Vendor keywords for `--vendors`: `gh`, `ashby`, `lever`, `workable`,
+`smartrecruiters`, `recruitee`, `bamboohr`, `breezy`, `pinpoint`, `rippling`,
+`join` (all slug-resolvable) and `workday` (fires only for companies carrying a
+hint). Default is all of them; `gh`, `ashby` and `lever` are probed first and the
+first match wins, so a company on one of them is resolved within at most three
+probes (one on `gh`, two on `ashby`, three on `lever`) before any long-tail
+vendor is tried. Only a company none of the three can resolve pays for the rest.
 
 Parse the JSON envelope:
 
@@ -77,7 +82,7 @@ Parse the JSON envelope:
 |-----|----------|
 | `metadata` | Counts (`resolved`, `unresolved`, `duplicatesSkipped`, `fresh`, `freshWritten`), `written` flag, `previewOnly`, `portalsPath`, `warnings` |
 | `resolved` | Per company: `name`, `vendor`, `slug`, `careers_url`, `api` (Greenhouse only), `provider` (Workday only), `jobCount` |
-| `unresolved` | Per company: `name`, `triedVendors`, `reason`, and (when present) `emptyBoards`, `errors`, `skippedUnsafeSlug`, `website` |
+| `unresolved` | Per company: `name`, `triedVendors`, `reason`, and (when present) `emptyBoards`, `errors`, `skippedUnsafeSlug`, `unsupportedSlugShape`, `website` |
 | `pendingEntries` | The rendered YAML block — present whenever nothing was written (i.e. on a preview run, the default) so the user can paste it manually |
 
 **Default is preview.** Always show the user the `pendingEntries` / resolved
@@ -97,6 +102,11 @@ careers_url) and the unresolved list with reasons. Call out:
   a `workday:` hint, then re-run. discover-ats confirms it live and adds it — no
   manual portals.yml editing. If you have the tenant + site but not the instance,
   give `workday: {tenant, site}` and the instance is auto-probed.
+- **Unsupported slug shape** (`unsupportedSlugShape`): the slug is safe but the
+  listed vendors' own contracts can't represent it, so they were never probed.
+  Most often a dotted slug (`foo.bar`): the subdomain vendors (recruitee,
+  bamboohr, breezy, pinpoint) put the slug in the hostname and accept exactly one
+  tenant label. Fix the `slug:` field rather than re-running unchanged.
 - **camelCase Ashby slugs** (e.g. `DeepL`, `AlephAlpha`): if a company you know
   is on Ashby came back unresolved, its slug is likely mixed-case — re-run with
   an explicit `slug:` in the input file (derived slugs are lowercased).

@@ -44,7 +44,7 @@ system/user data-contract layers live in [../ARCHITECTURE.md](../ARCHITECTURE.md
 3. **Classify**: Detect archetype (1 of 6 types)
 4. **Evaluate**: 7 blocks (A-G):
    - A: Role summary
-   - B: CV match (gaps + mitigation)
+   - B: CV match (per-requirement importance + gaps + mitigation)
    - C: Level strategy
    - D: Comp research (WebSearch)
    - E: CV personalization plan
@@ -68,7 +68,7 @@ batch-input.tsv    →  batch-runner.sh  →  N × headless CLI workers
                     (tracks progress)
 ```
 
-Each worker is a headless AI CLI instance — the bundled `batch-runner.sh` supports multiple CLIs via the `--cli` flag (`--cli claude` or `--cli opencode`). See the Headless / Batch Mode table in `AGENTS.md`. Workers produce:
+Each worker is a headless AI CLI instance — the bundled `batch-runner.sh` currently runs `claude -p` workers only. See the Headless / Batch Mode table in `AGENTS.md`. Workers produce:
 - Report .md
 - PDF
 - Tracker TSV line

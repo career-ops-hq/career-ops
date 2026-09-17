@@ -55,6 +55,14 @@
     unicode-range: U+0100-02AF, U+0304, U+0308, U+0329, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
   }
 
+  /* Themeable tokens (#1837): only --secondary-color is wired in this template
+     so far (this template does not yet expose --accent-color; that gap is
+     pre-existing and out of scope here). Overridable via config/profile.yml
+     `style:`, which the PDF pipeline injects as a later :root block. */
+  :root {
+    --secondary-color: hsl(270, 70%, 45%);
+  }
+
   * {
     margin: 0;
     padding: 0;
@@ -112,7 +120,7 @@
 
   .header-gradient {
     height: 2px;
-    background: linear-gradient(to right, hsl(187, 74%, 32%), hsl(270, 70%, 45%));
+    background: linear-gradient(to right, hsl(187, 74%, 32%), var(--secondary-color));
     border-radius: 1px;
     margin-bottom: 10px;
   }
@@ -221,7 +229,7 @@
     font-family: 'Space Grotesk', sans-serif;
     font-size: 12.5px;
     font-weight: 600;
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
   }
 
   .job-period {
@@ -267,7 +275,7 @@
     font-family: 'Space Grotesk', sans-serif;
     font-size: 11.5px;
     font-weight: 600;
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
   }
 
   .project-badge {
@@ -312,7 +320,7 @@
   }
 
   .edu-org {
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
     font-weight: 500;
   }
 
@@ -322,11 +330,55 @@
     white-space: nowrap;
   }
 
+  .edu-location {
+    font-size: 10px;
+    color: #888;
+  }
+
   .edu-desc {
     font-size: 10px;
     color: #666;
     margin-top: 2px;
     line-height: 1.5;
+  }
+
+  /* === AWARDS === */
+  /* Kept here even though Certifications is not: an award is a recent,
+     competitive signal (contest medal, dean's list) rather than the academic
+     filler the resume variant drops, and the section is hidden entirely when
+     the payload carries no entries. */
+  .award-table {
+    display: table;
+    width: 100%;
+  }
+
+  .award-item {
+    display: table-row;
+  }
+
+  .award-item > * {
+    display: table-cell;
+    vertical-align: baseline;
+    padding-bottom: 6px;
+  }
+
+  .award-title {
+    font-size: 10.5px;
+    font-weight: 500;
+    color: #333;
+  }
+
+  .award-org {
+    color: var(--secondary-color);
+    white-space: nowrap;
+  }
+
+  .award-year {
+    font-size: 10px;
+    color: #777;
+    white-space: nowrap;
+    text-align: right;
+    width: 44px;
   }
 
   /* === SKILLS === */
@@ -385,7 +437,7 @@
   }
 
   html[lang="ar"] .header-gradient {
-    background: linear-gradient(to left, hsl(187, 74%, 32%), hsl(270, 70%, 45%));
+    background: linear-gradient(to left, hsl(187, 74%, 32%), var(--secondary-color));
   }
 
   html[lang="ar"] .job ul {
@@ -450,6 +502,54 @@
     overflow-wrap: break-word;
   }
 
+  /* === Korean typography === modes/ko/ ships as a locale but nothing matched
+     html[lang="ko"], so Hangul fell back to the Latin-only stack. */
+  html[lang="ko"] body,
+  html[lang="ko"] .contact-row,
+  html[lang="ko"] .competency-tag {
+    font-family: 'DM Sans', 'Apple SD Gothic Neo', 'Malgun Gothic',
+      'Noto Sans CJK KR', 'Noto Sans KR',
+      'Nanum Gothic', sans-serif;
+    line-break: strict;
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+
+  /* === Traditional Chinese typography === html[lang="zh"] does not match
+     zh-TW, and TC needs TC faces, not the Simplified stack above. */
+  html[lang="zh-TW"] body,
+  html[lang="zh-TW"] .contact-row,
+  html[lang="zh-TW"] .competency-tag {
+    font-family: 'DM Sans', 'PingFang TC', 'Microsoft JhengHei',
+      'Noto Sans CJK TC', 'Noto Sans TC',
+      'Source Han Sans TC', sans-serif;
+    line-break: strict;
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+
+  /* .header h1/.section-title/.job-company/.project-title set their own
+     font-family (Space Grotesk, see lines ~104/165/221/267), so the body
+     rule above can't reach them — same gap CodeRabbit flagged on #2616,
+     fixed the same way as the ja/zh-CN blocks below. */
+  html[lang="ko"] .header h1,
+  html[lang="ko"] .section-title,
+  html[lang="ko"] .job-company,
+  html[lang="ko"] .project-title {
+    font-family: 'Space Grotesk', 'Apple SD Gothic Neo', 'Malgun Gothic',
+      'Noto Sans CJK KR', 'Noto Sans KR',
+      'Nanum Gothic', sans-serif;
+  }
+
+  html[lang="zh-TW"] .header h1,
+  html[lang="zh-TW"] .section-title,
+  html[lang="zh-TW"] .job-company,
+  html[lang="zh-TW"] .project-title {
+    font-family: 'Space Grotesk', 'PingFang TC', 'Microsoft JhengHei',
+      'Noto Sans CJK TC', 'Noto Sans TC',
+      'Source Han Sans TC', sans-serif;
+  }
+
   html[lang="zh-CN"] .header h1,
   html[lang="zh-CN"] .section-title,
   html[lang="zh-CN"] .job-company,
@@ -465,13 +565,19 @@
 
   html[lang="zh-CN"] .summary-text,
   html[lang="zh"] .summary-text,
+  html[lang="ko"] .summary-text,
+  html[lang="zh-TW"] .summary-text,
   html[lang="zh-CN"] .job li,
-  html[lang="zh"] .job li {
+  html[lang="zh"] .job li,
+  html[lang="ko"] .job li,
+  html[lang="zh-TW"] .job li {
     line-height: 1.7;
   }
 
   html[lang="zh-CN"] .section-title,
-  html[lang="zh"] .section-title {
+  html[lang="zh"] .section-title,
+  html[lang="ko"] .section-title,
+  html[lang="zh-TW"] .section-title {
     letter-spacing: 0.03em;
   }
 </style>
@@ -529,11 +635,19 @@
     {{EDUCATION}}
   </div>
 
+  <!-- AWARDS -->
+  <div class="section avoid-break">
+    <div class="section-title">{{SECTION_AWARDS}}</div>
+    <div class="award-table">{{AWARDS}}</div>
+  </div>
+
   <!-- SKILLS -->
   <div class="section avoid-break">
     <div class="section-title">{{SECTION_SKILLS}}</div>
     {{SKILLS}}
   </div>
+
+  <!-- END -->
 
 </div>
 </body>

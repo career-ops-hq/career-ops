@@ -1,45 +1,37 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
-// EchoJobs provider — board-wide public JSON feed of tech jobs aggregated from
-// company ATS boards (https://echojobs.io/api/jobs). Public, zero-auth, paginated
-// (`?page=N&per_page=M`). The broad feed is fetched so scan.mjs's title_filter
-// gates on the configured titles; pages are pulled until one comes back short or
-// the page cap is reached (default 3, override with `max_pages`).
+// EchoJobs provider — RETIRED (#2976, 2026-08-20). The board-wide public JSON
+// feed this provider read (https://echojobs.io/api/jobs) no longer serves
+// listings: both the feed and its robots.txt now answer with a Vercel
+// bot-protection checkpoint (HTTP 429), and the site's own robots.txt
+// disallows /api. career-ops does not work around bot protection, so this is
+// not a provider to repair — the door is closed on purpose. See
+// docs/SUPPORTED_JOB_BOARDS.md for the current state.
 //
-// Each row's `url` is the ORIGINAL ATS posting (e.g. jobs.ashbyhq.com/…), so —
-// unlike the feed host — job URLs are not pinned to echojobs.io; only the feed
-// fetch is host-locked. The url is display-only and never server-fetched here.
+// fetch() below throws immediately with that explanation rather than making
+// a request against the checkpoint and surfacing a confusing raw parse error
+// ("expected { jobs: [...] }") to anyone who still has `provider: echojobs`
+// configured. detect() is left matching `provider: echojobs` on purpose, so
+// that misconfiguration surfaces this clear message instead of a silent
+// "no provider matched" — remove the entry from portals.yml once seen.
 //
-// Wire in via a `job_boards:` entry with `provider: echojobs`.
+// normalizeEchojobsJob() is kept (and still unit-tested) as a record of the
+// feed's shape; it is dead code today since fetch() never reaches it.
+//
+// Each row's `url` was the ORIGINAL ATS posting (e.g. jobs.ashbyhq.com/…), so
+// — unlike the feed host — job URLs were not pinned to echojobs.io; only the
+// feed fetch was host-locked.
 
 const FEED_BASE = 'https://echojobs.io/api/jobs';
-const TRUSTED_HOST = 'echojobs.io';
-const PER_PAGE = 100;
-const DEFAULT_MAX_PAGES = 3;
-const MAX_PAGES_CAP = 50;
 
-/** @param {string} url */
-function assertEchojobsUrl(url) {
-  let parsed;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error(`echojobs: invalid URL: ${url}`);
-  }
-  if (parsed.protocol !== 'https:') throw new Error(`echojobs: URL must use HTTPS: ${url}`);
-  if (parsed.hostname !== TRUSTED_HOST) {
-    throw new Error(`echojobs: untrusted hostname "${parsed.hostname}" — must be ${TRUSTED_HOST}`);
-  }
-  return url;
-}
-
-/** Resolve the page cap: a positive integer `max_pages` on the entry, capped. */
-function resolveMaxPages(entry) {
-  const v = entry?.max_pages;
-  if (Number.isInteger(v) && v > 0) return Math.min(v, MAX_PAGES_CAP);
-  return DEFAULT_MAX_PAGES;
-}
+// The retirement message thrown by fetch() below — also asserted verbatim in
+// tests/providers/echojobs.test.mjs, so update both together.
+const RETIRED_MESSAGE =
+  'echojobs: this feed is gone — echojobs.io/api/jobs is now behind bot protection ' +
+  '(HTTP 429, Vercel checkpoint) and the site\'s robots.txt disallows /api (#2976). ' +
+  'This provider is retired, not broken-and-fixable: remove `provider: echojobs` from ' +
+  'portals.yml. See docs/SUPPORTED_JOB_BOARDS.md.';
 
 // Guards against a doubled marker when the board already spells the work model
 // into the location itself ("Berlin (Hybrid)", "Hybrid - London").
@@ -138,28 +130,11 @@ export default {
     return entry?.provider === 'echojobs' ? { url: FEED_BASE } : null;
   },
 
-  async fetch(entry, ctx) {
-    const maxPages = resolveMaxPages(entry);
-    const fallbackCompany = entry?.name;
-    const out = [];
-
-    for (let page = 1; page <= maxPages; page++) {
-      // Validate the URL actually fetched (not just a constant) so the host pin
-      // is meaningful, then redirect:'error' blocks SSRF via server-side
-      // redirects — together they keep every page request on echojobs.io.
-      const url = assertEchojobsUrl(`${FEED_BASE}?per_page=${PER_PAGE}&page=${page}`);
-      const json = /** @type {any} */ (await ctx.fetchJson(url, { redirect: 'error' }));
-      if (!json || !Array.isArray(json.jobs)) {
-        throw new Error(
-          `echojobs: unexpected API response on page ${page} — expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
-        );
-      }
-      for (const j of json.jobs) {
-        const normalized = normalizeEchojobsJob(j, fallbackCompany);
-        if (normalized) out.push(normalized);
-      }
-      if (json.jobs.length < PER_PAGE) break; // short page → last page reached
-    }
-    return out;
+  async fetch() {
+    // Deliberately no network call: the feed is confirmed gone (see the file
+    // header), and career-ops does not work around bot protection. Throwing
+    // immediately, with a message naming the cause, is what turns "expected
+    // { jobs: [...] }" into something a user can act on.
+    throw new Error(RETIRED_MESSAGE);
   },
 };

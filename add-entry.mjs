@@ -41,16 +41,40 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { normalizeTextKey } from './tracker-parse.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 
 const CV_FILE = process.env.CAREER_OPS_CV || join(CAREER_OPS, 'cv.md');
 const ARTICLE_DIGEST_FILE = process.env.CAREER_OPS_ARTICLE_DIGEST || join(CAREER_OPS, 'article-digest.md');
 
+const KNOWN_FLAGS = ['--dry-run', '--stdin', '--help', '-h'];
+
+const USAGE = `Usage:
+  node add-entry.mjs <payload.json> [--dry-run]
+  node add-entry.mjs --stdin [--dry-run]
+  node add-entry.mjs --help                    # print this usage block and exit (-h is an alias)`;
+
 // Normalize a title/heading for duplicate detection: lowercase, collapse to
-// alphanumerics only. "FraudShield", "Fraud-Shield", "fraud shield" all match.
+// letters and digits. "FraudShield", "Fraud-Shield", "fraud shield" all match.
+//
+// Delegates to the shared normalizeTextKey rather than keeping a private
+// `[^a-z0-9]` strip. That strip deleted every non-Latin character, so a CV
+// written in Japanese, Russian or Hindi keyed EVERY heading and dedup key to
+// '' — which made `add` unusable rather than inaccurate: the non-empty-dedupKey
+// guard below rejected a key the user had actually supplied ("payload.cv
+// requires a non-empty dedupKey"), and two different section headings both
+// keying to '' matched each other, so an entry could land under the wrong
+// heading (#2849).
+//
+// Latin behaviour is unchanged except that an accented word now keys
+// faithfully: "Café" was truncated to "caf" (it never matched "Cafe" either
+// way), and now keys as "café".
 export function normalizeKey(s) {
-  return typeof s === 'string' ? s.toLowerCase().replace(/[^a-z0-9]+/g, '') : '';
+  return typeof s === 'string' ? normalizeTextKey(s) : '';
 }
 
 // Split a markdown doc into the block belonging to a `## <section>` heading:
@@ -117,15 +141,15 @@ export function insertIntoCvSection(md, section, entry) {
 
 // article-digest.md is a sequence of `## <name> -- <tagline>` blocks separated
 // by `---`. Dedup on the name (the heading text before the dash), matched by
-// normalized equality or prefix so "## FraudShield -- Detection" matches the key
-// "FraudShield" without a short key colliding on unrelated heading text.
+// normalized equality so "## FraudShield -- Detection" matches the key
+// "FraudShield" without a short key colliding on other project names.
 export function articleDigestHasEntry(md, dedupKey) {
   const key = normalizeKey(dedupKey);
   if (!key) return false;
   for (const m of md.matchAll(/^##\s+(.*\S)\s*$/gm)) {
     const name = m[1].split(/\s+[—–-]{1,2}\s+/)[0];
     const n = normalizeKey(name);
-    if (n === key || n.startsWith(key)) return true;
+    if (n === key) return true;
   }
   return false;
 }
@@ -194,12 +218,17 @@ async function readStdin() {
 
 async function main() {
   const args = process.argv.slice(2);
+
+  // Migrated to shared validateFlags to reject mistyped flags (#3112).
+  // Inside the main-module guard so importers are unaffected (#3088).
+  validateFlags(args, KNOWN_FLAGS, USAGE);
+
   const dryRun = args.includes('--dry-run');
   const useStdin = args.includes('--stdin');
-  const fileArg = args.find(a => !a.startsWith('--'));
+  const fileArg = args.find(a => !a.startsWith('-'));
 
   if (!useStdin && !fileArg) {
-    console.error('Usage: node add-entry.mjs <payload.json> [--dry-run]  (or --stdin)');
+    console.error(USAGE);
     process.exit(1);
   }
 
@@ -246,6 +275,6 @@ async function main() {
 }
 
 // Only run main() when invoked directly, not when imported by tests.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main();
 }

@@ -1,0 +1,16 @@
+# Fixture profile with a CUSTOMIZED cadence (#2268).
+#
+# The counterpart to profile-default-cadence.yml: it proves the suites pin the
+# profile rather than ignore it. If a future change made the cadence hard-coded
+# instead of profile-driven, the assertions built on this file fail — which is
+# the failure the #2268 fix must not introduce while making the suites
+# deterministic.
+name: Test Fixture
+email: fixture@example.test
+followup_cadence:
+  applied_first_days: 3
+  applied_subsequent_days: 30
+  applied_max_followups: 5
+  responded_initial_days: 2
+  responded_subsequent_days: 9
+  interview_thankyou_days: 4

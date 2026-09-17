@@ -1,0 +1,78 @@
+name: "🗂️ Source proposal"
+description: "Propose a job source for the registry — yours or anyone's — under the Source Indexing Policy"
+title: "[Source] "
+labels: ["source-proposal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a source! This form walks the five rules of the
+        [Source Indexing Policy](https://github.com/career-ops-hq/career-ops/blob/main/CONTRIBUTING.md#source-indexing-policy).
+        Operators proposing their own board are welcome — that's what rule-based gates are for.
+        You don't need code to propose a source; if you already have a provider PR, link it below.
+  - type: input
+    id: source-name
+    attributes:
+      label: Source name and URL
+      description: The job board, ATS, talent network or careers site you're proposing.
+      placeholder: "remotli — https://remotli.ch"
+    validations:
+      required: true
+  - type: input
+    id: operator
+    attributes:
+      label: Who operates the source?
+      description: Company or person running it. Say so if that's you — proposing your own board is fine.
+      placeholder: "Acme GmbH (I'm the founder)"
+    validations:
+      required: true
+  - type: input
+    id: provenance
+    attributes:
+      label: Operator contact at the source's own domain
+      description: Verification happens out-of-band before listing — an email at the source's domain, or equivalent proof of domain control.
+      placeholder: "team@remotli.ch"
+    validations:
+      required: true
+  - type: textarea
+    id: access
+    attributes:
+      label: Public read access
+      description: How listings are read without auth — public API, RSS, or server-rendered pages. Link API docs if they exist.
+      placeholder: "GET https://example.com/api/jobs (no auth), OpenAPI at /api/openapi.json, paginates ?page=N"
+    validations:
+      required: true
+  - type: textarea
+    id: rule1
+    attributes:
+      label: "Rule 1 — real, attributed, free for candidates"
+      description: Are listings real roles, attributed to an identifiable employer, and free for candidates to read and apply to? Note anything that isn't (confidential postings, paywalled applications).
+    validations:
+      required: true
+  - type: textarea
+    id: rule2
+    attributes:
+      label: "Rule 2 — canonical URL"
+      description: What's the shortest path to the employer the source exposes? (direct application URL / ATS link in the API response)
+      placeholder: "The API returns applyUrl pointing at the employer's ATS"
+    validations:
+      required: true
+  - type: textarea
+    id: rule3
+    attributes:
+      label: "Rule 3 — promoted content and complete inventory"
+      description: Does the source sell promoted/featured placement? If so, does the API mark it, and does the API return the complete inventory (API totals match what the site shows)?
+      placeholder: "Featured listings exist; the API marks them with featured: true and returns all listings regardless"
+    validations:
+      required: true
+  - type: input
+    id: provider-pr
+    attributes:
+      label: Provider PR (optional)
+      description: If you already wrote the provider, link the PR. A direct PR is welcome too — the same five rules apply before merge.
+      placeholder: "#2465"
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Volume, update frequency, regions/languages covered, or anything that helps the review.

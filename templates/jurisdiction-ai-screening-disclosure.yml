@@ -1,0 +1,220 @@
+# Career-Ops — AI-Screening Disclosure Requirements (jurisdiction table) (#2892)
+#
+# Consumed prompt-level by modes/oferta.md Block G ("AI-Screening Disclosure"
+# signal). This file is a DATA REFERENCE, not instruction logic: extending it
+# to a new jurisdiction never requires touching the rule text in
+# modes/oferta.md. No script reads it — the agent does. Nothing in this
+# system ever fetches or scrapes an official page: the candidate clicks the
+# official link themselves (zero-fetch by design, same as agency-licensing.yml).
+#
+# CONTRIBUTION RULE (mandatory): no entry lands in this table without
+#   1. a regulator-grade citable source (statute, regulation, official
+#      government page, or a reputable law-firm bulletin summarizing it), AND
+#   2. an explicit effective date for the disclosure obligation, AND
+#   3. an `as_of` date recording when the row was last verified, AND
+#   4. an `official_source.url` pointing at the OFFICIAL government/regulator
+#      page (statute text, regulator FAQ, or public registry) —
+#      never a third-party mirror, aggregator, or law-firm copy of the text.
+# Unverified or "I heard that..." rows will be rejected in review. Seed
+# narrow and verified; extend via community PRs — same discipline as the
+# jurisdiction tables introduced for #2013/#2018/#2019/#2025/#2037.
+#
+# NEVER-ASSERT RULE (mandatory — mirrored in modes/oferta.md): these rows
+# describe disclosure obligations that exist somewhere in the hiring process
+# (which may include steps that never appear in posting text at all — e.g.
+# Illinois' AI Video Interview Act requires disclosure and consent *before
+# the video interview itself*, not in the job ad). A posting's silence is
+# NEVER a basis for asserting that an employer skipped a legally required
+# disclosure — the disclosure may simply happen at a later stage this system
+# cannot see. The agent states the statutory fact and the posting's own
+# silence, side by side, and stops there. Not legal advice.
+#
+# Schema per entry (key = jurisdiction code, e.g. US-NY-NYC (city-level — no
+# existing table in this repo had a city-level precedent to follow, so this
+# table introduces {country}-{state}-{city} for city-scoped laws), US-IL, EU):
+#   jurisdiction_name: string    — human-readable name for report output
+#   law_name: string             — short name of the statute/regulation
+#   applies_to: string           — what kind of AI use triggers the obligation
+#   effective: YYYY-MM-DD        — date the disclosure obligation became mandatory
+#   requires: string             — what the law requires the employer to do
+#                                   (notice, audit, explanation, consent, etc.)
+#   job_location_condition: string — OPTIONAL, only when a law's obligations
+#                                   split by which condition triggers which
+#                                   duty (e.g. NYC LL144's bias-audit duty is
+#                                   keyed to where the JOB is based, not the
+#                                   candidate) — states that condition so it
+#                                   is never conflated with candidate_residency_condition
+#   candidate_residency_condition: string — OPTIONAL, same split as above but
+#                                   for duties keyed to where the CANDIDATE
+#                                   lives (e.g. NYC LL144's candidate-notice
+#                                   duty — the one this Block G signal
+#                                   evaluates, since the signal only knows the
+#                                   candidate's own config/profile.yml location,
+#                                   never the job's)
+#   disclosure_language_examples: list — phrases in posting/process text that
+#                                   would count as the employer having made the
+#                                   disclosure (used for agent-judged matching,
+#                                   never naive keyword regex)
+#   official_source:
+#     url: string                — OFFICIAL statute text / regulator page
+#     what_it_shows: string      — what a candidate finds there
+#   legal_basis: string          — statute/regulation citation
+#   enforcement_notes: string    — evidence the obligation is real/enforced,
+#                                   where available; also the place to record
+#                                   the honest status of any pending/provisional
+#                                   change to the effective date (see EU row)
+#   sources: list                — citable pages/bulletins backing the row
+#   as_of: YYYY-MM-DD            — date this row was last verified against sources
+#
+# CANDIDATE ROWS FOR CONTRIBUTORS (suggestions only — do NOT add without the
+# source + effective-date + as_of + official-source discipline above):
+#   - US-CA : California — proposed FEHA regs on automated-decision systems
+#             in employment (rulemaking status varies; verify before adding)
+#   - US-CO : Colorado — SB 24-205 (Colorado AI Act) high-risk AI system
+#             notice requirements for consequential decisions incl. employment
+#   - US-MD : Maryland — facial recognition in interviews consent law
+#   - CA-ON : Ontario — no dedicated AI-hiring-disclosure statute as of this
+#             writing; verify before adding (do not seed on a guess)
+
+jurisdictions:
+  US-NY-NYC:
+    jurisdiction_name: "New York City, USA (five boroughs)"
+    law_name: "NYC Local Law 144 of 2021 (Automated Employment Decision Tools)"
+    applies_to: >-
+      Automated Employment Decision Tools (AEDTs) used to substantially
+      assist or replace discretionary decision-making for hiring or
+      promotion of candidates. Local Law 144 splits its obligations across
+      TWO DIFFERENT conditions — see job_location_condition and
+      candidate_residency_condition below; they are not interchangeable.
+    effective: "2023-07-05"
+    requires: >-
+      Employers/employment agencies using an AEDT must have it undergo a bias
+      audit within the past year and publicly post a summary of the results
+      on their own website (job_location_condition); and must give affected
+      candidates notice that an AEDT will be used at least 10 business days
+      before use, including instructions on how to request an alternative
+      selection process or accommodation (candidate_residency_condition).
+    job_location_condition: >-
+      The bias-audit-and-public-summary duty applies when the JOB is based in
+      New York City (including a remote job whose employer/office is tied to
+      an NYC address). This condition is not what this Block G signal
+      evaluates — the signal only has the candidate's own jurisdiction from
+      config/profile.yml, not the employer's office location, so it cannot
+      verify this condition and does not attempt to.
+    candidate_residency_condition: >-
+      The candidate-notice duty applies when the CANDIDATE resides in one of
+      New York City's five boroughs (Manhattan, Brooklyn, Queens, The Bronx,
+      Staten Island) — NOT New York State generally. This is the condition
+      this signal actually evaluates: it requires the candidate's own
+      config/profile.yml location to be identifiable as NYC-resident
+      specifically. A generic "New York, USA" or "New York State" location
+      string is NOT sufficient to identify five-borough residency and must
+      NOT be treated as a match for this row — Buffalo and Albany are in New
+      York State but are not NYC. Only an explicit NYC/borough-level location
+      string (e.g. "New York, NY", "Brooklyn, NY", "Queens, NY") qualifies.
+    disclosure_language_examples:
+      - "this process uses an automated employment decision tool"
+      - "AI-powered assessment"
+      - "automated screening tool"
+      - "bias audit summary (or a link to one)"
+      - "named AEDT vendor (e.g. HireVue, Pymetrics, Modern Hire, Eightfold)"
+    official_source:
+      url: "https://www.nyc.gov/site/dca/about/automated-employment-decision-tools-aedt.page"
+      what_it_shows: "NYC Department of Consumer and Worker Protection's official Local Law 144 page — requirements, bias-audit FAQ, and enforcement info."
+    legal_basis: "NYC Administrative Code section 20-870 et seq. (Local Law 144 of 2021); NYC DCWP final rules (6 RCNY section 5-300 et seq.)"
+    enforcement_notes: >-
+      DCWP is empowered to issue civil penalties for noncompliance; a
+      candidate cannot verify from a posting alone whether a bias audit was
+      actually performed or posted — only the employer's own public audit
+      summary answers that. The audit-vs-notice condition split above is
+      independently confirmed by Crowell & Moring's NYC LL144 client alert
+      and Perkins Coie's summary of NYC's final AEDT rules.
+    sources:
+      - "NYC DCWP — Automated Employment Decision Tools (AEDT) official page"
+      - "Crowell & Moring — NYC Local Law 144 client alert (audit vs. notice conditions)"
+      - "Perkins Coie — summary of NYC's final AEDT rules"
+    as_of: "2026-08-14"
+
+  US-IL:
+    jurisdiction_name: "Illinois, USA"
+    law_name: "Artificial Intelligence Video Interview Act (820 ILCS 42)"
+    applies_to: >-
+      Employers who ask applicants to record video interviews and use AI
+      analysis of those videos (e.g. facial/vocal analysis) to help
+      determine an applicant's fitness for a position.
+    effective: "2020-01-01"
+    requires: >-
+      Before the video interview, employers must notify the applicant that
+      AI may be used to analyze the video interview and consider the
+      applicant's fitness; explain how the AI works and what characteristics
+      it uses to evaluate fitness; and obtain the applicant's consent to be
+      evaluated by the AI before the interview. This obligation attaches to
+      the interview step itself, not the job posting — a posting can be
+      completely silent about it and the employer can still be fully
+      compliant if disclosure happens verbally/in writing right before the
+      interview.
+    disclosure_language_examples:
+      - "this interview will be recorded and analyzed by AI"
+      - "AI-powered video interview assessment"
+      - "automated video interview analysis"
+      - "named AI video-interview vendor (e.g. HireVue)"
+    official_source:
+      url: "https://www.ilga.gov/legislation/ilcs/ilcs3.asp?ActID=3985"
+      what_it_shows: "Illinois General Assembly's official text of 820 ILCS 42, the Artificial Intelligence Video Interview Act."
+    legal_basis: "820 ILCS 42 (Artificial Intelligence Video Interview Act), enacted by Public Act 101-260"
+    enforcement_notes: >-
+      Illinois also requires employers using AI video-interview analysis to
+      report demographic data on applicants to the Illinois Department of
+      Commerce and Economic Opportunity annually (2022 amendment) — not
+      independently verifiable from a posting either.
+    sources:
+      - "Illinois General Assembly — 820 ILCS 42 official statute text"
+      - "Littler — Illinois AI Video Interview Act compliance bulletin"
+      - "Ogletree Deakins — Illinois AI Video Interview Act overview"
+    as_of: "2026-08-14"
+
+  EU:
+    jurisdiction_name: "European Union"
+    law_name: "AI Act (Regulation (EU) 2024/1689) — high-risk classification for employment AI"
+    applies_to: >-
+      AI systems classified as high-risk under Annex III(4) when used for
+      recruitment or selection of natural persons (e.g. targeted job ads,
+      analyzing/filtering applications, evaluating candidates) or to make
+      decisions affecting terms of a work-related relationship.
+    effective: "2027-12-02"
+    requires: >-
+      Deployers (employers) of a high-risk AI system in recruitment must
+      inform affected candidates/workers that a high-risk AI system is
+      being used before or at the time the decision is made, and provide
+      information on how the system functions and how decisions are made
+      (Article 26(11) worker-information obligation, plus the broader
+      Article 26 deployer obligations); providers must meet transparency,
+      documentation, and human-oversight requirements under the same
+      high-risk regime.
+    disclosure_language_examples:
+      - "this recruitment process uses a high-risk AI system"
+      - "AI-assisted candidate evaluation, in accordance with the EU AI Act"
+      - "automated candidate screening / ranking tool"
+      - "named high-risk recruitment-AI vendor"
+    official_source:
+      url: "https://digital-strategy.ec.europa.eu/en/policies/regulatory-framework-ai"
+      what_it_shows: "European Commission's official policy page for the AI Act regulatory framework, including the high-risk classification and its applicable dates."
+    legal_basis: "Regulation (EU) 2024/1689 (AI Act), Annex III point 4 (employment, workers management, and access to self-employment), Article 26 (obligations of deployers of high-risk AI systems)"
+    enforcement_notes: >-
+      Original date: the AI Act text as adopted set high-risk Annex III
+      obligations (including recruitment/employment AI) to apply from
+      2026-08-02 per Article 113. In May 2026, EU institutions reached a
+      provisional political agreement on a "Digital Omnibus" package that
+      defers high-risk obligations for stand-alone Annex III systems to
+      2027-12-02. This delay is PROVISIONAL as of this row's as_of date — it
+      takes full legal effect only once formally adopted and published in the
+      EU's Official Journal, which multiple sources expect to happen before
+      2026-08-02 (i.e. before the original date would otherwise have arrived),
+      but is not yet 100% finalized law. Re-verify against the as_of date
+      before relying on this as settled. National market-surveillance
+      authorities enforce per member state once obligations apply.
+    sources:
+      - "Regulation (EU) 2024/1689 — official text (EUR-Lex)"
+      - "European Commission — AI Act regulatory framework policy page (digital-strategy.ec.europa.eu)"
+      - "Reporting on the May 2026 Digital Omnibus provisional agreement deferring stand-alone Annex III high-risk obligations to 2027-12-02"
+    as_of: "2026-08-14"

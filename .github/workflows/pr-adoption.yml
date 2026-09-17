@@ -1,0 +1,117 @@
+name: 'PR adoption ladder'
+
+# Advances the adoption ladder for PRs whose author has gone quiet after a
+# review round. A maintainer opts a PR in by applying `adoption/track` (the
+# clock never starts by itself); from there this workflow handles the two
+# mechanical check-ins, and hands the final step back to a human:
+#
+#   adoption/track   -> post a friendly ping,        add adoption/pinged
+#   +14d of silence  -> post the adoption notice,    add adoption/warned
+#   +14d of silence  -> add adoption/ready           (no comment; a maintainer
+#                       closes with a personal note and opens the companion
+#                       `adoptable` issue - bots never close PRs here)
+#
+# Any activity from the PR author at any step resets the ladder completely
+# (all adoption/* labels removed, nothing posted). The policy is public:
+# CONTRIBUTING.md -> "Adopting an abandoned PR".
+
+on:
+  schedule:
+    - cron: '47 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  ladder:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const DAY = 24 * 60 * 60 * 1000;
+            const STEP_DAYS = 14;
+            const { owner, repo } = context.repo;
+
+            const tracked = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', labels: 'adoption/track', per_page: 100,
+            });
+
+            for (const issue of tracked) {
+              if (!issue.pull_request) continue;
+              const n = issue.number;
+              const author = issue.user.login;
+              const labels = issue.labels.map(l => l.name);
+              const has = (name) => labels.includes(name);
+
+              // Anchor = the most recent adoption/* label event. Author
+              // activity is only meaningful relative to the last ladder step.
+              const timeline = await github.paginate(github.rest.issues.listEventsForTimeline, {
+                owner, repo, issue_number: n, per_page: 100,
+              });
+              const labelEvents = timeline.filter(e =>
+                e.event === 'labeled' && e.label && e.label.name.startsWith('adoption/'));
+              if (labelEvents.length === 0) continue;
+              const anchor = new Date(labelEvents[labelEvents.length - 1].created_at);
+
+              // --- Author activity since the anchor resets the ladder. ---
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: n, since: anchor.toISOString(), per_page: 100,
+              });
+              const authorCommented = comments.some(c => c.user.login === author);
+
+              const reviewComments = await github.paginate(github.rest.pulls.listReviewComments, {
+                owner, repo, pull_number: n, since: anchor.toISOString(), per_page: 100,
+              });
+              const authorReviewed = reviewComments.some(c => c.user.login === author);
+
+              const commits = await github.paginate(github.rest.pulls.listCommits, {
+                owner, repo, pull_number: n, per_page: 100,
+              });
+              const lastCommitAt = commits.length
+                ? new Date(commits[commits.length - 1].commit.committer.date) : null;
+              const authorPushed = lastCommitAt && lastCommitAt > anchor;
+
+              if (authorCommented || authorReviewed || authorPushed) {
+                for (const name of labels.filter(l => l.startsWith('adoption/'))) {
+                  await github.rest.issues.removeLabel({ owner, repo, issue_number: n, name })
+                    .catch(() => {});
+                }
+                core.info(`#${n}: author active again, ladder reset`);
+                continue;
+              }
+
+              const daysSinceAnchor = (Date.now() - anchor.getTime()) / DAY;
+
+              if (!has('adoption/pinged')) {
+                await github.rest.issues.createComment({ owner, repo, issue_number: n, body:
+                  `👋 Checking in, @${author}: it's been quiet here for a while since the last review round. ` +
+                  `This PR is still yours and there's no rush - this is just a nudge in case it fell off your radar. ` +
+                  `If life got in the way and you'd rather hand it off, say the word and we'll take good care of it. ` +
+                  `If we don't hear back, we'll check in once more in two weeks.` });
+                await github.rest.issues.addLabels({ owner, repo, issue_number: n, labels: ['adoption/pinged'] });
+                core.info(`#${n}: pinged`);
+                continue;
+              }
+
+              if (!has('adoption/warned') && daysSinceAnchor >= STEP_DAYS) {
+                await github.rest.issues.createComment({ owner, repo, issue_number: n, body:
+                  `@${author}, second check-in, and this one comes with a plan attached so nothing here is a surprise. ` +
+                  `If we don't hear from you within **two weeks**, we'll open this work up for adoption: the PR gets closed ` +
+                  `by a maintainer (with thanks, not by a bot), and a companion issue will point another contributor at your ` +
+                  `branch to finish it. **Your commits and your credit travel with the work either way**: the adopter builds ` +
+                  `on your commits or credits you with \`Co-authored-by\`, and you stay the original author. ` +
+                  `And if you come back later, the work is still yours to reclaim - just say so on the issue. ` +
+                  `Details: CONTRIBUTING.md, "Adopting an abandoned PR".` });
+                await github.rest.issues.addLabels({ owner, repo, issue_number: n, labels: ['adoption/warned'] });
+                core.info(`#${n}: warned`);
+                continue;
+              }
+
+              if (has('adoption/warned') && !has('adoption/ready') && daysSinceAnchor >= STEP_DAYS) {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: n, labels: ['adoption/ready'] });
+                core.info(`#${n}: ready for maintainer close + adoptable issue`);
+              }
+            }

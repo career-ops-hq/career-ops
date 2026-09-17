@@ -2,6 +2,7 @@
   "#": "num",
   "num": "num",
   "date": "date",
+  "fecha": "date",
   "company": "company",
   "empresa": "company",
   "via": "via",
@@ -11,6 +12,13 @@
   "score": "score",
   "status": "status",
   "pdf": "pdf",
+  "materials": "pdf",
   "report": "report",
-  "notes": "notes"
+  "apply link": "applylink",
+  "apply": "applylink",
+  "follow-up": "followup",
+  "follow up": "followup",
+  "followup": "followup",
+  "notes": "notes",
+  "url": "url"
 }

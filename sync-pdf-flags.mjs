@@ -14,19 +14,30 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { rebuildRow, resolveTrackerPath, openTrackerTransaction } from './tracker-utils.mjs';
+import { rebuildRow, resolveTrackerPath, resolvePdfIndexPath, openTrackerTransaction } from './tracker-utils.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const APPS_FILE = resolveTrackerPath(CAREER_OPS);
-const PDF_MANIFEST = process.env.CAREER_OPS_PDF_INDEX || join(CAREER_OPS, 'data', 'pdf-index.tsv');
+const DATA_ROOT = getCareerOpsRoot();
+const APPS_FILE = resolveTrackerPath(DATA_ROOT);
+// Derived from the TRACKER, not from this script's location, so a redirected
+// CAREER_OPS_TRACKER moves the whole workspace together (#2471).
+const PDF_MANIFEST = resolvePdfIndexPath(APPS_FILE);
 
 const flags = { dryRun: false, json: false };
+const unknownOptions = [];
 for (const arg of process.argv.slice(2)) {
   if (arg === '--dry-run') flags.dryRun = true;
   else if (arg === '--json') flags.json = true;
+  else unknownOptions.push(arg);
+}
+
+if (unknownOptions.length > 0) {
+  const error = `unknown option(s): ${unknownOptions.join(', ')}`;
+  if (flags.json) console.error(JSON.stringify({ error, code: 'unknown-option' }));
+  else console.error(`Error: ${error}\nUsage: node sync-pdf-flags.mjs [--dry-run] [--json]`);
+  process.exit(1);
 }
 
 if (!existsSync(APPS_FILE)) {
@@ -37,14 +48,24 @@ if (!existsSync(APPS_FILE)) {
 
 const manifestReports = new Set();
 if (existsSync(PDF_MANIFEST)) {
-  const content = readFileSync(PDF_MANIFEST, 'utf-8');
+  let content;
+  try {
+    content = readFileSync(PDF_MANIFEST, 'utf-8');
+  } catch (err) {
+    if (flags.json) {
+      console.log(JSON.stringify({ error: `Cannot read PDF manifest: ${err.message}`, code: 'manifest-read-error' }));
+    } else {
+      console.error(`❌ Cannot read PDF manifest: ${err.message}`);
+    }
+    process.exit(2);
+  }
   for (const line of content.split('\n')) {
     if (!line.trim() || line.startsWith('#')) continue;
     const parts = line.split('\t');
     const reportVal = parts[0]?.trim();
-    if (reportVal) {
+    if (reportVal && /^\d+$/.test(reportVal)) {
       const norm = parseInt(reportVal, 10);
-      if (!isNaN(norm) && norm > 0) manifestReports.add(norm);
+      if (norm > 0) manifestReports.add(norm);
     }
   }
 }

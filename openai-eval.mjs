@@ -30,6 +30,8 @@
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
 import {
   formatReportNumber, releaseReportNumbers, reserveReportNumbers,
@@ -47,6 +49,7 @@ try {
 } catch { /* dotenv optional */ }
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -54,9 +57,15 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const PATHS = {
   shared:  join(ROOT, 'modes', '_shared.md'),
   oferta:  join(ROOT, 'modes', 'oferta.md'),
-  cv:        join(ROOT, 'cv.md'),
-  profileYml: join(ROOT, 'config', 'profile.yml'),
-  reports:    join(ROOT, 'reports'),
+  cv:        join(DATA_ROOT, 'cv.md'),
+  profileYml: join(DATA_ROOT, 'config', 'profile.yml'),
+  reports:    join(DATA_ROOT, 'reports'),
+  // CAREER_OPS_ADDITIONS mirrors merge-tracker.mjs:43. Writing under DATA_ROOT
+  // regardless would drop the addition somewhere the merge it instructs never
+  // looks, so the evaluation would sit there unread.
+  trackerAdditions: process.env.CAREER_OPS_ADDITIONS
+    ? process.env.CAREER_OPS_ADDITIONS
+    : join(DATA_ROOT, 'batch', 'tracker-additions'),
 };
 
 // ---------------------------------------------------------------------------
@@ -83,6 +92,8 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     --url <base>     OpenAI-compatible base URL, including any /v1
                      (env OPENAI_BASE_URL, default https://api.openai.com/v1)
     --key <key>      API key             (env OPENAI_API_KEY)
+    --posting-url <url>  Posting URL, recorded in the report header and
+                     used as the tracker's dedup key
     --no-save        Do not save report to reports/ directory
     --no-compress    Skip token budget compression (full context injection)
     --help           Show this help
@@ -107,6 +118,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
 // Parse flags
 let jdText     = '';
+let postingUrl = '';
 let modelName  = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 let baseUrl    = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
 let apiKey     = process.env.OPENAI_API_KEY || '';
@@ -133,6 +145,8 @@ for (let i = 0; i < args.length; i++) {
     baseUrl = args[++i].replace(/\/$/, '');
   } else if (args[i] === '--key' && args[i + 1]) {
     apiKey = args[++i];
+  } else if (args[i] === '--posting-url' && args[i + 1]) {
+    postingUrl = args[++i];
   } else if (args[i] === '--no-save') {
     saveReport = false;
   } else if (args[i] === '--no-compress') {
@@ -144,6 +158,17 @@ for (let i = 0; i < args.length; i++) {
 
 if (!jdText) {
   console.error('❌  No Job Description provided. Run with --help for usage.');
+  process.exit(1);
+}
+
+// A posting URL is the tracker's deterministic dedup key, so it is taken only in
+// a form that can actually become one. Parsed, not prefix-matched: `https://`
+// satisfies a prefix test and merge-tracker.mjs:697 would then classify it as
+// the URL extra, but normalizeUrl yields no key for it -- so it would sit in the
+// URL column looking like a key while deduping nothing. A placeholder written
+// there would be worse still, handing every such row the same key.
+if (postingUrl && !isPostingUrl(postingUrl)) {
+  console.error(`❌  --posting-url must be a complete http(s) URL: "${postingUrl}"`);
   process.exit(1);
 }
 
@@ -207,6 +232,80 @@ function readFile(path, label) {
     return `[${label} not found — skipping]`;
   }
   return readFileSync(path, 'utf-8').trim();
+}
+
+// ---------------------------------------------------------------------------
+// Tracker-addition helpers
+// ---------------------------------------------------------------------------
+/**
+ * Whether a value is a complete http(s) URL, and so can become a dedup key.
+ * @param {string} value - Candidate posting URL.
+ * @returns {boolean} True only for a parseable http/https URL with a host.
+ */
+function isPostingUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname !== '';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Slugify a company name for report/addition filenames.
+ * @param {string} value - Raw company name.
+ * @returns {string} Lowercase dash slug, or "unknown" when nothing survives.
+ */
+function slugifyCompany(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '') || 'unknown';
+}
+
+/**
+ * Flatten a value into a single TSV cell (tabs and newlines would shift columns).
+ * @param {*} value - Raw cell value.
+ * @returns {string} Single-line, trimmed cell.
+ */
+function tsvSafe(value) {
+  return String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
+}
+
+/**
+ * Normalize a model-reported score into the tracker's score cell.
+ *
+ * A missing or unparseable score becomes the documented `N/A` sentinel rather
+ * than an empty cell — `looksLikeScoreCell` in tracker-parse.mjs recognizes
+ * `N/A`, and a blank or unrecognized placeholder makes the row ambiguous and
+ * gets it skipped with a warning (#1799).
+ *
+ * @param {string} value - Score as extracted from the model's summary block.
+ * @returns {string} `X.X/5` or `N/A`.
+ */
+function normalizedTrackerScore(value) {
+  const clean = tsvSafe(value);
+  // Parse, do not pattern-match the string. Two bugs lived in the old guard:
+  // `/n\/?a/i` was unanchored with an optional slash, so bare `na` matched and a
+  // real score with trailing prose -- `4.2 (final)`, `4.2 (internal)`,
+  // `4.5 - strong signal` -- was recorded as `N/A`; and the `/5` early return kept
+  // the whole string, so `4.2/10` became `4.2/5` and merged as a genuine score.
+  // Trailing prose is tolerated because models produce it; a denominator that is
+  // not 5, or a value outside 0..5, is refused rather than reinterpreted.
+  const parsed = clean.match(/^(\d+(?:\.\d+)?)/);
+  if (!parsed) return 'N/A';
+  const score = parseFloat(parsed[1]);
+  // The denominator is load-bearing wherever it sits. Requiring it immediately
+  // after the number read `4.2 (strong fit)/10` -- a ten-point score with an
+  // annotation -- as a bare 4.2 and wrote `4.2/5`, the same wrong number
+  // `8/10` used to produce. The first denominator in the cell is taken and must
+  // be 5; absent one, the scale is the contract's. A cell that puts an unrelated
+  // fraction first (`4.2 (fit 3/4 axes)`) is refused rather than guessed at --
+  // N/A is recoverable, a wrong score is not.
+  const denominator = clean.match(/\/\s*(\d+(?:\.\d+)?)/);
+  const scale = denominator ? parseFloat(denominator[1]) : 5;
+  if (!Number.isFinite(score) || scale !== 5 || score < 0 || score > 5) return 'N/A';
+  return `${score}/5`;
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +407,9 @@ if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
 let evaluationText;
 try {
+  // Streaming (SSE): llama.cpp/Unsloth brauchen bei langen Generationen den
+  // sofortigen Header; Non-Streaming läuft in Node/undici in den 5-Minuten-
+  // Header-Timeout, bevor die erste Zeile ankommt (8 t/s × 22k-Prefill).
   const res = await fetch(endpoint, {
     method: 'POST',
     headers,
@@ -317,7 +419,7 @@ try {
         buildSystemMessage(systemPrompt, endpointHost),
         { role: 'user', content: `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}` },
       ],
-      stream:      false,
+      stream:      true,
       temperature: 0.4,
     }),
     signal: AbortSignal.timeout(timeoutMs),
@@ -335,10 +437,37 @@ try {
     process.exit(1);
   }
 
-  const data = await res.json();
-  evaluationText = data.choices?.[0]?.message?.content?.trim();
-  const usage = normalizeOpenAIUsage(data.usage);
-  tracker.record('evaluation', usage);
+  // SSE-Zeilen akkumulieren: content + reasoning_content getrennt
+  const parts = [];
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let sseBuf = '';
+  let thinkOpen = false;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    sseBuf += decoder.decode(value, { stream: true });
+    let nl;
+    while ((nl = sseBuf.indexOf('\n')) >= 0) {
+      const line = sseBuf.slice(0, nl).trim();
+      sseBuf = sseBuf.slice(nl + 1);
+      if (!line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (payload === '[DONE]') continue;
+      let delta;
+      try { delta = JSON.parse(payload); } catch { continue; }
+      const d = delta.choices?.[0]?.delta ?? {};
+      if (d.reasoning_content) {
+        if (!thinkOpen) { parts.push('\n<think>\n'); thinkOpen = true; }
+        parts.push(d.reasoning_content);
+      } else {
+        if (thinkOpen) { parts.push('\n</think>\n\n'); thinkOpen = false; }
+        if (d.content) parts.push(d.content);
+      }
+    }
+  }
+  if (thinkOpen) parts.push('\n</think>\n');
+  evaluationText = parts.join('').trim();
   if (!evaluationText) {
     console.error('❌  The endpoint returned an empty response.');
     process.exit(1);
@@ -397,7 +526,7 @@ if (saveReport) {
     reservedNumbers   = await reserveReportNumbers(1, { rootDir: ROOT, reportsDir: PATHS.reports });
     const num         = formatReportNumber(reservedNumbers[0]);
     const today       = new Date().toISOString().split('T')[0];
-    const companySlug = company.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const companySlug = slugifyCompany(company);
     const filename    = `${num}-${companySlug}-${today}.md`;
     const reportPath  = join(PATHS.reports, filename);
 
@@ -406,6 +535,7 @@ if (saveReport) {
 **Date:** ${today}
 **Archetype:** ${archetype}
 **Score:** ${score}/5
+**URL:** ${postingUrl || '(pasted)'}
 **Legitimacy:** ${legitimacy}
 **PDF:** pending
 **Tool:** OpenAI-compatible (${modelName} @ ${endpointHost})
@@ -418,8 +548,41 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
     writeFileSync(reportPath, reportContent, 'utf-8');
     console.log(`\n✅  Report saved: reports/${filename}`);
 
-    console.log(`\n📊  Tracker entry (add to data/applications.md):`);
-    console.log(`    | ${num} | ${today} | ${company} | ${role} | ${score}/5 | Evaluated | ❌ | [${num}](reports/${filename}) |`);
+    // AGENTS.md Pipeline Integrity rule 1: never hand the user a row to paste
+    // into data/applications.md. Evaluations persist as a tracker addition and
+    // merge-tracker.mjs applies dedup, status validation, report-link
+    // normalization and the tracker lock. A pasted literal skipped all of that,
+    // and at 8 cells it was also silently dropped by every reader's width guard.
+    // Field order is the TSV contract's -- status BEFORE score; merge-tracker
+    // swaps them into the tracker's own column order, resolved by name.
+    const additionName = `${num}-${companySlug}.tsv`;
+    const trackerFields = [
+      String(parseInt(num, 10)),
+      today,
+      tsvSafe(company),
+      tsvSafe(role),
+      'Evaluated',
+      normalizedTrackerScore(score),
+      '❌',
+      `[${num}](reports/${filename})`,
+      tsvSafe(`OpenAI-compatible evaluation (${modelName})`),
+    ];
+    // Optional tenth field, labelled in the header below so it resolves by name.
+    // Pass 0 can then match on it instead of waiting for --backfill-urls.
+    if (postingUrl) trackerFields.push(tsvSafe(postingUrl));
+    // Header row first (#3517/#3706): merge-tracker resolves the fields by name,
+    // so this row cannot be ingested into the wrong columns. The optional URL
+    // needs its own label -- values are read BY label, so a tenth field the
+    // header does not name is not mis-mapped, it is dropped.
+    const additionHeader = postingUrl ? `${TSV_ADDITION_HEADER}\turl` : TSV_ADDITION_HEADER;
+    mkdirSync(PATHS.trackerAdditions, { recursive: true });
+    writeFileSync(
+      join(PATHS.trackerAdditions, additionName),
+      `${additionHeader}\n${trackerFields.join('\t')}\n`,
+      'utf-8',
+    );
+    console.log(`\n📊  Tracker addition saved: batch/tracker-additions/${additionName}`);
+    console.log('    Run `node merge-tracker.mjs` to merge it into the tracker.');
   } catch (err) {
     console.warn(`⚠️   Could not save report: ${err.message}`);
   } finally {

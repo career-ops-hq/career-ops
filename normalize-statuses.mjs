@@ -14,12 +14,21 @@
 import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import {
-  openTrackerTransaction, rebuildRow, resolveTrackerPath,
+  openTrackerTransaction, rebuildRow,
+  loadCanonicalStates, resolveCanonicalState,
 } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+// System Layer files (templates/, modes/, scripts) live in the codebase and are
+// resolved from this module's own directory; only User Layer data follows the
+// configurable data root. Binding both to getCareerOpsRoot() made states.yml
+// unreadable under CAREER_OPS_ROOT / .career-ops-data, and the catch below
+// turned that into a silent "everything is unknown" (#3500).
+const CODEBASE_ROOT = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
 const DRY_RUN = process.argv.includes('--dry-run');
 
@@ -27,6 +36,25 @@ const DRY_RUN = process.argv.includes('--dry-run');
 mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
 
 // Canonical status mapping
+let statesCache = null;
+/** Canonical states from templates/states.yml, read once per CLI run. */
+function canonicalStates() {
+  if (statesCache) return statesCache;
+  const statesFile = join(CODEBASE_ROOT, 'templates', 'states.yml');
+  try {
+    statesCache = loadCanonicalStates(statesFile);
+  } catch (err) {
+    // Broken install: fall through to "unknown", never a stale copy — but say
+    // so. The silent [] is what made #3500 invisible: a states.yml looked up in
+    // the wrong tree is indistinguishable from one that is genuinely missing,
+    // and the whole tracker normalized to unknown without a word.
+    console.error(`[normalize-statuses] cannot read canonical states from ${statesFile}: ${err.message}`);
+    console.error('[normalize-statuses] every status will be reported as unknown until this is fixed.');
+    statesCache = [];
+  }
+  return statesCache;
+}
+
 function normalizeStatus(raw) {
   // Strip markdown bold
   let s = raw.replace(/\*\*/g, '').trim();
@@ -44,7 +72,11 @@ function normalizeStatus(raw) {
   if (/^descartado$/i.test(s)) return { status: 'Discarded' };
 
   // Rechazada / Rechazado → Rejected
-  if (/^rechazada?$/i.test(s)) return { status: 'Rejected' };
+  // `rechazada?` reads as "rechazad" + an OPTIONAL trailing "a", so it accepted
+  // "rechazada" and the bare stem "rechazad" but never "rechazado" — the masculine
+  // form this comment claims to handle, that states.yml lists as an alias, and that
+  // the header of this file names. A bare "Rechazado" fell through to unknown.
+  if (/^rechazad[oa]$/i.test(s)) return { status: 'Rejected' };
   if (/^rechazado\s+\d{4}/i.test(s)) return { status: 'Rejected' };
 
   // Aplicado with date → Applied (strip date)
@@ -74,20 +106,28 @@ function normalizeStatus(raw) {
     if (lower === c.toLowerCase()) return { status: c };
   }
 
-  // Spanish aliases → English canonicals
-  if (['evaluada'].includes(lower)) return { status: 'Evaluated' };
-  if (['aplicado', 'enviada', 'aplicada', 'applied', 'sent'].includes(lower)) return { status: 'Applied' };
-  if (['respondido'].includes(lower)) return { status: 'Responded' };
-  if (['entrevista'].includes(lower)) return { status: 'Interview' };
-  if (['oferta'].includes(lower)) return { status: 'Offer' };
-  if (['contratado', 'contratada', 'hired', 'accepted', 'accept'].includes(lower)) return { status: 'Hired' };
-  if (['cerrada', 'descartada'].includes(lower)) return { status: 'Discarded' };
-  if (['no aplicar', 'no_aplicar', 'skip'].includes(lower)) return { status: 'SKIP' };
+  // Every remaining alias comes from templates/states.yml, not a list here.
+  // The hand-written list this replaces had drifted: it carried the Spanish
+  // aliases and none of the Turkish ones, so a `Mülakat` row was reported as
+  // an unknown status by the very tool whose job is normalizing statuses
+  // (#2704). test-all already asserted states.yml ⊆ this function; deriving
+  // makes that hold by construction instead of by remembering.
+  const fromStates = resolveCanonicalState(lower, canonicalStates());
+  if (fromStates) return { status: fromStates };
 
   // Unknown — flag it
   return { status: null, unknown: true };
 }
 
+export { normalizeStatus };
+
+// Everything below is the CLI. It is guarded because importing this module used to
+// run it: the import alone opened a tracker transaction and rewrote applications.md.
+// That is why tests could only scrape this file's source with regexes instead of
+// calling the function, and why the rechazado gap went unnoticed.
+const IS_CLI = isMainModule(import.meta.url);
+
+if (IS_CLI) {
 // Read applications.md
 if (!existsSync(APPS_FILE)) {
   console.log('No applications.md found. Nothing to normalize.');
@@ -187,3 +227,4 @@ if (!DRY_RUN && changes > 0) {
 } finally {
   trackerTransaction?.close();
 }
+} // end IS_CLI

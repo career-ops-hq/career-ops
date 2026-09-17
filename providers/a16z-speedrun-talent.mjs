@@ -1,4 +1,6 @@
 // @ts-check
+import { fetchJsonWithRetry } from './_http.mjs';
+
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // a16z speedrun talent network provider — board-wide aggregator feed (a16z
@@ -8,11 +10,12 @@
 // Response shape: { jobs: [ { id, title, company, url, location, remote,
 //   published_at, ... } ], total, page, page_size, total_pages, facets }
 //
-// Paginated 100/page via `?page=N` (0-indexed); the response carries
+// Paginated 50/page via `?page=N` (0-indexed); the response carries
 // `total_pages`, so iteration is bounded by min(total_pages, max_pages).
-// Default cap is modest; the board is several thousand roles, so either
-// raise `max_pages` on the entry or narrow server-side with `q:` (the feed
-// runs full-text search with synonym expansion, e.g. "ml", "swe", "nyc").
+// Page budgets are sized in 50-job pages — see DEFAULT_MAX_PAGES and
+// MAX_PAGES_CAP below. Either raise `max_pages` on the entry or narrow
+// server-side with `q:` (the feed runs full-text search with synonym
+// expansion, e.g. "ml", "swe", "nyc").
 //
 // Every request carries `source=career-ops` — the feed's documented optional
 // attribution param, echoed in the response; it does not change results.
@@ -22,9 +25,16 @@
 
 const FEED_BASE = 'https://speedrun-talent-network.com/api/v1/jobs';
 const TRUSTED_HOST = 'speedrun-talent-network.com';
-const PER_PAGE = 100;
-const DEFAULT_MAX_PAGES = 3;
-const MAX_PAGES_CAP = 120;
+const PER_PAGE = 50;
+const DEFAULT_MAX_PAGES = 6; // × PER_PAGE = the 300-job default scan
+// Runaway bound, not a coverage target: iteration already stops at the
+// feed's reported total_pages (or, when the feed omits it, a short page), so
+// on an honest feed the cap costs nothing and full-board sweeps keep working
+// as the board grows.
+// It only bites a misbehaving feed or an absurd max_pages entry — so it
+// sits well above plausible board size (~353 pages / ~17.6k jobs as of
+// 2026-08), same policy as workday.mjs's cap.
+const MAX_PAGES_CAP = 1000;
 
 /** @param {string} url */
 function assertFeedUrl(url) {
@@ -150,8 +160,13 @@ export default {
       const params = new URLSearchParams({ page: String(page), source: 'career-ops' });
       if (q) params.set('q', q);
       const url = `${FEED_BASE}?${params}`;
-      // redirect:'error' prevents SSRF via server-side redirects
-      const json = await ctx.fetchJson(url, { redirect: 'error' });
+      // redirect:'error' prevents SSRF via server-side redirects.
+      // Retried on transient upstream failures (429/5xx/timeout): this board
+      // paginates into the hundreds of pages, so a single blip mid-sweep used
+      // to abort the whole provider and return NOTHING. Retries are bounded
+      // and, once exhausted, the error still propagates — a silent partial
+      // board would be worse than an loud empty one (#2506).
+      const json = await fetchJsonWithRetry(ctx, url, { redirect: 'error' });
       if (!json || !Array.isArray(json.jobs)) {
         throw new Error(
           `a16z-speedrun-talent: unexpected API response on page ${page} — expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
@@ -161,9 +176,30 @@ export default {
         const normalized = normalizeSpeedrunJob(j, fallbackCompany);
         if (normalized) out.push(normalized);
       }
-      // Stop at the last page: a short page, or past the reported total_pages.
-      if (json.jobs.length < PER_PAGE) break;
-      if (Number.isInteger(json.total_pages) && page + 1 >= json.total_pages) break;
+      // Stop at the last page. Termination priority (#2547):
+      //   1. An empty page always ends iteration — nothing left to read, and
+      //      it bounds a feed that over-reports total_pages instead of burning
+      //      requests up to max_pages.
+      //   2. The feed's own total_pages when present. A page that comes back
+      //      49/50 because a listing was deleted between requests on a board
+      //      that rotates mid-sweep is NOT the last page; treating it as one
+      //      ended the sweep silently, at a clean exit code — the cap warning
+      //      below is gated on max_pages and is never reached from here.
+      //      A non-positive total_pages is not a statement about board size,
+      //      so it counts as absent: a feed reporting 0 alongside 50 real
+      //      rows contradicts itself, and the rows win. Trusting them can
+      //      only cost requests (bounded by rule 1 and max_pages), never jobs.
+      //   3. A short page, only as the fallback for feeds whose total_pages is
+      //      absent or non-positive. Demoting it (rather than merely
+      //      reordering the two checks) is what fixes #2547: a 49-row page
+      //      fails the total_pages test and would still break out on the
+      //      next line.
+      if (json.jobs.length === 0) break;
+      if (Number.isInteger(json.total_pages) && json.total_pages > 0) {
+        if (page + 1 >= json.total_pages) break;
+      } else if (json.jobs.length < PER_PAGE) {
+        break;
+      }
       // Cap warning (same pattern as jibeapply/workday): the feed had more
       // pages than we were allowed to read — surface it, with the fix.
       if (page + 1 >= maxPages && Number.isInteger(json.total_pages) && json.total_pages > maxPages) {

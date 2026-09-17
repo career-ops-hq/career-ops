@@ -26,11 +26,15 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { dirname, resolve } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { resolvePdfIndexPath } from './tracker-utils.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 
 // "008" and "8" are the same report — zero-padded report-link form vs unpadded
 // tracker-# form (same normalization as the manifest writer in generate-pdf.mjs).
@@ -125,17 +129,43 @@ export function findMatches(rows, query, pdfIndex = new Map()) {
 
 // ── CLI ─────────────────────────────────────────────────────────────
 
-function main() {
-  const args = process.argv.slice(2);
+const KNOWN_FLAGS = ['--json', '--help', '-h'];
+
+const USAGE = `Usage:
+  node find.mjs <report# | tracker# | company/role fragment> [--json]
+  node find.mjs --help                            # print this usage block and exit`;
+
+function parseArgs(argv) {
+  const args = argv.slice(2);
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+
+  const unknownFlags = args.filter(a => a.startsWith('-') && !KNOWN_FLAGS.includes(a));
+  if (unknownFlags.length) {
+    console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
+    console.error(USAGE);
+    process.exit(1);
+  }
+
   const json = args.includes('--json');
   const query = args.filter(a => a !== '--json').join(' ').trim();
+  return { json, query };
+}
+
+function main() {
+  const { json, query } = parseArgs(process.argv);
   if (!query) {
-    console.log('Usage: node find.mjs <report# | tracker# | company/role fragment> [--json]');
+    // The same USAGE the flag paths print. A second hand-written copy is a
+    // second thing to keep in step, which is the class of bug #2773 was about.
+    console.log(USAGE);
     process.exitCode = 1;
     return;
   }
 
-  const trackerPath = process.env.CAREER_OPS_TRACKER || resolve(ROOT, 'data', 'applications.md');
+  const trackerPath = resolveTrackerPath(DATA_ROOT);
   if (!existsSync(trackerPath)) {
     console.error(`Error: ${trackerPath} not found — nothing to search.`);
     process.exitCode = 1;
@@ -143,7 +173,9 @@ function main() {
   }
   const rows = parseTrackerRows(readFileSync(trackerPath, 'utf-8'));
 
-  const manifestPath = resolve(ROOT, 'data', 'pdf-index.tsv');
+  // Derived from the tracker resolved just above, not from ROOT: a redirected
+  // CAREER_OPS_TRACKER must not be searched against this install's manifest (#2471).
+  const manifestPath = resolvePdfIndexPath(trackerPath);
   const pdfIndex = existsSync(manifestPath)
     ? parsePdfIndex(readFileSync(manifestPath, 'utf-8'))
     : new Map();
@@ -173,6 +205,6 @@ function main() {
   console.error(`\n${matches.length} match(es)`); // stderr so stdout stays pipeable
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main();
 }

@@ -105,14 +105,12 @@ export default {
   id: 'cryptocurrencyjobs',
 
   async fetch(_entry, ctx) {
-    let xml;
-    try {
-      // redirect:'error' — refuse server-side redirects (SSRF hardening, matches
-      // the other HTTP providers); the feed host is fixed so a redirect is a flag.
-      xml = await ctx.fetchText(FEED, { redirect: 'error' });
-    } catch {
-      return [];
-    }
+    // redirect:'error' — refuse server-side redirects (SSRF hardening, matches
+    // the other HTTP providers); the feed host is fixed so a redirect is a flag.
+    // A failed fetch must THROW, not return []: swallowing it makes a dead
+    // board read as "live but empty", so portal-health never escalates and
+    // coverage decays silently (same contract as meituan/tencent).
+    const xml = await ctx.fetchText(FEED, { redirect: 'error' });
     return parseCryptocurrencyJobsRss(xml);
   },
 };

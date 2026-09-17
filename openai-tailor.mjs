@@ -19,7 +19,8 @@
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
-import yaml from 'js-yaml';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import * as yaml from 'js-yaml';
 
 try {
   const { config } = await import('dotenv');
@@ -27,6 +28,7 @@ try {
 } catch { /* dotenv optional */ }
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -35,10 +37,10 @@ const PATHS = {
   shared:   join(ROOT, 'modes', '_shared.md'),
   writing:  join(ROOT, 'modes', '_writing.md'),
   pdfMode:  join(ROOT, 'modes', 'pdf.md'),
-  cv:       join(ROOT, 'cv.md'),
-  profile:  join(ROOT, 'config', 'profile.yml'),
+  cv:       join(DATA_ROOT, 'cv.md'),
+  profile:  join(DATA_ROOT, 'config', 'profile.yml'),
   template: join(ROOT, 'templates', 'cv-template.html'),
-  output:   join(ROOT, 'output'),
+  output:   join(DATA_ROOT, 'output'),
 };
 
 // ---------------------------------------------------------------------------
@@ -239,6 +241,25 @@ IMPORTANT OPERATING RULES FOR THIS SESSION
 6. Do NOT include markdown formatting like \`\`\`html or conversational filler. Output the raw HTML starting with <!DOCTYPE html> and ending with </html>.`;
 
 // ---------------------------------------------------------------------------
+// Prompt caching (#1709, closing the gap in #2432) — same shape as
+// openai-eval.mjs. This system prompt (shared + writing + pdf mode + HTML
+// template + cv + profile, ~15K+ tokens) is byte-identical across every
+// offer, yet was re-sent and re-billed each call.
+//
+// Host-gated on purpose: OpenAI-compatible gateways (OpenRouter, DeepSeek, …)
+// honor an ephemeral `cache_control` breakpoint on the prefix and reuse it
+// across back-to-back calls within the cache TTL. api.openai.com instead caches
+// long prefixes automatically and may reject the non-standard field, so it gets
+// a plain-string system message. Either way the prompt TEXT is unchanged.
+export function buildSystemMessage(prompt, host) {
+  if (host === 'api.openai.com') return { role: 'system', content: prompt };
+  return {
+    role: 'system',
+    content: [{ type: 'text', text: prompt, cache_control: { type: 'ephemeral' } }],
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Call the OpenAI-compatible endpoint
 // ---------------------------------------------------------------------------
 const timeoutMs = parseInt(process.env.OPENAI_TIMEOUT_MS || '300000', 10);
@@ -261,7 +282,7 @@ try {
     body: JSON.stringify({
       model:    modelName,
       messages: [
-        { role: 'system', content: systemPrompt },
+        buildSystemMessage(systemPrompt, endpointHost),
         { role: 'user',   content: `EVALUATION REPORT:\n\n${reportText}\n\nJOB DESCRIPTION:\n\n${jdText}\n\nNow, generate and output the fully filled HTML CV matching the rules above. Output ONLY raw HTML.` },
       ],
       stream:      false,

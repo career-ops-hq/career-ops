@@ -9,7 +9,228 @@ console.log('\nProvider — workday');
 try {
   const workdayModule = await import(pathToFileURL(join(ROOT, 'providers/workday.mjs')).href);
   const workday = workdayModule.default;
-  const { parseWorkdayResponse } = workdayModule;
+  const { parseWorkdayResponse, workdayDedupKey } = workdayModule;
+
+  // dedupKey (#3439) — one requisition served under several sites of the same
+  // tenant must collapse to one key; different tenants/instances must not.
+  if (workday.dedupKey === workdayDedupKey) {
+    pass('workday.dedupKey is wired to the exported workdayDedupKey helper');
+  } else {
+    fail('workday.dedupKey is not the exported workdayDedupKey helper');
+  }
+
+  const crossSiteA = workdayDedupKey({ url: 'https://acme.wd5.myworkdayjobs.com/External/job/Remote/Staff-Engineer_JR00123' });
+  const crossSiteB = workdayDedupKey({ url: 'https://acme.wd5.myworkdayjobs.com/Careers/job/Remote/Staff-Engineer_JR00123' });
+  if (crossSiteA && crossSiteA === crossSiteB) {
+    pass('workdayDedupKey() collapses the same requisition served under two sites of one tenant');
+  } else {
+    fail(`workdayDedupKey() cross-site collapse failed: ${JSON.stringify({ crossSiteA, crossSiteB })}`);
+  }
+
+  const tenantA = workdayDedupKey({ url: 'https://acme.wd5.myworkdayjobs.com/External/job/Remote/Staff-Engineer_JR00123' });
+  const tenantB = workdayDedupKey({ url: 'https://other.wd5.myworkdayjobs.com/External/job/Remote/Staff-Engineer_JR00123' });
+  if (tenantA && tenantB && tenantA !== tenantB) {
+    pass('workdayDedupKey() scopes by tenant — an identical requisition ID string on a different tenant does not collapse');
+  } else {
+    fail(`workdayDedupKey() must not collapse across tenants: ${JSON.stringify({ tenantA, tenantB })}`);
+  }
+
+  const instanceA = workdayDedupKey({ url: 'https://acme.wd5.myworkdayjobs.com/External/job/Remote/Staff-Engineer_JR00123' });
+  const instanceB = workdayDedupKey({ url: 'https://acme.wd1.myworkdayjobs.com/External/job/Remote/Staff-Engineer_JR00123' });
+  if (instanceA && instanceB && instanceA !== instanceB) {
+    pass('workdayDedupKey() scopes by instance too — same tenant name, different wd instance, does not collapse');
+  } else {
+    fail(`workdayDedupKey() must not collapse across instances: ${JSON.stringify({ instanceA, instanceB })}`);
+  }
+
+  const multiUnderscoreA = workdayDedupKey({ url: 'https://acme.wd5.myworkdayjobs.com/External/job/Remote/Staff-Engineer_JR_2024_00123' });
+  const multiUnderscoreB = workdayDedupKey({ url: 'https://acme.wd5.myworkdayjobs.com/Careers/job/Remote/Staff-Engineer_JR_2024_00123' });
+  if (multiUnderscoreA === 'workday:acme.wd5.myworkdayjobs.com:jr_2024_00123' && multiUnderscoreA === multiUnderscoreB) {
+    pass('workdayDedupKey() keeps a multi-underscore requisition ID intact (splits on the FIRST underscore only)');
+  } else {
+    fail(`workdayDedupKey() mishandled a multi-underscore requisition ID: ${JSON.stringify({ multiUnderscoreA, multiUnderscoreB })}`);
+  }
+
+  const localeSegment = workdayDedupKey({ url: 'https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote-Germany/Staff-Engineer_JR00123' });
+  if (localeSegment === 'workday:acme.wd5.myworkdayjobs.com:jr00123') {
+    pass('workdayDedupKey() is unaffected by extra path segments (locale, location) before the last one');
+  } else {
+    fail(`workdayDedupKey() with a locale segment returned ${JSON.stringify(localeSegment)}`);
+  }
+
+  if (workdayDedupKey({ url: 'https://acme.wd5.myworkdayjobs.com/External/job/Remote/StaffEngineer' }) === null) {
+    pass('workdayDedupKey() returns null when the last path segment has no requisition-ID separator');
+  } else {
+    fail('workdayDedupKey() should return null when it cannot find a requisition ID');
+  }
+
+  if (workdayDedupKey({ url: 'not a url' }) === null && workdayDedupKey({}) === null && workdayDedupKey(null) === null) {
+    pass('workdayDedupKey() returns null (not throws) for a malformed/missing url');
+  } else {
+    fail('workdayDedupKey() should return null, not throw, for malformed input');
+  }
+
+  // The 5 cases below are adapted from ronanime-arch's independent PR #3446
+  // implementation (same feature, different call sites — theirs covers
+  // runSeedScan + the main sweep, not checkpoint-resume reseed). Their case
+  // that caught a real bug here: Workday appends its own `-2`/`-3`
+  // disambiguator to the requisition tail when a requisition is republished
+  // on a second/third site, which this function didn't strip until now.
+
+  // Real-world case from their commit message (measured 2026-08-13): one
+  // requisition (agf R11312) served on three sites, Indeed/Glassdoor URLs
+  // carrying the `-2`/`-3` disambiguator Workday adds for the extra copies.
+  {
+    const base = 'https://agf.wd3.myworkdayjobs.com';
+    const keys = [
+      `${base}/agf_careers/job/Toronto-ON/Executive-Assistant--CIO---CFO_R11312`,
+      `${base}/indeed_careers/job/Toronto-ON/Executive-Assistant--CIO---CFO_R11312-3`,
+      `${base}/glassdoor_careers/job/Toronto-ON/Executive-Assistant--CIO---CFO_R11312-2`,
+    ].map(url => workdayDedupKey({ url }));
+    if (new Set(keys).size === 1 && keys[0]) {
+      pass('workdayDedupKey() strips the Indeed/Glassdoor `-N` disambiguator and collapses all 3 sites (ronanime-arch, PR #3446)');
+    } else {
+      fail(`workdayDedupKey() did not collapse the disambiguated sites: ${JSON.stringify(keys)}`);
+    }
+  }
+
+  // A multi-underscore requisition ID (R26_05710) carrying a disambiguator
+  // must keep the ID intact and still have the disambiguator stripped —
+  // not truncate to "05710" (first-underscore split) and not leave a
+  // dangling "-1" (missing disambiguator strip).
+  {
+    const k = workdayDedupKey({ url: 'https://agecare.wd10.myworkdayjobs.com/agecare_careers_external/job/Brooks-Alberta-Canada/Scheduler--Casual_R26_05710-1' });
+    if (k === 'workday:agecare.wd10.myworkdayjobs.com:r26_05710') {
+      pass('workdayDedupKey() keeps a multi-underscore requisition ID intact AND strips its disambiguator (ronanime-arch, PR #3446)');
+    } else {
+      fail(`workdayDedupKey() mishandled the multi-underscore + disambiguator case: ${k}`);
+    }
+  }
+
+  // #3446 review (ronanime-arch): the trailing-"-N" strip must fire ONLY when
+  // what precedes the hyphen is requisition-ID-shaped on its own (leading
+  // digit, 2+ trailing digits, underscores allowed between). Otherwise the
+  // hyphen-digits ARE the whole requisition ID and collapsing them merges every
+  // distinct posting at that tenant into one key. Fixtures below are
+  // ronanime's validated live cache.
+  {
+    const wd = (tail) =>
+      workdayDedupKey({ url: `https://acme.wd5.myworkdayjobs.com/careers/job/City/Some-Role_${tail}` });
+    const keyOf = (tail) => `workday:acme.wd5.myworkdayjobs.com:${tail.toLowerCase()}`;
+
+    // Two distinct R-NNNNNNN reqs at one tenant must NOT collapse.
+    if (wd('R-2593225') && wd('R-2592964') && wd('R-2593225') !== wd('R-2592964')) {
+      pass('workdayDedupKey() keeps two distinct R-NNNNNNN reqs apart (Walmart R-2593225 vs R-2592964)');
+    } else {
+      fail(`workdayDedupKey() collapsed distinct R-NNNNNNN reqs: ${wd('R-2593225')} vs ${wd('R-2592964')}`);
+    }
+
+    // Two distinct JR26-NNNNN reqs must NOT collapse.
+    if (wd('JR26-39350') && wd('JR26-42996') && wd('JR26-39350') !== wd('JR26-42996')) {
+      pass('workdayDedupKey() keeps two distinct JR26-NNNNN reqs apart (JR26-39350 vs JR26-42996)');
+    } else {
+      fail(`workdayDedupKey() collapsed distinct JR26-NNNNN reqs: ${wd('JR26-39350')} vs ${wd('JR26-42996')}`);
+    }
+
+    // Regression-lock: each of these hyphen tails is the requisition ID itself
+    // and must be left intact (no "-N" stripped).
+    const mustNotStrip = ['R-058589', 'R-101976', 'R-4253', 'R-103502',
+      'R2026-00707', 'R2026-01237', 'R2026-01334', 'R2026-01355'];
+    const wronglyStripped = mustNotStrip.filter((t) => wd(t) !== keyOf(t));
+    if (wronglyStripped.length === 0) {
+      pass('workdayDedupKey() leaves a non-req-shaped hyphen tail intact (Red Hat, XPEL, Lytx, Job Duck, R2026 quad)');
+    } else {
+      fail(`workdayDedupKey() wrongly altered: ${wronglyStripped.join(', ')}`);
+    }
+
+    // The R2026-NNNNN quad must be four distinct keys.
+    const quad = new Set(['R2026-00707', 'R2026-01237', 'R2026-01334', 'R2026-01355'].map(wd));
+    if (quad.size === 4) {
+      pass('workdayDedupKey() keeps the four R2026-NNNNN siblings distinct from each other');
+    } else {
+      fail(`workdayDedupKey() collapsed the R2026 quad to ${quad.size} key(s)`);
+    }
+
+    // Regression-lock the other half: a real disambiguator on a req-shaped base
+    // must STILL be stripped so the cross-site copies collapse to one key.
+    const mustCollapse = [
+      ['R11312', ['R11312-2', 'R11312-3']],
+      ['R260022205', ['R260022205-2']],
+      ['R26007842', ['R26007842-1']],
+      ['R266069', ['R266069-1']],
+      ['R53113', ['R53113-2']],
+      ['JR1126610', ['JR1126610-1']],
+      ['R2000678390', ['R2000678390-1']],
+    ];
+    const notCollapsed = mustCollapse.filter(([base, variants]) => variants.some((v) => wd(v) !== wd(base)));
+    if (notCollapsed.length === 0) {
+      pass('workdayDedupKey() still strips a real disambiguator off a req-shaped base (R11312/-2/-3, R260022205-2, R26007842-1, R266069-1, R53113-2, JR1126610-1, R2000678390-1)');
+    } else {
+      fail(`workdayDedupKey() failed to collapse: ${notCollapsed.map(([b]) => b).join(', ')}`);
+    }
+
+    // R26_05710 splits on "_" not "-": the guard allows underscores in the
+    // req-ID base, so the multi-underscore ID survives and the "-1" is dropped.
+    if (wd('R26_05710-1') === keyOf('R26_05710') && wd('R26_05710') === keyOf('R26_05710')) {
+      pass('workdayDedupKey() guard permits underscores in the req-ID base (R26_05710-1 → r26_05710, unchanged)');
+    } else {
+      fail(`workdayDedupKey() mishandled the underscore base: ${wd('R26_05710-1')} / ${wd('R26_05710')}`);
+    }
+  }
+
+  // Two different tenants reusing the same bare requisition number must not
+  // collapse — direct coverage of ronanime-arch's tenant-scoping case
+  // (already covered above by the JR00123 tenant/instance fixtures; kept as
+  // its own assertion since it's the literal case from their PR).
+  {
+    const a = workdayDedupKey({ url: 'https://one.wd3.myworkdayjobs.com/careers/job/Toronto/Analyst_R100' });
+    const b = workdayDedupKey({ url: 'https://two.wd3.myworkdayjobs.com/careers/job/Toronto/Analyst_R100' });
+    if (a && b && a !== b) {
+      pass('workdayDedupKey() does not collapse two tenants reusing the same requisition number (ronanime-arch, PR #3446)');
+    } else {
+      fail(`workdayDedupKey() incorrectly collapsed two tenants: ${JSON.stringify({ a, b })}`);
+    }
+  }
+
+  // No requisition-looking tail in the path — falls back rather than risk
+  // collapsing two different openings that happen to share a bare title.
+  if (workdayDedupKey({ url: 'https://acme.wd3.myworkdayjobs.com/careers/job/Toronto/Warehouse-Supervisor' }) === null) {
+    pass('workdayDedupKey() returns null for a bare title with no requisition ID (ronanime-arch, PR #3446)');
+  } else {
+    fail('workdayDedupKey() should return null for a bare-title path with no requisition ID');
+  }
+
+  // Non-Workday URLs are rejected by an explicit hostname check now (fixed
+  // per CodeRabbit against this function): previously these returned null
+  // only by coincidence, because their last path segment had no underscore.
+  // The Lever/Greenhouse cases below have an underscore in that segment
+  // specifically to prove the hostname check itself is doing the work, not
+  // the coincidence.
+  {
+    const bad = [
+      workdayDedupKey({ url: 'https://jobs.lever.co/achievers/abc-123' }),
+      workdayDedupKey({ url: 'not a url' }),
+      workdayDedupKey({}),
+    ];
+    if (bad.every(k => k === null)) {
+      pass('workdayDedupKey() returns null for non-Workday and malformed input (ronanime-arch, PR #3446)');
+    } else {
+      fail(`workdayDedupKey() expected all null for non-Workday/malformed input, got: ${JSON.stringify(bad)}`);
+    }
+  }
+
+  {
+    const spoofed = [
+      workdayDedupKey({ url: 'https://jobs.lever.co/acme/Role_R100' }),           // underscore in last segment, non-Workday host
+      workdayDedupKey({ url: 'https://boards.greenhouse.io/acme/jobs/Some_Role_12345' }),
+      workdayDedupKey({ url: 'https://evilmyworkdayjobs.com/job/Remote/Staff_JR1' }), // suffix without the leading dot
+    ];
+    if (spoofed.every(k => k === null)) {
+      pass('workdayDedupKey() rejects a non-Workday host even when the last path segment contains an underscore');
+    } else {
+      fail(`workdayDedupKey() should reject non-Workday hosts regardless of path shape: ${JSON.stringify(spoofed)}`);
+    }
+  }
 
   // Shared mock ctx shape for workday.fetch() calls below — only fetchJson varies per test.
   // sleep is a no-op so retry-backoff delays don't slow the test suite down.
@@ -70,6 +291,50 @@ try {
     pass('workday.detect() falls through a non-Workday api: to a valid careers_url');
   } else {
     fail(`workday.detect(fallthrough) returned ${JSON.stringify(hitFallthrough)}`);
+  }
+
+  // A CXS-form api: is the *resolved* endpoint, not a careers page. It matches
+  // the careers-page host shape too, so parsing it as one captured the literal
+  // `wday` as the site and produced a nonexistent endpoint — a live board
+  // reporting zero jobs and then reading as unreachable (#3498). The invariant:
+  // a correct api: resolves to exactly what careers_url alone resolves to.
+  const cxsCareers = 'https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers';
+  const cxsApi = 'https://crowdstrike.wd5.myworkdayjobs.com/wday/cxs/crowdstrike/crowdstrikecareers/jobs';
+  const withoutApi = workday.detect({ name: 'CrowdStrike', careers_url: cxsCareers });
+  const withApi = workday.detect({ name: 'CrowdStrike', careers_url: cxsCareers, api: cxsApi });
+  if (withApi && withoutApi && withApi.url === withoutApi.url && withApi.url === cxsApi) {
+    pass('workday.detect() resolves a CXS-form api: to the same endpoint as careers_url alone');
+  } else {
+    fail(`workday.detect(cxs api) returned ${JSON.stringify(withApi)}, careers_url alone ${JSON.stringify(withoutApi)}`);
+  }
+
+  // Same shape given as careers_url (no api: at all) — the misparse was in the
+  // shared pattern, not in the api: slot.
+  const cxsAsCareers = workday.detect({ name: 'CrowdStrike', careers_url: cxsApi });
+  if (cxsAsCareers && cxsAsCareers.url === cxsApi) {
+    pass('workday.detect() accepts a CXS-form careers_url');
+  } else {
+    fail(`workday.detect(cxs careers_url) returned ${JSON.stringify(cxsAsCareers)}`);
+  }
+
+  // The trailing /jobs is optional — a CXS base URL names the same board.
+  const cxsNoJobs = workday.detect({ name: 'CrowdStrike', api: 'https://crowdstrike.wd5.myworkdayjobs.com/wday/cxs/crowdstrike/crowdstrikecareers' });
+  if (cxsNoJobs && cxsNoJobs.url === cxsApi) {
+    pass('workday.detect() accepts a CXS api: without the trailing /jobs');
+  } else {
+    fail(`workday.detect(cxs no-/jobs) returned ${JSON.stringify(cxsNoJobs)}`);
+  }
+
+  // jobBase is derived from the CXS site too, so posting URLs stay on the
+  // site path (an externalPath hung off the host root 404s).
+  const cxsJobs = parseWorkdayResponse(
+    { jobPostings: [{ title: 'SRE', externalPath: '/job/Austin/SRE_R1', locationsText: 'Austin, TX' }] },
+    { name: 'CrowdStrike', careers_url: cxsCareers, api: cxsApi },
+  );
+  if (cxsJobs.length === 1 && cxsJobs[0].url === 'https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers/job/Austin/SRE_R1') {
+    pass('parseWorkdayResponse builds site-relative posting URLs from a CXS-form api:');
+  } else {
+    fail(`parseWorkdayResponse(cxs api) row 0 = ${JSON.stringify(cxsJobs[0])}`);
   }
 
   // Path-spoofed URL: myworkdayjobs.com in path, not hostname
@@ -222,6 +487,70 @@ try {
     pass('workday.fetch() warns (console.error) when the cap truncates real results');
   } else {
     fail(`workday fetch cap: expected a truncation warning, got ${JSON.stringify(capturedWarnings)}`);
+  }
+
+  // Which cap warning fires is keyed on ENTRY PROVENANCE, not on the date
+  // bound (#2495). "raise max_pages on this entry for more" is only actionable
+  // when the caller has a real portals.yml tracked_companies entry to edit;
+  // scan-ats-full.mjs synthesizes its entries from an external dataset and has
+  // nothing to point at, so it gets the terser line.
+  //
+  // `sinceMs === null` used to stand in for that distinction because
+  // scan-ats-full.mjs was the only caller setting it. Since #2418 `scan.mjs
+  // --since` sets ctx.sinceMs too, so the proxy silently mislabels a tracked
+  // entry as synthesized. These three cases pin the two messages to provenance
+  // so the next caller to start setting sinceMs cannot re-couple them.
+  const capEntry = { name: 'CappedCo', careers_url: 'https://cappedco.wd5.myworkdayjobs.com/careers', max_pages: 3 };
+  // total=200 → 10 pages available, capped at 3. Every posting is "Posted
+  // Today" so the --since early-stop never pre-empts the cap.
+  const capPage = () => ({
+    total: 200,
+    jobPostings: Array.from({ length: 20 }, (_, i) => ({ title: `Job ${i}`, externalPath: `/job/board/${i}`, postedOn: 'Posted Today' })),
+  });
+  const runCapCase = async (ctxExtra) => {
+    const { errors } = await captureConsoleErrors(() =>
+      workday.fetch(capEntry, mkWorkdayCtx(async () => capPage(), ctxExtra)));
+    return errors.map(String);
+  };
+  const ADVICE = /raise max_pages on this entry for more/;
+  const sevenDaysAgo = Date.now() - 7 * 86_400_000;
+
+  // scan.mjs without --since — the case that always worked.
+  const capFullRun = await runCapCase({});
+  if (capFullRun.some(w => ADVICE.test(w))) {
+    pass('workday.fetch() cap warning: a full scan.mjs run gets the "raise max_pages" advice');
+  } else {
+    fail(`workday cap warning (full run): expected the raise-max_pages advice, got ${JSON.stringify(capFullRun)}`);
+  }
+
+  // scan.mjs --since — same tracked entry, same cap; only the date bound differs.
+  const capSinceRun = await runCapCase({ sinceMs: sevenDaysAgo, includeUndated: true });
+  if (capSinceRun.some(w => ADVICE.test(w))) {
+    pass('workday.fetch() cap warning: a scan.mjs --since run keeps the "raise max_pages" advice');
+  } else {
+    fail(`workday cap warning (--since run): expected the raise-max_pages advice, got ${JSON.stringify(capSinceRun)}`);
+  }
+
+  // scan-ats-full.mjs — synthesized entries, nothing for the user to edit.
+  const capReverseScan = await runCapCase({ sinceMs: sevenDaysAgo, syntheticEntries: true });
+  if (capReverseScan.some(w => /truncated at 3 pages/.test(w)) && !capReverseScan.some(w => ADVICE.test(w))) {
+    pass('workday.fetch() cap warning: a reverse scan (synthesized entries) stays terse, no advice');
+  } else {
+    fail(`workday cap warning (reverse scan): expected the terse line without advice, got ${JSON.stringify(capReverseScan)}`);
+  }
+
+  // The "total may be Workday-capped" tag rides on the terse line and is about
+  // the tenant's total, not about provenance — it must survive the rekey.
+  const suspectEntry = { name: 'SuspectCo', careers_url: 'https://suspectco.wd5.myworkdayjobs.com/careers', max_pages: 3 };
+  const { errors: suspectWarnings } = await captureConsoleErrors(() =>
+    workday.fetch(suspectEntry, mkWorkdayCtx(async () => ({
+      total: 60, // exactly max_pages * PAGE_SIZE → the suspicious shape
+      jobPostings: Array.from({ length: 20 }, (_, i) => ({ title: `Job ${i}`, externalPath: `/job/board/${i}`, postedOn: 'Posted Today' })),
+    }), { sinceMs: sevenDaysAgo, syntheticEntries: true })));
+  if (suspectWarnings.some(w => /total may be Workday-capped, not real/.test(String(w)))) {
+    pass('workday.fetch() cap warning: the Workday-capped-total tag survives on the reverse-scan line');
+  } else {
+    fail(`workday cap warning (suspect total): expected the capped-total tag, got ${JSON.stringify(suspectWarnings)}`);
   }
 
   // fetch() pagination cap — entry.max_pages raises the cap for a genuinely
@@ -394,7 +723,7 @@ try {
   // fetch() retry — a non-retryable 4xx (e.g. malformed request) breaks
   // immediately, without wasting retry attempts.
   let non429Attempts = 0;
-  const { result: non429Jobs } = await captureConsoleErrors(() =>
+  const { result: non429Jobs, errors: non429Warnings } = await captureConsoleErrors(() =>
     workday.fetch(entry, mkWorkdayCtx(async (_url, opts) => {
       non429Attempts++;
       const body = JSON.parse(opts.body);
@@ -405,6 +734,15 @@ try {
     pass('workday.fetch() does not retry a non-retryable 4xx error');
   } else {
     fail(`workday non-retryable 4xx: attempts=${non429Attempts}, jobs=${non429Jobs.length} (expected 2/20)`);
+  }
+  // The truncation warning must report the REAL attempt count (1 — the error
+  // isn't retryable, so fetchJsonWithRetry gives up immediately), not the
+  // RETRY_POLICY-derived upper bound (4) that only applies when retries are
+  // actually exhausted.
+  if (non429Warnings.some(w => /truncated at 2 of \d+ pages after 1 attempts/.test(w))) {
+    pass('workday.fetch() truncation warning reports the real attempt count for a non-retryable failure (1, not the retry-cap upper bound)');
+  } else {
+    fail(`workday non-retryable 4xx warning: expected "after 1 attempts", got ${JSON.stringify(non429Warnings)}`);
   }
 
   // fetch() early-stop — once a page's postings are all clearly past
@@ -461,8 +799,8 @@ try {
     fail(`workday wide-since: requests=${wideRequests}, jobs=${wideJobs.length} (expected 2/40)`);
   }
 
-  // fetch() cap-hit warning — reverse-scan context (ctx.sinceMs set, as
-  // scan-ats-full.mjs always does) where entries are synthesized from an
+  // fetch() cap-hit warning — reverse-scan context (ctx.syntheticEntries set,
+  // as scan-ats-full.mjs does) where entries are synthesized from an
   // external dataset, not portals.yml: there's no portal entry to edit, and
   // — per the "no fixed cap can guarantee full coverage" conclusion — no
   // fix to advise at all, so the message is just the short fact, with
@@ -474,7 +812,7 @@ try {
     workday.fetch(entry, mkWorkdayCtx(async () => ({
       total: 1_000_000,
       jobPostings: Array.from({ length: 20 }, (_, i) => ({ title: `NoDate ${i}`, externalPath: `/job/board/nodate-${i}` })), // no postedOn
-    }), { sinceMs: noDateSinceMs, includeUndated: true })));
+    }), { sinceMs: noDateSinceMs, includeUndated: true, syntheticEntries: true })));
   if (noDateWarnings.some(w => /truncated at \d+ pages/.test(w))) {
     pass('workday.fetch() cap-hit warning fires in reverse-scan context (tenant has no dates, includeUndated on)');
   } else {
@@ -545,7 +883,7 @@ try {
     workday.fetch(entry, mkWorkdayCtx(async () => ({
       total: 1_000_000,
       jobPostings: Array.from({ length: 20 }, (_, i) => ({ title: `Fresh ${i}`, externalPath: `/job/board/fresh-${i}`, postedOn: 'Posted Today' })),
-    }), { sinceMs: datedCapSinceMs })));
+    }), { sinceMs: datedCapSinceMs, syntheticEntries: true })));
   if (datedCapWarnings.some(w => /truncated at \d+ pages \(2000 of 1000000 jobs\)/.test(w))) {
     pass('workday.fetch() cap-hit warning reports the short "truncated at N pages" form');
   } else {
@@ -568,7 +906,7 @@ try {
     workday.fetch(entry, mkWorkdayCtx(async () => ({
       total: 2000, // === DEFAULT_MAX_PAGES (100) * PAGE_SIZE (20)
       jobPostings: Array.from({ length: 20 }, (_, i) => ({ title: `Suspect ${i}`, externalPath: `/job/board/suspect-${i}`, postedOn: 'Posted Today' })),
-    }), { sinceMs: suspectCapSinceMs })));
+    }), { sinceMs: suspectCapSinceMs, syntheticEntries: true })));
   if (suspectCapWarnings.some(w => /\(total may be Workday-capped, not real\)/.test(w))) {
     pass('workday.fetch() cap-hit warning flags a suspected Workday-side total cap when total === maxPages*PAGE_SIZE');
   } else {

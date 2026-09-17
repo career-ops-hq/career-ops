@@ -38,6 +38,8 @@
 
 <p align="center"><strong>评估超过 740 个职位 · 生成超过 100 份个性化简历 · 成功拿下理想职位</strong></p>
 
+<p align="center"><sub>由 <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a>（<a href="https://github.com/santifer">@santifer</a>）创建并维护</sub></p>
+
 <p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/加入社区-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
   &nbsp;
   <a href="https://www.npmjs.com/package/@santifer/career-ops"><img src="https://img.shields.io/npm/dt/@santifer/career-ops?style=for-the-badge&logo=npm&color=CB3837&label=npx%20installs" alt="npm installs"></a></p>
@@ -67,7 +69,7 @@
 
 career-ops 可以把任何 AI 编码 CLI 变成完整的求职指挥中心。你不需要再手动用电子表格追踪申请流程，而是获得一个 AI 驱动的管道，能够：
 
-- **评估职位**，使用结构化的 A-F 评估报告（五个维度得出 1.0-5.0 的评分）
+- **评估职位**，使用结构化的 A-H 评估报告（五个维度得出 1-5 的评分）
 - **生成定制 PDF**，针对每份职位描述输出 ATS 优化简历
 - **自动扫描招聘平台**（Greenhouse、Ashby、Lever、公司招聘页）
 - **批量处理**，通过子代理并行评估 10 份以上职位
@@ -86,14 +88,14 @@ career-ops 具备代理式工作能力：Claude Code 会用 Playwright 浏览招
 | 功能 | 说明 |
 |------|------|
 | **自动管道** | 粘贴一个 URL，即可获得完整评估 + PDF + 追踪记录 |
-| **6 个评估模块** | 职位总结、简历匹配、职级策略、薪酬调研、个性化建议、面试准备（STAR+R）—— 外加一个用于核查职位真实性的 Block G 模块，可标记诈骗职位和幽灵职位 |
+| **A-H 评估** | 职位总结、简历匹配、职级策略、薪酬调研、个性化建议、面试准备（STAR+R）—— 外加一个用于核查职位真实性的 Block G 模块，可标记诈骗职位和幽灵职位 |
 | **面试故事库** | 跨多次评估积累 STAR+Reflection 故事，沉淀出 5-10 个可回答任意行为面试题的主线故事 |
 | **谈薪脚本** | 薪资谈判框架、地域折扣反驳话术、竞品 offer 杠杆策略 |
 | **ATS PDF 生成** | 注入关键词的简历，采用 Space Grotesk + DM Sans 设计 |
 | **平台扫描器** | 预配置 45+ 家公司（Anthropic、OpenAI、ElevenLabs、Retool、n8n...），支持跨 Ashby、Greenhouse、Lever、Wellfound 的自定义查询 |
 | **批量处理** | 使用 `claude -p` worker 并行评估 |
 | **Dashboard TUI** | 在终端 UI 中浏览、筛选和排序你的求职管道 |
-| **人类在环** | AI 负责评估和建议，你负责决定和行动。系统绝不会自动提交申请，最终决定始终在你手上 |
+| **人类在环** | AI 负责评估和建议，你负责决定和行动。系统绝不会提交申请，最终决定始终在你手上 <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. --> |
 | **管道完整性** | 自动合并、去重、状态标准化和健康检查 |
 
 ## 快速开始
@@ -121,7 +123,7 @@ claude   # 或 gemini / codex / qwen / opencode —— 在这里打开你的 AI 
 <summary><b>更喜欢手动设置？（git clone）</b></summary>
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # 仅生成 PDF 时需要
 claude   # 打开你的 AI CLI —— 它会在首次启动时引导你完成设置
@@ -209,7 +211,7 @@ career-ops 是一个单一斜杠命令，带有多种模式：
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  A-F 评估        │  匹配度、能力缺口、薪酬调研、STAR 故事
+│  A-H 评估        │  匹配度、能力缺口、薪酬调研、STAR 故事
 │  （读取 cv.md）  │
 └────────┬─────────┘
          │
@@ -327,9 +329,9 @@ Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/
 
 <a href="https://www.star-history.com/?repos=santifer%2Fcareer-ops&type=timeline&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
  </picture>
 </a>
 
@@ -346,11 +348,11 @@ Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/
 
 ## 贡献者
 
-<a href="https://github.com/santifer/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=santifer/career-ops" />
+<a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
 </a>
 
-通过 career-ops 成功入职？[分享你的故事！](https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml)
+通过 career-ops 成功入职？[分享你的故事！](https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml)
 
 ## 许可证与商标
 

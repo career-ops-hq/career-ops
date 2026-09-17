@@ -19,7 +19,7 @@ import { decodeEntities } from './_html-entities.mjs';
 // are rare on iCIMS and a reverse scan only needs the fresh slice anyway.
 const ICIMS_MAX_PAGES = 30;
 // Same per-tenant courtesy delay as workday.mjs — only multi-page tenants pay it.
-const INTER_PAGE_DELAY_MS = 150;
+const INTER_PAGE_DELAY_MS = 250;
 
 // iCIMS serves 200 directly to a browser-like UA (verified live); the default
 // career-ops UA risks WAF interstitials, same as workday/glints.
@@ -138,6 +138,14 @@ export default {
    * Fill in job.postedAt from the posting's detail page (JSON-LD JobPosting
    * `datePosted`) — the list pages carry no date at all. Any failure leaves
    * the job undated; the caller's undated policy then applies as usual.
+   *
+   * The same detail page also carries `jobLocation.address`, so an empty
+   * list-page location is filled here too. Several tenants render the search
+   * card without a location span at all; the empty string that produced then
+   * passes location_filter (an empty location can't match a block term), so a
+   * US-only board reaches the results with no country attached and the reader
+   * has to look each posting up by hand. Measured 2026-08-13: all six iCIMS
+   * matches in a 1,000-company sweep were US postings that arrived this way.
    */
   async enrichDate(job, ctx) {
     const sep = job.url.includes('?') ? '&' : '?';
@@ -158,8 +166,48 @@ export default {
     }
     const ts = Date.parse(pickDatePosted(nodes) || '');
     if (!Number.isNaN(ts)) job.postedAt = ts;
+    if (!String(job.location || '').trim() || /^n\/?a$/i.test(String(job.location).trim())) {
+      const loc = pickLocation(nodes);
+      if (loc) job.location = loc;
+    }
   },
 };
+
+// ISO country codes are what iCIMS emits, but location_filter matches on the
+// words a human wrote in portals.yml ("Canada", "United States"), so a bare
+// "US" would sail past a block list that spells the country out.
+const COUNTRY_NAMES = { US: 'United States', CA: 'Canada' };
+
+// From flattened JSON-LD nodes, build "Locality, Region, Country" out of the
+// first jobLocation entry (across all JobPosting nodes) that yields any usable
+// parts. Some tenants emit an all-UNAVAILABLE entry ahead of the real address,
+// so reading only the first entry would return no location even though a
+// later one has one. Partial addresses are kept: the country alone is already
+// enough for location_filter to decide.
+function pickLocation(nodes) {
+  for (const node of nodes) {
+    if (!node || typeof node !== 'object' || !node.jobLocation) continue;
+    const places = Array.isArray(node.jobLocation) ? node.jobLocation : [node.jobLocation];
+    for (const place of places) {
+      const addr = place?.address;
+      if (!addr || typeof addr !== 'object') continue;
+      const clean = v => {
+        const s = String(v ?? '').trim();
+        // iCIMS writes the literal string UNAVAILABLE into fields it has no value
+        // for, so an unchecked join yields "UNAVAILABLE, MD, United States".
+        return !s || /^unavailable$/i.test(s) ? '' : s;
+      };
+      const country = clean(addr.addressCountry);
+      const parts = [
+        clean(addr.addressLocality),
+        clean(addr.addressRegion),
+        COUNTRY_NAMES[country.toUpperCase()] || country,
+      ].filter(Boolean);
+      if (parts.length) return parts.join(', ');
+    }
+  }
+  return null;
+}
 
 // From flattened JSON-LD nodes, return the datePosted of the first JobPosting
 // node; if none carries a @type, fall back to the first node that has a
