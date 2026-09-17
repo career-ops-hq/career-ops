@@ -156,6 +156,14 @@ html {
 .report-prose h3 { font-weight: 600; font-size: 1.05rem; margin: 1.6rem 0 0.5rem; }
 .report-prose h4 { font-weight: 600; font-size: 0.95rem; color: var(--muted); margin: 1.25rem 0 0.4rem; }
 .report-prose p { margin: 0.9rem 0; }
+
+/* The report container widens on large screens so dense Block B/C tables get
+   room to breathe (they were pinned to ~720px on a 3440px display). Running
+   TEXT must not widen with it -- long measures are hard to read -- so prose
+   blocks keep a comfortable cap while tables use the full container width. */
+.report-prose p,
+.report-prose li,
+.report-prose blockquote { max-width: 76ch; }
 .report-prose strong { color: var(--fg); font-weight: 600; }
 .report-prose a { color: var(--color-brand); text-decoration: none; }
 .report-prose a:hover { text-decoration: underline; }

@@ -128,6 +128,56 @@ function discoverTests(dir) {
   return out;
 }
 
+// Strip comment lines before grepping a discovered suite's source for a
+// forbidden call: a suite that only MENTIONS a call in a comment (e.g.
+// documenting why it doesn't make it) must not be flagged.
+//
+// Removed: whole-line `//` comments, and every line of a `/* ... */` block,
+// including unstarred interior lines. Kept: any code that shares a line with a
+// comment, on either side of it, so a real call can never hide behind one:
+// `/* why */ process.exit(1)` and `*gen() { finish() }` are still scanned.
+// Trailing `//` comments on a code line are deliberately still scanned,
+// erring toward a loud false positive, never a silent miss.
+//
+// Comment markers inside a multi-line template literal are text, not
+// comments, and an interpolation there IS executable — so nothing is stripped
+// while the kept code has an odd number of unescaped backticks (quoted
+// strings and trailing `//` comments excluded from the count). An opener that
+// never closes is not a comment we understand either; the raw source is
+// scanned instead. Both limits fail loud, never silent.
+function stripCommentLines(src) {
+  let inBlock = false;
+  let inTemplate = false;
+  const kept = [];
+  for (const line of src.split('\n')) {
+    let rest = line;
+    if (!inTemplate) {
+      if (inBlock) {
+        const end = rest.indexOf('*/');
+        if (end === -1) continue;
+        inBlock = false;
+        rest = rest.slice(end + 2);
+      }
+      // A block comment opening at the start of the (remaining) line: drop it,
+      // then look again — `/* a */ /* b */ code` keeps `code`.
+      let open;
+      while ((open = /^\s*\/\*/.exec(rest))) {
+        const end = rest.indexOf('*/', open[0].length);
+        if (end === -1) { inBlock = true; rest = ''; break; }
+        rest = rest.slice(end + 2);
+      }
+      if (/^\s*(\/\/|$)/.test(rest)) continue;
+    }
+    kept.push(rest);
+    const code = rest
+      .replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g, '')
+      .replace(/\/\/.*$/, '');
+    if (((code.match(/(?<!\\)`/g) ?? []).length) % 2 === 1) inTemplate = !inTemplate;
+  }
+  if (inBlock) return src;
+  return kept.join('\n');
+}
+
 async function runDiscovered(filter = null) {
   let files = discoverTests(TESTS_DIR);
   if (filter) {
@@ -146,7 +196,9 @@ async function runDiscovered(filter = null) {
     // process.exit() inside one would terminate test-all mid-run with a forged
     // exit code — every later section (and finish()) would silently never run.
     // Refuse to import such a suite and fail loudly instead (#1916 regression).
-    if (/\bprocess\.exit\s*\(/.test(src)) {
+    // stripCommentLines() first: a suite that only MENTIONS process.exit() in
+    // a comment (e.g. documenting why it doesn't call it) must not be flagged.
+    if (/\bprocess\.exit\s*\(/.test(stripCommentLines(src))) {
       fail(`${rel} calls process.exit() — discovered suites must use pass/fail from tests/helpers.mjs and never exit`);
       continue;
     }
@@ -181,7 +233,10 @@ async function runDiscovered(filter = null) {
     // finish() prints the global summary and exits — inside a discovered suite
     // it forges the verdict line and decapitates every suite sorting after it,
     // sailing past the process.exit() check above (the exit lives in helpers).
-    if (/\bfinish\s*\(\s*\)/.test(src)) {
+    // Same stripCommentLines() treatment as the process.exit() guard above: a
+    // suite that only MENTIONS finish() in a comment (e.g. documenting why it
+    // doesn't call it) must not be flagged.
+    if (/\bfinish\s*\(\s*\)/.test(stripCommentLines(src))) {
       fail(`${f.slice(ROOT.length + 1)} calls finish() — only test-all.mjs may print the global summary; discovered suites use pass/fail and return`);
       continue;
     }
@@ -417,6 +472,9 @@ const scripts = [
   // default portals.yml because end-user workspaces often have a real user-layer
   // portals file that would trigger a live remote sweep during tests.
   { name: 'verify-portals.mjs --file .tmp-test-missing-portals.yml', expectExit: 0 },
+  // Pins #4250: --help must exit fast on its own, never fall through to the
+  // full network sweep (which is what "no output for minutes" looks like).
+  { name: 'verify-portals.mjs --help', expectExit: 0 },
   { name: 'update-system.mjs check', expectExit: 0 },
   { name: 'seed-fixture.mjs --self-test', expectExit: 0 },
   { name: 'archive-posting.mjs --help', expectExit: 0 },
@@ -17273,6 +17331,23 @@ try {
     fail(`appendScanRunSummary wrong file contents: ${JSON.stringify(runRows)}`);
   }
   rmSync(runsTmp, { recursive: true, force: true });
+
+  // Scan-run persistence, missing parent directory: filePath nested inside a
+  // directory that does not exist yet, proving appendScanRunSummary creates its
+  // own parent rather than relying on a folder some earlier step happened to make.
+  {
+    const nestedTmp = mkdtempSync(join(tmpdir(), 'scanruns-nested-'));
+    const nestedFile = join(nestedTmp, 'nested', 'deep', 'scan-runs.tsv');
+    appendScanRunSummary(counters, nestedFile);
+    const nestedRows = readFileSync(nestedFile, 'utf-8').trim().split('\n');
+    if (nestedRows[0] === SCAN_RUNS_HEADER.trim() && nestedRows.length === 2
+      && nestedRows[1].startsWith('2026-07-03T14:02:11Z\tcompleted\t45\t3\t120\t')) {
+      pass('appendScanRunSummary creates a missing nested parent directory and writes header + row');
+    } else {
+      fail(`appendScanRunSummary with missing nested parent: wrong file contents: ${JSON.stringify(nestedRows)}`);
+    }
+    rmSync(nestedTmp, { recursive: true, force: true });
+  }
 
   // computeRunStats: header-name parsing, torn rows skipped, failed runs
   // excluded from averages.
