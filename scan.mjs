@@ -2464,6 +2464,72 @@ export function loadBlacklist(filePath = BLACKLIST_PATH) {
   return parseBlacklist(readFileSync(filePath, 'utf-8'));
 }
 
+/**
+ * Parse data/aggregator-domains.txt into a Map keyed by domain.
+ * Format: `domain.com # reason`
+ * Skips blank lines and lines starting with `#`.
+ *
+ * @param {string} text - Raw data/aggregator-domains.txt content.
+ * @returns {Map<string, {domain: string, reason: string}>}
+ */
+export function parseAggregatorDomains(text) {
+  const entries = new Map();
+  for (let line of String(text ?? '').replace(/\r/g, '').split('\n')) {
+    line = line.trim();
+    if (!line || line.startsWith('#')) continue;
+    const hashIdx = line.indexOf('#');
+    let domain = line;
+    let reason = '';
+    if (hashIdx !== -1) {
+      domain = line.slice(0, hashIdx);
+      reason = line.slice(hashIdx + 1);
+    }
+    domain = domain.trim().toLowerCase();
+    reason = reason.trim();
+    if (!domain) continue;
+    entries.set(domain, { domain, reason });
+  }
+  return entries;
+}
+
+export const AGGREGATOR_DOMAINS_PATH = process.env.CAREER_OPS_AGGREGATOR_DOMAINS || path.join(DATA_ROOT, 'data/aggregator-domains.txt');
+
+/**
+ * Load data/aggregator-domains.txt dataset.
+ *
+ * @param {string} [filePath] - Override for tests.
+ * @returns {Map<string, {domain: string, reason: string}>}
+ */
+export function loadAggregatorDomains(filePath = AGGREGATOR_DOMAINS_PATH) {
+  if (!existsSync(filePath)) return new Map();
+  return parseAggregatorDomains(readFileSync(filePath, 'utf-8'));
+}
+
+/**
+ * Check if an offer's URL hostname matches a known aggregator domain.
+ * Uses the same `new URL(offer.url).hostname` pattern as `extractCareersUrlDomain()`.
+ *
+ * @param {{url: string}} offer - Offer object with a url property.
+ * @param {Map<string, {domain: string, reason: string}>} [domainsMap] - Optional map of aggregator domains.
+ * @returns {{domain: string, reason: string}|null} Matched entry or null.
+ */
+export function checkAggregatorRepost(offer, domainsMap = loadAggregatorDomains()) {
+  if (!offer || !offer.url || !domainsMap || domainsMap.size === 0) return null;
+  let hostname;
+  try {
+    hostname = new URL(offer.url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  if (!hostname) return null;
+  for (const [domain, entry] of domainsMap) {
+    if (hostname === domain || hostname.endsWith('.' + domain)) {
+      return entry;
+    }
+  }
+  return null;
+}
+
 // ── Scan-run persistence (#1604) ────────────────────────────────────
 
 // Anchored for the same reason (#3510), and with a reader to agree with:
@@ -3380,6 +3446,25 @@ async function main() {
       console.log(`    vs ${row.url}`);
     }
     console.log(`  If one side is an agency, apply through ONE channel only — a double submission burns both (#1596).`);
+  }
+  const aggregatorMap = loadAggregatorDomains();
+  if (aggregatorMap.size > 0 && verifiedOffers.length > 0) {
+    const aggregatorMatches = [];
+    for (const offer of verifiedOffers) {
+      const match = checkAggregatorRepost(offer, aggregatorMap);
+      if (match) {
+        aggregatorMatches.push({ offer, match });
+      }
+    }
+    if (aggregatorMatches.length > 0) {
+      console.log(`\n⚠️  Possible aggregator reposts (listed on a known aggregator domain) — warn only, nothing was dropped:`);
+      for (const { offer, match } of aggregatorMatches) {
+        console.log(`  - ${offer.company} — ${offer.title}`);
+        console.log(`    ${offer.url}`);
+        console.log(`    (${match.domain}: ${match.reason || 'known aggregator'})`);
+      }
+      console.log(`  Aggregators often scrape primary boards — consider applying directly on the employer's career site (#3577).`);
+    }
   }
   if (historyPolicy.recheckAfterDays != null) {
     console.log(`Recheck eligible:      ${dedupSnapshot.recheckEligible} old scan-history URL(s)`);

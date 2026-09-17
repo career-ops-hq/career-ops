@@ -8,6 +8,7 @@ local/
 # for every user automatically, with no per-filename .gitignore update needed.
 data/*
 !data/.gitkeep
+!data/aggregator-domains.txt
 !data/offers/
 !data/parser-output/
 # Received offers/contracts, promise notes, prep reports (PII — never commit)
