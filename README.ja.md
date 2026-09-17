@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20%F0%9F%8E%89%20CAREER-OPS%20%E3%81%A7%E5%86%85%E5%AE%9A&suffix=%20%E6%A4%9C%E8%A8%BC%E6%B8%88%E3%81%BF&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="career-ops で内定：検証済み件数"></a>
+  <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20CAREER-OPS%20%E3%81%A7%E5%86%85%E5%AE%9A&suffix=%20%E6%A4%9C%E8%A8%BC%E6%B8%88%E3%81%BF&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="career-ops で内定：検証済み件数"></a>
 </p>
 
 <p align="center"><sub>内定を勝ち取りましたか？<a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">ストーリーを共有 →</a> · あなたのカードが、検索中の誰かに「出口はある」と伝えます。</sub></p>

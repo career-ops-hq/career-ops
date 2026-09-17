@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20%F0%9F%8E%89%20CAREER-OPS%EB%A1%9C%20%EC%B7%A8%EC%97%85&suffix=%20%EA%B2%80%EC%A6%9D%EB%90%A8&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="career-ops로 취업: 검증된 인원"></a>
+  <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20CAREER-OPS%EB%A1%9C%20%EC%B7%A8%EC%97%85&suffix=%20%EA%B2%80%EC%A6%9D%EB%90%A8&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="career-ops로 취업: 검증된 인원"></a>
 </p>
 
 <p align="center"><sub>합격하셨나요? <a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">이야기를 공유해 주세요 →</a> · 당신의 카드가 구직 중인 누군가에게 “출구는 있다”는 사실을 보여줍니다.</sub></p>

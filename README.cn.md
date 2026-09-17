@@ -28,7 +28,6 @@
 
 <p align="center"><sub>每一个数字都是可以<a href="HIRED.md">审计 →</a>的公开故事 · 他们每一个人都曾站在你现在的位置。</sub></p>
 
-
 <p align="center">
   <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
   &nbsp;&nbsp;
