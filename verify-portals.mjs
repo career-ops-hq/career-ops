@@ -22,6 +22,7 @@
  *   node verify-portals.mjs --add cursor    # probe slug variants for one name
  *   node verify-portals.mjs --strict        # exit non-zero if any slug is unresolved
  *   node verify-portals.mjs --file <path>   # use a specific portals file
+ *   node verify-portals.mjs --help          # print this usage block and exit
  *
  * Network: only the sweep / --add paths hit the network. Importing the module
  * (for tests) runs nothing — main() is guarded — and all network access goes
@@ -36,6 +37,7 @@ import * as yaml from 'js-yaml';
 import { fetchJson as defaultFetchJson, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
 import { asciiFold } from './lib/ascii-fold.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
@@ -704,21 +706,42 @@ async function runAdd(name, { fetchJson }) {
   }
 }
 
+const KNOWN_FLAGS = ['--add', '--strict', '--file', '--help', '-h'];
+const VALUE_FLAGS = ['--add', '--file'];
+
+const USAGE = `Usage:
+  node verify-portals.mjs                 # sweep tracked_companies + job_boards in portals.yml
+  node verify-portals.mjs --add cursor    # probe slug variants for one name
+  node verify-portals.mjs --strict        # exit non-zero if any slug is unresolved
+  node verify-portals.mjs --file <path>   # use a specific portals file
+  node verify-portals.mjs --help          # print this usage block and exit`;
+
 async function main() {
   const args = process.argv.slice(2);
-  const strict = args.includes('--strict');
+  // Flags FIRST, before anything reaches the network: this script probes every
+  // tracked company, so a flag that falls through to the default sweep spends
+  // minutes on 100+ requests while printing nothing — indistinguishable from a
+  // hang, and reported as one (#4250). Same shape as audit-portals.mjs, and the
+  // same class lib/cli-flags.mjs exists to end: scan.mjs (#2270),
+  // scan-ats-full.mjs (#1633/#1635), reply-watch.mjs (#2743/#2745),
+  // dedup-tracker.mjs (#2744/#2746), doctor.mjs (#2874), fix-slugs.mjs (#2980).
+  if (hasFlag(args, '--help') || hasFlag(args, '-h')) {
+    console.log(USAGE);
+    return;
+  }
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+
+  const strict = hasFlag(args, '--strict');
   const fetchJson = defaultFetchJson;
 
-  const addFlag = args.indexOf('--add');
-  if (addFlag !== -1) {
-    await runAdd(args[addFlag + 1] || '', { fetchJson });
+  // flagValue, not indexOf: indexOf cannot see `--add=cursor` / `--file=path`,
+  // so that form silently dropped the value and swept the default file instead.
+  if (hasFlag(args, '--add')) {
+    await runAdd(flagValue(args, '--add') || '', { fetchJson });
     return;
   }
 
-  const fileFlag = args.indexOf('--file');
-  const filePath = resolve(
-    fileFlag === -1 ? DEFAULT_PORTALS_PATH : args[fileFlag + 1] || '',
-  );
+  const filePath = resolve(flagValue(args, '--file') || DEFAULT_PORTALS_PATH);
 
   // Load the scanner's provider plugins so non-ATS boards (Workday,
   // SuccessFactors, SmartRecruiters, …) get a real reachability probe instead

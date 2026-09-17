@@ -8,6 +8,11 @@
 // dedup-tracker.mjs (#2744/#2746), scan.mjs (#2270), doctor.mjs (#2874),
 // fix-slugs.mjs (#2980), and application-artifacts.mjs (#2774).
 //
+// verify-portals.mjs (#4250) is the sharpest instance: it probes every tracked
+// company, so a flag that fell through to the default sweep spent minutes on
+// 100+ network requests while printing nothing. It was reported as a Windows
+// module-load hang; it is neither Windows-specific nor a hang.
+//
 // HERMETIC: paths use tmpdir fixtures; nothing reads or writes the real data.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -37,6 +42,8 @@ const SCRIPTS = [
   ['linkedin-join.mjs', '--csvv'],
   ['linkedin-join.mjs', '--sinse'],
   ['application-artifacts.mjs', '--reprot'],
+  ['verify-portals.mjs', '--stict'],
+  ['verify-portals.mjs', '--flie'],
 ];
 
 for (const [script, typo] of SCRIPTS) {
@@ -48,6 +55,30 @@ for (const [script, typo] of SCRIPTS) {
   });
 }
 
+
+// The reported symptom (#4250): with no --help handler the flag fell through to
+// the live sweep, so this exited only when 100+ probes finished — or never. The
+// harness's own 30s timeout is what makes that a failure rather than a slow pass.
+for (const flag of ['--help', '-h']) {
+  test(`verify-portals.mjs ${flag} prints usage without touching the network`, () => {
+    const r = runScript('verify-portals.mjs', flag);
+    assert.equal(r.status, 0, `verify-portals.mjs ${flag} exited ${r.status}, want 0`);
+    assert.match(r.all, /Usage:/, `verify-portals.mjs ${flag} printed no usage block`);
+    assert.match(r.all, /--add/, 'usage should list the flags the script accepts');
+    // the sweep's summary line ("138 live, 2 live-but-empty, …"); the usage text
+    // legitimately contains the words "live" and "unresolved" on its own
+    assert.doesNotMatch(r.all, /\d+ live,/, 'usage must not be a sweep result');
+  });
+}
+
+// indexOf() cannot see `--flag=value`, so this form silently dropped the value
+// and swept the DEFAULT portals.yml instead of the file the caller named.
+test('verify-portals.mjs --file=<path> is honoured, not silently discarded', () => {
+  const missing = join(mkdtempSync(join(tmpdir(), 'co-vp-')), 'nope.yml');
+  const r = runScript('verify-portals.mjs', `--file=${missing}`);
+  assert.equal(r.status, 0, `exited ${r.status}, want 0`);
+  assert.ok(r.all.includes(missing), `did not use the path it was given: ${r.all.trim().slice(0, 200)}`);
+});
 
 test('fix-slugs.mjs --help exits 0 and prints usage', () => {
   const r = runScript('fix-slugs.mjs', '--help');
