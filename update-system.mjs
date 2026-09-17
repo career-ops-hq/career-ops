@@ -400,9 +400,15 @@ const SYSTEM_PATHS = [
   // nothing, while listing it here puts it in the pathspec check() diffs via
   // systemTreeDiffers, which turns every new signature into a
   // system-files-changed report on every install in the world that no apply
-  // can clear for long (#4062: the third independent cause of the #3149 class
-  // of permanent update-available, after the SHA-vs-content bug of #2630 and
-  // the ignore-rule route of #2756). Its repo-only coverage is declared in
+  // can clear for long (#4062). That is one cause of the #3149 class of
+  // permanent update-available, beside the SHA-vs-content bug of #2630, the
+  // ignore-rule route of #2756, and the symlinked skill entrypoints that a
+  // core.symlinks=false checkout materialises into regular files. Do not fix
+  // that last one the way this entry was fixed: the entrypoints must stay in
+  // SYSTEM_PATHS and be excluded from the drift comparison instead, because
+  // ensureSkillEntrypoints only refreshes an entry that still holds the
+  // pointer, so an entrypoint dropped from the manifest silently freezes.
+  // The SIGNATURES.md repo-only coverage is declared in
   // validate-system-paths-coverage.mjs, and the behaviour is pinned by
   // tests/updater-signature-ledger-drift.test.mjs.
   //
