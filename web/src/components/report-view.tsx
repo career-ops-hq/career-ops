@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm";
 import type { Application } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { scoreTone, scoreNum, legitimacyTone, parseReport } from "@/lib/format";
-import { cleanHeading, splitSections } from "@/lib/report-sections.mjs";
+import { cleanHeading, isVerdictHeading, splitSections } from "@/lib/report-sections.mjs";
 import { StatusSelect } from "@/components/status-select";
 import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
@@ -15,7 +15,7 @@ import { DeleteFromTracker } from "@/components/delete-from-tracker";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
 
 // Progressive disclosure of the report. The core writes prose blocks
-// "## F) Verdict (lead)", "## A) Role Summary", "## B) Match with CV", then
+// "## A) Role Summary", "## B) Match with CV", then
 // the remaining lettered blocks + machine artifacts (Machine Summary YAML,
 // Application Answers, submit log). A mainstream user deciding "should I
 // apply?" needs the verdict + fit; the rest is depth-on-demand. We lead with
@@ -53,6 +53,7 @@ export function ReportView({
   report,
   canDelete = false,
   pdfReadyFromIndex = false,
+  coverReady = false,
 }: {
   id: string;
   app: Application | null;
@@ -62,6 +63,10 @@ export function ReportView({
   file?: string | null;
   canDelete?: boolean;
   pdfReadyFromIndex?: boolean;
+  /** A tailored cover letter for THIS application exists in output/ (resolved by
+   *  the page, see resolveTailoredCover). View only — covers are never generated
+   *  from here. */
+  coverReady?: boolean;
 }) {
   const meta = report ? parseReport(report) : null;
   const field = (label: string) => meta?.fields.find((f) => f.label === label)?.value;
@@ -73,7 +78,7 @@ export function ReportView({
   const company = app ? companyPresentation(app) : null;
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8">
+    <div className="mx-auto max-w-3xl px-6 py-8 xl:max-w-5xl 2xl:max-w-[1600px]">
       <Link
         href="/pipeline"
         className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
@@ -104,6 +109,16 @@ export function ReportView({
           {app && <StatusSelect n={id} current={app.status} />}
           <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={pdfReady} />
           <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} pdfReady={pdfReady} />
+          {coverReady && (
+            <a
+              href={`/api/cover-pdf?application=${encodeURIComponent(id)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400 max-sm:min-h-[44px]"
+            >
+              <FileText className="size-3.5" /> View cover
+            </a>
+          )}
         </div>
 
         {app && canDelete && (
@@ -143,11 +158,19 @@ export function ReportView({
                 </article>
               );
             }
-            // Verdict (F) leads as a highlighted callout with no competing heading —
-            // it's THE answer. A/B stay expanded (fit detail); C–G collapse as
-            // content (with a 1-line preview); machine artifacts drop to a dimmer
-            // "Technical" tier so the CLI-DNA is present-but-clearly-secondary.
-            const verdict = sections.find((s) => s.letter === "F");
+            // A verdict block leads as a highlighted callout with no competing
+            // heading — it's THE answer. A/B stay expanded (fit detail); the rest
+            // collapse as content (with a 1-line preview); machine artifacts drop
+            // to a dimmer "Technical" tier so the CLI-DNA is present-but-clearly-
+            // secondary.
+            //
+            // Identified by the heading, never by the letter: reading "whatever is
+            // lettered F" as the verdict rendered the Interview Plan table into a
+            // callout built for one sentence — in the canonical mode and in all
+            // eighteen localized modes alike (#3416). No mode writes a Verdict
+            // block today, so today there is
+            // simply no callout and every block renders below.
+            const verdict = sections.find((s) => isVerdictHeading(s.heading));
             const rest = sections.filter((s) => s !== verdict);
             const machine = rest.filter((s) => isMachine(s.heading));
             const mainSections = rest.filter((s) => !isMachine(s.heading));

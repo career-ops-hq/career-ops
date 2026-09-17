@@ -2013,6 +2013,26 @@
         "code",
         "test"
       ]
+    },
+    {
+      "login": "WJiangH",
+      "name": "WJHuang",
+      "avatar_url": "https://avatars.githubusercontent.com/u/45132014?v=4",
+      "profile": "https://github.com/WJiangH",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "IaroslavMazur",
+      "name": "Iaroslav Mazur",
+      "avatar_url": "https://avatars.githubusercontent.com/u/22785348?v=4",
+      "profile": "https://github.com/IaroslavMazur",
+      "contributions": [
+        "code",
+        "test",
+        "doc"
+      ]
     }
   ]
 }

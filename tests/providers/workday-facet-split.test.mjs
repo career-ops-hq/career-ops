@@ -136,6 +136,33 @@ try {
     fail('chooseSplitFacet() should reject id-less facet values');
   }
 
+  const locationFirst = chooseSplitFacet([
+    { facetParameter: 'jobFamily', descriptor: 'Job Family', values: [{ id: 'admin', count: 10 }, { id: 'ops', count: 20 }] },
+    { facetParameter: 'location', descriptor: 'Location', values: [
+      { id: 'us', descriptor: 'Remote - United States', count: 4000 },
+      { id: 'toronto', descriptor: 'Toronto, Ontario, Canada', count: 20 },
+      { id: 'london', descriptor: 'London, Ontario, Canada', count: 10 },
+    ] },
+  ], { locationHints: { allow: ['Canada', 'Ontario', 'Toronto', 'Remote'], block: ['Remote - United States'] } });
+  if (locationFirst?.facetParameter === 'location'
+      && locationFirst.values.map((value) => value.id).join('|') === 'toronto|london') {
+    pass('chooseSplitFacet() prioritizes configured location values over smaller unrelated facets');
+  } else {
+    fail(`chooseSplitFacet(location hints) returned ${JSON.stringify(locationFirst)}`);
+  }
+
+  const oneTarget = chooseSplitFacet([
+    { facetParameter: 'location', descriptor: 'Location', values: [
+      { id: 'us', descriptor: 'United States', count: 9000 },
+      { id: 'ca', descriptor: 'Toronto, Canada', count: 20 },
+    ] },
+  ], { locationHints: { allow: ['Canada'], block: ['United States'] } });
+  if (oneTarget?.values.length === 1 && oneTarget.values[0].id === 'ca') {
+    pass('chooseSplitFacet() can select one in-scope location slice when other values are excluded');
+  } else {
+    fail(`chooseSplitFacet(single target) returned ${JSON.stringify(oneTarget)}`);
+  }
+
 } catch (e) {
   fail(`workday facet-split tests crashed: ${e.message}`);
 }
@@ -477,6 +504,71 @@ try {
     pass('workday.fetch() leaves a slice that early-stopped past the --since window untagged');
   } else {
     fail('a slice that stopped past the --since window is complete for the sweep and must not tag workdayTruncated');
+  }
+
+
+  // ── #2: the chosen facet may not cover the whole board ─────────────
+  //
+  // The clamp is detected against the LARGEST facet sum, but the split runs on
+  // whichever facet partitions most finely. When the chosen facet covers
+  // materially less than that, the postings it does not partition are never
+  // requested by any slice — and if every slice completes, the board is
+  // reported recovered with no "(still incomplete)".
+  const coverageResponder = (rootFacets, sliceTotals) => async (_url, opts) => {
+    const body = JSON.parse(opts.body);
+    const key = sliceKey(body.appliedFacets);
+    if (key === '') {
+      return { total: 2000, facets: rootFacets, jobPostings: postings('unfaceted', body.offset) };
+    }
+    if (!sliceTotals.includes(key)) throw new Error(`unexpected slice ${JSON.stringify(key)}`);
+    return { total: 20, facets: [], jobPostings: body.offset === 0 ? postings(key, 0) : [] };
+  };
+
+  // `tier` wins the split (largest slice 300 beats jobFamily's 1500) but covers
+  // 600 of a 2700 board. The 2100 postings outside it are unreachable.
+  const UNDERCOVERING = [
+    { facetParameter: 'jobFamily', values: [{ id: 'a', count: 1500 }, { id: 'b', count: 1200 }] },
+    { facetParameter: 'tier', values: [{ id: 't1', count: 300 }, { id: 't2', count: 300 }] },
+  ];
+  const { result: underJobs, errors: underErrors } = await captureConsoleErrors(() => workday.fetch(
+    ENTRY,
+    mkCtx(coverageResponder(UNDERCOVERING, ['tier=t1', 'tier=t2']), { includeUndated: true }),
+  ));
+
+  if (underJobs.workdayTruncated === true) {
+    pass('workday.fetch() tags a split whose chosen facet covers materially less than the board');
+  } else {
+    fail('a split facet covering 600 of a 2700 board leaves 2100 postings unreachable and must tag workdayTruncated');
+  }
+
+  const underLine = underErrors.find((e) => String(e).includes('offset-clamped at'));
+  if (underLine && String(underLine).includes('(still incomplete)')) {
+    pass('workday.fetch() says "(still incomplete)" when the chosen facet under-covers the board');
+  } else {
+    fail(`under-covering split printed ${JSON.stringify(underLine)}, expected "(still incomplete)"`);
+  }
+
+  // The materiality bar, and the reason it exists. Real facets disagree by a
+  // point or two because a posting missing a facet value is absent from that
+  // facet's counts, so the chosen facet is almost always just under the max —
+  // DSG's own numbers: trueTotal 8367, chosen jobFamily 8366, short by 1,
+  // against a 77-wide spread across the counted facets. A bare
+  // `chosen < trueTotal` fires here, which would tag essentially every board
+  // and make the tag mean nothing.
+  const NOISE = [
+    { facetParameter: 'jobFamily', values: [{ id: 'jf1', count: 800 }, { id: 'jf2', count: 783 }, { id: 'jf3', count: 783 }] },
+    { facetParameter: 'locType', values: [{ id: 'l1', count: 1184 }, { id: 'l2', count: 1183 }] },
+    { facetParameter: 'timeType', values: [{ id: 'tt1', count: 1200 }, { id: 'tt2', count: 1090 }] },
+  ];
+  const { result: noiseJobs } = await captureConsoleErrors(() => workday.fetch(
+    ENTRY,
+    mkCtx(coverageResponder(NOISE, ['jobFamily=jf1', 'jobFamily=jf2', 'jobFamily=jf3']), { includeUndated: true }),
+  ));
+
+  if (noiseJobs.workdayTruncated === undefined) {
+    pass('workday.fetch() ignores a chosen facet one posting under the max — inside the counted facets’ own spread');
+  } else {
+    fail('a 1-posting gap against a 77-wide facet spread is ordinary disagreement, not undercoverage, and must not tag');
   }
 
   // The unclamped path must not pay for any of this.

@@ -39,6 +39,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { flagValue, validateFlags, safeIntFlag } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { isPlaceholderCompany } from './lib/placeholder-cell.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(CAREER_OPS, 'data/active-interviews.md'))
@@ -155,11 +156,9 @@ export function extractFriction(row) {
   return { hasFriction: true, reason: (match[1] || '').trim() };
 }
 
-// A cell carrying no letter and no digit is a PLACEHOLDER, not a value: `?` for
-// an undisclosed employer (#1596), and the tracker's `—`/`-` no-data sentinels.
-function isPlaceholder(value) {
-  return !/[\p{L}\p{N}]/u.test(value);
-}
+// Local alias so the call sites below read unchanged; the definition moved to
+// lib/placeholder-cell.mjs, which was one of two identical copies.
+const isPlaceholder = isPlaceholderCompany;
 
 // --- Core aggregation ---
 //

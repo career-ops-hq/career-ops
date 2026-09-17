@@ -3,6 +3,10 @@
  */
 
 export const RATES = {
+  // MiniMax models
+  'MiniMax-M3': { input: 0.60 / 1000000, output: 2.40 / 1000000, cachedInput: 0.12 / 1000000 },
+  'MiniMax-M2.7': { input: 0.30 / 1000000, output: 1.20 / 1000000, cachedInput: 0.06 / 1000000 },
+
   // OpenAI models
   'gpt-4o-mini': { input: 0.150 / 1000000, output: 0.600 / 1000000 },
   'gpt-4o': { input: 2.50 / 1000000, output: 10.00 / 1000000 },

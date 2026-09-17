@@ -1,5 +1,5 @@
 /**
- * context-budget.test.mjs — Unit tests for lib/context-budget.mjs
+ * tests/context-budget.test.mjs — Unit tests for lib/context-budget.mjs
  *
  * Tests:
  *   1. estimateTokens — basic estimation, edge cases
@@ -8,40 +8,27 @@
  *      noCompress flag
  *   4. Edge cases — empty input, missing optional fields
  *
- * Run: node lib/context-budget.test.mjs
+ * Run: node test-all.mjs --only context-budget
  */
 
-import { estimateTokens, compressSharedContext, buildBudgetedPrompt, SECTION_PRIORITY } from './context-budget.mjs';
+import { pass, fail, ROOT } from './helpers.mjs';
+import { estimateTokens, compressSharedContext, buildBudgetedPrompt, SECTION_PRIORITY } from '../lib/context-budget.mjs';
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
 
-let passed = 0;
-let failed = 0;
-const failures = [];
-
+// The assertions below are unchanged from when this file lived in lib/ and ran
+// standalone; only the counters are. A discovered suite shares test-all.mjs's
+// own pass/fail counters and must never print its own summary or exit.
 function ok(label, cond) {
-  if (cond) {
-    passed++;
-  } else {
-    failed++;
-    failures.push(label);
-    console.log(`  FAIL: ${label}`);
-  }
+  if (cond) pass(label);
+  else fail(label);
 }
 
 function eq(label, actual, expected) {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
-  if (a === e) {
-    passed++;
-  } else {
-    failed++;
-    failures.push(label);
-    console.log(`  FAIL: ${label}`);
-    console.log(`    expected: ${e}`);
-    console.log(`    actual:   ${a}`);
-  }
+  if (a === e) pass(label);
+  else fail(`${label} — expected ${e}, got ${a}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -273,7 +260,6 @@ console.log('\n--- 11. P0 heading integrity guard ---');
 // trimmed with nobody noticing. This test enforces that every P0 heading key
 // in SECTION_PRIORITY is actually present as a ## heading in _shared.md.
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const sharedPath = join(ROOT, 'modes', '_shared.md');
 
 if (!existsSync(sharedPath)) {
@@ -338,16 +324,3 @@ if (!existsSync(sharedPath)) {
     console.log('  2 = prefer to compress).');
   }
 }
-
-// ============================================================================
-// RESULTS
-// ============================================================================
-console.log(`\n${'='.repeat(78)}`);
-console.log(`  Results: ${passed} passed, ${failed} failed`);
-if (failed > 0) {
-  console.log(`\n  Failed tests:`);
-  for (const f of failures) console.log(`    - ${f}`);
-}
-console.log(`${'='.repeat(78)}`);
-
-process.exit(failed > 0 ? 1 : 0);
