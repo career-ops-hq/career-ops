@@ -1,6 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 import { htmlToText } from './_html-to-text.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 // Garena careers provider — single-company provider (like ibm.mjs/dassault.mjs):
 // one fixed host, no per-tenant discovery.
@@ -47,6 +48,12 @@ export function parseGarenaResponse(json, entry) {
     if (!j || typeof j.title !== 'string' || j.title.trim() === '') continue;
     const id = j.id != null ? String(j.id).trim() : '';
     if (!id) continue;
+    // `id` is remote API data: a lone UTF-16 surrogate makes encodeURIComponent
+    // throw URIError, and a `.`/`..` would be a traversal segment. Either way,
+    // drop just this posting — the same thing the `!id` guard above does —
+    // instead of the throw aborting the whole page's parse loop (#3513).
+    const idSegment = idUrlSegment(id);
+    if (idSegment === null) continue;
 
     const locations = Array.isArray(j.tags && j.tags.location)
       ? j.tags.location.filter((l) => typeof l === 'string' && l.trim())
@@ -55,7 +62,7 @@ export function parseGarenaResponse(json, entry) {
     /** @type {{title: string, url: string, company: string, location: string, description?: string}} */
     const job = {
       title: j.title.trim(),
-      url: `https://${HOST}/${officeSegment}/careers/${urlSegment('id', id)}`,
+      url: `https://${HOST}/${officeSegment}/careers/${idSegment}`,
       company,
       location: locations.join(', '),
     };
@@ -74,10 +81,10 @@ function resolveOffice(entry) {
 }
 
 /**
- * Escapes an untrusted value before it is interpolated into a Garena URL.
- * `office` is user config and `id` is remote API data, so neither may widen
- * the URL we intended: separators (`/`, `?`, `#`, ...) are percent-escaped,
- * and `.`/`..` are rejected outright because escaping leaves them intact as
+ * Escapes a config-derived value before it is interpolated into a Garena URL.
+ * `office` is a `portals.yml` segment, so a malformed one is a config bug and
+ * should fail loudly: separators (`/`, `?`, `#`, ...) are percent-escaped, and
+ * `.`/`..` are rejected outright because escaping leaves them intact as
  * traversal segments.
  * @param {string} name - Field name, for the error message.
  * @param {string} value
@@ -88,6 +95,20 @@ function urlSegment(name, value) {
     throw new Error(`garena: ${name} is not a usable URL segment: ${JSON.stringify(value)}`);
   }
   return encodeURIComponent(value);
+}
+
+/**
+ * Escapes the per-posting `id` from the API response. Unlike `urlSegment`, a
+ * bad value here returns `null` rather than throwing: `id` is host-controlled
+ * and sits inside the parse loop, so a lone surrogate (URIError) or a `.`/`..`
+ * traversal segment must drop only that posting, not unwind the whole page
+ * (#3513).
+ * @param {string} id
+ * @returns {string | null}
+ */
+function idUrlSegment(id) {
+  if (id === '.' || id === '..') return null;
+  return safeEncodeURIComponent(id);
 }
 
 /** @type {Provider} */

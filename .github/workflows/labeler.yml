@@ -11,6 +11,25 @@ jobs:
       contents: read
       pull-requests: write
     steps:
+      # actions/labeler reads .github/labeler.yml straight from the runner when
+      # the file is on disk, and only calls the contents API when it is not
+      # (get-label-configs.ts, v7.0.0). That API call is this workflow's single
+      # network dependency, and when it fails the action rejects with a bare
+      # HttpError that takes the whole run down — e.g. run 34748939531 on #4142.
+      # Checking out puts the config on disk, so the call never happens.
+      #
+      # The API fallback always asks the BASE repo at the base SHA, never the
+      # fork, so a fork without the file was never the trigger: the failures are
+      # intermittent and hit base branches too. This removes the dependency
+      # rather than the symptom.
+      #
+      # pull_request_target checks out the base revision by default, so no PR
+      # code reaches the runner — this job only ever reads the config.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing downstream needs the token, and this job runs with
+          # pull-requests: write — do not leave it behind in .git/config.
+          persist-credentials: false
       - uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
