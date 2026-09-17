@@ -81,6 +81,19 @@ function escapeHtml(text) {
     .replace(/'/g, '&#39;');
 }
 
+// Escape, then reinterpret **…** as <strong>…</strong> — same regex and same
+// order (escape first, bold second) as generate-pdf.mjs's ATS normalization
+// (modes/pdf.md "Markdown bold"), so a literal `<script>` typed into a bullet
+// stays escaped inside the bold span rather than being unescaped by it.
+// Kept separate from escapeHtml() itself: escapeHtml() also feeds attribute
+// values (href, src, alt) and the <title>/lang attribute substitutions, where
+// injecting a <strong> tag would corrupt the attribute or the <title> text.
+// Use this only for narrative text-node fields (summary, bullets,
+// location/description blocks) — never for names, labels, or attributes.
+function escapeHtmlBold(text) {
+  return escapeHtml(text).replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+}
+
 // Sanitize a URL for an href attribute: only allow the schemes the template's
 // contact row uses, coerce bare emails/domains, drop javascript:/data: and other
 // script-bearing schemes, then HTML-escape for the attribute context.
@@ -351,10 +364,10 @@ function buildExperience(entries, partial) {
   if (!partial) {
     return entries.filter(e => hasRequiredFields(e, 'experience', 'html')).map(e => {
       const bullets = Array.isArray(e.bullets)
-        ? e.bullets.filter(Boolean).map(b => `        <li>${escapeHtml(b)}</li>`).join('\n')
+        ? e.bullets.filter(Boolean).map(b => `        <li>${escapeHtmlBold(b)}</li>`).join('\n')
         : '';
       const location = e.location
-        ? `\n    <div class="job-location">${escapeHtml(e.location)}</div>`
+        ? `\n    <div class="job-location">${escapeHtmlBold(e.location)}</div>`
         : '';
       return `<div class="job">
     <div class="job-header">
@@ -372,16 +385,16 @@ ${bullets}
   const { entryTemplate, blocks } = partial;
   return entries.filter(e => hasRequiredFields(e, 'experience', 'html')).map(e => {
     const bullets = Array.isArray(e.bullets)
-      ? e.bullets.filter(Boolean).map(b => `<li>${escapeHtml(b)}</li>`).join('\n    ')
+      ? e.bullets.filter(Boolean).map(b => `<li>${escapeHtmlBold(b)}</li>`).join('\n    ')
       : '';
     const blockValues = new Map([
-      ['LOCATION_BLOCK', { value: escapeHtml(e.location || ''), present: Boolean(e.location) }],
+      ['LOCATION_BLOCK', { value: escapeHtmlBold(e.location || ''), present: Boolean(e.location) }],
     ]);
     return fillEntry(entryTemplate, blocks, {
       COMPANY: escapeHtml(e.company || ''),
       PERIOD: escapeHtml(e.dates || e.period || ''),
       ROLE: escapeHtml(e.role || ''),
-      LOCATION: escapeHtml(e.location || ''),
+      LOCATION: escapeHtmlBold(e.location || ''),
       BULLETS: bullets,
     }, blockValues);
   }).join('\n  ');
@@ -404,7 +417,7 @@ function buildProjects(entries, partial) {
       const descText = e.description
         || (Array.isArray(e.bullets) ? e.bullets.filter(Boolean).join(' ') : '');
       const desc = descText
-        ? `\n    <div class="project-desc">${escapeHtml(descText)}</div>`
+        ? `\n    <div class="project-desc">${escapeHtmlBold(descText)}</div>`
         : '';
       const tech = e.tech
         ? `\n    <div class="project-tech">${escapeHtml(e.tech)}</div>`
@@ -421,7 +434,7 @@ function buildProjects(entries, partial) {
       || (Array.isArray(e.bullets) ? e.bullets.filter(Boolean).join(' ') : '');
     const blockValues = new Map([
       ['BADGE_BLOCK', { value: escapeHtml(e.badge || ''), present: Boolean(e.badge) }],
-      ['DESC_BLOCK',  { value: escapeHtml(descText),      present: Boolean(descText) }],
+      ['DESC_BLOCK',  { value: escapeHtmlBold(descText),  present: Boolean(descText) }],
       ['TECH_BLOCK',  { value: escapeHtml(e.tech || ''),  present: Boolean(e.tech) }],
     ]);
     const nameText = escapeHtml(e.name || '');
@@ -432,7 +445,7 @@ function buildProjects(entries, partial) {
     return fillEntry(entryTemplate, blocks, {
       NAME:  nameHtml,
       BADGE: escapeHtml(e.badge || ''),
-      DESC:  escapeHtml(descText),
+      DESC:  escapeHtmlBold(descText),
       TECH:  escapeHtml(e.tech || ''),
     }, blockValues);
   }).join('\n  ');
@@ -446,10 +459,10 @@ function buildEducation(entries, partial) {
         ? ` <span class="edu-org">${escapeHtml(e.org)}</span>`
         : '';
       const location = e.location
-        ? `\n    <div class="edu-location">${escapeHtml(e.location)}</div>`
+        ? `\n    <div class="edu-location">${escapeHtmlBold(e.location)}</div>`
         : '';
       const desc = e.description
-        ? `\n    <div class="edu-desc">${escapeHtml(e.description)}</div>`
+        ? `\n    <div class="edu-desc">${escapeHtmlBold(e.description)}</div>`
         : '';
       return `<div class="edu-item">
     <div class="edu-header">
@@ -464,15 +477,15 @@ function buildEducation(entries, partial) {
   return entries.filter(e => hasRequiredFields(e, 'education', 'html')).map(e => {
     const blockValues = new Map([
       ['ORG_BLOCK',      { value: escapeHtml(e.org || ''),         present: Boolean(e.org) }],
-      ['LOCATION_BLOCK', { value: escapeHtml(e.location || ''),    present: Boolean(e.location) }],
-      ['DESC_BLOCK',     { value: escapeHtml(e.description || ''), present: Boolean(e.description) }],
+      ['LOCATION_BLOCK', { value: escapeHtmlBold(e.location || ''), present: Boolean(e.location) }],
+      ['DESC_BLOCK',     { value: escapeHtmlBold(e.description || ''), present: Boolean(e.description) }],
     ]);
     return fillEntry(entryTemplate, blocks, {
       TITLE:    escapeHtml(e.title || ''),
       ORG:      escapeHtml(e.org || ''),
-      LOCATION: escapeHtml(e.location || ''),
+      LOCATION: escapeHtmlBold(e.location || ''),
       YEAR:     escapeHtml(e.year || ''),
-      DESC:     escapeHtml(e.description || ''),
+      DESC:     escapeHtmlBold(e.description || ''),
     }, blockValues);
   }).join('\n  ');
 }
@@ -636,7 +649,7 @@ function renderReport(payload, partials) {
     PAGE_WIDTH: pageWidth,
     NAME: escapeHtml(candidate.name || ''),
     SECTION_SUMMARY: escapeHtml(sectionTitles.summary),
-    SUMMARY_TEXT: escapeHtml(payload.summary || ''),
+    SUMMARY_TEXT: escapeHtmlBold(payload.summary || ''),
     SECTION_COMPETENCIES: escapeHtml(sectionTitles.competencies),
     COMPETENCIES: buildCompetencies(payload.competencies, partials.get('competencies')),
     SECTION_EXPERIENCE: escapeHtml(sectionTitles.experience),
