@@ -295,6 +295,7 @@ const SYSTEM_PATHS = [
   'application-artifacts.mjs',
   'batch-evaluate-gemini.mjs',
   'providers/',
+  'data-static/',
   'seeds/',
   'tests/',
   'user-agent.mjs',
