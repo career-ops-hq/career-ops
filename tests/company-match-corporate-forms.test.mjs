@@ -51,13 +51,31 @@ try {
     fail('companyMatch collapsed two unrelated companies via corporate-form stripping');
   }
 
+  // Same trade name, DIFFERENT legal form: a KK and a GK are two different
+  // legal entities, so these must stay apart. This is the case the strip can
+  // get wrong — stripping each side independently collapses them — and it is
+  // the discrimination case with teeth, because it varies ONLY the form. The
+  // case below it (different name AND different form) passes with or without
+  // the strip, so it cannot catch this on its own.
+  if (companyMatch('株式会社アカネ', '合同会社アカネ') === false
+      && companyMatch('阿里有限公司', '阿里株式会社') === false
+      && companyMatch('小米股份有限公司', '小米有限公司') === false) {
+    pass('companyMatch keeps same-name/different-form entities apart (no false merge)');
+  } else {
+    fail('companyMatch merged two entities that differ only by corporate form');
+  }
+
   // A name that IS only the marker must fall back to the unstripped key
   // rather than handing the equality check an empty "no signal" string,
   // the same discipline #2445 established for the base normalizeTextKey.
-  if (companyMatch('株式会社', '合同会社') === false) {
-    pass('companyMatch does not collapse two bare corporate-form-only names');
+  // Both directions: two different bare markers must not collapse, and one
+  // bare marker must still equal itself. The second assertion is the only
+  // witness the fallback has — without it the first passes either way.
+  if (companyMatch('株式会社', '合同会社') === false
+      && companyMatch('株式会社', '株式会社') === true) {
+    pass('companyMatch falls back to the unstripped key for bare corporate-form-only names');
   } else {
-    fail('companyMatch matched two different bare corporate-form-only names');
+    fail('companyMatch mishandled a bare corporate-form-only name');
   }
 
   // A form embedded mid-name (neither a prefix nor a suffix) must not be
