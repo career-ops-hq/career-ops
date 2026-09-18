@@ -55,10 +55,12 @@ const CARDS_RE = new RegExp(CARD_SRC, 'g');
 const ONE_CARD_RE = new RegExp(CARD_SRC);
 const HREF_RE = /\shref="([^"]*)"/;
 const REGION_RE = /\sdata-region="([^"]*)"/;
-const TITLE_RE = /<div\s(?:[^>]*?\s)?class="gw-job-title"[^>]*>([\s\S]*?)<\/div>/;
-const COMPANY_RE = /<div\s(?:[^>]*?\s)?class="gw-job-company"[^>]*>([\s\S]*?)<\/div>/;
+// Inner fields: same whole-token rule as the card itself, so an extra class on
+// the element (a class attribute is a token list) does not drop the field.
+const TITLE_RE = /<div\s(?:[^>]*?\s)?class="(?:[^"]*\s)?gw-job-title(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/div>/;
+const COMPANY_RE = /<div\s(?:[^>]*?\s)?class="(?:[^"]*\s)?gw-job-company(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/div>/;
 const LOCATION_RE = /<span\s(?:[^>]*?\s)?class="(?:[^"]*\s)?gw-location(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/span>/;
-const DESCRIPTION_RE = /<p\s(?:[^>]*?\s)?class="gw-job-description"[^>]*>([\s\S]*?)<\/p>/;
+const DESCRIPTION_RE = /<p\s(?:[^>]*?\s)?class="(?:[^"]*\s)?gw-job-description(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/p>/;
 // The listing container, `<div class="gw-jobs-section" data-jobs-container>`.
 // It is part of the page template, so it is present even when nothing is
 // posted; that separates "alive, empty board" from "not the page this parser
@@ -261,9 +263,10 @@ export function normalizeGeneralistWorldCard(cardHtml) {
  * Parse the board page. Comments, script, style, textarea and template
  * blocks are dropped first. An empty body, or a page that still carries the
  * listing container but no cards, is an alive-but-empty board and yields [].
- * A body with neither throws, so a redesign or a challenge page surfaces as
- * an error instead of a board that quietly reads 0 forever. Exported for
- * tests.
+ * A body with neither throws, and so does one whose cards all fail to yield
+ * a job (the anchors match but an inner field moved), so a redesign or a
+ * challenge page surfaces as an error instead of a board that quietly reads
+ * 0 forever. Exported for tests.
  * @param {unknown} html
  * @returns {Job[]}
  */
@@ -273,11 +276,22 @@ export function parseGeneralistWorldJobs(html) {
   /** @type {Job[]} */
   const jobs = [];
   const seen = new Set();
+  let cards = 0;
   for (const m of rendered.matchAll(CARDS_RE)) {
+    cards++;
     const job = cardToJob(m[1], m[2]);
     if (!job || seen.has(job.url)) continue;
     seen.add(job.url);
     jobs.push(job);
+  }
+  // Anchors that all fail to yield a job mean an inner field moved, not an
+  // empty board: the listing container is still there, so without this check
+  // a card redesign would read as zero postings forever. A malformed card
+  // among usable ones is still just skipped.
+  if (jobs.length === 0 && cards > 0) {
+    throw new Error(
+      `generalist-world: ${cards} gw-job-card anchor(s) matched but none carried a usable title, employer and /jobs/{slug}/ link; the card markup likely changed`,
+    );
   }
   if (jobs.length === 0 && !BOARD_MARKER_RE.test(rendered)) {
     throw new Error(

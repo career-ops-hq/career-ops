@@ -13,13 +13,32 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
-import { isAbsolute, join, dirname, basename } from 'path';
-import { fileURLToPath } from 'url';
+import { isAbsolute, join, basename } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_SOURCES = ['cv.md', 'article-digest.md'];
-const DEFAULT_CONFIG = join(ROOT, 'config', 'cv-facts.json');
+// Two roots, because this gate compares user-layer files against a user-layer
+// config and previously resolved neither from the user's data root.
+//
+// cv.md and article-digest.md are the Source-of-Truth Boundary's primary files.
+// As bare relative strings they resolved against process.cwd(), so from any
+// directory that is not the data root the gate read NO sources — and a fact
+// check with no sources does not fail open quietly, it fails LOUD and WRONG:
+// every quantified claim in the generated CV is reported as "absent from
+// sources", including claims copied verbatim out of the user's own cv.md.
+//
+// config/cv-facts.json is user-layer too (it holds the user's forbidden and
+// advisory phrases). Resolved from the CODE root it was simply absent for any
+// configured data root, and the gate said so and carried on:
+//
+//     ⚠️  fact-gate config not found: <CHECKOUT>/config/cv-facts.json
+//         — forbidden/advisory phrase checks did not run.
+//
+// So one invocation both invented failures and silently skipped half its
+// checks. --source and --config still override; only the defaults move.
+const DATA_ROOT = getCareerOpsRoot();
+const DEFAULT_SOURCES = [join(DATA_ROOT, 'cv.md'), join(DATA_ROOT, 'article-digest.md')];
+const DEFAULT_CONFIG = join(DATA_ROOT, 'config', 'cv-facts.json');
 const TOOL_PROSE_WORDS = new Set([
   'a', 'an', 'and', 'at', 'built', 'by', 'containerized', 'deployment',
   'deployments', 'delivery', 'diagnosing', 'efficiency', 'feedback', 'for', 'from', 'improve',

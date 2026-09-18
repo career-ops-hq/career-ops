@@ -107,18 +107,17 @@ const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(DATA_ROOT, 'con
 // anchored one (#3510). One resolution, imported, cannot drift.
 export const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(DATA_ROOT, 'data/scan-history.tsv');
 export const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data/pipeline.md');
+
 const APPLICATIONS_PATH = path.join(DATA_ROOT, 'data/applications.md');
 const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 
-// Ensure required directories exist (fresh setup). Stays rooted in the user-data
-// directory; override parents are created by their writers before first write.
-const targetDataDir = path.join(DATA_ROOT, 'data');
-try {
-  mkdirSync(targetDataDir, { recursive: true });
-} catch (err) {
-  console.error(`ERROR: Could not create data directory at "${targetDataDir}": ${err.message}`);
-  process.exit(1);
-}
+// No directory creation at import time (#3159). Every writer below creates its
+// own parent before its first write — scan-history (appendToScanHistory),
+// scan-runs (appendScanRunSummary), portal-health (appendPortalHealth) — and
+// pipeline.md goes through pipeline-lock.mjs, which creates data/ for the same
+// reason. applications.md and blacklist.md are read-only here. Importing this
+// module must stay side-effect free: a sibling that only reads a constant used
+// to leave a stray data/ in whatever cwd it ran from.
 
 const CONCURRENCY = 10;
 
@@ -1540,7 +1539,11 @@ function extractPipelineCompanyRole(line) {
 export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = {}) {
   const { scanHistoryText = '', pipelineText = '', applicationsText = '' } = sources;
   const seen = new Set();
-  let recheckEligible = 0;
+  // Rows the age policy has released. Held rather than counted here: the two
+  // sources parsed below carry no age policy of their own, so a row the TTL has
+  // just freed can be re-pinned a few lines later. The count is taken at the end,
+  // against the finished set, so it reports what is actually rescannable.
+  const recheckCandidates = new Set();
 
   // scan-history.tsv
   for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
@@ -1553,21 +1556,67 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
           if (token) seen.add(token);
         }
       }
-    } else recheckEligible++;
+    } else recheckCandidates.add(normalizeUrlForDedup(url));
   }
 
   // pipeline.md — extract URLs from checkbox lines, wherever the URL sits in the
   // line (see extractPipelineUrl: five of the six documented shapes lead with a
   // report number, a report link, or a strikethrough rather than the URL).
+  //
+  // This loop carried no age policy, which is what made
+  // `scan_history.recheck_after_days` a no-op: on an install that has been
+  // scanning for a while every URL the TTL releases above is listed here too, so
+  // it was re-pinned immediately and the window never freed anything.
+  //
+  // What may be released is decided by whether the row is still ACTIONABLE. A
+  // `- [ ]` row is a line the user can still pull from, and re-scanning it would
+  // append a SECOND copy of a job already on the list. A `- [x]` row, or any row
+  // under `## Processed`, is finished work: no queue entry can be duplicated, so
+  // the scan-history TTL is allowed to govern it alone. Release also requires the
+  // URL to be a recheck candidate, so a pipeline-only URL is never un-pinned.
+  // Sections are `##` in PIPELINE_SKELETON — `# Pipeline` is the document title,
+  // `## Pending` and `## Processed` are the sections. Heading depth decides what
+  // a heading does, in both directions:
+  //
+  //   deeper than a section (`###`)  a subdivision INSIDE it; changes nothing,
+  //                                  so `### August` under `## Processed` stays
+  //                                  released and `### Processed leftovers`
+  //                                  under `## Pending` releases nothing
+  //   at section level (`##`)        ends the previous section and opens this
+  //                                  one; released only if it is `Processed`
+  //   shallower (`#`)                outranks a section, so it ends it too — a
+  //                                  `# Backlog` after `## Processed` must not
+  //                                  inherit the released state
+  //
+  // Both failures are the same failure: a row that is still queued gets handed
+  // back to the scanner, which appends a second copy of a job already on the
+  // list. That duplication is what this function exists to prevent.
+  const SECTION_LEVEL = 2;
+  let inProcessed = false;
   for (const line of pipelineText.split('\n')) {
+    const heading = line.match(/^(#+)\s+(.*)$/);
+    if (heading && heading[1].length <= SECTION_LEVEL) {
+      inProcessed = heading[1].length === SECTION_LEVEL
+        && /^processed\b/i.test(heading[2].trim());
+    }
     const url = extractPipelineUrl(line);
-    if (url) seen.add(normalizeUrlForDedup(url));
+    if (!url) continue;
+    const key = normalizeUrlForDedup(url);
+    const done = /^\s*- \[x\]/i.test(line);
+    if ((done || inProcessed) && recheckCandidates.has(key)) continue;
+    seen.add(key);
   }
 
   // applications.md — extract URLs from report links and any inline URLs
   for (const match of applicationsText.matchAll(/https?:\/\/[^\s|)]+/g)) {
     seen.add(normalizeUrlForDedup(match[0]));
   }
+
+  // Counted against the finished set: a released row that applications.md or an
+  // actionable pipeline row pinned again is not eligible, and saying so keeps the
+  // number the scanners print honest.
+  let recheckEligible = 0;
+  for (const key of recheckCandidates) if (!seen.has(key)) recheckEligible++;
 
   return { seen, recheckEligible };
 }
@@ -2572,6 +2621,9 @@ export function writeRunFailureRow(status = 'failed', filePath = SCAN_RUNS_PATH)
 }
 
 export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
+
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  if (!existsSync(filePath)) writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
   // The header is written only on first creation, so a release that appends or inserts a counter
   // leaves existing files with a header that no longer describes the rows below it. Nothing
   // migrates it and nothing notices: stats.mjs reads by column NAME, so it silently returns a
@@ -3511,11 +3563,11 @@ async function main() {
   const unreachableTargets = errors.filter((e) => e.kind === 'slug_gone');
   const networkTargets = errors.filter((e) => e.kind === 'network');
   const otherErrors = errors.filter((e) => e.kind !== 'slug_gone' && e.kind !== 'network');
-  
+
   const STREAK_THRESHOLD = config.portal_health_threshold || 3;
   const nowStr = new Date().toISOString();
   const healthRecords = [];
-  
+
   // Record each errored target under its real classifyFetchError kind. Before
   // this, only slug_gone/network were recorded and auth (401/403), server
   // (5xx), and unknown fell through to 'reachable' — so a portal WAF-403ing
@@ -3540,7 +3592,7 @@ async function main() {
   const persistentlyDead = [];
   const newlyDeadSlug = [];
   const newlyDeadNetwork = [];
-  
+
   // All error kinds can reach the 🚨 persistent list (auth/server/unknown
   // included — a WAF that 403s the scanner every run is coverage decay too).
   // Below threshold, only slug_gone/network keep their dedicated warnings;
