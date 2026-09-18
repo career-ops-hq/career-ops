@@ -68,18 +68,18 @@ try {
     fail('checkAggregatorRepost matched Indeed when it should be excluded: ' + JSON.stringify(indeedMatch));
   }
 
-  // 5. Test loading actual data/aggregator-domains.txt file
+  // 5. Test loading actual data-static/aggregator-domains.txt file
   const realDomainsMap = loadAggregatorDomains();
   if (realDomainsMap.size >= 15 && realDomainsMap.has('recruit.net') && realDomainsMap.has('zippia.com')) {
-    pass('loadAggregatorDomains successfully loads data/aggregator-domains.txt');
+    pass('loadAggregatorDomains successfully loads data-static/aggregator-domains.txt');
   } else {
     fail('loadAggregatorDomains loaded unexpected size or missing keys: size=' + realDomainsMap.size);
   }
 
   if (checkAggregatorRepost(indeedOffer, realDomainsMap) === null) {
-    pass('data/aggregator-domains.txt does not contain Indeed');
+    pass('data-static/aggregator-domains.txt does not contain Indeed');
   } else {
-    fail('data/aggregator-domains.txt contains Indeed');
+    fail('data-static/aggregator-domains.txt contains Indeed');
   }
 
 } catch (e) {

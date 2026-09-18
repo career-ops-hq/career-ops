@@ -2492,10 +2492,10 @@ export function parseAggregatorDomains(text) {
   return entries;
 }
 
-export const AGGREGATOR_DOMAINS_PATH = process.env.CAREER_OPS_AGGREGATOR_DOMAINS || path.join(DATA_ROOT, 'data/aggregator-domains.txt');
+export const AGGREGATOR_DOMAINS_PATH = process.env.CAREER_OPS_AGGREGATOR_DOMAINS || path.join(CODE_ROOT, 'data-static/aggregator-domains.txt');
 
 /**
- * Load data/aggregator-domains.txt dataset.
+ * Load data-static/aggregator-domains.txt dataset.
  *
  * @param {string} [filePath] - Override for tests.
  * @returns {Map<string, {domain: string, reason: string}>}
