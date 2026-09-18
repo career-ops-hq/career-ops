@@ -39,6 +39,15 @@ type PipelineOpenPDFMsg struct {
 	Path string
 }
 
+// PipelineOpenFailedMsg reports that an external open (job URL, manifesto or
+// CV PDF) failed. The dashboard runs under an alt-screen, so the failure has to
+// travel back to the pipeline screen as a flash: anything written to stderr is
+// never seen. Target is the URL or path that could not be opened.
+type PipelineOpenFailedMsg struct {
+	Target string
+	Err    string
+}
+
 // PipelineGeneratePDFMsg requests a PDF regeneration via generate-pdf.mjs
 // from the application's recorded source HTML. Paths are relative to
 // CareerOpsPath (as recorded in the manifest).
@@ -478,6 +487,9 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 		} else {
 			m.flash = "PDF regenerated and opened: " + filepath.Base(msg.Path)
 		}
+		return m, nil
+	case PipelineOpenFailedMsg:
+		m.flash = "Could not open " + msg.Target + ": " + msg.Err
 		return m, nil
 	case pipelineStartDiscardPickerMsg:
 		// Issue 1380: initialise the discard reason picker state.
