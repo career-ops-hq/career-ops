@@ -1,4 +1,5 @@
 # Aggregator domains: known job aggregators and scrapers that repost listings from primary sources.
+# This list is maintained by the project via updates; it is not a user-editable file — do not add personal entries here.
 # Note: Indeed (indeed.com) is deliberately excluded because companies post there directly as a primary board.
 
 recruit.net # aggregator, reposts listings from other boards

@@ -2514,11 +2514,11 @@ export function loadBlacklist(filePath = BLACKLIST_PATH) {
 }
 
 /**
- * Parse data/aggregator-domains.txt into a Map keyed by domain.
+ * Parse data-static/aggregator-domains.txt into a Map keyed by domain.
  * Format: `domain.com # reason`
  * Skips blank lines and lines starting with `#`.
  *
- * @param {string} text - Raw data/aggregator-domains.txt content.
+ * @param {string} text - Raw data-static/aggregator-domains.txt content.
  * @returns {Map<string, {domain: string, reason: string}>}
  */
 export function parseAggregatorDomains(text) {
@@ -2569,6 +2569,9 @@ export function checkAggregatorRepost(offer, domainsMap = loadAggregatorDomains(
     hostname = new URL(offer.url).hostname.toLowerCase();
   } catch {
     return null;
+  }
+  if (hostname.endsWith('.')) {
+    hostname = hostname.slice(0, -1);
   }
   if (!hostname) return null;
   for (const [domain, entry] of domainsMap) {

@@ -19,12 +19,12 @@ try {
     '',
     'recruit.net # aggregator, reposts listings from other boards',
     'zippia.com # aggregator, scrapes and reposts job listings',
-    '  uk.adzuna.com # subdomain example  ',
+    '  adzuna.com # parent domain example  ',
   ].join('\n');
 
   const parsedMap = parseAggregatorDomains(sample);
 
-  if (parsedMap.size === 3 && parsedMap.has('recruit.net') && parsedMap.has('zippia.com') && parsedMap.has('uk.adzuna.com')) {
+  if (parsedMap.size === 3 && parsedMap.has('recruit.net') && parsedMap.has('zippia.com') && parsedMap.has('adzuna.com')) {
     pass('parseAggregatorDomains ignores comments/blank lines and extracts domain map correctly');
   } else {
     fail('parseAggregatorDomains failed: size=' + parsedMap.size);
@@ -42,10 +42,20 @@ try {
     fail('checkAggregatorRepost failed for known domain: ' + JSON.stringify(recruitMatch));
   }
 
-  if (subMatch && subMatch.domain === 'uk.adzuna.com') {
+  if (subMatch && subMatch.domain === 'adzuna.com') {
     pass('checkAggregatorRepost matches a subdomain of a known aggregator domain');
   } else {
-    fail('checkAggregatorRepost failed for subdomain match');
+    fail('checkAggregatorRepost failed for subdomain match: ' + JSON.stringify(subMatch));
+  }
+
+  // 2b. Test trailing dot in hostname
+  const trailingDotOffer = { url: 'https://recruit.net./job/12345', company: 'Acme', title: 'Developer' };
+  const trailingDotMatch = checkAggregatorRepost(trailingDotOffer, parsedMap);
+
+  if (trailingDotMatch && trailingDotMatch.domain === 'recruit.net') {
+    pass('checkAggregatorRepost matches hostname with trailing dot');
+  } else {
+    fail('checkAggregatorRepost failed for hostname with trailing dot: ' + JSON.stringify(trailingDotMatch));
   }
 
   // 3. Test checkAggregatorRepost with an unrelated domain (no match)
