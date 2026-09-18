@@ -293,7 +293,7 @@ career-ops एक shared command router use करता है। CLIs मे�
 
 ```
 /career-ops                → सभी available commands दिखाएं
-/career-ops {JD paste करें}   → Full auto-pipeline (evaluate + PDF + tracker)
+/career-ops auto-pipeline {JD paste करें}   → Full auto-pipeline (evaluate + PDF + tracker)
 /career-ops scan           → नए offers के लिए portals scan करें
 /career-ops pdf            → ATS-optimized CV generate करें
 /career-ops cover          → Cover letter generator (JD paste करें या /career-ops cover {slug})
@@ -307,7 +307,7 @@ career-ops एक shared command router use करता है। CLIs मे�
 /career-ops project        → Portfolio project evaluate करें
 ```
 
-या बस job URL या description directly paste करें -- career-ops auto-detect करेगा और full pipeline run करेगा।
+पूरी प्रक्रिया चलाने के लिए job URL या description के साथ `auto-pipeline` माँगें। केवल posting paste करने पर career-ops आपके अनुरोध या पहले से बताई गई preference के अनुसार काम करेगा; दोनों अस्पष्ट हों तो artifacts बनाने से पहले पूछेगा कि आप कौन-सा काम चाहते हैं।
 
 Codex में, slash commands guaranteed नहीं हैं। Same mode names को एक prompt में use करें, या उन्हें `codex exec` से call करें।
 

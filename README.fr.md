@@ -189,7 +189,7 @@ career-ops est accessible via une commande slash unique avec plusieurs modes :
 
 ```
 /career-ops                → Afficher toutes les commandes disponibles
-/career-ops {coller JD}    → Pipeline automatique complet (évaluation + PDF + tracker)
+/career-ops auto-pipeline {coller JD}    → Pipeline automatique complet (évaluation + PDF + tracker)
 /career-ops scan           → Scanner les portails pour de nouvelles offres
 /career-ops pdf            → Générer un CV optimisé pour les ATS
 /career-ops batch          → Évaluer plusieurs offres en lot

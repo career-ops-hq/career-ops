@@ -313,7 +313,8 @@ Two separate axes:
 
 | If the user... | Mode |
 |----------------|------|
-| Pastes JD or URL | auto-pipeline (evaluate + report + PDF + tracker) |
+| Requests the full pipeline for a JD or URL | auto-pipeline (evaluate + report + PDF + tracker) |
+| Pastes JD or URL | Honor the requested task or an established user preference; if intent is missing, ask which operation to run before creating artifacts |
 | Asks to evaluate offer | `oferta` |
 | Asks to compare offers | `ofertas` |
 | Wants LinkedIn outreach | `contacto` — identifies hiring manager, recruiter, or team peers via web search; drafts a message tailored to the contact type (recruiter / hiring manager / peer / interviewer), within LinkedIn's connection-request character limit for the account's tier (200 free, 300 Premium/Sales Navigator) |

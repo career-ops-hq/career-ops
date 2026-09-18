@@ -169,7 +169,7 @@ career-ops verwendet einen gemeinsamen Command-Router. In CLIs mit Slash-Command
 
 ```text
 /career-ops                → alle verfügbaren Befehle anzeigen
-/career-ops {JD einfügen}  → vollständige Auto-Pipeline (Bewertung + PDF + Tracker)
+/career-ops auto-pipeline {JD einfügen}  → vollständige Auto-Pipeline (Bewertung + PDF + Tracker)
 /career-ops scan           → Portale nach neuen Angeboten scannen
 /career-ops pdf            → ATS-optimierten Lebenslauf generieren
 /career-ops cover          → Anschreiben-Generator (JD einfügen oder /career-ops cover {slug})

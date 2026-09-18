@@ -287,7 +287,7 @@ career-ops paylaşılan bir komut yönlendiricisi kullanır. Slash komutlarını
 
 ```
 /career-ops                → Tüm kullanılabilir komutları göster
-/career-ops {bir iş ilanı yapıştırın}   → Tam otomatik hat (değerlendirme + PDF + tracker)
+/career-ops auto-pipeline {bir iş ilanı yapıştırın}   → Tam otomatik hat (değerlendirme + PDF + tracker)
 /career-ops scan           → Yeni ilanlar için portalları tara
 /career-ops pdf            → ATS uyumlu CV üret
 /career-ops cover          → Ön yazı üretici (iş ilanı yapıştırın veya /career-ops cover {slug})
