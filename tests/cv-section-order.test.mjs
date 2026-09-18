@@ -7,11 +7,11 @@
 // Assertions run against rendered HTML rather than source patterns: the reorder
 // has to survive nested markup, comments, absent optional sections and a second
 // application, and none of that is observable from the source text.
-import { pass, fail, ROOT, NODE } from './helpers.mjs';
+import { pass, fail, linkRepoPackage, ROOT, NODE } from './helpers.mjs';
 import { spawnSync } from 'child_process';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 
 console.log('\nCV section order from config/profile.yml (#2533)');
@@ -33,6 +33,7 @@ const RENDERED_TITLES = {
   SECTION_EDUCATION: 'Education',
   SECTION_CERTIFICATIONS: 'Certifications',
   SECTION_AWARDS: 'Awards & Honors',
+  SECTION_INTERESTS: 'Interests',
   SECTION_SKILLS: 'Skills',
 };
 
@@ -115,7 +116,7 @@ function captureWarnings(fn) {
 try {
   const { cvSectionOrderFrom, readCvSectionOrder } =
     await import(pathToFileURL(join(ROOT, 'theme-style.mjs')).href);
-  const { reorderCvSections, CV_SECTION_KEYS, validateCvSectionOrder } =
+  const { reorderCvSections, CV_SECTION_KEYS, validateCvSectionOrder, sectionKey } =
     await import(pathToFileURL(join(ROOT, 'generate-pdf.mjs')).href);
 
   // ── Reading the config ────────────────────────────────────────────────────
@@ -245,14 +246,14 @@ try {
   // Asserted against a written-out vocabulary, not against CV_SECTION_KEYS:
   // checking the message with the same list the message is built from would
   // pass however many sections the implementation actually knows about.
-  const EXPECTED_KEYS = ['summary', 'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'skills'];
+  const EXPECTED_KEYS = ['summary', 'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'interests', 'skills'];
   if (typo.warnings.some(w => EXPECTED_KEYS.every(k => w.includes(k)))) {
-    pass('the unrecognized-name warning lists all eight recognized section keys');
+    pass('the unrecognized-name warning lists all nine recognized section keys');
   } else {
     fail(`the warning should list the recognized keys: ${JSON.stringify(typo.warnings)}`);
   }
   if (EXPECTED_KEYS.every(k => CV_SECTION_KEYS.includes(k)) && CV_SECTION_KEYS.length === EXPECTED_KEYS.length) {
-    pass('CV_SECTION_KEYS is exactly the eight canonical sections the alias table produces');
+    pass('CV_SECTION_KEYS is exactly the nine canonical sections the alias table produces');
   } else {
     fail(`CV_SECTION_KEYS => ${JSON.stringify(CV_SECTION_KEYS)}`);
   }
@@ -655,10 +656,10 @@ try {
   // pass with the other six unreachable.
   const rendered = renderTemplate('cv-template.html');
   const shippedOrder = renderedTitles(rendered);
-  const allKeys = ['summary', 'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'skills'];
+  const allKeys = ['summary', 'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'interests', 'skills'];
   const reversed = renderedTitles(reorderCvSections(rendered, [...allKeys].reverse()));
-  if (shippedOrder.length === 8 && JSON.stringify(reversed) === JSON.stringify([...shippedOrder].reverse())) {
-    pass('every one of the shipped template\'s eight sections is movable (full reversal)');
+  if (shippedOrder.length === 9 && JSON.stringify(reversed) === JSON.stringify([...shippedOrder].reverse())) {
+    pass('every one of the shipped template\'s nine sections is movable (full reversal)');
   } else {
     fail(`shipped template reversal: before=${JSON.stringify(shippedOrder)} after=${JSON.stringify(reversed)}`);
   }
@@ -681,28 +682,91 @@ try {
 
   // ── The point of the whole exercise ───────────────────────────────────────
 
-  // A cv.md ordered Skills-before-Education fails the guard against the shipped
-  // template, and passes once the profile declares the same order. This is the
-  // behaviour #2533 asks for; without the reorder the second call throws too.
+  // A cv.md ordered Skills-before-Education fails the guard against a CV
+  // rendered in some other order, and passes once the profile declares the
+  // same order. This is the behaviour #2533 asks for; without the reorder the
+  // second call throws too.
   //
   // Moving Skills up past two sections is a rotation, not a swap: the sections
-  // it displaces are named too, in the order they should end up in. That is the
-  // shape the shipped template needs (`[skills, education, certifications,
-  // awards]`), so the end-to-end case exercises it rather than the 2-cycle.
+  // it displaces are named too, in the order they should end up in. That is
+  // the shape needed to reach cv.md's own order here (`[experience, projects,
+  // skills, education, certifications]`), so the end-to-end case exercises a
+  // real rotation rather than a 2-cycle.
+  //
+  // FIXTURE itself is deliberately NOT used as the "before" input here: its
+  // order (Summary, Experience, Projects, Education, Certifications, Skills)
+  // is exactly the canonical modes/pdf.md tailoring order (#3640), so
+  // validateCvSectionOrder() now accepts it against ANY cv.md — it would no
+  // longer demonstrate a divergence the guard rejects. scrambledHtml instead
+  // hoists Education/Certifications ahead of Experience/Projects, which
+  // matches neither cv.md's order below nor the canonical one, so it still
+  // exercises the "genuinely scrambled, must be rejected" path this guard
+  // exists for (#1646) — the case the cv.sections config feature (#2533)
+  // exists to let a user correct on purpose.
   const cvMarkdown = [
     '# Candidate', '', '## Professional Summary', 'x', '', '## Work Experience', 'x', '',
     '## Projects', 'x', '', '## Skills', 'x', '', '## Education', 'x', '', '## Certifications', 'x', '',
   ].join('\n');
+  const scrambledHtml = `<!DOCTYPE html>
+<html lang="en">
+<head><title>Test</title></head>
+<body>
+<div class="cv">
+  <!-- HEADER -->
+  <div class="header"><h1>Test Candidate</h1></div>
+
+  <!-- PROFESSIONAL SUMMARY -->
+  <div class="section">
+    <div class="section-title">Professional Summary</div>
+    <div class="summary-text">Summary body.</div>
+  </div>
+
+  <!-- EDUCATION -->
+  <div class="section">
+    <div class="section-title">Education</div>
+    <div class="edu-item">E</div>
+  </div>
+
+  <!-- CERTIFICATIONS -->
+  <div class="section">
+    <div class="section-title">Certifications</div>
+    <div class="cert-table">C</div>
+  </div>
+
+  <!-- WORK EXPERIENCE -->
+  <div class="section">
+    <div class="section-title">Work Experience</div>
+    <div class="job"><div class="job-header"><span class="job-company">Acme</span></div><ul><li>Did the thing</li></ul></div>
+  </div>
+
+  <!-- PROJECTS -->
+  <div class="section">
+    <div class="section-title">Projects</div>
+    <div class="project">P</div>
+  </div>
+
+  <!-- SKILLS -->
+  <div class="section">
+    <div class="section-title">Skills</div>
+    <div class="skills-grid">K</div>
+  </div>
+</div>
+</body>
+</html>
+`;
 
   let threwBefore = false;
   try {
-    validateCvSectionOrder(FIXTURE, cvMarkdown);
+    validateCvSectionOrder(scrambledHtml, cvMarkdown);
   } catch {
     threwBefore = true;
   }
   let threwAfter = false;
   try {
-    validateCvSectionOrder(reorderCvSections(FIXTURE, ['skills', 'education', 'certifications']), cvMarkdown);
+    validateCvSectionOrder(
+      reorderCvSections(scrambledHtml, ['experience', 'projects', 'skills', 'education', 'certifications']),
+      cvMarkdown,
+    );
   } catch (e) {
     threwAfter = true;
     fail(`the guard still rejected the reordered CV: ${e.message}`);
@@ -710,7 +774,201 @@ try {
   if (threwBefore && !threwAfter) {
     pass('a cv.md ordered Skills-before-Education fails the guard untouched and passes once cv.sections declares it');
   } else if (!threwBefore) {
-    fail('the fixture no longer diverges from cv.md — the end-to-end assertion proves nothing');
+    fail('the fixture no longer diverges from cv.md and the canonical order — the end-to-end assertion proves nothing');
+  }
+
+  // ── #3640: the documented modes/pdf.md tailoring order is a second accepted
+  //    target, so it stops needing --allow-reorder on every standard render ──
+
+  const titlesToHtml = titles => titles.map(t => `<div class="section-title">${t}</div>`).join('\n');
+
+  // A typical master cv.md: Summary, then Education, then Experience/Projects,
+  // then Skills — the shape the issue's repro used, and a perfectly ordinary
+  // way to write a *master* CV even though it is not how a tailored CV should
+  // read.
+  const typicalCvMd = [
+    '# Candidate', '', '## Summary', 'x', '', '## Education', 'x', '',
+    '## Experience', 'x', '', '## Projects', 'x', '', '## Skills', 'x', '',
+  ].join('\n');
+
+  // FIXTURE renders Summary -> Work Experience -> Projects -> Education ->
+  // Certifications -> Skills: exactly modes/pdf.md's documented "6-second
+  // recruiter scan" order (Education moved after Experience/Projects). Against
+  // typicalCvMd this is the one divergence #3640 exists to stop rejecting.
+  const pdfMdOrderRun = captureWarnings(() => validateCvSectionOrder(FIXTURE, typicalCvMd));
+  if (pdfMdOrderRun.warnings.length === 0) {
+    pass('a CV rendered in the documented modes/pdf.md tailoring order passes with no warning and no --allow-reorder, even though it diverges from a typical cv.md (#3640)');
+  } else {
+    fail(`the canonical modes/pdf.md order should need no warning: ${JSON.stringify(pdfMdOrderRun.warnings)}`);
+  }
+
+  // A genuinely scrambled order — matching neither cv.md's order nor the
+  // canonical modes/pdf.md order — must still be rejected by default. #3640
+  // narrows what the guard accepts; it must not disable the guard (#1646).
+  const trulyScrambled = titlesToHtml(['Skills', 'Professional Summary', 'Projects', 'Education', 'Work Experience']);
+
+  let scrambledThrew = false;
+  try {
+    validateCvSectionOrder(trulyScrambled, typicalCvMd);
+  } catch {
+    scrambledThrew = true;
+  }
+  if (scrambledThrew) {
+    pass('a genuinely scrambled order (matching neither cv.md nor the canonical modes/pdf.md order) still throws by default (#1646 regression check)');
+  } else {
+    fail('a genuinely scrambled order should still be rejected — #3640 must not have disabled the guard entirely');
+  }
+
+  // --allow-reorder remains the escape hatch for exactly this remaining case.
+  const scrambledAllowRun = captureWarnings(() => {
+    try {
+      validateCvSectionOrder(trulyScrambled, typicalCvMd, { allowReorder: true });
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  if (scrambledAllowRun.value === false && scrambledAllowRun.warnings.length > 0) {
+    pass('--allow-reorder still downgrades a genuinely scrambled order from a thrown error to a warning');
+  } else {
+    fail(`--allow-reorder should warn instead of throwing on a genuinely scrambled order: threw=${scrambledAllowRun.value} warnings=${JSON.stringify(scrambledAllowRun.warnings)}`);
+  }
+
+  // ── #3658: Chinese CVs reach the same two mechanisms ──────────────────────
+
+  // SECTION_ALIASES carried English and Polish only, so for the two Chinese
+  // markets this repo ships modes for (modes/zh-TW, modes/zh) every rendered
+  // title fell through sectionKey()'s "return the normalized title" branch.
+  // Nothing then matched a canonical key, so cv.sections resolved fewer than
+  // two blocks and returned the document untouched — a silent no-op, and the
+  // only documented way to correct an order the guard rejects.
+  //
+  // Built the same way as scrambledHtml above (marker comments stay English:
+  // they come from the template, not from the CV's language) and validated
+  // against the same English cvMarkdown, because cv.md is the source of truth
+  // in every mode.
+  const zhSection = (marker, title, body) =>
+    `  <!-- ${marker} -->\n  <div class="section">\n    <div class="section-title">${title}</div>\n    ${body}\n  </div>\n`;
+  const zhDocument = sections => `<!DOCTYPE html>
+<html lang="zh-Hant">
+<head><title>Test</title></head>
+<body>
+<div class="cv">
+  <!-- HEADER -->
+  <div class="header"><h1>Test Candidate</h1></div>
+
+${sections.join('\n')}</div>
+</body>
+</html>
+`;
+
+  // Traditional (modes/zh-TW), scrambled exactly like scrambledHtml: Education
+  // and Certifications hoisted ahead of Experience and Projects.
+  const zhTwScrambled = zhDocument([
+    zhSection('PROFESSIONAL SUMMARY', '專業摘要', '<div class="summary-text">Summary body.</div>'),
+    zhSection('EDUCATION', '學歷', '<div class="edu-item">E</div>'),
+    zhSection('CERTIFICATIONS', '證照', '<div class="cert-table">C</div>'),
+    zhSection('WORK EXPERIENCE', '工作經歷', '<div class="job">J</div>'),
+    zhSection('PROJECTS', '專案', '<div class="project">P</div>'),
+    zhSection('SKILLS', '技能', '<div class="skills-grid">K</div>'),
+  ]);
+  // Simplified (modes/zh), with the vocabulary that market actually uses.
+  const zhCnScrambled = zhDocument([
+    zhSection('PROFESSIONAL SUMMARY', '专业摘要', '<div class="summary-text">Summary body.</div>'),
+    zhSection('EDUCATION', '学历', '<div class="edu-item">E</div>'),
+    zhSection('CERTIFICATIONS', '证书', '<div class="cert-table">C</div>'),
+    zhSection('WORK EXPERIENCE', '工作经历', '<div class="job">J</div>'),
+    zhSection('PROJECTS', '项目', '<div class="project">P</div>'),
+    zhSection('SKILLS', '技能', '<div class="skills-grid">K</div>'),
+  ]);
+
+  const zhOrder = ['experience', 'projects', 'skills', 'education', 'certifications'];
+  const zhCases = [
+    ['Traditional (modes/zh-TW)', zhTwScrambled, ['專業摘要', '工作經歷', '專案', '技能', '學歷', '證照']],
+    ['Simplified (modes/zh)', zhCnScrambled, ['专业摘要', '工作经历', '项目', '技能', '学历', '证书']],
+  ];
+
+  for (const [label, html, expectedTitles] of zhCases) {
+    // The bug, stated as an observable: the document came back byte-identical.
+    const run = captureWarnings(() => reorderCvSections(html, zhOrder));
+    if (run.value === html) {
+      fail(`${label}: cv.sections left the CV byte-identical — the order is still a no-op`);
+      continue;
+    }
+    const got = renderedTitles(run.value);
+    if (JSON.stringify(got) !== JSON.stringify(expectedTitles)) {
+      fail(`${label}: reordered => ${JSON.stringify(got)}, expected ${JSON.stringify(expectedTitles)}`);
+      continue;
+    }
+    // Every body survives exactly once — the permutation must not lose or
+    // duplicate content just because the titles are non-Latin.
+    const zhIntact = ['Summary body.', 'class="edu-item">E', 'class="cert-table">C', 'class="job">J', 'class="project">P', 'class="skills-grid">K']
+      .every(b => run.value.split(b).length === 2);
+    if (!zhIntact) {
+      fail(`${label}: reordering lost or duplicated a section body`);
+      continue;
+    }
+    // "matched no section" is precisely the warning #3658 quoted as the symptom.
+    if (run.warnings.some(w => w.includes('matched no section'))) {
+      fail(`${label}: still reported names that matched no section: ${JSON.stringify(run.warnings)}`);
+      continue;
+    }
+    // And the reason the feature matters here: the guard rejects the scrambled
+    // CV and accepts it once cv.sections declares cv.md's own order. Chinese
+    // reaches the guard already (it compares titles), so before this change the
+    // render was blocked with no working way to fix it.
+    let zhThrewBefore = false;
+    try {
+      validateCvSectionOrder(html, cvMarkdown);
+    } catch {
+      zhThrewBefore = true;
+    }
+    if (!zhThrewBefore) {
+      fail(`${label}: the scrambled CV was not rejected — the end-to-end assertion proves nothing`);
+      continue;
+    }
+    try {
+      validateCvSectionOrder(run.value, cvMarkdown);
+    } catch (e) {
+      fail(`${label}: the guard still rejected the reordered CV: ${e.message}`);
+      continue;
+    }
+    pass(`${label}: cv.sections reorders a Chinese CV and the section-order guard then accepts it (#3658)`);
+  }
+
+  // Spellings that do not appear in the fixtures above still have to resolve:
+  // both scripts, and the synonyms each market writes in practice.
+  const zhKeyCases = [
+    ['個人簡介', 'summary'], ['个人简介', 'summary'],
+    ['核心競爭力', 'competencies'], ['核心竞争力', 'competencies'],
+    ['工作經驗', 'experience'], ['工作经验', 'experience'],
+    ['專案經驗', 'projects'], ['项目经验', 'projects'],
+    ['教育背景', 'education'], ['教育经历', 'education'],
+    ['專業證照', 'certifications'], ['资格认证', 'certifications'],
+    ['獲獎', 'awards'], ['荣誉', 'awards'],
+    ['技術能力', 'skills'], ['专长', 'skills'],
+    ['興趣', 'interests'], ['兴趣', 'interests'],
+    // The lookup folds diacritics through NFD before matching. Han characters
+    // have no combining marks to strip, so a Chinese title must survive that
+    // pass unchanged — asserted here rather than assumed.
+    ['專業摘要', 'summary'],
+  ];
+  // The repo's own Chinese vocabulary, not an invented one: this is the
+  // `sections` override rendered by tests/zh-minimal-template.test.mjs through
+  // templates/cv-template.zh-minimal.html. Every title a shipped fixture
+  // renders must be nameable, or cv.sections is still a no-op for it.
+  const ZH_MINIMAL_FIXTURE_TITLES = [
+    ['个人简介', 'summary'], ['核心能力', 'competencies'], ['工作经历', 'experience'],
+    ['精选项目', 'projects'], ['教育经历', 'education'], ['认证', 'certifications'],
+    ['技术栈', 'skills'],
+  ];
+  zhKeyCases.push(...ZH_MINIMAL_FIXTURE_TITLES);
+
+  const zhKeyFailures = zhKeyCases.filter(([title, expected]) => sectionKey(title) !== expected);
+  if (zhKeyFailures.length === 0) {
+    pass(`sectionKey resolves all ${zhKeyCases.length} Traditional/Simplified heading spellings`);
+  } else {
+    fail(`sectionKey missed: ${zhKeyFailures.map(([t, e]) => `"${t}" => "${sectionKey(t)}" (expected "${e}")`).join(', ')}`);
   }
 } catch (e) {
   fail(`cv-section-order tests crashed: ${e.message}`);
@@ -733,7 +991,10 @@ try {
 {
   const outputRoot = join(ROOT, 'output');
   mkdirSync(outputRoot, { recursive: true });
-  const sandbox = mkdtempSync(join(outputRoot, 'section-order-batch-'));
+  // realpathSync: see tests/generate-pdf-page-budget.test.mjs -- argv[1] keeps the
+  // caller's spelling while import.meta.url is realpathed, so a symlinked
+  // output/ makes generate-pdf.mjs's isMain guard false and the spawn a no-op (#3165).
+  const sandbox = realpathSync(mkdtempSync(join(outputRoot, 'section-order-batch-')));
   try {
     const script = join(sandbox, 'generate-pdf.mjs');
     for (const f of [
@@ -742,6 +1003,20 @@ try {
     ]) {
       copyFileSync(join(ROOT, f), join(sandbox, f));
     }
+    // generate-pdf.mjs resolves user-layer paths via path-resolver.mjs
+    // (CAREER_OPS_ROOT), so the fixture carries that too.
+    copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs'));
+    // generate-pdf.mjs's main-guard now lives in lib/is-main-module.mjs (#3170),
+    // so the copy needs it beside itself or it dies with ERR_MODULE_NOT_FOUND
+    // before parsing an argument.
+    mkdirSync(join(sandbox, 'lib'), { recursive: true });
+    copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
+
+    // theme-style.mjs and tracker-utils.mjs both `import * as yaml from
+    // 'js-yaml'`, resolved by walking up into the repo's node_modules -- from
+    // the sandbox's REALPATH, so a checkout with a symlinked output/ never
+    // reaches it and the spawned generate-pdf dies before parsing argv (#3165).
+    linkRepoPackage(sandbox, 'js-yaml');
     mkdirSync(join(sandbox, 'data'), { recursive: true });
     writeFileSync(join(sandbox, 'data', 'pdf-index.tsv'), '', 'utf-8');
 
@@ -853,7 +1128,10 @@ export const chromium = {
 {
   const outputRoot = join(ROOT, 'output');
   mkdirSync(outputRoot, { recursive: true });
-  const sandbox = mkdtempSync(join(outputRoot, 'section-order-anchor-'));
+  // realpathSync: see tests/generate-pdf-page-budget.test.mjs -- argv[1] keeps the
+  // caller's spelling while import.meta.url is realpathed, so a symlinked
+  // output/ makes generate-pdf.mjs's isMain guard false and the spawn a no-op (#3165).
+  const sandbox = realpathSync(mkdtempSync(join(outputRoot, 'section-order-anchor-')));
   try {
     const script = join(sandbox, 'generate-pdf.mjs');
     for (const f of [
@@ -862,6 +1140,20 @@ export const chromium = {
     ]) {
       copyFileSync(join(ROOT, f), join(sandbox, f));
     }
+    // generate-pdf.mjs resolves user-layer paths via path-resolver.mjs
+    // (CAREER_OPS_ROOT), so the fixture carries that too.
+    copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs'));
+    // generate-pdf.mjs's main-guard now lives in lib/is-main-module.mjs (#3170),
+    // so the copy needs it beside itself or it dies with ERR_MODULE_NOT_FOUND
+    // before parsing an argument.
+    mkdirSync(join(sandbox, 'lib'), { recursive: true });
+    copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
+
+    // theme-style.mjs and tracker-utils.mjs both `import * as yaml from
+    // 'js-yaml'`, resolved by walking up into the repo's node_modules -- from
+    // the sandbox's REALPATH, so a checkout with a symlinked output/ never
+    // reaches it and the spawned generate-pdf dies before parsing argv (#3165).
+    linkRepoPackage(sandbox, 'js-yaml');
 
     // The external workspace: tracker, profile, CV and documents all live here,
     // and NOT beside the script. This is the shape CAREER_OPS_TRACKER creates.

@@ -2,19 +2,51 @@
 // Files prefixed with _ are never loaded as providers by scan.mjs.
 
 import './_dns-cache.mjs'; // memoize dns.lookup process-wide (see that file)
-import { DEFAULT_USER_AGENT, BROWSER_LIKE_USER_AGENT } from '../user-agent.mjs';
+import {
+  DEFAULT_USER_AGENT,
+  BROWSER_LIKE_USER_AGENT,
+  MACOS_BROWSER_LIKE_USER_AGENT,
+} from '../user-agent.mjs';
+import { providerFetchContext } from './_ip-guard.mjs';
 
-export { BROWSER_LIKE_USER_AGENT };
+export { BROWSER_LIKE_USER_AGENT, MACOS_BROWSER_LIKE_USER_AGENT };
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
-async function fetchWithTimeout(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow' } = {}, consume) {
+async function fetchWithTimeout(url, opts = {}, consume) {
+  // Mark this request as provider traffic for the whole of its async life, so
+  // the patched dns.lookup validates the addresses it resolves (#3096). The
+  // guard is scoped rather than global because _dns-cache.mjs patches
+  // node:dns process-wide, and loopback has to keep working for everything
+  // that is not a provider fetch — see providers/_ip-guard.mjs.
+  //
+  // AsyncLocalStorage.run wraps the ENTIRE fetch, not just the call that
+  // starts it: the DNS lookup happens inside connect, well after the
+  // synchronous part of fetch() has returned, and the context has to still be
+  // entered when it does.
+  return providerFetchContext.run({ url: String(url) }, () => fetchInContext(url, opts, consume));
+}
+
+async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow' } = {}, consume) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    // Defaults go through Headers so a caller's override wins whatever its
+    // capitalization. An object spread only replaces an identical key: a caller's
+    // 'User-Agent' sat beside the default 'user-agent', and fetch JOINED the two
+    // into one comma-separated value instead of replacing it.
+    const requestHeaders = new Headers(headers);
+    if (!requestHeaders.has('user-agent')) requestHeaders.set('user-agent', DEFAULT_USER_AGENT);
+    // accept-encoding is pinned to the codecs undici decodes correctly.
+    // Left unset, Node negotiates zstd, and amazon.jobs' zstd response comes
+    // back TRUNCATED AT 1024 BYTES with a 200 status — so the failure surfaces
+    // as an unrelated-looking "Unterminated string in JSON at position 1024"
+    // rather than a transport error. curl on the same URL returns the full
+    // ~900KB. Callers can still override via `headers`.
+    if (!requestHeaders.has('accept-encoding')) requestHeaders.set('accept-encoding', 'gzip, deflate, br');
     const res = await fetch(url, {
       method,
-      headers: { 'user-agent': DEFAULT_USER_AGENT, ...headers },
+      headers: requestHeaders,
       body,
       redirect,
       signal: controller.signal,
@@ -52,6 +84,44 @@ async function fetchWithTimeout(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers =
 
 export async function fetchJson(url, opts = {}) {
   return fetchWithTimeout(url, opts, (res) => res.json());
+}
+
+/**
+ * Fetch only the head of a text response.
+ *
+ * Board landing pages carry the owner's name in <title>, but the page itself can
+ * be a megabyte of embedded job JSON (jobs.lever.co ships ~950KB and ignores a
+ * Range request). Reading the whole thing to learn one string would be exactly the
+ * "slow and rude to the careers site" behavior the probe path avoids elsewhere, so
+ * this stops at maxBytes and cancels the body.
+ *
+ * @param {string} url
+ * @param {{maxBytes?: number}} [opts]
+ * @returns {Promise<string>} The first maxBytes of the body, decoded as UTF-8.
+ */
+export async function fetchTextHead(url, opts = {}) {
+  const maxBytes = opts.maxBytes ?? 8192;
+  return fetchWithTimeout(url, opts, async (res) => {
+    const reader = res.body?.getReader?.();
+    if (!reader) return String(await res.text()).slice(0, maxBytes);
+    const chunks = [];
+    let total = 0;
+    try {
+      while (total < maxBytes) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(Buffer.from(value));
+        total += value.length;
+      }
+    } finally {
+      try {
+        await reader.cancel();
+      } catch {
+        /* body already closed */
+      }
+    }
+    return Buffer.concat(chunks).toString('utf8');
+  });
 }
 
 export async function fetchText(url, opts = {}) {
@@ -124,6 +194,28 @@ export function parseRetryAfterMs(value) {
 }
 
 /**
+ * Whether a failure is a redirect refused by the mandatory SSRF guard —
+ * `redirect:'error'` meeting a 3xx (#1440). It arrives as a bare TypeError
+ * with no `.status`, indistinguishable by shape from a timeout or a DNS
+ * failure, and only `err.cause.message` tells them apart.
+ *
+ * Exported because the verdict has two consumers, not one. isRetryableError()
+ * below needs it to stop retrying; discover-ats.mjs needs it to stop telling a
+ * human to re-run. Before it was shared, those two disagreed about the same
+ * error object: the retry layer called it deterministic while the CLI reported
+ * "board status unknown — re-run", and 48 of one user's 62 companies were
+ * BambooHR answering "no such tenant" with a 302 (#3788).
+ *
+ * @param {any} err
+ * @returns {boolean}
+ */
+export function isRefusedRedirectError(err) {
+  return err?.status === undefined
+    && err instanceof TypeError
+    && err?.cause?.message === REDIRECT_REFUSAL_CAUSE_MESSAGE;
+}
+
+/**
  * Whether a failed request is worth retrying: 429, any 5xx, or a transport
  * error (no status — timeout/abort/DNS). A 4xx other than 429 is the server
  * telling us the request itself is wrong, and retrying it just burns time.
@@ -131,13 +223,13 @@ export function parseRetryAfterMs(value) {
  * A refused redirect (redirect:'error' meeting a 3xx) surfaces as a bare
  * TypeError with no .status — the same shape as a transient network error —
  * but it's deterministic and will never succeed on retry. See
- * REDIRECT_REFUSAL_CAUSE_MESSAGE above for how it's distinguished.
+ * isRefusedRedirectError() above for how it's distinguished.
  */
 export function isRetryableError(err) {
   const status = err?.status;
   if (status === 429) return true;
   if (typeof status === 'number' && status >= 500) return true;
-  if (status === undefined && err instanceof TypeError && err?.cause?.message === REDIRECT_REFUSAL_CAUSE_MESSAGE) return false;
+  if (isRefusedRedirectError(err)) return false;
   return status === undefined; // network error / timeout / abort — no status set
 }
 

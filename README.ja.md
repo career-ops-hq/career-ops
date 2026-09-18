@@ -17,6 +17,18 @@
 </p>
 
 <p align="center">
+  <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20CAREER-OPS%20%E3%81%A7%E5%86%85%E5%AE%9A&suffix=%20%E6%A4%9C%E8%A8%BC%E6%B8%88%E3%81%BF&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="career-ops で内定：検証済み件数"></a>
+</p>
+
+<p align="center"><sub>内定を勝ち取りましたか？<a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">ストーリーを共有 →</a> · あなたのカードが、検索中の誰かに「出口はある」と伝えます。</sub></p>
+
+<p align="center">
+  <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="最新の内定ストーリー 3 件" width="800"></a>
+</p>
+
+<p align="center"><sub>すべての数字は<a href="HIRED.md">監査可能な公開ストーリー →</a> · どの人も、いまのあなたの場所から始めました。</sub></p>
+
+<p align="center">
   <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
   &nbsp;&nbsp;
   <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
@@ -37,6 +49,8 @@
 </p>
 
 <p align="center"><strong>740件以上の求人を評価 · 100件以上のパーソナライズCVを生成 · 理想のポジションを獲得</strong></p>
+
+<p align="center"><sub>作成・メンテナンス：<a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a>（<a href="https://github.com/santifer">@santifer</a>）</sub></p>
 
 <p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/コミュニティに参加-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
   &nbsp;
@@ -67,7 +81,7 @@
 
 career-opsは、あらゆるAIコーディングCLIを本格的な求職コマンドセンターに変えます。スプレッドシートで応募を手動管理する代わりに、AIによる以下のパイプラインが手に入ります:
 
-- **オファーを評価** -- 構造化されたA-F評価（5つの項目が1.0〜5.0のスコアに反映される）
+- **オファーを評価** -- 構造化されたA-H評価（5つの項目が1〜5のスコアに反映される）
 - **テーラーメイドPDFを生成** -- 各求人票に合わせてATS最適化されたCV
 - **求人ポータルを自動スキャン** （Greenhouse、Ashby、Lever、企業ページ）
 - **バッチ処理** -- サブエージェントで10件以上のオファーを並列評価
@@ -93,7 +107,7 @@ career-opsはエージェンティックです: Claude CodeがPlaywrightで求�
 | **ポータルスキャナー**   | 45社以上事前設定済み（Anthropic、OpenAI、ElevenLabs、Retool、n8n...) + Ashby、Greenhouse、Lever、Wellfound横断のカスタムクエリ   |
 | **バッチ処理**           | `claude -p`ワーカーによる並列評価                                                                                                |
 | **ダッシュボードTUI**    | パイプラインを閲覧・フィルター・ソートするターミナルUI                                                                           |
-| **Human-in-the-Loop**    | AIは評価と推奨を行い、決定と実行はあなたが行います。システムが応募を自動送信することは絶対になく、最終判断は常にあなたが下します |
+| **Human-in-the-Loop**    | AIは評価と推奨を行い、決定と実行はあなたが行います。システムが応募を送信することは絶対になく、最終判断は常にあなたが下します <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. --> |
 | **パイプラインの整合性** | 自動マージ、重複排除、ステータス正規化、ヘルスチェック                                                                           |
 
 ## クイックスタート
@@ -121,7 +135,7 @@ claude   # or gemini / codex / qwen / opencode — ここでAI CLIを起動
 <summary><b>手動でセットアップしたいですか？（git clone）</b></summary>
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # PDF生成にのみ必要
 claude   # AI CLIを起動 — 初回起動時にオンボーディングします
@@ -166,7 +180,7 @@ career-opsは複数のモードを持つ単一のスラッシュコマンドで�
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  A-F 評価        │  マッチ度、ギャップ、報酬調査、STARストーリー
+│  A-H 評価        │  マッチ度、ギャップ、報酬調査、STARストーリー
 │  (cv.mdを読む)   │
 └────────┬─────────┘
          │
@@ -262,9 +276,9 @@ Santiagoです -- Head of Applied AI、元創業者（自分の名前を冠し�
 
 <a href="https://www.star-history.com/?repos=santifer%2Fcareer-ops&type=timeline&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
  </picture>
 </a>
 

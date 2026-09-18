@@ -243,6 +243,8 @@ version: 1.0.0
 
   .edu-year { font-size: 8.5px; color: #626b78; white-space: nowrap; }
 
+  .edu-location { font-size: 8.5px; color: #6b7480; }
+
   .edu-desc { text-align: justify; }
 
   /* === CERTIFICATIONS === */
@@ -282,9 +284,17 @@ version: 1.0.0
   .job-company,
   .job-role,
   .job-location,
+  .edu-location,
   .project-title {
     break-after: avoid;
     page-break-after: avoid;
+  }
+
+  /* Keep a project's tech line attached to the description above it, so a bare
+     "Python | github.com/..." line is never stranded atop the next page. */
+  .project-tech {
+    break-before: avoid;
+    page-break-before: avoid;
   }
 
   /* === RTL (Arabic) support === */

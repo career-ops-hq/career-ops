@@ -142,4 +142,13 @@ async function run() {
   }
 }
 
-run();
+// Top-level await, not a floating `run()`: this suite is imported in-process by
+// test-all.mjs, and it sets CAREER_OPS_TRACKER for its own fixture. Without the
+// await the import resolves immediately, the async work keeps running alongside
+// later sections, and that variable stays pointed at this temp directory for a
+// window whose length depends on how fast the fixture runs — which is exactly
+// how the intermittent macOS-only page-budget failure in #3162 happened: a
+// valid repo path got compared against this fixture's root. The finally below
+// does restore it, but only once the work finishes. Awaiting here means the
+// import does not resolve until the environment is clean again.
+await run();

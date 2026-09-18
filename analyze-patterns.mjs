@@ -16,10 +16,13 @@
 import { readFileSync, existsSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
 import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
+import { isMainModule } from './lib/is-main-module.mjs';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
   ? join(CAREER_OPS, 'data/applications.md')
   : join(CAREER_OPS, 'applications.md');
@@ -55,25 +58,41 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   // Reporting line stated by the JD, verbatim (report + Machine Summary only).
   // Allowlisted so it round-trips; no consumer logic yet.
   'reports_to',
+  // Block B's requirement -> importance table, mirrored row by row (evidence
+  // tier, importance band, match). Allowlisted so it round-trips; no consumer
+  // logic yet, deliberately: importance is score-neutral, so nothing that folds
+  // historical scores may start reading it without its own design pass.
+  'requirement_importance',
 ]);
 
-// --- CLI args ---
 const args = process.argv.slice(2);
-const summaryMode = args.includes('--summary');
-const minThresholdIdx = args.indexOf('--min-threshold');
-const MIN_THRESHOLD = minThresholdIdx !== -1 && args[minThresholdIdx + 1] !== undefined
-  ? (Number.isNaN(parseInt(args[minThresholdIdx + 1])) ? 5 : parseInt(args[minThresholdIdx + 1]))
-  : 5;
 
-// Minimum per-vendor sample before a channel-yield recommendation fires. Kept
-// modest (small trackers) but high enough that one unlucky bucket isn't a claim.
-const minVendorNIdx = args.indexOf('--min-vendor-n');
+const KNOWN_FLAGS = ['--min-threshold', '--min-vendor-n', '--self-test', '--summary', '--help', '-h'];
+const VALUE_FLAGS = ['--min-threshold', '--min-vendor-n'];
+const USAGE = `Usage:
+  node analyze-patterns.mjs                       # analyze application patterns as JSON
+  node analyze-patterns.mjs --summary             # print a human-readable summary
+  node analyze-patterns.mjs --min-threshold <n>   # minimum submitted applications required (default: 5)
+  node analyze-patterns.mjs --min-vendor-n <n>    # minimum sample per vendor/channel (default: 8)
+  node analyze-patterns.mjs --self-test           # run the built-in consistency checks
+  node analyze-patterns.mjs --help                # show this message`;
+
+// --- CLI args ---
+const summaryMode = args.includes('--summary');
+const MIN_THRESHOLD = (() => {
+  const raw = flagValue(args, '--min-threshold');
+  if (raw === undefined) return 5;
+
+  const value = parseInt(raw, 10);
+  return Number.isNaN(value) ? 5 : value;
+})();
+
 const MIN_VENDOR_N = (() => {
-  if (minVendorNIdx === -1 || args[minVendorNIdx + 1] === undefined) return 8;
-  const n = parseInt(args[minVendorNIdx + 1], 10);
-  // Reject 0/negative: a floor of 0 makes sufficientSample always true and
-  // silently defeats the "don't claim on noise" guard the whole feature rests on.
-  return Number.isNaN(n) || n < 1 ? 8 : n;
+  const raw = flagValue(args, '--min-vendor-n');
+  if (raw === undefined) return 8;
+
+  const value = parseInt(raw, 10);
+  return Number.isNaN(value) || value < 1 ? 8 : value;
 })();
 
 // --- Status normalization (mirrors verify-pipeline.mjs) ---
@@ -98,13 +117,19 @@ function normalizeStatus(raw) {
   return ALIASES[clean] || clean;
 }
 
-function classifyOutcome(status) {
+export function classifyOutcome(status) {
   const s = normalizeStatus(status);
   // 'hired' is the strongest positive outcome — a landed job. It must not fall
   // through to the 'pending' default, which would drag conversion rates down.
-  if (['hired', 'interview', 'offer', 'responded', 'applied'].includes(s)) return 'positive';
-  if (['rejected', 'discarded'].includes(s)) return 'negative';
-  if (['skip'].includes(s)) return 'self_filtered';
+  if (['hired', 'interview', 'offer', 'responded'].includes(s)) return 'positive';
+  // 'applied' is SENT, not answered: denominator only, never the numerator.
+  // Mirrors ADVANCED_STATUSES, which already excludes it.
+  if (s === 'applied') return 'awaiting';
+  if (s === 'rejected') return 'negative';
+  // Withdrawn by the candidate or the posting died: neither a submission the
+  // canonical funnel counts (stats.mjs) nor an employer decision.
+  if (s === 'discarded') return 'discarded';
+  if (s === 'skip') return 'self_filtered';
   return 'pending'; // evaluated
 }
 
@@ -120,7 +145,7 @@ function classifyOutcome(status) {
 // the base only dilutes the share. Must stay in lockstep with the filter that
 // guards the discard-reason harvest loop.
 function discardableBase(enriched) {
-  return enriched.filter(e => e.outcome === 'self_filtered' || e.outcome === 'negative').length;
+  return enriched.filter(e => REASON_BEARING.has(e.outcome)).length;
 }
 
 // Entries that actually carry gaps, i.e. the ones a blocker can be extracted
@@ -130,11 +155,123 @@ function gapBearingBase(enriched) {
   return enriched.filter(e => e.report?.gaps?.length > 0).length;
 }
 
-// Statuses that count as a submitted application for channel-yield analysis
-// (drop 'evaluated' = never applied, 'skip' = self-filtered). 'hired' counts —
-// a landed job was, by definition, submitted. Module-scoped so the self-test
+// Outcome buckets a breakdown row carries. Kept in one place so a new bucket
+// cannot be added to classifyOutcome without every counter learning about it —
+// `entry[outcome]++` on a missing key silently writes NaN.
+export const OUTCOME_BUCKETS = ['positive', 'awaiting', 'negative', 'discarded', 'self_filtered', 'pending'];
+// Buckets whose rows can carry a skip/discard reason or a blocker: the base for
+// discard-reason shares and the source of blocker / tech-gap harvesting.
+const REASON_BEARING = new Set(['negative', 'discarded', 'self_filtered']);
+
+// Sample floors for the prescriptive recommendations. Small on purpose: they
+// do not claim statistical confidence, they stop a single row from becoming
+// an instruction ("avoid X", "set the threshold at Y").
+// A prescription ("double down", "avoid") needs at least this many DECIDED
+// outcomes — employer silence is not evidence in either direction.
+const MIN_DECIDED_FOR_RECOMMENDATION = 2;
+const MIN_POSITIVE_SCORES_FOR_THRESHOLD = 3;
+
+/** A zeroed counter row for the per-segment breakdowns. */
+export function newOutcomeCounts() {
+  const row = { total: 0 };
+  for (const bucket of OUTCOME_BUCKETS) row[bucket] = 0;
+  return row;
+}
+
+/**
+ * Rates for one breakdown row. `conversionRate` divides by SUBMITTED, never by
+ * `total` (which also counts Evaluated rows never sent). `decidedRate` divides
+ * by the rows with a recorded outcome and is `null`, not 0, while nothing is
+ * decided. `decided` ships as a count so callers gate on facts, not on a
+ * rounded percentage.
+ */
+export function withOutcomeRates(data) {
+  const submitted = data.positive + data.negative + data.awaiting;
+  const decided = data.positive + data.negative;
+  return {
+    ...data,
+    submitted,
+    decided,
+    conversionRate: submitted > 0 ? Math.round((data.positive / submitted) * 100) : 0,
+    decidedRate: decided > 0 ? Math.round((data.positive / decided) * 100) : null,
+  };
+}
+
+/** Group entries by a key, count outcomes, attach rates. Largest bucket first. */
+function breakdownBy(enriched, labelKey, keyOf) {
+  const map = new Map();
+  for (const e of enriched) {
+    const k = keyOf(e);
+    if (!map.has(k)) map.set(k, newOutcomeCounts());
+    const row = map.get(k);
+    row.total++;
+    row[e.outcome]++;
+  }
+  return [...map.entries()]
+    .map(([label, data]) => ({ [labelKey]: label, ...withOutcomeRates(data) }))
+    .sort((a, b) => b.total - a.total);
+}
+
+/**
+ * The segment worth doubling down on: highest decidedRate among rows with
+ * enough DECIDED outcomes. Ranking by conversionRate would let "1 positive +
+ * 1 awaiting" (50%) outrank "5 positive + 15 awaiting" (25%). A rate that
+ * rounds to 0% (1 of 201) is not a lane to double down on.
+ */
+export function bestDecidedSegment(rows) {
+  return rows
+    .filter(r => r.decided >= MIN_DECIDED_FOR_RECOMMENDATION && r.decidedRate > 0)
+    .sort((a, b) => b.decidedRate - a.decidedRate || b.decided - a.decided)[0] || null;
+}
+
+/**
+ * The segment to avoid: nothing advanced across enough DECIDED outcomes, the
+ * most evidence first. Gate on counts, not the rounded rate: 1 positive of 201
+ * decided rounds to 0% and is not "none advanced"; 1 negative + 1 awaiting is
+ * a data point, not a pattern.
+ */
+export function worstDecidedSegment(rows) {
+  return rows
+    .filter(r => r.positive === 0 && r.decided >= MIN_DECIDED_FOR_RECOMMENDATION)
+    .sort((a, b) => b.decided - a.decided)[0] || null;
+}
+
+/**
+ * Score floor from decided outcomes. The lowest positive score is always
+ * reported as an observation; it becomes a recommended threshold only when
+ * enough positives carry a score AND at least one rejected application scored
+ * below it — "nothing below X advanced" is vacuous when nothing below X was
+ * ever decided.
+ */
+export function scoreThresholdFrom(positiveScoresRaw, negativeScoresRaw) {
+  const positive = positiveScoresRaw.filter(s => s > 0);
+  const negative = negativeScoresRaw.filter(s => s > 0);
+  const min = positive.length > 0 ? Math.min(...positive) : 0;
+  const rejectedBelow = negative.filter(s => s < min).length;
+  const sufficient = positive.length >= MIN_POSITIVE_SCORES_FOR_THRESHOLD;
+  const prescribe = sufficient && rejectedBelow > 0;
+  let reasoning;
+  if (positive.length === 0) reasoning = 'No positive outcome carries a score yet.';
+  else if (!sufficient) reasoning = `Lowest score among positive outcomes so far is ${min}, but only ${positive.length} positive outcome(s) carry a score (${MIN_POSITIVE_SCORES_FOR_THRESHOLD} needed before this is a threshold).`;
+  else if (!prescribe) reasoning = `Lowest score among ${positive.length} positive outcomes is ${min}, but no rejected application scored below it — nothing shows that lower scores fail.`;
+  else reasoning = `None of the ${positive.length} positive outcomes scored below ${min}, and ${rejectedBelow} rejected application(s) did.`;
+  return {
+    recommended: prescribe ? Math.floor(min * 10) / 10 : null,
+    observedMinimum: min > 0 ? min : null,
+    sampleSize: positive.length,
+    sufficientSample: sufficient,
+    rejectedBelow,
+    reasoning,
+    positiveRange: positive.length > 0 ? `${min} - ${Math.max(...positive)}` : 'N/A',
+  };
+}
+
+// Statuses that count as a submitted application for channel-yield analysis.
+// 'evaluated' was never sent, 'skip' is self-filtered, and 'discarded' (withdrawn
+// or the posting closed) proves neither a submission nor an answer — the same
+// set stats.mjs uses for its canonical funnel. Module-scoped so the self-test
 // can assert membership and the channel-yield pass and self-test share one set.
-const SUBMITTED_STATUSES = new Set(['applied', 'responded', 'interview', 'offer', 'hired', 'rejected', 'discarded']);
+const SUBMITTED_STATUSES = new Set(['applied', 'responded', 'interview', 'offer', 'hired', 'rejected']);
 
 // Statuses that count as "advanced past screening" — STRICTER than
 // outcome=='positive': a bare 'applied' (submitted, no reply yet) does NOT
@@ -263,6 +400,16 @@ function extractTechMentions(description) {
   return matches.map(m => TECH_CANONICAL.get(m.toLowerCase()) || m);
 }
 
+/**
+ * Run the in-process self-test for this script's pure helpers.
+ *
+ * Covers the Machine Summary parser (including the MACHINE_SUMMARY_FIELDS
+ * allowlist and the nested `risk_summary` / `requirement_importance` shapes),
+ * ATS vendor detection, and the Via channel analysis. Exits non-zero on the
+ * first batch of failures so CI and `--self-test` fail loudly.
+ *
+ * @returns {void}
+ */
 function runSelfTest() {
   const summary = parseMachineSummary(`
 ## Machine Summary
@@ -330,6 +477,54 @@ risk_summary:
     if (riskSummary.ai_infra !== 'not_evaluated') failures.push('risk_summary.ai_infra was not preserved');
   }
 
+  // requirement_importance preservation: Block B's table is a LIST OF MAPS,
+  // a shape no allowlisted key had before it. The allowlist filters top-level
+  // keys only, so the list must survive with every row's nested fields intact
+  // — including jd_signal: null, which is legal for the structural/inferred
+  // evidence tiers and must not be dropped or coerced.
+  const reqImportance = parseMachineSummary(`
+## Machine Summary
+
+\`\`\`yaml
+company: "Acme"
+role: "Staff AI Engineer"
+score: 4.4
+requirement_importance:
+  - requirement: "Fluent German (C1)"
+    jd_signal: "Verhandlungssicheres Deutsch ist Voraussetzung"
+    evidence: "stated"
+    importance: "critical"
+    match: "missing"
+  - requirement: "Kubernetes in production"
+    jd_signal: null
+    evidence: "inferred"
+    importance: "meaningful"
+    match: "partial"
+\`\`\`
+`)?.requirement_importance;
+  if (!Array.isArray(reqImportance) || reqImportance.length !== 2) {
+    failures.push('requirement_importance list was dropped or not parsed as a list');
+  } else {
+    const [stated, inferred] = reqImportance;
+    if (stated.requirement !== 'Fluent German (C1)') failures.push('requirement_importance[0].requirement was not preserved');
+    if (stated.jd_signal !== 'Verhandlungssicheres Deutsch ist Voraussetzung') failures.push('requirement_importance[0].jd_signal verbatim quote was not preserved');
+    if (stated.evidence !== 'stated') failures.push('requirement_importance[0].evidence was not preserved');
+    if (stated.importance !== 'critical') failures.push('requirement_importance[0].importance was not preserved');
+    if (stated.match !== 'missing') failures.push('requirement_importance[0].match was not preserved');
+    if (inferred.jd_signal !== null) failures.push('requirement_importance[1].jd_signal null was not preserved');
+    if (inferred.evidence !== 'inferred') failures.push('requirement_importance[1].evidence was not preserved');
+    // The Block B gate, asserted on parsed data: an inferred row may never
+    // reach the two bands that create the interview-risk + mitigation
+    // obligation. Enforced in the modes; checked here so a fixture that
+    // violates it can never be introduced as "expected" output.
+    if (inferred.importance === 'critical' || inferred.importance === 'high') {
+      failures.push('requirement_importance fixture violates the inferred cap (evidence: inferred must never be critical/high)');
+    }
+  }
+
+  // Backward compat: summaries without requirement_importance parse as before.
+  if ('requirement_importance' in (summary ?? {})) failures.push('summary without requirement_importance must not gain the key');
+
   // Vendor detection (community ATS only; white-labeled → null)
   const vendorCases = [
     ['https://boards.greenhouse.io/acme/jobs/12345', 'greenhouse'],
@@ -347,6 +542,70 @@ risk_summary:
     const got = detectVendor(url);
     if (got !== expected) failures.push(`detectVendor(${JSON.stringify(url)}) → ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
   }
+
+  // Report header fields survive the locale they were written in. French output
+  // puts a space before the colon and accents "Archétype"; both used to make the
+  // field parse as absent, silently. parseReport strips `**` first, so the cases
+  // below are given in that post-strip form. Call the pattern rather than the
+  // string: `subject.match(re)` makes CodeQL read these URL fixtures as patterns
+  // (js/incomplete-hostname-regexp) because of their unescaped host dots.
+  const headerCases = [
+    ['URL: https://job-boards.greenhouse.io/acme/jobs/1', REPORT_URL_RE, 'https://job-boards.greenhouse.io/acme/jobs/1'],
+    ['URL : https://job-boards.greenhouse.io/acme/jobs/1', REPORT_URL_RE, 'https://job-boards.greenhouse.io/acme/jobs/1'],
+    ['URL\u00a0: https://jobs.lever.co/acme/x', REPORT_URL_RE, 'https://jobs.lever.co/acme/x'],
+    ['Archetype: Delivery Manager', REPORT_ARCHETYPE_RE, 'Delivery Manager'],
+    ['Archétype : Delivery Manager', REPORT_ARCHETYPE_RE, 'Delivery Manager'],
+    ['Arquetipo: Delivery Manager', REPORT_ARCHETYPE_RE, 'Delivery Manager'],
+  ];
+  for (const [line, re, expected] of headerCases) {
+    const got = re.exec(line)?.[1] ?? null;
+    if (got !== expected) failures.push(`report header ${JSON.stringify(line)} → ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
+  }
+
+  // A header that is genuinely absent must still yield null, so the fix cannot
+  // turn "no field" into a false positive.
+  if (REPORT_URL_RE.test('Score: 4.4/5')) failures.push('REPORT_URL_RE matched a line with no URL field');
+
+  // A header field is single-line. A label split from its colon, or a value pushed to
+  // the next line, must not parse — otherwise the capture picks up whatever URL happens
+  // to follow in the document.
+  const splitHeaderCases = [
+    ['URL\n: https://elsewhere.example.com/x', REPORT_URL_RE],
+    ['URL :\nhttps://elsewhere.example.com/y', REPORT_URL_RE],
+    ['Archétype\n: Delivery Manager', REPORT_ARCHETYPE_RE],
+  ];
+  for (const [text, re] of splitHeaderCases) {
+    if (re.test(text)) failures.push(`split-line header parsed as valid: ${JSON.stringify(text)}`);
+  }
+
+  // One case per localized mode that ships its own archetype label, so a mode
+  // renaming its header breaks a named assertion instead of silently emptying
+  // the archetype breakdown.
+  const localeArchetypeCases = [
+    ['Arquétipo: Delivery Manager', 'pt'],
+    ['Arquetipo: Delivery Manager', 'es'],
+    ['Archétype : Delivery Manager', 'fr (accented)'],
+    ['Archetype : Delivery Manager', 'fr (as the mode writes it)'],
+    ['Archetipo: Delivery Manager', 'it'],
+    ['Archetyp: Delivery Manager', 'de, pl'],
+    ['Arketipe: Delivery Manager', 'id'],
+    ['Arketype: Delivery Manager', 'da'],
+    ['Arketip: Delivery Manager', 'tr'],
+    ['Архетип: Delivery Manager', 'ru, ua'],
+  ];
+  for (const [line, locale] of localeArchetypeCases) {
+    const got = REPORT_ARCHETYPE_RE.exec(line)?.[1] ?? null;
+    if (got !== 'Delivery Manager') failures.push(`archetype label for ${locale} → ${JSON.stringify(got)}`);
+  }
+
+  // Block A stays English-only on purpose, so the header fallback is what serves
+  // localized reports. Loosening the Block A cell pattern to accept a suffixed
+  // qualifier ("Archétype détecté") would also match a scoring row whose first
+  // cell merely starts with the word, and capture its weight as the archetype:
+  //   | **Archétype / séniorité** | 25 % | **2.0** | …
+  // That is the leak #3808 closed, reopened from the table side.
+  const scoringRow = '| Archétype / séniorité | 25 % | 2.0 |';
+  if (REPORT_ARCHETYPE_RE.test(scoringRow)) failures.push('archetype pattern matched a scoring table row');
 
   // Via channel analysis (#1596): agency vs direct yield, normalized buckets.
   const viaRows = [
@@ -389,6 +648,15 @@ risk_summary:
   for (const alias of ['contratado', 'contratada', 'accepted', 'accept']) {
     if (normalizeStatus(alias) !== 'hired') failures.push(`hired: normalizeStatus('${alias}') → ${normalizeStatus(alias)}, expected 'hired'`);
   }
+  // Every submitted status must land in exactly one outcome bucket, and every
+  // bucket must be a declared one — a status added to one list and not the other
+  // would silently vanish from the rates.
+  for (const st of SUBMITTED_STATUSES) {
+    const bucket = classifyOutcome(st);
+    if (!['positive', 'negative', 'awaiting'].includes(bucket)) failures.push(`buckets: '${st}' classifies as '${bucket}', so submitted counts would disagree with the channel-yield pass`);
+  }
+  if (classifyOutcome('Discarded') !== 'discarded' || SUBMITTED_STATUSES.has('discarded')) failures.push('discarded: withdrawn/closed rows must be their own bucket and not count as submitted');
+
   if (!ADVANCED_STATUSES.has('hired')) failures.push('hired: ADVANCED_STATUSES must include hired (a hire advanced past screening)');
   if (!SUBMITTED_STATUSES.has('hired')) failures.push('hired: SUBMITTED_STATUSES must include hired (a hire was submitted)');
   if (!FUNNEL_ORDER.includes('hired')) failures.push('hired: FUNNEL_ORDER must include hired so it prints in the funnel');
@@ -467,14 +735,18 @@ risk_summary:
     failures.push(`geo blocker aggregation returned ${JSON.stringify(geoBlocker)} against base ${blockerSignals.blockerBase}, expected 2/2 (100%)`);
   }
 
-  // Repeated technology mentions across one report count once per entry.
-  const techSignals = buildPatternSignals([{ outcome: 'negative', notes: '', report: { gaps: [
-    { description: 'Java is required', severity: 'hard' },
-    { description: 'Production Java and Go experience', severity: 'hard' },
-  ] } }]);
+  // Repeated technology mentions across one report count once per entry, and a
+  // withdrawn/closed ('discarded') row is harvested like a rejected one.
+  const techSignals = buildPatternSignals([
+    { outcome: 'negative', notes: '', report: { gaps: [
+      { description: 'Java is required', severity: 'hard' },
+      { description: 'Production Java and Go experience', severity: 'hard' },
+    ] } },
+    { outcome: 'discarded', notes: '', report: { gaps: [{ description: 'Java is required', severity: 'hard' }] } },
+  ]);
   const javaGap = techSignals.techStackGaps.find(g => g.skill === 'Java');
-  if (javaGap?.frequency !== 1) {
-    failures.push(`technology deduplication returned ${JSON.stringify(javaGap)}, expected Java frequency 1`);
+  if (javaGap?.frequency !== 2) {
+    failures.push(`technology harvest returned ${JSON.stringify(javaGap)}, expected Java frequency 2 (one negative + one discarded row)`);
   }
 
   // Empty populations must expose zero bases and no NaN-bearing stats.
@@ -623,6 +895,53 @@ function readTextIfExists(path) {
 }
 
 // --- Parse a single report file ---
+// --- Report header field patterns (locale-tolerant) ---
+//
+// A report header is written by the modes in the user's output language, and
+// French typography puts a space before a colon: `**URL :**`, `**Archétype :**`.
+// The original patterns required `URL:` and `Archetype:` with no space and no
+// accent, so every French report parsed as "field absent" — silently, since a
+// missing header field is a legitimate state for older reports and never raises.
+//
+// The failure is invisible and it empties the analysis rather than breaking it:
+// on a 224-report corpus, 128 reports lost their URL (so their ATS vendor fell
+// into the `unknown` bucket, leaving the vendor breakdown to speak for 1 report
+// out of 22 submitted) and 61 lost their archetype. Same shape as #3495.
+//
+// The whitespace class is horizontal-only: space, tab, and U+00A0, the one French
+// editors insert automatically. `\s` would also match a line break, letting a header
+// split across two lines parse as valid and capture a value that belongs to the next
+// line; a header field is single-line by definition, so the class is bounded rather
+// than left permissive. Keep the accent-less spellings: reports written before this
+// fix, and the `Arquetipo` Spanish variant, must keep parsing.
+const REPORT_URL_RE = /^URL[ \t\u00a0]*:[ \t\u00a0]*(https?:\/\/\S+)/im;
+// Every archetype header label shipped by a localized evaluation mode in this
+// repo. Each form is extracted from the mode that writes it, never translated
+// here: an invented spelling adds a key no report ever carries while the real
+// one keeps being dropped. Same sourcing rule #3679 applies on the web side.
+//
+// Longest-first so a shorter form never shadows a longer one that starts with it
+// (Arketip / Arketipe). Backtracking would resolve it either way; the order makes
+// the intent explicit rather than incidental.
+const ARCHETYPE_LABELS = [
+  'Arquétipo',  // pt   — modes/pt/oferta.md
+  'Arquetipo',  // es   — modes/es/oferta.md
+  'Archétype',  // fr   — as generated when the agent writes the accent
+  'Archetype',  // en, nl, zh, zh-TW — and modes/fr/offre.md, which writes it unaccented
+  'Archetipo',  // it   — modes/it/annuncio.md
+  'Archetyp',   // de, pl — modes/de/angebot.md, modes/pl/oferta.md
+  'Arketipe',   // id   — modes/id/lowongan.md
+  'Arketype',   // da   — modes/da/oferta.md
+  'Arketip',    // tr   — modes/tr/is-ilani.md
+  'Архетип',    // ru, ua — modes/ru/oferta.md, modes/ua/oferta.md
+];
+
+const HEADER_HSPACE = '[ \\t\\u00a0]*';
+const REPORT_ARCHETYPE_RE = new RegExp(
+  `^(?:${ARCHETYPE_LABELS.join('|')})${HEADER_HSPACE}:${HEADER_HSPACE}(.+?)$`,
+  'im',
+);
+
 function parseReport(reportPath) {
   const content = readTextIfExists(reportPath);
   if (content === null) return null;
@@ -689,13 +1008,13 @@ function parseReport(reportPath) {
   const compRegex = /\|\s*(?:Comp|Salary|Salario|Listed salary)\s*\|\s*(.*?)\s*\|/i;
   const domainRegex = /\|\s*(?:Domain|Dominio|Industry)\s*\|\s*(.*?)\s*\|/i;
 
-  // Fallback: report header field `Archetype: ...` or `Arquetipo: ...` (newer reports use this).
-  const headerArchRegex = /^(?:Archetype|Arquetipo):\s*(.+?)$/im;
+  // Fallback: report header field `Archetype: ...` (newer reports use this).
+  const headerArchRegex = REPORT_ARCHETYPE_RE;
 
   // Report header carries `**URL:**` between Score and PDF (see CLAUDE.md /
   // Pipeline Integrity). Capture the first http(s) URL on that line for vendor
   // detection; reports predating the field simply leave url null (→ unknown bucket).
-  const urlMatch = plain.match(/^URL:\s*(https?:\/\/\S+)/im);
+  const urlMatch = plain.match(REPORT_URL_RE);
   if (urlMatch && !report.url) report.url = urlMatch[1].trim().replace(/[)>\].,]+$/, '');
 
   const archMatch = plain.match(blockARegex) || plain.match(headerArchRegex);
@@ -868,7 +1187,7 @@ function buildPatternSignals(enriched) {
 
   const discardReasonCounts = new Map();
   for (const e of enriched) {
-    if (e.outcome !== 'self_filtered' && e.outcome !== 'negative') continue;
+    if (!REASON_BEARING.has(e.outcome)) continue;
     const notesMatch = (e.notes || '').match(/(?:DISCARD|SKIP):\s*([^,;\n]+)/gi);
     if (!notesMatch) continue;
     const entryReasons = new Set();
@@ -891,7 +1210,7 @@ function buildPatternSignals(enriched) {
 
   const stackGapCounts = new Map();
   for (const e of enriched) {
-    if (e.outcome !== 'negative' && e.outcome !== 'self_filtered') continue;
+    if (!REASON_BEARING.has(e.outcome)) continue;
     if (!e.report?.gaps) continue;
     const entryTechs = new Set();
     for (const gap of e.report.gaps) {
@@ -976,12 +1295,13 @@ function analyze() {
     };
   });
 
-  // Count entries beyond "Evaluated"
-  const beyondEvaluated = enriched.filter(e => e.normalizedStatus !== 'evaluated');
-  if (beyondEvaluated.length < MIN_THRESHOLD) {
+  // The floor counts applications actually SENT: a tracker of skipped and
+  // withdrawn rows has no outcomes to learn from.
+  const sent = enriched.filter(e => SUBMITTED_STATUSES.has(e.normalizedStatus));
+  if (sent.length < MIN_THRESHOLD) {
     return {
-      error: `Not enough data: ${beyondEvaluated.length}/${MIN_THRESHOLD} applications beyond "Evaluated". Keep applying and come back later.`,
-      current: beyondEvaluated.length,
+      error: `Not enough data: ${sent.length}/${MIN_THRESHOLD} applications sent. Keep applying and come back later.`,
+      current: sent.length,
       threshold: MIN_THRESHOLD,
     };
   }
@@ -994,7 +1314,7 @@ function analyze() {
   }
 
   // --- Score comparison by outcome ---
-  const scoresByOutcome = { positive: [], negative: [], self_filtered: [], pending: [] };
+  const scoresByOutcome = Object.fromEntries(OUTCOME_BUCKETS.map((b) => [b, []]));
   for (const e of enriched) {
     if (e.score > 0) scoresByOutcome[e.outcome].push(e.score);
   }
@@ -1010,27 +1330,11 @@ function analyze() {
     };
   };
 
-  const scoreComparison = {
-    positive: scoreStats(scoresByOutcome.positive),
-    negative: scoreStats(scoresByOutcome.negative),
-    self_filtered: scoreStats(scoresByOutcome.self_filtered),
-    pending: scoreStats(scoresByOutcome.pending),
-  };
+  const scoreComparison = Object.fromEntries(
+    OUTCOME_BUCKETS.map((bucket) => [bucket, scoreStats(scoresByOutcome[bucket])])
+  );
 
-  // --- Archetype breakdown ---
-  const archetypeMap = new Map();
-  for (const e of enriched) {
-    const arch = e.report?.archetype || 'Unknown';
-    if (!archetypeMap.has(arch)) archetypeMap.set(arch, { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0 });
-    const entry = archetypeMap.get(arch);
-    entry.total++;
-    entry[e.outcome]++;
-  }
-  const archetypeBreakdown = [...archetypeMap.entries()].map(([archetype, data]) => ({
-    archetype,
-    ...data,
-    conversionRate: data.total > 0 ? Math.round((data.positive / data.total) * 100) : 0,
-  })).sort((a, b) => b.total - a.total);
+  const archetypeBreakdown = breakdownBy(enriched, 'archetype', e => e.report?.archetype || 'Unknown');
 
   // --- Blocker / discard-reason / technology analysis ---
   // Shared with --self-test so fixtures exercise the production aggregation.
@@ -1043,35 +1347,9 @@ function analyze() {
     discardReasonRecommendation,
   } = buildPatternSignals(enriched);
 
-  // --- Remote policy breakdown ---
-  const remoteMap = new Map();
-  for (const e of enriched) {
-    const policy = e.remoteBucket;
-    if (!remoteMap.has(policy)) remoteMap.set(policy, { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0 });
-    const entry = remoteMap.get(policy);
-    entry.total++;
-    entry[e.outcome]++;
-  }
-  const remotePolicy = [...remoteMap.entries()].map(([policy, data]) => ({
-    policy,
-    ...data,
-    conversionRate: data.total > 0 ? Math.round((data.positive / data.total) * 100) : 0,
-  })).sort((a, b) => b.total - a.total);
+  const remotePolicy = breakdownBy(enriched, 'policy', e => e.remoteBucket);
 
-  // --- Company size breakdown ---
-  const sizeMap = new Map();
-  for (const e of enriched) {
-    const size = e.companySize;
-    if (!sizeMap.has(size)) sizeMap.set(size, { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0 });
-    const entry = sizeMap.get(size);
-    entry.total++;
-    entry[e.outcome]++;
-  }
-  const companySizeBreakdown = [...sizeMap.entries()].map(([size, data]) => ({
-    size,
-    ...data,
-    conversionRate: data.total > 0 ? Math.round((data.positive / data.total) * 100) : 0,
-  })).sort((a, b) => b.total - a.total);
+  const companySizeBreakdown = breakdownBy(enriched, 'size', e => e.companySize);
 
   // --- ATS vendor / channel analysis (algorithmic-monoculture aware) ---
   // Motivation: Bommasani et al., "Algorithmic Monocultures in Hiring" (FAccT
@@ -1140,17 +1418,7 @@ function analyze() {
   const viaChannelAnalysis = buildViaChannelAnalysis(submitted, isAdvanced);
 
   // --- Score threshold analysis ---
-  const positiveScores = scoresByOutcome.positive.filter(s => s > 0);
-  const minPositiveScore = positiveScores.length > 0 ? Math.min(...positiveScores) : 0;
-  const scoreThreshold = {
-    recommended: minPositiveScore > 0 ? Math.floor(minPositiveScore * 10) / 10 : 3.5,
-    reasoning: positiveScores.length > 0
-      ? `Lowest score among positive outcomes is ${minPositiveScore}. No applications below this score led to progress.`
-      : 'Not enough positive outcome data to determine threshold.',
-    positiveRange: positiveScores.length > 0
-      ? `${Math.min(...positiveScores)} - ${Math.max(...positiveScores)}`
-      : 'N/A',
-  };
+  const scoreThreshold = scoreThresholdFrom(scoresByOutcome.positive, scoresByOutcome.negative);
 
   // --- Generate recommendations ---
   const recommendations = [];
@@ -1178,32 +1446,28 @@ function analyze() {
     });
   }
 
-  // Score threshold recommendation
-  if (minPositiveScore > 3.0) {
+  if (scoreThreshold.recommended !== null && scoreThreshold.recommended > 3.0) {
     recommendations.push({
       action: `Set minimum score threshold at ${scoreThreshold.recommended}/5 before generating PDFs`,
-      reasoning: `No positive outcomes below ${minPositiveScore}/5. Scores below this are wasted effort.`,
+      reasoning: scoreThreshold.reasoning,
       impact: 'medium',
     });
   }
 
-  // Best archetype recommendation
-  const bestArchetype = archetypeBreakdown.filter(a => a.total >= 2).sort((a, b) => b.conversionRate - a.conversionRate)[0];
-  if (bestArchetype && bestArchetype.conversionRate > 0) {
+  const bestArchetype = bestDecidedSegment(archetypeBreakdown);
+  if (bestArchetype) {
     recommendations.push({
-      action: `Double down on "${bestArchetype.archetype}" roles (${bestArchetype.conversionRate}% conversion rate)`,
-      reasoning: `${bestArchetype.positive} of ${bestArchetype.total} applications in this archetype led to positive outcomes.`,
+      action: `Double down on "${bestArchetype.archetype}" roles (${bestArchetype.decidedRate}% of decided outcomes advanced, ${bestArchetype.conversionRate}% of all sent)`,
+      reasoning: `${bestArchetype.positive} of ${bestArchetype.decided} decided applications in this archetype advanced (${bestArchetype.awaiting} still awaiting a reply).`,
       impact: 'medium',
     });
   }
 
-  // Remote policy recommendation
-  const bestRemote = remotePolicy.filter(r => r.total >= 2).sort((a, b) => b.conversionRate - a.conversionRate)[0];
-  const worstRemote = remotePolicy.filter(r => r.total >= 2 && r.conversionRate === 0)[0];
+  const worstRemote = worstDecidedSegment(remotePolicy);
   if (worstRemote) {
     recommendations.push({
-      action: `Avoid "${worstRemote.policy}" roles (0% conversion across ${worstRemote.total} applications)`,
-      reasoning: `None of the ${worstRemote.total} applications with "${worstRemote.policy}" policy led to progress.`,
+      action: `Avoid "${worstRemote.policy}" roles (0 of ${worstRemote.decided} decided outcomes advanced, ${worstRemote.submitted} sent)`,
+      reasoning: `None of the ${worstRemote.decided} decided applications with "${worstRemote.policy}" policy led to progress.`,
       impact: 'medium',
     });
   }
@@ -1250,17 +1514,19 @@ function analyze() {
   // Date range
   const dates = enriched.map(e => e.date).filter(Boolean).sort();
 
+  const byOutcome = Object.fromEntries(
+    OUTCOME_BUCKETS.map((bucket) => [bucket, enriched.filter(e => e.outcome === bucket).length])
+  );
+
   return {
     metadata: {
       total: enriched.length,
       dateRange: { from: dates[0], to: dates[dates.length - 1] },
       analysisDate: new Date().toISOString().split('T')[0],
-      byOutcome: {
-        positive: enriched.filter(e => e.outcome === 'positive').length,
-        negative: enriched.filter(e => e.outcome === 'negative').length,
-        self_filtered: enriched.filter(e => e.outcome === 'self_filtered').length,
-        pending: enriched.filter(e => e.outcome === 'pending').length,
-      },
+      byOutcome,
+      // The same rates as every breakdown row, over the whole tracker — the
+      // one honest place to quote "X% of what I sent advanced".
+      outcomeRates: withOutcomeRates({ total: enriched.length, ...byOutcome }),
     },
     funnel,
     scoreComparison,
@@ -1328,12 +1594,14 @@ function printSummary(result) {
   console.log('\nREMOTE POLICY');
   console.log('-'.repeat(40));
   for (const r of remotePolicy) {
-    console.log(`  ${r.policy.padEnd(20)} ${String(r.total).padStart(2)} total, ${r.positive} positive (${r.conversionRate}%)`);
+    // A segment nobody has answered yet prints n/a, not 0%: silence is not a result.
+    const decidedLabel = r.decidedRate === null ? 'n/a' : `${r.decidedRate}%`;
+    console.log(`  ${r.policy.padEnd(20)} ${String(r.submitted).padStart(2)} sent, ${r.awaiting} awaiting, ${r.positive} positive of ${r.decided} decided (${decidedLabel})`);
   }
 
   // Tech gaps
   if (techStackGaps.length > 0) {
-    console.log('\nTOP TECH STACK GAPS (negative outcomes)');
+    console.log('\nTOP TECH STACK GAPS (negative / discarded outcomes)');
     console.log('-'.repeat(40));
     for (const g of techStackGaps.slice(0, 10)) {
       console.log(`  ${g.skill.padEnd(20)} ${g.frequency}x`);
@@ -1342,7 +1610,7 @@ function printSummary(result) {
 
   // Discard reasons
   if (discardReasonStats && discardReasonStats.length > 0) {
-    console.log(`\nTOP DISCARD / SKIP REASONS (of ${result.discardReasonBase} self-filtered/negative entries)`);
+    console.log(`\nTOP DISCARD / SKIP REASONS (of ${result.discardReasonBase} self-filtered / discarded / negative entries)`);
     console.log('-'.repeat(40));
     for (const d of discardReasonStats.slice(0, 10)) {
       console.log(`  ${d.reason.padEnd(30)} ${String(d.frequency).padStart(2)}x (${d.percentage}%)`);
@@ -1379,7 +1647,14 @@ function printSummary(result) {
   }
 
   // Score threshold
-  console.log(`\nSCORE THRESHOLD: ${scoreThreshold.recommended}/5`);
+  // A threshold is printed only when one was actually earned (see
+  // scoreThresholdFrom); a sufficient sample with nothing rejected below the
+  // floor is still an observation.
+  if (scoreThreshold.recommended !== null) {
+    console.log(`\nSCORE THRESHOLD: ${scoreThreshold.recommended}/5`);
+  } else {
+    console.log(`\nSCORE OBSERVATION: lowest positive ${scoreThreshold.observedMinimum ?? 'n/a'}/5 (n=${scoreThreshold.sampleSize}; not a threshold yet)`);
+  }
   console.log(`  ${scoreThreshold.reasoning}`);
 
   // Recommendations
@@ -1396,17 +1671,24 @@ function printSummary(result) {
   console.log('');
 }
 
-// --- Run ---
-if (args.includes('--self-test')) {
-  runSelfTest();
+// --- Run (CLI only; guarded so the module is safely importable for tests) ---
+if (isMainModule(import.meta.url)) {
+  validateFlags(args, KNOWN_FLAGS, USAGE, {
+    valueFlags: VALUE_FLAGS,
+    requireOperand: true,
+  });
+
+  if (args.includes('--self-test')) {
+    runSelfTest();
+  }
+
+  const result = analyze();
+
+  if (summaryMode) {
+    printSummary(result);
+  } else {
+    console.log(JSON.stringify(result, null, 2));
+  }
+
+  if (result.error) process.exit(1);
 }
-
-const result = analyze();
-
-if (summaryMode) {
-  printSummary(result);
-} else {
-  console.log(JSON.stringify(result, null, 2));
-}
-
-if (result.error) process.exit(1);

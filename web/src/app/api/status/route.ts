@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { canonicalizeStatus } from "@/lib/core/states";
-import { parseCliJson, trackerRowArg } from "@/lib/status-cli.mjs";
+import { parseCliJson, trackerRowArg, clientErrorMessage } from "@/lib/status-cli.mjs";
 
 export const runtime = "nodejs"; // delegates to the core CLI via child_process
 
@@ -191,7 +191,13 @@ export async function POST(req: Request) {
       code === 1
         ? (cliCode && CLIENT_ERROR_CODES.has(cliCode) ? 400 : 500)
         : (EXIT_TO_HTTP[code] ?? 500);
-    const error = typeof parsed?.error === "string" ? parsed.error : stderr.trim() || "status update failed";
+    // Child stderr is logged, never echoed: on this path it is most likely a
+    // Node stack trace carrying absolute server paths, the same content the
+    // spawn-failure branch above already keeps out of the response body.
+    if (!parsed && stderr.trim()) {
+      console.error(`/api/status: set-status.mjs exited ${code} without JSON: ${stderr.trim()}`);
+    }
+    const error = clientErrorMessage(parsed, stderr);
     return NextResponse.json(
       { error, ...(cliCode ? { code: cliCode } : {}) },
       {

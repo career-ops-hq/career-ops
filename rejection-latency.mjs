@@ -42,27 +42,32 @@
  *      node rejection-latency.mjs --tracker path/to/applications.md
  *      node rejection-latency.mjs --self-test
  *
- * Issue #2013 — github.com/santifer/career-ops
+ * Issue #2013 — github.com/career-ops-hq/career-ops
  */
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 
 import { parseActiveInterviews } from './process-quality.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { isPlaceholderCompany } from './lib/placeholder-cell.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(CAREER_OPS, 'data/active-interviews.md'))
-  ? join(CAREER_OPS, 'data/active-interviews.md')
-  : join(CAREER_OPS, 'active-interviews.md');
-const DEFAULT_TRACKER_PATH = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
-const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS, 'config/profile.yml');
+const DATA_ROOT = getCareerOpsRoot();
+const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(DATA_ROOT, 'data/active-interviews.md'))
+  ? join(DATA_ROOT, 'data/active-interviews.md')
+  : join(DATA_ROOT, 'active-interviews.md');
+const DEFAULT_TRACKER_PATH = existsSync(join(DATA_ROOT, 'data/applications.md'))
+  ? join(DATA_ROOT, 'data/applications.md')
+  : join(DATA_ROOT, 'applications.md');
+const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(DATA_ROOT, 'config/profile.yml');
 
 export const DEFAULT_COURTESY_DAYS = 30;
 
@@ -165,6 +170,36 @@ export function companyKey(name) {
   return String(name || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
+/**
+ * The identity a row groups under, once a placeholder employer is accounted for.
+ *
+ * Mirrors process-quality.mjs:190-205, which solved this first and for the same
+ * data. A `?` employer names nothing, but a `?` row that names its CHANNEL does
+ * identify something the user can act on: every round brokered by one agency is
+ * one relationship, and that is the thing going quiet. So the channel becomes
+ * the bucket, and a row naming neither employer nor channel supports no
+ * per-company claim at all.
+ *
+ * The prefix is ALWAYS `?`, never the cell's own spelling. isPlaceholderCompany
+ * accepts `?`, `—`, `-` and an empty cell, and they all mean the same thing —
+ * but keeping them verbatim would key `— (via Hays)` apart from `? (via Hays)`
+ * and split one channel's totals, which is this file's own bug in miniature.
+ *
+ * @param {string} company
+ * @param {string} via - The `via=` channel, or '' when the row has none.
+ * @returns {{key: string, label: string}|null} null when the row identifies nothing.
+ */
+export function groupIdentity(company, via) {
+  if (!isPlaceholderCompany(company)) {
+    const key = companyKey(company);
+    return key ? { key, label: String(company).trim() } : null;
+  }
+  const channel = String(via || '').trim();
+  if (!channel || isPlaceholderCompany(channel)) return null;
+  const label = `? (via ${channel})`;
+  return { key: `?via:${companyKey(channel)}`, label };
+}
+
 // Case-insensitive column lookup for candidate-edited markdown headers
 // ("Notes" vs "notes" vs " Notes ") — same convention as process-quality.mjs.
 function findColumn(row, name) {
@@ -196,12 +231,62 @@ export function parseTrackerInterviewRows(content) {
     if (!row) continue;
     const status = String(row.status || '').replace(/\*\*/g, '').trim().toLowerCase();
     if (status !== 'interview') continue;
-    const key = companyKey(row.company);
-    if (!key) continue;
-    if (!byCompany.has(key)) byCompany.set(key, []);
-    byCompany.get(key).push(row);
+    // A placeholder employer that names its channel groups under that channel;
+    // one that names neither identifies nothing and is reported by
+    // placeholderInterviewRows instead of being dropped in silence.
+    const identity = groupIdentity(row.company, row.via);
+    if (!identity) continue;
+    if (!byCompany.has(identity.key)) byCompany.set(identity.key, []);
+    byCompany.get(identity.key).push({ ...row, groupLabel: identity.label });
   }
   return byCompany;
+}
+
+/**
+ * Interview-state tracker rows this signal CANNOT see, because their employer
+ * cell is a placeholder rather than a name.
+ *
+ * companyKey() strips everything that is not a letter or a digit, so `?` — the
+ * documented marker for an undisclosed end employer (#1596) — normalizes to the
+ * empty string and parseTrackerInterviewRows' `if (!key) continue` discards the
+ * row. The same goes for the `—`/`-` no-data sentinels.
+ *
+ * Dropping them is defensible; dropping them SILENTLY is not. This check exists
+ * to flag applications that have gone quiet, and agency-brokered roles — the
+ * ones that carry `?` plus a `via=` field — are where the candidate has the
+ * least visibility and ghosting is most common. A report that quietly omits
+ * them reads as "nothing is overdue" rather than "I did not look at these".
+ *
+ * Counting rather than guessing an identity is deliberate. Every `?` row says
+ * `?` on both sides, so joining them to active-interviews.md by company would
+ * match each one against all the others — a wrong answer in place of a stated
+ * gap. Naming the gap is the honest result until the rows carry something that
+ * can identify them (a `via=` agency, or a req ID in notes).
+ *
+ * Separate from parseTrackerInterviewRows rather than folded into its return so
+ * that function's Map contract is untouched — two internal callers and
+ * tests/local-today-gates.test.mjs consume it as a plain Map.
+ *
+ * @param {string} content - Raw tracker markdown.
+ * @returns {object[]} The excluded rows, in file order.
+ */
+export function placeholderInterviewRows(content) {
+  if (typeof content !== 'string' || !content.trim()) return [];
+  const lines = content.replace(/\r\n/g, '\n').split('\n');
+  const colmap = resolveColumns(lines);
+  const excluded = [];
+  for (const line of lines) {
+    const row = parseTrackerRow(line, colmap);
+    if (!row) continue;
+    const status = String(row.status || '').replace(/\*\*/g, '').trim().toLowerCase();
+    if (status !== 'interview') continue;
+    // Only rows that identify NOTHING. A placeholder employer with a via=
+    // channel now groups under that channel, so counting it here would report
+    // an exclusion that no longer happens — and would keep telling the user to
+    // add a via= they already added.
+    if (!groupIdentity(row.company, row.via)) excluded.push(row);
+  }
+  return excluded;
 }
 
 // --- Blacklist suggestion (suggestion-only, #1742/#1856) ---
@@ -221,9 +306,16 @@ export function buildBlacklistSuggestion(company, todayStr, reason) {
  * @returns {{ flags: object[], warnings: string[], companiesChecked: number }}
  */
 export function computeRejectionLatency(interviewRows, trackerByCompany, opts = {}) {
+  // The default is the LOCAL calendar day at UTC midnight, not `new Date()`.
+  // daysBetween() reduces both operands to their UTC date, so a bare clock read
+  // west of Greenwich counts one extra day all evening: a company crosses the
+  // courtesy threshold a day early and gets a ready-to-copy blacklist row —
+  // stamped, via isoDay(), with tomorrow's date. The UTC-midnight anchor is
+  // what daysBetween expects and is deliberately preserved; only WHICH day it
+  // anchors on moves (#2765 drew the same line).
   const today = opts.today instanceof Date && !Number.isNaN(opts.today.getTime())
     ? opts.today
-    : new Date();
+    : parseDate(localToday());
   const courtesyDays = Number.isFinite(opts.courtesyDays) && opts.courtesyDays > 0
     ? opts.courtesyDays
     : DEFAULT_COURTESY_DAYS;
@@ -245,12 +337,23 @@ export function computeRejectionLatency(interviewRows, trackerByCompany, opts = 
   // on each individual interview-round line (#2014 CodeRabbit).
   const byApplication = new Map(); // key: sorted tracker row numbers joined with ','
   const companiesSeen = new Set();
+  // Interview rounds whose employer AND channel are both placeholders. They
+  // cannot be attributed, and the caller has to be able to say so.
+  const placeholderRounds = [];
   for (const row of rows) {
     if (!row || typeof row !== 'object') continue;
     const company = findColumn(row, 'company').trim();
     if (!company) continue;
-    const cKey = companyKey(company);
-    if (!cKey) continue;
+    // Same treatment as the tracker side, because THIS is the side the flags
+    // come from: a `?` round dropped here produces no flag even when its
+    // tracker row grouped fine. Reported rather than skipped, for the same
+    // reason — an omission the user cannot see reads as "nothing is overdue".
+    const identity = groupIdentity(company, findColumn(row, 'via'));
+    if (!identity) {
+      placeholderRounds.push(row);
+      continue;
+    }
+    const cKey = identity.key;
 
     const dateCell = findColumn(row, 'date/time') || findColumn(row, 'date');
     const date = extractDate(dateCell);
@@ -295,7 +398,11 @@ export function computeRejectionLatency(interviewRows, trackerByCompany, opts = 
 
     const appKey = trackerRows.map(r => r.num).sort((a, b) => a - b).join(',');
     if (!byApplication.has(appKey)) {
-      byApplication.set(appKey, { company, role, lastDate: date, trackerRows });
+      // identity.label, not the raw cell. For a placeholder employer that is
+      // `? (via Hays)`, which is what the report prints AND what the blacklist
+      // suggestion row carries — a bare `?` there would be a do-not-apply entry
+      // naming no company, and data/blacklist.md is matched by name.
+      byApplication.set(appKey, { company: identity.label, role, lastDate: date, trackerRows });
     } else {
       const entry = byApplication.get(appKey);
       if (date > entry.lastDate) {
@@ -339,7 +446,14 @@ export function computeRejectionLatency(interviewRows, trackerByCompany, opts = 
     return a.company.localeCompare(b.company);
   });
 
-  return { flags, warnings, companiesChecked: companiesSeen.size };
+  if (placeholderRounds.length) {
+    warnings.push(
+      `${placeholderRounds.length} interview round${placeholderRounds.length === 1 ? '' : 's'} in `
+      + 'data/active-interviews.md could not be attributed: the employer cell is a placeholder and '
+      + 'no via= channel is set, so there is nothing to group by. Adding via= groups them under that channel.',
+    );
+  }
+  return { flags, warnings, companiesChecked: companiesSeen.size, placeholderRounds: placeholderRounds.length };
 }
 
 // --- File loading (CRLF normalized at read time — this repo's CRLF bug class) ---
@@ -356,7 +470,16 @@ function printSummary(result, meta) {
   console.log(`${'='.repeat(78)}\n`);
 
   if (result.flags.length === 0) {
-    console.log('  No post-interview silence exceeded the configured thresholds.\n');
+    // An all-clear only where everything was actually assessed. With rows this
+    // check could not attribute, "nothing exceeded the thresholds" is a claim
+    // about a subset printed as though it covered the whole file — the exact
+    // silence this change exists to remove, restated one line higher.
+    const unassessed = (meta.placeholderApplicationsExcluded || 0) + (result.placeholderRounds || 0);
+    if (unassessed === 0) {
+      console.log('  No post-interview silence exceeded the configured thresholds.\n');
+    } else {
+      console.log(`  Nothing flagged among the applications this check could assess — ${unassessed} could not be (see below).\n`);
+    }
   } else {
     const header =
       '  ' +
@@ -553,7 +676,7 @@ function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   if (selfTestMode) {
     runSelfTest();
   }
@@ -576,17 +699,32 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
 
   const interviewRows = parseActiveInterviews(readNormalized(ACTIVE_INTERVIEWS_PATH));
-  const trackerByCompany = parseTrackerInterviewRows(readNormalized(TRACKER_PATH));
+  const trackerMd = readNormalized(TRACKER_PATH);
+  const trackerByCompany = parseTrackerInterviewRows(trackerMd);
+  // Applications this signal cannot see. Reported, not dropped: see
+  // placeholderInterviewRows for why counting beats inventing an identity.
+  const excluded = placeholderInterviewRows(trackerMd);
 
   const result = computeRejectionLatency(interviewRows, trackerByCompany, {
     today, courtesyDays,
   });
+
+  if (excluded.length) {
+    const nums = excluded.map(r => `#${r.num}`).join(', ');
+    result.warnings.push(
+      `${excluded.length} Interview-state application${excluded.length === 1 ? '' : 's'} (${nums}) `
+      + 'excluded: the employer cell is a placeholder and no via= channel is set, so there is nothing '
+      + 'to group by. Setting via= groups them under that channel — the only remediation this check reads.',
+    );
+  }
 
   const metadata = {
     today: isoDay(today),
     courtesyDays,
     interviewRows: interviewRows.length,
     companiesChecked: result.companiesChecked,
+    // Distinguishes "nothing is overdue" from "I did not look at these".
+    placeholderApplicationsExcluded: excluded.length,
     flagged: result.flags.length,
     disclaimer: DISCLAIMER,
   };

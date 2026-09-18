@@ -41,13 +41,19 @@ try {
   const ofertaBlockG = section(oferta, '## Block G — Posting Legitimacy', '### Output format:');
   const batchBlockG = section(batch, '#### Block G — Posting Legitimacy', '#### Risk Summary (after Block G)');
   const signalPattern = /^\*\*(\d+)\.\s+(.+?)\*\*/gm;
-  const canonicalSignals = [...ofertaBlockG.matchAll(signalPattern)]
-    .sort((a, b) => Number(a[1]) - Number(b[1]))
-    .map((match) => match[2]);
+  const canonicalMatches = [...ofertaBlockG.matchAll(signalPattern)]
+    .sort((a, b) => Number(a[1]) - Number(b[1]));
+  const canonicalSignals = canonicalMatches.map((match) => match[2]);
 
+  // The count is DERIVED from modes/oferta.md, never restated here. A literal
+  // number would be a second copy of the canon — the exact drift this suite
+  // exists to prevent — and it would go red every time a signal lands. What is
+  // asserted instead is the invariant that survives growth: the canon numbers
+  // its signals 1..N with no gap, so the list below can be trusted as ordered.
   assert(
-    canonicalSignals.length === 9,
-    'canonical Block G exposes exactly nine ordered signal names',
+    canonicalSignals.length > 0
+      && canonicalMatches.every((match, index) => Number(match[1]) === index + 1),
+    `canonical Block G exposes ${canonicalSignals.length} signals numbered 1..${canonicalSignals.length}`,
   );
 
   const batchSignalPositions = canonicalSignals.map((name) => batchBlockG.indexOf(`**${name}**`));

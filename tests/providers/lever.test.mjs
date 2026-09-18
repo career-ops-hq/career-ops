@@ -175,6 +175,14 @@ try {
     fail(`lever.fetch() url=${JSON.stringify(capturedUrl)} opts=${JSON.stringify(capturedOpts)}`);
   }
 
+  // A board-wide feed with inlined descriptions: a large board (jobgether,
+  // 42.8 MB) outgrows the 10s _http.mjs default (#4177).
+  if (capturedOpts?.timeoutMs === 30_000) {
+    pass('lever.fetch() passes the 30s Lever feed timeout, not the 10s default');
+  } else {
+    fail(`lever.fetch() timeoutMs = ${JSON.stringify(capturedOpts?.timeoutMs)}`);
+  }
+
   if (fetched.length === 7)
     pass('lever.fetch() returns one normalized row per posting (no silent drops)');
   else fail(`lever.fetch() returned ${fetched.length} rows (expected 7)`);

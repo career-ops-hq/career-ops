@@ -12,7 +12,7 @@ Cowork mounts your career-ops folder and the agent reads the same instruction fi
 
 1. In a terminal (one time), clone career-ops **and install its dependencies** — Cowork's local shell has no npm network access, so do this before opening the folder:
    ```bash
-   git clone https://github.com/santifer/career-ops.git ~/career-ops
+   git clone https://github.com/career-ops-hq/career-ops.git ~/career-ops
    cd ~/career-ops && npm install
    ```
 2. Install [Claude Cowork](https://claude.com/download) and, in **Colaborar/Collaborate** mode, add the `~/career-ops` folder.

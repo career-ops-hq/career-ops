@@ -201,7 +201,13 @@ async function resolveDnsCached(hostname) {
   try {
     const addresses = await hostResolver(hostname);
     if (addresses.length === 0) {
-      throw new Error(`DNS resolution returned no addresses for ${hostname}`);
+      // Tagged so the route guard can tell "this host does not exist" apart from
+      // "this host resolves into private space". The first is a dead third-party
+      // script, the second is an egress-guard hit. Only the second says anything
+      // about the page being checked.
+      const missing = new Error(`DNS resolution returned no addresses for ${hostname}`);
+      missing.livenessCode = 'dns_no_addresses';
+      throw missing;
     }
     dnsCache.set(hostname, addresses);
     return addresses;
@@ -256,7 +262,36 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
         return route.continue();
       } catch (err) {
         console.warn(`Blocked request to restricted destination (DNS): ${requestUrl} - ${err.message}`);
-        page._blockedByGuard = { code: 'blocked_host', reason: err.message };
+        // A host that resolves to nothing is a DEAD THIRD-PARTY SCRIPT, not a
+        // statement about the posting. Measured 2026-08-14 over a 217-URL
+        // recheck: 78 live postings were returned as `uncertain` because an
+        // analytics or ad host on the page no longer exists — 53 on
+        // personalisation.visitorqueue.com, 17 on s7.addthis.com (AddThis was
+        // shut down in 2023), the rest on fluidads and cloudfront. One was
+        // opened by hand to confirm: 11,178 characters of live posting and a
+        // working apply control, called uncertain because of a dead tracker.
+        //
+        // The request is still aborted either way, so the egress guard loses
+        // nothing. Only the VERDICT stops being poisoned, and only for a
+        // subresource: if the main document itself cannot resolve, that is a
+        // real finding about the posting and still counts.
+        // Whether this was the main document or a subresource can only be asked
+        // of a real Playwright request. Callers may pass a lighter route double
+        // (the test suite does, with request() returning just a url()), and for
+        // those the answer is unknowable — so default to TRUE, which keeps the
+        // pre-existing behaviour of poisoning the verdict. The relaxation only
+        // applies where we can positively establish it was a subresource.
+        const request = typeof route?.request === 'function' ? route.request() : null;
+        const canTell =
+          typeof request?.isNavigationRequest === 'function' &&
+          typeof request?.frame === 'function' &&
+          typeof page?.mainFrame === 'function';
+        const isMainDocument = canTell
+          ? request.isNavigationRequest() && request.frame() === page.mainFrame()
+          : true;
+        if (err?.livenessCode !== 'dns_no_addresses' || isMainDocument) {
+          page._blockedByGuard = { code: 'blocked_host', reason: err.message };
+        }
         return route.abort('blockedbyclient');
       }
     });
@@ -430,8 +465,36 @@ export function createHeadedPageProvider(chromium) {
   let browser = null;
   let page = null;
   let launchFailed = false;
+  // A cached page is only reusable while its browser is still up. If the headed
+  // Chromium goes away mid-run (the user closes the window, the process dies),
+  // the cached handle stays non-null, so every later get() hands back a dead
+  // page and each anti-bot retry fails with "Target page, context or browser has
+  // been closed" instead of a real verdict. Guarded defensively because the
+  // provider is handed a chromium in tests, not necessarily a real Playwright one.
+  const isCachedPageUsable = () => {
+    if (!page) return false;
+    if (typeof page.isClosed === 'function' && page.isClosed()) return false;
+    if (browser && typeof browser.isConnected === 'function' && !browser.isConnected()) return false;
+    return true;
+  };
+
   return {
     async get() {
+      if (page && !isCachedPageUsable()) {
+        // Drop the dead handles and fall through to a fresh launch below. If the
+        // page went away but its Chromium is still up, tear that browser down
+        // first: close() only knows the current handle, so a replacement launch
+        // would otherwise leave the stale process running until exit.
+        if (browser && (typeof browser.isConnected !== 'function' || browser.isConnected())) {
+          try {
+            await browser.close();
+          } catch {
+            // best-effort teardown
+          }
+        }
+        page = null;
+        browser = null;
+      }
       if (page) return page;
       if (launchFailed) return null;
       try {

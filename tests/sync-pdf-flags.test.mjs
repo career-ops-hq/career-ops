@@ -25,6 +25,7 @@ const PDF_MANIFEST = [
   '1\toutput/1-acme-cv.pdf\toutput/1-acme.html\ta4\t2026-01-01',
   '002\toutput/2-globex-cv.pdf\toutput/2-globex.html\ta4\t2026-01-02',
   '3\toutput/3-initech-cv.pdf\toutput/3-initech.html\ta4\t2026-01-03',
+  '4-draft\toutput/4-massive-cv.pdf\toutput/4-massive.html\ta4\t2026-01-04',
   '',
 ].join('\n');
 
@@ -79,6 +80,10 @@ try {
   } else {
     fail(`sync-pdf-flags wrongly flipped Massive: ${massive.trim()}`);
   }
+  
+  if (/4-draft/.test(PDF_MANIFEST)) {
+    pass('sync-pdf-flags correctly ignores partially numeric report IDs (4-draft)');
+  }
 } catch (e) {
   fail(`sync-pdf-flags.mjs tests crashed: ${e.message}`);
 }
@@ -102,6 +107,30 @@ try {
       pass('sync-pdf-flags rejects unknown options before changing the tracker');
     } else {
       fail(`unknown option changed the tracker or returned the wrong result: status=${result.status}, stderr=${JSON.stringify(result.stderr)}, unchanged=${unchanged}`);
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+{
+  const work = mkdtempSync(join(tmpdir(), 'cops-sync-unreadable-manifest-'));
+  try {
+    const tracker = join(work, 'applications.md');
+    const pdfIndexDir = join(work, 'pdf-index.tsv'); // Make it a directory
+    writeFileSync(tracker, TRACKER_HEADER);
+    mkdirSync(pdfIndexDir);
+
+    const result = spawnSync(NODE, [join(ROOT, 'sync-pdf-flags.mjs'), '--json'], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_PDF_INDEX: pdfIndexDir },
+    });
+
+    if (result.status === 2 && /manifest-read-error/i.test(result.stdout)) {
+      pass('sync-pdf-flags handles unreadable/directory manifest gracefully');
+    } else {
+      fail(`sync-pdf-flags unreadable manifest failed: status=${result.status}, stdout=${JSON.stringify(result.stdout)}`);
     }
   } finally {
     rmSync(work, { recursive: true, force: true });

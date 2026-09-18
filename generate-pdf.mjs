@@ -4,7 +4,7 @@
  * generate-pdf.mjs — HTML → PDF via Playwright
  *
  * Usage:
- *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages]
+ *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages] [--skip-fact-check]
  *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--max-pages=N] [--strict-pages]
  *
  * --batch renders every document in a JSON manifest (an array of
@@ -39,11 +39,13 @@ import { readFile } from 'fs/promises';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const trackerPath = resolveTrackerPath(__dirname);
+const trackerPath = resolveTrackerPath(getCareerOpsRoot());
 const workspaceRoot = resolveWorkspaceRoot(trackerPath);
 const PDF_PAGE_MARGIN = '0.6in';
 
@@ -51,7 +53,33 @@ const PDF_PAGE_MARGIN = '0.6in';
 // /var -> /private/var) is compared like-for-like by assertInsideWorkspace.
 // When CAREER_OPS_TRACKER points at another workspace, that workspace—not the
 // installed script directory—is the safe boundary for input and output.
-const __workspaceRoot = realpathSync(workspaceRoot);
+//
+// Derived at USE time, not frozen at import (#3162, root-caused occurrence 6):
+// the root reads CAREER_OPS_TRACKER, and a sibling test that legitimately sets
+// that variable for its own fixture — and correctly restores it afterwards —
+// still poisoned this module for the whole process if the import happened to
+// land inside that window. A `const` cannot un-read an env var, so the guard
+// then compared perfectly valid repo paths against another test's temp dir and
+// refused to write, intermittently and only under the full suite. Memoized on
+// the variable's own value: same cost as the const while nothing changes, and
+// self-correcting the moment it does. Same defect class as #3159.
+let __rootCache = { key: null, root: null, canonical: null };
+function refreshRootCache() {
+  const key = process.env.CAREER_OPS_TRACKER || '';
+  if (__rootCache.key !== key) {
+    // Always re-derive: falling back to the import-time const when the variable
+    // is unset would hand back the very value the poisoned import froze.
+    const root = resolveWorkspaceRoot(resolveTrackerPath(__dirname));
+    __rootCache = { key, root, canonical: realpathSync(root) };
+  }
+  return __rootCache;
+}
+// Two accessors on purpose, so each call site keeps the exact semantics it had:
+// the containment guard compares canonical forms (a symlinked ancestor must not
+// read as an escape), while the manifest/output helpers work in the lexical form
+// the rest of the module and its callers use.
+function currentWorkspaceRoot() { return refreshRootCache().root; }
+function canonicalWorkspaceRoot() { return refreshRootCache().canonical; }
 
 /**
  * Assert that an already-resolved absolute path stays inside the tracker workspace,
@@ -81,15 +109,29 @@ function assertInsideWorkspace(absPath, label) {
   let canonical;
   try {
     canonical = existsSync(probe) ? resolve(realpathSync(probe), ...tail) : absPath;
-  } catch {
+  } catch (err) {
     // Canonicalization failed (realpath raced away, permission error): containment
     // is unprovable, so fail closed rather than fall back to a lexical form that a
-    // symlinked ancestor could slip past.
-    throw new Error(`${label} escapes the tracker workspace: ${absPath}`);
+    // symlinked ancestor could slip past. Named as its own failure, not as an
+    // escape: an intermittent CI-only hit of this guard (#3162) was undiagnosable
+    // while both branches threw the same message — "escapes" points a reader at
+    // the path, when the actual event was realpath failing underneath it.
+    throw new Error(
+      `${label} could not be canonicalized against the tracker workspace`
+      + ` (${/** @type {any} */ (err)?.code || 'realpath failed'} on ${probe}): ${absPath}`,
+    );
   }
-  const rel = relative(__workspaceRoot, canonical);
+  const workspace = canonicalWorkspaceRoot();
+  const rel = relative(workspace, canonical);
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
-    throw new Error(`${label} escapes the tracker workspace: ${absPath}`);
+    // #3162: an intermittent macOS-CI-only hit of this branch happens on paths
+    // that are lexically inside the sandbox, and canonicalization SUCCEEDS
+    // before it. Print both sides so the next occurrence names the disagreeing
+    // ancestor outright instead of asking a reader to reconstruct it.
+    throw new Error(
+      `${label} escapes the tracker workspace: ${absPath}`
+      + ` (workspaceRoot=${workspace} canonical=${canonical} rel=${rel})`,
+    );
   }
   return absPath;
 }
@@ -189,10 +231,11 @@ function foldDiacritics(text) {
 /**
  * Heading spelling -> canonical section key.
  *
- * Polish (modes/pl) is here because without these aliases the rendered Polish
- * titles match nothing derived from the English cv.md: validateCvSectionOrder()
- * finds fewer than two comparable sections and silently returns, leaving the
- * section-order guard disabled on every CV rendered in that mode.
+ * Polish (modes/pl) and Chinese (modes/zh-TW, modes/zh) are here because without
+ * these aliases the rendered non-English titles match nothing derived from the
+ * English cv.md: validateCvSectionOrder() finds fewer than two comparable
+ * sections and silently returns, leaving the section-order guard disabled on
+ * every CV rendered in those modes, and cv.sections resolves no block at all.
  *
  * Keys are folded on construction so authored diacritics match stripped input.
  */
@@ -220,6 +263,7 @@ const SECTION_ALIASES = new Map([
   ['awards & honours', 'awards'],
   ['skills', 'skills'],
   ['technical skills', 'skills'],
+  ['interests', 'interests'],
   // Polish — the vocabulary documented in modes/pl/README.md, plus the word-order
   // variants that turn up in practice (both "Kompetencje kluczowe" and
   // "Kluczowe kompetencje" are used for the same section).
@@ -246,6 +290,72 @@ const SECTION_ALIASES = new Map([
   ['nagrody i wyróżnienia', 'awards'],
   ['umiejętności', 'skills'],
   ['umiejętności techniczne', 'skills'],
+  // Chinese — the same failure the Polish block above fixes, for the two Chinese
+  // markets this repo ships modes for: Traditional (modes/zh-TW) and Simplified
+  // (modes/zh), rendered through templates/cv-template.zh-minimal.html. Both
+  // scripts are listed against every key because a CV written in either renders
+  // through this one alias table. The vocabulary is the repo's own: the
+  // `sections` payload in tests/zh-minimal-template.test.mjs (个人简介, 核心能力,
+  // 工作经历, 精选项目, 教育经历, 认证, 技术栈) and the modes' wording
+  // (e.g. "專業摘要" in modes/zh-TW/oferta.md), plus the everyday synonyms of
+  // each — the titles have no single canonical spelling because they come from
+  // a user-supplied `sections` override, not from DEFAULT_SECTION_TITLES.
+  ['專業摘要', 'summary'],
+  ['专业摘要', 'summary'],
+  ['摘要', 'summary'],
+  ['個人簡介', 'summary'],
+  ['个人简介', 'summary'],
+  ['簡介', 'summary'],
+  ['简介', 'summary'],
+  ['核心能力', 'competencies'],
+  ['核心競爭力', 'competencies'],
+  ['核心竞争力', 'competencies'],
+  ['工作經歷', 'experience'],
+  ['工作经历', 'experience'],
+  ['工作經驗', 'experience'],
+  ['工作经验', 'experience'],
+  ['專業經歷', 'experience'],
+  ['专业经历', 'experience'],
+  ['專案', 'projects'],
+  ['项目', 'projects'],
+  ['專案經驗', 'projects'],
+  ['项目经验', 'projects'],
+  ['專案經歷', 'projects'],
+  ['项目经历', 'projects'],
+  ['專案成就', 'projects'],
+  ['项目成就', 'projects'],
+  ['精選專案', 'projects'],
+  ['精选项目', 'projects'],
+  ['學歷', 'education'],
+  ['学历', 'education'],
+  ['教育背景', 'education'],
+  ['教育經歷', 'education'],
+  ['教育经历', 'education'],
+  ['證照', 'certifications'],
+  ['证照', 'certifications'],
+  ['證書', 'certifications'],
+  ['证书', 'certifications'],
+  ['專業證照', 'certifications'],
+  ['专业证书', 'certifications'],
+  ['認證', 'certifications'],
+  ['认证', 'certifications'],
+  ['資格認證', 'certifications'],
+  ['资格认证', 'certifications'],
+  ['獲獎', 'awards'],
+  ['获奖', 'awards'],
+  ['獎項', 'awards'],
+  ['奖项', 'awards'],
+  ['榮譽', 'awards'],
+  ['荣誉', 'awards'],
+  ['技能', 'skills'],
+  ['專長', 'skills'],
+  ['专长', 'skills'],
+  ['技術能力', 'skills'],
+  ['技术能力', 'skills'],
+  ['技術棧', 'skills'],
+  ['技术栈', 'skills'],
+  ['興趣', 'interests'],
+  ['兴趣', 'interests'],
 ].map(([alias, key]) => [foldDiacritics(alias), key]));
 
 function normalizeSectionTitle(text) {
@@ -292,6 +402,46 @@ function extractSourceSectionOrder(markdown) {
 }
 
 /**
+ * The section order `modes/pdf.md` documents under "Section order (optimized
+ * '6-second recruiter scan')" — Header, Professional Summary, Core
+ * Competencies, Work Experience, Projects, Education & Certifications,
+ * Skills — mapped through sectionKey()/SECTION_ALIASES the same way a
+ * rendered heading or a cv.md heading is. "Education & Certifications" is
+ * that document's own heading text and already folds to 'education' via the
+ * alias table (line above: `['education & certifications', 'education']`),
+ * so no separate normalization is needed for it. `certifications`, `awards`
+ * and `interests` are not named by modes/pdf.md's list — they are optional
+ * sections the shipped template (templates/cv-template.html) renders between
+ * Education and Skills — so they are included here in that template's own
+ * position to keep a real generated CV (which renders Education and
+ * Certifications as separate section-title elements) fully comparable
+ * against this order rather than only against the six pdf.md names it
+ * explicitly lists. See #3640.
+ */
+const CANONICAL_TAILORED_ORDER = [
+  'summary', 'competencies', 'experience', 'projects',
+  'education', 'certifications', 'awards', 'interests', 'skills',
+];
+const CANONICAL_TAILORED_POSITIONS = new Map(
+  CANONICAL_TAILORED_ORDER.map((key, index) => [key, index]),
+);
+
+/**
+ * First index in `comparableSections` whose key sits earlier in `positions`
+ * than the section right before it — i.e. the first place the rendered order
+ * violates the relative order `positions` encodes. -1 if no such index exists
+ * (the rendered order is consistent with `positions`).
+ */
+function findOrderDivergence(comparableSections, positions) {
+  for (let i = 1; i < comparableSections.length; i++) {
+    const previous = comparableSections[i - 1];
+    const current = comparableSections[i];
+    if (positions.get(current.key) < positions.get(previous.key)) return i;
+  }
+  return -1;
+}
+
+/**
  * @param {string} html
  * @param {string} cvMarkdown
  * @param {{ allowReorder?: boolean }} [options] - `allowReorder` downgrades a
@@ -299,6 +449,14 @@ function extractSourceSectionOrder(markdown) {
  *   where the section order was deliberately tailored (e.g. Projects moved
  *   ahead of Education for a technical-heavy role) rather than accidentally
  *   scrambled by an agent. See #1646.
+ *
+ *   A rendered order is accepted whenever it preserves the relative order of
+ *   EITHER cv.md's own headings OR the canonical modes/pdf.md tailoring order
+ *   above — the documented default workflow always moves Education after
+ *   Experience/Projects, which diverges from a typical cv.md on every
+ *   standard-compliant generation, so cv.md's order alone can't be the only
+ *   accepted target without making `allowReorder` mandatory rather than an
+ *   opt-in for genuine edge cases. See #3640.
  */
 export function validateCvSectionOrder(html, cvMarkdown, { allowReorder = false } = {}) {
   const rendered = extractRenderedSectionOrder(html);
@@ -309,23 +467,28 @@ export function validateCvSectionOrder(html, cvMarkdown, { allowReorder = false 
   const renderedComparable = rendered.filter(section => sourcePositions.has(section.key));
   if (renderedComparable.length < 2) return;
 
-  for (let i = 1; i < renderedComparable.length; i++) {
-    const previous = renderedComparable[i - 1];
-    const current = renderedComparable[i];
-    if (sourcePositions.get(current.key) < sourcePositions.get(previous.key)) {
-      const renderedOrder = renderedComparable.map(section => section.title).join(' -> ');
-      const sourceOrder = source
-        .filter(section => renderedComparable.some(renderedSection => renderedSection.key === section.key))
-        .map(section => section.title)
-        .join(' -> ');
-      const message = `CV section order diverges from cv.md: rendered ${renderedOrder}; cv.md ${sourceOrder}`;
-      if (allowReorder) {
-        console.warn(`⚠️  ${message} (proceeding — --allow-reorder set)`);
-        return;
-      }
-      throw new Error(message);
-    }
+  if (findOrderDivergence(renderedComparable, sourcePositions) === -1) return;
+
+  // Diverges from cv.md — but that alone isn't damning: it's also what every
+  // CV tailored per modes/pdf.md's documented order looks like. Only treat it
+  // as a real problem if it ALSO fails to match that canonical order.
+  const canonicalComparable = rendered.filter(section => CANONICAL_TAILORED_POSITIONS.has(section.key));
+  if (canonicalComparable.length >= 2
+      && findOrderDivergence(canonicalComparable, CANONICAL_TAILORED_POSITIONS) === -1) {
+    return;
   }
+
+  const renderedOrder = renderedComparable.map(section => section.title).join(' -> ');
+  const sourceOrder = source
+    .filter(section => renderedComparable.some(renderedSection => renderedSection.key === section.key))
+    .map(section => section.title)
+    .join(' -> ');
+  const message = `CV section order diverges from cv.md: rendered ${renderedOrder}; cv.md ${sourceOrder}`;
+  if (allowReorder) {
+    console.warn(`⚠️  ${message} (proceeding — --allow-reorder set)`);
+    return;
+  }
+  throw new Error(message);
 }
 
 /**
@@ -917,7 +1080,7 @@ function countRenderedPdfPages(pdfBuffer) {
  * @param {string} [rootDir] - Workspace root used as the manifest base.
  * @returns {string} Workspace-relative path using forward slashes, or an empty string.
  */
-export function workspaceRelativeManifestPath(pathValue, rootDir = workspaceRoot) {
+export function workspaceRelativeManifestPath(pathValue, rootDir = currentWorkspaceRoot()) {
   if (!pathValue) return '';
   const rel = relative(rootDir, resolve(pathValue));
   if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return '';
@@ -925,7 +1088,7 @@ export function workspaceRelativeManifestPath(pathValue, rootDir = workspaceRoot
 }
 
 /** @deprecated Use workspaceRelativeManifestPath. */
-export function repoRelativeManifestPath(pathValue, rootDir = workspaceRoot) {
+export function repoRelativeManifestPath(pathValue, rootDir = currentWorkspaceRoot()) {
   return workspaceRelativeManifestPath(pathValue, rootDir);
 }
 
@@ -949,7 +1112,7 @@ function nearestExistingPath(pathValue) {
  * Resolving the nearest existing ancestor catches output directories that are
  * symlinks to another location before Chromium writes through them.
  */
-export function isWorkspaceOutputPath(pathValue, rootDir = workspaceRoot) {
+export function isWorkspaceOutputPath(pathValue, rootDir = currentWorkspaceRoot()) {
   const root = resolve(rootDir);
   const candidate = resolve(pathValue);
   const lexical = relative(root, candidate);
@@ -1044,6 +1207,7 @@ function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
  */
 async function generatePDF() {
   const args = process.argv.slice(2);
+  let skipFactCheck = false;
 
   // Parse arguments
   let inputPath, outputPath, format = 'a4', reportNum = '', allowReorder = false;
@@ -1063,6 +1227,8 @@ async function generatePDF() {
       allowReorder = true;
     } else if (arg === '--strict-pages') {
       strictPages = true;
+    } else if (arg === '--skip-fact-check') {
+      skipFactCheck = true;
     } else if (!inputPath) {
       inputPath = arg;
     } else if (!outputPath) {
@@ -1168,6 +1334,37 @@ async function generatePDF() {
   if (totalReplacements > 0) {
     const breakdown = Object.entries(normalized.replacements).map(([k, v]) => `${k}=${v}`).join(', ');
     console.log(`🧹 ATS normalization: ${totalReplacements} replacements (${breakdown})`);
+  }
+
+  // Fact gate. generate-cover-letter.mjs already blocks on assertFacts before
+  // importing Playwright, on the reasoning that a failed gate must not leave a
+  // misleading artifact behind. A tailored CV is the same class of document and
+  // carries the numbers a reader acts on, but the CV path enforced the gate only
+  // as an instructed step in the mode prompts — so a programmatic caller (a
+  // bridge, a script, a batch run) rendered inflated metrics in silence. Gate the
+  // normalized HTML, which is the document that actually prints.
+  if (!skipFactCheck && cvMarkdown) {
+    // Imported lazily, INSIDE the guard. A static import is resolved at module
+    // load whether or not this branch runs, and the page-budget/batch suites copy
+    // generate-pdf.mjs alone into a temp workspace — a static import of a sibling
+    // that isn't copied made every one of those suites die with
+    // ERR_MODULE_NOT_FOUND before reaching the behaviour under test. Those
+    // fixtures also ship no cv.md, so this branch is never entered there. If the
+    // module is genuinely missing in a real workspace this throws and the render
+    // fails, which is the correct direction to fail for a fact gate.
+    const { assertFacts } = await import('./verify-cv-facts.mjs');
+    const factCheck = assertFacts(html, { label: basename(inputPath) });
+    // Ahead of the verdict, because it qualifies it: with no config the phrase
+    // lists are empty, so a "passed" below covers metrics and facts only.
+    if (factCheck.configMissing) {
+      console.warn('⚠️  No config/cv-facts.json — forbidden/advisory phrase checks did not run.');
+    }
+    if (factCheck.verdict === 'warn') {
+      console.warn(`⚠️  CV fact check warning: ${basename(inputPath)}`);
+      for (const phrase of factCheck.warnings) console.warn(`  - advisory phrase: ${phrase}`);
+    } else {
+      console.log('✅ Fact check passed');
+    }
   }
 
   return renderHtmlToPdf(html, outputPath, {
@@ -1430,6 +1627,7 @@ export async function inlineLocalFonts(html) {
  *   baseDir?: string,
  *   reportNum?: string,
  *   inputPath?: string,
+ *   workspaceRoot?: string,
  *   maxPages?: number,
  *   strictPages?: boolean,
  *   launchBrowser?: (options: {headless: boolean}) => Promise<import('playwright').Browser>
@@ -1479,9 +1677,25 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
  */
 async function renderInPage(browser, html, outputPath, opts = {}) {
   const format = opts.format || 'a4';
-  const baseDir = opts.baseDir || process.cwd();
+  const outputRoot = opts.workspaceRoot || workspaceRoot;
+  const requestedBaseDir = resolve(opts.baseDir || outputRoot);
+  // Temporary HTML is an output too: never let an external input path or
+  // caller-supplied baseDir choose an arbitrary directory. If the requested
+  // directory is outside the tracker workspace (or escapes through a symlink),
+  // keep the render workspace-owned while still allowing the input itself to
+  // be read.
+  const baseDir = isWorkspaceOutputPath(
+    resolve(requestedBaseDir, '.career-ops-render-anchor'),
+    outputRoot,
+  ) ? requestedBaseDir : resolve(outputRoot);
   const reportNum = opts.reportNum || '';
   const inputPath = opts.inputPath || '';
+
+  // Reject an escaping destination before creating directories, launching
+  // Chromium, or writing any renderer temporary files (#2844).
+  if (!isWorkspaceOutputPath(outputPath, outputRoot)) {
+    throw new Error(`Refusing to write the PDF outside the tracker workspace: ${outputPath}`);
+  }
 
   mkdirSync(dirname(outputPath), { recursive: true });
 
@@ -1549,7 +1763,8 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
       preferCSSPageSize: true,
     });
 
-    // Write PDF
+    // Write PDF only after rendering has completed. Renderer cleanup still runs
+    // if an injected browser fails before producing a buffer.
     await writeFile(outputPath, pdfBuffer);
 
     // Read the root page-tree count so page-like text in streams is ignored.
@@ -1659,7 +1874,7 @@ export async function renderBatch(entries, opts = {}) {
   }
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   generatePDF().catch((err) => {
     console.error('❌ PDF generation failed:', err.message);

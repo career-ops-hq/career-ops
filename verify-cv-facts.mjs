@@ -13,18 +13,51 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
-import { isAbsolute, join, dirname, basename } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { isAbsolute, join, basename } from 'path';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_SOURCES = ['cv.md', 'article-digest.md'];
-const DEFAULT_CONFIG = join(ROOT, 'config', 'cv-facts.json');
+// Two roots, because this gate compares user-layer files against a user-layer
+// config and previously resolved neither from the user's data root.
+//
+// cv.md and article-digest.md are the Source-of-Truth Boundary's primary files.
+// As bare relative strings they resolved against process.cwd(), so from any
+// directory that is not the data root the gate read NO sources — and a fact
+// check with no sources does not fail open quietly, it fails LOUD and WRONG:
+// every quantified claim in the generated CV is reported as "absent from
+// sources", including claims copied verbatim out of the user's own cv.md.
+//
+// config/cv-facts.json is user-layer too (it holds the user's forbidden and
+// advisory phrases). Resolved from the CODE root it was simply absent for any
+// configured data root, and the gate said so and carried on:
+//
+//     ⚠️  fact-gate config not found: <CHECKOUT>/config/cv-facts.json
+//         — forbidden/advisory phrase checks did not run.
+//
+// So one invocation both invented failures and silently skipped half its
+// checks. --source and --config still override; only the defaults move.
+const DATA_ROOT = getCareerOpsRoot();
+const DEFAULT_SOURCES = [join(DATA_ROOT, 'cv.md'), join(DATA_ROOT, 'article-digest.md')];
+const DEFAULT_CONFIG = join(DATA_ROOT, 'config', 'cv-facts.json');
 const TOOL_PROSE_WORDS = new Set([
   'a', 'an', 'and', 'at', 'built', 'by', 'containerized', 'deployment',
-  'deployments', 'for', 'from', 'in', 'of', 'on', 'production', 'project',
-  'team', 'the', 'to', 'using', 'with',
+  'deployments', 'delivery', 'diagnosing', 'efficiency', 'feedback', 'for', 'from', 'improve',
+  'improving', 'in', 'of', 'on', 'on-time', 'operations', 'production', 'project',
+  'recurring', 'resolving', 'submission', 'team', 'the', 'to', 'using', 'with',
 ]);
 const TOOL_PHRASE_PATTERN = /^(?=.{1,80}$)[\p{L}\p{N}.][\p{L}\p{N}+#./-]*(?:\s+[\p{L}\p{N}.][\p{L}\p{N}+#./-]*){0,2}$/u;
+const DELEGATED_PARTY_RE = /\b(?:vendors?|agenc(?:y|ies)|contractors?|consultanc(?:y|ies)|consultants?|external teams?|outsourc(?:ed|ing)|implementation partners?)\b/i;
+const DELEGATION_RE = /\b(?:commissioned|coordinated|directed|engaged|hired|managed|oversaw|partnered with|supervised)\b/i;
+const DIRECT_AUTHORSHIP_SIGNAL_RE = /\b(?:authored|built|coded|developed|engineered|implemented|programmed|wrote)\b/i;
+const THIRD_PARTY_EXECUTION_RE = /\b(?:vendors?|agenc(?:y|ies)|contractors?|consultanc(?:y|ies)|consultants?|external teams?|outsourc(?:ed|ing)|implementation partners?)\b[^.;!?]{0,120}\b(?:which|who|that)\b[^.;!?]{0,120}\b(?:authored|built|coded|developed|engineered|implemented|programmed|wrote)\b/i;
+const DIRECT_AUTHORSHIP_CLAIM_RE = /\b(authored|built|coded|developed|engineered|implemented|programmed|wrote)\b\s+(?:the\s+|an?\s+|my\s+|our\s+)?([^.;!?]{1,160})/giu;
+const ATTRIBUTION_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'as', 'at', 'authored', 'build', 'built', 'by', 'coded',
+  'commissioned', 'coordinated', 'created', 'developed', 'directed', 'engineered',
+  'engaged', 'for', 'from', 'hired', 'implemented', 'in', 'managed', 'my', 'of',
+  'on', 'our', 'oversaw', 'partnered', 'programmed', 'supervised', 'the', 'through',
+  'to', 'vendor', 'vendors', 'with', 'wrote',
+]);
 const METRIC_NOUNS = [
   'users', 'customers', 'clients', 'employees', 'engineers', 'teams', 'companies',
   'partners', 'organizations', 'organisations', 'brands', 'countries',
@@ -50,6 +83,15 @@ const METRIC_NOUNS = [
   'machines', 'devices', 'instruments', 'vehicles', 'units', 'locations',
   'acres', 'hectares', 'shifts', 'rounds', 'inspections', 'audits', 'incidents',
   'alarms', 'tickets',
+  // Education and training, for the same reason as the headcount block above.
+  // 'students' and 'staff' were already here, but the nouns an education or
+  // L&D CV actually inflates were not: how many people were put through a
+  // program and how many sites it covered. "Trained 900+ candidates across 60
+  // schools" against a source saying 250 and 20 passed the gate in silence.
+  'candidates', 'trainees', 'learners', 'participants', 'attendees',
+  'graduates', 'alumni', 'teachers', 'instructors', 'educators', 'faculty',
+  'schools', 'districts', 'campuses', 'classrooms', 'programs', 'programmes',
+  'workshops', 'assessments', 'exams',
 ];
 // How many words may sit between a number and the noun it counts. The same
 // regex parses the generated CV and the sources, so the window is symmetric by
@@ -81,7 +123,26 @@ const MODIFIER_WINDOW = 4;
 // handled by the modifier window) and "50kg users" (k not at a boundary) both keep
 // their existing behaviour and still normalize to "50".
 const COUNT_CLAIM_RE = new RegExp(
-  String.raw`\b(\d[\d,.]*(?:[kKmMbB]\b)?)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}(${METRIC_NOUNS.join('|')})\b`,
+  // LAZY (`{0,N}?`), so the number binds to the NEAREST noun in the window
+  // rather than the farthest. Greedy, the quantifier consumed as many filler
+  // words as the window allowed before looking for a noun, and only backtracked
+  // if that failed — so whenever two METRIC_NOUNS sat within the window it
+  // reported the wrong one (#3414):
+  //
+  //   "15+ years scaling teams and platforms"        -> 15 platforms, not 15 years
+  //   "20+ years leading engineering organizations"  -> 20 organizations, not 20 years
+  //
+  // The same sentence's plainer paraphrase ("15+ years of experience") produced
+  // "15 years", so a truthful line copied verbatim out of cv.md could be flagged
+  // as invented: the CV and the source stated the same fact and the extractor
+  // read two different claims out of them.
+  //
+  // Lazy cannot LOSE a claim. Both directions match exactly when some noun sits
+  // inside the window; only WHICH one is bound differs, and the nearest is the
+  // one a human reads. #2279's wide-window cases are unaffected — "~5 live
+  // Cloud Run deployments" still yields "5 deployments", because there is only
+  // one noun to bind to.
+  String.raw`\b(\d[\d,.]*(?:[kKmMbB]\b)?)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}?(${METRIC_NOUNS.join('|')})\b`,
   'gi'
 );
 const NOUN_SYNONYMS = new Map([
@@ -171,7 +232,7 @@ export function foldDigits(text) {
 }
 
 /** Remove HTML, basic LaTeX commands, and excess whitespace from document text. */
-export function stripMarkup(text) {
+export function stripMarkup(text, { keepLineBreaks = false } = {}) {
   return foldDigits(String(text))
     .replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, ' ')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi, ' ')
@@ -190,9 +251,43 @@ export function stripMarkup(text) {
     .replace(/<\/?(?:li|p|div|tr|h[1-6]|section|article|ul|ol|table|br)\b[^>\n]*>/gi, '. ')
     .replace(/<\/?[a-zA-Z][^>\n]*>/g, ' ')
     .replace(/\\[a-zA-Z]+\*?(?:\[[^\]]*\])?(?:\{([^}]*)\})?/g, ' $1 ')
+    // Markdown emphasis (`**bold**`, `__bold__`, `*italic*`) — the house style
+    // used to bold nearly every metric in cv.md/article-digest.md. A closing
+    // marker sitting directly against the number severed the number-noun
+    // adjacency the claim patterns require, so a bolded metric quoted verbatim
+    // from the source was reported as "invented" (#4085). Requires
+    // non-whitespace touching each marker (the standard markdown emphasis
+    // rule), so a lone unpaired asterisk — a footnote marker like "40%*", or
+    // two of them on one line — is left alone rather than paired into a false
+    // span. Single underscores are load-bearing in these sources (snake_case,
+    // env_keys.json, file paths), so only a DOUBLED underscore is stripped.
+    // Must run AFTER the LaTeX pass above: a LaTeX star-variant command
+    // (`\section*{...}`) leaves a single bare `*` behind if consumed first,
+    // and that stray star can pair with an unrelated later `*...*` span and
+    // mangle both. Bold before italic, so the italic pass never splits a
+    // `**...**` run in two. Bold may span a wrapped line (`keepLineBreaks`);
+    // italic is deliberately kept single-line, to stay conservative about the
+    // more collision-prone single-asterisk form.
+    //
+    // Deliberately NOT letter/digit-boundary-guarded (e.g. `(?<![\p{L}\p{N}_])`)
+    // even though that would preserve literal patterns like `2*3*4` or
+    // `foo*bar*baz`: a LaTeX star command directly abutting the next word
+    // (`\section*{Foo}and*emphasis*done` -> `Foo and*emphasis*done`) leaves
+    // the italic span's markers touching letters on both sides, which such a
+    // guard rejects — turning real emphasis back into a false negative. The
+    // covered CV/article-digest sources never contain literal multiplication
+    // asterisks, so this trades an untested hypothetical for a real,
+    // regression-tested case (see the LaTeX star-command test below).
+    .replace(/\*\*(\S(?:[\s\S]*?\S)?)\*\*/g, ' $1 ')
+    .replace(/__(\S(?:[\s\S]*?\S)?)__/g, ' $1 ')
+    .replace(/\*(\S(?:[^\n*]*\S)?)\*/g, ' $1 ')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
-    .replace(/\s+/g, ' ')
+    // keepLineBreaks preserves a newline as a CLAUSE boundary for the plan-horizon
+    // scan. Horizontal whitespace still collapses, and every claim pattern spans a
+    // newline through `\s`, so extraction is unaffected either way.
+    .replace(keepLineBreaks ? /[^\S\n]+/g : /\s+/g, ' ')
+    .replace(/ *\n+ */g, keepLineBreaks ? '\n' : ' ')
     .trim();
 }
 
@@ -235,19 +330,57 @@ function normalizeFact(value) {
   return normalizeClaim(value).replace(/[.;:,]+$/g, '').trim();
 }
 
-/** Keep likely technology names while dropping ordinary prose fragments. */
-function isLikelyTool(value) {
-  const normalized = normalizeFact(value);
-  const words = normalized.split(' ');
-  if (!normalized || words.length > 3 || words.some(word => TOOL_PROSE_WORDS.has(word))) return false;
-  // The surrounding grammar ("using", "built with", "tech stack") already
-  // asserts that each short fragment is a tool. Requiring capitalization or a
-  // hand-maintained allowlist makes unknown lowercase tools bypass the gate.
-  return TOOL_PHRASE_PATTERN.test(value.trim());
+/** Whether a raw (unnormalized) tool fragment looks like a real product name: Title Case, or carries a digit/version token (e.g. "n8n", "Python 3.11", "GPT-4"). */
+function looksToolShaped(rawValue) {
+  const trimmed = String(rawValue).trim();
+  if (!trimmed) return false;
+  // A digit anywhere marks a version or a name built on one: "n8n", "GPT-4",
+  // "Python 3.11".
+  if (/\d/.test(trimmed)) return true;
+  // Every word capitalised: "React", "Google Cloud", "Node.js". A single
+  // lowercase connector inside an otherwise-capitalised phrase never reaches
+  // here — TOOL_PHRASE_PATTERN caps a tool fragment at 3 words and the
+  // surrounding split on `and`/`with`/`in` already removes connectors.
+  return trimmed.split(/\s+/).every(word => /^[\p{Lu}]/u.test(word));
 }
 
-/** Extract explicitly asserted employer, title, and tool claims from text. */
-export function factClaims(text) {
+/**
+ * Keep likely technology names while dropping ordinary prose fragments.
+ *
+ * A fragment that does not look tool-shaped (see `looksToolShaped`) is kept
+ * anyway when it is already an exact substring of the source files: a real
+ * lowercase tool name ("kubernetes", "n8n") a user genuinely used and listed
+ * in cv.md must still pass, and rejecting it on casing alone would just trade
+ * one false-positive class for another.
+ *
+ * A fragment that is neither tool-shaped nor source-backed is still retained
+ * by default, preserving the gate's fail-closed behavior for lowercase names.
+ * Only exact words observed as prose false positives are rejected through
+ * `TOOL_PROSE_WORDS`; morphological suffixes are deliberately not used
+ * because real products such as Spring, Unity, and Processing share them.
+ */
+function isLikelyTool(value, sourceNormalized) {
+  const normalized = normalizeFact(value);
+  const words = normalized.split(' ');
+  if (!normalized || words.length > 3) return false;
+  if (!TOOL_PHRASE_PATTERN.test(value.trim())) return false;
+  if (looksToolShaped(value)) return true;
+  if (sourceNormalized != null && sourceContainsFact(sourceNormalized, normalized)) return true;
+  return !words.some(word => TOOL_PROSE_WORDS.has(word));
+}
+
+/**
+ * Extract explicitly asserted employer, title, and tool claims from text.
+ *
+ * `sourceNormalized` (from `normalizeFact(stripMarkup(sourceText))`, as
+ * `verifyFacts` already builds it) is optional and used only to let a
+ * lowercase-but-genuine tool fragment through `isLikelyTool` when it is
+ * already backed by a source file — see that function's doc comment. Callers
+ * that omit it (existing direct callers, tests) get the same conservative
+ * shape-only behaviour as before: a tool-shaped fragment is extracted, an
+ * ordinary lowercase one is not.
+ */
+export function factClaims(text, sourceNormalized = null) {
   const clean = stripMarkup(text);
   const claims = [];
   const patterns = [
@@ -274,7 +407,18 @@ export function factClaims(text) {
     // passed the gate (CodeRabbit review). The connector list is closed and
     // each one must be followed by another Capitalised word, so the capture
     // cannot wander into ordinary prose.
-    ['title', /\b(?:[Ss]erved [Aa]s|[Ww]orked [Aa]s|[Tt]itle\s*:\s*|[Rr]ole\s*:\s*)\s*(?:an?\s+|the\s+)?([A-Z][\w/-]*(?:\s+(?:of|for|and|the)\s+[A-Z][\w/-]*|\s+[A-Z][\w/-]*){0,4})|\b(?:[Ww]orked [Aa]t|[Jj]oined)\s+[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,4}\s+[Aa]s\s+(?:an?\s+|the\s+)?([A-Z][\w/-]*(?:\s+(?:of|for|and|the)\s+[A-Z][\w/-]*|\s+[A-Z][\w/-]*){0,4})/g],
+    //
+    // #3907 — the first captured token used `[A-Z][\w/-]*`, whose `*` allows
+    // a bare single capital letter to satisfy it. Ordinary prose like "...to
+    // this role: I do not have..." then read the pronoun "I" as a one-letter
+    // job title. The fix requires at least one more character after the
+    // leading capital (`+` instead of `*`), which a real title always has —
+    // even a 2-letter acronym like "VP" or "PM" still matches — while a bare
+    // "I" or "A" no longer can. Only the FIRST token of each alternative is
+    // tightened; the subsequent tokens in the `{0,4}` repetition keep `*`
+    // because a later short word in a real multi-word title (e.g. the "AI"
+    // in "Head of AI") must still be allowed.
+    ['title', /\b(?:[Ss]erved [Aa]s|[Ww]orked [Aa]s|[Tt]itle\s*:\s*|[Rr]ole\s*:\s*)\s*(?:an?\s+|the\s+)?([A-Z][\w/-]+(?:\s+(?:of|for|and|the)\s+[A-Z][\w/-]*|\s+[A-Z][\w/-]*){0,4})|\b(?:[Ww]orked [Aa]t|[Jj]oined)\s+[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,4}\s+[Aa]s\s+(?:an?\s+|the\s+)?([A-Z][\w/-]+(?:\s+(?:of|for|and|the)\s+[A-Z][\w/-]*|\s+[A-Z][\w/-]*){0,4})/g],
     ['tool', /\b(?:using|built with|worked with|technologies?\s*:\s*|tech stack\s*:\s*)([^.;\n]+?)(?=\s+\bfor\b|[.;\n]|$)/gi],
   ];
   for (const [kind, pattern] of patterns) {
@@ -285,26 +429,315 @@ export function factClaims(text) {
         : [match[1] || match[2]];
       for (const raw of rawValues) {
         const value = normalizeFact(raw);
-        if (value && (kind !== 'tool' || isLikelyTool(raw))) claims.push({ kind, value });
+        if (value && (kind !== 'tool' || isLikelyTool(raw, sourceNormalized))) claims.push({ kind, value });
       }
     }
   }
   return claims;
 }
 
+/** Split generated/source documents into bounded statements for attribution checks. */
+function factStatements(text) {
+  const withLineBoundaries = String(text ?? '').replace(/\r?\n+/g, '. ');
+  return stripMarkup(withLineBoundaries)
+    .split(/(?:[.!?]\s+|[.!?]$)/u)
+    .map(statement => statement.trim())
+    .filter(Boolean);
+}
+
+/** Return conservative content tokens used only to link a rewrite to its source statement. */
+function attributionTokens(text) {
+  return normalizeFact(text)
+    .split(/[^\p{L}\p{N}+#./-]+/u)
+    .filter(token => token.length >= 3 && !ATTRIBUTION_STOP_WORDS.has(token));
+}
+
+/**
+ * Detect a narrow authorship escalation: a source explicitly attributes
+ * execution to a third party, while the generated rewrite claims direct
+ * implementation and drops that attribution.
+ *
+ * This deliberately does not guess from generic leadership prose. It requires
+ * a delegation verb, a named third-party role, and at least two shared content
+ * tokens between the source and generated statements. Ambiguous source
+ * statements that also contain a direct implementation verb are left alone;
+ * an explicit relative clause such as "vendor X, which built Y" is treated as
+ * third-party execution evidence rather than candidate direct-work evidence.
+ */
+export function delegatedAuthorshipClaims(targetText, sourceText) {
+  const sourceStatements = factStatements(sourceText);
+  const directSources = sourceStatements
+    .filter(statement => DIRECT_AUTHORSHIP_SIGNAL_RE.test(statement))
+    .filter(statement => !THIRD_PARTY_EXECUTION_RE.test(statement))
+    .map(statement => new Set(attributionTokens(statement)));
+  const delegatedSources = sourceStatements
+    .filter(statement => DELEGATED_PARTY_RE.test(statement) && DELEGATION_RE.test(statement))
+    .filter(statement => (
+      !DIRECT_AUTHORSHIP_SIGNAL_RE.test(statement) || THIRD_PARTY_EXECUTION_RE.test(statement)
+    ))
+    .map(statement => ({
+      statement,
+      tokens: new Set(attributionTokens(statement)),
+    }));
+  if (!delegatedSources.length) return [];
+
+  const claims = [];
+  for (const statement of factStatements(targetText)) {
+    // Keeping the third-party attribution is not an authorship escalation.
+    if (DELEGATED_PARTY_RE.test(statement)) continue;
+    DIRECT_AUTHORSHIP_CLAIM_RE.lastIndex = 0;
+    for (const match of statement.matchAll(DIRECT_AUTHORSHIP_CLAIM_RE)) {
+      const value = normalizeFact(`${match[1]} ${match[2]}`);
+      const tokens = [...new Set(attributionTokens(match[2]))];
+      if (tokens.length < 2) continue;
+      // Explicit direct-work evidence wins over a nearby delegated project
+      // that happens to use the same technology or artifact vocabulary.
+      if (directSources.some(source => tokens.filter(token => source.has(token)).length >= 2)) {
+        continue;
+      }
+      const delegatedSource = delegatedSources.find(source => (
+        tokens.filter(token => source.tokens.has(token)).length >= 2
+      ));
+      if (delegatedSource) {
+        claims.push({ kind: 'authorship', value });
+      }
+    }
+  }
+  return claims.filter((claim, index, all) => (
+    all.findIndex(other => other.value === claim.value) === index
+  ));
+}
+
+// A PLAN HORIZON is the window a candidate proposes to work in, and it asserts
+// nothing about the past:
+//
+//   "I'd welcome the chance to talk through how I'd approach the first 90 days"
+//
+// The time units it uses belong in METRIC_NOUNS -- "cut deployment time to 2
+// days" and "saved 20 hours a week" are exactly the claims this gate exists to
+// check -- so the stock cover-letter closing above was extracted as the claim
+// "90 days" and reported as unsupported. No source can ever evidence a proposal,
+// so the only remedy was an allow_metrics entry per phrasing, and every fresh
+// wording came back red.
+//
+// Two signals are required together, and each alone would silence a real claim:
+//
+//   - a horizon LEAD adjacent to the number ("the first", "my next"). Alone it
+//     would swallow "revenue grew in the first 12 months", a past-tense claim.
+//   - a FORWARD marker in the same sentence: one of the four modals that frame
+//     a proposal (would, will, shall, should), a contracted 'd/'ll, or an
+//     explicit intent verb. Ability and possibility modals (can, could, may,
+//     might) are deliberately out, since they frame what is possible rather
+//     than what is planned. Alone this half would swallow "I would bring 20
+//     years of experience", where the number is a real claim inside a
+//     hypothetical sentence.
+//
+// CLAUSE-scoped on purpose. Document-scoped, one conditional courtesy line
+// would silence every time-unit claim in the letter; sentence-scoped, a marker in
+// a later clause ("...in the first 99 months, and I would be glad to repeat it")
+// silences a fabricated PAST number, which is the direction this gate exists to
+// prevent. A newline ends a clause, so a soft-wrapped letter cannot join two.
+const TIME_NOUNS = new Set(['days', 'weeks', 'months', 'years', 'hours', 'minutes', 'seconds']);
+const HORIZON_LEAD_RE = /\b(?:the|my|our|your)?\s*(?:first|next)\s+$/i;
+// `'d` is "had" as often as "would", so it only counts when the verb after it is
+// not a past participle. The -ed test is a heuristic: an irregular participle
+// ("I'd built the first 12 months") still reads as a marker, which is why the
+// clause scope below carries the weight rather than this test alone.
+const FORWARD_MARKER_RE = /\b(?:would|will|shall|should)\b|['\u2019]d\b(?!\s+[A-Za-z]+ed\b)|['\u2019]ll\b|\b(?:plan|plans|planning|intend|intends)\s+to\b|\bgoing to\b|\blooking forward\b/i;
+
+/**
+ * The CLAUSE of `text` containing `index`.
+ *
+ * Bounded by `. ! ? , ; :` and by a newline, so a marker in a neighbouring
+ * clause cannot reach the number: "grew in the first 99 months, and I would be
+ * glad to repeat it" keeps its claim, and so does the same pair soft-wrapped
+ * across two lines. A separator BETWEEN DIGITS is not a boundary, or the clause
+ * around "1.5 years" would end inside the number and lose its own marker.
+ *
+ * @param {string} text
+ * @param {number} index
+ * @returns {string}
+ */
+function clauseAround(text, index) {
+  const isBoundary = (i) => {
+    const c = text[i];
+    if (c === '\n') return true;
+    if (c !== '.' && c !== '!' && c !== '?' && c !== ',' && c !== ';' && c !== ':') return false;
+    return !(/\d/.test(text[i - 1] ?? '') && /\d/.test(text[i + 1] ?? ''));
+  };
+  const isSentenceEnd = (i) => {
+    const c = text[i];
+    if (c === '\n') return true;
+    if (c !== '.' && c !== '!' && c !== '?') return false;
+    return !(/\d/.test(text[i - 1] ?? '') && /\d/.test(text[i + 1] ?? ''));
+  };
+  let start = 0;
+  for (let i = index - 1; i >= 0; i--) if (isBoundary(i)) { start = i + 1; break; }
+  let end = text.length;
+  for (let i = index; i < text.length; i++) if (isBoundary(i)) { end = i; break; }
+  // A clause opened by a coordinator continues the one before it, and a plan
+  // stated once governs both halves: "I'd approach the first 90 days by
+  // listening, and the first 30 days by shipping". The lookback stops at a
+  // SENTENCE end, so it can never reach across "…first 99 months. I would…".
+  if (/^\s*(?:and|or|then|plus)\b/i.test(text.slice(start, end))) {
+    let sentenceStart = 0;
+    for (let i = start - 1; i >= 0; i--) if (isSentenceEnd(i)) { sentenceStart = i + 1; break; }
+    return text.slice(sentenceStart, end);
+  }
+  return text.slice(start, end);
+}
+
+/**
+ * Count-claim matches in `clean`, minus the ones that assert nothing.
+ *
+ * Shared by metricClaims and diagnoseCoverage so the two cannot disagree about
+ * whether a document contained a readable count.
+ *
+ * @param {string} clean
+ * @returns {RegExpMatchArray[]}
+ */
+function countMatches(clean) {
+  COUNT_CLAIM_RE.lastIndex = 0;
+  return [...clean.matchAll(COUNT_CLAIM_RE)].filter((match) => {
+    if (!TIME_NOUNS.has(match[2].toLowerCase())) return true;
+    const lead = clean.slice(Math.max(0, match.index - 40), match.index);
+    if (!HORIZON_LEAD_RE.test(lead)) return true;
+    return !FORWARD_MARKER_RE.test(clauseAround(clean, match.index));
+  });
+}
+
 /** Extract metric-like claims that require source evidence. */
 export function metricClaims(text) {
-  const clean = stripMarkup(text);
+  const clean = stripMarkup(text, { keepLineBreaks: true });
   const claims = new Set();
   for (const pattern of SIMPLE_CLAIM_PATTERNS) {
     for (const match of clean.matchAll(pattern)) claims.add(normalizeClaim(match[0]));
   }
-  COUNT_CLAIM_RE.lastIndex = 0;
-  for (const match of clean.matchAll(COUNT_CLAIM_RE)) {
+  for (const match of countMatches(clean)) {
     const noun = match[2].toLowerCase();
     claims.add(normalizeClaim(`${match[1]} ${NOUN_SYNONYMS.get(noun) ?? noun}`));
   }
   return claims;
+}
+
+// A number counting a word, in ANY script — the language-agnostic SHAPE of the
+// claims COUNT_CLAIM_RE recognises only when the noun happens to be English.
+// Used solely to answer "were there count claims this gate could not read?",
+// never to build a claim: it has no lexicon, so it cannot say what was counted.
+const GENERIC_COUNT_RE = new RegExp(
+  String.raw`(?<![\p{L}\p{N}])(\d[\d,.]*)\s*\+?\s*(?:[\p{L}][\p{L}\p{M}-]*[\s]+){0,${MODIFIER_WINDOW}}([\p{L}][\p{L}\p{M}]{2,})`,
+  'giu',
+);
+// A year is not a count. "Led the 2024 migration" is the shape above and none
+// of its meaning, and every CV has several.
+const YEAR_LIKE = /^(?:19|20)\d{2}$/;
+
+/**
+ * Count-shaped spans in `text`, whatever language it is written in.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function countShapedSpans(text) {
+  const clean = stripMarkup(String(text ?? ''));
+
+  // Ranges the language-neutral patterns already own. "$120k and closed a
+  // $90,000 deal" is currency followed by prose, and reads as two counts to a
+  // detector that only knows "digits, then a word" — but those amounts ARE
+  // checked, in every language, so reporting them as unread is a false alarm.
+  // Derived from SIMPLE_CLAIM_PATTERNS rather than re-guessed, so the two
+  // cannot drift.
+  const covered = [];
+  for (const pattern of SIMPLE_CLAIM_PATTERNS) {
+    for (const m of clean.matchAll(pattern)) covered.push([m.index, m.index + m[0].length]);
+  }
+  const alreadyChecked = (i) => covered.some(([from, to]) => i >= from && i < to);
+
+  const out = [];
+  for (const m of clean.matchAll(GENERIC_COUNT_RE)) {
+    if (YEAR_LIKE.test(m[1].replace(/[,.]/g, ''))) continue;
+    // The digits are what a simple pattern would have claimed, so test their
+    // position, not the span's — the span starts at the number either way, but
+    // a currency match starts one character earlier, at the symbol.
+    if (alreadyChecked(m.index) || alreadyChecked(m.index + m[0].indexOf(m[1]))) continue;
+    out.push(m[0].trim());
+  }
+  return out;
+}
+
+/**
+ * Whether this document contains count claims the extractor could not read.
+ *
+ * METRIC_NOUNS is an English word list, and COUNT_CLAIM_RE's modifier window is
+ * `[A-Za-z]`. Percentages, currency and multipliers are language-neutral and
+ * still checked everywhere — but a COUNT is checked only in English, and this
+ * file's own METRIC_NOUNS comment names counts as the class that gets inflated:
+ * "Managed 45 staff against a source saying 20 passed the gate silently, which
+ * is the exact fabrication class this script exists to catch."
+ *
+ * For a CV written in one of the market languages the project ships modes for,
+ * that sentence is true of EVERY count, not only the ones outside the list:
+ *
+ *   ES  "Gestioné 45 empleados en 3 instalaciones."  -> 0 count claims, pass
+ *   DE  "Leitete 45 Mitarbeiter an 3 Standorten."    -> 0 count claims, pass
+ *   JA  "3拠点で45名のスタッフを管理。"                   -> 0 count claims, pass
+ *
+ * AGENTS.md makes non-English output a first-class case (`language.output`
+ * governs "reports, tracker notes, PDFs, cover letters ... any user-visible
+ * prose"), so this is not an edge.
+ *
+ * Reporting it rather than blocking is the same choice jd-skill-gap.mjs's
+ * diagnoseExtraction() and story-provenance-check.mjs's diagnose() make, and
+ * for the reason story-provenance states outright: so "an empty/near-empty
+ * result isn't misread as 'scanned and clean'". Blocking instead would fail
+ * every non-English document, trading a silent gap for a wall.
+ *
+ * DELIBERATELY CONSERVATIVE. It fires only when the document has two or more
+ * count-shaped spans and the extractor produced NO count claim at all — a
+ * document where the lexicon reached something is assumed to be reaching it in
+ * the language it was written in. Under-reporting is the right direction for a
+ * signal added to a gate every generated document already runs.
+ *
+ * TWO KNOWN BLIND SPOTS, stated rather than implied:
+ *
+ *   - Coincidental coverage. French "3 sites" matches the English noun, so one
+ *     recognised count silences the warning for a French CV whose other counts
+ *     are invisible.
+ *   - CJK. This detector needs whitespace: it locates a count by a digit run
+ *     that is not preceded by a letter and is followed by one. Japanese and
+ *     Chinese put digits flush against the surrounding text ("3拠点で45名"),
+ *     so the second number is preceded by a letter and is not seen at all.
+ *     Relaxing the lookbehind to fix that would match digits inside Latin
+ *     identifiers, so it needs script-aware segmentation rather than a looser
+ *     regex — separate work, and the reason this is a partial answer.
+ *
+ * So this closes the silent pass for space-delimited languages (de, es, tr, pt,
+ * it, pl, ru, ...). A ja/zh CV can still reach 'pass' unchecked, which is why
+ * the real answer is a lexicon those languages are in, not a better detector.
+ *
+ * @param {string} targetText
+ * @returns {{reason: string, message: string, spans: string[]}|null}
+ */
+export function diagnoseCoverage(targetText) {
+  const spans = countShapedSpans(targetText);
+  if (spans.length < 2) return null;
+  // RAW matches on purpose. This asks "could the extractor read any count here?",
+  // which is about the noun lexicon, not about whether a count was later judged a
+  // proposal. Reading the filtered set made a letter whose only counts were plan
+  // horizons report "none matched the metric extractor, whose noun list is
+  // English-only" -- a false warn blaming the lexicon for counts it had read fine.
+  COUNT_CLAIM_RE.lastIndex = 0;
+  const recognized = [...stripMarkup(String(targetText ?? '')).matchAll(COUNT_CLAIM_RE)];
+  if (recognized.length > 0) return null;
+  return {
+    reason: 'no-count-claims-recognized',
+    message:
+      `${spans.length} count-like claims are present but none matched the metric extractor, whose noun ` +
+      'list is English-only — so no count in this document was checked against your sources. ' +
+      'Percentages, currency and multipliers were still checked. Verify the counts by hand, or add ' +
+      'them to allow_metrics in config/cv-facts.json once confirmed.',
+    spans,
+  };
 }
 
 /**
@@ -345,15 +778,32 @@ export function auditClaims(targetText, sourceText, config = {}) {
   return { invented, forbidden };
 }
 
-/** Load and validate the optional fact-gate configuration file. */
-function loadConfig(path) {
-  if (!existsSync(path)) return { allow_metrics: [], allow_facts: [], forbidden_phrases: [], warn_phrases: [] };
+/**
+ * Load and validate the optional fact-gate configuration file.
+ *
+ * The empty config is a fine default and a terrible silent one: forbidden_phrases
+ * and warn_phrases are the only phrase-level guard this module has, so with no
+ * file loaded the phrase check cannot fail — and a gate that is DISABLED then
+ * reads exactly like a gate that RAN AND FOUND NOTHING. `missing` is the one bit
+ * that tells them apart; callers surface it (#3894).
+ *
+ * Nothing here turns a missing config into an error. A user who has never
+ * written a cv-facts.json is in a normal state; they just should not be left
+ * believing a gate is protecting them when none is loaded.
+ *
+ * @param {string} path absolute path to the configuration file
+ * @returns {{missing: boolean, config: {allow_metrics: string[], allow_facts: string[], forbidden_phrases: string[], warn_phrases: string[]}}}
+ * @throws when the file exists but is unparseable or has a non-array key
+ */
+export function loadFactConfig(path) {
+  const keys = ['allow_metrics', 'allow_facts', 'forbidden_phrases', 'warn_phrases'];
+  if (!existsSync(path)) return { missing: true, config: Object.fromEntries(keys.map(key => [key, []])) };
   const config = JSON.parse(readFileSync(path, 'utf-8'));
-  for (const key of ['allow_metrics', 'allow_facts', 'forbidden_phrases', 'warn_phrases']) {
+  for (const key of keys) {
     if (config[key] == null) config[key] = [];
     else if (!Array.isArray(config[key])) throw new Error(`${key} must be an array in ${path}`);
   }
-  return config;
+  return { missing: false, config };
 }
 
 /** Resolve a CLI or configuration path relative to the selected working directory. */
@@ -381,13 +831,13 @@ export function verifyFacts(targetText, {
   cwd = process.cwd(),
 } = {}) {
   const sourceText = sourcePaths.map(path => readIfExists(resolveInputPath(path, cwd))).join('\n');
-  const config = loadConfig(resolveInputPath(configPath, cwd));
+  const { missing: configMissing, config } = loadFactConfig(resolveInputPath(configPath, cwd));
   const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const targetClaims = metricClaims(targetText);
   const invented = [...targetClaims].filter(claim => !allowed.has(claim));
   const sourceNormalized = normalizeFact(stripMarkup(sourceText));
   const allowedFacts = new Set(config.allow_facts.map(normalizeFact));
-  const unsupportedFacts = factClaims(targetText)
+  const unsupportedFacts = [...factClaims(targetText, sourceNormalized), ...delegatedAuthorshipClaims(targetText, sourceText)]
     .filter(({ value }) => !sourceContainsFact(sourceNormalized, value) && !allowedFacts.has(value))
     .filter((claim, index, claims) => claims.findIndex(other => other.kind === claim.kind && other.value === claim.value) === index);
   const forbidden = config.forbidden_phrases
@@ -396,12 +846,22 @@ export function verifyFacts(targetText, {
   const warnings = config.warn_phrases
       .filter(Boolean)
       .filter(phrase => stripMarkup(targetText).toLowerCase().includes(String(phrase).toLowerCase()));
+  // Never downgrades a block and never creates one: a document that fails on
+  // real evidence still fails on that, and a coverage gap only turns a would-be
+  // 'pass' into 'warn' so the caller is told the gate could not read it.
+  const coverage = diagnoseCoverage(targetText);
+  const blocked = invented.length || unsupportedFacts.length || forbidden.length;
   return {
-    verdict: invented.length || unsupportedFacts.length || forbidden.length ? 'block' : warnings.length ? 'warn' : 'pass',
+    verdict: blocked ? 'block' : (warnings.length || coverage) ? 'warn' : 'pass',
     invented,
     unsupportedFacts,
     forbidden,
     warnings,
+    coverage,
+    // Deliberately outside the verdict: no config is a normal state, not a
+    // finding. It rides along so a caller can say the phrase lists were never
+    // loaded instead of printing a clean result the reader takes for "checked".
+    configMissing,
   };
 }
 
@@ -451,7 +911,8 @@ function usage() {
        node verify-cv-facts.mjs --self-test
 
 Checks generated candidate-facing text for unsupported metrics and explicitly asserted
-non-metric facts (employers, titles, and tools) absent from source files.
+non-metric facts (employers, titles, tools, and delegated-work authorship) absent
+from source files.
 Default sources: cv.md, article-digest.md
 Default config:  config/cv-facts.json (optional)`;
 }
@@ -486,6 +947,83 @@ function runSelfTest() {
   equal('truthful multiplier', auditClaims('Partners earned 2x more', source).invented, []);
   equal('noun synonym', auditClaims('Authored 80 articles', source).invented, []);
   equal('ordinary year is ignored', auditClaims('Joined the team in 2013', source).invented, []);
+
+  // The number binds to the NEAREST noun in the window, not the farthest (#3414).
+  // Greedy, each of these bound the wrong noun while the SAME fact worded plainly
+  // bound the right one — so a truthful line copied verbatim out of cv.md read as
+  // a different claim from its own source, and the gate flagged it as invented.
+  const claimsOf = (text) => [...metricClaims(text)].sort().join(' | ');
+  equal('nearest noun wins over a farther one', claimsOf('15+ years scaling teams and platforms'), '15 years');
+  equal('nearest noun wins across three modifiers', claimsOf('20+ years leading engineering organizations'), '20 years');
+  equal('the plain phrasing of the same fact agrees', claimsOf('I have 15+ years of experience.'), '15 years');
+  // …and the whole point of a truthful restatement passing the gate:
+  equal('a verbatim experience line is not invented',
+    auditClaims('15+ years scaling teams and platforms', '15+ years of experience.').invented, []);
+  // #2279 is why the window is wide: one noun, several modifiers. Lazy must not
+  // shrink the reach, only decide which noun wins when there are two.
+  equal('a 3-modifier single-noun phrase still resolves', claimsOf('~5 live Cloud Run deployments'), '5 deployments');
+  equal('and its 2-modifier paraphrase agrees', claimsOf('~5 Cloud Run deployments'), '5 deployments');
+  // A number is a hard barrier for the chain, so two counts stay separate.
+  equal('two counts in one sentence stay distinct', claimsOf('8 years supporting 40 engineers'), '40 engineers | 8 years');
+
+  // A proposed plan horizon is not a claim about the past (#3655). Time units
+  // belong in METRIC_NOUNS, so the stock cover-letter closing was extracted as a
+  // metric and reported as invented, and no source could ever evidence it.
+  equal('a proposed plan horizon is not a claim',
+    claimsOf("I'd welcome the chance to talk through how I'd approach the first 90 days."), '');
+  equal('the same closing in the fuller phrasing',
+    claimsOf('I would welcome a conversation about the first 90 days.'), '');
+  equal('an end-to-end audit stops reporting it',
+    auditClaims("I'd approach the first 90 days by listening.", 'No numbers here.').invented, []);
+  // Both halves are required, and each alone would silence a real claim.
+  equal('a past-tense window behind the same lead is still a claim',
+    claimsOf('Revenue grew in the first 12 months.'), '12 months');
+  equal('a forward-looking sentence keeps a claim with no horizon lead',
+    claimsOf('I would bring 20 years of experience.'), '20 years');
+  equal('an ordinary time metric is untouched',
+    claimsOf('Cut deployment time to 2 days.'), '2 days');
+  // The marker must be in the SAME sentence, or one conditional courtesy line
+  // would silence every time-unit claim in the document.
+  equal('a marker in a neighbouring sentence does not reach',
+    claimsOf('I would be glad to help. Revenue grew in the first 12 months.'), '12 months');
+  // Scoped to time units on purpose: a count of anything else is still a count.
+  equal('a non-time noun behind the same construction is unaffected',
+    claimsOf("I'd start with the first 3 teams."), '3 teams');
+  // The marker need not be first person: a plan is still a plan when the letter
+  // frames it around the reader, or drops the pronoun entirely.
+  equal('a bare modal is a forward marker too',
+    claimsOf('My first 90 days would centre on the pipeline.'), '');
+  equal('a reader-facing plan question is one as well',
+    claimsOf('How would you approach the first 90 days?'), '');
+  equal('and a proposal framed with should',
+    claimsOf('Glad to talk through how the first 90 days should go.'), '');
+  // Ability is not a plan: "could" frames what is possible, not what is proposed.
+  equal('an ability modal is not a forward marker',
+    claimsOf('Revenue could be traced to the first 12 months.'), '12 months');
+  // Review of #3656: the filter was wider than the description, and in the
+  // direction the gate exists to prevent. A marker anywhere in the sentence let
+  // a fabricated PAST number through, so the marker must share the number's
+  // CLAUSE, and a line break ends one.
+  equal('a marker in a later clause does not suppress',
+    claimsOf('Revenue grew in the first 99 months, and I would be glad to repeat it.'), '99 months');
+  equal('a soft-wrapped line does not join two clauses',
+    claimsOf('I would be glad to help\nRevenue grew in the first 99 months'), '99 months');
+  // "'d" is "had" as often as "would"; a past-perfect claim is not a plan.
+  equal('a past-perfect contraction is not a forward marker',
+    claimsOf("I'd completed the migration in the first 12 months."), '12 months');
+  equal("but 'd before a base verb still is", claimsOf("I'd approach the first 90 days."), '');
+  // A decimal is not a sentence boundary. Splitting inside "1.5" put the marker
+  // outside the number's own clause, so a real plan horizon stayed a claim.
+  equal('a decimal horizon is still a plan', claimsOf('My first 1.5 years would focus on the pipeline.'), '');
+  // ...and the VERDICT, not just `invented`: routing diagnoseCoverage through the
+  // filtered matches turned a false block into a false warn whose message blamed
+  // the English-only noun list for counts that were English and recognized.
+  const verdictOf = (t) => {
+    const r = verifyFacts(t, { sourcePaths: [], configPath: '/nonexistent' });
+    return `${r.verdict}${r.coverage ? ' +' + r.coverage.reason : ''}`;
+  };
+  equal('two plan horizons do not trigger a coverage warning',
+    verdictOf("I'd approach the first 90 days by listening, and the first 30 days by shipping."), 'pass');
   equal(
     'allow_metrics override',
     auditClaims('Reached 94,772 users', source, { allow_metrics: ['94,772 users'] }).invented,
@@ -571,6 +1109,13 @@ function runSelfTest() {
   // exactly-three-digit window is for.
   equal('a decimal is not read as grouping',
     auditClaims('Cut build time to 2.5 hours', 'Cut build time to 2.5 hours.').invented, []);
+  // Assert the canonical form directly, not just that the two sides agree:
+  // the case above puts '2.5 hours' on BOTH sides of auditClaims, so a
+  // regression that stripped the period from every claim would keep them
+  // equal and stay green while silently folding 2.5 into 25. Pinning the
+  // output of normalizeClaim is what makes this case able to fail.
+  equal('an ordinary decimal survives normalization',
+    normalizeClaim('2.5 hours'), '2.5 hours');
   // A four-digit left part is a year, not a group: nothing is joined.
   equal('a year is not glued to the next number', auditClaims('Joined in 2026 100 users', foldSource).invented, ['100 users']);
 
@@ -724,6 +1269,12 @@ export function runCli(args = process.argv.slice(2)) {
       sourcePaths: parsed.sourcePaths.length ? parsed.sourcePaths : DEFAULT_SOURCES,
       configPath: parsed.configPath,
     });
+    // On stderr, before any verdict line and regardless of it: with no config
+    // the phrase lists are empty, so "passed" below means the phrase check never
+    // ran. stdout stays clean so --json remains parseable.
+    if (result.configMissing) {
+      console.error(`⚠️  fact-gate config not found: ${parsed.configPath} — forbidden/advisory phrase checks did not run.`);
+    }
     if (parsed.json) {
       console.log(JSON.stringify(result));
       return result.verdict === 'block' ? 1 : 0;
@@ -735,6 +1286,10 @@ export function runCli(args = process.argv.slice(2)) {
     if (result.verdict === 'warn') {
       console.error(`CV fact check warning: ${basename(targetPath)}`);
       for (const phrase of result.warnings) console.error(`  - advisory phrase: ${phrase}`);
+      if (result.coverage) {
+        console.error(`  - not checked: ${result.coverage.message}`);
+        for (const span of result.coverage.spans.slice(0, 8)) console.error(`      ${span}`);
+      }
       return 0;
     }
     console.error(`CV fact check failed: ${basename(targetPath)}`);
@@ -754,7 +1309,7 @@ export function runCli(args = process.argv.slice(2)) {
     return 1;
   } catch (err) {
     if (parsed.json) {
-      console.log(JSON.stringify({ verdict: 'block', invented: [], unsupportedFacts: [], forbidden: [], warnings: [], errors: [err.message] }));
+      console.log(JSON.stringify({ verdict: 'block', invented: [], unsupportedFacts: [], forbidden: [], warnings: [], coverage: null, errors: [err.message] }));
       return 1;
     }
     console.error(`ERROR: ${err.message}`);
@@ -762,6 +1317,6 @@ export function runCli(args = process.argv.slice(2)) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   process.exitCode = runCli();
 }

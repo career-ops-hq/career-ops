@@ -326,4 +326,64 @@ console.log('\n🧪 Local user-paths declaration file (#2421)\n');
   }
 }
 
+// ── 19. Non-canonical spellings of a system path are refused ──
+//
+// The collision check compares strings exactly (`path === sys`), and
+// userLayerViolations() later compares against git's changed-path format, which
+// is always canonical. A declaration written as `./merge-tracker.mjs` therefore
+// matches NEITHER: the collision check waves it through, and the safety check
+// never recognises it as the file it names. The declaration silently protects
+// nothing and the updater overwrites the file — the exact data loss #2421
+// exists to prevent, reachable from a plausible typo.
+//
+// Canonical syntax is REQUIRED rather than normalised, because normalising
+// would quietly accept several spellings for one path and leave this file
+// disagreeing with what git reports.
+{
+  const nonCanonical = [
+    ['./merge-tracker.mjs', 'a leading ./'],
+    ['batch/./batch-runner.sh', 'an interior . segment'],
+    ['batch//batch-runner.sh', 'a repeated separator'],
+    ['batch\\batch-runner.sh', 'a backslash separator'],
+    ['.', 'a bare dot'],
+  ];
+  const survivors = [];
+  for (const [path, shape] of nonCanonical) {
+    let threw = null;
+    try {
+      localUserPaths(root(`${path}\n`));
+    } catch (err) {
+      threw = err;
+    }
+    if (!threw || !threw.message.includes(path)) survivors.push(`${shape} → ${path}`);
+  }
+  if (survivors.length === 0) {
+    pass('non-canonical path spellings are refused and named');
+  } else {
+    fail(`#19 these non-canonical forms were accepted: ${survivors.join('; ')}`);
+  }
+}
+
+// ── 20. Canonical forms the fix must NOT break ──
+//
+// The guard rejects spelling, not vocabulary. A directory declaration keeps its
+// single trailing slash, a nested path keeps its separators, and dots inside a
+// FILENAME are ordinary characters rather than path segments — so a dotfile and
+// a dotted name must both survive.
+{
+  const canonical = ['my-runner.ps1', '.toolrc', 'fixtures/', 'scripts/fetch-thing.mjs', 'notes-v2.md'];
+  let problem = null;
+  try {
+    const got = localUserPaths(root(`${canonical.join('\n')}\n`));
+    if (!eq(got, canonical)) problem = `returned ${JSON.stringify(got)}`;
+  } catch (err) {
+    problem = err.message;
+  }
+  if (!problem) {
+    pass('canonical declarations, including a trailing-slash directory, still parse');
+  } else {
+    fail(`#20 canonical declarations were rejected or altered: ${problem}`);
+  }
+}
+
 for (const dir of roots) rmSync(dir, { recursive: true, force: true });

@@ -1,5 +1,8 @@
-// The two decisions /api/status makes around its set-status.mjs child, kept
-// here so they are testable without spawning anything.
+// The decisions /api/status makes around its set-status.mjs child, kept here so
+// they are testable without spawning anything.
+
+// What the caller is told when the CLI supplied no usable message of its own.
+const GENERIC_FAILURE = "status update failed";
 
 /**
  * The CLI's JSON document, or null when stdout carries none.
@@ -14,24 +17,72 @@
  * object is the result. A diagnostic that happens to be valid JSON cannot shadow
  * it, because the result is printed last.
  *
+ * One line is not the only shape the document takes, though, and assuming it was
+ * made this parser blind on the path that matters most. set-status.mjs prints
+ * its FAILURE object compactly (`JSON.stringify({error, code})`) but its SUCCESS
+ * object pretty, `JSON.stringify(result, null, 2)` — so a run that actually
+ * wrote the tracker produced a multi-line document, no single line parsed, and
+ * the route answered 500 "status update returned no result" for a change already
+ * committed to data/applications.md and already appended to data/status-log.tsv.
+ * Every successful write through /api/status looked like a server error to its
+ * caller — worse than the bug this function was written to fix, because the UI
+ * then reverts a control over a write that stood.
+ *
+ * So each candidate is tried twice: as a single line first, then as the head of
+ * a multi-line document running to the end of stdout. Only a TOP-LEVEL opening
+ * brace is unindented, so the multi-line attempt starts where the document
+ * starts; a nested `{` is indented and its slice does not parse.
+ *
  * @param {string} stdout
  * @returns {Record<string, unknown> | null}
  */
 export function parseCliJson(stdout) {
   const lines = String(stdout ?? "").split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line.startsWith("{")) continue;
+  /** @param {string} candidate */
+  const asObject = (candidate) => {
     try {
-      const parsed = JSON.parse(line);
+      const parsed = JSON.parse(candidate);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         return /** @type {Record<string, unknown>} */ (parsed);
       }
     } catch {
-      // Not the document line. Keep scanning earlier lines.
+      /* not the document */
     }
+    return null;
+  };
+  for (let i = lines.length - 1; i >= 0; i--) {
+    // Column zero, not "starts with a brace once trimmed": the CLI prints its
+    // document unindented, so an indented brace belongs to something INSIDE a
+    // document — and `"    {}"` from an empty object in an array is a valid
+    // single-line candidate that would be returned in place of the result.
+    if (!lines[i].startsWith("{")) continue;
+    const single = asObject(lines[i].trim());
+    if (single) return single;
+    const multi = asObject(lines.slice(i).join("\n"));
+    if (multi) return multi;
   }
   return null;
+}
+
+/**
+ * The message that goes in the response body for a failed run.
+ *
+ * Only the CLI's own `error` string is passed through. Child stderr never is:
+ * on the exit-1 crash path it is a Node stack trace carrying absolute server
+ * paths, which is exactly the content the spawn-failure path already refuses to
+ * echo. Guarding one of the two and not the other left the disclosure open on
+ * the path most likely to produce a stack trace in the first place.
+ *
+ * stderr still belongs in the server log — the caller just never sees it, which
+ * is why this takes it and ignores it rather than letting a caller forget it
+ * exists.
+ *
+ * @param {Record<string, unknown> | null} parsed
+ * @param {string} [_stderr] Deliberately unused; log it at the call site.
+ * @returns {string}
+ */
+export function clientErrorMessage(parsed, _stderr) {
+  return typeof parsed?.error === "string" ? parsed.error : GENERIC_FAILURE;
 }
 
 /**

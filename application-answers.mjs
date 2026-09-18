@@ -2,7 +2,7 @@
 
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
-import { fileURLToPath } from 'url';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 export const APPLICATION_ANSWERS_HEADING = '## Application Answers';
 
@@ -316,6 +316,64 @@ export function parseApplicationAnswersSection(reportText, { strict = false } = 
   return snapshot;
 }
 
+/**
+ * Read the evaluation mode's `## H) Draft Application Answers` block.
+ *
+ * A DIFFERENT producer and a different format from the section above.
+ * `parseApplicationAnswersSection` reads a format this module also writes, so
+ * the two halves are pinned to each other. Nothing writes Block H from code:
+ * `modes/oferta.md:622` specifies its heading and nothing about its body, so
+ * the bold-question-then-paragraph shape below is a CONVENTION the evaluation
+ * happens to emit, not a contract. This reads the convention and degrades to an
+ * empty list when it does not hold, rather than guessing: a mispaired
+ * question/answer here would be re-submitted to an employer later.
+ *
+ * Worth reading despite that, because `modes/apply.md` already treats Block H
+ * as a legitimate base for a real application ("If there is a Section H or
+ * `## Application Answers` -> load previous answers as a base"), and until now
+ * nothing in the tree could load it. An evaluated report is the one case where
+ * answers exist before any form has been seen.
+ *
+ * Returns the primary key spelling (`question`/`answer`) and omits the keys
+ * Block H cannot carry, so the result is a partial snapshot that
+ * `normalizeApplicationAnswersSnapshot` accepts as-is.
+ *
+ * @param {string} reportText Full report markdown.
+ * @returns {{freeText: object[]} | null} `null` when the report has no Block H.
+ */
+export function parseDraftAnswersBlockH(reportText) {
+  const report = String(reportText ?? '').replace(/\r\n/g, '\n');
+  const heading = /^##\s+H\)\s*Draft Application Answers\s*$/m.exec(report);
+  if (!heading) return null;
+
+  const afterHeading = heading.index + heading[0].length;
+  const nextHeading = /^## .+$/m.exec(report.slice(afterHeading));
+  const body = report.slice(
+    afterHeading,
+    nextHeading ? afterHeading + nextHeading.index : report.length,
+  );
+
+  // A question is a line that is ENTIRELY bold. Bold used mid-sentence inside an
+  // answer therefore cannot be mistaken for the start of the next question, and
+  // the italic parenthetical the mode emits under the heading is not a question.
+  const questionLine = /^\*\*(.+?)\*\*\s*$/gm;
+  const marks = [...body.matchAll(questionLine)];
+  const freeText = [];
+  for (const [index, mark] of marks.entries()) {
+    const from = mark.index + mark[0].length;
+    const to = index + 1 < marks.length ? marks[index + 1].index : body.length;
+    const question = mark[1].trim();
+    if (!question) continue;
+    const answer = body
+      .slice(from, to)
+      // A trailing horizontal rule closes the report block, it is not an answer.
+      .replace(/^\s*-{3,}\s*$/gm, '')
+      .trim();
+    freeText.push({ question, answer });
+  }
+  return { freeText };
+}
+
 export function upsertApplicationAnswersSection(reportText, snapshot = {}) {
   const report = String(reportText ?? '').replace(/\r\n/g, '\n');
   const section = formatApplicationAnswersSection(snapshot).trimEnd();
@@ -340,6 +398,9 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--help' || arg === '-h') args.help = true;
+    else if (arg === '--read') args.read = true;
+    else if (arg === '--read-draft') args.readDraft = true;
+    else if (arg === '--strict') args.strict = true;
     else if (arg.startsWith('--')) {
       const value = argv[i + 1];
       if (!value || value.startsWith('--')) {
@@ -355,8 +416,17 @@ function parseArgs(argv) {
 function usage() {
   return [
     'Usage: node application-answers.mjs --report <report.md> --input <answers.json> [--state filled|submitted] [--date YYYY-MM-DD]',
+    '       node application-answers.mjs --report <report.md> --read [--strict]',
+    '       node application-answers.mjs --report <report.md> --read-draft',
     '',
     'The input JSON may contain: freeText, selections, fieldValues, files, date, state.',
+    '--read prints the parsed ## Application Answers snapshot as JSON (null when the section is absent).',
+    '--strict makes --read refuse a partially unreadable section, naming every line it could not parse,',
+    'instead of skipping it. Recovery callers (modes/apply.md) want the refusal; the default stays total.',
+    '--read-draft prints the evaluation mode\'s ## H) Draft Application Answers block instead, as a partial',
+    'snapshot ({"freeText": [...]}), or null when the report has no Block H. Best-effort by construction:',
+    'modes/oferta.md fixes the heading and not the body, so an empty freeText means "drafted, unreadable",',
+    'which is why --strict does not apply to it.',
   ].join('\n');
 }
 
@@ -371,6 +441,53 @@ async function main() {
   }
   if (args.help) {
     console.log(usage());
+    return;
+  }
+  if (args.strict && !args.read) {
+    console.error(`--strict only applies to --read.\n\n${usage()}`);
+    process.exitCode = 1;
+    return;
+  }
+  if (args.read && args.readDraft) {
+    console.error(`--read and --read-draft print different sections; pass one.\n\n${usage()}`);
+    process.exitCode = 1;
+    return;
+  }
+  if (args.readDraft) {
+    if (args.input || args.state || args.date) {
+      console.error(`--read-draft is read-only and takes no --input, --state or --date.\n\n${usage()}`);
+      process.exitCode = 1;
+      return;
+    }
+    if (!args.report) {
+      console.error(usage());
+      process.exitCode = 1;
+      return;
+    }
+    // No strict counterpart on purpose. Block H's body is a convention, not a
+    // format this module writes, so "I could not read a line" is an expected
+    // outcome rather than a corrupted report worth refusing over.
+    const reportText = readFileSync(resolve(args.report), 'utf-8');
+    console.log(JSON.stringify(parseDraftAnswersBlockH(reportText), null, 2));
+    return;
+  }
+  if (args.read) {
+    if (args.input || args.state || args.date) {
+      console.error(`--read is read-only and takes no --input, --state or --date.\n\n${usage()}`);
+      process.exitCode = 1;
+      return;
+    }
+    if (!args.report) {
+      console.error(usage());
+      process.exitCode = 1;
+      return;
+    }
+    // strict throws with a message naming every unreadable line; main().catch
+    // prints it to stderr and sets a non-zero exit code, which is the contract
+    // modes/apply.md keys on. A report without the section prints null.
+    const reportText = readFileSync(resolve(args.report), 'utf-8');
+    const snapshot = parseApplicationAnswersSection(reportText, { strict: args.strict === true });
+    console.log(JSON.stringify(snapshot, null, 2));
     return;
   }
   if (!args.report || !args.input) {
@@ -394,7 +511,7 @@ async function main() {
   console.log(JSON.stringify({ report: reportPath, date: normalized.date, state: normalized.state }, null, 2));
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(err.message);
     process.exitCode = 1;

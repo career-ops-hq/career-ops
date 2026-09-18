@@ -44,11 +44,20 @@ test("keys are filesystem-safe and cannot escape the cache directory", () => {
   // component. The NUL case is written as an escape, never embedded: a raw NUL
   // makes this file binary to grep and every future search of it silently
   // returns nothing (tests/source-no-nul-bytes.test.mjs).
-  const hostile = ["../../etc/passwd", "..\\..\\windows\\system32", "a/b/c", "x y", "x\u0000y", "café/../../root"];
+  //
+  // The prefix allows Unicode letters/marks/numbers (\p{L}\p{M}\p{N}), not
+  // [a-z0-9] only — normalizeTextKey KEEPS non-ASCII letters AND combining
+  // marks on purpose (the collision fix below; a Devanagari name like कंपनी
+  // is letters plus marks, not letters alone, so \p{M} must be included or a
+  // legitimate name is rejected as "unsafe"). Safety here doesn't come from
+  // ASCII-only output; it comes from \p{L}\p{M}\p{N} excluding every
+  // traversal/separator/control character (`.`, `/`, `\`, space, NUL)
+  // regardless of script.
+  const hostile =["../../etc/passwd", "..\\..\\windows\\system32", "a/b/c", "x y", "x\u0000y", "café/../../root", "कंपनी/../../root"];
   for (const name of hostile) {
     const key = companyCacheKey(name);
     if (key === null) continue;
-    assert.match(key, /^co_v\d+_[a-z0-9]{1,40}_[0-9a-f]{10}$/, `unsafe key for ${JSON.stringify(name)}: ${key}`);
+    assert.match(key, /^co_v\d+_[\p{L}\p{M}\p{N}]{1,40}_[0-9a-f]{10}$/u, `unsafe key for ${JSON.stringify(name)}: ${key}`);
   }
 });
 
@@ -64,4 +73,63 @@ test("bumping the version changes every key", () => {
   const key = companyCacheKey("Notion");
   assert.ok(!key.includes("_v0_"), "keys must not carry a stale version token");
   assert.equal(key.split("_")[1], COMPANY_KEY_VERSION);
+});
+
+test("Škoda and Koda do not collide (the [^a-z0-9] regression this fix stops)", () => {
+  // Pre-fix: both stripped to "koda" and hashed identically — one company
+  // silently wore the other's logo forever, with no expiry to correct it
+  // (requirement 2 in this file's own header).
+  const a = companyCacheKey("Škoda");
+  const b = companyCacheKey("Koda");
+  // notEqual(null, "key") also passes, which would hide a DIFFERENT
+  // regression — one side wrongly becoming uncacheable — as if it were this
+  // test's collision guarantee holding. Both sides must be real keys first.
+  assert.notEqual(a, null);
+  assert.notEqual(b, null);
+  assert.notEqual(a, b);
+});
+
+test("Zürich Re and a plain-ASCII near-miss do not collide", () => {
+  const a = companyCacheKey("Zürich Re");
+  const b = companyCacheKey("Zurich Re");
+  assert.notEqual(a, null);
+  assert.notEqual(b, null);
+  assert.notEqual(a, b);
+});
+
+test("CJK company names are cacheable, not rejected as empty", () => {
+  // Pre-fix: [^a-z0-9] erased CJK entirely, so companyCacheKey returned null
+  // and the name was never cached — silently ineligible, not merely slower.
+  const key = companyCacheKey("日本電産");
+  assert.notEqual(key, null);
+  assert.match(key, /^co_v\d+_日本電産_[0-9a-f]{10}$/);
+});
+
+test("two distinct CJK companies get distinct keys", () => {
+  const a = companyCacheKey("日本電産");
+  const b = companyCacheKey("本田技研工業");
+  assert.notEqual(a, null);
+  assert.notEqual(b, null);
+  assert.notEqual(a, b);
+});
+
+test("a non-BMP letter landing on the 40-char truncation boundary does not split its surrogate pair", () => {
+  // CJK Extension B is astral-plane (surrogate pair in UTF-16), and real Han
+  // characters live there. String.prototype.slice(0, 40) counts UTF-16 code
+  // UNITS, so it can cut a pair in half and leave a lone surrogate — an
+  // invalid string, not a printable one. Built to land exactly on the
+  // boundary: 39 ASCII letters, then the astral letter at position 40.
+  const astralLetter = "\u{20000}"; // 𠀀 — CJK Extension B, \p{L}
+  const name = "a".repeat(39) + astralLetter + "trailing text past the cut";
+  const key = companyCacheKey(name);
+  assert.notEqual(key, null);
+  // A lone (unpaired) surrogate anywhere in the key means the pair was split.
+  assert.doesNotMatch(
+    key,
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/,
+    `key contains an unpaired surrogate: ${JSON.stringify(key)}`,
+  );
+  // The astral letter must survive whole, not be silently dropped either.
+  assert.ok(key.includes(astralLetter), `astral letter was lost, not just split: ${JSON.stringify(key)}`);
+  assert.match(key, /^co_v\d+_[\p{L}\p{M}\p{N}]{1,40}_[0-9a-f]{10}$/u);
 });
