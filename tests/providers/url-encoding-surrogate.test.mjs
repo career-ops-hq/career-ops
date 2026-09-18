@@ -234,6 +234,7 @@ try {
   const ALLOWLIST = {
     'csod.mjs': 'corpName comes from portals.yml (careers_url), not from the API response',
     '4dayweek.mjs': 'slug is already validated against SLUG_RE, which rejects a surrogate before this line',
+    'google.mjs': 'q and location come from the portals.yml google: block, not from a response; the job URL itself is built from a LINK_RE match whose id is \\d+ and slug is [a-z0-9-]+, so neither can carry a surrogate',
   };
 
   let files;
