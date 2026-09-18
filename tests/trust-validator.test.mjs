@@ -1,8 +1,10 @@
-#!/usr/bin/env node
 // @ts-check
 /**
- * test-trust-validator.mjs — Comprehensive test suite for trust validation.
- * Run: node test-trust-validator.mjs
+ * tests/trust-validator.test.mjs — Comprehensive test suite for trust validation.
+ * Run: node test-all.mjs --only trust-validator
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
  *
  * Tests cover:
  *   - buildTrustValidator: disabled/enabled, config merging
@@ -19,21 +21,17 @@ import {
   matchesDomainList,
   companyMatchesHostname,
   classifyTrustLevel,
-} from './providers/_trust-validator.mjs';
+} from '../providers/_trust-validator.mjs';
+import { pass, fail } from './helpers.mjs';
+
+console.log('\ntrust validation (providers/_trust-validator.mjs)');
 
 // ── Test runner ──────────────────────────────────────────────────────
 
-let passed = 0;
-let failed = 0;
 
 function assert(condition, testName) {
-  if (condition) {
-    passed++;
-    console.log(`  ✓ ${testName}`);
-  } else {
-    failed++;
-    console.error(`  ✗ FAIL: ${testName}`);
-  }
+  if (condition) pass(testName);
+  else fail(testName);
 }
 
 function section(name) {
@@ -445,14 +443,3 @@ section('buildTrustValidator — config without enabled key');
 // ══════════════════════════════════════════════════════════════════════
 // Summary
 // ══════════════════════════════════════════════════════════════════════
-
-console.log(`\n${'═'.repeat(50)}`);
-console.log(`  Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
-console.log(`${'═'.repeat(50)}`);
-
-if (failed > 0) {
-  console.error(`\n❌ ${failed} test(s) FAILED`);
-  process.exit(1);
-} else {
-  console.log(`\n✅ All ${passed} tests passed!`);
-}

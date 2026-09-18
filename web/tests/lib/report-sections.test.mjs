@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cleanHeading, authorLetter, splitSections } from "../../src/lib/report-sections.mjs";
+import { cleanHeading, authorLetter, isVerdictHeading, splitSections } from "../../src/lib/report-sections.mjs";
 
 test("strips the author letter from the blocks the core has always written", () => {
   assert.equal(cleanHeading("A) Role Summary"), "Role Summary");
@@ -126,4 +126,43 @@ test("the ASCII double-hyphen Block form is stripped whole", () => {
   // A heading whose text legitimately starts with a hyphen keeps it: only the
   // separator run is consumed, and it must be attached to the letter.
   assert.equal(cleanHeading("Block A) -- keep this"), "-- keep this");
+});
+
+test("the Interview Plan at F is not a verdict", () => {
+  // report-view.tsx read "whatever is lettered F" as the verdict and promoted it
+  // into a callout built for a single sentence. F has been the Interview Plan
+  // since before that callout existed (#1535 landed against a modes/oferta.md
+  // that already read "## F) Interview Plan"), so every report rendered a table
+  // into it (#3416).
+  assert.equal(isVerdictHeading("F) Interview Plan"), false);
+  assert.equal(isVerdictHeading("Block F -- Interview Plan"), false);
+});
+
+test("no localized mode heading is mistaken for a verdict", () => {
+  // All eighteen localized modes write Interview Plan at F, so this was never an
+  // English-only slip. A letter-based rule is wrong in every language at once.
+  for (const heading of [
+    "F) Plan rozmów kwalifikacyjnych",
+    "F) План співбесід",
+    "F) 面試準備計畫",
+    "F) 면접 준비 계획",
+    "F) Vorstellungsgesprächs-Plan",
+    "F) Plan d'entretiens",
+  ]) {
+    assert.equal(isVerdictHeading(heading), false, heading);
+  }
+});
+
+test("the authoring marker names the verdict, in any language", () => {
+  // cleanHeading has always stripped a trailing "(lead)" / "(verdict)": that
+  // marker is the core's deliberate signal, and it does not depend on the
+  // letter or on English.
+  assert.equal(isVerdictHeading("F) Verdict (lead)"), true);
+  assert.equal(isVerdictHeading("C) Veredicto (lead)"), true);
+  assert.equal(isVerdictHeading("A) 判定 (verdict)"), true);
+  // A plainly titled block is caught too, with the letter stripped first.
+  assert.equal(isVerdictHeading("Verdict"), true);
+  assert.equal(isVerdictHeading("B) Verdict"), true);
+  // ...but a heading that merely mentions the word is not the verdict block.
+  assert.equal(isVerdictHeading("D) Verdict rationale and caveats"), false);
 });

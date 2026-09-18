@@ -16,6 +16,20 @@
   <em>現在，它開源了。</em>
 </p>
 
+<hr>
+
+<p align="center">
+  <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20%E7%94%A8%20CAREER-OPS%20%E6%89%BE%E5%88%B0%E5%B7%A5%E4%BD%9C&suffix=%20%E4%BA%BA%E5%B7%B2%E9%A9%97%E8%AD%89&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="用 career-ops 找到工作：已驗證人數"></a>
+</p>
+
+<p align="center"><sub>你也上岸了嗎？<a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">分享你的故事 →</a> · 你的卡片會讓還在找的人看見：出路真的存在。</sub></p>
+
+<p align="center">
+  <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="最近三則成功入職的故事" width="800"></a>
+</p>
+
+<p align="center"><sub>每一個數字都是一則公開的故事，你可以<a href="HIRED.md">親自查證 →</a> · 他們每一個人，都曾站在你現在的位置。</sub></p>
+
 <p align="center">
   <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
   &nbsp;&nbsp;
@@ -37,6 +51,8 @@
 </p>
 
 <p align="center"><strong>評估超過 740 份職缺 · 生成超過 100 份個人化履歷 · 成功獲得理想職位</strong></p>
+
+<p align="center"><sub>由 <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a>（<a href="https://github.com/santifer">@santifer</a>）建立並維護</sub></p>
 
 <p align="center">
   <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/加入社群-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
@@ -92,7 +108,7 @@ career-ops 是 [CareerOps Manifesto](https://career-ops.org/manifesto?utm_source
 | 功能             | 說明                                                                                                                   |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **自動管道**     | 貼上 URL，自動完成評估 + PDF + 追蹤紀錄                                                                                |
-| **6 區塊評估**   | 職位摘要、履歷匹配、職級策略、薪酬調查、個人化、面試準備（STAR+R）— 另有 Block G 職缺正當性檢查，標記詐騙與幽靈職缺          |
+| **A-H 評估**   | 職位摘要、履歷匹配、職級策略、薪酬調查、個人化、面試準備（STAR+R）— 另有 Block G 職缺正當性檢查，標記詐騙與幽靈職缺          |
 | **面試故事庫**   | 跨評估累積 STAR+Reflection 故事 — 能回答任何行為面試問題的 5-10 個核心故事                                             |
 | **薪資談判腳本** | 薪資談判框架、地區薪資折扣反駁話術、競爭 Offer 運用策略                                                                |
 | **ATS PDF 生成** | 注入關鍵字的履歷，採用 Space Grotesk + DM Sans 設計                                                                    |
@@ -127,7 +143,7 @@ claude   # 或 gemini / codex / qwen / opencode — 在此開啟你的 AI CLI
 <summary><b>偏好手動設定？（git clone）</b></summary>
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # 僅 PDF 生成所需
 claude   # 開啟你的 AI CLI — 首次啟動時會帶你完成設定
@@ -385,9 +401,9 @@ career-ops 可以在 Windows 上執行。如果安裝過程中技能因 symlink 
 
 <a href="https://www.star-history.com/?repos=santifer%2Fcareer-ops&type=timeline&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
  </picture>
 </a>
 
@@ -404,11 +420,11 @@ career-ops 可以在 Windows 上執行。如果安裝過程中技能因 symlink 
 
 ## 貢獻者
 
-<a href="https://github.com/santifer/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=santifer/career-ops" />
+<a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
 </a>
 
-使用 career-ops 找到工作了嗎？[分享你的故事！](https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml)
+使用 career-ops 找到工作了嗎？[分享你的故事！](https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml)
 
 ## 授權條款
 

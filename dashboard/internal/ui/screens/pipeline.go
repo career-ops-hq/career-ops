@@ -112,7 +112,7 @@ type reportSummary struct {
 	comp      string
 }
 
-const storyTemplateURL = "https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml"
+const storyTemplateURL = "https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml"
 
 // Sort modes
 const (
@@ -603,7 +603,11 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 		}
 
 	case "o":
-		if app, ok := m.CurrentApp(); ok && app.JobURL != "" {
+		if app, ok := m.CurrentApp(); ok {
+			if app.JobURL == "" {
+				m.flash = "No URL found for this application"
+				break
+			}
 			return m, func() tea.Msg {
 				return PipelineOpenURLMsg{URL: app.JobURL}
 			}

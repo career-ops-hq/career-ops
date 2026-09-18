@@ -16,8 +16,7 @@ import { fileURLToPath } from 'url';
 
 import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const CODE_ROOT = __dirname;
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
 
 const warnings = [];
@@ -51,9 +50,9 @@ if (!existsSync(profilePath)) {
 
 // 3. Check for hardcoded metrics in prompt files
 const filesToCheck = [
-  { path: join(projectRoot, 'modes', '_shared.md'), name: '_shared.md' },
-  { path: join(projectRoot, 'modes', '_writing.md'), name: '_writing.md' },
-  { path: join(projectRoot, 'batch', 'batch-prompt.md'), name: 'batch-prompt.md' },
+  { path: join(CODE_ROOT, 'modes', '_shared.md'), name: '_shared.md' },
+  { path: join(CODE_ROOT, 'modes', '_writing.md'), name: '_writing.md' },
+  { path: join(CODE_ROOT, 'batch', 'batch-prompt.md'), name: 'batch-prompt.md' },
 ];
 
 // Pattern: numbers that look like hardcoded metrics (e.g., "170+ hours", "90% self-service")

@@ -8,6 +8,7 @@ import { fetchJsonWithRetry } from './_http.mjs';
 // vetoes "Sales &amp; Marketing Lead". Shared decoder, same as softgarden and
 // radancy (#2487, #2921).
 import { decodeEntities } from './_html-entities.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 // Phenom People provider — the "CareerConnect" career sites many large
 // enterprises run (branded domains like careers.exampleco.com). The search
@@ -137,10 +138,14 @@ export function parseRefineSearch(json, cfg) {
     const id = job.jobId != null ? String(job.jobId) : '';
     const title = decodeEntities(String(job.title || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
     if (!id || !title) continue;
+    // A lone surrogate in id throws URIError out of encodeURIComponent and
+    // aborts this loop; id is also the dedup key. Drop just this one.
+    const encodedId = safeEncodeURIComponent(id);
+    if (encodedId === null) continue;
     rows.push({
       id,
       title,
-      url: `${cfg.origin}/${cfg.urlPrefix}/job/${encodeURIComponent(id)}/${slugify(title)}`,
+      url: `${cfg.origin}/${cfg.urlPrefix}/job/${encodedId}/${slugify(title)}`,
       location: jobLocation(job),
       postedAt: parsePhenomDate(job.postedDate || job.dateCreated),
     });

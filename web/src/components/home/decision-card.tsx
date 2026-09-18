@@ -7,6 +7,7 @@ import { Check, X, FileText, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CompanyLogo } from "@/components/company-logo";
 import { scoreNum, scoreTone } from "@/lib/format";
+import { companyPresentation } from "@/lib/company-presentation.mjs";
 import type { Application } from "@/lib/career-ops";
 
 // Awaiting-decision row: a scored role with no terminal status. Primary action
@@ -17,6 +18,7 @@ export function DecisionCard({ app }: { app: Application }) {
   const [done, setDone] = useState<string | null>(null);
   const score = scoreNum(app.score);
   const tone = scoreTone(app.score);
+  const company = companyPresentation(app);
 
   const setStatus = async (status: "Applied" | "Discarded") => {
     setBusy(status);
@@ -36,9 +38,9 @@ export function DecisionCard({ app }: { app: Application }) {
   return (
     <div className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-surface/40 p-3.5 transition hover:border-brand/30">
       <div className="flex items-start gap-2.5">
-        <CompanyLogo name={app.company} size={24} />
+        <CompanyLogo name={company.logoName} size={24} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-foreground">{app.company}</p>
+          <p className="truncate text-sm font-medium text-foreground">{company.label}</p>
           <p className="truncate text-[13px] text-muted">{app.role}</p>
         </div>
         {Number.isFinite(score) && score > 0 && (

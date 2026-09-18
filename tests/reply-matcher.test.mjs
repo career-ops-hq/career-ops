@@ -46,6 +46,226 @@ test('checkRoleMatch', () => {
   assert.ok(checkRoleMatch('邀请您参加python开发工程师的面试', 'PY01_python开发工程师'));
 });
 
+test('checkRoleMatch - a role word inside a longer word is not a match (#3455)', () => {
+  // Rejection boilerplate that names neither role. "Analytic" appears only as a
+  // prefix of "Analytics", which is not a mention of the role and must not
+  // corroborate one. Before this fix `tNorm.includes()` matched it, and because
+  // matchCandidates() only counts a partial match on a row already carrying a
+  // company or domain signal, the effect was to inflate whichever row was
+  // already ahead — see #3455.
+  const boilerplate = 'Unfortunately we will not be moving forward. We will retain your '
+    + 'data on file. Please watch our Analytics openings for future roles.';
+  assert.equal(checkRoleMatch(boilerplate, 'Managing VP, Analytic & AI Product'), false);
+
+  // The same shape, isolated: a role word must not match as a substring of a
+  // longer word, in either direction.
+  assert.equal(checkRoleMatch('We have moved to a new database vendor.', 'Data Engineer'), false);
+  assert.equal(checkRoleMatch('Our platforms team will follow up.', 'Platform Lead'), false);
+  assert.equal(checkRoleMatch('Please see the attached engineering brief.', 'Engineer'), false);
+
+  // ...but a genuine whole-word occurrence still matches. This is deliberate:
+  // it is what keeps the partial-match path useful for a real mention.
+  assert.ok(checkRoleMatch('An update on the Analytic role you applied for.', 'Managing VP, Analytic & AI Product'));
+});
+
+test('checkRoleMatch - a common noun in a role title still matches as a whole word (#3455 limit)', () => {
+  // Documents the boundary of the #3455 fix rather than asserting desired
+  // behaviour. "data" occurs as a real word in ordinary rejection prose, so a
+  // word-boundary rule cannot exclude it — only the GENERIC_ROLE_WORDS
+  // enumeration could, and enumerating every domain noun does not scale.
+  // Half of darkpandawarrior's two-row example is therefore still reachable;
+  // the ownership rule in #3455, not this fix, is what closes that.
+  const boilerplate = 'Unfortunately we will not be moving forward. We will retain your '
+    + 'data on file. Please watch our Analytics openings for future roles.';
+  assert.ok(checkRoleMatch(boilerplate, 'Senior Director, AI Data'));
+});
+
+test('checkRoleMatch - stripping punctuation must not push a non-Latin part under the length gate', () => {
+  // "工程师。" is four characters, three once the ideographic period is stripped.
+  // The stripped form belongs to the Latin branch only; gating every script on
+  // it silently dropped three-character Chinese titles — 工程师 (engineer),
+  // 设计师 (designer) — that the substring path had always matched. This is why
+  // the script routing runs before the length and generic-word gates rather
+  // than after them.
+  assert.ok(checkRoleMatch('我们招聘工程师。欢迎申请。', 'PY_工程师。'));
+  assert.ok(checkRoleMatch('我们招聘工程师，欢迎申请。', 'PY_工程师，'));
+  assert.ok(checkRoleMatch('私たちはエンジ。を募集。', 'JP_エンジ。'));
+});
+
+test('checkRoleMatch - a mixed Latin+Han part is not Latin, so it keeps substring matching', () => {
+  // "python开发工程师" is one semantic phrase, not a Latin word followed by a
+  // Chinese one, so the Latin-only gate correctly declines to apply a boundary
+  // rule to it. These two are the pre-existing cases from the suite above,
+  // repeated here as the regression guard for the mixed-script path.
+  assert.ok(checkRoleMatch('邀请您参加PY01_python开发工程师的面试', 'python开发工程师'));
+  assert.ok(checkRoleMatch('邀请您参加python开发工程师的面试', 'PY01_python开发工程师'));
+});
+
+test('checkRoleMatch - non-Latin role words keep the substring test unchanged', () => {
+  // The whole-word rule is deliberately Latin-only. "Which scripts have word
+  // boundaries" has no clean answer, and two earlier drafts of this fix each
+  // broke a different language by trying to answer it:
+  //
+  //   Japanese  runs without separators in ALL THREE of its scripts, so routing
+  //             on Han ideographs alone sent a pure-Katakana title down the
+  //             boundary path, where the surrounding Hiragana is \p{L}.
+  //   Korean    DOES separate words with spaces, but glues grammatical
+  //             particles straight onto the noun — 개발자 + 를 -> 개발자를 — so
+  //             the boundary never holds even though the title is right there.
+  //
+  // Every case below is a role genuinely mentioned in the text, and every one
+  // must behave exactly as it did before this change.
+  assert.ok(checkRoleMatch('私たちはエンジニアを募集しています。', 'PY02_エンジニア'));
+  assert.ok(checkRoleMatch('私たちは上級エンジニアを募集しています。', '上級エンジニア'));
+  assert.ok(checkRoleMatch('우리는 소프트웨어개발자를 찾고 있습니다.', 'KR_소프트웨어개발자'));
+  assert.ok(checkRoleMatch('프로젝트매니저의 면접 일정을 안내드립니다.', 'KR_프로젝트매니저'));
+  assert.ok(checkRoleMatch('Мы ищем Разработчика в команду.', 'RU_Разработчик'));
+  assert.ok(checkRoleMatch('نبحث عن مهندس برمجيات للانضمام.', 'AR_مهندس_برمجيات'));
+});
+
+test('checkRoleMatch - a pathologically long role part does not crash the matcher', () => {
+  // matchesOnWordBoundary builds new RegExp(..., 'iu'), and V8 stack-overflows
+  // constructing a case-insensitive Unicode pattern around a long enough
+  // literal — it THROWS at construction. checkCompanyMatch, the helper's only
+  // other caller, is gated by isShortName and can never reach that; a role part
+  // has no such ceiling, so without MAX_BOUNDARY_NEEDLE this throw escapes
+  // matchCandidates() uncaught and takes reply-watch down for every candidate
+  // in the run — not a graceful non-match on one row.
+  //
+  // Reachable from a single malformed tracker row: a JD pasted into the role
+  // field, or a merged CSV column.
+  const huge = 'Word'.repeat(2500);
+  assert.doesNotThrow(() => checkRoleMatch('unrelated rejection text', huge));
+  assert.doesNotThrow(() => matchCandidates(
+    [{ message_id: 'm', from: 'a@b.example', subject: 's', body_snippet: 'unrelated', signal: 'rejection' }],
+    [{ num: 1, company: 'Acme', role: huge, status: 'Applied', notes: '' }],
+    []
+  ));
+  // Over the ceiling it takes the substring path, which is what main did.
+  assert.ok(checkRoleMatch(`we mentioned ${huge} once`, huge));
+
+  // Pin the threshold itself, not just "well past it". A part of exactly
+  // MAX_BOUNDARY_NEEDLE characters is still ON the whole-word path, so it must
+  // refuse a substring-inside-a-longer-word; flipping the comparison to >=
+  // would push it to the substring fallback and match. Inert in practice — 128
+  // has enormous headroom over any real role word — but the boundary of a
+  // guard is the part worth pinning.
+  const atCeiling = 'a'.repeat(128);
+  assert.equal(checkRoleMatch(`about the ${atCeiling}x team`, atCeiling), false);
+  assert.ok(checkRoleMatch(`about the ${atCeiling} team`, atCeiling));
+});
+
+test('checkRoleMatch - the generic-word gate runs on the stripped form, not the raw part', () => {
+  // "Recruiter," is not in GENERIC_ROLE_WORDS; "recruiter" is. Checking the raw
+  // part lets any attached punctuation walk a generic word straight past the
+  // #2671 protection, which is the bug that rule exists to stop.
+  assert.equal(checkRoleMatch('Please contact our Recruiter, team lead, for more info.', 'Recruiter,'), false);
+  // Text carries only the punctuated generic word, never the whole role — so
+  // this exercises the partial path rather than checkRoleMatchExact.
+  assert.equal(checkRoleMatch('Our Operations. team will be in touch.', 'People Operations.'), false);
+});
+
+test('checkRoleMatch - a combining mark keeps a Latin word on the whole-word path (#3535)', () => {
+  // toLowerCase() can INTRODUCE a character that is not Script=Latin: "İ"
+  // (U+0130) becomes "i" + U+0307, and U+0307 is \p{M}/Script=Inherited. A Latin
+  // gate without \p{M} therefore drops these words to the substring path and the
+  // bug survives for them.
+  //
+  // Turkish dotted-I, the case that exposed it:
+  assert.equal(checkRoleMatch('Bizim İstatistikler ekibi yanıt verecek.', 'İstatistik Uzmanı'), false);
+  assert.ok(checkRoleMatch('Bizim İstatistik ekibi yanıt verecek.', 'İstatistik Uzmanı'));
+
+  // ...and NFD-decomposed accented text, which is the broader half — it needs no
+  // Turkish at all and reaches French, Spanish, Portuguese and Vietnamese.
+  const nfd = 'Ingénieur';           // e + combining acute, not U+00E9
+  assert.equal(checkRoleMatch(`Notre équipe ${nfd}ie recrute.`, `${nfd} Logiciel`), false);
+  assert.ok(checkRoleMatch(`Notre équipe ${nfd} recrute.`, `${nfd} Logiciel`));
+
+  // A mark belongs to the base letter before it, so a needle sitting next to one
+  // is mid-word, not at a boundary. Both lookarounds need \p{M}, and they fail
+  // independently — hence a case on each side.
+  //
+  // mark AFTER the needle:
+  assert.equal(checkRoleMatch('Our datá pipeline is unrelated.', 'Data Engineer'), false);
+  // mark BEFORE the needle — a decomposed accented word running straight into
+  // it, as happens in slugs, filenames and run-together compounds:
+  assert.equal(checkRoleMatch('Attached: re\u0301sume\u0301data.pdf for review.', 'Data Engineer'), false);
+});
+
+test('checkRoleMatch - an NFD word ending in a combining mark keeps it (#3535)', () => {
+  // Escapes, not literals: a source-file "\u00e9" is PRECOMPOSED and does not
+  // exercise this path at all. The bug needs a word whose LAST character is a
+  // combining mark.
+  //
+  // \\p{M} has to be in the stripping class as well as in LATIN_WORD_RE and the
+  // lookarounds. Without it the terminal mark is peeled off as though it were
+  // punctuation — "Charge\u0301" strips to "Charge" — and the boundary test then
+  // correctly refuses that, because the mark still present in the text makes
+  // the position mid-grapheme. The word stops matching itself.
+  const charge = 'Charge\u0301';   // Chargé, mark terminal
+  const cafe   = 'Cafe\u0301';     // Café, mark terminal
+  const disena = 'Disen\u0303ador'; // Diseñador, mark interior
+
+  // Text carries the PART but not the whole role, so checkRoleMatchExact cannot
+  // short-circuit and mask the partial path — which is what hid this at first.
+  assert.ok(checkRoleMatch(`Le poste de ${charge} est ouvert.`, `${charge} de Mission`));
+  assert.ok(checkRoleMatch(`Notre ${cafe} recrute.`, `${cafe} Manager`));
+  assert.ok(checkRoleMatch(`Buscamos un ${disena} para el equipo.`, `${disena} Senior`));
+
+  // ...and the whole-word rule still applies to them.
+  assert.equal(checkRoleMatch(`Le poste de ${charge}s est ouvert.`, `${charge} de Mission`), false);
+});
+test('checkRoleMatch - a Latin role word containing digits still gets the whole-word rule', () => {
+  // The \p{N} in LATIN_WORD_RE is load-bearing. Without it a part carrying a
+  // digit — "Web3", "K8s", "Tier2" are all ordinary in job titles — fails the
+  // Latin allowlist, falls through to the substring path, and the #3455 bug is
+  // back for exactly those titles.
+  assert.equal(checkRoleMatch('Our Web3D research group published a paper.', 'Web3 Platform Lead'), false);
+  // ...and the genuine whole-word mention still matches.
+  assert.ok(checkRoleMatch('An update on the Web3 role you applied for.', 'Web3 Platform Lead'));
+});
+
+test('checkRoleMatch - a role word is not matched at a letter-adjacent prefix either', () => {
+  // The left lookbehind carries its own weight: without it, a role word glued to
+  // the END of a longer word still matches. The CJK case above cannot catch this
+  // because "data" there is letter-bounded on BOTH sides, so the right-hand
+  // lookahead alone already rejects it.
+  assert.equal(checkRoleMatch('The XAnalytic system flagged this for review.', 'Managing VP, Analytic & AI Product'), false);
+  assert.equal(checkRoleMatch('Our metadata pipeline is unrelated.', 'Data Engineer'), false);
+});
+
+test('checkRoleMatch - a short root word is not made significant by attached punctuation', () => {
+  // The length gate runs again after stripping. Without the second check, "AI!!"
+  // (4 raw chars, 2 real ones) would clear a gate meant to admit only words with
+  // more than three significant characters.
+  assert.equal(checkRoleMatch('Our team uses ai to triage applications.', 'AI!! Specialist'), false);
+  assert.equal(checkRoleMatch('The ops team will follow up.', 'Ops. Lead'), false);
+});
+
+test('checkRoleMatch - the word boundary is defined on letters in any script, not \\w', () => {
+  // These two cases are the whole reason the rule uses \p{L}/\p{N} lookarounds
+  // rather than \b. \b is defined on [A-Za-z0-9_], which is wrong twice over:
+  //
+  //   "data工程师"     a CJK ideograph is not \w, so \b sees a boundary and
+  //                    matches "data" INSIDE a single Chinese compound word —
+  //                    exactly the substring-inside-a-word bug this fix exists
+  //                    to remove, reintroduced for every non-Latin script.
+  assert.equal(checkRoleMatch('我们正在招聘data工程师。', 'Data Analyst'), false);
+
+  //   "data_engineer"  "_" IS \w, so \b sees NO boundary and misses a genuine
+  //                    mention. "_" is one of the separators role titles are
+  //                    split on, so treating it as a boundary is the consistent
+  //                    reading.
+  assert.ok(checkRoleMatch('Subject: data_engineer role update', 'Data Engineer'));
+});
+
+test('checkRoleMatch - punctuation attached to a role word does not defeat the match', () => {
+  // Parts are split on [\s_\\/()-]+, which leaves a trailing comma on "Director,".
+  // A naive `\b${part}\b` fails here: the \b after "," needs a word character
+  // next, and a space follows.
+  assert.ok(checkRoleMatch('Congratulations on the Director offer.', 'Senior Director, AI Data'));
+});
+
 test('checkRoleMatch - generic recruiting words never match alone (#2671)', () => {
   // A signature line from an unrelated recruiter ("Talent Acquisition & Diversity")
   // must not satisfy a role match against a "Talent Acquisition Specialist"

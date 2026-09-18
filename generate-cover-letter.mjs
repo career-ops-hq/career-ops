@@ -325,6 +325,11 @@ Usage:
     // validator before importing Playwright or writing a PDF so a failed gate
     // cannot leave behind a misleading artifact.
     const factCheck = assertFacts(html, { label: "cover letter" });
+    // Ahead of the verdict, because it qualifies it: with no config the phrase
+    // lists are empty, so a silent gate here covers metrics and facts only.
+    if (factCheck.configMissing) {
+      console.error("No config/cv-facts.json — forbidden/advisory phrase checks did not run.");
+    }
     if (factCheck.verdict === "warn") {
       console.error(`CV fact check warning: cover letter`);
       for (const phrase of factCheck.warnings) {
