@@ -127,8 +127,40 @@ function parseFontFamilies(declaration) {
     // early on `var(--font family)` and reported `family` as a font.
     .replace(/var\([ \t\n\f\r]*--(?:\\[\s\S]|[^ \t\n\f\r,()])*[ \t\n\f\r]*,?/gi, ' ')
     .split(',')
-    .map(raw => raw.replace(/['"()]/g, '').trim().toLowerCase())
+    // cssTrim, not `.trim()`, for the same JS-vs-CSS disagreement as above but
+    // at the ends of the name: `.trim()` also strips U+00A0, so the quoted
+    // family `" Arial"` — which is NOT Arial, and resolves to nothing —
+    // became `arial`, matched ATS_SAFE_FONTS, and passed silently.
+    .map(raw => cssTrim(raw.replace(/['"()]/g, '')).toLowerCase())
     .filter(Boolean);
+}
+
+/**
+ * Trim CSS whitespace, and only CSS whitespace.
+ *
+ * `String.prototype.trim()` strips every Unicode space, which is wrong here:
+ * CSS whitespace is just these five characters, and everything else it would
+ * remove (U+00A0, U+2000-U+200A, U+3000, …) is an ordinary identifier
+ * character that belongs to the family name.
+ * @param {string} text
+ * @returns {string}
+ */
+function cssTrim(text) {
+  return text.replace(/^[ \t\n\f\r]+|[ \t\n\f\r]+$/g, '');
+}
+
+/**
+ * A font name made safe to print. Anything that renders as blank but is not a
+ * plain space — every other Unicode space separator, plus control and format
+ * characters — is shown as an escape, so a name flagged *because* of such a
+ * character does not read as an ordinary one the reader cannot tell apart.
+ * @param {string} name
+ * @returns {string}
+ */
+function describeFontName(name) {
+  return name.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Zs}]/gu, ch =>
+    ch === ' ' ? ch : `\\u${ch.codePointAt(0).toString(16).padStart(4, '0')}`
+  );
 }
 
 /**
@@ -420,7 +452,7 @@ function auditAts(html, opts = {}) {
     score += WEIGHTS.fonts;
   } else {
     score += Math.max(0, WEIGHTS.fonts - unsafeFonts.length * 3);
-    add('warning', `Non-standard font(s): ${unsafeFonts.join(', ')}. Prefer widely-supported, embeddable fonts (Arial, Helvetica, Calibri, Times New Roman, Georgia) for reliable ATS text extraction.`);
+    add('warning', `Non-standard font(s): ${unsafeFonts.map(describeFontName).join(', ')}. Prefer widely-supported, embeddable fonts (Arial, Helvetica, Calibri, Times New Roman, Georgia) for reliable ATS text extraction.`);
   }
 
   // 7. UTF-8 declared.
@@ -616,6 +648,27 @@ function runSelfTest() {
   // …while real CSS whitespace around the name is still skipped.
   const varSpaced = auditAts(buildCleanHtml({ font: 'var( --font-family ), Arial, sans-serif' }));
   check('CSS whitespace around a custom-property name is skipped', !hasIssue(varSpaced.issues, 'non-standard font'));
+
+  // The same JS-vs-CSS disagreement at the ENDS of a family name. `.trim()`
+  // strips U+00A0, so the quoted family " Arial" — which is not Arial and
+  // resolves to nothing — trimmed onto the allowlist and passed silently. A
+  // false negative: the check said a CV was fine when its font was broken.
+  const nbspFont = auditAts(buildCleanHtml({ font: "' Arial', sans-serif" }));
+  check('a leading U+00A0 does not trim a family onto the safe list', hasIssue(nbspFont.issues, 'non-standard font'));
+
+  // …and the warning has to name it in a form the reader can act on, or it
+  // reports a font that looks exactly like the one they meant to use.
+  check('an invisible character in a flagged font is shown as an escape', hasIssue(nbspFont.issues, '\\u00a0arial'));
+
+  // Real CSS whitespace around a family name is still trimmed, so the ordinary
+  // `'  Arial  '` spelling gains no warning from the above.
+  const paddedFont = auditAts(buildCleanHtml({ font: "'  Arial  ', sans-serif" }));
+  check('CSS whitespace around a family name is still trimmed', !hasIssue(paddedFont.issues, 'non-standard font'));
+
+  // A font that was already flagged must now be named correctly rather than
+  // under the plain name its invisible prefix trimmed onto.
+  const nbspUnsafe = auditAts(buildCleanHtml({ font: "' Comic Sans MS', sans-serif" }));
+  check('a flagged font keeps its real name', hasIssue(nbspUnsafe.issues, '\\u00a0comic sans ms'));
 
   // The Korean and Traditional Chinese stacks the template declares
   // unconditionally must not penalise a CV that never renders them.
