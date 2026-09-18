@@ -429,7 +429,21 @@ function buildProjects(entries, partial) {
     const nameHtml = url
       ? `<a href="${url}">${nameText}</a>`
       : nameText;
-    return fillEntry(entryTemplate, blocks, {
+    // A bullets array with 2+ items and no description renders one DESC_BLOCK
+    // per bullet, matching how experience renders one <li> per bullet, instead
+    // of joining them into a single block.
+    let entryBlocks = blocks;
+    const multi = !e.description && Array.isArray(e.bullets)
+      ? e.bullets.filter(Boolean) : [];
+    const descBlock = blocks.get('DESC_BLOCK');
+    if (multi.length > 1 && descBlock) {
+      const present = multi
+        .map(b => descBlock.present.replace(/\{\{(DESC_BLOCK|DESC)\}\}/g, () => escapeHtml(b)))
+        .join('\n  ');
+      entryBlocks = new Map(blocks);
+      entryBlocks.set('DESC_BLOCK', { ...descBlock, present });
+    }
+    return fillEntry(entryTemplate, entryBlocks, {
       NAME:  nameHtml,
       BADGE: escapeHtml(e.badge || ''),
       DESC:  escapeHtml(descText),
@@ -968,6 +982,21 @@ async function runSelfTest() {
   }
   if (!html.includes('class="edu-location"')) {
     console.error('Self-test failed: edu-location block not rendered when education location is present');
+    process.exit(1);
+  }
+
+  // Guard that a project's bullets array renders one DESC_BLOCK per bullet
+  // (2+ bullets, no description), while a plain description stays a single block.
+  const multiBulletHtml = renderHtml(template, {
+    ...sample,
+    projects: [{ name: 'Multi', bullets: ['First bullet', 'Second bullet', 'Third bullet'] }],
+  }, TEMPLATE_PATH);
+  if ((multiBulletHtml.match(/class="project-desc"/g) || []).length !== 3) {
+    console.error('Self-test failed: project bullets did not render one block per bullet');
+    process.exit(1);
+  }
+  if ((html.match(/class="project-desc"/g) || []).length !== 1) {
+    console.error('Self-test failed: project description should render as a single block');
     process.exit(1);
   }
 
