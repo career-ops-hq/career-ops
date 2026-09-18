@@ -1,0 +1,39 @@
+{
+  "resumeId": "engineering-manager",
+  "targetRole": "Engineering Manager",
+  "category": "technology",
+  "experienceLevel": "executive",
+  "expectedScore": [90, 99],
+  "rawText": "Robert Sterling\nEngineering Manager\nSan Francisco, CA | robert.sterling@email.com | +1 555-011-2299 | linkedin.com/in/rsterling-eng\n\nEXECUTIVE SUMMARY\nEngineering Manager with 12 years of experience building high-performing software engineering teams, driving technical strategy, and delivering cloud infrastructure projects. Proven leader of 18+ engineers across backend, frontend, and DevOps disciplines. Reduced deployment time by 42% and increased release frequency by 60%.\n\nWORK EXPERIENCE\nEngineering Manager | CloudScale Enterprise | San Francisco, CA | 2020 - Present\n- Led a team of 18 engineers across 3 pod teams, managing hiring, mentoring, career development, and performance reviews.\n- Reduced deployment time by 42% and improved release frequency by 60% by driving transition to CI/CD and microservices architecture.\n- Managed $4M annual cloud infrastructure budget on AWS, optimizing resource allocation to achieve a 30% cost reduction.\n- Architected high-availability distributed systems serving 50M+ requests per day with 99.99% operational uptime.\n- Mentored 12+ developers into senior engineering and tech lead roles.\n\nSoftware Engineering Lead | Nexus Global Systems | San Francisco, CA | 2015 - 2020\n- Scaled engineering department from 5 to 25 developers, driving talent acquisition and tech recruitment.\n- Oversaw technical delivery of enterprise cloud migration project, completing migration 2 months ahead of schedule.\n- Established technical standards for Code Review, TDD, Architecture Reviews, and Incident Retrospectives.\n\nSenior Software Engineer | DataCorp Solutions | San Jose, CA | 2012 - 2015\n- Built distributed microservices in Java, Go, Python, and PostgreSQL.\n\nEDUCATION\nMaster of Science in Computer Science | Stanford University | 2010 - 2012\nBachelor of Science in Computer Engineering | UC Davis | 2006 - 2010\n\nTECHNICAL LEADERSHIP & SKILLS\n- Management & Leadership: Team Leadership, Hiring, Mentoring, Engineering Metrics, Technical Strategy, Agile Delivery, Budgeting\n- Technical Expertise: Architecture, Cloud Infrastructure, AWS, Microservices, Docker, Kubernetes, CI/CD, Java, Python, PostgreSQL, DevOps",
+  "jobDescriptionText": "Seeking an Engineering Manager with 10+ years experience to lead a team of 15+ engineers. Responsibilities: hiring, mentoring, architecture, delivery, engineering metrics, cloud infrastructure, and technical strategy. Must demonstrate quantified leadership achievements.",
+  "sections": ["summary", "experience", "education", "skills"],
+  "skills": [
+    "Leadership", "Team Size", "Hiring", "Mentoring", "Architecture", "Delivery", "Engineering Metrics", "Cloud Infrastructure", "Technical Strategy", "AWS", "Microservices", "CI/CD"
+  ],
+  "keywords": [
+    "Engineering Manager", "Leadership", "Hiring", "Mentoring", "Architecture", "Delivery", "Engineering Metrics", "Cloud Infrastructure", "Technical Strategy", "AWS", "Microservices", "CI/CD", "Agile"
+  ],
+  "achievementSignals": [
+    "Led a team of 18 engineers",
+    "42% deployment time reduction",
+    "60% release frequency improvement",
+    "30% cloud cost reduction",
+    "12+ developers mentored",
+    "50M+ daily requests"
+  ],
+  "formattingSignals": {
+    "singleColumn": true,
+    "standardHeadings": true,
+    "tables": false,
+    "graphics": false,
+    "icons": false,
+    "readablePdfText": true
+  },
+  "qualitySignals": {
+    "quantifiedAchievements": true,
+    "actionVerbs": true,
+    "relevantKeywords": true,
+    "clearDates": true,
+    "careerProgression": true
+  }
+}

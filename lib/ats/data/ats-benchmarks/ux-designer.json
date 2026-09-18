@@ -1,0 +1,38 @@
+{
+  "resumeId": "ux-designer",
+  "targetRole": "Senior UX/UI Designer",
+  "category": "design",
+  "experienceLevel": "mid-senior",
+  "expectedScore": [85, 96],
+  "rawText": "Maya Lin\nSenior UX/UI Designer\nSan Francisco, CA | maya.lin@email.com | +1 555-017-6644 | linkedin.com/in/mayalin-ux | mayalin.design\n\nPROFESSIONAL SUMMARY\nSenior UX/UI Designer with 6 years of experience creating intuitive, accessible digital products and multi-platform design systems. Skilled in Figma, UX Research, Wireframing, Prototyping, Usability Testing, and WCAG Accessibility compliance. Increased user task completion rate by 28% and reduced customer support tickets by 34%.\n\nWORK EXPERIENCE\nSenior UX/UI Designer | DesignCraft Systems | San Francisco, CA | 2021 - Present\n- Built and scaled comprehensive Figma design system used across 4 product teams, reducing design-to-development handoff time by 40%.\n- Led end-to-end UX research, user flows, wireframing, and interactive prototyping for mobile and web SaaS applications.\n- Conducted 50+ usability testing sessions, resulting in a 28% increase in task completion rates and a 19% boost in checkout conversion.\n- Audited web applications for WCAG 2.1 AA accessibility compliance, resolving contrast and screen reader accessibility issues.\n- Partnered with product managers and engineers to optimize user onboarding, decreasing support requests by 34%.\n\nUX/UI Designer | Pixel Labs | San Jose, CA | 2018 - 2021\n- Designed responsive web interfaces, interactive prototypes, and visual asset libraries.\n- Improved overall System Usability Scale (SUS) benchmark score from 68 to 86 through iterative user testing.\n\nEDUCATION\nBachelor of Fine Arts in Interaction Design | California College of the Arts (CCA) | 2014 - 2018\n\nTECHNICAL SKILLS & TOOLS\n- Design & Prototyping: Figma, UI Design, Wireframing, Interactive Prototyping, Design Systems, Design Tokens\n- UX Research & Strategy: UX Research, Usability Testing, User Flows, Information Architecture, Persona Creation, User Journeys\n- Standards & Code: Accessibility (WCAG 2.1), HTML5, CSS3, Responsive Design, Design Specifications",
+  "jobDescriptionText": "Seeking a Senior UX/UI Designer with 5-8 years experience in Figma, UX Research, UI Design, Wireframing, Prototyping, Design Systems, Usability Testing, User Flows, and Accessibility. Proven track record of improving user task completion and usability score.",
+  "sections": ["summary", "experience", "education", "skills"],
+  "skills": [
+    "Figma", "UX Research", "UI Design", "Wireframing", "Prototyping", "Design Systems", "Usability Testing", "User Flows", "Accessibility"
+  ],
+  "keywords": [
+    "Figma", "UX Research", "UI Design", "Wireframing", "Prototyping", "Design Systems", "Usability Testing", "User Flows", "Accessibility", "WCAG", "SUS"
+  ],
+  "achievementSignals": [
+    "28% task completion rate increase",
+    "34% support ticket reduction",
+    "40% handoff time reduction",
+    "19% checkout conversion boost",
+    "SUS score 68 to 86"
+  ],
+  "formattingSignals": {
+    "singleColumn": true,
+    "standardHeadings": true,
+    "tables": false,
+    "graphics": false,
+    "icons": false,
+    "readablePdfText": true
+  },
+  "qualitySignals": {
+    "quantifiedAchievements": true,
+    "actionVerbs": true,
+    "relevantKeywords": true,
+    "clearDates": true,
+    "careerProgression": true
+  }
+}

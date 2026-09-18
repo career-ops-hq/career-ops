@@ -1,0 +1,38 @@
+{
+  "resumeId": "product-manager",
+  "targetRole": "Senior Product Manager",
+  "category": "product",
+  "experienceLevel": "senior",
+  "expectedScore": [90, 99],
+  "rawText": "Marcus Vance\nSenior Product Manager\nAustin, TX | marcus.vance@email.com | +1 555-016-3390 | linkedin.com/in/marcusvance-pm\n\nPROFESSIONAL SUMMARY\nSenior Product Manager with 8 years of experience leading cross-functional engineering, UX, and analytics teams to build high-growth SaaS products. Skilled in Product Strategy, Product Roadmap development, Agile/Scrum methodologies, User Research, and A/B Testing. Generated $5.8M in new ARR and increased retention by 18%.\n\nWORK EXPERIENCE\nSenior Product Manager | SaaSify Inc | Austin, TX | 2021 - Present\n- Defined product strategy and multi-year product roadmap for B2B SaaS platform, driving DAU/MAU by 45% and annual recurring revenue (ARR) by $5.8M.\n- Led user research interviews with 100+ enterprise clients, translating qualitative insights into high-impact feature specifications.\n- Executed 25+ product analytics experiments and A/B testing cycles in SQL and Amplitude, boosting user activation by 30% and feature adoption by 40%.\n- Managed 2 Scrum sprint teams (14 engineers & 2 designers) using Jira and Agile ceremonies to ensure 98% on-time feature delivery.\n\nProduct Manager | InnoTech Solutions | Austin, TX | 2017 - 2021\n- Spearheaded launch of self-serve onboarding flow, reducing product churn by 15% and increasing 30-day user retention by 18%.\n- Collaborated with executive leadership and cross-functional stakeholder management to align product goals with corporate growth targets.\n- Conducted competitive market analysis and user journey mapping to prioritize backlog items.\n\nEDUCATION\nBachelor of Science in Computer Information Systems | University of Texas at Austin | 2013 - 2017\n\nSKILLS & COMPETENCIES\n- Product Management: Product Strategy, Product Roadmap, User Research, Product Analytics, A/B Testing, Feature Prioritization, Backlog Management\n- Frameworks & Tools: Agile, Scrum, Jira, Confluence, SQL, Amplitude, Mixpanel, Figma, Stakeholder Management",
+  "jobDescriptionText": "Looking for a Senior Product Manager with 6+ years experience in Product Strategy, Product Roadmap creation, Agile/Scrum, User Research, A/B Testing, Product Analytics, SQL, and Jira to manage stakeholder expectations and boost DAU/MAU retention.",
+  "sections": ["summary", "experience", "education", "skills"],
+  "skills": [
+    "Product Strategy", "Product Roadmap", "Agile", "Scrum", "User Research", "Product Analytics", "A/B Testing", "SQL", "Jira", "Stakeholder Management"
+  ],
+  "keywords": [
+    "Product Strategy", "Product Roadmap", "Agile", "Scrum", "User Research", "Product Analytics", "A/B Testing", "SQL", "Jira", "Stakeholder Management", "Amplitude", "Mixpanel"
+  ],
+  "achievementSignals": [
+    "45% DAU/MAU increase",
+    "$5.8M ARR growth",
+    "30% activation boost",
+    "15% churn reduction",
+    "18% retention increase"
+  ],
+  "formattingSignals": {
+    "singleColumn": true,
+    "standardHeadings": true,
+    "tables": false,
+    "graphics": false,
+    "icons": false,
+    "readablePdfText": true
+  },
+  "qualitySignals": {
+    "quantifiedAchievements": true,
+    "actionVerbs": true,
+    "relevantKeywords": true,
+    "clearDates": true,
+    "careerProgression": true
+  }
+}
