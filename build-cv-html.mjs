@@ -393,6 +393,16 @@ ${bullets}
   }).join('\n  ');
 }
 
+function projectDescriptionHtml(e) {
+  const hasDescription = Boolean(e.description);
+  const bulletText = Array.isArray(e.bullets) ? e.bullets.filter(Boolean).join(' ') : '';
+  const descText = hasDescription ? e.description : bulletText;
+  const escapedDesc = hasDescription
+    ? escapeHtml(descText)
+    : escapeHtmlPreservingLiteralPlaceholders(descText);
+  return { descText, escapedDesc };
+}
+
 function buildProjects(entries, partial) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
   if (!partial) {
@@ -405,12 +415,12 @@ function buildProjects(entries, partial) {
       const nameHtml = url
         ? `<a href="${url}">${nameText}</a>`
         : nameText;
-      // Prefer a single description; fall back to joining bullets into one line so
-      // a bullets-shaped payload still renders inside the .project-desc block.
-      const descText = e.description
-        || (Array.isArray(e.bullets) ? e.bullets.filter(Boolean).join(' ') : '');
+      // Prefer an explicit description. When falling back to bullets, preserve
+      // literal {{PLACEHOLDER}} text instead of letting the unresolved-token
+      // guard mistake it for a template placeholder.
+      const { descText, escapedDesc } = projectDescriptionHtml(e);
       const desc = descText
-        ? `\n    <div class="project-desc">${escapeHtml(descText)}</div>`
+        ? `\n    <div class="project-desc">${escapedDesc}</div>`
         : '';
       const tech = e.tech
         ? `\n    <div class="project-tech">${escapeHtml(e.tech)}</div>`
@@ -423,11 +433,10 @@ function buildProjects(entries, partial) {
 
   const { entryTemplate, blocks } = partial;
   return entries.filter(e => hasRequiredFields(e, 'projects', 'html')).map(e => {
-    const descText = e.description
-      || (Array.isArray(e.bullets) ? e.bullets.filter(Boolean).join(' ') : '');
+    const { descText, escapedDesc } = projectDescriptionHtml(e);
     const blockValues = new Map([
       ['BADGE_BLOCK', { value: escapeHtml(e.badge || ''), present: Boolean(e.badge) }],
-      ['DESC_BLOCK',  { value: escapeHtml(descText),      present: Boolean(descText) }],
+      ['DESC_BLOCK',  { value: escapedDesc,               present: Boolean(descText) }],
       ['TECH_BLOCK',  { value: escapeHtml(e.tech || ''),  present: Boolean(e.tech) }],
     ]);
     const nameText = escapeHtml(e.name || '');
@@ -455,7 +464,7 @@ function buildProjects(entries, partial) {
     return fillEntry(entryTemplate, entryBlocks, {
       NAME:  nameHtml,
       BADGE: escapeHtml(e.badge || ''),
-      DESC:  escapeHtml(descText),
+      DESC:  escapedDesc,
       TECH:  escapeHtml(e.tech || ''),
     }, blockValues);
   }).join('\n  ');
