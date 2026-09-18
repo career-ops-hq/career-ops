@@ -250,16 +250,37 @@ export function stripMarkup(text, { keepLineBreaks = false } = {}) {
     // chain), so the two sides now normalise the same way.
     .replace(/<\/?(?:li|p|div|tr|h[1-6]|section|article|ul|ol|table|br)\b[^>\n]*>/gi, '. ')
     .replace(/<\/?[a-zA-Z][^>\n]*>/g, ' ')
-    // Markdown bold (`**text**` / `__text__`) — the house style used to bold
-    // nearly every metric in cv.md/article-digest.md. A closing marker sitting
-    // directly against the number severed the number-noun adjacency the claim
-    // patterns require, so a bolded metric quoted verbatim from the source was
-    // reported as "invented" (#4085). Requires non-whitespace touching each
-    // marker (the standard markdown emphasis rule), so a lone unpaired
-    // asterisk — a footnote marker like "40%*" — is left alone.
+    .replace(/\\[a-zA-Z]+\*?(?:\[[^\]]*\])?(?:\{([^}]*)\})?/g, ' $1 ')
+    // Markdown emphasis (`**bold**`, `__bold__`, `*italic*`) — the house style
+    // used to bold nearly every metric in cv.md/article-digest.md. A closing
+    // marker sitting directly against the number severed the number-noun
+    // adjacency the claim patterns require, so a bolded metric quoted verbatim
+    // from the source was reported as "invented" (#4085). Requires
+    // non-whitespace touching each marker (the standard markdown emphasis
+    // rule), so a lone unpaired asterisk — a footnote marker like "40%*", or
+    // two of them on one line — is left alone rather than paired into a false
+    // span. Single underscores are load-bearing in these sources (snake_case,
+    // env_keys.json, file paths), so only a DOUBLED underscore is stripped.
+    // Must run AFTER the LaTeX pass above: a LaTeX star-variant command
+    // (`\section*{...}`) leaves a single bare `*` behind if consumed first,
+    // and that stray star can pair with an unrelated later `*...*` span and
+    // mangle both. Bold before italic, so the italic pass never splits a
+    // `**...**` run in two. Bold may span a wrapped line (`keepLineBreaks`);
+    // italic is deliberately kept single-line, to stay conservative about the
+    // more collision-prone single-asterisk form.
+    //
+    // Deliberately NOT letter/digit-boundary-guarded (e.g. `(?<![\p{L}\p{N}_])`)
+    // even though that would preserve literal patterns like `2*3*4` or
+    // `foo*bar*baz`: a LaTeX star command directly abutting the next word
+    // (`\section*{Foo}and*emphasis*done` -> `Foo and*emphasis*done`) leaves
+    // the italic span's markers touching letters on both sides, which such a
+    // guard rejects — turning real emphasis back into a false negative. The
+    // covered CV/article-digest sources never contain literal multiplication
+    // asterisks, so this trades an untested hypothetical for a real,
+    // regression-tested case (see the LaTeX star-command test below).
     .replace(/\*\*(\S(?:[\s\S]*?\S)?)\*\*/g, ' $1 ')
     .replace(/__(\S(?:[\s\S]*?\S)?)__/g, ' $1 ')
-    .replace(/\\[a-zA-Z]+\*?(?:\[[^\]]*\])?(?:\{([^}]*)\})?/g, ' $1 ')
+    .replace(/\*(\S(?:[^\n*]*\S)?)\*/g, ' $1 ')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     // keepLineBreaks preserves a newline as a CLAUSE boundary for the plan-horizon

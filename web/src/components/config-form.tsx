@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
 import { persistCliId, readSavedCliId } from "@/lib/saved-cli";
+import { pickDefaultInstalled } from "@/lib/cli-pick.mjs";
 
 type Cli = {
   id: string;
@@ -68,14 +69,18 @@ export function ConfigForm() {
       .then((d) => {
         const list: Cli[] = d.clis ?? [];
         setClis(list);
-        // Highlight + persist the only installed CLI when Config was never saved.
-        // Highlight-only used to look configured while jobs still read empty localStorage.
+        // Highlight + persist the default installed CLI when Config was never
+        // saved. Highlight-only looks configured while jobs still read empty
+        // localStorage -- so whatever is rendered as selected must be written.
+        // This applies at ANY installed count: restricting it to a SOLE install
+        // left every multi-CLI machine (claude + codex, say) in exactly the
+        // broken state the highlight was meant to avoid.
         setCliId((prev) => {
           if (prev) return prev;
-          const only = list.filter((c) => c.installed);
-          if (only.length !== 1) return list.find((c) => c.installed)?.id || "";
-          if (!readSavedCliId()) persistCliId(only[0].id);
-          return only[0].id;
+          const auto = pickDefaultInstalled(list);
+          if (!auto) return "";
+          if (!readSavedCliId()) persistCliId(auto);
+          return auto;
         });
       })
       .catch(() => setClis([]));
