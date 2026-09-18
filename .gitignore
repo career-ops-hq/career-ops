@@ -203,3 +203,31 @@ documents/*
 # Intake fingerprints — the recorded source filenames may themselves carry
 # PII (e.g. cv/jane-doe-master-cv.pdf). #1723
 data/intake-state.json
+
+# Added by career-ops update-system.mjs.
+# System-owned ignore rules that were missing from this file. Your own rules
+# are never modified, reordered or removed: the updater only appends patterns
+# it cannot already find somewhere in this file. Reordering these lines, or
+# moving them elsewhere in the file, is safe and will not bring them back.
+# Deleting or commenting one out is not: they are system-owned, several of
+# them guard files holding personal data, and the next update re-adds any
+# that is no longer present as a live pattern.
+# Single-level glob above misses subdirectories (e.g. reports/superseded/).
+# Kept alongside it rather than replacing it, so update-system.mjs does not
+# re-append the original pattern as "missing".
+reports/**/*.md
+!reports/.gitkeep
+!output/.gitkeep
+!batch/logs/.gitkeep
+!batch/tracker-additions/.gitkeep
+!jds/.gitkeep
+!interview-prep/
+!interview-prep/.gitkeep
+!interview-prep/sessions/
+!interview-prep/sessions/.gitkeep
+!interview-prep/sessions/README.md
+!writing-samples/README.md
+!web/package-lock.json
+!test-fixtures/**
+!documents/.gitkeep
+!documents/README.md

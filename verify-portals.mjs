@@ -740,7 +740,14 @@ async function main() {
   // fell through untouched and triggered the exact same full portals.yml
   // sweep as no flags, which on a large config can run for minutes with zero
   // output and reads exactly like a hang.
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+  // requireOperand: without it, `--file --strict` reads --strict as the file
+  // path (flagValue() returns args[idx+1] unconditionally, with no check that
+  // it isn't itself another flag), and a bare `--file`/`--file=` reaches
+  // resolve('') — the current directory — which readFileSync() then rejects
+  // with a raw EISDIR instead of a usage error (CodeRabbit, #4254 review).
+  // Same shape already fixed the same way in process-quality.mjs, doctor.mjs,
+  // detect-reposts.mjs and others.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
   const strict = hasFlag(args, '--strict');
   const fetchJson = defaultFetchJson;
@@ -750,8 +757,19 @@ async function main() {
     return;
   }
 
+  // requireOperand above catches a bare `--file` (nothing follows) and
+  // `--file --anotherflag` (the next token looks like a flag), but not
+  // `--file=` — an explicit empty value after `=` is a single token
+  // (`--file=`) that never matches the bare `--file` requireOperand checks
+  // for, so it would otherwise reach resolve('') the same way.
+  const fileArg = flagValue(args, '--file');
+  if (hasFlag(args, '--file') && !fileArg) {
+    console.error('Error: --file requires a value');
+    process.exit(1);
+  }
+
   const filePath = resolve(
-    hasFlag(args, '--file') ? flagValue(args, '--file') || '' : DEFAULT_PORTALS_PATH,
+    hasFlag(args, '--file') ? fileArg : DEFAULT_PORTALS_PATH,
   );
 
   // Load the scanner's provider plugins so non-ATS boards (Workday,
