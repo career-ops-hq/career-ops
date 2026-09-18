@@ -120,7 +120,12 @@ function parseFontFamilies(declaration) {
     // property may be non-ASCII (`--字体`, `--police-caractères`) or carry a
     // CSS escape, and an ASCII-only class stops at the first such character —
     // leaving its tail behind to be reported as a font the CV never named.
-    .replace(/var\(\s*--(?:\\[\s\S]|[^\s,()])*\s*,?/gi, ' ')
+    //
+    // The separator set is CSS whitespace, spelled out rather than `\s`. The
+    // two disagree on U+00A0: JavaScript calls it whitespace, CSS calls it an
+    // ordinary identifier character (it is >= U+0080), so `\s` ended the name
+    // early on `var(--font family)` and reported `family` as a font.
+    .replace(/var\([ \t\n\f\r]*--(?:\\[\s\S]|[^ \t\n\f\r,()])*[ \t\n\f\r]*,?/gi, ' ')
     .split(',')
     .map(raw => raw.replace(/['"()]/g, '').trim().toLowerCase())
     .filter(Boolean);
@@ -602,6 +607,15 @@ function runSelfTest() {
   // An escaped character inside the name is part of the name, not a separator.
   const varEscaped = auditAts(buildCleanHtml({ font: 'var(--a\\,b), Arial, sans-serif' }));
   check('an escaped character in a custom-property name is consumed', !hasIssue(varEscaped.issues, 'non-standard font'));
+
+  // U+00A0 is whitespace to JavaScript but an ordinary identifier character to
+  // CSS, so a `\s`-based name class ended early here and reported `family`.
+  const varNbsp = auditAts(buildCleanHtml({ font: 'var(--font family), Arial, sans-serif' }));
+  check('U+00A0 inside a custom-property name is not a separator', !hasIssue(varNbsp.issues, 'non-standard font'));
+
+  // …while real CSS whitespace around the name is still skipped.
+  const varSpaced = auditAts(buildCleanHtml({ font: 'var( --font-family ), Arial, sans-serif' }));
+  check('CSS whitespace around a custom-property name is skipped', !hasIssue(varSpaced.issues, 'non-standard font'));
 
   // The Korean and Traditional Chinese stacks the template declares
   // unconditionally must not penalise a CV that never renders them.
