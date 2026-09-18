@@ -15,10 +15,12 @@ try {
   } = await import(pathToFileURL(join(ROOT, 'theme-style.mjs')).href);
 
   // styleTokensFrom: recognized keys → css vars; ignore unknown/non-string/missing
-  const t = styleTokensFrom({ accent_color: '#2563eb', secondary_color: '#111827', font_family: 'Outfit, sans-serif', font_size: '10pt', margin: '0.5in', nope: 'x', font_weight: 700 });
-  if (t['--accent-color'] === '#2563eb' && t['--secondary-color'] === '#111827' && t['--font-family'] === 'Outfit, sans-serif' && t['--font-size'] === '10pt' && t['--page-margin'] === '0.5in'
-      && !('--font-weight' in t) && Object.keys(t).length === 5) {
-    pass('styleTokensFrom maps the 5 recognized keys and ignores unknown/non-string');
+  const t = styleTokensFrom({ accent_color: '#2563eb', secondary_color: '#111827', tag_color: '#0e7490', tag_bg: '#ecfeff', tag_border: '#a5f3fc', font_family: 'Outfit, sans-serif', font_size: '10pt', margin: '0.5in', nope: 'x', font_weight: 700 });
+  if (t['--accent-color'] === '#2563eb' && t['--secondary-color'] === '#111827'
+      && t['--tag-color'] === '#0e7490' && t['--tag-bg'] === '#ecfeff' && t['--tag-border'] === '#a5f3fc'
+      && t['--font-family'] === 'Outfit, sans-serif' && t['--font-size'] === '10pt' && t['--page-margin'] === '0.5in'
+      && !('--font-weight' in t) && Object.keys(t).length === 8) {
+    pass('styleTokensFrom maps the 8 recognized keys and ignores unknown/non-string');
   } else {
     fail(`styleTokensFrom => ${JSON.stringify(t)}`);
   }
@@ -213,6 +215,36 @@ try {
       fail(`page-margin cascade order/value wrong: root=${rootDefaultIdx} override=${overrideIdx} pageSetup=${pageSetupIdx} usesVar=${pageSetupUsesVar}`);
     }
   }
+  // The competency-tag palette was three hardcoded literals, so a profile could
+  // recolor the accents and then had nowhere to go for the tags — and a template
+  // edit is reverted by every `update-system.mjs apply`. Two things must hold: the
+  // template still READS each token (an unreferenced var makes an override inert),
+  // and each :root default is byte-identical to the literal it replaced (or every
+  // existing CV silently changes color).
+  {
+    const DEFAULTS = {
+      '--tag-color':  'hsl(187, 74%, 28%)',
+      '--tag-bg':     'hsl(187, 40%, 95%)',
+      '--tag-border': 'hsl(187, 40%, 88%)',
+    };
+    // every template that carried these literals, not just the default one — a token
+    // the resume/zh templates don't read is a style: key that silently does nothing there
+    const TEMPLATES = ['templates/cv-template.html', 'templates/cv-template.zh-minimal.html', 'templates/resume-template.html'];
+    for (const tpl of TEMPLATES) {
+    const tplSrc = readFileSync(join(ROOT, tpl), 'utf-8');
+    const wrongDefault = Object.entries(DEFAULTS).filter(([v, d]) => !tplSrc.includes(`${v}: ${d};`));
+    const unreferenced = Object.keys(DEFAULTS).filter(v => !tplSrc.includes(`var(${v})`));
+    const selfReferential = Object.keys(DEFAULTS).filter(v => tplSrc.includes(`${v}: var(${v})`));
+    const strays = tplSrc.split('\n')
+      .filter(l => /hsl\(187, 74%, 28%\)|hsl\(187, 40%, (?:95|88)%\)/.test(l) && !/^\s*--tag-/.test(l));
+    if (!wrongDefault.length && !unreferenced.length && !selfReferential.length && !strays.length) {
+      pass(`${tpl}: tag tokens keep the exact colors they replaced, are read, and leave no literal behind`);
+    } else {
+      fail(`${tpl} tag tokens: wrongDefault=${JSON.stringify(wrongDefault)} unreferenced=${unreferenced} selfRef=${selfReferential} strays=${JSON.stringify(strays)}`);
+    }
+    }
+  }
+
 } catch (e) {
   fail(`theme-style tests crashed: ${e.message}`);
 }
