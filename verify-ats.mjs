@@ -116,7 +116,11 @@ function parseFontFamilies(declaration) {
   return declaration
     // `var(--name` plus the comma before its fallback; the orphaned `)` that
     // closed the reference is removed with the remaining punctuation below.
-    .replace(/var\(\s*--[\w-]*\s*,?/gi, ' ')
+    // The name is "any run that is not a separator", not `[\w-]+`: a custom
+    // property may be non-ASCII (`--字体`, `--police-caractères`) or carry a
+    // CSS escape, and an ASCII-only class stops at the first such character —
+    // leaving its tail behind to be reported as a font the CV never named.
+    .replace(/var\(\s*--(?:\\[\s\S]|[^\s,()])*\s*,?/gi, ' ')
     .split(',')
     .map(raw => raw.replace(/['"()]/g, '').trim().toLowerCase())
     .filter(Boolean);
@@ -587,6 +591,17 @@ function runSelfTest() {
   // …but a font named in var()'s fallback slot must not hide behind it.
   const varFallback = auditAts(buildCleanHtml({ font: "var(--font-family, 'Comic Sans MS'), sans-serif" }));
   check('a font in a var() fallback is still flagged', hasIssue(varFallback.issues, 'comic sans ms'));
+
+  // A custom property is not restricted to ASCII. An ASCII-only name class
+  // stops at the first such character and leaves the tail behind as a "font":
+  // `var(--police-caractères)` reported `ères`, and `var(--字体, Arial)`
+  // reported `字体` — names the CV never asked for.
+  const varNonAscii = auditAts(buildCleanHtml({ font: 'var(--字体, Arial), var(--police-caractères), sans-serif' }));
+  check('a non-ASCII custom-property name is consumed whole', !hasIssue(varNonAscii.issues, 'non-standard font'));
+
+  // An escaped character inside the name is part of the name, not a separator.
+  const varEscaped = auditAts(buildCleanHtml({ font: 'var(--a\\,b), Arial, sans-serif' }));
+  check('an escaped character in a custom-property name is consumed', !hasIssue(varEscaped.issues, 'non-standard font'));
 
   // The Korean and Traditional Chinese stacks the template declares
   // unconditionally must not penalise a CV that never renders them.
