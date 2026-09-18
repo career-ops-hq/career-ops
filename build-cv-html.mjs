@@ -81,6 +81,12 @@ function escapeHtml(text) {
     .replace(/'/g, '&#39;');
 }
 
+function escapeHtmlPreservingLiteralPlaceholders(text) {
+  return escapeHtml(text).replace(PLACEHOLDER_RE, marker => marker
+    .replace(/\{/g, '&#123;')
+    .replace(/\}/g, '&#125;'));
+}
+
 // Sanitize a URL for an href attribute: only allow the schemes the template's
 // contact row uses, coerce bare emails/domains, drop javascript:/data: and other
 // script-bearing schemes, then HTML-escape for the attribute context.
@@ -438,7 +444,10 @@ function buildProjects(entries, partial) {
     const descBlock = blocks.get('DESC_BLOCK');
     if (multi.length > 1 && descBlock) {
       const present = multi
-        .map(b => descBlock.present.replace(/\{\{(DESC_BLOCK|DESC)\}\}/g, () => escapeHtml(b)))
+        .map(b => descBlock.present.replace(
+          /\{\{(DESC_BLOCK|DESC)\}\}/g,
+          () => escapeHtmlPreservingLiteralPlaceholders(b),
+        ))
         .join('\n  ');
       entryBlocks = new Map(blocks);
       entryBlocks.set('DESC_BLOCK', { ...descBlock, present });
@@ -989,10 +998,18 @@ async function runSelfTest() {
   // (2+ bullets, no description), while a plain description stays a single block.
   const multiBulletHtml = renderHtml(template, {
     ...sample,
-    projects: [{ name: 'Multi', bullets: ['First bullet', 'Second bullet', 'Third bullet'] }],
+    projects: [{
+      name: 'Multi',
+      bullets: ['Literal {{DESC}} marker', 'Literal {{DESC_BLOCK}} marker', 'Third bullet'],
+    }],
   }, TEMPLATE_PATH);
   if ((multiBulletHtml.match(/class="project-desc"/g) || []).length !== 3) {
     console.error('Self-test failed: project bullets did not render one block per bullet');
+    process.exit(1);
+  }
+  if (!multiBulletHtml.includes('Literal &#123;&#123;DESC&#125;&#125; marker')
+      || !multiBulletHtml.includes('Literal &#123;&#123;DESC_BLOCK&#125;&#125; marker')) {
+    console.error('Self-test failed: project bullet literal placeholders were reprocessed');
     process.exit(1);
   }
   if ((html.match(/class="project-desc"/g) || []).length !== 1) {
