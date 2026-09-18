@@ -29,10 +29,22 @@
 import { readFileSync, existsSync } from 'fs';
 import { canonicalize, extractSkills } from './skill-extract.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { join } from 'path';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const CV_PATH = 'cv.md';
+// From the data root, not the cwd. cv.md is a Source-of-Truth Boundary primary
+// file and lives wherever CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / the
+// .career-ops-data marker points; a bare relative path resolves against
+// whatever directory the process was started in.
+//
+// Everything this script reports is a comparison against that file, so without
+// it there is nothing to say at all. The error below therefore has to serve two
+// different users at once: one who never wrote a cv.md, and one who has one
+// sitting outside the data root this resolver just looked in. Naming only one
+// of them sends the other to the wrong fix.
+const CV_PATH = join(getCareerOpsRoot(), 'cv.md');
 
 // ── JD skill extraction (regex, no LLM) ─────────────────────────────
 //
@@ -41,16 +53,40 @@ const CV_PATH = 'cv.md';
 // (missing a skill) is recoverable by the user reading the JD themselves;
 // over-extracting noise into "required skills" is not — it would misreport
 // gaps that aren't real.
-
+//
 // Real postings rarely use the word "Requirements". The literal-only list
 // missed the phrasings most modern ATS boards actually ship ("What we're
 // looking for", "Who you are", "You may be a good fit if", "You have"), so a
 // JD could yield zero skills - which reads identically to "no gaps found" and
 // is the more dangerous of the two failure modes this file warns about.
+//
+// CJK characters are \W (non-word), so the s?\b suffix that works for ASCII
+// terms would always fail after a Chinese heading: \b asserts between \w and
+// \W, and after a CJK char the following whitespace / colon / newline is also
+// \W, so no boundary fires. The fix is a separate alternation arm for CJK
+// terms that drops s?\b; both arms share the same ^#{0,6}\s* prefix.
+//
+// The prefix itself stays #{0,6} — it is NOT widened to also swallow `*`/`_`.
+// A bolded heading with no markdown hash ("**What We're Looking For**") is
+// handled instead by stripping `**`/`__` pairs from the line before testing
+// it against this pattern (see stripBoldMarkers() and its call site in
+// scanJd(), #4273). Widening the prefix character class was the first thing
+// tried here and it regressed a real, common shape: an asterisk-BULLET whose
+// text happens to start with a keyword — "* Required: Python and
+// Kubernetes" — would have its leading `*` consumed as a heading marker,
+// misclassifying the bullet itself as a new heading (and dropping the
+// skills on that exact line, since a heading match short-circuits before
+// bullet extraction runs). Stripping only doubled `**`/`__` markers — never
+// a single `*`/`_` — leaves a literal bullet character untouched, since a
+// real bullet is one asterisk, not two.
 const REQUIREMENT_HEADER_RE = new RegExp(
-  '^#{0,6}\\s*(?:' + [
+  '^#{0,6}\\s*(?:(?:' + [
     'required', 'requirements', 'qualifications', 'must[- ]have', 'preferred', 'nice[- ]to[- ]have',
-    "what\\s+we(?:'|’)?\\s*re\\s+looking\\s+for",
+    // (?:'|’)?\s*re|\s+are (not just (?:'|’)?\s*re): the contracted-only form
+    // matched "we're"/"we re" but not the equally common uncontracted "we are"
+    // (#4273 — the Netflix posting that surfaced this used the uncontracted,
+    // bolded form of this exact heading).
+    "what\\s+we(?:(?:'|’)?\\s*re|\\s+are)\\s+looking\\s+for",
     "what\\s+you(?:(?:'|’)ll|\\s+will)?\\s+bring",
     'who\\s+you\\s+are',
     'about\\s+you',
@@ -67,7 +103,21 @@ const REQUIREMENT_HEADER_RE = new RegExp(
     'it\\s+would\\s+be\\s+great\\s+if\\s+you\\s+ha(?:ve|d)',
     'ideal\\s+candidate',
     'skills\\s+(?:and|&)\\s+experience',
-  ].join('|') + ')s?\\b.*$',
+  ].join('|') + ')s?\\b|(?:' + [
+    // zh-TW / zh-CN requirement headers.
+    // 104 / 1111 / CakeResume / Yourator all use variants of these headings.
+    '\u61C9\u5FB5\u689D\u4EF6',   // 應徵條件
+    '\u8CC7\u683C\u689D\u4EF6',   // 資格條件
+    '\u8077\u52D9\u9700\u6C42',   // 職務需求
+    '\u689D\u4EF6\u8981\u6C42',   // 條件要求 (zh-CN)
+    '\u4EFB\u8077\u8CC7\u683C',   // 任職資格 (zh-CN)
+    '\u5FC5\u8981\u689D\u4EF6',   // 必要條件
+    '\u57FA\u672C\u8981\u6C42',   // 基本要求 (zh-CN)
+    '\u8077\u4F4D\u8981\u6C42',   // 職位要求 (zh-CN)
+    // preferred / nice-to-have
+    '\u52A0\u5206\u9805\u76EE',   // 加分項目
+    '\u52A0\u5206\u689D\u4EF6',   // 加分條件
+  ].join('|') + ')).*$',
   'im'
 );
 
@@ -75,8 +125,13 @@ const REQUIREMENT_HEADER_RE = new RegExp(
 // heading levels. Without this the block stayed open to end-of-file and swept
 // the benefits list into "required skills" - turning perks like "401k",
 // "Equity" and "Carrot" into reported skill gaps.
+//
+// Same #{0,6} prefix, same reason for leaving it unwidened, as
+// REQUIREMENT_HEADER_RE above: a bolded "**Benefits**" with no markdown hash
+// is handled by stripBoldMarkers() before this pattern ever sees the line,
+// not by letting the prefix itself swallow `*`/`_` (#4273).
 const NON_REQUIREMENT_HEADER_RE = new RegExp(
-  '^#{0,6}\\s*(?:' + [
+  '^#{0,6}\\s*(?:(?:' + [
     // Responsibilities. The negative lookahead keeps "You will have" on the
     // requirements side — this list is tested BEFORE REQUIREMENT_HEADER_RE in
     // scanJd(), so without it a "You will have:" heading would close a block
@@ -92,13 +147,41 @@ const NON_REQUIREMENT_HEADER_RE = new RegExp(
     'equal\\s+opportunity', 'eeo', 'diversity',
     'interview\\s+process', 'how\\s+to\\s+apply', 'to\\s+apply',
     'our\\s+(?:stack|process|values|mission)',
-  ].join('|') + ')\\b.*$',
+  ].join('|') + ')\\b|(?:' + [
+    // zh-TW / zh-CN closing headers — drops \b for the same CJK reason.
+    '\u5DE5\u4F5C\u5167\u5BB9',   // 工作內容
+    '\u5DE5\u4F5C\u8077\u8CAC',   // 工作職責
+    '\u8077\u8CAC\u7BC4\u758A',   // 職責範疇
+    '\u798F\u5229',               // 福利
+    '\u85AA\u8CC7',               // 薪資
+    '\u85AA\u916C',               // 薪酬 (zh-CN)
+    '\u516C\u53F8\u4ECB\u7D39',   // 公司介紹
+    '\u95DC\u65BC\u6211\u5011',   // 關於我們
+    '\u61C9\u5FB5\u65B9\u5F0F',   // 應徵方式
+    '\u5982\u4F55\u61C9\u5FB5',   // 如何應徵
+  ].join('|') + ')).*$',
   'im'
 );
 
 // `\r?$` is required, not cosmetic: JS treats \r as a line terminator, so `.`
 // cannot consume it and a bare `$` never matches on a CRLF-split line.
 const BULLET_LINE_RE = /^\s*[-*•]\s*(.+)\r?$/;
+
+// Strip markdown STRONG-emphasis markers (`**text**` / `__text__`) so a
+// bolded heading with no `#` at all — "**What We're Looking For**" — still
+// reaches REQUIREMENT_HEADER_RE / NON_REQUIREMENT_HEADER_RE's own `#{0,6}`
+// prefix as if the bold wrapper were never there (#4273).
+//
+// Only doubled markers: a single `*`/`_` is left completely alone, on
+// purpose. `*` is also how a plain markdown bullet starts (BULLET_LINE_RE),
+// and a bullet whose text happens to start with a keyword — "* Required:
+// Python and Kubernetes" — must stay a bullet, not become a misdetected
+// heading that swallows its own line's skills before bullet extraction ever
+// runs. `**` (two characters) can never be a single-asterisk bullet marker,
+// so this global-replace has no bullet-collision case to worry about.
+function stripBoldMarkers(line) {
+  return line.replace(/\*\*|__/g, '');
+}
 
 // A conservative skill-token extractor: pulls comma/slash/and-separated
 // technical-looking tokens out of a requirement bullet, rather than treating
@@ -160,19 +243,27 @@ function scanJd(jdText) {
   let sawRequirementSection = false;
 
   for (const line of lines) {
+    // Header-classification only, never bullet extraction below: a bolded
+    // heading ("**Benefits**") must match these two regexes as if the bold
+    // wrapper weren't there, but a bolded SKILL inside a bullet
+    // ("- **Docker** and **Kubernetes**") already extracts fine as-is via
+    // SKILL_TOKEN_RE, which skips right over `*` since it isn't in the
+    // token's character class — stripping there would be a no-op at best
+    // (#4273).
+    const headerLine = stripBoldMarkers(line);
     // Checked before the requirement test so a heading that satisfies both
     // (e.g. "Why this role") closes the block rather than reopening it.
-    if (NON_REQUIREMENT_HEADER_RE.test(line)) {
+    if (NON_REQUIREMENT_HEADER_RE.test(headerLine)) {
       inRequirementsBlock = false;
       continue;
     }
-    if (REQUIREMENT_HEADER_RE.test(line)) {
+    if (REQUIREMENT_HEADER_RE.test(headerLine)) {
       inRequirementsBlock = true;
       sawRequirementSection = true;
       continue;
     }
     if (inRequirementsBlock && line.trim() === '') continue;
-    if (inRequirementsBlock && /^#{1,6}\s/.test(line) && !REQUIREMENT_HEADER_RE.test(line)) {
+    if (inRequirementsBlock && /^#{1,6}\s/.test(line) && !REQUIREMENT_HEADER_RE.test(headerLine)) {
       inRequirementsBlock = false;
     }
 
@@ -626,6 +717,13 @@ Benefits and Perks (US Only)
   const crlfSkills = extractJdSkills(lineEndingJd.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n'));
   eq('CRLF JD extracts the same skills as the LF JD', crlfSkills, lfSkills);
   eq('CRLF JD extracts a non-zero number of skills', crlfSkills.length > 0, true);
+  const lfClassification = classifySkillGaps(lfSkills, fakeCv);
+  const crlfClassification = classifySkillGaps(crlfSkills, fakeCv);
+  eq(
+    'CRLF JD produces the same classification as the LF JD',
+    JSON.stringify(crlfClassification),
+    JSON.stringify(lfClassification)
+  );
 
   // Regression (#1896): the reported bug. A CV alias and a JD's canonical name
   // must not read as a gap. Before the shared skill-extract canonicalization,
@@ -746,13 +844,28 @@ Maintained the internal Fabrikam-SDK build.
     'empty-jd'
   );
 
-  // The warning must carry a caller-facing message, not just a code — the agent
-  // following modes/pdf.md Step 4 surfaces this text to the user.
-  eq(
-    'the diagnosis carries a non-empty message',
-    diagnoseExtraction(unreadableJd, []).message.length > 0,
-    true
-  );
+  // Regression (#3601): Chinese headers (zh-TW / zh-CN) like 應徵條件 or 職務需求
+  // must be recognized as requirement section openers, and headers like 工作內容
+  // or 福利 must close the section.
+  const zhJd = `
+# PHP 後端工程師
+
+## 應徵條件
+- 熟悉 PHP、MySQL、Git
+- 具 Linux 基本指令能力
+
+## 工作內容
+- 開發 RESTful API
+- 維護既有 專案
+`;
+  const zhSkills = extractJdSkills(zhJd);
+  eq('Chinese requirement header (應徵條件) extracts skills', zhSkills.includes('PHP'), true);
+  eq('Chinese requirement header extracts MySQL', zhSkills.includes('MySQL'), true);
+  eq('Chinese requirement header extracts Git', zhSkills.includes('Git'), true);
+  eq('Chinese requirement header extracts Linux', zhSkills.includes('Linux'), true);
+  eq('Chinese non-requirement header (工作內容) closes requirement section', zhSkills.includes('RESTful'), false);
+
+  eq('Chinese header diagnosis is conclusive', diagnoseExtraction(zhJd, zhSkills), null);
 
   console.log(`\njd-skill-gap self-test: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
@@ -770,7 +883,8 @@ if (selfTestMode) {
     process.exit(1);
   }
   if (!existsSync(CV_PATH)) {
-    console.error(`Error: ${CV_PATH} not found — this is a user-layer file, create it first.`);
+    console.error(`Error: cv.md not found at ${CV_PATH}`);
+    console.error('Create it there, or point CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR (or a .career-ops-data marker) at the directory that already has it.');
     process.exit(1);
   }
 

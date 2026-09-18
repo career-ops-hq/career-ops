@@ -10,6 +10,7 @@ System-layer template files used by career-ops scripts and modes. These files ar
 | `cv-template.{compact,executive,jake,leadership,modern}.html` | `generate-pdf.mjs`, `build-cv-html.mjs` (via `cv-templates.mjs`) | Named CV variants selectable per CV or as a `cv.template` default. Same placeholder tokens and ATS rules as `cv-template.html`. See detailed section below. |
 | `resume-template.html` | `generate-pdf.mjs` (via `--template`) | Resume-branded variant of `cv-template.html`. Same layout and placeholder tokens; differs in: `<title>` reads "Resume" instead of "CV", omits Certifications section (but keeps Awards & Honors), targets 1–2 page US/industry format. See detailed section below. |
 | `cv-template.tex` | `generate-latex.mjs` | LaTeX/Overleaf template for ATS-optimized CV PDFs |
+| `cv-template.cjk.tex` | `build-cv-latex.mjs --template=cjk`, `generate-latex.mjs` | CJK (Chinese/Japanese/Korean) variant of `cv-template.tex` — loads `fontspec`+`xeCJK`. Requires the `tectonic` engine (XeTeX backend); pdflatex still cannot render CJK. See "CJK variant" below and `modes/latex.md`. |
 | `portals.example.yml` | Onboarding | Example portal scanner configuration (copy to `portals.yml` to activate) |
 | `states.yml` | `verify-pipeline.mjs`, `normalize-statuses.mjs`, `merge-tracker.mjs` | Canonical application states and their aliases |
 | `restrictive-covenants.yml` | `modes/offer-prep.md` (statutory-context notes) | Jurisdiction-keyed table of restrictive-covenant statutory rules, per covenant type (v1: non-compete only — seeds US-CA B&P §16600/§16600.5 and Ontario ESA s.67.2). Status spectrum: `prohibited` / `allowed_with_mandatory_compensation` / `allowed_with_limits` / `common_law_reasonableness`. Prompt-level data reference — no script reads it; local lookup, never online research. Feeds statutory-context notes and targeted lawyer questions; never a verdict about the candidate's clause. Contribution rule: no entry without a citable legal source, an effective date, and an `as_of` verification date; covenant types are never conflated. |
@@ -93,6 +94,12 @@ node generate-latex.mjs output/cv-name-company-date.tex output/custom-name.pdf
 **Prerequisites:** `pdflatex` via [MiKTeX](https://miktex.org/) (Windows) or TeX Live (Linux/macOS). First compilation may auto-install missing LaTeX packages. Alternatively, upload the `.tex` file directly to [Overleaf](https://www.overleaf.com) — no local install needed.
 
 **Customization:** Edit this file to change margins, section order, or formatting commands. The placeholder tokens are documented in `modes/latex.md` under "Template Placeholders."
+
+### cv-template.cjk.tex
+
+CJK (Chinese/Japanese/Korean) variant of `cv-template.tex` — same placeholder tokens and structure, plus `fontspec` + `xeCJK` so kana/kanji/hangul render (#3553). Select it explicitly: `node build-cv-latex.mjs <input.json> <output.tex> --template=cjk`.
+
+**Prerequisite:** a XeTeX-based engine (its backend is XeTeX, unlike pdflatex's pdfTeX). Locally that's the `tectonic` engine — `generate-latex.mjs` only accepts this path when tectonic is the resolved compiler; a pdflatex-only setup still gets redirected to `pdf` mode. **On Overleaf, switch the compiler to XeLaTeX** (Menu → Compiler → XeLaTeX) after uploading — Overleaf's default pdfLaTeX compiler can't build this file either. You also need a CJK-capable font installed system-wide — fontspec/xeCJK read fonts from the OS, tectonic does not download or bundle them. The template defaults `\setCJKmainfont{Noto Serif CJK SC}`; if that font isn't installed, edit that line to a font you have (e.g. "Noto Sans CJK JP", "Microsoft YaHei", "Hiragino Mincho ProN").
 
 ### portals.example.yml
 

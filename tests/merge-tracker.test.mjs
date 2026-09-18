@@ -687,3 +687,38 @@ try {
 } catch (e) {
   fail(`merge-tracker PDF-flag sync tests crashed: ${e.message}`);
 }
+
+// ── One-sided level + two-sided vocabulary (#4058) ──────────────────────────
+// roleFuzzyMatch() used to merge two materially different same-employer roles
+// when they shared reordered qualifiers, each title had a unique token, and
+// only one side stated a level. Both rows below carry no posting URL and
+// different report/entry numbers, so the company + fuzzy-role tier decides —
+// asserting on the rows proves the fix where the bug lived.
+console.log('\nmerge-tracker.mjs — one-sided level keeps distinct roles apart (#4058)');
+try {
+  const ROLE_A = 'Front Desk Assistant (Summer Housing)';
+  const ROLE_B = 'Administrative Assistant II (Housing Front Desk)';
+  const SEED_4058 = `| 1 | 2026-09-01 | Acme Health | ${ROLE_A} | 4.0/5 | Evaluated | ❌ | [1](reports/1-acme.md) | |\n`;
+
+  const split = runMergeDetailed({
+    '2-acme.tsv': `2\t2026-09-09\tAcme Health\t${ROLE_B}\tEvaluated\t4.1/5\t❌\t[2](reports/2-acme.md)\t\n`,
+  }, { rows: SEED_4058 });
+  const splitRows = dataRows(split.tracker);
+  if (splitRows.length === 2) {
+    pass('merge-tracker keeps a one-sided-level, two-vocabulary role pair as two rows (#4058)');
+  } else {
+    fail(`merge-tracker collapsed the #4058 pair: ${splitRows.join(' // ')}`);
+  }
+
+  const repost = runMergeDetailed({
+    '2-acme.tsv': `2\t2026-09-09\tAcme Health\t${ROLE_A}\tEvaluated\t4.1/5\t❌\t[2](reports/2-acme.md)\t\n`,
+  }, { rows: SEED_4058 });
+  const repostRows = dataRows(repost.tracker);
+  if (repost.exitCode === 0 && repost.killedBy === null && repostRows.length === 1) {
+    pass('merge-tracker still merges a true same-role repost to one row (#4058 control)');
+  } else {
+    fail(`merge-tracker same-role repost control failed: exit=${repost.exitCode} killedBy=${repost.killedBy ?? 'none'} rows=${repostRows.length}: ${repostRows.join(' // ')} | ${repost.output.trim()}`);
+  }
+} catch (e) {
+  fail(`merge-tracker #4058 tests crashed: ${e.message}`);
+}

@@ -13,7 +13,12 @@ import { isReservedReportFile } from "./report-files.mjs";
  * co-occur on a Claude `result` event.
  * `costUsd` is `number | null`: null is a REPORTED absence, not a missing field —
  * Codex sends usage with no cost, and callers must not fill that in with a rate.
- * @typedef {{status?: string, tool?: string, text?: string, tokens?: number, costUsd?: number | null, error?: string}} ParsedEvent
+ * `tokensAreTotal` marks a CLI whose usage frame carries the RUN TOTAL rather
+ * than one turn's delta. It exists because the two conventions are not
+ * distinguishable from the number alone, and guessing wrong is silent: summing
+ * totals over-counts, and overwriting deltas under-counts. Absent means delta,
+ * which is what Codex and Claude send.
+ * @typedef {{status?: string, tool?: string, text?: string, tokens?: number, tokensAreTotal?: boolean, costUsd?: number | null, error?: string}} ParsedEvent
  */
 
 const STATUS_READY = "Agent ready";
@@ -299,17 +304,87 @@ export function parseClaudeEvent(line) {
 }
 
 /**
- * Fold one parsed event's token count into a running total. `turn.completed`
- * (Codex) and `result` (Claude) usage is per-event, not cumulative-since-start,
- * so callers must accumulate across multiple events in one run rather than
- * overwrite — otherwise a multi-turn run silently undercounts.
+ * Convert one Grok Build CLI `--output-format streaming-json` line into the
+ * same shape the other two parsers produce.
+ *
+ * Two things here differ from Codex and Claude, and both are format facts
+ * rather than preferences:
+ *
+ * 1. **`end` carries the turn TOTAL, not a delta.** `usage` frames arrive
+ *    first and `end` reports the whole run, so summing them adds the parts to
+ *    the whole. Both kinds are emitted with `tokensAreTotal` so the fold takes
+ *    the latest — keeping the intermediates means a run killed mid-flight
+ *    still records something rather than zero.
+ * 2. **`thought` is dropped.** It carries chain-of-thought; forwarding it would
+ *    put reasoning in the report pane and, worse, mark a run as having produced
+ *    text when it never produced an answer, defeating the route's honesty gate.
+ *    `available_commands` is a multi-kilobyte tool manifest repeated every turn.
+ *
+ * @param {string} line
+ * @returns {ParsedEvent | null}
+ */
+export function parseGrokEvent(line) {
+  let ev;
+  try {
+    ev = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  // Same reason as the other two parsers' guard: JSON.parse("null") succeeds.
+  if (!ev || typeof ev !== "object") return null;
+
+  if (ev.type === "text") {
+    if (typeof ev.data !== "string" || ev.data === "") return null;
+    return { text: ev.data };
+  }
+
+  if (ev.type === "tool_call") {
+    const name = ev.toolName ?? ev.title;
+    return { tool: typeof name === "string" && name ? name : "Working" };
+  }
+
+  if (ev.type === "usage" || ev.type === "end") {
+    const usage = ev.usage;
+    // No usage block means nothing to report — null rather than {tokens: 0}, so
+    // the fold's `typeof === "number"` guard skips it instead of zeroing a
+    // total an earlier frame already established.
+    if (!usage || typeof usage !== "object") return null;
+    // Same subtraction as Codex: cached input is billed at a different rate, so
+    // counting it at full rate overstates the run. Clamped at 0 so a malformed
+    // usage block can never report negative tokens.
+    const fresh = Math.max(0, tokenCount(usage.input_tokens) - tokenCount(usage.cached_input_tokens));
+    /** @type {ParsedEvent} */
+    const result = { tokens: fresh + tokenCount(usage.output_tokens), tokensAreTotal: true };
+    // Last NUMERIC cost wins upstream, so emitting null here would not erase a
+    // figure already reported; grok sends the real number only on `end`.
+    result.costUsd = typeof ev.total_cost_usd === "number" ? ev.total_cost_usd : null;
+    return result;
+  }
+
+  return null;
+}
+
+/**
+ * Fold one parsed event's token count into a running total.
+ *
+ * Two wire conventions, and the fold has to be told which one it is holding:
+ *
+ * - **Delta** (Codex `turn.completed`, Claude `result`): each usage frame
+ *   reports one turn, so the caller must ADD or a multi-turn run undercounts.
+ * - **Total** (Grok `end`): the frame reports the whole run, so the caller must
+ *   take the LATEST or the run over-counts by the sum of its own intermediates.
+ *
+ * The parser sets `tokensAreTotal` because the parser is the only place that
+ * knows the CLI's format; the route stays CLI-agnostic. Defaulting to delta
+ * keeps every existing caller and CLI behaving exactly as before.
  *
  * @param {number} current
  * @param {ParsedEvent | null | undefined} ev
  * @returns {number}
  */
 export function accumulateTokens(current, ev) {
-  return typeof ev?.tokens === "number" ? current + ev.tokens : current;
+  if (typeof ev?.tokens !== "number") return current;
+  return ev.tokensAreTotal ? ev.tokens : current + ev.tokens;
 }
 
 /**

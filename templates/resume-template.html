@@ -55,6 +55,14 @@
     unicode-range: U+0100-02AF, U+0304, U+0308, U+0329, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
   }
 
+  /* Themeable tokens (#1837): only --secondary-color is wired in this template
+     so far (this template does not yet expose --accent-color; that gap is
+     pre-existing and out of scope here). Overridable via config/profile.yml
+     `style:`, which the PDF pipeline injects as a later :root block. */
+  :root {
+    --secondary-color: hsl(270, 70%, 45%);
+  }
+
   * {
     margin: 0;
     padding: 0;
@@ -112,7 +120,7 @@
 
   .header-gradient {
     height: 2px;
-    background: linear-gradient(to right, hsl(187, 74%, 32%), hsl(270, 70%, 45%));
+    background: linear-gradient(to right, hsl(187, 74%, 32%), var(--secondary-color));
     border-radius: 1px;
     margin-bottom: 10px;
   }
@@ -221,7 +229,7 @@
     font-family: 'Space Grotesk', sans-serif;
     font-size: 12.5px;
     font-weight: 600;
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
   }
 
   .job-period {
@@ -267,7 +275,7 @@
     font-family: 'Space Grotesk', sans-serif;
     font-size: 11.5px;
     font-weight: 600;
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
   }
 
   .project-badge {
@@ -312,7 +320,7 @@
   }
 
   .edu-org {
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
     font-weight: 500;
   }
 
@@ -320,6 +328,11 @@
     font-size: 10px;
     color: #777;
     white-space: nowrap;
+  }
+
+  .edu-location {
+    font-size: 10px;
+    color: #888;
   }
 
   .edu-desc {
@@ -356,7 +369,7 @@
   }
 
   .award-org {
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
     white-space: nowrap;
   }
 
@@ -424,7 +437,7 @@
   }
 
   html[lang="ar"] .header-gradient {
-    background: linear-gradient(to left, hsl(187, 74%, 32%), hsl(270, 70%, 45%));
+    background: linear-gradient(to left, hsl(187, 74%, 32%), var(--secondary-color));
   }
 
   html[lang="ar"] .job ul {

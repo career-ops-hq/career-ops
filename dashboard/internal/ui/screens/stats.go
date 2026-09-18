@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/santifer/career-ops/dashboard/internal/data"
 	"github.com/santifer/career-ops/dashboard/internal/i18n"
@@ -45,10 +46,82 @@ func (m StatsModel) Init() tea.Cmd {
 	return nil
 }
 
+const (
+	// twoColumnMinWidth is the terminal width at which renderBody switches from a
+	// single stacked column to two side-by-side columns. It has to clear the
+	// widest fixed-content panel: the pie chart's 17-column disc, its 4-column
+	// gap and its legend come to 55 columns that nothing can shrink, and the
+	// right column is only m.width/2-2 wide. At 110 the layout engaged four
+	// columns before that fit, and the pie wrapped into the panel below it.
+	twoColumnMinWidth = 114
+
+	// panelPadW is the horizontal padding every stats panel adds around its rows
+	// (Padding(0, 2), so two columns on each side).
+	panelPadW = 4
+
+	// Fixed cell widths, named so the bar budget and the lipgloss.Width call that
+	// renders the cell cannot drift apart — that drift is what let the rows
+	// overflow in the first place.
+	archetypeCountW = 10 // "%4d (%.0f%%)"
+	archetypeScoreW = 10 // "★ %.1f/5"
+	labelCountW     = 18 // work-mode and location label cell
+	payLabelW       = 16 // salary band label cell
+	barGapW         = 1  // single space either side of an archetype bar
+
+	// minReadableBarW is the point below which an archetype bar stops conveying
+	// proportion, so the label cell gives up its width instead.
+	minReadableBarW = 8
+)
+
 // Resize updates dimensions.
 func (m *StatsModel) Resize(width, height int) {
 	m.width = width
 	m.height = height
+}
+
+// contentWidth returns the number of columns a single panel may occupy. Above
+// twoColumnMinWidth renderBody places each panel inside a box roughly half the
+// terminal wide, so a panel that sizes itself off m.width overflows that box
+// and is wrapped by lipgloss — losing its indent in the process.
+func (m StatsModel) contentWidth() int {
+	if m.width >= twoColumnMinWidth {
+		return m.width/2 - 2
+	}
+	return m.width
+}
+
+// rightColumnWidth returns the width of the second column of the two-column
+// layout, which renderBody gives whatever contentWidth leaves over.
+func (m StatsModel) rightColumnWidth() int {
+	if m.width >= twoColumnMinWidth {
+		return m.width - m.contentWidth() - 4
+	}
+	return m.width
+}
+
+// barWidth returns the bar column for a panel row whose other cells occupy
+// fixedCells columns: the preferred width, clamped to what the panel column
+// has left, and floored at one glyph so a tight column yields a short chart
+// rather than no chart. Without the clamp a row came out wider than the box
+// holding it and lipgloss wrapped it, dropping the panel's indent.
+func (m StatsModel) barWidth(avail, fixedCells int) int {
+	preferred := 25
+	if avail < 90 {
+		preferred = 15
+	}
+	return max(1, min(preferred, avail-panelPadW-fixedCells))
+}
+
+// countCells renders each row's trailing count cell and returns them with the
+// widest, so the variable-width count column can be budgeted before the bar.
+func countCells(stats []model.LabelCountStat, format string) ([]string, int) {
+	cells := make([]string, len(stats))
+	widest := 0
+	for i, s := range stats {
+		cells[i] = fmt.Sprintf(format, s.Count, s.Pct)
+		widest = max(widest, lipgloss.Width(cells[i]))
+	}
+	return cells, widest
 }
 
 // Update processes navigation and input events for the stats analytics dashboard.
@@ -116,9 +189,9 @@ func (m StatsModel) renderBody() string {
 	locations := m.renderLabelCountTable(i18n.Current.LocationTitle, m.metrics.Locations)
 	pay := m.renderPay()
 
-	if m.width >= 110 {
-		leftColWidth := m.width/2 - 2
-		rightColWidth := m.width - leftColWidth - 4
+	if m.width >= twoColumnMinWidth {
+		leftColWidth := m.contentWidth()
+		rightColWidth := m.rightColumnWidth()
 
 		leftCol := lipgloss.NewStyle().Width(leftColWidth).Render(
 			lipgloss.JoinVertical(lipgloss.Left,
@@ -229,8 +302,8 @@ func (m StatsModel) renderInsights() string {
 	sectionTitle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Yellow).Render("💡 " + i18n.Current.StatsStrategicInsights)
 
 	boxW := m.width - 6
-	if m.width >= 110 {
-		boxW = m.width/2 - 6
+	if m.width >= twoColumnMinWidth {
+		boxW = m.contentWidth() - 4
 	}
 
 	boxStyle := lipgloss.NewStyle().
@@ -365,35 +438,36 @@ func (m StatsModel) renderArchetypeChart() string {
 		return strings.Join(lines, "\n")
 	}
 
+	// Size against the panel column, not the terminal: in the two-column
+	// layout this panel is rendered into a box half the terminal wide.
+	avail := m.contentWidth()
+
+	// The count cell overflows its nominal width once a share rounds to 100%
+	// (a single archetype, or one that dominates), so measure it rather than
+	// assuming — an over-full cell wraps and takes the row with it.
+	maxCount := 0
+	counts := make([]string, len(m.metrics.Archetypes))
+	countW := archetypeCountW
+	for i, a := range m.metrics.Archetypes {
+		maxCount = max(maxCount, a.Count)
+		counts[i] = fmt.Sprintf("%4d (%.0f%%)", a.Count, a.Pct)
+		countW = max(countW, lipgloss.Width(counts[i]))
+	}
+
+	fixedCells := func(labelW int) int {
+		return labelW + countW + 2*barGapW + archetypeScoreW
+	}
+
+	// Prefer the wide label cell, but fall back to the narrow one when the panel
+	// is too tight to leave a readable bar beside it.
 	labelW := 26
-	if m.width < 90 {
+	if m.width < 90 || m.barWidth(avail, fixedCells(26)) < minReadableBarW {
 		labelW = 20
 	}
+	barMaxW := m.barWidth(avail, fixedCells(labelW))
 
-	maxCount := 0
-	for _, a := range m.metrics.Archetypes {
-		if a.Count > maxCount {
-			maxCount = a.Count
-		}
-	}
-
-	barMaxW := 25
-	if m.width < 90 {
-		barMaxW = 15
-	}
-
-	for _, a := range m.metrics.Archetypes {
-		label := a.Label
-		if lipgloss.Width(label) > labelW-1 {
-			runes := []rune(label)
-			cut := labelW - 2
-			if cut < 0 {
-				cut = 0
-			}
-			if cut < len(runes) {
-				label = string(runes[:cut]) + "…"
-			}
-		}
+	for i, a := range m.metrics.Archetypes {
+		label := ansi.Truncate(a.Label, labelW-1, "…")
 
 		barW := 0
 		if maxCount > 0 {
@@ -406,12 +480,12 @@ func (m StatsModel) renderArchetypeChart() string {
 		color := m.scoreColor(a.AvgScore)
 		barStyle := lipgloss.NewStyle().Foreground(color)
 		labelStyle := lipgloss.NewStyle().Foreground(m.theme.Text).Width(labelW)
-		countStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(10)
-		scoreStyle := lipgloss.NewStyle().Bold(true).Foreground(color).Width(10).Align(lipgloss.Right)
+		countStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(countW)
+		scoreStyle := lipgloss.NewStyle().Bold(true).Foreground(color).Width(archetypeScoreW).Align(lipgloss.Right)
 
 		bar := barStyle.Render(strings.Repeat("█", barW))
 		lbl := labelStyle.Render(label)
-		countStr := countStyle.Render(fmt.Sprintf("%4d (%.0f%%)", a.Count, a.Pct))
+		countStr := countStyle.Render(counts[i])
 
 		scoreStr := "-"
 		if a.AvgScore > 0 {
@@ -438,18 +512,16 @@ func (m StatsModel) renderLabelCountTable(title string, stats []model.LabelCount
 		return strings.Join(lines, "\n")
 	}
 
-	labelW := 18
-	barMaxW := 25
-	if m.width < 90 {
-		barMaxW = 15
-	}
-
 	maxCount := 0
 	for _, s := range stats {
 		if s.Count > maxCount {
 			maxCount = s.Count
 		}
 	}
+
+	// The count cell is variable-width, so measure it before budgeting the bar.
+	counts, countW := countCells(stats, "  %d (%.0f%%)")
+	barMaxW := m.barWidth(m.contentWidth(), labelCountW+countW)
 
 	barColors := []lipgloss.Color{
 		m.theme.Green,
@@ -476,25 +548,15 @@ func (m StatsModel) renderLabelCountTable(title string, stats []model.LabelCount
 			color = barColors[i]
 		}
 
-		label := s.Label
-		if lipgloss.Width(label) > labelW-1 {
-			runes := []rune(label)
-			cut := labelW - 2
-			if cut < 0 {
-				cut = 0
-			}
-			if cut < len(runes) {
-				label = string(runes[:cut]) + "…"
-			}
-		}
+		label := ansi.Truncate(s.Label, labelCountW-1, "…")
 
 		barStyle := lipgloss.NewStyle().Foreground(color)
-		labelStyle := lipgloss.NewStyle().Foreground(m.theme.Text).Width(labelW)
+		labelStyle := lipgloss.NewStyle().Foreground(m.theme.Text).Width(labelCountW)
 		countStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
 
 		bar := barStyle.Render(strings.Repeat("█", barW))
 		lbl := labelStyle.Render(label)
-		count := countStyle.Render(fmt.Sprintf("  %d (%.0f%%)", s.Count, s.Pct))
+		count := countStyle.Render(counts[i])
 
 		lines = append(lines, padStyle.Render(lbl+bar+count))
 	}
@@ -550,12 +612,13 @@ func (m StatsModel) renderPay() string {
 			}
 		}
 
-		barMaxW := 25
-		if m.width < 90 {
-			barMaxW = 15
-		}
+		// The count cell is variable-width, so measure it before budgeting the bar.
+		counts, countW := countCells(m.metrics.PayHistogram, "  %2d (%.0f%%)")
+		// This panel sits in the right-hand column, which gets whatever the left
+		// one leaves over rather than the same width.
+		barMaxW := m.barWidth(m.rightColumnWidth(), payLabelW+countW)
 
-		for _, b := range m.metrics.PayHistogram {
+		for i, b := range m.metrics.PayHistogram {
 			barW := 0
 			if maxHist > 0 {
 				barW = b.Count * barMaxW / maxHist
@@ -565,12 +628,12 @@ func (m StatsModel) renderPay() string {
 			}
 
 			barStyle := lipgloss.NewStyle().Foreground(m.theme.Green)
-			labelStyle := lipgloss.NewStyle().Foreground(m.theme.Text).Width(16)
+			labelStyle := lipgloss.NewStyle().Foreground(m.theme.Text).Width(payLabelW)
 			countStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
 
 			bar := barStyle.Render(strings.Repeat("█", barW))
 			lbl := labelStyle.Render(b.Label)
-			cnt := countStyle.Render(fmt.Sprintf("  %2d (%.0f%%)", b.Count, b.Pct))
+			cnt := countStyle.Render(counts[i])
 
 			lines = append(lines, padStyle.Render(lbl+bar+cnt))
 		}
