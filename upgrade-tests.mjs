@@ -326,16 +326,24 @@ function canary() {
   const { failures } = runLeg({
     oldTag: newestOld, targetSha, label: 'canary',
     mutateMirror: (mirror, work) => {
-      // Poison commit: track cv.md and add it to SYSTEM_PATHS so the old
-      // updater checks it out over the user's CV.
+      // Poison only the throwaway target updater: after its own safety checks
+      // and coherent-install verification have passed, write a sentinel over
+      // the user's CV. This keeps the canary independent of manifest policy —
+      // including when the old release already validates target manifests —
+      // and asks whether the harness's byte-integrity oracle catches a clobber.
       const wt = join(work, 'poison-wt');
       git(mirror, 'worktree', 'add', wt, 'main');
-      writeFileSync(join(wt, 'cv.md'), '# CLOBBERED BY UPDATE\n');
+      const completion = "    console.log(`\\nUpdate complete: v${local} → v${remote}`);";
       const updater = readFileSync(join(wt, 'update-system.mjs'), 'utf-8')
-        .replace(/const\s+SYSTEM_PATHS\s*=\s*\[/, "const SYSTEM_PATHS = [\n  'cv.md',");
+        .replace(
+          completion,
+          `    writeFileSync(join(ROOT, 'cv.md'), '# CLOBBERED BY UPDATE\\n');\n${completion}`,
+        );
+      if (updater === readFileSync(join(wt, 'update-system.mjs'), 'utf-8')) {
+        throw new Error('Could not inject the canary user-file clobber');
+      }
       writeFileSync(join(wt, 'update-system.mjs'), updater);
-      // -f: cv.md is gitignored (user layer) — the poison must force-track it.
-      git(wt, 'add', '-f', 'cv.md', 'update-system.mjs');
+      git(wt, 'add', 'update-system.mjs');
       git(wt, '-c', 'user.name=canary', '-c', 'user.email=canary@test', 'commit', '-qm', 'canary: poison');
       const sha = git(wt, 'rev-parse', 'HEAD');
       git(mirror, 'worktree', 'remove', '--force', wt);
