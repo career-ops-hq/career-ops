@@ -156,56 +156,62 @@ export function ConfigForm() {
               <div className="space-y-2">
                 {clis.map((c) => {
                   const selected = c.id === cliId;
+                  const rowClassName = cn(
+                    "flex items-center gap-3 rounded-xl border px-4 py-3 text-sm transition-colors",
+                    selected
+                      ? "border-brand/50 bg-brand-soft"
+                      : c.installed
+                        ? "border-border bg-surface/50"
+                        : "border-border/60 bg-surface/20",
+                  );
+
+                  if (c.installed) {
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setCliId(c.id)}
+                        aria-pressed={selected}
+                        className={cn(rowClassName, "w-full cursor-pointer text-left")}
+                      >
+                        <Check className="size-4 shrink-0 text-emerald-400" />
+                        <span className="flex min-w-0 flex-1 items-center gap-2">
+                          <span className={cn("font-medium", selected ? "text-foreground" : "")}>
+                            {c.name}
+                          </span>
+                          <span className="font-mono text-xs text-faint">{c.run}</span>
+                        </span>
+                        <span className="hidden max-w-[40%] shrink-0 truncate text-xs text-faint sm:block">
+                          {c.path}
+                        </span>
+                      </button>
+                    );
+                  }
+
                   return (
                     <div
                       key={c.id}
-                      className={cn(
-                        "flex items-center gap-3 rounded-xl border px-4 py-3 text-sm transition-colors",
-                        selected
-                          ? "border-brand/50 bg-brand-soft"
-                          : c.installed
-                            ? "border-border bg-surface/50"
-                            : "border-border/60 bg-surface/20",
-                      )}
+                      className={rowClassName}
                     >
-                      {c.installed ? (
-                        <Check className="size-4 shrink-0 text-emerald-400" />
-                      ) : (
-                        <CircleDashed className="size-4 shrink-0 text-faint" />
-                      )}
+                      <CircleDashed className="size-4 shrink-0 text-faint" />
                       <button
                         type="button"
-                        disabled={!c.installed}
-                        onClick={() => setCliId(c.id)}
-                        className={cn(
-                          "flex flex-1 items-center gap-2 text-left max-sm:min-h-[44px]",
-                          c.installed ? "" : "cursor-default",
-                        )}
+                        disabled
+                        className="flex flex-1 items-center gap-2 text-left max-sm:min-h-[44px] cursor-default"
                       >
-                        <span
-                          className={cn(
-                            "font-medium",
-                            selected ? "text-foreground" : c.installed ? "" : "text-muted",
-                          )}
-                        >
+                        <span className="font-medium text-muted">
                           {c.name}
                         </span>
                         <span className="font-mono text-xs text-faint">{c.run}</span>
                       </button>
-                      {c.installed ? (
-                        <span className="hidden max-w-[40%] shrink-0 truncate text-xs text-faint sm:block">
-                          {c.path}
-                        </span>
-                      ) : (
-                        <a
-                          href={c.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex shrink-0 items-center justify-center gap-1 text-xs text-brand hover:underline max-sm:min-h-[44px]"
-                        >
-                          Install <ExternalLink className="size-3" />
-                        </a>
-                      )}
+                      <a
+                        href={c.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex shrink-0 items-center justify-center gap-1 text-xs text-brand hover:underline max-sm:min-h-[44px]"
+                      >
+                        Install <ExternalLink className="size-3" />
+                      </a>
                     </div>
                   );
                 })}
