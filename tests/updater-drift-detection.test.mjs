@@ -32,9 +32,8 @@
 import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { execFileSync } from 'child_process';
-import { pass, fail, rmSync } from './helpers.mjs';
-import { gitIn, systemTreeDiffers } from '../update-system.mjs';
+import { pass, fail, rmSync, makeHermeticGitRunner } from './helpers.mjs';
+import { systemTreeDiffers } from '../update-system.mjs';
 
 // System paths the fixtures pretend this install manages. Small and stable:
 // one root-level script, one modes/ file (exercises a directory-style
@@ -45,7 +44,7 @@ const USER_PATH = 'data/applications.md';
 
 function makeOrigin() {
   const dir = mkdtempSync(join(tmpdir(), 'co-drift-origin-'));
-  const g = (...args) => gitIn(dir, ...args);
+  const g = makeHermeticGitRunner(dir);
   g('init', '-q', '-b', 'main', '.');
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
@@ -63,8 +62,8 @@ function makeOrigin() {
 
 function cloneInstall(originDir) {
   const dir = mkdtempSync(join(tmpdir(), 'co-drift-install-'));
-  gitIn(dir, 'clone', '-q', originDir, '.');
-  const g = (...args) => gitIn(dir, ...args);
+  const g = makeHermeticGitRunner(dir);
+  g('clone', '-q', originDir, '.');
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
   g('config', 'core.autocrlf', 'false');
@@ -111,7 +110,7 @@ console.log('\n🧪 Testing updater system-tree drift detection...');
       fail('fixture: expected post-apply HEAD SHA to differ from upstream');
     }
 
-    if (systemTreeDiffers(SYSTEM_PATHS, 'FETCH_HEAD', { git: (...a) => gitIn(install.dir, ...a) }) === false) {
+    if (systemTreeDiffers(SYSTEM_PATHS, 'FETCH_HEAD', { git: install.g }) === false) {
       pass('post-apply install (equal content, diverged SHA) is NOT drift');
     } else {
       fail('post-apply install (equal content, diverged SHA) reported as drift — the false positive is back');
@@ -131,7 +130,7 @@ console.log('\n🧪 Testing updater system-tree drift detection...');
     origin.g('commit', '-qm', 'fix scanner');
     install.g('fetch', '-q', origin.dir, 'main');
 
-    if (systemTreeDiffers(SYSTEM_PATHS, 'FETCH_HEAD', { git: (...a) => gitIn(install.dir, ...a) }) === true) {
+    if (systemTreeDiffers(SYSTEM_PATHS, 'FETCH_HEAD', { git: install.g }) === true) {
       pass('genuine upstream system-file change IS drift');
     } else {
       fail('genuine upstream system-file change NOT reported as drift');
@@ -153,7 +152,7 @@ console.log('\n🧪 Testing updater system-tree drift detection...');
     install.g('commit', '-qm', 'track another application');
     install.g('fetch', '-q', origin.dir, 'main');
 
-    if (systemTreeDiffers(SYSTEM_PATHS, 'FETCH_HEAD', { git: (...a) => gitIn(install.dir, ...a) }) === false) {
+    if (systemTreeDiffers(SYSTEM_PATHS, 'FETCH_HEAD', { git: install.g }) === false) {
       pass('user-layer-only difference is NOT drift');
     } else {
       fail('user-layer-only difference reported as drift');
@@ -173,7 +172,7 @@ console.log('\n🧪 Testing updater system-tree drift detection...');
     writeFileSync(join(install.dir, 'scan.mjs'), '// local uncommitted tweak\n');
     install.g('fetch', '-q', origin.dir, 'main');
 
-    if (systemTreeDiffers(SYSTEM_PATHS, 'FETCH_HEAD', { git: (...a) => gitIn(install.dir, ...a) }) === false) {
+    if (systemTreeDiffers(SYSTEM_PATHS, 'FETCH_HEAD', { git: install.g }) === false) {
       pass('uncommitted system-file edit is NOT drift (committed-state comparison)');
     } else {
       fail('uncommitted system-file edit reported as drift');
@@ -199,7 +198,7 @@ console.log('\n🧪 Testing updater system-tree drift detection...');
 
     let crlfDiffIsReal = false;
     try {
-      gitIn(install.dir, 'diff', '--quiet', 'FETCH_HEAD', 'HEAD', '--', 'modes/_shared.md');
+      install.g('diff', '--quiet', 'FETCH_HEAD', 'HEAD', '--', 'modes/_shared.md');
     } catch {
       crlfDiffIsReal = true; // exit 1 = blobs genuinely differ
     }
@@ -207,7 +206,7 @@ console.log('\n🧪 Testing updater system-tree drift detection...');
       fail('fixture: expected a real CRLF blob difference before the flag-scoped check');
     }
 
-    if (systemTreeDiffers(SYSTEM_PATHS, 'FETCH_HEAD', { git: (...a) => gitIn(install.dir, ...a) }) === false) {
+    if (systemTreeDiffers(SYSTEM_PATHS, 'FETCH_HEAD', { git: install.g }) === false) {
       pass('CRLF/LF-only difference is NOT drift (--ignore-cr-at-eol)');
     } else {
       fail('CRLF/LF-only difference reported as drift');
@@ -224,16 +223,7 @@ console.log('\n🧪 Testing updater system-tree drift detection...');
   const origin = makeOrigin();
   const install = cloneInstall(origin.dir);
   try {
-    // Same seam as production gitIn, but with stderr explicitly piped:
-    // execFileSync's DEFAULT stdio lets git's expected "fatal: bad revision"
-    // leak onto the suite's fd2, and this scenario fails on purpose.
-    const quietGit = (...args) =>
-      execFileSync('git', args, {
-        cwd: install.dir, encoding: 'utf-8', timeout: 30000,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      }).trim();
-
-    if (systemTreeDiffers(SYSTEM_PATHS, 'refs/heads/does-not-exist', { git: quietGit }) === true) {
+    if (systemTreeDiffers(SYSTEM_PATHS, 'refs/heads/does-not-exist', { git: install.g }) === true) {
       pass('unreadable upstream ref reads as drift (conservative)');
     } else {
       fail('unreadable upstream ref read as no-drift — verification failed open');
@@ -246,7 +236,7 @@ console.log('\n🧪 Testing updater system-tree drift detection...');
 // ── 7. Empty pathspec short-circuits without invoking git ──────────────────
 {
   let calls = 0;
-  const countingGit = (...a) => { calls++; return gitIn(process.cwd(), ...a); };
+  const countingGit = () => { calls++; throw new Error('git must not run'); };
   if (systemTreeDiffers([], 'FETCH_HEAD', { git: countingGit }) === false && calls === 0) {
     pass('empty pathspec returns false without invoking git');
   } else {
