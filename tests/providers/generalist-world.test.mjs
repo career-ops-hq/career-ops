@@ -184,6 +184,25 @@ try {
   const multiClass = normalizeGeneralistWorldCard(`<a class="featured gw-job-card is-new" href="/jobs/x-acme/">${ACME}<div class="gw-job-title">Ops Lead</div></a>`);
   if (multiClass && multiClass.title === 'Ops Lead') pass('normalizeGeneralistWorldCard() matches gw-job-card anywhere in the class list');
   else fail(`normalizeGeneralistWorldCard() multi-class card returned ${JSON.stringify(multiClass)}`);
+  // Inner field elements can carry extra class tokens too (the live cards do
+  // not today, but a class attribute is a token list); the token still has to
+  // be whole, so a near-miss class is not the field.
+  const innerMulti = normalizeGeneralistWorldCard(card('data-region="us" href="/jobs/x-acme/"',
+    `<div class="gw-job-card-top"><div class="card-field gw-job-company is-verified">Acme</div></div>
+     <div class="gw-job-title featured">Ops Lead</div>
+     <p class="teaser gw-job-description clamp-2">Teaser two.</p>`));
+  if (innerMulti && innerMulti.title === 'Ops Lead' && innerMulti.company === 'Acme' && innerMulti.description === 'Teaser two.') {
+    pass('normalizeGeneralistWorldCard() matches gw-job-title / gw-job-company / gw-job-description anywhere in a multi-token class list');
+  } else {
+    fail(`normalizeGeneralistWorldCard() multi-token inner classes returned ${JSON.stringify(innerMulti)}`);
+  }
+  const innerNearMiss = normalizeGeneralistWorldCard(card('href="/jobs/x-acme/"',
+    `<div class="gw-job-company-logo">Logo</div><div class="gw-job-company">Acme</div><div class="gw-job-title-small">Not it</div><div class="gw-job-title">Ops Lead</div><p class="gw-job-description-more">More</p>`));
+  if (innerNearMiss && innerNearMiss.title === 'Ops Lead' && innerNearMiss.company === 'Acme' && !('description' in innerNearMiss)) {
+    pass('normalizeGeneralistWorldCard() still requires whole inner class tokens (gw-job-title-small / gw-job-company-logo / gw-job-description-more are not the fields)');
+  } else {
+    fail(`normalizeGeneralistWorldCard() inner near-miss classes returned ${JSON.stringify(innerNearMiss)}`);
+  }
 
   for (const [input, label] of [[null, 'null'], [42, 'a number'], ['', 'an empty string'], ['<div>no card</div>', 'unrelated markup']]) {
     let out;
@@ -238,6 +257,23 @@ try {
   }
   if (structureThrew) pass('parseGeneralistWorldJobs() throws a descriptive error on a non-empty page with no cards and no listing container');
   else fail('parseGeneralistWorldJobs() should throw when the page has neither cards nor the listing container');
+
+  // Cards present but none usable is a changed card, not an empty board: the
+  // anchors still match while an inner field moved. That has to surface as an
+  // error too, or a redesign reads as zero postings forever. Mixed rows keep
+  // skipping the bad ones (the 4-card fixture above covers that).
+  let unusableThrew = '';
+  try {
+    parseGeneralistWorldJobs(page({ main: c3 + c4 }));
+  } catch (e) {
+    if (e instanceof Error) unusableThrew = e.message;
+    else throw e;
+  }
+  if (unusableThrew.includes('2 gw-job-card') && unusableThrew.includes('card markup likely changed')) {
+    pass('parseGeneralistWorldJobs() throws when cards match but none yields a job (2 unusable cards inside the listing container)');
+  } else {
+    fail(`parseGeneralistWorldJobs() with only unusable cards ${unusableThrew ? `threw ${JSON.stringify(unusableThrew)}` : 'returned an empty board'}`);
+  }
 
   // The container marker has to be a real opening tag, not the words in text,
   // CSS or script: those pages are not the board and must still throw.
