@@ -29,10 +29,22 @@
 import { readFileSync, existsSync } from 'fs';
 import { canonicalize, extractSkills } from './skill-extract.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { join } from 'path';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const CV_PATH = 'cv.md';
+// From the data root, not the cwd. cv.md is a Source-of-Truth Boundary primary
+// file and lives wherever CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / the
+// .career-ops-data marker points; a bare relative path resolves against
+// whatever directory the process was started in.
+//
+// Everything this script reports is a comparison against that file, so without
+// it there is nothing to say at all. The error below therefore has to serve two
+// different users at once: one who never wrote a cv.md, and one who has one
+// sitting outside the data root this resolver just looked in. Naming only one
+// of them sends the other to the wrong fix.
+const CV_PATH = join(getCareerOpsRoot(), 'cv.md');
 
 // ── JD skill extraction (regex, no LLM) ─────────────────────────────
 //
@@ -824,7 +836,8 @@ if (selfTestMode) {
     process.exit(1);
   }
   if (!existsSync(CV_PATH)) {
-    console.error(`Error: ${CV_PATH} not found — this is a user-layer file, create it first.`);
+    console.error(`Error: cv.md not found at ${CV_PATH}`);
+    console.error('Create it there, or point CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR (or a .career-ops-data marker) at the directory that already has it.');
     process.exit(1);
   }
 
