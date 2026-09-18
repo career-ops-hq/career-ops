@@ -351,6 +351,122 @@ try {
     fail(`descriptions = ${JSON.stringify([withDesc[1]?.description, withDesc[2]?.description])}`);
   }
 
+  // ── opt-in embed source (ashby: { embed: true }) ──────────────────────────
+  // Some companies disable the public posting API while the board stays
+  // published — api.ashbyhq.com answers 404, and the embed page every careers
+  // site loads still serves the whole board.
+  const embedHtml = (appData) => `<!doctype html><script>window.__appData = ${JSON.stringify(appData)}; // trailing comment\n</script>`;
+  const POSTING = {
+    id: 'c7509615-34bb-4ca8-b6a0-adbdb63f6c1a',
+    title: 'Business Operations Manager',
+    locationName: 'Los Angeles, CA',
+    workplaceType: 'Hybrid',
+    employmentType: 'FullTime',
+    secondaryLocations: [{ locationName: 'New York, NY' }, { locationName: 'Los Angeles, CA' }],
+    compensationTierSummary: null,
+  };
+  const recording = (respond) => {
+    const calls = [];
+    return { calls, ctx: { transport: 'http', sleep: async () => {}, fetchText: async (url, opts) => { const c = { url, opts, n: calls.length }; calls.push(c); return respond(c); }, fetchJson: async (url, opts) => { const c = { url, opts, n: calls.length, json: true }; calls.push(c); return respond(c); } } };
+  };
+  const EMBED_ENTRY = { name: 'Whatnot', careers_url: 'https://jobs.ashbyhq.com/whatnot', ashby: { embed: true } };
+
+  {
+    const { ctx, calls } = recording(() => embedHtml({ organization: { name: 'Whatnot' }, jobBoard: { jobPostings: [POSTING] } }));
+    const jobs = await ashby.fetch(EMBED_ENTRY, ctx);
+    const j = jobs[0];
+    jobs.length === 1
+      && j.title === 'Business Operations Manager'
+      && j.url === 'https://jobs.ashbyhq.com/whatnot/c7509615-34bb-4ca8-b6a0-adbdb63f6c1a'
+      && j.company === 'Whatnot'
+      && j.externalId === 'c7509615-34bb-4ca8-b6a0-adbdb63f6c1a'
+      && j.location === 'Los Angeles, CA; New York, NY'
+      ? pass('ashby embed source maps title/url/company/externalId and dedupes the location list')
+      : fail(`ashby embed mapping: ${JSON.stringify(jobs)}`);
+
+    calls.length === 1
+      && calls[0].url === 'https://jobs.ashbyhq.com/whatnot?embed=js'
+      && calls[0].opts?.redirect === 'error'
+      && !calls[0].json
+      ? pass('ashby embed source reads the board in one fetchText with redirect:"error"')
+      : fail(`ashby embed request: ${JSON.stringify(calls.map((c) => [c.url, c.opts?.redirect, !!c.json]))}`);
+  }
+
+  // Without the flag nothing changes: the posting API path must not gain an
+  // embed request (that is the whole reason this is opt-in).
+  {
+    const { ctx, calls } = recording((c) => {
+      if (!c.json) fail('ashby made an embed request without the opt-in flag');
+      const err = new Error('HTTP 404'); /** @type {any} */ (err).status = 404; throw err;
+    });
+    await ashby.fetch({ name: 'Gone', careers_url: 'https://jobs.ashbyhq.com/gone' }, ctx).catch(() => {});
+    calls.every((c) => c.json)
+      ? pass('ashby without embed:true makes zero embed requests, even on a 404')
+      : fail(`unflagged entry made an embed request: ${calls.map((c) => c.url).join(' ')}`);
+  }
+
+  // A slug that does not exist renders with jobBoard: null. That must stay a
+  // loud 404, or a typo reads as "no open roles" forever — and scan-ats-full's
+  // dead-board cache only counts a real 404.
+  {
+    const { ctx } = recording(() => embedHtml({ organization: null, posting: null, jobBoard: null }));
+    let caught = null;
+    await ashby.fetch({ ...EMBED_ENTRY, careers_url: 'https://jobs.ashbyhq.com/zz-no-such-co' }, ctx).catch((e) => { caught = e; });
+    caught && caught.status === 404 && /does not exist/.test(caught.message)
+      ? pass('ashby embed source throws a 404-shaped error when jobBoard is null')
+      : fail(`ashby embed missing board: ${caught && caught.message} status=${caught && caught.status}`);
+  }
+
+  // Markup changes must be loud, not empty.
+  {
+    const { ctx } = recording(() => '<!doctype html><p>nothing here</p>');
+    let msg = '';
+    await ashby.fetch(EMBED_ENTRY, ctx).catch((e) => { msg = e.message; });
+    /carried no window\.__appData/.test(msg)
+      ? pass('ashby embed source throws when __appData is gone')
+      : fail(`ashby embed no-appData error: ${JSON.stringify(msg)}`);
+  }
+  {
+    const { ctx } = recording(() => embedHtml({ jobBoard: { jobPostings: 'not-an-array' } }));
+    let msg = '';
+    await ashby.fetch(EMBED_ENTRY, ctx).catch((e) => { msg = e.message; });
+    /no jobPostings array/.test(msg)
+      ? pass('ashby embed source throws when jobPostings is not an array')
+      : fail(`ashby embed bad-payload error: ${JSON.stringify(msg)}`);
+  }
+
+  // An explicit board slug wins over the careers_url, for an entry that keeps a
+  // corporate careers page as its human-facing link.
+  {
+    const { ctx, calls } = recording(() => embedHtml({ jobBoard: { jobPostings: [POSTING] } }));
+    await ashby.fetch({ name: 'Whatnot', careers_url: 'https://www.whatnot.com/careers', ashby: { embed: true, board: 'whatnot' } }, ctx);
+    calls[0]?.url === 'https://jobs.ashbyhq.com/whatnot?embed=js'
+      ? pass('ashby embed source honours an explicit ashby.board slug over careers_url')
+      : fail(`ashby embed slug resolution: ${calls[0]?.url}`);
+  }
+
+  // The embed payload is host-controlled, so a lone surrogate in an id must cost
+  // that one posting, not abort the map and lose the whole board.
+  {
+    const { ctx } = recording(() => embedHtml({ jobBoard: { jobPostings: [
+      { ...POSTING, id: 'bad-\ud800-id', title: 'Dropped' },
+      { ...POSTING, id: 'fine-id', title: 'Kept' },
+    ] } }));
+    const jobs = await ashby.fetch(EMBED_ENTRY, ctx);
+    jobs.length === 1 && jobs[0].title === 'Kept'
+      ? pass('ashby embed source drops a posting whose id cannot be URI-encoded and keeps the rest')
+      : fail(`ashby embed surrogate id: ${JSON.stringify(jobs)}`);
+  }
+
+  // An empty-but-real board is a legitimate answer.
+  {
+    const { ctx } = recording(() => embedHtml({ jobBoard: { jobPostings: [] } }));
+    const jobs = await ashby.fetch(EMBED_ENTRY, ctx);
+    Array.isArray(jobs) && jobs.length === 0
+      ? pass('ashby embed source returns [] for a real board with no open postings')
+      : fail(`ashby embed empty board: ${JSON.stringify(jobs)}`);
+  }
+
 } catch (e) {
   fail(`ashby provider tests crashed: ${e.message}`);
 }
