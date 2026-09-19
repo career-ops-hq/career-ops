@@ -298,6 +298,67 @@ function resolveEndpoint(entry) {
   return null;
 }
 
+// Workday externalPath is `/job/{Location}/{Title-slug}_{REQ}(-{n})?`. The req token
+// is the ANCHORED trailing segment — that anchoring is the whole point.
+//
+// An earlier version corroborated bulletFields with `externalPath.includes(v)`, which
+// is unanchored, and externalPath always embeds the location slug — so bulletFields
+// ["Burbank"] against /job/Burbank/Sr-Analyst_10154966 was "corroborated" and returned
+// "Burbank" as the requisition id. Two unrelated Burbank reqs then shared an id. The
+// check certified exactly the value it was written to exclude.
+// The token keeps its hyphens: Walmart posts "R-2593225", and an earlier
+// `(?:-\d+)?$` tail ate everything after the hyphen, leaving "R" — which the
+// 3-character check below then rejected, so those postings carried no ids at
+// all (CodeRabbit, #4076). Workday's own cross-site "-N" disambiguator is
+// stripped by stripCrossSiteReqSuffix() instead, which is the same rule
+// workdayDedupKey() applies, in one place rather than two.
+const WORKDAY_REQ_RE = /_([A-Za-z0-9][A-Za-z0-9.-]*)$/;
+
+// Workday appends "-1", "-2" … to the SAME requisition when it is published to
+// more than one careers site (credit: ronanime-arch, PR #3446). Strip that only
+// when what precedes it already looks like a requisition id on its own —
+// otherwise the hyphen digits ARE the id, as in Walmart's "R-2593225".
+const CROSS_SITE_SUFFIX_RE = /^(.*?)-(\d{1,2})$/;
+const REQ_ID_SHAPE_RE = /^[a-z]*\d[a-z0-9_]*\d{2,}$/i;
+
+/**
+ * @param {string} token raw token after the last `_` in a Workday path segment
+ * @returns {string} the token with a cross-site suffix removed when one applies
+ */
+export function stripCrossSiteReqSuffix(token) {
+  const m = token.match(CROSS_SITE_SUFFIX_RE);
+  return m && REQ_ID_SHAPE_RE.test(m[1]) ? m[1] : token;
+}
+
+// Position alone does not identify a req: plenty of Workday titles contain an
+// underscore, so the trailing segment of `/job/Remote/Data_Scientist` is the word
+// "Scientist", and `/job/NY/Sr_Manager_Ops` yields "Ops". Two unrelated postings
+// whose titles happen to end in the same word would then share a requisition id —
+// the same collision the location slug used to cause, one layer along.
+//
+// A Workday req id always carries at least one digit (R167982, 10154966, JR113711);
+// a title word never does. Validating the token's SHAPE is what separates them, and
+// it is why bulletFields corroboration is not needed: the format check is stronger
+// than a free-text match against a field with no guaranteed slot.
+const REQ_SHAPE_RE = /\d/;
+
+function reqTokenFromPath(externalPath) {
+  if (typeof externalPath !== 'string') return undefined;
+  const m = externalPath.match(WORKDAY_REQ_RE);
+  if (!m) return undefined;
+  const token = stripCrossSiteReqSuffix(m[1]);
+  if (token.length < 3) return undefined;
+  return REQ_SHAPE_RE.test(token) ? token : undefined;
+}
+
+// bulletFields is deliberately NOT consulted. It is tenant-configurable free text
+// (location, job family, req number, …) with no guaranteed slot, so it cannot
+// identify a req on its own — and as corroboration it added nothing the anchored
+// path match had not already established.
+function reqFromWorkday(j) {
+  return reqTokenFromPath(j.externalPath);
+}
+
 function parsePostedOn(label) {
   if (!label) return undefined;
   if (/posted\s+today/i.test(label)) return Date.now();
@@ -357,13 +418,10 @@ export function workdayDedupKey(job) {
   const underscoreIdx = lastSegment.indexOf('_');
   if (underscoreIdx === -1) return null; // no title/requisition-ID separator — nothing to key on
   const raw = lastSegment.slice(underscoreIdx + 1).toLowerCase();
-  // Only treat a trailing "-N" as Workday's cross-site disambiguator when what
-  // precedes it is already requisition-ID-shaped on its own (a leading digit,
-  // 2+ trailing digits, underscores allowed in between) — otherwise the hyphen
-  // digits ARE the requisition ID and must be kept, e.g. Walmart's "R-2593225"
-  // (credit: ronanime-arch, PR #3446).
-  const m = raw.match(/^(.*?)-(\d{1,2})$/);
-  const reqId = m && /^[a-z]*\d[a-z0-9_]*\d{2,}$/.test(m[1]) ? m[1] : raw;
+  // Same cross-site "-N" rule reqTokenFromPath() applies (credit:
+  // ronanime-arch, PR #3446) — shared so the dedup key and the captured
+  // externalId can never disagree about what the requisition id is.
+  const reqId = stripCrossSiteReqSuffix(raw);
   if (!reqId) return null;
   return `workday:${parsed.hostname.toLowerCase()}:${reqId}`;
 }
@@ -527,6 +585,13 @@ export function parseWorkdayResponse(json, entry) {
       title: j.title || '',
       url: jobBase + j.externalPath,
       company: entry.name,
+      // The req token, NOT the whole externalPath. externalPath embeds the title
+      // slug, so it changes on exactly the title drift this capture exists to survive
+      // (Adobe: "Associate--Corporate-Strategy_R167982" -> "Sr-Associate--…_R167982-1"
+      // — the path moved, R167982 did not). Abstain when no token is recoverable
+      // rather than emitting an unstable key, matching the Ashby/Lever precedent.
+      externalId: reqTokenFromPath(j.externalPath),
+      requisitionId: reqFromWorkday(j),
       location: j.locationsText || locationFromPath(j.externalPath),
       postedAt: parsePostedOn(j.postedOn),
     });
