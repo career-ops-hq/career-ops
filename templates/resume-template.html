@@ -399,6 +399,22 @@
     font-size: 10.5px;
   }
 
+  /* === GDPR / RODO CONSENT (footer) === */
+  /* Opt-in footer slot filled from payload.consent. Empty by default — the
+     :empty rule hides the div (and its border-top) when no consent text is
+     set, so existing resumes render byte-identical to a pre-consent layout.
+     Mirrors the {{PHOTO}} opt-in slot pattern (#264). */
+  .cv-consent {
+    margin-top: 14px;
+    padding-top: 8px;
+    border-top: 1px solid #ddd;
+    font-size: 8.5px;
+    line-height: 1.4;
+    color: #777;
+    text-align: left;
+  }
+  .cv-consent:empty { display: none; }
+
   /* === PRINT === */
   @media print {
     body {
@@ -648,6 +664,9 @@
   </div>
 
   <!-- END -->
+
+  <!-- GDPR / RODO consent -->
+  <div class="cv-consent">{{CONSENT}}</div>
 
 </div>
 </body>

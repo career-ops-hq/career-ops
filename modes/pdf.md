@@ -211,6 +211,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | `certifications[]` | object | `title`, `org`, `year`. |
 | `awards[]` | object | `title` (award name), `org` (issuing body, optional), `year` (optional). Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Use it for competitive or academic distinctions (olympiad medals, hackathon wins, dean's list) that carry more signal than a thin experience section. |
 | `skills[]` | object | `items` (**required**): a non-blank comma-separated string, or a non-empty array of non-blank strings — every element must be text, since the builder joins the whole array. `category` (optional): omitted, the line renders without its prefix. |
+| `consent` | string | Opt-in GDPR/RODO consent footer text. Empty/absent emits **no visible footer** (the `.cv-consent:empty { display: none }` CSS rule hides the empty div and its border-top), so existing CVs are unchanged. Mirrors the `{{PHOTO}}` opt-in slot pattern (#264). |
 
 `build-cv-html.mjs` errors out (non-zero exit) if any template placeholder is left unresolved, so a malformed payload fails loudly instead of shipping a broken CV. Run `node build-cv-html.mjs --test` for a self-test render.
 
