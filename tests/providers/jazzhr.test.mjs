@@ -138,6 +138,17 @@ try {
   if (recovered.length === 1 && recovered[0].title === 'Support Engineer' && recovered[0].location === '') pass('falls back to a bare /apply/ anchor when the card wrapper is absent');
   else fail(`wrapper-less fallback failed ${JSON.stringify(recovered)}`);
 
+  // Regression: an href of "/apply/?ref=1" satisfies the raw-string capture
+  // (something non-quote follows "/apply/") but collapses to pathname
+  // "/apply/" once parsed as a URL — the board root, not a posting. Must be
+  // rejected rather than added as a job pointing at the board root; with no
+  // other posting recovered, this correctly reads as the "links present,
+  // nothing parsed" broken-markup case and throws.
+  try {
+    mod.parseJazzHRList('<a href="/apply/?ref=1">Board root, not a posting</a>', board, 'X');
+    fail('an href resolving to the board root should not be accepted as a posting');
+  } catch { pass('rejects an href that resolves to the board root, not a posting'); }
+
   // Regression: a PARTIAL redesign (one posting still in a list-group-item
   // card, another already migrated off it) must recover both — the fallback
   // has to run even when the primary pass already found something, or the
