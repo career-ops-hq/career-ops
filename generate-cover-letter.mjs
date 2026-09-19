@@ -344,6 +344,7 @@ Usage:
       format: args.format || "a4",
       reportNum: args.report,
       inputPath: payloadPath,
+      kind: "cover",
     });
     console.log(`\nCover letter PDF: ${payload.output_path}`);
   } catch (err) {
