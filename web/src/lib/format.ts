@@ -67,6 +67,11 @@ export function legitimacyTone(l: string): "good" | "warn" | "bad" | "muted" {
   return "muted";
 }
 
+// Parsing lives in report-header.mjs so `node --test` can reach it without the
+// `@/` alias; the TYPE lives here, at the TS boundary, the same way career-ops.ts
+// declares Application over tracker-table.mjs's untyped parseApplications.
+import { parseReport as parseReportUntyped } from "./report-header.mjs";
+
 export type ReportMeta = {
   title: string | null;
   fields: { label: string; value: string }[];
@@ -74,53 +79,4 @@ export type ReportMeta = {
   body: string;
 };
 
-const FIELD_KEYS: Record<string, string> = {
-  date: "Date",
-  fecha: "Date",
-  url: "URL",
-  archetype: "Archetype",
-  arquetipo: "Archetype",
-  score: "Score",
-  legitimacy: "Legitimacy",
-  legitimidad: "Legitimacy",
-  pdf: "PDF",
-};
-
-/**
- * Tolerant report parser (per maintainer: adapt the render, don't migrate the
- * old data). Extracts the bold key/value header fields (Date/URL/Archetype/
- * Score/Legitimacy/PDF) when present and returns the body without the header
- * block. Degrades gracefully on legacy reports that lack some fields.
- */
-export function parseReport(md: string): ReportMeta {
-  const lines = md.split("\n");
-  // Header runs until the first `---` or the first `## ` section.
-  let cut = lines.findIndex((l, i) => i > 0 && (/^\s*-{3,}\s*$/.test(l) || /^##\s/.test(l)));
-  if (cut === -1) cut = Math.min(lines.length, 10);
-
-  const headerLines = lines.slice(0, cut);
-  let bodyStart = cut;
-  if (/^\s*-{3,}\s*$/.test(lines[cut] ?? "")) bodyStart = cut + 1;
-  const body = lines.slice(bodyStart).join("\n").trim();
-
-  let title: string | null = null;
-  let legitimacy: string | null = null;
-  const fields: { label: string; value: string }[] = [];
-
-  for (const l of headerLines) {
-    const h = l.match(/^#\s+(.+)/);
-    if (h) {
-      title = h[1].replace(/^Evaluat?i[oó]n:?\s*/i, "").trim();
-      continue;
-    }
-    const m = l.match(/^\s*\*\*(.+?):\*\*\s*(.*)$/);
-    if (!m) continue;
-    const label = FIELD_KEYS[m[1].trim().toLowerCase()];
-    const value = m[2].trim();
-    if (!label || !value) continue;
-    if (label === "Legitimacy") legitimacy = value;
-    fields.push({ label, value });
-  }
-
-  return { title, fields, legitimacy, body: body || md };
-}
+export const parseReport = parseReportUntyped as (md: string) => ReportMeta;
