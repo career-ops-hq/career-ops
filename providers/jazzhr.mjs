@@ -3,12 +3,19 @@
 
 // JazzHR provider — scrapes the public, server-rendered ApplyToJob career
 // page. Auto-detects from careers_url/api on any `*.applytojob.com` https
-// host (canonical form: `https://<tenant>.applytojob.com/apply`, which the
-// same tenant also serves identically at its bare host). This is a
-// single-company ATS adapter driven entirely from `tracked_companies:` in
-// portals.yml — there is no public directory of ApplyToJob tenants to
-// enumerate, so unlike greenhouse/lever/ashby/workday/icims this provider is
-// never wired into scan-ats-full.mjs's reverse sweep.
+// host. This is a single-company ATS adapter driven entirely from
+// `tracked_companies:` in portals.yml — there is no public directory of
+// ApplyToJob tenants to enumerate, so unlike greenhouse/lever/ashby/
+// workday/icims this provider is never wired into scan-ats-full.mjs's
+// reverse sweep.
+//
+// Board resolution follows the same shape as providers/bamboohr.mjs,
+// providers/breezy.mjs and providers/icims.mjs: only the hostname is
+// trusted from config — whatever path a `careers_url`/`api` happens to
+// carry is discarded, and the canonical board path (`/apply`) is always
+// reconstructed from the resolved origin. That sidesteps validating the
+// input path's shape entirely; a bare host, `/apply`, `/apply/`, or even a
+// stray deep path all resolve to the same board.
 //
 // The board is one page with no pagination — every posting is in the
 // initial HTML. Title/URL/location come from the list markup; an opt-in
@@ -34,44 +41,30 @@ const DETAIL_DEFAULT_LIMIT = 25;
 // fire up to 100 requests with no pacing.
 const DETAIL_FETCH_DELAY_MS = 200;
 
-function parseBoardUrl(raw) {
-  if (typeof raw !== 'string' || !raw.trim()) return null;
-  try {
-    const url = new URL(raw.trim());
-    if (url.protocol !== 'https:' || !HOST_RE.test(url.hostname)) return null;
-    // Board root only — both a bare host and an already-/apply URL resolve,
-    // but a deep path (a specific posting's own permalink, /apply/<id>/...)
-    // is rejected here even though the same host+HTTPS combination is
-    // otherwise trusted. A `careers_url` pointing at one posting instead of
-    // the board would otherwise get fetched and parsed as if it were the
-    // listing page. Posting permalinks are validated separately, by
-    // assertJazzHRUrl below.
-    if (url.pathname === '/' || url.pathname === '') url.pathname = '/apply';
-    else if (!/^\/apply\/?$/i.test(url.pathname)) return null;
-    return url;
-  } catch { return null; }
-}
-
-function resolveBoardUrl(entry) {
+/** Resolve the tenant origin (`https://<tenant>.applytojob.com`) from an
+ * entry — honours an explicit `api:` URL, else `careers_url`. Mirrors
+ * providers/bamboohr.mjs / providers/breezy.mjs / providers/icims.mjs. */
+function resolveOrigin(entry) {
   for (const raw of [entry?.api, entry?.careers_url]) {
-    const parsed = parseBoardUrl(raw);
-    if (parsed) return parsed;
+    if (typeof raw !== 'string' || !raw.trim()) continue;
+    let parsed;
+    try { parsed = new URL(raw.trim()); } catch { continue; }
+    if (parsed.protocol !== 'https:' || !HOST_RE.test(parsed.hostname)) continue;
+    return parsed.origin;
   }
   return null;
 }
 
-/** Re-gates a posting permalink (`/apply/<id>/...`) before a detail fetch —
- * same host allowlist as parseBoardUrl, but deliberately accepts the deep
- * path parseBoardUrl rejects, since this validates a specific job's URL,
- * not the board root. */
+const boardUrl = (origin) => `${origin}/apply`;
+
+/** Re-gates a URL against the same host allowlist before a network call —
+ * used for a posting permalink before its detail fetch. Only the origin is
+ * trusted; the path is not otherwise constrained (mirrors icims.mjs's
+ * `parsed.origin !== origin` check on a posting href). */
 function assertJazzHRUrl(raw) {
   let parsed;
-  try {
-    parsed = new URL(String(raw).trim());
-  } catch {
-    parsed = null;
-  }
-  if (!parsed || parsed.protocol !== 'https:' || !HOST_RE.test(parsed.hostname) || !/^\/apply\/.+$/i.test(parsed.pathname)) {
+  try { parsed = new URL(String(raw).trim()); } catch { parsed = null; }
+  if (!parsed || parsed.protocol !== 'https:' || !HOST_RE.test(parsed.hostname)) {
     throw new Error(`jazzhr: untrusted or invalid public board URL: ${raw}`);
   }
   return parsed;
@@ -120,10 +113,10 @@ function resolvePostingUrl(href, base) {
   } catch { return null; }
 }
 
-/** @param {string} html @param {string} boardUrl @param {string} companyName */
-export function parseJazzHRList(html, boardUrl, companyName) {
+/** @param {string} html @param {string} boardHref @param {string} companyName */
+export function parseJazzHRList(html, boardHref, companyName) {
   if (typeof html !== 'string') return [];
-  const base = new URL(boardUrl);
+  const base = new URL(boardHref);
   const jobs = [];
   const seen = new Set();
   const addJob = (url, title, location) => {
@@ -206,14 +199,15 @@ function config(entry) {
 export default {
   id: 'jazzhr',
   detect(entry) {
-    const board = resolveBoardUrl(entry);
-    return board ? { url: board.href } : null;
+    const origin = resolveOrigin(entry);
+    return origin ? { url: boardUrl(origin) } : null;
   },
   async fetch(entry, ctx) {
-    const board = resolveBoardUrl(entry);
-    if (!board) throw new Error(`jazzhr: cannot derive public ApplyToJob board URL for ${entry.name}`);
-    const html = await fetchTextWithRetry(ctx, board.href, { redirect: 'error', headers: { 'User-Agent': BROWSER_LIKE_USER_AGENT, Accept: 'text/html' } });
-    const jobs = parseJazzHRList(html, board.href, entry.name);
+    const origin = resolveOrigin(entry);
+    if (!origin) throw new Error(`jazzhr: cannot derive public ApplyToJob board URL for ${entry.name}`);
+    const board = boardUrl(origin);
+    const html = await fetchTextWithRetry(ctx, board, { redirect: 'error', headers: { 'User-Agent': BROWSER_LIKE_USER_AGENT, Accept: 'text/html' } });
+    const jobs = parseJazzHRList(html, board, entry.name);
     const { fetchDetails, detailLimit } = config(entry);
     const probing = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0;
     if (fetchDetails && !probing) {
@@ -232,4 +226,4 @@ export default {
   },
 };
 
-export { parseBoardUrl, resolveBoardUrl, assertJazzHRUrl };
+export { resolveOrigin, assertJazzHRUrl };

@@ -11,25 +11,26 @@ try {
   if (provider.id === 'jazzhr') pass('jazzhr.id is "jazzhr"');
   else fail('wrong provider id');
 
-  // ── detect(): host allowlist, bare-host normalization, SSRF spoofs ──
-  if (provider.detect({ name: 'Example', careers_url: board })?.url === board) pass('detects *.applytojob.com/apply board');
-  else fail('detect failed');
-
-  const bareHost = 'https://exampleco.applytojob.com/';
-  if (provider.detect({ name: 'Example', careers_url: bareHost })?.url === 'https://exampleco.applytojob.com/apply') pass('normalizes bare-host board to /apply');
-  else fail('bare-host normalization failed');
-
-  const bareHostNoSlash = 'https://exampleco.applytojob.com';
-  if (provider.detect({ name: 'Example', careers_url: bareHostNoSlash })?.url === `${bareHostNoSlash}/apply`) pass('normalizes bare-host board without trailing slash');
-  else fail('bare-host-no-slash normalization failed');
+  // ── detect(): only the host is trusted — any path resolves to the board root ──
+  // Mirrors providers/bamboohr.mjs / providers/breezy.mjs / providers/icims.mjs:
+  // the input path is never validated, just discarded and rebuilt as /apply.
+  for (const [label, url] of [
+    ['bare host with trailing slash', 'https://exampleco.applytojob.com/'],
+    ['bare host without trailing slash', 'https://exampleco.applytojob.com'],
+    ['already /apply', 'https://exampleco.applytojob.com/apply'],
+    ['/apply with a trailing slash', 'https://exampleco.applytojob.com/apply/'],
+    ['an unrelated path', 'https://exampleco.applytojob.com/login'],
+    ['a posting permalink, not the board root', 'https://exampleco.applytojob.com/apply/D4/Some-Posting'],
+  ]) {
+    if (provider.detect({ name: 'Example', careers_url: url })?.url === 'https://exampleco.applytojob.com/apply') pass(`resolves ${label} to the board root`);
+    else fail(`${label} did not resolve to the board root: ${JSON.stringify(provider.detect({ name: 'Example', careers_url: url }))}`);
+  }
 
   for (const bad of [
-    'http://exampleco.applytojob.com/apply',
-    'https://evil.example/apply',
-    'https://exampleco.applytojob.com/login',
+    'http://exampleco.applytojob.com/apply', // non-https
+    'https://evil.example/apply', // untrusted host
     'https://x.applytojob.com.evil.com/apply', // suffix-host bypass
     'https://x.applytojob.com@evil/apply', // userinfo-host bypass
-    'https://exampleco.applytojob.com/apply/D4/Some-Posting', // a posting permalink, not the board root
     null,
     7,
   ]) {
