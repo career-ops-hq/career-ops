@@ -89,6 +89,10 @@ const DAY_MATH_SOURCES = new Set(['set-status', 'web', 'correction', 'reply-watc
 // mixes offers and rejections reads grim and means nothing.
 const HOPS = [
   { key: 'appliedToResponded', from: 'Applied', to: 'Responded' },
+  { key: 'respondedToAssessment', from: 'Responded', to: 'Assessment' },
+  { key: 'assessmentToInterview', from: 'Assessment', to: 'Interview' },
+  // Keep the direct hop for legacy rows that moved from Responded straight to
+  // Interview before Assessment became a first-class lifecycle stage.
   { key: 'respondedToInterview', from: 'Responded', to: 'Interview' },
   { key: 'interviewToOffer', from: 'Interview', to: 'Offer' },
   { key: 'appliedToRejected', from: 'Applied', to: 'Rejected' },
