@@ -930,7 +930,7 @@ search_queries:
 # scan.mjs auto-loads everything in providers/*.mjs and tries each
 # provider's detect() in order. URL patterns recognized:
 #
-#   greenhouse      job-boards(.eu)?.greenhouse.io/<slug>  (or api: field)
+#   greenhouse      (job-)?boards(.eu)?.greenhouse.io/<slug>  (or api: field)
 #   ashby           jobs.ashbyhq.com/<slug>
 #   lever           jobs.(eu.)?lever.co/<slug>
 #   workable        apply.workable.com/<slug>
