@@ -184,13 +184,17 @@ a rebase on the rest.
 contract, the mandatory guards, and what `tests/providers/{name}.test.mjs`
 must cover.
 
-**Adding a test for the web app:** web suites live under `web/tests/`, mirroring
-the tested module's path below `web/src/` (`src/lib/clean-chips.mjs` →
-`tests/lib/clean-chips.test.mjs`), named `{module}.test.mjs`. `web/`'s own
-`npm test` glob-discovers them, so no registration is needed there either — but
-keep them out of `web/src/` (Next.js scans that tree) and write them as `.mjs`,
-since there is no TypeScript loader for `node --test`. `web/README.md` has the
-detail; `tests/web-test-layout.test.mjs` enforces it on every PR.
+**Adding a test for the web app:** web suites live under `web/tests/`. A suite
+that covers one module mirrors that module's path below `web/src/` and takes its
+name (`src/lib/clean-chips.mjs` → `tests/lib/clean-chips.test.mjs`); a suite that
+pins a behaviour across modules is named for the behaviour instead, which is what
+roughly half of `web/tests/` does. `web/`'s own `npm test` glob-discovers them
+either way, so no registration is needed there either — but keep them out of
+`web/src/` (Next.js scans that tree) and write them as `.mjs`, since there is no
+TypeScript loader for `node --test`. `web/README.md` has the detail;
+`tests/web-test-layout.test.mjs` enforces the *discovery* half on every PR — that
+the glob reaches every suite on disk and that `web/`'s engines floor can run it.
+The naming is a convention, not a checked contract.
 
 **`--only` is a dev convenience, not a PR gate:** it runs *only* the discovered
 `tests/` files matching the given substring and skips every inline core
