@@ -38,7 +38,7 @@ jobs:
           node-version: '24'
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26'
+          go-version: '1.27'
       # Skip the postinstall (npx playwright install chromium); the tests
       # never launch a browser, so the ~170 MB download is pure CI overhead.
       - run: npm install --ignore-scripts
@@ -83,7 +83,7 @@ jobs:
           node-version: '24'
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26'   # old updaters rebuild the dashboard during apply
+          go-version: '1.27'   # old updaters rebuild the dashboard during apply
       - run: npm install --ignore-scripts
       - name: Upgrade PR gate (newest old release -> this commit)
         run: node upgrade-tests.mjs --pr-gate
