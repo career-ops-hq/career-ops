@@ -4719,7 +4719,7 @@ try {
   if (
     bl.size === 3 &&
     exact && exact.reason === 'post-interview process signals' && exact.since === '2026-01-15' &&
-    bl.has('globex') && bl.get('ibmcom')?.scope === 'domain' && !bl.has('company')
+    bl.has('globex') && bl.get('domain:ibm.com')?.scope === 'domain' && !bl.has('company')
   ) {
     pass('scan.mjs parseBlacklist parses normalized company and domain-scope rows (#1742, #4139)');
   } else {
@@ -4735,7 +4735,7 @@ try {
     fail('scan.mjs blacklist matching misses case/punctuation company variants');
   }
 
-  const domain = bl.get('ibmcom');
+  const domain = bl.get('domain:ibm.com');
   const domainMatch = findBlacklistEntry(bl, 'Confluent', 'https://jobs.ibm.com/engineering/123');
   const boundaryMiss = findBlacklistEntry(bl, 'Confluent', 'https://notibm.com/engineering/123');
   const legacyMatch = findBlacklistEntry(bl, 'ACME-CORP', 'https://example.com/jobs/123');

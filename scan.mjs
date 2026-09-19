@@ -2418,6 +2418,10 @@ export async function appendToScanHistory(offers, date, status = 'added') {
 // list was silently empty while the run reported no filtering at all.
 const BLACKLIST_PATH = path.join(DATA_ROOT, 'data/blacklist.md');
 
+function normalizeBlacklistDomain(domain) {
+  return String(domain || '').trim().toLowerCase().replace(/\.$/, '');
+}
+
 /**
  * Parse the user's do-not-apply list (data/blacklist.md, user layer, opt-in).
  *
@@ -2429,7 +2433,7 @@ const BLACKLIST_PATH = path.join(DATA_ROOT, 'data/blacklist.md');
  *
  * @param {string} text - Raw data/blacklist.md content.
  * @returns {Map<string, {company: string, since: string, scope: 'company'|'domain', reason: string}>}
- *          Normalized company key → entry. First row wins on duplicate keys.
+ *          Normalized company key or domain:<hostname> → entry. First row wins on duplicate keys.
  */
 export function parseBlacklist(text) {
   const entries = new Map();
@@ -2439,9 +2443,10 @@ export function parseBlacklist(text) {
     const company = cells[1] || '';
     if (!company || /^[-: ]+$/.test(company)) continue; // separator row
     if (company.toLowerCase() === 'company') continue;  // header row
-    const key = normalizeCompany(company);
-    if (!key || entries.has(key)) continue;
     const scope = (cells[3] || 'company').toLowerCase();
+    const value = scope === 'domain' ? normalizeBlacklistDomain(company) : normalizeCompany(company);
+    const key = scope === 'domain' ? `domain:${value}` : value;
+    if (!value || entries.has(key)) continue;
     entries.set(key, {
       company,
       since: cells[2] || '',
@@ -2475,14 +2480,14 @@ export function findBlacklistEntry(blacklist, company, url) {
 
   let hostname;
   try {
-    hostname = new URL(url).hostname.toLowerCase().replace(/\.$/, '');
+    hostname = normalizeBlacklistDomain(new URL(url).hostname);
   } catch {
     return null;
   }
 
   for (const entry of blacklist.values()) {
     if (entry.scope !== 'domain') continue;
-    const suffix = String(entry.company || '').trim().toLowerCase().replace(/\.$/, '');
+    const suffix = normalizeBlacklistDomain(entry.company);
     if (suffix && (hostname === suffix || hostname.endsWith(`.${suffix}`))) return entry;
   }
   return null;
