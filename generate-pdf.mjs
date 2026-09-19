@@ -43,6 +43,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { stripEmptyRenderedSections } from './cv-sections-core.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const trackerPath = resolveTrackerPath(getCareerOpsRoot());
@@ -1316,6 +1317,15 @@ async function generatePDF() {
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
+  // Drop the optional sections that came in as a bare header — a title with
+  // nothing under it (#3986). The builders already strip these from the payload
+  // side, but neither builder is on every path here: the web pdf flow has the
+  // agent emit finished HTML, which reaches this script with the empty wrappers
+  // still in place. Deciding from the rendered content covers both, and running
+  // it before the reorder and the guard means they judge the document that will
+  // actually be printed. A CV with nothing empty comes through unchanged.
+  html = stripEmptyRenderedSections(html);
+
   // Apply the user's declared section order (config/profile.yml `cv.sections`)
   // before the guard runs, so the guard judges the document that will be
   // printed. Anchored to workspaceRoot, NOT __dirname: readStyleTokens() reads
@@ -1485,9 +1495,11 @@ async function runBatchFromManifest(manifestPath, globals) {
       }
 
       let html = await readFile(entryInput, 'utf-8');
-      // Same order as the single render: reorder first so the guard judges the
-      // document that will actually be printed. Without this the batch path
-      // rendered N CVs with cv.sections silently inert.
+      // Same order as the single render: strip the bare-header sections, then
+      // reorder, so the guard judges the document that will actually be
+      // printed. Without this the batch path rendered N CVs with cv.sections
+      // silently inert.
+      html = stripEmptyRenderedSections(html);
       html = reorderCvSections(html, cvSectionOrder);
       validateCvSectionOrder(html, cvMarkdown, { allowReorder: globals.allowReorder });
       html = normalizeTextForATS(html).html;
