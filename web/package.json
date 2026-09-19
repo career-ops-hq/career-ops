@@ -4,9 +4,9 @@
   "private": true,
   "description": "Official web experience for career-ops — local-first.",
   "scripts": {
-    "dev": "next dev",
+    "dev": "node server.mjs dev",
     "build": "next build",
-    "start": "next start",
+    "start": "node server.mjs start",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"tests/**/*.test.mjs\""
   },
