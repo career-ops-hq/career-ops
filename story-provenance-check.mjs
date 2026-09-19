@@ -154,13 +154,20 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
 import { flagValue } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const DEFAULT_STORY_BANK_PATH = 'interview-prep/story-bank.md';
-const DEFAULT_CV_PATH = 'cv.md';
+// story-bank.md and cv.md are USER-layer files: resolve them against the data
+// root, not the process working directory. Bare relative paths meant that with
+// an external data directory the check reported "story-bank.md not found —
+// nothing was checked" while still returning a well-formed result object, so a
+// clean-looking run silently verified nothing.
+const DEFAULT_STORY_BANK_PATH = join(getCareerOpsRoot(), 'interview-prep/story-bank.md');
+const DEFAULT_CV_PATH = join(getCareerOpsRoot(), 'cv.md');
 
 // ── Numeric claim patterns ──────────────────────────────────────────
 // Each pattern extracts {kind, text, index, values}. `values` are the

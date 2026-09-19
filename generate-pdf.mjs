@@ -65,15 +65,32 @@ const PDF_PAGE_MARGIN = '0.6in';
 // self-correcting the moment it does. Same defect class as #3159.
 let __rootCache = { key: null, root: null, canonical: null };
 function refreshRootCache() {
-  const key = process.env.CAREER_OPS_TRACKER || '';
-  if (__rootCache.key !== key) {
-    // Always re-derive: falling back to the import-time const when the variable
-    // is unset would hand back the very value the poisoned import froze.
-    const root = resolveWorkspaceRoot(resolveTrackerPath(__dirname));
-    __rootCache = { key, root, canonical: realpathSync(root) };
+  // Derive the root on EVERY call and key the cache on the resolved value.
+  //
+  // The root can move three ways: CAREER_OPS_TRACKER, CAREER_OPS_ROOT /
+  // CAREER_OPS_DATA_DIR, and the .career-ops-data marker file. Keying on the
+  // environment alone misses the marker, which is a file on disk and can change
+  // while the environment does not — the cache would then keep serving a stale
+  // workspace. The resolved root is the one value that captures all three.
+  //
+  // Derived from getCareerOpsRoot(), NOT __dirname: the workspace that owns the
+  // tracker is the USER layer, which an external data directory may place
+  // outside the checkout. Anchoring to the script directory made every write to
+  // an external data directory fail containment ("input escapes the tracker
+  // workspace"), so no CV or cover-letter PDF could be produced at all.
+  // getCareerOpsRoot() falls back to the checkout when nothing is configured,
+  // so the default install is unchanged.
+  //
+  // Re-deriving rather than freezing at import also preserves the #3162 fix:
+  // a const could not un-read an env var a sibling test had set. What is
+  // memoised here is only realpathSync(), the syscall worth avoiding.
+  const root = resolveWorkspaceRoot(resolveTrackerPath(getCareerOpsRoot()));
+  if (__rootCache.key !== root) {
+    __rootCache = { key: root, root, canonical: realpathSync(root) };
   }
   return __rootCache;
 }
+
 // Two accessors on purpose, so each call site keeps the exact semantics it had:
 // the containment guard compares canonical forms (a symlinked ancestor must not
 // read as an escape), while the manifest/output helpers work in the lexical form
