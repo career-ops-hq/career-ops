@@ -24,12 +24,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isMainModule } from '../lib/is-main-module.mjs';
-import { isNestedCheckout } from '../lib/mjs-files.mjs';
+import { walkTree } from '../lib/walk-tree.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -207,26 +207,18 @@ const SKIP_DIRS = new Set([
   'output', 'data', 'reports', 'jds', 'documents', 'interview-prep',
 ]);
 
-function walk(dir, out = []) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name.startsWith('.')) continue; // .tmp-* probe dirs; no tracked dotdir ships .mjs
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (SKIP_DIRS.has(entry.name)) continue;
-      // A linked worktree is a second checkout of this repo at some other
-      // commit, and `.git` in SKIP_DIRS does not catch one — it marks itself
-      // with a `.git` FILE (#3499). The dot-prefix skip above happens to cover
-      // Claude Code's default `.claude/worktrees/`, but nothing keeps a
-      // worktree there; one at `wt/` would put a stale copy of every entrypoint
-      // under enforcement, and this gate would grade source the branch does not
-      // contain — passing or failing on the age of somebody's worktree.
-      if (isNestedCheckout(full)) continue;
-      walk(full, out);
-    } else if (entry.name.endsWith('.mjs')) {
-      out.push(full);
-    }
-  }
-  return out;
+// A linked worktree is a second checkout of this repo at some other commit, and
+// `.git` in SKIP_DIRS does not catch one — it marks itself with a `.git` FILE
+// (#3499). The dot-prefix skip below happens to cover Claude Code's default
+// `.claude/worktrees/`, but nothing keeps a worktree there; one at `wt/` would
+// put a stale copy of every entrypoint under enforcement, and this gate would
+// grade source the branch does not contain — passing or failing on the age of
+// somebody's worktree. walkTree applies that guard on every descent.
+function walk(dir) {
+  return walkTree(dir, {
+    // .tmp-* probe dirs; no tracked dotdir ships .mjs
+    skip: (entry) => entry.name.startsWith('.') || (entry.isDirectory() && SKIP_DIRS.has(entry.name)),
+  }).filter((f) => f.endsWith('.mjs'));
 }
 
 // Every exemption carries its reason; an unexplained entry is a review smell.
