@@ -171,6 +171,10 @@ claude   # or codex / qwen / opencode / agy / grok — open your AI CLI here
 git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # only needed for PDF generation
+# On a non-Debian/Ubuntu Linux distro (Fedora, Arch, ...), Chromium's system
+# libraries aren't installed by the line above — install them yourself with
+# your distro's package manager if PDF generation fails to launch the browser
+# (Playwright's own docs list the required libraries per platform).
 
 # 2. Check setup
 npm run doctor                     # Validates all prerequisites
