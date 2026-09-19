@@ -94,6 +94,17 @@ On a ⛔ determination, add exactly one flag line at the top of Block B in the r
 
 The flag is additive only; ✅ / ➖ / ⚠️ emit no flag line.
 
+### PcD-quota check (Brazil-market)
+
+Opt-in, gated on the candidate's own profile — most evaluations skip this entirely. Run it only when **both** are true: `config/profile.yml` → `disability.br_pcd_quota_eligible` is `true`, **and** the role's own posting location is Brazil (not just the candidate's home country — the international/USD track never triggers this check).
+
+When gated in, scan the JD body (case-insensitive) for disability-specific quota/affirmative-hiring language: "PcD", "pessoa com deficiência", "cotas para pessoas com deficiência", "Lei de Cotas", "Lei 8.213". The generic terms "vaga afirmativa" and "vaga exclusiva" qualify only when a disability-specific term from that list appears in the same local context (same sentence or bullet) — on their own they also describe affirmative openings for groups unrelated to disability (e.g. "vaga afirmativa para pessoas negras"), which must not emit this flag.
+
+- **Match found** → add exactly one flag line at the top of Block A: `🟢 **PcD-Quota:** [Render in {language.output}: a short factual statement that the posting advertises quota-designated hiring] — "{verbatim JD line}"`. Keep `PcD-Quota` as the literal marker (`_shared.md`'s scoring rule detects the flag by that name) and preserve the quoted JD line exactly as employer data — never translate or paraphrase it. This is a positive opportunity signal (legally mandated quota under Lei 8.213/91, typically a smaller applicant pool) — treat it as a positive contributor to the Cultural signals dimension (see `_shared.md` § Scoring System), never a penalty in its absence.
+- **No match, or check not gated in** → emit no flag line at all. Silence is absence of signal, not a negative — same "don't penalize missing data" discipline as `location_filter`.
+
+**Hard rule:** this check NEVER discloses, implies, or references the candidate's diagnosis in any generated content — not the CV, not the cover letter, not a draft form answer. It only notices language the employer already put in the JD. If an application form later asks a disability/self-identification question, that goes through `modes/apply.md`'s existing `needs_candidate_confirmation` flow — always a per-application, candidate-confirmed decision, never auto-filled from this check.
+
 ## Block B — Match with CV
 
 One table, one row per significant JD requirement, mapped to exact evidence in the primary files (`cv.md` first, then `article-digest.md`, `config/profile.yml`, `modes/_profile.md`). Block B **is** the requirement→evidence mapping for the whole report: never emit a second matrix that re-enumerates the same requirements, because nothing keeps two lists in sync and the first disagreement between them contradicts the report in a way no test can catch.
