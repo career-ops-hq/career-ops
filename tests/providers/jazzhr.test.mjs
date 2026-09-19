@@ -137,6 +137,15 @@ try {
   if (recovered.length === 1 && recovered[0].title === 'Support Engineer' && recovered[0].location === '') pass('falls back to a bare /apply/ anchor when the card wrapper is absent');
   else fail(`wrapper-less fallback failed ${JSON.stringify(recovered)}`);
 
+  // Regression: a PARTIAL redesign (one posting still in a list-group-item
+  // card, another already migrated off it) must recover both — the fallback
+  // has to run even when the primary pass already found something, or the
+  // unwrapped posting is dropped with no signal at all.
+  const mixedMarkup = `${list}<a href="/apply/E5/Support-Engineer">Support Engineer</a>`;
+  const mixed = mod.parseJazzHRList(mixedMarkup, board, 'X');
+  if (mixed.length === 3 && mixed.some((j) => j.title === 'Support Engineer' && j.location === '')) pass('recovers an unwrapped posting alongside cards the primary pass already found');
+  else fail(`mixed-markup recovery failed ${JSON.stringify(mixed)}`);
+
   try {
     mod.parseJazzHRList('<a href="/apply/1/role"></a>', board, 'X');
     fail('a titleless ApplyToJob link should throw');

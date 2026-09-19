@@ -135,17 +135,18 @@ export function parseJazzHRList(html, boardUrl, companyName) {
   // Fallback: `list-group-item` is a markup detail, not a JazzHR guarantee —
   // a redesign that renames or drops that wrapper while keeping the /apply/
   // permalink shape would otherwise read as a healthy empty board. Anchor
-  // directly on the posting link instead. Location isn't recoverable
-  // outside the card wrapper, so this pass only ever adds a title/url the
-  // primary pass missed — it never downgrades a result the primary pass
-  // already found.
-  if (jobs.length === 0) {
-    for (const match of html.matchAll(POSTING_LINK_RE)) {
-      const url = resolvePostingUrl(match[1], base);
-      if (!url) continue;
-      addJob(url, clean(match[2]), '');
-      if (jobs.length >= MAX_JOBS) break;
-    }
+  // directly on the posting link instead. Runs unconditionally, not only
+  // when the primary pass found nothing — a partial redesign (some cards
+  // still wrapped, some not) would otherwise silently drop the unwrapped
+  // postings with no signal at all, worse than losing all of them. `seen`
+  // (shared with the primary pass) makes this safe: a posting the primary
+  // pass already added is skipped here, so this only ever adds a title/url
+  // the primary pass missed, never a duplicate or a downgrade.
+  for (const match of html.matchAll(POSTING_LINK_RE)) {
+    const url = resolvePostingUrl(match[1], base);
+    if (!url) continue;
+    addJob(url, clean(match[2]), '');
+    if (jobs.length >= MAX_JOBS) break;
   }
 
   if (jobs.length === 0 && /<a\b[^>]*href=["'][^"']*\/apply\//i.test(html)) {
