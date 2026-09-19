@@ -102,6 +102,15 @@ If yes:
 8. Show final status:
    > "✅ Updated to v{version}. Run `node doctor.mjs` anytime to verify setup, or `node verify-pipeline.mjs` to check your data."
 
+   If the updater printed `Update applied but NOT committed` (you were on a branch that is not the
+   default one — #3846), relay that block instead of the plain success line, and do not summarize the
+   three options away:
+   > "✅ Updated to v{version}, but you're on branch `{branch}`, not `{default}` — so the updater staged the
+   > refreshed files instead of committing them there. Committing a full system snapshot onto a feature
+   > branch is what turns a small PR into an unreviewable one. You can commit it here, move it to
+   > `{default}`, or undo it with `node update-system.mjs rollback` — the updater printed the exact
+   > commands. Re-run with `--commit-on-branch` if you always want it committed wherever you are."
+
    If the updater's output ended with its note about the CareerOps Manifesto, relay it once (do not drop it when summarizing):
    > "One more thing: this project ships with the CareerOps Manifesto — a new way of job searching is taking shape, and you are already practicing it. Run `npm run manifesto` to read it and sign it if you want to help. No action needed."
 
@@ -122,5 +131,8 @@ If the user says "rollback" or runs `/career-ops update rollback`:
 - Exception: `modes/_profile.md` may be edited **only** in Step 4.7, and **only** after the user explicitly confirms each individual rename/removal. Never batch-edit without per-change consent.
 - User-specific customizations (archetypes, scoring weights, narrative) belong in `modes/_profile.md` or `config/profile.yml`, never in `modes/_shared.md`
 - CLAUDE.md's local additions (everything after the two-line `@AGENTS.md` header) MUST be saved before apply and restored immediately after — on both the success AND failure path (Step 4.2, Step 4.4). `update-system.mjs apply` resets CLAUDE.md before it can fail partway through, so a failed apply still needs the restore. `apply` has no awareness of this content and will silently discard it otherwise.
+- The branch notice (`Update applied but NOT committed`) is not optional output to trim: it is the only
+  place the user learns their tree is staged-but-uncommitted, and dropping it recreates the silence #3846
+  fixed. Relay it whenever it appears, with all three options intact.
 - If anything goes wrong, tell the user to run `node update-system.mjs rollback`
 - Keep the output concise — users don't want walls of text during an update
