@@ -54,8 +54,16 @@ CLIs: ${VALID_CLIS.join(', ')}`;
 validateFlags(argv, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
 const targetIdx = argv.indexOf('--target');
-const projectRoot =
-  targetIdx !== -1 && argv[targetIdx + 1] ? argv[targetIdx + 1] : getCareerOpsRoot();
+const explicitTarget = targetIdx !== -1 && argv[targetIdx + 1] ? argv[targetIdx + 1] : null;
+const projectRoot = explicitTarget || getCareerOpsRoot();
+// node_modules and .git belong to the CODE checkout, not the resolved data
+// root — under a split checkout (CAREER_OPS_ROOT/CAREER_OPS_DATA_DIR or the
+// .career-ops-data marker) those are two different directories, and neither
+// ever holds the other's artifacts (career-ops#3867 finding 6). --target is
+// the one case that means "diagnose this whole other checkout" — code layer
+// included — so it keeps pointing both roots at the same place, matching how
+// tests/doctor-tracked-bak-files.test.mjs already exercises it.
+const codeRoot = explicitTarget || __dirname;
 const JSON_OUT = argv.includes('--json');
 // --strict adds a live reachability probe of every portals.yml entry (network).
 // Opt-in so the default `npm run doctor` stays fast and fully offline.
@@ -145,7 +153,7 @@ function checkBillingSource() {
 }
 
 function checkDependencies() {
-  if (existsSync(join(projectRoot, 'node_modules'))) {
+  if (existsSync(join(codeRoot, 'node_modules'))) {
     return { pass: true, label: 'Dependencies installed' };
   }
   return {
@@ -653,7 +661,7 @@ async function main() {
     geminiNodeFloor(activeCli, process.versions.node),
     checkBillingSource(),
     checkDependencies(),
-    checkTrackedBakFiles(projectRoot),
+    checkTrackedBakFiles(codeRoot),
     await checkPlaywright(),
     checkPlaywrightMcp(projectRoot, activeCli),
     checkScanExtractor(projectRoot),
@@ -821,7 +829,12 @@ function onboardingState(root) {
 
   const mcpCheck = checkPlaywrightMcp(root, activeCli);
   const unpersonalized = unpersonalizedFiles(root);
-  const bakCheck = checkTrackedBakFiles(root);
+  // Every other check in this function is data-layer and correctly uses this
+  // function's own `root` parameter. The tracked-.bak check is the one
+  // code-layer exception (#3867 finding 6) — it must read the module-level
+  // codeRoot (the code checkout), which only differs from `root` when a real
+  // split-checkout data root is in play and no --target was given.
+  const bakCheck = checkTrackedBakFiles(codeRoot);
   const warnings = [
     ...(cliWarning ? [cliWarning] : []),
     ...(mcpCheck?.warn ? [`${mcpCheck.label}\n→ ${[].concat(mcpCheck.fix || []).join('\n  ')}`] : []),
