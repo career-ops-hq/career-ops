@@ -139,6 +139,10 @@ html {
   font-size: 0.95rem;
   line-height: 1.7;
 }
+.report-prose > p,
+.report-prose > ul,
+.report-prose > ol,
+.report-prose > blockquote { max-width: 75ch; }
 .report-prose > :first-child { margin-top: 0; }
 .report-prose h1, .report-prose h2, .report-prose h3, .report-prose h4 {
   color: var(--fg);
