@@ -275,7 +275,7 @@ export function resolveColumns(lines) {
  *
  * @param {string} line - One line from applications.md.
  * @param {Object<string,number>} [colmap] - From resolveColumns(); defaults to legacy.
- * @returns {object|null} `{num,date,company,role,score,status,pdf,report,notes,location?,raw}`.
+ * @returns {object|null} `{num,date,company,role,score,status,pdf,report,notes,url,location?,via?,raw}`.
  */
 export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
   if (typeof line !== 'string' || !line.startsWith('|')) return null;
@@ -302,6 +302,12 @@ export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
     pdf: at('pdf'),
     report: at('report'),
     notes: at('notes'),
+    // The posting URL, always the HREF rather than the raw cell (#3516): the
+    // cell is written as a markdown link, and `normalizeUrl('[l](u)')` returns
+    // '' — which every consumer reads as "this row has no URL", not as a parse
+    // failure. Always present (''), never conditional on the column existing,
+    // so `row.url` means the same thing on every tracker layout.
+    url: extractCellUrl(at('url')),
     raw: line,
   };
   if (colmap.location != null) row.location = at('location');
@@ -310,15 +316,17 @@ export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
 }
 
 /**
- * Extract report IDs referenced by one tracker Report cell.
+ * The destination of one markdown link, given everything between `](` and the
+ * matching `)`.
  *
- * Both the numeric markdown label and the local report filename are returned.
- * Keeping both makes tracker drift visible instead of silently trusting one
- * side of a malformed link. External URLs are ignored even when their path
- * happens to contain a reports/ segment.
+ * Deliberately not a `\(([^)]+)\)` one-liner: a destination may be wrapped in
+ * angle brackets, may contain balanced parentheses, and may escape either.
+ * Getting that wrong truncates the destination — and for the URL cell a
+ * truncated href is worse than none at all, because normalizeUrl() still parses
+ * it and it becomes a WRONG dedup key rather than an absent one.
  *
- * @param {string} reportCell - Raw Report cell value.
- * @returns {number[]} Unique positive report IDs in encounter order.
+ * @param {string} raw - Text after `](`, up to the closing paren.
+ * @returns {string|null} The destination, or null when there is none.
  */
 function markdownLinkDestination(raw) {
   const value = String(raw).trimStart();
@@ -351,7 +359,18 @@ function markdownLinkDestination(raw) {
   return destination ? destination.replace(/\\([\\()<> ])/g, '$1') : null;
 }
 
-function parseMarkdownLinks(value) {
+/**
+ * Every markdown link in a string, as `{label, target}` in encounter order.
+ *
+ * Shared by the two tracker cells that carry links — `Report`
+ * (`[61](../reports/061-….md)`) and `URL` (`[ashby](https://…)`, #3516) — so
+ * the strict destination handling above can never be half-applied to one of
+ * them. Exported for merge-tracker.mjs, the only writer of the URL cell.
+ *
+ * @param {string} value - A raw tracker cell.
+ * @returns {{label: string, target: string}[]}
+ */
+export function parseMarkdownLinks(value) {
   const links = [];
   let cursor = 0;
   while (cursor < value.length) {
@@ -395,6 +414,52 @@ function parseMarkdownLinks(value) {
   return links;
 }
 
+/**
+ * The posting URL a tracker `URL` cell points at, in either written form.
+ *
+ * The cell is written as a markdown link (`[careers.acme.com](https://…)`) so
+ * the table stays readable — a raw posting URL runs to 141 characters and
+ * pushes every other column off screen (#3516). Older trackers, and any row a
+ * merge has not rewritten since, still carry the bare URL. Both forms must
+ * produce the SAME dedup key, which is why the extraction lives HERE, in the
+ * shared row parser, rather than inside merge-tracker alone.
+ *
+ * THE FAILURE THIS PREVENTS IS SILENT. `normalizeUrl()` (url-key.mjs) starts
+ * with `new URL(s)` and returns '' when that throws, and '' means "this row has
+ * no URL" — not "parse error". So handing it a markdown-wrapped cell does not
+ * error: the row quietly drops out of merge-tracker's exact-match dedup tier
+ * (Pass 0) and falls back to fuzzy company+role, where two genuinely distinct
+ * postings at one employer merge into one row. The damage surfaces much later,
+ * with nothing tying it back to a formatting change.
+ *
+ * The first http(s) link target wins; a cell with no link (a bare URL, `N/A`,
+ * `—`, empty) is returned verbatim, so the callers' placeholder handling and
+ * normalizeUrl()'s "no key is not a key" rule keep working unchanged.
+ *
+ * @param {string} cellValue - Raw `URL` cell from a tracker row.
+ * @returns {string} The href, or the trimmed cell when it holds no link.
+ */
+export function extractCellUrl(cellValue) {
+  const value = String(cellValue ?? '').trim();
+  if (!value) return '';
+  for (const link of parseMarkdownLinks(value)) {
+    const target = String(link.target).trim().replace(/^<|>$/g, '');
+    if (/^https?:\/\//i.test(target)) return target;
+  }
+  return value;
+}
+
+/**
+ * Extract report IDs referenced by one tracker Report cell.
+ *
+ * Both the numeric markdown label and the local report filename are returned.
+ * Keeping both makes tracker drift visible instead of silently trusting one
+ * side of a malformed link. External URLs are ignored even when their path
+ * happens to contain a reports/ segment.
+ *
+ * @param {string} reportCell - Raw Report cell value.
+ * @returns {number[]} Unique positive report IDs in encounter order.
+ */
 export function extractTrackerReportNumbers(reportCell, notesCell = '') {
   const value = String(reportCell ?? '').trim();
   if (!value || value === '-' || value === '—') return scanNotesForReportNumbers(notesCell);
