@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // The DEMAND loop: surface follow-ups due, via the core's own
-// followup-cadence.mjs --json (the SAME calculator the CLI uses) — we never
+// followup-cadence.mjs (the SAME calculator the CLI uses) — we never
 // reimplement the cadence logic, we read its verdict (mirrors /api/doctor).
 // Default: capped list for the home card. `?full=1`: the complete cadence
 // (entries + metadata + cadenceConfig) for the /followups tracker page.
@@ -16,7 +16,7 @@ export async function GET(req: Request) {
   const script = rootScript("followup-cadence");
   if (!fs.existsSync(script)) return Response.json({ available: false, metadata: null, entries: [], nextUpcoming: null });
   const stdout = await new Promise<string>((resolve) => {
-    execFile("node", [script, "--json"], { cwd: careerOpsRoot(), timeout: 12_000 }, (err, out) => resolve(err ? "" : out || ""));
+    execFile("node", [script], { cwd: careerOpsRoot(), timeout: 12_000 }, (err, out) => resolve(err ? "" : out || ""));
   });
   try {
     const start = stdout.indexOf("{");
