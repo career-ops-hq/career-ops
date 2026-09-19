@@ -32,9 +32,42 @@ import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
+// Resolve language.modes_dir from config/profile.yml the way gemini-eval.mjs
+// does. Without this the batch evaluator always loaded the English modes/
+// files, so a profile selecting modes/id (or any other market) silently got
+// the generic rubric - the localisation was configured and never applied.
+// Measured 2026-09-04: 39 Indonesian offers all evaluated against modes/oferta.md.
+function resolveModesDir() {
+  try {
+    const ymlPath = join(DATA_ROOT, 'config', 'profile.yml');
+    if (!existsSync(ymlPath)) return join(ROOT, 'modes');
+    const m = readFileSync(ymlPath, 'utf-8').match(/^[ 	]*modes_dir[ 	]*:[ 	]*(.+)$/m);
+    if (!m) return join(ROOT, 'modes');
+    const rel = m[1].trim().replace(/^["']|["']$/g, '');
+    const candidate = join(ROOT, rel);
+    // Never let a profile value escape the project root.
+    if (!candidate.startsWith(ROOT)) return join(ROOT, 'modes');
+    return existsSync(candidate) ? candidate : join(ROOT, 'modes');
+  } catch { return join(ROOT, 'modes'); }
+}
+
+const MODES_DIR = resolveModesDir();
+// Fall back per file: a market dir may localise only some of the modes.
+const modeFile = (name) =>
+  existsSync(join(MODES_DIR, name)) ? join(MODES_DIR, name) : join(ROOT, 'modes', name);
+
+// The evaluation mode is named per market - oferta.md in Spanish, lowongan.md
+// in Indonesian, and so on. Same list gemini-eval.mjs resolves against; keep
+// the two in step or a market localises for one entry point and not the other.
+const EVAL_MODE_FILES = ['oferta.md', 'lowongan.md', 'angebot.md', 'offre.md', 'kyujin.md', 'is-ilani.md', 'naukri.md'];
+const evalModeFile = () => {
+  const found = EVAL_MODE_FILES.find((f) => existsSync(join(MODES_DIR, f)));
+  return found ? join(MODES_DIR, found) : join(ROOT, 'modes', 'oferta.md');
+};
+
 export const PATHS = {
-  shared:      join(ROOT, 'modes', '_shared.md'),
-  oferta:      join(ROOT, 'modes', 'oferta.md'),
+  shared:      modeFile('_shared.md'),
+  oferta:      evalModeFile(),
   cv:          join(DATA_ROOT, 'cv.md'),
   profile:     join(ROOT, 'modes', '_profile.md'),
   profileYml:  join(DATA_ROOT, 'config', 'profile.yml'),
@@ -60,13 +93,17 @@ function readSpendTier() {
   return 'standard';
 }
 
+// Model ids per spend tier. The 2.5 family this used to name was deprecated
+// (2.5-flash 2026-06-17, 2.5-flash-lite 2026-07-22) and now answers HTTP 404
+// "no longer available to new users", so every offer in a batch failed before
+// this was updated. Keep in step with the deprecation table in gemini-eval.mjs.
 function spendTierToModel(tier) {
   switch (tier) {
-    case 'economy': return 'gemini-2.5-flash-lite';
-    case 'premium': return 'gemini-2.5-pro';
+    case 'economy': return 'gemini-3.5-flash-lite';
+    case 'premium': return 'gemini-3.1-pro-preview';
     case 'standard':
     default:
-      return 'gemini-2.5-flash';
+      return 'gemini-3.5-flash';
   }
 }
 
