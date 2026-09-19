@@ -156,11 +156,21 @@
 import { readFileSync, existsSync } from 'fs';
 import { flagValue } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { join } from 'path';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+
+const DATA_ROOT = getCareerOpsRoot();
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const DEFAULT_STORY_BANK_PATH = 'interview-prep/story-bank.md';
-const DEFAULT_CV_PATH = 'cv.md';
+// From the data root, not the cwd. Both are user-layer files under the
+// Source-of-Truth Boundary, and this check compares them — a bare relative path
+// resolves against wherever the process was started, so from any other
+// directory both reads miss and the result is "no stories, no claims", which
+// reads as a clean bill rather than as having looked in the wrong place.
+// --story-bank / --cv still override, unchanged.
+const DEFAULT_STORY_BANK_PATH = join(DATA_ROOT, 'interview-prep', 'story-bank.md');
+const DEFAULT_CV_PATH = join(DATA_ROOT, 'cv.md');
 
 // ── Numeric claim patterns ──────────────────────────────────────────
 // Each pattern extracts {kind, text, index, values}. `values` are the
