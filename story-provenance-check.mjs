@@ -789,7 +789,25 @@ Brings 15 years of unrelated professional background in adult education prior to
 
 // ── Main ─────────────────────────────────────────────────────────────
 
+// Derived from the flags this file actually accepts, so `--help` cannot
+// describe an option that does not exist.
+const USAGE = `Usage:
+  node story-provenance-check.mjs [--summary] [--story-bank <path>] [--cv <path>] [--self-test]
+
+  --summary            human-readable table instead of JSON
+  --story-bank <path>  override the story-bank path
+  --cv <path>          override the cv.md path
+  --self-test          run the built-in checks
+  --help, -h   print this and exit`;
+
 if (isMainModule(import.meta.url)) {
+  // BEFORE any work. Unhandled, `--help` fell through to the analysis: this
+  // script printed a full report for it, which is not what the flag asks for
+  // and hides that it was never recognised.
+  if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
   if (selfTestMode) {
     runSelfTest();
   } else {
