@@ -15,11 +15,30 @@ import { join } from 'path';
 import { pass, fail } from './helpers.mjs';
 import { gitIn, locallyModifiedSystemFiles, pathFullyPreserved } from '../update-system.mjs';
 
+const fixtures = [];
+
+// Registered on exit rather than removed per case, the same shape as
+// template-packs.test.mjs: the cases are top-level blocks, and a hook still
+// runs when one of them throws, which is the run that would otherwise leak
+// every repo created so far. Each run used to leave one repo per case in the
+// OS temp dir, and a global core.fsmonitor=true gives each of those a daemon
+// that outlives the run.
+process.on('exit', () => {
+  for (const dir of fixtures) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // A fixture that cannot be removed must not change the suite's verdict.
+    }
+  }
+});
+
 // A repo with an `upstream` branch standing in for FETCH_HEAD, and `main` as
 // the install. Both start from a shared base commit, which is what gives
 // merge-base a meaningful baseline.
 function makeRepo() {
   const dir = mkdtempSync(join(tmpdir(), 'co-local-edits-'));
+  fixtures.push(dir);
   const g = (...args) => gitIn(dir, ...args);
   g('init', '-q', '-b', 'main', '.');
   g('config', 'user.email', 'test@example.com');
