@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 
 const KEY = "career-ops:theme";
 
-export function ThemeToggle({ className, showLabel = false }: { className?: string; showLabel?: boolean }) {
+export function ThemeToggle({ className }: { className?: string }) {
   const [dark, setDark] = useState(true);
 
   useEffect(() => {
@@ -37,14 +37,9 @@ export function ThemeToggle({ className, showLabel = false }: { className?: stri
       onClick={toggle}
       aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
       title={dark ? "Light mode" : "Dark mode"}
-      className={cn(
-        "text-muted",
-        showLabel && "h-9 w-full justify-start gap-2 px-2 text-xs",
-        className,
-      )}
+      className={cn("text-muted", className)}
     >
       {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-      {showLabel && <span>{dark ? "Light mode" : "Dark mode"}</span>}
     </Button>
   );
 }

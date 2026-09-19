@@ -63,17 +63,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <WorkerPills />
 
-          <div className="mt-auto space-y-3 pb-16 pt-4">
+          <div className="mt-auto space-y-3 pt-4">
             <UsageMeter />
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between px-1">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-faint">Appearance</span>
-                <span className="font-mono text-[10px] text-faint">THEME</span>
-              </div>
-              <ThemeToggle showLabel />
-              <div className="px-1">
-                <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
-              </div>
+            <div className="flex items-center justify-between px-1">
+              <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
+              <ThemeToggle />
             </div>
           </div>
         </aside>
