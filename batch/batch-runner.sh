@@ -125,7 +125,13 @@ while [[ $# -gt 0 ]]; do
         echo "ERROR: --limit must be a positive integer; omit --limit for no limit."
         exit 1
       fi
-      LIMIT="$2"
+      # Remove leading zeroes before Bash arithmetic (which otherwise reads octal).
+      LIMIT="${2#"${2%%[!0]*}"}"
+      # Compare decimal strings before arithmetic can wrap an oversized integer.
+      if [[ ${#LIMIT} -gt 19 ]] || { [[ ${#LIMIT} -eq 19 ]] && [[ "$LIMIT" > 9223372036854775807 ]]; }; then
+        echo "ERROR: --limit must be at most 9223372036854775807; omit --limit for no limit."
+        exit 1
+      fi
       shift 2
       ;;
     --max-retries) MAX_RETRIES="$2"; shift 2 ;;
