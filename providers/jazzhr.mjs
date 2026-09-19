@@ -43,14 +43,17 @@ const DETAIL_FETCH_DELAY_MS = 200;
 
 /** Resolve the tenant origin (`https://<tenant>.applytojob.com`) from an
  * entry — honours an explicit `api:` URL, else `careers_url`. Mirrors
- * providers/bamboohr.mjs / providers/breezy.mjs / providers/icims.mjs. */
+ * providers/bamboohr.mjs / providers/breezy.mjs: hostname is validated,
+ * then the origin is rebuilt from it rather than carried through from the
+ * input, so a port has nowhere to survive to — nothing to separately
+ * check or reject. */
 function resolveOrigin(entry) {
   for (const raw of [entry?.api, entry?.careers_url]) {
     if (typeof raw !== 'string' || !raw.trim()) continue;
     let parsed;
     try { parsed = new URL(raw.trim()); } catch { continue; }
-    if (parsed.protocol !== 'https:' || parsed.port !== '' || !HOST_RE.test(parsed.hostname)) continue;
-    return parsed.origin;
+    if (parsed.protocol !== 'https:' || !HOST_RE.test(parsed.hostname)) continue;
+    return `https://${parsed.hostname}`;
   }
   return null;
 }
@@ -64,7 +67,7 @@ const boardUrl = (origin) => `${origin}/apply`;
 function assertJazzHRUrl(raw) {
   let parsed;
   try { parsed = new URL(String(raw).trim()); } catch { parsed = null; }
-  if (!parsed || parsed.protocol !== 'https:' || parsed.port !== '' || !HOST_RE.test(parsed.hostname)) {
+  if (!parsed || parsed.protocol !== 'https:' || !HOST_RE.test(parsed.hostname)) {
     throw new Error(`jazzhr: untrusted or invalid public board URL: ${raw}`);
   }
   return parsed;

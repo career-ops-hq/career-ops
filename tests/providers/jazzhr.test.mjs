@@ -21,6 +21,7 @@ try {
     ['/apply with a trailing slash', 'https://exampleco.applytojob.com/apply/'],
     ['an unrelated path', 'https://exampleco.applytojob.com/login'],
     ['a posting permalink, not the board root', 'https://exampleco.applytojob.com/apply/D4/Some-Posting'],
+    ['a non-default port', 'https://exampleco.applytojob.com:8443/apply'], // dropped, same as the path — origin is rebuilt from the hostname alone, not carried through
   ]) {
     if (provider.detect({ name: 'Example', careers_url: url })?.url === 'https://exampleco.applytojob.com/apply') pass(`resolves ${label} to the board root`);
     else fail(`${label} did not resolve to the board root: ${JSON.stringify(provider.detect({ name: 'Example', careers_url: url }))}`);
@@ -31,7 +32,6 @@ try {
     'https://evil.example/apply', // untrusted host
     'https://x.applytojob.com.evil.com/apply', // suffix-host bypass
     'https://x.applytojob.com@evil/apply', // userinfo-host bypass
-    'https://exampleco.applytojob.com:8443/apply', // non-default port
     null,
     7,
   ]) {
