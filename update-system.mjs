@@ -358,6 +358,7 @@ const SYSTEM_PATHS = [
   'validate-untrusted-content-coverage.mjs',
   'reply-matcher.mjs',
   'reply-watch.mjs',
+  'jev-reply-classify.mjs',
   'paste-reply.mjs',
   'paste-reply-tests.mjs',
   'outcome.mjs',

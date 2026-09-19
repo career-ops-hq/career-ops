@@ -16,6 +16,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { matchCandidates, classifyReply } from './reply-matcher.mjs';
+import { jevAvailable, classifyReplyWithJev } from './jev-reply-classify.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import {
   openTrackerTransaction, rebuildRow, resolveTrackerPath,
@@ -247,9 +248,20 @@ async function main() {
 
   const recommendations = [];
 
-  matched.forEach((match, index) => {
+  const jevOn = jevAvailable();
+
+  for (const [index, match] of matched.entries()) {
     const cand = candidates.find(c => c.message_id === match.message_id);
-    const classification = classifyReply(cand);
+    let classification = classifyReply(cand);
+
+    // Jev fallback: only when the deterministic matcher found nothing —
+    // never overrides a keyword hit, opt-in via TYPESAFE_API_KEY.
+    if (classification.type === 'Unknown' && jevOn) {
+      const jevResult = await classifyReplyWithJev(cand);
+      if (jevResult) {
+        classification = jevResult;
+      }
+    }
 
     let headerStr = '';
     if (match.application_num !== null) {
@@ -287,7 +299,7 @@ async function main() {
         });
       }
     }
-  });
+  }
 
   const groupedRecommendations = groupStatusRecommendations(recommendations);
   if (groupedRecommendations.conflicts.length > 0) {
