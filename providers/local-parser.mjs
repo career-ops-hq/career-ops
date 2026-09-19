@@ -137,6 +137,18 @@ function normalizeLocation(value) {
   return String(value).trim();
 }
 
+// NaN-safe coercion for an optional parser-supplied posting date. Accepts an
+// epoch-milliseconds number or a Date.parse-able string; an unparseable string,
+// a non-finite number, or an absent field yields undefined, so the row is kept
+// without a date rather than carrying a wrong one. `|| undefined` is avoided on
+// purpose — it would also drop a legitimate epoch 0.
+function toEpochMs(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (!value) return undefined;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
 function normalizeParserJob(job, entry) {
   if (!job || typeof job !== 'object') return null;
 
@@ -147,12 +159,17 @@ function normalizeParserJob(job, entry) {
   );
   if (!title || !url) return null;
 
-  return {
+  const out = {
     title,
     url,
     company: String(job.company || entry.name || '').trim(),
     location: normalizeLocation(job.location || job.locations),
   };
+
+  const postedAt = toEpochMs(job.postedAt ?? job.posted_at ?? job.publishedAt ?? job.published_at);
+  if (postedAt !== undefined) out.postedAt = postedAt;
+
+  return out;
 }
 
 async function runLocalParser(entry) {
