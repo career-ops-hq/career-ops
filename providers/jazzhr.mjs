@@ -107,7 +107,7 @@ const POSTING_LINK_RE = /<a\b[^>]*href=["']([^"']*\/apply\/[^"']+)["'][^>]*>([\s
 function resolvePostingUrl(href, base) {
   try {
     const url = new URL(href, base);
-    if (url.protocol !== 'https:' || url.hostname !== base.hostname || !/^\/apply\/.+$/i.test(url.pathname)) return null;
+    if (url.protocol !== 'https:' || url.hostname !== base.hostname || !/^\/apply\/[^/].*$/i.test(url.pathname)) return null;
     url.search = '';
     return url;
   } catch { return null; }

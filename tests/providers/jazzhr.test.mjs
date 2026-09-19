@@ -150,6 +150,14 @@ try {
     fail('an href resolving to the board root should not be accepted as a posting');
   } catch { pass('rejects an href that resolves to the board root, not a posting'); }
 
+  // Regression: "/apply//" satisfies a naive ".+ after /apply/" check (the
+  // extra "/" itself counts as "something"), but it is not a real posting
+  // segment either.
+  try {
+    mod.parseJazzHRList('<a href="/apply//">Double slash, not a posting</a>', board, 'X');
+    fail('an "/apply//" href should not be accepted as a posting');
+  } catch { pass('rejects an "/apply//" href with no real posting segment'); }
+
   // Regression: a PARTIAL redesign (one posting still in a list-group-item
   // card, another already migrated off it) must recover both — the fallback
   // has to run even when the primary pass already found something, or the
