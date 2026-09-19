@@ -233,6 +233,7 @@ const SYSTEM_PATHS = [
   'lib/gemini-node-floor.mjs',
   'lib/local-today.mjs',
   'lib/placeholder-cell.mjs',
+  'lib/tracker-addition.mjs',
   'lib/scan-summary-marker.mjs',
   'lib/is-main-module.mjs',
   'lib/mjs-files.mjs',
