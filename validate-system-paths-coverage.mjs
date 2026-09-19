@@ -126,6 +126,9 @@ if (process.argv.includes('--self-test')) {
   // Pinned as the CONSTANT, not the literal: if the declaration file is ever
   // renamed, an assertion on 'config/local-paths.txt' would keep passing while
   // the real file went back to being an orphan in a fork's CI.
+  // How a fork makes it visible to CI without tripping `user-layer-untracked`:
+  // append `!config/local-paths.txt` to .gitignore and commit it, so it is tracked
+  // and NOT ignored (#4128). `config/local-paths.example.txt` carries the recipe.
   assert(covered(LOCAL_PATHS_FILE) === true, 'the local-paths declaration file must be covered when a fork commits it (excluded, #2991)');
   // The example is asserted through its MECHANISM, not just through covered().
   // covered() answers true for any of them, EXCLUDES included, so a single
