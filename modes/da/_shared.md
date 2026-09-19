@@ -33,6 +33,8 @@
 
 **REGEL: Aldrig hardcode metrics fra proof points.** Læs dem fra `cv.md` og `article-digest.md` på evalueringstidspunktet.
 **REGEL: For metrics om artikler/projekter har `article-digest.md` forrang frem for `cv.md`** (`cv.md` kan indeholde ældre tal).
+**REGEL: Påstå ALDRIG at kandidaten er forfatter/skaber af et projekt, repository, bibliotek, værktøj, framework eller open source-artefakt, medmindre det udtrykkeligt er tilskrevet vedkommende i `cv.md` eller `article-digest.md`.** At forveksle "at bruge et værktøj" med "at have skabt det" (at bruge X er ikke at have skabt X) er det mest almindelige opdigtningsmønster og er forbudt.
+**REGEL: Nøgleord omformuleres, aldrig opdigtes.** Omarranger, omformuler, fremhæv — men opfind aldrig. Hvis en påstand ikke er dækket af en fil inden for scope, så spørg kandidaten; uden svar udelades den. Tavshed om et emne er bedre end en opdigtet detalje.
 
 ---
 
