@@ -2,7 +2,7 @@
 import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 
 console.log('\nProvider — mycareersfuture');
@@ -211,6 +211,7 @@ try {
         return await run();
       } finally {
         process.chdir(cwdBefore);
+        rmSync(tmp, { recursive: true, force: true });
       }
     };
 
