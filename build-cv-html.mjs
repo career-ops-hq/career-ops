@@ -356,12 +356,15 @@ function buildExperience(entries, partial) {
       const location = e.location
         ? `\n    <div class="job-location">${escapeHtml(e.location)}</div>`
         : '';
+      const context = e.context
+        ? `\n    <div class="job-context">${escapeHtml(e.context)}</div>`
+        : '';
       return `<div class="job">
     <div class="job-header">
       <span class="job-company">${escapeHtml(e.company)}</span>
       <span class="job-period">${escapeHtml(e.dates || e.period || '')}</span>
     </div>
-    <div class="job-role">${escapeHtml(e.role)}</div>${location}
+    <div class="job-role">${escapeHtml(e.role)}</div>${location}${context}
     <ul>
 ${bullets}
     </ul>
@@ -376,12 +379,14 @@ ${bullets}
       : '';
     const blockValues = new Map([
       ['LOCATION_BLOCK', { value: escapeHtml(e.location || ''), present: Boolean(e.location) }],
+      ['CONTEXT_BLOCK', { value: escapeHtml(e.context || ''), present: Boolean(e.context) }],
     ]);
     return fillEntry(entryTemplate, blocks, {
       COMPANY: escapeHtml(e.company || ''),
       PERIOD: escapeHtml(e.dates || e.period || ''),
       ROLE: escapeHtml(e.role || ''),
       LOCATION: escapeHtml(e.location || ''),
+      CONTEXT: escapeHtml(e.context || ''),
       BULLETS: bullets,
     }, blockValues);
   }).join('\n  ');
@@ -826,6 +831,7 @@ async function runSelfTest() {
       company: 'Test Corp',
       role: 'Test Engineer',
       location: 'Remote',
+      context: 'Seed-stage startup; joined as employee #7.',
       dates: 'June 2024 - Present',
       bullets: [
         'Built automated testing pipelines with CI/CD integration',
@@ -966,6 +972,10 @@ async function runSelfTest() {
     console.error('Self-test failed: job-location block not rendered when location is present');
     process.exit(1);
   }
+  if (!html.includes('class="job-context"') || !html.includes('Seed-stage startup; joined as employee #7.')) {
+    console.error('Self-test failed: job-context block not rendered when context is present');
+    process.exit(1);
+  }
   if (!html.includes('class="edu-location"')) {
     console.error('Self-test failed: edu-location block not rendered when education location is present');
     process.exit(1);
@@ -988,6 +998,10 @@ async function runSelfTest() {
   }
   if (noLocHtml.includes('class="job-location"')) {
     console.error('Self-test failed: job-location block rendered when location is absent');
+    process.exit(1);
+  }
+  if (noLocHtml.includes('class="job-context"')) {
+    console.error('Self-test failed: job-context block rendered when context is absent');
     process.exit(1);
   }
   if (noLocHtml.includes('class="edu-location"')) {
