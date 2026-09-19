@@ -350,6 +350,7 @@ const SYSTEM_PATHS = [
   'tracker-writer-lock-tests.mjs',
   'agent-inbox-tests.mjs',
   'validate-portals.mjs',
+  'validate-profile.mjs',
   'verify-portals.mjs',
   'audit-portals.mjs',
   'fix-slugs.mjs',
