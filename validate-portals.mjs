@@ -162,6 +162,26 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     }
   }
 
+  // Consumed only by scan-ats-full.mjs's board gate (#3105). A bare list, not
+  // an object like the filters around it: the gate has one dimension. A
+  // negative domain term would have to mean "this employer is NOT in my
+  // industry because of one posting", which no single posting can establish,
+  // and the threshold is fixed at one by measurement rather than configurable.
+  //
+  // Validated even though its failure direction is the safe one. A malformed
+  // domain_filter leaves the gate OFF, which is exactly today's behaviour — but
+  // the user is then sweeping unguarded while believing the opposite, and the
+  // scanner cannot warn them, because an absent domain_filter is a legitimate
+  // configuration it has to stay silent about. That silence is what makes this
+  // the only place the typo can surface.
+  if (config.domain_filter !== undefined) {
+    if (!Array.isArray(config.domain_filter)) {
+      add(errors, 'domain_filter', 'domain_filter must be a list of keywords');
+    } else {
+      validateKeywordList(config.domain_filter, 'domain_filter', errors);
+    }
+  }
+
   if (config.location_filter !== undefined) {
     if (!isObject(config.location_filter)) {
       add(errors, 'location_filter', 'location_filter must be an object');
