@@ -40,7 +40,7 @@ try {
   }
 
   // Regression: detect(null) (and other missing/malformed entry shapes) must
-  // return null, not throw — resolveBoardUrl used to dereference entry.api
+  // return null, not throw — resolveOrigin used to dereference entry.api
   // unguarded, so a null/undefined entry crashed instead of being rejected.
   try {
     if (provider.detect(null) === null) pass('detect(null) returns null, does not throw');
