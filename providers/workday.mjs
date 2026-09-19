@@ -339,31 +339,61 @@ function locationFromPath(externalPath) {
 // requisition filled 3 of 7 results in a sweep). Left un-stripped, that
 // disambiguator defeats the entire point of this function: the three sites'
 // URLs would each key to a different requisition ID and never collapse.
-export function workdayDedupKey(job) {
+/**
+ * Lowercase a raw requisition token and drop Workday's cross-site repost
+ * disambiguator (a trailing `-N`, one or two digits).
+ *
+ * Only treat the suffix as a disambiguator when what precedes it is already
+ * requisition-ID-shaped on its own (a leading digit, 2+ trailing digits,
+ * underscores allowed in between) — otherwise the hyphen digits ARE the
+ * requisition ID and must be kept, e.g. Walmart's "R-2593225" (credit:
+ * ronanime-arch, PR #3446).
+ *
+ * Shared with scan.mjs's `requisitionIdForDedup` so that a tracker note which
+ * copied the URL tail (`req JR25919-1`) and the URL itself name the same
+ * requisition: without one rule for both, the note read as `259191` while the
+ * URL read as `25919`, and the already-applied posting was re-queued as a new
+ * requisition (PR #4267 review).
+ *
+ * @param {unknown} raw - Token as found after the URL's `_` or a note's label.
+ * @returns {string} Lowercased requisition ID ('' when `raw` is empty).
+ */
+export function stripWorkdayRepostSuffix(raw) {
+  const token = raw == null ? '' : String(raw).toLowerCase();
+  const m = token.match(/^(.*?)-(\d{1,2})$/);
+  return m && /^[a-z]*\d[a-z0-9_]*\d{2,}$/.test(m[1]) ? m[1] : token;
+}
+
+/**
+ * Whether a URL points at a Workday-hosted posting.
+ *
+ * @param {unknown} url
+ * @returns {boolean|null} `true`/`false` for a parseable URL, `null` when
+ *   `url` is absent or unparseable (no evidence either way).
+ */
+export function isWorkdayJobUrl(url) {
   let parsed;
   try {
-    parsed = new URL(job?.url);
+    parsed = new URL(url);
   } catch {
     return null;
   }
+  return parsed.hostname.toLowerCase().endsWith('.myworkdayjobs.com');
+}
+
+export function workdayDedupKey(job) {
   // Non-Workday URLs must fall back to normalized-URL dedup, not produce a
   // bogus workday: key just because their last path segment happens to
   // contain an underscore (e.g. a Lever/Greenhouse job whose slug does) —
   // reported by CodeRabbit against this exact function.
-  if (!parsed.hostname.toLowerCase().endsWith('.myworkdayjobs.com')) return null;
+  if (!isWorkdayJobUrl(job?.url)) return null;
+  const parsed = new URL(job.url);
   const segments = parsed.pathname.split('/').filter(Boolean);
   const lastSegment = segments[segments.length - 1];
   if (!lastSegment) return null;
   const underscoreIdx = lastSegment.indexOf('_');
   if (underscoreIdx === -1) return null; // no title/requisition-ID separator — nothing to key on
-  const raw = lastSegment.slice(underscoreIdx + 1).toLowerCase();
-  // Only treat a trailing "-N" as Workday's cross-site disambiguator when what
-  // precedes it is already requisition-ID-shaped on its own (a leading digit,
-  // 2+ trailing digits, underscores allowed in between) — otherwise the hyphen
-  // digits ARE the requisition ID and must be kept, e.g. Walmart's "R-2593225"
-  // (credit: ronanime-arch, PR #3446).
-  const m = raw.match(/^(.*?)-(\d{1,2})$/);
-  const reqId = m && /^[a-z]*\d[a-z0-9_]*\d{2,}$/.test(m[1]) ? m[1] : raw;
+  const reqId = stripWorkdayRepostSuffix(lastSegment.slice(underscoreIdx + 1));
   if (!reqId) return null;
   return `workday:${parsed.hostname.toLowerCase()}:${reqId}`;
 }
