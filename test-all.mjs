@@ -4817,7 +4817,7 @@ try {
 // is case- and punctuation-insensitive; loadBlacklist on an absent file is a
 // no-op (empty Map — the scan filter never fires).
 try {
-  const { parseBlacklist, loadBlacklist } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { parseBlacklist, loadBlacklist, findBlacklistEntry } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
   const bl = parseBlacklist([
     '# Company Blacklist',
     '',
@@ -4825,14 +4825,15 @@ try {
     '|---------|-------|-------|--------|',
     '| Acme Corp. | 2026-01-15 | company | post-interview process signals |',
     '| Globex | 2026-02-01 | company | zero conversion |',
+    '| ibm.com | 2026-03-01 | domain | avoid parent-company ATS hosts |',
   ].join('\n'));
   const exact = bl.get('acmecorp');
   if (
-    bl.size === 2 &&
+    bl.size === 3 &&
     exact && exact.reason === 'post-interview process signals' && exact.since === '2026-01-15' &&
-    bl.has('globex') && !bl.has('company')
+    bl.has('globex') && bl.get('domain:ibm.com')?.scope === 'domain' && !bl.has('company')
   ) {
-    pass('scan.mjs parseBlacklist parses the table and keys by normalized company (#1742)');
+    pass('scan.mjs parseBlacklist parses normalized company and domain-scope rows (#1742, #4139)');
   } else {
     fail(`scan.mjs parseBlacklist wrong: size=${bl.size} keys=${[...bl.keys()].join(',')}`);
   }
@@ -4844,6 +4845,16 @@ try {
     pass('scan.mjs blacklist matching is case/punctuation-insensitive via shared normalizeCompany (#1742)');
   } else {
     fail('scan.mjs blacklist matching misses case/punctuation company variants');
+  }
+
+  const domain = bl.get('domain:ibm.com');
+  const domainMatch = findBlacklistEntry(bl, 'Confluent', 'https://jobs.ibm.com/engineering/123');
+  const boundaryMiss = findBlacklistEntry(bl, 'Confluent', 'https://notibm.com/engineering/123');
+  const legacyMatch = findBlacklistEntry(bl, 'ACME-CORP', 'https://example.com/jobs/123');
+  if (domainMatch === domain && boundaryMiss === null && legacyMatch === exact) {
+    pass('scan.mjs blacklist domain scope matches host suffixes without weakening company matching (#4139)');
+  } else {
+    fail('scan.mjs blacklist domain scope does not preserve host boundaries and legacy company matching (#4139)');
   }
 
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-blacklist-'));
@@ -4873,6 +4884,7 @@ try {
 // scan-runs.tsv by header name, and --include-blacklisted bypasses the filter.
 if (
   scanScript.includes("args.includes('--include-blacklisted')") &&
+  scanScript.includes('findBlacklistEntry(blacklist') &&
   scanScript.includes('totalFilteredBlacklist') &&
   scanScript.includes('skipped (blacklist)') &&
   scanScript.includes('filtered_blacklist')
@@ -5112,11 +5124,14 @@ try {
 try {
   const { filterBlacklistedOffers } = await import(pathToFileURL(join(ROOT, 'scan-ats-full.mjs')).href);
   const blacklist = new Map([
-    ['acmecorp', { company: 'Acme Corp', reason: 'example reason' }],
+    ['acmecorp', { company: 'Acme Corp', scope: 'company', reason: 'example reason' }],
+    ['ibmcom', { company: 'ibm.com', scope: 'domain', reason: 'parent ATS host' }],
   ]);
   const offers = [
     { company: 'Acme Corp.', title: 'Software Engineer', url: 'https://example.com/acme' },
     { company: 'Globex', title: 'Software Engineer', url: 'https://example.com/globex' },
+    { company: 'Confluent', title: 'Software Engineer', url: 'https://jobs.ibm.com/confluent' },
+    { company: 'Not IBM', title: 'Software Engineer', url: 'https://notibm.com/role' },
   ];
   const skipped = typeof filterBlacklistedOffers === 'function'
     ? filterBlacklistedOffers(offers, blacklist, { includeBlacklisted: false })
@@ -5125,16 +5140,19 @@ try {
     ? filterBlacklistedOffers(offers, blacklist, { includeBlacklisted: true })
     : null;
   const ok =
-    skipped?.filteredBlacklist === 1 &&
-    skipped.offers.length === 1 &&
+    skipped?.filteredBlacklist === 2 &&
+    skipped.offers.length === 2 &&
     skipped.offers[0].company === 'Globex' &&
-    audited?.annotatedBlacklisted === 1 &&
-    audited.offers.length === 2 &&
+    skipped.offers[1].company === 'Not IBM' &&
+    audited?.annotatedBlacklisted === 2 &&
+    audited.offers.length === 4 &&
     audited.offers[0].blacklisted === true &&
     audited.offers[0].note.includes('blacklisted: example reason') &&
+    audited.offers[2].blacklisted === true &&
+    audited.offers[2].note.includes('blacklisted: parent ATS host') &&
     offers[0].blacklisted === undefined;
-  if (ok) pass('scan-ats-full filters data/blacklist.md matches by default and annotates them under --include-blacklisted (#1911)');
-  else fail('scan-ats-full missing blacklist filter/audit semantics (#1911)');
+  if (ok) pass('scan-ats-full applies company and domain blacklist scopes in default and audit modes (#1911, #4139)');
+  else fail('scan-ats-full missing company/domain blacklist filter/audit semantics (#1911, #4139)');
 } catch (e) {
   fail(`scan-ats-full blacklist test crashed: ${e.message}`);
 }
