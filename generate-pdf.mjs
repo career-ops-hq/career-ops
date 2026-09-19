@@ -1445,11 +1445,11 @@ async function runBatchFromManifest(manifestPath, globals) {
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
-  // One profile governs the whole batch, so the declared order is read once
-  // rather than per entry. Anchored to workspaceRoot for the same reason the
-  // single render is: it is the anchor readStyleTokens() and the cv.md read
-  // already use, so one profile.yml supplies every setting.
-  const cvSectionOrder = readCvSectionOrder(resolve(workspaceRoot, 'config', 'profile.yml'));
+  // Read one workspace profile for the batch. The working directory must not
+  // choose a different theme from the single-document render.
+  const profilePath = resolve(workspaceRoot, 'config', 'profile.yml');
+  const cvSectionOrder = readCvSectionOrder(profilePath);
+  const styleTokens = readStyleTokens(profilePath);
 
   for (let i = 0; i < manifest.length; i++) {
     const spec = manifest[i];
@@ -1502,6 +1502,7 @@ async function runBatchFromManifest(manifestPath, globals) {
         inputPath: entryInput,
         maxPages: globals.maxPages,
         strictPages: globals.strictPages,
+        styleTokens,
       });
     } catch (err) {
       console.error(`❌ Skipping batch entry ${i} (${spec?.output ?? '?'}): ${err.message}`);
@@ -1703,7 +1704,7 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
   // properties so the templates' var(--x, <default>) reads pick them up (#1837).
   // No `style:` block → no tokens → byte-identical output. Both the CV path and
   // the cover-letter path flow through here, so both are themed from one place.
-  const styleTokens = opts.styleTokens ?? readStyleTokens();
+  const styleTokens = opts.styleTokens ?? readStyleTokens(resolve(outputRoot, 'config', 'profile.yml'));
   html = injectThemeStyle(html, styleTokens);
 
   html = injectPrintPageCss(html, format);
