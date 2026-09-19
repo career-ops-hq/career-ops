@@ -184,15 +184,21 @@ it is inert until the provider is added there.
   keep the leading dot on a suffix test (`endsWith('vendordomain.com')` also
   accepts `evilvendordomain.com`).
 
-  Once the host is anchored, resolve **only the origin**
-  (`protocol://hostname`) from `entry.api` / `entry.careers_url` and
-  reconstruct the provider's own canonical path yourself — never parse or
-  validate the shape of whatever path the input happened to carry.
-  Reference: `resolveOrigin`-shaped helpers in `providers/bamboohr.mjs` /
-  `providers/breezy.mjs` / `providers/icims.mjs`, each of which takes
-  `new URL(raw).origin` and appends its own fixed suffix (`/careers/list`,
-  `/json`, `/jobs/search?ss=1`) — the input path is discarded, not
-  inspected. The alternative — accepting or rejecting specific path shapes
+  Once the host is anchored, resolve **only the hostname**
+  from `entry.api` / `entry.careers_url` and rebuild `https://${hostname}`
+  yourself, then append the provider's own canonical path — never parse or
+  validate the shape of whatever path (or port) the input happened to
+  carry. Reference: `resolveOrigin`-shaped helpers in `providers/bamboohr.mjs`
+  / `providers/breezy.mjs`, each of which appends its own fixed suffix
+  (`/careers/list`, `/json`) to a hardcoded `https://${hostname}` —
+  the input path is discarded, not inspected, and a port has nowhere to
+  survive to since it was never part of what got reconstructed. Don't use
+  `new URL(raw).origin` for this: unlike a manually rebuilt origin, it
+  carries the input's own port through unchanged, which quietly reopens
+  the exact thing rebuilding the origin was meant to close (`providers/icims.mjs`
+  does use `.origin`, inconsistently with the other two — treat the
+  hardcoded-scheme form as the one to copy). The alternative — accepting
+  or rejecting specific path shapes
   (bare host vs. a trailing-slash path vs. a deeper permalink, and so on) —
   is a rabbit hole with no natural end: every shape the check doesn't
   special-case becomes its own edge case to patch (a config-derived posting
