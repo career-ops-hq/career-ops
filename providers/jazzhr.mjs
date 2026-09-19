@@ -39,12 +39,15 @@ function parseBoardUrl(raw) {
   try {
     const url = new URL(raw.trim());
     if (url.protocol !== 'https:' || !HOST_RE.test(url.hostname)) return null;
-    // Real JazzHR boards serve the same listing at the bare host and at
-    // /apply — every natural route in (a company's own careers button, an
-    // aggregator link, a search hit) hands over the bare host, never the
-    // constructed /apply form, so both must resolve.
+    // Board root only — both a bare host and an already-/apply URL resolve,
+    // but a deep path (a specific posting's own permalink, /apply/<id>/...)
+    // is rejected here even though the same host+HTTPS combination is
+    // otherwise trusted. A `careers_url` pointing at one posting instead of
+    // the board would otherwise get fetched and parsed as if it were the
+    // listing page. Posting permalinks are validated separately, by
+    // assertJazzHRUrl below.
     if (url.pathname === '/' || url.pathname === '') url.pathname = '/apply';
-    else if (!/^\/apply(?:\/.*)?$/i.test(url.pathname)) return null;
+    else if (!/^\/apply\/?$/i.test(url.pathname)) return null;
     return url;
   } catch { return null; }
 }
@@ -57,9 +60,20 @@ function resolveBoardUrl(entry) {
   return null;
 }
 
+/** Re-gates a posting permalink (`/apply/<id>/...`) before a detail fetch —
+ * same host allowlist as parseBoardUrl, but deliberately accepts the deep
+ * path parseBoardUrl rejects, since this validates a specific job's URL,
+ * not the board root. */
 function assertJazzHRUrl(raw) {
-  const parsed = parseBoardUrl(raw);
-  if (!parsed) throw new Error(`jazzhr: untrusted or invalid public board URL: ${raw}`);
+  let parsed;
+  try {
+    parsed = new URL(String(raw).trim());
+  } catch {
+    parsed = null;
+  }
+  if (!parsed || parsed.protocol !== 'https:' || !HOST_RE.test(parsed.hostname) || !/^\/apply\//i.test(parsed.pathname)) {
+    throw new Error(`jazzhr: untrusted or invalid public board URL: ${raw}`);
+  }
   return parsed;
 }
 

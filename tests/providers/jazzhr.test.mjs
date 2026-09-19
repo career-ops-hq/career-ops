@@ -29,6 +29,7 @@ try {
     'https://exampleco.applytojob.com/login',
     'https://x.applytojob.com.evil.com/apply', // suffix-host bypass
     'https://x.applytojob.com@evil/apply', // userinfo-host bypass
+    'https://exampleco.applytojob.com/apply/D4/Some-Posting', // a posting permalink, not the board root
     null,
     7,
   ]) {
