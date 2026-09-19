@@ -137,6 +137,26 @@ function normalizeLocation(value) {
   return String(value).trim();
 }
 
+/**
+ * Posting date from a parser's job object, as epoch ms, or undefined.
+ *
+ * Accepts the spellings a scraped source hands back: epoch ms already (what
+ * `scan.mjs` consumes), or a date string, including the `datePosted` a JSON-LD
+ * `JobPosting` block carries. Anything unparseable is dropped rather than
+ * guessed at, so a malformed field behaves exactly as an absent one: no date,
+ * and `buildPostingAgeFilter` passes the job.
+ *
+ * @param {object} job
+ * @returns {number|undefined}
+ */
+function normalizeParserPostedAt(job) {
+  const raw = job.postedAt ?? job.posted_at ?? job.publishedAt ?? job.published_at
+    ?? job.published_date ?? job.datePosted ?? job.date_posted;
+  if (raw == null || raw === '') return undefined;
+  const ts = typeof raw === 'number' ? raw : Date.parse(String(raw));
+  return Number.isFinite(ts) && ts > 0 ? ts : undefined;
+}
+
 function normalizeParserJob(job, entry) {
   if (!job || typeof job !== 'object') return null;
 
@@ -147,12 +167,20 @@ function normalizeParserJob(job, entry) {
   );
   if (!title || !url) return null;
 
-  return {
+  const normalized = {
     title,
     url,
     company: String(job.company || entry.name || '').trim(),
     location: normalizeLocation(job.location || job.locations),
   };
+
+  // Optional, and only set when it parses: `max_posting_age_days`,
+  // `--posted-after`/`--posted-before` and `--since` all read `postedAt`, and a
+  // job that omits it passes every one of them.
+  const postedAt = normalizeParserPostedAt(job);
+  if (postedAt !== undefined) normalized.postedAt = postedAt;
+
+  return normalized;
 }
 
 async function runLocalParser(entry) {

@@ -147,6 +147,47 @@ try {
     }
   }
 
+  // 9. Fetch - posting date. Without it a local-parser job reaches the scan loop
+  // with no `postedAt`, so max_posting_age_days, --posted-after/--posted-before
+  // and --since all pass it through, whatever the source actually said.
+  const datedJobs = await localParser.fetch({
+    careers_url: 'https://example.com/careers',
+    parser: {
+      command: 'node',
+      script: 'tests/providers/_fixture-local-parser.mjs',
+      args: ['dates'],
+    },
+  });
+  const byTitle = Object.fromEntries(datedJobs.map(j => [j.title, j]));
+  const expected = Date.parse('2026-02-08T00:00:00Z');
+
+  if (byTitle['Epoch ms']?.postedAt === 1760000000000) {
+    pass('localParser.fetch() keeps an epoch-ms postedAt as given');
+  } else {
+    fail(`epoch ms postedAt was ${JSON.stringify(byTitle['Epoch ms']?.postedAt)}`);
+  }
+
+  const spellings = [
+    ['ISO date', 'posted_at', expected],
+    ['ISO datetime', 'publishedAt', Date.parse('2026-02-08T10:30:00Z')],
+    ['Breezy spelling', 'published_date', Date.parse('2026-02-08T10:30:00Z')],
+    ['JSON-LD spelling', 'datePosted', expected],
+  ];
+  const wrongSpellings = spellings.filter(([title, , want]) => byTitle[title]?.postedAt !== want);
+  if (wrongSpellings.length === 0) {
+    pass('localParser.fetch() parses postedAt / posted_at / publishedAt / published_date / datePosted');
+  } else {
+    fail(`postedAt spellings not parsed: ${JSON.stringify(wrongSpellings.map(([t]) => t))}`);
+  }
+
+  const mustBeAbsent = ['Unparseable', 'Empty', 'Absent'];
+  const leaked = mustBeAbsent.filter(t => 'postedAt' in (byTitle[t] || {}));
+  if (leaked.length === 0) {
+    pass('localParser.fetch() omits postedAt for unparseable, empty and absent dates');
+  } else {
+    fail(`postedAt should be absent for: ${JSON.stringify(leaked)}`);
+  }
+
 } catch (e) {
   fail(`local-parser provider tests crashed: ${e.message}`);
 }
