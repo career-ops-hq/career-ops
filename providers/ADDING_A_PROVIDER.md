@@ -183,6 +183,24 @@ it is inert until the provider is added there.
   passes), escape the dots (`\.`, or `.` also matches `vendordomainXcom`), and
   keep the leading dot on a suffix test (`endsWith('vendordomain.com')` also
   accepts `evilvendordomain.com`).
+
+  Once the host is anchored, resolve **only the origin**
+  (`protocol://hostname`) from `entry.api` / `entry.careers_url` and
+  reconstruct the provider's own canonical path yourself — never parse or
+  validate the shape of whatever path the input happened to carry.
+  Reference: `resolveOrigin`-shaped helpers in `providers/bamboohr.mjs` /
+  `providers/breezy.mjs` / `providers/icims.mjs`, each of which takes
+  `new URL(raw).origin` and appends its own fixed suffix (`/careers/list`,
+  `/json`, `/jobs/search?ss=1`) — the input path is discarded, not
+  inspected. The alternative — accepting or rejecting specific path shapes
+  (bare host vs. a trailing-slash path vs. a deeper permalink, and so on) —
+  is a rabbit hole with no natural end: every shape the check doesn't
+  special-case becomes its own edge case to patch (a config-derived posting
+  permalink mistaken for the board root, a query string collapsing a path
+  onto the root once parsed, a stray double slash), each needing its own
+  regex fix discovered one at a time. None of that surfaces if the input
+  path is never inspected for shape in the first place — only the host is a
+  trust boundary here; the path is not, so treat it as opaque and unowned.
 - If the whole URL is assembled by the provider from a fixed literal host, no
   allowlist is needed, but `redirect: 'error'` still is.
 - Some providers are the inverse of a fixed vendor domain: the scanning
