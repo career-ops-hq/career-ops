@@ -125,6 +125,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `fetch-jd.mjs` | JD text from a known ATS API (Greenhouse/Lever/Ashby/Workday — `liveness-api.mjs`'s `JD_TEXT_API_ATS`), no browser needed. Prints the JD on stdout and exits 0 on a hit; exits 1 with empty stdout otherwise, so the caller's existing browser/WebFetch fallback is the next step. Backed by `browser-extract.mjs`'s `fetchJdViaKnownApi()`, the same dispatch its `jd` mode uses |
 | `set-status.mjs` | Canonical tracker-row update: `node set-status.mjs <report#\|company> <State> [--note] [--force]` — strict states.yml validation, report-link mismatch guard, shared lock, atomic write |
 | `invite-match.mjs` | Fuzzy-match a pasted interview invite (company, date, req ID) against the tracker, ranking candidates when a company has multiple entries (JSON or `--summary`) |
+| `next-actions.mjs` | Durable candidate action inbox: `list`, manual `add`/structured `import`, reviewed `accept`/`done`, edits and exact tracker binding. Read `modes/next-actions.md` when the user asks what remains to do; writes only `data/next-actions.json`, never application status. |
 | `paste-reply.mjs` | Manual/no-Gmail input into reply-watch classification — normalizes a pasted/file email (subject/from/body) and appends to `data/reply-candidates.json`; never overwrites entries, never classifies, never touches the tracker |
 | `analyze-patterns.mjs` | Pattern analysis incl. per-ATS-vendor advance rate (JSON) |
 | `upskill.mjs` | Weighted skill-gap map from tracked reports; known skills from `cv.md`/`config/profile.yml` excluded (JSON) |
@@ -350,6 +351,7 @@ Two separate axes:
 | Wants to classify application replies and review updates | `reply-watch` — classifies replies, matches to applications, suggests tracker updates |
 | Wants to record application outcome & archive artifacts | `outcome` |
 | Wants to update the system | `update` |
+| Wants to see or maintain outstanding replies, forms, assignments or other candidate next steps | `next-actions` — persistent proposals and reviewed tasks; start with `node next-actions.mjs list` before reconstructing pending work |
 | Wants to queue a request for later / check the inbox between sessions | `agent-inbox` — append-only checklist drained next session; nothing auto-submits |
 | Wants to add a finished project, paper, or role to the CV | `add` — source-grounded preview, confirm-before-write; dedup + insertion via `add-entry.mjs` |
 
