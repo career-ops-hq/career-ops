@@ -65,11 +65,27 @@ const PDF_PAGE_MARGIN = '0.6in';
 // self-correcting the moment it does. Same defect class as #3159.
 let __rootCache = { key: null, root: null, canonical: null };
 function refreshRootCache() {
-  const key = process.env.CAREER_OPS_TRACKER || '';
+  // Key on BOTH variables that can move the root: CAREER_OPS_TRACKER (an
+  // explicit tracker override) and CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR (an
+  // external data directory). Keying on the tracker alone left the cache stale
+  // when only the data root changed.
+  const key = [
+    process.env.CAREER_OPS_TRACKER || '',
+    process.env.CAREER_OPS_ROOT || '',
+    process.env.CAREER_OPS_DATA_DIR || '',
+  ].join('\u0000');
   if (__rootCache.key !== key) {
     // Always re-derive: falling back to the import-time const when the variable
     // is unset would hand back the very value the poisoned import froze.
-    const root = resolveWorkspaceRoot(resolveTrackerPath(__dirname));
+    //
+    // Derive from getCareerOpsRoot(), NOT __dirname. The workspace that owns
+    // the tracker is the USER layer, which .career-ops-data / CAREER_OPS_ROOT
+    // may place outside the checkout; anchoring to the script directory made
+    // every write to an external data directory fail the containment guard
+    // ("input escapes the tracker workspace"), with no way to generate a CV or
+    // cover-letter PDF at all. getCareerOpsRoot() falls back to the checkout
+    // when no external root is configured, so the default install is unchanged.
+    const root = resolveWorkspaceRoot(resolveTrackerPath(getCareerOpsRoot()));
     __rootCache = { key, root, canonical: realpathSync(root) };
   }
   return __rootCache;

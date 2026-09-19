@@ -56,6 +56,9 @@ validateFlags(argv, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperan
 const targetIdx = argv.indexOf('--target');
 const projectRoot =
   targetIdx !== -1 && argv[targetIdx + 1] ? argv[targetIdx + 1] : getCareerOpsRoot();
+// Where the scripts themselves live. Distinct from projectRoot, which is the
+// USER layer and may point elsewhere entirely.
+const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const JSON_OUT = argv.includes('--json');
 // --strict adds a live reachability probe of every portals.yml entry (network).
 // Opt-in so the default `npm run doctor` stays fast and fully offline.
@@ -145,7 +148,12 @@ function checkBillingSource() {
 }
 
 function checkDependencies() {
-  if (existsSync(join(projectRoot, 'node_modules'))) {
+  // node_modules belongs to the CODE layer, so it is resolved against the
+  // script directory, never the data root. With an external data directory
+  // (CAREER_OPS_ROOT / .career-ops-data) projectRoot is the user's data
+  // folder, which never contains node_modules — the check then failed on
+  // every run and told the user to re-run an install that had succeeded.
+  if (existsSync(join(scriptRoot, 'node_modules'))) {
     return { pass: true, label: 'Dependencies installed' };
   }
   return {
