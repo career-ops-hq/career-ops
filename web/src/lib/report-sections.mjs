@@ -51,15 +51,21 @@ const HEADING_LETTER = /^(?:Block\s+([A-Z])(?:[).:]|\s)|([A-Z])[).:])/i;
 
 /**
  * Display form of a section heading: author-letter prefix and the trailing
- * "(lead)" / "(verdict)" marker removed. Falls back to the original when
- * stripping would leave nothing.
+ * "(lead)" / "(verdict)" / "(draft)" marker removed. Falls back to the original
+ * when stripping would leave nothing.
+ *
+ * "(draft)" joins the list because the modes now write it on the draft-answers
+ * block, where it is what `parseDraftAnswersBlockH` locates the block by in
+ * the sixteen languages whose heading is neither `H)` nor the English name
+ * (#3884). It is an authoring signal like the other two, so it is stripped
+ * here for the same reason: the reader needs it, the viewer must not see it.
  * @param {string} h
  * @returns {string}
  */
 export function cleanHeading(h) {
   const stripped = h
     .replace(HEADING_PREFIX, "")
-    .replace(/\s*\((?:lead|verdict)\)\s*$/i, "")
+    .replace(/\s*\((?:lead|verdict|draft)\)\s*$/i, "")
     .trim();
   return stripped || h.trim();
 }

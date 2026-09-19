@@ -138,7 +138,7 @@ Sauvegarder l'evaluation complete dans `reports/{###}-{company-slug}-{YYYY-MM-DD
 ## F) Plan d'entretiens
 (contenu complet du bloc F)
 
-## G) Brouillons de reponses pour la candidature
+## G) Brouillons de reponses pour la candidature (draft)
 (uniquement si score >= 4.5 -- brouillons de reponses pour le formulaire de candidature)
 
 ---

@@ -138,7 +138,7 @@ Salvar avaliação completa em `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 ## F) Plano de Entrevistas
 (conteúdo completo do bloco F)
 
-## G) Rascunhos de Respostas para Candidatura
+## G) Rascunhos de Respostas para Candidatura (draft)
 (apenas se score >= 4.5 -- rascunhos de respostas para o formulário de candidatura)
 
 ---

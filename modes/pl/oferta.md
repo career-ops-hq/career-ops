@@ -138,7 +138,7 @@ Zapisz pełną ocenę w `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 ## F) Plan rozmów kwalifikacyjnych
 (pełna zawartość bloku F)
 
-## G) Szkice odpowiedzi do aplikacji
+## G) Szkice odpowiedzi do aplikacji (draft)
 (tylko jeśli score >= 4.5 -- szkice odpowiedzi do formularza aplikacyjnego)
 
 ---
