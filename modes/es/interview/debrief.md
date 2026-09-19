@@ -57,7 +57,7 @@ Sea cual sea la ruta que produjo los datos de pregunta/respuesta, los Steps 2 en
 
 ---
 
-## Step 1b — Comprobar Hechos Contradichos
+## Step 1b — Check for Contradicted Facts
 
 Mientras capturas lo que se dijo, compáralo también con las afirmaciones fácticas existentes en el archivo de preparación específico del rol — esto se ejecuta en paralelo al Step 1, no después.
 
