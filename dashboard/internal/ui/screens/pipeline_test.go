@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/santifer/career-ops/dashboard/internal/data"
 	"github.com/santifer/career-ops/dashboard/internal/model"
 	"github.com/santifer/career-ops/dashboard/internal/theme"
 )
@@ -441,6 +442,27 @@ func TestRespondedTabSitsBetweenInterviewAndApplied(t *testing.T) {
 			"expected tab order interview < responded < applied, got %d, %d, %d",
 			interview, responded, applied,
 		)
+	}
+}
+
+func TestAssessmentTabFiltersCorrectly(t *testing.T) {
+	apps := []model.CareerApplication{
+		{Company: "AirAsia", Role: "Data Engineer", Status: "Assessment"},
+		{Company: "AirAsia", Role: "Data Engineer", Status: "Interview"},
+	}
+	pm := NewPipelineModel(
+		theme.NewTheme("catppuccin-mocha"),
+		apps,
+		model.PipelineMetrics{Total: len(apps)},
+		t.TempDir(),
+		120,
+		40,
+	)
+
+	pm.activeTab = tabIndexForFilter(t, filterAssessment)
+	pm.applyFilterAndSort()
+	if len(pm.filtered) != 1 || data.NormalizeStatus(pm.filtered[0].Status) != "assessment" {
+		t.Fatalf("expected assessment tab to isolate assessment rows, got %+v", pm.filtered)
 	}
 }
 

@@ -572,7 +572,7 @@ Headerless files in the legacy 9-column order (`num date company role status sco
 
 **Optional fields:** if the offer came through an agency/recruiter (#1596), add a `via` column to the header and put the agency name (for example `Hays`) in it. In a headerless file the same value travels as a labeled trailing field `via={Agency}` — never positional; the label is mandatory. One extra unlabeled field is interpreted as the legacy location column. If the end employer is unknown, use `?` as company and add the descriptor in notes (for example `fintech, Leeds`). `merge-tracker.mjs` rejects ambiguous extras (two unlabeled extras, or two `via=` fields).
 
-Valid canonical statuses are defined in `templates/states.yml`: `Evaluated`, `Applied`, `Responded`, `Interview`, `Offer`, `Rejected`, `Discarded`, `SKIP`.
+Valid canonical statuses are defined in `templates/states.yml`: `Evaluated`, `Applied`, `Responded`, `Assessment`, `Interview`, `Offer`, `Rejected`, `Discarded`, `SKIP`.
 
 Use `{{REPORT_NUM}}` as the tracker `num`. The batch coordinator reserves this number before launching the worker, so do not calculate a local `max+1`.
 

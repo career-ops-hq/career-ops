@@ -93,6 +93,18 @@ eq(
   addDays(parseDate('2026-07-02'), DEFAULT_CADENCE.responded_subsequent),
 );
 
+eq(
+  'assessment, no prior follow-up uses responded_initial',
+  computeNextFollowupDate('assessment', APP, null, 0),
+  addDays(parseDate(APP), DEFAULT_CADENCE.responded_initial),
+);
+
+eq(
+  'assessment, with prior follow-up uses responded_subsequent',
+  computeNextFollowupDate('assessment', APP, '2026-07-02', 1),
+  addDays(parseDate('2026-07-02'), DEFAULT_CADENCE.responded_subsequent),
+);
+
 // The initial next-date must not land after the overdue threshold, otherwise a row can be
 // flagged "overdue" (daysSinceApp >= responded_subsequent) while its own next-follow-up
 // date is still in the future, which is impossible for a date meant to trigger "overdue".
@@ -212,6 +224,8 @@ eq(
 for (const raw of ['Hired', 'Accepted', 'accept', 'Contratado', 'contratada']) {
   eq(`normalizeStatus('${raw}') canonicalizes to hired`, normalizeStatus(raw), 'hired');
 }
+eq('normalizeStatus(Assessment) canonicalizes to assessment', normalizeStatus('Assessment'), 'assessment');
+eq('normalizeStatus(online screening) canonicalizes to assessment', normalizeStatus('online screening'), 'assessment');
 
 // #2268 — the suite pins the profile so a user's own followup_cadence can't
 // turn a healthy install red. These two guard the pin from the opposite
@@ -266,4 +280,3 @@ eq(
   resolveCadenceConfig({ profilePath: DEFAULT_CADENCE_PROFILE, appliedDays: parseAppliedDaysOverride('10days') }).applied_first,
   DEFAULT_CADENCE.applied_first,
 );
-

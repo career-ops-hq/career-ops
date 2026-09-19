@@ -497,7 +497,8 @@ num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
 | `Evaluated` | Report completed, pending decision |
 | `Applied` | Application sent |
 | `Responded` | Company responded |
-| `Interview` | In interview process |
+| `Assessment` | Online assessment or asynchronous screening |
+| `Interview` | In an actual interview process |
 | `Offer` | Offer received |
 | `Hired` | Offer accepted — landed the job (terminal success) |
 | `Rejected` | Rejected by company |

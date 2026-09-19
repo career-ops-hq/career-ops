@@ -61,6 +61,12 @@ try {
   } else {
     fail(`computeFunnel mishandles Hired: ${JSON.stringify(fh)}`);
   }
+  const fa = stats.computeFunnel({ Applied: 1, Assessment: 1 });
+  if (fa.everApplied === 2 && fa.everResponded === 1 && fa.everInterview === 0) {
+    pass('computeFunnel treats Assessment as responded-before-interview');
+  } else {
+    fail(`computeFunnel mishandles Assessment: ${JSON.stringify(fa)}`);
+  }
   if (stats.computeFunnel({ Applied: 3 }).smallSample === true) {
     pass('computeFunnel flags small samples (everApplied < 10)');
   } else {
