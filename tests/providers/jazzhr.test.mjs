@@ -31,6 +31,7 @@ try {
     'https://evil.example/apply', // untrusted host
     'https://x.applytojob.com.evil.com/apply', // suffix-host bypass
     'https://x.applytojob.com@evil/apply', // userinfo-host bypass
+    'https://exampleco.applytojob.com:8443/apply', // non-default port
     null,
     7,
   ]) {

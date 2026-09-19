@@ -49,7 +49,7 @@ function resolveOrigin(entry) {
     if (typeof raw !== 'string' || !raw.trim()) continue;
     let parsed;
     try { parsed = new URL(raw.trim()); } catch { continue; }
-    if (parsed.protocol !== 'https:' || !HOST_RE.test(parsed.hostname)) continue;
+    if (parsed.protocol !== 'https:' || parsed.port !== '' || !HOST_RE.test(parsed.hostname)) continue;
     return parsed.origin;
   }
   return null;
@@ -64,7 +64,7 @@ const boardUrl = (origin) => `${origin}/apply`;
 function assertJazzHRUrl(raw) {
   let parsed;
   try { parsed = new URL(String(raw).trim()); } catch { parsed = null; }
-  if (!parsed || parsed.protocol !== 'https:' || !HOST_RE.test(parsed.hostname)) {
+  if (!parsed || parsed.protocol !== 'https:' || parsed.port !== '' || !HOST_RE.test(parsed.hostname)) {
     throw new Error(`jazzhr: untrusted or invalid public board URL: ${raw}`);
   }
   return parsed;
@@ -107,7 +107,7 @@ const POSTING_LINK_RE = /<a\b[^>]*href=["']([^"']*\/apply\/[^"']+)["'][^>]*>([\s
 function resolvePostingUrl(href, base) {
   try {
     const url = new URL(href, base);
-    if (url.protocol !== 'https:' || url.hostname !== base.hostname || !/^\/apply\/[^/].*$/i.test(url.pathname)) return null;
+    if (url.origin !== base.origin || !/^\/apply\/[^/].*$/i.test(url.pathname)) return null;
     url.search = '';
     return url;
   } catch { return null; }
