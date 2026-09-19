@@ -200,7 +200,7 @@
 7. 직접적이고 구체적으로 씁니다. 불필요한 말은 줄입니다.
 8. 한국 테크 채용 문맥에 맞는 자연스러운 한국어를 사용합니다. 짧은 문장, 동사 중심, 수동태 회피. stack, pipeline, deployment, embedding 같은 현장 용어는 억지로 번역하지 않습니다.
 8b. **PDF Professional Summary의 case study URL:** PDF가 case study나 demo를 언급하면 URL은 반드시 첫 문단(Professional Summary)에 들어갑니다. recruiter는 summary만 읽는 경우가 많습니다. HTML에서는 모든 URL에 `white-space: nowrap` 적용.
-9. **Tracker entry는 TSV로 작성** -- 새 항목을 위해 applications.md를 직접 수정하지 않습니다. `batch/tracker-additions/`에 TSV를 쓰고 `merge-tracker.mjs`가 병합합니다.
+9. **Tracker entry는 TSV로 작성** -- 새 항목을 위해 applications.md를 직접 수정하지 않습니다. `batch/tracker-additions/`에 TSV를 쓰고 `merge-tracker.mjs`가 병합합니다. 먼저 **컬럼 이름 줄**을 쓰고 그 아래에 데이터 줄을 정확히 하나 씁니다 (AGENTS.md의 "TSV Format for Tracker Additions" 참조). 이 이름 줄 덕분에 `merge-tracker.mjs`는 어느 컬럼이 score이고 어느 것이 status인지 추측하지 않고 이름으로 필드를 해석합니다.
 10. **모든 report header에 `**URL:**` 포함** -- Score와 PDF 사이에 둡니다.
 
 ### 도구
