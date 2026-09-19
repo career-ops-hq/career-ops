@@ -1,0 +1,1855 @@
+# Portal Scanner Configuration
+# Used by /career-ops scan to discover new offers automatically.
+#
+# Strategy (3 levels):
+#   1. Playwright → careers_url of each company (real-time, reliable)
+#   2. Greenhouse API → structured JSON (fast, Greenhouse-only)
+#   3. WebSearch with site: filters (broad discovery, may be stale)
+#
+# IMPORTANT: Each company in tracked_companies MUST have careers_url.
+#
+# HOW TO CUSTOMIZE:
+#   1. Copy this file to portals.yml in the project root
+#   2. Edit title_filter.positive with YOUR target role keywords
+#   3. Add/remove companies in tracked_companies
+#   4. Adjust search_queries for your preferred job boards
+#   5. Set enabled: false on companies you don't care about
+
+# -- Title filter --
+# The scanner uses these keywords to decide if a title is relevant.
+# At least 1 positive must match AND 0 negatives must match (case-insensitive).
+
+title_filter:
+  positive:
+    # -- Core SDET / QA abbreviations --
+    - "SDET"
+    - "SET"
+    - "SDE-T"
+    - "SDE/T"
+    - "QA"
+    - "QE"
+
+    # -- Quality Assurance / Quality Engineer variants --
+    - "Quality Assurance"
+    - "Quality Engineer"
+    - "Quality Analyst"
+    - "Quality Specialist"
+    - "Quality Lead"
+    - "Quality Manager"
+    - "Quality Ops"
+    - "Quality Operations"
+    - "Quality Software"
+    - "Software Quality"
+
+    # -- Test Engineer / Test Automation variants --
+    - "Test Engineer"
+    - "Testing Engineer"
+    - "Test Automation"
+    - "Automated Test"
+    - "Test Analyst"
+    - "Test Lead"
+    - "Test Manager"
+    - "Test Architect"
+    - "Test Infrastructure"
+    - "Test Developer"
+    - "Test Ops"
+    - "TestOps"
+
+    # -- Automation Engineer variants --
+    - "Automation Engineer"
+    - "Automation Architect"
+    - "Automation Developer"
+    - "Automation QA"
+    - "Automation Lead"
+
+    # -- Software Engineer in Test / Developer in Test variants --
+    - "Software Engineer in Test"
+    - "Software Development Engineer in Test"
+    - "Engineer in Test"
+    - "Developer in Test"
+    - "Software Test"
+
+    # -- QA Lead / Manager / Specialist --
+    - "QA Lead"
+    - "QA Manager"
+    - "QA Specialist"
+    - "QA Tester"
+    - "QA Architect"
+    - "QA Engineer"
+    - "QA Analyst"
+
+    # -- Framework / Tool keywords (catch tool-named roles) --
+    - "Selenium"
+    - "Playwright"
+    - "Cypress"
+    - "WebdriverIO"
+    - "Appium"
+    - "TestNG"
+    - "JUnit"
+    - "Pytest"
+    - "RSpec"
+    - "Cucumber"
+    - "RestAssured"
+    - "Rest Assured"
+    - "Karate"
+
+    # -- Performance / Load / Security testing --
+    - "Performance Test"
+    - "Load Test"
+    - "Stress Test"
+    - "Performance Engineer"
+
+    # -- API / Backend test roles --
+    - "API Automation"
+    - "API Test"
+    - "Backend Test"
+
+    # -- CI/CD / DevOps adjacent QA --
+    - "Release Engineer"
+    - "CI/CD Engineer"
+    - "DevOps QA"
+    - "Platform QA"
+    - "Release Validation"
+    - "Release Quality"
+
+    # -- Full Stack / Other test titles --
+    - "Full Stack Test"
+    - "Full-Stack Test"
+  # Contract positions are included — do NOT add "Contract" to negatives
+  # Only skip if title is clearly non-SDET/QA (covered by positive filter)
+  negative:
+    # [CUSTOMIZE] Add keywords for roles you want to exclude
+    - "Junior"
+    - "Intern"
+
+    - "Game QA"
+    - "Game Tester"
+    - "iOS"
+    - "Android"
+    - "Embedded"
+    - "Firmware"
+    - "FPGA"
+    - "ASIC"
+    - "Blockchain"
+    - "Web3"
+    - "Crypto"
+    - "Mainframe"
+    - "COBOL"
+
+    # -- India location hints in title --
+    - "India"
+    - "Bangalore"
+    - "Bengaluru"
+    - "Hyderabad"
+    - "Mumbai"
+    - "Pune"
+    - "Chennai"
+    - "Noida"
+    - "Gurugram"
+    - "Gurgaon"
+  seniority_boost:
+    # These prefixes add relevance but are not required
+    - "Senior"
+    - "Staff"
+    - "Principal"
+    - "Lead"
+    - "Head"
+    - "Director"
+
+# -- Location filter --
+# Applied AFTER title filter. A result passes if:
+#   - Its location/metadata contains at least 1 positive term, OR has no location info (treated as remote)
+#   - Its location/metadata contains 0 negative terms
+# The scanner checks title, URL, snippet, and any location field returned by the API/WebSearch.
+location_filter:
+  # Accept: US locations only. "Remote" must be paired with a US qualifier.
+  # Bare "Remote" / "Anywhere" / "Worldwide" / "Global" are NOT accepted —
+  # they too often hide non-US-eligible roles. User is US-only (Green Card, FL).
+  positive:
+    - "United States"
+    - "US Remote"
+    - "Remote - US"
+    - "Remote, US"
+    - "Remote (US)"
+    - "Remote — US"
+    - "Remote US"
+    - "USA"
+    - "U.S."
+    - "U.S.A."
+    - "Remote (United States)"
+    - "Remote, United States"
+    - "Remote - United States"
+    - "Remote — United States"
+    - "Remote in the US"
+    - "Remote in US"
+    - "Remote within the US"
+    - "Remote North America"
+    - "US-based"
+    - "US-only"
+    - "Anywhere in the US"
+    - "Anywhere in the United States"
+    - "US Nationwide"
+    - "Nationwide - US"
+    - "Nationwide — US"
+    - "Remote - Anywhere in US"
+    - "Florida"
+    - "New York"
+    - "California"
+    - "Texas"
+    - "Washington"
+    - "Illinois"
+    - "Georgia"
+    - "North Carolina"
+    - "Colorado"
+    - "Massachusetts"
+    - "Virginia"
+    - "Arizona"
+    - "Ohio"
+    - "Michigan"
+    - "Tennessee"
+    - "Seattle"
+    - "Austin"
+    - "Chicago"
+    - "Atlanta"
+    - "Denver"
+    - "Boston"
+    - "San Francisco"
+    - "New York City"
+    - "NYC"
+    - "LA"
+    - "Los Angeles"
+  # Reject: non-US locations explicitly mentioned
+  # Also reject bare "Remote"/"Anywhere"/"Worldwide"/"Global" without US qualifier —
+  # too often hides non-US-eligible roles.
+  negative:
+    - "Remote - EMEA"
+    - "Remote - EU"
+    - "Remote - LATAM"
+    - "Remote - APAC"
+    - "Remote - Canada"
+    - "Remote — EMEA"
+    - "Remote — EU"
+    - "Remote — LATAM"
+    - "Remote — APAC"
+    - "Remote — Canada"
+    - "Remote (EMEA)"
+    - "Remote (EU)"
+    - "Remote (LATAM)"
+    - "Remote (APAC)"
+    - "Remote (Canada)"
+    - "Remote EMEA"
+    - "Remote EU"
+    - "Remote LATAM"
+    - "Remote APAC"
+    - "Worldwide except US"
+    - "Worldwide excluding US"
+    - "Global excluding US"
+    - "Remote excluding US"
+    - "Remote outside US"
+    - "Non-US"
+    - "India"
+    - "Bangalore"
+    - "Bengaluru"
+    - "Hyderabad"
+    - "Mumbai"
+    - "Pune"
+    - "Chennai"
+    - "Delhi"
+    - "Noida"
+    - "Gurugram"
+    - "Gurgaon"
+    - "Kolkata"
+    - "UK"
+    - "United Kingdom"
+    - "London"
+    - "Europe"
+    - "Germany"
+    - "France"
+    - "Netherlands"
+    # Americas (non-US)
+    - "Canada"
+    - "Mexico"
+    - "Brazil"
+    - "Argentina"
+    - "Colombia"
+    - "Chile"
+    - "Peru"
+    - "LATAM"
+    - "Latin America"
+    # Europe
+    - "Europe"
+    - "EMEA"
+    - "(EU)"
+    - "EU remote"
+    - "EU only"
+    - "United Kingdom"
+    - "UK"
+    - "London"
+    - "Ireland"
+    - "Dublin"
+    - "Germany"
+    - "Berlin"
+    - "Munich"
+    - "France"
+    - "Paris"
+    - "Netherlands"
+    - "Amsterdam"
+    - "Spain"
+    - "Madrid"
+    - "Barcelona"
+    - "Poland"
+    - "Warsaw"
+    - "Portugal"
+    - "Lisbon"
+    - "Sweden"
+    - "Stockholm"
+    - "Norway"
+    - "Denmark"
+    - "Finland"
+    - "Switzerland"
+    - "Zurich"
+    - "Austria"
+    - "Vienna"
+    - "Belgium"
+    - "Brussels"
+    - "Italy"
+    - "Rome"
+    - "Milan"
+    - "Romania"
+    - "Czech"
+    # Asia-Pacific
+    - "Australia"
+    - "New Zealand"
+    - "Singapore"
+    - "Japan"
+    - "Tokyo"
+    - "Korea"
+    - "Seoul"
+    - "China"
+    - "Beijing"
+    - "Shanghai"
+    - "Taiwan"
+    - "Hong Kong"
+    - "India"
+    - "Bangalore"
+    - "Bengaluru"
+    - "Hyderabad"
+    - "Mumbai"
+    - "Pune"
+    - "Chennai"
+    - "Delhi"
+    - "Noida"
+    - "Gurugram"
+    - "Gurgaon"
+    - "Kolkata"
+    - "Philippines"
+    - "Pakistan"
+    - "Sri Lanka"
+    # Middle East / Africa
+    - "Israel"
+    - "Tel Aviv"
+    - "UAE"
+    - "Dubai"
+    - "Turkey"
+
+# -- Search queries --
+# Each query triggers a WebSearch. Use site: to filter by portal.
+# The scanner extracts title, URL, and company from results.
+
+search_queries:
+  # -- Ashby --
+  - name: Ashby — Senior SDET
+    query: 'site:jobs.ashbyhq.com "SDET" OR "Senior SDET" OR "Software Engineer in Test" "United States" OR "Remote"'
+    enabled: true
+
+  - name: Ashby — QA Automation
+    query: 'site:jobs.ashbyhq.com "QA Automation" OR "Automation Engineer" OR "Test Automation" senior "United States" OR "Remote"'
+    enabled: true
+
+  - name: Ashby — Test Architect
+    query: 'site:jobs.ashbyhq.com "Test Architect" OR "QA Lead" OR "Quality Engineer" "United States" OR "Remote"'
+    enabled: true
+
+  # -- Greenhouse --
+  - name: Greenhouse — Senior SDET
+    query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "SDET" OR "Software Engineer in Test" OR "Senior SDET" "United States" OR "Remote"'
+    enabled: true
+
+  - name: Greenhouse — QA Automation
+    query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "QA Automation" OR "Automation Engineer" OR "Test Automation" senior "United States" OR "Remote"'
+    enabled: true
+
+  - name: Greenhouse — Test Architect
+    query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Test Architect" OR "QA Lead" OR "Quality Engineer" "United States" OR "Remote"'
+    enabled: true
+
+  # -- Lever --
+  - name: Lever — SDET & QA
+    query: 'site:jobs.lever.co "SDET" OR "QA Automation" OR "Automation Engineer" OR "Engineer in Test" "United States" OR "Remote"'
+    enabled: true
+
+  - name: Lever — Test Lead
+    query: 'site:jobs.lever.co "QA Lead" OR "Test Architect" OR "Quality Assurance Lead" OR "Test Engineer" senior "United States" OR "Remote"'
+    enabled: true
+
+  # -- Wellfound (startups) --
+  - name: Wellfound — SDET & QA
+    query: 'site:wellfound.com "SDET" OR "QA Automation" OR "Automation Engineer" OR "Test Engineer" "United States" OR "Remote"'
+    enabled: true
+
+  # -- Workable --
+  - name: Workable — QA Automation
+    query: 'site:apply.workable.com "QA Automation" OR "SDET" OR "Test Automation" OR "Automation Engineer" "United States" OR "Remote"'
+    enabled: true
+
+  # -- LinkedIn (US, role-specific) --
+  - name: LinkedIn — Staff/Senior SDET US
+    query: 'site:linkedin.com/jobs "Staff SDET" OR "Senior SDET" "United States"'
+    enabled: true
+
+  - name: LinkedIn — QA Automation Engineer US
+    query: 'site:linkedin.com/jobs "QA Automation Engineer" OR "Senior QA Automation" "United States"'
+    enabled: true
+
+  - name: LinkedIn — Test Architect US
+    query: 'site:linkedin.com/jobs "Test Architect" OR "QA Lead" OR "Software Engineer in Test" "United States"'
+    enabled: true
+
+  - name: LinkedIn — Automation Engineer Selenium Playwright
+    query: 'site:linkedin.com/jobs "Automation Engineer" Selenium OR Playwright "United States" senior'
+    enabled: true
+
+  # -- Indeed (US, tighter filters) --
+  - name: Indeed — Senior SDET US
+    query: 'site:indeed.com "Senior SDET" OR "Staff SDET" "United States"'
+    enabled: true
+
+  - name: Indeed — QA Automation Engineer US
+    query: 'site:indeed.com "QA Automation Engineer" OR "Senior QA Automation" "United States"'
+    enabled: true
+
+  - name: Indeed — Software Engineer in Test
+    query: 'site:indeed.com "Software Engineer in Test" OR "Test Automation Engineer" senior'
+    enabled: true
+
+  - name: Indeed — Playwright Selenium Automation
+    query: 'site:indeed.com "Automation Engineer" Playwright OR Selenium senior'
+    enabled: true
+
+  # -- Glassdoor --
+  - name: Glassdoor — Senior SDET
+    query: 'site:glassdoor.com "Senior SDET" OR "QA Automation Engineer" OR "Staff SDET" "United States"'
+    enabled: true
+
+  # -- Dice (tech jobs US) --
+  - name: Dice — SDET QA Automation
+    query: 'site:dice.com "SDET" OR "QA Automation" OR "Automation Engineer" OR "Engineer in Test" "United States" OR "Remote"'
+    enabled: true
+
+  # -- Builtin (startup-focused US) --
+  # NOTE: Builtin.com frequently serves old/expired listings — liveness check mandatory for all results
+  - name: Builtin — SDET QA Automation
+    query: 'site:builtin.com "SDET" OR "QA Automation" OR "Automation Engineer" OR "Software Engineer in Test" after:2025-10-01'
+    enabled: true
+
+  # -- We Work Remotely (remote-only, high quality senior tech) --
+  - name: WeWorkRemotely — SDET QA Automation
+    query: 'site:weworkremotely.com "SDET" OR "QA Automation" OR "Automation Engineer" OR "Software Engineer in Test" OR "Test Automation"'
+    enabled: true
+
+  # -- Remotive (remote-only, found Intrado here) --
+  # NOTE: Remotive can show non-US remote roles — location filter enforced at scan step
+  - name: Remotive — SDET QA Automation
+    query: 'site:remotive.com "SDET" OR "QA Automation" OR "Software Engineer in Test" OR "Test Automation" OR "Automation Engineer" "United States" OR "worldwide" OR "anywhere"'
+    enabled: true
+
+  # -- Himalayas (remote-first, growing fast) --
+  - name: Himalayas — SDET QA Senior
+    query: 'site:himalayas.app "SDET" OR "QA Automation" OR "Software Engineer in Test" OR "Automation Engineer" senior "United States" OR "Remote"'
+    enabled: true
+
+  # -- YC Work at a Startup (AI/funded startups) --
+  - name: YC — SDET QA Automation
+    query: 'site:workatastartup.com "SDET" OR "QA" OR "Automation Engineer" OR "Test Engineer" OR "Software Engineer in Test" "United States" OR "Remote"'
+    enabled: true
+
+  # -- iCIMS (enterprise ATS — Intrado, many mid/large companies) --
+  - name: iCIMS — SDET QA Automation
+    query: 'site:careers.icims.com "SDET" OR "QA Automation" OR "Automation Engineer" OR "Software Engineer in Test" "United States" OR "Remote"'
+    enabled: true
+
+  # -- SmartRecruiters (enterprise ATS) --
+  - name: SmartRecruiters — SDET QA Automation
+    query: 'site:careers.smartrecruiters.com "SDET" OR "QA Automation" OR "Automation Engineer" OR "Software Engineer in Test" "United States" OR "Remote"'
+    enabled: true
+
+  # -- Breezy HR (startups/SMB ATS) --
+  - name: BreezyHR — SDET QA Automation
+    query: 'site:app.breezy.hr "SDET" OR "QA Automation" OR "Automation Engineer" OR "Test Automation" "United States" OR "Remote"'
+    enabled: true
+
+  # -- Teamtailor (EU/startup ATS, some US companies) --
+  - name: Teamtailor — SDET QA Automation
+    query: 'site:teamtailor.com "SDET" OR "QA Automation" OR "Software Engineer in Test" OR "Automation Engineer" "United States" OR "Remote"'
+    enabled: true
+
+  # -- ZipRecruiter (US-focused, high volume) --
+  - name: ZipRecruiter — Senior SDET US
+    query: 'site:ziprecruiter.com "Senior SDET" OR "Staff SDET" OR "Software Engineer in Test" "United States" OR "Remote"'
+    enabled: true
+
+  - name: ZipRecruiter — QA Automation Engineer US
+    query: 'site:ziprecruiter.com "QA Automation Engineer" OR "Automation Engineer" OR "Test Automation" senior "United States" OR "Remote"'
+    enabled: true
+
+  - name: ZipRecruiter — SDET QA Lead US
+    query: 'site:ziprecruiter.com "SDET" OR "QA Lead" OR "Engineer in Test" "United States" OR "Remote"'
+    enabled: true
+
+  # -- Contract / C2C / W2 contract positions --
+  - name: Contract — SDET QA Automation Greenhouse/Lever/Ashby
+    query: '"SDET" OR "QA Automation" OR "Software Engineer in Test" contract "United States" OR "Remote" site:job-boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com'
+    enabled: true
+
+  - name: Contract — SDET ZipRecruiter
+    query: 'site:ziprecruiter.com "SDET" OR "QA Automation Engineer" OR "Test Automation Engineer" contract "United States" OR "Remote"'
+    enabled: true
+
+  - name: Contract — SDET Indeed
+    query: 'site:indeed.com "SDET" OR "QA Automation Engineer" OR "Software Engineer in Test" contract "United States"'
+    enabled: true
+
+  - name: Contract — SDET Dice (tech contract hub)
+    query: 'site:dice.com "SDET" OR "QA Automation" OR "Automation Engineer" contract OR "contract-to-hire" OR "C2C" "United States" OR "Remote"'
+    enabled: true
+
+  # -- Cross-portal broad --
+  - name: All portals — Playwright Selenium SDET
+    query: '"SDET" OR "Automation Engineer" Playwright OR Selenium senior "United States" OR "Remote" site:job-boards.greenhouse.io OR site:jobs.ashbyhq.com OR site:jobs.lever.co'
+    enabled: true
+
+# -- Tracked companies --
+# Companies whose career pages are checked directly.
+# scan_method: playwright (default), websearch, greenhouse_api
+# For Greenhouse companies, add api: field for faster structured JSON access.
+
+tracked_companies:
+
+# --- Healthcare / Enterprise (Your Advantage Zone) ---
+  - name: Epic Systems
+    careers_url: https://careers.epic.com/
+    scan_method: websearch
+    scan_query: 'site:epic.com/careers "QA" OR "Test Engineer"'
+    enabled: true
+
+  - name: Oracle
+    careers_url: https://careers.oracle.com/
+    scan_method: websearch
+    scan_query: 'site:oracle.com/careers "QA" OR "Automation Engineer"'
+    enabled: true
+
+  - name: Athenahealth
+    careers_url: https://job-boards.greenhouse.io/athena
+    api: https://boards-api.greenhouse.io/v1/boards/athena/jobs
+    enabled: true
+
+  - name: Teladoc Health
+    careers_url: https://www.teladochealth.com/careers/
+    scan_method: websearch
+    scan_query: 'site:teladochealth.com/careers "QA"'
+    enabled: true
+
+  - name: Amwell
+    careers_url: https://job-boards.greenhouse.io/amwell
+    api: https://boards-api.greenhouse.io/v1/boards/amwell/jobs
+    enabled: true
+
+  - name: CVS Health
+    careers_url: https://jobs.cvshealth.com/
+    scan_method: websearch
+    scan_query: 'site:cvshealth.com/jobs "QA" OR "Automation"'
+    enabled: true
+
+  - name: UnitedHealth Group
+    careers_url: https://careers.unitedhealthgroup.com/
+    scan_method: websearch
+    scan_query: 'site:unitedhealthgroup.com/careers "QA"'
+    enabled: true
+
+  - name: Microsoft
+    careers_url: https://careers.microsoft.com/
+    scan_method: websearch
+    scan_query: 'site:microsoft.com/careers "QA" OR "SDET"'
+    enabled: true
+
+  # --- Greenhouse API Supported ---
+  - name: Datadog
+    careers_url: https://www.datadoghq.com/careers/
+    api: https://boards-api.greenhouse.io/v1/boards/datadog/jobs
+    enabled: true
+
+  - name: PagerDuty
+    careers_url: https://www.pagerduty.com/careers/
+    api: https://boards-api.greenhouse.io/v1/boards/pagerduty/jobs
+    enabled: true
+
+  - name: Snowflake
+    careers_url: https://jobs.ashbyhq.com/snowflake
+    enabled: true
+
+  - name: Airtable
+    careers_url: https://airtable.com/careers
+    api: https://boards-api.greenhouse.io/v1/boards/airtable/jobs
+    enabled: true
+
+  - name: Vercel
+    careers_url: https://vercel.com/careers
+    api: https://boards-api.greenhouse.io/v1/boards/vercel/jobs
+    enabled: true
+
+  - name: HubSpot
+    careers_url: https://www.hubspot.com/careers
+    api: https://boards-api.greenhouse.io/v1/boards/hubspot/jobs
+    enabled: true
+
+  - name: Zendesk
+    careers_url: https://careers.zendesk.com/
+    enabled: false  # ATS unknown — re-enable once correct API is found
+
+  - name: Okta
+    careers_url: https://www.okta.com/company/careers/
+    api: https://boards-api.greenhouse.io/v1/boards/okta/jobs
+    enabled: true
+
+  - name: Shopify
+    careers_url: https://www.shopify.com/careers
+    enabled: false  # ATS unknown — re-enable once correct API is found
+
+  - name: Retool
+    careers_url: https://jobs.ashbyhq.com/retool
+    enabled: true
+
+  - name: Notion
+    careers_url: https://jobs.ashbyhq.com/notion
+    enabled: true
+
+  - name: Figma
+    careers_url: https://www.figma.com/careers/
+    api: https://boards-api.greenhouse.io/v1/boards/figma/jobs
+    enabled: true
+
+
+  # --- Non-API (Fallback via Web Search) ---
+  - name: GitLab
+    careers_url: https://job-boards.greenhouse.io/gitlab
+    api: https://boards-api.greenhouse.io/v1/boards/gitlab/jobs
+    enabled: true
+
+  - name: Stripe
+    careers_url: https://job-boards.greenhouse.io/stripe
+    api: https://boards-api.greenhouse.io/v1/boards/stripe/jobs
+    enabled: true
+
+  - name: Twilio
+    careers_url: https://job-boards.greenhouse.io/twilio
+    api: https://boards-api.greenhouse.io/v1/boards/twilio/jobs
+    enabled: true
+
+  - name: Netflix
+    careers_url: https://jobs.lever.co/netflix
+    enabled: true
+
+  - name: Uber
+    careers_url: https://www.uber.com/us/en/careers/
+    scan_method: websearch
+    scan_query: 'site:uber.com/careers "QA" OR "SDET"'
+    enabled: true
+
+  - name: Airbnb
+    careers_url: https://job-boards.greenhouse.io/airbnb
+    api: https://boards-api.greenhouse.io/v1/boards/airbnb/jobs
+    enabled: true
+
+  - name: DoorDash
+    careers_url: https://job-boards.greenhouse.io/doordashusa
+    api: https://boards-api.greenhouse.io/v1/boards/doordashusa/jobs
+    enabled: true
+
+  - name: Instacart
+    careers_url: https://job-boards.greenhouse.io/instacart
+    api: https://boards-api.greenhouse.io/v1/boards/instacart/jobs
+    enabled: true
+
+  - name: Salesforce
+    careers_url: https://careers.salesforce.com/
+    scan_method: websearch
+    scan_query: 'site:salesforce.com/careers "QA" OR "SDET"'
+    enabled: true
+
+  - name: ServiceNow
+    careers_url: https://careers.servicenow.com/
+    scan_method: websearch
+    scan_query: 'site:servicenow.com/careers "QA" OR "Automation Engineer"'
+    enabled: true
+
+  - name: Workday
+    careers_url: https://workday.wd5.myworkdayjobs.com/Workday
+    scan_method: websearch
+    scan_query: 'site:workday.com/careers "QA" OR "SDET"'
+    enabled: true
+
+  - name: Zoom
+    careers_url: https://careers.zoom.us/home
+    scan_method: websearch
+    scan_query: 'site:zoom.us/careers "QA" OR "Automation"'
+    enabled: true
+
+  - name: Dropbox
+    careers_url: https://job-boards.greenhouse.io/dropbox
+    api: https://boards-api.greenhouse.io/v1/boards/dropbox/jobs
+    enabled: true
+
+  - name: Box
+    careers_url: https://job-boards.greenhouse.io/boxinc
+    api: https://boards-api.greenhouse.io/v1/boards/boxinc/jobs
+    enabled: true
+
+  - name: Canva
+    careers_url: https://www.canva.com/careers/
+    scan_method: websearch
+    scan_query: 'site:canva.com/careers "QA" OR "SDET"'
+    enabled: true
+
+  - name: Zapier
+    careers_url: https://jobs.ashbyhq.com/zapier
+    enabled: true
+
+  - name: n8n
+    careers_url: https://jobs.ashbyhq.com/n8n
+    enabled: true
+
+  - name: Make.com
+    careers_url: https://job-boards.greenhouse.io/make
+    api: https://boards-api.greenhouse.io/v1/boards/make/jobs
+    enabled: true
+
+
+  
+      # --- Big Tech / Enterprise (NEW ADDITIONS) ---
+
+  - name: Amazon
+    careers_url: https://www.amazon.jobs/en/
+    scan_method: websearch
+    scan_query: 'site:amazon.jobs "SDET" OR "QA Engineer" OR "Quality Assurance Engineer"'
+    enabled: true
+
+  - name: Google
+    careers_url: https://careers.google.com/jobs/results/
+    scan_method: websearch
+    scan_query: 'site:careers.google.com "Software Engineer in Test" OR "QA Engineer"'
+    enabled: true
+
+  - name: Meta (Facebook)
+    careers_url: https://www.metacareers.com/jobs/
+    scan_method: websearch
+    scan_query: 'site:metacareers.com "QA" OR "Test Engineer" OR "Quality"'
+    enabled: true
+
+  - name: Apple
+    careers_url: https://jobs.apple.com/en-us/search
+    scan_method: websearch
+    scan_query: 'site:jobs.apple.com "QA" OR "SDET" OR "Test Automation"'
+    enabled: true
+
+  - name: Deloitte
+    careers_url: https://jobs.deloitte.com/
+    scan_method: websearch
+    scan_query: 'site:deloitte.com/careers "QA" OR "Automation" OR "Test Engineer"'
+    enabled: true
+
+  - name: Accenture
+    careers_url: https://www.accenture.com/us-en/careers
+    scan_method: websearch
+    scan_query: 'site:accenture.com/careers "QA" OR "Automation Engineer"'
+    enabled: true
+
+  # India-based outsourcing firms — overwhelmingly post India roles, disabled to avoid noise
+  - name: Cognizant
+    careers_url: https://careers.cognizant.com/
+    scan_method: websearch
+    scan_query: 'site:cognizant.com/careers "QA" OR "Automation Engineer" "United States"'
+    enabled: false
+
+  - name: Capgemini
+    careers_url: https://www.capgemini.com/careers/
+    scan_method: websearch
+    scan_query: 'site:capgemini.com/careers "QA" OR "Test Automation" "United States"'
+    enabled: false
+
+  - name: Infosys
+    careers_url: https://www.infosys.com/careers/
+    scan_method: websearch
+    scan_query: 'site:infosys.com/careers "QA" OR "Automation" "United States"'
+    enabled: false
+
+  - name: TCS (Tata Consultancy Services)
+    careers_url: https://www.tcs.com/careers
+    scan_method: websearch
+    scan_query: 'site:tcs.com/careers "QA" OR "Automation Engineer" "United States"'
+    enabled: false
+
+  - name: Wipro
+    careers_url: https://careers.wipro.com/
+    scan_method: websearch
+    scan_query: 'site:wipro.com/careers "QA" OR "Automation" "United States"'
+    enabled: false
+
+  # --- AI Companies (high SDET demand, strong culture fit) ---
+
+  - name: Anthropic
+    careers_url: https://www.anthropic.com/careers
+    api: https://boards-api.greenhouse.io/v1/boards/anthropic/jobs
+    enabled: true
+
+  - name: OpenAI
+    careers_url: https://jobs.ashbyhq.com/openai
+    enabled: true
+
+  - name: Scale AI
+    careers_url: https://scale.com/careers
+    api: https://boards-api.greenhouse.io/v1/boards/scaleai/jobs
+    enabled: true
+
+  - name: Weights & Biases
+    careers_url: https://coreweave.com/careers/weights-biases
+    enabled: false  # Acquired by CoreWeave — no public API found
+
+  - name: Hugging Face
+    careers_url: https://apply.workable.com/huggingface/
+    enabled: true
+
+  - name: Cohere
+    careers_url: https://jobs.ashbyhq.com/cohere
+    enabled: true
+
+  # --- Fintech / HR Tech (strong eng culture, remote-friendly) ---
+
+  - name: Plaid
+    careers_url: https://jobs.ashbyhq.com/plaid
+    enabled: true
+
+  - name: Brex
+    careers_url: https://www.brex.com/careers
+    api: https://boards-api.greenhouse.io/v1/boards/brex/jobs
+    enabled: true
+
+  - name: Rippling
+    careers_url: https://www.rippling.com/careers
+    enabled: false  # ATS unknown — re-enable once correct API is found
+
+  - name: Checkr
+    careers_url: https://checkr.com/careers
+    api: https://boards-api.greenhouse.io/v1/boards/checkr/jobs
+    enabled: true
+
+  - name: Gusto
+    careers_url: https://gusto.com/about/careers
+    api: https://boards-api.greenhouse.io/v1/boards/gusto/jobs
+    enabled: true
+
+  # --- DevTools / API / Feature Flags (strong SDET fit) ---
+
+  - name: Postman
+    careers_url: https://www.postman.com/company/careers/
+    api: https://boards-api.greenhouse.io/v1/boards/postman/jobs
+    enabled: true
+
+  - name: LaunchDarkly
+    careers_url: https://launchdarkly.com/careers/
+    api: https://boards-api.greenhouse.io/v1/boards/launchdarkly/jobs
+    enabled: true
+
+  - name: Intercom
+    careers_url: https://www.intercom.com/careers
+    api: https://boards-api.greenhouse.io/v1/boards/intercom/jobs
+    enabled: true
+
+  - name: FullStory
+    careers_url: https://jobs.ashbyhq.com/fullstory
+    enabled: true
+
+  # --- Product Analytics / MarTech ---
+
+  - name: Amplitude
+    careers_url: https://amplitude.com/careers
+    api: https://boards-api.greenhouse.io/v1/boards/amplitude/jobs
+    enabled: true
+
+  - name: Mixpanel
+    careers_url: https://mixpanel.com/careers/
+    api: https://boards-api.greenhouse.io/v1/boards/mixpanel/jobs
+    enabled: true
+
+  - name: Braze
+    careers_url: https://www.braze.com/company/careers
+    api: https://boards-api.greenhouse.io/v1/boards/braze/jobs
+    enabled: true
+
+  - name: Klaviyo
+    careers_url: https://www.klaviyo.com/company/careers
+    api: https://boards-api.greenhouse.io/v1/boards/klaviyo/jobs
+    enabled: true
+
+  # --- Work Management / Scheduling SaaS ---
+
+  - name: Asana
+    careers_url: https://asana.com/jobs
+    api: https://boards-api.greenhouse.io/v1/boards/asana/jobs
+    enabled: true
+
+  - name: Calendly
+    careers_url: https://calendly.com/jobs
+    api: https://boards-api.greenhouse.io/v1/boards/calendly/jobs
+    enabled: true
+
+  - name: Qualtrics
+    careers_url: https://www.qualtrics.com/careers/
+    api: https://boards-api.greenhouse.io/v1/boards/qualtrics/jobs
+    enabled: true
+
+  # --- Infrastructure / Security / Data ---
+
+  - name: Cloudflare
+    careers_url: https://www.cloudflare.com/careers/
+    api: https://boards-api.greenhouse.io/v1/boards/cloudflare/jobs
+    enabled: true
+
+  - name: Elastic
+    careers_url: https://www.elastic.co/about/careers
+    api: https://boards-api.greenhouse.io/v1/boards/elastic/jobs
+    enabled: true
+
+  - name: MongoDB
+    careers_url: https://www.mongodb.com/careers
+    api: https://boards-api.greenhouse.io/v1/boards/mongodb/jobs
+    enabled: true
+
+  # --- Integration / Automation Platforms ---
+
+  - name: Workato
+    careers_url: https://www.workato.com/careers
+    api: https://boards-api.greenhouse.io/v1/boards/workato/jobs
+    enabled: true
+
+  # --- Fintech ---
+
+  - name: Affirm
+    careers_url: https://www.affirm.com/careers
+    api: https://boards-api.greenhouse.io/v1/boards/affirm/jobs
+    enabled: true
+
+  # --- Industry / Vertical SaaS ---
+
+  - name: Samsara
+    careers_url: https://www.samsara.com/company/careers
+    api: https://boards-api.greenhouse.io/v1/boards/samsara/jobs
+    enabled: true
+
+  - name: Toast
+    careers_url: https://pos.toasttab.com/careers
+    api: https://boards-api.greenhouse.io/v1/boards/toast/jobs
+    enabled: true
+
+  # --- Fintech / Payments (NEW) ---
+
+  - name: Ramp
+    careers_url: https://jobs.ashbyhq.com/ramp
+    enabled: true
+
+  - name: Robinhood
+    careers_url: https://job-boards.greenhouse.io/robinhood
+    api: https://boards-api.greenhouse.io/v1/boards/robinhood/jobs
+    enabled: true
+
+  - name: Coinbase
+    careers_url: https://job-boards.greenhouse.io/coinbase
+    api: https://boards-api.greenhouse.io/v1/boards/coinbase/jobs
+    enabled: true
+
+  - name: Chime
+    careers_url: https://job-boards.greenhouse.io/chime
+    api: https://boards-api.greenhouse.io/v1/boards/chime/jobs
+    enabled: true
+
+  - name: Mercury
+    careers_url: https://job-boards.greenhouse.io/mercury
+    api: https://boards-api.greenhouse.io/v1/boards/mercury/jobs
+    enabled: true
+
+  - name: Marqeta
+    careers_url: https://job-boards.greenhouse.io/marqeta
+    api: https://boards-api.greenhouse.io/v1/boards/marqeta/jobs
+    enabled: true
+
+  - name: Gemini
+    careers_url: https://job-boards.greenhouse.io/gemini
+    api: https://boards-api.greenhouse.io/v1/boards/gemini/jobs
+    enabled: true
+
+  - name: Carta
+    careers_url: https://job-boards.greenhouse.io/carta
+    api: https://boards-api.greenhouse.io/v1/boards/carta/jobs
+    enabled: true
+
+  - name: Bitpanda
+    careers_url: https://job-boards.greenhouse.io/bitpanda
+    api: https://boards-api.greenhouse.io/v1/boards/bitpanda/jobs
+    enabled: true
+
+  # --- Data / Infrastructure / DevOps ---
+
+  - name: Databricks
+    careers_url: https://job-boards.greenhouse.io/databricks
+    api: https://boards-api.greenhouse.io/v1/boards/databricks/jobs
+    enabled: true
+
+  - name: CockroachLabs
+    careers_url: https://job-boards.greenhouse.io/cockroachlabs
+    api: https://boards-api.greenhouse.io/v1/boards/cockroachlabs/jobs
+    enabled: true
+
+  - name: Grafana Labs
+    careers_url: https://job-boards.greenhouse.io/grafanalabs
+    api: https://boards-api.greenhouse.io/v1/boards/grafanalabs/jobs
+    enabled: true
+
+  - name: Fastly
+    careers_url: https://job-boards.greenhouse.io/fastly
+    api: https://boards-api.greenhouse.io/v1/boards/fastly/jobs
+    enabled: true
+
+  - name: Tailscale
+    careers_url: https://job-boards.greenhouse.io/tailscale
+    api: https://boards-api.greenhouse.io/v1/boards/tailscale/jobs
+    enabled: true
+
+  - name: Linear
+    careers_url: https://jobs.ashbyhq.com/linear
+    enabled: true
+
+  - name: Airbyte
+    careers_url: https://jobs.ashbyhq.com/airbyte
+    enabled: true
+
+  - name: Pinecone
+    careers_url: https://jobs.ashbyhq.com/pinecone
+    enabled: true
+
+  - name: Weaviate
+    careers_url: https://jobs.ashbyhq.com/weaviate
+    enabled: true
+
+  # --- AI / ML Startups ---
+
+  - name: Perplexity
+    careers_url: https://jobs.ashbyhq.com/perplexity
+    enabled: true
+
+  - name: LangChain
+    careers_url: https://jobs.ashbyhq.com/langchain
+    enabled: true
+
+  - name: Anyscale
+    careers_url: https://jobs.ashbyhq.com/anyscale
+    enabled: true
+
+  - name: Modal
+    careers_url: https://jobs.ashbyhq.com/modal
+    enabled: true
+
+  - name: Replit
+    careers_url: https://jobs.ashbyhq.com/replit
+    enabled: true
+
+  - name: Vanta
+    careers_url: https://jobs.ashbyhq.com/vanta
+    enabled: true
+
+  - name: PostHog
+    careers_url: https://jobs.ashbyhq.com/posthog
+    enabled: true
+
+  - name: Supabase
+    careers_url: https://jobs.ashbyhq.com/supabase
+    enabled: true
+
+  - name: Granola
+    careers_url: https://jobs.ashbyhq.com/granola
+    enabled: true
+
+  - name: Arcade
+    careers_url: https://jobs.ashbyhq.com/arcade
+    enabled: true
+
+  # --- Consumer / Social / Media ---
+
+  - name: Reddit
+    careers_url: https://job-boards.greenhouse.io/reddit
+    api: https://boards-api.greenhouse.io/v1/boards/reddit/jobs
+    enabled: true
+
+  - name: Discord
+    careers_url: https://job-boards.greenhouse.io/discord
+    api: https://boards-api.greenhouse.io/v1/boards/discord/jobs
+    enabled: true
+
+  - name: Pinterest
+    careers_url: https://job-boards.greenhouse.io/pinterest
+    api: https://boards-api.greenhouse.io/v1/boards/pinterest/jobs
+    enabled: true
+
+  - name: Duolingo
+    careers_url: https://job-boards.greenhouse.io/duolingo
+    api: https://boards-api.greenhouse.io/v1/boards/duolingo/jobs
+    enabled: true
+
+  - name: Squarespace
+    careers_url: https://job-boards.greenhouse.io/squarespace
+    api: https://boards-api.greenhouse.io/v1/boards/squarespace/jobs
+    enabled: true
+
+  - name: Masterclass
+    careers_url: https://job-boards.greenhouse.io/masterclass
+    api: https://boards-api.greenhouse.io/v1/boards/masterclass/jobs
+    enabled: true
+
+  # --- Enterprise SaaS / Marketplaces ---
+
+  - name: Palantir
+    careers_url: https://jobs.lever.co/palantir
+    enabled: true
+
+  - name: Webflow
+    careers_url: https://job-boards.greenhouse.io/webflow
+    api: https://boards-api.greenhouse.io/v1/boards/webflow/jobs
+    enabled: true
+
+  - name: Highspot
+    careers_url: https://jobs.lever.co/highspot
+    enabled: true
+
+  - name: Flexport
+    careers_url: https://job-boards.greenhouse.io/flexport
+    api: https://boards-api.greenhouse.io/v1/boards/flexport/jobs
+    enabled: true
+
+  - name: Faire
+    careers_url: https://job-boards.greenhouse.io/faire
+    api: https://boards-api.greenhouse.io/v1/boards/faire/jobs
+    enabled: true
+
+  - name: Lyft
+    careers_url: https://job-boards.greenhouse.io/lyft
+    api: https://boards-api.greenhouse.io/v1/boards/lyft/jobs
+    enabled: true
+
+  - name: Whoop
+    careers_url: https://jobs.lever.co/whoop
+    enabled: true
+
+  - name: Zoox
+    careers_url: https://jobs.lever.co/zoox
+    enabled: true
+
+  - name: Outreach
+    careers_url: https://jobs.lever.co/outreach
+    enabled: true
+
+  # --- Healthcare ---
+
+  - name: Zocdoc
+    careers_url: https://job-boards.greenhouse.io/zocdoc
+    api: https://boards-api.greenhouse.io/v1/boards/zocdoc/jobs
+    enabled: true
+
+  - name: Flatiron Health
+    careers_url: https://job-boards.greenhouse.io/flatironhealth
+    api: https://boards-api.greenhouse.io/v1/boards/flatironhealth/jobs
+    enabled: true
+
+  - name: Doximity
+    careers_url: https://job-boards.greenhouse.io/doximity
+    api: https://boards-api.greenhouse.io/v1/boards/doximity/jobs
+    enabled: true
+
+  # --- CI/CD / Dev Tools (NEW) ---
+
+  - name: CircleCI
+    careers_url: https://job-boards.greenhouse.io/circleci
+    api: https://boards-api.greenhouse.io/v1/boards/circleci/jobs
+    enabled: true
+
+  - name: Buildkite
+    careers_url: https://job-boards.greenhouse.io/buildkite
+    api: https://boards-api.greenhouse.io/v1/boards/buildkite/jobs
+    enabled: true
+
+  - name: Cursor
+    careers_url: https://jobs.ashbyhq.com/cursor
+    enabled: true
+
+  - name: Netlify
+    careers_url: https://job-boards.greenhouse.io/netlify
+    api: https://boards-api.greenhouse.io/v1/boards/netlify/jobs
+    enabled: true
+
+  - name: PlanetScale
+    careers_url: https://job-boards.greenhouse.io/planetscale
+    api: https://boards-api.greenhouse.io/v1/boards/planetscale/jobs
+    enabled: true
+
+  - name: Warp
+    careers_url: https://jobs.ashbyhq.com/warp
+    enabled: true
+
+  - name: Mintlify
+    careers_url: https://jobs.ashbyhq.com/mintlify
+    enabled: true
+
+  # --- Data / Databases (NEW) ---
+
+  - name: ClickHouse
+    careers_url: https://job-boards.greenhouse.io/clickhouse
+    api: https://boards-api.greenhouse.io/v1/boards/clickhouse/jobs
+    enabled: true
+
+  - name: Starburst
+    careers_url: https://job-boards.greenhouse.io/starburst
+    api: https://boards-api.greenhouse.io/v1/boards/starburst/jobs
+    enabled: true
+
+  - name: Materialize
+    careers_url: https://job-boards.greenhouse.io/materialize
+    api: https://boards-api.greenhouse.io/v1/boards/materialize/jobs
+    enabled: true
+
+  # --- AI / Writing (NEW) ---
+
+  - name: ElevenLabs
+    careers_url: https://jobs.ashbyhq.com/elevenlabs
+    enabled: true
+
+  - name: Writer
+    careers_url: https://jobs.ashbyhq.com/writer
+    enabled: true
+
+  - name: Dust
+    careers_url: https://jobs.ashbyhq.com/dust
+    enabled: true
+
+  - name: Browserbase
+    careers_url: https://jobs.ashbyhq.com/browserbase
+    enabled: true
+
+  - name: Exa
+    careers_url: https://jobs.ashbyhq.com/exa
+    enabled: true
+
+  - name: Tavus
+    careers_url: https://jobs.ashbyhq.com/tavus
+    enabled: true
+
+  - name: Character.AI
+    careers_url: https://jobs.ashbyhq.com/character
+    enabled: true
+
+  - name: Wiz
+    careers_url: https://jobs.ashbyhq.com/wiz
+    enabled: true
+
+  # --- Fintech (NEW) ---
+
+  - name: SoFi
+    careers_url: https://job-boards.greenhouse.io/sofi
+    api: https://boards-api.greenhouse.io/v1/boards/sofi/jobs
+    enabled: true
+
+  - name: Betterment
+    careers_url: https://job-boards.greenhouse.io/betterment
+    api: https://boards-api.greenhouse.io/v1/boards/betterment/jobs
+    enabled: true
+
+  - name: Upstart
+    careers_url: https://job-boards.greenhouse.io/upstart
+    api: https://boards-api.greenhouse.io/v1/boards/upstart/jobs
+    enabled: true
+
+  - name: Alpaca
+    careers_url: https://job-boards.greenhouse.io/alpaca
+    api: https://boards-api.greenhouse.io/v1/boards/alpaca/jobs
+    enabled: true
+
+  - name: Mesh
+    careers_url: https://job-boards.greenhouse.io/mesh
+    api: https://boards-api.greenhouse.io/v1/boards/mesh/jobs
+    enabled: true
+
+  # --- Healthcare (NEW) ---
+
+  - name: KomodoHealth
+    careers_url: https://job-boards.greenhouse.io/komodohealth
+    api: https://boards-api.greenhouse.io/v1/boards/komodohealth/jobs
+    enabled: true
+
+  - name: Talkspace
+    careers_url: https://job-boards.greenhouse.io/talkspace
+    api: https://boards-api.greenhouse.io/v1/boards/talkspace/jobs
+    enabled: true
+
+  - name: Cerebral
+    careers_url: https://job-boards.greenhouse.io/cerebral
+    api: https://boards-api.greenhouse.io/v1/boards/cerebral/jobs
+    enabled: true
+
+  - name: Maven Clinic
+    careers_url: https://job-boards.greenhouse.io/maven
+    api: https://boards-api.greenhouse.io/v1/boards/maven/jobs
+    enabled: true
+
+  - name: Parsley Health
+    careers_url: https://job-boards.greenhouse.io/parsleyhealth
+    api: https://boards-api.greenhouse.io/v1/boards/parsleyhealth/jobs
+    enabled: true
+
+  # --- Consumer / Mobility (NEW) ---
+
+  - name: ClassPass
+    careers_url: https://job-boards.greenhouse.io/classpass
+    api: https://boards-api.greenhouse.io/v1/boards/classpass/jobs
+    enabled: true
+
+  - name: Opendoor
+    careers_url: https://job-boards.greenhouse.io/opendoor
+    api: https://boards-api.greenhouse.io/v1/boards/opendoor/jobs
+    enabled: true
+
+  - name: Peloton
+    careers_url: https://job-boards.greenhouse.io/peloton
+    api: https://boards-api.greenhouse.io/v1/boards/peloton/jobs
+    enabled: true
+
+  - name: Via
+    careers_url: https://job-boards.greenhouse.io/via
+    api: https://boards-api.greenhouse.io/v1/boards/via/jobs
+    enabled: true
+
+  - name: Ripple
+    careers_url: https://job-boards.greenhouse.io/ripple
+    api: https://boards-api.greenhouse.io/v1/boards/ripple/jobs
+    enabled: true
+
+  - name: Fireblocks
+    careers_url: https://job-boards.greenhouse.io/fireblocks
+    api: https://boards-api.greenhouse.io/v1/boards/fireblocks/jobs
+    enabled: true
+
+  - name: Blockchain.com
+    careers_url: https://job-boards.greenhouse.io/blockchain
+    api: https://boards-api.greenhouse.io/v1/boards/blockchain/jobs
+    enabled: true
+
+  - name: Fireworks AI
+    careers_url: https://job-boards.greenhouse.io/fireworksai
+    api: https://boards-api.greenhouse.io/v1/boards/fireworksai/jobs
+    enabled: true
+
+  - name: RunPod
+    careers_url: https://job-boards.greenhouse.io/runpod
+    api: https://boards-api.greenhouse.io/v1/boards/runpod/jobs
+    enabled: true
+
+  - name: Smartsheet
+    careers_url: https://job-boards.greenhouse.io/smartsheet
+    api: https://boards-api.greenhouse.io/v1/boards/smartsheet/jobs
+    enabled: true
+
+  - name: Modern Health
+    careers_url: https://job-boards.greenhouse.io/modernhealth
+    api: https://boards-api.greenhouse.io/v1/boards/modernhealth/jobs
+    enabled: true
+
+  - name: StockX
+    careers_url: https://job-boards.greenhouse.io/stockx
+    api: https://boards-api.greenhouse.io/v1/boards/stockx/jobs
+    enabled: true
+
+  - name: Mercari
+    careers_url: https://job-boards.greenhouse.io/mercari
+    api: https://boards-api.greenhouse.io/v1/boards/mercari/jobs
+    enabled: true
+
+  - name: GOAT Group
+    careers_url: https://job-boards.greenhouse.io/goatgroup
+    api: https://boards-api.greenhouse.io/v1/boards/goatgroup/jobs
+    enabled: true
+
+  - name: Abnormal Security
+    careers_url: https://job-boards.greenhouse.io/abnormalsecurity
+    api: https://boards-api.greenhouse.io/v1/boards/abnormalsecurity/jobs
+    enabled: true
+
+  - name: HelloFresh
+    careers_url: https://job-boards.greenhouse.io/hellofresh
+    api: https://boards-api.greenhouse.io/v1/boards/hellofresh/jobs
+    enabled: true
+
+  - name: Glean
+    careers_url: https://job-boards.greenhouse.io/gleanwork
+    api: https://boards-api.greenhouse.io/v1/boards/gleanwork/jobs
+    enabled: true
+
+  - name: Block
+    careers_url: https://job-boards.greenhouse.io/block
+    api: https://boards-api.greenhouse.io/v1/boards/block/jobs
+    enabled: true
+
+  - name: Oscar Health
+    careers_url: https://job-boards.greenhouse.io/oscar
+    api: https://boards-api.greenhouse.io/v1/boards/oscar/jobs
+    enabled: true
+
+  - name: Gong
+    careers_url: https://job-boards.greenhouse.io/gongio
+    api: https://boards-api.greenhouse.io/v1/boards/gongio/jobs
+    enabled: true
+
+# --- Healthcare (extended) ---
+  - name: McKesson
+    careers_url: https://www.mckesson.com/Careers/
+    scan_method: websearch
+    scan_query: 'site:mckesson.com/careers "QA" OR "SDET" OR "Automation Engineer"'
+    enabled: true
+
+  - name: Cardinal Health
+    careers_url: https://careers.cardinalhealth.com/
+    scan_method: websearch
+    scan_query: 'site:cardinalhealth.com/careers "QA" OR "Automation Engineer"'
+    enabled: true
+
+  - name: Elevance Health
+    careers_url: https://careers.elevancehealth.com/
+    scan_method: websearch
+    scan_query: 'site:elevancehealth.com/careers "QA" OR "SDET" OR "Automation"'
+    enabled: true
+
+  - name: Humana
+    careers_url: https://careers.humana.com/
+    scan_method: websearch
+    scan_query: 'site:humana.com/careers "QA" OR "Automation"'
+    enabled: true
+
+  - name: Kaiser Permanente
+    careers_url: https://www.kaiserpermanentejobs.org/
+    scan_method: websearch
+    scan_query: 'site:kaiserpermanentejobs.org "QA" OR "SDET"'
+    enabled: true
+
+  - name: Cigna
+    careers_url: https://jobs.thecignagroup.com/
+    scan_method: websearch
+    scan_query: 'site:thecignagroup.com/jobs "QA" OR "Automation Engineer"'
+    enabled: true
+
+  - name: Walgreens
+    careers_url: https://jobs.walgreens.com/
+    scan_method: websearch
+    scan_query: 'site:jobs.walgreens.com "QA" OR "SDET"'
+    enabled: true
+
+  - name: Change Healthcare
+    careers_url: https://careers.changehealthcare.com/
+    scan_method: websearch
+    scan_query: 'site:changehealthcare.com/careers "QA" OR "Automation"'
+    enabled: true
+
+  - name: Veeva Systems
+    careers_url: https://careers.veeva.com/
+    scan_method: websearch
+    scan_query: 'site:veeva.com/careers "QA" OR "SDET" OR "Automation Engineer"'
+    enabled: true
+
+# --- Fintech / Banking ---
+  - name: Capital One
+    careers_url: https://www.capitalonecareers.com/
+    scan_method: websearch
+    scan_query: 'site:capitalonecareers.com "SDET" OR "QA Engineer" OR "Automation Engineer"'
+    enabled: true
+
+  - name: JPMorgan Chase
+    careers_url: https://careers.jpmorgan.com/
+    scan_method: websearch
+    scan_query: 'site:jpmorgan.com/careers "QA" OR "SDET" OR "Automation"'
+    enabled: true
+
+  - name: Goldman Sachs
+    careers_url: https://www.goldmansachs.com/careers/
+    scan_method: websearch
+    scan_query: 'site:goldmansachs.com/careers "QA" OR "SDET"'
+    enabled: true
+
+  - name: Morgan Stanley
+    careers_url: https://www.morganstanley.com/people/careers
+    scan_method: websearch
+    scan_query: 'site:morganstanley.com/careers "QA" OR "Automation Engineer"'
+    enabled: true
+
+  - name: Bank of America
+    careers_url: https://careers.bankofamerica.com/
+    scan_method: websearch
+    scan_query: 'site:bankofamerica.com/careers "QA" OR "SDET"'
+    enabled: true
+
+  - name: Wells Fargo
+    careers_url: https://www.wellsfargojobs.com/
+    scan_method: websearch
+    scan_query: 'site:wellsfargojobs.com "QA" OR "SDET" OR "Automation"'
+    enabled: true
+
+  - name: American Express
+    careers_url: https://careers.americanexpress.com/
+    scan_method: websearch
+    scan_query: 'site:americanexpress.com/careers "QA" OR "SDET"'
+    enabled: true
+
+  - name: Visa
+    careers_url: https://corporate.visa.com/en/careers.html
+    scan_method: websearch
+    scan_query: 'site:visa.com/careers "QA" OR "SDET" OR "Automation Engineer"'
+    enabled: true
+
+  - name: Mastercard
+    careers_url: https://careers.mastercard.com/
+    scan_method: websearch
+    scan_query: 'site:mastercard.com/careers "QA" OR "SDET"'
+    enabled: true
+
+  - name: PayPal
+    careers_url: https://careers.pypl.com/
+    scan_method: websearch
+    scan_query: 'site:pypl.com/careers "QA" OR "SDET"'
+    enabled: true
+
+  - name: Fidelity Investments
+    careers_url: https://jobs.fidelity.com/
+    scan_method: websearch
+    scan_query: 'site:jobs.fidelity.com "QA" OR "SDET"'
+    enabled: true
+
+  - name: Charles Schwab
+    careers_url: https://www.schwabjobs.com/
+    scan_method: websearch
+    scan_query: 'site:schwabjobs.com "QA" OR "Automation Engineer"'
+    enabled: true
+
+# --- Big Tech / Enterprise ---
+  - name: IBM
+    careers_url: https://www.ibm.com/careers/
+    scan_method: websearch
+    scan_query: 'site:ibm.com/careers "QA" OR "SDET" OR "Automation Engineer"'
+    enabled: true
+
+  - name: Intel
+    careers_url: https://jobs.intel.com/
+    scan_method: websearch
+    scan_query: 'site:jobs.intel.com "SDET" OR "Automation Engineer"'
+    enabled: true
+
+  - name: NVIDIA
+    careers_url: https://www.nvidia.com/en-us/about-nvidia/careers/
+    scan_method: websearch
+    scan_query: 'site:nvidia.com/careers "QA" OR "SDET"'
+    enabled: true
+
+  - name: Cisco
+    careers_url: https://jobs.cisco.com/
+    scan_method: websearch
+    scan_query: 'site:jobs.cisco.com "QA" OR "SDET" OR "Automation"'
+    enabled: true
+
+  - name: Adobe
+    careers_url: https://www.adobe.com/careers.html
+    scan_method: websearch
+    scan_query: 'site:adobe.com/careers "QA" OR "SDET"'
+    enabled: true
+
+  - name: Autodesk
+    careers_url: https://www.autodesk.com/careers
+    scan_method: websearch
+    scan_query: 'site:autodesk.com/careers "QA" OR "Automation Engineer"'
+    enabled: true
+
+  - name: Intuit
+    careers_url: https://www.intuit.com/careers/
+    scan_method: websearch
+    scan_query: 'site:intuit.com/careers "QA" OR "SDET"'
+    enabled: true
+
+  - name: SAP
+    careers_url: https://jobs.sap.com/
+    scan_method: websearch
+    scan_query: 'site:jobs.sap.com "QA" OR "Automation Engineer" "United States"'
+    enabled: true
+
+  - name: VMware
+    careers_url: https://careers.vmware.com/
+    scan_method: websearch
+    scan_query: 'site:careers.vmware.com "QA" OR "SDET"'
+    enabled: true
+
+  - name: Dell Technologies
+    careers_url: https://jobs.dell.com/
+    scan_method: websearch
+    scan_query: 'site:jobs.dell.com "QA" OR "SDET" OR "Automation"'
+    enabled: true
+
+  - name: HP
+    careers_url: https://jobs.hp.com/
+    scan_method: websearch
+    scan_query: 'site:jobs.hp.com "QA" OR "SDET"'
+    enabled: true
+
+  - name: Qualcomm
+    careers_url: https://www.qualcomm.com/company/careers
+    scan_method: websearch
+    scan_query: 'site:qualcomm.com/careers "QA" OR "Automation Engineer"'
+    enabled: true
+
+# --- Consulting / Defense ---
+  - name: Booz Allen Hamilton
+    careers_url: https://careers.boozallen.com/
+    scan_method: websearch
+    scan_query: 'site:careers.boozallen.com "QA" OR "SDET" OR "Automation Engineer"'
+    enabled: true
+
+  - name: Leidos
+    careers_url: https://careers.leidos.com/
+    scan_method: websearch
+    scan_query: 'site:careers.leidos.com "QA" OR "Automation Engineer"'
+    enabled: true
+
+  - name: CACI
+    careers_url: https://careers.caci.com/
+    scan_method: websearch
+    scan_query: 'site:careers.caci.com "QA" OR "SDET" OR "Automation"'
+    enabled: true
+
+  - name: SAIC
+    careers_url: https://jobs.saic.com/
+    scan_method: websearch
+    scan_query: 'site:jobs.saic.com "QA" OR "SDET" OR "Automation"'
+    enabled: true
+
+  - name: General Dynamics IT
+    careers_url: https://www.gdit.com/careers/
+    scan_method: websearch
+    scan_query: 'site:gdit.com/careers "QA" OR "Automation Engineer"'
+    enabled: true
+
+  - name: Northrop Grumman
+    careers_url: https://www.northropgrumman.com/careers/
+    scan_method: websearch
+    scan_query: 'site:northropgrumman.com/careers "QA" OR "SDET"'
+    enabled: true
+
+  - name: Lockheed Martin
+    careers_url: https://www.lockheedmartinjobs.com/
+    scan_method: websearch
+    scan_query: 'site:lockheedmartinjobs.com "QA" OR "SDET" OR "Automation"'
+    enabled: true
+
+  - name: Raytheon (RTX)
+    careers_url: https://careers.rtx.com/
+    scan_method: websearch
+    scan_query: 'site:rtx.com/careers "QA" OR "Automation Engineer"'
+    enabled: true
+
+  - name: KPMG
+    careers_url: https://home.kpmg/xx/en/home/careers.html
+    scan_method: websearch
+    scan_query: 'site:kpmg.com/careers "QA" OR "SDET" "United States"'
+    enabled: true
+
+  - name: PwC
+    careers_url: https://jobs.us.pwc.com/
+    scan_method: websearch
+    scan_query: 'site:pwc.com/careers "QA" OR "Automation Engineer" "United States"'
+    enabled: true
+
+  - name: EY
+    careers_url: https://www.ey.com/en_us/careers
+    scan_method: websearch
+    scan_query: 'site:ey.com/careers "QA" OR "Automation Engineer" "United States"'
+    enabled: true
+
+# --- Media / Retail ---
+  - name: Disney
+    careers_url: https://www.disneycareers.com/
+    scan_method: websearch
+    scan_query: 'site:disneycareers.com "QA" OR "SDET" OR "Automation Engineer"'
+    enabled: true
+
+  - name: Warner Bros Discovery
+    careers_url: https://careers.wbd.com/
+    scan_method: websearch
+    scan_query: 'site:careers.wbd.com "QA" OR "SDET"'
+    enabled: true
+
+  - name: NBCUniversal
+    careers_url: https://www.nbcunicareers.com/
+    scan_method: websearch
+    scan_query: 'site:nbcunicareers.com "QA" OR "Automation"'
+    enabled: true
+
+  - name: Paramount
+    careers_url: https://www.paramount.com/careers
+    scan_method: websearch
+    scan_query: 'site:paramount.com/careers "QA" OR "SDET"'
+    enabled: true
+
+  - name: Target
+    careers_url: https://corporate.target.com/careers
+    scan_method: websearch
+    scan_query: 'site:target.com/careers "QA" OR "SDET" OR "Automation Engineer"'
+    enabled: true
+
+  - name: Walmart
+    careers_url: https://careers.walmart.com/
+    scan_method: websearch
+    scan_query: 'site:careers.walmart.com "QA" OR "SDET"'
+    enabled: true
+
+  - name: Best Buy
+    careers_url: https://corporate.bestbuy.com/careers/
+    scan_method: websearch
+    scan_query: 'site:bestbuy.com/careers "QA" OR "Automation Engineer"'
+    enabled: true
+
+  - name: Home Depot
+    careers_url: https://careers.homedepot.com/
+    scan_method: websearch
+    scan_query: 'site:careers.homedepot.com "QA" OR "SDET"'
+    enabled: true
+
+  - name: Lowes
+    careers_url: https://talent.lowes.com/
+    scan_method: websearch
+    scan_query: 'site:lowes.com/careers "QA" OR "Automation Engineer"'
+    enabled: true
+
+# --- Airlines / Travel ---
+  - name: United Airlines
+    careers_url: https://careers.united.com/
+    scan_method: websearch
+    scan_query: 'site:careers.united.com "QA" OR "SDET" OR "Automation"'
+    enabled: true
+
+  - name: Delta Air Lines
+    careers_url: https://careers.delta.com/
+    scan_method: websearch
+    scan_query: 'site:careers.delta.com "QA" OR "SDET"'
+    enabled: true
+
+  - name: American Airlines
+    careers_url: https://jobs.aa.com/
+    scan_method: websearch
+    scan_query: 'site:jobs.aa.com "QA" OR "Automation Engineer"'
+    enabled: true
+
+  - name: Southwest Airlines
+    careers_url: https://careers.southwestair.com/
+    scan_method: websearch
+    scan_query: 'site:careers.southwestair.com "QA" OR "SDET"'
+    enabled: true
+
+  - name: Expedia Group
+    careers_url: https://careers.expediagroup.com/
+    scan_method: websearch
+    scan_query: 'site:expediagroup.com/careers "QA" OR "SDET" OR "Automation"'
+    enabled: true
+
+  - name: Booking Holdings
+    careers_url: https://careers.bookingholdings.com/
+    scan_method: websearch
+    scan_query: 'site:bookingholdings.com/careers "QA" OR "SDET"'
+    enabled: true
+
+# -- Search APIs (keyword-based, broad discovery across all companies) --
+# These query job search engines by keyword — great for finding companies
+# not in tracked_companies above.
+#
+# Adzuna:   register free at https://developer.adzuna.com/ → get app_id + app_key
+# CareerJet: register free at https://www.careerjet.com/partners/ → get affid
+
+search_apis:
+
+  - name: Adzuna — SDET QA US
+    type: adzuna
+    app_id: "321f183d"
+    app_key: "0fe82bbc84cf96b7e82ebb444404fec5"
+    keywords: 'SDET "QA Automation" "Automation Engineer" "Software Engineer in Test" "Test Automation Engineer"'
+    location: "United States"
+    results_per_page: 50
+    enabled: true
+
+  - name: Adzuna — SDET QA Remote
+    type: adzuna
+    app_id: "321f183d"
+    app_key: "0fe82bbc84cf96b7e82ebb444404fec5"
+    keywords: 'SDET "QA Automation" "Automation Engineer" "Software Engineer in Test" "Test Automation Engineer"'
+    location: "Remote"
+    results_per_page: 50
+    enabled: true
+
+  - name: Adzuna — QA & Test titles US
+    type: adzuna
+    app_id: "321f183d"
+    app_key: "0fe82bbc84cf96b7e82ebb444404fec5"
+    keywords_or: '"QA Engineer" "QA Analyst" "QA Tester" "Quality Assurance Engineer" "Software Quality Engineer" "Test Engineer" "Software Tester" "Test Analyst" "Quality Engineer" "QA Lead" "QA Manager" "Test Lead"'
+    location: "United States"
+    results_per_page: 50
+    enabled: true
+
+  - name: Adzuna — QA & Test titles Remote
+    type: adzuna
+    app_id: "321f183d"
+    app_key: "0fe82bbc84cf96b7e82ebb444404fec5"
+    keywords_or: '"QA Engineer" "QA Analyst" "QA Tester" "Quality Assurance Engineer" "Software Quality Engineer" "Test Engineer" "Software Tester" "Test Analyst" "Quality Engineer" "QA Lead" "QA Manager" "Test Lead"'
+    location: "Remote"
+    results_per_page: 50
+    enabled: true
+
+  - name: Adzuna — Automation & SDET titles US
+    type: adzuna
+    app_id: "321f183d"
+    app_key: "0fe82bbc84cf96b7e82ebb444404fec5"
+    keywords_or: '"QA Automation Engineer" "Automation Test Engineer" "Test Automation Engineer" "QA Automation Developer" "Software Development Engineer in Test" SDET "Automation Engineer"'
+    location: "United States"
+    results_per_page: 50
+    enabled: true
+
+  - name: Adzuna — Automation & SDET titles Remote
+    type: adzuna
+    app_id: "321f183d"
+    app_key: "0fe82bbc84cf96b7e82ebb444404fec5"
+    keywords_or: '"QA Automation Engineer" "Automation Test Engineer" "Test Automation Engineer" "QA Automation Developer" "Software Development Engineer in Test" SDET "Automation Engineer"'
+    location: "Remote"
+    results_per_page: 50
+    enabled: true
+
+  - name: CareerJet — SDET QA US
+    type: careerjet
+    affid: "0952c633c13bdfdc1e9bc6d9caf7764b"
+    keywords: 'SDET "QA Automation" "Test Automation" "Software Engineer in Test"'
+    location: "United States"
+    pagesize: 50
+    enabled: false  # API dead — public.api.careerjet.com DNS fails

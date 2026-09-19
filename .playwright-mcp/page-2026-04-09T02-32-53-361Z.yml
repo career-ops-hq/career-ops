@@ -1,0 +1,242 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]:
+        - link "Back to jobs" [ref=e5] [cursor=pointer]:
+          - /url: https://job-boards.greenhouse.io/rapidfortinc
+          - img [ref=e6]
+          - text: Back to jobs
+        - generic [ref=e9]:
+          - generic [ref=e10]:
+            - heading "SR SDET / Sr QA Automation Engineer (Python, CLI, CI/CD, Containers)" [level=1] [ref=e11]
+            - generic [ref=e12]:
+              - img [ref=e13]
+              - generic [ref=e15]: Remote
+          - button "Apply" [ref=e16] [cursor=pointer]
+        - generic [ref=e18]:
+          - generic [ref=e31]:
+            - generic [ref=e34]:
+              - heading "SR SDET / Sr QA Automation Engineer (Python, CLI, CI/CD, Containers)" [level=2] [ref=e35]
+              - text: RAPIDFORT United States (Remote)
+            - generic [ref=e37]:
+              - generic [ref=e38]:
+                - strong [ref=e39]: "Location:"
+                - text: Remote (US) |
+                - strong [ref=e40]: "Type:"
+                - text: Full-Time |
+                - strong [ref=e41]: "Experience:"
+                - text: 10+ Years
+                - strong [ref=e42]: About RapidFort
+                - text: RapidFort is the leader in end-to-end software supply chain security. Our platform helps organizations automatically identify, prioritize, and remediate vulnerabilities in containerized applications—without code changes or pipeline disruption. From curated near-zero-CVE container images to runtime Kubernetes protection, we enable teams to ship secure software faster. Backed by $42M in Series A funding and trusted by 100+ customers across defense, federal, and enterprise sectors, we’re defining the new standard for software attack surface management (SASM). We were recognized in the 2025 Gartner® Cool Vendors™ in Container Management report.
+                - text: Role Summary
+                - text: We’re looking for a hands-on Sr. QA Automation Engineer to own and evolve the Python-based test automation framework for our CLI-driven security platform. You’ll design and maintain end-to-end test suites that validate container image hardening, vulnerability scanning, SBOM generation, and compliance workflows across local, CI, and Kubernetes environments. This role demands strong ownership of test reliability, data-driven execution strategy, and clear documentation—paired with a genuine interest in security tooling.
+                - text: What You’ll Work On
+                - list [ref=e43]:
+                  - listitem [ref=e44]: Build and maintain robust automation suites using Python and pytest
+                  - listitem [ref=e45]: Convert manual/bash test plans into scalable, data-driven test frameworks (CSV/JSON/YAML)
+                  - listitem [ref=e46]: Design selective execution strategy (tags, ranges, run flags, grouping/sharding)
+                  - listitem [ref=e47]: Automate CLI command validation (exit codes, stdout/stderr expectations, failure semantics)
+                  - listitem [ref=e48]: Integrate and maintain test execution in CI/CD pipelines (GitHub Actions or equivalent)
+                  - listitem [ref=e49]: Validate container image hardening, scan outputs, and SBOM/RBOM generation across base distributions (Ubuntu, RHEL, Debian, Alpine)
+                  - listitem [ref=e50]: Manage and improve test artifacts/reporting (.html, .log, .json) for fast triage
+                  - listitem [ref=e51]: Troubleshoot environment/auth/configuration drift across runners and VMs
+                  - listitem [ref=e52]: Maintain high-quality handover docs, runbooks, and troubleshooting guides
+                  - listitem [ref=e53]: Partner with dev/platform teams to stabilize flaky tests and shorten feedback loops
+                - strong [ref=e54]: Must-Have Qualifications
+                - list [ref=e55]:
+                  - listitem [ref=e56]: 10+ years in SDET or QA Automation roles
+                  - listitem [ref=e57]: 5+ years of Python automation experience (pytest required)
+                  - listitem [ref=e58]: Strong Linux and shell scripting (bash) skills
+                  - listitem [ref=e59]: Hands-on experience testing CLI tools or developer workflows
+                  - listitem [ref=e60]: Experience with Docker and/or Podman
+                  - listitem [ref=e61]: Experience integrating and debugging test runs in CI pipelines
+                  - listitem [ref=e62]: Strong debugging skills for authentication, environment, and infra-related failures
+                  - listitem [ref=e63]: Solid Git workflow and code review practices
+                - strong [ref=e64]: Nice-to-Have Qualifications
+                - list [ref=e65]:
+                  - listitem [ref=e66]: Kubernetes/KIND/Helm testing experience
+                  - listitem [ref=e67]: Compliance/security scan automation exposure (SBOM/STIG-like workflows)
+                  - listitem [ref=e68]: Multi-runner parallel execution/sharding strategy experience
+                  - listitem [ref=e69]: Experience capturing test telemetry for trend analysis (Postgres/SQLite)
+                  - listitem [ref=e70]: Experience building reusable reporting and observability layers
+                - text: Base Salary:$120,000- $150,000
+              - complementary [ref=e71]:
+                - list [ref=e72]:
+                  - listitem [ref=e73]
+          - list [ref=e75]:
+            - listitem [ref=e76]
+      - separator [ref=e77]
+      - generic [ref=e78]:
+        - generic [ref=e80]:
+          - heading "Apply for this job" [level=2] [ref=e82]
+          - generic [ref=e83]:
+            - paragraph [ref=e85]: "*"
+            - paragraph [ref=e86]: indicates a required field
+        - generic [ref=e87]:
+          - generic [ref=e88]:
+            - generic [ref=e91]:
+              - generic [ref=e92]: First Name*
+              - textbox "First Name" [ref=e93]
+            - generic [ref=e96]:
+              - generic [ref=e97]: Last Name*
+              - textbox "Last Name" [ref=e98]
+            - generic [ref=e101]:
+              - generic [ref=e102]: Preferred First Name
+              - textbox "Preferred First Name" [ref=e103]
+            - generic [ref=e106]:
+              - generic [ref=e107]: Email*
+              - textbox "Email" [ref=e108]
+            - group "Phone" [ref=e110]:
+              - generic [ref=e111]: Phone
+              - generic [ref=e114]:
+                - generic [ref=e115]: Country
+                - generic [ref=e116]:
+                  - log [ref=e118]
+                  - generic [ref=e120]:
+                    - combobox "Country" [ref=e123]
+                    - button "Toggle flyout" [ref=e125] [cursor=pointer]:
+                      - img [ref=e126]
+              - generic [ref=e130]:
+                - generic [ref=e131]: Phone
+                - textbox "Phone" [ref=e132]
+            - group "Resume/CV" [ref=e134]:
+              - generic [ref=e135]: Resume/CV
+              - generic [ref=e137]:
+                - generic [ref=e139]:
+                  - button "Attach" [ref=e140] [cursor=pointer]
+                  - generic [ref=e141]: Attach
+                  - button "Attach" [ref=e142]
+                - button "Dropbox" [ref=e144] [cursor=pointer]
+                - button "Google Drive" [ref=e146] [cursor=pointer]
+                - generic [ref=e148]:
+                  - button "Enter manually" [ref=e149] [cursor=pointer]
+                  - generic [ref=e150]: Enter manually
+                - paragraph [ref=e151]: "Accepted file types: pdf, doc, docx, txt, rtf"
+            - group "Cover Letter" [ref=e153]:
+              - generic [ref=e154]: Cover Letter
+              - generic [ref=e156]:
+                - generic [ref=e158]:
+                  - button "Attach" [ref=e159] [cursor=pointer]
+                  - generic [ref=e160]: Attach
+                  - button "Attach" [ref=e161]
+                - button "Dropbox" [ref=e163] [cursor=pointer]
+                - button "Google Drive" [ref=e165] [cursor=pointer]
+                - generic [ref=e167]:
+                  - button "Enter manually" [ref=e168] [cursor=pointer]
+                  - generic [ref=e169]: Enter manually
+                - paragraph [ref=e170]: "Accepted file types: pdf, doc, docx, txt, rtf"
+          - generic [ref=e171]:
+            - separator [ref=e172]
+            - generic [ref=e175]:
+              - generic [ref=e176]: LinkedIn Profile
+              - textbox "LinkedIn Profile" [ref=e177]
+            - generic [ref=e180]:
+              - generic [ref=e181]: Website
+              - textbox "Website" [ref=e182]
+          - generic [ref=e183]:
+            - separator [ref=e184]
+            - generic [ref=e185]:
+              - heading "Voluntary Self-Identification" [level=2] [ref=e186]
+              - paragraph [ref=e187]: For government reporting purposes, we ask candidates to respond to the below self-identification survey. Completion of the form is entirely voluntary. Whatever your decision, it will not be considered in the hiring process or thereafter. Any information that you do provide will be recorded and maintained in a confidential file.
+              - paragraph [ref=e188]: As set forth in RapidFort, Inc.’s Equal Employment Opportunity policy, we do not discriminate on the basis of any protected group status under any applicable law.
+            - generic [ref=e191]:
+              - generic [ref=e192]: Gender
+              - generic [ref=e193]:
+                - log [ref=e195]
+                - generic [ref=e197]:
+                  - generic [ref=e198]:
+                    - generic [ref=e199]: Select...
+                    - combobox "Gender" [ref=e201]
+                  - button "Toggle flyout" [ref=e203] [cursor=pointer]:
+                    - img [ref=e204]
+            - generic [ref=e206]:
+              - generic [ref=e208]:
+                - generic [ref=e209]: Are you Hispanic/Latino?
+                - generic [ref=e210]:
+                  - log [ref=e212]
+                  - generic [ref=e214]:
+                    - generic [ref=e215]:
+                      - generic [ref=e216]: Select...
+                      - combobox "Are you Hispanic/Latino?" [ref=e218]
+                    - button "Toggle flyout" [ref=e220] [cursor=pointer]:
+                      - img [ref=e221]
+              - link "Race & Ethnicity Definitions" [ref=e223] [cursor=pointer]:
+                - /url: https://job-boards.cdn.greenhouse.io/docs/2023/RaceEthnicityDefinitions.pdf
+            - generic [ref=e224]:
+              - paragraph [ref=e225]: "If you believe you belong to any of the categories of protected veterans listed below, please indicate by making the appropriate selection. As a government contractor subject to the Vietnam Era Veterans Readjustment Assistance Act (VEVRAA), we request this information in order to measure the effectiveness of the outreach and positive recruitment efforts we undertake pursuant to VEVRAA. Classification of protected categories is as follows:"
+              - paragraph [ref=e226]: "A \"disabled veteran\" is one of the following: a veteran of the U.S. military, ground, naval or air service who is entitled to compensation (or who but for the receipt of military retired pay would be entitled to compensation) under laws administered by the Secretary of Veterans Affairs; or a person who was discharged or released from active duty because of a service-connected disability."
+              - paragraph [ref=e227]: A "recently separated veteran" means any veteran during the three-year period beginning on the date of such veteran's discharge or release from active duty in the U.S. military, ground, naval, or air service.
+              - paragraph [ref=e228]: An "active duty wartime or campaign badge veteran" means a veteran who served on active duty in the U.S. military, ground, naval or air service during a war, or in a campaign or expedition for which a campaign badge has been authorized under the laws administered by the Department of Defense.
+              - paragraph [ref=e229]: An "Armed forces service medal veteran" means a veteran who, while serving on active duty in the U.S. military, ground, naval or air service, participated in a United States military operation for which an Armed Forces service medal was awarded pursuant to Executive Order 12985.
+            - generic [ref=e232]:
+              - generic [ref=e233]: Veteran Status
+              - generic [ref=e234]:
+                - log [ref=e236]
+                - generic [ref=e238]:
+                  - generic [ref=e239]:
+                    - generic [ref=e240]: Select...
+                    - combobox "Veteran Status" [ref=e242]
+                  - button "Toggle flyout" [ref=e244] [cursor=pointer]:
+                    - img [ref=e245]
+            - separator [ref=e247]
+            - generic [ref=e248]:
+              - heading "Voluntary Self-Identification of Disability" [level=2] [ref=e249]
+              - generic [ref=e250]:
+                - generic [ref=e251]:
+                  - generic [ref=e252]: Form CC-305
+                  - generic [ref=e253]: Page 1 of 1
+                - generic [ref=e254]:
+                  - generic [ref=e255]: OMB Control Number 1250-0005
+                  - generic [ref=e256]: Expires 04/30/2026
+              - strong [ref=e257]: Why are you being asked to complete this form?
+              - paragraph [ref=e258]: We are a federal contractor or subcontractor. The law requires us to provide equal employment opportunity to qualified people with disabilities. We have a goal of having at least 7% of our workers as people with disabilities. The law says we must measure our progress towards this goal. To do this, we must ask applicants and employees if they have a disability or have ever had one. People can become disabled, so we need to ask this question at least every five years.
+              - paragraph [ref=e259]:
+                - text: Completing this form is voluntary, and we hope that you will choose to do so. Your answer is confidential. No one who makes hiring decisions will see it. Your decision to complete the form and your answer will not harm you in any way. If you want to learn more about the law or this form, visit the U.S. Department of Labor’s Office of Federal Contract Compliance Programs (OFCCP) website at
+                - link "www.dol.gov/ofccp" [ref=e260] [cursor=pointer]:
+                  - /url: https://www.dol.gov/ofccp
+                - text: .
+              - strong [ref=e261]: How do you know if you have a disability?
+              - paragraph [ref=e262]:
+                - text: A disability is a condition that substantially limits one or more of your “major life activities.” If you have or have ever had such a condition, you are a person with a disability.
+                - strong [ref=e263]: "Disabilities include, but are not limited to:"
+              - list [ref=e264]:
+                - listitem [ref=e265]: Alcohol or other substance use disorder (not currently using drugs illegally)
+                - listitem [ref=e266]: Autoimmune disorder, for example, lupus, fibromyalgia, rheumatoid arthritis, HIV/AIDS
+                - listitem [ref=e267]: Blind or low vision
+                - listitem [ref=e268]: Cancer (past or present)
+                - listitem [ref=e269]: Cardiovascular or heart disease
+                - listitem [ref=e270]: Celiac disease
+                - listitem [ref=e271]: Cerebral palsy
+                - listitem [ref=e272]: Deaf or serious difficulty hearing
+                - listitem [ref=e273]: Diabetes
+                - listitem [ref=e274]: Disfigurement, for example, disfigurement caused by burns, wounds, accidents, or congenital disorders
+                - listitem [ref=e275]: Epilepsy or other seizure disorder
+                - listitem [ref=e276]: Gastrointestinal disorders, for example, Crohn's Disease, irritable bowel syndrome
+                - listitem [ref=e277]: Intellectual or developmental disability
+                - listitem [ref=e278]: Mental health conditions, for example, depression, bipolar disorder, anxiety disorder, schizophrenia, PTSD
+                - listitem [ref=e279]: Missing limbs or partially missing limbs
+                - listitem [ref=e280]: Mobility impairment, benefiting from the use of a wheelchair, scooter, walker, leg brace(s) and/or other supports
+                - listitem [ref=e281]: Nervous system condition, for example, migraine headaches, Parkinson’s disease, multiple sclerosis (MS)
+                - listitem [ref=e282]: Neurodivergence, for example, attention-deficit/hyperactivity disorder (ADHD), autism spectrum disorder, dyslexia, dyspraxia, other learning disabilities
+                - listitem [ref=e283]: Partial or complete paralysis (any cause)
+                - listitem [ref=e284]: Pulmonary or respiratory conditions, for example, tuberculosis, asthma, emphysema
+                - listitem [ref=e285]: Short stature (dwarfism)
+                - listitem [ref=e286]: Traumatic brain injury
+            - generic [ref=e289]:
+              - generic [ref=e290]: Disability Status
+              - generic [ref=e291]:
+                - log [ref=e293]
+                - generic [ref=e295]:
+                  - generic [ref=e296]:
+                    - generic [ref=e297]: Select...
+                    - combobox "Disability Status" [ref=e299]
+                  - button "Toggle flyout" [ref=e301] [cursor=pointer]:
+                    - img [ref=e302]
+            - paragraph [ref=e305]: "PUBLIC BURDEN STATEMENT: According to the Paperwork Reduction Act of 1995 no persons are required to respond to a collection of information unless such collection displays a valid OMB control number. This survey should take about 5 minutes to complete."
+          - button "Submit application" [ref=e307] [cursor=pointer]
+  - contentinfo [ref=e308]:
+    - generic [ref=e309]:
+      - paragraph [ref=e310]: Powered by
+      - link "Greenhouse logo" [ref=e311] [cursor=pointer]:
+        - /url: https://www.greenhouse.com
+        - img "Greenhouse logo" [ref=e312]

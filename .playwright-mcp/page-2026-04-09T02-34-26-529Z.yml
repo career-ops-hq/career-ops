@@ -1,0 +1,113 @@
+- generic [active] [ref=e1]:
+  - link "Gravie logo" [ref=e4] [cursor=pointer]:
+    - /url: https://www.gravie.com/careers/
+    - img "Gravie logo" [ref=e5]
+  - generic [ref=e7]:
+    - generic [ref=e9]:
+      - generic [ref=e10]:
+        - heading "AI Test Automation Engineer" [level=2] [ref=e11]
+        - generic [ref=e12]:
+          - generic [ref=e13]: Remote
+          - generic [ref=e14]: Engineering /
+          - generic [ref=e15]: Remote
+      - link "apply for this job" [ref=e17] [cursor=pointer]:
+        - /url: https://jobs.lever.co/gravie/1a651cf9-4c31-417b-9b9b-4aaa2dc9de6e/apply
+    - generic [ref=e18]:
+      - generic [ref=e20]:
+        - paragraph [ref=e21]: Hi, we’re Gravie. Our mission is to create health benefits that actually benefit small and midsize businesses and their employees. Our innovative benefit solutions and services are developed and delivered by a diverse group of unique people. We encourage you to be your authentic self - we like you that way.
+        - paragraph [ref=e22]
+        - paragraph [ref=e23]:
+          - strong [ref=e24]: "A Little More About The role:"
+        - paragraph [ref=e25]: We’re looking for an AI Test Automation Engineer who will own the design and development of AI-driven test automation systems across our product portals. Rather than manually writing test cases, you will build the frameworks, feedback loops, and infrastructure that enable AI tools to generate, execute, and maintain automated tests at scale. You will work closely with our QA, Engineering, and Product teams to dramatically increase our automated regression coverage, accelerate delivery timelines, and reduce the risk of defects reaching production.
+        - paragraph [ref=e26]
+        - paragraph [ref=e27]:
+          - strong [ref=e28]: "You will:"
+        - list [ref=e29]:
+          - listitem [ref=e30]:
+            - paragraph [ref=e31]: Design and build AI-driven test automation workflows using tools like Claude Code, where AI agents generate, execute, and iterate on Playwright tests with minimal human intervention. Your primary job is building the system, not writing individual tests.
+          - listitem [ref=e32]:
+            - paragraph [ref=e33]: Architect a Playwright test framework from scratch, establishing patterns, page-object models, fixtures, and conventions that are optimized for AI-assisted test generation. The framework should be structured so that AI tools can reliably produce correct, maintainable tests.
+          - listitem [ref=e34]:
+            - paragraph [ref=e35]: Build tight feedback loops between local test execution, CI pipeline results, and merge request creation, so AI agents can run tests, interpret failures, fix issues, and resubmit with minimal manual intervention.
+          - listitem [ref=e36]:
+            - paragraph [ref=e37]: "Audit the existing Geb/Spock/Groovy test suites across three portals (Member, Employer/Broker, Admin) and classify each test into one of three categories: convert to Playwright, convert to an API or unit test, or delete (legacy functionality no longer in use)."
+          - listitem [ref=e38]:
+            - paragraph [ref=e39]: Lead the migration from Geb/Spock to Playwright, using AI agents to accelerate conversion at scale while maintaining coverage continuity.
+          - listitem [ref=e40]:
+            - paragraph [ref=e41]: Integrate Playwright test execution into GitLab CI/CD pipelines with automated quality gates on every merge request and deployment. Optimize for fast feedback through parallelization and caching strategies.
+          - listitem [ref=e42]:
+            - paragraph [ref=e43]: Instrument tests with reporting on pass/fail trends, flakiness rates, and coverage gaps. Use this data to prioritize AI-driven test generation toward the highest-value uncovered areas.
+          - listitem [ref=e44]:
+            - paragraph [ref=e45]: Identify scenarios where end-to-end Playwright tests are not the right tool and implement API-layer automation or contract tests for microservice boundaries instead.
+          - listitem [ref=e46]:
+            - paragraph [ref=e47]: Continuously improve the AI automation workflow by refining prompts, context structures, and validation patterns to increase the percentage of tests that AI generates correctly on the first pass.
+        - paragraph [ref=e48]
+        - paragraph [ref=e49]:
+          - strong [ref=e50]: "You bring:"
+        - list [ref=e51]:
+          - listitem [ref=e52]:
+            - paragraph [ref=e53]: 5+ years of experience in test automation engineering, SDET, or software engineering with strong testing practices.
+          - listitem [ref=e54]:
+            - paragraph [ref=e55]: Demonstrated experience using AI coding tools (Claude Code, Cursor, GitHub Copilot, or similar) to generate and maintain code at scale. This is not optional; we need someone who has already built workflows around AI-assisted development.
+          - listitem [ref=e56]:
+            - paragraph [ref=e57]: Hands-on experience with Playwright or a comparable modern end-to-end testing framework. Experience building a framework from scratch is strongly preferred.
+          - listitem [ref=e58]:
+            - paragraph [ref=e59]: Proficiency in TypeScript or JavaScript with the ability to write production-quality code.
+          - listitem [ref=e60]:
+            - paragraph [ref=e61]: Experience with CI/CD pipelines (GitLab preferred), including writing pipeline configuration, test stages, and merge request workflows.
+          - listitem [ref=e62]:
+            - paragraph [ref=e63]: Solid understanding of REST API testing and when to use API-level tests vs. UI-level tests.
+          - listitem [ref=e64]:
+            - paragraph [ref=e65]: Experience migrating legacy test automation to a modern framework, including planning the transition and maintaining coverage during the migration.
+          - listitem [ref=e66]:
+            - paragraph [ref=e67]: "Strong communication skills: able to explain technical trade-offs to non-technical stakeholders and write clear documentation."
+          - listitem [ref=e68]:
+            - paragraph [ref=e69]: A builder mindset. You think in terms of systems, feedback loops, and automation leverage, not individual test cases.
+          - listitem [ref=e70]:
+            - paragraph [ref=e71]: Comfort working in ambiguity. Our AI-driven approach is new, and the right person will help define what good looks like.
+        - paragraph [ref=e72]
+        - paragraph [ref=e73]:
+          - strong [ref=e74]: "Extra credit:"
+        - list [ref=e75]:
+          - listitem [ref=e76]:
+            - paragraph [ref=e77]: Experience with Groovy, Spock, or Geb (the legacy framework you will be migrating from).
+          - listitem [ref=e78]:
+            - paragraph [ref=e79]: Experience with contract testing (Pact or equivalent).
+          - listitem [ref=e80]:
+            - paragraph [ref=e81]: Background in health insurance, benefits administration, or regulated industries.
+          - listitem [ref=e82]:
+            - paragraph [ref=e83]: Experience building or contributing to internal developer tooling or productivity platforms.
+        - paragraph [ref=e84]:
+          - strong [ref=e85]
+        - paragraph [ref=e86]:
+          - strong [ref=e87]: "Gravie:"
+        - paragraph [ref=e88]:
+          - strong [ref=e89]
+        - paragraph [ref=e90]: In order to create a more equitable and sustainable future for employer-sponsored health insurance, we need talented people doing amazing work. In exchange, we offer a great overall employee experience with opportunities for career growth, meaningful mission-driven work, and an above average total rewards package.
+        - paragraph [ref=e91]
+        - paragraph [ref=e92]: The salary range for this position is $124,271 - $207,118 annually. Numerous factors including, but not limited to, education, skills, work experience, certifications, etc. will be considered when determining compensation. I
+        - paragraph [ref=e93]
+        - paragraph [ref=e94]: Our unique benefits program is the gravy, i.e., the special sauce that sets our compensation package apart. In addition to standard health and wellness benefits, Gravie’s package includes alternative medicine coverage, generous PTO, up to 16 weeks paid parental leave, paid holidays, a 401k program, transportation perks, education reimbursement, and paid paw-ternity leave.
+        - paragraph [ref=e95]
+        - paragraph [ref=e96]:
+          - strong [ref=e97]: "A Little More About Us:"
+        - list [ref=e98]:
+          - listitem [ref=e99]:
+            - paragraph [ref=e100]: We know healthcare. Our company was founded and is still led by industry veterans who have started and grown several market-leading companies in the space.
+          - listitem [ref=e101]:
+            - paragraph [ref=e102]: We have raised money from top tier investors who share the same long-term vision as we do of building an industry defining company that will endure over the long run. We are well capitalized.
+          - listitem [ref=e103]:
+            - paragraph [ref=e104]: Our clients love us. Customer satisfaction rates among employees using Gravie health plans consistently rank above 80% – nearly 40 points above the industry average.
+          - listitem [ref=e105]:
+            - paragraph [ref=e106]: Our culture is unique. We tend to be non-hierarchical, merit-driven, opinionated but kind people who thrive working in a high-performance, fast-paced environment. People at Gravie care deeply about making a positive impact in the lives of the people we serve. We may not be the right place for everybody, but if you get energized by doing work every day that focuses on putting consumers at the front of the line, we could be a great place for you. It takes unique people and diverse perspectives to deliver our results. We encourage you to be your authentic self – we like you that way.
+      - generic [ref=e108]: We may use artificial intelligence (AI) tools to support parts of the hiring process, such as reviewing applications, analyzing resumes, or assessing responses. These tools assist our recruitment team but do not replace human judgment. Final hiring decisions are ultimately made by humans. If you would like more information about how your data is processed, please contact us.
+      - link "apply for this job" [ref=e110] [cursor=pointer]:
+        - /url: https://jobs.lever.co/gravie/1a651cf9-4c31-417b-9b9b-4aaa2dc9de6e/apply
+  - generic [ref=e112]:
+    - paragraph [ref=e113]:
+      - link "Gravie Home Page" [ref=e114] [cursor=pointer]:
+        - /url: http://www.gravie.com
+    - link "Jobs powered by Lever logo" [ref=e115] [cursor=pointer]:
+      - /url: https://www.lever.co/job-seeker-support/
+      - generic [ref=e116]: Jobs powered by
+      - img "Lever logo" [ref=e117]
