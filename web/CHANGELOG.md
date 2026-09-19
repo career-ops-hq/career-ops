@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.12.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.11.0...web-v0.12.0) (2026-09-19)
+
+
+### Features
+
+* **web:** resizable assistant panel and a composer that grows with its content ([#4258](https://github.com/career-ops-hq/career-ops/issues/4258)) ([8be08ce](https://github.com/career-ops-hq/career-ops/commit/8be08ce362d45556b12bb659fd66360cd409ebb3))
+
+
+### Bug Fixes
+
+* **web:** add vertical padding to pipeline facet chips ([#4038](https://github.com/career-ops-hq/career-ops/issues/4038)) ([b6bc5ff](https://github.com/career-ops-hq/career-ops/commit/b6bc5ffb92e847e43b91042d4b828c99ce5960a2))
+* **web:** let report tables use the screen on large displays ([e571f2c](https://github.com/career-ops-hq/career-ops/commit/e571f2cb9de3f8952863e5c51adc437a09b83fef))
+* **web:** make CLI choices fully clickable ([b4be24f](https://github.com/career-ops-hq/career-ops/commit/b4be24f2b9e476888dedb5ee85d29df68baf53df))
+* **web:** make CLI choices fully clickable ([977bb11](https://github.com/career-ops-hq/career-ops/commit/977bb1144fec223f98b66984a9dfeb508d73f08f))
+* **web:** persist the default CLI at any installed count, not only a sole one ([#4151](https://github.com/career-ops-hq/career-ops/issues/4151)) ([ecbe651](https://github.com/career-ops-hq/career-ops/commit/ecbe651320d5da9a97ea29a0ee7e39cbd14207ed))
+* **web:** pluralize the Analytics evaluation count ([#3161](https://github.com/career-ops-hq/career-ops/issues/3161)) ([7c91c6d](https://github.com/career-ops-hq/career-ops/commit/7c91c6d9682c0441b8fdd1c0a6ce983524be02fd))
+* **web:** resolve the data root exactly as the core does ([#4064](https://github.com/career-ops-hq/career-ops/issues/4064)) ([1704575](https://github.com/career-ops-hq/career-ops/commit/17045758851f7c7294e23669f4e6c8d34edf1712))
+
 ## [0.11.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.10.0...web-v0.11.0) (2026-09-16)
 
 
