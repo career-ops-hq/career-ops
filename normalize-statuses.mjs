@@ -122,7 +122,6 @@ function normalizeStatus(raw) {
 export { normalizeStatus };
 
 const KNOWN_FLAGS = ['--help', '-h', '--dry-run'];
-const DRY_RUN = process.argv.includes('--dry-run');
 const USAGE = `Usage: node normalize-statuses.mjs [options]
 
   Options:
@@ -148,6 +147,7 @@ if (!existsSync(APPS_FILE)) {
   process.exit(0);
 }
 
+const DRY_RUN = process.argv.includes('--dry-run');
 let trackerTransaction = null;
 if (!DRY_RUN) {
   try {

@@ -38,6 +38,7 @@ const SCRIPTS = [
   ['linkedin-join.mjs', '--sinse'],
   ['application-artifacts.mjs', '--reprot'],
   ['clean-markers.mjs', '--dryrun'],
+  ['normalize-statuses.mjs', '--dryrun'],
 ];
 
 for (const [script, typo] of SCRIPTS) {
@@ -313,4 +314,38 @@ test('linkedin-join.mjs --help --bogus still errors', () => {
   const r = runScript('linkedin-join.mjs', '--help', '--bogus');
   assert.equal(r.status, 1, `--help --bogus exited ${r.status}, want 1`);
   assert.match(r.all, /unrecognized flag/i);
+});
+
+// normalize-statuses.mjs rewrites applications.md, so a mistyped --dry-run used
+// to be ignored and the tracker was edited at exit 0.
+test('normalize-statuses.mjs --help exits 0 and prints usage', () => {
+  const r = runScript('normalize-statuses.mjs', '--help');
+  assert.equal(r.status, 0, `normalize-statuses.mjs --help exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'normalize-statuses.mjs --help printed no usage block');
+});
+
+test('normalize-statuses.mjs -h exits 0 and prints usage', () => {
+  const r = runScript('normalize-statuses.mjs', '-h');
+  assert.equal(r.status, 0, `normalize-statuses.mjs -h exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'normalize-statuses.mjs -h printed no usage block');
+});
+
+test('normalize-statuses.mjs rejects --bogus and lists the valid flags', () => {
+  const r = runScript('normalize-statuses.mjs', '--bogus');
+  assert.equal(r.status, 1, `normalize-statuses.mjs --bogus exited ${r.status}, want 1`);
+  assert.match(r.all, /unrecognized flag\(s\): --bogus/i);
+  assert.match(r.all, /--help, -h, --dry-run/, 'the valid flags were not listed');
+});
+
+test('normalize-statuses.mjs --help --bogus still errors', () => {
+  const r = runScript('normalize-statuses.mjs', '--help', '--bogus');
+  assert.equal(r.status, 1, `normalize-statuses.mjs --help --bogus exited ${r.status}, want 1`);
+  assert.match(r.all, /unrecognized flag/i);
+});
+
+// --dry-run never writes, so it is safe against whatever tracker the checkout has.
+test('normalize-statuses.mjs still accepts --dry-run as a known flag', () => {
+  const r = runScript('normalize-statuses.mjs', '--dry-run');
+  assert.equal(r.status, 0, `normalize-statuses.mjs --dry-run exited ${r.status}, want 0`);
+  assert.doesNotMatch(r.all, /unrecognized flag/i, '--dry-run must not be rejected as unrecognized');
 });
