@@ -34,9 +34,10 @@ function savedTheme(): Theme | null {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // The inline bootstrap script establishes the correct class before React
-  // hydrates. Starting from the class-derived value prevents an icon flash.
-  const [theme, setThemeState] = useState<Theme>(currentTheme);
+  // Keep the server and first client snapshots identical. The bootstrap script
+  // establishes the document class before paint; the effect adopts it after
+  // hydration without forcing React to rebuild theme-dependent controls.
+  const [theme, setThemeState] = useState<Theme>("dark");
 
   useEffect(() => {
     const initial = currentTheme();
@@ -89,4 +90,3 @@ export function useTheme(): ThemeContextValue {
   if (!context) throw new Error("useTheme must be used inside ThemeProvider");
   return context;
 }
-
