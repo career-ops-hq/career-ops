@@ -323,11 +323,13 @@ function canary() {
   const targetSha = git(ROOT, 'rev-parse', 'HEAD');
   const newestOld = newestAncestorTag(targetSha);
   if (!newestOld) { console.error('No release tag is an ancestor of HEAD'); process.exit(1); }
-  const { failures } = runLeg({
+  const { failures, output } = runLeg({
     oldTag: newestOld, targetSha, label: 'canary',
     mutateMirror: (mirror, work) => {
-      // Poison commit: track cv.md and add it to SYSTEM_PATHS so the old
-      // updater checks it out over the user's CV.
+      // Poison commit: track cv.md and add it to SYSTEM_PATHS so the updater's
+      // user-layer guard must either refuse the entry or the harness must catch
+      // a byte-level clobber. Both outcomes prove this canary can go red on a
+      // dangerous manifest. A completely silent pass proves nothing.
       const wt = join(work, 'poison-wt');
       git(mirror, 'worktree', 'add', wt, 'main');
       writeFileSync(join(wt, 'cv.md'), '# CLOBBERED BY UPDATE\n');
@@ -344,8 +346,14 @@ function canary() {
     },
   });
   const clobbered = failures.some((f) => f.startsWith('user file byte-identical: cv.md'));
-  if (clobbered) { console.log('CANARY GREEN: harness detected the planted user-file clobber'); process.exit(0); }
-  console.error('CANARY RED: planted clobber was NOT detected — the harness cannot fail; do not trust its green');
+  const refused = /Refused \d+ manifest entry\(ies\) naming the user layer:[\s\S]*\bcv\.md\b/.test(output || '');
+  if (clobbered || refused) {
+    console.log(clobbered
+      ? 'CANARY GREEN: harness detected the planted user-file clobber'
+      : 'CANARY GREEN: updater refused the planted user-layer manifest entry');
+    process.exit(0);
+  }
+  console.error('CANARY RED: planted clobber was neither refused nor detected — do not trust this gate');
   process.exit(1);
 }
 
