@@ -2049,6 +2049,7 @@ const allowedFiles = [
   // Dashboard credit string
   'dashboard/internal/ui/screens/pipeline.go',
   'dashboard/internal/ui/screens/progress.go',
+  'dashboard/internal/ui/screens/stats.go',
 ];
 
 // Paths added for #4131, checked by EXACT match rather than folded into
