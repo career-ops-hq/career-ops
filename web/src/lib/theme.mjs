@@ -18,4 +18,3 @@ export function isTheme(value) {
 export function storedTheme(value, fallback = "dark") {
   return isTheme(value) ? value : fallback;
 }
-
