@@ -8,13 +8,13 @@ import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { LogDialog } from "@/components/followups/log-dialog";
 import { NextDateDialog } from "@/components/followups/next-date-dialog";
+import { FollowupStatusSelect } from "@/components/followups/followup-status-select";
 import { scoreTone } from "@/lib/format";
 import {
   type CadenceEntry,
   type CadenceMetadata,
   type Urgency,
   daysHeatClass,
-  followupStatusTone,
   oxfordJoin,
   relativeDays,
   urgencyRank,
@@ -198,6 +198,9 @@ export function FollowupsView() {
         <div>
           <h1 className="font-display text-2xl tracking-tight text-landing">Follow-up Tracker</h1>
           <p className="mt-1 text-sm text-muted">{subtitle}</p>
+          <p className="mt-2 max-w-3xl text-xs leading-relaxed text-faint">
+            Use <span className="font-medium text-muted">Log</span> after you actually send an email, LinkedIn message, or call. The count and next date update automatically; status changes recalculate urgency, while <span className="font-medium text-muted">Next date</span> lets you pin a custom reminder.
+          </p>
         </div>
         <div className="relative w-56 max-w-[35vw]">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
@@ -280,6 +283,7 @@ export function FollowupsView() {
                   onToggle={() => toggleExpand(e.num)}
                   onLog={() => setDialogFor(e)}
                   onPin={() => setPinFor(e)}
+                  onStatusSaved={refetch}
                   onRemove={removeLogged}
                 />
               ))}
@@ -333,6 +337,7 @@ function FollowupRow({
   onToggle,
   onLog,
   onPin,
+  onStatusSaved,
   onRemove,
 }: {
   entry: CadenceEntry;
@@ -340,6 +345,7 @@ function FollowupRow({
   onToggle: () => void;
   onLog: () => void;
   onPin: () => void;
+  onStatusSaved: () => void;
   onRemove: (num: number) => void;
 }) {
   const statusLabel = e.status.charAt(0).toUpperCase() + e.status.slice(1);
@@ -376,10 +382,15 @@ function FollowupRow({
           <Badge tone={scoreTone(e.score)}>{e.score || "—"}</Badge>
         </td>
         <td className="px-2.5 py-3">
-          <Badge tone={followupStatusTone(e.status)}>{statusLabel}</Badge>
+          <FollowupStatusSelect n={e.num} current={statusLabel} onSaved={onStatusSaved} />
         </td>
         <td className="px-2.5 py-3">
-          <Badge tone={urgencyTone(e.urgency)}>{e.urgency}</Badge>
+          <Badge
+            tone={urgencyTone(e.urgency)}
+            title="Urgency is calculated from status, follow-up history, and the next follow-up date"
+          >
+            {e.urgency}
+          </Badge>
         </td>
         <td className={cn("px-2.5 py-3 tabular-nums", daysHeatClass(e.daysSinceApplication))}>{e.daysSinceApplication}</td>
         <td className="whitespace-nowrap px-2.5 py-3">
@@ -417,6 +428,7 @@ function FollowupRow({
             <button
               type="button"
               onClick={onPin}
+              aria-label={e.nextOverride ? `Change next follow-up date for ${e.company}` : `Set next follow-up date for ${e.company}`}
               title={e.nextOverride ? `Next date pinned to ${e.nextOverride} — change or clear` : "Pin a custom next follow-up date"}
               className={cn(
                 "rounded-md p-1 transition-colors hover:bg-brand-soft hover:text-brand",
@@ -424,6 +436,7 @@ function FollowupRow({
               )}
             >
               <CalendarClock className="size-3.5" />
+              <span className="hidden xl:inline">Next date</span>
             </button>
           </span>
         </td>

@@ -80,8 +80,8 @@ const DEFAULT_SILENCE_WINDOW_DAYS = 28;
 // Statuses that count as "the company answered" — a rejection IS an answer, and
 // a hire is the strongest answer of all (omitting it once labelled a company
 // that hired you 'no-history', or 'silent-on-you' against other quiet rows).
-const RESPONDED_STATUSES = new Set(['responded', 'interview', 'offer', 'hired', 'rejected']);
-const OUTCOME_LABELS = { responded: 'Responded', interview: 'Interview', offer: 'Offer', hired: 'Hired', rejected: 'Rejected' };
+const RESPONDED_STATUSES = new Set(['responded', 'assessment', 'interview', 'offer', 'hired', 'rejected']);
+const OUTCOME_LABELS = { responded: 'Responded', assessment: 'Assessment', interview: 'Interview', offer: 'Offer', hired: 'Hired', rejected: 'Rejected' };
 
 const EXPLANATION_LINE =
   'high-volume inboxes, evergreen requisitions, re-opened searches, and your own unlogged responses ' +

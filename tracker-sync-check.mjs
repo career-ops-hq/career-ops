@@ -20,8 +20,8 @@
  *   bucket rather than being silently guessed.
  *
  * Resolution (see compareLifecycle):
- *   Tier 1 (auto-resolve) — templates/states.yml's 8 canonical states have a
- *   one-way lifecycle order: Evaluated -> Applied -> Responded -> Interview
+ *   Tier 1 (auto-resolve) — templates/states.yml's canonical states have a
+ *   one-way lifecycle order: Evaluated -> Applied -> Responded -> Assessment -> Interview
  *   -> {Offer | Rejected | Discarded | SKIP} (the last four are terminal, no
  *   further order among them, but any of them supersedes an earlier stage).
  *   If the two files disagree and one side is strictly later-stage, that's
@@ -137,6 +137,7 @@ const STATUS_ALIASES = {
   'aplicado': 'applied', 'enviada': 'applied', 'aplicada': 'applied',
   'applied': 'applied', 'sent': 'applied',
   'respondido': 'responded',
+  'screening': 'assessment', 'online assessment': 'assessment', 'online_assessment': 'assessment', 'online screening': 'assessment',
   'entrevista': 'interview',
   'oferta': 'offer',
   'rechazado': 'rejected', 'rechazada': 'rejected',
@@ -146,7 +147,7 @@ const STATUS_ALIASES = {
 };
 
 /**
- * Normalize an applications.md status cell to one of the 8 canonical ids.
+ * Normalize an applications.md status cell to one of the canonical ids.
  * @param {string} raw
  * @returns {string}
  */
@@ -157,7 +158,7 @@ export function normalizeStatus(raw) {
 }
 
 // active-interviews.md's Status column tracks a per-round state (Scheduled,
-// Confirmed, Completed, Rejected, ...), not one of the 8 canonical tracker
+// Confirmed, Completed, Rejected, ...), not one of the canonical tracker
 // states directly. Only the terminal outcomes below carry unambiguous
 // tracker-status meaning; anything else (Scheduled/Confirmed/Completed/
 // Pending/unrecognized) means the row is simply present in the live
@@ -175,7 +176,7 @@ const INTERVIEW_ROUND_STATUS_MAP = {
 };
 
 /**
- * Normalize an active-interviews.md Status cell to one of the 8 canonical
+ * Normalize an active-interviews.md Status cell to one of the canonical
  * ids, defaulting to "interview" (presence in the live interview log implies
  * at least that stage) when the cell isn't a recognized terminal outcome.
  * @param {string} raw
