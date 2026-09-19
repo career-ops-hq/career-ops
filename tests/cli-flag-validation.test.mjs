@@ -163,7 +163,6 @@ test('fix-slugs honours both --file <path> and --file=<path> syntax', () => {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-fixslugs-flag-'));
   try {
     const customPortals = join(dir, 'custom.yml');
-    // Non-existent custom path should be reported when flags are valid
     const r1 = runScript('fix-slugs.mjs', '--file', customPortals);
     assert.match(r1.all, new RegExp(`no portals file at ${customPortals.replace(/\\/g, '\\\\')}`));
 
@@ -205,6 +204,48 @@ test('fix-slugs rejects missing --file values (bare, empty, or next-is-flag)', (
   assert.match(rShortFlagEq.all, /--file requires a value/);
   assert.doesNotMatch(rShortFlagEq.all, /no portals file at/i);
 });
+
+// --- analyze-patterns specific: numeric value flags must be strict ----------
+for (const [form, args] of [
+  ['space-separated', ['--min-threshold', 'abc']],
+  ['negative', ['--min-threshold', '-5']],
+  ['decimal', ['--min-threshold', '1.5']],
+  ['extra characters', ['--min-threshold', '10abc']],
+  ['unsafe integer', ['--min-threshold=9007199254740992']],
+]) {
+  test(`analyze-patterns rejects ${form} threshold values`, () => {
+    const r = runScript('analyze-patterns.mjs', ...args);
+    assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+    assert.match(r.all, /--min-threshold requires a non-negative integer, got/);
+  });
+}
+
+for (const [form, args] of [
+  ['space-separated', ['--min-vendor-n', 'abc']],
+  ['zero', ['--min-vendor-n', '0']],
+  ['negative', ['--min-vendor-n=-1']],
+  ['decimal', ['--min-vendor-n=1.5']],
+  ['unsafe integer', ['--min-vendor-n', '9007199254740992']],
+]) {
+  test(`analyze-patterns rejects ${form} vendor sample values`, () => {
+    const r = runScript('analyze-patterns.mjs', ...args);
+    assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+    assert.match(r.all, /--min-vendor-n requires a positive integer, got/);
+  });
+}
+
+test('analyze-patterns rejects a trailing --min-threshold without an operand', () => {
+  const r = runScript('analyze-patterns.mjs', '--min-threshold');
+  assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+  assert.match(r.all, /--min-threshold requires a value/);
+});
+
+test('analyze-patterns rejects a trailing --min-vendor-n without an operand', () => {
+  const r = runScript('analyze-patterns.mjs', '--min-vendor-n');
+  assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+  assert.match(r.all, /--min-vendor-n requires a value/);
+});
+
 
 // --- missing operand for a RECOGNIZED value-taking flag (#3087) ------------
 //
