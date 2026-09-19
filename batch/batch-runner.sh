@@ -50,7 +50,7 @@ RATE_LIMIT_SLEEP=300
 BATCH_PAUSED=false
 STATUS_ONLY=false
 WATCH_MODE=false
-LIMIT=0
+LIMIT=0  # internal sentinel only; explicit --limit must be positive
 
 # Return success for non-negative integer or decimal strings.
 is_decimal_number() {
@@ -76,7 +76,7 @@ Options:
   --retry-failed       Only retry offers marked as "failed" in state
   --resume-paused      Resume offers paused by a Claude session/rate limit
   --start-from N       Start from offer ID N (skip earlier IDs)
-  --limit N            Max number of offers to process in this run
+  --limit N            Max offers: positive integer; omit for no limit
   --max-retries N      Max retry attempts per offer (default: 2)
   --min-score N        Skip PDF/tracker for offers scoring below N (default: 0 = off)
   --skip-pdf           Skip PDF generation entirely (write ❌ in tracker PDF column)
@@ -120,7 +120,14 @@ while [[ $# -gt 0 ]]; do
     --retry-failed) RETRY_FAILED=true; shift ;;
     --resume-paused) RESUME_PAUSED=true; shift ;;
     --start-from) START_FROM="$2"; shift 2 ;;
-    --limit) LIMIT="$2"; shift 2 ;;
+    --limit)
+      if [[ $# -lt 2 ]] || ! [[ "$2" =~ ^[0-9]+$ ]] || [[ "$2" =~ ^0+$ ]]; then
+        echo "ERROR: --limit must be a positive integer; omit --limit for no limit."
+        exit 1
+      fi
+      LIMIT="$2"
+      shift 2
+      ;;
     --max-retries) MAX_RETRIES="$2"; shift 2 ;;
     --min-score) MIN_SCORE="$2"; shift 2 ;;
     --skip-pdf) SKIP_PDF=true; shift ;;
@@ -144,11 +151,6 @@ fi
 
 if ! is_decimal_number "$MIN_SCORE"; then
   echo "ERROR: --min-score must be a non-negative number."
-  exit 1
-fi
-
-if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
-  echo "ERROR: --limit must be a non-negative integer."
   exit 1
 fi
 

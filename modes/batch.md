@@ -104,7 +104,7 @@ Options:
 - `--retry-failed` — retry only failed jobs
 - `--resume-paused` — resume jobs paused after a Claude session/rate limit
 - `--start-from N` — start from ID N
-- `--limit N` — max number of jobs to process in this run
+- `--limit N` — max number of jobs to process in this run (positive integer; `0` is rejected, omit the flag for no limit)
 - `--parallel N` — N workers in parallel
 - `--max-retries N` — attempts per job (default: 2)
 - `--rate-limit-sleep N` — seconds to wait before retrying a transient rate-limited worker (default: 300; use 0 to pause the batch immediately)
