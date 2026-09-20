@@ -129,7 +129,7 @@ function ProgressPanel({ metrics }: { metrics: ProgressMetrics }) {
           {metrics.weeklyActivity.length ? (
             <div className="mt-5 space-y-3">
               {metrics.weeklyActivity.map((week) => {
-                return <BarRow key={week.week} label={week.shortWeek} count={week.count} pct={week.count} widthPct={(week.count / maxWeeklyActivity) * 100} tone="bg-sky-400" />;
+                return <BarRow key={week.week} label={week.shortWeek} count={week.count} widthPct={(week.count / maxWeeklyActivity) * 100} tone="bg-sky-400" />;
               })}
             </div>
           ) : <EmptyData label="No dated activity yet" detail="Weekly activity will appear once evaluations have valid dates." />}
@@ -198,8 +198,9 @@ function RateRow({ label, value }: { label: string; value: number }) {
   return <div className="flex items-center justify-between gap-3 border-b border-border py-3 last:border-0 xl:first:pt-0"><span className="text-sm text-muted">{label} rate</span><span className="font-mono text-lg font-semibold tabular-nums text-foreground">{value.toFixed(1)}%</span></div>;
 }
 
-function BarRow({ label, count, pct, widthPct, tone }: { label: string; count: number; pct: number; widthPct: number; tone: string }) {
-  return <div className="grid grid-cols-[minmax(94px,0.45fr)_minmax(80px,1fr)_auto] items-center gap-3"><span className="break-words text-xs text-muted" title={label}>{label}</span><div className="h-2 overflow-hidden rounded-full bg-surface-hover" role="img" aria-label={`${label}: ${count}, ${Math.round(pct)} percent`}><div className={`h-full rounded-full ${tone} transition-[width] duration-500`} style={{ width: `${Math.min(100, Math.max(0, widthPct))}%` }} /></div><span className="min-w-16 text-right font-mono text-xs tabular-nums text-foreground">{count} <span className="text-faint">({Math.round(pct)}%)</span></span></div>;
+function BarRow({ label, count, pct, widthPct, tone }: { label: string; count: number; pct?: number; widthPct: number; tone: string }) {
+  const accessibleValue = pct === undefined ? `${label}: ${count}` : `${label}: ${count}, ${Math.round(pct)} percent`;
+  return <div className="grid grid-cols-[minmax(94px,0.45fr)_minmax(80px,1fr)_auto] items-center gap-3"><span className="break-words text-xs text-muted" title={label}>{label}</span><div className="h-2 overflow-hidden rounded-full bg-surface-hover" role="img" aria-label={accessibleValue}><div className={`h-full rounded-full ${tone} transition-[width] duration-500`} style={{ width: `${Math.min(100, Math.max(0, widthPct))}%` }} /></div><span className="min-w-16 text-right font-mono text-xs tabular-nums text-foreground">{count}{pct === undefined ? null : <> <span className="text-faint">({Math.round(pct)}%)</span></>}</span></div>;
 }
 
 function Distribution({ rows, emptyLabel = "No distribution data" }: { rows: { label: string; count: number; pct: number }[]; emptyLabel?: string }) {

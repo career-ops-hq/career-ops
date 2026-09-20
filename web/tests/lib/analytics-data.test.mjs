@@ -84,3 +84,28 @@ test("non-USD amounts and finance acronyms are not relabeled as USD or locations
   assert.equal(enriched.location, "Singapore");
   assert.equal(enriched.payMax, 0);
 });
+
+test("role text does not leak into a city and state parsed from notes", () => {
+  const enriched = enrichAnalyticsApplication(
+    application("Austin, TX; Hybrid", "Platform Engineer"),
+  );
+
+  assert.equal(enriched.location, "Austin");
+  assert.equal(enriched.workMode, "Hybrid");
+});
+
+test("a location without a work-mode signal stays unclassified", () => {
+  const enriched = enrichAnalyticsApplication(application("Berlin; Salary USD 140K"));
+
+  assert.equal(enriched.location, "Berlin");
+  assert.equal(enriched.workMode, "");
+  assert.equal(enriched.payMax, 140_000);
+});
+
+test("a dollar amount explicitly qualified as CAD is not treated as USD", () => {
+  const enriched = enrichAnalyticsApplication(application("Remote; Salary $140K CAD"));
+
+  assert.equal(enriched.workMode, "Remote");
+  assert.equal(enriched.payMax, 0);
+  assert.equal(enriched.paySource, "");
+});

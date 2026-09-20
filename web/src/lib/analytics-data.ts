@@ -12,6 +12,7 @@ export type AnalyticsApplication = Application & {
 // Keep suffixes token-bound so a requisition such as `340741BR` cannot be
 // misread as `340741B` (the same false-positive guard as the TUI parser).
 const MONEY = /(?:[$€£¥₹₺₩]|USD|EUR|GBP|PLN|CHF|SGD|AUD|CAD)?\s*(\d[\d,]*(?:\.\d+)?)\s*([KkMmBb])?(?![A-Za-z])(?:\s*[-–]\s*(?:[$€£¥₹₺₩]|USD|EUR|GBP|PLN|CHF|SGD|AUD|CAD)?\s*(\d[\d,]*(?:\.\d+)?)\s*([KkMmBb])?(?![A-Za-z]))?/g;
+const NON_USD_CURRENCY = /(?:€|£|¥|₹|₺|₩|\b(?:EUR|GBP|PLN|CHF|SGD|AUD|CAD)\b)/i;
 
 function scalar(source: string, key: string): string {
   const match = source.match(new RegExp(`^${key}:\\s*(.+)$`, "im"));
@@ -34,9 +35,12 @@ function highestMoney(text: string): { value: number; source: "POSTED" | "est" |
   for (const match of text.matchAll(MONEY)) {
     const hasCurrency = Boolean(match[0].match(/\$|\bUSD\b/));
     if (!hasCurrency) continue;
+    const before = text.slice(Math.max(0, (match.index ?? 0) - 8), match.index ?? 0);
+    const after = text.slice((match.index ?? 0) + match[0].length, (match.index ?? 0) + match[0].length + 8);
+    if (NON_USD_CURRENCY.test(before) || NON_USD_CURRENCY.test(after)) continue;
     const value = Math.max(moneyNumber(match[1], match[2]), moneyNumber(match[3] ?? "0", match[4] ?? ""));
-    const after = text.slice((match.index ?? 0) + match[0].length);
-    if (/^\s*(?:valuation|(?:total\s+)?raised|series\s|round\b)/i.test(after)) continue;
+    const trailingText = text.slice((match.index ?? 0) + match[0].length);
+    if (/^\s*(?:valuation|(?:total\s+)?raised|series\s|round\b)/i.test(trailingText)) continue;
     // Bare M/B values in prose are usually company scale or valuation, not
     // compensation (for example, "1,079.2M devices"). Keep currency-backed
     // values, but do not let those metrics become a salary datapoint.
@@ -89,12 +93,12 @@ export function enrichAnalyticsApplication(app: Application, reportContent = "")
   const notes = app.notes ?? "";
   const notePay = highestMoney(notes);
   const combinedText = `${app.role} ${notes}`;
-  const noteLocation = fallbackLocation(`${app.role} ${notes}`);
+  const noteLocation = fallbackLocation(notes);
   return {
     ...app,
     archetype: reportArchetype(reportContent, ""),
     location: noteLocation,
-    workMode: normalizeWorkMode("", combinedText) || (noteLocation ? "Full" : ""),
+    workMode: normalizeWorkMode("", combinedText),
     payMax: notePay.value,
     paySource: notePay.source,
   };
