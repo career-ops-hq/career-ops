@@ -124,6 +124,64 @@ html {
   animation: job-progress 1.3s ease-in-out infinite;
 }
 
+/* ── Route transition feedback ──────────────────────────────────────────── */
+/* The skeleton remains intentionally neutral so it works in both themes and
+   keeps the page structure visible while server components/data resolve. */
+@keyframes skeleton-sheen {
+  100% { transform: translateX(100%); }
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  border-radius: 0.75rem;
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--fg) 9%, transparent),
+    transparent
+  );
+  animation: skeleton-sheen 1.5s ease-in-out infinite;
+}
+
+@keyframes route-bar-creep {
+  0% { transform: scaleX(0.02); }
+  40% { transform: scaleX(0.35); }
+  75% { transform: scaleX(0.68); }
+  100% { transform: scaleX(0.9); }
+}
+
+.route-bar {
+  transform-origin: 0 50%;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--color-brand) 70%, transparent), var(--color-brand), var(--color-brand-200));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-brand) 60%, transparent);
+  will-change: transform, opacity;
+}
+
+.route-bar[data-state="loading"] {
+  opacity: 1;
+  animation: route-bar-creep 8s cubic-bezier(0.1, 0.7, 0.2, 1) forwards;
+}
+
+.route-bar[data-state="done"] {
+  opacity: 0;
+  transform: scaleX(1);
+  transition: transform 0.2s ease-out, opacity 0.35s ease-out 0.15s;
+}
+
+.route-bar[data-state="idle"] {
+  opacity: 0;
+  transform: scaleX(0);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cli-cursor,
   .animate-terminal-popup,
@@ -131,6 +189,8 @@ html {
     animation: none;
   }
   .job-indeterminate::after { animation: none; width: 100%; opacity: 0.35; }
+  .skeleton::after { animation: none; }
+  .route-bar[data-state="loading"] { animation: none; transform: scaleX(0.9); }
 }
 
 /* ── Report / CV markdown prose (theme-aware) ───────────────────────────── */
