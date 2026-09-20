@@ -40,6 +40,9 @@ const WEIGHTS = {
   hidden: 5,       // no hidden text / keyword stuffing
 };
 
+import { asciiFold } from './lib/ascii-fold.mjs';
+import { decodeEntities } from './providers/_html-entities.mjs';
+
 const TEXT_MIN_CHARS = 300;      // below this, the CV likely has no real text layer
 const TEXT_LOW_WITH_IMG = 800;   // images + this little text ⇒ text probably baked in
 
@@ -95,7 +98,7 @@ function collapse(text) {
 
 /** Strip a fragment of inner tags to a plain-text label. */
 function stripInline(fragment) {
-  return collapse(fragment.replace(/<[^>]+>/g, ' '));
+  return collapse(decodeEntities(fragment.replace(/<[^>]+>/g, ' ')));
 }
 
 /**
@@ -187,16 +190,11 @@ function stripNonContentRegions(html) {
  * @returns {string}
  */
 function extractVisibleText(html) {
-  return collapse(
+  return decodeEntities(collapse(
     stripNonContentRegions(html)
       .replace(/<\/?[a-zA-Z][^>]*>/g, ' ')
-      .replace(/&nbsp;/gi, ' ')
-      .replace(/&lt;/gi, '<')
-      .replace(/&gt;/gi, '>')
-      // &amp; is decoded LAST: doing it earlier could turn "&amp;lt;" into "&lt;"
-      // and then into "<", double-unescaping text that was never an entity.
-      .replace(/&amp;/gi, '&')
-  );
+      .replace(/&nbsp;/gi, ' '),
+  ));
 }
 
 /**
@@ -289,7 +287,11 @@ function extractHeadings(html) {
   for (const m of html.matchAll(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/gi)) {
     out.push(stripInline(m[1]));
   }
-  return out.map(s => s.toLowerCase()).filter(Boolean);
+  // Headings are folded, not merely lowercased: `Éducation` has to match the
+  // `education` pattern, and `Übersicht` has to reach `summary`. asciiFold also
+  // strips the combining marks NFD leaves behind, which is what makes an
+  // accented heading comparable to the English literal the pattern carries.
+  return out.map(s => asciiFold(s)).filter(Boolean);
 }
 
 /**
@@ -486,9 +488,13 @@ function auditAts(html, opts = {}) {
   let keywordCoverage = null;
   const keywords = normalizeKeywords(opts.keywords, opts.role);
   if (keywords.length) {
-    const haystack = text.toLowerCase();
-    const found = keywords.filter(k => haystack.includes(k.toLowerCase()));
-    const missingKeywords = keywords.filter(k => !haystack.includes(k.toLowerCase()));
+    // Folded on both sides: a CV written with accents and a keyword typed
+    // without them are the same word, and a keyword list pasted with an
+    // entity in it should still match the CV's real text.
+    const haystack = asciiFold(text);
+    const needle = k => asciiFold(k);
+    const found = keywords.filter(k => haystack.includes(needle(k)));
+    const missingKeywords = keywords.filter(k => !haystack.includes(needle(k)));
     keywordCoverage = {
       total: keywords.length,
       found: found.length,
