@@ -8,6 +8,7 @@ import {
   MACOS_BROWSER_LIKE_USER_AGENT,
 } from '../user-agent.mjs';
 import { providerFetchContext } from './_ip-guard.mjs';
+import { normalizeUrl } from '../url-key.mjs';
 
 export { BROWSER_LIKE_USER_AGENT, MACOS_BROWSER_LIKE_USER_AGENT };
 
@@ -338,5 +339,11 @@ export function makeHttpCtx() {
     fetchJson,
     fetchText,
     fetchResponse,
+    // The canonical posting-URL key, so a provider can deduplicate its own
+    // results the way the tracker and scanner do. Handing it over through ctx
+    // is what keeps the behaviour identical: `url-key.mjs` is dependency-free,
+    // so a standalone provider receives the same function the core calls rather
+    // than importing the file or copying its body (#4218).
+    normalizePostingUrl: normalizeUrl,
   };
 }
