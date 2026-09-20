@@ -15952,6 +15952,40 @@ try {
       fail(`web status list(s) missing canonical state(s) — dashboard can't set/count them (#2249): ${drift.join(' | ')}`);
     }
 
+    // Analytics derives its funnel from canonical status values rather than
+    // keeping another copy of the dashboard's status list. Exercise every
+    // non-SKIP state through the real module so a future refactor cannot drop
+    // a lifecycle state without the root contract gate noticing.
+    const analyticsPath = join(ROOT, 'web', 'src', 'lib', 'analytics-metrics.mjs');
+    if (existsSync(analyticsPath)) {
+      try {
+        const { computeProgressMetrics } = await import(pathToFileURL(analyticsPath).href);
+        const canonical = stateLabels.map((label) => label.toUpperCase()).filter((label) => label !== 'SKIP');
+        const synthetic = canonical.map((status) => ({ status, score: '4.0/5', date: '2026-09-18' }));
+        const countIn = (allowed) => canonical.filter((status) => allowed.has(status)).length;
+        const applied = countIn(new Set(['APPLIED', 'RESPONDED', 'ASSESSMENT', 'INTERVIEW', 'OFFER', 'HIRED', 'REJECTED']));
+        const responded = countIn(new Set(['RESPONDED', 'ASSESSMENT', 'INTERVIEW', 'OFFER', 'HIRED']));
+        const interview = countIn(new Set(['INTERVIEW', 'OFFER', 'HIRED']));
+        const offer = countIn(new Set(['OFFER', 'HIRED']));
+        const expectedFunnel = [canonical.length, applied, responded, interview, offer];
+        const metrics = computeProgressMetrics(synthetic);
+        const actualFunnel = metrics.funnel?.map((stage) => stage.count) ?? [];
+        const expectedActive = countIn(new Set(canonical.filter((status) => !['REJECTED', 'DISCARDED'].includes(status))));
+        const expectedOffers = offer;
+        const contractOk = metrics.tracked === canonical.length
+          && JSON.stringify(actualFunnel) === JSON.stringify(expectedFunnel)
+          && metrics.activeApps === expectedActive
+          && metrics.totalOffers === expectedOffers;
+        if (contractOk) {
+          pass('analytics progress covers every canonical non-SKIP state, including terminal states');
+        } else {
+          fail(`analytics progress dropped or misclassified a canonical non-SKIP state: expected ${JSON.stringify(expectedFunnel)}, got ${JSON.stringify(actualFunnel)}`);
+        }
+      } catch (e) {
+        fail(`analytics progress contract test crashed: ${e.message}`);
+      }
+    }
+
     // 55.3b+ the degraded-path FALLBACK in the states ACL (career-ops-ui's
     // find, #2282). It promised to mirror states.yml, drifted to 8 states
     // while the live path had 9, and later to 31 missing aliases (#2705).
