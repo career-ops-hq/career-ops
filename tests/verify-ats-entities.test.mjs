@@ -189,3 +189,15 @@ test('a keyword that folds to nothing is never counted as found', () => {
     'only the keyword present in the text may be found');
   assert.deepEqual(result.keywordCoverage.missing, ['工作经历']);
 });
+
+test('an alias listed in accented form still matches a folded heading', () => {
+  // Headings reach the matcher folded, so an accented alias such as `übersicht`
+  // or `experiência` was dead weight: the heading is `ubersicht` by then. Raised in
+  // review on #4330, and it also made the file comment above the table false.
+  assert.ok(extractHeadings('<h2>Übersicht</h2>').includes('summary'),
+    'the documented German summary heading must map to summary');
+  assert.ok(extractHeadings('<h2>Experiência</h2>').includes('experience'),
+    'the Portuguese experience heading must map to experience');
+  assert.ok(extractHeadings('<h2>Formação</h2>').includes('education'),
+    'the Portuguese education heading must map to education');
+});

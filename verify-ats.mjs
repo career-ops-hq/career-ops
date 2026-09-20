@@ -327,6 +327,9 @@ const LOCALIZED_SECTION_ALIASES = [
   ['formación', 'education'], ['formação', 'education'], ['formation', 'education'],
   ['habilidades', 'skills'], ['competências', 'skills'], ['kenntnisse', 'skills'],
   ['resumen', 'summary'], ['resumo', 'summary'], ['profil', 'summary'],
+  // Both forms are listed: the accented entry matches a heading written with the
+  // umlaut, the folded one matches the same heading typed without it.
+  ['übersicht', 'summary'], ['ubersicht', 'summary'],
 ];
 
 function extractHeadings(html) {
