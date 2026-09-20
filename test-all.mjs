@@ -2509,7 +2509,7 @@ const batchReserveSentence = batchTrackerStep
     /\b(?:numbers?|tracker|REPORT_NUM)\b/i.test(sentence));
 const batchNumIsReserved =
   batchReserveSentence !== undefined &&
-  !/(?:\bnot\b|\bnever\b|\bcannot\b|n't)[^.]*\breserv/i.test(batchReserveSentence);
+  !/(?:\bnot\b|\bnever\b|\bcannot\b|n['’]t)[^.]*\breserv/i.test(batchReserveSentence);
 if (
   batchTrackerRowShape &&
   batchNumIsReserved &&
