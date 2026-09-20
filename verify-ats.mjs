@@ -280,6 +280,22 @@ function extractInlineStyles(html) {
  * @returns {string[]}
  */
 /**
+ * Fold a string for accent-insensitive comparison, keeping punctuation.
+ *
+ * Lowercasing plus NFD mark-stripping is the part that makes an accented CV match
+ * a plain keyword, and it leaves `C++` intact so it only matches `C++`.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+function foldAccents(value) {
+  return String(value ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}+/gu, '');
+}
+
+/**
  * Non-Latin section headings mapped to the canonical English name.
  *
  * A CV written in another language is not an unparseable CV, and reporting its
@@ -362,11 +378,36 @@ function localizedSections(heading) {
   let rest = heading;
   const needles = [...LOCALIZED_SECTION_ALIASES].sort((a, b) => b[0].length - a[0].length);
   for (const [needle, canonical] of needles) {
-    if (!rest.includes(needle)) continue;
+    const remainder = matchAlias(rest, needle);
+    if (remainder === null) continue;
     out.push(canonical);
-    rest = rest.split(needle).join(' ');
+    rest = remainder;
   }
   return out;
+}
+
+/**
+ * Match one alias against a heading, returning the heading with the match consumed,
+ * or null when the alias does not apply.
+ *
+ * A Latin alias must sit on word boundaries. Plain substring matching made
+ * `formation` hit inside `information`, so a CV with an "Information" heading
+ * reported an education section it does not have. Boundary syntax is only reliable
+ * for Latin scripts, so a non-Latin alias keeps substring matching.
+ *
+ * @param {string} heading - Lowercased heading text, with earlier matches removed.
+ * @param {string} needle - Alias to look for.
+ * @returns {string|null}
+ */
+function matchAlias(heading, needle) {
+  if (/^[a-z ]+$/.test(needle)) {
+    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const found = heading.match(new RegExp(`(?<!\\p{L})${escaped}(?!\\p{L})`, 'u'));
+    if (!found) return null;
+    return heading.slice(0, found.index) + ' ' + heading.slice(found.index + found[0].length);
+  }
+  if (!heading.includes(needle)) return null;
+  return heading.split(needle).join(' ');
 }
 
 /**
@@ -563,13 +604,19 @@ function auditAts(html, opts = {}) {
   let keywordCoverage = null;
   const keywords = normalizeKeywords(opts.keywords, opts.role);
   if (keywords.length) {
-    // Folded on both sides: a CV written with accents and a keyword typed
-    // without them are the same word, and a keyword list pasted with an
-    // entity in it should still match the CV's real text.
-    const haystack = asciiFold(text);
-    const needle = k => asciiFold(k);
-    const found = keywords.filter(k => haystack.includes(needle(k)));
-    const missingKeywords = keywords.filter(k => !haystack.includes(needle(k)));
+    // Folded on both sides so a CV written with accents and a keyword typed
+    // without them are the same word. `asciiFold` is the wrong fold here: it maps
+    // `C++` to `c`, which then matches a stray `c` anywhere in the text and reports
+    // a keyword the CV never mentions, and it returns '' when nothing Latin
+    // survives, where `includes('')` is true for every haystack.
+    const haystack = foldAccents(text);
+    const needle = k => foldAccents(k);
+    const has = k => {
+      const n = needle(k);
+      return n.length > 0 && haystack.includes(n);
+    };
+    const found = keywords.filter(has);
+    const missingKeywords = keywords.filter(k => !has(k));
     keywordCoverage = {
       total: keywords.length,
       found: found.length,

@@ -132,3 +132,60 @@ test('Latin headings fold exactly as before', () => {
   }
   assert.ok(extractHeadings('<h2>ÉDUCATION</h2>').includes('education'));
 });
+
+test('a Latin alias does not match inside a longer word', () => {
+  // Plain substring matching made `formation` hit inside `information`, so a CV
+  // with an Information heading reported an education section it does not have.
+  // Raised as a regression in review on #4330.
+  const headings = extractHeadings('<h2>Information</h2>');
+  assert.ok(!headings.includes('education'),
+    `Information must not report education, got ${JSON.stringify(headings)}`);
+
+  const tech = extractHeadings('<h2>Information Technology</h2>');
+  assert.ok(!tech.includes('education'),
+    `Information Technology must not report education, got ${JSON.stringify(tech)}`);
+
+  // the alias still applies when it IS the word
+  assert.ok(extractHeadings('<h2>Formation</h2>').includes('education'));
+});
+
+test('a punctuation-bearing keyword does not match a bare letter', () => {
+  // `asciiFold('C++')` is 'c', so any CV containing a 'c' anywhere counted C++
+  // as found. Reported in review on #4330.
+  const wrap = (body) => `<html><head><style>body{font-family:Arial,sans-serif;font-size:11px;}</style></head>
+<body>
+  <div class="header"><p>Alex Martin | alex@example.com | +1 555 0100</p></div>
+  <div class="section"><div class="section-title">Experience</div>
+    <p>${body} Led a team of engineers through the migration, owning the roadmap,
+    the on-call rotation and the handover docs for four new hires.</p></div>
+  <div class="section"><div class="section-title">Education</div><p>BSc</p></div>
+  <div class="section"><div class="section-title">Skills</div><p>Postgres</p></div>
+</body></html>`;
+
+  const strayC = auditAts(wrap('I write c and other letters'), { keywords: 'C++' });
+  assert.equal(strayC.keywordCoverage.found, 0,
+    'a stray c must not satisfy C++');
+  assert.deepEqual(strayC.keywordCoverage.missing, ['C++']);
+
+  const withCpp = auditAts(wrap('I write C++ professionally'), { keywords: 'C++' });
+  assert.equal(withCpp.keywordCoverage.found, 1,
+    'a real C++ mention must still match');
+});
+
+test('a keyword that folds to nothing is never counted as found', () => {
+  // `includes('')` is true for every haystack, so a keyword whose fold is empty
+  // was reported present in any CV. Reported in review on #4330.
+  const html = `<html><head><style>body{font-family:Arial,sans-serif;font-size:11px;}</style></head>
+<body>
+  <div class="header"><p>Alex Martin | alex@example.com | +1 555 0100</p></div>
+  <div class="section"><div class="section-title">Experience</div>
+    <p>Led a team of engineers through the migration, owning the roadmap and the
+    on-call rotation for two offices and four new hires.</p></div>
+  <div class="section"><div class="section-title">Education</div><p>BSc</p></div>
+  <div class="section"><div class="section-title">Skills</div><p>Python</p></div>
+</body></html>`;
+  const result = auditAts(html, { keywords: ['工作经历', 'Python'] });
+  assert.equal(result.keywordCoverage.found, 1,
+    'only the keyword present in the text may be found');
+  assert.deepEqual(result.keywordCoverage.missing, ['工作经历']);
+});
