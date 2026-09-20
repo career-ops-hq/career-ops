@@ -162,7 +162,39 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     }
   }
 
-  if (config.location_filter !== undefined) {
+  // #3438. Per-field whitelists a target can gate on instead of title. Each
+  // block has the same shape as title_filter and is compiled by the same
+  // buildTitleFilter(), so it gets the same structural checks for the same
+  // reason: a misspelled `positve:` leaves positive empty, and an empty
+  // positive list means "no positive constraint" — the whitelist would match
+  // everything while looking configured.
+  if (config.field_filters !== undefined) {
+    if (!isObject(config.field_filters)) {
+      add(errors, 'field_filters', 'field_filters must be an object keyed by field name');
+    } else {
+      for (const [field, block] of Object.entries(config.field_filters)) {
+        if (field === 'title') {
+          // title routes to the top-level title_filter by definition. A block
+          // here would be silently ignored, so say so rather than ignore it.
+          add(errors, 'field_filters.title', 'field_filters.title is not read - filter_on: title uses the top-level title_filter');
+          continue;
+        }
+        if (!isObject(block)) {
+          add(errors, `field_filters.${field}`, `field_filters.${field} must be an object`);
+          continue;
+        }
+        for (const key of Object.keys(block)) {
+          if (!TITLE_FILTER_FIELDS.includes(key)) {
+            add(errors, `field_filters.${field}.${key}`, `unknown field_filters field - expected one of ${TITLE_FILTER_FIELDS.join(', ')}`);
+          }
+        }
+        validateKeywordList(block.positive, `field_filters.${field}.positive`, errors);
+        validateKeywordList(block.negative, `field_filters.${field}.negative`, errors);
+      }
+    }
+  }
+
+    if (config.location_filter !== undefined) {
     if (!isObject(config.location_filter)) {
       add(errors, 'location_filter', 'location_filter must be an object');
     } else {
@@ -262,6 +294,23 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
           add(errors, `${base}.provider`, 'provider must be a non-empty string when set');
         } else if (!providerIds.has(entry.provider)) {
           add(errors, `${base}.provider`, `unknown provider "${entry.provider}"`);
+        }
+      }
+
+      // #3438. Which field this target's whitelist reads. scan.mjs exits on a
+      // name with no field_filters block; this catches the shape earlier and
+      // checks the cross-reference here too, where the whole config is in hand.
+      if (entry.filter_on !== undefined) {
+        const declared = Array.isArray(entry.filter_on) ? entry.filter_on : [entry.filter_on];
+        if (declared.length === 0) {
+          add(errors, `${base}.filter_on`, 'filter_on must not be an empty list - omit the key to gate on title');
+        }
+        for (const field of declared) {
+          if (typeof field !== 'string' || field.trim() === '') {
+            add(errors, `${base}.filter_on`, 'filter_on must be a non-empty string or a list of them');
+          } else if (field.trim() !== 'title' && !isObject(config.field_filters?.[field.trim()])) {
+            add(errors, `${base}.filter_on`, `filter_on "${field.trim()}" has no field_filters.${field.trim()} block`);
+          }
         }
       }
 

@@ -179,6 +179,43 @@ export function emitJsonReceipt(receipt, exitCode) {
 // the title filter's short-acronym auto-anchor (#3274).
 export { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter };
 
+// ── Declared-field whitelists (#3438) ──────────────────────────────
+// A title whitelist cannot express "this posting is in an occupation I want"
+// on a board that publishes an occupation code, because one title maps to
+// several occupations and one occupation to unboundedly many titles. Such a
+// board's matches are dropped silently: the title never matched, so nothing
+// was ever counted as rejected for the reason that actually applied.
+//
+// Fix: a target declares WHICH FIELD its whitelist reads. Default is `title`,
+// so a portals.yml that says nothing behaves byte-for-byte as before.
+//
+// Shape:
+//   field_filters:            # top level, optional
+//     noc:
+//       positive: ["stem:22", "stem:13"]
+//   job_boards:
+//     - name: Job Bank — help desk
+//       filter_on: noc        # string, or array (AND), default ["title"]
+//
+// No new matching semantics anywhere: each block is compiled by the same
+// buildTitleFilter() as title_filter, so `word:`/`stem:`/substring and the
+// word-boundary rules from #3103 stay identical across every field.
+//
+// `title` is deliberately not a key in field_filters: it routes to the
+// existing top-level config.title_filter, the same compiled object as before,
+// so declaring it explicitly changes nothing.
+/**
+ * @param {unknown} value - a target's `filter_on`: string, array, or absent.
+ * @returns {string[]} field names to gate on, defaulting to ["title"].
+ */
+export function normalizeFilterOn(value) {
+  const list = (Array.isArray(value) ? value : [value])
+    .filter(f => typeof f === 'string')
+    .map(f => f.trim())
+    .filter(Boolean);
+  return list.length > 0 ? list : ['title'];
+}
+
 // ── Title filter overrides (per-company broadened title net) ───────
 // Optional. `title_filter_overrides` in portals.yml lets specific companies
 // (matched by an explicit slug list — the company/tenant slug the scanner
@@ -2942,6 +2979,12 @@ async function main() {
   const companies = Array.isArray(config.tracked_companies) ? config.tracked_companies : [];
   const boards = Array.isArray(config.job_boards) ? config.job_boards : [];
   const titleFilter = buildTitleFilter(config.title_filter);
+  // #3438. One compiled predicate per declared field, built by the same
+  // compiler as titleFilter so no field gets its own matching dialect.
+  const fieldFilters = new Map(
+    Object.entries(config.field_filters && typeof config.field_filters === 'object' ? config.field_filters : {})
+      .map(([name, block]) => [name, buildTitleFilter(block)]),
+  );
 
   // Seniority tier classifier integration
   let classifyTier = null;
@@ -3017,6 +3060,19 @@ async function main() {
   resolveEntries(companies);
   resolveEntries(boards, { isBoard: true });
 
+  // #3438. A filter_on naming a field with no field_filters block would gate
+  // on a predicate that does not exist. Exit here rather than at filter time:
+  // the whole point of the issue is that a misconfigured whitelist fails
+  // silently, and trading one silent failure for another would be no fix.
+  for (const target of targets) {
+    for (const field of normalizeFilterOn(target.filter_on)) {
+      if (field !== 'title' && !fieldFilters.has(field)) {
+        console.error(`Error: ${target.name}: filter_on "${field}" has no field_filters.${field} block in portals.yml`);
+        process.exit(1);
+      }
+    }
+  }
+
   const localParserCount = targets.filter(t => t._provider.id === 'local-parser').length;
   const companyCount = targets.length - boardCount;
   const parts = [`${companyCount} companies`];
@@ -3053,6 +3109,14 @@ async function main() {
   let totalFound = 0;
   let totalFilteredTitle = 0;
   let totalFilteredTier = 0;
+  // #3438: rejections by a declared non-title field, kept apart from
+  // totalFilteredTitle so the summary says which whitelist did the work.
+  let totalFilteredDeclaredField = 0;
+  // Jobs that passed only because a declared field was absent from the
+  // posting. Counted, never dropped — see the end-of-run warning.
+  let totalPassedFieldAbsent = 0;
+  const declaredFieldSeen = new Map();
+  const declaredFieldAbsent = new Map();
   let totalFilteredLocation = 0;
   let totalFilteredPostingAge = 0;
   let totalFilteredPostedDate = 0;
@@ -3167,8 +3231,33 @@ async function main() {
           }
         }
 
-        if (!titleFilter(job.title)) {
-          totalFilteredTitle++;
+        // #3438. Absent filter_on → normalizeFilterOn returns ["title"] and
+        // this is the same titleFilter(job.title) call as before, against the
+        // same compiled object. Declared fields are ANDed.
+        const declaredFields = normalizeFilterOn(company.filter_on);
+        const gatesOnTitle = declaredFields.includes('title');
+        if (!gatesOnTitle) {
+          declaredFieldSeen.set(company.name, (declaredFieldSeen.get(company.name) || 0) + 1);
+        }
+        let fieldAbsentHere = false;
+        const passesDeclaredFields = declaredFields.every((field) => {
+          if (field === 'title') return titleFilter(job.title);
+          const value = job[field];
+          // Absent field: pass, but count it. Dropping here would recreate the
+          // silent loss this issue is about, only with the sign flipped.
+          if (value === undefined || value === null || value === '') {
+            fieldAbsentHere = true;
+            return true;
+          }
+          return fieldFilters.get(field)(String(value));
+        });
+        if (fieldAbsentHere) {
+          totalPassedFieldAbsent++;
+          declaredFieldAbsent.set(company.name, (declaredFieldAbsent.get(company.name) || 0) + 1);
+        }
+        if (!passesDeclaredFields) {
+          if (gatesOnTitle) totalFilteredTitle++;
+          else totalFilteredDeclaredField++;
           continue;
         }
         if (classifyTier && skipTiers.includes(classifyTier(job.title))) {
@@ -3386,6 +3475,9 @@ async function main() {
   if (config.title_filter || totalFilteredTitle > 0) {
     console.log(`Filtered by title:     ${totalFilteredTitle} removed`);
   }
+  if (fieldFilters.size > 0 || totalFilteredDeclaredField > 0) {
+    console.log(`Filtered by field:     ${totalFilteredDeclaredField} removed`);
+  }
   if (skipTiers.length > 0) {
     console.log(`Filtered by tier:      ${totalFilteredTier} removed`);
   }
@@ -3432,6 +3524,27 @@ async function main() {
       console.log(`    vs ${row.url}`);
     }
     console.log(`  If one side is an agency, apply through ONE channel only — a double submission burns both (#1596).`);
+  }
+  // #3438. A declared field that never appeared on a single posting means
+  // the provider does not supply it: the whitelist silently passed everything
+  // for that target. That is precisely the failure this feature exists to
+  // surface, so it is reported even though nothing was dropped.
+  const deadDeclarations = targets
+    .filter(t => !normalizeFilterOn(t.filter_on).includes('title'))
+    .map(t => ({
+      name: t.name,
+      seen: declaredFieldSeen.get(t.name) || 0,
+      absent: declaredFieldAbsent.get(t.name) || 0,
+      fields: normalizeFilterOn(t.filter_on).join(', '),
+    }))
+    .filter(t => t.seen > 0 && t.absent === t.seen);
+  if (deadDeclarations.length > 0) {
+    console.log(`
+⚠️  Declared field never observed — the whitelist is effectively OFF for these targets:`);
+    for (const t of deadDeclarations) {
+      console.log(`  ${t.name}: filter_on "${t.fields}", absent on all ${t.seen} job(s) from this target`);
+    }
+    console.log(`  Check the field name and whether the provider supplies it.`);
   }
   if (historyPolicy.recheckAfterDays != null) {
     console.log(`Recheck eligible:      ${dedupSnapshot.recheckEligible} old scan-history URL(s)`);
