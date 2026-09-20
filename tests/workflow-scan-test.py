@@ -44,8 +44,8 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-") as temporary:
     assert scanned["artifact"]["review"]["verdict"] == "approve"
     assert run(directory, "start", "scan", "job-1", str(source)) == scanned
 
-    database = sqlite3.connect(directory / "business.db")
-    assert database.execute("SELECT count(*) FROM source_evidence").fetchone()[0] == 1
+    database = sqlite3.connect(directory / "opportunities.db")
+    assert database.execute("SELECT count(*) FROM workflow_source_evidence").fetchone()[0] == 1
     database.close()
 
     scored = run(directory, "start", "score", "job-1", "scan:job-1")
@@ -102,5 +102,42 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-") as temporary:
     }))
     excluded = run(directory, "start", "scan", "job-4", str(excluded_source))
     assert excluded["artifact"]["outcome"] == "exclude"
+
+with tempfile.TemporaryDirectory(prefix="career-ops-cron-") as temporary:
+    directory = Path(temporary)
+    database = sqlite3.connect(directory / "opportunities.db")
+    database.executescript("""
+      CREATE TABLE opportunities (
+        id INTEGER PRIMARY KEY, url TEXT NOT NULL, company TEXT NOT NULL,
+        role TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'discovered'
+      );
+      CREATE TABLE page_evidence (
+        opportunity_id INTEGER PRIMARY KEY, content TEXT NOT NULL,
+        captured_at TEXT NOT NULL
+      );
+      INSERT INTO opportunities(id,url,company,role) VALUES
+        (1,'https://example.com/jobs/cron','Example','AI Engineer');
+      INSERT INTO page_evidence(opportunity_id,content,captured_at) VALUES
+        (1,'Build reviewed AI agent workflows.','2026-09-20T04:00:00Z');
+    """)
+    database.close()
+    assert run(directory, "cron-score")["task"]["status"] == "completed"
+    assert run(directory, "cron-score")["task"]["status"] == "completed"
+    assert run(directory, "cron-score") == {"status": "idle", "reason": "no_unscored_opportunities"}
+
+with tempfile.TemporaryDirectory(prefix="career-ops-cron-wait-") as temporary:
+    directory = Path(temporary)
+    database = sqlite3.connect(directory / "opportunities.db")
+    database.executescript("""
+      CREATE TABLE opportunities (id INTEGER PRIMARY KEY, url TEXT NOT NULL, company TEXT NOT NULL, role TEXT NOT NULL);
+      CREATE TABLE page_evidence (opportunity_id INTEGER PRIMARY KEY, content TEXT NOT NULL, captured_at TEXT NOT NULL);
+      INSERT INTO opportunities VALUES (1,'https://example.com/jobs/blocked','Blocked','Engineer');
+      INSERT INTO opportunities VALUES (2,'https://example.com/jobs/ready','Ready','Engineer');
+      INSERT INTO page_evidence VALUES (2,'Build reviewed AI systems.','2026-09-20T04:00:00Z');
+    """)
+    database.close()
+    assert run(directory, "cron-score")["task"]["status"] == "waiting"
+    advanced = run(directory, "cron-score")
+    assert advanced["opportunity_id"] == "2" and advanced["task"]["status"] == "completed"
 
 print("workflow scan: evidence, deduplication, review and score handoff passed")

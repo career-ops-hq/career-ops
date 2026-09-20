@@ -11,7 +11,7 @@
     "lint": "node scripts/check-syntax.mjs",
     "liveness": "node check-liveness.mjs",
     "scan": "node scan.mjs",
-    "application": "node application-workflow.mjs",
+    "workflow": "workflow/.venv/bin/python -B workflow/career_ops.py",
     "application:lifecycle": "node application-lifecycle.mjs",
     "interview:context": "node interview-context.mjs",
     "cv:maintain": "node cv-maintenance.mjs",

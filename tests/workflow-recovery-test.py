@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
     assert published["status"] == "completed"
     reconciled = call(directory, "run", published["task_id"], "--crash-at", "publish")
     assert reconciled == published
-    database = sqlite3.connect(directory / "business.db")
+    database = sqlite3.connect(directory / "opportunities.db")
     assert database.execute("SELECT count(*) FROM results WHERE task_id=?", (published["task_id"],)).fetchone()[0] == 1
     assert database.execute("SELECT count(*) FROM events WHERE task_id=? AND type='published'", (published["task_id"],)).fetchone()[0] == 1
     database.close()

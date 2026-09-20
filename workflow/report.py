@@ -1,0 +1,96 @@
+"""Render a frozen model assessment as the evidence-linked score report."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from pathlib import Path
+
+import yaml
+
+
+HEADINGS = (
+    "A. 岗位概览", "B. 能力竞争力", "C. 入职吸引力", "D. 薪酬与需求",
+    "E. 补证问题", "G. 岗位真实性", "Risk Summary", "Evaluation Checklist", "Machine Summary",
+)
+DIMENSIONS = ("direction", "compensation", "team", "company")
+
+
+def digest(value: bytes | str) -> str:
+    return hashlib.sha256(value if isinstance(value, bytes) else value.encode()).hexdigest()
+
+
+def attractiveness(dimensions: dict, weights: dict) -> dict:
+    if set(dimensions) != set(DIMENSIONS) or set(weights) != set(DIMENSIONS):
+        raise ValueError("Score dimensions and weights must match")
+    if any(not isinstance(weight, (int, float)) or weight <= 0 for weight in weights.values()) or abs(sum(weights.values()) - 1) >= 1e-9:
+        raise ValueError("Weights must be positive and sum to one")
+    lower = upper = coverage = 0.0
+    for name in DIMENSIONS:
+        score = dimensions[name].get("score")
+        if score is not None and (not isinstance(score, int) or not 1 <= score <= 5):
+            raise ValueError(f"{name}: score must be null or an integer from 1 to 5")
+        if score is not None and not dimensions[name].get("evidence"):
+            raise ValueError(f"{name}: known score requires evidence")
+        lower += weights[name] * (score if score is not None else 1)
+        upper += weights[name] * (score if score is not None else 5)
+        coverage += weights[name] if score is not None else 0
+    return {"lower": round(lower, 2), "upper": round(upper, 2), "coverage": round(coverage, 6)}
+
+
+def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
+    root, directory = Path(packet["root"]), Path(packet["directory"])
+    if evidence.get("complete_jd") is not True or evidence.get("liveness") != "active" or not evidence.get("jd", "").strip():
+        raise ValueError("Complete live JD required")
+    files = {name: directory / f"{name}.txt" for name in packet["sources"]}
+    files["jd"] = directory / "jd.txt"
+    files["jd"].write_text(evidence["jd"])
+    for index, source in enumerate(assessment.get("sources", []), 1):
+        if source.get("id") != f"web{index}" or not source.get("text", "").strip():
+            raise ValueError("External sources must be sequential web1, web2, ... with text")
+        files[source["id"]] = directory / f"{source['id']}.txt"
+        files[source["id"]].write_text(source["text"])
+    citations = [item for dimension in assessment["dimensions"].values() for item in dimension["evidence"]]
+    citations += assessment["research"]["findings"]
+    for citation in citations:
+        if citation.get("status") not in (None, "retrieved"):
+            if citation.get("quote") is not None or citation.get("source") is not None:
+                raise ValueError("Unretrieved research cannot provide evidence")
+            continue
+        if not citation.get("quote") or citation.get("source") not in files:
+            raise ValueError("Citation requires a quote from a frozen source")
+        source = files[citation["source"]].read_text()
+        match = re.search(r"\s+".join(re.escape(word) for word in citation["quote"].split()), source, re.IGNORECASE)
+        if not match:
+            raise ValueError(f"Quote not found in frozen source: {citation['source']}")
+        citation["quote"] = match.group(0)
+    files["research"] = directory / "research.json"
+    files["research"].write_text(json.dumps(assessment["research"], ensure_ascii=False, indent=2) + "\n")
+    profile = yaml.safe_load(packet["sources"]["profile"])
+    score = attractiveness(assessment["dimensions"], profile["attractiveness"]["weights"])
+    summary = {
+        "report_format": "scoring-v2", "scoring_model": "attractiveness-v1", "score": None,
+        "company": evidence["company"], "role": evidence["role"], "complete_jd": True, "jd_source": "jd",
+        "sources": [{"id": name, "path": str(path.relative_to(root)), "sha256": digest(path.read_bytes())} for name, path in files.items()],
+        "dimensions": assessment["dimensions"], "attractiveness": score,
+    }
+    table = "| 维度 | 分数 | 权重 |\n|---|---|---|\n" + "\n".join(
+        f"| {name} | {assessment['dimensions'][name]['score'] if assessment['dimensions'][name]['score'] is not None else 'Unknown'} | {profile['attractiveness']['weights'][name] * 100:g}% |"
+        for name in DIMENSIONS
+    )
+    findings = "\n".join(f"- {item['id']} {item['url']} {item['entity']}" for item in assessment["research"]["findings"]) or "- 无外部研究发现"
+    sections = assessment["sections"]
+    bodies = {
+        "A. 岗位概览": sections["overview"], "B. 能力竞争力": sections["capabilities"],
+        "C. 入职吸引力": f"**入职吸引力：** {score['lower']:.2f}–{score['upper']:.2f}/5；证据覆盖率：{score['coverage'] * 100:g}%\n\n{table}",
+        "D. 薪酬与需求": sections["compensation"], "E. 补证问题": f"{sections['questions']}\n\n### 外部研究记录\n\n{findings}",
+        "G. 岗位真实性": sections["legitimacy"], "Risk Summary": sections["risks"],
+        "Evaluation Checklist": f"{sections['checklist']}\n\n联网研究：完成；记录见 E. 补证问题。",
+        "Machine Summary": f"```yaml\n{yaml.safe_dump(summary, allow_unicode=True, sort_keys=False, width=10_000).strip()}\n```",
+    }
+    if any(not isinstance(body, str) or len(body.strip()) < 20 or re.search(r"^## ", body, re.MULTILINE) for body in bodies.values()):
+        raise ValueError("Report section missing or contains extra level-two headings")
+    report = "\n\n".join(f"## {heading}\n\n{bodies[heading]}" for heading in HEADINGS) + "\n"
+    (directory / "report.md").write_text(report)
+    return {"report": report, "report_sha256": digest(report)}

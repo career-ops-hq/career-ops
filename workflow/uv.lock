@@ -44,12 +44,14 @@ source = { virtual = "." }
 dependencies = [
     { name = "langgraph" },
     { name = "langgraph-checkpoint-sqlite" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "langgraph", specifier = "==1.2.11" },
     { name = "langgraph-checkpoint-sqlite", specifier = "==3.1.1" },
+    { name = "pyyaml", specifier = "==6.0.3" },
 ]
 
 [[package]]

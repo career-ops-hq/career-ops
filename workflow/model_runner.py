@@ -3,25 +3,19 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 
+from workflow.prescreen import evaluate as evaluate_prescreen
+from workflow.report import render_report
 
 ROOT = Path(__file__).resolve().parents[1]
 DRAFT_ROOT = Path(os.environ["CAREER_OPS_DRAFT_ROOT"]) if "CAREER_OPS_DRAFT_ROOT" in os.environ else ROOT / "data" / "workflow-drafts"
 
 
-def load_legacy_model_adapter():
-    """Reuse the proven prompts and Hermes model boundary during score migration."""
-    path = ROOT / "scripts" / "hermes-score.py"
-    spec = importlib.util.spec_from_file_location("career_ops_score_adapter", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+from workflow import model_adapter
 
 
 def write_json(path: Path, value: object) -> None:
@@ -40,7 +34,7 @@ def normalize_resume_payload(resume: dict) -> dict:
 def scan_evaluate(payload: dict) -> dict:
     inputs = payload["inputs"]
     source = inputs["source"]
-    adapter = load_legacy_model_adapter()
+    adapter = model_adapter
     key = hashlib.sha256(json.dumps(inputs, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     directory = DRAFT_ROOT / key
     directory.mkdir(parents=True, exist_ok=True)
@@ -58,15 +52,7 @@ def scan_evaluate(payload: dict) -> dict:
     if evidence["complete_jd"] is not True:
         return {"waiting_reason": "core_evidence_missing", "tool_calls": 1}
     evidence["prescreen"]["job"] = {"url": source["url"]}
-    evidence_path = directory / "prescreen-input.json"
-    write_json(evidence_path, evidence["prescreen"])
-    checked = subprocess.run(
-        ["node", str(ROOT / "prescreen.mjs"), "--input", str(evidence_path)],
-        cwd=ROOT, text=True, capture_output=True, timeout=30,
-    )
-    if checked.returncode:
-        raise RuntimeError(checked.stderr.strip())
-    prescreen = json.loads(checked.stdout)
+    prescreen = evaluate_prescreen(evidence["prescreen"])
     if evidence["liveness"] == "expired":
         return {
             "outcome": "exclude",
@@ -99,7 +85,7 @@ def scan_evaluate(payload: dict) -> dict:
 
 
 def scan_review(payload: dict) -> dict:
-    adapter = load_legacy_model_adapter()
+    adapter = model_adapter
     prompt = (
         "Independently verify that this scan artifact is fully grounded in the immutable source and current rules. "
         "Unknown is not mismatch. Return {verdict:'approve|revise',checks:{grounded:'pass|fail'},defects:[]}.\n"
@@ -112,7 +98,7 @@ def scan_review(payload: dict) -> dict:
 
 
 def apply_evaluate(payload: dict) -> dict:
-    adapter = load_legacy_model_adapter()
+    adapter = model_adapter
     prompt = """Prepare one application package from only the supplied candidate facts, reviewed JD, score report, rules, requirements and user feedback.
 Return JSON with exactly these package fields:
 - resume_payload: exact input for reactive-resume.mjs. candidate has name/email/phone/location and optional linkedin/github/portfolio {url,display}; headline and summary are strings; competencies is a string array; experience entries use {company,role,location,dates,bullets:string[]}; projects use {name,url,tech,badge,bullets:string[]}; education uses {org,title,year,description}; certifications and awards use {org,title,year}; skills use {category,items:string[]}. Preserve facts; tailor experience through evidence-backed selection, ordering or rewriting. Never use points/institution/degree keys. Do not invent or upgrade prototypes.
@@ -155,7 +141,7 @@ Write user-facing material in the configured output language. Never submit, send
 
 
 def apply_review(payload: dict) -> dict:
-    adapter = load_legacy_model_adapter()
+    adapter = model_adapter
     prompt = """Independently review the application package against all frozen inputs. Do not trust the drafter.
 Return {schema:'career-ops/application-review',schema_version:1,verdict:'approve|revise|blocked',checks:[...],unsupported_claims:[],required_changes:[]}.
 checks must contain exactly source-grounding, role-alignment, cv-materiality, employer-questions, sensitive-fields and artifact-consistency; each is {id,status:'pass|fail|uncertain',finding}. Approve only when every check passes and both issue arrays are empty. Unknown employer facts must stay unknown. Never submit or send.
@@ -217,7 +203,7 @@ def evaluate(payload: dict) -> dict:
             },
             "tool_calls": 0,
         }
-    adapter = load_legacy_model_adapter()
+    adapter = model_adapter
     revision = payload["revision"]
     repairing = revision > 0 or saved_review.exists()
     previous_review = payload.get("previous_review")
@@ -261,13 +247,7 @@ def evaluate(payload: dict) -> dict:
     write_json(directory / "assessment.json", assessment)
     for source_id, content in packet["sources"].items():
         (directory / f"{source_id}.txt").write_text(content)
-    rendered = subprocess.run(
-        ["node", str(ROOT / "score-job.mjs"), "render", str(directory)],
-        cwd=ROOT, text=True, capture_output=True, timeout=30,
-    )
-    if rendered.returncode:
-        raise RuntimeError(rendered.stderr.strip())
-    result = json.loads(rendered.stdout)
+    result = render_report(packet, evidence, assessment)
     return {
         "outcome": "score",
         "artifact": {
@@ -279,9 +259,11 @@ def evaluate(payload: dict) -> dict:
 
 
 def review(payload: dict) -> dict:
-    adapter = load_legacy_model_adapter()
+    adapter = model_adapter
     artifact = payload["artifact"]
     inputs = payload["inputs"]
+    if artifact["type"] == "score" and hashlib.sha256(artifact["report"].encode()).hexdigest() != artifact["report_sha256"]:
+        raise ValueError("Score report hash mismatch")
     if artifact["type"] == "exclusion":
         prompt = (
             "Independently review this exclusion using only the JD report and rule inputs. "
@@ -304,13 +286,6 @@ def review(payload: dict) -> dict:
     report_path = directory / "report.md"
     report_path.write_text(artifact["report"])
     write_json(Path(str(report_path) + ".review.json"), decision)
-    checked = subprocess.run(
-        ["node", str(ROOT / "scoring-report.mjs"), str(report_path)],
-        cwd=ROOT, text=True, capture_output=True, timeout=30,
-    )
-    if checked.returncode:
-        decision["verdict"] = "revise"
-        decision["validation_error"] = checked.stdout.strip() or checked.stderr.strip()
     return {**decision, "tool_calls": 0}
 
 

@@ -19,3 +19,6 @@ Read `prompts/shared/contract.md`, resolve `language.output` from
 
 Use the applicable Mainland China, Hong Kong, or remote employment rule. It
 supplies policy only; all prose follows `language.output`.
+
+Persist scan, score, and apply through `workflow/career_ops.py`. Hermes may run
+the repository cron scripts, but it never decides or advances workflow state.

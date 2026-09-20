@@ -4,10 +4,12 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import sys
 import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 spec = importlib.util.spec_from_file_location("workflow_model_runner", ROOT / "workflow" / "model_runner.py")
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
@@ -30,7 +32,6 @@ with tempfile.TemporaryDirectory(prefix="career-ops-runner-") as temporary:
     (directory / "report.md").write_text("# Completed draft")
     (directory / "assessment.json").write_text("{}")
     (directory / "evidence.json").write_text(json.dumps({"liveness_reason": "Verified active"}))
-    runner.load_legacy_model_adapter = lambda: (_ for _ in ()).throw(AssertionError("model must not run"))
     result = runner.evaluate({"inputs": inputs, "revision": 0})
     assert result["artifact"]["report"] == "# Completed draft"
     assert result["tool_calls"] == 0

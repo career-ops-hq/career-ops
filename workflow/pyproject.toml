@@ -5,4 +5,5 @@ requires-python = ">=3.11"
 dependencies = [
   "langgraph==1.2.11",
   "langgraph-checkpoint-sqlite==3.1.1",
+  "pyyaml==6.0.3",
 ]

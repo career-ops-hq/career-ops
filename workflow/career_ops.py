@@ -59,9 +59,9 @@ def canonical_score_input(value: str) -> str:
 
 def canonical_scan_input(value: str) -> str:
     path = Path(value)
-    if not path.is_file():
+    source = json.loads(path.read_text() if path.is_file() else value)
+    if "source" in source:
         return value
-    source = json.loads(path.read_text())
     required = {"schema_version", "opportunity_id", "url", "company", "role", "jd", "captured_at", "liveness"}
     missing = sorted(required - source.keys())
     if missing:
@@ -191,7 +191,7 @@ class BusinessStore:
               type TEXT NOT NULL,
               payload TEXT NOT NULL DEFAULT '{}'
             );
-            CREATE TABLE IF NOT EXISTS source_evidence (
+            CREATE TABLE IF NOT EXISTS workflow_source_evidence (
               source_hash TEXT PRIMARY KEY,
               opportunity_id TEXT NOT NULL,
               url TEXT NOT NULL,
@@ -287,7 +287,7 @@ class BusinessStore:
         source = inputs["source"]
         payload = json.dumps(source, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         self.db.execute(
-            "INSERT OR IGNORE INTO source_evidence(source_hash,opportunity_id,url,captured_at,payload) VALUES(?,?,?,?,?)",
+            "INSERT OR IGNORE INTO workflow_source_evidence(source_hash,opportunity_id,url,captured_at,payload) VALUES(?,?,?,?,?)",
             (digest(payload), opportunity_id, source["url"], source["captured_at"], payload),
         )
 
@@ -500,7 +500,7 @@ def task_view(store: BusinessStore, task: sqlite3.Row) -> dict:
 
 
 def view(directory: Path, identifier: str) -> dict:
-    store = BusinessStore(directory / "business.db")
+    store = BusinessStore(directory / "opportunities.db")
     try:
         task = store.find_task(identifier)
         refresh_apply_validity(store, task)
@@ -510,7 +510,7 @@ def view(directory: Path, identifier: str) -> dict:
 
 
 def list_views(directory: Path) -> list[dict]:
-    store = BusinessStore(directory / "business.db")
+    store = BusinessStore(directory / "opportunities.db")
     try:
         tasks = store.list_tasks()
         for task in tasks:
@@ -521,7 +521,7 @@ def list_views(directory: Path) -> list[dict]:
 
 
 def cancel_task(directory: Path, task_id: str) -> dict:
-    store = BusinessStore(directory / "business.db")
+    store = BusinessStore(directory / "opportunities.db")
     try:
         return task_view(store, store.cancel(task_id))
     finally:
@@ -802,7 +802,7 @@ def run_task(
     start_state: WorkflowState | None = None,
     crash_at: str | None = None,
 ) -> dict:
-    store = BusinessStore(directory / "business.db")
+    store = BusinessStore(directory / "opportunities.db")
     try:
         task = store.task(task_id)
         existing = store.result(task_id)
@@ -813,7 +813,7 @@ def run_task(
             return {"task_id": task_id, "status": "waiting", "reason": "workflow_version_incompatible"}
         runtime = Runtime(store, directory, crash_at)
         config = {"configurable": {"thread_id": f"{task_id}:{task['attempt']}"}}
-        with SqliteSaver.from_conn_string(str(directory / "checkpoints.db")) as saver:
+        with SqliteSaver.from_conn_string(str(directory / "workflow-checkpoints.db")) as saver:
             graph = runtime.graph(saver)
             value = graph.invoke(start_state, config)
         if value.get("waiting_reason"):
@@ -831,7 +831,7 @@ def run_task(
 
 
 def start_and_run(directory: Path, opportunity: str, module: str, input_text: str, corrections: int, scenario: str, crash_at: str | None, re_evaluate: bool = False) -> dict:
-    store = BusinessStore(directory / "business.db")
+    store = BusinessStore(directory / "opportunities.db")
     if module == "scan":
         input_text = canonical_scan_input(input_text)
         if not input_text.startswith("{"):
@@ -874,6 +874,62 @@ def start_and_run(directory: Path, opportunity: str, module: str, input_text: st
     return run_task(directory, task["task_id"], start_state=initial_state(task, corrections, scenario), crash_at=crash_at)
 
 
+def cron_score(directory: Path) -> dict:
+    """Advance at most one discovered scanner record through scan and score."""
+    store = BusinessStore(directory / "opportunities.db")
+    try:
+        if not store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='opportunities'").fetchone():
+            return {"status": "idle", "reason": "scanner_store_not_initialized"}
+        opportunity = store.db.execute(
+            """
+            SELECT o.id,o.url,o.company,o.role,p.content,p.captured_at
+            FROM opportunities o
+            LEFT JOIN page_evidence p ON p.opportunity_id=o.id
+            WHERE NOT EXISTS (
+              SELECT 1 FROM results r
+              WHERE r.opportunity_id=CAST(o.id AS TEXT) AND r.module='score'
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM results r
+              WHERE r.opportunity_id=CAST(o.id AS TEXT) AND r.module='scan'
+                AND json_extract(r.payload,'$.outcome')='exclude'
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM tasks t
+              WHERE t.opportunity_id=CAST(o.id AS TEXT) AND t.status='waiting'
+            )
+            ORDER BY o.id LIMIT 1
+            """
+        ).fetchone()
+        if not opportunity:
+            return {"status": "idle", "reason": "no_unscored_opportunities"}
+        opportunity_id = str(opportunity["id"])
+        scan = store.module_result(opportunity_id, "scan")
+        active = store.db.execute(
+            "SELECT task_id,module,status FROM tasks WHERE opportunity_id=? AND status IN ('running','waiting')",
+            (opportunity_id,),
+        ).fetchone()
+    finally:
+        store.close()
+    if active:
+        result = run_task(directory, active["task_id"])
+        return {"status": "advanced", "opportunity_id": opportunity_id, "task": result}
+    if not scan:
+        source = {
+            "schema_version": "scan_input_v1", "opportunity_id": opportunity_id,
+            "url": opportunity["url"], "company": opportunity["company"], "role": opportunity["role"],
+            "captured_at": opportunity["captured_at"] or time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "liveness": "active" if opportunity["content"] else "uncertain",
+            "jd": opportunity["content"] or "",
+        }
+        result = start_and_run(directory, opportunity_id, "scan", json.dumps(source), 0, "normal", None)
+        return {"status": "advanced", "opportunity_id": opportunity_id, "task": result}
+    if scan["outcome"] == "exclude":
+        return {"status": "complete", "opportunity_id": opportunity_id, "outcome": "exclude"}
+    result = start_and_run(directory, opportunity_id, "score", f"scan:{opportunity_id}", 0, "normal", None)
+    return {"status": "advanced", "opportunity_id": opportunity_id, "task": result}
+
+
 def resume_task(
     directory: Path,
     task_id: str,
@@ -883,7 +939,7 @@ def resume_task(
     feedback: str | None = None,
     decision: str | None = None,
 ) -> dict:
-    store = BusinessStore(directory / "business.db")
+    store = BusinessStore(directory / "opportunities.db")
     task = store.task(task_id)
     if task["module"] == "apply":
         if task["status"] == "completed" and decision == "confirm":
@@ -955,7 +1011,7 @@ def resume_task(
 
 def parser() -> argparse.ArgumentParser:
     cli = argparse.ArgumentParser()
-    cli.add_argument("--directory", type=Path, default=ROOT / "data" / "workflow")
+    cli.add_argument("--directory", type=Path, default=ROOT / "data")
     commands = cli.add_subparsers(dest="command", required=True)
     start = commands.add_parser("start")
     start.add_argument("module", choices=("scan", "score", "apply"))
@@ -969,6 +1025,7 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("task_id")
     run.add_argument("--state", help=argparse.SUPPRESS)
     run.add_argument("--crash-at", choices=("review", "publish"), help=argparse.SUPPRESS)
+    commands.add_parser("cron-score")
     resume = commands.add_parser("resume")
     resume.add_argument("task_id")
     resume.add_argument("--input")
@@ -993,6 +1050,8 @@ def main() -> None:
         elif args.command == "run":
             run_task(args.directory, args.task_id, start_state=json.loads(args.state) if args.state else None, crash_at=args.crash_at)
             result = view(args.directory, args.task_id)
+        elif args.command == "cron-score":
+            result = cron_score(args.directory)
         elif args.command == "resume":
             resume_task(
                 args.directory, args.task_id, args.input, args.crash_at,

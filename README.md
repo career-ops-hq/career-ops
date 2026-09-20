@@ -20,7 +20,7 @@ that workflow rather than exposing a public product surface.
 ```bash
 node doctor.mjs --json
 node scripts/check-syntax.mjs
-/Users/oii/.hermes/hermes-agent/venv/bin/python -B tests/hermes-score-test.py
+workflow/.venv/bin/python -B tests/workflow-scan-test.py
 ```
 
 ## Historical cutover
