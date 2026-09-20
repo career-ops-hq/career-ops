@@ -44,8 +44,13 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-") as temporary:
     assert scanned["artifact"]["review"]["verdict"] == "approve"
     assert run(directory, "start", "scan", "job-1", str(source)) == scanned
 
+    inline = run(directory, "start", "scan", "inline", json.dumps({
+        **json.loads(source.read_text()), "opportunity_id": "inline", "jd": "x" * 5000,
+    }))
+    assert inline["status"] == "completed"
+
     database = sqlite3.connect(directory / "opportunities.db")
-    assert database.execute("SELECT count(*) FROM workflow_source_evidence").fetchone()[0] == 1
+    assert database.execute("SELECT count(*) FROM workflow_source_evidence").fetchone()[0] == 2
     database.close()
 
     scored = run(directory, "start", "score", "job-1", "scan:job-1")

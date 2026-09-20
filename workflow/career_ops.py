@@ -19,13 +19,18 @@ from typing import Literal, TypedDict
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
+try:
+    from workflow.discovery import discover
+except ModuleNotFoundError:  # Direct script invocation keeps only workflow/ on sys.path.
+    from discovery import discover
+
 os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
 
 ROOT = Path(__file__).resolve().parents[1]
 INPUT_ROOT = Path(os.environ.get("CAREER_OPS_INPUT_ROOT", ROOT))
 WORKFLOW_VERSION = "oii-333-v1"
 MAX_CORRECTIONS = 2
-MODEL_RUNNER = ROOT / "workflow" / "model_runner.py"
+MODEL_RUNNER = "workflow.model_runner"
 
 
 def digest(value: str) -> str:
@@ -53,13 +58,14 @@ def score_inputs(report: dict) -> str:
 
 
 def canonical_score_input(value: str) -> str:
+    if value.lstrip().startswith("{"):
+        return value
     path = Path(value)
     return score_inputs(json.loads(path.read_text())) if path.is_file() else value
 
 
 def canonical_scan_input(value: str) -> str:
-    path = Path(value)
-    source = json.loads(path.read_text() if path.is_file() else value)
+    source = json.loads(value) if value.lstrip().startswith("{") else json.loads(Path(value).read_text())
     if "source" in source:
         return value
     required = {"schema_version", "opportunity_id", "url", "company", "role", "jd", "captured_at", "liveness"}
@@ -566,7 +572,8 @@ class Runtime:
         configured = os.environ.get("CAREER_OPS_MODEL_RUNNER")
         command = shlex.split(configured) if configured else [
             str(Path.home() / ".hermes" / "hermes-agent" / "venv" / "bin" / "python"),
-            str(MODEL_RUNNER),
+            "-m",
+            MODEL_RUNNER,
         ]
         try:
             for attempt in range(3):
@@ -1026,6 +1033,7 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--state", help=argparse.SUPPRESS)
     run.add_argument("--crash-at", choices=("review", "publish"), help=argparse.SUPPRESS)
     commands.add_parser("cron-score")
+    commands.add_parser("discover")
     resume = commands.add_parser("resume")
     resume.add_argument("task_id")
     resume.add_argument("--input")
@@ -1052,6 +1060,8 @@ def main() -> None:
             result = view(args.directory, args.task_id)
         elif args.command == "cron-score":
             result = cron_score(args.directory)
+        elif args.command == "discover":
+            result = discover(args.directory, INPUT_ROOT / "portals.yml")
         elif args.command == "resume":
             resume_task(
                 args.directory, args.task_id, args.input, args.crash_at,

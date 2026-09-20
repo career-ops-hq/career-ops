@@ -208,6 +208,12 @@ def call_agent(phase, prompt, tools, directory):
                 if attempt == 0:
                     continue
                 raise
+            if phase in ('assessment', 'repair') and not all(key in value for key in (
+                'direction', 'compensation', 'team', 'company', 'sections'
+            )):
+                if attempt == 0:
+                    continue
+                raise ValueError(f'{phase} response is incomplete')
         finally:
             agent.close()
         break
