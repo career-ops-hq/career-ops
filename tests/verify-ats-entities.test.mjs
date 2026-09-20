@@ -175,6 +175,13 @@ test('a punctuation-bearing keyword does not match a bare letter', () => {
 test('a keyword that folds to nothing is never counted as found', () => {
   // `includes('')` is true for every haystack, so a keyword whose fold is empty
   // was reported present in any CV. Reported in review on #4330.
+  //
+  // The keyword must fold to '' for this to reach the guard. A CJK keyword does
+  // NOT: `foldAccents` only strips combining marks, so 工作经历 stays 工作经历 and
+  // the test would pass merely because that text is absent. A combining-marks-only
+  // keyword is what actually produces the empty needle, which review caught on the
+  // first version of this test.
+  const combiningMarksOnly = '\u0301\u0302\u0303';
   const html = `<html><head><style>body{font-family:Arial,sans-serif;font-size:11px;}</style></head>
 <body>
   <div class="header"><p>Alex Martin | alex@example.com | +1 555 0100</p></div>
@@ -184,10 +191,12 @@ test('a keyword that folds to nothing is never counted as found', () => {
   <div class="section"><div class="section-title">Education</div><p>BSc</p></div>
   <div class="section"><div class="section-title">Skills</div><p>Python</p></div>
 </body></html>`;
-  const result = auditAts(html, { keywords: ['工作经历', 'Python'] });
+  const result = auditAts(html, { keywords: [combiningMarksOnly, 'Python'] });
+  assert.equal(result.keywordCoverage.total, 2);
   assert.equal(result.keywordCoverage.found, 1,
     'only the keyword present in the text may be found');
-  assert.deepEqual(result.keywordCoverage.missing, ['工作经历']);
+  assert.deepEqual(result.keywordCoverage.missing, [combiningMarksOnly],
+    'a keyword that folds to nothing must never be reported found');
 });
 
 test('an alias listed in accented form still matches a folded heading', () => {
