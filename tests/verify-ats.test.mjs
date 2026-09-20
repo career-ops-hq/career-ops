@@ -1,4 +1,4 @@
-// tests/verify-ats-entities.test.mjs — a CV whose headings and body carry HTML
+// tests/verify-ats.test.mjs: a CV whose headings and body carry HTML
 // entities, or accented letters, was scored as if its text were missing.
 //
 // Two independent causes (#4261):
@@ -11,7 +11,7 @@
 // The assertions below are on auditAts' own output, so they fail on main and pass
 // with the fix rather than pinning the helper functions.
 //
-// Run:  node --test tests/verify-ats-entities.test.mjs
+// Run:  node --test tests/verify-ats.test.mjs
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
