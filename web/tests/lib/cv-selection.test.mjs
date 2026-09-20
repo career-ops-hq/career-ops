@@ -41,3 +41,22 @@ test("pdfPathForReport selects the exact report from a real pdf-index.tsv row sh
   assert.equal(pdfPathForReport(index, 10), "output/cv-company-old-role.pdf");
   assert.equal(pdfPathForReport(index, 11), "output/cv-company-new-role.pdf");
 });
+
+test("pdfIndexEntryForReport returns the CV even when a cover row precedes it", () => {
+  // Cover generated first: its row sits ahead of the CV row for the same report.
+  // A first-match reader would hand back the cover; selecting by kind must not.
+  const index = [
+    "# report\tpdf\thtml\tformat\tdate\tkind",
+    "052\toutput/052-cover.pdf\toutput/052-cover.html\tats\t2026-09-01\tcover",
+    "052\toutput/052-cv.pdf\toutput/052-cv.html\tats\t2026-09-01\tcv",
+  ].join("\n");
+  assert.deepEqual(pdfIndexEntryForReport(index, 52), { found: true, path: "output/052-cv.pdf" });
+});
+
+test("pdfIndexEntryForReport never resolves a report to a cover-only row", () => {
+  const index = [
+    "# report\tpdf\thtml\tformat\tdate\tkind",
+    "052\toutput/052-cover.pdf\toutput/052-cover.html\tats\t2026-09-01\tcover",
+  ].join("\n");
+  assert.deepEqual(pdfIndexEntryForReport(index, 52), { found: false, path: null });
+});

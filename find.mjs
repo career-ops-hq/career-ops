@@ -79,9 +79,10 @@ export function parseTrackerRows(text) {
 }
 
 /**
- * Parse data/pdf-index.tsv (report \t pdf \t html \t format \t date) into a
- * normalized-report# → PDF-path map. Comment lines and rows generated without
- * a report number are skipped.
+ * Parse data/pdf-index.tsv (report \t pdf \t html \t format \t date \t kind)
+ * into a normalized-report# → CV-PDF-path map. Comment lines, rows generated
+ * without a report number, and cover-letter rows are skipped: this map is the
+ * report's CV (outcome.mjs and merge-tracker.mjs treat it as the applied PDF).
  *
  * @param {string} text - Full contents of pdf-index.tsv.
  * @returns {Map<string,string>}
@@ -92,6 +93,10 @@ export function parsePdfIndex(text) {
     if (!line.trim() || line.startsWith('#')) continue;
     const fields = line.split('\t');
     if (!fields[0]?.trim() || !fields[1]) continue;
+    // A report can hold both a CV and a cover-letter row (#3967); this map is
+    // the report's CV. Skip cover rows so a later one can't overwrite the CV
+    // under last-row-wins; a missing kind column reads as 'cv' (legacy rows).
+    if ((fields[5] || '').trim() === 'cover') continue;
     map.set(normNum(fields[0]), fields[1]);
   }
   return map;

@@ -11322,6 +11322,19 @@ try {
   } else {
     fail('find.mjs matched a query that exists nowhere in the tracker');
   }
+
+  // A report can hold both a CV and a cover-letter row (#3967). The map is the
+  // report's CV, so a cover row must not overwrite the CV under last-row-wins.
+  const kindedIndex = parsePdfIndex([
+    '# report\tpdf\thtml\tformat\tdate\tkind',
+    '012\toutput/012-cv.pdf\toutput/012-cv.html\tats\t2026-06-01\tcv',
+    '012\toutput/012-cover.pdf\toutput/012-cover.html\tats\t2026-06-01\tcover',
+  ].join('\n'));
+  if (kindedIndex.get('12') === 'output/012-cv.pdf') {
+    pass('find.mjs parsePdfIndex returns the CV row, not a trailing cover row');
+  } else {
+    fail(`find.mjs parsePdfIndex resolved report 12 to ${JSON.stringify(kindedIndex.get('12'))}`);
+  }
 } catch (e) {
   fail(`find.mjs unit test crashed: ${e.message}`);
 }

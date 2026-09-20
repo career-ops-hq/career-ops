@@ -1166,10 +1166,11 @@ export function injectPrintPageCss(html, format = 'a4') {
  * per PDF path; when a report number is given, an older row for that report is
  * dropped only when it is the same kind, so a report can hold both its CV and
  * its cover letter at once (#3967). A regenerated artifact still supersedes its
- * own stale row. Readers key on the leading columns and ignore kind, so the
- * trailing column is backward compatible; a legacy row with no kind reads as
- * 'cv'. The file is gitignored: it references gitignored output/ artifacts and
- * is meaningless on another machine.
+ * own stale row. Because a report can now carry two rows, readers must select
+ * by kind — parsePdfIndex (find.mjs) and pdfIndexEntryForReport (cv-selection)
+ * both return the CV row and skip cover rows, treating a missing kind column as
+ * 'cv' so legacy single-row manifests still resolve. The file is gitignored: it
+ * references gitignored output/ artifacts and is meaningless on another machine.
  */
 export function updatePDFManifest(reportNum, pdfPath, htmlPath, format, kind = 'cv') {
   const manifestPath = resolvePdfIndexPath(trackerPath);
