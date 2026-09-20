@@ -65,6 +65,24 @@ function replayUpdate(repo, version) {
   repo.g('commit', '-qm', `chore: auto-update system files to v${version}`);
 }
 
+/**
+ * Replay an update that PRESERVES some paths, which is what apply() does with
+ * whatever locallyModifiedSystemFiles reported: the preserved files are excluded
+ * from the checkout, so the auto-update commit it writes carries the user's
+ * content unchanged (#4170).
+ */
+function replayUpdatePreserving(repo, version, preserved) {
+  // Check out each path on its own rather than passing `:(exclude)` pathspecs
+  // together: `git checkout <ref> -- <paths> :(exclude)<path>` errors with
+  // "did not match any file(s)" when the exclusions cancel a path entirely,
+  // which is the failure apply() guards against with pathFullyPreserved.
+  for (const path of PATHS) {
+    if (preserved.includes(path)) continue;
+    repo.g('checkout', 'upstream', '--', path);
+  }
+  repo.g('commit', '-qm', `chore: auto-update system files to v${version}`);
+}
+
 const PATHS = ['modes/', 'generate-cover-letter.mjs'];
 
 // ── 1. The reported case: a committed local fix upstream has not adopted ──
@@ -601,5 +619,36 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
     pass('an uncommitted revert to an older upstream version is reported too (#3129)');
   } else {
     fail(`#18 expected ['modes/pdf.md'], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+
+// ── 19. A customization an earlier update PRESERVED is still reported (#4170) ──
+//    The baseline used to be the newest auto-update commit, and an update keeps
+//    a customized file by folding the user's content into that same commit. So
+//    from the next update onward the file diffs clean against that baseline and
+//    the customization silently stops being protected: it is checked out raw on
+//    the update after that, losing the edit with no warning and no .bak.
+//
+//    The distinction the baseline has to make is "is this content the user's",
+//    not "did anything change since the last update". A file the update itself
+//    delivered must stay unreported (case 5 / #3094); a file the user wrote and
+//    an update merely carried along must not.
+{
+  const repo = makeRepo();
+  writeFileSync(join(repo.dir, 'generate-cover-letter.mjs'), 'local linkedin fix\n');
+  repo.g('commit', '-qam', 'local fix');
+  // Update 1 refreshes another file and preserves this one, so its commit now
+  // contains the user's content.
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  replayUpdatePreserving(repo, '2', ['generate-cover-letter.mjs']);
+  // Update 2 arrives.
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v3\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 1 && atRisk[0] === 'generate-cover-letter.mjs') {
+    pass('a customization an earlier update preserved is still reported (#4170)');
+  } else {
+    fail(`#19 expected ['generate-cover-letter.mjs'], got ${JSON.stringify(atRisk)}`);
   }
 }

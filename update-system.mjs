@@ -1188,31 +1188,69 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
     }
   };
 
-  // An updater commit is the installed system snapshot. On a later update,
-  // using the original merge-base would mistake the previous update's files
-  // for user edits. Keep the merge-base fallback for installations without a
-  // recorded updater commit.
-  let baseline = null;
+  // The baseline has to answer "is this content the user's", not "did anything
+  // change since the last update". Those are different questions for a file the
+  // user customized and an update then PRESERVED: the updater folds the user's
+  // version into its own commit unchanged, so from that commit onward the file
+  // diffs clean and the customization stops being protected (#4170).
+  //
+  // An earlier version of this used the newest updater commit outright, which
+  // has exactly that blind spot, and the original merge-base, which flags every
+  // file the previous update delivered. Both are wrong for the same reason:
+  // neither one separates "upstream put this here" from "the user wrote this".
+  //
+  // Per file, the reference that answers the question is the newest updater
+  // commit that CHANGED that file. An updater commit only changes a file it
+  // checked out, and the checkout skips preserved paths, so a change in an
+  // updater commit means upstream's content was installed there. The worktree
+  // differing from that version is what "the user wrote this" means.
+  //
+  // The candidate set comes from the merge-base, deliberately, because it is
+  // the most inclusive baseline available: it can only ever over-report, and
+  // the per-file refinement below removes what it over-reports. Starting from
+  // the updater commit instead would under-report and silently lose files, and
+  // a guard that misses the file it exists to protect is worse than a noisy one.
+  let mergeBase = null;
   try {
-    const updaterCommit = runGit(
-      'log', '-1', '--format=%H', '--grep=^chore: auto-update system files', 'HEAD',
-    ).trim();
-    if (updaterCommit) {
-      runGit('merge-base', '--is-ancestor', updaterCommit, 'HEAD');
-      baseline = updaterCommit;
-    }
+    mergeBase = runGit('merge-base', 'HEAD', upstreamRef) || null;
   } catch {
-    baseline = null;
-  }
-  if (!baseline) {
-    try {
-      baseline = runGit('merge-base', 'HEAD', upstreamRef) || null;
-    } catch {
-      baseline = null;
-    }
+    mergeBase = null;
   }
 
-  const changedLocally = new Set(diffNames(baseline || 'HEAD'));
+  // `true` when the file's current content cannot be proven identical to `ref`.
+  // An unreadable ref answers `true`: keeping a candidate costs a warning, and
+  // dropping one costs the user their edits with no warning at all.
+  const fileDiffersFrom = (ref, file) => {
+    try {
+      return runGit('diff', '--ignore-cr-at-eol', '--numstat', ref, '--', file).trim().length > 0;
+    } catch {
+      return true;
+    }
+  };
+
+  const changedLocally = new Set(diffNames(mergeBase || 'HEAD'));
+  for (const file of [...changedLocally]) {
+    let delivered = null;
+    try {
+      delivered = runGit(
+        'log', '-1', '--format=%H', '--grep=^chore: auto-update system files', 'HEAD', '--', file,
+      ).trim() || null;
+    } catch {
+      // Unreadable history (shallow clone): keep the candidate rather than
+      // guess, same degradation contract as diffNames.
+      delivered = null;
+    }
+    // No update ever delivered this file, so nothing upstream put it there and
+    // the merge-base difference stands as the user's.
+    if (!delivered) continue;
+    // Still differs from the version upstream installed here, or the check
+    // could not run: the user's.
+    if (fileDiffersFrom(delivered, file)) continue;
+    // Identical to what upstream delivered: the merge-base difference is the
+    // update's own work, not a local edit.
+    changedLocally.delete(file);
+  }
+
   const differsFromUpstream = new Set(diffNames(upstreamRef));
   const atRisk = [...changedLocally].filter((file) => differsFromUpstream.has(file));
 
