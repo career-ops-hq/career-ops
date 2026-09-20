@@ -19,7 +19,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const { verifyCompanies } = await import(pathToFileURL(join(ROOT, 'verify-portals.mjs')).href);
+const { verifyCompanies, printResults } = await import(pathToFileURL(join(ROOT, 'verify-portals.mjs')).href);
 
 const GH_BOARD = 'https://job-boards.greenhouse.io/temporal';
 const COMPANY = 'Temporal';
@@ -52,6 +52,20 @@ const deadFetchers = () => ({
 });
 
 const rowFor = (rows) => rows.find((r) => r.name === COMPANY);
+
+/** Run the real printer and return what it wrote, so assertions are on output. */
+function capturePrintResults(rows) {
+  const lines = [];
+  const original = console.log;
+  console.log = (...args) => lines.push(args.join(' '));
+  try {
+    printResults(rows);
+  } finally {
+    console.log = original;
+  }
+  return lines.join('\n');
+}
+
 
 test('a live alternate the gate refuses is reported with its reason', async () => {
   const rows = await verifyCompanies([entry()], fetchers());
@@ -108,4 +122,54 @@ test('a confirmed live alternate is still suggested and adoptable', async () => 
   assert.equal(suggested?.slug, ALT_SLUG);
   // No refusal rides along when a board was confirmed.
   assert.equal(suggested?.rejectedAlternate, undefined);
+});
+
+test('a rejected-only result does not print undefined/undefined', async () => {
+  // The steward review caught this: the "try" line gated on `r.suggested` being
+  // truthy, and a rejected-only result satisfies that while carrying no
+  // top-level ats/slug. The operator saw `try undefined/undefined`.
+  const fetchJson = async (url) => {
+    if (url.includes('job-boards.greenhouse.io')) throw notFound();
+    if (url.includes('posting-api/job-board')) return { jobs: [{ id: 1, title: 'Eng' }] };
+    throw notFound();
+  };
+  const fetchText = async (url) => (url.includes('jobs.ashbyhq.com') ? '<title>Somebody Else Ltd</title>' : '');
+
+  const rows = await verifyCompanies([entry()], { fetchJson, fetchText });
+  const printed = capturePrintResults(rows);
+  assert.ok(!printed.includes('undefined'), `printed an undefined: ${printed}`);
+  assert.ok(printed.includes('Somebody Else Ltd'), 'the observed owner is reported');
+  assert.ok(printed.includes('owner-mismatch'), 'the refusal reason is reported separately');
+});
+
+test('an adoptable suggestion still prints its try line', async () => {
+  // The guard above must not silence the line it was protecting.
+  const fetchJson = async (url) => {
+    if (url.includes('job-boards.greenhouse.io')) throw notFound();
+    if (url.includes('posting-api/job-board')) return { jobs: [{ id: 1, title: 'Eng' }] };
+    throw notFound();
+  };
+  const fetchText = async (url) => (url.includes('jobs.ashbyhq.com') ? `<title>${COMPANY}</title>` : '');
+
+  const rows = await verifyCompanies([entry()], { fetchJson, fetchText });
+  const printed = capturePrintResults(rows);
+  assert.ok(printed.includes(`try ashby/${ALT_SLUG}`), `missing try line: ${printed}`);
+  assert.ok(!printed.includes('undefined'), `printed an undefined: ${printed}`);
+});
+
+test('a control character in a remote board title does not reach the terminal', async () => {
+  // The owner name comes from a remote page's <title>, so a hostile board can
+  // put ANSI escapes in our output and rewrite prior lines.
+  const hostile = 'Ev\u001b[31mil\u001b[0m Corp';
+  const fetchJson = async (url) => {
+    if (url.includes('job-boards.greenhouse.io')) throw notFound();
+    if (url.includes('posting-api/job-board')) return { jobs: [{ id: 1, title: 'Eng' }] };
+    throw notFound();
+  };
+  const fetchText = async (url) => (url.includes('jobs.ashbyhq.com') ? `<title>${hostile}</title>` : '');
+
+  const rows = await verifyCompanies([entry()], { fetchJson, fetchText });
+  const printed = capturePrintResults(rows);
+  assert.ok(!printed.includes('\u001b'), 'an escape sequence reached the terminal');
+  assert.ok(printed.includes('Ev[31mil[0m Corp'), 'the visible text survives');
 });

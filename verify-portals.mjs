@@ -426,6 +426,21 @@ async function ownerConfirmed(ats, slug, companyName, { fetchJson, fetchText, eu
 }
 
 /**
+ * Strip control characters from text before it reaches a terminal.
+ *
+ * Owner names come from a remote board page's ``<title>``, so a hostile or
+ * merely broken board can put ANSI escapes in our CLI output. Escape sequences
+ * can recolour or rewrite prior lines, which is a misleading report rather than
+ * a cosmetic problem: this command's whole job is telling an operator what is
+ * live. Tab and newline are dropped too, since the row is one line.
+ */
+function sanitizeForTerminal(text) {
+  if (typeof text !== 'string') return '';
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').slice(0, 120).trim();
+}
+
+/**
  * Probe slug variants across all ATSes; prefer live boards over empty ones.
  *
  * No first-word suffix variants (#2937). Nothing downstream re-checks identity:
@@ -670,7 +685,7 @@ const ERROR_KIND_LABEL = {
   unknown: 'unresolved',
 };
 
-function printResults(results) {
+export function printResults(results) {
   for (const r of results) {
     const icon = ICON[r.status] || '?';
     // ATS rows carry ats/slug; provider-layer rows carry the provider id.
@@ -683,7 +698,10 @@ function printResults(results) {
     } else if (r.status === 'missing') {
       const kind = ERROR_KIND_LABEL[r.errorKind] || 'unresolved';
       detail = `${source} (${kind}) — ${r.reason || 'unresolved'}`;
-      if (r.suggested) {
+      // Only an *adoptable* suggestion gets the "try" line. A rejected-only
+      // result carries `rejectedAlternate` and no top-level ats/slug, so gating
+      // on `r.suggested` alone rendered `try undefined/undefined`.
+      if (r.suggested && r.suggested.ats && r.suggested.slug) {
         detail += ` → try ${r.suggested.ats}/${r.suggested.slug}`;
       }
       // A live alternate whose identity could not be confirmed is reported, never
@@ -691,8 +709,15 @@ function printResults(results) {
       // and `fix-slugs` still will not write it (#4230).
       const rejected = r.suggested?.rejectedAlternate;
       if (rejected) {
-        const who = rejected.ownerBoardName || rejected.ownerReason || 'identity unconfirmed';
-        detail += `; also found live ${rejected.ats}/${rejected.slug} owned by "${who}" — identity unconfirmed`;
+        // The observed owner and the refusal reason are two different facts: the
+        // first is what the board calls itself, the second is why we would not
+        // adopt it. Printing one in place of the other told the operator
+        // "identity unconfirmed" even when the identity was confirmed and simply
+        // did not match.
+        const board = sanitizeForTerminal(rejected.ownerBoardName);
+        const reason = rejected.ownerReason || 'identity unconfirmed';
+        const who = board ? `owned by "${board}" — ${reason}` : reason;
+        detail += `; also found live ${rejected.ats}/${rejected.slug} ${who}`;
       }
     } else {
       detail = r.reason || '';
