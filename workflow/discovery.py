@@ -28,7 +28,8 @@ def workday_endpoint(api: str) -> tuple[str, str, str]:
     parts = parsed.path.strip("/").split("/")
     if not parsed.hostname or not parts or not parts[-1]:
         raise ValueError(f"Invalid Workday API URL: {api}")
-    return f"{parsed.scheme}://{parsed.netloc}", parsed.hostname.split(".")[0], parts[-1]
+    site = parts[-2] if parts[-1] == "jobs" and len(parts) > 1 else parts[-1]
+    return f"{parsed.scheme}://{parsed.netloc}", parsed.hostname.split(".")[0], site
 
 
 def text(value: str) -> str:
@@ -139,6 +140,11 @@ def discover(directory: Path, config_path: Path, fetch_json=request_json) -> dic
                             continue
                         detail = fetch_json(f"{endpoint}{job['externalPath']}")
                         info = detail.get("jobPostingInfo", {})
+                        detail_place = place or info.get("location", "")
+                        if matches(detail_place, block) and not matches(detail_place, always):
+                            continue
+                        if allow and detail_place and not matches(detail_place, allow):
+                            continue
                         url = info.get("externalUrl") or f"{source['api'].rstrip('/')}{job['externalPath']}"
                         added += retain(db, source["name"], url, role, detail)
                         checked += 1
@@ -147,6 +153,7 @@ def discover(directory: Path, config_path: Path, fetch_json=request_json) -> dic
                 db.commit()
             except Exception as error:
                 failures.append({"source": source["name"], "error": str(error)})
-        return {"status": "completed", "sources": len(sources), "checked": checked, "added": added, "failures": failures}
+        status = "failed" if failures and not checked else "partial" if failures else "completed"
+        return {"status": status, "sources": len(sources), "checked": checked, "added": added, "failures": failures}
     finally:
         db.close()

@@ -1062,6 +1062,8 @@ def main() -> None:
             result = cron_score(args.directory)
         elif args.command == "discover":
             result = discover(args.directory, INPUT_ROOT / "portals.yml")
+            if result["status"] == "failed":
+                raise RuntimeError(json.dumps(result, ensure_ascii=False, sort_keys=True))
         elif args.command == "resume":
             resume_task(
                 args.directory, args.task_id, args.input, args.crash_at,

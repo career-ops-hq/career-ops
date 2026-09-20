@@ -47,6 +47,8 @@ tracked_companies:
     assert first == {"status": "completed", "sources": 1, "checked": 1, "added": 1, "failures": []}
     assert second["added"] == 0
     assert calls[0][0] == "https://example.wd1.myworkdayjobs.com/wday/cxs/example/External/jobs"
+    from workflow.discovery import workday_endpoint
+    assert workday_endpoint("https://roche.wd3.myworkdayjobs.com/roche-ext/jobs")[1:] == ("roche", "roche-ext")
     db = sqlite3.connect(root / "opportunities.db")
     assert db.execute("SELECT count(*) FROM opportunities").fetchone()[0] == 1
     assert db.execute("SELECT content FROM page_evidence").fetchone()[0] == "Build reviewed AI systems."
