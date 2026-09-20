@@ -15984,6 +15984,8 @@ try {
       } catch (e) {
         fail(`analytics progress contract test crashed: ${e.message}`);
       }
+    } else {
+      fail('analytics progress contract module is missing: web/src/lib/analytics-metrics.mjs');
     }
 
     // 55.3b+ the degraded-path FALLBACK in the states ACL (career-ops-ui's
