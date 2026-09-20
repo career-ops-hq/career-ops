@@ -5,6 +5,10 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — workday');
 
+// Expected jobs.workdayTruncated value, spelled out locally rather than
+// imported from providers/workday.mjs — see the same constant in
+// workday-facet-split.test.mjs for why.
+const TRANSIENT = 'transient';
 
 try {
   const workdayModule = await import(pathToFileURL(join(ROOT, 'providers/workday.mjs')).href);
@@ -659,10 +663,10 @@ try {
       throw new Error('fetch failed'); // every page-2 attempt dies
     });
     const { result: jobs } = await captureConsoleErrors(() => workday.fetch(entry, ctx));
-    if (jobs.workdayTruncated === true && jobs.length === 20) {
-      pass('fetch-error truncation tags jobs.workdayTruncated');
+    if (jobs.workdayTruncated === TRANSIENT && jobs.length === 20) {
+      pass(`fetch-error truncation tags jobs.workdayTruncated='${TRANSIENT}'`);
     } else {
-      fail(`expected workdayTruncated tag on 20 partial jobs, got tag=${jobs.workdayTruncated} len=${jobs.length}`);
+      fail(`expected workdayTruncated='${TRANSIENT}' tag on 20 partial jobs, got tag=${jobs.workdayTruncated} len=${jobs.length}`);
     }
   }
 

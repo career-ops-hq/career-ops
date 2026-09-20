@@ -52,7 +52,7 @@ import { isResolverFailure, dnsPacingStats } from './providers/_dns-cache.mjs';
 import greenhouse from './providers/greenhouse.mjs';
 import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
-import workday from './providers/workday.mjs';
+import workday, { WORKDAY_TRUNCATED_REASON } from './providers/workday.mjs';
 import icims from './providers/icims.mjs';
 import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, loadBlacklist, parseSinceDays, PORTALS_PATH, PIPELINE_PATH } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -962,7 +962,11 @@ async function main() {
           const jobs = await source.provider.fetch(entry, ctx);
           recordBoardResult(deadBoards, name, deadBoard, 200);
           consecutiveResolverFailures = 0;
-          if (jobs.workdayTruncated) truncated.push(entry);
+          // Only 'transient' is worth a sequential retry — 'structural' means
+          // the board hit a fixed bound (facet-split slice/depth/page budget)
+          // that a repeat run reaches again, paying the same expensive split
+          // for the same result.
+          if (jobs.workdayTruncated === WORKDAY_TRUNCATED_REASON.TRANSIENT) truncated.push(entry);
           if (jobs.icimsTruncated) {
             cappedBoards++;
             if (opts.verbose) console.error(`  ⚠ ${name}/${entry.name}: hit the page cap — later postings not scanned`);
@@ -1034,8 +1038,16 @@ async function main() {
             recordBoardResult(deadBoards, name, boardKey(entry), 200);
             await processJobs(jobs, name, source.provider, entry.name);
             if (jobs.workdayTruncated) {
-              errors++; // still truncated on a quiet line — genuine board problem, move on
-              if (opts.verbose) console.error(`  ✗ ${name}/${entry.name}: still truncated after sequential retry`);
+              errors++; // still not fully covered — move on
+              // A board pushed here as 'transient' can legitimately come back
+              // 'structural': the retry's root crawl succeeded, the clamp got
+              // detected for the first time, and the split then hit its own
+              // bound — that's a real first split, not a repeat.
+              if (opts.verbose) {
+                const why = jobs.workdayTruncated === WORKDAY_TRUNCATED_REASON.STRUCTURAL
+                  ? 'facet split hit its bound' : 'still truncated';
+                console.error(`  ✗ ${name}/${entry.name}: ${why} after sequential retry`);
+              }
             }
           })(), COMPANY_TIMEOUT_MS, `${name}/${entry.name} (retry)`);
         } catch (err) {
