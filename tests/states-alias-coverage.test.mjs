@@ -147,6 +147,33 @@ try {
       ? pass(`normalizeStatus("${raw}") -> ${expected}`)
       : fail(`normalizeStatus("${raw}") -> ${got ?? 'unknown'}, expected ${expected}`);
   }
+
+  // dedup-tracker has its own rank table because its duplicate-resolution
+  // policy intentionally differs from the canonical lifecycle ordering for
+  // terminal states. Aliases must nevertheless carry the same rank as their
+  // canonical state or a duplicate can keep the less advanced row.
+  const dedupSrc = readFileSync(join(ROOT, 'dedup-tracker.mjs'), 'utf-8');
+  const rankBody = dedupSrc.match(/const STATUS_RANK = \{([\s\S]*?)\n\};/)?.[1] ?? '';
+  const ranks = new Map([...rankBody.matchAll(/'([^']+)'\s*:\s*(\d+)/g)].map((m) => [m[1], Number(m[2])]));
+  const expectedRanks = [
+    ['screening', 5],
+    ['online assessment', 5],
+    ['online_assessment', 5],
+    ['online screening', 5],
+    ['entrevista', 6],
+    ['oferta', 7],
+    ['contratado', 8],
+    ['contratada', 8],
+    ['accepted', 8],
+    ['accept', 8],
+  ];
+  const rankMismatches = expectedRanks.filter(([alias, rank]) => ranks.get(alias) !== rank);
+  rankMismatches.length === 0
+    ? pass('dedup lifecycle aliases carry their canonical Assessment/Interview/Offer/Hired ranks')
+    : fail(`dedup lifecycle alias rank mismatch: ${rankMismatches.map(([alias, rank]) => `${alias}=${ranks.get(alias) ?? 'missing'} (want ${rank})`).join(', ')}`);
+  !ranks.has('evaluación')
+    ? pass('dedup does not invent the unconfigured Evaluación alias')
+    : fail('dedup ranks Evaluación even though templates/states.yml does not configure it');
 } catch (err) {
   fail(`states alias coverage test threw: ${err?.message ?? err}`);
 }
