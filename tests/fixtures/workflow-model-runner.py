@@ -34,6 +34,29 @@ if phase == "scan_evaluate":
     }))
 elif phase == "scan_review":
     print(json.dumps({"verdict": "approve", "checks": {"grounded": "pass"}, "tool_calls": 1}))
+elif phase == "apply_evaluate":
+    feedback = payload["inputs"].get("feedback", [])
+    print(json.dumps({
+        "outcome": "package",
+        "artifact": {
+            "resume_payload": {"candidate": {"name": "Jiaming Zhang"}, "summary": "Verified AI engineer", "experience": [], "projects": [], "education": [], "certifications": [], "awards": [], "skills": []},
+            "changes": "# Evidence-backed changes",
+            "cover_letter": "Grounded cover letter",
+            "upskill": "# Upskill plan",
+            "interview_prep": "# Interview preparation",
+            "questions": "# Questions",
+        },
+        "tool_calls": 20 if "force-budget" in feedback else 1,
+    }))
+elif phase == "apply_review":
+    checks = ["source-grounding", "role-alignment", "cv-materiality", "employer-questions", "sensitive-fields", "artifact-consistency"]
+    forced = "force-review-failure" in payload["inputs"].get("feedback", [])
+    print(json.dumps({
+        "verdict": "revise" if forced else "approve", "schema": "career-ops/application-review", "schema_version": 1,
+        "checks": [{"id": item, "status": "fail" if forced and item == "source-grounding" else "pass", "finding": "Verified"} for item in checks],
+        "unsupported_claims": ["Unsupported"] if forced else [],
+        "required_changes": ["Remove claim"] if forced else [], "tool_calls": 1,
+    }))
 elif phase == "evaluate":
     report = payload["inputs"]["jd_report"]
     if report["prescreen"]["status"] == "fail":

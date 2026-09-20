@@ -12,6 +12,11 @@ spec = importlib.util.spec_from_file_location("workflow_model_runner", ROOT / "w
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
+flattened = {"name": "Jiaming Zhang", "email": "candidate@example.com", "summary": "Grounded"}
+normalized = runner.normalize_resume_payload(flattened)
+assert normalized["candidate"] == {"name": "Jiaming Zhang", "email": "candidate@example.com"}
+assert "name" not in normalized
+
 inputs = {
     "jd_report": {"prescreen": {"status": "uncertain"}},
     "cv": "cv", "profile": "profile", "targeting": "targeting", "rules": "rules",

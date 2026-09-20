@@ -84,6 +84,7 @@ class FakeAgent:
     responses = []
     instances = []
     def __init__(self, **kwargs):
+        self.kwargs = kwargs
         self.request_overrides = kwargs.get('request_overrides')
         self.closed = False
         self.instances.append(self)
@@ -94,8 +95,8 @@ class FakeAgent:
 
 hermes_modules = {
     'hermes_cli.env_loader': types.SimpleNamespace(load_hermes_dotenv=lambda: None),
-    'hermes_cli.config': types.SimpleNamespace(load_config_readonly=lambda: {'model': {'default': 'test'}}),
-    'hermes_cli.runtime_provider': types.SimpleNamespace(resolve_runtime_provider=lambda **_: {}),
+    'hermes_cli.config': types.SimpleNamespace(load_config_readonly=lambda: {'model': {'default': 'test'}, 'agent': {'reasoning_effort': 'xhigh'}}),
+    'hermes_cli.runtime_provider': types.SimpleNamespace(resolve_runtime_provider=lambda **_: {'provider': 'custom', 'base_url': 'https://model.example/v1', 'api_key': 'secret'}),
     'run_agent': types.SimpleNamespace(AIAgent=FakeAgent),
 }
 with tempfile.TemporaryDirectory() as temporary, patch.dict(sys.modules, hermes_modules):
@@ -104,6 +105,10 @@ with tempfile.TemporaryDirectory() as temporary, patch.dict(sys.modules, hermes_
     FakeAgent.instances = []
     assert score.call_agent('test', 'prompt', [], directory)[0] == {'ok': True}
     assert len(FakeAgent.instances) == 2 and all(agent.closed for agent in FakeAgent.instances)
+    assert FakeAgent.instances[-1].kwargs['model'] == 'test'
+    assert FakeAgent.instances[-1].kwargs['provider'] == 'custom'
+    assert FakeAgent.instances[-1].kwargs['base_url'] == 'https://model.example/v1'
+    assert FakeAgent.instances[-1].kwargs['reasoning_config']['effort'] == 'xhigh'
     FakeAgent.responses = [{'final_response': 'bad', 'messages': []}, {'final_response': 'still bad', 'messages': []}]
     FakeAgent.instances = []
     try:

@@ -16,7 +16,9 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 HERMES = Path.home() / '.hermes' / 'hermes-agent'
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HERMES))
+from workflow.model_config import create_agent
 STOPPING = False
 
 
@@ -259,27 +261,13 @@ def attach_evidence(value, snapshot):
 
 
 def call_agent(phase, prompt, tools, directory):
-    """Fresh role-specific context; installed provider/model and reasoning stay unchanged."""
+    """Run the configured workflow model in a fresh role-specific context."""
     if STOPPING:
         raise TimeoutError('Soft deadline reached')
-    from hermes_cli.env_loader import load_hermes_dotenv
-    load_hermes_dotenv()
-    from hermes_cli.config import load_config_readonly
-    from hermes_cli.runtime_provider import resolve_runtime_provider
-    from run_agent import AIAgent
-    config = load_config_readonly()
-    model = config['model']['default']
-    runtime = resolve_runtime_provider(target_model=model)
     started = time.monotonic()
     for attempt in range(2):
         session = f'score-{phase}-{uuid.uuid4().hex[:12]}'
-        agent = AIAgent(
-            model=model, **{k: runtime.get(k) for k in ('api_key', 'base_url', 'provider', 'api_mode', 'requested_provider', 'request_overrides')},
-            enabled_toolsets=tools, max_iterations=12 if tools else 1,
-            skip_context_files=True, skip_memory=True, load_soul_identity=False, skip_background_review=True,
-            ephemeral_system_prompt=BASE, quiet_mode=True, session_id=session,
-            reasoning_config={'enabled': True, 'effort': config.get('agent', {}).get('reasoning_effort', 'high')},
-        )
+        agent = create_agent(system_prompt=BASE, tools=tools, session_id=session)
         if tools:
             limit_research(agent)
         else:
