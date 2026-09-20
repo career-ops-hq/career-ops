@@ -113,3 +113,37 @@ test('a malformed tier degrades to null rather than throwing', () => {
 test('an unknown interval on a component is rejected', () => {
   assert.equal(parseCompensation(jobWith([salary({ interval: '7 MOON' })])), null);
 });
+
+test('a nested component with no interval is rejected, not assumed yearly', () => {
+  // A component states its own interval. Defaulting it to 1 YEAR would annualize
+  // a monthly figure and present it as a salary with nothing signalling it.
+  assert.equal(parseCompensation(jobWith([salary({ interval: undefined })])), null);
+  assert.equal(parseCompensation(jobWith([salary({ interval: '' })])), null);
+});
+
+test('only a Salary component is read, so an equity number is never the range', () => {
+  // A bonus component can carry real numbers. Reading the widest one regardless
+  // of type would report a one-off as the role's annual band.
+  const bonus = {
+    id: 'b1',
+    summary: '10% bonus',
+    compensationType: 'Bonus',
+    interval: '1 YEAR',
+    currencyCode: 'USD',
+    minValue: 500000,
+    maxValue: 900000,
+  };
+  const result = parseCompensation(jobWith([salary(), bonus]));
+  assert.equal(result.min, 128000);
+  assert.equal(result.max, 180000);
+
+  // And a tier with no Salary component at all has nothing to report.
+  assert.equal(parseCompensation(jobWith([bonus, equity()])), null);
+});
+
+test('the flat shape keeps its 1 YEAR default', () => {
+  // The fallback is a flat-shape convenience and must survive the nested rule.
+  const flat = parseCompensation({ compensation: { minValue: 80000, maxValue: 100000, currency: 'EUR' } });
+  assert.equal(flat.min, 80000);
+  assert.equal(flat.max, 100000);
+});

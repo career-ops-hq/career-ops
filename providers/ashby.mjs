@@ -65,15 +65,21 @@ export function parseCompensation(job) {
   };
 
   // A real payload nests the numbers under tiers[].components[]; the flat shape
-  // puts them on `comp` directly. Prefer the component with an actual range so
-  // an equity percentage sitting in the same tier cannot be mistaken for salary.
-  /** @type {any} */
+  // puts them on `comp` directly.
   let source = comp;
+  let nested = false;
   /** @type {any[]} */
   const components = (Array.isArray(comp.compensationTiers) ? comp.compensationTiers : [])
     .flatMap((tier) => (Array.isArray(tier?.components) ? tier.components : []));
   if (components.length) {
-    const withRange = components.filter(
+    // Only a Salary component carries the role's range. An EquityPercentage or
+    // bonus component may still hold a number, and reading it as salary would
+    // report a percentage or a one-off as an annual figure.
+    const salaryComponents = components.filter(
+      (c) => String(c?.compensationType ?? '').toLowerCase() === 'salary',
+    );
+    if (!salaryComponents.length) return null;
+    const withRange = salaryComponents.filter(
       (c) => normalizeNum(c?.minValue) != null || normalizeNum(c?.maxValue) != null,
     );
     if (!withRange.length) return null;
@@ -86,11 +92,16 @@ export function parseCompensation(job) {
         - (normalizeNum(best?.minValue) ?? normalizeNum(best?.maxValue) ?? 0);
       return span > bestSpan ? c : best;
     }, withRange[0]);
+    nested = true;
   }
 
-  const interval = /** @type {keyof typeof INTERVAL_MULTIPLIERS} */ (
-    source.interval || comp.interval || '1 YEAR'
-  );
+  // A component states its own interval, so a nested component with none is not
+  // the same as a flat object with none. The `1 YEAR` default is a convenience
+  // for the legacy flat shape; applying it here would annualize a monthly figure
+  // and present it as a salary with nothing signalling the substitution.
+  const rawInterval = nested ? source.interval : (source.interval || comp.interval || '1 YEAR');
+  if (typeof rawInterval !== 'string' || !rawInterval.trim()) return null;
+  const interval = /** @type {keyof typeof INTERVAL_MULTIPLIERS} */ (rawInterval);
   const multiplier = INTERVAL_MULTIPLIERS[interval];
   if (!multiplier) return null;
 
