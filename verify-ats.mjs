@@ -279,6 +279,40 @@ function extractInlineStyles(html) {
  * @param {string} html
  * @returns {string[]}
  */
+/**
+ * Non-Latin section headings mapped to the canonical English name.
+ *
+ * A CV written in another language is not an unparseable CV, and reporting its
+ * sections as missing is a 15-point loss for a defect that does not exist. This
+ * covers the languages the tool is most likely to see; extending it is a matter
+ * of adding rows, and an unmapped heading still folds and matches on its own.
+ */
+const LOCALIZED_SECTION_ALIASES = [
+  // Chinese (Simplified and Traditional)
+  ['工作经历', 'experience'], ['工作經驗', 'experience'], ['经历', 'experience'],
+  ['教育经历', 'education'], ['教育經驗', 'education'], ['学历', 'education'], ['學歷', 'education'],
+  ['技术栈', 'skills'], ['技術棧', 'skills'], ['技能', 'skills'],
+  ['简介', 'summary'], ['自我评价', 'summary'], ['自傳', 'summary'],
+  // Japanese
+  ['職務経歴', 'experience'], ['職歴', 'experience'],
+  ['学歴', 'education'], ['學歴', 'education'],
+  ['スキル', 'skills'],
+  ['自己紹介', 'summary'],
+  // Korean
+  ['경력', 'experience'], ['학력', 'education'], ['기술', 'skills'], ['요약', 'summary'],
+  // Russian
+  ['опыт работы', 'experience'], ['образование', 'education'],
+  ['навыки', 'skills'], ['о себе', 'summary'],
+  // Arabic
+  ['الخبرة', 'experience'], ['التعليم', 'education'],
+  ['المهارات', 'skills'], ['الملخص', 'summary'],
+  // Spanish / Portuguese / French / German
+  ['experiencia', 'experience'], ['experiência', 'experience'], ['erfahrung', 'experience'],
+  ['formación', 'education'], ['formação', 'education'], ['formation', 'education'],
+  ['habilidades', 'skills'], ['competências', 'skills'], ['kenntnisse', 'skills'],
+  ['resumen', 'summary'], ['resumo', 'summary'], ['profil', 'summary'],
+];
+
 function extractHeadings(html) {
   const out = [];
   for (const m of html.matchAll(/<[^>]*class\s*=\s*"[^"]*\bsection-title\b[^"]*"[^>]*>([\s\S]*?)<\//gi)) {
@@ -287,11 +321,52 @@ function extractHeadings(html) {
   for (const m of html.matchAll(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/gi)) {
     out.push(stripInline(m[1]));
   }
-  // Headings are folded, not merely lowercased: `Éducation` has to match the
-  // `education` pattern, and `Übersicht` has to reach `summary`. asciiFold also
-  // strips the combining marks NFD leaves behind, which is what makes an
-  // accented heading comparable to the English literal the pattern carries.
-  return out.map(s => asciiFold(s)).filter(Boolean);
+  // Headings are folded so `Éducation` matches the `education` pattern and
+  // `Übersicht` reaches `summary`. asciiFold also strips the combining marks NFD
+  // leaves behind, which is what makes an accented heading comparable to the
+  // English literal the pattern carries.
+  //
+  // asciiFold returns '' when nothing Latin survives, which is right for a name
+  // and wrong for a heading: a Chinese CV's 工作经历 / 教育经历 / 技术栈 all fold to
+  // '' and every required section then reads missing. So the folded form is
+  // ADDED, not substituted, and each heading also carries the canonical section
+  // names its own script uses. Latin headings are unchanged: they fold to
+  // themselves and match exactly as before.
+  const folded = [];
+  for (const raw of out) {
+    const lower = raw.toLowerCase().trim();
+    if (!lower) continue;
+    folded.push(lower);
+    const ascii = asciiFold(raw);
+    if (ascii && ascii !== lower) folded.push(ascii);
+    for (const canonical of localizedSections(lower)) folded.push(canonical);
+  }
+  return folded;
+}
+
+/**
+ * Canonical section names for a non-Latin heading, so the English required-section
+ * patterns can match it.
+ *
+ * Only the headings the checks actually look for are mapped. Keys are lowercased
+ * and matched by substring, because templates decorate them ("工作经历 Experience").
+ * @param {string} heading - Lowercased heading text.
+ * @returns {string[]}
+ */
+function localizedSections(heading) {
+  const out = [];
+  // Longest needle first, and each match is consumed from the working copy, so a
+  // compound heading does not also match its own substring: `教育经历` contains
+  // `经历`, and without this an education heading would also report `experience`,
+  // claiming a section the CV may not have.
+  let rest = heading;
+  const needles = [...LOCALIZED_SECTION_ALIASES].sort((a, b) => b[0].length - a[0].length);
+  for (const [needle, canonical] of needles) {
+    if (!rest.includes(needle)) continue;
+    out.push(canonical);
+    rest = rest.split(needle).join(' ');
+  }
+  return out;
 }
 
 /**

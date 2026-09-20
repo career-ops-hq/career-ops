@@ -16,7 +16,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { auditAts, extractVisibleText } from '../verify-ats.mjs';
+import { auditAts, extractHeadings, extractVisibleText } from '../verify-ats.mjs';
 
 /** A CV body long enough to clear TEXT_MIN_CHARS, with a given heading set. */
 function cvWithHeadings(headings) {
@@ -95,4 +95,40 @@ test('an unknown entity is left visible rather than dropped', () => {
   );
   assert.ok(extractVisibleText(html).includes('&notarealentity;'),
     'a reference we do not know must survive as text, not vanish');
+});
+
+test('Chinese headings are recognised, not folded away', () => {
+  // asciiFold returns '' when nothing Latin survives, so feeding headings
+  // through it alone made every required section read missing for a Chinese CV:
+  // a 15-point loss and a critical for a defect that does not exist. Raised in
+  // review on #4330.
+  const result = auditAts(cvWithHeadings(['工作经历', '教育经历', '技术栈']));
+  assert.deepEqual(missingHeadings(result), [],
+    'a Chinese CV must not report its sections as missing');
+});
+
+test('an unmapped non-Latin heading keeps its own text rather than vanishing', () => {
+  // The alias table covers the languages we know; an unmapped one must still be
+  // comparable instead of folding to '', so the heading is present at all.
+  const headings = extractHeadings('<h2>職務要約</h2>');
+  assert.ok(headings.some(h => h.includes('職務要約')),
+    `the heading text must survive folding, got ${JSON.stringify(headings)}`);
+});
+
+test('a compound Chinese heading does not also claim an unrelated section', () => {
+  // `教育经历` contains `经历`, so a naive substring match emitted `experience`
+  // as well, reporting a section the CV may not have.
+  const headings = extractHeadings('<h2>教育经历</h2>');
+  assert.ok(headings.includes('education'), 'education is mapped');
+  assert.ok(!headings.includes('experience'),
+    `education must not also report experience, got ${JSON.stringify(headings)}`);
+});
+
+test('Latin headings fold exactly as before', () => {
+  // The non-Latin support must not disturb the accented behaviour this PR added.
+  for (const h of ['ÉDUCATION', 'Übersicht', 'Experience']) {
+    const headings = extractHeadings(`<h2>${h}</h2>`);
+    assert.ok(headings.includes(h.toLowerCase()), `folded form kept for ${h}`);
+  }
+  assert.ok(extractHeadings('<h2>ÉDUCATION</h2>').includes('education'));
 });
