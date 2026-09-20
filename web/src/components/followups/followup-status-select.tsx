@@ -57,7 +57,7 @@ export function FollowupStatusSelect({
   }
 
   return (
-    <span className="inline-flex max-w-full items-center gap-1.5">
+    <span className="inline-flex max-w-full flex-wrap items-center gap-1.5">
       <select
         aria-label={`Update status for application #${n}`}
         title="Change status — urgency recalculates from the new status and follow-up history"
@@ -76,9 +76,11 @@ export function FollowupStatusSelect({
           </option>
         ))}
       </select>
-      {busy && <Loader2 aria-label="Saving status" className="size-3.5 animate-spin text-faint" />}
-      {saved && <Check aria-label="Status saved" className="size-3.5 text-brand" />}
-      {error && <span className="sr-only">{error}</span>}
+      <span role="status" aria-live="polite" aria-atomic="true" className="inline-flex min-h-3.5 items-center">
+        {busy && <><Loader2 aria-hidden="true" className="size-3.5 animate-spin text-faint" /><span className="sr-only">Saving status</span></>}
+        {saved && <><Check aria-hidden="true" className="size-3.5 text-brand" /><span className="sr-only">Status saved</span></>}
+      </span>
+      {error && <span role="alert" className="basis-full text-xs text-red-400">{error}</span>}
     </span>
   );
 }
