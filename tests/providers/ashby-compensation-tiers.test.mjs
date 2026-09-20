@@ -177,3 +177,42 @@ test('a nested set with no readable interval at all still refuses', () => {
     null,
   );
 });
+
+test('a wider component with no interval does not mask a readable narrower one', () => {
+  // The sibling of the unusable-interval case above. A missing interval went on
+  // being admitted as a candidate, so a wider component without one won the
+  // width contest and then failed the nested check that refuses it, returning
+  // null while a valid `1 YEAR` component sat next to it. Reported by CodeRabbit
+  // on #4331, and reproduced in every shape below before changing anything.
+  //
+  // Built with an explicit spread rather than `salary({...})`, because that
+  // helper defaults `interval` to '1 YEAR': passing `interval: undefined` would
+  // be overwritten by the default and the "missing" case would test nothing.
+  const bare = (over = {}) => {
+    const c = {compensationType: 'Salary', currencyCode: 'USD', ...over};
+    if (!('interval' in over)) delete c.interval;
+    return c;
+  };
+
+  const variants = [
+    ['missing key', bare({minValue: 100000, maxValue: 200000})],
+    ['empty string', bare({minValue: 100000, maxValue: 200000, interval: ''})],
+    ['whitespace only', bare({minValue: 100000, maxValue: 200000, interval: '   '})],
+    ['explicit null', bare({minValue: 100000, maxValue: 200000, interval: null})],
+    ['unknown word', bare({minValue: 100000, maxValue: 200000, interval: 'FORTNIGHTLY'})]
+  ];
+
+  for (const [label, wide] of variants) {
+    const narrow = bare({minValue: 120000, maxValue: 150000, interval: '1 YEAR'});
+
+    for (const [order, comps] of [['widest first', [wide, narrow]], ['narrowest first', [narrow, wide]]]) {
+      const result = parseCompensation(jobWith(comps));
+      assert.equal(result?.min, 120000, `readable component must win (${label}, ${order})`);
+      assert.equal(result?.max, 150000, `readable component must win (${label}, ${order})`);
+    }
+  }
+
+  // Still refuses when nothing in the set is readable, so the filter did not
+  // become "take anything".
+  assert.equal(parseCompensation(jobWith([bare({minValue: 100000, maxValue: 200000})])), null);
+});

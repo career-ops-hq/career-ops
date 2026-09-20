@@ -90,14 +90,19 @@ export function parseCompensation(job) {
     // them. Picking the widest first and validating its interval afterwards made
     // a wider component with an unusable interval fatal: the function returned
     // null instead of falling through to a narrower component that parses, in
-    // either array order. A component with no interval of its own is still a
-    // candidate, since a nested one is allowed to carry none and be refused
-    // below rather than silently annualized.
+    // either array order.
+    //
+    // A missing interval is unusable here, not merely unvalidated. The nested
+    // branch refuses a component with no interval of its own rather than
+    // annualizing it, so admitting one as a candidate only lets it win the width
+    // contest and then fail that check, which returns null with a readable
+    // narrower component sitting right there. That is the same masking failure
+    // this filter exists to prevent, one field over.
     const readable = (c) => {
       const raw = c?.interval;
-      if (raw == null) return true;
-      if (typeof raw !== 'string' || !raw.trim()) return true;
-      return Boolean(INTERVAL_MULTIPLIERS[/** @type {keyof typeof INTERVAL_MULTIPLIERS} */ (raw)]);
+      return typeof raw === 'string'
+        && raw.trim() !== ''
+        && Object.hasOwn(INTERVAL_MULTIPLIERS, raw);
     };
     const candidates = withRange.filter(readable);
     if (!candidates.length) return null;
