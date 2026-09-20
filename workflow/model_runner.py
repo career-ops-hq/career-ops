@@ -5,12 +5,14 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
+DRAFT_ROOT = Path(os.environ["CAREER_OPS_DRAFT_ROOT"]) if "CAREER_OPS_DRAFT_ROOT" in os.environ else ROOT / "data" / "workflow-drafts"
 
 
 def load_legacy_model_adapter():
@@ -27,21 +29,113 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
 
 
+def scan_evaluate(payload: dict) -> dict:
+    inputs = payload["inputs"]
+    source = inputs["source"]
+    adapter = load_legacy_model_adapter()
+    key = hashlib.sha256(json.dumps(inputs, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    directory = DRAFT_ROOT / key
+    directory.mkdir(parents=True, exist_ok=True)
+    prompt = adapter.EVIDENCE + json.dumps({
+        "browser_snapshot": source,
+        "cv": inputs["cv"],
+        "profile": inputs["profile"],
+        "targeting": inputs["targeting"],
+        "rules": inputs["rules"],
+    }, ensure_ascii=False)
+    extracted = adapter.call_agent("scan_evidence", prompt, [], directory)[0]
+    evidence = adapter.attach_evidence(extracted, {"text": source["jd"]})
+    if evidence["liveness"] == "uncertain":
+        return {"waiting_reason": "source_access_unknown", "tool_calls": 1}
+    if evidence["complete_jd"] is not True:
+        return {"waiting_reason": "core_evidence_missing", "tool_calls": 1}
+    evidence["prescreen"]["job"] = {"url": source["url"]}
+    evidence_path = directory / "prescreen-input.json"
+    write_json(evidence_path, evidence["prescreen"])
+    checked = subprocess.run(
+        ["node", str(ROOT / "prescreen.mjs"), "--input", str(evidence_path)],
+        cwd=ROOT, text=True, capture_output=True, timeout=30,
+    )
+    if checked.returncode:
+        raise RuntimeError(checked.stderr.strip())
+    prescreen = json.loads(checked.stdout)
+    if evidence["liveness"] == "expired":
+        return {
+            "outcome": "exclude",
+            "artifact": {"type": "exclusion", "reason": evidence["liveness_reason"], "evidence": source["url"]},
+            "tool_calls": 1,
+        }
+    if prescreen["status"] == "fail":
+        return {
+            "outcome": "exclude",
+            "artifact": {
+                "type": "exclusion",
+                "reason": "; ".join(item["message"] for item in prescreen["discard_reasons"]),
+                "evidence": prescreen["discard_reasons"],
+            },
+            "tool_calls": 1,
+        }
+    report = {
+        "schema_version": "jd_report_v1",
+        "opportunity_id": source["opportunity_id"],
+        "url": source["url"],
+        "company": evidence["company"],
+        "role": evidence["role"],
+        "jd": source["jd"],
+        "captured_at": source["captured_at"],
+        "liveness": evidence["liveness"],
+        "liveness_reason": evidence["liveness_reason"],
+        "prescreen": prescreen,
+    }
+    return {"outcome": "jd_report", "artifact": report, "tool_calls": 1}
+
+
+def scan_review(payload: dict) -> dict:
+    adapter = load_legacy_model_adapter()
+    prompt = (
+        "Independently verify that this scan artifact is fully grounded in the immutable source and current rules. "
+        "Unknown is not mismatch. Return {verdict:'approve|revise',checks:{grounded:'pass|fail'},defects:[]}.\n"
+        + json.dumps(payload, ensure_ascii=False)
+    )
+    decision, reviewer = adapter.call_agent("scan_review", prompt, [], DRAFT_ROOT)
+    if decision.get("verdict") not in ("approve", "revise") or decision.get("checks", {}).get("grounded") not in ("pass", "fail"):
+        raise ValueError("Invalid scan review response")
+    return {**decision, "reviewer": reviewer, "tool_calls": 0}
+
+
 def evaluate(payload: dict) -> dict:
     inputs = payload["inputs"]
     jd = inputs["jd_report"]
     if jd["prescreen"]["status"] == "fail":
+        reasons = jd["prescreen"].get("discard_reasons", [])
         return {
             "outcome": "exclude",
-            "artifact": {"type": "exclusion", "reason": jd["prescreen"]["reason"], "evidence": jd["prescreen"].get("evidence", [])},
+            "artifact": {
+                "type": "exclusion",
+                "reason": jd["prescreen"].get("reason") or "; ".join(item["message"] for item in reasons),
+                "evidence": jd["prescreen"].get("evidence", reasons),
+            },
+            "tool_calls": 0,
+        }
+    key = hashlib.sha256(json.dumps(inputs, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    directory = DRAFT_ROOT / key
+    directory.mkdir(parents=True, exist_ok=True)
+    report_path = directory / "report.md"
+    saved_review = directory / "report.md.review.json"
+    if not saved_review.exists() and report_path.exists() and (directory / "assessment.json").exists() and (directory / "evidence.json").exists():
+        report = report_path.read_text()
+        evidence = json.loads((directory / "evidence.json").read_text())
+        return {
+            "outcome": "score",
+            "artifact": {
+                "type": "score", "report": report,
+                "report_sha256": hashlib.sha256(report.encode()).hexdigest(),
+                "draft_directory": str(directory), "liveness_reason": evidence["liveness_reason"],
+            },
             "tool_calls": 0,
         }
     adapter = load_legacy_model_adapter()
-    key = hashlib.sha256(json.dumps(inputs, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-    directory = ROOT / "data" / "workflow-drafts" / key
-    directory.mkdir(parents=True, exist_ok=True)
     revision = payload["revision"]
-    saved_review = directory / "report.md.review.json"
     repairing = revision > 0 or saved_review.exists()
     previous_review = payload.get("previous_review")
     if saved_review.exists():
@@ -111,7 +205,7 @@ def review(payload: dict) -> dict:
             "Return the standard review JSON. Unknown is not evidence of mismatch.\n"
             + json.dumps(payload, ensure_ascii=False)
         )
-        decision, reviewer = adapter.call_agent("review", prompt, [], ROOT / "data" / "workflow-drafts")
+        decision, reviewer = adapter.call_agent("review", prompt, [], DRAFT_ROOT)
         return {**decision, "reviewer": reviewer, "tool_calls": 0}
     directory = Path(artifact["draft_directory"])
     review_inputs = {
@@ -139,7 +233,13 @@ def review(payload: dict) -> dict:
 
 def main() -> None:
     payload = json.load(sys.stdin)
-    result = evaluate(payload) if sys.argv[1] == "evaluate" else review(payload)
+    phase = sys.argv[1]
+    result = {
+        "scan_evaluate": scan_evaluate,
+        "scan_review": scan_review,
+        "evaluate": evaluate,
+        "review": review,
+    }[phase](payload)
     print(json.dumps(result, ensure_ascii=False))
 
 

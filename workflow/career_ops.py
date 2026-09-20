@@ -30,12 +30,8 @@ def digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def canonical_score_input(value: str) -> str:
+def score_inputs(report: dict) -> str:
     """Bind a JD report to every module-level policy and candidate input."""
-    path = Path(value)
-    if not path.is_file():
-        return value
-    report = json.loads(path.read_text())
     required = {"schema_version", "opportunity_id", "url", "company", "role", "jd", "liveness", "prescreen"}
     missing = sorted(required - report.keys())
     if missing:
@@ -54,15 +50,42 @@ def canonical_score_input(value: str) -> str:
     return json.dumps(inputs, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def canonical_score_input(value: str) -> str:
+    path = Path(value)
+    return score_inputs(json.loads(path.read_text())) if path.is_file() else value
+
+
+def canonical_scan_input(value: str) -> str:
+    path = Path(value)
+    if not path.is_file():
+        return value
+    source = json.loads(path.read_text())
+    required = {"schema_version", "opportunity_id", "url", "company", "role", "jd", "captured_at", "liveness"}
+    missing = sorted(required - source.keys())
+    if missing:
+        raise ValueError("Scan input missing: " + ", ".join(missing))
+    if source["schema_version"] != "scan_input_v1":
+        raise ValueError("Unsupported scan input schema")
+    inputs = {
+        "source": source,
+        "cv": (ROOT / "cv.md").read_text(),
+        "profile": (ROOT / "config" / "profile.yml").read_text(),
+        "targeting": (ROOT / "modes" / "_profile.md").read_text(),
+        "rules": (ROOT / "modes" / "_custom.md").read_text(),
+    }
+    return json.dumps(inputs, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
 class WorkflowState(TypedDict):
     task_id: str
-    module: Literal["score"]
+    module: Literal["scan", "score"]
     input_hash: str
     required_corrections: int
     revision: int
-    outcome: Literal["score", "exclude"]
+    outcome: Literal["jd_report", "score", "exclude"]
     draft: str
     review_approved: bool
+    review: dict
     waiting_reason: str | None
     material_hash: str
     tool_calls: int
@@ -82,7 +105,7 @@ class BusinessStore:
             CREATE TABLE IF NOT EXISTS tasks (
               task_id TEXT PRIMARY KEY,
               opportunity_id TEXT NOT NULL,
-              module TEXT NOT NULL CHECK(module = 'score'),
+              module TEXT NOT NULL CHECK(module IN ('scan','score')),
               status TEXT NOT NULL CHECK(status IN ('running','waiting','completed','cancelled')),
               input_hash TEXT NOT NULL,
               attempt INTEGER NOT NULL DEFAULT 1,
@@ -108,6 +131,13 @@ class BusinessStore:
               type TEXT NOT NULL,
               payload TEXT NOT NULL DEFAULT '{}'
             );
+            CREATE TABLE IF NOT EXISTS source_evidence (
+              source_hash TEXT PRIMARY KEY,
+              opportunity_id TEXT NOT NULL,
+              url TEXT NOT NULL,
+              captured_at TEXT NOT NULL,
+              payload TEXT NOT NULL
+            );
             """
         )
 
@@ -127,7 +157,7 @@ class BusinessStore:
             (opportunity_id, module),
         ).fetchone()
         if prior and not re_evaluate:
-            raise ValueError("A score already exists; pass --re-evaluate to score changed inputs")
+            raise ValueError(f"A {module} result already exists; pass --re-evaluate for changed inputs")
         self.db.execute("BEGIN IMMEDIATE")
         try:
             active = self.db.execute(
@@ -157,6 +187,22 @@ class BusinessStore:
     def result(self, task_id: str) -> dict | None:
         row = self.db.execute("SELECT payload FROM results WHERE task_id=?", (task_id,)).fetchone()
         return json.loads(row["payload"]) if row else None
+
+    def module_result(self, opportunity_id: str, module: str) -> dict | None:
+        row = self.db.execute(
+            "SELECT payload FROM results WHERE opportunity_id=? AND module=? ORDER BY rowid DESC LIMIT 1",
+            (opportunity_id, module),
+        ).fetchone()
+        return json.loads(row["payload"]) if row else None
+
+    def retain_source(self, opportunity_id: str, input_text: str) -> None:
+        inputs = json.loads(input_text)
+        source = inputs["source"]
+        payload = json.dumps(source, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        self.db.execute(
+            "INSERT OR IGNORE INTO source_evidence(source_hash,opportunity_id,url,captured_at,payload) VALUES(?,?,?,?,?)",
+            (digest(payload), opportunity_id, source["url"], source["captured_at"], payload),
+        )
 
     def find_task(self, identifier: str) -> sqlite3.Row:
         row = self.db.execute("SELECT * FROM tasks WHERE task_id=?", (identifier,)).fetchone()
@@ -221,6 +267,7 @@ class BusinessStore:
             "module": task["module"],
             "outcome": state["outcome"],
             "artifact": artifact,
+            "review": state.get("review"),
             "input_hash": state["input_hash"],
             "material_hash": state["material_hash"],
         }
@@ -310,9 +357,6 @@ class Runtime:
         """Call one fresh model process while enforcing the module budget."""
         if state["tool_calls"] >= 20:
             raise TimeoutError("tool_budget_exhausted")
-        remaining = 900 - (time.monotonic() - state["started_at"])
-        if remaining <= 0:
-            raise TimeoutError("time_budget_exhausted")
         configured = os.environ.get("CAREER_OPS_MODEL_RUNNER")
         command = shlex.split(configured) if configured else [
             str(Path.home() / ".hermes" / "hermes-agent" / "venv" / "bin" / "python"),
@@ -320,6 +364,9 @@ class Runtime:
         ]
         try:
             for attempt in range(3):
+                remaining = 900 - (time.monotonic() - state["started_at"])
+                if remaining <= 0:
+                    raise TimeoutError("time_budget_exhausted")
                 result = subprocess.run(
                     [*command, phase], input=json.dumps(payload, ensure_ascii=False), text=True,
                     capture_output=True, timeout=max(1, remaining), cwd=ROOT,
@@ -343,6 +390,21 @@ class Runtime:
         task = self.store.task(state["task_id"])
         if task["input_payload"].startswith("{"):
             inputs = json.loads(task["input_payload"])
+            if task["module"] == "scan":
+                if inputs["source"]["liveness"] == "uncertain":
+                    return {"waiting_reason": "source_access_unknown"}
+                result = self.run_model("scan_evaluate", {"inputs": inputs, "revision": state["revision"]}, state)
+                if result.get("waiting_reason"):
+                    return {"waiting_reason": result["waiting_reason"], "tool_calls": result["tool_calls"]}
+                artifact = result["artifact"]
+                if result["outcome"] == "jd_report":
+                    score_inputs(artifact)
+                return {
+                    "outcome": result["outcome"],
+                    "draft": json.dumps(artifact, ensure_ascii=False, sort_keys=True),
+                    "material_hash": digest(json.dumps(artifact, ensure_ascii=False, sort_keys=True)),
+                    "tool_calls": result["tool_calls"],
+                }
             if inputs["jd_report"]["prescreen"]["status"] == "incomplete":
                 return {"waiting_reason": "core_evidence_missing"}
             result = self.run_model(
@@ -373,7 +435,7 @@ class Runtime:
         task = self.store.task(state["task_id"])
         if task["input_payload"].startswith("{"):
             decision = self.run_model(
-                "review",
+                "scan_review" if task["module"] == "scan" else "review",
                 {"inputs": json.loads(task["input_payload"]), "artifact": json.loads(state["draft"])},
                 state,
             )
@@ -414,6 +476,12 @@ class Runtime:
                 temporary.write_text(artifact["report"])
                 temporary.replace(path)
                 artifact["path"] = str(path)
+                draft_directory = artifact.get("draft_directory")
+                review = Path(draft_directory) / "report.md.review.json" if draft_directory else None
+                if review and review.is_file():
+                    review_path = Path(str(path) + ".review.json")
+                    review_path.write_text(review.read_text())
+                    artifact["review_path"] = str(review_path)
                 state = {**state, "draft": json.dumps(artifact, ensure_ascii=False, sort_keys=True)}
             payload = self.store.publish(state)
         self.crash_once(state, "publish")
@@ -447,6 +515,7 @@ def initial_state(task: sqlite3.Row, required_corrections: int, scenario: str) -
         "outcome": "score",
         "draft": scenario,
         "review_approved": False,
+        "review": {},
         "waiting_reason": None,
         "material_hash": "",
         "tool_calls": 0,
@@ -490,10 +559,27 @@ def run_task(
 
 
 def start_and_run(directory: Path, opportunity: str, module: str, input_text: str, corrections: int, scenario: str, crash_at: str | None, re_evaluate: bool = False) -> dict:
-    input_text = canonical_score_input(input_text)
-    if input_text.startswith("{") and json.loads(input_text)["jd_report"]["opportunity_id"] != opportunity:
-        raise ValueError("CLI opportunity does not match the JD report")
     store = BusinessStore(directory / "business.db")
+    if module == "scan":
+        input_text = canonical_scan_input(input_text)
+        if not input_text.startswith("{"):
+            store.close()
+            raise ValueError("scan requires a scan_input_v1 JSON file")
+    elif input_text.startswith("scan:"):
+        scan = store.module_result(input_text.removeprefix("scan:"), "scan")
+        if not scan or scan["outcome"] != "jd_report":
+            store.close()
+            raise ValueError("Missing reviewed scan result")
+        input_text = score_inputs(scan["artifact"])
+    else:
+        input_text = canonical_score_input(input_text)
+    inputs = json.loads(input_text) if input_text.startswith("{") else None
+    report = inputs["source"] if module == "scan" and inputs else inputs["jd_report"] if inputs else None
+    if report and report["opportunity_id"] != opportunity:
+        store.close()
+        raise ValueError("CLI opportunity does not match the JD report")
+    if module == "scan" and inputs:
+        store.retain_source(opportunity, input_text)
     started = store.start(opportunity, module, input_text, re_evaluate=re_evaluate)
     task = store.task(started["task_id"])
     store.close()
@@ -506,7 +592,12 @@ def resume_task(directory: Path, task_id: str, input_text: str | None, crash_at:
     store = BusinessStore(directory / "business.db")
     task = store.task(task_id)
     if input_text is not None:
-        input_text = canonical_score_input(input_text)
+        input_text = canonical_scan_input(input_text) if task["module"] == "scan" else canonical_score_input(input_text)
+        if task["module"] == "scan" and not input_text.startswith("{"):
+            store.close()
+            raise ValueError("scan requires a scan_input_v1 JSON file")
+        if task["module"] == "scan" and input_text.startswith("{"):
+            store.retain_source(task["opportunity_id"], input_text)
     if input_text is not None:
         task = store.reset_input(task_id, input_text)
     elif task["status"] == "waiting":
@@ -520,7 +611,7 @@ def parser() -> argparse.ArgumentParser:
     cli.add_argument("--directory", type=Path, default=ROOT / "data" / "workflow")
     commands = cli.add_subparsers(dest="command", required=True)
     start = commands.add_parser("start")
-    start.add_argument("module", choices=("score",))
+    start.add_argument("module", choices=("scan", "score"))
     start.add_argument("opportunity")
     start.add_argument("input")
     start.add_argument("--corrections", type=int, default=0, help=argparse.SUPPRESS)

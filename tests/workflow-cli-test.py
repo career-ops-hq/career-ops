@@ -66,10 +66,14 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cli-") as temporary:
         "prescreen": {"status": "pass", "unknowns": ["compensation"]},
     }))
     runner = f"{PYTHON} {ROOT / 'tests' / 'fixtures' / 'workflow-model-runner.py'}"
-    real = run(directory, "start", "score", "job-real", str(jd_report), env={"CAREER_OPS_MODEL_RUNNER": runner})
+    real = run(directory, "start", "score", "job-real", str(jd_report), env={
+        "CAREER_OPS_MODEL_RUNNER": runner,
+        "WORKFLOW_TEST_DRAFT_DIRECTORY": str(directory / "draft"),
+    })
     assert real["artifact"]["outcome"] == "score"
     assert real["artifact"]["artifact"]["report"] == "# Verified score report"
     assert Path(real["artifact"]["artifact"]["path"]).read_text() == "# Verified score report"
+    assert Path(real["artifact"]["artifact"]["review_path"]).is_file()
 
     incomplete_report = directory / "incomplete-jd.json"
     incomplete_report.write_text(json.dumps({
