@@ -57,11 +57,13 @@ test('plain English headings still count, so the fix does not narrow the gate', 
 });
 
 test('an entity-encoded body matches an ASCII keyword', () => {
+  // The keyword appears only in entity-encoded form in the body, so this fails
+  // unless the decode happens before the haystack is folded.
   const html = `<html><head><style>body{font-family:Arial,sans-serif;font-size:11px;}</style></head>
 <body>
   <div class="header"><p>Alex Martin | alex@example.com | +1 555 0100</p></div>
   <div class="section"><div class="section-title">Exp&eacute;rience</div>
-    <p>Led Kubernetes migrations for a payments platform, and cut p99 latency by 40
+    <p>Led Kubernet&egrave;s migrations for a payments platform, and cut p99 latency by 40
     percent. Owned the Postgres query planner work, the on-call rotation, and the
     handover documentation for four new hires across two offices.</p></div>
 </body></html>`;
@@ -71,16 +73,19 @@ test('an entity-encoded body matches an ASCII keyword', () => {
 });
 
 test('an accented CV matches a keyword typed without accents', () => {
+  // The keyword itself carries an accent in the CV ("réduit" is not it — the
+  // search term is), so this only passes when both sides are folded.
   const html = `<html><head><style>body{font-family:Arial,sans-serif;font-size:11px;}</style></head>
 <body>
   <div class="header"><p>Alex Martin | alex@example.com | +1 555 0100</p></div>
   <div class="section"><div class="section-title">Expérience</div>
-    <p>Piloté la migration Kubernetes d'une plateforme de paiement et réduit la
+    <p>Piloté la migration Réseaux d'une plateforme de paiement et réduit la
     latence p99 de 40 pour cent. Responsable de la rotation d'astreinte et de la
     documentation de passation pour quatre nouveaux collègues sur deux sites.</p></div>
 </body></html>`;
-  const result = auditAts(html, { keywords: 'Kubernetes' });
-  assert.equal(result.keywordCoverage.found, 1);
+  const result = auditAts(html, { keywords: 'reseaux' });
+  assert.equal(result.keywordCoverage.found, 1,
+    'an unaccented keyword must match the accented word the CV carries');
 });
 
 test('an unknown entity is left visible rather than dropped', () => {
