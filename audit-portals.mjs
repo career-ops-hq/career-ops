@@ -54,7 +54,8 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 
 import { makeHttpCtx } from './providers/_http.mjs';
@@ -63,14 +64,24 @@ import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
-// Anchored to the career-ops root, not the cwd. Both paths below used to be
-// bare relative strings, which silently audited nothing the moment the script
-// was invoked from anywhere but the repo root — `node /path/to/audit-portals.mjs`
-// from a home directory would throw on portals.yml and, worse, load zero
-// providers and report every board as `no-provider`.
+// Anchored, not cwd-relative. Both paths below used to be bare relative
+// strings, which silently audited nothing the moment the script was invoked
+// from anywhere but the repo root — `node /path/to/audit-portals.mjs` from a
+// home directory would throw on portals.yml and, worse, load zero providers
+// and report every board as `no-provider`.
+//
+// The two anchors are different roots and must stay that way (#4171).
+// `portals.yml` is user layer and follows the DATA root, which is wherever
+// CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR or the `.career-ops-data` marker
+// points. `providers/` is system layer: it ships with the checkout and never
+// travels to a user's data root. Anchoring it to the data root reproduced the
+// exact failure the paragraph above describes — loadProviders() reads a
+// directory that does not exist, returns an empty registry, and the audit
+// reports `0 audited` and exits 0. scan.mjs already splits the two this way.
 const ROOT = getCareerOpsRoot();
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(ROOT, 'portals.yml');
-const PROVIDERS_DIR = join(ROOT, 'providers');
+export const PROVIDERS_DIR = join(CODE_ROOT, 'providers');
 
 /** Boards at or under this many postings are worth a second look, not an error. */
 export const DEFAULT_SMALL_THRESHOLD = 5;

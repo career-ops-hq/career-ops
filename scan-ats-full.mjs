@@ -204,6 +204,24 @@ export function entryOnHost(name, careersUrl, isCanonicalHost) {
   return isCanonicalHost(hostname) ? { name, careers_url: careersUrl } : null;
 }
 
+// The public iCIMS dataset is not consistent about what an entry is. Most are a
+// bare tenant ("acmefreight", served at careers-acmefreight.icims.com), but
+// thousands are already the full portal subdomain: "careers-acmefreight",
+// "uscareers-acme", "acmecareers-west". Prefixing every entry with "careers-"
+// built hosts like careers-careers-acmefreight.icims.com that do not exist, so
+// those boards answered 404 and were recorded as dead. Neither reading is safe
+// on its own (a bare tenant can contain a hyphen, and some bare tenants are
+// served without the prefix), so return the likelier host first and the other
+// shape as a fallback that icims.fetch() tries only on a first-page 404.
+export function icimsHostCandidates(slug) {
+  const s = String(slug ?? '').toLowerCase().replace(/^-+/, '');
+  if (!s) return [];
+  const asIs = `${s}.icims.com`;
+  const prefixed = `careers-${s}.icims.com`;
+  if (s.startsWith('careers-')) return [asIs];
+  return s.includes('careers') ? [asIs, prefixed] : [prefixed, asIs];
+}
+
 // Each source: the provider module that does the fetching, plus how to turn a
 // dataset entry into a synthetic PortalEntry the provider can detect/fetch.
 export const SOURCES = {
@@ -251,9 +269,15 @@ export const SOURCES = {
   icims: {
     provider: icims,
     dataset: `${DATASET_BASE}/icims_companies.json`,
-    toEntry: (slug) => SLUG_RE.test(String(slug))
-      ? entryOnHost(String(slug), `https://careers-${slug}.icims.com/jobs/search?ss=1&in_iframe=1`, h => h === `careers-${String(slug).toLowerCase()}.icims.com`)
-      : null,
+    toEntry: (slug) => {
+      if (!SLUG_RE.test(String(slug))) return null;
+      const hosts = icimsHostCandidates(slug);
+      if (hosts.length === 0) return null;
+      const [primary, ...fallbacks] = hosts.map((h) => `https://${h}/jobs/search?ss=1&in_iframe=1`);
+      const entry = entryOnHost(String(slug), primary, (h) => h === hosts[0]);
+      if (entry && fallbacks.length) entry.fallback_urls = fallbacks;
+      return entry;
+    },
   },
 };
 

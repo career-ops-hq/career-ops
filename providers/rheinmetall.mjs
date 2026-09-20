@@ -68,7 +68,19 @@ export function parseVacancies(html, origin) {
     // the markup shifts, so a styling change degrades titles instead of
     // dropping postings.
     const titleM = block.match(/md:text-xl[^"]*">([\s\S]*?)<\/div>/);
-    const title = titleM ? clean(titleM[1]) : clean(decodeURIComponent(link[1].split('/')[3] || '').replace(/_/g, ' '));
+    let title;
+    if (titleM) {
+      title = clean(titleM[1]);
+    } else {
+      // Fallback: reconstruct the title from the URL slug. decodeURIComponent
+      // throws URIError on a malformed percent-sequence in the scraped href, so
+      // decode defensively — a bad link falls back to its raw slug instead of
+      // aborting the whole page's parse loop.
+      const slug = link[1].split('/')[3] || '';
+      let decoded;
+      try { decoded = decodeURIComponent(slug); } catch { decoded = slug; }
+      title = clean(decoded.replace(/_/g, ' '));
+    }
     if (!title) continue;
     // "{Company GmbH} | {City}" line; the city is what location filters need.
     const orgM = block.match(/class="flex flex-wrap mr-6">([\s\S]*?)<\/div>/);

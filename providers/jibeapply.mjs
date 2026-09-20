@@ -1,6 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { safeEncodeURIComponent } from './_safe-url.mjs';
+
 // JibeApply provider — hits the /api/jobs endpoint on the same hostname.
 // Auto-detects from careers_url pattern `https://<slug>.jibeapply.com`.
 // iCIMS acquired Jibe in 2019; some tenants run it on a branded custom
@@ -65,9 +67,14 @@ export function parseJibeapplyResponse(json, entry) {
       const title = String(d.title || '').trim();
       const slug = d.slug || d.req_id;
       if (!title || !slug) return null;
+      // A lone surrogate in slug throws URIError out of encodeURIComponent and
+      // aborts the whole page's .map(); drop just this job (the trailing
+      // .filter(Boolean) removes the null).
+      const encodedSlug = safeEncodeURIComponent(slug);
+      if (encodedSlug === null) return null;
       return {
         title,
-        url: `${origin}/jobs/${encodeURIComponent(slug)}`,
+        url: `${origin}/jobs/${encodedSlug}`,
         company: String(d.hiring_organization || entry.name || '').trim(),
         location: d.full_location || [d.city, d.country].filter(Boolean).join(', '),
       };

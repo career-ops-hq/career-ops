@@ -9,7 +9,7 @@
 
 import { readFileSync, existsSync, rmSync } from 'fs';
 import { execFileSync, spawnSync } from 'child_process';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 import { createReexecMarker, consumeReexecMarker } from './update-system.mjs';
 
 let passed = 0;
@@ -43,10 +43,37 @@ try {
 // checkout. Give that copy its own tiny repository so update-system's
 // production guard can distinguish a valid fixture from an install whose git
 // operations would escape into an enclosing repository.
+//
+// That repository is scaffolding for this suite alone, so it is removed again
+// on exit. test-all runs every smoke script from the SAME shared copy, and a
+// `.git` left behind makes that copy a checkout of its own for every script
+// after this one: `update-system.mjs check` then passes its nested-install
+// guard and fetches upstream main into the empty fixture repository - a full
+// clone over the network inside the smoke matrix, killed at the shared 30s
+// budget on any connection slow enough (`exit null, signal SIGTERM`).
+//
+// Removal is keyed on whether `.git` existed BEFORE this script ran, never on
+// the toplevel comparison below. That comparison is unreliable (#3732: on
+// Windows it never matches, so the init branch runs inside the real checkout),
+// and a cleanup keyed on it could delete a real repository. A `.git` this
+// script did not create is never touched, a linked worktree's `.git` file
+// included. The handler is registered before `git init` so a setup that fails
+// halfway still leaves the copy as it found it.
 try {
   const cwd = process.cwd();
   const toplevel = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8' }).trim();
   if (toplevel !== cwd) {
+    const fixtureGitDir = join(cwd, '.git');
+    if (!existsSync(fixtureGitDir)) {
+      process.on('exit', () => {
+        try {
+          rmSync(fixtureGitDir, { recursive: true, force: true });
+        } catch (error) {
+          console.error(`FAIL migration fixture cleanup: ${error.message}`);
+          process.exitCode = 1;
+        }
+      });
+    }
     execFileSync('git', ['init', '-q'], { cwd });
     execFileSync('git', ['config', 'user.email', 'tests@example.invalid'], { cwd });
     execFileSync('git', ['config', 'user.name', 'career-ops tests'], { cwd });

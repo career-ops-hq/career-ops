@@ -43,6 +43,12 @@ import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
+// Sibling scripts live next to this file in the *code* checkout, which is a
+// different directory from CAREER_OPS whenever the data root is external
+// (CAREER_OPS_ROOT / a .career-ops-data marker). Resolving them off the data
+// root made --apply die with `Cannot find module <data-root>/set-status.mjs`.
+// Same split, and the same constant name, as merge-tracker.mjs (#3761).
+const CAREER_OPS_CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
 
 // --- CLI args ---
@@ -773,7 +779,7 @@ export function analyzeInvite(text, trackerRows = null) {
  * @returns {object} set-status.mjs's own --json result (or its structured error).
  */
 export function applyRejectionStatus(appNumber, options = {}) {
-  const scriptPath = join(CAREER_OPS, 'set-status.mjs');
+  const scriptPath = join(CAREER_OPS_CODE_ROOT, 'set-status.mjs');
   const env = options.appsFile ? { ...process.env, CAREER_OPS_TRACKER: options.appsFile } : process.env;
   try {
     const out = execFileSync(process.execPath, [scriptPath, String(appNumber), 'Rejected', '--json'], {

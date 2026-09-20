@@ -3,6 +3,7 @@
 
 import { resolveProfileKeywords } from './_profile-keywords.mjs';
 import { intInRange } from './_config-utils.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 // VDAB (Flanders' public employment service) provider — hits the public
 // vindeenjob search API directly (the same endpoint vdab.be's own frontend
@@ -126,9 +127,14 @@ export function normalizeJob(job) {
   const id = job && job.id && job.id.id;
   const title = String((job && job.vacaturefunctie && job.vacaturefunctie.naam) || '').trim();
   if (!id || !title) return null;
+  // A lone surrogate in id would throw URIError out of encodeURIComponent and
+  // abort the caller's per-job loop; id is also the dedup key (byId / the `id`
+  // field below). Drop this one.
+  const encodedId = safeEncodeURIComponent(id);
+  if (encodedId === null) return null;
   const result = {
     title,
-    url: DETAIL_BASE + encodeURIComponent(String(id)),
+    url: DETAIL_BASE + encodedId,
     company: String((job && job.vacatureBedrijfsnaam) || '').trim(),
     location: String((job && job.tewerkstellingsLocatieRegioOfAdres) || '').trim(),
     id: String(id),

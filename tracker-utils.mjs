@@ -700,8 +700,12 @@ export function writeFileAtomic(path, content) {
  * their aliases. Parsing it here (instead of hardcoding the list) means a new
  * state or alias lands in one file and every consumer follows.
  *
+ * `description` and `terminal` are passed through for callers that EXPLAIN the
+ * states rather than list them (set-status.mjs --help). Both default rather
+ * than throw: an entry omitting them is still a usable state.
+ *
  * @param {string} statesPath - Path to templates/states.yml.
- * @returns {{id:string,label:string,aliases:string[]}[]} Parsed state entries.
+ * @returns {{id:string,label:string,aliases:string[],description:string,terminal:boolean}[]} Parsed state entries.
  */
 export function loadCanonicalStates(statesPath) {
   const doc = yaml.load(readFileSync(statesPath, 'utf-8'));
@@ -712,6 +716,8 @@ export function loadCanonicalStates(statesPath) {
     id: String(s.id ?? ''),
     label: String(s.label ?? ''),
     aliases: Array.isArray(s.aliases) ? s.aliases.map(String) : [],
+    description: String(s.description ?? ''),
+    terminal: s.terminal === true,
   }));
 }
 

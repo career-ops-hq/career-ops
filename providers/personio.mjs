@@ -32,7 +32,19 @@ function assertPersonioUrl(url) {
  * Returns null for non-Personio or malformed URLs.
  * @param {import('./_types.js').PortalEntry} entry
  */
+const PERSONIO_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,62}$/i;
+
 function resolveHost(entry) {
+  // An explicit `personio: <slug>` pins the tenant directly. Needed because many
+  // companies embed the Personio tenant as an iframe on a branded careers page,
+  // so careers_url points at the company domain while the feed lives at
+  // <slug>.jobs.personio.de. The slug is charset-restricted here and the
+  // resulting URL still goes through assertPersonioUrl(), so the host allowlist
+  // and HTTPS check below remain the only way a request URL is accepted.
+  if (typeof entry.personio === 'string') {
+    const slug = entry.personio.trim();
+    if (PERSONIO_SLUG_RE.test(slug)) return `${slug}.jobs.personio.de`;
+  }
   const raw = typeof entry.careers_url === 'string' ? entry.careers_url : '';
   if (!raw) return null;
   let parsed;

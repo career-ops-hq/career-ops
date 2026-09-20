@@ -74,6 +74,31 @@ try {
     else if (badRows.length === 1 && badRows[0].title === 'Overflow &#99999999; & Hex &#xFFFFFFFF; Surrogate &#xD800;') pass('rheinmetall.parseVacancies() tolerates out-of-range / surrogate entities, degrading them to literal text while still decoding &amp; (no RangeError crash)');
     else fail(`rheinmetall.parseVacancies() out-of-range entity wrong: ${JSON.stringify(badRows)}`);
   }
+
+  // Slug-fallback branch — when the md:text-xl headline div is absent (a markup
+  // shift), the title is rebuilt from the URL slug via decodeURIComponent, which
+  // throws URIError on a malformed percent-sequence. A bad scraped href must
+  // degrade to its raw slug, not abort the whole page's parse.
+  {
+    const noHeadlineCard = (id, slug, org) =>
+      '<div class="flex gap-0.5 group">' +
+      `<a href="/en/job/${slug}/${id}" target="_blank">img</a>` +
+      `<div><a href="/en/job/${slug}/${id}">link</a>` +
+      `<div class="flex flex-wrap mr-6"> ${org} </div></div>` +
+      '</div>';
+    const fallbackPage = '<html>'
+      + noHeadlineCard('9100', 'Bad%ZZ_Slug', 'Rheinmetall AG | Kassel')
+      + noHeadlineCard('9101', 'Data_Engineer_Bremen', 'Rheinmetall AG | Bremen')
+      + '</html>';
+    let fbRows, fbThrew = null;
+    try { fbRows = parseVacancies(fallbackPage, 'https://www.rheinmetall.com'); } catch (e) { fbThrew = e; }
+    if (fbThrew) fail(`rheinmetall.parseVacancies() threw ${fbThrew.name} on a malformed percent-sequence in a scraped slug: ${fbThrew.message}`);
+    else if (fbRows.length === 2 && fbRows[0].title === 'Bad%ZZ Slug' && fbRows[1].title === 'Data Engineer Bremen') {
+      pass('rheinmetall.parseVacancies() slug fallback tolerates a malformed percent-sequence and keeps the other card');
+    } else {
+      fail(`rheinmetall.parseVacancies() slug-fallback rows wrong: ${JSON.stringify(fbRows)}`);
+    }
+  }
 } catch (e) {
   fail(`rheinmetall provider tests crashed: ${e.message}`);
 }

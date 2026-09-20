@@ -25,6 +25,7 @@
 
 import { randomUUID } from 'crypto';
 import { sleep } from './_http.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 const API_HOST = 'talent.alibaba.com';
 const API = `https://${API_HOST}/position/search`;
@@ -85,10 +86,14 @@ export function parseAlibabaResponse(json, companyName) {
     const title = p.name || '';
     const id = p.id;
     if (!title || id == null) continue;
+    // A lone surrogate in id throws URIError out of encodeURIComponent and
+    // aborts this loop, losing every job on the page. Drop just this one.
+    const encodedId = safeEncodeURIComponent(id);
+    if (encodedId === null) continue;
     const experience = formatExperience(p.experience);
     jobs.push({
       title,
-      url: DETAIL + encodeURIComponent(id),
+      url: DETAIL + encodedId,
       company: companyName,
       location: Array.isArray(p.workLocations) ? p.workLocations.filter(Boolean).join('/') : '',
       // Alibaba posts carry full-text JDs (description + requirement), much

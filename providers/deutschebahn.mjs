@@ -1,6 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 import { decodeEntities } from './_html-entities.mjs';
+import { fetchTextWithRetry } from './_http.mjs';
 
 // Deutsche Bahn provider — single-company (pattern: ibm/dassault/rheinmetall).
 // DB's careers run on the custom db.jobs portal (the branded Avature front,
@@ -116,10 +117,14 @@ export default {
     const jobs = [];
     const seen = new Set();
 
+    // Each page is a ~450KB HTML fragment; on a walk of up to 60 pages, an
+    // occasional single-page timeout/abort is a transient blip, not a board
+    // failure — fetchTextWithRetry absorbs it instead of failing the whole scan.
+
     for (let page = 0; page < maxPages; page++) {
       if (page > 0) await wait(PAGE_DELAY_MS);
       const url = `${cfg.searchBase}?qli=true&query=&sort=score&itemsPerPage=${ITEMS_PER_PAGE}&pageNum=${page}`;
-      const html = await ctx.fetchText(url, { headers: { accept: 'text/html' } });
+      const html = await fetchTextWithRetry(ctx, url, { headers: { accept: 'text/html' }, redirect: 'error' });
       const rows = parseHits(html, cfg.origin);
       if (rows.length === 0) break; // past the last page
 

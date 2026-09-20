@@ -531,6 +531,7 @@ if (!existsSync(PORTALS_FILE)) {
   try {
     const { findUnclaimedEntries } = await import('./audit-portals.mjs');
     const { loadProviders } = await import('./providers/_registry.mjs');
+    const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
     const yaml = await import('js-yaml');
 
     const cfg = yaml.load(readFileSync(PORTALS_FILE, 'utf-8')) || {};
@@ -540,7 +541,15 @@ if (!existsSync(PORTALS_FILE)) {
       ...(Array.isArray(cfg.tracked_companies) ? cfg.tracked_companies : []),
       ...(Array.isArray(cfg.job_boards) ? cfg.job_boards : []),
     ];
-    const providers = await loadProviders(join(CAREER_OPS, 'providers'));
+    // providers/ and plugins/ both ship in the code layer — resolve them from
+    // CODE_ROOT (scan.mjs does the same). Without mergeProviderPlugins() the
+    // health check sees only providers/*.mjs and reports every enabled
+    // plugin-provider entry as an unknown provider that "never scans", while
+    // the scanner resolves and scans it (#4026). No-op for a plugin-free
+    // install: mergeProviderPlugins returns before any work when
+    // config/plugins.yml is absent.
+    const providers = await loadProviders(join(CODE_ROOT, 'providers'));
+    await mergeProviderPlugins(providers, { root: CODE_ROOT });
     const { silent, handoff, unknownProvider } = findUnclaimedEntries(entries, providers);
 
     // findUnclaimedEntries silently skips an entry with no (or blank) `name` —

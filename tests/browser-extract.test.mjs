@@ -82,6 +82,34 @@ try {
     fail(`normalizeJd => ${JSON.stringify(jd)}`);
   }
 
+  // normalizeJd prefers a schema.org JobPosting from JSON-LD when the page
+  // ships one, over the rendered DOM text — but the comparison must be on
+  // NORMALIZED length, not raw length. Phenom-style chrome ("Apply now / Save
+  // job / Share ...") is mostly repeated newlines: it can out-length a real,
+  // shorter-in-raw-HTML JSON-LD description before whitespace is collapsed,
+  // even though the JSON-LD is clearly the substantive content once both are
+  // normalized. (Regression for the case where raw-length comparison let DOM
+  // chrome win and the JD came out empty.)
+  const chromeHeavy = 'Apply now\n\n\n\n\n\n\n\nSave job\n\n\n\n\n\n\n\nShare\n\n\n\n\n\n\n\nLocation\n\n\n\n\n\n\n\nBasel\n\n\n\n\n\n\n\nJob ID\n\n\n\n\n\n\n\n2024\n\n\n\n\n\n\n\n';
+  const substantiveLd = '<p>Lead the Rust platform team. Own the roadmap for the core services and mentor five engineers.</p>';
+  const ldWins = normalizeJd({ title: '', text: chromeHeavy, jsonLdDescription: substantiveLd }, 'https://x/1');
+  if (ldWins.text === 'Lead the Rust platform team. Own the roadmap for the core services and mentor five engineers.') {
+    pass('normalizeJd compares normalized (not raw) DOM length, so JSON-LD wins over whitespace-heavy DOM chrome');
+  } else {
+    fail(`normalizeJd chrome-vs-ld => ${JSON.stringify(ldWins.text)}`);
+  }
+
+  // ...and the rule stays "longer wins", not "JSON-LD always wins": a genuinely
+  // longer, substantive DOM text must still beat a short stub JobPosting.
+  const realDomText = 'Full job description with responsibilities, requirements, and a benefits section spanning several sentences.';
+  const stubLd = '<p>Rust Engineer</p>';
+  const domWins = normalizeJd({ title: '', text: realDomText, jsonLdDescription: stubLd }, 'https://x/1');
+  if (domWins.text === realDomText) {
+    pass('normalizeJd keeps the rendered DOM text when the JSON-LD is a shorter stub');
+  } else {
+    fail(`normalizeJd dom-vs-stub-ld => ${JSON.stringify(domWins.text)}`);
+  }
+
   // normalizeJd honors a custom text cap (a long JD is truncated at the cap, not
   // silently at the 12000 default) while leaving the default behavior unchanged.
   const longText = 'y'.repeat(20000);

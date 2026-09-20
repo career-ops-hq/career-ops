@@ -54,6 +54,27 @@ try {
   if (gh1 !== gh2) pass('identity params (gh_jid) stay distinct');
   else fail(`collapsed distinct gh_jid postings onto ${gh1}`);
 
+  // SPA job routes carry identity in the fragment. Dropping every fragment
+  // makes distinct postings on the same tenant path compare equal.
+  const hashJob1 = normalizeUrlForDedup('https://jobs.example.com/careers#/job/123');
+  const hashJob2 = normalizeUrlForDedup('https://jobs.example.com/careers#/jobs/456');
+  if (hashJob1 !== hashJob2) pass('recognized hash-route job IDs stay distinct');
+  else fail(`collapsed distinct hash-route postings onto ${hashJob1}`);
+
+  const preExistingInternalParam = normalizeUrlForDedup(
+    'https://jobs.example.com/careers?_career_ops_fragment_job_id=query-id#/jobs/hash-id',
+  );
+  if (preExistingInternalParam === 'https://jobs.example.com/careers?_career_ops_fragment_job_id=query-id&_career_ops_fragment_job_id=hash-id') {
+    pass('pre-existing internal fragment key is preserved beside promoted hash job ID');
+  } else {
+    fail(`pre-existing fragment query key was overwritten: ${preExistingInternalParam}`);
+  }
+
+  const cosmeticHash = normalizeUrlForDedup('https://jobs.example.com/careers#apply');
+  const fragmentFree = normalizeUrlForDedup('https://jobs.example.com/careers');
+  if (cosmeticHash === fragmentFree) pass('cosmetic fragments still collapse onto the fragment-free key');
+  else fail(`cosmetic fragment changed the key: ${JSON.stringify({ cosmeticHash, fragmentFree })}`);
+
   // A tracking param must not take a real one with it.
   const mixed = normalizeUrlForDedup('https://jobs.example.com/j?gh_jid=9&rltr=abc&utm_source=feed');
   if (mixed === 'https://jobs.example.com/j?gh_jid=9') pass('only tracking params are dropped from a mixed query');

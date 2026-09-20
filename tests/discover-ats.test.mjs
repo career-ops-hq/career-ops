@@ -506,6 +506,44 @@ ok('DNS-shaped TypeError → not marked as a refused redirect',
 ok('DNS-shaped TypeError → the slug is never blamed for a transport failure',
   !/redirected off-tenant/i.test(dnsFailure.unresolved.reason));
 
+// ── SmartRecruiters' phantom empty board must not outrank a real "not found" (#4179) ──
+//
+// SmartRecruiters' public postings API answers 200 with totalFound:0 (here:
+// content: []) for ANY slug, including one that does not exist — unlike every
+// other vendor, "empty" from this one establishes nothing. emptyBoards is
+// checked FIRST in the reason ladder, so counting it there let a single
+// phantom hit outrank a genuine "no board anywhere" verdict.
+const srEmptyCtx = () => ({
+  fetchJson: async () => ({ content: [] }),
+  fetchText: async () => { throw new Error('unused'); },
+});
+const srOnly = await resolveCompany({ name: 'Zz No Such Company 8841' },
+  { vendors: ['smartrecruiters'], includeWorkday: false, ctx: srEmptyCtx() });
+ok('SmartRecruiters-only, always empty → NOT reported as "board(s) found"',
+  !/board\(s\) found/i.test(srOnly.unresolved.reason));
+ok('SmartRecruiters-only, always empty → falls through to the real "not found" verdict',
+  /no supported ATS board found/i.test(srOnly.unresolved.reason));
+ok('SmartRecruiters-only, always empty → contributes nothing to emptyBoards',
+  !srOnly.unresolved.emptyBoards);
+ok('SmartRecruiters-only, always empty → contributes nothing to errors either (it is not an error)',
+  !srOnly.unresolved.errors);
+ok('SmartRecruiters-only, always empty → the vendor still shows as tried',
+  srOnly.unresolved.triedVendors.includes('smartrecruiters'));
+
+// Control, the direction that must NOT change: a genuinely empty board from an
+// ORDINARY vendor still populates emptyBoards and gets the "board(s) found"
+// verdict — only SmartRecruiters' answer is untrustworthy this way.
+const ghEmptyCtx = () => ({
+  fetchJson: async () => ({ jobs: [] }),
+  fetchText: async () => { throw new Error('unused'); },
+});
+const ghEmpty = await resolveCompany({ name: 'Real But Jobless Co' },
+  { vendors: ['gh'], includeWorkday: false, ctx: ghEmptyCtx() });
+ok('Greenhouse-only, genuinely empty → still reported as "board(s) found"',
+  /board\(s\) found/i.test(ghEmpty.unresolved.reason));
+ok('Greenhouse-only, genuinely empty → still populates emptyBoards',
+  ghEmpty.unresolved.emptyBoards?.length === 1 && ghEmpty.unresolved.emptyBoards[0].vendor === 'gh');
+
 // The refused-redirect branch sits ABOVE the workday-hint branch, so a
 // malformed hint alongside a refusal reports the redirect. That order is
 // deliberate and load-bearing: the redirect is an answer a vendor actually
