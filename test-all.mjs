@@ -5730,7 +5730,12 @@ try {
     [{ name: 'Nimbus Data', careers_url: 'https://job-boards.greenhouse.io/nimbusdata' }],
     { fetchJson: bareFetch },
   );
-  if (bare.status === 'missing' && !bare.suggested) {
+  // The refusal must still refuse: no top-level ats/slug, so nothing is adoptable
+  // and `fix-slugs` cannot write it. A refused board is REPORTED under
+  // `rejectedAlternate` (#4230), which is a record of what was found, not an
+  // invitation to use it.
+  if (bare.status === 'missing' && !bare.suggested?.ats && !bare.suggested?.slug
+      && bare.suggested?.rejectedAlternate?.ownerReason === 'owner-mismatch') {
     pass('verify-portals refuses a live board whose Greenhouse owner is a different company');
   } else {
     fail(`verify-portals adopted a mismatched owner: ${JSON.stringify(bare.suggested)}`);
@@ -5841,7 +5846,9 @@ try {
     [{ name: 'Nimbus Data', careers_url: 'https://job-boards.greenhouse.io/nimbusdata' }],
     { fetchJson: leverJson, fetchText: leverText },
   );
-  if (leverMismatch.status === 'missing' && !leverMismatch.suggested) {
+  if (leverMismatch.status === 'missing' && !leverMismatch.suggested?.ats
+      && !leverMismatch.suggested?.slug
+      && leverMismatch.suggested?.rejectedAlternate?.ownerReason === 'owner-mismatch') {
     pass('verify-portals refuses a Lever board whose page title names a different company');
   } else {
     fail(`verify-portals adopted a mismatched Lever owner: ${JSON.stringify(leverMismatch.suggested)}`);
