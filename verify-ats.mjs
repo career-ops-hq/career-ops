@@ -652,7 +652,7 @@ export {
  * Build a clean, ATS-friendly CV HTML fixture for the self-test, with hooks to
  * override individual pieces (font, email, charset, sections, extra body) so a
  * single check can be regressed in isolation.
- * @param {{font?:string, email?:string, charset?:string, education?:string, skills?:string, extraBody?:string}} [overrides]
+ * @param {{font?:string, email?:string, charset?:string, experience?:string, education?:string, skills?:string, extraBody?:string}} [overrides]
  * @returns {string} A full HTML document.
  */
 function buildCleanHtml(overrides = {}) {
@@ -660,6 +660,7 @@ function buildCleanHtml(overrides = {}) {
     font = "'Liberation Sans', Arial, sans-serif",
     email = '<a href="mailto:jane@example.com">jane@example.com</a>',
     charset = '<meta charset="UTF-8">',
+    experience = '<div class="section"><div class="section-title">Work Experience</div>\n    <p>Staff Engineer, Acme Corp (2020-present). Built and operated the core payments platform,\n    reducing incident rates and improving deployment cadence across multiple engineering teams.</p></div>',
     education = '<div class="section"><div class="section-title">Education</div><p>B.S. Computer Science, State University, 2018. Graduated with honors.</p></div>',
     skills = '<div class="section"><div class="section-title">Skills</div><p>Python, Kubernetes, Docker, PostgreSQL, distributed systems, CI/CD pipelines.</p></div>',
     extraBody = '',
@@ -676,9 +677,7 @@ function buildCleanHtml(overrides = {}) {
     distributed systems. Led platform teams delivering resilient services on Kubernetes, with a
     focus on observability, cost efficiency, and clean, well-tested Python codebases used daily
     across the organization.</p></div>
-  <div class="section"><div class="section-title">Work Experience</div>
-    <p>Staff Engineer, Acme Corp (2020-present). Built and operated the core payments platform,
-    reducing incident rates and improving deployment cadence across multiple engineering teams.</p></div>
+  ${experience}
   <div class="section"><div class="section-title">Projects</div>
     <p>Open-source tracing toolkit adopted by several teams for latency debugging.</p></div>
   ${education}
@@ -740,10 +739,12 @@ function runSelfTest() {
     };
     const failing = Object.entries(localized)
       .filter(([, [exp, edu, skl]]) => {
+        // Each localized heading REPLACES the English one, so the English fallback
+        // cannot satisfy the requirement on the localized heading's behalf.
         const cv = auditAts(buildCleanHtml({
+          experience: `<div class="section"><div class="section-title">${exp}</div><p>Senior Engineer, Acme, 2019 - 2024.</p></div>`,
           education: `<div class="section"><div class="section-title">${edu}</div><p>B.S. Computer Science, State University, 2018. Graduated with honors.</p></div>`,
           skills: `<div class="section"><div class="section-title">${skl}</div><p>Python, Kubernetes, Docker, PostgreSQL, distributed systems, CI/CD pipelines.</p></div>`,
-          extraBody: `<div class="section"><div class="section-title">${exp}</div><p>Senior Engineer, Acme, 2019 - 2024.</p></div>`,
         }));
         return hasIssue(cv.issues, 'missing standard section');
       })
