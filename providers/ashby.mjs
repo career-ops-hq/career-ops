@@ -85,13 +85,29 @@ export function parseCompensation(job) {
     if (!withRange.length) return null;
     // A board can post several salary components; the widest range is the role's
     // band, and the others are usually a narrower sub-tier of the same posting.
-    source = withRange.reduce((best, c) => {
+    //
+    // Choose among the components that can actually be read, not among all of
+    // them. Picking the widest first and validating its interval afterwards made
+    // a wider component with an unusable interval fatal: the function returned
+    // null instead of falling through to a narrower component that parses, in
+    // either array order. A component with no interval of its own is still a
+    // candidate, since a nested one is allowed to carry none and be refused
+    // below rather than silently annualized.
+    const readable = (c) => {
+      const raw = c?.interval;
+      if (raw == null) return true;
+      if (typeof raw !== 'string' || !raw.trim()) return true;
+      return Boolean(INTERVAL_MULTIPLIERS[/** @type {keyof typeof INTERVAL_MULTIPLIERS} */ (raw)]);
+    };
+    const candidates = withRange.filter(readable);
+    if (!candidates.length) return null;
+    source = candidates.reduce((best, c) => {
       const span = (normalizeNum(c?.maxValue) ?? normalizeNum(c?.minValue) ?? 0)
         - (normalizeNum(c?.minValue) ?? normalizeNum(c?.maxValue) ?? 0);
       const bestSpan = (normalizeNum(best?.maxValue) ?? normalizeNum(best?.minValue) ?? 0)
         - (normalizeNum(best?.minValue) ?? normalizeNum(best?.maxValue) ?? 0);
       return span > bestSpan ? c : best;
-    }, withRange[0]);
+    }, candidates[0]);
     nested = true;
   }
 

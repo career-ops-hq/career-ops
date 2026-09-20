@@ -147,3 +147,33 @@ test('the flat shape keeps its 1 YEAR default', () => {
   assert.equal(flat.min, 80000);
   assert.equal(flat.max, 100000);
 });
+
+test('a wider component with an unusable interval does not mask a readable one', () => {
+  // The widest range was chosen before its own interval was validated, so one
+  // wider component with an unknown interval made the whole parse return null
+  // while a narrower component was perfectly readable. Reported by CodeRabbit on
+  // #4331. The failure is order-independent, in both array orders.
+  const wide = salary({ minValue: 100000, maxValue: 200000, interval: 'BIWEEKLY' });
+  const narrow = salary({ minValue: 120000, maxValue: 150000, interval: '1 YEAR' });
+
+  for (const [label, comps] of [['widest first', [wide, narrow]], ['narrowest first', [narrow, wide]]]) {
+    const result = parseCompensation(jobWith(comps));
+    assert.equal(result?.min, 120000, `the readable component must win (${label})`);
+    assert.equal(result?.max, 150000, `the readable component must win (${label})`);
+  }
+});
+
+test('a nested set with no readable interval at all still refuses', () => {
+  // The fallback must not become 'take anything': a nested component carries its
+  // own interval, so when none is usable there is still nothing to report. The
+  // flat shape is different and keeps its documented 1 YEAR default, covered by
+  // the test above this one.
+  assert.equal(
+    parseCompensation(jobWith([salary({ minValue: 100000, maxValue: 200000, interval: 'BIWEEKLY' })])),
+    null,
+  );
+  assert.equal(
+    parseCompensation(jobWith([salary({ minValue: 90000, maxValue: 95000, interval: '' })])),
+    null,
+  );
+});
