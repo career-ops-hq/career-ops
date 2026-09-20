@@ -11,7 +11,7 @@ import { canonStatus, scoreNum, scoreTone, statusDot } from "@/lib/format";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { cn } from "@/lib/cn";
 import { companyPresentation, companySearchText } from "@/lib/company-presentation.mjs";
-import { compareTrackerNumbers } from "@/lib/pipeline-sort.mjs";
+import { sortRows } from "@/lib/core/pipeline-sort.mjs";
 
 // INBOX (the triage queue) is the default tab; the rest filter the tracker.
 const TABS = [
@@ -106,19 +106,11 @@ export function PipelineView({
       const needle = q.toLowerCase();
       rows = rows.filter((r) => companySearchText(r).toLowerCase().includes(needle));
     }
-    return [...rows].sort((a, b) => {
-      if (sort.key === "tracker") return compareTrackerNumbers(a, b) * sort.dir;
-      if (sort.key === "score") {
-        const an = scoreNum(a.score);
-        const bn = scoreNum(b.score);
-        const av = Number.isNaN(an) ? -Infinity : an;
-        const bv = Number.isNaN(bn) ? -Infinity : bn;
-        return (av - bv) * sort.dir;
-      }
-      const aValue = sort.key === "company" ? companyPresentation(a).label : a[sort.key] || "";
-      const bValue = sort.key === "company" ? companyPresentation(b).label : b[sort.key] || "";
-      return aValue.localeCompare(bValue) * sort.dir;
-    });
+    return sortRows(
+      rows,
+      sort,
+      (row) => companyPresentation(row).label,
+    );
   }, [applications, tab, q, sort, minFilter]);
 
   return (
