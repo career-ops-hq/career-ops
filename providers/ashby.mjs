@@ -35,6 +35,20 @@ const INTERVAL_MULTIPLIERS = {
  * Parse compensation data from Ashby job object.
  * Returns structured salary object with min, max, and currency,
  * or null if no valid compensation data exists.
+ *
+ * Ashby's posting-api does not put min/max on the compensation object itself.
+ * A real payload carries tiers, and each tier carries components:
+ *
+ *   compensationTiers[].components[] = {
+ *     compensationType: 'Salary', interval: '1 YEAR',
+ *     minValue, maxValue, currencyCode, summary
+ *   }
+ *
+ * The salary component is the one with min/max; `EquityPercentage` and bonus
+ * components carry `summary` text instead and must not be read as a range.
+ * The flat shape is still accepted because the existing fixtures and any
+ * hand-built job object use it.
+ *
  * @param {any} job - Ashby job object
  * @returns {{min: number, max: number, currency: string}|null}
  */
@@ -42,11 +56,6 @@ export function parseCompensation(job) {
   const comp = job?.compensation;
   if (!comp) return null;
 
-  const interval = /** @type {keyof typeof INTERVAL_MULTIPLIERS} */ (comp.interval || '1 YEAR');
-  const multiplier = INTERVAL_MULTIPLIERS[interval];
-  if (!multiplier) return null;
-
-  // Coerce and validate numeric fields — malformed API payloads must not propagate
   /** @param {any} v */
   const normalizeNum = (v) => {
     if (v == null) return null;
@@ -54,9 +63,42 @@ export function parseCompensation(job) {
     const n = Number(v);
     return Number.isFinite(n) && n >= 0 ? n : null;
   };
-  const minValue = normalizeNum(comp.minValue);
-  const maxValue = normalizeNum(comp.maxValue);
-  const currency = typeof comp.currency === 'string' ? comp.currency.trim() : '';
+
+  // A real payload nests the numbers under tiers[].components[]; the flat shape
+  // puts them on `comp` directly. Prefer the component with an actual range so
+  // an equity percentage sitting in the same tier cannot be mistaken for salary.
+  /** @type {any} */
+  let source = comp;
+  /** @type {any[]} */
+  const components = (Array.isArray(comp.compensationTiers) ? comp.compensationTiers : [])
+    .flatMap((tier) => (Array.isArray(tier?.components) ? tier.components : []));
+  if (components.length) {
+    const withRange = components.filter(
+      (c) => normalizeNum(c?.minValue) != null || normalizeNum(c?.maxValue) != null,
+    );
+    if (!withRange.length) return null;
+    // A board can post several salary components; the widest range is the role's
+    // band, and the others are usually a narrower sub-tier of the same posting.
+    source = withRange.reduce((best, c) => {
+      const span = (normalizeNum(c?.maxValue) ?? normalizeNum(c?.minValue) ?? 0)
+        - (normalizeNum(c?.minValue) ?? normalizeNum(c?.maxValue) ?? 0);
+      const bestSpan = (normalizeNum(best?.maxValue) ?? normalizeNum(best?.minValue) ?? 0)
+        - (normalizeNum(best?.minValue) ?? normalizeNum(best?.maxValue) ?? 0);
+      return span > bestSpan ? c : best;
+    }, withRange[0]);
+  }
+
+  const interval = /** @type {keyof typeof INTERVAL_MULTIPLIERS} */ (
+    source.interval || comp.interval || '1 YEAR'
+  );
+  const multiplier = INTERVAL_MULTIPLIERS[interval];
+  if (!multiplier) return null;
+
+  // Coerce and validate numeric fields — malformed API payloads must not propagate
+  const minValue = normalizeNum(source.minValue ?? comp.minValue);
+  const maxValue = normalizeNum(source.maxValue ?? comp.maxValue);
+  const rawCurrency = source.currencyCode ?? source.currency ?? comp.currency;
+  const currency = typeof rawCurrency === 'string' ? rawCurrency.trim() : '';
 
   // If neither min nor max is provided, no valid compensation
   if (minValue == null && maxValue == null) return null;
