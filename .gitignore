@@ -149,3 +149,5 @@ documents/*
 # PII (e.g. cv/jane-doe-master-cv.pdf). #1723
 data/intake-state.json
 scripts/__pycache__/
+**/__pycache__/
+workflow/.venv/
