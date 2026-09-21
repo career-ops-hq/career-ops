@@ -69,32 +69,31 @@ const titleKeywords = await import(pathToFileURL(join(ROOT, 'title-keywords.mjs'
   else fail('22222 should have been vetoed');
 }
 
-// ── Absent field passes, and is counted ────────────────────────────
-// Dropping a posting because the provider omitted the field would recreate
-// the silent loss with the sign flipped. It passes, and the run says so.
+// ── declaredFieldKey ───────────────────────────────────────────────
+// The absence counters are keyed per (target, field): one counter per target
+// cannot tell "noc is never published" from "company was missing on a
+// different job", and reported the second as the first.
 {
-  const fieldFilters = new Map([['noc', buildTitleFilter({ positive: ['stem:22'] })]]);
-  const gate = (job, filterOn) => {
-    let absent = false;
-    const ok = normalizeFilterOn(filterOn).every((field) => {
-      if (field === 'title') return true;
-      const value = job[field];
-      if (value === undefined || value === null || value === '') { absent = true; return true; }
-      return fieldFilters.get(field)(String(value));
-    });
-    return { ok, absent };
-  };
+  const { declaredFieldKey } = scan;
+  if (declaredFieldKey('A', 'noc') !== declaredFieldKey('A', 'company')) pass('two fields of one target get distinct keys');
+  else fail('expected distinct keys per field');
 
-  const missing = gate({ title: 'Anything' }, 'noc');
-  if (missing.ok && missing.absent) pass('a posting with no noc passes and is flagged absent');
-  else fail(`expected pass+absent, got ${JSON.stringify(missing)}`);
+  if (declaredFieldKey('A', 'noc') !== declaredFieldKey('B', 'noc')) pass('two targets get distinct keys for one field');
+  else fail('expected distinct keys per target');
 
-  const present = gate({ title: 'Anything', noc: '65102' }, 'noc');
-  if (!present.ok && !present.absent) pass('a posting with a non-matching noc is rejected');
-  else fail(`expected reject, got ${JSON.stringify(present)}`);
+  // A delimiter-joined key would collide here; JSON escaping does not.
+  if (declaredFieldKey('A", "noc', 'x') !== declaredFieldKey('A', 'noc')) pass('a target name containing the delimiter cannot forge another key');
+  else fail('key collision on a crafted target name');
 
-  const anded = gate({ title: 'Anything', noc: '22221' }, ['noc', 'title']);
-  if (anded.ok) pass('an array of fields is ANDed');
-  else fail('expected both fields to pass');
+  if (declaredFieldKey('Job Bank — help desk: IT', 'noc').includes('Job Bank — help desk: IT')) {
+    pass('a name with colons and em-dashes survives intact');
+  } else {
+    fail('expected the target name to appear in the key');
+  }
 }
 
+// Behaviour of the gate itself — which fields are read, what an absent field
+// does, AND semantics, rejection attribution and the dead-declaration warning
+// — is asserted against the real scan in tests/scan-field-filters-e2e.test.mjs.
+// Re-implementing the loop here would only prove the copy still agrees with
+// itself, and would stay green if scan.mjs stopped applying filter_on.

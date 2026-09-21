@@ -117,6 +117,13 @@ async function loadProviderIds() {
 }
 
 const TITLE_FILTER_FIELDS = ['positive', 'negative', 'seniority_boost'];
+// #3438. field_filters blocks are compiled by buildTitleFilter(), which reads
+// positive and negative and nothing else — seniority_boost is a title-level
+// concept with no consumer here. A block containing only seniority_boost would
+// otherwise validate clean and compile to an empty positive list, which reads
+// as "no positive constraint" and matches every posting: the pass-all
+// whitelist this validation exists to catch.
+const FIELD_FILTER_FIELDS = ['positive', 'negative'];
 
 export async function validatePortalsConfig(config, { providerIds = new Set() } = {}) {
   const errors = [];
@@ -184,8 +191,8 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
           continue;
         }
         for (const key of Object.keys(block)) {
-          if (!TITLE_FILTER_FIELDS.includes(key)) {
-            add(errors, `field_filters.${field}.${key}`, `unknown field_filters field - expected one of ${TITLE_FILTER_FIELDS.join(', ')}`);
+          if (!FIELD_FILTER_FIELDS.includes(key)) {
+            add(errors, `field_filters.${field}.${key}`, `unknown field_filters field - expected one of ${FIELD_FILTER_FIELDS.join(', ')}`);
           }
         }
         validateKeywordList(block.positive, `field_filters.${field}.positive`, errors);

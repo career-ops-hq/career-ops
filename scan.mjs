@@ -208,6 +208,19 @@ export { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTit
  * @param {unknown} value - a target's `filter_on`: string, array, or absent.
  * @returns {string[]} field names to gate on, defaulting to ["title"].
  */
+/**
+ * Key for the per-(target, field) absence counters. JSON rather than a
+ * delimiter string: a target name may contain any printable character —
+ * board names here carry colons and em-dashes — and JSON escaping keeps two
+ * different (name, field) pairs from colliding on one key.
+ * @param {string} targetName
+ * @param {string} field
+ * @returns {string}
+ */
+export function declaredFieldKey(targetName, field) {
+  return JSON.stringify([targetName, field]);
+}
+
 export function normalizeFilterOn(value) {
   const list = (Array.isArray(value) ? value : [value])
     .filter(f => typeof f === 'string')
@@ -3234,29 +3247,42 @@ async function main() {
         // #3438. Absent filter_on → normalizeFilterOn returns ["title"] and
         // this is the same titleFilter(job.title) call as before, against the
         // same compiled object. Declared fields are ANDed.
+        //
+        // Deliberately NOT .every(): short-circuiting on the first failure
+        // would leave the per-field absence counts incomplete, and those counts
+        // are what the end-of-run warning reads. Every declared field is
+        // evaluated; only the verdict is derived afterwards.
         const declaredFields = normalizeFilterOn(company.filter_on);
-        const gatesOnTitle = declaredFields.includes('title');
-        if (!gatesOnTitle) {
-          declaredFieldSeen.set(company.name, (declaredFieldSeen.get(company.name) || 0) + 1);
-        }
-        let fieldAbsentHere = false;
-        const passesDeclaredFields = declaredFields.every((field) => {
-          if (field === 'title') return titleFilter(job.title);
+        let firstFailedField = null;
+        let sawAbsentField = false;
+        for (const field of declaredFields) {
+          if (field === 'title') {
+            if (!titleFilter(job.title) && firstFailedField === null) firstFailedField = field;
+            continue;
+          }
+          // Keyed per (target, field): one counter per target cannot tell
+          // "noc is never published" from "company was missing on a different
+          // job", and reported the second as the first.
+          const key = declaredFieldKey(company.name, field);
+          declaredFieldSeen.set(key, (declaredFieldSeen.get(key) || 0) + 1);
           const value = job[field];
           // Absent field: pass, but count it. Dropping here would recreate the
           // silent loss this issue is about, only with the sign flipped.
           if (value === undefined || value === null || value === '') {
-            fieldAbsentHere = true;
-            return true;
+            declaredFieldAbsent.set(key, (declaredFieldAbsent.get(key) || 0) + 1);
+            sawAbsentField = true;
+            continue;
           }
-          return fieldFilters.get(field)(String(value));
-        });
-        if (fieldAbsentHere) {
-          totalPassedFieldAbsent++;
-          declaredFieldAbsent.set(company.name, (declaredFieldAbsent.get(company.name) || 0) + 1);
+          if (!fieldFilters.get(field)(String(value)) && firstFailedField === null) {
+            firstFailedField = field;
+          }
         }
-        if (!passesDeclaredFields) {
-          if (gatesOnTitle) totalFilteredTitle++;
+        if (sawAbsentField) totalPassedFieldAbsent++;
+        if (firstFailedField !== null) {
+          // Attribute the rejection to the field that actually failed: with
+          // filter_on: [title, noc], a matching title and a rejected noc is a
+          // field rejection, not a title one.
+          if (firstFailedField === 'title') totalFilteredTitle++;
           else totalFilteredDeclaredField++;
           continue;
         }
@@ -3529,20 +3555,21 @@ async function main() {
   // the provider does not supply it: the whitelist silently passed everything
   // for that target. That is precisely the failure this feature exists to
   // surface, so it is reported even though nothing was dropped.
-  const deadDeclarations = targets
-    .filter(t => !normalizeFilterOn(t.filter_on).includes('title'))
-    .map(t => ({
-      name: t.name,
-      seen: declaredFieldSeen.get(t.name) || 0,
-      absent: declaredFieldAbsent.get(t.name) || 0,
-      fields: normalizeFilterOn(t.filter_on).join(', '),
-    }))
-    .filter(t => t.seen > 0 && t.absent === t.seen);
+  const deadDeclarations = [];
+  for (const target of targets) {
+    for (const field of normalizeFilterOn(target.filter_on)) {
+      if (field === 'title') continue;
+      const key = declaredFieldKey(target.name, field);
+      const seen = declaredFieldSeen.get(key) || 0;
+      const absent = declaredFieldAbsent.get(key) || 0;
+      if (seen > 0 && absent === seen) deadDeclarations.push({ name: target.name, field, seen });
+    }
+  }
   if (deadDeclarations.length > 0) {
     console.log(`
-⚠️  Declared field never observed — the whitelist is effectively OFF for these targets:`);
-    for (const t of deadDeclarations) {
-      console.log(`  ${t.name}: filter_on "${t.fields}", absent on all ${t.seen} job(s) from this target`);
+⚠️  Declared field never observed — that whitelist is effectively OFF:`);
+    for (const d of deadDeclarations) {
+      console.log(`  ${d.name}: "${d.field}" absent on all ${d.seen} job(s) from this target`);
     }
     console.log(`  Check the field name and whether the provider supplies it.`);
   }
@@ -3702,7 +3729,7 @@ async function main() {
   console.log('→ Share results and get help: https://discord.gg/8pRpHETxa4');
 
   if (jsonMode) {
-    const filtered = totalFilteredTitle + totalFilteredTier + totalFilteredLocation
+    const filtered = totalFilteredTitle + totalFilteredDeclaredField + totalFilteredTier + totalFilteredLocation
       + totalFilteredPostingAge + totalFilteredPostedDate + totalFilteredSalary
       + totalFilteredContent + totalFilteredCountryEligibility + totalFilteredBlacklist
       + totalFilteredVisa + totalFilteredCooldown;

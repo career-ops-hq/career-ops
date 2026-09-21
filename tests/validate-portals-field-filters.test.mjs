@@ -95,6 +95,21 @@ tracked_companies: []
     else fail('expected rejection of a field_filters.title block');
   }
 
+  // seniority_boost is legal in title_filter but has no consumer here:
+  // buildTitleFilter reads positive and negative only. A block containing
+  // just seniority_boost would compile to an empty positive list, which reads
+  // as "no positive constraint" and matches every posting.
+  {
+    const res = run(NODE, ['validate-portals.mjs', '--file', write('boost.yml', `
+field_filters:
+  noc:
+    seniority_boost: ["senior"]
+tracked_companies: []
+`)]);
+    if (res === null) pass('a seniority_boost-only field_filters block is rejected');
+    else fail('expected rejection of a seniority_boost block');
+  }
+
   // An explicitly empty positive list stays a deliberate choice, exactly as it
   // is for title_filter_full — only UNKNOWN fields are errors.
   {
