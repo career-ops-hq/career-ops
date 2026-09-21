@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
 import { atomicWrite } from "@/lib/core/safe-write";
+import { resolveDataRoot } from "@/lib/core/data-root.mjs";
 import { parseApplications } from "@/lib/tracker-table.mjs";
 // One definition of the `{n}-RESERVED.md` convention, shared with
 // run-cli-support.mjs — see report-files.mjs for why it lives there.
@@ -20,9 +21,24 @@ import { pdfIndexEntryForReport } from "@/lib/apply/cv-selection.mjs";
  * checkout — see web/.env.local.
  */
 export function careerOpsRoot(): string {
-  const env = process.env.CAREER_OPS_ROOT?.trim();
-  if (env) return env;
-  return path.resolve(process.cwd(), "..");
+  // `process.cwd()` is `<core>/web` for `next dev`/`next start`, so its parent is
+  // the core checkout — the same directory `path-resolver.mjs` calls `__dirname`.
+  // resolveDataRoot() needs it explicitly because relative env values and marker
+  // contents resolve against it; see data-root.mjs for why that base matters.
+  const coreRoot = path.resolve(process.cwd(), "..");
+  return resolveDataRoot(
+    coreRoot,
+    (p) => {
+      try {
+        return fs.readFileSync(p, "utf8");
+      } catch {
+        return null; // absent, unreadable, or a directory — all mean "no marker"
+      }
+    },
+    process.env,
+    path.resolve,
+    path.join,
+  );
 }
 
 /**

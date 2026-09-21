@@ -114,7 +114,9 @@ try {
   // color (hsl(270, 70%, 45%), used for company/institution names and the
   // header gradient's second stop) is now themeable via --secondary-color,
   // with no leftover hardcoded occurrences and no circular var() default.
-  for (const tpl of ['templates/cv-template.html', 'templates/cv-template.zh-minimal.html', 'templates/resume-template.html']) {
+  // Chinese Minimal has its own palette and per-surface fallbacks, covered by
+  // zh-minimal-theme.test.mjs instead of this standard-template default guard.
+  for (const tpl of ['templates/cv-template.html', 'templates/resume-template.html']) {
     const src = readFileSync(join(ROOT, tpl), 'utf-8');
     const hasRoot = /:root\s*\{[^}]*--secondary-color:\s*hsl\(270, 70%, 45%\);/s.test(src);
     const usesVar = src.includes('var(--secondary-color)');

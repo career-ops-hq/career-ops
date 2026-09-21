@@ -992,8 +992,11 @@ func ComputeProgressMetrics(apps []model.CareerApplication) model.ProgressMetric
 	interview := statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"]
 	offer := statusCounts["offer"] + statusCounts["hired"]
 
+	// Top stage counts every tracked row, including rows backfilled without a
+	// score (#1799) — hence "Tracked", not "Evaluated", which already means both
+	// a status value and the Stats screen's scored count.
 	pm.FunnelStages = []model.FunnelStage{
-		{Label: "Evaluated", Count: total, Pct: 100.0},
+		{Label: "Tracked", Count: total, Pct: 100.0},
 		{Label: "Applied", Count: applied, Pct: safePct(applied, total)},
 		{Label: "Responded", Count: responded, Pct: safePct(responded, applied)},
 		{Label: "Interview", Count: interview, Pct: safePct(interview, applied)},
