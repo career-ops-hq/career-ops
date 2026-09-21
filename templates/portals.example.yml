@@ -1022,6 +1022,9 @@ search_queries:
 #
 # - name: Example Rippling Co
 #   careers_url: https://ats.rippling.com/exampleco/jobs  # any ats.rippling.com/<slug>
+#   max_pages: 10          # optional page cap (up to 1000 jobs/page, default 10, max 50) —
+#                          # raise it for a tenant with 10,000+ open postings (a warning
+#                          # is logged if the cap truncates real results)
 #   enabled: true
 #
 # - name: Example JibeApply Co
