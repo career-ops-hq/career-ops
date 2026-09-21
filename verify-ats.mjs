@@ -421,12 +421,18 @@ function auditAts(html, opts = {}) {
   // rows of each modes/<lang>/README.md rather than invented here; the
   // education terms had no such table and are the ordinary CV heading in each
   // language. Native-speaker corrections welcome, as in #3223.
+  // Each term must START a word: `formation` must not be found inside
+  // `Information`, nor `formacion` inside `Informacion`. `\b` is ASCII-only, so
+  // the boundary is "not preceded by a letter or digit" in any script. Terms
+  // stay open on the right (`experien`, `competen`) and the German, Dutch and
+  // Danish compounds that put the key word LAST are listed whole.
+  const startsWord = (terms) => new RegExp(`(?<![\\p{L}\\p{N}])(?:${terms.join('|')})`, 'u');
   const required = [
-    { name: 'Experience', re: new RegExp([
+    { name: 'Experience', re: startsWord([
       'experience', 'work history', 'employment',          // en
       'experien', 'esperienza',                            // es pt fr (folded); it spells it with an s
-      'erfahrung', 'werdegang',                            // de
-      'ervaring', 'loopbaan',                              // nl
+      'erfahrung', 'berufserfahrung', 'arbeitserfahrung', 'werdegang', // de: compounds put it last
+      'ervaring', 'werkervaring', 'loopbaan',              // nl
       'doswiadczenie', 'przebieg kariery',                 // pl
       'deneyim',                                           // tr
       'erhvervserfaring', 'karriereforlob',                // da
@@ -441,8 +447,8 @@ function auditAts(html, opts = {}) {
       'الخبرات', 'التاريخ المهني',                        // ar
       'करियर',                                              // hi
       '工作经历', '工作經歷',                                  // zh zh-TW
-    ].join('|')) },
-    { name: 'Education', re: new RegExp([
+    ]) },
+    { name: 'Education', re: startsWord([
       'education', 'academic',                             // en
       'formation', 'formacion', 'formacao',                // fr es pt
       'ausbildung', 'bildung', 'studium',                  // de
@@ -459,15 +465,15 @@ function auditAts(html, opts = {}) {
       'التعليم', 'المؤهلات',                            // ar
       'शिक्षा',                                             // hi
       '教育背景', '學歷',                                    // zh zh-TW
-    ].join('|')) },
-    { name: 'Skills', re: new RegExp([
+    ]) },
+    { name: 'Skills', re: startsWord([
       'skills', 'competen', 'proficienc',                  // en, + es pt fr folded; 'competen' also covers it 'Competenze'
-      'kenntnisse', 'fahigkeiten',                         // de
+      'kenntnisse', 'fachkenntnisse', 'sprachkenntnisse', 'fahigkeiten', // de
       'habilidades',                                       // es pt
       'vaardigheden',                                      // nl
       'umiejetnosci',                                      // pl
       'beceri',                                            // tr
-      'kompetenc',                                         // da + pl/pt variants
+      'kompetenc', 'kernkompetenc',                        // da + pl/pt variants
       'keahlian',                                          // id
       'スキル',                                              // ja
       '역량', '기술',                                          // ko
@@ -475,8 +481,8 @@ function auditAts(html, opts = {}) {
       'навички',                                             // ua
       'مهارات',                                             // ar
       'कौशल',                                               // hi
-      '技能', '专业技能',                                       // zh zh-TW
-    ].join('|')) },
+      '技能', '专业技能', '專業技能',                           // zh zh-TW: 專業技能 does not start with 技能
+    ]) },
   ];
   const missing = [];
   for (const s of required) {
@@ -759,6 +765,19 @@ function runSelfTest() {
     education: '<div class="section"><div class="section-title">&Eacute;ducation</div><p>B.S. Computer Science, State University, 2018. Graduated with honors.</p></div>',
   }));
   check('an HTML-entity heading is decoded before matching', !hasIssue(entityHeading.issues, 'missing standard section'));
+
+  // A term must start a word: `Personal Information` contains `formation` and
+  // `Informacion personal` contains `formacion`, and neither is an Education
+  // heading. A CV with no Education section must still be told so.
+  for (const heading of ['Personal Information', 'Informations personnelles', 'Información personal']) {
+    const noEdu = auditAts(buildCleanHtml({ education: `<div class="section"><div class="section-title">${heading}</div><p>Based in San Francisco.</p></div>` }));
+    check(`"${heading}" does not pass for Education`, hasIssue(noEdu.issues, 'missing standard section'));
+  }
+  // ...while the compounds that put the key word last are still recognized.
+  for (const heading of ['Berufserfahrung', 'Werkervaring', 'Erhvervserfaring']) {
+    const compound = auditAts(buildCleanHtml({ experience: `<div class="section"><div class="section-title">${heading}</div><p>Senior Engineer, Acme, 2019 - 2024.</p></div>` }));
+    check(`compound heading "${heading}" is recognized for Experience`, !hasIssue(compound.issues, 'missing standard section'));
+  }
 
   // Decoding must not double-unescape: `&amp;lt;` is the literal text "&lt;",
   // not "<". A single pass gives that for free, whatever order the table is in.
