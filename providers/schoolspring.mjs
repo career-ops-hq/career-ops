@@ -1,6 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { decodeEntities } from './_html-entities.mjs';
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
 
 // SchoolSpring provider — K-12 districts hosted at `<district>.schoolspring.com`.
@@ -91,7 +92,9 @@ export default {
     const pagesToFetch = ctxMax > 0 ? Math.min(ceiling, ctxMax) : ceiling;
 
     const jobs = [];
+    const seen = new Set();
     let lastPageFull = false;
+    let stoppedOnRepeat = false;
     let pagesFetched = 0;
     for (let page = 1; page <= pagesToFetch; page++) {
       if (page > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
@@ -101,13 +104,27 @@ export default {
       const json = await fetchJsonWithRetry(ctx, pageUrl(host, page), { redirect: 'error' });
       const list = parseSchoolSpringPage(json, entry.name, `https://${host}`);
       pagesFetched++;
-      jobs.push(...list.jobs);
+      // A repeated or overlapping page must not add the same postings again. A
+      // page that adds nothing new is the end of the board, or the API ignoring
+      // `page` and repeating itself; either way, stop instead of looping to the
+      // ceiling.
+      let fresh = 0;
+      for (const job of list.jobs) {
+        if (seen.has(job.url)) continue;
+        seen.add(job.url);
+        jobs.push(job);
+        fresh++;
+      }
       lastPageFull = list.rawCount >= PAGE_SIZE;
       if (!lastPageFull) break;
+      if (fresh === 0) {
+        stoppedOnRepeat = true;
+        break;
+      }
     }
-    // Warn only when OUR ceiling cut a board that had more — never for a
-    // ctx.maxPages probe cap.
-    if (lastPageFull && pagesFetched >= ceiling && !(ctxMax > 0 && ctxMax < ceiling)) {
+    // Warn only when OUR ceiling cut a board that had more, never for a
+    // ctx.maxPages probe cap and never when the API just repeated itself.
+    if (lastPageFull && !stoppedOnRepeat && pagesFetched >= ceiling && !(ctxMax > 0 && ctxMax < ceiling)) {
       console.warn(`schoolspring: ${entry.name}: stopped at ${ceiling} pages (${ceiling * PAGE_SIZE} postings); raise max_pages on this entry`);
     }
     return jobs;
@@ -122,18 +139,11 @@ function toEpochMs(value) {
 }
 
 /**
- * The API HTML-escapes titles and employer names ("Hudson&#x27;s Bay").
+ * The API HTML-escapes titles and employer names ("Hudson&#x27;s Bay", "Grade 5
+ * &#8211; Teacher"), so they go through the shared decoder.
  * @param {unknown} s
  */
-function unescapeBasic(s) {
-  return String(s ?? '')
-    .replace(/&#x27;|&#39;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-    .trim();
-}
+const clean = (s) => decodeEntities(String(s ?? '')).trim();
 
 /**
  * Parse one `GetPagedJobsWithSearch` page. Exported for unit tests.
@@ -141,9 +151,9 @@ function unescapeBasic(s) {
  * Shape: `{ success, message, value: { page, size, jobsList: [{ jobId,
  * employer, title, location, displayDate }] } }`.
  *
- * - `{}`/`null` or `jobsList: null` → empty (endpoint alive, nothing matched).
- * - `success: false`, or a body whose `value` is present but has no
- *   `jobsList` array → throws, naming what it got.
+ * - `{}`/`null` (a contentless body) or `jobsList: []` (a real empty board) → empty.
+ * - `success: false`, or any other body with no `jobsList` array (including
+ *   `value: null` and `jobsList: null`) → throws, naming what it got.
  * - Rows with no numeric `jobId` or no title are skipped.
  *
  * @param {any} json
@@ -154,21 +164,20 @@ function unescapeBasic(s) {
 export function parseSchoolSpringPage(json, companyName, origin) {
   if (json == null || typeof json !== 'object' || Object.keys(json).length === 0) return { jobs: [], rawCount: 0 };
   if (json.success === false) throw new Error(`schoolspring: API error: ${json.message || 'success:false'}`);
-  const value = json.value;
-  if (value == null) return { jobs: [], rawCount: 0 };
-  const list = value.jobsList;
-  if (list == null) return { jobs: [], rawCount: 0 };
+  // A real empty board answers `jobsList: []`. A response with no jobsList array
+  // at all is not that, so it throws instead of silently reading as empty.
+  const list = json.value?.jobsList;
   if (!Array.isArray(list)) {
-    throw new Error(`schoolspring: unexpected response shape (value keys: ${Object.keys(value).join(', ') || 'none'})`);
+    throw new Error(`schoolspring: unexpected response shape, no jobsList array (${json.value && typeof json.value === 'object' ? `value keys: ${Object.keys(json.value).join(', ') || 'none'}` : `top-level keys: ${Object.keys(json).join(', ')}`})`);
   }
   const jobs = [];
   for (const j of list) {
     const id = String(j?.jobId ?? '').trim();
-    const title = unescapeBasic(j?.title);
+    const title = clean(j?.title);
     // jobId is numeric; anything else is not a posting we can link to.
     if (!/^\d+$/.test(id) || !title) continue;
-    const where = unescapeBasic(j.location);
-    const employer = unescapeBasic(j.employer);
+    const where = clean(j.location);
+    const employer = clean(j.employer);
     /** @type {{title: string, url: string, company: string, location: string, postedAt?: number}} */
     const job = {
       title,

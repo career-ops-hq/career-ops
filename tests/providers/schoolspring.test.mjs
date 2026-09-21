@@ -51,7 +51,7 @@ try {
       size: 100,
       jobsList: [
         { jobId: 5930050, employer: 'Gaiser Middle School', title: 'Head Coach', location: 'Exampleville, Washington', displayDate: '2026-09-16T07:00:00' },
-        { jobId: 5791497, employer: 'Hudson&#x27;s Bay High School', title: 'Assistant Boys &amp; Girls Coach', location: 'Exampleville, Washington', displayDate: 'not a date' },
+        { jobId: 5791497, employer: 'Hudson&#x27;s Bay High School', title: 'Assistant Boys &amp; Girls Coach &#8211; Grade 5', location: 'Exampleville, Washington', displayDate: 'not a date' },
         { jobId: 'abc', employer: 'X', title: 'Non-numeric id', location: 'Y' },       // dropped
         { jobId: 7, employer: 'X', title: '', location: 'Y' },                          // no title → dropped
         { employer: 'X', title: 'No id', location: 'Y' },                               // no id → dropped
@@ -66,18 +66,21 @@ try {
   else fail(`parseSchoolSpringPage url/company was ${JSON.stringify(jobs[0])}`);
   if (jobs[0]?.location === 'Exampleville, Washington - Gaiser Middle School') pass('parseSchoolSpringPage joins location and employer');
   else fail(`parseSchoolSpringPage location was ${JSON.stringify(jobs[0]?.location)}`);
-  if (jobs[1]?.title === 'Assistant Boys & Girls Coach' && jobs[1]?.location.endsWith("Hudson's Bay High School")) pass('parseSchoolSpringPage decodes the API\'s HTML entities (&amp; &#x27;)');
+  if (jobs[1]?.title === 'Assistant Boys & Girls Coach \u2013 Grade 5' && jobs[1]?.location.endsWith("Hudson's Bay High School")) pass('parseSchoolSpringPage decodes the API\'s HTML entities through the shared decoder (&amp; &#x27; and numeric &#8211;)');
   else fail(`parseSchoolSpringPage entities: ${JSON.stringify(jobs[1])}`);
   if (typeof jobs[0]?.postedAt === 'number' && !('postedAt' in jobs[1])) pass('parseSchoolSpringPage sets postedAt from displayDate and omits it when unparseable');
   else fail(`parseSchoolSpringPage postedAt: ${jobs[0]?.postedAt} / ${jobs[1]?.postedAt}`);
 
-  for (const [label, empty] of [['{}', {}], ['null', null], ['{value: null}', { value: null }], ['{value: {jobsList: null}}', { value: { jobsList: null } }], ['{value: {jobsList: []}}', { value: { jobsList: [] } }]]) {
+  for (const [label, empty] of [['{}', {}], ['null', null], ['{value: {jobsList: []}} (a real empty board)', { success: true, value: { jobsList: [] } }]]) {
     if (parseSchoolSpringPage(empty, 'X', ORIGIN).jobs.length === 0) pass(`parseSchoolSpringPage ${label} → empty`);
     else fail(`parseSchoolSpringPage ${label} should be empty`);
   }
   for (const [label, bad, re] of [
     ['success:false', { success: false, message: 'Domain not found' }, /Domain not found/],
-    ['jobsList of the wrong type', { value: { jobsList: 'oops', extra: 1 } }, /unexpected response shape.*jobsList|unexpected response shape/],
+    ['jobsList of the wrong type', { value: { jobsList: 'oops', extra: 1 } }, /no jobsList array.*extra|no jobsList array/],
+    ['a value with no jobsList', { success: true, value: {} }, /no jobsList array/],
+    ['value: null', { success: true, value: null }, /no jobsList array/],
+    ['jobsList: null', { success: true, value: { page: 1, jobsList: null } }, /no jobsList array.*page/],
   ]) {
     try { parseSchoolSpringPage(bad, 'X', ORIGIN); fail(`parseSchoolSpringPage should throw for ${label}`); }
     catch (e) { if (re.test(e.message)) pass(`parseSchoolSpringPage throws a descriptive error for ${label}`); else fail(`parseSchoolSpringPage ${label} threw: ${e.message}`); }
@@ -86,6 +89,9 @@ try {
   // ── fetch() ───────────────────────────────────────────────────────
   const row = (n) => ({ jobId: 1000 + n, employer: 'E', title: `Job ${n}`, location: 'L', displayDate: '2026-09-01T07:00:00' });
   const fullPage = (start) => ({ success: true, value: { jobsList: Array.from({ length: 100 }, (_, i) => row(start + i)) } });
+  const pageNo = (url) => Number(new URL(url).searchParams.get('page'));
+  // a distinct full page per page number, as a real board returns
+  const distinctPage = (url) => fullPage((pageNo(url) - 1) * 100);
   const noSleep = async () => {};
   const entry = { name: 'Acme', careers_url: 'https://example.schoolspring.com/' };
   const warnings = [];
@@ -114,12 +120,31 @@ try {
     // source never says "no more": the provider's OWN ceiling (20) stops it and warns
     calls = [];
     warnings.length = 0;
-    ctx = { fetchJson: async (url) => { calls.push(url); return fullPage(0); }, sleep: noSleep };
+    ctx = { fetchJson: async (url) => { calls.push(url); return distinctPage(url); }, sleep: noSleep };
     out = await schoolspring.fetch(entry, ctx);
     if (calls.length === 20 && out.length === 2000) pass("schoolspring.fetch() stops at its own DEFAULT_MAX_PAGES (20) even though every page is full");
     else fail(`schoolspring.fetch() ceiling: ${calls.length} calls, ${out.length} jobs`);
     if (warnings.some((w) => /raise max_pages/.test(w))) pass('schoolspring.fetch() warns "raise max_pages" when its ceiling truncated the board');
     else fail(`schoolspring.fetch() ceiling warning missing: ${JSON.stringify(warnings)}`);
+
+    // an API that ignores `page` and repeats the same full page: no duplicates, stops early, no max_pages blame
+    calls = [];
+    warnings.length = 0;
+    const repeating = { fetchJson: async (url) => { calls.push(url); return fullPage(0); }, sleep: noSleep };
+    out = await schoolspring.fetch(entry, repeating);
+    if (out.length === 100 && new Set(out.map((j) => j.url)).size === 100) pass('schoolspring.fetch() does not add the same postings twice when a page repeats');
+    else fail(`schoolspring.fetch() repeated page: ${out.length} jobs, ${new Set(out.map((j) => j.url)).size} unique`);
+    if (calls.length === 2) pass('schoolspring.fetch() stops as soon as a page adds no new postings');
+    else fail(`schoolspring.fetch() repeated page made ${calls.length} calls (expected 2)`);
+    if (!warnings.some((w) => /raise max_pages/.test(w))) pass('schoolspring.fetch() does not blame max_pages when the API just repeated itself');
+    else fail('schoolspring.fetch() misfired the max_pages warning on a repeating API');
+
+    // overlapping pages: only the new postings from page 2 are added
+    calls = [];
+    const overlapping = { fetchJson: async (url) => { calls.push(url); return pageNo(url) === 1 ? fullPage(0) : pageNo(url) === 2 ? fullPage(50) : { success: true, value: { jobsList: [] } }; }, sleep: noSleep };
+    out = await schoolspring.fetch(entry, overlapping);
+    if (out.length === 150 && new Set(out.map((j) => j.url)).size === 150) pass('schoolspring.fetch() keeps only the new postings when pages overlap');
+    else fail(`schoolspring.fetch() overlapping pages: ${out.length} jobs, ${new Set(out.map((j) => j.url)).size} unique`);
 
     // entry max_pages lowers the ceiling; an absurd override is capped
     calls = [];
@@ -157,7 +182,7 @@ try {
     ctx = {
       fetchJson: async (url) => {
         calls.push(url);
-        if (new URL(url).searchParams.get('page') === '1') return fullPage(0);
+        if (pageNo(url) === 1) return fullPage(0);
         const e = new Error('HTTP 503'); e.status = 503; throw e;
       },
       sleep: noSleep,
