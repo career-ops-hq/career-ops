@@ -209,8 +209,11 @@ export default {
       jobs.push(...pageJobs);
 
       // Natural end: the source's own raw row count for this page (before
-      // malformed-row filtering) is short of PAGE_SIZE.
-      if (rawCount < PAGE_SIZE) { page++; break; }
+      // malformed-row filtering) is short of PAGE_SIZE. Break WITHOUT
+      // incrementing page — a short page that happens to land on the last
+      // allowed page must still read as a natural end below, not as the
+      // ceiling having truncated a healthy board.
+      if (rawCount < PAGE_SIZE) break;
     }
 
     // Only a healthy walk that ran out of its OWN entry.max_pages /

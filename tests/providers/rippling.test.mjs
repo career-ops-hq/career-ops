@@ -230,6 +230,31 @@ try {
     fail(`rippling.fetch() pagination: ${bigPages} pages, ${bigJobs.length} jobs (expected 2 pages, 1500 jobs)`);
   }
 
+  // Regression: a short final page that happens to land exactly on the last
+  // ALLOWED page (max_pages reached and short) must still read as a natural
+  // end, not as the ceiling having truncated a healthy board.
+  let lastPageShortPages = 0;
+  const { result: lastPageShortJobs, errors: lastPageShortErrors } = await captureConsoleErrors(() => rippling.fetch(
+    { ...bigEntry, max_pages: 2 },
+    {
+      sleep: async () => {},
+      fetchJson: async () => {
+        lastPageShortPages++;
+        return lastPageShortPages === 1 ? pageOf(0, 1000) : pageOf(1, 300); // page 1 IS the last allowed page, and short
+      },
+    },
+  ));
+  if (lastPageShortPages === 2 && lastPageShortJobs.length === 1300) {
+    pass(`rippling.fetch() stops on a short page that is also the last allowed page (${lastPageShortPages} pages, ${lastPageShortJobs.length} jobs)`);
+  } else {
+    fail(`rippling.fetch() last-page-short handling: ${lastPageShortPages} pages, ${lastPageShortJobs.length} jobs (expected 2 pages, 1300 jobs)`);
+  }
+  if (!lastPageShortErrors.some((e) => /raise max_pages/.test(e))) {
+    pass('rippling.fetch() does not warn "raise max_pages" when the last allowed page is short (natural end, not a cap stop)');
+  } else {
+    fail(`rippling.fetch() should not warn "raise max_pages" for a short last-allowed page, got: ${JSON.stringify(lastPageShortErrors)}`);
+  }
+
   // DEFAULT_MAX_PAGES (10) stops an ever-full board even when the source
   // never reports a short page — and warns, since this IS a healthy board
   // truncated by the ceiling.
