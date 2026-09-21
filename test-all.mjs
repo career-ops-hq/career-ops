@@ -473,6 +473,9 @@ const scripts = [
   // default portals.yml because end-user workspaces often have a real user-layer
   // portals file that would trigger a live remote sweep during tests.
   { name: 'verify-portals.mjs --file .tmp-test-missing-portals.yml', expectExit: 0 },
+  // Pins #4250: --help must exit fast on its own, never fall through to the
+  // full network sweep (which is what "no output for minutes" looks like).
+  { name: 'verify-portals.mjs --help', expectExit: 0 },
   { name: 'update-system.mjs check', expectExit: 0 },
   { name: 'seed-fixture.mjs --self-test', expectExit: 0 },
   { name: 'archive-posting.mjs --help', expectExit: 0 },
@@ -2049,6 +2052,30 @@ const allowedFiles = [
   'dashboard/internal/ui/screens/progress.go',
 ];
 
+// Paths added for #4131, checked by EXACT match rather than folded into
+// allowedFiles above. allowedFiles.some(a => file.includes(a)) is a
+// substring test, which every pre-existing entry already relies on (a
+// nested path containing e.g. "README.md" is exempted too) — widening that
+// same list with plain root-relative basenames like 'funding.json' or
+// 'HIRED.md' would also silently exempt an unrelated tracked file that
+// merely shares a basename, such as a future fixtures/funding.json or
+// snapshots/tests/hired-wall.test.mjs (luochen211, #4144 review). These are
+// the ones this PR actually intends to allow, so they get the tighter
+// check instead of loosening the shared one.
+const exactAllowedFiles = new Set([
+  // GitHub Sponsors funding target + Codex plugin manifest (#4131) — same
+  // maintainer-credit shape as the .claude-plugin/.github/plugin ones above.
+  'funding.json', '.codex-plugin/plugin.json',
+  // Hired Wall: celebrates a hire with a link back to the project, and the
+  // scripts/tests that build and cover that feature necessarily carry the
+  // same URL (#4131).
+  'HIRED.md', 'hired-wall-build.mjs', 'tests/hired-wall.test.mjs', 'tests/project-identity.test.mjs',
+  // Dashboard credit string (#4131) — same substring-vs-exact reasoning as
+  // the entries above; the pre-existing pipeline.go/progress.go entries stay
+  // in the broad allowedFiles list above since they predate this PR.
+  'dashboard/internal/ui/screens/stats.go',
+]);
+
 // Build pathspec for git grep — only scan tracked files matching these
 // extensions. This is what `grep -rn` was trying to do, but git-aware:
 // untracked files (debate artifacts, AI tool scratch, local plans/) and
@@ -2060,15 +2087,45 @@ const grepPathspecs = scanExtensions.map(e => `*.${e}`);
 
 let leakFound = false;
 for (const pattern of leakPatterns) {
-  const result = run(
-    'git',
-    ['grep', '-n', pattern, '--', ...grepPathspecs],
-    { stdio: ['pipe', 'pipe', 'ignore'] }
-  );
+  // --name-only -z NUL-delimits filenames only — no line number, no matching
+  // line, nothing but the path is ever needed here. A prior version used
+  // plain `-n -z` (path\0line\0matching-line\n) and split on '\n' first to
+  // recover records, but a tracked filename containing a literal embedded
+  // newline byte — legal on Linux and macOS — would then be truncated at
+  // that byte, before the real end of the record. A truncated name that
+  // happens to collide with an allowed one (or with the empty string) would
+  // then skip the warning for whatever the file actually leaks (CodeRabbit,
+  // #4144 review). `--name-only -z` sidesteps the ambiguity entirely: NUL is
+  // the only delimiter, so a raw newline inside a filename is preserved
+  // verbatim and splitting purely on '\0' recovers the exact path every time.
+  //
+  // execFileSync() directly, NOT the shared run() helper: run()'s documented
+  // contract is "trimmed stdout" (tests/helpers.mjs), and .trim() strips
+  // whitespace from the very ends of the whole NUL-joined blob. A tracked
+  // filename that legitimately starts or ends with a space — legal on
+  // Linux/macOS — would have that space silently stripped if it happened to
+  // be the first or last match, corrupting the one thing this whole fix
+  // exists to keep exact (CodeRabbit, #4144 review).
+  let result = null;
+  try {
+    result = execFileSync(
+      'git',
+      ['grep', '--name-only', '-z', pattern, '--', ...grepPathspecs],
+      { cwd: ROOT, encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'ignore'] },
+    );
+  } catch (error) {
+    // git grep exits 1 with no matches — nothing to warn about. Any other
+    // failure (a real git error, or the 30s timeout above firing) must not
+    // be swallowed the same way: silently treating it as "no matches" would
+    // let this whole check report a false "no leaks" on a run where it
+    // never actually completed (CodeRabbit, #4144 review).
+    if (error?.status !== 1) throw error;
+  }
   if (result) {
-    for (const line of result.split('\n')) {
-      const file = line.split(':')[0];
+    for (const file of result.split('\0')) {
+      if (!file) continue;
       if (allowedFiles.some(a => file.includes(a))) continue;
+      if (exactAllowedFiles.has(file)) continue;
       if (file.includes('dashboard/go.mod')) continue;
       warn(`Possible personal data in ${file}: "${pattern}"`);
       leakFound = true;
@@ -4095,7 +4152,7 @@ if (
 // loudly otherwise), so the list can only shrink. Denominator asserted: the
 // locale walk must find the known files, or the whole check is blind.
 {
-  const FROZEN_OFERTA = new Set(['da', 'es', 'pl', 'pt', 'ua']);
+  const FROZEN_OFERTA = new Set(['da', 'pl', 'pt', 'ua']);
   const REQUIRED_HEADINGS = ['## A)', '## B)', '## C)', '## D)', '## E)', '## F)', '## G)', '## Risk Summary', '## H)'];
   const REQUIRED_LABELS = ['**Date:**', '**URL:**', '**Archetype:**', '**Score:**', '**Legitimacy:**', '**PDF:**'];
   const withOferta = readdirSync(join(ROOT, 'modes'), { withFileTypes: true })
@@ -17329,6 +17386,23 @@ try {
     fail(`appendScanRunSummary wrong file contents: ${JSON.stringify(runRows)}`);
   }
   rmSync(runsTmp, { recursive: true, force: true });
+
+  // Scan-run persistence, missing parent directory: filePath nested inside a
+  // directory that does not exist yet, proving appendScanRunSummary creates its
+  // own parent rather than relying on a folder some earlier step happened to make.
+  {
+    const nestedTmp = mkdtempSync(join(tmpdir(), 'scanruns-nested-'));
+    const nestedFile = join(nestedTmp, 'nested', 'deep', 'scan-runs.tsv');
+    appendScanRunSummary(counters, nestedFile);
+    const nestedRows = readFileSync(nestedFile, 'utf-8').trim().split('\n');
+    if (nestedRows[0] === SCAN_RUNS_HEADER.trim() && nestedRows.length === 2
+      && nestedRows[1].startsWith('2026-07-03T14:02:11Z\tcompleted\t45\t3\t120\t')) {
+      pass('appendScanRunSummary creates a missing nested parent directory and writes header + row');
+    } else {
+      fail(`appendScanRunSummary with missing nested parent: wrong file contents: ${JSON.stringify(nestedRows)}`);
+    }
+    rmSync(nestedTmp, { recursive: true, force: true });
+  }
 
   // computeRunStats: header-name parsing, torn rows skipped, failed runs
   // excluded from averages.
