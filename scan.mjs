@@ -3103,12 +3103,25 @@ async function main() {
         process.exit(1);
       }
     }
-    if (!Array.isArray(block.positive) && !Array.isArray(block.negative)) {
-      console.error(`Error: field_filters.${name} has neither a positive nor a negative list - it would match every posting`);
+    // Count the entries buildTitleFilter would actually keep. Array.isArray
+    // alone is not enough: it drops every non-string and every blank, so
+    // `positive: [123, null]` is a well-formed array that compiles to an empty
+    // positive list — "no positive constraint" — and passes every posting.
+    const usable = (v) => (Array.isArray(v) ? v : [])
+      .filter(k => typeof k === 'string' && k.trim() !== '').length;
+    if (usable(block.positive) + usable(block.negative) === 0) {
+      console.error(`Error: field_filters.${name} has no usable keyword in positive or negative - it would match every posting`);
       process.exit(1);
     }
   }
   for (const target of targets) {
+    if (target.filter_on !== undefined) {
+      const declared = Array.isArray(target.filter_on) ? target.filter_on : [target.filter_on];
+      if (!declared.some(f => typeof f === 'string' && f.trim() !== '')) {
+        console.error(`Error: ${target.name}: filter_on has no usable field name - omit the key to gate on title`);
+        process.exit(1);
+      }
+    }
     for (const field of normalizeFilterOn(target.filter_on)) {
       if (field !== 'title' && !fieldFilters.has(field)) {
         console.error(`Error: ${target.name}: filter_on "${field}" has no field_filters.${field} block in portals.yml`);

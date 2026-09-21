@@ -79,7 +79,8 @@ tracked_companies:
   else fail(`expected an empty pipeline, got ${urls.length} entr(y/ies)`);
 }
 
-// A block with neither list is the same pass-all, spelled differently.
+// A block with neither list is the same pass-all, spelled differently — and
+// so is a block whose lists contain nothing buildTitleFilter can compile.
 {
   const { exitCode, stderr } = scanWith(`${TITLE}field_filters:
   noc: {}
@@ -91,7 +92,7 @@ tracked_companies:
       command: node
       script: tests/fixtures/noc-board.mjs
 `);
-  if (exitCode !== 0 && /neither a positive nor a negative list/.test(stderr)) {
+  if (exitCode !== 0 && /no usable keyword/.test(stderr)) {
     pass('an empty field_filters block exits rather than matching everything');
   } else {
     fail(`expected an exit naming the empty block, got code ${exitCode}: ${stderr}`);
@@ -118,6 +119,47 @@ tracked_companies:
   else fail(`the scan ran with an unread title whitelist and queued ${urls.length} posting(s)`);
   if (/field_filters.title is never read/.test(stderr)) pass('the error says where the keywords belong');
   else fail(`expected the explanation in stderr, got: ${stderr}`);
+}
+
+// ── A well-formed array that still compiles to nothing ─────────
+// buildTitleFilter drops every non-string and blank entry, so Array.isArray
+// says "configured" while the compiled positive list is empty — the same
+// pass-all, reached through a list that looks populated.
+{
+  const { exitCode, stderr, urls } = scanWith(`${TITLE}field_filters:
+  noc:
+    positive: [123, null]
+tracked_companies:
+  - name: Fixture Board
+    careers_url: https://example.invalid/jobs
+    filter_on: noc
+    parser:
+      command: node
+      script: tests/fixtures/noc-board.mjs
+`);
+  if (exitCode !== 0) pass('a keyword list with no usable entry exits');
+  else fail(`the scan ran with an empty compiled whitelist and queued ${urls.length} posting(s)`);
+  if (/no usable keyword/.test(stderr)) pass('the error says the list compiles to nothing');
+  else fail(`expected the explanation in stderr, got: ${stderr}`);
+}
+
+// ── An empty filter_on silently became ["title"] ──────────────
+// Gating on a field the user did not ask for is quieter than failing, and
+// with no title_filter present it gates on nothing at all.
+{
+  const { exitCode, stderr } = scanWith(`field_filters:
+  noc:
+    positive: ["stem:22"]
+tracked_companies:
+  - name: Fixture Board
+    careers_url: https://example.invalid/jobs
+    filter_on: []
+    parser:
+      command: node
+      script: tests/fixtures/noc-board.mjs
+`);
+  if (exitCode !== 0 && /no usable field name/.test(stderr)) pass('an empty filter_on exits instead of falling back to title');
+  else fail(`expected an exit, got code ${exitCode}: ${stderr}`);
 }
 
 // ── Two enabled targets sharing one name ───────────────────────────
