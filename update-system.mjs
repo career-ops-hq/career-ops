@@ -1228,7 +1228,16 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
     }
   };
 
-  const changedLocally = new Set(diffNames(mergeBase || 'HEAD'));
+  const differsFromUpstream = new Set(diffNames(upstreamRef));
+
+  // Without a merge-base, the fallback has to stay inside the same contract:
+  // over-report, never under-report. `HEAD` is the wrong direction, because it
+  // diffs against the working tree and a customization already COMMITTED in
+  // HEAD is invisible to it — the file diffs clean, drops out of the candidate
+  // set, and apply() replaces it with no warning and no .bak. The upstream
+  // difference is the inclusive alternative, and the per-file refinement below
+  // still strips what it over-reports.
+  const changedLocally = new Set(mergeBase ? diffNames(mergeBase) : differsFromUpstream);
   for (const file of [...changedLocally]) {
     let delivered = null;
     try {
@@ -1251,7 +1260,6 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
     changedLocally.delete(file);
   }
 
-  const differsFromUpstream = new Set(diffNames(upstreamRef));
   const atRisk = [...changedLocally].filter((file) => differsFromUpstream.has(file));
 
   // `git diff` never lists untracked files, so a file created locally at a path

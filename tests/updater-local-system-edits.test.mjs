@@ -652,3 +652,48 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
     fail(`#19 expected ['generate-cover-letter.mjs'], got ${JSON.stringify(atRisk)}`);
   }
 }
+
+// ── 20. With no merge-base, a COMMITTED customization is still reported ──
+//    The candidate set normally comes from the merge-base. When that call fails
+//    (a shallow clone, or unrelated histories), the fallback has to keep the
+//    same contract: over-report, never under-report. Falling back to `HEAD`
+//    breaks it, because a diff against HEAD compares the index and working tree,
+//    so a customization already committed is invisible — the file diffs clean,
+//    leaves the candidate set, and apply() replaces it with no warning and no
+//    .bak. That is the exact loss this detector exists to prevent.
+//
+//    Modelled with an orphan `unreachable` branch standing in for a ref with no
+//    common ancestor, which is what makes `git merge-base HEAD upstream` fail.
+//    Every file the fake upstream shares is REWRITTEN with upstream content
+//    first: `git rm --cached` leaves files on disk, so a plain `git add -A`
+//    would re-commit the user's own content and "adopt" the edit the case is
+//    trying to keep at risk.
+{
+  const repo = makeRepo();
+  writeFileSync(join(repo.dir, 'generate-cover-letter.mjs'), 'local linkedin fix\n');
+  repo.g('commit', '-qam', 'local fix');
+
+  repo.g('checkout', '-q', '--orphan', 'unreachable');
+  writeFileSync(join(repo.dir, 'generate-cover-letter.mjs'), 'shipped script v2\n');
+  writeFileSync(join(repo.dir, 'modes/pdf.md'), 'shipped pdf v2\n');
+  writeFileSync(join(repo.dir, 'modes/cover.md'), 'shipped cover v2\n');
+  repo.g('add', '-A');
+  repo.g('commit', '-qm', 'unrelated upstream history');
+  repo.g('checkout', '-q', 'main');
+
+  let mergeBaseFailed = false;
+  try {
+    repo.g('merge-base', 'HEAD', 'unreachable');
+  } catch {
+    mergeBaseFailed = true;
+  }
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'unreachable', repo.ctx);
+  if (mergeBaseFailed && atRisk.includes('generate-cover-letter.mjs')) {
+    pass('with no merge-base, a committed customization is still reported');
+  } else if (!mergeBaseFailed) {
+    fail('#20 the fixture did not break merge-base, so the fallback was never exercised');
+  } else {
+    fail(`#20 expected the committed customization in the candidate set, got ${JSON.stringify(atRisk)}`);
+  }
+}

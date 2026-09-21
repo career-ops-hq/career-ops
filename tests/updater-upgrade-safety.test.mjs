@@ -129,10 +129,21 @@ console.log('\n🧪 Testing updater upgrade safety (#2337, #2007)...');
 
 // ── 1b. unrelated histories: no merge-base must degrade, not throw (#2337) ──
 // When HEAD and the upstream ref share no history (a shallow clone, or a foreign
-// root), `git merge-base` errors. locallyModifiedSystemFiles must swallow that,
-// fall back to a HEAD baseline, and still return an array. A divergence warning
-// we cannot compute must never abort the update. Kept separate from the
-// missing-entry assertion so this early-return path is exercised on its own.
+// root), `git merge-base` errors. locallyModifiedSystemFiles must swallow that
+// and still return an array: a divergence warning we cannot compute must never
+// abort the update. Kept separate from the missing-entry assertion so this
+// path is exercised on its own.
+//
+// The candidate set in this case comes from the upstream difference rather than
+// from `HEAD`, because with no shared ancestor nothing can prove a file's
+// current content is upstream's rather than the user's. `HEAD` diffs against the
+// index and the working tree, so a customization already COMMITTED here is
+// invisible to it: the file drops out of the candidate set and apply() replaces
+// it with no warning and no `.bak`. Over-reporting costs a "keep your version?"
+// prompt on a file that was about to be overwritten anyway; under-reporting
+// costs the user's work, which is the loss this detector exists to prevent.
+// The per-file refinement in locallyModifiedSystemFiles still strips what it
+// over-reports wherever a delivered blob can be identified.
 {
   const { dir, g, ctx } = makeRepo('co-upgrade-orphan-');
   writeFixture(dir, 'generate-cover-letter.mjs', ['// cover base']);
@@ -152,10 +163,12 @@ console.log('\n🧪 Testing updater upgrade safety (#2337, #2007)...');
   } catch {
     threw = true;
   }
-  if (!threw && Array.isArray(result) && result.length === 0) {
-    pass('#2337: no merge-base (unrelated histories) degrades to an empty result without throwing');
-  } else {
+  if (!threw && Array.isArray(result) && result.includes('generate-cover-letter.mjs')) {
+    pass('#2337: with no merge-base, a file the upstream ref would overwrite is still reported, without throwing');
+  } else if (threw || !Array.isArray(result)) {
     fail(`unrelated-histories path mishandled (threw=${threw}, got=${JSON.stringify(result)})`);
+  } else {
+    fail(`#2337 regression: with no merge-base a file about to be overwritten went unreported (got: ${JSON.stringify(result)})`);
   }
 
   rmSync(dir, { recursive: true, force: true });
