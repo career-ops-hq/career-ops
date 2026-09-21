@@ -41,11 +41,6 @@ function highestMoney(text: string): { value: number; source: "POSTED" | "est" |
     const value = Math.max(moneyNumber(match[1], match[2]), moneyNumber(match[3] ?? "0", match[4] ?? ""));
     const trailingText = text.slice((match.index ?? 0) + match[0].length);
     if (/^\s*(?:valuation|(?:total\s+)?raised|series\s|round\b)/i.test(trailingText)) continue;
-    // Bare M/B values in prose are usually company scale or valuation, not
-    // compensation (for example, "1,079.2M devices"). Keep currency-backed
-    // values, but do not let those metrics become a salary datapoint.
-    if (!hasCurrency && /[MmBb]/.test(`${match[2] ?? ""}${match[4] ?? ""}`)) continue;
-    if (!hasCurrency && value > 500_000) continue;
     if (value > highest) {
       highest = value;
       const context = text.slice(Math.max(0, (match.index ?? 0) - 24), Math.min(text.length, (match.index ?? 0) + match[0].length + 40)).toLowerCase();
