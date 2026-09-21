@@ -3083,6 +3083,16 @@ async function main() {
   for (const [name, block] of Object.entries(
     config.field_filters && typeof config.field_filters === 'object' ? config.field_filters : {},
   )) {
+    // `title` routes to the top-level title_filter by definition, so a block
+    // under this key is never read. Left accepted, it is the pass-all trap in
+    // its most convincing form: with no title_filter present, buildTitleFilter
+    // compiles an empty positive list — "no positive constraint" — while the
+    // user is looking at a field_filters.title.positive they believe is in
+    // force. validate-portals.mjs rejects it too, but scan.mjs never calls it.
+    if (name === 'title') {
+      console.error('Error: field_filters.title is never read - filter_on "title" uses the top-level title_filter. Move these keywords there.');
+      process.exit(1);
+    }
     if (!block || typeof block !== 'object' || Array.isArray(block)) {
       console.error(`Error: field_filters.${name} must be an object with positive and/or negative lists`);
       process.exit(1);

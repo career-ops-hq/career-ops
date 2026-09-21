@@ -98,6 +98,28 @@ tracked_companies:
   }
 }
 
+// ── field_filters.title, with no title_filter to fall back on ──────
+// The pass-all trap in its most convincing form: the user is reading a
+// positive list they believe is in force, while `title` routes to the absent
+// top-level title_filter and buildTitleFilter compiles "no constraint".
+{
+  const { exitCode, stderr, urls } = scanWith(`field_filters:
+  title:
+    positive: ["Help Desk"]
+tracked_companies:
+  - name: Fixture Board
+    careers_url: https://example.invalid/jobs
+    filter_on: title
+    parser:
+      command: node
+      script: tests/fixtures/noc-board.mjs
+`);
+  if (exitCode !== 0) pass('a field_filters.title block exits instead of silently passing every title');
+  else fail(`the scan ran with an unread title whitelist and queued ${urls.length} posting(s)`);
+  if (/field_filters.title is never read/.test(stderr)) pass('the error says where the keywords belong');
+  else fail(`expected the explanation in stderr, got: ${stderr}`);
+}
+
 // ── Two enabled targets sharing one name ───────────────────────────
 // A duplicate enabled name is only a validate-portals WARNING, so this config
 // is legal. Keyed by name, the second board's noc suppressed the first board's
