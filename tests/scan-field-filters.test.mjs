@@ -70,26 +70,21 @@ const titleKeywords = await import(pathToFileURL(join(ROOT, 'title-keywords.mjs'
 }
 
 // ── declaredFieldKey ───────────────────────────────────────────────
-// The absence counters are keyed per (target, field): one counter per target
-// cannot tell "noc is never published" from "company was missing on a
-// different job", and reported the second as the first.
+// The absence counters are keyed per (target, field), and by the target's
+// INDEX rather than its name: a duplicate enabled name is only a
+// validate-portals warning, so two real targets can share one.
 {
   const { declaredFieldKey } = scan;
-  if (declaredFieldKey('A', 'noc') !== declaredFieldKey('A', 'company')) pass('two fields of one target get distinct keys');
+  if (declaredFieldKey(0, 'noc') !== declaredFieldKey(0, 'company')) pass('two fields of one target get distinct keys');
   else fail('expected distinct keys per field');
 
-  if (declaredFieldKey('A', 'noc') !== declaredFieldKey('B', 'noc')) pass('two targets get distinct keys for one field');
+  if (declaredFieldKey(0, 'noc') !== declaredFieldKey(1, 'noc')) pass('two targets get distinct keys for one field');
   else fail('expected distinct keys per target');
 
-  // A delimiter-joined key would collide here; JSON escaping does not.
-  if (declaredFieldKey('A", "noc', 'x') !== declaredFieldKey('A', 'noc')) pass('a target name containing the delimiter cannot forge another key');
-  else fail('key collision on a crafted target name');
-
-  if (declaredFieldKey('Job Bank — help desk: IT', 'noc').includes('Job Bank — help desk: IT')) {
-    pass('a name with colons and em-dashes survives intact');
-  } else {
-    fail('expected the target name to appear in the key');
-  }
+  // Two enabled targets may share a name — that is only a validate-portals
+  // warning — so the id, not the name, is what must separate them.
+  if (declaredFieldKey(10, 'noc') !== declaredFieldKey(1, '0noc')) pass('adjacent ids cannot run together into one key');
+  else fail('key collision between two distinct (id, field) pairs');
 }
 
 // Behaviour of the gate itself — which fields are read, what an absent field

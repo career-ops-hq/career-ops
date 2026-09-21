@@ -209,16 +209,18 @@ export { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTit
  * @returns {string[]} field names to gate on, defaulting to ["title"].
  */
 /**
- * Key for the per-(target, field) absence counters. JSON rather than a
- * delimiter string: a target name may contain any printable character —
- * board names here carry colons and em-dashes — and JSON escaping keeps two
- * different (name, field) pairs from colliding on one key.
- * @param {string} targetName
+ * Key for the per-(target, field) absence counters.
+ *
+ * Keyed by the target's index in `targets`, not its name: a duplicate enabled
+ * name is only a validate-portals WARNING, so two distinct targets can share
+ * one, and keying by name merged their counters — a field supplied on one then
+ * suppressed the all-absent warning for the other.
+ * @param {number} targetId
  * @param {string} field
  * @returns {string}
  */
-export function declaredFieldKey(targetName, field) {
-  return JSON.stringify([targetName, field]);
+export function declaredFieldKey(targetId, field) {
+  return JSON.stringify([targetId, field]);
 }
 
 export function normalizeFilterOn(value) {
@@ -3065,7 +3067,7 @@ async function main() {
         continue;
       }
 
-      targets.push({ ...entry, _provider: resolved.provider, _isBoard: isBoard });
+      targets.push({ ...entry, _provider: resolved.provider, _isBoard: isBoard, _targetId: targets.length });
       if (isBoard) boardCount++;
     }
   }
@@ -3077,6 +3079,25 @@ async function main() {
   // on a predicate that does not exist. Exit here rather than at filter time:
   // the whole point of the issue is that a misconfigured whitelist fails
   // silently, and trading one silent failure for another would be no fix.
+  const FIELD_FILTER_KEYS = ['positive', 'negative'];
+  for (const [name, block] of Object.entries(
+    config.field_filters && typeof config.field_filters === 'object' ? config.field_filters : {},
+  )) {
+    if (!block || typeof block !== 'object' || Array.isArray(block)) {
+      console.error(`Error: field_filters.${name} must be an object with positive and/or negative lists`);
+      process.exit(1);
+    }
+    for (const key of Object.keys(block)) {
+      if (!FIELD_FILTER_KEYS.includes(key)) {
+        console.error(`Error: field_filters.${name}.${key} is not a recognized key - expected one of ${FIELD_FILTER_KEYS.join(', ')}`);
+        process.exit(1);
+      }
+    }
+    if (!Array.isArray(block.positive) && !Array.isArray(block.negative)) {
+      console.error(`Error: field_filters.${name} has neither a positive nor a negative list - it would match every posting`);
+      process.exit(1);
+    }
+  }
   for (const target of targets) {
     for (const field of normalizeFilterOn(target.filter_on)) {
       if (field !== 'title' && !fieldFilters.has(field)) {
@@ -3218,6 +3239,21 @@ async function main() {
       }
 
       for (const job of jobs) {
+        // #3438. Presence accounting only — no verdict, no rejection. It runs
+        // before every filter below, including the blacklist skip, because it
+        // answers "does this provider publish this field at all", which no
+        // later filter's opinion can change.
+        const declaredFields = normalizeFilterOn(company.filter_on);
+        for (const field of declaredFields) {
+          if (field === 'title') continue;
+          const key = declaredFieldKey(company._targetId, field);
+          declaredFieldSeen.set(key, (declaredFieldSeen.get(key) || 0) + 1);
+          const value = job[field];
+          if (value === undefined || value === null || value === '') {
+            declaredFieldAbsent.set(key, (declaredFieldAbsent.get(key) || 0) + 1);
+          }
+        }
+
         // Trust enrichment — runs before filters, never drops
         const trustResult = trustValidator(job);
         job.trustScore = trustResult.score;
@@ -3248,11 +3284,10 @@ async function main() {
         // this is the same titleFilter(job.title) call as before, against the
         // same compiled object. Declared fields are ANDed.
         //
-        // Deliberately NOT .every(): short-circuiting on the first failure
-        // would leave the per-field absence counts incomplete, and those counts
-        // are what the end-of-run warning reads. Every declared field is
-        // evaluated; only the verdict is derived afterwards.
-        const declaredFields = normalizeFilterOn(company.filter_on);
+        // Deliberately NOT .every(): the verdict needs the field that
+        // actually failed, and short-circuiting would hide a second failure
+        // behind the first. `declaredFields` and the presence counters were
+        // settled above, before the blacklist skip.
         let firstFailedField = null;
         let sawAbsentField = false;
         for (const field of declaredFields) {
@@ -3260,16 +3295,10 @@ async function main() {
             if (!titleFilter(job.title) && firstFailedField === null) firstFailedField = field;
             continue;
           }
-          // Keyed per (target, field): one counter per target cannot tell
-          // "noc is never published" from "company was missing on a different
-          // job", and reported the second as the first.
-          const key = declaredFieldKey(company.name, field);
-          declaredFieldSeen.set(key, (declaredFieldSeen.get(key) || 0) + 1);
           const value = job[field];
-          // Absent field: pass, but count it. Dropping here would recreate the
-          // silent loss this issue is about, only with the sign flipped.
+          // Absent field: pass. Dropping here would recreate the silent loss
+          // this issue is about, only with the sign flipped.
           if (value === undefined || value === null || value === '') {
-            declaredFieldAbsent.set(key, (declaredFieldAbsent.get(key) || 0) + 1);
             sawAbsentField = true;
             continue;
           }
@@ -3559,7 +3588,7 @@ async function main() {
   for (const target of targets) {
     for (const field of normalizeFilterOn(target.filter_on)) {
       if (field === 'title') continue;
-      const key = declaredFieldKey(target.name, field);
+      const key = declaredFieldKey(target._targetId, field);
       const seen = declaredFieldSeen.get(key) || 0;
       const absent = declaredFieldAbsent.get(key) || 0;
       if (seen > 0 && absent === seen) deadDeclarations.push({ name: target.name, field, seen });
