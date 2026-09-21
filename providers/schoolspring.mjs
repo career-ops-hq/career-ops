@@ -151,9 +151,12 @@ const clean = (s) => decodeEntities(String(s ?? '')).trim();
  * Shape: `{ success, message, value: { page, size, jobsList: [{ jobId,
  * employer, title, location, displayDate }] } }`.
  *
- * - `{}`/`null` (a contentless body) or `jobsList: []` (a real empty board) → empty.
- * - `success: false`, or any other body with no `jobsList` array (including
- *   `value: null` and `jobsList: null`) → throws, naming what it got.
+ * - `null`, `{}` and `[]` (contentless bodies) or `jobsList: []` (a real empty
+ *   board) → empty.
+ * - A bare primitive (string, number, boolean), any envelope without
+ *   `success: true` (including an omitted `success`), or any body with no
+ *   `jobsList` array (including `value: null` and `jobsList: null`) → throws,
+ *   naming what it got.
  * - Rows with no numeric `jobId` or no title are skipped.
  *
  * @param {any} json
@@ -162,8 +165,14 @@ const clean = (s) => decodeEntities(String(s ?? '')).trim();
  * @returns {{jobs: Array<{title: string, url: string, company: string, location: string, postedAt?: number}>, rawCount: number}}
  */
 export function parseSchoolSpringPage(json, companyName, origin) {
-  if (json == null || typeof json !== 'object' || Object.keys(json).length === 0) return { jobs: [], rawCount: 0 };
-  if (json.success === false) throw new Error(`schoolspring: API error: ${json.message || 'success:false'}`);
+  // Only the documented contentless bodies (null, {} and []) read as empty. Any
+  // other primitive (a bare string or number) is not this API's envelope.
+  if (json == null) return { jobs: [], rawCount: 0 };
+  if (typeof json !== 'object') throw new Error(`schoolspring: unexpected response type ${typeof json}, expected a JSON object`);
+  if (Object.keys(json).length === 0) return { jobs: [], rawCount: 0 };
+  // The API always answers success:true on a good response, so require it rather
+  // than treating only an explicit success:false as a failure.
+  if (json.success !== true) throw new Error(`schoolspring: API error: ${json.message || 'response did not report success:true'}`);
   // A real empty board answers `jobsList: []`. A response with no jobsList array
   // at all is not that, so it throws instead of silently reading as empty.
   const list = json.value?.jobsList;

@@ -71,13 +71,18 @@ try {
   if (typeof jobs[0]?.postedAt === 'number' && !('postedAt' in jobs[1])) pass('parseSchoolSpringPage sets postedAt from displayDate and omits it when unparseable');
   else fail(`parseSchoolSpringPage postedAt: ${jobs[0]?.postedAt} / ${jobs[1]?.postedAt}`);
 
-  for (const [label, empty] of [['{}', {}], ['null', null], ['{value: {jobsList: []}} (a real empty board)', { success: true, value: { jobsList: [] } }]]) {
+  for (const [label, empty] of [['{}', {}], ['[]', []], ['null', null], ['{value: {jobsList: []}} (a real empty board)', { success: true, value: { jobsList: [] } }]]) {
     if (parseSchoolSpringPage(empty, 'X', ORIGIN).jobs.length === 0) pass(`parseSchoolSpringPage ${label} → empty`);
     else fail(`parseSchoolSpringPage ${label} should be empty`);
   }
   for (const [label, bad, re] of [
     ['success:false', { success: false, message: 'Domain not found' }, /Domain not found/],
-    ['jobsList of the wrong type', { value: { jobsList: 'oops', extra: 1 } }, /no jobsList array.*extra|no jobsList array/],
+    ['a bare string body ("unavailable")', 'unavailable', /unexpected response type string/],
+    ['a bare number body', 503, /unexpected response type number/],
+    ['a bare boolean body', true, /unexpected response type boolean/],
+    ['an envelope that omits success', { value: { jobsList: [] } }, /did not report success:true/],
+    ['success that is not true', { success: 'yes', value: { jobsList: [] } }, /did not report success:true/],
+    ['jobsList of the wrong type', { success: true, value: { jobsList: 'oops', extra: 1 } }, /no jobsList array.*extra/],
     ['a value with no jobsList', { success: true, value: {} }, /no jobsList array/],
     ['value: null', { success: true, value: null }, /no jobsList array/],
     ['jobsList: null', { success: true, value: { page: 1, jobsList: null } }, /no jobsList array.*page/],
