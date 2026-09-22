@@ -41,7 +41,7 @@ func TestFunnelHistoryTrackerOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	pm := ComputeProgressMetrics([]model.CareerApplication{{Number: 1, Status: "Discarded"}}, ReadFunnelHistory(root))
-	if pm.FunnelStages[4].Count != 1 {
+	if pm.FunnelStages[4].Count != 1 || pm.TotalOffers != 1 {
 		t.Fatal("discarded offer lost from overridden tracker ledger")
 	}
 }

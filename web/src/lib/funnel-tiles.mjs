@@ -1,3 +1,6 @@
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
 // Cumulative "how far has this search actually got?" counters for the analytics
 // headline tiles. Pure JS (no TS types) so it can be imported by the analytics
 // page and unit-tested under `node --test`, matching clean-chips.mjs /
@@ -48,20 +51,20 @@ export function cumulativeTiles(canonStatuses) {
  * Malformed transitions and history for deleted tracker rows are ignored.
  * @param {{n: string, status: string}[]} applications
  * @param {string|null} content
+ * @param {string} [coreRoot] Code checkout, never the separate user data root.
  */
-export function cumulativeTilesWithHistory(applications, content) {
-  const rank = (s) => ({ APPLIED: 1, RESPONDED: 2, REJECTED: 2, INTERVIEW: 3, OFFER: 4, HIRED: 5 })[String(s).trim().toUpperCase()] || 0;
-  const reached = new Map();
+export async function cumulativeTilesWithHistory(applications, content, coreRoot = path.resolve(process.cwd(), '..')) {
+  // Turbopack is intentionally confined to web/ for Windows stability. Load
+  // the core at runtime, as the other core accessors do; do not widen its root
+  // or silently substitute a second engine if the installation is incomplete.
+  const file = path.join(coreRoot, 'funnel-stages.mjs');
+  const { parseStatusLogStages, recoverFunnelStages } = await import(/* webpackIgnore: true */ pathToFileURL(file).href);
+  const statuses = new Map();
   for (const app of applications) {
     // Non-numeric backfill IDs retain snapshot counts but cannot join history.
     const id = /^\d+$/.test(app.n) ? Number(app.n) : Symbol();
-    reached.set(id, Math.max(reached.get(id) || 0, rank(app.status)));
+    statuses.set(id, app.status);
   }
-  for (const line of String(content ?? '').replace(/\r/g, '').split('\n')) {
-    const [id, date, from, to] = line.split('\t').map(s => s.trim());
-    if (!/^\d+$/.test(id || '') || !date || !from || !to || !reached.has(Number(id))) continue;
-    reached.set(Number(id), Math.max(reached.get(Number(id)), rank(from), rank(to)));
-  }
-  const values = [...reached.values()];
+  const values = [...recoverFunnelStages(statuses, parseStatusLogStages(content)).values()];
   return { interviews: values.filter(n => n >= 3).length, offers: values.filter(n => n >= 4).length };
 }

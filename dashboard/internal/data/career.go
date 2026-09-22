@@ -970,11 +970,6 @@ func ComputeProgressMetrics(apps []model.CareerApplication, history ...map[int]i
 			}
 		}
 
-		// A hire proves an offer was received and accepted, so it counts here
-		// too — same reasoning as everOffer in stats.mjs's computeFunnel().
-		if norm == "offer" || norm == "hired" {
-			pm.TotalOffers++
-		}
 		if norm != "skip" && norm != "rejected" && norm != "discarded" {
 			pm.ActiveApps++
 		}
@@ -1024,6 +1019,9 @@ func ComputeProgressMetrics(apps []model.CareerApplication, history ...map[int]i
 			}
 		}
 	}
+
+	// The Progress headline and funnel must report the same historical offers.
+	pm.TotalOffers = offer
 
 	// Top stage counts every tracked row, including rows backfilled without a
 	// score (#1799) — hence "Tracked", not "Evaluated", which already means both

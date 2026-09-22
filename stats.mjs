@@ -27,6 +27,8 @@ import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeStatus, analyzeFromContent } from './followup-cadence.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { parseStatusLogStages, recoverFunnelStages } from './funnel-stages.mjs';
+export { parseStatusLogStages } from './funnel-stages.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -180,33 +182,6 @@ export function computeFunnel(byStatus) {
   };
 }
 
-// Canonical pipeline depth per stage, for "ever reached" math. Terminal and
-// pre-pipeline states (Discarded/Evaluated/SKIP/Unknown) are absent →
-// depth 0; the ledger's from/to history is what proves the stages a row passed
-// through before it landed on a terminal snapshot.
-const STAGE_RANK = { Applied: 1, Responded: 2, Rejected: 2, Interview: 3, Offer: 4, Hired: 5 };
-
-/**
- * Parse data/status-log.tsv into per-row transition observations. Columns are
- * {num}\t{date}\t{from}\t{to}\t{source}\t{note}; only num/from/to are read here.
- * Torn or non-numeric-num rows are skipped — this is a display aid, never throws.
- * @returns {Array<{num:number, from:string, to:string}>}
- */
-export function parseStatusLogStages(content) {
-  const out = [];
-  for (const line of String(content ?? '').replace(/\r/g, '').split('\n')) {
-    if (!line.trim()) continue;
-    const c = line.split('\t');
-    const rawNum = String(c[0] || '').trim();
-    const date = String(c[1] || '').trim();
-    const from = String(c[2] || '').trim();
-    const to = String(c[3] || '').trim();
-    if (!/^\d+$/.test(rawNum) || !date || !from || !to) continue;
-    out.push({ num: Number(rawNum), from, to });
-  }
-  return out;
-}
-
 /**
  * Ledger-aware funnel: everX counts DISTINCT tracker rows that ever reached
  * stage X, folding the transition ledger so a row now sitting in a terminal
@@ -223,16 +198,7 @@ export function parseStatusLogStages(content) {
  * @param {Array<{num:number,from:string,to:string}>} ledger - parseStatusLogStages output.
  */
 export function computeFunnelWithHistory(statusByNum, ledger) {
-  const reached = new Map(); // num → highest stage rank ever held (distinct rows)
-  const bump = (num, rank) => { if (rank > (reached.get(num) || 0)) reached.set(num, rank); };
-  for (const [num, status] of statusByNum) {
-    bump(num, STAGE_RANK[status] || 0);
-  }
-  for (const { num, from, to } of ledger) {
-    if (!statusByNum.has(num)) continue; // ledger row whose tracker row is gone
-    bump(num, STAGE_RANK[from] || 0);
-    bump(num, STAGE_RANK[to] || 0);
-  }
+  const reached = recoverFunnelStages(statusByNum, ledger);
   let everApplied = 0, everResponded = 0, everInterview = 0, everOffer = 0;
   for (const rank of reached.values()) {
     if (rank >= 1) everApplied++;

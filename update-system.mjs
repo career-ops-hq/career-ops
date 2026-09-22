@@ -313,6 +313,7 @@ const SYSTEM_PATHS = [
   'skill-extract.mjs',
   'intake.mjs',
   'stats.mjs',
+  'funnel-stages.mjs',
   'detect-reposts.mjs',
   'rank-pipeline.mjs',
   'discover-ats.mjs',

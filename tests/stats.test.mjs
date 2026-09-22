@@ -4,10 +4,24 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
+import assert from 'node:assert/strict';
 
 console.log('\nstats.mjs — lifetime pipeline stats aggregator (#1604)');
 try {
   const stats = await import(pathToFileURL(join(ROOT, 'stats.mjs')).href);
+  const states = [...Array(10).fill('Applied'), ...Array(5).fill('Responded'), ...Array(2).fill('Interview'), ...Array(12).fill('Rejected')];
+  const numbered = new Map(states.map((s,i) => [i+1,s]));
+  const transitions = [18,19,20].map(n => `${n}\t2026-09-01\tInterview\tRejected\tset-status\t`).join('\n');
+  const recovered = stats.computeFunnelWithHistory(numbered, stats.parseStatusLogStages(transitions + '\n' + transitions));
+  assert.equal(recovered.everApplied, 29);
+  assert.equal(recovered.everResponded, 19);
+  assert.equal(recovered.everInterview, 5);
+  assert.equal(recovered.responseRate, 65.5);
+  assert.equal(recovered.interviewRate, 17.2);
+  assert.equal(stats.computeFunnel({Rejected:2, Discarded:3}).everResponded, 2);
+  assert.equal(stats.computeFunnelWithHistory(new Map([[1,'Discarded']]), [{num:1,from:'Rejected',to:'Discarded'}]).everResponded, 1);
+  assert.equal(stats.computeFunnelWithHistory(new Map([[1,'Discarded']]), [{num:1,from:'offer',to:'discarded'}]).everOffer, 1);
+  pass('rejections count as replies and distinct ledger history retains reached stages');
 
   // Tracker roll-up — CRLF input on purpose (Windows checkouts).
   const trackerMd = [

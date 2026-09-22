@@ -16,7 +16,7 @@ const STAGES: { key: string; label: string }[] = [
   { key: "DISCARDED", label: "Discarded" },
 ];
 
-export default function Analytics() {
+export default async function Analytics() {
   const { applications } = pipelineSummary();
   const total = applications.length;
 
@@ -46,7 +46,7 @@ export default function Analytics() {
   // already advanced past a stage must not read 0 for it (an offer-holder was
   // told "Interviews follow replies — keep follow-ups warm"). Mirrors
   // everInterview/everOffer in stats.mjs, including stages recovered from history.
-  const { interviews, offers } = cumulativeTilesWithHistory(
+  const { interviews, offers } = await cumulativeTilesWithHistory(
     applications.map((a) => ({ n: a.n, status: canonStatus(a.status) })),
     readApplicationStatusLog(),
   );
