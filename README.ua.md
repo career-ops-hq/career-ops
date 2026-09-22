@@ -1,116 +1,162 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
-<p align="center">
-  <em>Я провів місяці у пошуках роботи, роблячи все самотужки. Тому я створив систему, яку хотів би мати з самого початку.</em><br>
-  Компанії використовують AI для фільтрації кандидатів. <strong>Я дав кандидатам AI, щоб вони могли <em>вибирати</em> компанії.</strong><br>
-  Оцінює, ранжує і готує чернетки. <strong>Ніколи не надсилає: надсилаєте ви.</strong> Відкритий код, локально, ваше.
-</p>
+<table align="center">
+<tr>
+<td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
+<td valign="middle">
+<strong>Місяці надсилання резюме в тишу.</strong> Тож я побудував фільтр, який був мені потрібен.<br>
+<strong>740 вакансій. 68 вартих відгуку. 12 співбесід. 1 офер.</strong><br>
+Я був його першим користувачем. <strong>Я отримав роботу.</strong> Потім відкрив код.
+</td>
+</tr>
+</table>
 
-<p align="center">
-  <a href="https://x.com/santifer/status/2041403685696053741"><img src="docs/demo.gif" alt="конвеєр career-ops: вакансії з оцінками, 219 позначено як не подаватися, потім одна повна оцінка" width="800"></a>
-</p>
-
-<p align="center"><sub>Знімок посеред пошуку: конвеєр, потім одна вакансія відкрита й оцінена від початку до кінця.</sub></p>
-
-<p align="center"><strong>Із 740 вакансій подаватися було варто на 68. 12 співбесід. 1 офер.</strong></p>
-<p align="center"><sub>Один пошук, авторський, 2026. Важлива цифра: відсів, а не кількість. Усі цифри в <a href="https://santifer.io/career-ops-system">кейс-стаді</a>.</sub></p>
-
-<p align="center"><sub>Ніколи не надсилає, не шле листів, не дзвонить додому: <a href="#чого-career-ops-не-робить">чого воно не робить</a> · працює в AI CLI, яким ви вже користуєтеся, <a href="docs/RUNNING_ON_A_BUDGET.md">безкоштовні та локальні моделі теж</a>.</sub></p>
-
+<div align="center">
 <details>
-<summary>Читати 17 мовами</summary>
+<summary>🌍 Читати 17 мовами</summary>
 <div align="center">
 
 [English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [தமிழ்](README.ta.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md) | [Türkçe](README.tr.md)
 
 </div>
 </details>
-
-<hr>
-
-<p align="center">
-  <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20verified&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Найняті з career-ops: перевірена кількість"></a>
-</p>
-
-<p align="center"><sub>Отримали свою роботу? <a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">Поділіться →</a> · ваша картка покаже комусь посеред пошуку, що вихід є.</sub></p>
+</div>
 
 <p align="center">
-  <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="Три найновіші історії працевлаштування" width="800"></a>
+  Компанії використовують ШІ, щоб фільтрувати кандидатів. <strong>Я дав кандидатам ШІ, щоб <em>обирати</em> компанії.</strong><br>
+  На вашій машині він каже, які вакансії справжні, які вам підходять, і <strong>ніколи не відгукується від вашого імені.</strong>
 </p>
 
-<p align="center"><sub>Кожна цифра є публічною історією, яку можна <a href="HIRED.md">перевірити →</a> · кожна з них почалася там, де ви зараз.</sub></p>
+<p align="center">
+  <a href="https://x.com/santifer/status/2041403685696053741"><img src="docs/demo.gif" alt="Власний пошук автора: вакансії, позначені червоним «не відгукуватися» ще до того, як пішло хоч одне резюме" width="800"></a>
+</p>
 
-<p align="center"><sub>ПРО НАС ПИСАЛИ</sub></p>
+<p align="center"><sub>Ця червона вкладка і є продукт. <em>Не відгукуватися.</em> <a href="https://santifer.io/career-ops-system">Повна історія →</a></sub></p>
+
+<br>
+
+<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20verified&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Найняті з career-ops: перевірена кількість"></a></p>
+
+<p align="center">Люди, які прийшли після мене, записали, як їх найняли.</p>
+
+<p align="center">
+  <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="Історії найму, які можна відкрити й прочитати" width="800"></a>
+</p>
+
+<p align="center"><sub>Кожна картка — публічний issue, який можна відкрити. Отримали свою роботу? <a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">Залиште свою картку →</a></sub></p>
+
+<br>
 
 <p align="center">
   <a href="https://wired.com.gr/article/to-ai-ergaleio-pou-fernei-epanastasi-ston-tropo-pou-psachnoume-douleia/" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/wired-dark.svg"><img src="docs/press/wired.svg" alt="WIRED" height="32"></picture></a>
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://www.businessinsider.com/how-i-built-tool-filter-job-listings-landed-head-ai-2026-4" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/business-insider-dark.svg"><img src="docs/press/business-insider.svg" alt="Business Insider" height="32"></picture></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="Featured on Product Hunt" width="206" height="54"></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://trendshift.io/repositories/25195" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="GitHub Trending: #1 repository of the day (Trendshift)" width="250" height="55"></a>
 </p>
+
+## Ваша черга
+
+Вставте одну вакансію, на яку збиралися відгукнутися сьогодні ввечері. Якщо у відповідь прийде <em>не відгукуватися</em>, ви щойно повернули собі вечір. Якщо прийде план, ви знаєте, що робити далі.
+
+```bash
+npx @santifer/career-ops init
+```
+
+<p align="center"><sub>Відкритий код. Локально. У тому ШІ-CLI, яким ви вже користуєтесь. <a href="docs/RUNNING_ON_A_BUDGET.md">Безкоштовні та локальні моделі включно.</a></sub></p>
+
+
+## Вам не обов’язково шукати наодинці
+
+Тиша після натискання «надіслати» не про вас. Достатньо людей побачили те саме, щоб записати практику в шість рядків:
+
+> Відгукуватися краще, але на менше. Сигнал важливіший за обсяг. Докази важливіші за ключові слова. Вирішує людина. Спершу локально. Гідність по обидва боки столу.
+
+<p align="center"><a href="https://career-ops.org/manifesto?utm_source=readme"><img src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2FSIGNATURES.md&search=n%3A(%5Cd%2B)%5Cs*%24&replace=%241%20signatories&label=THE%20CAREEROPS%20MANIFESTO&color=DD7627&style=for-the-badge&labelColor=2b3137" alt="Маніфест CareerOps: кількість підписантів наживо"></a></p>
+
+<p align="center">Кілька з них, їхніми власними словами.</p>
 
 <p align="center">
-  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
-  &nbsp;&nbsp;
-  <a href="https://trendshift.io/repositories/25195" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+  <a href="https://career-ops.org/manifesto?utm_source=readme"><img src="docs/manifesto-wall.svg" alt="Три підписи під маніфестом CareerOps, їхніми власними словами" width="800"></a>
 </p>
 
-<p align="center"><sub>Створив і підтримує <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
+<p align="center"><sub>Кожен підпис — коміт, який можна перевірити. <a href="https://career-ops.org/manifesto?utm_source=readme">Прочитати всі або додати свій →</a></sub></p>
 
-## Що це таке
+<br>
 
-career-ops ([career-ops.org](https://career-ops.org), також відомий як **careerops**) є AI-пошуком роботи з відкритим кодом, який працює локально всередині будь-якого AI-кодинг CLI: він оцінює вакансії, адаптує ваше резюме і відстежує кожну заявку, а останнє слово завжди за вами. Замість ручного відстеження заявок у таблиці ви отримуєте AI-конвеєр, який:
+Найм сам себе не виправить. Люди, які через нього проходять, можуть, і вони вже в кімнаті: звіряють нотатки й лагодять одне одному налаштування. [Саме тут пишеться виправлення](CONTRIBUTING.md). Кімната, а не клуб. **Будуймо разом.**
 
-- **Оцінює вакансії** у структурованому звіті: блоки від A до H із загальною оцінкою від 1 до 5, що виводиться цілісним судженням за п'ятьма вимірами, а не арифметичною формулою. Колонка важливості кожної вимоги в блоці B і оцінка легітимності вакансії в блоці G є окремими сигналами, нейтральними до оцінки, і ніколи на неї не впливають; блок H складається лише від 4.5 і вище
-- **Генерує персоналізовані PDF**: ATS-оптимізовані резюме під кожен опис вакансії
-- **Сканує портали** автоматично (Greenhouse, Ashby, Lever, сторінки компаній)
-- **Обробляє пакетно**: оцінка 10+ вакансій паралельно суб-агентами
-- **Відстежує все** в єдиному джерелі даних із перевіркою цілісності
-- **Досліджує компанії та знаходить потрібну людину для контакту**: заявка ставить вас у чергу, дослідження дає вам розмову
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord: кількість учасників сервера career-ops наживо"></a></p>
 
-> **Важливо: це НЕ інструмент для масової розсилки.** career-ops є фільтром: він допомагає знайти серед сотень вакансій ті кілька, що варті вашого часу. Система наполегливо рекомендує не подаватися на будь-що з оцінкою нижче 4.0/5. Ваш час цінний, як і час рекрутера. Завжди перевіряйте перед надсиланням.
+## Спонсори
 
-career-ops працює агентно: обраний вами AI-кодинг CLI переходить на кар'єрні сторінки за допомогою Playwright, оцінює відповідність, аналізуючи ваше резюме відносно опису вакансії (не за ключовими словами), та адаптує ваше резюме під кожну вакансію.
+career-ops безкоштовний для кандидатів, назавжди. Компанії нижче оплачують час мейнтейнера і зберігають це так.
 
-> **Зверніть увагу: перші оцінки будуть не ідеальними.** Система ще не знає вас. Дайте їй контекст: ваше резюме, вашу кар'єрну історію, ваші досягнення, уподобання, сильні сторони, чого хочете уникати. Чим більше ви її наповнюєте, тим краще вона працює. Сприймайте це як онбординг нового рекрутера: першого тижня йому треба вас вивчити, а потім він стає незамінним.
+<p align="center">
+  <a href="https://serpapi.com/career-ops-org" title="SerpApi"><img src="docs/sponsors/serpapi.svg" alt="SerpApi" height="48"></a>
+</p>
 
-Зробив той, хто оцінив із ним 740 вакансій, подався на 68 і отримав посаду Head of Applied AI. [Читати повне кейс-стаді](https://santifer.io/career-ops-system).
+<p align="center"><strong>SerpApi</strong> · Build a portfolio project with live search data. SerpApi gives developers structured JSON/Markdown from Google Search, Maps, Shopping, and other engines through a simple API call.</p>
+
+> Спонсорство купує чітко позначену видимість, ніколи не вплив: жодна сума грошей не змінює дорожню карту і нічого не розміщує в продукті. Спонсори ніколи не з’являються в оцінках, рейтингах чи рекомендаціях.
+
+## Що career-ops робить для вас
+
+Вставте вакансію. Він скаже, чи вартий вона цього вечора.
+
+- **Фейк чи застаріла?** Він позначає вакансії-привиди та шахрайство ще до того, як ви напишете хоч слово.
+- **Не ваше?** Він оцінює роль проти вашого справжнього резюме і радить пропустити слабкий збіг. Ви можете його переважити.
+- **Варте уваги?** Він готує чернетки резюме, супровідного листа та відповідей. Ви їх читаєте. Ви їх надсилаєте.
+- **З ким говорити?** Він знаходить людину й готує чернетку повідомлення. Він ніколи його не надсилає.
+- **Куди все це йде?** Кожен відгук залишається на вашій машині. Нам нічого не завантажується.
+- **Що мені вивчити?** Після серії відмов він називає прогалину.
+
+Перші запуски шорсткі. Він вас ще не знає. Поговоріть з ним: ваше резюме, чого ви хочете, від чого відмовляєтесь. Сприймайте це як перший тиждень рекрутера.
+
+Під час першого запуску він запитує все це в чаті. Нічого налаштовувати вручну.
 
 ## Чого career-ops не робить
 
-- **Не надсилає заявку.** Готує відповіді; ви відкриваєте форму і натискаєте Надіслати. Скрипт ніколи не робить POST (`prepare-application.mjs`).
+- **Надсилати відгук автоматично.** Він готує чернетку відповіді для кожного поля; ви перевіряєте й натискаєте «Надіслати». Скрипт ніколи не робить POST (`prepare-application.mjs`).
 - **Не надсилає листи.** Лише чернетки. У всьому коді немає жодного поштового транспорту.
 - **Не дзвонить додому.** Без телеметрії, без нашого бекенду. Ваше резюме йде з вашої машини до обраного вами AI-провайдера і більше нікуди. Єдиний публічний реєстр: цей репозиторій, `HIRED.md` та його issues.
 - **Не штовхає подаватися нижче 4.0/5.** Скаже не робити цього. Ви можете проігнорувати, і воно про це скаже.
 
 Воно переформульовує ваше резюме; вигадувати не має права ніколи. Сьогодні це правило живе в промптах, ще не в примусовій перевірці в коді. Читайте кожне резюме перед відправкою. Деталі у [FAQ](#faq).
 
-## Маніфест CareerOps
-
-career-ops є першою еталонною реалізацією [Маніфесту CareerOps](https://career-ops.org/manifesto?utm_source=readme). прочитайте його. якщо він каже те, у що ви вірите, підпишіть. ваш підпис стає комітом.
-
 ## Що система вміє
 
 | Функція                  | Опис                                                                                                                                     |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Авто-конвеєр**         | Вставте URL і отримайте повну оцінку + PDF + запис у трекері                                                                             |
 | **Оцінка A-H**           | Резюме ролі, відповідність резюме (з вагою кожної вимоги для цієї вакансії та позначкою, чи взято вагу з формулювання опису, його структури чи з оцінки; підписано для кожної вимоги, і оцінка ніколи не може бути найвищого рівня), стратегія рівня, дослідження компенсації, персоналізація, підготовка до співбесіди (STAR+R), плюс перевірка легітимності вакансії в блоці G, що позначає шахрайство та фейкові вакансії, і сигнал дозволу на роботу, що позначає опис із явною відмовою у спонсорстві візи як жорсткий блокер |
-| **Банк історій для співбесід** | Накопичує історії STAR+Reflection між оцінками: 5-10 головних історій, що відповідають на будь-яке поведінкове питання             |
-| **Скрипти переговорів**  | Фреймворки переговорів про зарплату, відповідь на географічну знижку, важіль конкурентних оферів                                          |
+| **Human-in-the-Loop**    | AI оцінює та рекомендує, ви вирішуєте та дієте. Система ніколи не подає заявку: останнє слово завжди за вами <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->               |
 | **Генерація ATS PDF**    | Резюме з ключовими словами у дизайні Space Grotesk + DM Sans                                                                              |
 | **Генератор супровідних листів** | Супровідні листи на основі дослідження з віддзеркаленням ключових слів, чотирма інтерактивними запитаннями про кут подачі (чому/проблеми/підхід/тон), затвердженням чернетки в чаті та A4 PDF через той самий конвеєр HTML + Playwright, що й для резюме. Готує чернетку при кожній оцінці; завершити й згенерувати на вимогу через `/career-ops cover` |
+| **Поза межами резюме**   | Дослідження компанії ([`deep`](modes/deep.md)) розкриває AI-стратегію, нещодавні кроки, інженерну культуру та кут, під яким варто подати ваш профіль. Пошук контактів ([`contacto`](modes/contacto.md)) визначає hiring-менеджера, рекрутера або колегу з команди, до кого варто звернутися, і готує повідомлення для LinkedIn до 300 символів під кожен тип контакту. Чернетки формальних листів-заявок ([`email`](modes/email.md)) перетворюють оцінений звіт або вставлений опис на тему, текст і чекліст вкладень, нічого не надсилаючи, не подаючи і не клікаючи. Заявка ставить вас у чергу, дослідження дає вам розмову. |
+| **Аналіз патернів**      | Патерни відмов і частка проходження по каналах ATS (`analyze-patterns.mjs`), статистика воронки за весь пошук (`stats.mjs`), виявлення перепублікацій і фейкових вакансій (`detect-reposts.mjs`) |
+
+<details>
+<summary><b>Усе інше, що він робить</b></summary>
+
+| Функція                  | Опис                                                                                                                                     |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Авто-конвеєр**         | Вставте URL і отримайте повну оцінку + PDF + запис у трекері                                                                             |
+| **Банк історій для співбесід** | Накопичує історії STAR+Reflection між оцінками: 5-10 головних історій, що відповідають на будь-яке поведінкове питання             |
+| **Скрипти переговорів**  | Фреймворки переговорів про зарплату, відповідь на географічну знижку, важіль конкурентних оферів                                          |
 | **Чернетки листів-заявок** | Формальні листи рекрутеру, за рекомендацією або холодні заявки зі звіту чи вставленого опису, з темою, чеклістом вкладень, обґрунтованими пунктами відповідності та блоком контактів із профілю. Лише чернетки: career-ops ніколи не надсилає, не подає і не клікає нічого. |
 | **Сканер порталів**      | 100+ попередньо налаштованих компаній (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + власні запити по Ashby, Greenhouse, Lever, Wellfound |
 | **Пошук профінансованих компаній** | Команда `company:funded` (спершу перегляд) показує компанії з нещодавнім фінансуванням і діагностику джерел зі структурованих публічних стрічок, не змінюючи ваші дані |
 | **Пакетна обробка**      | Паралельна оцінка headless CLI-воркерами (`claude -p` / `opencode run`)                                                                 |
 | **Dashboard TUI**        | Термінальний інтерфейс для перегляду, фільтрації та сортування вашого конвеєра                                                           |
-| **Human-in-the-Loop**    | AI оцінює та рекомендує, ви вирішуєте та дієте. Система ніколи не подає заявку: останнє слово завжди за вами <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->               |
 | **Цілісність конвеєра**  | Автоматичне злиття, дедуплікація, нормалізація статусів, перевірки стану                                                                 |
 | **Набір для співбесід**  | Плани підготовки за часовими блоками, тренувальні сесії зі зворотним зв'язком, розбори після співбесіди ([`interview/`](modes/interview/README.md)) і детектор тривожних ознак компанії ([`interview-redflag`](modes/interview-redflag.md)) |
 | **Етап оферу**           | Супровід читання контракту: прохід по пунктах плюс список питань для юриста ([`offer-prep`](modes/offer-prep.md)), і аналізатор розриву між бажаною, заявленою та фактичною зарплатою (`salary-gap.mjs`) |
 | **Фоллоу-апи та відповіді** | Калькулятор ритму фоллоу-апів і заготовлені нагадування (`followup-cadence.mjs`, `followup-seed.mjs`); класифікація відповідей роботодавця в оновлення трекера ([`reply-watch`](modes/reply-watch.md)) |
-| **Аналіз патернів**      | Патерни відмов і частка проходження по каналах ATS (`analyze-patterns.mjs`), статистика воронки за весь пошук (`stats.mjs`), виявлення перепублікацій і фейкових вакансій (`detect-reposts.mjs`) |
 | **Система плагінів**     | Опціональні інтеграції (Gmail, Notion, Apify + реєстр спільноти), вимкнені за замовчуванням; див. [docs/PLUGINS.md](docs/PLUGINS.md)      |
-| **Поза межами резюме**   | Дослідження компанії ([`deep`](modes/deep.md)) розкриває AI-стратегію, нещодавні кроки, інженерну культуру та кут, під яким варто подати ваш профіль. Пошук контактів ([`contacto`](modes/contacto.md)) визначає hiring-менеджера, рекрутера або колегу з команди, до кого варто звернутися, і готує повідомлення для LinkedIn до 300 символів під кожен тип контакту. Чернетки формальних листів-заявок ([`email`](modes/email.md)) перетворюють оцінений звіт або вставлений опис на тему, текст і чекліст вкладень, нічого не надсилаючи, не подаючи і не клікаючи. Заявка ставить вас у чергу, дослідження дає вам розмову. |
+
+</details>
 
 ## Швидкий старт
 
@@ -187,6 +233,79 @@ npm i -g @santifer/career-ops
 > **Система спроєктована так, щоб її налаштовував сам ваш AI-кодинг CLI.** Режими, архетипи, ваги оцінювання, скрипти переговорів: просто попросіть його змінити їх. Він читає ті самі файли, якими користується, тож точно знає, що редагувати.
 
 Дивіться [docs/SETUP.md](docs/SETUP.md) для повного посібника з налаштування, [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) для дешевого запуску career-ops на власних або локальних моделях (і [docs/FREE_TIER.md](docs/FREE_TIER.md) для запуску без витрат на безкоштовному тарифі Antigravity CLI), [docs/AUTOMATION.md](docs/AUTOMATION.md) для планування регулярних сканувань і рецепту відбору в шортліст без витрат токенів, [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md) для деталей автозаповнення форм ATS, [docs/LINKEDIN_JOIN.md](docs/LINKEDIN_JOIN.md) для звірки експорту ваших контактів LinkedIn з компаніями у вашій воронці, та [docs/FAQ.md](docs/FAQ.md) для відповідей на типові питання з налаштування, зокрема [як походження історій запобігає вигаданим цифрам](docs/FAQ.md#why-does-career-ops-refuse-to-use-a-number-from-my-story-bank). Принципи дизайну в [ARCHITECTURE.md](ARCHITECTURE.md); потоки виконання в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Використання
+
+career-ops використовує спільний роутер команд. У CLI, які реєструють слеш-команди, це виглядає так:
+
+```
+/career-ops           → Показати всі доступні команди
+/career-ops {JD}      → АВТО-КОНВЕЄР: оцінка + звіт + PDF + трекер (вставте текст або URL)
+/career-ops pipeline  → Обробити відкладені URL із вхідних (data/pipeline.md)
+/career-ops oferta    → Лише оцінка, блоки A–G (без автоматичного PDF)
+/career-ops ofertas   → Порівняти й ранжувати кілька вакансій
+/career-ops contacto  → Хід конем у LinkedIn: знайти контакти + підготувати повідомлення
+/career-ops deep      → Промпт глибокого дослідження компанії
+/career-ops interview-prep → Згенерувати документ підготовки до співбесіди під конкретну компанію
+/career-ops interview    → Інтерактивне онбординг-інтерв'ю для профілю та резюме
+/career-ops eu-swe    → Відкалібрувати європейську заявку SWE перед резюме, поданням або співбесідою
+/career-ops eu-fintech → Просканувати 21 європейський фінтех-портал на ролі Product Manager (без токенів)
+/career-ops interview/plan → План підготовки за часовими блоками до майбутньої співбесіди
+/career-ops interview/practice → Тренувальна співбесіда, по одному питанню зі зворотним зв'язком
+/career-ops interview/debrief → Розбір після співбесіди: закрити прогалини, передбачити наступний раунд
+/career-ops interview-redflag → Проаналізувати тривожні ознаки роботодавця перед виходом на роботу
+/career-ops pdf       → Лише PDF, ATS-оптимізоване резюме
+/career-ops text      → Адаптоване резюме в markdown (віддзеркалює cv.md, без PDF)
+/career-ops latex     → Експорт резюме в LaTeX/Overleaf .tex
+/career-ops latex-tex → Адаптувати власний resume.tex на місці (опційно; cv.md лишається за замовчуванням)
+/career-ops cover     → Супровідний лист: окремо вставлений опис або /career-ops cover {slug}
+/career-ops email     → Чернетка формального листа-заявки (лише чернетка; ніколи не надсилає, не подає і не клікає)
+/career-ops add       → Додати проєкт/статтю/роль до резюме (завантажити + переглянути + підтвердити)
+/career-ops expand    → Автоматично знайти й додати відсутні компетенції з посилань профілю
+/career-ops training  → Оцінити курс/сертифікат відносно North Star
+/career-ops project   → Оцінити ідею проєкту для портфоліо
+/career-ops tracker   → Огляд статусів заявок
+/career-ops agent-inbox → Поставити в чергу/розібрати запити для наступної сесії (data/agent-inbox.md)
+/career-ops apply     → Живий помічник подання (читає форму + генерує відповіді)
+/career-ops scan      → Просканувати портали та знайти нові вакансії
+/career-ops discover  → Перетворити список компаній на скановані ATS-дошки + додати до portals.yml (без токенів)
+/career-ops batch     → Пакетна обробка паралельними воркерами
+/career-ops patterns  → Проаналізувати патерни відмов і покращити націлювання
+/career-ops offer-prep → Прочитати отриманий офер/контракт разом із кандидатом: прохід по пунктах + питання для юриста (не юридична порада)
+/career-ops titles    → Запропонувати суміжні назви посад із вашого резюме, щоб розширити пошук
+/career-ops upskill   → Зведений аналіз прогалин у навичках з оцінених звітів
+/career-ops followup  → Трекер ритму фоллоу-апів: позначити прострочені, згенерувати чернетки
+/career-ops reply-watch → Класифікувати відповіді роботодавців і запропонувати оновлення трекера
+/career-ops outcome   → Записати результат заявки та заархівувати артефакти
+/career-ops calibrate → Консультативний звіт: чи передбачають ваші оцінки реальні результати? Читає дані /outcome; ніколи не змінює оцінювання
+/career-ops update    → Оновити системні файли career-ops із попереднім переглядом diff + перевіркою сумісності
+```
+
+Або просто вставте URL чи опис вакансії: career-ops визначить його автоматично й запустить повний конвеєр.
+
+У Codex слеш-команди не гарантовані. Використовуйте ті самі назви режимів у промпті або викликайте їх через `codex exec`.
+
+## Як це працює
+
+```
+You paste a job URL or description
+        │
+        ▼
+┌──────────────────┐
+│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
+│  Detection       │
+└────────┬─────────┘
+         │
+┌────────▼─────────┐
+│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
+│  (reads cv.md)   │
+└────────┬─────────┘
+         │
+    ┌────┼────┐
+    ▼    ▼    ▼
+ Report  PDF  Tracker
+  .md   .pdf  entry
+```
 
 ## Інтеграція з Antigravity CLI
 
@@ -281,79 +400,6 @@ npm run gemini:eval -- "JD text here"
 ```
 
 > **Безкоштовний тариф:** обидва варіанти працюють без оплати. Нативний CLI використовує Google OAuth; скрипт API використовує `gemini-3.6-flash` (ліміти запитів залежать від моделі та тарифу; актуальні квоти дивіться в документації Google AI).
-
-## Використання
-
-career-ops використовує спільний роутер команд. У CLI, які реєструють слеш-команди, це виглядає так:
-
-```
-/career-ops           → Показати всі доступні команди
-/career-ops {JD}      → АВТО-КОНВЕЄР: оцінка + звіт + PDF + трекер (вставте текст або URL)
-/career-ops pipeline  → Обробити відкладені URL із вхідних (data/pipeline.md)
-/career-ops oferta    → Лише оцінка, блоки A–G (без автоматичного PDF)
-/career-ops ofertas   → Порівняти й ранжувати кілька вакансій
-/career-ops contacto  → Хід конем у LinkedIn: знайти контакти + підготувати повідомлення
-/career-ops deep      → Промпт глибокого дослідження компанії
-/career-ops interview-prep → Згенерувати документ підготовки до співбесіди під конкретну компанію
-/career-ops interview    → Інтерактивне онбординг-інтерв'ю для профілю та резюме
-/career-ops eu-swe    → Відкалібрувати європейську заявку SWE перед резюме, поданням або співбесідою
-/career-ops eu-fintech → Просканувати 21 європейський фінтех-портал на ролі Product Manager (без токенів)
-/career-ops interview/plan → План підготовки за часовими блоками до майбутньої співбесіди
-/career-ops interview/practice → Тренувальна співбесіда, по одному питанню зі зворотним зв'язком
-/career-ops interview/debrief → Розбір після співбесіди: закрити прогалини, передбачити наступний раунд
-/career-ops interview-redflag → Проаналізувати тривожні ознаки роботодавця перед виходом на роботу
-/career-ops pdf       → Лише PDF, ATS-оптимізоване резюме
-/career-ops text      → Адаптоване резюме в markdown (віддзеркалює cv.md, без PDF)
-/career-ops latex     → Експорт резюме в LaTeX/Overleaf .tex
-/career-ops latex-tex → Адаптувати власний resume.tex на місці (опційно; cv.md лишається за замовчуванням)
-/career-ops cover     → Супровідний лист: окремо вставлений опис або /career-ops cover {slug}
-/career-ops email     → Чернетка формального листа-заявки (лише чернетка; ніколи не надсилає, не подає і не клікає)
-/career-ops add       → Додати проєкт/статтю/роль до резюме (завантажити + переглянути + підтвердити)
-/career-ops expand    → Автоматично знайти й додати відсутні компетенції з посилань профілю
-/career-ops training  → Оцінити курс/сертифікат відносно North Star
-/career-ops project   → Оцінити ідею проєкту для портфоліо
-/career-ops tracker   → Огляд статусів заявок
-/career-ops agent-inbox → Поставити в чергу/розібрати запити для наступної сесії (data/agent-inbox.md)
-/career-ops apply     → Живий помічник подання (читає форму + генерує відповіді)
-/career-ops scan      → Просканувати портали та знайти нові вакансії
-/career-ops discover  → Перетворити список компаній на скановані ATS-дошки + додати до portals.yml (без токенів)
-/career-ops batch     → Пакетна обробка паралельними воркерами
-/career-ops patterns  → Проаналізувати патерни відмов і покращити націлювання
-/career-ops offer-prep → Прочитати отриманий офер/контракт разом із кандидатом: прохід по пунктах + питання для юриста (не юридична порада)
-/career-ops titles    → Запропонувати суміжні назви посад із вашого резюме, щоб розширити пошук
-/career-ops upskill   → Зведений аналіз прогалин у навичках з оцінених звітів
-/career-ops followup  → Трекер ритму фоллоу-апів: позначити прострочені, згенерувати чернетки
-/career-ops reply-watch → Класифікувати відповіді роботодавців і запропонувати оновлення трекера
-/career-ops outcome   → Записати результат заявки та заархівувати артефакти
-/career-ops calibrate → Консультативний звіт: чи передбачають ваші оцінки реальні результати? Читає дані /outcome; ніколи не змінює оцінювання
-/career-ops update    → Оновити системні файли career-ops із попереднім переглядом diff + перевіркою сумісності
-```
-
-Або просто вставте URL чи опис вакансії: career-ops визначить його автоматично й запустить повний конвеєр.
-
-У Codex слеш-команди не гарантовані. Використовуйте ті самі назви режимів у промпті або викликайте їх через `codex exec`.
-
-## Як це працює
-
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
 
 ## Попередньо налаштовані портали
 
@@ -465,6 +511,33 @@ career-ops/
 - **Дашборд**: Go + Bubble Tea + Lipgloss (тема Catppuccin Mocha)
 - **Дані**: таблиці Markdown + конфігурація YAML + пакетні файли TSV
 
+<p align="center">
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+</p>
+
+<p align="center">
+  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
+</p>
+
+<p align="center">
+  <sub>Працює також у будь-якому CLI зі стандартом agent skills. Див. <a href="docs/SUPPORTED_CLIS.md">підтримувані CLI</a>.</sub><br>
+  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
+  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
+  <img src="https://img.shields.io/badge/Antigravity_CLI-4285F4?style=flat&logo=google&logoColor=white" alt="Antigravity CLI">
+  <img src="https://img.shields.io/badge/Codex-412991?style=flat&logo=openai&logoColor=white" alt="Codex">
+  <img src="https://img.shields.io/badge/Qwen-615CED?style=flat" alt="Qwen">
+  <img src="https://img.shields.io/badge/Kimi-FF4B4B?style=flat" alt="Kimi">
+  <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
+  <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
+  <br>
+  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
+  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
+  <img src="https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white" alt="Bubble Tea">
+  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
+  <a href="TRADEMARK.md"><img src="https://img.shields.io/badge/Trademark-Policy-blue.svg" alt="Trademark Policy"></a>
+</p>
+
 ## Також у відкритому коді
 
 - **[cv-santiago](https://github.com/santifer/cv-santiago)**: сайт-портфоліо (santifer.io) з AI-чатботом, дашбордом LLMOps і кейс-стаді. Якщо вам потрібне портфоліо на додачу до пошуку роботи, зробіть форк і зробіть його своїм.
@@ -472,7 +545,7 @@ career-ops/
 ## FAQ
 
 **Що таке career-ops?**
-career-ops є AI-пошуком роботи з відкритим кодом, який працює локально у вашому AI-кодинг CLI (Claude Code, Codex, OpenCode та інших) і залишає кожне рішення за вами. Він оцінює вакансії відносно вашого резюме, генерує ATS-адаптовані PDF, знаходить потрібну людину для контакту і відстежує все в одному місці: останнє слово завжди за вами. Це перша еталонна реалізація Маніфесту CareerOps. Більше на [career-ops.org](https://career-ops.org).
+career-ops ([career-ops.org](https://career-ops.org), також відомий як **careerops**) є AI-пошуком роботи з відкритим кодом, який працює локально у вашому AI-кодинг CLI (Claude Code, Codex, OpenCode та інших) і залишає кожне рішення за вами. Він оцінює вакансії відносно вашого резюме, генерує ATS-адаптовані PDF, знаходить потрібну людину для контакту і відстежує все в одному місці: останнє слово завжди за вами. Це перша еталонна реалізація [Маніфесту CareerOps](https://career-ops.org/manifesto).
 
 **Чи може адаптоване резюме щось вигадати?**
 Не має права, і промпти це кажуть: переформульовувати, ніколи не вигадувати. Але це правило ще не забезпечене перевіркою в коді. Його відстежують два відкриті issue: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (назви посад мають збігатися з cv.md) і [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (перевірка достовірності, що блокує в разі невідповідності). Поки їх не змерджено, читайте кожне резюме перед відправкою. [Юридичне застереження](LEGAL_DISCLAIMER.md) каже те саме довше.
@@ -535,7 +608,7 @@ Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/
 для використання спільнотою, зарезервованою для назв комерційних продуктів
 і схвалень.
 
-## Відзнаки
+## Історія зірок
 
 <p align="center">
   <a href="https://warpchart.dev/hq">
@@ -546,36 +619,7 @@ Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/
   </a>
 </p>
 
-<p align="center">
-  <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Join_the_community-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
-</p>
-
-<p align="center">
-  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
-</p>
-
-<p align="center">
-  <sub>Також працює в будь-якому CLI за стандартом agent-skill. Дивіться <a href="docs/SUPPORTED_CLIS.md">Підтримувані CLI</a>.</sub><br>
-  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
-  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
-  <img src="https://img.shields.io/badge/Antigravity_CLI-4285F4?style=flat&logo=google&logoColor=white" alt="Antigravity CLI">
-  <img src="https://img.shields.io/badge/Codex-412991?style=flat&logo=openai&logoColor=white" alt="Codex">
-  <img src="https://img.shields.io/badge/Qwen-615CED?style=flat" alt="Qwen">
-  <img src="https://img.shields.io/badge/Kimi-FF4B4B?style=flat" alt="Kimi">
-  <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
-  <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
-  <br>
-  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
-  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
-  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
-  <img src="https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white" alt="Bubble Tea">
-  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
-  <a href="TRADEMARK.md"><img src="https://img.shields.io/badge/Trademark-Policy-blue.svg" alt="Trademark Policy"></a>
-</p>
+<p align="center"><sub>Створив і підтримує <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
 
 ## Контакти
 
