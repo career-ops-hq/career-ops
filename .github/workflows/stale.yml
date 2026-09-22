@@ -34,4 +34,7 @@ jobs:
           # adoption/* PRs are governed by the adoption ladder (pr-adoption.yml),
           # which pings, warns, and hands the close to a human. Two clocks on
           # one PR would race each other.
-          exempt-pr-labels: 'pinned,security,adoption/track,adoption/pinged,adoption/warned,adoption/ready'
+          # triage/ready, direction/* and maintainer-commitment mean the ball is
+          # in OUR court (queued for merge, waiting on a maintainer decision, or
+          # a promise we made): our delay must never become the author's stale.
+          exempt-pr-labels: 'pinned,security,adoption/track,adoption/pinged,adoption/warned,adoption/ready,triage/ready,direction/needs-santiago,direction/review,maintainer-commitment'

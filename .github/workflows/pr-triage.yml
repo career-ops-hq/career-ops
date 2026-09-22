@@ -1,0 +1,62 @@
+name: PR triage
+
+# Clasifica, etiqueta y da la primera respuesta a cada PR (script: .github/scripts/triage.bundle.mjs,
+# generado desde el maintainer privado; la política vive allí, aquí solo se ejecuta).
+#
+#   pull_request_target  -> triage de esa PR; en `opened`/`ready_for_review` publica la primera respuesta
+#   issue_comment        -> re-triage de la PR comentada (solo comentarios humanos, solo en PRs)
+#   schedule (cada 6h)   -> sweep: PRs >20h sin comentario de maintainer ni marcador reciben la primera
+#                           respuesta (tope TRIAGE_SWEEP_MAX por pasada, para no bombardear)
+#
+# Seguridad: `pull_request_target` corre con permisos de escritura, así que NUNCA se hace checkout del
+# código del fork. El checkout es de la rama BASE (ref por defecto del evento) y solo para leer el script,
+# con `persist-credentials: false` para que el token no quede en .git/config.
+# Cada comentario lleva marcador `<!-- co:first-reply:N:sha7 -->` y se busca antes de publicar: nunca duplica.
+#
+# Variables/secrets:
+#   vars.TRIAGE_DRY_RUN = "true"  -> no escribe en GitHub; todo va al job summary (para probar en seco)
+#   secrets.JEV_API_KEY (+ vars.JEV_URL) opcionales: sin ellos el script sigue con el suelo determinista
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  pull-requests: write
+  issues: write
+  contents: read
+
+concurrency:
+  group: pr-triage-${{ github.event.pull_request.number || github.event.issue.number || 'sweep' }}
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    # Comentarios: solo los de PRs (issue_comment también dispara en issues).
+    if: github.event_name != 'issue_comment' || github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Rama base (pull_request_target) o rama por defecto (comment/schedule): nunca el head del fork.
+          persist-credentials: false
+          # CODEOWNERS real para el gate no-codeowners; nada más del árbol hace falta.
+          sparse-checkout: |
+            .github/scripts
+            .github/CODEOWNERS
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Triage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ vars.TRIAGE_DRY_RUN }}
+          JEV_API_KEY: ${{ secrets.JEV_API_KEY }}
+          JEV_URL: ${{ vars.JEV_URL }}
+          TRIAGE_SWEEP_MAX: ${{ vars.TRIAGE_SWEEP_MAX }}
+        run: node .github/scripts/triage.bundle.mjs

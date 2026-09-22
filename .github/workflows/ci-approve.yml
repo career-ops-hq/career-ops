@@ -1,0 +1,45 @@
+name: Approve CI for fork PRs
+
+# Cada 30 min aprueba los runs de tests que esperan aprobación (política de Actions
+# `first_time_contributors`), con reglas fijas (.github/scripts/ci-approve.mjs):
+#   - pagina TODOS los runs `action_required` y los agrupa por head_sha en local
+#   - aprueba solo si la PR está abierta, el run es del head actual, el autor no es bot,
+#     y la PR no toca .github/workflows/** ni ningún package*.json
+#   - tope 20 SHAs por ejecución
+#
+# Token: `GITHUB_TOKEN` con `actions: write` puede aprobar runs (POST /actions/runs/{id}/approve).
+# Si en el laboratorio devuelve 403 para runs de forks, crea un fine-grained PAT de Santiago con
+# permiso Actions: write en el repo, guárdalo como secret `CI_APPROVE_TOKEN` y el script lo usa
+# automáticamente en lugar de GITHUB_TOKEN.
+# vars.TRIAGE_DRY_RUN = "true" -> solo informa en el job summary.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  pull-requests: read
+
+concurrency:
+  group: ci-approve
+  cancel-in-progress: false
+
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Approve pending runs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_APPROVE_TOKEN: ${{ secrets.CI_APPROVE_TOKEN }}
+          DRY_RUN: ${{ vars.TRIAGE_DRY_RUN }}
+        run: node .github/scripts/ci-approve.mjs
