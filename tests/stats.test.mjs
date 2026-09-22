@@ -46,8 +46,8 @@ try {
 
   // Funnel — Rejected counts into everApplied (mirrors dashboard ComputeProgressMetrics).
   const f = stats.computeFunnel({ Applied: 4, Responded: 2, Interview: 1, Offer: 1, Rejected: 2, Evaluated: 9 });
-  if (f.everApplied === 10 && f.everResponded === 4 && f.everInterview === 2 && f.everOffer === 1
-      && f.responseRate === 40 && f.offerRate === 10 && f.smallSample === false) {
+  if (f.everApplied === 10 && f.everResponded === 6 && f.everInterview === 2 && f.everOffer === 1
+      && f.responseRate === 60 && f.offerRate === 10 && f.smallSample === false) {
     pass('computeFunnel cumulative ever* stages match the dashboard math');
   } else {
     fail(`computeFunnel wrong output: ${JSON.stringify(f)}`);
@@ -70,7 +70,7 @@ try {
   // Ledger-aware funnel (#1428): a declined offer (now Discarded) and a
   // rejected-after-interview must count for the stages they passed through,
   // which the status snapshot alone cannot see. Row 3 has no ledger history and
-  // must fall back to its current status (Rejected proves everApplied only).
+  // must fall back to its current status (Rejected proves a reply, not an interview).
   const statusByNum = new Map([[1, 'Discarded'], [2, 'Rejected'], [3, 'Rejected'], [4, 'Interview']]);
   const ledgerTsv = [
     '1\t2026-08-19\tInterview\tOffer\tset-status\t',   // row 1 reached Offer, then declined

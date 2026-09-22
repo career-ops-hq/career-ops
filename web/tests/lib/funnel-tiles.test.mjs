@@ -40,8 +40,8 @@ test("stages that never reached an interview are not counted", () => {
 
 test("a rejection is not folded in — its stage is unknowable from a snapshot", () => {
   // stats.mjs calls the middle stages lower bounds for exactly this reason: a
-  // Rejected row that never got a reply is indistinguishable from one rejected
-  // after onsites, so counting it would overstate the funnel.
+  // Rejected row proves a reply, but without history cannot distinguish an
+  // early rejection from one after onsites.
   const t = cumulativeTiles(["REJECTED", "REJECTED"]);
   assert.equal(t.interviews, 0);
   assert.equal(t.offers, 0);

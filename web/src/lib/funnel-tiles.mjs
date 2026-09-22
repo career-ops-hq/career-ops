@@ -16,9 +16,8 @@
 //   everInterview = Interview + Offer + Hired
 //   everOffer     = Offer + Hired
 // — on the reasoning that a landed job proves the offer and everything before
-// it. Rejected is deliberately NOT folded in: a status is a snapshot, so a
-// rejection never reveals which stage it came from (stats.mjs calls the middle
-// stages lower bounds for exactly this reason).
+// it. A rejection proves a response, but not an interview or offer. The
+// ledger-aware variant below recovers those stages from actual transitions.
 
 /**
  * Count applications whose canonical status is any of `keys`.
@@ -43,4 +42,26 @@ export function cumulativeTiles(canonStatuses) {
     interviews: countOf(list, ["INTERVIEW", "OFFER", "HIRED"]),
     offers: countOf(list, ["OFFER", "HIRED"]),
   };
+}
+
+/** Recover interview/offer achievements by tracker identity, not row position.
+ * Malformed transitions and history for deleted tracker rows are ignored.
+ * @param {{n: string, status: string}[]} applications
+ * @param {string|null} content
+ */
+export function cumulativeTilesWithHistory(applications, content) {
+  const rank = (s) => ({ APPLIED: 1, RESPONDED: 2, REJECTED: 2, INTERVIEW: 3, OFFER: 4, HIRED: 5 })[String(s).trim().toUpperCase()] || 0;
+  const reached = new Map();
+  for (const app of applications) {
+    // Non-numeric backfill IDs retain snapshot counts but cannot join history.
+    const id = /^\d+$/.test(app.n) ? Number(app.n) : Symbol();
+    reached.set(id, Math.max(reached.get(id) || 0, rank(app.status)));
+  }
+  for (const line of String(content ?? '').replace(/\r/g, '').split('\n')) {
+    const [id, date, from, to] = line.split('\t').map(s => s.trim());
+    if (!/^\d+$/.test(id || '') || !date || !from || !to || !reached.has(Number(id))) continue;
+    reached.set(Number(id), Math.max(reached.get(Number(id)), rank(from), rank(to)));
+  }
+  const values = [...reached.values()];
+  return { interviews: values.filter(n => n >= 3).length, offers: values.filter(n => n >= 4).length };
 }

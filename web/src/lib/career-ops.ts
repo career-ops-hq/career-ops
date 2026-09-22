@@ -174,6 +174,11 @@ export function readApplications(): Application[] {
   return parseApplications(md, careerOpsRoot());
 }
 
+/** Ledger sibling of the same tracker readApplications consumes. */
+export function readApplicationStatusLog(): string | null {
+  return read("data/status-log.tsv");
+}
+
 /** Resolve the report-number cell in data/pdf-index.tsv for a given report id.
  *  Digits-only, full-string match — parseInt alone would let "12abc" resolve to
  *  report 12, matching the wrong index row. Returns null for anything malformed,

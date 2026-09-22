@@ -123,17 +123,22 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 
 		num++
 		trackerNumber := num
-		if parsedNumber, err := strconv.Atoi(at("num")); err == nil {
+		rawNumber := at("num")
+		missingNumber := rawNumber == "" || strings.IndexFunc(rawNumber, func(r rune) bool { return r < '0' || r > '9' }) >= 0
+		if parsedNumber, err := strconv.Atoi(rawNumber); err == nil && !missingNumber {
 			trackerNumber = parsedNumber
+		} else {
+			missingNumber = true
 		}
 		app := model.CareerApplication{
-			Number:  trackerNumber,
-			Date:    at("date"),
-			Company: at("company"),
-			Role:    at("role"),
-			JobURL:  at("url"),
-			Status:  at("status"),
-			HasPDF:  strings.Contains(at("pdf"), "\u2705"),
+			Number:               trackerNumber,
+			TrackerNumberMissing: missingNumber,
+			Date:                 at("date"),
+			Company:              at("company"),
+			Role:                 at("role"),
+			JobURL:               at("url"),
+			Status:               at("status"),
+			HasPDF:               strings.Contains(at("pdf"), "\u2705"),
 		}
 
 		// Parse score from the Score column.
@@ -945,7 +950,7 @@ func StatusPriority(status string) int {
 }
 
 // ComputeProgressMetrics computes progress-oriented analytics from applications.
-func ComputeProgressMetrics(apps []model.CareerApplication) model.ProgressMetrics {
+func ComputeProgressMetrics(apps []model.CareerApplication, history ...map[int]int) model.ProgressMetrics {
 	pm := model.ProgressMetrics{}
 
 	// Count by normalized status
@@ -988,9 +993,37 @@ func ComputeProgressMetrics(apps []model.CareerApplication) model.ProgressMetric
 	// math as mirroring this function.
 	total := len(apps)
 	applied := statusCounts["applied"] + statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"] + statusCounts["rejected"]
-	responded := statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"]
+	responded := statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"] + statusCounts["rejected"]
 	interview := statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"]
 	offer := statusCounts["offer"] + statusCounts["hired"]
+	if len(history) > 0 {
+		applied, responded, interview, offer = 0, 0, 0, 0
+		seen := make(map[int]bool)
+		for _, app := range apps {
+			if !app.TrackerNumberMissing && seen[app.Number] {
+				continue
+			}
+			if !app.TrackerNumberMissing {
+				seen[app.Number] = true
+			}
+			rank := funnelRank(app.Status)
+			if !app.TrackerNumberMissing && history[0][app.Number] > rank {
+				rank = history[0][app.Number]
+			}
+			if rank >= 1 {
+				applied++
+			}
+			if rank >= 2 {
+				responded++
+			}
+			if rank >= 3 {
+				interview++
+			}
+			if rank >= 4 {
+				offer++
+			}
+		}
+	}
 
 	// Top stage counts every tracked row, including rows backfilled without a
 	// score (#1799) — hence "Tracked", not "Evaluated", which already means both

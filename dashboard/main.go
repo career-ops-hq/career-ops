@@ -42,7 +42,7 @@ type appModel struct {
 func (m *appModel) reloadPipelineData() {
 	apps := data.ParseApplications(m.careerOpsPath)
 	metrics := data.ComputeMetrics(apps)
-	m.progressMetrics = data.ComputeProgressMetrics(apps)
+	m.progressMetrics = data.ComputeProgressMetrics(apps, data.ReadFunnelHistory(m.careerOpsPath))
 	m.pipeline = m.pipeline.WithReloadedData(apps, metrics)
 	enrichArchetypes(m.careerOpsPath, apps, &m.pipeline)
 	m.statsMetrics = data.ComputeStatsMetrics(apps)
@@ -382,7 +382,7 @@ func main() {
 
 	// Compute metrics
 	metrics := data.ComputeMetrics(apps)
-	progressMetrics := data.ComputeProgressMetrics(apps)
+	progressMetrics := data.ComputeProgressMetrics(apps, data.ReadFunnelHistory(careerOpsPath))
 
 	// Batch-load all report summaries
 	t := theme.NewTheme("auto")
