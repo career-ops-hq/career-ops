@@ -205,8 +205,10 @@ schedule
     const output = execFileSync(getBash(), [join(batch, 'batch-runner.sh'), '--status'], { encoding: 'utf8', timeout: 30000 });
     assert.match(output, /Needs confirmation: 1/);
     assert.match(output, /Needs confirmation: Which agency/);
-    assert(output.includes(url), 'full URL is visible');
-    assert(output.includes(question), 'full question is visible');
+    const heldLine = output.split('\n').find((line) => /^1\s*\|/.test(line));
+    assert(heldLine, 'held row is visible');
+    assert.equal(heldLine.split('|')[4].trim(), `${url} — Needs confirmation: ${question}`,
+      'status cell preserves the full URL and question');
     assert.doesNotMatch(output, /Error: Which agency/);
   });
   for (const [name, count] of [['capacity wait', 3], ['final drain', 2]]) {
