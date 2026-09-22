@@ -12,7 +12,7 @@ When the candidate pastes a **URL** (not JD text), confirm the posting is still 
 2. Classify the posting:
    - **active posting evidence:** title/role + a real job description or an application/apply path
    - **closed posting evidence:** expired/closed/"no longer accepting applications", missing JD with only nav/footer, hard redirect to a generic careers/search page, or 404/410
-3. If the posting appears closed, **stop before Block A**: tell the candidate the link is dead, and if the entry came from `data/pipeline.md`, mark it `- [x] ~~Company | Role~~ — oferta nieaktywna`. Do not generate an evaluation, report, or CV.
+3. If the posting appears closed, **stop before Block A**: output `---DEAD_POSTING---` on its own line, tell the candidate the link is dead, and if the entry came from `data/pipeline.md`, mark it `- [x] ~~Company | Role~~ — oferta nieaktywna`. Do not generate an evaluation, report, or CV.
 4. If the candidate pasted JD text (no URL), liveness cannot be verified — note that and proceed; there is no link to check.
 
 Do not continue to Block A until this gate is resolved. The snapshot captured here is reused by Block G's freshness signals.

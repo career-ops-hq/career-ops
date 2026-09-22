@@ -1,6 +1,6 @@
 import { pass, fail, rmSync, ROOT } from './helpers.mjs';
 import { processPipelineBatch, processOffer, PATHS } from '../batch-evaluate-gemini.mjs';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync } from 'fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -91,6 +91,47 @@ LEGITIMACY: High Confidence
   }
 }
 
+async function testDeadPostingOutcome() {
+  const work = mkdtempSync(join(tmpdir(), 'cops-batcheval-dead-'));
+  const oldReports = PATHS.reports;
+  const oldAdditions = PATHS.trackerAdditions;
+
+  try {
+    PATHS.reports = join(work, 'reports');
+    PATHS.trackerAdditions = join(work, 'tracker-additions');
+    const mockBrowser = {
+      newPage: async () => ({
+        url: () => 'https://example.com/job', route: async () => {}, goto: async () => {},
+        waitForTimeout: async () => {},
+        evaluate: async () => 'Expired job posting content. '.repeat(8),
+        close: async () => {}
+      })
+    };
+    const result = await processOffer(
+      mockBrowser,
+      '- [ ] https://example.com/job | Acme Corp | Senior Engineer',
+      1,
+      async () => '---DEAD_POSTING---\nThis posting has expired.'
+    );
+
+    if (result.processed && result.outcome === 'dead-posting'
+      && result.line === '- [x] ~~Acme Corp | Senior Engineer~~ — oferta nieaktywna') {
+      pass('dead-posting marker resolves the pipeline entry without a score');
+    } else {
+      fail(`dead-posting marker returned unexpected result: ${JSON.stringify(result)}`);
+    }
+    if (!existsSync(PATHS.reports) && !existsSync(PATHS.trackerAdditions)) {
+      pass('dead posting writes no report or tracker addition');
+    } else {
+      fail('dead posting unexpectedly wrote evaluation artifacts');
+    }
+  } finally {
+    PATHS.reports = oldReports;
+    PATHS.trackerAdditions = oldAdditions;
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
 async function testProcessPipelineBatch() {
   const pendingIndices = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
   const concurrency = 4;
@@ -137,6 +178,7 @@ async function run() {
   try {
     await testProcessPipelineBatch();
     await testProcessOffer();
+    await testDeadPostingOutcome();
   } catch (err) {
     fail(`batch-evaluate tests crashed: ${err.message}`);
   }

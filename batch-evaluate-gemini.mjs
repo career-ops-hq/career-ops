@@ -270,6 +270,12 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
     const evaluationText = await _evaluate(`URL: ${url}\n\n${jdText}`);
 
     // Parse output
+    if (/^---DEAD_POSTING---\s*$/m.test(evaluationText)) {
+      const newLine = `- [x] ~~${companyHint} | ${titleHint}~~ — oferta nieaktywna`;
+      console.log(`⏭️ Closed posting: ${companyHint} - ${titleHint}`);
+      return { line: newLine, processed: true, outcome: 'dead-posting' };
+    }
+
     const summaryMatch = evaluationText.match(/---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/);
     if (!summaryMatch) {
       console.error('Missing SCORE_SUMMARY block from model output:\n' + evaluationText.slice(0, 500));
