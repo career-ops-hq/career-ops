@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // GENERADO por github-src/scripts/build.mjs: no editar a mano. Fuente: github-src/scripts/triage.mjs + bin/lib/triage-core.mjs + policy/*.json
-// {"builtAt":"2026-09-22T20:56:16.716Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
+// {"builtAt":"2026-09-22T21:41:27.948Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -448,7 +448,7 @@ function round2(v) {
   return v;
 }
 function buildJevMarker(pr, sha7, payload) {
-  const json = JSON.stringify(round2(payload)).replace(/-->/g, '--\\u003e'); // "-->" dentro del JSON cerraría el comentario; \u003e es un escape JSON válido
+  const json = JSON.stringify(round2(payload)).replace(/--!?>/g, (m) => m.slice(0, -1) + '\\u003e'); // "-->" y "--!>" dentro del JSON cerrarían el comentario (CodeQL js/bad-tag-filter); \u003e es un escape JSON válido
   return `<!-- co:jev:${pr}:${sha7} ${json} -->`;
 }
 /** Todos los bloques del cuerpo, en orden: [{pr, sha7, ...payload}]. Un JSON corrupto se salta. */
