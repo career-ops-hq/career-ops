@@ -15,6 +15,13 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=11 level=handle handle=SPerekrestova role="Software Engineer" sector="Big tech / global marketplace" geo="Amsterdam, Netherlands" weeks=8 link="https://github.com/career-ops-hq/career-ops/issues/4339" -->
+### Hire #11
+
+> I used career-ops through my personal Hermes agent setup: I delegated the job search operations to Hermes and had it run career-ops as my command center. The search was time-constr
+
+<a href="https://github.com/SPerekrestova"><img src="https://github.com/SPerekrestova.png?size=64" width="28" height="28" align="top" alt="@SPerekrestova"> **@SPerekrestova**</a> · Software Engineer · Amsterdam, Netherlands · 8 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/4339)
+
 <!-- hire n=10 level=role role="Senior Systems Engineer (MARCENT)" sector="Federal" geo="Tampa, FL" weeks=20 link="https://github.com/career-ops-hq/career-ops/issues/4277" -->
 ### Hire #10
 
