@@ -147,13 +147,11 @@ export function normalizeParserJob(job, entry) {
   );
   if (!title || !url) return null;
 
-  // Carry through any other key the parser emitted (#3438). This object was
-  // a closed literal, so a jobs-json-v1 parser could publish an occupation
-  // code, a department or a req id and scan.mjs would never see it — which
-  // made a non-title filter_on dead on arrival for every local-parser board.
-  // The four normalized keys are destructured out (along with the aliases
-  // they were built from) so rest cannot overwrite them. Today's parsers emit
-  // nothing else, so rest is {} and behaviour is unchanged.
+  // Carry through any other key the parser emitted (#3438), so a jobs-json-v1
+  // parser can publish an occupation code, a department or a req id for a
+  // non-title filter_on to read. The normalized keys are destructured out,
+  // along with the aliases they are built from, so rest cannot overwrite
+  // them; a parser that emits only those keys gets the same object as before.
   const {
     title: _title, name: _name,
     url: _url, jobUrl: _jobUrl, job_url: _jobUrlSnake,

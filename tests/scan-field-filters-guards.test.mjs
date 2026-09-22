@@ -1,8 +1,9 @@
-// tests/scan-field-filters-guards.test.mjs — #3438, second review round.
+// tests/scan-field-filters-guards.test.mjs — #3438, bad input only.
 //
-// Each case here BREAKS a guard rather than confirming it on good input. The
-// first round's tests all passed while three real defects sat in the code,
-// because they asserted that correct configs behave correctly.
+// Each case here tries to BREAK a guard rather than confirm it on good input:
+// a config that looks like a working whitelist but would pass every posting,
+// or accounting that bad input could skew. Tests that only feed correct
+// configs cannot see either.
 import { pass, fail, ROOT, NODE } from './helpers.mjs';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
@@ -139,7 +140,7 @@ tracked_companies:
 `);
   if (exitCode !== 0) pass('a keyword list with no usable entry exits');
   else fail(`the scan ran with an empty compiled whitelist and queued ${urls.length} posting(s)`);
-  if (/no usable keyword/.test(stderr)) pass('the error says the list compiles to nothing');
+  if (/field_filters\.noc\.positive entries must be non-empty strings/.test(stderr)) pass('the error names the list holding the unusable entries');
   else fail(`expected the explanation in stderr, got: ${stderr}`);
 }
 
@@ -158,14 +159,14 @@ tracked_companies:
       command: node
       script: tests/fixtures/noc-board.mjs
 `);
-  if (exitCode !== 0 && /no usable field name/.test(stderr)) pass('an empty filter_on exits instead of falling back to title');
+  if (exitCode !== 0 && /filter_on must not be an empty list/.test(stderr)) pass('an empty filter_on exits instead of falling back to title');
   else fail(`expected an exit, got code ${exitCode}: ${stderr}`);
 }
 
 // ── Two enabled targets sharing one name ───────────────────────────
 // A duplicate enabled name is only a validate-portals WARNING, so this config
-// is legal. Keyed by name, the second board's noc suppressed the first board's
-// all-absent warning.
+// is legal. If the counters merged by name, the second board's noc would
+// suppress the first board's all-absent warning.
 {
   const { stdout } = scanWith(`${TITLE}field_filters:
   noc:
@@ -192,11 +193,11 @@ tracked_companies:
 }
 
 // ── The field-bearing postings are blacklisted, one other is not ───
-// The blacklist skip runs before the gate. With presence accounting inside
-// the gate, only the code-less posting was ever counted and the run reported
-// "noc absent on all 1 job" — a statement about the provider produced by the
-// user's own do-not-apply list. Blacklisting every posting would NOT catch
-// this: the seen count stays zero and the warning is silent either way.
+// Presence is counted before the blacklist skip: whether a provider publishes
+// a field cannot depend on the user's do-not-apply list. Counted after it,
+// only the code-less posting would be seen and the run would report "noc
+// absent on all 1 job". The board must be MIXED — blacklisting every posting
+// keeps the seen count at zero, so the warning is silent either way.
 {
   const { stdout } = scanWith(`${TITLE}field_filters:
   noc:

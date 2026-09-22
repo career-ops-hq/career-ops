@@ -195,13 +195,32 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
             add(errors, `field_filters.${field}.${key}`, `unknown field_filters field - expected one of ${FIELD_FILTER_FIELDS.join(', ')}`);
           }
         }
-        validateKeywordList(block.positive, `field_filters.${field}.positive`, errors);
-        validateKeywordList(block.negative, `field_filters.${field}.negative`, errors);
+        // Stricter than title_filter on purpose: a bare-string list is dropped
+        // by buildTitleFilter, and a block with no keyword at all matches every
+        // posting. title_filter keeps that leniency for existing configs;
+        // field_filters is new and has none to preserve. scan.mjs applies the
+        // same rules at startup.
+        let keywordCount = 0;
+        let malformedList = false;
+        for (const key of FIELD_FILTER_FIELDS) {
+          const list = block[key];
+          if (list === undefined || list === null) continue;
+          if (!Array.isArray(list)) {
+            add(errors, `field_filters.${field}.${key}`, 'must be a list of strings - a bare string is ignored');
+            malformedList = true;
+            continue;
+          }
+          validateKeywordList(list, `field_filters.${field}.${key}`, errors);
+          keywordCount += list.length;
+        }
+        if (keywordCount === 0 && !malformedList) {
+          add(errors, `field_filters.${field}`, 'no keyword in positive or negative - it would match every posting');
+        }
       }
     }
   }
 
-    if (config.location_filter !== undefined) {
+  if (config.location_filter !== undefined) {
     if (!isObject(config.location_filter)) {
       add(errors, 'location_filter', 'location_filter must be an object');
     } else {

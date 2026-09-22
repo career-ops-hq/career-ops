@@ -87,6 +87,28 @@ const titleKeywords = await import(pathToFileURL(join(ROOT, 'title-keywords.mjs'
   else fail('key collision between two distinct (id, field) pairs');
 }
 
+// ── isFieldAbsent ──────────────────────────────────────────────────
+// Presence accounting and the gate both read this, so they cannot disagree on
+// what "absent" means. A whitespace-only value carries no code: judged as
+// present, it would be rejected by every positive list — a silent drop.
+{
+  const { isFieldAbsent } = scan;
+  const cases = [
+    [undefined, true, 'undefined is absent'],
+    [null, true, 'null is absent'],
+    ['', true, 'an empty string is absent'],
+    ['   ', true, 'a whitespace-only string is absent'],
+    ['22221', false, 'a code is present'],
+    [22221, false, 'a numeric code is present'],
+    [0, false, 'zero is a value, not an absence'],
+    [false, false, 'false is a value, not an absence'],
+  ];
+  for (const [input, want, label] of cases) {
+    if (isFieldAbsent(input) === want) pass(label);
+    else fail(`${label}: expected ${want} for ${JSON.stringify(input)}`);
+  }
+}
+
 // Behaviour of the gate itself — which fields are read, what an absent field
 // does, AND semantics, rejection attribution and the dead-declaration warning
 // — is asserted against the real scan in tests/scan-field-filters-e2e.test.mjs.

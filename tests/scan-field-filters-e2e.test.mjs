@@ -22,7 +22,7 @@ const TITLE_FILTER = `title_filter:
     - "Help Desk"
 `;
 
-function runScan(entryExtra, fixture = 'noc-board.mjs') {
+function runScan(entryExtra, fixture = 'noc-board.mjs', titleFilter = TITLE_FILTER) {
   const dir = mkdtempSync(join(tmpdir(), 'scan-ff-'));
   try {
     mkdirSync(join(dir, 'data'), { recursive: true });
@@ -33,7 +33,7 @@ function runScan(entryExtra, fixture = 'noc-board.mjs') {
 `);
     writeFileSync(join(dir, 'data', 'pipeline.md'), '# Pipeline\n\n');
     const portals = join(dir, 'portals.yml');
-    writeFileSync(portals, `${TITLE_FILTER}field_filters:
+    writeFileSync(portals, `${titleFilter}field_filters:
   noc:
     positive: ["stem:22"]
 tracked_companies:
@@ -86,10 +86,14 @@ ${entryExtra}    parser:
 
   if (/Filtered by field:\s+1 removed/.test(stdout)) pass('the rejection is attributed to the field, not to title');
   else fail(`expected "Filtered by field: 1 removed" in the summary:\n${stdout}`);
+
+  if (/Passed, field absent:\s+1 ungated/.test(stdout)) pass('the summary counts the posting that passed without a noc');
+  else fail(`expected "Passed, field absent: 1 ungated" in the summary:\n${stdout}`);
 }
 
 // AND semantics, and attribution: title fails first for every posting here, so
-// all three are title rejections and the field counter stays at zero.
+// all three are title rejections and the field counter stays at zero. The
+// posting with no noc was rejected, so it did not pass ungated either.
 {
   const { stdout, urls } = runScan('    filter_on: [title, noc]\n');
   if (urls.length === 0) pass('filter_on: [title, noc] ANDs — the narrow title filter still rejects everything');
@@ -97,13 +101,33 @@ ${entryExtra}    parser:
 
   if (/Filtered by title:\s+3 removed/.test(stdout)) pass('they are booked as title rejections, since title is what failed');
   else fail(`expected "Filtered by title: 3 removed":\n${stdout}`);
+
+  if (/Passed, field absent:\s+0 ungated/.test(stdout)) pass('a rejected posting is not also counted as passed with the field absent');
+  else fail(`expected "Passed, field absent: 0 ungated":\n${stdout}`);
+}
+
+// Attribution the other way round: the title matches and the noc does not.
+// Only "Guest Experience Associate" (65102) clears this title filter, so it is
+// the one field rejection; the other two fail on title.
+{
+  const associate = `title_filter:
+  positive:
+    - "Associate"
+`;
+  const { stdout, urls } = runScan('    filter_on: [title, noc]\n', 'noc-board.mjs', associate);
+  if (urls.length === 0) pass('a matching title does not rescue a rejected noc under AND');
+  else fail(`expected 0 entries, got ${urls.length}: ${JSON.stringify(urls)}`);
+
+  if (/Filtered by field:\s+1 removed/.test(stdout) && /Filtered by title:\s+2 removed/.test(stdout)) {
+    pass('a matching title with a rejected noc is booked to the field, not to title');
+  } else {
+    fail(`expected field 1 / title 2 in the summary:\n${stdout}`);
+  }
 }
 
 // The failure the issue is really about: a declared field the provider never
 // supplies. Every posting passes and the run says so, instead of looking like
-// a working whitelist. A target-level counter could not report this for a
-// mixed [title, noc] declaration at all, which is why the counters are keyed
-// per (target, field).
+// a working whitelist.
 {
   const { stdout, urls } = runScan('    filter_on: noc\n', 'noc-less-board.mjs');
   if (urls.length === 2) pass('a board that never publishes the field drops nothing');
@@ -114,10 +138,13 @@ ${entryExtra}    parser:
 
   if (/"noc" absent on all 2 job\(s\)/.test(stdout)) pass('the warning names the single field and the count');
   else fail(`expected the per-field warning line:\n${stdout}`);
+
+  if (/Passed, field absent:\s+2 ungated/.test(stdout)) pass('both postings are counted as passed with the field absent');
+  else fail(`expected "Passed, field absent: 2 ungated":\n${stdout}`);
 }
 
-// Same, declared alongside title. The old target-level accounting excluded
-// these targets outright, so this case produced no warning at all.
+// Same, declared alongside title: the warning is per (target, field), so a
+// dead noc is reported even when title is declared too.
 {
   const { stdout } = runScan('    filter_on: [title, noc]\n', 'noc-less-board.mjs');
   if (/"noc" absent on all 2 job\(s\)/.test(stdout)) pass('a mixed [title, noc] declaration still reports the dead field');

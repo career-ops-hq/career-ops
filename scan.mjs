@@ -182,14 +182,11 @@ export { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTit
 // ── Declared-field whitelists (#3438) ──────────────────────────────
 // A title whitelist cannot express "this posting is in an occupation I want"
 // on a board that publishes an occupation code, because one title maps to
-// several occupations and one occupation to unboundedly many titles. Such a
-// board's matches are dropped silently: the title never matched, so nothing
-// was ever counted as rejected for the reason that actually applied.
+// several occupations and one occupation to unboundedly many titles.
 //
-// Fix: a target declares WHICH FIELD its whitelist reads. Default is `title`,
-// so a portals.yml that says nothing behaves byte-for-byte as before.
+// A target therefore declares WHICH FIELD its whitelist reads. Default is
+// `title`, so a portals.yml that says nothing behaves byte-for-byte as before.
 //
-// Shape:
 //   field_filters:            # top level, optional
 //     noc:
 //       positive: ["stem:22", "stem:13"]
@@ -202,19 +199,24 @@ export { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTit
 // word-boundary rules from #3103 stay identical across every field.
 //
 // `title` is deliberately not a key in field_filters: it routes to the
-// existing top-level config.title_filter, the same compiled object as before,
-// so declaring it explicitly changes nothing.
+// existing top-level config.title_filter, the same compiled object as before.
+
 /**
  * @param {unknown} value - a target's `filter_on`: string, array, or absent.
  * @returns {string[]} field names to gate on, defaulting to ["title"].
  */
+export function normalizeFilterOn(value) {
+  const list = (Array.isArray(value) ? value : [value])
+    .filter(f => typeof f === 'string')
+    .map(f => f.trim())
+    .filter(Boolean);
+  return list.length > 0 ? list : ['title'];
+}
+
 /**
- * Key for the per-(target, field) absence counters.
- *
- * Keyed by the target's index in `targets`, not its name: a duplicate enabled
- * name is only a validate-portals WARNING, so two distinct targets can share
- * one, and keying by name merged their counters — a field supplied on one then
- * suppressed the all-absent warning for the other.
+ * Key for the per-(target, field) presence counters. Keyed by the target's
+ * index in `targets`, not its name: two enabled targets may share a name
+ * (validate-portals only warns), and their counters must stay apart.
  * @param {number} targetId
  * @param {string} field
  * @returns {string}
@@ -223,12 +225,15 @@ export function declaredFieldKey(targetId, field) {
   return JSON.stringify([targetId, field]);
 }
 
-export function normalizeFilterOn(value) {
-  const list = (Array.isArray(value) ? value : [value])
-    .filter(f => typeof f === 'string')
-    .map(f => f.trim())
-    .filter(Boolean);
-  return list.length > 0 ? list : ['title'];
+/**
+ * Whether a posting lacks a declared field. The gate cannot judge such a
+ * posting, so it passes and is counted — dropping it would be the same silent
+ * loss this feature exists to end, with the sign flipped.
+ * @param {unknown} value - `job[field]`
+ * @returns {boolean}
+ */
+export function isFieldAbsent(value) {
+  return value === undefined || value === null || String(value).trim() === '';
 }
 
 // ── Title filter overrides (per-company broadened title net) ───────
@@ -2994,12 +2999,6 @@ async function main() {
   const companies = Array.isArray(config.tracked_companies) ? config.tracked_companies : [];
   const boards = Array.isArray(config.job_boards) ? config.job_boards : [];
   const titleFilter = buildTitleFilter(config.title_filter);
-  // #3438. One compiled predicate per declared field, built by the same
-  // compiler as titleFilter so no field gets its own matching dialect.
-  const fieldFilters = new Map(
-    Object.entries(config.field_filters && typeof config.field_filters === 'object' ? config.field_filters : {})
-      .map(([name, block]) => [name, buildTitleFilter(block)]),
-  );
 
   // Seniority tier classifier integration
   let classifyTier = null;
@@ -3075,57 +3074,74 @@ async function main() {
   resolveEntries(companies);
   resolveEntries(boards, { isBoard: true });
 
-  // #3438. A filter_on naming a field with no field_filters block would gate
-  // on a predicate that does not exist. Exit here rather than at filter time:
-  // the whole point of the issue is that a misconfigured whitelist fails
-  // silently, and trading one silent failure for another would be no fix.
+  // #3438. Startup checks for field_filters / filter_on, before any network
+  // call. scan.mjs does not run validatePortalsConfig, so every rule that
+  // decides whether a declared whitelist actually filters is enforced here as
+  // well; tests/scan-field-filters-parity.test.mjs holds the two rule sets
+  // together. Each shape rejected below would otherwise leave the whitelist
+  // narrower than written, or compile to "no positive constraint" and pass
+  // every posting while the config looks in force.
+  const exitOnConfigError = (message) => {
+    console.error(`Error: ${message}`);
+    process.exit(1);
+  };
+  const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
   const FIELD_FILTER_KEYS = ['positive', 'negative'];
-  for (const [name, block] of Object.entries(
-    config.field_filters && typeof config.field_filters === 'object' ? config.field_filters : {},
-  )) {
-    // `title` routes to the top-level title_filter by definition, so a block
-    // under this key is never read. Left accepted, it is the pass-all trap in
-    // its most convincing form: with no title_filter present, buildTitleFilter
-    // compiles an empty positive list — "no positive constraint" — while the
-    // user is looking at a field_filters.title.positive they believe is in
-    // force. validate-portals.mjs rejects it too, but scan.mjs never calls it.
+  if (config.field_filters !== undefined && !isPlainObject(config.field_filters)) {
+    exitOnConfigError('field_filters must be an object keyed by field name');
+  }
+  for (const [name, block] of Object.entries(config.field_filters ?? {})) {
+    // `title` routes to the top-level title_filter, so a block under this key
+    // is never read — and with no title_filter present, the scan would pass
+    // every title while this list looks like a whitelist in force.
     if (name === 'title') {
-      console.error('Error: field_filters.title is never read - filter_on "title" uses the top-level title_filter. Move these keywords there.');
-      process.exit(1);
+      exitOnConfigError('field_filters.title is never read - filter_on "title" uses the top-level title_filter. Move these keywords there.');
     }
-    if (!block || typeof block !== 'object' || Array.isArray(block)) {
-      console.error(`Error: field_filters.${name} must be an object with positive and/or negative lists`);
-      process.exit(1);
+    if (!isPlainObject(block)) {
+      exitOnConfigError(`field_filters.${name} must be an object with positive and/or negative lists`);
     }
     for (const key of Object.keys(block)) {
       if (!FIELD_FILTER_KEYS.includes(key)) {
-        console.error(`Error: field_filters.${name}.${key} is not a recognized key - expected one of ${FIELD_FILTER_KEYS.join(', ')}`);
-        process.exit(1);
+        exitOnConfigError(`field_filters.${name}.${key} is not a recognized key - expected one of ${FIELD_FILTER_KEYS.join(', ')}`);
       }
     }
-    // Count the entries buildTitleFilter would actually keep. Array.isArray
-    // alone is not enough: it drops every non-string and every blank, so
-    // `positive: [123, null]` is a well-formed array that compiles to an empty
-    // positive list — "no positive constraint" — and passes every posting.
-    const usable = (v) => (Array.isArray(v) ? v : [])
-      .filter(k => typeof k === 'string' && k.trim() !== '').length;
-    if (usable(block.positive) + usable(block.negative) === 0) {
-      console.error(`Error: field_filters.${name} has no usable keyword in positive or negative - it would match every posting`);
-      process.exit(1);
+    // buildTitleFilter silently drops a list written as a bare string and any
+    // non-string or blank entry. title_filter keeps that leniency for existing
+    // configs; field_filters is new, so it has none to preserve.
+    let keywordCount = 0;
+    for (const key of FIELD_FILTER_KEYS) {
+      const list = block[key];
+      if (list === undefined || list === null) continue;
+      if (!Array.isArray(list)) {
+        exitOnConfigError(`field_filters.${name}.${key} must be a list of strings - a bare string is ignored`);
+      }
+      if (list.some(k => typeof k !== 'string' || k.trim() === '')) {
+        exitOnConfigError(`field_filters.${name}.${key} entries must be non-empty strings`);
+      }
+      keywordCount += list.length;
+    }
+    if (keywordCount === 0) {
+      exitOnConfigError(`field_filters.${name} has no usable keyword in positive or negative - it would match every posting`);
     }
   }
+  // One compiled predicate per declared field, built by the same compiler as
+  // titleFilter so no field gets its own matching dialect.
+  const fieldFilters = new Map(
+    Object.entries(config.field_filters ?? {}).map(([name, block]) => [name, buildTitleFilter(block)]),
+  );
   for (const target of targets) {
     if (target.filter_on !== undefined) {
       const declared = Array.isArray(target.filter_on) ? target.filter_on : [target.filter_on];
-      if (!declared.some(f => typeof f === 'string' && f.trim() !== '')) {
-        console.error(`Error: ${target.name}: filter_on has no usable field name - omit the key to gate on title`);
-        process.exit(1);
+      if (declared.length === 0) {
+        exitOnConfigError(`${target.name}: filter_on must not be an empty list - omit the key to gate on title`);
+      }
+      if (declared.some(f => typeof f !== 'string' || f.trim() === '')) {
+        exitOnConfigError(`${target.name}: filter_on must be a non-empty string or a list of them`);
       }
     }
     for (const field of normalizeFilterOn(target.filter_on)) {
       if (field !== 'title' && !fieldFilters.has(field)) {
-        console.error(`Error: ${target.name}: filter_on "${field}" has no field_filters.${field} block in portals.yml`);
-        process.exit(1);
+        exitOnConfigError(`${target.name}: filter_on "${field}" has no field_filters.${field} block in portals.yml`);
       }
     }
   }
@@ -3169,8 +3185,8 @@ async function main() {
   // #3438: rejections by a declared non-title field, kept apart from
   // totalFilteredTitle so the summary says which whitelist did the work.
   let totalFilteredDeclaredField = 0;
-  // Jobs that passed only because a declared field was absent from the
-  // posting. Counted, never dropped — see the end-of-run warning.
+  // Jobs that cleared the declared-field gate with a declared field absent,
+  // i.e. passed without that whitelist ever judging them.
   let totalPassedFieldAbsent = 0;
   const declaredFieldSeen = new Map();
   const declaredFieldAbsent = new Map();
@@ -3261,18 +3277,17 @@ async function main() {
         emptyTargets.push(company.name);
       }
 
+      const declaredFields = normalizeFilterOn(company.filter_on);
       for (const job of jobs) {
         // #3438. Presence accounting only — no verdict, no rejection. It runs
         // before every filter below, including the blacklist skip, because it
         // answers "does this provider publish this field at all", which no
         // later filter's opinion can change.
-        const declaredFields = normalizeFilterOn(company.filter_on);
         for (const field of declaredFields) {
           if (field === 'title') continue;
           const key = declaredFieldKey(company._targetId, field);
           declaredFieldSeen.set(key, (declaredFieldSeen.get(key) || 0) + 1);
-          const value = job[field];
-          if (value === undefined || value === null || value === '') {
+          if (isFieldAbsent(job[field])) {
             declaredFieldAbsent.set(key, (declaredFieldAbsent.get(key) || 0) + 1);
           }
         }
@@ -3305,39 +3320,30 @@ async function main() {
 
         // #3438. Absent filter_on → normalizeFilterOn returns ["title"] and
         // this is the same titleFilter(job.title) call as before, against the
-        // same compiled object. Declared fields are ANDed.
-        //
-        // Deliberately NOT .every(): the verdict needs the field that
-        // actually failed, and short-circuiting would hide a second failure
-        // behind the first. `declaredFields` and the presence counters were
-        // settled above, before the blacklist skip.
-        let firstFailedField = null;
+        // same compiled object. Declared fields are ANDed, and a rejection is
+        // booked to the field that failed: with filter_on: [title, noc], a
+        // matching title and a rejected noc is a field rejection.
+        let failedField = null;
         let sawAbsentField = false;
         for (const field of declaredFields) {
           if (field === 'title') {
-            if (!titleFilter(job.title) && firstFailedField === null) firstFailedField = field;
-            continue;
-          }
-          const value = job[field];
-          // Absent field: pass. Dropping here would recreate the silent loss
-          // this issue is about, only with the sign flipped.
-          if (value === undefined || value === null || value === '') {
+            if (!titleFilter(job.title)) { failedField = field; break; }
+          } else if (isFieldAbsent(job[field])) {
             sawAbsentField = true;
-            continue;
-          }
-          if (!fieldFilters.get(field)(String(value)) && firstFailedField === null) {
-            firstFailedField = field;
+          } else if (!fieldFilters.get(field)(String(job[field]))) {
+            failedField = field;
+            break;
           }
         }
-        if (sawAbsentField) totalPassedFieldAbsent++;
-        if (firstFailedField !== null) {
-          // Attribute the rejection to the field that actually failed: with
-          // filter_on: [title, noc], a matching title and a rejected noc is a
-          // field rejection, not a title one.
-          if (firstFailedField === 'title') totalFilteredTitle++;
-          else totalFilteredDeclaredField++;
+        if (failedField === 'title') {
+          totalFilteredTitle++;
           continue;
         }
+        if (failedField !== null) {
+          totalFilteredDeclaredField++;
+          continue;
+        }
+        if (sawAbsentField) totalPassedFieldAbsent++;
         if (classifyTier && skipTiers.includes(classifyTier(job.title))) {
           totalFilteredTier++;
           continue;
@@ -3553,8 +3559,9 @@ async function main() {
   if (config.title_filter || totalFilteredTitle > 0) {
     console.log(`Filtered by title:     ${totalFilteredTitle} removed`);
   }
-  if (fieldFilters.size > 0 || totalFilteredDeclaredField > 0) {
+  if (fieldFilters.size > 0) {
     console.log(`Filtered by field:     ${totalFilteredDeclaredField} removed`);
+    console.log(`Passed, field absent:  ${totalPassedFieldAbsent} ungated`);
   }
   if (skipTiers.length > 0) {
     console.log(`Filtered by tier:      ${totalFilteredTier} removed`);
