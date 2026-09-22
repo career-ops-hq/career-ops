@@ -37,6 +37,19 @@ function runDoctor(cwd, args, env, { executionCwd = cwd } = {}) {
   }
 }
 
+function runDoctorHuman(cwd, env, { executionCwd = cwd } = {}) {
+  try {
+    return execFileSync(NODE, [DOCTOR, '--target', cwd], {
+      cwd: executionCwd,
+      env: { ...process.env, CLAUDE_CONFIG_DIR: EMPTY_CONFIG_DIR, ...env },
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (e) {
+    return `${e.stdout ? String(e.stdout) : ''}${e.stderr ? String(e.stderr) : ''}`;
+  }
+}
+
 // Build a fake Claude Code config dir: settings.json (enabledPlugins) plus
 // plugins/installed_plugins.json (installPath per plugin) plus each plugin's
 // own .mcp.json - the exact three-file shape doctor resolves.
@@ -68,6 +81,9 @@ try {
     const codeRoot = mkdtempSync(join(tmpdir(), 'co-mcp-split-code-'));
     const codeConfig = join(codeRoot, '.mcp.json');
     try {
+      writeFileSync(join(dataRoot, '.mcp.json'), JSON.stringify({
+        mcpServers: { unrelated: { command: 'false' } },
+      }));
       writeFileSync(codeConfig, JSON.stringify({
         mcpServers: { playwright: { command: 'npx', args: ['@playwright/mcp@latest'] } },
       }));
@@ -77,6 +93,13 @@ try {
         pass('split checkout reads Playwright MCP config from code root');
       } else {
         fail(`split checkout ignored code-root MCP config: ${JSON.stringify(state)}`);
+      }
+      const human = runDoctorHuman(dataRoot, {}, { executionCwd: codeRoot });
+      if (/Playwright MCP server configured \(claude\)/.test(human)
+          && !/Playwright MCP tools not detected/.test(human)) {
+        pass('human doctor output reads Playwright MCP config from code root');
+      } else {
+        fail(`human doctor output ignored code-root MCP config: ${human}`);
       }
     } finally {
       rmSync(codeRoot, { recursive: true, force: true });

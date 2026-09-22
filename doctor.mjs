@@ -655,7 +655,7 @@ async function main() {
     checkDependencies(),
     checkTrackedBakFiles(projectRoot),
     await checkPlaywright(),
-    checkPlaywrightMcp(projectRoot, activeCli),
+    checkPlaywrightMcp(process.cwd(), activeCli),
     checkScanExtractor(projectRoot),
     ...USER_LAYER_PREREQS.map(checkPrereq),
     checkFonts(),
