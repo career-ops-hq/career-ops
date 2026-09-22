@@ -558,16 +558,15 @@ append_recovery_record() {
 # duplicate run, on a path that by construction only fires when something
 # already went wrong.
 #
-# Terminal set mirrors the pending-selection guard in main() exactly. Keep
-# the two in sync: adding a terminal status there without adding it here
-# reopens this rollback for that status.
+# Completed and human-held states must not be rolled back by stale records.
+# Keep these protected states in sync with the pending-selection guard.
 recovery_record_is_superseded() {
   local current="$1"
-  [[ "$current" == "completed" || "$current" == "skipped" ]]
+  [[ "$current" == "completed" || "$current" == "skipped" || "$current" == "needs_confirmation" ]]
 }
 
 # Merge one recovery record, but only into a row that has not already reached
-# a terminal state. The status read happens INSIDE the lock deliberately: a
+# a completed or human-held state. The status read happens INSIDE the lock: a
 # check-then-write gap would let a worker finish between the two and
 # reintroduce the same rollback. get_status is a lock-free reader (plain awk
 # over $STATE_FILE), so calling it here does not re-enter the non-reentrant
@@ -661,7 +660,9 @@ reconcile_recovery_records() {
 # and, if it still fails, falls back to append_recovery_record so the
 # transition is never actually lost (only delayed until the next run's
 # reconcile step), then logs a clear warning and returns non-zero so the
-# CALLER can still decide whether to skip side effects that assumed success
+# CALLER can still decide whether to skip side effects that assumed success.
+# Return 1 means the transition is durable in recovery; 2 means neither write
+# succeeded, so a human gate must stop and surface the persistence failure
 # (found under --parallel 5 on Git Bash/Windows: ~47 of 50 jobs silently
 # dropped in one run from exactly this before the retry+recovery-log fix).
 update_state_retrying() {
@@ -681,6 +682,7 @@ update_state_retrying() {
     echo "    ⚠️  State update failed after $max_attempts attempts — offer id=$1 status=$3 recorded to $RECOVERY_DIR for reconciliation on next run." >&2
   else
     echo "    ❌ State update failed after $max_attempts attempts AND recovery-record write also failed — offer id=$1 status=$3 was NOT recorded anywhere. It will be retried as pending next run." >&2
+    return 2
   fi
   return 1
 }
@@ -1145,9 +1147,14 @@ process_offer() {
       ' "$worker_result_json" "$url" "$id"; then
         question="Invalid confirmation handoff identity/reason; parent must inspect the job log and ask for this URL"
       fi
-      update_state_retrying "$id" "$url" "needs_confirmation" "$started_at" "$completed_at" "-" "-" "$question" "$retries"
+      local hold_rc=0
+      update_state_retrying "$id" "$url" "needs_confirmation" "$started_at" "$completed_at" "-" "-" "$question" "$retries" || hold_rc=$?
       release_report_num "$report_num"
       echo "    Needs confirmation: $url — $question (resume in the parent session after an explicit answer)"
+      if (( hold_rc == 2 )); then
+        echo "    ERROR: confirmation hold could not be persisted; stop and repair state before rerunning this posting." >&2
+        return 2
+      fi
       return 0
     fi
 
@@ -1335,12 +1342,12 @@ print_status_table() {
     sreport="${sreport%$'\r'}"
     local target="$surl"
     if [[ "$sstatus" == "needs_confirmation" ]]; then
-      target="Needs confirmation: $serror"
+      target="$surl — Needs confirmation: $serror"
     elif [[ "$sstatus" == "failed" && -n "$serror" && "$serror" != "-" ]]; then
       target="Error: $serror"
     fi
     # Trim target to fit nicely (e.g. 50 chars)
-    if (( ${#target} > 50 )); then
+    if [[ "$sstatus" != "needs_confirmation" ]] && (( ${#target} > 50 )); then
       target="${target:0:47}..."
     fi
     printf "%-4s | %-17s | %-6s | %-5s | %-50s\n" "$sid" "$sstatus" "$sreport" "$sscore" "$target"
@@ -1543,6 +1550,7 @@ main() {
   else
     # Parallel processing with job control
     local running=0
+    local parallel_rc=0 worker_rc=0
     local -a pids=()
     local -a pid_ids=()
 
@@ -1557,7 +1565,11 @@ main() {
         # Wait for any child to finish
         for j in "${!pids[@]}"; do
           if ! kill -0 "${pids[$j]}" 2>/dev/null; then
-            wait "${pids[$j]}" 2>/dev/null || true
+            worker_rc=0
+            wait "${pids[$j]}" 2>/dev/null || worker_rc=$?
+            if (( worker_rc != 0 )); then
+              parallel_rc=$worker_rc
+            fi
             unset 'pids[j]'
             unset 'pid_ids[j]'
             running=$((running - 1))
@@ -1566,6 +1578,9 @@ main() {
         # Compact arrays
         pids=("${pids[@]}")
         pid_ids=("${pid_ids[@]}")
+        if (( parallel_rc != 0 )); then
+          break
+        fi
         if [[ "$BATCH_PAUSED" == "true" || -f "$PAUSE_FILE" ]]; then
           echo "=== Batch paused: session/rate limit reached. Waiting for running workers, not scheduling new offers. ==="
           break
@@ -1573,7 +1588,7 @@ main() {
         sleep 1
       done
 
-      if [[ "$BATCH_PAUSED" == "true" || -f "$PAUSE_FILE" ]]; then
+      if (( parallel_rc != 0 )) || [[ "$BATCH_PAUSED" == "true" || -f "$PAUSE_FILE" ]]; then
         break
       fi
 
@@ -1586,8 +1601,16 @@ main() {
 
     # Wait for remaining workers
     for pid in "${pids[@]}"; do
-      wait "$pid" 2>/dev/null || true
+      worker_rc=0
+      wait "$pid" 2>/dev/null || worker_rc=$?
+      if (( worker_rc != 0 )); then
+        parallel_rc=$worker_rc
+      fi
     done
+    if (( parallel_rc != 0 )); then
+      echo "ERROR: a parallel worker failed fatally; tracker merge skipped. Inspect the worker log and repair state before rerunning." >&2
+      return "$parallel_rc"
+    fi
   fi
 
   # Merge tracker additions
