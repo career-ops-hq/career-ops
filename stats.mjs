@@ -406,7 +406,7 @@ export function computePortalRecommendations(portalsContent, scanContent, health
   const days = positive(cfg.portal_prune_quiet_days, 30);
   const threshold = positive(cfg.portal_health_threshold, 3);
   const cutoff = now - days * 86400000;
-  const validDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || '') && Number.isFinite(Date.parse(s)) && Date.parse(s) <= now;
+  const validDate = (s) => /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)?$/.test(s || '') && Number.isFinite(Date.parse(s)) && Date.parse(s) <= now;
   const produced = new Set(scanCompanyNames(scanContent));
   const lastMatch = new Map();
   for (const line of String(scanContent ?? '').split('\n')) {
@@ -428,6 +428,7 @@ export function computePortalRecommendations(portalsContent, scanContent, health
     health.set(key, h);
   }
   const buckets = { neverProduced: [], rotted: [], healthyButQuiet: [] };
+  if (scanContent == null) return { quietDays: days, failureThreshold: threshold, ...buckets };
   const seen = new Set();
   for (const company of Array.isArray(cfg.tracked_companies) ? cfg.tracked_companies : []) {
     if (!company?.name || company.enabled === false || company.scan_method === 'websearch') continue;

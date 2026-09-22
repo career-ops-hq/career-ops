@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { pass, fail } from './helpers.mjs';
 import { computePortalRecommendations as recommend } from '../stats.mjs';
 
-const now = Date.parse('2026-09-22');
+const now = Date.parse('2026-09-22T12:00:00Z');
 const config = `tracked_companies:
   - {name: Never}
   - {name: Rot}
@@ -17,7 +17,7 @@ const scan = ['Rot', 'Quiet', 'Stale'].map(n => `https://example.com/${n}\t2026-
 const health = [
   '2026-07-01\tNever\treachable', '2026-09-22\tNever\tempty',
   '2026-09-20\tRot\tslug_gone', '2026-09-21\tRot\tserver', '2026-09-22\tRot\tnetwork',
-  '2026-09-22\tQuiet\treachable', '2026-09-22\tRecent\treachable',
+  '2026-09-22T10:00:00.000Z\tQuiet\treachable', '2026-09-22\tRecent\treachable',
   '2026-07-01\tStale\tslug_gone', '2026-07-02\tStale\tslug_gone', '2026-07-03\tStale\tslug_gone',
   ...['Disabled', 'Search'].flatMap(n => [`2026-07-01\t${n}\treachable`, `2026-09-22\t${n}\tempty`]),
 ].join('\r\n');
@@ -31,6 +31,7 @@ check('pruning separates never-produced, rotted and healthy quiet companies', ()
 check('pruning requires history and recent evidence, not configuration age guesses', () => {
   const r = recommend(config, null, null, now);
   assert.equal(r.neverProduced.length + r.rotted.length + r.healthyButQuiet.length, 0);
+  assert.equal(recommend(config, null, health, now).neverProduced.length, 0);
   assert.equal(recommend('invalid: [', scan, health, now), null);
 });
 check('pruning honors thresholds and healthy streak resets', () => {
