@@ -76,8 +76,8 @@ try {
   if (requested.every(({ redirect }) => redirect === 'error')) pass('fetch() passes redirect:"error" for every request');
   else fail(`fetch() redirect options = ${JSON.stringify(requested)}`);
 
-  // A board card can legitimately omit the partner name. Keep the employer
-  // empty rather than substituting the board name, which is not an employer.
+  // A board card without a partner name has no verified employer and must not
+  // become a candidate listing.
   const noPartnerHtml = '<div class="job-element bg-white">'
     + '<h3><a class="stretched-link" href="/jobs/303010/unknown-employer">Support Engineer</a></h3>'
     + '<div class="text-muted small">Remote</div></div>';
@@ -85,10 +85,10 @@ try {
     { name: 'Empfehlungsbund', max_pages: 1 },
     { fetchText: async () => noPartnerHtml },
   );
-  if (noPartnerJobs.length === 1 && noPartnerJobs[0]?.company === '') {
-    pass('fetch() keeps company empty when a card does not expose an employer');
+  if (noPartnerJobs.length === 0) {
+    pass('fetch() drops a card that does not expose an employer');
   } else {
-    fail(`fetch() must not substitute the board name for a missing employer: ${JSON.stringify(noPartnerJobs)}`);
+    fail(`fetch() must drop cards without an employer: ${JSON.stringify(noPartnerJobs)}`);
   }
 } catch (err) {
   fail(`empfehlungsbund provider tests crashed: ${err.message}`);

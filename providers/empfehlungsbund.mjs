@@ -76,6 +76,7 @@ export function parseJobCards(html, origin) {
 
     const companyAnchor = [...card.matchAll(/<a\b[^>]*>/gi)].find((match) => attribute(match[0], 'href').includes('/partner_profil/'));
     const company = companyAnchor ? clean(attribute(companyAnchor[0], 'title')) : '';
+    if (!company) continue;
     const afterTitle = card.slice(link.index + link[0].length);
     const locationMatch = /<div\b[^>]*\bclass=(?:"[^"]*\btext-muted\b[^"]*\bsmall\b[^"]*"|'[^']*\btext-muted\b[^']*\bsmall\b[^']*')[^>]*>([\s\S]*?)<\/div>/i.exec(afterTitle);
     const location = locationMatch ? clean(locationMatch[1]) : '';
