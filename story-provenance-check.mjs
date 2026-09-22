@@ -243,8 +243,15 @@ function parseStoryBlocks(content) {
     const themeMatch = header.match(/^\[([^\]]+)\]\s*(.+)/);
     const title = themeMatch ? themeMatch[2].trim() : header;
 
-    const provMatch = block.match(/\*\*Provenance:\*\*\s*(.+)/i);
-    const provenance = provMatch ? provMatch[1].trim().toLowerCase() : null;
+    const provMatch = block.match(/\*\*Provenance:\*\*[ \t]*([^\r\n]*)/i);
+    const inlineProvenance = provMatch?.[1].trim().toLowerCase() || null;
+    // Preserve an existing denial even when it was wrapped onto the next line.
+    // Positive evidence must stay inline: following story text cannot verify it.
+    const wrappedDenial = provMatch && !inlineProvenance
+      && /^[ \t]*\r?\n[ \t\r\n]*user-cannot-confirm[ \t]*(?:\r?\n|$)/i.test(
+        block.slice(provMatch.index + provMatch[0].length),
+      );
+    const provenance = inlineProvenance || (wrappedDenial ? 'user-cannot-confirm' : null);
 
     stories.push({ title, provenance, body: block });
   }
