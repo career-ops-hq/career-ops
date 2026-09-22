@@ -1095,6 +1095,7 @@ process_offer() {
     # as status/error fixes both by construction -- there's only one place
     # left to look.
     local worker_failed_match="" worker_error_match="" score="-"
+    local parsed_status="" parsed_error="" parsed_score=""
     if [[ -n "$worker_result_json" ]]; then
       local parsed
       parsed=$(printf '%s' "$worker_result_json" | node -e '
@@ -1104,7 +1105,8 @@ process_offer() {
           try {
             const obj = JSON.parse(data);
             const status = typeof obj.status === "string" ? obj.status : "";
-            const error = typeof obj.error === "string" ? obj.error : "";
+            const message = status === "needs_confirmation" ? obj.question : obj.error;
+            const error = typeof message === "string" ? message.replace(/[\x00-\x1f\x7f]/g, " ") : "";
             const score = typeof obj.score === "number" ? String(obj.score) : "";
             process.stdout.write(status + "\x1f" + error + "\x1f" + score);
           } catch {
@@ -1128,6 +1130,25 @@ process_offer() {
           score="$parsed_score"
         fi
       fi
+    fi
+
+    # A human gate is not a failure or a successful evaluation (#4359).
+    # Keep it out of retries and release the unused report reservation.
+    if [[ "$parsed_status" == "needs_confirmation" ]]; then
+      local question="${parsed_error:-Which agency did this posting come through?}"
+      # A malformed/misattributed handoff stays held, never becomes retryable
+      # and never supplies an agency answer for a different posting.
+      if ! node -e '
+        const result = JSON.parse(process.argv[1]);
+        process.exit(result.reason === "agency_confirmation" &&
+          result.url === process.argv[2] && String(result.id) === process.argv[3] ? 0 : 1);
+      ' "$worker_result_json" "$url" "$id"; then
+        question="Invalid confirmation handoff identity/reason; parent must inspect the job log and ask for this URL"
+      fi
+      update_state_retrying "$id" "$url" "needs_confirmation" "$started_at" "$completed_at" "-" "-" "$question" "$retries"
+      release_report_num "$report_num"
+      echo "    Needs confirmation: $url — $question (resume in the parent session after an explicit answer)"
+      return 0
     fi
 
     if [[ -n "$worker_failed_match" ]]; then
@@ -1208,7 +1229,7 @@ print_summary() {
     return
   fi
 
-  local total=0 completed=0 skipped=0 failed=0 pending=0
+  local total=0 completed=0 skipped=0 failed=0 pending=0 needs_confirmation=0
   local score_sum=0 score_count=0
 
   while IFS=$'\t' read -r sid _ sstatus _ _ _ sscore _ _; do
@@ -1223,11 +1244,12 @@ print_summary() {
         ;;
       skipped) skipped=$((skipped + 1)) ;;
       failed) failed=$((failed + 1)) ;;
+      needs_confirmation) needs_confirmation=$((needs_confirmation + 1)) ;;
       *) pending=$((pending + 1)) ;;
     esac
   done < "$STATE_FILE"
 
-  echo "Total: $total | Completed: $completed | Skipped: $skipped | Failed: $failed | Pending: $pending"
+  echo "Total: $total | Completed: $completed | Skipped: $skipped | Failed: $failed | Pending: $pending | Needs confirmation: $needs_confirmation"
 
   if (( score_count > 0 )); then
     local avg
@@ -1250,7 +1272,7 @@ print_status_table() {
     return
   fi
 
-  local total=0 completed=0 processing=0 failed=0 pending=0 skipped=0 rate_limited=0 paused_rate_limit=0
+  local total=0 completed=0 processing=0 failed=0 pending=0 skipped=0 rate_limited=0 paused_rate_limit=0 needs_confirmation=0
   local score_sum=0 score_count=0
 
   # Read first line to skip header
@@ -1275,6 +1297,7 @@ print_status_table() {
         fi
         ;;
       processing) processing=$((processing + 1)) ;;
+      needs_confirmation) needs_confirmation=$((needs_confirmation + 1)) ;;
       failed) failed=$((failed + 1)) ;;
       skipped) skipped=$((skipped + 1)) ;;
       rate_limited) rate_limited=$((rate_limited + 1)) ;;
@@ -1284,7 +1307,7 @@ print_status_table() {
   done < "$STATE_FILE"
 
   echo "=== Batch Progress ==="
-  echo "Total: $total | Completed: $completed | Processing: $processing | Failed: $failed | Pending: $pending | Skipped: $skipped | Rate Limited: $rate_limited | Paused: $paused_rate_limit"
+  echo "Total: $total | Completed: $completed | Processing: $processing | Failed: $failed | Pending: $pending | Skipped: $skipped | Rate Limited: $rate_limited | Paused: $paused_rate_limit | Needs confirmation: $needs_confirmation"
   if (( score_count > 0 )); then
     local avg
     # LC_ALL=C: under e.g. a German locale awk formats "%.1f" as "4,5"
@@ -1295,8 +1318,8 @@ print_status_table() {
   echo ""
 
   # Format the per-job table:
-  # Columns: ID, Status, Report, Score, Target (URL or Error Message)
-  printf "%-4s | %-17s | %-6s | %-5s | %-40s\n" "ID" "Status" "Report" "Score" "URL / Error"
+  # Columns: ID, Status, Report, Score, Target (URL or explanation)
+  printf "%-4s | %-17s | %-6s | %-5s | %-40s\n" "ID" "Status" "Report" "Score" "URL / Detail"
   printf "%-4s+%-19s+%-8s+%-7s+%-42s\n" "----" "-------------------" "--------" "-------" "------------------------------------------"
 
   header=true
@@ -1311,7 +1334,9 @@ print_status_table() {
     serror="${serror%$'\r'}"
     sreport="${sreport%$'\r'}"
     local target="$surl"
-    if [[ "$sstatus" == "failed" && -n "$serror" && "$serror" != "-" ]]; then
+    if [[ "$sstatus" == "needs_confirmation" ]]; then
+      target="Needs confirmation: $serror"
+    elif [[ "$sstatus" == "failed" && -n "$serror" && "$serror" != "-" ]]; then
       target="Error: $serror"
     fi
     # Trim target to fit nicely (e.g. 50 chars)
@@ -1428,6 +1453,12 @@ main() {
 
     local status
     status=$(get_status "$id")
+
+    # No command-line retry flag constitutes a user's agency answer.
+    if [[ "$status" == "needs_confirmation" ]]; then
+      echo "HOLD #$id: needs confirmation in the parent session ($url)"
+      continue
+    fi
 
     if [[ "$RESUME_PAUSED" == "true" ]]; then
       if [[ "$status" != "paused_rate_limit" ]]; then

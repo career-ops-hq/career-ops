@@ -228,6 +228,16 @@ A mode may tell you to run work in a background subagent (e.g. `scan`, or parall
 - Company, role, and compensation research is ALWAYS done **inline**, with the small explicit set of WebSearch/WebFetch queries the mode names (e.g. `oferta` Blocks C/D) — never delegated to a recursive research harness.
 - One `/career-ops <JD>` evaluates one role; it must never explode into a self-replicating swarm of agents. If you are about to delegate research or nest agents, stop and do it inline, bounded.
 
+<!-- guardrail:agency-confirmation -->
+**RULE: Agency confirmation must happen before any tracker, report, or CV write.** If the JD suggests an agency/recruiter intermediary ("our client", agency domain, undisclosed end employer), and the user has not explicitly identified or confirmed the agency for this posting, stop before evaluating or writing artifacts. A guessed agency, a Via value from the JD, blanket batch authorization, silence, and elapsed time are not confirmation.
+
+### Agency confirmation handoff (#4359)
+
+- **Interactive session:** ask which agency this posting came through. Wait for an explicit answer for this URL (or local JD reference). If the user cannot identify it or declines, leave it pending; do not invent a Via value. A direct-employer correction resolves the gate only when the user explicitly says this posting is direct.
+- **Delegated/headless worker:** return `status: needs_confirmation`, `reason: agency_confirmation`, the posting `url`, observed `agency` (string or null, evidence only), and the `question` for the parent. Stop immediately: no tracker row or TSV, no report, no CV in any format, no application drafts, and no pipeline completion. Return through the worker hand-back/stdout, never a placeholder report. Do not wait for a human inside the worker, spawn another agent, or write first and flag an override afterward.
+- **Parent/orchestrator:** surface the question with the URL and evidence; keep this item pending and show it separately from completed/failed evaluations. Other URLs may continue. Release any unused report-number reservation. Resume only after the user's explicit answer, passing that answer and its exact posting identity to a fresh single-pass worker or handling the posting interactively. Re-check liveness and other gates; reserve a fresh report number if the old reservation was released. A new URL needs its own answer. Only actual completed artifacts may enter the tracker merge and completion summary.
+- After confirmation, use the confirmed agency as Via; use `?` for an undisclosed end employer plus a distinguishing Notes descriptor. Never substitute the agency for the end employer. This gate also applies to localized modes and overrides unconditional "always write/register" instructions. It is not a new tracker lifecycle status.
+
 ### Time-to-offer priority
 - Working demo + metrics > perfection
 - Apply sooner > learn more

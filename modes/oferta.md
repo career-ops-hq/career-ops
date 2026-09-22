@@ -26,6 +26,10 @@ If `data/blacklist.md` exists, check the posting's company against it before Blo
 2. Wait for an explicit answer — never silently refuse, never silently proceed. The candidate's call always wins (same HITL spirit as the score < 4.0 rule): an explicit yes runs the full A-G evaluation as normal (note the override in the report notes); anything else stops here with no evaluation, report, or CV.
 3. No match, or no `data/blacklist.md` → proceed. A blacklist entry never changes any score anywhere — it is a gate, not a signal.
 
+## Agency confirmation gate (#1596, #4359)
+
+Before Block A or any tracker, report, or CV write, if the JD suggests an agency/recruiter intermediary ("our client", agency domain, no employer named), ask which agency this posting came through and wait for an explicit answer. Follow `modes/_shared.md` → **Agency confirmation handoff**: a delegated/headless worker returns `needs_confirmation` with the posting identity, evidence, and question, then stops without artifacts. The parent asks and resumes only with the user's explicit answer for this posting. Never write `Company: ?` / Via first and seek confirmation afterward. After confirmation, retain `?` for an unknown employer and the confirmed agency in Via.
+
 ## Bounded Research Budget
 
 Company, compensation, and hiring-signal research must be a single-pass lookup, not an open-ended investigation. This mode is an evaluation workflow, not deep company research.
