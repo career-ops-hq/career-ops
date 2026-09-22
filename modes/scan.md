@@ -30,6 +30,12 @@ Read `portals.yml` which contains:
 - `tracked_companies[].parser`: Optional local parser for SSR pages or stable HTML
 - `title_filter`: Keywords (positive/negative/seniority_boost) for filtering job titles
 
+Before using saved per-company WebSearch queries, run `node audit-portals.mjs --queries`.
+It checks enabled `scan_method: websearch` entries against `title_filter.positive`
+offline, and flags queries with no keyword overlap. Review warnings especially
+after changing target roles; synonyms or another language may legitimately differ.
+This is advisory: do not automatically rewrite queries or exclude a company.
+
 ## Discovery Strategy (4 Levels)
 
 ### Level 0 — Local Parser (CHEAPEST)
