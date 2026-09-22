@@ -572,6 +572,40 @@ title_filter:
 #       - "Registrar"
 #       - "Student Services"
 
+# -- Declared-field whitelists (optional, scan.mjs) --
+# title_filter judges a posting by its TITLE. Some boards publish a better
+# discriminator as a field of its own — an occupation code, a department —
+# which no title list can stand in for: one title spans several occupations,
+# and one occupation is advertised under countless titles.
+#
+# field_filters holds one whitelist per field, in the same keyword language as
+# title_filter (plain substring, `word:`, `stem:`). A target opts in with
+# `filter_on`; a target without it gates on title exactly as before.
+#
+#   filter_on: noc             # judge this target by `noc` instead of title
+#   filter_on: [title, noc]    # both must match (AND)
+#
+# The provider has to emit the field: e.g. a local_parser script adding
+# "noc": "22221" to each job object it prints. A posting without the field
+# PASSES rather than being dropped, and is counted as "Passed, field absent" in
+# the scan summary; a target that never supplies the field at all gets an
+# end-of-run warning that its whitelist is effectively off. `title` cannot be
+# a key here — title keywords belong in title_filter above.
+#
+# field_filters:
+#   noc:
+#     positive: ["stem:22", "stem:13"]   # occupation codes starting 22 or 13
+#
+# tracked_companies:
+#   - name: Example Occupation-Coded Board
+#     careers_url: https://example.com/jobs
+#     scan_method: local_parser
+#     filter_on: noc
+#     parser:
+#       command: node
+#       script: scripts/parsers/example-board-jobs.js
+#       format: jobs-json-v1
+
 # -- Search queries --
 # Each query triggers a WebSearch. Use site: to filter by portal.
 # The scanner extracts title, URL, and company from results.

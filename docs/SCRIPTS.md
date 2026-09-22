@@ -133,7 +133,7 @@ Processed TSVs are moved to `batch/tracker-additions/merged/`.
 
 Validates `portals.yml` before running the scanner. The validator is offline: it reads YAML, loads local provider IDs from `providers/*.mjs`, and checks common configuration mistakes without fetching any job boards.
 
-It reports errors for invalid YAML shape, unknown explicit providers, malformed URLs, empty filter keywords, and invalid local parser blocks. `tracked_companies` and `job_boards` entries are checked against the same schema, and their names share one namespace: a duplicate enabled name — within either list or across the two — is a warning (it may be intentional during a migration, but is worth reviewing).
+It reports errors for invalid YAML shape, unknown explicit providers, malformed URLs, empty filter keywords, invalid local parser blocks, and `field_filters` / `filter_on` declarations that would not filter (an unknown key, a block with no keyword, a `filter_on` naming a field with no block). `tracked_companies` and `job_boards` entries are checked against the same schema, and their names share one namespace: a duplicate enabled name — within either list or across the two — is a warning (it may be intentional during a migration, but is worth reviewing).
 
 ```bash
 npm run validate:portals
