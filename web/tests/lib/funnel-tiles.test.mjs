@@ -7,6 +7,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { cumulativeTiles, cumulativeTilesWithHistory } from "../../src/lib/funnel-tiles.mjs";
+import { canonStatus } from "../../src/lib/status-alias.mjs";
+import { parseApplications } from "../../src/lib/tracker-table.mjs";
 import { recoverFunnelStages, parseStatusLogStages } from '../../../funnel-stages.mjs';
 import { fileURLToPath } from 'node:url';
 const coreRoot = fileURLToPath(new URL('../../../', import.meta.url));
@@ -64,6 +66,16 @@ test('terminal states retain distinct ledger achievements, never orphan rows', a
 
 test('backfill IDs do not share history and snapshots include hired', async () => {
   assert.deepEqual(await cumulativeTilesWithHistory([{n:'N/A',status:'HIRED'}, {n:'N/A',status:'INTERVIEW'}], '', coreRoot), {interviews:2,offers:1});
+});
+
+test('markdown-formatted canonical tracker status retains snapshot achievements', async () => {
+  const tracker = `| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 2026-09-22 | Example | Engineer | 5 | **Offer** | - | - | |`;
+  const applications = parseApplications(tracker, coreRoot)
+    .map((app) => ({ ...app, status: canonStatus(app.status) }));
+  assert.equal(applications[0].status, 'OFFER');
+  assert.deepEqual(await cumulativeTilesWithHistory(applications, '', coreRoot), { interviews: 1, offers: 1 });
 });
 
 test('web tiles consume the core recovered-stage contract, including case normalization', async () => {
