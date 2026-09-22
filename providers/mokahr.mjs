@@ -75,6 +75,7 @@
 
 import { createDecipheriv } from 'crypto';
 import { htmlToText } from './_html-to-text.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 const API = 'https://app.mokahr.com/api/outer/ats-apply/website/jobs/v2';
 const DETAIL_HOST = 'app.mokahr.com';
@@ -152,7 +153,10 @@ export function parseMokaHrJobs(decrypted, companyName, tenantBaseUrl) {
     const title = j?.title;
     const id = j?.id;
     if (!title || id == null) continue;
-    const encodedId = encodeURIComponent(String(id));
+    // A lone surrogate in id throws URIError out of encodeURIComponent and
+    // aborts this loop, losing every job on the page. Drop just this one.
+    const encodedId = safeEncodeURIComponent(id);
+    if (encodedId === null) continue;
     // locations[].cityName is DISTRICT-level ("海淀区", "拱墅区"), not the
     // city/province — a plain cityName join produces a location string with
     // no "北京"/"China" substring at all, which portals.yml's location_filter

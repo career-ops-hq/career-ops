@@ -96,7 +96,8 @@ test('a PDF run keeps its original workspace when the marker changes before CLI 
     let childClosed = false;
     child.once('close', () => { childClosed = true; });
     let initial;
-    globalThis[spawnKey] = (_bin, _args, options) => { initial = options; return child; };
+    let fence;
+    globalThis[spawnKey] = (_bin, _args, options, policy) => { initial = options; fence = policy; return child; };
     let response;
     try {
       response = await run(new Request('http://localhost/api/run', {
@@ -105,6 +106,8 @@ test('a PDF run keeps its original workspace when the marker changes before CLI 
       }));
       assert.equal(response.status, 200);
       assert.equal(initial.cwd, a);
+      assert.equal(fence.cliId, 'fixture');
+      assert.deepEqual(fence.capabilities, { writes: false, network: false });
       assert.equal(initial.env.CAREER_OPS_TRACKER, path.join(a, 'data/applications.md'));
       put(code, '.career-ops-data', '../b');
       child.stdout.write('<<cv-html format="a4">>\n<!DOCTYPE html><html><body>Synthetic CV</body></html>\n<</cv-html>>');

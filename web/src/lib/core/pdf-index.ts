@@ -1,6 +1,6 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { careerOpsRoot, careerOpsCodeRoot } from "@/lib/career-ops";
+import { careerOpsTrackerPath, careerOpsCodeRoot } from "@/lib/career-ops";
 
 /**
  * ACL for the core's `resolvePdfIndexPath`/`resolveTrackerPath` (tracker-utils.mjs)
@@ -22,7 +22,6 @@ import { careerOpsRoot, careerOpsCodeRoot } from "@/lib/career-ops";
  */
 
 type TrackerUtils = {
-  resolveTrackerPath: (rootDir: string) => string;
   resolvePdfIndexPath: (trackerPath: string) => string;
 };
 
@@ -35,20 +34,20 @@ let warned = false;
  *  hardcoded literal here would reintroduce #2471 for non-default layouts, so
  *  callers must treat null as "can't resolve" rather than guessing a path. */
 export async function resolvePdfIndexPath(): Promise<string | null> {
-  const root = careerOpsRoot();
+  const tracker = careerOpsTrackerPath();
   const file = path.join(careerOpsCodeRoot(), "tracker-utils.mjs");
   const hit = modCache.get(file);
-  if (hit) return hit.resolvePdfIndexPath(hit.resolveTrackerPath(root));
+  if (hit) return hit.resolvePdfIndexPath(tracker);
   try {
     const mod = (await import(/* webpackIgnore: true */ pathToFileURL(file).href)) as Partial<TrackerUtils>;
-    if (typeof mod.resolveTrackerPath === "function" && typeof mod.resolvePdfIndexPath === "function") {
+    if (typeof mod.resolvePdfIndexPath === "function") {
       const utils = mod as TrackerUtils;
       modCache.set(file, utils); // only successes are cached (#2590)
-      return utils.resolvePdfIndexPath(utils.resolveTrackerPath(root));
+      return utils.resolvePdfIndexPath(tracker);
     }
     if (!warned) {
       warned = true;
-      console.warn(`[career-ops] ${file} has no resolveTrackerPath/resolvePdfIndexPath export — update career-ops to enable the tailored-CV viewer.`);
+      console.warn(`[career-ops] ${file} has no resolvePdfIndexPath export — update career-ops to enable the tailored-CV viewer.`);
     }
   } catch {
     if (!warned) {

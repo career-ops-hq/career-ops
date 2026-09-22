@@ -3,7 +3,7 @@ import path from "node:path";
 import * as yaml from "js-yaml";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { parseApplications } from "@/lib/tracker-table.mjs";
-import { resolveWorkspacePaths } from "@/lib/workspace-paths.mjs";
+import { resolveWorkspaceTrackerPath, resolveWorkspacePaths } from "@/lib/workspace-paths.mjs";
 // One definition of the `{n}-RESERVED.md` convention, shared with
 // run-cli-support.mjs — see report-files.mjs for why it lives there.
 import { isReservedReportFile } from "@/lib/report-files.mjs";
@@ -18,7 +18,8 @@ export function careerOpsRoot(): string {
   return resolveWorkspacePaths().dataRoot;
 }
 
-/** Runtime core checkout; a separate Data Root never supplies executable code. */
+/** Hosting checkout supplying core adapters, shared modules and rootScript().
+ * AI/PDF runs retain their separate complete-workspace requirement. */
 export function careerOpsCodeRoot(): string {
   return resolveWorkspacePaths().codeRoot;
 }
@@ -26,15 +27,17 @@ export function careerOpsCodeRoot(): string {
 /** Keep child processes on the same absolute Data Root after changing cwd or
  *  loading a core from another checkout. Preserve all other explicit overrides. */
 export function careerOpsEnv(): NodeJS.ProcessEnv & { CAREER_OPS_ROOT: string } {
-  const { codeRoot, dataRoot } = resolveWorkspacePaths();
+  const { dataRoot } = resolveWorkspacePaths();
   const env: NodeJS.ProcessEnv & { CAREER_OPS_ROOT: string } = { ...process.env, CAREER_OPS_ROOT: dataRoot };
-  // Older core writers resolve their default tracker from the script directory.
-  // Pin them to the same canonical file readApplications() displays, or a status
-  // change could update a different workspace's row with the same number.
-  if (codeRoot !== dataRoot && !env.CAREER_OPS_TRACKER?.trim()) {
-    env.CAREER_OPS_TRACKER = path.join(dataRoot, "data", "applications.md");
-  }
+  // Pin the displayed tracker before children change cwd (including AI search's
+  // temporary cwd); a relative override must never select a second tracker.
+  env.CAREER_OPS_TRACKER = resolveWorkspaceTrackerPath(dataRoot);
   return env;
+}
+
+/** Absolute tracker shared by readers, report links and spawned core writers. */
+export function careerOpsTrackerPath(): string {
+  return resolveWorkspaceTrackerPath(careerOpsRoot());
 }
 
 /**
@@ -166,8 +169,17 @@ export type Application = {
  * web-side mirror to drift (#954, PR #1598 review).
  */
 export function readApplications(): Application[] {
-  const md = read("data/applications.md");
-  if (!md) return [];
+  return readApplicationsFrom(careerOpsTrackerPath());
+}
+
+function readApplicationsFrom(tracker: string): Application[] {
+  let md: string;
+  try {
+    md = fs.readFileSync(tracker, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
   return parseApplications(md, careerOpsCodeRoot());
 }
 
@@ -335,10 +347,11 @@ export function findReportFile(n: string): string | null {
   const target = parseInt(n, 10);
   if (Number.isNaN(target)) return null;
   const root = careerOpsRoot();
-  const app = readApplications().find((a) => parseInt(a.n, 10) === target);
+  const tracker = careerOpsTrackerPath();
+  const app = readApplicationsFrom(tracker).find((a) => parseInt(a.n, 10) === target);
   const linked = app?.report.match(/\]\(([^)]+)\)/)?.[1];
   if (linked) {
-    const p = path.resolve(root, "data", linked);
+    const p = path.resolve(path.dirname(tracker), linked);
     // Containment: a hand-edited link must not resolve outside the project.
     if (p.endsWith(".md") && !isReservedReportFile(p) && containedRealpath(p, root)) return p;
   }

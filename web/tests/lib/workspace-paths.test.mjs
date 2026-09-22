@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { resolveWorkspacePaths } from '../../src/lib/workspace-paths.mjs';
+import { defaultWorkspaceTrackerPath, resolveWorkspacePaths } from '../../src/lib/workspace-paths.mjs';
 
 // Compare the web mirror with the real core resolver in a separate checkout.
 // No process-wide environment/cwd mutation and no access to a user's data.
@@ -38,12 +38,10 @@ for (const name of ['default', 'data-absolute', 'data-relative', 'root-absolute'
       if (['root-absolute', 'root-wins'].includes(name)) {
         env.CAREER_OPS_ROOT = alternate;
         expected = alternate;
-        expectedCode = alternate;
       }
       if (name === 'root-relative') {
         env.CAREER_OPS_ROOT = '../other checkout';
         expected = alternate;
-        expectedCode = alternate;
       }
       if (name === 'blank-root') env.CAREER_OPS_ROOT = '  ';
       if (['marker-absolute', 'marker-relative', 'empty-marker', 'env-wins-marker'].includes(name)) {
@@ -87,6 +85,26 @@ test('changing a marker is observed without a server restart', () => {
     assert.equal(resolveWorkspacePaths(options).dataRoot, join(sandbox, 'first'));
     writeFileSync(join(sandbox, '.career-ops-data'), 'second');
     assert.equal(resolveWorkspacePaths(options).dataRoot, join(sandbox, 'second'));
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true });
+  }
+});
+
+test('default tracker path matches core reads for existing layouts and core writes for a new workspace', () => {
+  const sandbox = realpathSync(mkdtempSync(join(tmpdir(), 'co-web-tracker-')));
+  try {
+    const env = { ...process.env };
+    delete env.CAREER_OPS_TRACKER;
+    copyFileSync(new URL('../../../path-resolver.mjs', import.meta.url), join(sandbox, 'path-resolver.mjs'));
+    for (const layout of ['canonical', 'legacy', 'both', 'empty']) {
+      const root = join(sandbox, layout);
+      mkdirSync(join(root, 'data'), { recursive: true });
+      if (layout === 'canonical' || layout === 'both') writeFileSync(join(root, 'data/applications.md'), 'canonical');
+      if (layout === 'legacy' || layout === 'both') writeFileSync(join(root, 'applications.md'), 'legacy');
+      const script = `import { resolveTrackerPath, resolveTrackerPathForWrite } from ${JSON.stringify(pathToFileURL(join(sandbox, 'path-resolver.mjs')).href)}; process.stdout.write(${layout === 'empty' ? 'resolveTrackerPathForWrite' : 'resolveTrackerPath'}(${JSON.stringify(root)}));`;
+      const core = execFileSync(process.execPath, ['--input-type=module', '-e', script], { env, encoding: 'utf8' });
+      assert.equal(defaultWorkspaceTrackerPath(root), core, layout);
+    }
   } finally {
     rmSync(sandbox, { recursive: true, force: true });
   }

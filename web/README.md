@@ -65,8 +65,8 @@ npm run build        # production build
 
 Workspace settings can be placed in `web/.env.local`:
 
-- `CAREER_OPS_ROOT=/path/to/checkout` preserves the web's existing behavior:
-  select another checkout for both user files and core scripts.
+- `CAREER_OPS_ROOT=/path/to/data` selects user files, matching the core resolver.
+  Executable scripts, templates and modes stay in the checkout hosting `web/`.
 - Otherwise, `CAREER_OPS_DATA_DIR=/path/to/data` selects user files while core
   scripts, templates and modes stay in the checkout hosting `web/`.
 - With neither variable set, `.career-ops-data` in the hosting checkout selects
@@ -75,6 +75,8 @@ Workspace settings can be placed in `web/.env.local`:
 Relative paths are resolved from the hosting checkout, not `web/`.
 `CAREER_OPS_ROOT` takes precedence over `CAREER_OPS_DATA_DIR` and the marker.
 An unreadable marker is an error; the web does not silently switch workspaces.
+`CAREER_OPS_TRACKER` overrides the tracker file; relative values resolve from
+the selected Data Root and are passed to core children as absolute paths.
 
 Separate user directories work for viewing and configuration. AI evaluation,
 CV/PDF generation and portal repair still require a complete selected workspace

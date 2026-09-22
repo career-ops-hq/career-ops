@@ -106,6 +106,18 @@ test('a separate Data Root retains the pipeline and access to its core', async (
       assert.equal(data.readLanguageConfig().evalModeFile, 'modes/de/angebot.md');
     });
 
+    await t.test('ROOT points at user files without executing modules from that directory', async () => {
+      process.env.CAREER_OPS_ROOT = user;
+      put(user, 'doctor.mjs', 'throw new Error("user data must not supply code");');
+      put(user, 'tracker-utils.mjs', 'throw new Error("user data must not supply code");');
+      assert.equal(data.readApplications()[0].company, 'Fixture Employer');
+      assert.equal(data.rootScript('doctor'), path.join(code, 'doctor.mjs'));
+      assert.equal(execFileSync(process.execPath, [data.rootScript('doctor')], { encoding: 'utf8' }), 'core-script-ran');
+      assert.equal(await resolvePdfIndexPath(), path.join(user, 'data/pdf-index.tsv'));
+      await withTrackerLock(path.join(user, 'data/applications.md'), () => 'uses hosting lock');
+      delete process.env.CAREER_OPS_ROOT;
+    });
+
     await t.test('scripts, canonical states, matching, manifest and real locks remain available', async () => {
       assert.equal(data.rootScript('doctor'), path.join(code, 'doctor.mjs'));
       assert.equal(execFileSync(process.execPath, [data.rootScript('doctor')], { encoding: 'utf8' }), 'core-script-ran');
@@ -139,6 +151,104 @@ test('a separate Data Root retains the pipeline and access to its core', async (
       assert.equal(fs.readFileSync(codeTracker, 'utf8'), codeBefore);
       assert.equal(fs.existsSync(path.join(code, 'data/status-log.tsv')), false);
       fs.writeFileSync(tracker, before);
+    });
+
+    await t.test('legacy tracker status updates keep the displayed rows and ledger together', async (t) => {
+      const canonical = path.join(user, 'data/applications.md');
+      const legacy = path.join(user, 'applications.md');
+      const before = fs.readFileSync(canonical, 'utf8');
+      fs.renameSync(canonical, legacy);
+      try {
+        await t.test('reader preserves the core legacy fallback', () => {
+          assert.equal(data.readApplications()[0]?.company, 'Fixture Employer');
+        });
+        await t.test('real child writer updates the legacy tracker', () => {
+          const output = execFileSync(process.execPath, [data.rootScript('set-status'), '7', 'Rejected', '--json'], {
+            cwd: user, env: data.careerOpsEnv(), encoding: 'utf8', timeout: 10_000,
+          });
+          const result = JSON.parse(output);
+          assert.equal(result.tracker, legacy);
+          assert.equal(data.readApplications()[0].status, 'Rejected');
+          assert.equal(fs.existsSync(canonical), false);
+          assert.match(fs.readFileSync(path.join(user, 'status-log.tsv'), 'utf8'), /7\t[^\t]+\tApplied\tRejected\t/);
+        });
+      } finally {
+        fs.writeFileSync(legacy, before);
+        fs.renameSync(legacy, canonical);
+      }
+    });
+
+    await t.test('canonical tracker wins over legacy unless an explicit override selects it', () => {
+      const canonical = path.join(user, 'data/applications.md');
+      const legacy = path.join(user, 'applications.md');
+      const before = fs.readFileSync(canonical, 'utf8');
+      put(user, 'applications.md', before.replace('Fixture Employer', 'Explicit Employer'));
+      try {
+        assert.equal(data.careerOpsEnv().CAREER_OPS_TRACKER, canonical);
+        assert.equal(data.readApplications()[0].company, 'Fixture Employer');
+        process.env.CAREER_OPS_TRACKER = legacy;
+        assert.equal(data.careerOpsEnv().CAREER_OPS_TRACKER, legacy);
+        assert.equal(data.readApplications()[0].company, 'Explicit Employer');
+        const output = execFileSync(process.execPath, [data.rootScript('set-status'), '7', 'Rejected', '--json'], {
+          cwd: user, env: data.careerOpsEnv(), encoding: 'utf8', timeout: 10_000,
+        });
+        assert.equal(JSON.parse(output).tracker, legacy);
+        assert.equal(data.readApplications()[0].status, 'Rejected');
+        assert.equal(fs.readFileSync(canonical, 'utf8'), before);
+      } finally {
+        delete process.env.CAREER_OPS_TRACKER;
+        fs.unlinkSync(legacy);
+      }
+    });
+
+    await t.test('relative tracker overrides keep reader, report links and child writes on one file', async () => {
+      const relative = 'custom/tracker.md';
+      const tracker = path.join(user, relative);
+      const canonical = path.join(user, 'data/applications.md');
+      const before = fs.readFileSync(canonical, 'utf8');
+      put(user, relative, before.replace('| 7 |', '| 41 |'));
+      put(code, 'web/custom/tracker.md', before.replace('Fixture Employer', 'Wrong cwd'));
+      process.env.CAREER_OPS_TRACKER = relative;
+      try {
+        assert.equal(data.readApplications()[0].n, '41');
+        assert.equal(data.careerOpsEnv().CAREER_OPS_TRACKER, tracker);
+        assert.equal(await resolvePdfIndexPath(), path.join(user, 'custom/data/pdf-index.tsv'));
+        assert.equal(data.findReportFile('41'), path.join(user, 'reports/007-fixture.md'));
+        const output = execFileSync(process.execPath, [data.rootScript('set-status'), '--row', '41', 'Rejected', '--json'], {
+          cwd: sandbox, env: data.careerOpsEnv(), encoding: 'utf8', timeout: 10_000,
+        });
+        assert.equal(JSON.parse(output).tracker, tracker);
+        assert.equal(data.readApplications()[0].status, 'Rejected');
+        assert.equal(fs.readFileSync(canonical, 'utf8'), before);
+      } finally {
+        delete process.env.CAREER_OPS_TRACKER;
+      }
+    });
+
+    await t.test('legacy report links use the tracker directory when row and report numbers differ', () => {
+      const canonical = path.join(user, 'data/applications.md');
+      const legacy = path.join(user, 'applications.md');
+      const before = fs.readFileSync(canonical, 'utf8');
+      fs.unlinkSync(canonical);
+      put(user, 'applications.md', before.replace('| 7 |', '| 42 |').replace('../reports/', 'reports/'));
+      try {
+        assert.equal(data.findReportFile('42'), path.join(user, 'reports/007-fixture.md'));
+      } finally {
+        fs.unlinkSync(legacy);
+        fs.writeFileSync(canonical, before);
+      }
+    });
+
+    await t.test('empty workspace pins new tracker writes to the canonical path', () => {
+      const tracker = path.join(user, 'data/applications.md');
+      const before = fs.readFileSync(tracker, 'utf8');
+      fs.unlinkSync(tracker);
+      try {
+        assert.deepEqual(data.readApplications(), []);
+        assert.equal(data.careerOpsEnv().CAREER_OPS_TRACKER, tracker);
+      } finally {
+        fs.writeFileSync(tracker, before);
+      }
     });
 
     await t.test('AI runs reject a data-only workspace before starting a CLI', async () => {
@@ -199,15 +309,15 @@ test('a separate Data Root retains the pipeline and access to its core', async (
       assert.equal(data.careerOpsCodeRoot(), code);
     });
 
-    await t.test('legacy relative ROOT retains its own core and hands children an absolute root', () => {
+    await t.test('relative ROOT selects only data and hands children an absolute root', () => {
       process.env.CAREER_OPS_ROOT = '../user data';
       process.env.CAREER_OPS_DATA_DIR = code;
       process.env.CAREER_OPS_TRACKER = 'explicit-tracker.md';
-      assert.equal(data.careerOpsCodeRoot(), user);
+      assert.equal(data.careerOpsCodeRoot(), code);
       assert.equal(data.careerOpsRoot(), user);
       const childEnv = data.careerOpsEnv();
       assert.equal(childEnv.CAREER_OPS_ROOT, user);
-      assert.equal(childEnv.CAREER_OPS_TRACKER, 'explicit-tracker.md');
+      assert.equal(childEnv.CAREER_OPS_TRACKER, path.join(user, 'explicit-tracker.md'));
       assert.equal(process.env.CAREER_OPS_ROOT, '../user data');
     });
 

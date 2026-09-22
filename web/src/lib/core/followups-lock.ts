@@ -48,8 +48,7 @@ type CoreWithFollowupsLock = (
 const modCache = new Map<string, CoreWithFollowupsLock>();
 
 /** Resolve the lock from the selected core, even when user files live elsewhere.
- *  Retain the legacy data-only CAREER_OPS_ROOT fallback when that selected
- *  checkout has no seeder. */
+ *  Older hosting checkouts without the seeder retain their fallback. */
 async function loadCoreLock(): Promise<CoreWithFollowupsLock | null> {
   const file = path.join(careerOpsCodeRoot(), "followup-seed.mjs");
   const cached = modCache.get(file);
@@ -75,7 +74,7 @@ export class FollowupsBusyError extends Error {
 /**
  * Run `fn` holding the core's follow-ups lock, releasing it on EVERY path.
  *
- * When the selected core has no seeder (legacy data-only CAREER_OPS_ROOT), runs `fn` with no file
+ * When an older hosting checkout has no seeder, runs `fn` with no file
  * lock: without the core there is no seeder to race, and `withLogLock` still
  * serializes this process. When the lock is contended past the web timeout,
  * throws `FollowupsBusyError` so the route can answer 409 rather than hang.
