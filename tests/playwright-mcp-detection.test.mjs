@@ -5,7 +5,7 @@
 // Each scenario uses a fresh --target dir so no MCP config leaks across cases.
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
 import { execFileSync } from 'child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -65,14 +65,13 @@ try {
   // at the user-data root. The CLI never reads a decoy config in that data root.
   {
     const dataRoot = mkdtempSync(join(tmpdir(), 'co-mcp-split-data-'));
-    const codeConfig = join(ROOT, '.mcp.json');
-    const hadCodeConfig = existsSync(codeConfig);
-    const previousCodeConfig = hadCodeConfig ? readFileSync(codeConfig, 'utf8') : null;
+    const codeRoot = mkdtempSync(join(tmpdir(), 'co-mcp-split-code-'));
+    const codeConfig = join(codeRoot, '.mcp.json');
     try {
       writeFileSync(codeConfig, JSON.stringify({
         mcpServers: { playwright: { command: 'npx', args: ['@playwright/mcp@latest'] } },
       }));
-      const state = runDoctor(dataRoot, [], {}, { executionCwd: ROOT });
+      const state = runDoctor(dataRoot, [], {}, { executionCwd: codeRoot });
       if (state.playwright_mcp?.claude === true
           && !state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
         pass('split checkout reads Playwright MCP config from code root');
@@ -80,8 +79,7 @@ try {
         fail(`split checkout ignored code-root MCP config: ${JSON.stringify(state)}`);
       }
     } finally {
-      if (hadCodeConfig) writeFileSync(codeConfig, previousCodeConfig);
-      else rmSync(codeConfig, { force: true });
+      rmSync(codeRoot, { recursive: true, force: true });
       rmSync(dataRoot, { recursive: true, force: true });
     }
   }
