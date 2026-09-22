@@ -30,13 +30,43 @@
 import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { resolveColumns, parseTrackerRow, extractTrackerReportNumbers } from './tracker-parse.mjs';
 import * as yaml from 'js-yaml';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const OBS_PATH = join(CAREER_OPS, 'data/salary-observations.tsv');
 const REPORTS_DIR = join(CAREER_OPS, 'reports');
+
+/**
+ * Canonical form of a tracker#/report# so `29` and `029` are one key.
+ *
+ * Column 1 of the observation log is a tracker#, and the docs tell the user to
+ * write it plainly (`29`), while report filenames are zero-padded to three
+ * digits (`029-*.md`). Joining those as raw strings made padding load-bearing:
+ * the same row wrote two different keys depending on how it was typed.
+ *
+ * Digits only, so `*` (the profile-desired pseudo-row) and anything unexpected
+ * pass through untouched rather than collapsing into each other.
+ *
+ * @param {string|number} raw - An id as written by a human or a filename.
+ * @returns {string} The id without leading zeros, or the input trimmed.
+ */
+export function normalizeId(raw) {
+  const s = String(raw ?? '').trim();
+  return /^\d+$/.test(s) ? String(parseInt(s, 10)) : s;
+}
+
+// Sort ids the way a reader expects: 9 before 10. Once ids are unpadded,
+// localeCompare would order them lexicographically ('10' < '9'), which the
+// previous zero-padded keys had hidden.
+const compareIds = (a, b) => {
+  const na = /^\d+$/.test(a), nb = /^\d+$/.test(b);
+  if (na && nb) return Number(a) - Number(b);
+  if (na !== nb) return na ? -1 : 1;
+  return a.localeCompare(b);
+};
 
 const args = process.argv.slice(2);
 const summaryMode = args.includes('--summary');
@@ -163,8 +193,9 @@ export function parseObservations(content) {
 // NOT folded/trust-ranked like desired/advertised/actual — every prior statement
 // stays visible (a candidate needs the full trail, not just the "best" one).
 export function getStatedObservations(observations, num) {
+  const want = normalizeId(num);
   return observations
-    .filter(o => o.type === 'stated' && o.num === num)
+    .filter(o => o.type === 'stated' && normalizeId(o.num) === want)
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
@@ -226,10 +257,15 @@ function pickEffective(type, candidates) {
 
 // --- Fold + aggregates ---
 export function fold(observations, apps, profileDesired) {
+  // Both sides of the join are canonicalised, so a row written `29` and a row
+  // written `029` fold into one application instead of two keys, one of which
+  // silently matched a different row's report (#4351).
+  const appsByNum = new Map(Object.entries(apps ?? {}).map(([k, v]) => [normalizeId(k), v]));
   const byNum = new Map();
   for (const o of observations) {
-    if (!byNum.has(o.num)) byNum.set(o.num, []);
-    byNum.get(o.num).push(o);
+    const key = normalizeId(o.num);
+    if (!byNum.has(key)) byNum.set(key, []);
+    byNum.get(key).push(o);
   }
 
   const applications = [];
@@ -237,14 +273,14 @@ export function fold(observations, apps, profileDesired) {
   const currencyMismatches = [];
   const unparseable = observations
     .filter(o => o.parsed === null && o.amount && o.amount !== '?')
-    .map(o => ({ num: o.num, type: o.type, raw: o.amount }));
+    .map(o => ({ num: normalizeId(o.num), type: o.type, raw: o.amount }));
   // pickEffective only trusts sources in TRUST[type]'s vocabulary — anything else
   // (e.g. the `recruiter_verbal` underscore typo) must be reported, not silently
   // dropped. Report-derived obs are always `jd` and profile obs `profile`, so in
   // practice only TSV lines can land here.
   const invalidSources = observations
     .filter(o => TRUST[o.type] && !Object.hasOwn(TRUST[o.type], o.source))
-    .map(o => ({ num: o.num, type: o.type, source: o.source }));
+    .map(o => ({ num: normalizeId(o.num), type: o.type, source: o.source }));
 
   const profileObs = profileDesired?.amount ? {
     num: '*', date: '0000-00-00', type: 'desired', amount: profileDesired.amount,
@@ -257,7 +293,8 @@ export function fold(observations, apps, profileDesired) {
   }
 
   for (const [num, obs] of byNum) {
-    if (!apps[num]) { orphans.push({ num, count: obs.length }); continue; }
+    const meta = appsByNum.get(num);
+    if (!meta) { orphans.push({ num, count: obs.length }); continue; }
     const trail = [...obs].sort((a, b) => (a.date < b.date ? -1 : 1));
     const desired = pickEffective('desired', profileObs ? [...obs, profileObs] : obs);
     const advertised = pickEffective('advertised', obs);
@@ -272,14 +309,14 @@ export function fold(observations, apps, profileDesired) {
     if (advertised && actual && !advComparable) currencyMismatches.push({ num, comparison: 'advertised-vs-actual', currencies: [advertised.currency, actual.currency] });
     if (desired && actual && !desComparable) currencyMismatches.push({ num, comparison: 'desired-vs-actual', currencies: [desired.currency, actual.currency] });
     applications.push({
-      num, company: apps[num].company, role: apps[num].role,
+      num, company: meta.company, role: meta.role,
       desired, advertised, actual, trail,
       advToActPct: advComparable ? pctDelta(advertised.value, actual.value) : null,
       desiredToActPct: desComparable ? pctDelta(desired.value, actual.value) : null,
     });
   }
   // apps with no observations at all but a profile desired still get the default
-  for (const [num, meta] of Object.entries(apps)) {
+  for (const [num, meta] of appsByNum) {
     if (!byNum.has(num) && profileObs) {
       applications.push({
         num, company: meta.company, role: meta.role,
@@ -288,7 +325,7 @@ export function fold(observations, apps, profileDesired) {
       });
     }
   }
-  applications.sort((a, b) => a.num.localeCompare(b.num));
+  applications.sort((a, b) => compareIds(a.num, b.num));
 
   const byCurrency = {};
   const byCompanyRole = {};
@@ -331,7 +368,7 @@ export function fold(observations, apps, profileDesired) {
     aggregates: { byCurrency, byCompanyRole },
     quality: {
       orphans, unparseable, invalidSources,
-      currencyMismatches: currencyMismatches.sort((a, b) => a.num.localeCompare(b.num)),
+      currencyMismatches: currencyMismatches.sort((a, b) => compareIds(a.num, b.num)),
       withoutActual: applications.filter(a => !a.actual).length, latestObservation: today,
     },
   };
@@ -404,6 +441,20 @@ company: "Initech"
 role: "Platform"
 score: 4.0
 advertised_comp: null
+\`\`\`
+`;
+
+// #4351: a report whose number (029) collides with a DIFFERENT tracker row's
+// number (29). Acme is report 029, linked from tracker row 1; tracker row 29 is
+// Globex and has no report.
+const REPORT_FIXTURE_4351_029 = `# Eval: Acme — Staff Engineer
+
+## Machine Summary
+
+\`\`\`yaml
+company: "Acme"
+role: "Staff Engineer"
+advertised_comp: "100k EUR"
 \`\`\`
 `;
 
@@ -514,7 +565,10 @@ function selfTest() {
   const crossCurrencyObs = parseObservations('004\t2026-06-30\tactual\t88k\tGBP\toffer-letter\tcross-currency on purpose');
   const result = fold([...obs, ...reportObs, ...crossCurrencyObs], apps, { amount: '90k', currency: 'EUR' });
 
-  const a1 = result.applications.find(a => a.num === '001');
+  // Ids in folded output are canonical (#4351): the fixture writes the padded
+  // form a user would type, and the join resolves it, so lookups go through
+  // normalizeId rather than hardcoding the unpadded result.
+  const a1 = result.applications.find(a => a.num === normalizeId('001'));
   // trust precedence: contract 86k (2026-07-05) wins over offer-letter 84k even though
   // BOTH lose to nothing — and specifically contract beats recruiter-verbal 90k
   assert(a1.actual.value === 86000 && a1.actual.source === 'contract', '001 actual = contract 86k');
@@ -526,7 +580,7 @@ function selfTest() {
   // trajectory preserved
   assert(a1.trail.filter(t => t.type === 'actual').length === 3, '001 keeps full actual trail');
 
-  const a2 = result.applications.find(a => a.num === '002');
+  const a2 = result.applications.find(a => a.num === normalizeId('002'));
   // the later recruiter_verbal (underscore typo) 99k and toString (prototype key)
   // 120k must NOT become effective — unrecognized sources are excluded from
   // pickEffective (Object.hasOwn, not `in`) and reported instead
@@ -534,7 +588,7 @@ function selfTest() {
   assert(a2.desired.source === 'profile' && a2.desired.value === 90000, '002 desired falls back to profile');
 
   // cross-currency guard: advertised USD vs actual GBP, desired EUR vs actual GBP
-  const a4 = result.applications.find(a => a.num === '004');
+  const a4 = result.applications.find(a => a.num === normalizeId('004'));
   assert(a4.advertised.currency === 'USD' && a4.actual.currency === 'GBP', '004 mixed currencies folded');
   assert(a4.advToActPct === null, `004 cross-currency adv->act pct must be null, got ${a4.advToActPct}`);
   assert(a4.desiredToActPct === null, `004 cross-currency desired->act pct must be null, got ${a4.desiredToActPct}`);
@@ -543,14 +597,14 @@ function selfTest() {
     'GBP aggregates exclude cross-currency comparisons');
 
   // data quality
-  assert(result.quality.orphans.length === 1 && result.quality.orphans[0].num === '007', 'orphan 007 reported');
+  assert(result.quality.orphans.length === 1 && result.quality.orphans[0].num === normalizeId('007'), 'orphan 007 reported');
   assert(result.quality.unparseable.length === 1 && result.quality.unparseable[0].raw === '9ok', 'typo 9ok reported');
   assert(result.quality.invalidSources.length === 2, `2 invalid sources reported, got ${result.quality.invalidSources.length}`);
-  assert(result.quality.invalidSources.some(s => s.num === '002' && s.type === 'actual' && s.source === 'recruiter_verbal'),
+  assert(result.quality.invalidSources.some(s => s.num === normalizeId('002') && s.type === 'actual' && s.source === 'recruiter_verbal'),
     'unrecognized source recruiter_verbal reported in invalidSources');
   // prototype-key source: `'toString' in tiers` is true via Object.prototype, so an
   // `in` check would let it through and poison the trust sort — must land here instead
-  assert(result.quality.invalidSources.some(s => s.num === '002' && s.type === 'actual' && s.source === 'toString'),
+  assert(result.quality.invalidSources.some(s => s.num === normalizeId('002') && s.type === 'actual' && s.source === 'toString'),
     'prototype-key source toString reported in invalidSources, not treated as trusted');
   // unparseable profile target must be reported, not silently dropped
   const badProfile = fold([], {}, { amount: 'competitive', currency: 'EUR' });
@@ -558,20 +612,20 @@ function selfTest() {
     'unparseable profile target reported');
   const mm = result.quality.currencyMismatches;
   assert(mm.length === 4, `4 currency mismatches reported, got ${mm.length}`);
-  assert(mm.some(m => m.num === '004' && m.comparison === 'advertised-vs-actual' && m.currencies[0] === 'USD' && m.currencies[1] === 'GBP'),
+  assert(mm.some(m => m.num === normalizeId('004') && m.comparison === 'advertised-vs-actual' && m.currencies[0] === 'USD' && m.currencies[1] === 'GBP'),
     'advertised-vs-actual mismatch reported for 004');
-  assert(mm.some(m => m.num === '004' && m.comparison === 'desired-vs-actual' && m.currencies[0] === 'EUR' && m.currencies[1] === 'GBP'),
+  assert(mm.some(m => m.num === normalizeId('004') && m.comparison === 'desired-vs-actual' && m.currencies[0] === 'EUR' && m.currencies[1] === 'GBP'),
     'desired-vs-actual mismatch reported for 004');
 
   // UNKNOWN guard: advertised_comp without a currency token (guess UNKNOWN) vs actual
   // logged with currency UNKNOWN — never comparable, even though the strings match
-  const a5 = result.applications.find(a => a.num === '005');
+  const a5 = result.applications.find(a => a.num === normalizeId('005'));
   assert(a5.advertised.currency === 'UNKNOWN' && a5.actual.currency === 'UNKNOWN', '005 both sides UNKNOWN currency');
   assert(a5.advToActPct === null, `005 UNKNOWN-vs-UNKNOWN adv->act pct must be null, got ${a5.advToActPct}`);
   assert(a5.desiredToActPct === null, `005 EUR-vs-UNKNOWN desired->act pct must be null, got ${a5.desiredToActPct}`);
-  assert(mm.some(m => m.num === '005' && m.comparison === 'advertised-vs-actual' && m.currencies[0] === 'UNKNOWN' && m.currencies[1] === 'UNKNOWN'),
+  assert(mm.some(m => m.num === normalizeId('005') && m.comparison === 'advertised-vs-actual' && m.currencies[0] === 'UNKNOWN' && m.currencies[1] === 'UNKNOWN'),
     'UNKNOWN-vs-UNKNOWN skip reported for 005');
-  assert(mm.some(m => m.num === '005' && m.comparison === 'desired-vs-actual' && m.currencies[0] === 'EUR' && m.currencies[1] === 'UNKNOWN'),
+  assert(mm.some(m => m.num === normalizeId('005') && m.comparison === 'desired-vs-actual' && m.currencies[0] === 'EUR' && m.currencies[1] === 'UNKNOWN'),
     'known-vs-UNKNOWN skip reported for 005');
   const unk = result.aggregates.byCurrency.UNKNOWN;
   assert(unk.confirmed === 1 && unk.meanAdvToActPct === null && unk.atOrAboveAdvertised === 0 && unk.atOrAboveDesired === 0,
@@ -602,32 +656,199 @@ function selfTest() {
   assert(legacy.aggregates.byCompanyRole['#101'].company === 'report #101' && legacy.aggregates.byCompanyRole['#101'].role !== null,
     'legacy bucket display fields render without null');
 
+  // --- #4351: column 1 is a tracker#, and the join honours it ---
+
+  // normalizeId: padding is not identity, and non-numeric ids pass through
+  assert(normalizeId('029') === '29' && normalizeId('29') === '29', 'padded and plain ids canonicalize together');
+  assert(normalizeId(29) === '29', 'numeric input accepted');
+  assert(normalizeId('*') === '*' && normalizeId('') === '', 'non-numeric ids pass through untouched');
+  assert(normalizeId('0') === '0', 'zero survives normalization');
+
+  // The scenario from #4351: tracker row 1 links report 029 (Acme); tracker row
+  // 29 (Globex) is recruiter-sourced and has no report at all.
+  const trackerRows = [
+    { num: '1', company: 'Acme', role: 'Staff Engineer', report: '[029](../reports/029-acme-2026-01-01.md)', notes: '' },
+    { num: '29', company: 'Globex', role: 'Principal Engineer', report: '', notes: 'recruiter-sourced' },
+  ];
+  const reportsByNum = new Map([
+    ['29', reportToObservation(REPORT_FIXTURE_4351_029, '029', '2026-01-01')],
+  ]);
+  const mapped = mapTrackerToApps(trackerRows, reportsByNum);
+
+  assert(mapped.apps['29'].company === 'Globex', 'a report-less tracker row still resolves, from the row itself');
+  assert(mapped.apps['1'].company === 'Acme', 'a row that links a report keeps its own company');
+  // The report's advertised figure belongs to the row that links it (row 1), not
+  // to the row that happens to share the report's number (row 29).
+  const advOn1 = mapped.observations.filter(o => o.num === '1' && o.type === 'advertised');
+  assert(advOn1.length === 1 && advOn1[0].parsed.mid === 100000, "report 029's advertised figure attaches to tracker row 1");
+  assert(!mapped.observations.some(o => o.num === '29' && o.type === 'advertised'), 'nothing from report 029 leaks onto tracker row 29');
+  assert(mapped.ambiguousIds.length === 1 && mapped.ambiguousIds[0].num === '29' && mapped.ambiguousIds[0].linkedBy === '1',
+    'the id that means two different applications is reported, not silently resolved');
+
+  // Both spellings of the tracker# land on Globex, and neither reaches Acme.
+  for (const written of ['29', '029']) {
+    const obs = parseObservations(`${written}\t2026-01-05\tactual\t150k\tEUR\trecruiter-verbal\tGlobex`);
+    const folded = fold(obs, mapped.apps, null);
+    const globex = folded.applications.find(a => a.num === '29');
+    const acme = folded.applications.find(a => a.num === '1');
+    assert(folded.quality.orphans.length === 0, `tracker# written as "${written}" is not an orphan`);
+    assert(globex && globex.company === 'Globex' && globex.actual.value === 150000,
+      `tracker# written as "${written}" folds onto Globex`);
+    assert(!acme || acme.actual === null, `tracker# written as "${written}" never puts Globex's figure on Acme`);
+  }
+
+  // A report the tracker does not link keeps its own id (rule 2), but a row that
+  // owns that id wins (rule 3 resolves to the row, which rule 2 must not undo).
+  const unlinked = mapTrackerToApps(
+    [{ num: '4', company: 'Initech', role: 'Platform', report: '', notes: '' }],
+    new Map([['9', reportToObservation(REPORT_FIXTURE_001, '009', '2026-06-20')]]),
+  );
+  assert(unlinked.apps['9']?.company === 'Acme', 'an unlinked report still registers under its own number');
+  assert(unlinked.apps['4']?.company === 'Initech', 'tracker rows survive alongside unlinked reports');
+  const claimed = mapTrackerToApps(
+    [{ num: '9', company: 'RowNine', role: 'Eng', report: '', notes: '' }],
+    new Map([['9', reportToObservation(REPORT_FIXTURE_001, '009', '2026-06-20')]]),
+  );
+  assert(claimed.apps['9'].company === 'RowNine', 'a tracker row keeps an id an unlinked report also claims');
+
+  // Ids sort the way a reader expects once they are unpadded (9 before 10).
+  const sortRows = [10, 9, 1].map(n => ({ num: String(n), company: `C${n}`, role: 'R', report: '', notes: '' }));
+  const sortObs = parseObservations([10, 9, 1].map(n => `${n}\t2026-01-0${1}\tactual\t1k\tEUR\tcontract\t`).join('\n'));
+  const sorted = fold(sortObs, mapTrackerToApps(sortRows, new Map()).apps, null);
+  assert(sorted.applications.map(a => a.num).join(',') === '1,9,10', `unpadded ids sort numerically, got ${sorted.applications.map(a => a.num).join(',')}`);
+
+  // --stated-for tolerates either spelling (mirror of the fold join)
+  const statedPad = parseObservations('029\t2026-07-01\tstated\t90k\tCAD\tuser\t\tpanel\tJane');
+  assert(getStatedObservations(statedPad, '29').length === 1, 'stated lookup by plain id finds a padded row');
+  assert(getStatedObservations(parseObservations('29\t2026-07-01\tstated\t90k\tCAD\tuser\t'), '029').length === 1,
+    'stated lookup by padded id finds a plain row');
+
   console.log('salary-gap self-test OK (parser + report extraction + fold + aggregates + currency guard)');
 }
 
 // --- Real sources ---
 const REPORT_FILE_RE = /^(\d{3})-.*-(\d{4}-\d{2}-\d{2})\.md$/;
 
-function collectSources() {
+/**
+ * Resolve applications from tracker rows, reaching each row's report through
+ * its Report link — the same way `set-status.mjs`, `outcome.mjs` and
+ * `check-jd-archive.mjs` already do it.
+ *
+ * Column 1 of `salary-observations.tsv` is documented as a tracker#, but this
+ * file used to build its application map from `reports/NNN-*.md` filenames, so
+ * it was really joining on report#. Those are two independent counters that
+ * "diverge permanently once any row exists without a report" (set-status.mjs),
+ * which had three consequences (#4351): a report-less row could never match and
+ * every observation on it was called an orphan; and once an id was padded to
+ * silence that orphan, the figure attached to whichever report happened to carry
+ * the same number — a different company, with no warning.
+ *
+ * Identity rules, in order:
+ *   1. A tracker row owns its own id. Company and role come from the row, so a
+ *      recruiter-sourced or backfilled row with no report folds like any other.
+ *   2. A report the tracker does not link still registers under its own number,
+ *      but only if no tracker row already claims that id. This keeps working for
+ *      logs written before the tracker carried Report links, without letting a
+ *      report re-take an id that belongs to a row.
+ *   3. A collision — report R exists, a tracker row is also numbered R, and
+ *      that report belongs to a different row — resolves to the tracker row and
+ *      is reported in `quality.ambiguousIds`, because a log written under the old
+ *      report#-join semantics means something different now and that should be
+ *      visible rather than silent.
+ *
+ * @param {object[]} rows - Parsed tracker rows from `parseTrackerRow`.
+ * @param {Map<string,object>} reportsByNum - Normalised report# -> `reportToObservation` result.
+ * @returns {{apps: object, observations: object[], ambiguousIds: object[]}}
+ */
+export function mapTrackerToApps(rows, reportsByNum) {
   const apps = {};
   const observations = [];
+  const linkedBy = new Map(); // report# -> tracker# that links it
 
-  if (existsSync(REPORTS_DIR)) {
-    for (const file of readdirSync(REPORTS_DIR)) {
-      const m = file.match(REPORT_FILE_RE);
-      if (!m) continue;
-      const [, num, date] = m;
-      let content;
-      try { content = readFileSync(join(REPORTS_DIR, file), 'utf-8'); } catch { continue; }
-      const r = reportToObservation(content, num, date);
-      if (r) {
-        apps[num] = { company: r.company, role: r.role };
-        if (r.observation) observations.push(r.observation);
-      } else {
-        // report exists but has no Machine Summary (legacy) — still a valid
-        // tracker row, so log observations against it are NOT orphans
-        apps[num] = { company: null, role: null };
-      }
+  for (const row of rows ?? []) {
+    const id = normalizeId(row?.num);
+    if (!/^\d+$/.test(id)) continue;
+    let company = row.company || null;
+    let role = row.role || null;
+    for (const rep of extractTrackerReportNumbers(row.report, row.notes).map(normalizeId)) {
+      const report = reportsByNum.get(rep);
+      if (!linkedBy.has(rep)) linkedBy.set(rep, id);
+      if (!report) continue;
+      // A legacy report (no Machine Summary) yields null company/role; only fill
+      // a gap the tracker row left, never overwrite what the row states.
+      if (!company) company = report.company || null;
+      if (!role) role = report.role || null;
+      if (report.observation) observations.push({ ...report.observation, num: id });
+    }
+    apps[id] = { company: company || null, role: role || null };
+  }
+
+  // Rule 2: reports no row links keep their own id, unless a row owns it.
+  for (const [rep, report] of reportsByNum) {
+    if (linkedBy.has(rep) || Object.hasOwn(apps, rep)) continue;
+    apps[rep] = { company: report.company || null, role: report.role || null };
+    if (report.observation) observations.push({ ...report.observation, num: rep });
+  }
+
+  // Rule 3: surface ids whose meaning changes between the two join semantics.
+  const ambiguousIds = [];
+  for (const [rep, owner] of linkedBy) {
+    if (owner !== rep && Object.hasOwn(apps, rep)) ambiguousIds.push({ num: rep, linkedBy: owner });
+  }
+
+  return { apps, observations, ambiguousIds: ambiguousIds.sort((a, b) => compareIds(a.num, b.num)) };
+}
+
+function readReportsByNum() {
+  const reportsByNum = new Map();
+  if (!existsSync(REPORTS_DIR)) return reportsByNum;
+  for (const file of readdirSync(REPORTS_DIR)) {
+    const m = file.match(REPORT_FILE_RE);
+    if (!m) continue;
+    const [, num, date] = m;
+    let content;
+    try { content = readFileSync(join(REPORTS_DIR, file), 'utf-8'); } catch { continue; }
+    const r = reportToObservation(content, num, date);
+    // A report with no Machine Summary is still a real application, so it
+    // registers with null company/role rather than being dropped.
+    reportsByNum.set(normalizeId(num), r ?? { company: null, role: null, observation: null });
+  }
+  return reportsByNum;
+}
+
+function readTrackerRows() {
+  let trackerPath;
+  try { trackerPath = resolveTrackerPath(CAREER_OPS); } catch { return null; }
+  if (!trackerPath || !existsSync(trackerPath)) return null;
+  let lines;
+  try { lines = readFileSync(trackerPath, 'utf-8').split('\n'); } catch { return null; }
+  const colmap = resolveColumns(lines);
+  const rows = [];
+  for (const line of lines) {
+    const row = parseTrackerRow(line, colmap);
+    if (row) rows.push(row);
+  }
+  return rows;
+}
+
+function collectSources() {
+  const reportsByNum = readReportsByNum();
+  const rows = readTrackerRows();
+  const observations = [];
+  let apps = {};
+  let ambiguousIds = [];
+
+  if (rows) {
+    const mapped = mapTrackerToApps(rows, reportsByNum);
+    apps = mapped.apps;
+    observations.push(...mapped.observations);
+    ambiguousIds = mapped.ambiguousIds;
+  } else {
+    // No readable tracker: fall back to report filenames, which is what this
+    // file did before #4351. An install without applications.md keeps working.
+    for (const [num, report] of reportsByNum) {
+      apps[num] = { company: report.company || null, role: report.role || null };
+      if (report.observation) observations.push({ ...report.observation, num });
     }
   }
 
@@ -635,7 +856,7 @@ function collectSources() {
     observations.push(...parseObservations(readFileSync(OBS_PATH, 'utf-8')));
   }
 
-  return { apps, observations };
+  return { apps, observations, ambiguousIds };
 }
 
 function loadProfileDesired() {
@@ -711,10 +932,17 @@ function printSummary(result) {
     console.log('  unrecognized sources: none');
   }
   if (quality.orphans.length) {
-    console.log(`  ⚠ ${quality.orphans.length} orphaned tracker#${quality.orphans.length === 1 ? '' : 's'} (observations without a matching report — renumbering/dedup can strand them):`);
+    console.log(`  ⚠ ${quality.orphans.length} orphaned tracker#${quality.orphans.length === 1 ? '' : 's'} (no tracker row carries that number — renumbering/dedup can strand them):`);
     for (const o of quality.orphans) console.log(`      #${o.num} (${o.count} observation${o.count === 1 ? '' : 's'})`);
   } else {
     console.log('  orphaned observations: none');
+  }
+  if (quality.ambiguousIds?.length) {
+    console.log(`  ⚠ ${quality.ambiguousIds.length} id${quality.ambiguousIds.length === 1 ? '' : 's'} mean${quality.ambiguousIds.length === 1 ? 's' : ''} two different applications (column 1 is a tracker#, so these resolve to the tracker row):`);
+    for (const a of quality.ambiguousIds) {
+      console.log(`      #${a.num}: tracker row #${a.num}, but report ${a.num} belongs to tracker row #${a.linkedBy}`);
+    }
+    console.log('      If an older observation on one of these meant the REPORT, re-point it at tracker row #' + quality.ambiguousIds[0].linkedBy + '.');
   }
   if (quality.currencyMismatches.length) {
     console.log(`  ⚠ ${quality.currencyMismatches.length} cross-currency comparison${quality.currencyMismatches.length === 1 ? '' : 's'} skipped (no FX conversion — excluded from all gap math):`);
@@ -748,8 +976,9 @@ function main() {
     return;
   }
 
-  const { apps, observations } = collectSources();
+  const { apps, observations, ambiguousIds } = collectSources();
   const result = fold(observations, apps, loadProfileDesired());
+  result.quality.ambiguousIds = ambiguousIds ?? [];
 
   if (summaryMode) {
     printSummary(result);
