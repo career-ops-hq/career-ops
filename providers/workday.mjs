@@ -264,6 +264,11 @@ function makeEndpoint(origin, tenant, site) {
     // externalPath is relative to the site, not the host root — without the
     // site segment the URL 404s.
     jobBase: `${origin}/${site}`,
+    // Same externalPath against the CXS host instead of the careers host
+    // returns the posting's DETAIL document (GET, no body). That is the only
+    // place a multi-location posting's real places exist — see
+    // MULTI_LOCATION_PLACEHOLDER_RE.
+    cxsBase: `${origin}/wday/cxs/${tenant}/${site}`,
     origin,
   };
 }
@@ -361,6 +366,153 @@ export function workdayDedupKey(job) {
   const reqId = m && /^[a-z]*\d[a-z0-9_]*\d{2,}$/.test(m[1]) ? m[1] : raw;
   if (!reqId) return null;
   return `workday:${parsed.hostname.toLowerCase()}:${reqId}`;
+}
+
+// Workday's LIST endpoint answers a posting attached to more than one location
+// with a COUNT where every other posting carries a place: `"53 Locations"`. It
+// is not a location, and `buildLocationFilter` matches locations by
+// case-insensitive substring, so the string contributes nothing to any tier —
+// the posting is then judged on `locationHintFromUrl` alone, which carries only
+// the posting's PRIMARY location (`/job/USA---Sunnyvale-CA/…`). A role open in
+// Sunnyvale AND Austin is therefore invisible to an `allow: [austin]` config
+// (#3860).
+//
+// Measured live on three tenants (60 page-0/1/2 postings each, 2026-09-07):
+// placeholders are 53 of 291 postings — crowdstrike 23, nvidia 29, cvshealth 1
+// — so this is an ordinary case, not an edge one. Against `allow:
+// [united states, usa, remote]`, 23 of those 53 were rejected while a real
+// location would have passed; against `allow: [austin, new york]`, 17.
+//
+// Anchored, and `Locations?` singular-tolerant: it must not fire on a real
+// place that merely contains a digit and the word ("100 Locations Plaza").
+const MULTI_LOCATION_PLACEHOLDER_RE = /^\s*\d+\s+locations?\s*$/i;
+
+/**
+ * True when a Workday list location is the count-placeholder rather than a place.
+ * Exported for tests/providers/workday-multi-location.test.mjs, which pins the boundary cases.
+ *
+ * @param {unknown} location - `locationsText` as the list endpoint returned it.
+ * @returns {boolean}
+ */
+export function isMultiLocationPlaceholder(location) {
+  return typeof location === 'string' && MULTI_LOCATION_PLACEHOLDER_RE.test(location);
+}
+
+// How many detail GETs one entry may spend to resolve placeholders — every
+// request the tenant sees, retries included, not one per posting. The
+// enrichment is one extra GET per placeholder posting, and nvidia ran 29
+// placeholders in 60 postings — a 2,000-posting tenant at that rate would add
+// ~1,000 requests, which is a different kind of scan than the one the caller
+// asked for. The cap bounds that; it is deliberately loud rather than silent
+// (see the console.error below), because a silent cap reads as "all locations
+// resolved" when it isn't.
+const MAX_DETAIL_REQUESTS = 200;
+
+/**
+ * The real places behind a multi-location placeholder, from the detail document.
+ *
+ * Measured on cvshealth/crowdstrike/nvidia (7 of 7 probes, then 53 of 53):
+ * `jobPostingInfo.location` holds the primary place and
+ * `jobPostingInfo.additionalLocations` the rest, and
+ * `1 + additionalLocations.length` equals the number the placeholder announced
+ * every single time. `jobPostingInfo.locationsText` does not exist at this
+ * level, so there is nothing else to read.
+ *
+ * Joined with `' · '` — the separator greenhouse/ashby/eightfold/gem/ibm/
+ * echojobs already use for exactly this, and the one
+ * `normalizeLocationForDedup` (scan.mjs) splits back into a sorted SET, so the
+ * order Workday happens to return does not reach a dedupe key.
+ *
+ * @param {unknown} detail - Parsed detail document.
+ * @returns {string} `' · '`-joined places, or '' when the document has none.
+ */
+export function locationsFromDetail(detail) {
+  const info = detail?.jobPostingInfo;
+  if (!info || typeof info !== 'object') return '';
+  const extra = Array.isArray(info.additionalLocations) ? info.additionalLocations : [];
+  const places = [info.location, ...extra]
+    .filter((p) => typeof p === 'string' && p.trim() !== '')
+    .map((p) => p.trim());
+  // Deduped: a tenant that repeats the primary place inside additionalLocations
+  // would otherwise ship it twice into a user-visible field.
+  return [...new Set(places)].join(' · ');
+}
+
+/**
+ * The posting's real publication date, from the detail document.
+ *
+ * The list endpoint offers only `postedOn`, relative prose that `parsePostedOn`
+ * turns into a coarse timestamp and that tops out at an unbounded "30+ Days
+ * Ago" (→ `undefined`). The detail document carries `jobPostingInfo.startDate`,
+ * an absolute date — so a posting we already paid a GET for can be dated
+ * exactly instead of approximately.
+ *
+ * Deliberately stricter than `Date.parse` alone: `Date.parse` falls back to an
+ * implementation-defined parse for anything non-ISO, so a tenant emitting some
+ * other date format could yield a plausible-looking timestamp on one Node build
+ * and NaN on another. Measured on cvshealth/crowdstrike/nvidia, 11 of 11 detail
+ * documents returned a bare `YYYY-MM-DD` and none carried a time — but 11 is a
+ * small sample and three further tenants could not be measured (their list
+ * endpoint answers HTTP 422), so anything that is not an ISO-8601 date is left
+ * alone rather than guessed at. `postedAt` then keeps its `parsePostedOn`
+ * value, which is the pre-existing behaviour.
+ *
+ * Note the granularity change this implies for a posting whose `postedOn` said
+ * "Posted Today": `Date.now()` becomes that day's UTC midnight, i.e. slightly
+ * EARLIER. That cannot cost a posting its place in a `--since` window —
+ * `resolveEffectiveAfter` truncates the cutoff to a date and
+ * `buildPostedDateFilter` parses it as UTC midnight too (scan.mjs), so both
+ * sides of the comparison are day-aligned.
+ *
+ * A second direction applies to the "Posted 30+ Days Ago" bucket.
+ * `parsePostedOn` returns `undefined` for that label, so without enrichment the
+ * posting carries no `postedAt` and passes any age-based filter
+ * ("don't penalize missing data"). Once `startDate` provides the real date, the
+ * posting is accurately dated and a `max_posting_age_days: 30` window can now
+ * legitimately exclude it. The "undated passes" rule is a fallback for
+ * ignorance, not a policy of inclusion; once the real date is in hand the filter
+ * decision is correct, not stricter.
+ *
+ * @param {unknown} detail - Parsed detail document.
+ * @returns {number|undefined} Epoch ms, or undefined when there is no usable date.
+ */
+export function postedAtFromDetail(detail) {
+  const raw = detail?.jobPostingInfo?.startDate;
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  // `YYYY-MM-DD`, or a time form that states its offset (`Z` / `±HH:MM`).
+  //
+  // The offset is REQUIRED once a time is present, and that is the whole point
+  // of this branch: Date.parse resolves a date-only string as UTC, and a
+  // date-time carrying Z or an offset as that offset, but a date-time WITHOUT
+  // one as the local time of whatever machine is scanning (ECMAScript
+  // §21.4.3.2). Measured: `2026-09-04T08:30:00` is 08:30Z on a UTC box, 12:30Z
+  // in America/New_York and 2026-09-**03**T23:30Z in Asia/Tokyo — the day
+  // itself moves. Since `--since` is compared day-against-day, that would make
+  // the same posting eligible on one machine and not on another. Such a string
+  // does not say which day it means, so it is left unparsed and `postedAt`
+  // keeps its `parsePostedOn` value.
+  const shape = /^(\d{4})-(\d{2})-(\d{2})(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2}))?$/.exec(trimmed);
+  if (!shape) return undefined;
+  // The shape above still admits a date that does not exist, and `Date.parse`
+  // does NOT reject those — it rolls them over (`2026-02-30` parses as
+  // 2026-03-02; measured on this Node, not assumed). A silently shifted date is
+  // worse than no date, so the calendar is checked on the Y-M-D components
+  // themselves. Doing it on the components rather than on the parsed timestamp
+  // keeps a legitimate offset form like `...T23:00:00-05:00`, whose UTC day is
+  // the NEXT one, from being thrown away as a rollover.
+  const [, y, m, d] = shape;
+  const asUtc = new Date(0);
+  // setUTCFullYear, not Date.UTC: Date.UTC maps a year of 0..99 onto 19xx, so
+  // Date.UTC(26, ...) is 1926 and the equality check below would reject the
+  // perfectly real date `0026-05-05`. Irrelevant to any live job posting, but
+  // this reads as a general ISO-8601 check and should not lie about one.
+  asUtc.setUTCFullYear(Number(y), Number(m) - 1, Number(d));
+  if (asUtc.getUTCFullYear() !== Number(y) || asUtc.getUTCMonth() !== Number(m) - 1 || asUtc.getUTCDate() !== Number(d)) {
+    return undefined;
+  }
+  const ms = Date.parse(trimmed);
+  return Number.isFinite(ms) ? ms : undefined;
 }
 
 export function parseWorkdayResponse(json, entry) {
@@ -679,6 +831,110 @@ export default {
       // recovered on top of the ceiling.
       const short = splitIncomplete || budgetExhausted ? ' (still incomplete)' : '';
       console.error(`⚠️  workday: ${entry.name} offset-clamped at ${WORKDAY_OFFSET_CEILING} — recovered ${jobs.length} jobs via ${slicesSpent} facet slices${short}`);
+    }
+
+    // Resolve `"53 Locations"` placeholders into the real places (#3860). Runs
+    // on the FINAL job list, after the facet split has deduped its overlapping
+    // slices — enriching before that would pay for the same posting once per
+    // slice it appears in.
+    //
+    // Skipped for a probe (`ctx.maxPages`): verify-portals/discover-ats only
+    // need to know the board answers and how many postings page 0 has, and
+    // charging a liveness check one GET per multi-location posting would make
+    // the probe cost scale with the board instead of staying at one request.
+    if (ctxCap === Infinity) {
+      const detailOpts = {
+        redirect: 'error',
+        headers: {
+          accept: 'application/json',
+          'user-agent': BROWSER_LIKE_USER_AGENT,
+          'accept-language': 'en-US,en;q=0.9',
+          referer: `${ep.jobBase}/`,
+        },
+      };
+      const placeholders = jobs.filter((j) => isMultiLocationPlaceholder(j.location));
+      // The detail document lives at the same externalPath under the CXS host.
+      // `job.url` is `jobBase + externalPath` (parseWorkdayResponse), so the
+      // path is recovered by removing the prefix rather than by re-parsing a
+      // URL whose site segment can itself contain slashes. A posting whose URL
+      // is not jobBase-relative has no recoverable path and is filtered out
+      // HERE rather than skipped inside the loop, so that the "left unresolved
+      // by the cap" count below cannot absorb it and report the wrong reason.
+      const pending = placeholders.filter((j) => j.url.startsWith(`${ep.jobBase}/`));
+      const unaddressable = placeholders.length - pending.length;
+      let resolved = 0;
+      let redated = 0;
+      let failed = 0;
+      // Two counters, because a retry is a request the tenant sees but not a
+      // posting the caller gets. `requests` is what MAX_DETAIL_REQUESTS bounds
+      // — every attempt, retries included — and `attempted` is how far down
+      // `pending` the loop reached, which is what "left unresolved" reports.
+      // Counting only postings made the cap a per-posting count wearing a
+      // request cap's name: with RETRY_POLICY at 3 retries, a tenant answering
+      // 503 turned a promised 200 GETs into 800 (measured, not reasoned) —
+      // and a failing tenant is exactly where restraint matters most.
+      let requests = 0;
+      let attempted = 0;
+      // Meters the transport itself rather than trusting a post-hoc count:
+      // withRetry calls ctx.fetchJson once per attempt, and on a SUCCESSFUL
+      // call after a transient failure it reports no attempt count anywhere
+      // (`err.attempts` only exists on the error it rethrows). Object.create
+      // rather than a spread so anything the caller's ctx carries — including
+      // accessors and prototype methods — stays reachable.
+      const meteredCtx = Object.create(ctx);
+      meteredCtx.fetchJson = (url, opts) => { requests++; return ctx.fetchJson(url, opts); };
+      for (const job of pending) {
+        if (requests >= MAX_DETAIL_REQUESTS) break;
+        const externalPath = job.url.slice(ep.jobBase.length);
+        attempted++;
+        // Same politeness as the pagination loop: one tenant, one request at a
+        // time, spaced. A burst of same-host GETs is what its WAF watches for.
+        if (attempted > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
+        // The last postings under the cap get fewer retries rather than the cap
+        // getting more requests: `remaining` is at least 1 (the loop broke
+        // otherwise), so this posting spends at most what is left and the
+        // documented ceiling holds for every tenant, not just healthy ones.
+        const remaining = MAX_DETAIL_REQUESTS - requests;
+        const policy = { ...RETRY_POLICY, retries: Math.min(RETRY_POLICY.retries, remaining - 1) };
+        // Fetched once and parsed twice: the location and the date both live in
+        // this one document, and a second GET for the date would double the
+        // cost of the enrichment for a field that is already in hand.
+        let detail;
+        try {
+          detail = await fetchJsonWithRetry(meteredCtx, `${ep.cxsBase}${externalPath}`, detailOpts, policy);
+        } catch {
+          // Fail soft, per posting. A detail document that 404s, rate-limits or
+          // returns something unexpected leaves the placeholder exactly as it
+          // was, which is the pre-#3860 behaviour — never a dropped posting and
+          // never an empty location, which reads as "location unknown"
+          // downstream and would be a worse lie than the count.
+          failed++;
+          continue;
+        }
+        const places = locationsFromDetail(detail);
+        if (places === '') { failed++; continue; }
+        job.location = places;
+        resolved++;
+        // Only on a posting whose location actually resolved: the date is a
+        // by-product of a request made for the location, never a reason to make
+        // one. A document with no usable startDate leaves postedAt as
+        // parsePostedOn left it — an absent date must not erase a present one.
+        const started = postedAtFromDetail(detail);
+        if (started !== undefined) {
+          job.postedAt = started;
+          redated++;
+        }
+      }
+      if (placeholders.length > 0) {
+        const capped = pending.length > attempted ? `, ${pending.length - attempted} left unresolved by the ${MAX_DETAIL_REQUESTS}-request cap` : '';
+        const unreadable = failed > 0 ? `, ${failed} detail document(s) unreadable` : '';
+        const unroutable = unaddressable > 0 ? `, ${unaddressable} with no site-relative path` : '';
+        // Reported separately from `resolved` because the two can differ: a
+        // detail document can carry places but no parseable startDate. Folding
+        // them into one number would hide that.
+        const dated = redated > 0 ? `, ${redated} dated exactly from the detail document` : '';
+        console.error(`ℹ️  workday: ${entry.name} resolved ${resolved} of ${placeholders.length} multi-location placeholder(s)${unreadable}${unroutable}${capped}${dated}`);
+      }
     }
 
     // The cap is a safety net, not a working limit — silent by design, but a

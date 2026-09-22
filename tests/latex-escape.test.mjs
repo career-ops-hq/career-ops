@@ -76,14 +76,15 @@ const CV_JSON = {
 
 /**
  * Render the CV template through build-cv-latex.mjs with the given email URL
- * and return the produced .tex source (or null when the CLI failed).
+ * (and any other payload fields to override) and return the produced .tex
+ * source (or null when the CLI failed).
  */
-function renderWithEmail(emailUrl) {
+function renderWithEmail(emailUrl, overrides = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'latex-href-'));
   try {
     const inPath = join(dir, 'cv.json');
     const outPath = join(dir, 'cv.tex');
-    writeFileSync(inPath, JSON.stringify({ ...CV_JSON, email: { url: emailUrl, display: 'test@example.com' } }), 'utf-8');
+    writeFileSync(inPath, JSON.stringify({ ...CV_JSON, email: { url: emailUrl, display: 'test@example.com' }, ...overrides }), 'utf-8');
     if (run(NODE, [join(ROOT, 'build-cv-latex.mjs'), inPath, outPath]) === null) return null;
     return readFileSync(outPath, 'utf-8');
   } finally {
@@ -119,4 +120,57 @@ for (const [label, input] of [['a bare address', 'test@example.com'], ['an expli
   rendered.includes('\\href{https://linkedin.com/in/test}{') && rendered.includes('\\href{https://github.com/test}{')
     ? pass(`rendered .tex keeps the outer \\href braces for LINKEDIN_URL/GITHUB_URL (${label} run)`)
     : fail(`LINKEDIN_URL/GITHUB_URL lost their outer \\href braces (${label} run)`);
+}
+
+// ---------------------------------------------------------------------------
+// %, #, ~ and & in link targets.
+//
+// sanitizeUrl() used to DELETE %, # and ~, so a percent-encoded LinkedIn
+// profile, a #fragment or a ~user homepage linked somewhere else in the LaTeX
+// CV (test%C3%A9 -> testC3A9) while the HTML CV kept the real URL. & went through
+// raw, and inside \resumeProjectHeading's argument a raw & (or %, or #) stops
+// pdflatex, so a project link with a query string broke the whole build. All
+// four are escaped for hyperref now, which writes the literal character into
+// the PDF link in both positions.
+const URL_CASES = [
+  ['a percent-encoded path', 'https://www.linkedin.com/in/test%C3%A9-user', 'https://www.linkedin.com/in/test\\%C3\\%A9-user'],
+  ['a #fragment', 'https://github.com/jdoe/proj#readme', 'https://github.com/jdoe/proj\\#readme'],
+  ['a ~user path', 'https://www.cs.example.edu/~jdoe/thesis/', 'https://www.cs.example.edu/\\~jdoe/thesis/'],
+  ['a query string with &', 'https://www.youtube.com/watch?v=abc&t=10s', 'https://www.youtube.com/watch?v=abc\\&t=10s'],
+];
+for (const [label, input, expected] of URL_CASES) {
+  const got = sanitizeUrl(input);
+  got === expected
+    ? pass(`sanitizeUrl escapes ${label} for \\href`)
+    : fail(`sanitizeUrl mishandled ${label}: ${input} => ${got} (expected ${expected})`);
+}
+
+// The remaining LaTeX specials are still dropped, as before.
+const structural = sanitizeUrl('https://example.com/a{b}c\\d^e$f');
+structural === 'https://example.com/abcdef'
+  ? pass('sanitizeUrl still drops { } \\ ^ $ from a URL')
+  : fail(`sanitizeUrl stopped dropping LaTeX-structural characters: ${structural}`);
+
+// Both positions a link can take in the rendered template: the header, and a
+// project name inside \resumeProjectHeading's argument.
+const withLinks = renderWithEmail('test@example.com', {
+  linkedin: { url: URL_CASES[0][1], display: 'linkedin.com/in/test-user' },
+  projects: [
+    { name: 'Thesis', url: URL_CASES[2][1], dates: '2023', bullets: ['Wrote it'] },
+    { name: 'Demo', url: URL_CASES[3][1], dates: '2024', bullets: ['Recorded it'] },
+  ],
+});
+if (withLinks === null) {
+  fail(`build-cv-latex.mjs failed to render links with %, #, ~ or &${formatRunFailure()}`);
+} else {
+  const lineWith = (needle) => (withLinks.split('\n').find((l) => l.includes(needle)) || `<no line with ${needle}>`).trim();
+  withLinks.includes(`\\href{${URL_CASES[0][2]}}{`)
+    ? pass('rendered .tex keeps the percent-encoded LinkedIn URL in the header \\href')
+    : fail(`header \\href lost the percent-encoding: ${lineWith('faLinkedin')}`);
+  withLinks.includes(`{\\href{${URL_CASES[2][2]}}{\\textbf{Thesis}}}`)
+    ? pass('rendered .tex keeps the ~user project URL inside \\resumeProjectHeading')
+    : fail(`project \\href lost the ~: ${lineWith('\\textbf{Thesis}')}`);
+  withLinks.includes(`{\\href{${URL_CASES[3][2]}}{\\textbf{Demo}}}`)
+    ? pass('rendered .tex escapes the & of a project URL inside \\resumeProjectHeading')
+    : fail(`project \\href left a raw & that stops pdflatex: ${lineWith('\\textbf{Demo}')}`);
 }

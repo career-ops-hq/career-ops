@@ -423,6 +423,101 @@ try {
     fail(`retry: attempts=${attempts}, slept=${slept}, jobs=${JSON.stringify(retried)}`);
   }
 
+  // ── pagination: a SHORT page is not the end when a total says otherwise ──
+  // American Express (egug pod, CX_1) reports TotalJobsCount 454 and serves
+  // 200, 199, 54 — the middle page is one row short because ORC filters a row
+  // server-side. The old `listLen < PAGE_SIZE` stop took that 199 as the end of
+  // the board and returned 399 of 454, losing 12% of the postings.
+  const amexPages = [200, 199, 54];
+  let amexRequests = 0;
+  const amexJobs = await oc.fetch(
+    { name: 'Amex', careers_url: careers, max_pages: 10 },
+    {
+      transport: 'http',
+      sleep: async () => {},
+      fetchText: async () => { throw new Error('fetchText should not be called'); },
+      fetchJson: async (url) => {
+        const offset = Number(new URL(url).searchParams.get('offset') || 0);
+        const rows = amexPages[amexRequests] ?? 0;
+        amexRequests++;
+        return { items: [{ TotalJobsCount: 454, requisitionList: Array.from({ length: rows }, (_, i) => ({ Id: String(offset + i), Title: `Role ${offset + i}` })) }], hasMore: false };
+      },
+    },
+  );
+  if (amexJobs.length === 453 && amexRequests === 3) {
+    pass('oraclecloud.fetch() walks past a short middle page while TotalJobsCount says more (453 rows, 3 requests)');
+  } else {
+    fail(`short-page walk: got ${amexJobs.length} jobs in ${amexRequests} requests, expected 453 in 3`);
+  }
+
+  // Once the walk has covered the reported total, it stops — no speculative
+  // extra request beyond the last page.
+  let pastTotalRequests = 0;
+  const pastTotal = await oc.fetch(
+    { name: 'Exact', careers_url: careers, max_pages: 10 },
+    {
+      transport: 'http',
+      sleep: async () => {},
+      fetchText: async () => {},
+      fetchJson: async (url) => {
+        const offset = Number(new URL(url).searchParams.get('offset') || 0);
+        pastTotalRequests++;
+        return { items: [{ TotalJobsCount: 400, requisitionList: Array.from({ length: 200 }, (_, i) => ({ Id: String(offset + i), Title: `R${offset + i}` })) }], hasMore: false };
+      },
+    },
+  );
+  if (pastTotalRequests === 2 && pastTotal.length === 400) {
+    pass('oraclecloud.fetch() stops once offset+PAGE_SIZE reaches the reported total');
+  } else {
+    fail(`past-total stop: ${pastTotalRequests} requests, ${pastTotal.length} jobs, expected 2 and 400`);
+  }
+
+  // A tenant that reports NO total keeps the old short-page stop — that is the
+  // only signal left, and paging on would loop until max_pages.
+  let noTotalRequests = 0;
+  const noTotal = await oc.fetch(
+    { name: 'NoTotal', careers_url: careers, max_pages: 10 },
+    {
+      transport: 'http',
+      sleep: async () => {},
+      fetchText: async () => {},
+      fetchJson: async (url) => {
+        const offset = Number(new URL(url).searchParams.get('offset') || 0);
+        const rows = noTotalRequests === 0 ? 200 : 12;
+        noTotalRequests++;
+        return { items: [{ requisitionList: Array.from({ length: rows }, (_, i) => ({ Id: String(offset + i), Title: `N${offset + i}` })) }], hasMore: false };
+      },
+    },
+  );
+  if (noTotalRequests === 2 && noTotal.length === 212) {
+    pass('oraclecloud.fetch() still stops on a short page when the tenant reports no total');
+  } else {
+    fail(`no-total stop: ${noTotalRequests} requests, ${noTotal.length} jobs, expected 2 and 212`);
+  }
+
+  // An empty page ends the walk even when the total claims more (a tenant whose
+  // count is stale must not drive the loop to max_pages).
+  let emptyRequests = 0;
+  const emptyStop = await oc.fetch(
+    { name: 'StaleTotal', careers_url: careers, max_pages: 10 },
+    {
+      transport: 'http',
+      sleep: async () => {},
+      fetchText: async () => {},
+      fetchJson: async (url) => {
+        const offset = Number(new URL(url).searchParams.get('offset') || 0);
+        const rows = emptyRequests === 0 ? 200 : 0;
+        emptyRequests++;
+        return { items: [{ TotalJobsCount: 9999, requisitionList: Array.from({ length: rows }, (_, i) => ({ Id: String(offset + i), Title: `S${offset + i}` })) }], hasMore: false };
+      },
+    },
+  );
+  if (emptyRequests === 2 && emptyStop.length === 200) {
+    pass('oraclecloud.fetch() stops on an empty page even when the reported total is stale');
+  } else {
+    fail(`empty-page stop: ${emptyRequests} requests, ${emptyStop.length} jobs, expected 2 and 200`);
+  }
+
 } catch (e) {
   fail(`oraclecloud provider tests crashed: ${e.message}`);
 }

@@ -8,7 +8,7 @@ import { isNestedCheckout } from '../lib/mjs-files.mjs';
 // locale from FROZEN_EVALUATION_MODES here; keep it in KNOWN_EVALUATION_MODES.
 export const FROZEN_EVALUATION_MODES = new Set([
   // modes/<lang>/oferta.md (#3669)
-  'da/oferta.md', 'es/oferta.md', 'pl/oferta.md', 'pt/oferta.md', 'ua/oferta.md',
+  'da/oferta.md', 'pl/oferta.md', 'pt/oferta.md', 'ua/oferta.md',
   // market-named evaluation modes (#3828)
   'de/angebot.md', 'fr/offre.md', 'hi/naukri.md', 'id/lowongan.md', 'it/annuncio.md',
   'ko/gonggo.md', 'nl/vacature.md', 'tr/is-ilani.md',
