@@ -1147,6 +1147,24 @@ process_offer() {
       ' "$worker_result_json" "$url" "$id"; then
         question="Invalid confirmation handoff identity/reason; parent must inspect the job log and ask for this URL"
       fi
+      local tracker_artifact="$TRACKER_DIR/$id.tsv"
+      local -a report_artifacts=()
+      if [[ -n "$report_num" && "$report_num" != "-" ]]; then
+        shopt -s nullglob
+        report_artifacts=("$REPORTS_DIR/$report_num-"*.md)
+        shopt -u nullglob
+      fi
+      if [[ -f "$tracker_artifact" || ${#report_artifacts[@]} -gt 0 ]]; then
+        local quarantine_dir="$LOGS_DIR/quarantine"
+        mkdir -p "$quarantine_dir"
+        if [[ -f "$tracker_artifact" ]]; then
+          mv "$tracker_artifact" "$quarantine_dir/$id-tracker.tsv"
+        fi
+        question="Worker violated the confirmation hold by writing artifacts; inspect the quarantined tracker/report before answering"
+        update_state_retrying "$id" "$url" "needs_confirmation" "$started_at" "$completed_at" "-" "-" "$question" "$retries" || true
+        echo "    ERROR: confirmation hold produced artifacts; reservation kept and tracker merge skipped." >&2
+        return 2
+      fi
       local hold_rc=0
       update_state_retrying "$id" "$url" "needs_confirmation" "$started_at" "$completed_at" "-" "-" "$question" "$retries" || hold_rc=$?
       release_report_num "$report_num"
@@ -1576,8 +1594,8 @@ main() {
           fi
         done
         # Compact arrays
-        pids=("${pids[@]}")
-        pid_ids=("${pid_ids[@]}")
+        pids=(${pids[@]+"${pids[@]}"})
+        pid_ids=(${pid_ids[@]+"${pid_ids[@]}"})
         if (( parallel_rc != 0 )); then
           break
         fi
@@ -1600,7 +1618,7 @@ main() {
     done
 
     # Wait for remaining workers
-    for pid in "${pids[@]}"; do
+    for pid in ${pids[@]+"${pids[@]}"}; do
       worker_rc=0
       wait "$pid" 2>/dev/null || worker_rc=$?
       if (( worker_rc != 0 )); then

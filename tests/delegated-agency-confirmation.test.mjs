@@ -35,6 +35,9 @@ try {
   writeFileSync(harness, `set -euo pipefail
 cd "$(dirname "$0")"
 REPORTS_DIR="$PWD/reports"
+TRACKER_DIR="$PWD/tracker-additions"
+LOGS_DIR="$PWD/logs"
+mkdir -p "$TRACKER_DIR" "$LOGS_DIR"
 log_file="$PWD/worker.log"
 MAX_RETRIES=2
 MIN_SCORE=0
@@ -73,6 +76,18 @@ handle_result
     assert.equal(readFileSync(join(work, 'released'), 'utf8'), '042');
     assert.match(output, /https:\/\/jobs.example.test\/1.*Which agency/);
     assert.doesNotMatch(output, /Completed|Failed/);
+  });
+  check('confirmation artifacts fail closed, keep the reservation, and quarantine tracker data', () => {
+    writeFileSync(join(work, 'tracker-additions/1.tsv'), 'unconfirmed tracker row\n');
+    assert.throws(() => handle({ status: 'needs_confirmation', question: 'Which agency?' }), (error) => {
+      assert.equal(error.status, 2);
+      assert.match(error.stderr, /reservation kept and tracker merge skipped/);
+      return true;
+    });
+    assert.equal(existsSync(join(work, 'released')), false);
+    assert.equal(existsSync(join(work, 'tracker-additions/1.tsv')), false);
+    assert.equal(readFileSync(join(work, 'logs/quarantine/1-tracker.tsv'), 'utf8'), 'unconfirmed tracker row\n');
+    rmSync(join(work, 'logs/quarantine/1-tracker.tsv'), { force: true });
   });
   check('handoff question control characters cannot split batch state fields', () => {
     const { fields } = handle({ status: 'needs_confirmation', question: 'Agency?\tConfirm\nplease\u001fnow' });
