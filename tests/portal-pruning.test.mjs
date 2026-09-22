@@ -39,6 +39,18 @@ check('pruning honors thresholds and healthy streak resets', () => {
   assert.equal(recommend(config, scan, health + '\n2026-09-22\tRot\treachable', now).rotted.length, 0);
   assert.equal(recommend(config + 'portal_prune_quiet_days: 100\n', scan, health, now).neverProduced.length, 0);
 });
+check('pruning orders health evidence chronologically before computing the streak', () => {
+  const reversed = [
+    '2026-09-22\tRot\treachable',
+    '2026-09-20T03:00:00.000Z\tRot\tnetwork',
+    '2026-09-20T02:00:00.000Z\tRot\tserver',
+    '2026-09-20T01:00:00.000Z\tRot\tslug_gone',
+  ].join('\n');
+  const r = recommend(config, scan, reversed, now);
+  assert.equal(r.rotted.length, 0);
+  assert.deepEqual(r.healthyButQuiet.map(x => x.company), ['Rot']);
+  assert.equal(r.healthyButQuiet[0].lastObserved, '2026-09-22');
+});
 check('pruning tolerates torn/future rows and keeps exact name matching', () => {
   const r = recommend(config, scan.replace(/Quiet/g, 'Quiet Inc.'), health + '\n2027-01-01\tQuiet\tslug_gone\ntorn', now);
   assert.equal(r.healthyButQuiet.length, 0);

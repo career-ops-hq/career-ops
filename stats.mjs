@@ -416,9 +416,14 @@ export function computePortalRecommendations(portalsContent, scanContent, health
     if (!lastMatch.has(key) || c[1] > lastMatch.get(key)) lastMatch.set(key, c[1]);
   }
   const health = new Map();
+  const healthRows = [];
   for (const line of String(healthContent ?? '').split('\n')) {
     const [date, company, status] = line.trimEnd().split('\t');
     if (!validDate(date) || !company || !['reachable', 'empty', 'slug_gone', 'network', 'auth', 'server', 'unknown'].includes(status)) continue;
+    healthRows.push({ date, company, status });
+  }
+  healthRows.sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
+  for (const { date, company, status } of healthRows) {
     const key = company.toLowerCase();
     const h = health.get(key) || { firstObserved: date, lastObserved: date, streak: 0, status };
     h.firstObserved = date < h.firstObserved ? date : h.firstObserved;
