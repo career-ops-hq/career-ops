@@ -80,8 +80,8 @@ Options:
   --max-retries N      Max retry attempts per offer (default: 2)
   --min-score N        Skip PDF/tracker for offers scoring below N (default: 0 = off)
   --skip-pdf           Skip PDF generation entirely (write ❌ in tracker PDF column)
-  --rate-limit-sleep N Seconds to wait before retrying a rate-limited worker
-                       (default: 300; claude only)
+  --rate-limit-sleep N Maximum adaptive retry delay in seconds; 0 pauses immediately
+                       (default: 300; range: 0–2147483647; claude only)
   --status             Show batch progress and a per-job table, then exit
   --watch              Live-refresh progress until the run completes
   -h, --help           Show this help
@@ -139,6 +139,14 @@ done
 
 if ! [[ "$RATE_LIMIT_SLEEP" =~ ^[0-9]+$ ]]; then
   echo "ERROR: --rate-limit-sleep must be a non-negative integer (seconds)."
+  exit 1
+fi
+# Normalize decimal input before shell arithmetic (08 must not mean octal),
+# and bound it before conversion so oversized input cannot wrap around.
+RATE_LIMIT_SLEEP=$(printf '%s' "$RATE_LIMIT_SLEEP" | sed 's/^0*//')
+RATE_LIMIT_SLEEP=${RATE_LIMIT_SLEEP:-0}
+if [[ ${#RATE_LIMIT_SLEEP} -gt 10 ]] || { [[ ${#RATE_LIMIT_SLEEP} -eq 10 ]] && [[ "$RATE_LIMIT_SLEEP" > 2147483647 ]]; }; then
+  echo "ERROR: --rate-limit-sleep must not exceed 2147483647 seconds."
   exit 1
 fi
 
@@ -695,6 +703,53 @@ is_session_limit_log() {
   grep -Eiq '(session limit|resets [0-9:]+[ap]m|usage limit|limit[[:space:]]+reached)' "$log_file"
 }
 
+# Print a delay or "pause". Only standalone delta-seconds headers are trusted;
+# never feed worker text into shell arithmetic. awk compares before formatting,
+# so even an arbitrarily long integer header safely requests a pause.
+rate_limit_delay() {
+  local log_file="$1" retry="$2" base delay hint step
+  if (( RATE_LIMIT_SLEEP == 0 )); then
+    echo pause
+    return
+  fi
+  base=30
+  (( base <= RATE_LIMIT_SLEEP )) || base=$RATE_LIMIT_SLEEP
+  hint=$(LC_ALL=C awk -v cap="$RATE_LIMIT_SLEEP" '
+    tolower($0) ~ /^[[:space:]]*retry-after:[[:space:]]*[0-9]+[[:space:]]*$/ {
+      value=$0
+      sub(/^[^:]*:[[:space:]]*/, "", value)
+      if (value + 0 > cap) over=1
+      if (value + 0 > largest) largest=value + 0
+      found=1
+    }
+    END {
+      if (over) print "pause"
+      else if (found) printf "%.0f\n", largest
+    }
+  ' "$log_file")
+  if [[ "$hint" == pause ]]; then
+    echo pause
+    return
+  fi
+  delay=$base
+  if [[ -n "$hint" ]]; then
+    (( hint <= delay )) || delay=$hint
+  else
+    # Saturate before doubling, avoiding exponentiation/overflow even on resume.
+    for (( step=0; step<retry && delay<RATE_LIMIT_SLEEP; step++ )); do
+      if (( delay > RATE_LIMIT_SLEEP / 2 )); then
+        delay=$RATE_LIMIT_SLEEP
+      else
+        delay=$((delay * 2))
+      fi
+    done
+  fi
+  # Upward-only jitter never undercuts Retry-After or the base delay.
+  delay=$((delay + delay * (RANDOM % 21) / 100))
+  (( delay <= RATE_LIMIT_SLEEP )) || delay=$RATE_LIMIT_SLEEP
+  echo "$delay"
+}
+
 mark_paused_rate_limit() {
   local id="$1" url="$2" started_at="$3" report_num="$4" retries="$5" log_file="$6"
   local completed_at
@@ -1045,12 +1100,20 @@ process_offer() {
         terminal_failure_recorded=true
         break
       fi
+      local retry_delay
+      retry_delay=$(rate_limit_delay "$log_file" "$retries")
+      if [[ "$retry_delay" == pause ]]; then
+        mark_paused_rate_limit "$id" "$url" "$started_at" "$report_num" "$retries" "$log_file"
+        echo "    ⏸️  Retry-After exceeds --rate-limit-sleep; pausing batch without consuming retry budget."
+        terminal_failure_recorded=true
+        break
+      fi
       retries=$((retries + 1))
       local retry_completed_at
       retry_completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-      update_state_retrying "$id" "$url" "rate_limited" "$started_at" "$retry_completed_at" "$report_num" "-" "rate-limit; retrying after ${RATE_LIMIT_SLEEP}s" "$retries" || true
-      echo "    ⏳ Rate limited (attempt $retries/$MAX_RETRIES). Waiting ${RATE_LIMIT_SLEEP}s before retry..."
-      sleep "$RATE_LIMIT_SLEEP"
+      update_state_retrying "$id" "$url" "rate_limited" "$started_at" "$retry_completed_at" "$report_num" "-" "rate-limit; retrying after ${retry_delay}s" "$retries" || true
+      echo "    ⏳ Rate limited (attempt $retries/$MAX_RETRIES). Waiting ${retry_delay}s before retry..."
+      sleep "$retry_delay"
       continue
     fi
 
