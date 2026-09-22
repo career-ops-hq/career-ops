@@ -183,6 +183,11 @@
 # the provider) is older than N days. Offers from providers that expose no date
 # are never skipped — same "don't penalize missing data" rule as location_filter.
 # Absent, 0, or non-positive → disabled (all ages pass).
+# This applies to every source, including an employer's own ATS board.
+# An old posting date does not prove a role is closed: evergreen roles may
+# remain open for months. Increase the window or disable this filter to include
+# them, then verify the specific posting before applying. There is currently
+# no per-source exemption; disabling this filter affects all sources.
 #
 # max_posting_age_days: 45
 #
