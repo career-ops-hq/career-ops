@@ -5,7 +5,7 @@
 <td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
 <td valign="middle">
 <strong>Måneder med at sende CV'er ud i stilheden.</strong> Så jeg byggede det filter, jeg havde brug for.<br>
-<strong>740 opslag. 68 var værd at søge. 12 samtaler. 1 tilbud.</strong><br>
+<strong>740 opslag. 68 ansøgt. 12 samtaler. 1 tilbud.</strong><br>
 Jeg var den første bruger. <strong>Jeg fik jobbet.</strong> Så gjorde jeg det open source.
 </td>
 </tr>
@@ -23,7 +23,7 @@ Jeg var den første bruger. <strong>Jeg fik jobbet.</strong> Så gjorde jeg det 
 </div>
 
 <p align="center">
-  Virksomheder bruger AI til at filtrere kandidater. <strong>Jeg gav kandidater AI til at <em>vælge</em> virksomheder.</strong><br>
+  Virksomheder bruger AI til at filtrere kandidater. <strong>Jeg gav kandidaterne AI, så de kan <em>vælge</em> virksomhederne.</strong><br>
   På din egen maskine fortæller den dig, hvilke job der er ægte, hvilke der passer, og <strong>søger aldrig i dit navn.</strong>
 </p>
 
@@ -242,7 +242,7 @@ career-ops bruger en fælles kommandorouter. I CLI'er, der registrerer slash-kom
 /career-ops           → Vis alle tilgængelige kommandoer
 /career-ops {JD}      → AUTO-PIPELINE: vurdering + rapport + PDF + tracker (indsæt tekst eller URL)
 /career-ops pipeline  → Behandl ventende URL'er fra indbakken (data/pipeline.md)
-/career-ops oferta    → Kun vurdering, blok A til G (ingen automatisk PDF)
+/career-ops oferta    → Kun vurdering, blok A til H (ingen automatisk PDF)
 /career-ops ofertas   → Sammenlign og rangér flere opslag
 /career-ops contacto  → LinkedIn-trækket: find kontakter + skriv udkast til besked
 /career-ops deep      → Prompt til dyb research af virksomheden

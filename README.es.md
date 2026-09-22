@@ -5,7 +5,7 @@
 <td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
 <td valign="middle">
 <strong>Meses mandando CVs al silencio.</strong> Así que construí el filtro que necesitaba.<br>
-<strong>740 ofertas. 68 merecían candidatura. 12 entrevistas. 1 oferta.</strong><br>
+<strong>740 ofertas. 68 candidaturas. 12 entrevistas. 1 oferta.</strong><br>
 Fui su primer usuario. <strong>Conseguí el trabajo.</strong> Luego lo liberé como open source.
 </td>
 </tr>
@@ -23,7 +23,7 @@ Fui su primer usuario. <strong>Conseguí el trabajo.</strong> Luego lo liberé c
 </div>
 
 <p align="center">
-  Las empresas usan IA para filtrar candidatos. <strong>Yo di a los candidatos IA para <em>elegir</em> empresas.</strong><br>
+  Las empresas usan IA para descartarte. <strong>Yo le di a los candidatos IA para <em>elegirlas</em>.</strong><br>
   En tu máquina, te dice qué ofertas son reales, cuáles encajan, y <strong>nunca aplica en tu nombre.</strong>
 </p>
 
@@ -242,7 +242,7 @@ career-ops usa un enrutador de comandos compartido. En los CLIs que registran co
 /career-ops           → Muestra todos los comandos disponibles
 /career-ops {JD}      → AUTO-PIPELINE: evaluación + informe + PDF + tracker (pega texto o URL)
 /career-ops pipeline  → Procesa las URLs pendientes de la bandeja (data/pipeline.md)
-/career-ops oferta    → Solo evaluación, bloques A a G (sin PDF automático)
+/career-ops oferta    → Solo evaluación, bloques A a H (sin PDF automático)
 /career-ops ofertas   → Compara y ordena varias ofertas
 /career-ops contacto  → Jugada maestra en LinkedIn: encuentra contactos + redacta el mensaje
 /career-ops deep      → Prompt de investigación en profundidad sobre la empresa

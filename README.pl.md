@@ -5,7 +5,7 @@
 <td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
 <td valign="middle">
 <strong>Miesiące wysyłania CV w ciszę.</strong> Więc zbudowałem filtr, którego potrzebowałem.<br>
-<strong>740 ogłoszeń. 68 wartych aplikacji. 12 rozmów. 1 oferta.</strong><br>
+<strong>740 ogłoszeń. 68 aplikacji. 12 rozmów. 1 oferta.</strong><br>
 Byłem jego pierwszym użytkownikiem. <strong>Dostałem tę pracę.</strong> Potem otworzyłem kod.
 </td>
 </tr>
@@ -23,7 +23,7 @@ Byłem jego pierwszym użytkownikiem. <strong>Dostałem tę pracę.</strong> Pot
 </div>
 
 <p align="center">
-  Firmy używają AI, żeby filtrować kandydatów. <strong>Ja dałem kandydatom AI, żeby <em>wybierali</em> firmy.</strong><br>
+  Firmy używają AI do filtrowania kandydatów. <strong>Ja dałem kandydatom AI, żeby mogli <em>wybierać</em> firmy.</strong><br>
   Na twoim komputerze mówi ci, które oferty są prawdziwe, które pasują, i <strong>nigdy nie aplikuje w twoim imieniu.</strong>
 </p>
 
@@ -242,7 +242,7 @@ career-ops używa wspólnego routera komend. W CLI, które rejestrują komendy s
 /career-ops           → Pokaż wszystkie dostępne komendy
 /career-ops {JD}      → AUTO-PIPELINE: ocena + raport + PDF + tracker (wklej tekst lub URL)
 /career-ops pipeline  → Przetwórz oczekujące URL-e ze skrzynki (data/pipeline.md)
-/career-ops oferta    → Sama ocena, bloki A–G (bez automatycznego PDF)
+/career-ops oferta    → Sama ocena, bloki A–H (bez automatycznego PDF)
 /career-ops ofertas   → Porównaj i uszereguj wiele ofert
 /career-ops contacto  → Mocny ruch na LinkedIn: znajdź kontakty + napisz szkic wiadomości
 /career-ops deep      → Prompt do głębokiego researchu firmy
