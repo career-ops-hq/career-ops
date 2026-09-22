@@ -19,6 +19,7 @@ import {
   isFatalGenericStderr,
   parseClaudeEvent,
   parseCodexEvent,
+  parseGrokEvent,
 } from "../../src/lib/run-cli-support.mjs";
 import { createCvEnvelopeFilter } from "../../src/lib/cv-envelope.mjs";
 
@@ -393,6 +394,110 @@ test("accumulateTokens ignores events without a token count", () => {
 
 test("accumulateTokens ignores a null event (unparseable or unrecognized line)", () => {
   assert.equal(accumulateTokens(120, null), 120);
+});
+
+// --- Grok Build CLI (--output-format streaming-json) -----------------------
+
+test("Grok text frame becomes dashboard text", () => {
+  assert.deepEqual(parseGrokEvent(JSON.stringify({ type: "text", data: "Scoring the role" })), {
+    text: "Scoring the role",
+  });
+});
+
+test("Grok empty text is nothing to report, not a blank line", () => {
+  assert.equal(parseGrokEvent(JSON.stringify({ type: "text", data: "" })), null);
+});
+
+test("Grok tool_call names the tool, falling back when it is unnamed", () => {
+  assert.deepEqual(parseGrokEvent(JSON.stringify({ type: "tool_call", toolName: "Bash" })), { tool: "Bash" });
+  assert.deepEqual(parseGrokEvent(JSON.stringify({ type: "tool_call" })), { tool: "Working" });
+});
+
+test("Grok thought is dropped — reasoning must not read as an answer", () => {
+  // Forwarding it would also set the route's emittedText, so a run that never
+  // answered would pass the honesty gate.
+  assert.equal(parseGrokEvent(JSON.stringify({ type: "thought", data: "let me think" })), null);
+});
+
+test("Grok available_commands (a multi-KB manifest, every turn) is dropped", () => {
+  assert.equal(parseGrokEvent(JSON.stringify({ type: "available_commands", commands: ["a", "b"] })), null);
+});
+
+test("Grok usage counts cached input at its own rate, not at full rate", () => {
+  const line = JSON.stringify({
+    type: "usage",
+    usage: { input_tokens: 10000, cached_input_tokens: 9000, output_tokens: 500 },
+  });
+  // 10000 - 9000 fresh + 500 out. Counting the cached 9000 at full rate would
+  // report 10500 — the same overstatement the Codex formula exists to avoid.
+  assert.deepEqual(parseGrokEvent(line), { tokens: 1500, tokensAreTotal: true, costUsd: null });
+});
+
+test("Grok end carries the run total and says so", () => {
+  const line = JSON.stringify({
+    type: "end",
+    usage: { input_tokens: 18000, cached_input_tokens: 0, output_tokens: 607 },
+    total_cost_usd: 0.42,
+  });
+  assert.deepEqual(parseGrokEvent(line), { tokens: 18607, tokensAreTotal: true, costUsd: 0.42 });
+});
+
+test("Grok usage without a usage block is skipped, not reported as zero", () => {
+  // {tokens: 0} would clobber a correct total an earlier frame established.
+  assert.equal(parseGrokEvent(JSON.stringify({ type: "usage" })), null);
+  assert.equal(parseGrokEvent(JSON.stringify({ type: "end" })), null);
+});
+
+test("Grok malformed usage cannot report negative tokens", () => {
+  const line = JSON.stringify({ type: "end", usage: { input_tokens: 5, cached_input_tokens: 9000 } });
+  assert.deepEqual(parseGrokEvent(line), { tokens: 0, tokensAreTotal: true, costUsd: null });
+});
+
+test("Grok survives its own JSON.parse successes (null, bare scalars) and garbage", () => {
+  assert.equal(parseGrokEvent("null"), null);
+  assert.equal(parseGrokEvent("42"), null);
+  assert.equal(parseGrokEvent('"a string"'), null);
+  assert.equal(parseGrokEvent("{not json"), null);
+});
+
+// --- the fold, which is where the two conventions actually collide ----------
+
+test("a Grok run reports the total, not the sum of its own intermediates", () => {
+  // Given the real shape: usage frames first, then `end` with the turn total.
+  const lines = [
+    { type: "usage", usage: { input_tokens: 9212, cached_input_tokens: 0, output_tokens: 0 } },
+    { type: "usage", usage: { input_tokens: 9395, cached_input_tokens: 0, output_tokens: 0 } },
+    { type: "end", usage: { input_tokens: 18000, cached_input_tokens: 0, output_tokens: 607 } },
+  ].map((e) => JSON.stringify(e));
+
+  let total = 0;
+  for (const line of lines) total = accumulateTokens(total, parseGrokEvent(line));
+
+  // 18607, not 9212 + 9395 + 18607 = 37214 — a 2.0x overstatement.
+  assert.equal(total, 18607);
+});
+
+test("a killed Grok run still records the last intermediate rather than zero", () => {
+  let total = 0;
+  total = accumulateTokens(total, parseGrokEvent(JSON.stringify({
+    type: "usage", usage: { input_tokens: 9212, cached_input_tokens: 0, output_tokens: 0 },
+  })));
+  assert.equal(total, 9212);
+});
+
+test("the delta convention is untouched: Codex and Claude still accumulate", () => {
+  // The regression this flag could have caused. Absent tokensAreTotal, add.
+  let total = 0;
+  total = accumulateTokens(total, { tokens: 100 });
+  total = accumulateTokens(total, { tokens: 50 });
+  assert.equal(total, 150);
+  // And a real Codex turn still lands on the adding path.
+  const codex = parseCodexEvent(JSON.stringify({
+    type: "turn.completed",
+    usage: { input_tokens: 100, cached_input_tokens: 40, output_tokens: 10 },
+  }));
+  assert.equal(codex.tokensAreTotal, undefined);
+  assert.equal(accumulateTokens(1000, codex), 1070);
 });
 
 test("completedReportNames filters out RESERVED sentinels", () => {

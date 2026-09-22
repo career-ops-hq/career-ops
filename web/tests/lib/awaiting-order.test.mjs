@@ -91,3 +91,34 @@ test("the caller's array is not reordered underneath it", () => {
   pickAwaitingDecision(rows, scoreOf);
   assert.deepEqual(rows.map((r) => r.date), ["2026-08-01", "2026-08-30"]);
 });
+
+test("every alias that means EVALUATED is offered, not just the English one", () => {
+  // /^evaluat/i covered `evaluated`, `evaluada` and `evaluar` and silently
+  // dropped the rest, so a tracker written in Turkish — or a Spanish one using
+  // `condicional`/`verificar` — rendered an empty queue. The aliases come from
+  // templates/states.yml (plus the web-only `evaluado`); status-alias.test.mjs
+  // is what keeps that table honest as new market modes land.
+  const aliases = [
+    "Evaluated", "Evaluada", "Evaluado", "Condicional",
+    "Hold", "Evaluar", "Verificar", "değerlendirildi", "Degerlendirildi",
+  ];
+  const rows = aliases.map((s, i) => row(`2026-08-${String(i + 1).padStart(2, "0")}`, "3.0/5", s));
+  assert.equal(
+    pickAwaitingDecision(rows, scoreOf, aliases.length).length,
+    aliases.length,
+    "an alias listed in states.yml was filtered out of the queue",
+  );
+});
+
+test("a terminal status is still excluded, and prefix-matching is not the reason", () => {
+  // Guards the fix from being "accept everything": `Evaluation Pending` starts
+  // with `evaluat` and is NOT a canonical evaluated status, so the old prefix
+  // test admitted it while canonStatus() correctly does not.
+  const rows = [
+    row("2026-08-05", "4.0/5", "Applied"),
+    row("2026-08-04", "4.0/5", "Rejected"),
+    row("2026-08-03", "4.0/5", "Evaluation Pending"),
+    row("2026-08-02", "4.0/5", "Evaluated"),
+  ];
+  assert.deepEqual(pickAwaitingDecision(rows, scoreOf).map((r) => r.date), ["2026-08-02"]);
+});

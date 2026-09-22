@@ -111,13 +111,21 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
   //
   // The agent used to be told to run reserve-report-num.mjs / write reports/ /
   // write a TSV / merge-tracker.mjs, which is why it held Write + Bash. A
-  // posting is untrusted input (AGENTS.md Untrusted External Content) and those
-  // tools are unscoped, so an injected instruction could aim them at cv.md.
-  // Persistence moved to report-persist.mjs; this prompt must never ask for a
-  // write the agent cannot (and must not) perform.
+  // posting is untrusted input and those tools are unscoped, so an injected
+  // instruction could aim them at cv.md. Persistence moved to report-persist.mjs.
+  // This prompt must never ask for a write, and it must not carry a TSV template.
+  //
+  // It also does not enumerate the report's sections. modes/oferta.md is the
+  // only source of truth for which sections exist. And it does not let a failed
+  // fetch become a scored report: a login wall, empty shell, expired ad, or bot
+  // challenge is the mode file's "posting appears closed" case (#2619, #2995).
   return `You are running the OFFICIAL career-ops job evaluation, HEADLESS, on the user's own machine. Today is ${today}. Run the REAL career-ops evaluation — do NOT improvise your own scoring.
 
-1. Read ${resolvedLang.evalModeFile} and follow it EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary). Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md. Use WebFetch to read the posting (you are headless — Playwright is unavailable, so use WebFetch and mark the report header "Verification: unconfirmed (batch mode)").
+1. Read ${resolvedLang.evalModeFile} and follow it EXACTLY — EVERY section its report template specifies, in its order, including the Machine Summary. Do not treat any list of sections in THIS prompt as the set to produce; that file is the only source of truth for which sections exist. Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md.
+
+   Use WebFetch to read the posting (you are headless — Playwright is unavailable), and mark the report header "Verification: unconfirmed (batch mode)".
+
+   **If WebFetch does not return the posting itself — a login/consent wall, a partial page shell with no job description, a 404 or expired ad, a paywall, a bot challenge, or a page whose text is not this job — this is the mode file's "posting appears closed" case: STOP BEFORE BLOCK A and do not generate an evaluation, a report or a CV.** That rule is the mode's, not this prompt's; modes/pipeline.md states the same thing for extraction — never treat a login wall or partial shell as a verified JD. Instead, say which URL you fetched and what came back, so the user can paste the job text themselves. A scored report about a login screen looks exactly like a scored report about the job, and a run that reports it could not read the posting is a correct outcome.
 
 2. ${REPORT_ENVELOPE_INSTRUCTION}
 

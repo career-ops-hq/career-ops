@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,8 +29,26 @@ function render(inputPayload, { preview = false } = {}) {
   const args = preview
     ? ['build-cv-html.mjs', '--preview', input, TEMPLATE]
     : ['build-cv-html.mjs', input, output, TEMPLATE];
-  const stdout = execFileSync(process.execPath, args, { cwd: ROOT, encoding: 'utf8' });
-  return { html: readFileSync(preview ? join(ROOT, 'output', 'cv-preview.html') : output, 'utf8'), stdout, output };
+
+  // --preview ignores the output argument and resolves its destination from the
+  // DATA ROOT (build-cv-html.mjs's only use of it), which is the candidate's own
+  // output/ -- not the checkout. Unqualified, this test drops a "Test Candidate"
+  // fixture into a real user's CV output directory on every run, from any
+  // checkout, and then reads it back from the CHECKOUT's output/. Those two
+  // paths are the same file only on a layout where the data root is the repo,
+  // so the assertion passes by luck and the write escapes the sandbox.
+  // Point the data root at this render's own temp dir: the preview lands there,
+  // is read back from there, and nothing outside the sandbox is touched.
+  const env = { ...process.env };
+  let previewRoot;
+  if (preview) {
+    previewRoot = join(dir, 'data-root');
+    mkdirSync(join(previewRoot, 'output'), { recursive: true });
+    env.CAREER_OPS_ROOT = previewRoot;
+  }
+
+  const stdout = execFileSync(process.execPath, args, { cwd: ROOT, encoding: 'utf8', env });
+  return { html: readFileSync(preview ? join(previewRoot, 'output', 'cv-preview.html') : output, 'utf8'), stdout, output };
 }
 
 test('no photo emits no img and reserves no photo markup', () => {

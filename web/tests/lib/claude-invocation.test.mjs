@@ -17,9 +17,9 @@ import {
   claudeCliArgs,
   argValue,
   toolNames,
-  KNOWN_KINDS,
-  UNTRUSTED_JD_KINDS,
 } from "../../src/lib/claude-invocation.mjs";
+// KNOWN_KINDS lives with the policy both CLIs read, not on Claude's path (#2507).
+import { KNOWN_KINDS, capabilitiesFor } from "../../src/lib/worker-capabilities.mjs";
 
 test("toolScopeFor: pdf gets no write-capable tool at all", () => {
   // Given the pdf kind, whose agent only tailors content and emits it inline
@@ -71,36 +71,66 @@ test("toolScopeFor: pdf can still read what it needs to tailor", () => {
   }
 });
 
-test("toolScopeFor: research is read-only too, and shares pdf's scope", () => {
-  // Given research is documented as fully read-only
-  // When comparing it with pdf
-  // Then they are the same object — one read-only arm, not two that can drift
-  assert.equal(toolScopeFor("research"), toolScopeFor("pdf"));
-  assert.equal(toolScopeFor("research"), TOOL_SCOPES.readOnly);
+test("toolScopeFor: research is read-only too, but is NOT pdf's scope", () => {
+  // Given both are read-only, yet they differ on the other axis: research fetches
+  // ("use WebFetch for URLs") and pdf reads local files only. They shared one
+  // scope until the network axis was wired up, which is exactly how pdf came to
+  // declare network:false while still being handed WebFetch on Claude (#2507).
+  const research = toolScopeFor("research");
+  const pdf = toolScopeFor("pdf");
+
+  // Then neither can write...
+  assert.equal(grantsWriteCapability(research), false);
+  assert.equal(grantsWriteCapability(pdf), false);
+  // ...and they are deliberately different arms, not one shared read-only arm.
+  assert.equal(research, TOOL_SCOPES.networkReadOnly);
+  assert.equal(pdf, TOOL_SCOPES.localReadOnly);
+  assert.notEqual(research, pdf);
+
+  // Assert the CONTENTS, not just which object was selected. Identity alone would
+  // still pass if TOOL_SCOPES.networkReadOnly lost WebFetch or localReadOnly
+  // gained it — a regression on precisely the axis this test exists to protect.
+  assert.ok(toolNames(research.allowed).includes("WebFetch"), "research fetches its target");
+  assert.ok(!toolNames(pdf.allowed).includes("WebFetch"), "pdf reads local files only");
+  assert.ok(!toolNames(pdf.allowed).includes("WebSearch"), "pdf reads local files only");
+
+  // And the same through the shipped argv, since that is what actually reaches
+  // the CLI — a scope is only as good as the command line built from it.
+  assert.ok(
+    toolNames(argValue(claudeCliArgs({ kind: "research", prompt: "x" }), "--allowedTools")).includes("WebFetch"),
+    "research must be GRANTED WebFetch in the shipped argv — the flattened argv also contains it when it is denied",
+  );
+  assert.ok(!toolNames(argValue(claudeCliArgs({ kind: "pdf", prompt: "x" }), "--allowedTools")).includes("WebFetch"));
 });
 
-test("toolScopeFor: an unknown kind falls back to the read-only scope", () => {
-  // Given a kind nobody has taught this map about
-  // When resolving its scope
-  const scope = toolScopeFor("some-future-kind");
-
-  // Then it is read-only — the safe default, since granting write to an unknown
-  // kind is the one unrecoverable mistake here
-  assert.equal(scope, TOOL_SCOPES.readOnly);
-});
-
-test("toolScopeFor: untrusted-JD kinds get no write-capable tool at all", () => {
-  // Given evaluate/oferta/auto-pipeline ingest a posting (data, never
-  // instructions) and pdf already reads that same posting via the report
-  for (const kind of UNTRUSTED_JD_KINDS) {
+test("toolScopeFor: an unknown kind falls back to the narrowest scope", () => {
+  // Given a kind nobody has taught this map about, including inherited property
+  // names. Note this case CANNOT catch a regression to a bare
+  // `KIND_CAPABILITIES[kind]` on its own: destructuring {writes, network} off the
+  // resulting function yields undefined for both, which is falsy, so the scope
+  // still lands here by accident (verified by mutation). The discriminating
+  // assertion is record identity, in worker-capabilities.test.mjs; this one pins
+  // the scope that a correct capabilitiesFor must produce.
+  for (const kind of ["some-future-kind", "constructor", "toString", "valueOf", "__proto__"]) {
+    // When resolving its scope
     const scope = toolScopeFor(kind);
-    const allowed = toolNames(scope.allowed);
-    const denied = toolNames(scope.disallowed);
-    for (const tool of WRITE_CAPABLE_TOOLS) {
-      assert.ok(!allowed.includes(tool), `${kind} must not allow ${tool}`);
-      assert.ok(denied.includes(tool), `${kind} must explicitly deny ${tool}`);
-    }
-    assert.equal(grantsWriteCapability(scope), false, `${kind} must not grant write`);
+
+    // Then it is the NARROWEST scope — no write tool and no network tool. Granting
+    // either to a worker nobody has classified is the unrecoverable mistake here,
+    // and the fallback must be the strictest arm, not merely a non-writing one.
+    assert.equal(scope, TOOL_SCOPES.localReadOnly, `${kind} must fall back to the narrowest scope`);
+  }
+});
+
+test("toolScopeFor: writing kinds keep Write and Bash on purpose", () => {
+  // Given the policy, not a hardcoded name. evaluate is read-only: the backend
+  // persists its envelope. fix-portal still writes portals.yml.
+  const writingKinds = KNOWN_KINDS.filter((k) => capabilitiesFor(k).writes);
+  assert.deepEqual(writingKinds, ["fix-portal"]);
+  for (const kind of writingKinds) {
+    const allowed = toolNames(toolScopeFor(kind).allowed);
+    assert.ok(allowed.includes("Write"), `${kind} needs Write`);
+    assert.ok(allowed.includes("Bash"), `${kind} needs Bash`);
   }
 });
 
@@ -151,7 +181,7 @@ test("grantsWriteCapability: catches Bash and MultiEdit, not just Write/Edit", (
   assert.equal(grantsWriteCapability({ allowed: "Read,Write", disallowed: "" }), true);
 
   // And a genuinely read-only scope is not a false positive
-  assert.equal(grantsWriteCapability(TOOL_SCOPES.readOnly), false);
+  assert.equal(grantsWriteCapability(TOOL_SCOPES.localReadOnly), false);
 });
 
 test("grantsWriteCapability: a substring of a tool name is not a match", () => {
@@ -194,26 +224,26 @@ test("claudeCliArgs: loads no MCP servers", () => {
   assert.ok(!args.includes("--mcp-config"), "no MCP server may be loaded");
 });
 
-test("claudeCliArgs: untrusted-JD kinds load no MCP servers", () => {
-  // Given MCP tools would appear in neither the allow nor the deny list, so a
-  // write tool arriving from the user's MCP config would be invisible to every
-  // check here. evaluate ingests a posting; locking MCP is the same hole pdf
-  // already closed.
-  for (const kind of UNTRUSTED_JD_KINDS) {
-    const args = claudeCliArgs({ kind, prompt: "x" });
-    assert.ok(args.includes("--strict-mcp-config"), `${kind} argv must pass --strict-mcp-config`);
-    assert.ok(!args.includes("--mcp-config"), `${kind}: no MCP server may be loaded`);
-  }
-});
+test("claudeCliArgs: MCP is locked for non-writing kinds, kept for writing ones", () => {
+  // A deny list describes only native tools, so without --strict-mcp-config a
+  // user's MCP server could hand a non-writing worker a write tool. evaluate is
+  // in that non-writing set. fix-portal still writes, so its MCP config stays.
+  const nonWriting = KNOWN_KINDS.filter((k) => !capabilitiesFor(k).writes);
+  const writing = KNOWN_KINDS.filter((k) => capabilitiesFor(k).writes);
+  assert.ok(nonWriting.includes("evaluate"));
+  assert.deepEqual(writing, ["fix-portal"]);
 
-test("claudeCliArgs: research and fix-portal keep their MCP servers", () => {
-  // research investigates the user's own work; fix-portal edits portals.yml.
-  // Neither ingests a posting, so a configured MCP server (optional Canva)
-  // still loads. Non-Claude CLIs remain unfenced — #2507.
-  for (const kind of ["research", "fix-portal"]) {
+  for (const kind of nonWriting) {
+    assert.ok(
+      claudeCliArgs({ kind, prompt: "x" }).includes("--strict-mcp-config"),
+      `${kind} declares writes:false, so its tool list must describe everything it can reach`,
+    );
+  }
+
+  for (const kind of writing) {
     assert.ok(
       !claudeCliArgs({ kind, prompt: "x" }).includes("--strict-mcp-config"),
-      `${kind} must not have its MCP config locked down by an evaluate/pdf fix`,
+      `${kind} writes by design`,
     );
   }
 });

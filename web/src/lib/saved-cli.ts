@@ -1,3 +1,5 @@
+import { pickSoleInstalled } from "./cli-pick.mjs";
+
 export const CONFIG_KEY = "career-ops:config";
 
 export function readSavedCliId(): string | null {
@@ -23,12 +25,7 @@ export function persistCliId(cliId: string) {
   }
 }
 
-export function pickSoleInstalled(
-  clis: { id: string; installed?: boolean }[] | undefined,
-): string | null {
-  const installed = (clis || []).filter((c) => c.installed);
-  return installed.length === 1 ? installed[0].id : null;
-}
+export { pickDefaultInstalled, pickSoleInstalled } from "./cli-pick.mjs";
 
 /** Saved Config cliId, or the only installed CLI (and persist that pick). */
 export async function resolveCliId(): Promise<string | null> {

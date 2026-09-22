@@ -1,5 +1,5 @@
 import { pass, fail } from './helpers.mjs';
-import { factClaims, verifyFacts } from '../verify-cv-facts.mjs';
+import { delegatedAuthorshipClaims, factClaims, verifyFacts } from '../verify-cv-facts.mjs';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -108,6 +108,51 @@ try {
     fail(`ordinary prose produced a false title claim: ${JSON.stringify(proseTitle)}`);
   }
 
+  // #3907 — "role:" or "title:" immediately followed by a bare capitalised
+  // pronoun ("I") satisfied the old `[A-Z][\w/-]*` first-token class (the
+  // `*` allows zero extra characters), so ordinary prose like a cover-letter
+  // disclaimer was misread as a one-letter job title claim and blocked
+  // rendering even though nothing false was ever asserted.
+  const roleColonPronoun = factClaims(
+    'I want to be direct about something important to this role: I do not have functional knowledge in X.',
+  );
+  if (!roleColonPronoun.some(claim => claim.kind === 'title')) {
+    pass('#3907 "role: I" is not read as a one-letter title claim');
+  } else {
+    fail(`#3907 regression: "role: I ..." produced a false title claim: ${JSON.stringify(roleColonPronoun)}`);
+  }
+
+  const titleColonArticle = factClaims('Please review the role: A candidate should have strong communication skills.');
+  if (!titleColonArticle.some(claim => claim.kind === 'title')) {
+    pass('#3907 "role: A" is not read as a one-letter title claim');
+  } else {
+    fail(`#3907 regression: "role: A ..." produced a false title claim: ${JSON.stringify(titleColonArticle)}`);
+  }
+
+  // The #3907 fix must not make the gate blind to real title fabrication,
+  // including short 2-letter acronym titles, which are common enough (VP,
+  // PM, HR) that a naive "require 2+ letters, uppercase only" fix would have
+  // broken them.
+  const unsupportedAcronymTitle = verifyFacts('Title: VP of Sales, previously unrelated experience.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (unsupportedAcronymTitle.verdict === 'block'
+      && unsupportedAcronymTitle.unsupportedFacts.some(claim => claim.kind === 'title' && claim.value === 'vp of sales')) {
+    pass('#3907 fix does not blind the gate to a fabricated acronym title (VP of Sales)');
+  } else {
+    fail(`#3907 fix broke acronym title detection: ${JSON.stringify(unsupportedAcronymTitle)}`);
+  }
+
+  const unsupportedRealTitle = verifyFacts('Title: Principal Engineer, previously unrelated experience.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (unsupportedRealTitle.verdict === 'block'
+      && unsupportedRealTitle.unsupportedFacts.some(claim => claim.kind === 'title' && claim.value === 'principal engineer')) {
+    pass('#3907 fix still flags a genuinely unsupported title claim (Principal Engineer)');
+  } else {
+    fail(`#3907 fix regressed real title detection: ${JSON.stringify(unsupportedRealTitle)}`);
+  }
+
   const boundary = verifyFacts('I am using Go and Google Cloud.', {
     sourcePaths: [source], configPath: config,
   });
@@ -115,6 +160,173 @@ try {
     pass('fact matching does not accept embedded substrings');
   } else {
     fail(`fact matching accepted an embedded substring: ${JSON.stringify(boundary)}`);
+  }
+
+  // #3639 — concrete false positives hit in one real session: ordinary
+  // gerund/abstract-noun prose after a "using"/"with"/"in" trigger word was
+  // extracted as a "tool" claim and blocked a truthful document. Each of
+  // these must now produce NO tool claim at all.
+  const falsePositiveCases = [
+    ['gerund alone', 'Built this using diagnosing and resolving workflow friction.'],
+    ['gerund + abstract-noun-suffix phrase', 'Built this using recurring HR and operations tasks.'],
+    ['bare abstract noun', 'Built this using efficiency.'],
+    ['stoplisted noun + abstract-noun-suffix phrase', 'Built this using feedback and improve delivery.'],
+    ['three-word gerund-led phrase', 'Built this using improving on-time submission.'],
+  ];
+  for (const [label, text] of falsePositiveCases) {
+    const found = factClaims(text).filter(claim => claim.kind === 'tool');
+    if (found.length === 0) {
+      pass(`#3639 false positive fixed: ${label}`);
+    } else {
+      fail(`#3639 false positive NOT fixed (${label}): ${JSON.stringify(found)}`);
+    }
+  }
+
+  // Review regression: a word ending that looks like ordinary English is not
+  // enough to discard a lowercase tool claim. Spring, Unity, and Processing
+  // are real technology names and must remain subject to source verification.
+  for (const tool of ['spring', 'unity', 'processing']) {
+    const directClaims = factClaims(`Built this using ${tool}.`).filter(claim => claim.kind === 'tool');
+    const unbacked = verifyFacts(`Built this using ${tool}.`, {
+      sourcePaths: [source], configPath: config,
+    });
+    if (directClaims.some(claim => claim.value === tool)
+        && unbacked.verdict === 'block'
+        && unbacked.unsupportedFacts.some(claim => claim.kind === 'tool' && claim.value === tool)) {
+      pass(`lowercase technology with prose-like suffix remains fail-closed: ${tool}`);
+    } else {
+      fail(`lowercase technology bypassed the fact gate: ${JSON.stringify({ tool, directClaims, unbacked })}`);
+    }
+  }
+
+  writeFileSync(source, 'Built the workflow using delivery.');
+  const sourceBackedCollision = verifyFacts('Built the workflow using delivery.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (sourceBackedCollision.verdict === 'pass') {
+    pass('source evidence overrides an exact prose-word collision');
+  } else {
+    fail(`source-backed lowercase tool collided with the prose filter: ${JSON.stringify(sourceBackedCollision)}`);
+  }
+
+  // The fix must not let a fabricated tool typed in lowercase evade
+  // detection just by losing its capitalisation — the false-positive fix is
+  // scoped to prose-shaped (gerund/abstract-noun) fragments only.
+  const lowercaseFabricationStillCaught = verifyFacts('Shipped it using kubernetes and google cloud.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (lowercaseFabricationStillCaught.verdict === 'block'
+      && lowercaseFabricationStillCaught.unsupportedFacts.some(claim => claim.value === 'kubernetes')
+      && lowercaseFabricationStillCaught.unsupportedFacts.some(claim => claim.value === 'google cloud')) {
+    pass('#3639 fix does not open a lowercase-evasion bypass');
+  } else {
+    fail(`lowercase fabricated tools bypassed the fact gate after the #3639 fix: ${JSON.stringify(lowercaseFabricationStillCaught)}`);
+  }
+
+  // A genuinely fabricated, Title-Cased tool with no source backing must
+  // still block — the shape check only ever ADDS a source-backed exemption,
+  // it never removes the requirement for evidence.
+  const capitalizedFabricationStillCaught = verifyFacts('Shipped it using Kubernetes and Terraform.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (capitalizedFabricationStillCaught.verdict === 'block'
+      && capitalizedFabricationStillCaught.unsupportedFacts.some(claim => claim.value === 'kubernetes')
+      && capitalizedFabricationStillCaught.unsupportedFacts.some(claim => claim.value === 'terraform')) {
+    pass('a fabricated Title-Cased tool with no source backing still blocks');
+  } else {
+    fail(`a fabricated Title-Cased tool bypassed the fact gate: ${JSON.stringify(capitalizedFabricationStillCaught)}`);
+  }
+
+  // A real lowercase tool name genuinely used and listed in the source must
+  // still pass cleanly, even though it is neither Title-Cased nor numbered.
+  writeFileSync(source, 'Senior Platform Engineer at Acme Labs. Built using React and Docker on kubernetes with n8n. Cut spend to $120k and closed a €90,000 deal.');
+  const backedLowercaseTool = verifyFacts('Deployed the service using kubernetes and n8n.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (backedLowercaseTool.verdict === 'pass') {
+    pass('a source-backed lowercase tool name is not penalized for casing');
+  } else {
+    fail(`a source-backed lowercase tool name was blocked: ${JSON.stringify(backedLowercaseTool)}`);
+  }
+
+  const delegatedSource = [
+    'Sourced and directed vendor Acme Interactive through the WebGL build of an in-store kiosk.',
+    'Built the internal deployment pipeline using Node.js.',
+  ].join('\n');
+  writeFileSync(source, delegatedSource);
+
+  const escalatedText = 'Designed the interaction model and wrote the WebGL implementation for an in-store kiosk.';
+  const escalatedClaims = delegatedAuthorshipClaims(escalatedText, delegatedSource);
+  const escalated = verifyFacts(escalatedText, {
+    sourcePaths: [source], configPath: config,
+  });
+  if (escalated.verdict === 'block'
+      && escalatedClaims.some(claim => claim.kind === 'authorship' && claim.value.includes('wrote webgl implementation'))
+      && escalated.unsupportedFacts.some(claim => claim.kind === 'authorship')) {
+    pass('third-party implementation rewritten as direct authorship blocks');
+  } else {
+    fail(`delegated implementation was promoted to direct authorship: ${JSON.stringify({ escalatedClaims, escalated })}`);
+  }
+
+  const relativeClauseSource = [
+    'Managed vendor Acme Interactive, which built the WebGL implementation for an in-store kiosk.',
+    'Oversaw contractors who developed the onboarding automation in Node.js.',
+  ].join('\n');
+  const relativeClauseCases = [
+    ['Wrote the WebGL implementation for an in-store kiosk.', 'vendor relative clause is treated as delegated execution'],
+    ['Developed the onboarding automation in Node.js.', 'contractor relative clause is treated as delegated execution'],
+  ];
+  writeFileSync(source, relativeClauseSource);
+  for (const [target, label] of relativeClauseCases) {
+    const claims = delegatedAuthorshipClaims(target, relativeClauseSource);
+    const result = verifyFacts(target, { sourcePaths: [source], configPath: config });
+    if (claims.some(claim => claim.kind === 'authorship') && result.verdict === 'block') {
+      pass(label);
+    } else {
+      fail(`${label} was accepted: ${JSON.stringify({ claims, result })}`);
+    }
+  }
+
+  const attributionKept = verifyFacts('Directed vendor Acme Interactive through the WebGL build of an in-store kiosk.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (attributionKept.verdict === 'pass'
+      && !attributionKept.unsupportedFacts.some(claim => claim.kind === 'authorship')) {
+    pass('a rewrite that keeps third-party attribution passes');
+  } else {
+    fail(`preserved vendor attribution was blocked: ${JSON.stringify(attributionKept)}`);
+  }
+
+  const unrelatedDirectWork = verifyFacts('Built the internal deployment pipeline using Node.js.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (unrelatedDirectWork.verdict === 'pass'
+      && !unrelatedDirectWork.unsupportedFacts.some(claim => claim.kind === 'authorship')) {
+    pass('unrelated source-backed direct work is not matched to delegated work');
+  } else {
+    fail(`source-backed direct work was blocked: ${JSON.stringify(unrelatedDirectWork)}`);
+  }
+
+  const ambiguousSource = 'Directed vendor Acme Interactive through the WebGL build and wrote the kiosk integration layer.';
+  const ambiguous = delegatedAuthorshipClaims('Wrote the kiosk integration layer.', ambiguousSource);
+  if (ambiguous.length === 0) {
+    pass('mixed direct and delegated source statements fail open');
+  } else {
+    fail(`ambiguous mixed-authorship source was blocked: ${JSON.stringify(ambiguous)}`);
+  }
+
+  const separateDirectEvidence = [
+    'Directed vendor Acme Interactive through the WebGL build of an in-store kiosk.',
+    'Wrote the WebGL implementation for an in-store kiosk prototype.',
+  ].join('\n');
+  const directlySupported = delegatedAuthorshipClaims(
+    'Wrote the WebGL implementation for an in-store kiosk prototype.',
+    separateDirectEvidence,
+  );
+  if (directlySupported.length === 0) {
+    pass('separate direct-work evidence wins over overlapping delegated work');
+  } else {
+    fail(`explicit direct-work evidence was ignored: ${JSON.stringify(directlySupported)}`);
   }
 } finally {
   rmSync(tmp, { recursive: true, force: true });

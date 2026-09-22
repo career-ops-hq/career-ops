@@ -30,7 +30,20 @@ const HARD_EXPIRED_PATTERNS = [
   /job posting has expired/i,
   /no longer accepting applications/i,
   /this (position|role|job) (is )?no longer/i,
-  /this job (listing )?is closed/i,
+  // Widened from /this job (listing )?is closed/i: agentic-engineering-jobs.com
+  // writes "This role is closed" (111 of 111 uncertain postings measured in
+  // one run, #4175), and other boards use "position". The three nouns are
+  // interchangeable in JD copy.
+  //
+  // The trailing \b(?!-) is a compound-adjective guard. Without it,
+  // "This role is closed-loop control of the platform" (real prose in a
+  // control-systems JD, per santifer's review on #4194) matches the "is
+  // closed" fragment and returns expired. \b requires end-of-word after
+  // "closed"; (?!-) additionally rejects the hyphen case that \b alone
+  // allows (d->- is word->non-word, so \b matches; the lookahead is what
+  // catches closed-loop / closed-form / closed-source). "closedown" is
+  // rejected by \b alone (d->o is word->word).
+  /this (?:job|role|position)(?: listing)? is closed\b(?!-)/i,
   /job (listing )?not found/i,
   /the page you are looking for doesn.t exist/i,
   /applications?\s+(?:(?:have|are|is)\s+)?closed/i,
@@ -51,6 +64,31 @@ const HARD_EXPIRED_PATTERNS = [
 const LISTING_PAGE_PATTERNS = [
   /\d+\s+jobs?\s+found/i,
   /search for jobs page is loaded/i,
+];
+
+// Weak expiry signals: real when nothing else on the page contradicts them,
+// but too broad to override a visible apply control. The tier distinction
+// exists because HARD_EXPIRED_PATTERNS is checked BEFORE hasApplyControl —
+// anything placed there wins over a live Apply button on the page.
+//
+// /\bjob expired\b/i lived in HARD_EXPIRED_PATTERNS in the first cut of #4175
+// and false-fired on four live-posting shapes santifer measured in the #4194
+// review: a "Similar jobs" carousel with a "Job Expired" entry, a "Hide job
+// expired" filter chip, a footer FAQ asking "what happens when a job
+// expired?", and — before the closed-loop guard on the closed pattern above —
+// "This role is closed-loop control of the platform" prose. liveness-browser
+// hands classifyLiveness the whole page innerText plus same-origin iframe
+// text (liveness-browser.mjs:434), so those elements are in scope.
+//
+// Moved down here so the same phrase in a dead-page scenario (nodesk.co's
+// bare "JOB EXPIRED" banner, no apply control, per #4175) still fires. The
+// pre-existing comments on the 5xx and 429 guards spell out the underlying
+// rule: a false `expired` is written to scan-history as skipped_expired and
+// dedup-filters a real job out of every later scan (indefinitely, unless
+// scan_history.recheck_after_days is set), so this direction of error is
+// always the more expensive one.
+const SOFT_EXPIRED_PATTERNS = [
+  /\bjob expired\b/i,
 ];
 
 // Anti-bot interstitials (Cloudflare "Just a moment...", hCaptcha walls, etc.)
@@ -91,6 +129,11 @@ const APPLY_PATTERNS = [
   /panelu aplikowania/i,
   // Accent-free: apply controls go through normalizeForMatch too ("wyślij" → "wyslij").
   /wyslij (cv|aplikacj)/i,
+  // Chinese MokaHR and Feishu Jobs detail pages use these exact control texts.
+  // Keep them narrow: bare “申请” appears in descriptive prose, while longer
+  // labels containing “投递” can be status/history controls rather than Apply.
+  /^申请职位$/,
+  /^投递$/,
 ];
 
 const MIN_CONTENT_CHARS = 300;
@@ -176,6 +219,13 @@ export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '',
 
   if (hasApplyControl(applyControls)) {
     return { result: 'active', code: 'apply_control_visible', reason: 'visible apply control detected' };
+  }
+
+  // Weak expiry signals — see SOFT_EXPIRED_PATTERNS above for why these
+  // live below the apply-control check rather than in HARD_EXPIRED_PATTERNS.
+  const softExpired = firstMatch(SOFT_EXPIRED_PATTERNS, bodyText);
+  if (softExpired) {
+    return { result: 'expired', code: 'expired_body_soft', reason: `pattern matched: ${softExpired.source}` };
   }
 
   const listingPage = firstMatch(LISTING_PAGE_PATTERNS, bodyText);
