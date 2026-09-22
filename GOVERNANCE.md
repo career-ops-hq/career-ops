@@ -47,6 +47,8 @@ Anyone can grow their role in the project. Roles are earned through sustained, q
 **Earned after 5+ quality PRs merged + track record of helpful code reviews.**
 
 - Can approve PRs (maintainer still merges)
+- Reviews carry the decision **inside the reviewer's area** (listed in [MAINTAINERS.md](MAINTAINERS.md)); outside it, an approval is a valued signal on code quality, not the routing decision
+- Routing (core vs. plugin vs. separate project, see CONTRIBUTING "Scope") and the critical files in `.github/CODEOWNERS` stay with the maintainers, before code review
 - Listed in CONTRIBUTORS.md
 - Invited to architectural discussions before major changes
 

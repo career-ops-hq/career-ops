@@ -25,7 +25,7 @@
 import { writeFileSync, mkdirSync, rmSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, makeUpdaterRepo } from './helpers.mjs';
-import { gitIn, addPaths, isTracked, expandToShippedFiles } from '../update-system.mjs';
+import { gitIn, addPaths, isTracked, expandToShippedFiles, stagingFileList } from '../update-system.mjs';
 
 // Shared with updater-is-tracked.test.mjs so the git-isolation pins live in one
 // body: dropping one has to redden both suites, not leave this one quietly
@@ -307,6 +307,84 @@ console.log('\n🧪 Testing updater staging behavior (ignored + never-tracked pa
   rmSync(dir, { recursive: true, force: true });
 }
 
+// ── 6b. a scoped apply commit uses the target tree's file list ──────────
+//     A directory can still contain a tracked file that the target retired.
+//     Staging the expanded target list leaves that file alone; committing the
+//     original directory pathspec would read its local edit from the worktree.
+{
+  const { dir, g, ctx } = makeRepo();
+  mkdirSync(join(dir, 'docs'));
+  writeFileSync(join(dir, 'docs/README.md'), 'v1');
+  writeFileSync(join(dir, 'docs/RETIRED.md'), 'v1');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+  g('branch', 'target');
+
+  g('checkout', '-q', 'target');
+  writeFileSync(join(dir, 'docs/README.md'), 'v2');
+  g('rm', '-q', '--', 'docs/RETIRED.md');
+  g('add', '--', 'docs/README.md');
+  g('commit', '-qm', 'target update');
+
+  g('checkout', '-q', 'main');
+  writeFileSync(join(dir, 'docs/README.md'), 'v2');
+  writeFileSync(join(dir, 'docs/RETIRED.md'), 'the user\'s local edit');
+
+  const expanded = expandToShippedFiles(['docs/'], 'target', ctx);
+  g('add', '--', ...expanded);
+  g('commit', '-qm', 'scoped apply', '--', ...expanded);
+
+  const committed = g('show', '--name-only', '--format=', 'HEAD').split('\n').filter(Boolean);
+  const status = g('status', '--porcelain');
+  if (expanded.includes('docs/README.md') && !expanded.includes('docs/RETIRED.md')) {
+    pass('apply expansion follows the target tree and omits a retired tracked file');
+  } else {
+    fail(`apply expansion kept the retired file: ${expanded.join(', ')}`);
+  }
+  if (committed.includes('docs/README.md') && !committed.includes('docs/RETIRED.md')
+      && status.includes('docs/RETIRED.md')) {
+    pass('scoped apply commit leaves the retired tracked edit unstaged');
+  } else {
+    fail(`scoped apply commit touched the wrong paths: committed=${committed.join(', ')} status=${status}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 6c. preserved exclusions survive scoped commit expansion ────────────
+//     The positive directory entry expands to every shipped file, while the
+//     `:(exclude)` pathspec must remain so a preserved local file stays out.
+{
+  const { dir, g, ctx } = makeRepo();
+  mkdirSync(join(dir, 'docs'));
+  writeFileSync(join(dir, 'docs/README.md'), 'v1');
+  writeFileSync(join(dir, 'docs/KEEP.md'), 'v1');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+
+  writeFileSync(join(dir, 'docs/README.md'), 'updated');
+  writeFileSync(join(dir, 'docs/KEEP.md'), 'the preserved local edit');
+  const paths = ['docs/', ':(exclude)docs/KEEP.md'];
+  const expanded = expandToShippedFiles(paths, 'HEAD', ctx);
+  g('add', '--', 'docs/README.md');
+  g('commit', '-qm', 'scoped apply with preservation', '--', ...expanded);
+
+  const committed = g('show', '--name-only', '--format=', 'HEAD').split('\n').filter(Boolean);
+  const status = g('status', '--porcelain');
+  if (expanded.includes('docs/README.md') && expanded.includes('docs/KEEP.md')
+      && expanded.includes(':(exclude)docs/KEEP.md')) {
+    pass('scoped commit expansion keeps both shipped files and the preserve exclusion');
+  } else {
+    fail(`preserve exclusion was lost during expansion: ${expanded.join(', ')}`);
+  }
+  if (committed.includes('docs/README.md') && !committed.includes('docs/KEEP.md')
+      && status.includes('docs/KEEP.md')) {
+    pass('scoped commit honors the preserve exclusion');
+  } else {
+    fail(`preserve exclusion failed: committed=${committed.join(', ')} status=${status}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
 // ── 7. the expansion returns files only, and passes non-directories through ──
 //    Pruned deletions and materialized entrypoints arrive as plain filenames and
 //    must survive untouched — a deletion is absent from the target tree, so
@@ -567,6 +645,44 @@ console.log('\n🧪 Testing updater staging behavior (ignored + never-tracked pa
   rmSync(dir, { recursive: true, force: true });
 }
 
+// ── 12a. a scoped rollback commit uses the backup tree's file list ──────
+//      A file added after the backup can remain in the worktree when checkout
+//      restores a directory. The rollback commit must not sweep its edit.
+{
+  const { dir, g, ctx } = makeRepo();
+  mkdirSync(join(dir, 'docs'));
+  writeFileSync(join(dir, 'docs/README.md'), 'backup');
+  g('add', '-A');
+  g('commit', '-qm', 'backup base');
+  g('branch', 'backup-pre-update-1.0.0');
+
+  writeFileSync(join(dir, 'docs/README.md'), 'current');
+  writeFileSync(join(dir, 'docs/LOCAL.md'), 'current');
+  g('add', '-A');
+  g('commit', '-qm', 'current update');
+  writeFileSync(join(dir, 'docs/LOCAL.md'), 'the user\'s local edit');
+
+  g('checkout', 'backup-pre-update-1.0.0', '--', 'docs/');
+  const expanded = expandToShippedFiles(['docs/'], 'backup-pre-update-1.0.0', ctx);
+  g('add', '--', ...expanded);
+  g('commit', '-qm', 'scoped rollback', '--', ...expanded);
+
+  const committed = g('show', '--name-only', '--format=', 'HEAD').split('\n').filter(Boolean);
+  const status = g('status', '--porcelain');
+  if (expanded.includes('docs/README.md') && !expanded.includes('docs/LOCAL.md')) {
+    pass('rollback expansion follows the backup tree and omits a later file');
+  } else {
+    fail(`rollback expansion kept the later file: ${expanded.join(', ')}`);
+  }
+  if (committed.includes('docs/README.md') && !committed.includes('docs/LOCAL.md')
+      && status.includes('docs/LOCAL.md')) {
+    pass('scoped rollback commit leaves the later tracked edit unstaged');
+  } else {
+    fail(`scoped rollback commit touched the wrong paths: committed=${committed.join(', ')} status=${status}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
 // ── 12b. the refusal is about directories, not about trailing slashes ──
 //    `git add -f -- docs` sweeps exactly as `docs/` does, and rollback() builds
 //    its `removed` list in precisely that slash-stripped form a few lines from a
@@ -746,6 +862,70 @@ console.log('\n🧪 Testing updater staging behavior (ignored + never-tracked pa
     pass('an unreadable ref propagates instead of silently expanding to nothing');
   } else {
     fail(`a bad ref was absorbed and returned ${JSON.stringify(out)} — staging would go quietly incomplete`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 14. a preserved :(exclude) spec never reaches addPaths as a literal ──
+//    apply() stages `[...updated, ...preserveSpecs]`, where preserveSpecs are
+//    `:(exclude)<path>` entries for files THIS install modified and the update
+//    leaves alone (#2337). addPaths force-adds under --literal-pathspecs, so a
+//    `:(exclude)Dockerfile` handed straight to it is a literal, unmatched
+//    pathspec that aborts the whole update commit half-done — the break a
+//    Docker/sandbox Dockerfile local edit hit in the field. stagingFileList
+//    resolves preservation into a plain file list before it gets there, and
+//    subtracts a preserved file that a positive directory entry would otherwise
+//    pull back in — the subtraction the exclude spec never did during staging.
+{
+  const { dir, g, ctx } = makeRepo();
+  mkdirSync(join(dir, 'providers'));
+  writeFileSync(join(dir, 'AGENTS.md'), 'v1');
+  writeFileSync(join(dir, 'Dockerfile'), 'shipped upstream');
+  writeFileSync(join(dir, 'providers/core.mjs'), 'v1');
+  writeFileSync(join(dir, 'providers/acme.mjs'), 'v1');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+
+  // The update rewrites all four, but this install locally edited Dockerfile
+  // (standalone) and providers/acme.mjs (under an updated directory), so both
+  // are preserved: kept on disk with the user's content and out of the commit.
+  writeFileSync(join(dir, 'AGENTS.md'), 'v2');
+  writeFileSync(join(dir, 'Dockerfile'), "the user's local sandbox edit");
+  writeFileSync(join(dir, 'providers/core.mjs'), 'v2');
+  writeFileSync(join(dir, 'providers/acme.mjs'), "the user's local edit");
+
+  const pathsToStage = ['AGENTS.md', 'providers/', ':(exclude)Dockerfile', ':(exclude)providers/acme.mjs'];
+  const preserved = ['Dockerfile', 'providers/acme.mjs'];
+  const files = stagingFileList(pathsToStage, preserved, 'HEAD', ctx);
+
+  if (!files.some(f => f.startsWith(':(exclude)'))) {
+    pass('stagingFileList emits no :(exclude) spec');
+  } else {
+    fail(`an exclusion spec survived into the staging list: ${files.join(', ')}`);
+  }
+  if (!files.includes('Dockerfile') && !files.includes('providers/acme.mjs')) {
+    pass('a standalone AND an under-directory preserved file are both subtracted');
+  } else {
+    fail(`a preserved file reached the staging list: ${files.join(', ')}`);
+  }
+  if (files.includes('AGENTS.md') && files.includes('providers/core.mjs')) {
+    pass("the update's own files remain in the staging list");
+  } else {
+    fail(`stagingFileList dropped a real update file: ${files.join(', ')}`);
+  }
+
+  let threw = null;
+  try {
+    addPaths(files, ctx);
+  } catch (err) {
+    threw = err;
+  }
+  const staged = stagedPaths(g);
+  if (!threw && staged.has('AGENTS.md') && staged.has('providers/core.mjs')
+      && !staged.has('Dockerfile') && !staged.has('providers/acme.mjs')) {
+    pass('the derived list stages cleanly and leaves preserved files uncommitted');
+  } else {
+    fail(`staging the derived list failed: ${threw?.message.split('\n')[0] ?? [...staged].join(', ')}`);
   }
   rmSync(dir, { recursive: true, force: true });
 }

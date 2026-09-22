@@ -10,7 +10,11 @@ import { pass, fail, ROOT } from './helpers.mjs';
 
 console.log('\nShared User-Agent constants');
 
-const { DEFAULT_USER_AGENT, BROWSER_LIKE_USER_AGENT } = await import(pathToFileURL(join(ROOT, 'user-agent.mjs')).href);
+const {
+  DEFAULT_USER_AGENT,
+  BROWSER_LIKE_USER_AGENT,
+  MACOS_BROWSER_LIKE_USER_AGENT,
+} = await import(pathToFileURL(join(ROOT, 'user-agent.mjs')).href);
 const { fetchJson } = await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
 
 // 1. Pinned to a literal, not derived from package.json — the exact
@@ -24,6 +28,10 @@ else fail(`DEFAULT_USER_AGENT drifted from the pinned literal: got ${DEFAULT_USE
 const EXPECTED_BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36';
 if (BROWSER_LIKE_USER_AGENT === EXPECTED_BROWSER_UA) pass('BROWSER_LIKE_USER_AGENT matches the pinned literal');
 else fail(`BROWSER_LIKE_USER_AGENT drifted from the pinned literal: got ${BROWSER_LIKE_USER_AGENT}`);
+
+const EXPECTED_MACOS_BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+if (MACOS_BROWSER_LIKE_USER_AGENT === EXPECTED_MACOS_BROWSER_UA) pass('MACOS_BROWSER_LIKE_USER_AGENT matches the pinned literal');
+else fail(`MACOS_BROWSER_LIKE_USER_AGENT drifted from the pinned literal: got ${MACOS_BROWSER_LIKE_USER_AGENT}`);
 
 // 2. The header that actually goes out on the wire matches the constant —
 // checks 1 above only inspect the exported string in isolation, which

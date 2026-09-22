@@ -468,8 +468,36 @@ export function createHeadedPageProvider(chromium) {
   let browser = null;
   let page = null;
   let launchFailed = false;
+  // A cached page is only reusable while its browser is still up. If the headed
+  // Chromium goes away mid-run (the user closes the window, the process dies),
+  // the cached handle stays non-null, so every later get() hands back a dead
+  // page and each anti-bot retry fails with "Target page, context or browser has
+  // been closed" instead of a real verdict. Guarded defensively because the
+  // provider is handed a chromium in tests, not necessarily a real Playwright one.
+  const isCachedPageUsable = () => {
+    if (!page) return false;
+    if (typeof page.isClosed === 'function' && page.isClosed()) return false;
+    if (browser && typeof browser.isConnected === 'function' && !browser.isConnected()) return false;
+    return true;
+  };
+
   return {
     async get() {
+      if (page && !isCachedPageUsable()) {
+        // Drop the dead handles and fall through to a fresh launch below. If the
+        // page went away but its Chromium is still up, tear that browser down
+        // first: close() only knows the current handle, so a replacement launch
+        // would otherwise leave the stale process running until exit.
+        if (browser && (typeof browser.isConnected !== 'function' || browser.isConnected())) {
+          try {
+            await browser.close();
+          } catch {
+            // best-effort teardown
+          }
+        }
+        page = null;
+        browser = null;
+      }
       if (page) return page;
       if (launchFailed) return null;
       try {
