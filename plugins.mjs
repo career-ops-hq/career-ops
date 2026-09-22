@@ -77,7 +77,14 @@ function existingPipelineUrls() {
   const urls = new Set();
   if (!existsSync(PIPELINE_PATH)) return urls;
   const text = readFileSync(PIPELINE_PATH, 'utf8');
-  for (const m of text.matchAll(/- \[[ xX]\]\s+(\S+)/g)) urls.add(m[1]);
+  for (const m of text.matchAll(/- \[[ xX]\][ \t]+([^\r\n]+)/g)) {
+    // Closed entries use the modes' canonical ~~body~~ wrapper. Unwrap before
+    // reading the URL token, including URL-only rows whose closing ~~ touches it.
+    const body = m[1].startsWith('~~')
+      ? (m[1].match(/^~~([\s\S]*?)~~/)?.[1] ?? m[1].slice(2)) : m[1];
+    const url = body.match(/^\S+/)?.[0];
+    if (url) urls.add(url);
+  }
   return urls;
 }
 
