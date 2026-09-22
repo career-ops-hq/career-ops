@@ -4396,6 +4396,10 @@ if (
   upskillModeDoc.includes('successful HTTP response') &&
   upskillModeDoc.includes('non-error title') &&
   upskillModeDoc.includes('substantive page content') &&
+  upskillModeDoc.includes('reject 4xx/5xx responses') &&
+  upskillModeDoc.includes('error/challenge pages') &&
+  upskillModeDoc.includes('empty bodies') &&
+  upskillModeDoc.includes('redirects to unrelated destinations') &&
   upskillModeDoc.includes('job-posting-only') &&
   upskillModeDoc.includes('must not classify learning resources') &&
   upskillModeDoc.includes('Dead links never enter the report')
