@@ -819,7 +819,9 @@ function onboardingState(root) {
 
   const { cli: activeCli, source: cliSource, warning: cliWarning } = resolveActiveCli();
 
-  const mcpCheck = checkPlaywrightMcp(root, activeCli);
+  // MCP project configuration belongs to the launch checkout. `root` is the
+  // user-data layer and may point elsewhere under split-checkout installs.
+  const mcpCheck = checkPlaywrightMcp(process.cwd(), activeCli);
   const unpersonalized = unpersonalizedFiles(root);
   const bakCheck = checkTrackedBakFiles(root);
   const warnings = [

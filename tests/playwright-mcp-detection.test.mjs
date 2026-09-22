@@ -5,7 +5,7 @@
 // Each scenario uses a fresh --target dir so no MCP config leaks across cases.
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -21,10 +21,10 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
 // Scenarios that exercise the plugin path pass their own CLAUDE_CONFIG_DIR.
 const EMPTY_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'co-mcp-emptycfg-'));
 
-function runDoctor(cwd, args, env) {
+function runDoctor(cwd, args, env, { executionCwd = cwd } = {}) {
   try {
     const out = execFileSync(NODE, [DOCTOR, '--json', '--target', cwd, ...args], {
-      cwd,
+      cwd: executionCwd,
       // Order matters: the empty dir must override an ambient CLAUDE_CONFIG_DIR
       // from the developer's own shell, while a scenario's explicit env still wins.
       env: { ...process.env, CLAUDE_CONFIG_DIR: EMPTY_CONFIG_DIR, ...env },
@@ -61,6 +61,31 @@ function expectWarn(state, msg) {
 const PLAYWRIGHT_RE = /playwright mcp/i;
 
 try {
+  // Split checkout: MCP config lives beside doctor.mjs, while --target points
+  // at the user-data root. The CLI never reads a decoy config in that data root.
+  {
+    const dataRoot = mkdtempSync(join(tmpdir(), 'co-mcp-split-data-'));
+    const codeConfig = join(ROOT, '.mcp.json');
+    const hadCodeConfig = existsSync(codeConfig);
+    const previousCodeConfig = hadCodeConfig ? readFileSync(codeConfig, 'utf8') : null;
+    try {
+      writeFileSync(codeConfig, JSON.stringify({
+        mcpServers: { playwright: { command: 'npx', args: ['@playwright/mcp@latest'] } },
+      }));
+      const state = runDoctor(dataRoot, [], {}, { executionCwd: ROOT });
+      if (state.playwright_mcp?.claude === true
+          && !state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('split checkout reads Playwright MCP config from code root');
+      } else {
+        fail(`split checkout ignored code-root MCP config: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      if (hadCodeConfig) writeFileSync(codeConfig, previousCodeConfig);
+      else rmSync(codeConfig, { force: true });
+      rmSync(dataRoot, { recursive: true, force: true });
+    }
+  }
+
   // 1. Default CLI (no flag/env/.env), no MCP config anywhere → warning fires.
   {
     const dir = mkdtempSync(join(tmpdir(), 'co-mcp-1-'));
