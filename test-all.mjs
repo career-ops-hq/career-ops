@@ -4390,13 +4390,17 @@ if (upskillModeDoc.includes('regenerated fresh every run, never diffed')) {
   fail('upskill trust rule 3 (ephemeral / non-versioned resources) missing');
 }
 
-// Rule 4 — write-time URL liveness via the check-liveness pattern; dead links excluded.
+// Rule 4 — resource-specific URL liveness; job-posting heuristics excluded.
 if (
   upskillModeDoc.includes('Write-time URL liveness') &&
-  upskillModeDoc.includes('liveness-core.mjs') &&
-  upskillModeDoc.includes('dead links never enter the report')
+  upskillModeDoc.includes('successful HTTP response') &&
+  upskillModeDoc.includes('non-error title') &&
+  upskillModeDoc.includes('substantive page content') &&
+  upskillModeDoc.includes('job-posting-only') &&
+  upskillModeDoc.includes('must not classify learning resources') &&
+  upskillModeDoc.includes('Dead links never enter the report')
 ) {
-  pass('upskill trust rule 4: write-time URL liveness via check-liveness pattern; dead links excluded');
+  pass('upskill trust rule 4: resource-specific URL liveness; job-posting heuristic excluded');
 } else {
   fail('upskill trust rule 4 (write-time URL liveness) missing');
 }
