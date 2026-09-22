@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getBash, rmSync } from './helpers.mjs';
@@ -139,5 +139,55 @@ test('successful, non-rate-limit and non-Claude workers do not back off', () => 
     const out = runLoop(ctx, options);
     assert.doesNotMatch(out, /SLEEP:|STATE:/);
     assert.match(out, /END:1:0:false:/);
+  }
+}));
+
+test('full runner resumes persisted retries and schedules paused rows only with --resume-paused', () => fixture(({ dir, invoke }) => {
+  mkdirSync(join(dir, 'batch'));
+  writeFileSync(join(dir, 'batch/batch-runner.sh'), source);
+  writeFileSync(join(dir, 'batch/batch-prompt.md'), 'Fixture prompt');
+  writeFileSync(join(dir, 'batch/batch-input.tsv'), 'id\turl\tsource\tnotes\n1\thttps://example.com/job\ttest\tfixture\n');
+  // Isolate report allocation and post-run integrations; use the real runner's
+  // argument parsing, scheduling, state reads/writes, process_offer and backoff.
+  writeFileSync(join(dir, 'reserve-report-num.mjs'), 'if (!process.argv.includes("--release")) console.log("001");\n');
+  for (const script of ['merge-tracker', 'reconcile-pipeline', 'verify-pipeline']) {
+    writeFileSync(join(dir, `${script}.mjs`), '// No external integrations in this fixture.\n');
+  }
+  const stateFile = join(dir, 'batch/batch-state.tsv');
+  for (const [status, resume, scheduled] of [
+    ['rate_limited', false, true],
+    ['paused_rate_limit', false, false],
+    ['paused_rate_limit', true, true],
+  ]) {
+    const state = 'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries\n'
+      + `1\thttps://example.com/job\t${status}\tstart\tend\t001\t-\t429\t1\n`;
+    writeFileSync(stateFile, state);
+    const output = invoke(`
+      : > calls.log
+      claude() { echo called >> calls.log; echo '429 Too Many Requests'; return 1; }
+      curl() { return 1; }
+      sleep() {
+        printf 'SLEEP:%s\n' "$1"
+        cp batch/batch-state.tsv sleeping-state.tsv
+      }
+      source batch/batch-runner.sh --model fixture ${resume ? '--resume-paused' : ''}`);
+    const calls = readFileSync(join(dir, 'calls.log'), 'utf8').trim();
+    if (!scheduled) {
+      assert.equal(calls, '');
+      assert.doesNotMatch(output, /SLEEP:/);
+      assert.equal(readFileSync(stateFile, 'utf8'), state);
+      continue;
+    }
+    assert.equal(calls.split('\n').length, 2, status);
+    const delays = [...output.matchAll(/SLEEP:(\d+)/g)].map(m => Number(m[1]));
+    assert.equal(delays.length, 1, output);
+    assert.ok(delays[0] >= 60 && delays[0] <= 72, output);
+    const sleeping = readFileSync(join(dir, 'sleeping-state.tsv'), 'utf8').trim().split('\n')[1].split('\t');
+    assert.equal(sleeping[2], 'rate_limited');
+    assert.equal(sleeping[7], `rate-limit; retrying after ${delays[0]}s`);
+    assert.equal(sleeping[8], '2');
+    const final = readFileSync(stateFile, 'utf8').trim().split('\n')[1].split('\t');
+    assert.equal(final[2], 'failed');
+    assert.equal(final[8], '2');
   }
 }));
