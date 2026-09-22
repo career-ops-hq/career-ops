@@ -21,8 +21,10 @@ from langgraph.graph import END, START, StateGraph
 
 try:
     from workflow.discovery import discover
+    from workflow.application_lifecycle import ApplicationStore, mutate as mutate_application
 except ModuleNotFoundError:  # Direct script invocation keeps only workflow/ on sys.path.
     from discovery import discover
+    from application_lifecycle import ApplicationStore, mutate as mutate_application
 
 os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
 
@@ -1045,6 +1047,14 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("list")
     cancel = commands.add_parser("cancel")
     cancel.add_argument("task_id")
+    application = commands.add_parser("application")
+    application.add_argument("action", choices=("submit", "transition", "activity", "outcome", "view", "followups"))
+    application.add_argument("opportunity", nargs="?")
+    application.add_argument("value", nargs="?")
+    application.add_argument("--source", default="candidate-confirmed")
+    application.add_argument("--confirmed", action="store_true")
+    application.add_argument("--payload", default="{}")
+    application.add_argument("--idempotency-key")
     return cli
 
 
@@ -1076,6 +1086,29 @@ def main() -> None:
             result = list_views(args.directory)
         elif args.command == "cancel":
             result = cancel_task(args.directory, args.task_id)
+        elif args.command == "application":
+            store = ApplicationStore(args.directory / "opportunities.db")
+            try:
+                if args.action == "view":
+                    result = store.application(args.opportunity) if args.opportunity else store.views()
+                elif args.action == "followups":
+                    result = store.followups()
+                else:
+                    if not args.opportunity or (args.action != "submit" and not args.value):
+                        raise ValueError("application mutation requires opportunity and value")
+                    if not args.idempotency_key:
+                        raise ValueError("application mutation requires --idempotency-key")
+                    if args.action in {"submit", "activity"} and not args.confirmed:
+                        raise ValueError(f"application {args.action} requires --confirmed")
+                    store.close()
+                    store = None
+                    result = mutate_application(
+                        args.directory, args.opportunity, args.action, args.value or "",
+                        source=args.source, payload=json.loads(args.payload), idempotency_key=args.idempotency_key,
+                    )
+            finally:
+                if store:
+                    store.close()
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     except Exception as error:
         print(f"{type(error).__name__}: {error}", file=sys.stderr)
