@@ -130,7 +130,7 @@ export default {
         jobs.push({
           title: row.title,
           url: row.url,
-          company: row.company || entry.name || 'Empfehlungsbund',
+          company: row.company,
           location: row.location,
         });
       }
