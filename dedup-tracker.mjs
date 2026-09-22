@@ -13,13 +13,15 @@
 import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { roleFuzzyMatch } from './role-matcher.mjs';
 import {
-  openTrackerTransaction, rebuildRow, resolveTrackerPath, normalizeCompany,
+  openTrackerTransaction, rebuildRow, normalizeCompany,
 } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 // Support both layouts: data/applications.md (boilerplate) and applications.md
 // (original). CAREER_OPS_TRACKER lets tests point the script at an isolated
 // fixture so the real user tracker is never touched.
@@ -36,7 +38,6 @@ const USAGE = `Usage: node dedup-tracker.mjs [--dry-run]`;
 const cliArgs = process.argv.slice(2);
 
 validateFlags(cliArgs, KNOWN_FLAGS, USAGE);
-
 const DRY_RUN = process.argv.includes('--dry-run');
 
 // Ensure the target tracker directory exists in both normal and fixture mode.

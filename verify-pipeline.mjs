@@ -16,33 +16,39 @@
  * 11. Via channel consistency (see #1596)
  * 12. No # value reused across 2+ tracker rows (error — see #1704)
  * 13. applications.md <-> active-interviews.md status sync (see #1504)
+ * 14. data/follow-ups.md table schema (see #2971)
+ * 15. portals.yml entries no provider claims (see #3251)
+ * 16. No invisible control characters in tracker cells (error — see #3892)
  *
  * Run: node career-ops/verify-pipeline.mjs
  */
 
 import { readFileSync, readdirSync, existsSync, mkdirSync, unlinkSync, statSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import {
   looksLikeScoreCell, isSeparatorRow, isHeaderRow, resolveColumns,
   normalizeTextKey, normalizeVia,
 } from './tracker-parse.mjs';
+import { CONTROL_CHARS } from './tracker-utils.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
+import { checkFollowupsSchema } from './stats.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 // Support both layouts: data/applications.md (boilerplate) and applications.md (original).
 // CAREER_OPS_TRACKER overrides the path (used by tests and non-standard layouts).
-const APPS_FILE = process.env.CAREER_OPS_TRACKER
-  ? process.env.CAREER_OPS_TRACKER
-  : existsSync(join(CAREER_OPS, 'data/applications.md'))
-    ? join(CAREER_OPS, 'data/applications.md')
-    : join(CAREER_OPS, 'applications.md');
+const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+
 const ADDITIONS_DIR = join(CAREER_OPS, 'batch/tracker-additions');
 // CAREER_OPS_REPORTS overrides the reports dir (used by tests, mirrors CAREER_OPS_TRACKER).
-const REPORTS_DIR = process.env.CAREER_OPS_REPORTS || join(CAREER_OPS, 'reports');
-const STATES_FILE = existsSync(join(CAREER_OPS, 'templates/states.yml'))
-  ? join(CAREER_OPS, 'templates/states.yml')
-  : join(CAREER_OPS, 'states.yml');
+const REPORTS_DIR = process.env.CAREER_OPS_REPORTS
+  ? resolve(CAREER_OPS, process.env.CAREER_OPS_REPORTS)
+  : join(CAREER_OPS, 'reports');
+const STATES_FILE = existsSync(join(CODE_ROOT, 'templates/states.yml'))
+  ? join(CODE_ROOT, 'templates/states.yml')
+  : join(CODE_ROOT, 'states.yml');
 
 // Ensure required directories exist (fresh setup)
 mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
@@ -343,7 +349,7 @@ for (const e of entries) {
   }
   for (const lt of linkTexts) referencedNums.add(parseInt(lt[1], 10));
   for (const lt of linkTargets) {
-    const m = lt[1].split('/').pop().match(/^(\d+)-/);
+    const m = lt[1].split(/[\\/]/).pop().match(/^(\d+)-/);
     if (m) referencedNums.add(parseInt(m[1], 10));
   }
 }
@@ -442,7 +448,12 @@ let syncResult;
 try {
   syncResult = checkTrackerSync({ appsFile: APPS_FILE });
 } catch (err) {
-  warn(`Sync check could not run: ${err.message}`);
+  // A check that could not RUN is a failed check, not a warning. warn() does not affect the exit
+  // code, so a throw here made verify-pipeline print a notice and still exit 0 — and to anything
+  // reading the exit status (CI, a cron wrapper, a pre-push hook) that is indistinguishable from
+  // the invariant holding. We do not know whether the tracker is in sync; we know we failed to
+  // look. The honest report is failure.
+  error(`Sync check could not run — the tracker was NOT verified: ${err.message}`);
 }
 
 if (syncResult) {
@@ -465,6 +476,138 @@ if (syncResult) {
       : 'No active-interviews.md rows to sync-check');
   }
 }
+
+// --- Check 14: data/follow-ups.md table schema (#2971) ---
+// stats.mjs (computeFollowupStats) and followup-cadence.mjs both read this table
+// positionally, in the shape modes/followup.md documents, and both skip any row
+// whose num/appNum cells don't parse as integers. A table written with a
+// different column order therefore reports as ZERO follow-ups in both tools,
+// silently — indistinguishable from a file where nothing has been logged yet.
+// Follow-up compliance is exactly the number a user consults to decide whether
+// their follow-ups are working, so a silent zero is actively misleading. This is
+// the only place that difference is visible.
+//
+// Path resolution deliberately matches the two consumers (CAREER_OPS/data/...)
+// rather than APPS_FILE's directory: the check exists to predict what they will
+// do, so it has to read the same file they read.
+const FOLLOWUPS_FILE = join(CAREER_OPS, 'data', 'follow-ups.md');
+const FOLLOWUPS_COLUMNS = '| num | appNum | date | company | role | channel | contact | notes |';
+if (!existsSync(FOLLOWUPS_FILE)) {
+  ok('No follow-ups.md yet — nothing to schema-check');
+} else {
+  const fups = checkFollowupsSchema(readFileSync(FOLLOWUPS_FILE, 'utf-8'));
+  if (fups.pipeLines === 0) {
+    ok('follow-ups.md has no table rows yet');
+  } else if (!fups.sawSeparator) {
+    error(`follow-ups.md has table rows but no header delimiter row, so every row is skipped — expected ${FOLLOWUPS_COLUMNS} (see modes/followup.md)`);
+  } else if (fups.dataRows === 0) {
+    ok('follow-ups.md has no logged follow-ups yet');
+  } else if (fups.parsed === 0) {
+    error(`follow-ups.md: none of its ${fups.dataRows} row(s) parse, so stats.mjs and followup-cadence.mjs will both report zero follow-ups — expected column order ${FOLLOWUPS_COLUMNS} (see modes/followup.md)`);
+  } else if (fups.unparsedLines.length > 0) {
+    warn(`follow-ups.md: ${fups.unparsedLines.length} of ${fups.dataRows} rows will be skipped by stats.mjs and followup-cadence.mjs (line${fups.unparsedLines.length === 1 ? '' : 's'} ${fups.unparsedLines.join(', ')}) — expected ${FOLLOWUPS_COLUMNS}`);
+  } else {
+    ok(`follow-ups.md schema valid (${fups.parsed} logged follow-up${fups.parsed === 1 ? '' : 's'})`);
+  }
+}
+
+// --- Check 15: portals.yml entries no provider claims (#3251) ---
+// Coverage rot is invisible from every other check here: an entry with
+// `enabled: true` and a careers_url nothing matches reads as a tracked company
+// in the config and contributes zero postings on every scan. Twelve of those
+// were live on 2026-08-26, one of them a company whose real board existed and
+// was one character off the slug in the file.
+//
+// Only the OFFLINE half of audit-portals.mjs runs here — provider resolution is
+// pure config matching, so this check stays as fast and network-free as the rest
+// of verify-pipeline. The live half (does the board answer, and with whose
+// jobs?) needs 170 fetches and stays a separate command: `node audit-portals.mjs`.
+//
+// portals.yml is user-layer and gitignored, so its absence is not a finding.
+const PORTALS_FILE = process.env.CAREER_OPS_PORTALS || join(CAREER_OPS, 'portals.yml');
+if (!existsSync(PORTALS_FILE)) {
+  ok('No portals.yml yet — nothing to coverage-check');
+} else {
+  try {
+    const { findUnclaimedEntries } = await import('./audit-portals.mjs');
+    const { loadProviders } = await import('./providers/_registry.mjs');
+    const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
+    const yaml = await import('js-yaml');
+
+    const cfg = yaml.load(readFileSync(PORTALS_FILE, 'utf-8')) || {};
+    // Both sections, because scan.mjs resolves both through the same registry:
+    // an unclaimed aggregator board is exactly as dead as an unclaimed company.
+    const entries = [
+      ...(Array.isArray(cfg.tracked_companies) ? cfg.tracked_companies : []),
+      ...(Array.isArray(cfg.job_boards) ? cfg.job_boards : []),
+    ];
+    // providers/ and plugins/ both ship in the code layer — resolve them from
+    // CODE_ROOT (scan.mjs does the same). Without mergeProviderPlugins() the
+    // health check sees only providers/*.mjs and reports every enabled
+    // plugin-provider entry as an unknown provider that "never scans", while
+    // the scanner resolves and scans it (#4026). No-op for a plugin-free
+    // install: mergeProviderPlugins returns before any work when
+    // config/plugins.yml is absent.
+    const providers = await loadProviders(join(CODE_ROOT, 'providers'));
+    await mergeProviderPlugins(providers, { root: CODE_ROOT });
+    const { silent, handoff, unknownProvider } = findUnclaimedEntries(entries, providers);
+
+    // findUnclaimedEntries silently skips an entry with no (or blank) `name` —
+    // it can't report what it can't label. Without this, that entry vanishes
+    // from silent/handoff/unknownProvider entirely, and the enabled count
+    // below (which doesn't share the same eligibility rule) would still
+    // include it — so a malformed entry never gets a provider check AND the
+    // "All N entries resolve" success line claims it as resolved anyway.
+    const malformed = entries.filter(e => e && e.enabled !== false && (typeof e.name !== 'string' || !e.name.trim()));
+    for (const e of malformed) {
+      warn(`portals.yml: an enabled entry has no name (careers_url: ${e.careers_url || 'none'}) — it cannot be provider-checked; give it a name`);
+    }
+
+    for (const e of unknownProvider) {
+      error(`portals.yml: "${e.name}" sets an unknown provider — ${e.error}. The entry never scans (see providers/ for valid ids)`);
+    }
+    for (const e of silent) {
+      warn(`portals.yml: "${e.name}" is enabled but no provider claims ${e.careers_url || 'its careers_url'} — scan.mjs skips it on every run without naming it (run node audit-portals.mjs)`);
+    }
+    if (silent.length === 0 && unknownProvider.length === 0 && malformed.length === 0) {
+      const enabled = entries.filter(e => e && e.enabled !== false).length;
+      ok(handoff.length > 0
+        ? `All ${enabled - handoff.length} scannable portals.yml entries resolve to a provider (${handoff.length} on websearch handoff)`
+        : `All ${enabled} enabled portals.yml entries resolve to a provider`);
+    }
+  } catch (err) {
+    warn(`Portal coverage check could not run: ${err.message}`);
+  }
+}
+
+// --- Check 16: invisible control bytes already in tracker cells (#3892) ---
+// cell() in tracker-utils.mjs strips these on the way in, which stops new ones
+// entering but can do nothing about the ones already written. This is the only
+// place such a byte is visible at all: it shifts or truncates the positional
+// `split('|')` parse, so a row silently reads as a different row or drops out
+// of a count entirely, while every renderer of the table — markdown, GitHub,
+// the web dashboard — shows the cell as correct. The corruption surfaces much
+// later as an unrelated arithmetic discrepancy with no trail back to the cause.
+//
+// Read off the RAW lines rather than the parsed `entries`, so a byte in a
+// column this file has no field for is caught too, and reported with the file
+// line number: a shifted parse is exactly the situation where the row's own #
+// cell is the thing not to trust.
+//
+// CONTROL_CHARS is imported, never re-declared — a second copy of the range
+// would let the write path and this detector disagree about what counts.
+let controlByteRows = 0;
+for (let i = 0; i < lines.length; i++) {
+  if (!lines[i].startsWith('|')) continue;
+  // .match() with a /g regex resets lastIndex; .test() would not, and would
+  // then skip every other offending row.
+  const found = lines[i].match(CONTROL_CHARS);
+  if (!found) continue;
+  const points = [...new Set(found.map(c => `U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`))];
+  error(`applications.md line ${i + 1}: tracker row contains invisible control character(s) ${points.join(', ')} — delete them; they render as nothing in every view but shift the positional column parse`);
+  controlByteRows++;
+}
+if (controlByteRows === 0) ok('No control characters in tracker cells');
 
 // --- Summary ---
 console.log('\n' + '='.repeat(50));

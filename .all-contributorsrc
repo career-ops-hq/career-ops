@@ -1,6 +1,6 @@
 {
   "projectName": "career-ops",
-  "projectOwner": "santifer",
+  "projectOwner": "career-ops-hq",
   "repoType": "github",
   "repoHost": "https://github.com",
   "files": [
@@ -919,7 +919,10 @@
       "avatar_url": "https://avatars.githubusercontent.com/u/94570424?u=00affba7d9f68cb50ec594b83766bfb14ce3d139&v=4",
       "profile": "https://github.com/LayerC0de",
       "contributions": [
-        "doc"
+        "code",
+        "doc",
+        "plugin",
+        "test"
       ]
     },
     {
@@ -1978,6 +1981,57 @@
         "infra",
         "plugin",
         "test"
+      ]
+    },
+    {
+      "login": "AdilAzhari",
+      "name": "Adil omer",
+      "avatar_url": "https://avatars.githubusercontent.com/u/36453919?v=4",
+      "profile": "https://github.com/AdilAzhari",
+      "contributions": [
+        "code",
+        "test"
+      ]
+    },
+    {
+      "login": "artemtrofymenko",
+      "name": "Artem Trofymenko",
+      "avatar_url": "https://avatars.githubusercontent.com/u/99894081?v=4",
+      "profile": "https://skusum.com/",
+      "contributions": [
+        "code",
+        "test",
+        "doc"
+      ]
+    },
+    {
+      "login": "thibmonier",
+      "name": "thibmonier",
+      "avatar_url": "https://avatars.githubusercontent.com/u/413136?v=4",
+      "profile": "https://github.com/thibmonier",
+      "contributions": [
+        "code",
+        "test"
+      ]
+    },
+    {
+      "login": "WJiangH",
+      "name": "WJHuang",
+      "avatar_url": "https://avatars.githubusercontent.com/u/45132014?v=4",
+      "profile": "https://github.com/WJiangH",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "IaroslavMazur",
+      "name": "Iaroslav Mazur",
+      "avatar_url": "https://avatars.githubusercontent.com/u/22785348?v=4",
+      "profile": "https://github.com/IaroslavMazur",
+      "contributions": [
+        "code",
+        "test",
+        "doc"
       ]
     }
   ]

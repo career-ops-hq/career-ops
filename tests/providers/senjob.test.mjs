@@ -113,13 +113,27 @@ try {
   // A numeric reference outside the valid scalar range must stay literal.
   // String.fromCodePoint() happily builds a LONE SURROGATE, which is not valid
   // text and breaks strict serialization downstream (CodeRabbit, #2962).
-  if (visibleText('&#55296;') === '&#55296;'
-      && visibleText('&#xD800;') === '&#xD800;'
-      && visibleText('&#65534;') === '&#65534;'
-      && visibleText('&#xFDD0;') === '&#xFDD0;') {
-    pass('visibleText() rejects surrogates and noncharacters, leaving them literal');
+  // The policy is the shared decoder's: XML 1.0 §2.2 Char. Surrogates and
+  // U+FFFE/U+FFFF are outside it and stay literal. The FDD0–FDEF noncharacter
+  // block is INSIDE it and decodes — a deliberate consequence of naming that
+  // standard, not an oversight here, so this pins the standard's actual edge
+  // rather than a stricter rule this provider used to apply alone.
+  const outsideXmlChar = ['&#55296;', '&#xD800;', '&#65534;', '&#65535;', '&#1;'];
+  const keptLiteral = outsideXmlChar.filter((ref) => visibleText(ref) === ref);
+  if (keptLiteral.length === outsideXmlChar.length) {
+    pass('visibleText() keeps surrogates, U+FFFE, U+FFFF and the C0 controls literal');
   } else {
-    fail(`invalid scalar decoded: ${JSON.stringify([visibleText('&#55296;'), visibleText('&#xD800;'), visibleText('&#65534;'), visibleText('&#xFDD0;')])}`);
+    fail(`decoded outside XML Char: ${JSON.stringify(outsideXmlChar.filter((r) => !keptLiteral.includes(r)).map((r) => [r, visibleText(r)]))}`);
+  }
+  // The other side of the same boundary, which the comment above claims and the
+  // assertion above cannot show: U+FDD0 is INSIDE XML Char and therefore
+  // decodes. Without this, a decoder that rejected the whole FDD0–FDEF block —
+  // the stricter rule senjob used to apply alone — would still pass (CodeRabbit,
+  // #3007).
+  if (visibleText('&#64976;') === '\uFDD0') {
+    pass('visibleText() decodes U+FDD0: inside XML Char, so inside the policy');
+  } else {
+    fail(`U+FDD0 not decoded: ${JSON.stringify(visibleText('&#64976;'))}`);
   }
   // Guard: valid references on both sides of the rejected ranges still decode.
   if (visibleText('&#233;') === 'é' && visibleText('&#xE9;') === 'é' && visibleText('&#128512;') === '\u{1F600}') {
@@ -129,10 +143,12 @@ try {
   }
 
   // An entity the table does not know is left alone rather than mangled.
-  if (visibleText('100&euro; &unknown; net') === '100&euro; &unknown; net') {
+  // `&euro;` is now a KNOWN entity (the shared table carries it), so the guard
+  // uses names the table genuinely does not have.
+  if (visibleText('&unknown; &fakeent; net') === '&unknown; &fakeent; net') {
     pass('visibleText() leaves an unknown entity untouched');
   } else {
-    fail(`unknown entity mangled: ${JSON.stringify(visibleText('100&euro; &unknown; net'))}`);
+    fail(`unknown entity mangled: ${JSON.stringify(visibleText('&unknown; &fakeent; net'))}`);
   }
 
   // ── parseListingPage(): the shapes the board actually serves ──

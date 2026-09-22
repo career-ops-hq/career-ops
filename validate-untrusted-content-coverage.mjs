@@ -26,8 +26,10 @@
 
 import { readFileSync, existsSync, globSync } from 'fs';
 import { dirname, join, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { USER_PATHS } from './update-system.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { isUnderNestedCheckout } from './lib/mjs-files.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 
@@ -142,7 +144,7 @@ export function hasCanonicalHeading(text) {
 // Everything below is the CLI. Guarded so importing this module for its pure
 // helpers (deriveIngestingModes, isUserLayerPath, hasDirectiveMarker) does not
 // run the validation and process.exit() out from under the importer.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
     console.log('Running validate-untrusted-content-coverage.mjs self-tests...');
 
@@ -240,10 +242,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     problems.push(`modes/_shared.md does not reference "${MARKER}"`);
   }
 
+  // globSync expands the whole subtree in one call, so a nested checkout is
+  // filtered out of the result rather than skipped during a descent: a worktree
+  // under modes/ turned 174 candidate files into 459, all of them somebody
+  // else's, and this validator would have graded them as ours (#3762).
   const candidates = [
     ...globSync('modes/**/*.md', { cwd: ROOT }),
     ...globSync('batch/*.md', { cwd: ROOT }),
-  ].map((p) => p.split(sep).join('/'));
+  ].map((p) => p.split(sep).join('/'))
+    .filter((rel) => !isUnderNestedCheckout(ROOT, rel));
 
   const required = deriveIngestingModes(candidates, (rel) => readFileSync(join(ROOT, rel), 'utf-8'));
 

@@ -81,8 +81,32 @@ export async function withTrackerLock<T>(trackerFile: string, fn: () => T | Prom
       retryMs: 50,
       tracker: trackerFile,
     });
-  } catch {
-    throw new TrackerBusyError();
+  } catch (e) {
+    // The core tags ONLY the genuine-contention timeout with code LOCK_TIMEOUT
+    // (tracker-utils.mjs's own comment: "so callers can tell 'lock is busy,
+    // retry later' apart from filesystem/configuration failures rethrown out
+    // of the loop above"). A bare catch here converted EVERY error — including
+    // ENOENT from a missing lock-dir parent, a broken checkout — into
+    // "tracker is being written by another process, retry", which is false:
+    // those never resolve by retrying. Anything not tagged propagates as-is.
+    //
+    // EACCES/EPERM is its own case, not "propagates as-is" like ENOENT: the
+    // core's isMkdirContention (pipeline-lock.mjs) treats EACCES/EPERM as
+    // contention too, because on Windows a lock dir mid-create/mid-remove by
+    // another process answers with exactly those codes (#2777) — there is no
+    // way to tell that apart from a genuine permission problem by code alone.
+    // So a PERSISTENT EACCES/EPERM (not another writer, just no permission)
+    // still retries inside the core's loop and, after timeoutMs, surfaces as
+    // LOCK_TIMEOUT — which this catch then reports as TrackerBusyError, same
+    // as real contention. That is a known, accepted characteristic of the
+    // shared lock machinery (see the PR discussion), not a gap in this catch:
+    // fixing it means changing isMkdirContention itself, which every lock in
+    // the repo shares, not something scoped to this wrapper.
+    const err = e as { code?: string } | null;
+    if (err && err.code === "LOCK_TIMEOUT") {
+      throw new TrackerBusyError();
+    }
+    throw e;
   }
   try {
     return await fn();

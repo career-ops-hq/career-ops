@@ -209,6 +209,10 @@ export function FilterBuilder({
             </div>
           </div>
           <div>
+            <Label hint="hard reject — overrides Always include">Never in (hard)</Label>
+            <KeywordField values={filters.blockHard} tone="exc" placeholder="USA, Brazil…" onChange={(v) => set({ blockHard: v })} />
+          </div>
+          <div>
             <Label hint={`${filters.limitPerAts} companies / source`}>Scan depth</Label>
             <input
               type="range"

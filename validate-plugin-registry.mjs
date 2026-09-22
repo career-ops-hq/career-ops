@@ -11,6 +11,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { loadRegistry, loadRegistryFiles, validateRegistryEntry } from './plugins/_registry.mjs';
 import { HOOK_KINDS, RESERVED_ENV } from './plugins/_engine.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -43,7 +44,7 @@ export function validateRegistry(root) {
   return problems;
 }
 
-if (import.meta.url === (await import('node:url')).pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   const root = process.cwd();
   const deep = process.argv.includes('--deep');
   const problems = validateRegistry(root);

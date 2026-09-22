@@ -161,8 +161,12 @@ for (const [label, getTitle] of checked) {
   // cosmetic variations a re-introduced copy would arrive with, and matching
   // one spelling would let it back in (CodeRabbit on this PR).
   const SHARED_IMPORT = /\bfrom\s*['"]\.\/_html-entities\.mjs['"]/;
+  // The name list is a list of SPELLINGS, so it has to carry the near misses.
+  // senjob (#2962) declared `decodeEntity` — singular — alongside its own
+  // `NAMED_ENTITIES` table, and matched none of the three names below, so this
+  // guard reported a clean repository while a fifth private copy sat in it.
   const PRIVATE_DECL =
-    /(?:function\s*\*?\s+|(?:const|let|var)\s+)(decodeEntities|decodeXmlEntities|fromCodePoint)\b/;
+    /(?:function\s*\*?\s+|(?:const|let|var)\s+)(decodeEntity|decodeEntities|decodeXmlEntity|decodeXmlEntities|fromCodePoint|NAMED_ENTITIES|XML_ENTITIES|HTML_ENTITIES)\b/;
   // Declarations only — remotli.mjs names String.fromCodePoint in a comment
   // explaining why it uses the shared decoder, which is not a private copy.
   // A destructure (`const { decodeEntities } = …`) has a brace after `const`
@@ -172,6 +176,57 @@ for (const [label, getTitle] of checked) {
     'jobspresso.mjs', 'higheredjobs.mjs', 'nodesk.mjs', 'larajobs.mjs',
     'personio.mjs', 'teamtailor.mjs', 'weworkremotely.mjs',
   ];
+
+  // The classification lives in one function so the POSITIVE CONTROL below can
+  // run it on synthetic sources instead of restating the logic. A guard whose
+  // discrimination is only ever demonstrated in a pull-request description is
+  // demonstrated nowhere after the merge (Scott-Emberson on this PR).
+  /** @returns {string|null} offender line, or null when the file is clean. */
+  const classifyProvider = (file, src) => {
+    const local = src.match(PRIVATE_DECL);
+    if (!local) return null;
+    return SHARED_IMPORT.test(src)
+      ? `${file} (declares ${local[1]})`
+      : `${file} (declares ${local[1]}, and does not import the shared decoder)`;
+  };
+
+  // ── Positive control ──
+  // Plant each shape that has actually escaped this guard and assert it fires.
+  // Without these, a regex that later matches NOTHING keeps every run green
+  // over a real private copy — the exact failure this block exists to prevent.
+  {
+    const IMPORT_LINE = "import { decodeEntities } from './_html-entities.mjs';\n";
+    const planted = [
+      // The senjob escape: singular name, no shared import.
+      ['const decodeEntity = (m, r) => m;',
+        'x.mjs (declares decodeEntity, and does not import the shared decoder)'],
+      // The same name as a function declaration.
+      ['function decodeEntity(m) { return m; }',
+        'x.mjs (declares decodeEntity, and does not import the shared decoder)'],
+      // A re-introduced table rather than a function.
+      ['const NAMED_ENTITIES = { amp: "&" };',
+        'x.mjs (declares NAMED_ENTITIES, and does not import the shared decoder)'],
+      // The original shape: a private copy ALONGSIDE the shared import.
+      [IMPORT_LINE + 'function decodeEntities(s) { return s; }',
+        'x.mjs (declares decodeEntities)'],
+    ];
+    const missed = planted.filter(([src, want]) => classifyProvider('x.mjs', src) !== want);
+    if (missed.length === 0) {
+      pass('positive control: every known-offending shape is still detected');
+    } else {
+      fail(`guard no longer fires on: ${JSON.stringify(missed.map(([src]) => src.slice(0, 60)))}`);
+    }
+
+    // Negative control, so the widened pattern cannot pass by matching
+    // everything: importing the shared decoder by destructuring is CORRECT
+    // usage and must stay clean.
+    const legitimate = IMPORT_LINE + 'const title = decodeEntities(raw);\n';
+    if (classifyProvider('x.mjs', legitimate) === null) {
+      pass('negative control: importing and calling the shared decoder is not an offence');
+    } else {
+      fail(`guard flags legitimate usage: ${classifyProvider('x.mjs', legitimate)}`);
+    }
+  }
 
   let files;
   try {
@@ -210,9 +265,14 @@ for (const [label, getTitle] of checked) {
         offenders.push(`${file} (unreadable: ${e.message})`);
         continue;
       }
-      if (!SHARED_IMPORT.test(src)) continue;
-      const local = src.match(PRIVATE_DECL);
-      if (local) offenders.push(`${file} (declares ${local[1]})`);
+      // NOT `if (!SHARED_IMPORT.test(src)) continue;`. Skipping non-importers
+      // is what let senjob through: a brand-new provider that never imports the
+      // shared module and simply writes its own decoder is the re-introduction
+      // this guard exists to fail on, and it was the one shape it could not
+      // see. A provider that declares a decoder is an offender whether or not
+      // it also imports the shared one.
+      const verdict = classifyProvider(file, src);
+      if (verdict) offenders.push(verdict);
     }
 
     if (offenders.length === 0) {

@@ -14,7 +14,9 @@ import { createHash } from 'crypto';
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, existsSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, dirname, relative, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { isNestedCheckout } from './lib/mjs-files.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(ROOT, 'test-fixtures', 'upgrade');
@@ -25,8 +27,13 @@ function walk(dir, base = dir, out = []) {
   // platforms (readdirSync returns filesystem order, which varies).
   for (const name of readdirSync(dir).sort()) {
     const p = join(dir, name);
-    if (statSync(p).isDirectory()) walk(p, base, out);
-    else out.push(relative(base, p).split(sep).join('/'));
+    // A checkout under a fixture state is another tree, not fixture content:
+    // seeding it would copy a whole second repository into the install under
+    // test and put its files in the manifest (#3762).
+    if (statSync(p).isDirectory()) {
+      if (isNestedCheckout(p)) continue;
+      walk(p, base, out);
+    } else out.push(relative(base, p).split(sep).join('/'));
   }
   return out;
 }
@@ -35,7 +42,14 @@ export function listStates() {
   if (!existsSync(FIXTURES)) return [];
   // Sort for deterministic state ordering across platforms (readdirSync
   // returns filesystem order, which varies).
-  return readdirSync(FIXTURES).sort().filter((n) => statSync(join(FIXTURES, n)).isDirectory());
+  //
+  // A checkout under test-fixtures/upgrade/ is excluded HERE, not only in
+  // walk(): this list is the state allowlist, and walk() starts AT the state
+  // directory, where the child-only guard cannot see it (the walk root is
+  // deliberately exempt). Leaving it in would make a whole second repository an
+  // allowlisted fixture state and seed it into the install under test (#3762).
+  return readdirSync(FIXTURES).sort()
+    .filter((n) => statSync(join(FIXTURES, n)).isDirectory() && !isNestedCheckout(join(FIXTURES, n)));
 }
 
 // Strict allowlist: a state must be one of the real fixture subdirectories.
@@ -101,7 +115,7 @@ function selfTest() {
   process.exit(failed ? 1 : 0);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   if (args[0] === '--self-test') selfTest();
   else if (args[0] && !args[0].startsWith('--')) {

@@ -34,6 +34,7 @@
 // `assertParsedSomething` below.
 
 import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry } from './_http.mjs';
+import { decodeEntities } from './_html-entities.mjs';
 
 const TRUSTED_HOST = 'senjob.com';
 const LIST_URL = 'https://senjob.com/offres-d-emploi.php';
@@ -83,60 +84,6 @@ function assertSenjobUrl(url) {
 }
 
 /**
- * Named entities this board actually emits. A French-language listing carries
- * accented references freely, so they are decoded rather than left as noise in
- * a job title.
- */
-const NAMED_ENTITIES = new Map([
-  ['nbsp', ' '], ['amp', '&'], ['quot', '"'], ['apos', "'"], ['lt', '<'], ['gt', '>'],
-  ['eacute', 'é'], ['egrave', 'è'], ['ecirc', 'ê'], ['agrave', 'à'], ['acirc', 'â'],
-  ['ccedil', 'ç'], ['ocirc', 'ô'], ['ugrave', 'ù'], ['ucirc', 'û'], ['icirc', 'î'],
-  ['iuml', 'ï'], ['euml', 'ë'], ['ouml', 'ö'], ['deg', '°'], ['hellip', '…'],
-]);
-
-const ENTITY_RE = /&(#\d{1,7}|#x[0-9a-f]{1,6}|[a-z]+);/gi;
-
-/**
- * Whether a code point is a character worth emitting.
- *
- * `String.fromCodePoint()` does NOT reject surrogates: `&#55296;` builds a LONE
- * SURROGATE, which is not valid text and breaks strict serialization further
- * down the pipeline. Noncharacters are excluded for the same reason — a job
- * title is candidate-facing text, so an undecodable reference is better left
- * visible than turned into a broken glyph.
- * @param {number} code
- */
-function isValidScalar(code) {
-  if (!Number.isInteger(code) || code <= 0 || code > 0x10ffff) return false;
-  if (code >= 0xd800 && code <= 0xdfff) return false;          // surrogate halves
-  if (code >= 0xfdd0 && code <= 0xfdef) return false;          // noncharacter block
-  if ((code & 0xfffe) === 0xfffe) return false;                // U+xFFFE / U+xFFFF
-  return true;
-}
-
-/**
- * Decode ONE entity reference. Decoding must happen in a single pass: chained
- * `.replace()` calls decoded `&amp;` first, so `&amp;quot;` became `&quot;` and
- * then `"` — a double-unescape that rewrites text the board meant literally
- * (CodeQL flagged it on #2962). An unknown reference is returned untouched
- * rather than guessed at.
- * @param {string} match - The full entity reference, returned when it cannot be decoded.
- * @param {string} ref - The reference body: `#233`, `#xE9`, or a named entity.
- * @returns {string}
- */
-function decodeEntity(match, ref) {
-  if (ref[0] === '#') {
-    const code = ref[1] === 'x' || ref[1] === 'X'
-      ? Number.parseInt(ref.slice(2), 16)
-      : Number.parseInt(ref.slice(1), 10);
-    if (!isValidScalar(code)) return match;
-    return String.fromCodePoint(code);
-  }
-  const named = NAMED_ENTITIES.get(ref.toLowerCase());
-  return named === undefined ? match : named;
-}
-
-/**
  * Collapse a markup fragment to its visible text.
  * Comments are stripped FIRST: the anchor bodies carry `<!-- d ico postulez -->`
  * between the title and a spacer image, and a naive tag strip would leave the
@@ -145,10 +92,11 @@ function decodeEntity(match, ref) {
  * @returns {string}
  */
 export function visibleText(fragment) {
-  return String(fragment ?? '')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(ENTITY_RE, decodeEntity)
+  return decodeEntities(
+    String(fragment ?? '')
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<[^>]+>/g, ' '),
+  )
     .replace(/\s+/g, ' ')
     .trim();
 }

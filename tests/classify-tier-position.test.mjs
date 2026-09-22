@@ -108,6 +108,74 @@ try {
   check('Intern Program Coordinator', 'intern');
   check('Graduate Scheme Analyst', 'intern');
   check('Trainee Program Engineer', 'intern');
+
+  // ── Guard (a): `associate` names a RANK, not a junior variant (#3178) ──
+  // These fell through the closed noun list to the `associate` matcher at
+  // classify-tier.mjs:72 and classified `entry`. scan.mjs drops a posting whose
+  // tier is in `skip_tiers` and never names it (it prints a "Filtered by tier: N
+  // removed" count, not the title), so an academic candidate running the
+  // documented example config — templates/portals.example.yml suggests
+  // `skip_tiers: [intern, entry]` and ships a HigherEdJobs board, both commented
+  // out — lost every Associate Professor posting without seeing which.
+  check('Associate Professor', 'senior');
+  check('Associate Research Professor', 'senior');
+  check('Associate Dean', 'senior');
+  check('Associate Dean of Students', 'senior');
+  check('Associate Provost', 'senior');
+  check('Associate Chancellor', 'senior');
+  check('Associate Vice Chancellor', 'senior');
+  check('Associate Superintendent', 'senior');
+  // Legal: the COMPOUND is on the list, the bare noun deliberately is not.
+  check('Associate General Counsel', 'senior');
+  // Pinned because the widened list must keep them (both new to this file).
+  check('Associate Vice President', 'senior');
+  check('Associate Partner', 'senior');
+
+  // ── The counterexamples that keep the noun list closed ──
+  // In these fields `associate` really is the junior variant, so guard (a)
+  // cannot become a generic "associate never demotes" rule. `Associate Rector`
+  // (a parish curate) and `Associate Registrar` (an office-level deputy) are why
+  // the criterion is "institution-level head", not "sounds academic".
+  check('Associate Counsel', 'entry');
+  check('Associate Attorney', 'entry');
+  check('Associate Editor', 'entry');
+  check('Associate Producer', 'entry');
+  check('Associate Manager', 'entry');
+  check('Associate Consultant', 'entry');
+  check('Associate Rector', 'entry');
+  check('Associate Registrar', 'entry');
+
+  // ── Guard (a) is skipped when a junior marker LEADS the title ──
+  // Same doctrine as the position loop: "Summer Intern, Director of Product" is
+  // an internship. Without this, guard (a) returns early and inverts #3178's own
+  // harm on the same board — a junior candidate skipping `senior` would lose the
+  // dean's-office internships they were scanning for.
+  check('Intern, Associate Dean of Student Life', 'intern');
+  check('Student Intern, Office of the Associate Provost', 'intern');
+  check('Summer Intern, Associate Professor Research Group', 'intern');
+  check('Graduate Trainee, Office of the Associate Dean', 'intern');
+  check('Entry-Level Associate, Dean of Admissions Office', 'entry');
+  check('Junior Associate Professor Support Specialist', 'entry');
+
+  // ── Guard (a)'s window is whitespace-only and at most two words ──
+  // A comma or dash after `associate` means `associate` is the ROLE and what
+  // follows is a separate clause; an unbounded search to end-of-string reads all
+  // of these as senior. The two-word cap additionally stops "Office of the X"
+  // and employers named for a noun on the list — Dean & Company, whose entry
+  // title is literally "Associate Consultant", plus Dean Foods, Dean Witter and
+  // Provost Umphrey. The counsel pair is the sharpest: identical junior in-house
+  // lawyer, tier decided by the department name.
+  check('Administrative Associate, Office of the Dean', 'entry');
+  check('Program Associate, Office of the Provost', 'entry');
+  check('Research Associate - Professor Smith Laboratory', 'entry');
+  check('Postdoctoral Research Associate, Lab of Professor Jane Doe', 'entry');
+  check('Associate Consultant - Dean & Company', 'entry');
+  check('Associate Attorney - Provost Umphrey Law Firm', 'entry');
+  check('Associate Manager, Dean Foods', 'entry');
+  check('Junior Associate, Dean Witter', 'entry');
+  check('Associate Counsel, Office of the General Counsel', 'entry');
+  check('Associate Counsel - Office of General Counsel', 'entry');
+
 } catch (error) {
   fail(`classify-tier.mjs tests could not run: ${error.message}`);
 }

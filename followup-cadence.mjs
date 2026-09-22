@@ -13,15 +13,21 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname, relative, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { loadCanonicalStates, foldStatusInput } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
+// templates/states.yml is System Layer — resolved from the codebase, not from
+// the user's data root (#3500).
+const CODEBASE_ROOT = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
+const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+
 const FOLLOWUPS_FILE = join(CAREER_OPS, 'data/follow-ups.md');
 const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS, 'config/profile.yml');
 
@@ -30,8 +36,21 @@ const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS, 'config/
 const args = process.argv.slice(2);
 const summaryMode = args.includes('--summary');
 const overdueOnly = args.includes('--overdue-only');
-const appliedDaysIdx = args.indexOf('--applied-days');
-const appliedDaysOverride = appliedDaysIdx !== -1 ? parseInt(args[appliedDaysIdx + 1], 10) : null;
+// flagValue (not indexOf) so `--applied-days=10` is honored too — indexOf()
+// can't see the `=` form and used to silently discard it, falling back to the
+// default cadence for a value the caller did supply (#2401/#2402 defect class).
+const appliedDaysRaw = flagValue(args, '--applied-days');
+
+// Whole-string match, not a bare parseInt: parseInt('1.5', 10) is 1 and
+// parseInt('10days', 10) is 10 — both truncate a bad value into a plausible
+// one instead of rejecting it, which is the exact silent-wrong-answer shape
+// this file is being fixed to close. Exported so a value's actual numeric
+// effect can be asserted directly, rather than only "the CLI didn't error".
+const APPLIED_DAYS_RE = /^\d+$/;
+export function parseAppliedDaysOverride(raw) {
+  return raw !== undefined && APPLIED_DAYS_RE.test(raw) ? parseInt(raw, 10) : null;
+}
+const appliedDaysOverride = parseAppliedDaysOverride(appliedDaysRaw);
 
 // --- Cadence config ---
 export const DEFAULT_CADENCE = {
@@ -104,16 +123,19 @@ function statusAliasMap() {
   if (aliasMapCache) return aliasMapCache;
   const map = new Map();
   try {
-    for (const st of loadCanonicalStates(join(CAREER_OPS, 'templates', 'states.yml'))) {
+    for (const st of loadCanonicalStates(join(CODEBASE_ROOT, 'templates', 'states.yml'))) {
       const id = st.id.toLowerCase();
       map.set(foldStatusInput(id), id);
       if (st.label) map.set(foldStatusInput(st.label), id);
       for (const a of st.aliases) map.set(foldStatusInput(a), id);
     }
-  } catch {
+  } catch (err) {
     // A missing/malformed states.yml is a broken install. Degrade to
     // identity-normalization rather than resurrecting a hardcoded table: a
     // fallback copy is the same copy in disguise and drifts the same way.
+    // Report it, though — degrading silently is what hid #3500, and here it
+    // costs every localized status its place in the funnel.
+    console.error(`[followup-cadence] cannot read canonical states from templates/states.yml: ${err.message}`);
     return (aliasMapCache = new Map());
   }
   return (aliasMapCache = map);
@@ -131,7 +153,14 @@ export function normalizeStatus(raw) {
 
 // --- Date helpers ---
 function today() {
-  return new Date(new Date().toISOString().split('T')[0]);
+  // LOCAL calendar day, UTC midnight anchor. toISOString() gives the UTC DAY,
+  // so west of Greenwich an evening run answered "today" with tomorrow and
+  // every daysSinceApp came out one high — the follow-up came due a day early
+  // (#3070). Same fix as followup-seed (#2765) and set-status (#2932).
+  //
+  // The arithmetic below is unchanged: parseDate() still anchors at UTC
+  // midnight, so only WHICH day this is moves.
+  return new Date(localToday());
 }
 
 export function parseDate(dateStr) {
@@ -534,7 +563,13 @@ export function isRetired(cleared, lastFollowupDate) {
 // Emitted shape is `{ name, email, channel }`. `email` stays first-class (and
 // remains non-null for email contacts) so existing consumers keep working;
 // `channel` is additive.
-const EMAIL_RE = /[\w.-]+@[\w.-]+\.\w+/g;
+// `+` must be in the local part. \w is [A-Za-z0-9_], so the previous class silently TRUNCATED a
+// plus-addressed address at the plus — `mayank+6a88…@reply.cutshort.io` was captured as
+// `6a88…@reply.cutshort.io`, a different mailbox that would bounce. Recruiting platforms route
+// replies through exactly this form (CutShort, Greenhouse, Lever, Workable all use
+// `name+token@reply.domain`), so the addresses most worth capturing were the ones being corrupted
+// — and corrupted into something that still looks like a valid address, so nothing notices.
+const EMAIL_RE = /[\w.+%-]+@[\w.-]+\.\w+/g;
 
 // Name-shaped contacts are gated on an explicit outreach verb or role word, so
 // a capitalized company name ("Acme Corp") can never be mistaken for a person.
@@ -555,7 +590,43 @@ function splitStatements(notes) {
   return String(notes).split(/[;\n]+|\.\s+(?=[A-Z])/).filter(s => s.trim());
 }
 
-export function extractContacts(notes) {
+/**
+ * The candidate's own addresses, so a note that mentions them is not reported as somebody to chase.
+ *
+ * Tracker notes routinely cite your own mailbox while recording where a search ran — e.g. "searched
+ * both accounts (personal + me@work.example) for this thread" written to establish that a reply was
+ * NOT received. extractContacts has no concept of self, so it reads that as a repliable human and
+ * the row advertises a contact that cannot be written to. That is worse than reporting no contact:
+ * it makes an un-chaseable row look actionable.
+ *
+ * Read from config/profile.yml rather than hardcoded, so it stays correct per profile. Fails open —
+ * an absent or unreadable profile yields an empty set, because a missing profile must never start
+ * deleting real contacts.
+ */
+export function loadSelfIdentities(profilePath = PROFILE_FILE) {
+  if (!profilePath || !existsSync(profilePath)) return new Set();
+  let raw;
+  try {
+    raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+  } catch {
+    return new Set();
+  }
+  const out = new Set();
+  const push = (v) => { if (typeof v === 'string' && v.includes('@')) out.add(v.trim().toLowerCase()); };
+  push(raw.candidate?.email);
+  // Only iterate an actual array. A hand-edited profile can reasonably hold a mapping here
+  // (`alternate_emails: { work: me@example.com }`), and `for...of` on an object throws — at module
+  // load, because SELF_IDENTITIES is initialised at import time. That would take followup-cadence
+  // down entirely over a cosmetic config mistake, which is the opposite of the fail-open behaviour
+  // this function promises everywhere else.
+  const alternates = raw.candidate?.alternate_emails;
+  if (Array.isArray(alternates)) for (const alt of alternates) push(alt);
+  return out;
+}
+
+const SELF_IDENTITIES = loadSelfIdentities();
+
+export function extractContacts(notes, selfIdentities = SELF_IDENTITIES) {
   if (!notes) return [];
   const byEmail = new Map();  // normalized email -> contact
   const byName = new Map();   // normalized name  -> contact
@@ -626,7 +697,8 @@ export function extractContacts(notes) {
     for (const name of names) add({ name, email: null, channel });
   }
 
-  return contacts;
+  // A note citing your own mailbox is not a person to follow up with.
+  return contacts.filter((c) => !(c.email && selfIdentities.has(c.email.toLowerCase())));
 }
 
 // The channel a single statement names, when it names one. Null rather than a
@@ -914,28 +986,51 @@ function printSummary(result) {
 
 // ── CLI flags + help ────────────────────────────────────────────────
 
-const KNOWN_FLAGS = ['--summary', '--overdue-only', '--applied-days', '--help', '-h'];
+// --json is the DEFAULT output form, not a mode switch: it names what the
+// script already does with no flag at all. It is listed here because callers
+// pass it explicitly — web/src/app/api/followups/route.ts and
+// web/src/app/api/followups/cadence/route.ts both spawn `[script, '--json']`
+// — and validateFlags() rejects any flag not on this list, so omitting it
+// made both routes exit 1 and read as "no follow-ups" (#3196 added the
+// validation without the flag the web already passed).
+const KNOWN_FLAGS = ['--summary', '--json', '--overdue-only', '--applied-days', '--help', '-h'];
+const VALUE_FLAGS = ['--applied-days'];
 
 const USAGE = `Usage:
   node followup-cadence.mjs                    # full JSON analysis to stdout
-  node followup-cadence.mjs --summary          # human-readable dashboard
+  node followup-cadence.mjs --json             # same as above, JSON is the default
+  node followup-cadence.mjs --summary          # human-readable dashboard (wins over --json)
   node followup-cadence.mjs --overdue-only     # only show overdue/urgent entries
   node followup-cadence.mjs --applied-days 10  # override applied_first cadence (days)
   node followup-cadence.mjs --help|-h          # print this usage block and exit`;
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-  } else {
-    const result = analyze();
+if (isMainModule(import.meta.url)) {
+  // Must run inside this guard, not at module top level: CADENCE (above) is a
+  // module-level singleton built at import time, and test-all.mjs section 12
+  // dynamic-imports this module in-process to read it — validating the host
+  // process's own argv there would false-positive on the test runner's flags.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
-    if (summaryMode) {
-      printSummary(result);
-    } else {
-      console.log(JSON.stringify(result, null, 2));
-    }
-
-    if (result.error) process.exit(1);
+  // positiveInteger() (used to build CADENCE above) treats a NaN/negative value
+  // as "absent" and silently keeps the default — exactly the wrong-answer-at-
+  // exit-0 shape this fix exists to close. A value that was actually SUPPLIED
+  // must fail loudly instead of being swallowed the same way a bad flag NAME
+  // used to be.
+  if (appliedDaysRaw !== undefined && !(Number.isFinite(appliedDaysOverride) && appliedDaysOverride >= 0)) {
+    console.error(`Error: --applied-days requires a non-negative integer, got "${appliedDaysRaw}"`);
+    process.exit(1);
   }
+
+  const result = analyze();
+
+  // --summary wins when both are given: it is the flag that asks for something
+  // other than the default, so it is the one carrying an intention.
+  if (summaryMode) {
+    printSummary(result);
+  } else {
+    console.log(JSON.stringify(result, null, 2));
+  }
+
+  if (result.error) process.exit(1);
 }

@@ -70,6 +70,9 @@ function oneLine(s) {
   return String(s ?? '').replace(/\s*\n\s*/g, ' ').trim();
 }
 
+// MUST be called with the queue lock held — see add(). Creating the file is
+// only half of it; the file is not usable until the header is IN it, and that
+// is two syscalls, not one.
 function ensureFile() {
   if (existsSync(PATH)) return;
   ensureGitignored();
@@ -80,6 +83,19 @@ function ensureFile() {
   // lands after the first has already appended its item and wipes it back to
   // just the header. 'wx' makes only one of them win the create — the loser
   // gets EEXIST and does nothing, same as if it had seen existsSync === true.
+  //
+  // 'wx' settles the two-creator case and nothing else. It makes the CREATE
+  // atomic, not the INITIALISATION: writeFileSync is open() then write(), and
+  // between those two syscalls the file EXISTS and is ZERO BYTES. Measured on
+  // Windows, a second process polling existsSync and stat-ing the moment the
+  // file appeared saw it at 0 bytes in 303 of 400 rounds.
+  //
+  // So there is a third participant the exclusive flag cannot see: a writer
+  // that arrives INSIDE that window, finds existsSync === true, skips creation,
+  // and appends — into a file this call is about to overwrite from offset 0.
+  // Its item is gone, with no error anywhere; the write below simply lands on
+  // top of it. That is why the caller holds the lock across this function
+  // rather than around the append alone.
   try {
     writeFileSync(PATH, HEADER, { flag: 'wx' });
   } catch (err) {
@@ -125,7 +141,6 @@ function opt(name, def = '') {
 async function add() {
   const text = oneLine(process.argv.slice(3).join(' '));
   if (!text) fail('add needs a request, e.g. node agent-inbox.mjs add "evaluate https://..."');
-  ensureFile();
   // Append rather than rewrite. This is the queue's concurrent path — anything
   // running in the background can drop an item in — and a read-whole-file /
   // write-whole-file cycle loses every request that lands between the two. With
@@ -159,7 +174,22 @@ async function add() {
   // cure"; the fit-for-purpose budget for a burst-write queue is the contained
   // fix. 30s gives ~375 rounds of headroom, well past the herd's worst case,
   // while the critical section itself is a single sub-millisecond append.
+  //
+  // ensureFile() is INSIDE the lock, not before it. Seeding the file is a
+  // check-create-initialise sequence, and run unlocked it loses items the same
+  // way the unlocked append did: a writer that observes the file between the
+  // creator's open() and its write() sees a zero-byte file, appends into it,
+  // and has its line overwritten when the header lands at offset 0. Every
+  // writer exits 0 and the queue is left perfectly well-formed, one item
+  // shorter — the silent drop the lock was added to end, one step earlier in
+  // the same function.
+  //
+  // Holding the lock across the seed makes the window unreachable rather than
+  // narrow: no writer can observe the file until the creator has released, and
+  // the creator writes the header before it releases. 'wx' above stays as the
+  // guard against writers that are not this function.
   await withPipelineLock(PATH, () => {
+    ensureFile();
     const separator = needsLeadingNewline(PATH) ? '\n' : '';
     appendFileSync(PATH, `${separator}- [ ] ${stamp()} — ${text}\n`);
   }, { timeoutMs: 30_000 });
@@ -175,20 +205,30 @@ function list() {
   });
 }
 
-function resolve() {
+async function resolve() {
   const n = Number(process.argv[3]);
   if (!Number.isInteger(n) || n < 1) fail('resolve needs a 1-based item number (see `list`)');
-  // Number against the pending view, so `list` then `resolve N` line up.
-  const pending = parseItems().filter((it) => !it.done);
-  const target = pending[n - 1];
-  if (!target) fail(`no pending item #${n} (${pending.length} pending)`);
-  const result = oneLine(opt('result'));
-  const lines = readFileSync(PATH, 'utf8').split('\n');
-  let updated = lines[target.line].replace('[ ]', '[x]');
-  if (result && !/→ result:/.test(updated)) updated += ` → result: ${result}`;
-  lines[target.line] = updated;
-  writeFileSync(PATH, lines.join('\n'));
-  process.stdout.write(`Resolved #${n}: ${target.text}\n`);
+  const outcome = await withPipelineLock(PATH, () => {
+    // The pending snapshot, line lookup, and rewrite are one transaction. An
+    // add between the old read and write was acknowledged, then overwritten by
+    // this stale snapshot even though add itself correctly held this same lock.
+    // Number inside the critical section too, so the selected item and the
+    // rewritten line always come from one locked view.
+    const pending = parseItems().filter((it) => !it.done);
+    const target = pending[n - 1];
+    if (!target) return { error: `no pending item #${n} (${pending.length} pending)` };
+    const result = oneLine(opt('result'));
+    const lines = readFileSync(PATH, 'utf8').split('\n');
+    let updated = lines[target.line].replace('[ ]', '[x]');
+    if (result && !/→ result:/.test(updated)) updated += ` → result: ${result}`;
+    lines[target.line] = updated;
+    writeFileSync(PATH, lines.join('\n'));
+    return { target };
+  }, { timeoutMs: 30_000 });
+  // Fail only after withPipelineLock has released. process.exit() inside the
+  // callback would bypass the lock's finally block and strand the directory.
+  if (outcome.error) fail(outcome.error);
+  process.stdout.write(`Resolved #${n}: ${outcome.target.text}\n`);
 }
 
 function fail(msg) {
@@ -199,7 +239,7 @@ function fail(msg) {
 const cmd = process.argv[2];
 if (cmd === 'add') await add();
 else if (cmd === 'list') list();
-else if (cmd === 'resolve') resolve();
+else if (cmd === 'resolve') await resolve();
 else {
   process.stdout.write(
     'Usage:\n' +

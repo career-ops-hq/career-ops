@@ -13,7 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail } from './helpers.mjs';
-import { gitIn, locallyModifiedSystemFiles } from '../update-system.mjs';
+import { gitIn, locallyModifiedSystemFiles, pathFullyPreserved } from '../update-system.mjs';
 
 // A repo with an `upstream` branch standing in for FETCH_HEAD, and `main` as
 // the install. Both start from a shared base commit, which is what gives
@@ -53,6 +53,16 @@ function upstreamChange(repo, file, content) {
   writeFileSync(join(repo.dir, ...file.split('/')), content);
   repo.g('commit', '-qam', `upstream: ${file}`);
   repo.g('checkout', '-q', 'main');
+}
+
+/**
+ * Replay what apply() does with an update: check the content out of the
+ * upstream ref and record it with an ordinary commit. NOT a merge — that is
+ * the whole point of case 14, so this must stay a raw checkout.
+ */
+function replayUpdate(repo, version) {
+  repo.g('checkout', 'upstream', '--', ...PATHS);
+  repo.g('commit', '-qm', `chore: auto-update system files to v${version}`);
 }
 
 const PATHS = ['modes/', 'generate-cover-letter.mjs'];
@@ -256,6 +266,108 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
   }
 }
 
+// ── 9b. pathFullyPreserved: a single-file match skips WITHOUT an upstream
+//    lookup ── The reported bug: every one of the reporter's 12 preserved
+//    files (AGENTS.md, fonts/*.ttf, cv-template.*.html, ...) is a single
+//    SYSTEM_PATHS entry, not a directory. The old code still ran an
+//    unnecessary `ls-tree` round-trip to "confirm" what the string match (`f
+//    === path`) had already proven, and when that lookup failed to return the
+//    expected result, execution fell through into the exact cancel-out
+//    checkout case 9 shows fails. Assert no git call happens at all for this
+//    case, so a future regression that reintroduces the lookup is caught even
+//    if the lookup itself would have "worked" in a normal test repo.
+{
+  let gitCalls = 0;
+  const spyCtx = { git: (...args) => { gitCalls++; throw new Error(`unexpected git call: ${args.join(' ')}`); } };
+
+  const preservedPaths = ['AGENTS.md'];
+  const preservedSet = new Set(preservedPaths);
+  const result = pathFullyPreserved('AGENTS.md', preservedPaths, preservedSet, spyCtx);
+
+  if (result === true && gitCalls === 0) {
+    pass('a single-file preserved path is skipped without any upstream lookup');
+  } else {
+    fail(`#9b expected true/0 calls, got result=${result} gitCalls=${gitCalls}`);
+  }
+}
+
+// ── 9c. pathFullyPreserved: a path unrelated to any preserved file is never
+//    skipped, and costs no git call either ──
+{
+  let gitCalls = 0;
+  const spyCtx = { git: (...args) => { gitCalls++; throw new Error(`unexpected git call: ${args.join(' ')}`); } };
+
+  const preservedPaths = ['AGENTS.md'];
+  const preservedSet = new Set(preservedPaths);
+  const result = pathFullyPreserved('modes/pdf.md', preservedPaths, preservedSet, spyCtx);
+
+  if (result === false && gitCalls === 0) {
+    pass('an unrelated path is never skipped, and needs no upstream lookup');
+  } else {
+    fail(`#9c expected false/0 calls, got result=${result} gitCalls=${gitCalls}`);
+  }
+}
+
+// ── 9d. pathFullyPreserved: a directory entirely made of preserved files IS
+//    skipped — the pre-existing behaviour this fix must not regress ──
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  // pathFullyPreserved's ls-tree branch reads FETCH_HEAD, same ref apply()
+  // fetches into for real. Populate it here by fetching the local `upstream`
+  // branch into this repo's own FETCH_HEAD.
+  repo.g('fetch', '.', 'upstream');
+  const preservedPaths = ['modes/pdf.md', 'modes/cover.md'];
+  const preservedSet = new Set(preservedPaths);
+  const ctx = { git: (...args) => gitIn(repo.dir, ...args) };
+
+  const result = pathFullyPreserved('modes/', preservedPaths, preservedSet, ctx);
+  if (result === true) {
+    pass('a directory whose entire upstream content is preserved is skipped (ls-tree path)');
+  } else {
+    fail(`#9d expected true, got ${result}`);
+  }
+}
+
+// ── 9e. pathFullyPreserved: a directory only PARTLY preserved is NOT skipped
+//    — the rest of the directory still needs a real checkout ──
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  repo.g('fetch', '.', 'upstream'); // populate FETCH_HEAD, see #9d
+  const preservedPaths = ['modes/cover.md']; // pdf.md is NOT preserved here
+  const preservedSet = new Set(preservedPaths);
+  const ctx = { git: (...args) => gitIn(repo.dir, ...args) };
+
+  const result = pathFullyPreserved('modes/', preservedPaths, preservedSet, ctx);
+  if (result === false) {
+    pass('a directory only partly preserved is not skipped');
+  } else {
+    fail(`#9e expected false, got ${result}`);
+  }
+}
+
+// ── 9f. pathFullyPreserved: an unreadable upstream lookup degrades to "not
+//    fully preserved" for a directory, never throws ──
+{
+  const preservedPaths = ['modes/pdf.md'];
+  const preservedSet = new Set(preservedPaths);
+  const throwingCtx = { git: () => { throw new Error('unreadable ref'); } };
+
+  let threw = false;
+  let result = null;
+  try {
+    result = pathFullyPreserved('modes/', preservedPaths, preservedSet, throwingCtx);
+  } catch {
+    threw = true;
+  }
+  if (!threw && result === false) {
+    pass('an unreadable directory lookup degrades to "not fully preserved" instead of throwing');
+  } else {
+    fail(`#9f threw=${threw} result=${result}`);
+  }
+}
+
 // ── 10. A system file the user DELETED locally is not "at risk" ──
 //    `git diff --name-only` lists deletions, so a deleted file landed in BOTH
 //    sets and therefore in atRisk. From there apply() preserved it — excluded
@@ -362,4 +474,132 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
     fail(`#13 expected ['generate-cover-letter.mjs'], got ${JSON.stringify(atRisk)}`);
   }
   rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 14. The SECOND update: upstream's own last release is not a local edit ──
+//    Every case above models an install at its FIRST update, where the
+//    merge-base is still the commit the install was cloned at and therefore
+//    still describes it. apply() never advances that merge-base: it installs
+//    updates with a raw checkout plus an ordinary commit, neither of which
+//    creates ancestry to the fetched commit. So from the second update on, the
+//    baseline describes a state the install left behind, and every file
+//    upstream changed in between reads as a local edit — preserved, backed up
+//    to `.bak`, and never updated. `VERSION` is a system file too, so it is
+//    preserved along with the rest and the run reports the version it just
+//    failed to install (#3094).
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  replayUpdate(repo, '2');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v3\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 0) {
+    pass('content installed by a previous update is not a local edit (#3094)');
+  } else {
+    fail(`#14 expected [], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 15. ...and the fix must not cost us the warning it exists for ──
+//    Case 14 removes files from atRisk, so pin that it removes ONLY the ones
+//    upstream itself installed. A genuine local fix in a twice-updated install
+//    is exactly the #2337 case, and it has to survive the second update too.
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  replayUpdate(repo, '2');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v3\n');
+  writeFileSync(join(repo.dir, 'generate-cover-letter.mjs'), 'local linkedin fix\n');
+  repo.g('commit', '-qam', 'local fix');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 1 && atRisk[0] === 'generate-cover-letter.mjs') {
+    pass('a real local fix is still reported after a second update (#2337)');
+  } else {
+    fail(`#15 expected ['generate-cover-letter.mjs'], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 16. History we cannot read degrades the warning, never the update ──
+//    Same contract as case 7, one level down: the #3094 filter reads upstream
+//    history, and a shallow clone does not have it. A history query that fails
+//    must leave the detector reporting what it already knew rather than
+//    throwing — a warning we cannot compute must never abort the checkout.
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  writeFileSync(join(repo.dir, 'generate-cover-letter.mjs'), 'local linkedin fix\n');
+  const blind = {
+    root: repo.dir,
+    git: (...args) => {
+      if (args[0] === 'log') throw new Error('shallow clone: no history here');
+      return repo.g(...args);
+    },
+  };
+
+  let threw = false;
+  let atRisk = null;
+  try {
+    atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', blind);
+  } catch {
+    threw = true;
+  }
+  if (!threw && Array.isArray(atRisk) && atRisk.includes('generate-cover-letter.mjs')) {
+    pass('unreadable upstream history degrades the filter, not the update');
+  } else {
+    fail(`#16 threw=${threw} atRisk=${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 17. A deliberate revert to an older upstream version is a local edit ──
+//    Case 14 filters out content a previous update installed. The bytes a user
+//    checks back out themselves are also bytes upstream published, so a filter
+//    that asks "did upstream ever ship this?" cannot tell the two apart and
+//    drops the revert from atRisk — overwriting it with no warning and no
+//    `.bak`, which is the protection #2337 exists for. Baselining on the last
+//    installed snapshot separates them by origin instead: a revert made after
+//    that snapshot sits between it and HEAD, so the diff still sees it (#3129).
+//
+//    Two updates are needed before the revert has anywhere to go: after a
+//    single update the install still holds v2, so checking v2 back out changes
+//    nothing and the case would pass without exercising anything.
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  replayUpdate(repo, '2');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v3\n');
+  replayUpdate(repo, '3');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v4\n');
+  // The install is on v3 and prefers the v2 wording.
+  writeFileSync(join(repo.dir, 'modes', 'pdf.md'), 'shipped pdf v2\n');
+  repo.g('commit', '-qam', 'prefer the v2 wording of pdf.md');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 1 && atRisk[0] === 'modes/pdf.md') {
+    pass('a committed revert to an older upstream version is reported (#3129)');
+  } else {
+    fail(`#17 expected ['modes/pdf.md'], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 18. ...and uncommitted, which is the sharper edge ──
+//    The detector diffs the worktree, so an uncommitted revert should be caught
+//    the same way — and it matters more: there is no local commit to recover
+//    the content from once the checkout overwrites it.
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  replayUpdate(repo, '2');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v3\n');
+  replayUpdate(repo, '3');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v4\n');
+  writeFileSync(join(repo.dir, 'modes', 'pdf.md'), 'shipped pdf v2\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 1 && atRisk[0] === 'modes/pdf.md') {
+    pass('an uncommitted revert to an older upstream version is reported too (#3129)');
+  } else {
+    fail(`#18 expected ['modes/pdf.md'], got ${JSON.stringify(atRisk)}`);
+  }
 }

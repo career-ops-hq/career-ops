@@ -130,10 +130,20 @@ export function isHeaderRow(line) {
 
 /**
  * Given the two adjacent cells that carry score and status in EITHER order,
- * identify which is which by content — the score cell is recognizable by
- * pattern (`looksLikeScoreCell`), statuses never are. This lets TSV ingestion
- * tolerate the two known column orders (batch TSV writes status-then-score;
- * `applications.md` is score-then-status) instead of trusting position.
+ * identify which is which by content. This lets HEADERLESS TSV ingestion
+ * tolerate the two known column orders (legacy batch TSV writes
+ * status-then-score; `applications.md` is score-then-status) instead of
+ * trusting position.
+ *
+ * This discriminator is INCOMPLETE, and that is why headed additions exist
+ * (#3517). The comment here used to claim "statuses never are" recognizable as
+ * a score. That is false: `looksLikeScoreCell` accepts `—` and `-` as score
+ * sentinels (#1799), and `normalize-statuses.mjs` accepts the same two glyphs
+ * (plus empty) as a status meaning Discarded. So a discarded, never-scored row
+ * carries `—` in BOTH cells and no content rule can order them. That row is
+ * refused rather than guessed at — but refusing is still a failure to ingest,
+ * so writers should emit a header row and let ingestion resolve by NAME
+ * (`resolveTsvColumns`), which has no undecidable case at all.
  *
  * Returns null when the order is undecidable — neither cell, or BOTH cells, look
  * like a score — so callers can fail loudly rather than merge a silent swap.
@@ -147,6 +157,87 @@ export function resolveScoreStatus(a, b) {
   const bScore = looksLikeScoreCell(b);
   if (aScore === bScore) return null; // ambiguous: neither, or both
   return aScore ? { score: a, status: b } : { score: b, status: a };
+}
+
+/**
+ * The canonical fields a HEADED tracker addition must label before its header
+ * is usable. Deliberately wider than REQUIRED_HEADER_FIELDS (which describes
+ * `applications.md`, a file whose optional columns are the user's business):
+ * an addition is machine-generated in one shot, every one of these has a
+ * documented value, and a header that omits one is a broken emitter — better
+ * caught at the header than silently merged as an empty cell.
+ *
+ * `notes`, `via`, `location` and `url` stay optional, matching the TSV contract
+ * in AGENTS.md.
+ */
+export const TSV_REQUIRED_FIELDS = ['num', 'date', 'company', 'role', 'score', 'status', 'pdf', 'report'];
+
+/**
+ * The header line an in-repo TSV writer emits above its data row. Order is
+ * arbitrary by construction — ingestion resolves by name — so this exists only
+ * so the several writers cannot drift into slightly different LABEL spellings,
+ * which is the one thing name resolution cannot absorb.
+ */
+export const TSV_ADDITION_HEADER = ['num', 'date', 'company', 'role', 'status', 'score', 'pdf', 'report', 'notes'].join('\t');
+
+/** Recognized labels a first row needs before it is READ as a header at all. */
+const TSV_HEADER_MIN_LABELS = 3;
+
+/**
+ * Whether the first row of an addition file is meant to be a header row.
+ *
+ * Separate from "is this header VALID": a row that looks like a header but does
+ * not resolve must be reported, not silently reinterpreted as data and merged
+ * through the positional path — that would turn a typo'd label into exactly the
+ * silent column swap headers exist to prevent.
+ *
+ * Two signals, both required: the first cell is not a tracker number (a data
+ * row always leads with one), and at least three cells carry recognized column
+ * labels. A data row would have to put three different header words in three
+ * different cells to false-positive.
+ *
+ * @param {string[]} cells - Raw cells of the first row.
+ * @returns {boolean}
+ */
+export function looksLikeTsvHeaderRow(cells) {
+  if (!Array.isArray(cells) || cells.length < TSV_HEADER_MIN_LABELS) return false;
+  if (/^\d+$/.test(String(cells[0] ?? '').trim())) return false;
+  const recognized = new Set();
+  for (const c of cells) {
+    const key = HEADER_ALIASES[String(c ?? '').trim().toLowerCase()];
+    if (key != null) recognized.add(key);
+  }
+  return recognized.size >= TSV_HEADER_MIN_LABELS;
+}
+
+/**
+ * Resolve a tracker addition's header row to field name → column index, using
+ * the same shared alias table as the markdown tracker (tracker-aliases.json),
+ * so the two name-resolution surfaces cannot drift.
+ *
+ * Reports rather than throws: the caller owns the warning text and the
+ * skip-this-file decision.
+ *
+ * @param {string[]} cells - Raw cells of the header row.
+ * @returns {{map: Object<string,number>, missing: string[], duplicates: string[], unknown: string[]}}
+ */
+export function resolveTsvColumns(cells) {
+  const map = {};
+  const duplicates = [];
+  const unknown = [];
+  (cells || []).forEach((c, i) => {
+    const label = String(c ?? '').trim();
+    if (!label) return;
+    const key = HEADER_ALIASES[label.toLowerCase()];
+    if (key == null) { unknown.push(label); return; }
+    // First occurrence wins for the map, but a repeat is still reported: two
+    // columns claiming the same field is an emitter bug, and picking one of
+    // them is the guess this whole path exists to avoid.
+    if (map[key] != null) { duplicates.push(key); return; }
+    map[key] = i;
+  });
+  const missing = TSV_REQUIRED_FIELDS.filter(k => map[k] == null);
+  return { map, missing, duplicates, unknown };
 }
 
 /**
@@ -304,9 +395,9 @@ function parseMarkdownLinks(value) {
   return links;
 }
 
-export function extractTrackerReportNumbers(reportCell) {
+export function extractTrackerReportNumbers(reportCell, notesCell = '') {
   const value = String(reportCell ?? '').trim();
-  if (!value || value === '-' || value === '—') return [];
+  if (!value || value === '-' || value === '—') return scanNotesForReportNumbers(notesCell);
 
   const numbers = new Set();
   const numberFromTarget = (rawTarget) => {
@@ -335,6 +426,48 @@ export function extractTrackerReportNumbers(reportCell) {
   if (markdownLinks.length === 0) {
     const pathNum = numberFromTarget(value);
     if (pathNum != null) numbers.add(pathNum);
+  }
+  // A layout with a Report column that simply has no link yet still falls back
+  // to Notes, so a customized tracker behaves the same whether its Report cell
+  // is absent or empty.
+  return numbers.size > 0 ? [...numbers] : scanNotesForReportNumbers(notesCell);
+}
+
+/**
+ * Report numbers named by a report link inside a free-form Notes cell.
+ *
+ * Customized trackers with no dedicated Report column embed the link in Notes
+ * prose instead — the layout merge-tracker.mjs learned to read in 8668ac1, via
+ * its own `extractReportNum(reportStr, notesStr)`. set-status.mjs read only the
+ * Report cell, so `--report N` could not find a row merge-tracker had linked
+ * happily (#3075).
+ *
+ * DELIBERATELY STRICTER than the Report-cell scan above, which is the same
+ * scoping merge-tracker applies. The Report cell holds a report link by
+ * contract, so a loose match there is safe; Notes is prose, and a link like
+ * `[9](../notes/9-thing.md)` satisfies the generic `N-*.md` shape without being
+ * a report at all. Requiring a `reports/` path segment is what keeps an
+ * unrelated markdown link — or a job-posting URL in the same sentence — from
+ * claiming to be a report number.
+ *
+ * @param {string} [notesCell] - Free-form Notes cell.
+ * @returns {number[]} Report numbers, or [] when the cell names none.
+ */
+function scanNotesForReportNumbers(notesCell) {
+  const notes = String(notesCell ?? '').trim();
+  if (!notes) return [];
+  const numbers = new Set();
+  for (const link of parseMarkdownLinks(notes)) {
+    const target = String(link.target).trim().replace(/^<|>$/g, '');
+    // Absolute URLs are never a local report path, and a posting URL is the
+    // most likely thing to sit next to a report link in the same note.
+    if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(target)) continue;
+    const pathname = target.split(/[?#]/, 1)[0];
+    if (!/(?:^|[\\/])reports[\\/]/i.test(pathname)) continue;
+    const match = pathname.match(/(?:^|[\\/])reports[\\/]0*(\d+)-/i);
+    if (!match) continue;
+    const num = parseInt(match[1], 10);
+    if (Number.isInteger(num) && num > 0) numbers.add(num);
   }
   return [...numbers];
 }

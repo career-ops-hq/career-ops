@@ -1,0 +1,492 @@
+/**
+ * tests/contacts.test.mjs — Systematic test suite for contacts.mjs
+ *
+ * Tests every exported function across:
+ * - TSV phonebook parsing (well-formed, malformed, comments, `-` tracker ref)
+ * - vCard escaping (backslash-first order, semicolon, comma, newline)
+ * - 75-octet byte-counted line folding (ASCII, umlaut, CJK — never splitting
+ *   a multibyte UTF-8 sequence)
+ * - UID determinism: each part is {slug}-{8-hex normalized-value hash} (bare hash
+ *   when the slug is empty/non-ASCII), collision-resistant even for lossy-equal
+ *   slugs (José/Josè) yet case/whitespace/NFC-stable for one name; caller-id FN
+ *   variant, optional-field omission, dup last-wins
+ * - CLI behavior (JSON/--summary/--vcf/--caller-id, empty store, path guard)
+ *
+ * Expected vCard strings are built in code on purpose — a committed .vcf
+ * fixture would be corrupted by git autocrlf on Windows.
+ *
+ * Run: node test-all.mjs --only contacts
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
+ */
+
+import { parseContacts, escapeVcard, foldLine, slug, uidPart, normalizeForHash, contactUid, contactToVcard, buildVcf } from '../contacts.mjs';
+import { execFileSync, spawnSync } from 'child_process';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, copyFileSync, readFileSync, existsSync, realpathSync, symlinkSync } from 'fs';
+import { tmpdir } from 'os';
+import { pass, fail } from './helpers.mjs';
+
+console.log('\ncontacts.mjs — phonebook and vCard export');
+
+
+function ok(label, cond) {
+  if (cond) pass(label);
+  else fail(label);
+}
+
+function eq(label, actual, expected) {
+  const a = JSON.stringify(actual);
+  const e = JSON.stringify(expected);
+  if (a === e) pass(label);
+  else fail(`${label} — expected ${e}, got ${a}`);
+}
+
+const row = (cells) => cells.join('\t');
+const bytes = (s) => Buffer.byteLength(s, 'utf-8');
+const REV = '2026-07-09T00:00:00.000Z';
+
+// ============================================================================
+// 1. parseContacts — input validation
+// ============================================================================
+console.log('\n--- 1. parseContacts input validation ---');
+
+eq('null input -> no contacts', parseContacts(null).contacts, []);
+eq('undefined input -> no contacts', parseContacts(undefined).contacts, []);
+eq('empty string -> no contacts', parseContacts('').contacts, []);
+eq('whitespace-only -> no contacts', parseContacts('   \n  \n').contacts, []);
+eq('comment-only store -> no contacts', parseContacts('# name\tcompany\ttype\ttitle\tphone\temail\tlinkedin\ttracker\tnotes').contacts, []);
+eq('clean empty store -> empty quality buckets', parseContacts(''), { contacts: [], quality: { shortRows: [], missingRequired: [], invalidTypes: [], duplicates: [] } });
+
+// ============================================================================
+// 2. parseContacts — well-formed rows
+// ============================================================================
+console.log('\n--- 2. well-formed rows ---');
+
+const full = parseContacts(row(['Jane Doe', 'Acme', 'recruiter', 'Talent Partner', '+49 151 1234567', 'jane@acme.io', 'https://linkedin.com/in/janedoe', '012', 'met at screen'])).contacts;
+eq('parses 1 full row', full.length, 1);
+eq('name mapped', full[0].name, 'Jane Doe');
+eq('company mapped', full[0].company, 'Acme');
+eq('type mapped', full[0].type, 'recruiter');
+eq('title mapped', full[0].title, 'Talent Partner');
+eq('phone mapped', full[0].phone, '+49 151 1234567');
+eq('email mapped', full[0].email, 'jane@acme.io');
+eq('linkedin mapped', full[0].linkedin, 'https://linkedin.com/in/janedoe');
+eq('tracker mapped', full[0].tracker, '012');
+eq('notes mapped', full[0].notes, 'met at screen');
+
+const minimal = parseContacts(row(['山田 太郎', 'Globex', 'hiring-manager', ''])).contacts;
+eq('minimal 4-cell row parses', minimal.length, 1);
+eq('missing optional cells default empty', [minimal[0].phone, minimal[0].email, minimal[0].linkedin, minimal[0].notes], ['', '', '', '']);
+eq('absent tracker cell -> null', minimal[0].tracker, null);
+
+const dash = parseContacts(row(['Jörg Müller', 'Initech', 'peer', '', '', 'joerg@initech.de', '', '-', 'pre-application contact'])).contacts;
+eq('`-` tracker ref -> null (contact precedes application)', dash[0].tracker, null);
+
+const multi = parseContacts([
+  '# columns comment',
+  row(['A One', 'Acme', 'recruiter', '']),
+  '',
+  row(['B Two', 'Globex', 'peer', '']),
+].join('\n'));
+eq('comments and blank lines skipped, 2 contacts parsed', multi.contacts.length, 2);
+eq('CRLF store parses identically', parseContacts(row(['A One', 'Acme', 'recruiter', '']) + '\r\n' + row(['B Two', 'Globex', 'peer', '']) + '\r\n').contacts.length, 2);
+
+// ============================================================================
+// 3. parseContacts — malformed rows land in quality, never dropped silently
+// ============================================================================
+console.log('\n--- 3. malformed rows -> quality ---');
+
+const bad = parseContacts([
+  row(['Good Row', 'Acme', 'recruiter', '']),
+  row(['Too', 'Few']),
+  row(['', 'NoName GmbH', 'other', '']),
+  row(['No Company', '', 'other', '']),
+  row(['Typo Type', 'Hooli', 'recruter', '']),
+].join('\n'));
+eq('valid rows kept alongside malformed ones', bad.contacts.length, 2);
+eq('short row reported with line + cell count', bad.quality.shortRows, [{ line: 2, cells: 2 }]);
+eq('empty name reported (leading tab does NOT shift columns)', bad.quality.missingRequired[0], { line: 3, name: '', company: 'NoName GmbH' });
+eq('empty company reported', bad.quality.missingRequired[1], { line: 4, name: 'No Company', company: '' });
+eq('off-enum type reported', bad.quality.invalidTypes, [{ line: 5, name: 'Typo Type', type: 'recruter' }]);
+ok('off-enum type contact is KEPT', bad.contacts.some(c => c.name === 'Typo Type'));
+eq('empty type is allowed (not an invalidTypes entry)', parseContacts(row(['A One', 'Acme', '', ''])).quality.invalidTypes, []);
+
+// A stray tab inside the notes column must not silently drop the tail cells —
+// notes is the LAST column, so cells past the 9th fold back in (tab -> space).
+const tabbed = parseContacts(row(['Tab Note', 'Hooli', 'other', '', '', '', '', '-', 'part one', 'part two']));
+eq('tab inside notes: contact still parses', tabbed.contacts.length, 1);
+eq('tab inside notes folds back into the notes cell', tabbed.contacts[0].notes, 'part one part two');
+eq('tab inside notes: no quality complaint', tabbed.quality, { shortRows: [], missingRequired: [], invalidTypes: [], duplicates: [] });
+
+// Duplicate name+company (same UID): JSON keeps every row, quality reports it.
+const dupPair = parseContacts([
+  row(['Jane Doe', 'Acme', 'recruiter', '', '', '', '', '012', 'first line']),
+  row(['Jane Doe', 'Acme', 'recruiter', '', '', '', '', '012', 'updated line']),
+].join('\n'));
+eq('duplicate pair: both rows kept in JSON', dupPair.contacts.length, 2);
+eq('duplicate pair: one quality.duplicates entry', dupPair.quality.duplicates,
+  [{ uid: 'careerops-jane-doe-bc225ac5--acme-293abb6b', name: 'Jane Doe', company: 'Acme', count: 2 }]);
+
+// ============================================================================
+// 4. escapeVcard — backslash first, then ; , then newline
+// ============================================================================
+console.log('\n--- 4. escapeVcard ---');
+
+eq('backslash escaped', escapeVcard('a\\b'), 'a\\\\b');
+eq('semicolon escaped', escapeVcard('a;b'), 'a\\;b');
+eq('comma escaped', escapeVcard('a,b'), 'a\\,b');
+eq('LF -> literal \\n', escapeVcard('a\nb'), 'a\\nb');
+eq('CRLF -> single literal \\n', escapeVcard('a\r\nb'), 'a\\nb');
+eq('lone CR -> literal \\n', escapeVcard('a\rb'), 'a\\nb');
+eq('all together, order preserved', escapeVcard('a\\b;c,d\ne'), 'a\\\\b\\;c\\,d\\ne');
+// order proof: if newline ran before backslash, the "\" of "\n" would double
+eq('pre-escaped-looking input stays literal', escapeVcard('a\\nb'), 'a\\\\nb');
+eq('null -> empty string', escapeVcard(null), '');
+eq('undefined -> empty string', escapeVcard(undefined), '');
+
+// ============================================================================
+// 5. foldLine — 75 octets by BYTES, multibyte-safe
+// ============================================================================
+console.log('\n--- 5. foldLine ---');
+
+eq('75-octet line untouched', foldLine('x'.repeat(75)), 'x'.repeat(75));
+const fold76 = foldLine('x'.repeat(76));
+eq('76-octet ASCII line folds into two', fold76.split('\r\n').length, 2);
+eq('first ASCII segment is exactly 75 octets', bytes(fold76.split('\r\n')[0]), 75);
+ok('continuation line starts with a single space', fold76.split('\r\n')[1] === ' x');
+
+const longAscii = foldLine('NOTE:' + 'x'.repeat(200));
+ok('every ASCII folded segment <= 75 octets', longAscii.split('\r\n').every(l => bytes(l) <= 75));
+eq('ASCII unfold reconstructs the original', longAscii.split('\r\n').map((l, i) => (i ? l.slice(1) : l)).join(''), 'NOTE:' + 'x'.repeat(200));
+
+// Umlaut (2-byte ö) straddling the boundary: 74 ASCII bytes + ö would hit 76,
+// so the whole ö moves to the continuation line and the first closes at 74.
+const umlaut = foldLine('x'.repeat(74) + 'ö' + 'y'.repeat(10));
+const umlautLines = umlaut.split('\r\n');
+eq('umlaut never split: first segment closes at 74 octets', bytes(umlautLines[0]), 74);
+ok('umlaut lands intact on the continuation line', umlautLines[1].startsWith(' ö'));
+ok('every umlaut segment <= 75 octets', umlautLines.every(l => bytes(l) <= 75));
+eq('umlaut unfold reconstructs the original', umlautLines.map((l, i) => (i ? l.slice(1) : l)).join(''), 'x'.repeat(74) + 'ö' + 'y'.repeat(10));
+
+// CJK (3-byte あ): "NOTE:" (5) + 23*3 = 74; the 24th あ would hit 77.
+const cjk = foldLine('NOTE:' + 'あ'.repeat(60));
+const cjkLines = cjk.split('\r\n');
+eq('CJK first segment closes at 74 octets (never splits あ)', bytes(cjkLines[0]), 74);
+ok('every CJK segment <= 75 octets', cjkLines.every(l => bytes(l) <= 75));
+ok('no replacement characters introduced', !cjk.includes('�'));
+eq('CJK unfold reconstructs the original', cjkLines.map((l, i) => (i ? l.slice(1) : l)).join(''), 'NOTE:' + 'あ'.repeat(60));
+
+// ============================================================================
+// 6. slug + UID determinism
+// ============================================================================
+console.log('\n--- 6. slug + UID ---');
+
+eq('lowercase', slug('Jane Doe'), 'jane-doe');
+eq('non-alphanumeric runs collapse to one dash', slug('Jörg  Müller'), 'j-rg-m-ller');
+eq('leading/trailing dashes trimmed', slug('--Acme  Inc.--'), 'acme-inc');
+eq('slug is deterministic', slug('Jane Doe'), slug('Jane Doe'));
+
+const jane = { name: 'Jane Doe', company: 'Acme', type: 'recruiter', title: '', phone: '', email: '', linkedin: '', tracker: null, notes: '' };
+ok('UID = careerops-{uidPart(name)}--{uidPart(company)}', /UID:careerops-jane-doe-[0-9a-f]{8}--acme-[0-9a-f]{8}\r\n/.test(contactToVcard(jane, { rev: REV })));
+eq('same contact -> identical card under pinned REV', contactToVcard(jane, { rev: REV }), contactToVcard(jane, { rev: REV }));
+
+// Each UID part is {slug}-{8-hex sha1 of the normalized value}, or the bare
+// 8-hex hash when the slug is empty (a fully non-ASCII value slugs to ''). The
+// normalized-value hash — not the lossy slug — is what keeps distinct inputs
+// distinct (while folding case/whitespace/NFC noise for one name).
+ok('uidPart = pretty ASCII slug + raw-value hash', /^jane-doe-[0-9a-f]{8}$/.test(uidPart('Jane Doe')));
+ok('uidPart CJK part is the bare 8 hex chars', /^[0-9a-f]{8}$/.test(uidPart('山田 太郎')));
+eq('uidPart is deterministic', uidPart('山田 太郎'), uidPart('山田 太郎'));
+ok('different CJK names at the same company do NOT collide',
+  contactUid({ name: '山田 太郎', company: 'Globex' }) !== contactUid({ name: '佐藤 花子', company: 'Globex' }));
+// Lossy-slug collision guard: "José" and "Josè" both slug to "jos" (the accented
+// char drops out), but the raw hash keeps their UID parts — and full contact
+// UIDs — distinct.
+eq('distinct accented names slug identically', slug('José'), slug('Josè'));
+ok('lossy-equal slugs get distinct uidParts', uidPart('José') !== uidPart('Josè'));
+ok('distinct raw names that slug the same -> different contact UIDs',
+  contactUid({ name: 'José', company: 'Acme' }) !== contactUid({ name: 'Josè', company: 'Acme' }));
+// Stability (the flip side of the collision guard): pure case / surrounding-
+// whitespace variants of ONE name fold to the SAME UID part, because the hash
+// input is normalized (normalizeForHash), not the raw value.
+ok('case variants of one name get the same UID part', uidPart('José') === uidPart('JOSÉ'));
+ok('surrounding-whitespace variants of one name get the same UID part', uidPart('José') === uidPart('  josé  '));
+ok('case/space stability holds at the full contact UID',
+  contactUid({ name: '  jane  doe ', company: 'ACME' }) === contactUid({ name: 'Jane Doe', company: 'Acme' }));
+// Composition (NFC vs NFD) is folded in the HASH input, accents preserved.
+eq('NFC vs NFD composition folds to one normalized hash input',
+  normalizeForHash('José'.normalize('NFC')), normalizeForHash('José'.normalize('NFD')));
+ok('normalizeForHash keeps é vs è distinct', normalizeForHash('José') !== normalizeForHash('Josè'));
+const taro = { name: '山田 太郎', company: 'Globex', type: 'hiring-manager', title: '', phone: '', email: '', linkedin: '', tracker: null, notes: '' };
+eq('CJK contact UID: same input -> same UID across two calls',
+  contactToVcard(taro, { rev: REV }).match(/UID:[^\r]+/)[0],
+  contactToVcard(taro, { rev: REV }).match(/UID:[^\r]+/)[0]);
+ok('CJK contact UID = careerops-{8-hex}--globex-{8-hex}', /UID:careerops-[0-9a-f]{8}--globex-[0-9a-f]{8}/.test(contactToVcard(taro, { rev: REV })));
+// Both name AND company fully non-ASCII: each slug is '' so BOTH uidParts fall
+// back to the bare 8-hex raw hash -> the dual-bare UID shape.
+const taroKk = { name: '山田 太郎', company: '株式会社', type: 'hiring-manager', title: '', phone: '', email: '', linkedin: '', tracker: null, notes: '' };
+ok('both-non-ASCII name+company UID is dual-bare careerops-{8-hex}--{8-hex}',
+  /^careerops-[0-9a-f]{8}--[0-9a-f]{8}$/.test(contactToVcard(taroKk, { rev: REV }).match(/UID:([^\r]+)/)[1]));
+ok('ASCII UID = careerops-jane-doe-{8-hex}--acme-{8-hex}', /^careerops-jane-doe-[0-9a-f]{8}--acme-[0-9a-f]{8}$/.test(contactUid(jane)));
+
+// ============================================================================
+// 7. contactToVcard — structure, expected string built in code (no fixture)
+// ============================================================================
+console.log('\n--- 7. contactToVcard ---');
+
+const fullContact = {
+  name: 'Jane Doe', company: 'Acme', type: 'recruiter', title: 'Talent Partner',
+  phone: '+49 151 1234567', email: 'jane@acme.io', linkedin: 'https://linkedin.com/in/janedoe',
+  tracker: '012', notes: 'met at screen; email, ok',
+};
+const expectedCard = [
+  'BEGIN:VCARD',
+  'VERSION:3.0',
+  'UID:careerops-jane-doe-bc225ac5--acme-293abb6b',
+  'FN:Jane Doe',
+  'N:Doe;Jane;;;',
+  'ORG:Acme',
+  'TITLE:Talent Partner',
+  'TEL;TYPE=CELL:+49 151 1234567',
+  'EMAIL;TYPE=INTERNET:jane@acme.io',
+  'URL:https://linkedin.com/in/janedoe',
+  'NOTE:recruiter — tracker #012 — met at screen\\; email\\, ok',
+  'CATEGORIES:career-ops',
+  `REV:${REV}`,
+  'END:VCARD',
+].join('\r\n');
+eq('full contact renders the exact expected card', contactToVcard(fullContact, { rev: REV }), expectedCard);
+
+const callerCard = contactToVcard(fullContact, { callerId: true, rev: REV });
+ok('--caller-id FN variant', callerCard.includes('FN:Jane Doe (Acme recruiter)'));
+ok('caller-id leaves N untouched', callerCard.includes('N:Doe;Jane;;;'));
+const typelessCaller = contactToVcard({ ...fullContact, type: '' }, { callerId: true, rev: REV });
+ok('caller-id without type -> company only', typelessCaller.includes('FN:Jane Doe (Acme)'));
+
+const minimalCard = contactToVcard({ name: 'Cher', company: 'Globex', type: '', title: '', phone: '', email: '', linkedin: '', tracker: null, notes: '' }, { rev: REV });
+ok('single-token name lands in the family slot', minimalCard.includes('N:Cher;;;;'));
+ok('no TEL when phone empty', !minimalCard.includes('TEL'));
+ok('no EMAIL when email empty', !minimalCard.includes('EMAIL'));
+ok('no URL when linkedin empty', !minimalCard.includes('URL'));
+ok('no NOTE when type/tracker/notes all empty', !minimalCard.includes('NOTE'));
+ok('no TITLE when title empty', !minimalCard.includes('TITLE'));
+
+const threeToken = contactToVcard({ ...jane, name: 'Ana María García' }, { rev: REV });
+ok('multi-token name: last token = family, rest = given', threeToken.includes('N:García;Ana María;;;'));
+ok('long NOTE lines come out folded', contactToVcard({ ...jane, notes: 'z'.repeat(200) }, { rev: REV }).split('\r\n').every(l => bytes(l) <= 75));
+ok('REV defaults to an ISO timestamp when not pinned', /REV:\d{4}-\d{2}-\d{2}T[\d:.]+Z/.test(contactToVcard(jane)));
+
+// ============================================================================
+// 8. buildVcf — CRLF discipline
+// ============================================================================
+console.log('\n--- 8. buildVcf ---');
+
+const distinct = { ...jane, name: 'Bob Roe', company: 'Globex' };
+const vcf = buildVcf([fullContact, distinct], { rev: REV });
+eq('two cards emitted for distinct contacts', (vcf.match(/BEGIN:VCARD/g) || []).length, 2);
+ok('file ends with CRLF', vcf.endsWith('END:VCARD\r\n'));
+ok('no bare LF anywhere', !/[^\r]\n/.test(vcf) && !vcf.startsWith('\n'));
+eq('empty store -> empty string', buildVcf([]), '');
+
+// Duplicates (same UID): LAST occurrence wins the export — the store is
+// updated in place, so the freshest line is the authoritative one.
+const dupVcf = buildVcf([
+  { ...jane, notes: 'stale line' },
+  { ...jane, notes: 'fresh line' },
+], { rev: REV });
+eq('duplicate pair -> one card in the vcf', (dupVcf.match(/BEGIN:VCARD/g) || []).length, 1);
+ok('the LATER occurrence wins', dupVcf.includes('fresh line') && !dupVcf.includes('stale line'));
+
+// ============================================================================
+// 9. CLI behavior
+// ============================================================================
+console.log('\n--- 9. CLI behavior ---');
+
+const scriptPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'contacts.mjs');
+
+try {
+  execFileSync('node', [scriptPath, '--self-test'], { encoding: 'utf-8', timeout: 10000 });
+  ok('--self-test exits 0', true);
+} catch (e) {
+  ok('--self-test exits 0', false);
+  console.log(`    exit code: ${e.status}, stderr: ${e.stderr?.slice(0, 200)}`);
+}
+
+// --help / -h and unknown-flag rejection
+const spawnContacts = (...argv) => spawnSync('node', [scriptPath, ...argv], { encoding: 'utf-8', timeout: 10000 });
+
+const helpR = spawnContacts('--help');
+const hR = spawnContacts('-h');
+ok('--help exits 0', helpR.status === 0);
+ok('-h exits 0', hR.status === 0);
+ok('--help prints Usage:', helpR.stdout.includes('Usage:'));
+ok('-h output matches --help', hR.stdout === helpR.stdout);
+ok('--help writes nothing to stderr', helpR.stderr === '');
+
+const typoR = spawnContacts('--sumary');
+ok('unknown flag exits 1', typoR.status === 1);
+ok('unknown flag names the bad flag', typoR.stderr.includes('--sumary'));
+ok('unknown flag prints Valid flags:', typoR.stderr.includes('Valid flags:'));
+ok('unknown flag writes nothing to stdout', typoR.stdout === '');
+
+const helpBogusR = spawnContacts('--help', '--bogus');
+ok('--help --bogus exits 1 (unknown flag checked before --help)', helpBogusR.status === 1);
+ok('--help --bogus names the bad flag in stderr', helpBogusR.stderr.includes('--bogus'));
+ok('--help --bogus writes nothing to stdout', helpBogusR.stdout === '');
+
+// contacts.mjs resolves its paths from import.meta.url and is zero-dep, so a
+// copy of the script into a temp dir is a fully isolated career-ops root:
+// data/contacts.tsv and output/ under the temp dir, no dependence on whatever
+// the caller's real workspace contains — a contributor with a real phonebook
+// gets the same results as CI.
+// NOT realpathed, deliberately. macOS tmpdir() is a symlink (/var/folders →
+// /private/var), and this used to be resolved to keep the copied script's
+// hand-rolled main-guard from silently defeating itself. That guard is now
+// lib/is-main-module.mjs, which realpaths both sides (#3170) — and contacts.mjs
+// canonicalizes internally for its own containment checks (realpath-containment
+// right before the write), so nothing here needs a pre-resolved root.
+//
+// This is removal of a dead workaround, NOT coverage of #3170: whether tmpdir()
+// is a symlink at all is a platform accident (macOS yes, Linux CI usually no).
+// The deliberate coverage is in tests/main-guard-convention.test.mjs.
+const tmpRoot = mkdtempSync(join(tmpdir(), 'contacts-cli-'));
+const tmpScript = join(tmpRoot, 'contacts.mjs');
+try {
+  copyFileSync(scriptPath, tmpScript);
+  // contacts.mjs resolves user-layer paths via path-resolver.mjs
+  // (CAREER_OPS_ROOT), so the fixture carries that too.
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'path-resolver.mjs'), join(tmpRoot, 'path-resolver.mjs'));
+  mkdirSync(join(tmpRoot, 'lib'), { recursive: true });
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/cli-flags.mjs'), join(tmpRoot, 'lib/cli-flags.mjs'));
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/is-main-module.mjs'), join(tmpRoot, 'lib/is-main-module.mjs'));
+  mkdirSync(join(tmpRoot, 'data'), { recursive: true });
+  writeFileSync(join(tmpRoot, 'data/contacts.tsv'), [
+    '# name\tcompany\ttype\ttitle\tphone\temail\tlinkedin\ttracker\tnotes',
+    row(['Jane Doe', 'Acme', 'recruiter', 'Talent Partner', '+49 151 1234567', 'jane@acme.io', 'https://linkedin.com/in/janedoe', '012', 'met at screen; prefers email, not calls']),
+    row(['山田 太郎', 'Globex', 'hiring-manager', '', '', 'taro@globex.jp', '', '-', '']),
+  ].join('\n'));
+
+  const jsonOut = JSON.parse(execFileSync('node', [tmpScript], { encoding: 'utf-8', timeout: 10000 }));
+  eq('default JSON: total = 2', jsonOut.total, 2);
+  eq('default JSON: contacts array present', jsonOut.contacts.length, 2);
+  ok('default JSON: quality object present', 'quality' in jsonOut);
+
+  const summaryOut = execFileSync('node', [tmpScript, '--summary'], { encoding: 'utf-8', timeout: 10000 });
+  ok('--summary is human-readable', summaryOut.includes('CONTACTS') && summaryOut.includes('Jane Doe'));
+  ok('--summary prints the data-quality section', summaryOut.includes('Data quality:'));
+
+  execFileSync('node', [tmpScript, '--vcf'], { encoding: 'utf-8', timeout: 10000 });
+  const vcfPath = join(tmpRoot, 'output/contacts.vcf');
+  ok('--vcf writes output/contacts.vcf by default', existsSync(vcfPath));
+  const written = readFileSync(vcfPath, 'utf-8');
+  ok('written vcf uses CRLF', written.includes('\r\n') && !/[^\r]\n/.test(written));
+  ok('written vcf carries UIDs', /UID:careerops-jane-doe-[0-9a-f]{8}--acme-[0-9a-f]{8}/.test(written));
+  ok('written vcf keeps the CJK name intact', written.includes('山田 太郎'));
+  ok('default FN has no caller-id suffix', written.includes('FN:Jane Doe\r\n'));
+
+  execFileSync('node', [tmpScript, '--vcf', '--caller-id'], { encoding: 'utf-8', timeout: 10000 });
+  ok('--vcf --caller-id renders annotated FN', readFileSync(vcfPath, 'utf-8').includes('FN:Jane Doe (Acme recruiter)'));
+
+  // --vcf surfaces the quality report on stderr (same never-silently-dropped
+  // contract as JSON/--summary) while the export itself still succeeds.
+  writeFileSync(join(tmpRoot, 'data/contacts.tsv'), '\n' + row(['', 'NoName GmbH', 'recruiter', 'TA']), { flag: 'a' });
+  const flawedRun = spawnSync('node', [tmpScript, '--vcf'], { encoding: 'utf-8', timeout: 10000 });
+  eq('--vcf with a flawed store still exits 0', flawedRun.status, 0);
+  ok('--vcf reports quality issues on stderr', flawedRun.stderr.includes('data-quality') && flawedRun.stderr.includes('missing name or company'));
+  ok('--vcf keeps stdout for the write confirmation only', flawedRun.stdout.includes('Wrote') && !flawedRun.stdout.includes('data-quality'));
+
+  const customOut = execFileSync('node', [tmpScript, '--vcf', 'output/custom.vcf'], { encoding: 'utf-8', timeout: 10000, cwd: tmpRoot });
+  ok('--vcf accepts a custom in-project path', existsSync(join(tmpRoot, 'output/custom.vcf')) && customOut.includes('custom.vcf'));
+
+  // Regression: --vcf=path (attached form) must be honored — the path was
+  // previously ignored because indexOf('--vcf') returned -1 for that token.
+  const eqFormOut = execFileSync('node', [tmpScript, '--vcf=output/eq-form.vcf'], { encoding: 'utf-8', timeout: 10000, cwd: tmpRoot });
+  ok('--vcf=path (attached =) writes to the specified path', existsSync(join(tmpRoot, 'output/eq-form.vcf')));
+  ok('--vcf=path confirmation message names the eq-form path', eqFormOut.includes('eq-form.vcf'));
+  ok('--vcf=path file contains valid vCard content', readFileSync(join(tmpRoot, 'output/eq-form.vcf'), 'utf-8').includes('BEGIN:VCARD'));
+
+  // Path-traversal guard: the escaped target must never be written. Anchor it in
+  // a UNIQUE sibling temp dir (outside tmpRoot, i.e. outside the project) so the
+  // escape target is a fresh name this test owns — a fixed shared /tmp filename
+  // could clobber an unrelated pre-existing file and isn't hermetic. Clean up
+  // only the unique dir this test created, on BOTH paths (guard held -> nothing
+  // written; guard failed -> a real file leaked into the unique dir).
+  const escapeDir = mkdtempSync(join(realpathSync(tmpdir()), 'contacts-escape-'));
+  const escapePath = join(escapeDir, 'contacts-escape.vcf');
+  try {
+    let escaped = false;
+    try {
+      execFileSync('node', [tmpScript, '--vcf', escapePath], { encoding: 'utf-8', timeout: 10000 });
+      escaped = true;
+    } catch (e) {
+      ok('--vcf refuses a path escaping the project dir (exit 1)', e.status === 1);
+      ok('refusal names the offending path', String(e.stderr).includes('Refusing to write'));
+    }
+    if (escaped) ok('--vcf refuses a path escaping the project dir (exit 1)', false);
+    ok('--vcf traversal guard leaves no file outside the project dir', !existsSync(escapePath));
+  } finally {
+    rmSync(escapeDir, { recursive: true, force: true });
+  }
+
+  // Symlink-escape guard: the lexical `..` check passes for a path that is
+  // LEXICALLY inside the project but whose parent is a SYMLINK resolving OUTSIDE
+  // it. Realpath-containment (run right before the write) must still refuse, and
+  // no file may leak to the symlink's real target. Uses a UNIQUE sibling temp dir
+  // as the outside target; on Windows symlinkSync may throw EPERM (no privilege /
+  // Developer Mode off) — skip gracefully in that case (test-all tolerates it).
+  const linkTargetDir = mkdtempSync(join(realpathSync(tmpdir()), 'contacts-symlink-'));
+  try {
+    let symlinkSupported = true;
+    // A symlinked child directory living lexically inside the project root, whose
+    // real target is the outside temp dir. `--vcf linked/x.vcf` is lexically
+    // contained but resolves out of the project.
+    const linkPath = join(tmpRoot, 'linked');
+    try {
+      symlinkSync(linkTargetDir, linkPath, 'junction'); // 'junction' works dir-only on Windows w/o privilege
+    } catch (e) {
+      symlinkSupported = false;
+      console.log(`  SKIP: --vcf symlink-escape guard (symlink unsupported: ${e.code || e.message})`);
+    }
+    if (symlinkSupported) {
+      const symlinkEscapePath = join(linkPath, 'contacts-symlink-escape.vcf');
+      const realOutsidePath = join(linkTargetDir, 'contacts-symlink-escape.vcf');
+      let symEscaped = false;
+      try {
+        execFileSync('node', [tmpScript, '--vcf', symlinkEscapePath], { encoding: 'utf-8', timeout: 10000 });
+        symEscaped = true;
+      } catch (e) {
+        ok('--vcf refuses a symlinked-dir path escaping the project (exit 1)', e.status === 1);
+        ok('symlink refusal names the offending path', String(e.stderr).includes('Refusing to write'));
+      }
+      if (symEscaped) ok('--vcf refuses a symlinked-dir path escaping the project (exit 1)', false);
+      ok('--vcf symlink guard leaves no file at the real outside target', !existsSync(realOutsidePath));
+    }
+  } finally {
+    rmSync(linkTargetDir, { recursive: true, force: true });
+  }
+} finally {
+  rmSync(tmpRoot, { recursive: true, force: true });
+}
+
+// Empty store: fresh temp root with NO data/contacts.tsv at all.
+const emptyRoot = mkdtempSync(join(tmpdir(), 'contacts-empty-'));
+try {
+  copyFileSync(scriptPath, join(emptyRoot, 'contacts.mjs'));
+  // contacts.mjs resolves user-layer paths via path-resolver.mjs
+  // (CAREER_OPS_ROOT), so the fixture carries that too.
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'path-resolver.mjs'), join(emptyRoot, 'path-resolver.mjs'));
+  mkdirSync(join(emptyRoot, 'lib'), { recursive: true });
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/cli-flags.mjs'), join(emptyRoot, 'lib/cli-flags.mjs'));
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/is-main-module.mjs'), join(emptyRoot, 'lib/is-main-module.mjs'));
+  const emptyJson = JSON.parse(execFileSync('node', [join(emptyRoot, 'contacts.mjs')], { encoding: 'utf-8', timeout: 10000 }));
+  eq('missing store: JSON total = 0', emptyJson.total, 0);
+  eq('missing store: contacts = []', emptyJson.contacts, []);
+  const emptyVcfOut = execFileSync('node', [join(emptyRoot, 'contacts.mjs'), '--vcf'], { encoding: 'utf-8', timeout: 10000 });
+  ok('missing store: --vcf exits 0 with a clear message', emptyVcfOut.includes('No contacts to export'));
+  ok('missing store: --vcf writes no file', !existsSync(join(emptyRoot, 'output/contacts.vcf')));
+} finally {
+  rmSync(emptyRoot, { recursive: true, force: true });
+}
