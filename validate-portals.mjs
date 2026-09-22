@@ -334,8 +334,15 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
         for (const field of declared) {
           if (typeof field !== 'string' || field.trim() === '') {
             add(errors, `${base}.filter_on`, 'filter_on must be a non-empty string or a list of them');
-          } else if (field.trim() !== 'title' && !isObject(config.field_filters?.[field.trim()])) {
-            add(errors, `${base}.filter_on`, `filter_on "${field.trim()}" has no field_filters.${field.trim()} block`);
+            continue;
+          }
+          const name = field.trim();
+          // Own keys only: `filter_on: __proto__` must not find Object.prototype.
+          const block = isObject(config.field_filters) && Object.hasOwn(config.field_filters, name)
+            ? config.field_filters[name]
+            : undefined;
+          if (name !== 'title' && !isObject(block)) {
+            add(errors, `${base}.filter_on`, `filter_on "${name}" has no field_filters.${name} block`);
           }
         }
       }

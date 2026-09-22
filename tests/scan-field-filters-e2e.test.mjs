@@ -151,6 +151,17 @@ ${entryExtra}    parser:
   else fail(`expected the warning for a mixed declaration:\n${stdout}`);
 }
 
+// A field declared twice is one field: presence is counted once per job, so
+// the warning reports the number of postings, not postings × repetitions.
+{
+  const { stdout } = runScan('    filter_on: [noc, noc]\n', 'noc-less-board.mjs');
+  if (/"noc" absent on all 2 job\(s\)/.test(stdout) && !/absent on all 4/.test(stdout)) {
+    pass('a repeated field is counted once per posting');
+  } else {
+    fail(`expected "absent on all 2 job(s)" for [noc, noc]:\n${stdout}`);
+  }
+}
+
 // filter_on naming a field with no field_filters block: exit at startup, not a
 // silent pass-all at filter time.
 {

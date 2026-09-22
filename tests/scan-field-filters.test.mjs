@@ -27,6 +27,8 @@ const titleKeywords = await import(pathToFileURL(join(ROOT, 'title-keywords.mjs'
     ['  noc  ', ['noc'], 'surrounding whitespace is trimmed'],
     [[], ['title'], 'an empty array defaults to title'],
     [[null, 'noc', 42], ['noc'], 'non-string entries are dropped'],
+    [['noc', 'noc'], ['noc'], 'a repeated field collapses to one'],
+    [['title', 'noc', ' title '], ['title', 'noc'], 'duplicates collapse after trimming, first position kept'],
   ];
   for (const [input, want, label] of cases) {
     const got = normalizeFilterOn(input);

@@ -69,6 +69,7 @@ const REJECTED = [
   ['a filter_on list with a blank entry', NOC, 'filter_on: [noc, ""]'],
   ['an empty filter_on list', NOC, 'filter_on: []'],
   ['a filter_on naming a field with no block', NOC, 'filter_on: department'],
+  ['a filter_on naming an inherited property', NOC, 'filter_on: __proto__'],
   ['field_filters that is a list, not a mapping', 'field_filters: [noc]\n', 'filter_on: noc'],
   ['a field_filters.title block', 'field_filters:\n  title:\n    positive: ["Help Desk"]\n', 'filter_on: title'],
   ['a misspelled key in a block', nocBlock('    positve: ["stem:22"]\n'), 'filter_on: noc'],

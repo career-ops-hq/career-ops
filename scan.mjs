@@ -203,14 +203,16 @@ export { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTit
 
 /**
  * @param {unknown} value - a target's `filter_on`: string, array, or absent.
- * @returns {string[]} field names to gate on, defaulting to ["title"].
+ * @returns {string[]} unique field names to gate on, in declared order,
+ *   defaulting to ["title"]. Unique, because presence is counted once per
+ *   field per job: a repeated field would double every count in the warning.
  */
 export function normalizeFilterOn(value) {
   const list = (Array.isArray(value) ? value : [value])
     .filter(f => typeof f === 'string')
     .map(f => f.trim())
     .filter(Boolean);
-  return list.length > 0 ? list : ['title'];
+  return list.length > 0 ? [...new Set(list)] : ['title'];
 }
 
 /**
