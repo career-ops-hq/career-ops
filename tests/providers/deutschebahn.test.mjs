@@ -49,12 +49,15 @@ try {
   const dbPages = [dbHtml, '<html>' + dbHit('700000', 'C', 'Berlin, Deutschland') + '</html>', '<html></html>'];
   let dbCalls = 0;
   const dbSeen = [];
-  const dbCtx = { sleep: async () => {}, fetchText: async (url) => { dbSeen.push(url); return dbPages[dbCalls++] ?? '<html></html>'; } };
+  const dbOpts = [];
+  const dbCtx = { sleep: async () => {}, fetchText: async (url, opts) => { dbSeen.push(url); dbOpts.push(opts); return dbPages[dbCalls++] ?? '<html></html>'; } };
   const dbJobs = await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588' }, dbCtx);
   if (dbJobs.length === 3 && dbCalls === 3) pass('deutschebahn.fetch() paginates and stops on the first empty page');
   else fail(`deutschebahn.fetch() returned ${dbJobs.length} jobs after ${dbCalls} calls`);
   if (dbSeen[0]?.includes('pageNum=0') && dbSeen[1]?.includes('pageNum=1')) pass('deutschebahn.fetch() pages via pageNum=N (0-based)');
   else fail(`deutschebahn.fetch() paged wrong: ${JSON.stringify(dbSeen.map((u) => u.match(/pageNum=\d+/)?.[0]))}`);
+  if (dbOpts.every((o) => o?.redirect === 'error')) pass('deutschebahn.fetch() passes redirect:\'error\' on every request');
+  else fail(`deutschebahn.fetch() redirect option wrong: ${JSON.stringify(dbOpts.map((o) => o?.redirect))}`);
 
   // max_pages safety valve — a small explicit cap stops the walk even though
   // every page keeps returning fresh ids (DB's board runs into the thousands,
@@ -64,6 +67,43 @@ try {
   const cappedJobs = await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588', max_pages: 3 }, capCtx);
   if (cappedJobs.length === 3 && capCalls === 3) pass('deutschebahn.fetch() honors entry.max_pages and stops even with more pages available');
   else fail(`deutschebahn.fetch() max_pages cap wrong: ${cappedJobs.length} jobs after ${capCalls} calls`);
+
+  // A transient (no-status) fetch failure is retried via fetchTextWithRetry;
+  // the walk recovers instead of dying on a single flaky page.
+  let retryCalls = 0;
+  const retryCtx = {
+    sleep: async () => {},
+    fetchText: async () => {
+      retryCalls++;
+      if (retryCalls === 1) throw new Error('This operation was aborted');
+      if (retryCalls === 2) return dbHit('800001', 'Retried Job', 'Berlin, Deutschland');
+      return '<html></html>'; // next page: empty, stop
+    },
+  };
+  const retriedJobs = await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588' }, retryCtx);
+  if (retriedJobs.length === 1 && retryCalls === 3) pass('deutschebahn.fetch() retries a transient failure and recovers');
+  else fail(`deutschebahn.fetch() retry wrong: ${retriedJobs.length} jobs after ${retryCalls} calls`);
+
+  // A deterministic (non-transient) failure — a 4xx other than 429 — must NOT
+  // be retried: it is the server telling us the request itself is wrong.
+  let noRetryCalls = 0;
+  const noRetryCtx = {
+    sleep: async () => {},
+    fetchText: async () => {
+      noRetryCalls++;
+      const err = new Error('Not Found');
+      err.status = 404;
+      throw err;
+    },
+  };
+  let dbThrew = false;
+  try {
+    await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588' }, noRetryCtx);
+  } catch {
+    dbThrew = true;
+  }
+  if (dbThrew && noRetryCalls === 1) pass('deutschebahn.fetch() does not retry a non-429 4xx');
+  else fail(`deutschebahn.fetch() should fail fast on a 404, got threw=${dbThrew} calls=${noRetryCalls}`);
 
   // Non-positive/non-integer max_pages falls back to the provider default
   // (60) rather than collapsing to zero pages.

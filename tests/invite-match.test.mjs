@@ -15,7 +15,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
-import { matchInvite, normalizeCompanyName, extractPlatform, isAIInterviewerPlatform, classifyEmail, analyzeInvite, applyRejectionStatus, selectApplyTarget } from '../invite-match.mjs';
+import { matchInvite, normalizeCompanyName, extractCompany, extractPlatform, isAIInterviewerPlatform, classifyEmail, analyzeInvite, applyRejectionStatus, selectApplyTarget } from '../invite-match.mjs';
 import { pass, fail } from './helpers.mjs';
 
 console.log('\ninvite-match.mjs — interview invite matching');
@@ -358,6 +358,61 @@ const redundancyFullEmail = 'Hi team,\n\nWe regret to inform everyone that, foll
 const redundancyFullResult = classifyEmail(redundancyFullEmail);
 eq('unrelated company-wide redundancy announcement does not classify as rejection', redundancyFullResult.classification === 'rejection', false);
 eq('unrelated company-wide redundancy announcement does not report phraseStrength "strong"', redundancyFullResult.phraseStrength === 'strong', false);
+
+// --- extractCompany must not be ASCII-only ---
+// COMPANY_LINE_PATTERNS used `[A-Z][\w.,&' -]{1,60}?`, and `\w` is ASCII-only
+// in JS: the lazy match could not cross the `e` with an acute accent in a name
+// like Nestle, so the terminator it was waiting for never arrived and the whole
+// pattern failed. The leading `[A-Z]` refused a non-Latin first letter for the
+// same reason. normalizeCompanyName() was already script-preserving (#2517), so
+// the miss sat one function earlier: extraction returned null, matchInvite() got
+// no company, and an invite from a company sitting right there in the tracker
+// produced zero candidates.
+
+const accented = [
+  ['Your interview with <accented name>', 'Your interview with Nestl\u00e9', 'Nestl\u00e9'],
+  ['Interview at <accented name> for <role>', 'Interview at Nestl\u00e9 for Senior Engineer', 'Nestl\u00e9'],
+  ['Phone screen - <accented name>', 'Phone screen - Nestl\u00e9', 'Nestl\u00e9'],
+  ['Schedule your interview - <accented name> opportunity', 'Schedule your interview - Nestl\u00e9 opportunity', 'Nestl\u00e9'],
+  ['an umlaut mid-name does not truncate the company', 'Your interview with M\u00fcnchen Analytics', 'M\u00fcnchen Analytics'],
+  ['a Cyrillic name is extracted, not refused by the leading [A-Z]', 'Your interview with \u042f\u043d\u0434\u0435\u043a\u0441', '\u042f\u043d\u0434\u0435\u043a\u0441'],
+  ['a Japanese name is extracted (no case distinction to lead with)', 'Your interview with \u682a\u5f0f\u4f1a\u793e\u65e5\u7acb\u88fd\u4f5c\u6240', '\u682a\u5f0f\u4f1a\u793e\u65e5\u7acb\u88fd\u4f5c\u6240'],
+];
+for (const [label, text, expected] of accented) {
+  eq(`extractCompany: ${label}`, extractCompany(text), expected);
+}
+
+// The ASCII phrasings are unchanged by the Unicode classes, including the
+// known trailing-clause weakness ("on Monday" is swallowed), which this PR
+// deliberately does not touch.
+const ascii = [
+  ['Your interview with Acme', 'Acme'],
+  ['Interview at Acme for Senior Engineer', 'Acme'],
+  ['Phone screen - Acme', 'Acme'],
+  ['Schedule your interview - Acme opportunity', 'Acme'],
+  ['Company: Acme Corporation', 'Acme Corporation'],
+  ['Interview at Acme Inc on Monday', 'Acme Inc on Monday'],
+  // `\w` (ASCII-only) included `_`; the Unicode replacement class must too,
+  // or a company name with an underscore hits the exact same "no reachable
+  // terminator" failure this PR fixes for accented and non-Latin names.
+  ['Interview with Acme_Corp for Senior Engineer', 'Acme_Corp'],
+  ['Your interview with Acme_Corp', 'Acme_Corp'],
+  ['Phone screen - Acme_Corp', 'Acme_Corp'],
+  ['Nothing that looks like an invite line at all.', null],
+];
+for (const [text, expected] of ascii) {
+  eq(`extractCompany (ASCII unchanged): ${JSON.stringify(text)}`, extractCompany(text), expected);
+}
+
+// End to end: the tracker row exists, so the invite must produce a candidate.
+// This is what the user actually loses when extraction returns null.
+const accentedRows = [
+  { num: 301, company: 'Nestl\u00e9', role: 'Data Engineer', status: 'Applied', date: '2026-05-01', notes: '' },
+];
+const accentedInvite = analyzeInvite('Hi Jamie,\n\nInterview with Nestl\u00e9 for Data Engineer is confirmed.\n\nBest,\nRecruiting', accentedRows);
+eq('an accented-company invite yields the company signal', accentedInvite.signals.company, 'Nestl\u00e9');
+eq('an accented-company invite matches its tracker row', accentedInvite.candidates.length, 1);
+eq('the matched row is the right one', accentedInvite.candidates[0]?.appNumber, 301);
 
 // --- CLI flag-handling & help regression tests (#2854) ---
 

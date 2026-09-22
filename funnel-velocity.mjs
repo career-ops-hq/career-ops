@@ -43,13 +43,25 @@ import * as yaml from 'js-yaml';
 import { computeFunnel, computeFunnelWithHistory, parseStatusLogStages, trackerStatusByNum, computeTrackerStats } from './stats.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { resolveTrackerPath, loadCanonicalStates, resolveCanonicalState } from './tracker-utils.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import { parseAppliedDate, normalizeStatus } from './followup-cadence.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
+// Two roots, because this file reads both layers and they are not the same
+// directory. CODE_ROOT is where the shipped templates live; DATA_ROOT is where
+// the USER's tracker and overrides live, and getCareerOpsRoot() is what honours
+// CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / the .career-ops-data marker.
+//
+// One name for both is how this went wrong: the constant was called CAREER_OPS
+// and held __dirname, so it read correctly for templates and silently pointed
+// the tracker lookup at the checkout. A user with a data root configured got
+// "No tracker found ... nothing to calibrate yet" — indistinguishable from
+// having no data.
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
+const STATES_FILE = join(CODE_ROOT, 'templates/states.yml');
 
 const KNOWN_FLAGS = ['--summary', '--self-test', '--benchmarks', '--help', '-h'];
 const VALUE_FLAGS = ['--benchmarks'];
@@ -236,7 +248,7 @@ export function computeVelocity(timelines, todayStr) {
 // --- Benchmarks ---
 export function loadBenchmarks(explicitPath) {
   const path = explicitPath
-    || (existsSync(join(CAREER_OPS, 'config/benchmarks.yml')) ? join(CAREER_OPS, 'config/benchmarks.yml') : join(CAREER_OPS, 'templates/benchmarks.yml'));
+    || (existsSync(join(DATA_ROOT, 'config/benchmarks.yml')) ? join(DATA_ROOT, 'config/benchmarks.yml') : join(CODE_ROOT, 'templates/benchmarks.yml'));
   let doc;
   try {
     doc = yaml.load(readFileSync(path, 'utf-8'));
@@ -590,7 +602,7 @@ function selfTest() {
   check(v3.appliedToResponded.censored === 2, 'velocity: censored drops to 2 after row 4 completes');
 
   // -- benchmarks + classification --
-  const bm = loadBenchmarks(join(CAREER_OPS, 'templates/benchmarks.yml')).benchmarks;
+  const bm = loadBenchmarks(join(CODE_ROOT, 'templates/benchmarks.yml')).benchmarks;
   check(bm.response_rate && Array.isArray(bm.response_rate.range_pct), 'benchmarks: shipped file loads');
   check(bm.days_first_response.range_days[1] === 14, 'benchmarks: first-response window upper bound');
   check(!('time_to_fill' in bm), 'benchmarks: employer-side time_to_fill must not exist');
@@ -809,7 +821,7 @@ function main() {
     process.exit(1);
   }
   const states = loadCanonicalStates(STATES_FILE);
-  const trackerPath = resolveTrackerPath(CAREER_OPS);
+  const trackerPath = resolveTrackerPath(DATA_ROOT);
   const logPath = join(dirname(trackerPath), 'status-log.tsv');
   const trackerContent = existsSync(trackerPath) ? readFileSync(trackerPath, 'utf-8') : '';
   const logContent = existsSync(logPath) ? readFileSync(logPath, 'utf-8') : '';

@@ -231,10 +231,11 @@ function foldDiacritics(text) {
 /**
  * Heading spelling -> canonical section key.
  *
- * Polish (modes/pl) is here because without these aliases the rendered Polish
- * titles match nothing derived from the English cv.md: validateCvSectionOrder()
- * finds fewer than two comparable sections and silently returns, leaving the
- * section-order guard disabled on every CV rendered in that mode.
+ * Polish (modes/pl) and Chinese (modes/zh-TW, modes/zh) are here because without
+ * these aliases the rendered non-English titles match nothing derived from the
+ * English cv.md: validateCvSectionOrder() finds fewer than two comparable
+ * sections and silently returns, leaving the section-order guard disabled on
+ * every CV rendered in those modes, and cv.sections resolves no block at all.
  *
  * Keys are folded on construction so authored diacritics match stripped input.
  */
@@ -289,6 +290,72 @@ const SECTION_ALIASES = new Map([
   ['nagrody i wyróżnienia', 'awards'],
   ['umiejętności', 'skills'],
   ['umiejętności techniczne', 'skills'],
+  // Chinese — the same failure the Polish block above fixes, for the two Chinese
+  // markets this repo ships modes for: Traditional (modes/zh-TW) and Simplified
+  // (modes/zh), rendered through templates/cv-template.zh-minimal.html. Both
+  // scripts are listed against every key because a CV written in either renders
+  // through this one alias table. The vocabulary is the repo's own: the
+  // `sections` payload in tests/zh-minimal-template.test.mjs (个人简介, 核心能力,
+  // 工作经历, 精选项目, 教育经历, 认证, 技术栈) and the modes' wording
+  // (e.g. "專業摘要" in modes/zh-TW/oferta.md), plus the everyday synonyms of
+  // each — the titles have no single canonical spelling because they come from
+  // a user-supplied `sections` override, not from DEFAULT_SECTION_TITLES.
+  ['專業摘要', 'summary'],
+  ['专业摘要', 'summary'],
+  ['摘要', 'summary'],
+  ['個人簡介', 'summary'],
+  ['个人简介', 'summary'],
+  ['簡介', 'summary'],
+  ['简介', 'summary'],
+  ['核心能力', 'competencies'],
+  ['核心競爭力', 'competencies'],
+  ['核心竞争力', 'competencies'],
+  ['工作經歷', 'experience'],
+  ['工作经历', 'experience'],
+  ['工作經驗', 'experience'],
+  ['工作经验', 'experience'],
+  ['專業經歷', 'experience'],
+  ['专业经历', 'experience'],
+  ['專案', 'projects'],
+  ['项目', 'projects'],
+  ['專案經驗', 'projects'],
+  ['项目经验', 'projects'],
+  ['專案經歷', 'projects'],
+  ['项目经历', 'projects'],
+  ['專案成就', 'projects'],
+  ['项目成就', 'projects'],
+  ['精選專案', 'projects'],
+  ['精选项目', 'projects'],
+  ['學歷', 'education'],
+  ['学历', 'education'],
+  ['教育背景', 'education'],
+  ['教育經歷', 'education'],
+  ['教育经历', 'education'],
+  ['證照', 'certifications'],
+  ['证照', 'certifications'],
+  ['證書', 'certifications'],
+  ['证书', 'certifications'],
+  ['專業證照', 'certifications'],
+  ['专业证书', 'certifications'],
+  ['認證', 'certifications'],
+  ['认证', 'certifications'],
+  ['資格認證', 'certifications'],
+  ['资格认证', 'certifications'],
+  ['獲獎', 'awards'],
+  ['获奖', 'awards'],
+  ['獎項', 'awards'],
+  ['奖项', 'awards'],
+  ['榮譽', 'awards'],
+  ['荣誉', 'awards'],
+  ['技能', 'skills'],
+  ['專長', 'skills'],
+  ['专长', 'skills'],
+  ['技術能力', 'skills'],
+  ['技术能力', 'skills'],
+  ['技術棧', 'skills'],
+  ['技术栈', 'skills'],
+  ['興趣', 'interests'],
+  ['兴趣', 'interests'],
 ].map(([alias, key]) => [foldDiacritics(alias), key]));
 
 function normalizeSectionTitle(text) {
@@ -1287,6 +1354,11 @@ async function generatePDF() {
     // fails, which is the correct direction to fail for a fact gate.
     const { assertFacts } = await import('./verify-cv-facts.mjs');
     const factCheck = assertFacts(html, { label: basename(inputPath) });
+    // Ahead of the verdict, because it qualifies it: with no config the phrase
+    // lists are empty, so a "passed" below covers metrics and facts only.
+    if (factCheck.configMissing) {
+      console.warn('⚠️  No config/cv-facts.json — forbidden/advisory phrase checks did not run.');
+    }
     if (factCheck.verdict === 'warn') {
       console.warn(`⚠️  CV fact check warning: ${basename(inputPath)}`);
       for (const phrase of factCheck.warnings) console.warn(`  - advisory phrase: ${phrase}`);

@@ -124,6 +124,15 @@ Frame the candidate as a technical builder whose positioning adapts to the role.
 
 Produce a table with: detected archetype, domain, function, seniority, remote/work mode, team size, TL;DR, and any user-profile caps or overrides applied.
 
+**Work-authorization classification (required):** Read `config/profile.yml` → `location.authorized_in` and `location.needs_sponsorship`, falling back conservatively to `location.visa_status`. Compare those rights with the role location and the JD's verbatim sponsorship language, then produce exactly one tier for Machine Summary `work_auth`:
+
+- ✅ **Sponsors** — the JD explicitly offers visa sponsorship or relocation for a role outside `authorized_in`.
+- ➖ **Not needed** — the role is within `authorized_in`, is genuinely location-agnostic remote from an authorized country, or `needs_sponsorship` is false.
+- ⚠️ **Unstated** — the role is outside `authorized_in` and the JD is silent; treat this as neutral, not a blocker.
+- ⛔ **No sponsorship** — the JD explicitly refuses sponsorship or requires existing authorization for a role outside `authorized_in`; this is the only hard-stop tier.
+
+Quote sponsorship evidence verbatim. If structured profile keys are absent, infer conservatively from `visa_status` and default to **Unstated** rather than guessing a blocker.
+
 #### Block B — CV Match
 
 One table, one row per significant JD requirement, mapped to exact evidence from `cv.md` or `article-digest.md`. Never emit a second matrix re-enumerating the same requirements — Block B *is* the requirement→evidence mapping.
@@ -252,9 +261,29 @@ Also include:
 
 #### Block G — Posting Legitimacy
 
-Assess whether the posting appears real and worth pursuing.
+Analyze whether the posting appears real and worth pursuing through these signals, in order:
 
 Batch mode limitation: Playwright is not available, so exact apply-button state and freshness cannot be directly verified. Mark those signals as `unverified (batch mode)`.
+
+1. **Posting Freshness** — mark page date, redirects, and apply-button state `unverified (batch mode)`.
+2. **Description Quality** — check specificity, realistic requirements, scope, compensation detail, boilerplate, and contradictions in the JD.
+3. **Company Hiring Signals** — use the bounded research already performed for layoffs, freezes, and same-department impact.
+4. **Reposting Detection** — check `data/scan-history.tsv` for the company plus a similar role title, and report count and period.
+5. **Role Market Context** — judge qualitatively whether the role fits the company's business and a plausible hiring timeline.
+6. **Employment Classification Risk** — `not evaluated` in batch; do not infer contractor or employee status.
+7. **AI-Buzzword vs. Infrastructure Mismatch** — flag only when at least two are present: buzzword/scope mismatch, a roughly five-person-or-smaller team owning broad transformation, or a legacy-heavy industry base rate.
+8. **Benefits/Employment Terminology Country Mismatch** — compare stated location with strong country-specific employment or benefits terms; generic terms alone do not trigger it.
+9. **Third-Party Platform Location Tag vs. Employer's Own Posting Mismatch** — compare only when both sources are available and a matching requisition/job ID confirms the same posting; flag different countries only.
+10. **Agency Licensing Check** — requires both: the JD's own text shows the posting is agency-mediated ("our client", a staffing brand hiring for an unnamed employer), and the candidate's jurisdiction has a row in `templates/agency-licensing.yml`. No row → skip silently. State the row's regime facts and hand over its official registry link so the candidate can check in one lookup. Never assert an agency is unlicensed, and never fetch or scrape the registry.
+11. **Immigration-Status Requirement Overreach** — derive the candidate's jurisdiction key from `config/profile.yml` → `location` and read `templates/immigration-status-requirements.yml`. No entry → say nothing. The authorization-vs-status line is what the whole signal hinges on: asking about *work authorization* or sponsorship is lawful and is **never** flagged, per the entry's `lawful_screening_contrast`; only a demand for a *particular immigration status* fires it, and a line that could plausibly be read either way is read as lawful screening. A permanence qualifier ("authorized to work here permanently") is the documented conversion that does fire. When the posting names a plausible statutory hook — a government contract, a security-clearance requirement, an entry `exceptions` category — name that claimed hook instead of flagging cleanly. Quote the posting's wording with the entry's `legal_basis`; never conclude the employer is in breach.
+12. **Jurisdiction-Prohibited Content** — same jurisdiction derivation against `templates/jurisdiction-prohibited-content.yml`; no entry → say nothing. JD text only in batch: the apply-form half of this signal has no input here. Agent-judged per each entry's `matching` guidance, never keyword matching — a fraud-warning footer promising never to ask for salary history must not fire it. State what the posting contains and what the jurisdiction has prohibited since when; draw no conclusion about the employer.
+13. **Pay-Transparency Range-Width Check** — pure arithmetic on the `advertised_comp` already parsed for Block B. Requires both bounds, one explicit and matching currency, an explicit period, and a normalized floor strictly above zero; anything missing or ambiguous → skip rather than guess. Flag when `top - bottom > 0.5 × bottom`, and say plainly that this is a general heuristic on the posting's own numbers, not a jurisdiction's legal threshold.
+14. **Minimum-Wage Lawyer Question** — only for a guaranteed fixed cash amount (never a range, never bonus, commission or benefits), and only when the JD's own stated work location names a jurisdiction — never the candidate's `location`. Convert to an hourly figure using the JD's stated hours, or disclose the 2080-hour fallback; missing hours or currency → skip. Report it as an `[ask your lawyer]` question. Never state, look up or compare a statutory minimum.
+15. **AI-Screening Disclosure** — two independent checks. (a) The JD discloses AI or automated screening: quote it, informational only, never a warning. (b) Corroborating-only, never standalone: the candidate's jurisdiction has a row in `templates/jurisdiction-ai-screening-disclosure.yml` whose condition their `location` string actually satisfies — a borough-level NYC string, not a state-level "New York" — its `effective` date is on or before the posting's own date (or today's date, only when the JD carries no clear date), and the JD shows no disclosure at all. State the statutory fact and the posting's silence side by side; silence is never evidence that disclosure did not happen.
+
+Signals 1-5 and 7-9 set the tier. Signal 6 is `not evaluated` in batch, so it never feeds the tier either — it stays a descriptive, informational finding, as the Risk Summary already reports. Signals 10-15 never change the tier: report each one separately as its own finding, keep every one of them descriptive rather than assertive, and close them as informational, not legal advice.
+
+Use one tier: **High Confidence**, **Proceed with Caution**, or **Suspicious**. Present observations, not accusations, and explain thin evidence.
 
 #### Risk Summary (after Block G)
 
@@ -506,39 +535,42 @@ Design rules:
 - White background, 0.6in margins.
 - Keep the output readable and ATS-safe.
 
-### Step 5 — Tracker TSV Line
+### Step 5 — Tracker TSV Row
 
-Write exactly one TSV line to:
+Write exactly two TSV lines — a header row, then one data row — to:
 
 ```text
 batch/tracker-additions/{{ID}}.tsv
 ```
 
-Format, no header, 9 tab-separated columns plus an optional trailing `url`:
+Format: a header row of column labels, then exactly one data row.
 
 ```text
+num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
 {{REPORT_NUM}}\t{{DATE}}\t{company}\t{role}\t{status}\t{score}/5\t{pdf_emoji}\t[{{REPORT_NUM}}](reports/{{REPORT_NUM}}-{company-slug}-{{DATE}}.md)\t{one_sentence_note}\t{url}
 ```
 
-Column order is important:
+Write the header line exactly as shown. `merge-tracker.mjs` then resolves each field by NAME, so nothing depends on the order the fields happen to be in:
 
-| # | Field | Type | Example |
-|---|-------|------|---------|
-| 1 | num | integer | `647` |
-| 2 | date | YYYY-MM-DD | `2026-03-14` |
-| 3 | company | string | `Datadog` |
-| 4 | role | string | `Staff AI Engineer` |
-| 5 | status | canonical | `Evaluated` |
-| 6 | score | X.X/5 | `4.5/5` |
-| 7 | pdf | emoji | `✅` or `❌` |
-| 8 | report | markdown link | `[647](reports/647-...)` |
-| 9 | notes | string | one concise sentence |
+| Field | Type | Example |
+|-------|------|---------|
+| num | integer | `647` |
+| date | YYYY-MM-DD | `2026-03-14` |
+| company | string | `Datadog` |
+| role | string | `Staff AI Engineer` |
+| status | canonical | `Evaluated` |
+| score | X.X/5 | `4.5/5` |
+| pdf | emoji | `✅` or `❌` |
+| report | markdown link | `[647](reports/647-...)` |
+| notes | string | one concise sentence |
 
-**Important:** TSV order has status BEFORE score. `applications.md` displays score before status. `merge-tracker.mjs` handles the conversion.
+**Important:** emit exactly one data row under the header, and never emit a value order that contradicts the labels. A file with two data rows, a missing required label, a repeated label, or a `score` value that is not `X.X/5` (or the sentinels `N/A` / `—` / `-`) is skipped, and the evaluation does not reach the tracker.
+
+Headerless files in the legacy 9-column order (`num date company role status score pdf report notes`) are still accepted, but do not write them: without labels, `merge-tracker.mjs` has to tell score from status by content, and a discarded, never-scored row (`—` in both) has no answer (#3517).
 
 **Posting date in notes:** when the pipeline entry for this offer carries a `| posted: {YYYY-MM-DD}` segment (the scanner writes it from the provider's `offer.postedAt`, see `modes/pipeline.md`), carry it into `notes` as its own trailing segment — `…the sentence; posted: 2026-08-07`. It is the only path by which requisition age reaches the tracker, and the dashboard's POSTED column reads it from there. Copy the date verbatim; never infer one when the pipeline entry has no segment, and never write today's date as a stand-in — an absent date renders as `—`, which is honest, while a guessed one silently reports a stale req as fresh. Keep it a segment (`;`-separated, `posted:` first): prose like "recruiter posted an update 2026-07-20" is a contact date, not a posting date, and is read as such.
 
-**Optional fields (column ≥ 10):** if the offer came through an agency/recruiter (#1596), append a labeled field `via={Agency}` (for example `via=Hays`) — never positional; the label is mandatory. One extra unlabeled field is interpreted as the legacy location column. If the end employer is unknown, use `?` as company and add the descriptor in notes (for example `fintech, Leeds`). `merge-tracker.mjs` rejects ambiguous extras (two unlabeled extras, or two `via=` fields).
+**Optional fields:** if the offer came through an agency/recruiter (#1596), add a `via` column to the header and put the agency name (for example `Hays`) in it. In a headerless file the same value travels as a labeled trailing field `via={Agency}` — never positional; the label is mandatory. One extra unlabeled field is interpreted as the legacy location column. If the end employer is unknown, use `?` as company and add the descriptor in notes (for example `fintech, Leeds`). `merge-tracker.mjs` rejects ambiguous extras (two unlabeled extras, or two `via=` fields).
 
 Valid canonical statuses are defined in `templates/states.yml`: `Evaluated`, `Applied`, `Responded`, `Interview`, `Offer`, `Rejected`, `Discarded`, `SKIP`.
 

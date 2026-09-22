@@ -353,7 +353,10 @@ function isPreambleFragment(line) {
 }
 
 /** Read labels in the opening metadata block, before any body section or prose. */
-function preambleTitle(lines) {
+function preambleLabels(lines) {
+  let title = null;
+  let company = null;
+  let url = null;
   let sawHeading = false;
   let nonblankLines = 0;
   let ambiguousPosition = false;
@@ -381,9 +384,13 @@ function preambleTitle(lines) {
         if (position) ambiguousPosition = true;
         continue;
       }
-      return { title: value, ambiguousPosition: false };
+      title ??= value;
+      continue;
     }
-    if (COMPANY_LABEL_RE.test(line) || URL_LABEL_RE.test(line)) continue;
+    const companyLabel = COMPANY_LABEL_RE.exec(line);
+    if (companyLabel) { company ??= companyLabel[1].trim(); continue; }
+    const urlLabel = URL_LABEL_RE.exec(line);
+    if (urlLabel) { url ??= urlLabel[1]; continue; }
     const metadata = POSTING_METADATA_HEADING_RE.exec(line);
     if (metadata && /^\s*[:\-]/.test(line.slice(metadata[0].length))) continue;
     // ATS captures may put a bare location, date or Apply now between labels.
@@ -391,7 +398,7 @@ function preambleTitle(lines) {
     if (isPreambleFragment(line)) continue;
     break;
   }
-  return { title: null, ambiguousPosition };
+  return { title, company, url, ambiguousPosition: title ? false : ambiguousPosition };
 }
 
 /**
@@ -439,7 +446,12 @@ function preambleTitle(lines) {
  * @returns {string|null} Trimmed title, or null.
  */
 export function detectTitle(jdText, explicit = null, company = null) {
-  if (typeof explicit === 'string' && explicit.trim()) return explicit.trim();
+  return detectTitleWithConfidence(jdText, explicit, company).title;
+}
+
+// Residual guesses remain useful to display, but cannot supply negative evidence.
+function detectTitleWithConfidence(jdText, explicit = null, company = null) {
+  if (typeof explicit === 'string' && explicit.trim()) return { title: explicit.trim(), confident: true };
   const text = String(jdText ?? '');
 
   // A preamble label is trusted only at title length. A capture whose
@@ -447,8 +459,12 @@ export function detectTitle(jdText, explicit = null, company = null) {
   // now About us ...") would otherwise hand the rest of the posting back as
   // the title, and the title signal would become a body-text search.
   const lines = text.split('\n');
-  const { title: labelled, ambiguousPosition } = preambleTitle(lines);
-  if (labelled) return labelled;
+  const { title: labelled, ambiguousPosition } = preambleLabels(lines);
+  if (labelled) return { title: labelled, confident: true };
+
+  const companyFolded = foldForCompare(company);
+  const isCompanyLine = (line) => Boolean(companyFolded) && foldForCompare(line) === companyFolded;
+  const isTitleCandidate = (line) => !isCompanyLine(line) && looksLikeTitle(line);
 
   const headings = [];
   const plainLines = [];
@@ -464,43 +480,42 @@ export function detectTitle(jdText, explicit = null, company = null) {
     // end of the base title, allowing one ATS level suffix; otherwise leave it
     // unknown. Plain exports can supply only their first nonempty line. Explicit
     // labels above accept every language without this conservative check.
-    const companyFolded = foldForCompare(company);
     const firstLine = lines.find((line) => line.trim())?.trim() ?? '';
     const firstPlain = firstLine && !MD_HEADING_RE.test(firstLine)
       && !firstLine.includes(':') && isPreambleFragment(firstLine);
     const candidates = firstPlain ? [firstLine, ...headings] : headings;
-    return candidates.find((heading) => {
-      if (companyFolded && foldForCompare(heading) === companyFolded) return false;
+    const title = candidates.find((heading) => {
+      if (isCompanyLine(heading)) return false;
       const base = bracketText(heading).split(/,| [-–—] /, 1)[0].trim()
         .replace(/\s+(?:I{1,3}|IV|V|[1-9])$/i, '');
       const lastWord = base.split(/\s+/).at(-1) ?? '';
       return looksLikeTitle(base) && ROLE_NOUN_RE.test(lastWord);
     }) ?? null;
+    return { title, confident: title !== null };
   }
 
-  const titledHeading = headings.find(looksLikeTitle);
-  if (titledHeading) return titledHeading;
+  const titledHeading = headings.find(isTitleCandidate);
+  if (titledHeading) return { title: titledHeading, confident: true };
 
   if (headings.length > 0) {
     // No heading reads like a job title by the English vocabulary above. Still
     // English-only: a non-English section heading is not recognized here and
     // is the same residual gap as an unrecognized non-English title noun.
-    const companyFolded = foldForCompare(company);
-    const isCompanyHeading = (h) => Boolean(companyFolded) && foldForCompare(h) === companyFolded;
     const isKnownNonTitle = (h) => SECTION_HEADING_RE.test(h) || POSTING_METADATA_HEADING_RE.test(h);
-    const best = headings.find((h) => !isCompanyHeading(h) && !isKnownNonTitle(h));
-    if (best) return best;
-    const other = headings.find((h) => !isCompanyHeading(h));
-    if (other) return other;
-    return headings[0];
+    const best = headings.find((h) => !isCompanyLine(h) && !isKnownNonTitle(h));
+    if (best) return { title: best, confident: false };
+    const other = headings.find((h) => !isCompanyLine(h));
+    if (other) return { title: other, confident: false };
+    return { title: headings[0], confident: false };
   }
 
   // No headings at all: a plain-text export. Same preference, bounded to the top
   // of the document so a role noun buried in the body is never mistaken for the
   // title.
   const head = plainLines.slice(0, 5);
-  const first = head.find(looksLikeTitle) ?? head[0] ?? null;
-  return first !== null && isTitleLength(first) ? first : null;
+  const first = head.find(isTitleCandidate) ?? head[0] ?? null;
+  const title = first !== null && isTitleLength(first) ? first : null;
+  return { title, confident: title !== null && isTitleCandidate(title) };
 }
 
 /**
@@ -751,7 +766,10 @@ const CUR = `[$€£¥]|(?:${ISO_CODES.join('|')})`;
 // shape of thousands grouping and the same rule `parseAmount`'s
 // `canonicalizeSeparators` applies. Space is a grouping separator in French,
 // German and Nordic listings ("75 000 EUR").
-const NUM = String.raw`\d+(?:[ ,.]\d{3})*(?:[.,]\d+)?\s*[kK]?`;
+// Cap grouped runs: without this bound the trailing-currency scan retries
+// every suffix of a long grouped number with no currency, taking quadratic time.
+// Five groups already exceed any plausible salary in supported currencies.
+const NUM = String.raw`\d+(?:[ ,.]\d{3}){0,5}(?:[.,]\d+)?\s*[kK]?`;
 
 // Range connectors between the two bounds: "-"/"to" in English, "et"/"à" in
 // French ("entre 75 000 EUR et 90 000 EUR", "de 50 000 EUR à 70 000 EUR"),
@@ -782,6 +800,32 @@ const COMP_TRAIL_RE = new RegExp(
 const NON_ANNUAL_RE = /\b(?:per\s+hour|an\s+hour|hourly|\/\s*(?:hr|hour)|per\s+day|daily|per\s+diem|\/\s*(?:d|day)|per\s+week|weekly|\/\s*(?:wk|week)|per\s+month|monthly|\/\s*(?:mo|month))\b/i;
 
 const CONTEXT_CHARS = 40;
+
+// An explicit bonus, stipend or budget is not an annual pay band, even when
+// it exceeds the magnitude heuristic below. Choose the nearest label within
+// the same short clause so "Base $150k, bonus $50k" keeps its actual salary.
+// Unlabelled bands and localized salary wording remain accepted: requiring an
+// English salary keyword would turn ordinary non-English disclosures unknown.
+const COMP_KIND_RE = /\b(?:(bonus|stipend|allowance|budget|sign[- ]on)|salary|base(?:\s+pay)?|wages?|annual\s+pay|ctc|ote)\b/gi;
+function isNonSalaryFigure(text, index, length) {
+  const before = text.slice(Math.max(0, index - CONTEXT_CHARS), index).split(/\n|[;!?]|\.\s/).at(-1);
+  const after = text.slice(index + length, index + length + CONTEXT_CHARS).split(/\n|[;!?]|\.\s/, 1)[0];
+  const context = before + ' '.repeat(length) + after;
+  let closest = Infinity;
+  let nonSalary = false;
+  for (const match of context.matchAll(COMP_KIND_RE)) {
+    if (match.index >= before.length + length
+      && /\b(?:plus|and|with)\b/i.test(context.slice(before.length + length, match.index))) continue;
+    const distance = match.index < before.length
+      ? before.length - match.index - match[0].length
+      : match.index - before.length - length;
+    if (distance < closest) {
+      closest = distance;
+      nonSalary = Boolean(match[1]);
+    }
+  }
+  return nonSalary;
+}
 
 /**
  * India's de-facto annual-comp notation: "12 LPA", "22-28 LPA", "CTC 18 LPA"
@@ -851,7 +895,7 @@ function parseCapturedRange(lo, hi) {
  * `scoreComp`'s job, because it needs the user's floor to do it.
  *
  * @param {string} jdText
- * @returns {{annual: Array<{min: number, max: number, open: boolean, currency: string|null, raw: string}>,
+ * @returns {{annual: Array<{min: number, max: number, open: boolean, currency: string|null, raw: string, nonSalary: boolean}>,
  *            nonAnnual: {raw: string}|null}} `open` marks a lower bound with no top ("$100k+").
  */
 export function extractJdComp(jdText) {
@@ -878,6 +922,7 @@ export function extractJdComp(jdText) {
       open,
       currency: toCurrencyCode(currencyToken),
       raw: match[0].trim() + (open ? '+' : ''),
+      nonSalary: isNonSalaryFigure(text, match.index, match[0].length),
     });
   };
 
@@ -894,6 +939,7 @@ export function extractJdComp(jdText) {
       open: false,
       currency: 'INR',
       raw: m[0].trim(),
+      nonSalary: isNonSalaryFigure(text, m.index, m[0].length),
     });
   }
 
@@ -946,10 +992,10 @@ export function profileFloor(profile) {
  * an annual salary. There is no FX conversion here and there should not be: a
  * cross-currency comparison would be a guess wearing a number.
  *
- * Among the comparable figures the LARGEST is the band: a salary is never
- * smaller than the bonus or stipend stated beside it, and when the largest
- * figure is the top of a total-comp band, that top is what the tiers below
- * compare anyway. Picking the largest can only err toward proceed. An
+ * Explicit bonuses, stipends and budgets are excluded before comparison.
+ * Among the remaining comparable figures the LARGEST is the band; when it is
+ * the top of a total-comp band, that top is what the tiers below compare.
+ * Picking the largest can only err toward proceed. An
  * open-ended band ("$100k+") clears the floor when its start does and is
  * otherwise unknown: there is no top to call "below floor".
  *
@@ -968,7 +1014,11 @@ export function scoreComp(comp, floor) {
       unknown: true,
     };
   }
-  const annual = comp?.annual ?? [];
+  const figures = comp?.annual ?? [];
+  const annual = figures.filter((f) => !f.nonSalary);
+  if (figures.length > 0 && annual.length === 0) {
+    return { score: UNKNOWN_SCORE, evidence: `the posting states only bonuses or other non-salary figures ("${figures[0].raw}")`, unknown: true };
+  }
   if (annual.length === 0) {
     if (comp?.nonAnnual) {
       return {
@@ -1204,15 +1254,16 @@ export function prescore({
   const jd = String(jdText ?? '');
   const knownCompany = (typeof company === 'string' && company.trim())
     ? company.trim()
-    : (COMPANY_LABEL_RE.exec(jd)?.[1]?.trim() ?? null);
+    : preambleLabels(jd.split('\n')).company;
 
   // Title detection feeds two signals, so its own failure is handled here rather
   // than inside safeSignal: a null title makes both title and domain unknown,
   // which is the correct fail-open reading of "we could not tell what this
   // posting is for".
   let detected = null;
+  let confidentTitle = false;
   try {
-    detected = detectTitle(jd, title, knownCompany);
+    ({ title: detected, confident: confidentTitle } = detectTitleWithConfidence(jd, title, knownCompany));
   } catch (err) {
     notes.push(`the posting title could not be detected (${err?.message ?? err}), so title and domain scored as unknown`);
   }
@@ -1226,12 +1277,12 @@ export function prescore({
       ...safeSignal('title', () => {
         const targets = profileTargets(profile);
         hasTargets = targets.primary.length + targets.archetypes.length > 0;
-        return scoreTitle(detected, targets);
+        return scoreTitle(confidentTitle ? detected : null, targets);
       }, notes),
       weight: WEIGHTS.title,
     },
     requirements: { ...safeSignal('requirements', () => scoreRequirements(jdText, cvText), notes), weight: WEIGHTS.requirements },
-    domain: { ...safeSignal('domain', () => scoreDomain(detected), notes), weight: WEIGHTS.domain },
+    domain: { ...safeSignal('domain', () => scoreDomain(confidentTitle ? detected : null), notes), weight: WEIGHTS.domain },
     comp: {
       ...safeSignal('comp', () => scoreComp(extractJdComp(jdText), profileFloor(profile)), notes),
       weight: WEIGHTS.comp,
@@ -1573,12 +1624,15 @@ function main() {
       mkdirSync(dirname(logPath), { recursive: true });
       appendFileSync(
         logPath,
-        discardLogLine(new Date().toISOString(), flagValue(args, '--url') ?? URL_LABEL_RE.exec(jdText)?.[1] ?? null, discardReason(result)),
+        discardLogLine(new Date().toISOString(), flagValue(args, '--url') ?? preambleLabels(jdText.split('\n')).url, discardReason(result)),
         'utf-8',
       );
       result.discardLogged = true;
     } catch (err) {
       logFailure = err?.message ?? String(err);
+      result.verdict = 'proceed';
+      result.override = 'log-failed';
+      result.overrideReason = 'skip not auditable: data/discard.log could not be written';
     }
   }
 

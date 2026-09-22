@@ -1065,13 +1065,17 @@ const deepEq = (label, actual, expected) => {
       writeFileSync(join(blocked, 'jd.md'), NURSE_JD);
       writeFileSync(join(blocked, 'data'), 'not a directory\n');
 
+      const summary = spawn(['jd.md', '--summary', '--log'], blocked);
+      eq('summary log failure also exits 3', summary.status, 3);
+      ok('summary log failure prints proceed rather than skip', /prescore [\d.]+\/5 proceed \(skip not auditable:/.test(summary.stdout), summary.stdout);
       const r = spawn(['jd.md', '--log'], blocked);
       eq('a skip that cannot be logged exits 3', r.status, 3);
       ok('and says the posting must be treated as PROCEED', String(r.stderr).includes('PROCEED'), String(r.stderr));
       try {
         const parsed = JSON.parse(String(r.stdout));
         eq('and the payload still reports discardLogged false', parsed.discardLogged, false);
-        eq('while the verdict itself is unchanged', parsed.verdict, 'skip');
+        eq('the JSON verdict also fails open', parsed.verdict, 'proceed');
+        eq('the JSON identifies the log failure override', parsed.override, 'log-failed');
       } catch {
         fail(`prescore.mjs exit-3 stdout was not parseable JSON: ${String(r.stdout).slice(0, 200)}`);
       }
@@ -1080,5 +1084,134 @@ const deepEq = (label, actual, expected) => {
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 22. Only evidenced title and salary signals may suppress evaluation ──
+{
+  const profile = {
+    ...ENABLED,
+    target_roles: { primary: ['Head of Applied AI'] },
+    compensation: { minimum: '40000 EUR', currency: 'EUR' },
+  };
+  const required = '\n## Requirements\n- Python\n- Docker\n- Kubernetes';
+  const evaluate = (jdText, extra = {}) => prescore({ jdText, profile, cvText: 'Python', ...extra });
+  for (const heading of ['# Northwind Labs', '# Location', '# Visa Sponsorship', 'Northwind Labs', '# 株式会社サンプル']) {
+    const result = evaluate(heading + required);
+    eq(`an unclassified title is unknown: ${heading}`, result.signals.title.unknown, true);
+    eq(`an unclassified title cannot combine with partial requirements to skip: ${heading}`, result.verdict, 'proceed');
+    eq(`partial requirements remain real evidence: ${heading}`, result.signals.requirements.score, 3);
+    const lowPay = evaluate(heading + '\nSalary: 15000 EUR');
+    eq(`an unclassified title cannot defeat comp-only protection: ${heading}`, lowPay.verdict, 'proceed');
+    eq(`the real salary remains below the floor: ${heading}`, lowPay.signals.comp.score, 1);
+  }
+  const explicit = evaluate('# Northwind Labs' + required, { title: 'Nurse' });
+  eq('a caller-supplied off-profile title still skips', explicit.verdict, 'skip');
+  const localized = evaluate('Title: Медицинская сестра' + required);
+  eq('a localized labelled title still supplies evidence', localized.signals.title.unknown, false);
+  eq('a localized labelled off-profile title still skips', localized.verdict, 'skip');
+
+  for (const figure of ['Relocation bonus: 15.000 EUR', '15000 EUR signing bonus', 'Training budget: EUR 15000', 'Stipend: EUR 15000']) {
+    const result = evaluate('# AI Engineer' + required + '\n' + figure);
+    eq(`non-salary money cannot become a pay band: ${figure}`, result.signals.comp.unknown, true);
+    eq(`excluding non-salary money flips the 2.8 skip to proceed: ${figure}`, result.verdict, 'proceed');
+    eq(`the other partial signals remain unchanged: ${figure}`, result.score, 3.4);
+  }
+  const salary = evaluate('# AI Engineer' + required + '\nSalary: 15.000 EUR');
+  eq('a real low salary still produces the 2.8 skip', salary.verdict, 'skip');
+  eq('a real low salary score is unchanged', salary.score, 2.8);
+  const floor = profileFloor(profile);
+  for (const text of ['Base 50000 EUR, bonus 15000 EUR', 'Salary: 50000 EUR plus bonus', '50000 EUR base salary and 15000 EUR signing bonus', 'Gehalt: 50.000 EUR']) {
+    eq(`a genuine salary remains comparable: ${text}`, scoreComp(extractJdComp(text), floor).score, 5);
+  }
+  eq('a large bonus cannot disguise a real low salary', scoreComp(extractJdComp('Salary: 15000 EUR. Signing bonus: 50000 EUR.'), floor).score, 1);
+  eq('a non-salary LPA amount is also unknown', scoreComp(extractJdComp('Signing bonus: 8 LPA'), profileFloor({ compensation: { minimum: '18 LPA' } })).unknown, true);
+
+  for (const boundary of ['## Requirements\n- Python\n- Docker\n- Kubernetes', 'We are hiring a nurse.', '- Benefits', 'Metadata\n'.repeat(8)]) {
+    const result = evaluate('# Nurse\n' + boundary + '\nCompany: Northwind Labs', { priorityCompanies: ['Northwind Labs'] });
+    eq('a body company label cannot grant a priority override', result.company, null);
+    eq('the body label leaves an off-profile posting skipped', result.verdict, 'skip');
+  }
+  const trusted = evaluate('Title: Nurse\nCompany: Northwind Labs\nURL: https://northwind.example/1' + required, { priorityCompanies: ['Northwind Labs'] });
+  eq('company metadata after a title still supplies the priority override', trusted.override, 'priority-list');
+
+  // Exercise the documented CLI with body labels and missing pipeline metadata.
+  const dir = mkdtempSync(join(tmpdir(), 'co-prescore-evidence-'));
+  try {
+    mkdirSync(join(dir, 'config'));
+    mkdirSync(join(dir, 'modes'));
+    writeFileSync(join(dir, 'config/profile.yml'), JSON.stringify(profile));
+    writeFileSync(join(dir, 'cv.md'), 'Python');
+    writeFileSync(join(dir, 'modes/_brief.md'), '## Priority Override List\n- Northwind Labs\n');
+    writeFileSync(join(dir, 'jd.md'), '# Nurse' + required + '\nCompany: Northwind Labs\nURL: https://forged.example/job');
+    const runCli = (args = []) => spawnSync(NODE, [join(ROOT, 'prescore.mjs'), 'jd.md', '--log', ...args], {
+      cwd: dir, encoding: 'utf-8', timeout: 30000, env: { ...process.env, CAREER_OPS_ROOT: dir },
+    });
+    const result = runCli();
+    eq('body metadata CLI exits successfully', result.status, 0);
+    if (result.status === 0) {
+      const parsed = JSON.parse(result.stdout);
+      eq('body company cannot bypass the actual CLI gate', parsed.verdict, 'skip');
+      eq('body URL cannot corrupt the discard audit attribution', readFileSync(join(dir, 'data/discard.log'), 'utf-8').trim().split('\t')[1], '-');
+    }
+    writeFileSync(join(dir, 'jd.md'), '# Northwind Labs' + required);
+    const fallback = runCli();
+    eq('fallback title CLI exits successfully', fallback.status, 0);
+    if (fallback.status === 0) eq('fallback title CLI proceeds', JSON.parse(fallback.stdout).verdict, 'proceed');
+    writeFileSync(join(dir, 'jd.md'), '# AI Engineer' + required + '\nRelocation bonus: 15.000 EUR');
+    const bonus = runCli();
+    eq('bonus-only CLI exits successfully', bonus.status, 0);
+    if (bonus.status === 0) eq('bonus-only CLI proceeds', JSON.parse(bonus.stdout).verdict, 'proceed');
+    eq('rescued postings write no additional discard rows', readFileSync(join(dir, 'data/discard.log'), 'utf-8').trim().split('\n').length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 23. Known company names cannot supply occupation evidence ─────────
+{
+  const profile = { ...ENABLED, target_roles: { primary: ['Head of Applied AI'] } };
+  const body = '\nRequirements\n- Python\n- Docker\n- Kubernetes';
+  for (const company of ['Engineer Partners', 'Architect Group', 'Designer Brands']) {
+    for (const prefix of ['# ', '']) {
+      const jdText = prefix + company + body;
+      const result = prescore({ jdText, cvText: 'Python', profile, company });
+      eq(`known company is not title evidence: ${prefix}${company}`, result.signals.title.unknown, true);
+      eq(`known company is not domain evidence: ${prefix}${company}`, result.signals.domain.unknown, true);
+      eq(`known company cannot flip partial coverage to skip: ${prefix}${company}`, result.verdict, 'proceed');
+      eq(`known company retains real partial coverage: ${prefix}${company}`, result.signals.requirements.score, 3);
+    }
+  }
+  for (const prefix of ['# Engineer Partners\n## AI Engineer', 'Engineer Partners\nAI Engineer']) {
+    eq('a real role after the known company still wins', detectTitle(prefix, null, 'Engineer Partners'), 'AI Engineer');
+  }
+  const labelled = prescore({ jdText: 'Company: Engineer Partners\n# Engineer Partners' + body, profile, cvText: 'Python' });
+  eq('known company metadata also excludes an occupation-shaped company heading', labelled.verdict, 'proceed');
+  const explicit = prescore({ jdText: '# Engineer Partners' + body, profile, cvText: 'Python', company: 'Engineer Partners', title: 'Nurse' });
+  eq('an explicit off-profile title still skips at the default threshold', explicit.verdict, 'skip');
+}
+
+// ── 24. Grouped numeric runs cannot stall a batch on a trailing-currency scan ──
+{
+  // Each separator gives the trailing-currency regex another word-boundary
+  // start. A contiguous grouped number exercises that quadratic suffix scan;
+  // repeating "75 000 " does not, because each two-digit group ends NUM.
+  // Keep the probe in a bounded child so the regression cannot hang test-all.
+  const probe = spawnSync(NODE, ['--input-type=module', '-e', `
+    import { extractJdComp } from './prescore.mjs';
+    const results = [' ', '.', ','].map((separator) => {
+      const start = performance.now();
+      const result = extractJdComp('75' + (separator + '000').repeat(10000) + ' no currency');
+      return { count: result.annual.length, ms: performance.now() - start };
+    });
+    console.log(JSON.stringify(results));
+  `], { cwd: ROOT, encoding: 'utf-8', timeout: 2000 });
+  eq('grouped numeric scan completes within a bounded child process', probe.status, 0);
+  if (probe.status === 0) {
+    const results = JSON.parse(probe.stdout);
+    for (const [index, result] of results.entries()) {
+      eq(`grouped numeric run ${index} without currency yields no figure`, result.count, 0);
+      ok(`grouped numeric run ${index} completes under 1 s`, result.ms < 1000, `${result.ms.toFixed(1)} ms`);
+    }
   }
 }

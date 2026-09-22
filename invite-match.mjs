@@ -43,6 +43,12 @@ import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
+// Sibling scripts live next to this file in the *code* checkout, which is a
+// different directory from CAREER_OPS whenever the data root is external
+// (CAREER_OPS_ROOT / a .career-ops-data marker). Resolving them off the data
+// root made --apply die with `Cannot find module <data-root>/set-status.mjs`.
+// Same split, and the same constant name, as merge-tracker.mjs (#3761).
+const CAREER_OPS_CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
 
 // --- CLI args ---
@@ -257,11 +263,24 @@ export function companySimilarity(a, b) {
 // too much for one regex to be authoritative, so this is a best-effort
 // extraction — the fuzzy match against the tracker is what actually decides
 // the result, not this heuristic alone.
+//
+// The name class is Unicode, not `[A-Z][\w…]`: `\w` is ASCII-only in JS, so a
+// lazy `[\w…]{1,60}?` cannot cross the `é` in Nestlé and the terminator it is
+// looking for never arrives — the whole pattern fails and the invite yields no
+// company at all. `[A-Z]` refused a non-Latin first letter for the same reason,
+// so Яндекс and 株式会社 never even started matching. `\p{Lo}` covers
+// scripts with no case distinction; the body class is the one
+// normalizeCompanyName() already uses (#2517), plus the punctuation company
+// names carry, plus `_`: `\w` included it, and dropping it reproduces the
+// exact same failure mode this fix is for (a lazy class with no reachable
+// terminator fails the whole pattern, not just the one character) for any
+// ASCII company name that happens to contain an underscore. The first
+// pattern captures `(.+)` and was never script-bound.
 const COMPANY_LINE_PATTERNS = [
   /(?:^|\n)\s*company\s*[:\-]\s*(.+)/i,
-  /interview(?:ing)?\s+(?:with|at)\s+([A-Z][\w.,&' -]{1,60}?)(?:[.,\n]|\s+for\s|\s+regarding\s|$)/i,
-  /(?:phone screen|screening|interview)\s*[-–—:]\s*([A-Z][\w.,&' -]{1,60}?)(?:\s+opportunity)?(?:[.,\n]|$)/i,
-  /schedule your (?:phone screen|interview)\s*(?:[-–—:]\s*)?([A-Z][\w.,&' -]{1,60}?)\s*opportunity/i,
+  /interview(?:ing)?\s+(?:with|at)\s+([\p{Lu}\p{Lo}][\p{L}\p{M}\p{N}_.,&' -]{1,60}?)(?:[.,\n]|\s+for\s|\s+regarding\s|$)/iu,
+  /(?:phone screen|screening|interview)\s*[-–—:]\s*([\p{Lu}\p{Lo}][\p{L}\p{M}\p{N}_.,&' -]{1,60}?)(?:\s+opportunity)?(?:[.,\n]|$)/iu,
+  /schedule your (?:phone screen|interview)\s*(?:[-–—:]\s*)?([\p{Lu}\p{Lo}][\p{L}\p{M}\p{N}_.,&' -]{1,60}?)\s*opportunity/iu,
 ];
 
 /**
@@ -760,11 +779,21 @@ export function analyzeInvite(text, trackerRows = null) {
  * @returns {object} set-status.mjs's own --json result (or its structured error).
  */
 export function applyRejectionStatus(appNumber, options = {}) {
-  const scriptPath = join(CAREER_OPS, 'set-status.mjs');
+  const scriptPath = join(CAREER_OPS_CODE_ROOT, 'set-status.mjs');
   const env = options.appsFile ? { ...process.env, CAREER_OPS_TRACKER: options.appsFile } : process.env;
   try {
     const out = execFileSync(process.execPath, [scriptPath, String(appNumber), 'Rejected', '--json'], {
       encoding: 'utf-8', env,
+      // Capture the child's stderr instead of letting execFileSync's default
+      // inherit it. set-status.mjs's failWith writes the machine payload to
+      // stdout AND an `❌ {message}` line to stderr; inherited, that line
+      // printed straight through this function — which by contract returns a
+      // structured result and never speaks for itself — into whatever was
+      // running it. In the test suite a *passing* assertion therefore emitted
+      // `❌ No tracker row with #999`, indistinguishable from a real failure.
+      // Nothing is lost: it is the same string as the JSON `error` field the
+      // CLI already prints as "Apply FAILED: ...".
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     return JSON.parse(out);
   } catch (err) {
@@ -774,7 +803,11 @@ export function applyRejectionStatus(appNumber, options = {}) {
     if (err.stdout) {
       try { return JSON.parse(err.stdout); } catch { /* fall through */ }
     }
-    return { error: err.message, code: 'apply-failed' };
+    // failUsage's non-JSON branch (and any hard crash) leaves stderr as the
+    // only account of what went wrong; now that it is piped, fold it into the
+    // returned error rather than dropping it on the floor.
+    const stderr = typeof err.stderr === 'string' ? err.stderr.trim() : '';
+    return { error: stderr || err.message, code: 'apply-failed' };
   }
 }
 

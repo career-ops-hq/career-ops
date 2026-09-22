@@ -116,7 +116,7 @@ function captureWarnings(fn) {
 try {
   const { cvSectionOrderFrom, readCvSectionOrder } =
     await import(pathToFileURL(join(ROOT, 'theme-style.mjs')).href);
-  const { reorderCvSections, CV_SECTION_KEYS, validateCvSectionOrder } =
+  const { reorderCvSections, CV_SECTION_KEYS, validateCvSectionOrder, sectionKey } =
     await import(pathToFileURL(join(ROOT, 'generate-pdf.mjs')).href);
 
   // ── Reading the config ────────────────────────────────────────────────────
@@ -832,6 +832,143 @@ try {
     pass('--allow-reorder still downgrades a genuinely scrambled order from a thrown error to a warning');
   } else {
     fail(`--allow-reorder should warn instead of throwing on a genuinely scrambled order: threw=${scrambledAllowRun.value} warnings=${JSON.stringify(scrambledAllowRun.warnings)}`);
+  }
+
+  // ── #3658: Chinese CVs reach the same two mechanisms ──────────────────────
+
+  // SECTION_ALIASES carried English and Polish only, so for the two Chinese
+  // markets this repo ships modes for (modes/zh-TW, modes/zh) every rendered
+  // title fell through sectionKey()'s "return the normalized title" branch.
+  // Nothing then matched a canonical key, so cv.sections resolved fewer than
+  // two blocks and returned the document untouched — a silent no-op, and the
+  // only documented way to correct an order the guard rejects.
+  //
+  // Built the same way as scrambledHtml above (marker comments stay English:
+  // they come from the template, not from the CV's language) and validated
+  // against the same English cvMarkdown, because cv.md is the source of truth
+  // in every mode.
+  const zhSection = (marker, title, body) =>
+    `  <!-- ${marker} -->\n  <div class="section">\n    <div class="section-title">${title}</div>\n    ${body}\n  </div>\n`;
+  const zhDocument = sections => `<!DOCTYPE html>
+<html lang="zh-Hant">
+<head><title>Test</title></head>
+<body>
+<div class="cv">
+  <!-- HEADER -->
+  <div class="header"><h1>Test Candidate</h1></div>
+
+${sections.join('\n')}</div>
+</body>
+</html>
+`;
+
+  // Traditional (modes/zh-TW), scrambled exactly like scrambledHtml: Education
+  // and Certifications hoisted ahead of Experience and Projects.
+  const zhTwScrambled = zhDocument([
+    zhSection('PROFESSIONAL SUMMARY', '專業摘要', '<div class="summary-text">Summary body.</div>'),
+    zhSection('EDUCATION', '學歷', '<div class="edu-item">E</div>'),
+    zhSection('CERTIFICATIONS', '證照', '<div class="cert-table">C</div>'),
+    zhSection('WORK EXPERIENCE', '工作經歷', '<div class="job">J</div>'),
+    zhSection('PROJECTS', '專案', '<div class="project">P</div>'),
+    zhSection('SKILLS', '技能', '<div class="skills-grid">K</div>'),
+  ]);
+  // Simplified (modes/zh), with the vocabulary that market actually uses.
+  const zhCnScrambled = zhDocument([
+    zhSection('PROFESSIONAL SUMMARY', '专业摘要', '<div class="summary-text">Summary body.</div>'),
+    zhSection('EDUCATION', '学历', '<div class="edu-item">E</div>'),
+    zhSection('CERTIFICATIONS', '证书', '<div class="cert-table">C</div>'),
+    zhSection('WORK EXPERIENCE', '工作经历', '<div class="job">J</div>'),
+    zhSection('PROJECTS', '项目', '<div class="project">P</div>'),
+    zhSection('SKILLS', '技能', '<div class="skills-grid">K</div>'),
+  ]);
+
+  const zhOrder = ['experience', 'projects', 'skills', 'education', 'certifications'];
+  const zhCases = [
+    ['Traditional (modes/zh-TW)', zhTwScrambled, ['專業摘要', '工作經歷', '專案', '技能', '學歷', '證照']],
+    ['Simplified (modes/zh)', zhCnScrambled, ['专业摘要', '工作经历', '项目', '技能', '学历', '证书']],
+  ];
+
+  for (const [label, html, expectedTitles] of zhCases) {
+    // The bug, stated as an observable: the document came back byte-identical.
+    const run = captureWarnings(() => reorderCvSections(html, zhOrder));
+    if (run.value === html) {
+      fail(`${label}: cv.sections left the CV byte-identical — the order is still a no-op`);
+      continue;
+    }
+    const got = renderedTitles(run.value);
+    if (JSON.stringify(got) !== JSON.stringify(expectedTitles)) {
+      fail(`${label}: reordered => ${JSON.stringify(got)}, expected ${JSON.stringify(expectedTitles)}`);
+      continue;
+    }
+    // Every body survives exactly once — the permutation must not lose or
+    // duplicate content just because the titles are non-Latin.
+    const zhIntact = ['Summary body.', 'class="edu-item">E', 'class="cert-table">C', 'class="job">J', 'class="project">P', 'class="skills-grid">K']
+      .every(b => run.value.split(b).length === 2);
+    if (!zhIntact) {
+      fail(`${label}: reordering lost or duplicated a section body`);
+      continue;
+    }
+    // "matched no section" is precisely the warning #3658 quoted as the symptom.
+    if (run.warnings.some(w => w.includes('matched no section'))) {
+      fail(`${label}: still reported names that matched no section: ${JSON.stringify(run.warnings)}`);
+      continue;
+    }
+    // And the reason the feature matters here: the guard rejects the scrambled
+    // CV and accepts it once cv.sections declares cv.md's own order. Chinese
+    // reaches the guard already (it compares titles), so before this change the
+    // render was blocked with no working way to fix it.
+    let zhThrewBefore = false;
+    try {
+      validateCvSectionOrder(html, cvMarkdown);
+    } catch {
+      zhThrewBefore = true;
+    }
+    if (!zhThrewBefore) {
+      fail(`${label}: the scrambled CV was not rejected — the end-to-end assertion proves nothing`);
+      continue;
+    }
+    try {
+      validateCvSectionOrder(run.value, cvMarkdown);
+    } catch (e) {
+      fail(`${label}: the guard still rejected the reordered CV: ${e.message}`);
+      continue;
+    }
+    pass(`${label}: cv.sections reorders a Chinese CV and the section-order guard then accepts it (#3658)`);
+  }
+
+  // Spellings that do not appear in the fixtures above still have to resolve:
+  // both scripts, and the synonyms each market writes in practice.
+  const zhKeyCases = [
+    ['個人簡介', 'summary'], ['个人简介', 'summary'],
+    ['核心競爭力', 'competencies'], ['核心竞争力', 'competencies'],
+    ['工作經驗', 'experience'], ['工作经验', 'experience'],
+    ['專案經驗', 'projects'], ['项目经验', 'projects'],
+    ['教育背景', 'education'], ['教育经历', 'education'],
+    ['專業證照', 'certifications'], ['资格认证', 'certifications'],
+    ['獲獎', 'awards'], ['荣誉', 'awards'],
+    ['技術能力', 'skills'], ['专长', 'skills'],
+    ['興趣', 'interests'], ['兴趣', 'interests'],
+    // The lookup folds diacritics through NFD before matching. Han characters
+    // have no combining marks to strip, so a Chinese title must survive that
+    // pass unchanged — asserted here rather than assumed.
+    ['專業摘要', 'summary'],
+  ];
+  // The repo's own Chinese vocabulary, not an invented one: this is the
+  // `sections` override rendered by tests/zh-minimal-template.test.mjs through
+  // templates/cv-template.zh-minimal.html. Every title a shipped fixture
+  // renders must be nameable, or cv.sections is still a no-op for it.
+  const ZH_MINIMAL_FIXTURE_TITLES = [
+    ['个人简介', 'summary'], ['核心能力', 'competencies'], ['工作经历', 'experience'],
+    ['精选项目', 'projects'], ['教育经历', 'education'], ['认证', 'certifications'],
+    ['技术栈', 'skills'],
+  ];
+  zhKeyCases.push(...ZH_MINIMAL_FIXTURE_TITLES);
+
+  const zhKeyFailures = zhKeyCases.filter(([title, expected]) => sectionKey(title) !== expected);
+  if (zhKeyFailures.length === 0) {
+    pass(`sectionKey resolves all ${zhKeyCases.length} Traditional/Simplified heading spellings`);
+  } else {
+    fail(`sectionKey missed: ${zhKeyFailures.map(([t, e]) => `"${t}" => "${sectionKey(t)}" (expected "${e}")`).join(', ')}`);
   }
 } catch (e) {
   fail(`cv-section-order tests crashed: ${e.message}`);
