@@ -18850,6 +18850,26 @@ try {
   fail(`jd-archive wiring check: ${e.message}`);
 }
 
+console.log('\n76. README sponsors section is generated from .github/sponsors.json');
+try {
+  // The Sponsors section of README.md (heading, intro, per-sponsor rows,
+  // independence note, placement between the community section and the value
+  // proposition) and the per-sponsor rows of every README.<lang>.md are
+  // rendered by .github/scripts/sponsors.mjs; a hand edit on either side is
+  // drift that the next --write would silently undo, so the two are pinned
+  // together here. The script also refuses a logo that is not a file inside
+  // docs/sponsors/ (no hotlinking), a non-https sponsor URL, and a sponsor URL
+  // carrying tracking parameters.
+  const r = spawnSync(process.execPath, [join(ROOT, '.github', 'scripts', 'sponsors.mjs'), '--check'], { cwd: ROOT, encoding: 'utf8' });
+  if (r.status === 0) {
+    pass('README.md and every README.<lang>.md match .github/sponsors.json');
+  } else {
+    fail(`README sponsors drifted or invalid: ${String(r.stderr || r.stdout).trim().split('\n')[0]}`);
+  }
+} catch (e) {
+  fail(`sponsors check: ${e.message}`);
+}
+
 await runDiscovered();
 
 finish();
