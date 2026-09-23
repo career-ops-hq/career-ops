@@ -268,35 +268,45 @@ function textOf(fragment) {
   return decodeEntities(fragment.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
 }
 
-// An element with nothing but whitespace inside it — the decorative icon span
-// (`<span class="icon"></span>`, `<i class="fa"></i>`) that sits before a
-// heading's text. It carries no text, so removing it cannot change what any
-// heading SAYS, which is what makes this safe to do to the whole document.
+// Everything between an element's opening tag and its OWN closing tag, found
+// by counting nested tags of the same name from `from` (the index just past
+// the opening tag).
 //
-// It is removed because of what it does to the heading scan below, whose
-// capture ends at the first `</`. An empty element closes before the heading's
-// own text starts, so the capture ended at the decoration, `textOf` returned
-// nothing, and the heading was skipped as empty — a non-standard heading
-// reported clean, the one direction of error a linter cannot afford.
+// The class-based scan below used to capture as far as the first `</`, which
+// is the close of whatever is nested INSIDE the heading, not the heading's.
+// Two ways that reads something other than what the heading says, and the
+// second is the dangerous one:
 //
-// Deleting the construct is preferred over bounding the element more precisely
-// (a tag backreference): matching an element by its own closing tag makes the
-// OUTERMOST element win, so `<body>…</body>` swallows the document in a single
-// lazy match and the scan finds no headings at all in any real template. The
-// loop is for the nested case (`<span class="icon"><i class="fa"></i></span>`),
-// which is how icon fonts are actually written; it terminates because every
-// pass replaces at least seven characters with one.
-const EMPTY_ELEMENT = /<([a-z][a-z0-9]*)\b[^>]*>\s*<\/\1\s*>/gi;
-function stripEmptyElements(html) {
-  let prev;
-  let out = html;
-  do {
-    prev = out;
-    // A space, not '', because that is exactly what textOf would have done to
-    // this markup had the capture reached it — the strip has to be invisible.
-    out = out.replace(EMPTY_ELEMENT, ' ');
-  } while (out !== prev);
-  return out;
+//   <div class="section-title"><span class="icon"></span>Career Highlights</div>
+//        → capture ends at the decoration, text comes back empty, heading
+//          skipped as a placeholder.
+//   <div class="section-title">Work <em>Experience</em> Details</div>
+//        → capture ends at `</em>`, text reads "Work Experience", which is a
+//          SANCTIONED header, and the real heading passes clean.
+//
+// Truncating onto an accepted name is strictly worse than truncating onto
+// nothing: the empty case at least fails visibly. Both are the same bug, so
+// both are fixed by bounding the element instead of guessing at its end.
+//
+// A regex backreference cannot do this and was measured: `<(\w+)[^>]*>(.*?)</\1>`
+// makes the OUTERMOST element win, so `<body>` swallows the document in one
+// lazy match and the scan finds no headings at all in any real template — a
+// silent, total kill of the rule that presents as a clean pass. Counting is
+// what a backreference cannot do, so the count is written out.
+//
+// An unclosed element returns the rest of the document. That over-reads rather
+// than under-reads, so a malformed heading is reported loudly instead of
+// vanishing — the same direction of error the rest of this detector takes.
+function innerHtml(html, tag, from) {
+  const scan = new RegExp(`<(/?)${tag}\\b[^>]*?(/?)>`, 'gi');
+  scan.lastIndex = from;
+  let depth = 1;
+  for (let m; (m = scan.exec(html));) {
+    if (m[2]) continue; // self-closing: opens and closes in one tag
+    depth += m[1] ? -1 : 1;
+    if (depth === 0) return html.slice(from, m.index);
+  }
+  return html.slice(from);
 }
 
 // A `<table>` opened while another is still open. Depth never exceeds 1 for a
@@ -314,7 +324,17 @@ const HIDDEN_SIGNALS = [
   [/display\s*:\s*none/i, 'display:none'],
   [/visibility\s*:\s*hidden/i, 'visibility:hidden'],
   [/font-size\s*:\s*0(?:px|pt|em|rem|%)?\s*(?:;|$)/i, 'font-size:0'],
-  [/color\s*:\s*(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))/i, 'white text'],
+  // `color` STANDALONE — anchored on the start of a declaration, so the
+  // property is `color` and not one that merely ends in it. Unanchored, the
+  // `color:#fff` inside `background-color:#fff` matched, and a badge (white
+  // background, dark text) was reported as white-on-white. That is the first
+  // thing a real template carries, and a lint that fires on it is one people
+  // learn to ignore. The same substring sits inside `border-color`,
+  // `outline-color` and `text-decoration-color`; all four are excluded by the
+  // `-` that precedes the word, none by an enumeration this would have to
+  // chase. `^` and `;` are the only declaration boundaries that exist here
+  // because the scan reads style ATTRIBUTES, never a stylesheet block.
+  [/(?:^|;)\s*color\s*:\s*(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))/i, 'white text'],
 ];
 
 // INLINE style attributes only. A stylesheet rule hiding a class is layout —
@@ -342,16 +362,20 @@ function detectHiddenText(html) {
 function detectStandardSectionHeaders(html, rule) {
   const accepted = new Set((rule.headers || []).map((h) => h.toLowerCase()));
   if (accepted.size === 0) return [];
-  const body = stripEmptyElements(stripNonContent(html));
+  const body = stripNonContent(html);
   // Deduplicated because the two passes overlap: an element carrying both a
   // heading tag and the class (`<h2 class="section-title">`) is matched by
   // each, and reported the same finding twice. Deduplicating the TEXT rather
   // than the matches also collapses a heading genuinely written twice, which
   // is the same warning either way.
   const headings = [...new Set([
-    ...body.matchAll(/<[^>]*class\s*=\s*(?:"[^"]*\bsection-title\b[^"]*"|'[^']*\bsection-title\b[^']*')[^>]*>([\s\S]*?)<\//gi),
-    ...body.matchAll(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/gi),
-  ].map((m) => textOf(m[1])))];
+    // The class pass reads to the matching close (see innerHtml). The heading
+    // pass does not need to: `</h[1-6]>` is already the element's own end, and
+    // a heading nested in a heading is not markup anyone writes.
+    ...[...body.matchAll(/<([a-z][a-z0-9]*)\b[^>]*class\s*=\s*(?:"[^"]*\bsection-title\b[^"]*"|'[^']*\bsection-title\b[^']*')[^>]*>/gi)]
+      .map((m) => innerHtml(body, m[1], m.index + m[0].length)),
+    ...[...body.matchAll(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/gi)].map((m) => m[1]),
+  ].map(textOf))];
 
   const out = [];
   for (const heading of headings) {

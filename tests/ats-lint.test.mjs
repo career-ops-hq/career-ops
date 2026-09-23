@@ -158,6 +158,31 @@ test('no-hidden-text: font-size:0 must not swallow a legitimate 0.9em', () => {
   assert.deepEqual(ids(result), []);
 });
 
+test('no-hidden-text: a white VALUE on a property that is not `color` is not white text', () => {
+  // A badge — white background, dark text — is the first thing a real template
+  // carries, and `color:#fff` is a substring of `background-color:#fff`. A lint
+  // that fires on the most ordinary construct in the file teaches its reader to
+  // ignore it, so the must-not-flag half is what decides whether this rule is
+  // worth having at all.
+  for (const decl of [
+    'background-color:#fff; color:#111',
+    'background-color: white',
+    'border-color:#ffffff',
+    'outline-color: rgb(255, 255, 255)',
+    'text-decoration-color:#fff',
+  ]) {
+    assert.deepEqual(ids(lint(`<body><span style="${decl}">Senior Director</span></body>`)), [],
+      `style="${decl}" is visible text and must not be reported as hidden`);
+  }
+  // The other half: narrowing to a standalone `color` must not narrow the rule
+  // out of existence. Genuine white-on-white still fires, including when the
+  // declaration is not the first one in the attribute.
+  for (const decl of ['color:#fff', 'background:#fff;color:#ffffff', 'background-color:#fff; color: white']) {
+    assert.deepEqual(ids(lint(`<body><span style="${decl}">Kubernetes Terraform</span></body>`)), ['no-hidden-text'],
+      `style="${decl}" hides text and must still fire`);
+  }
+});
+
 // ── standard-section-headers ────────────────────────────────────────
 
 test('standard-section-headers: fires on a literal heading the doc does not sanction', () => {
@@ -221,6 +246,26 @@ test('standard-section-headers: a decorative empty element does not hide the hea
     ids(lint('<body><div class="section-title"><span class="icon"></span>Work Experience</div></body>')),
     []
   );
+});
+
+test('standard-section-headers: inline markup inside a heading does not truncate it', () => {
+  // The class-based capture stopped at the first `</`, which is the close of
+  // whatever is nested INSIDE the heading, not the heading's own. So
+  // `Work <em>Experience</em> Details` was read as "Work Experience" — a
+  // SANCTIONED header — and a non-standard heading passed silently. Truncating
+  // onto an accepted name is the worst shape of this bug: the empty case at
+  // least got skipped visibly, this one reports clean.
+  const result = lint('<body><div class="section-title">Work <em>Experience</em> Details</div></body>');
+  assert.deepEqual(ids(result), ['standard-section-headers']);
+  assert.match(result.findings[0].detail, /Work Experience Details/);
+  // Truncation the other way round: markup wrapping the whole heading text.
+  assert.deepEqual(
+    ids(lint('<body><div class="section-title"><span>Career Highlights</span></div></body>')),
+    ['standard-section-headers']
+  );
+  // And the must-not-flag half — inline emphasis inside a sanctioned header
+  // stays quiet, so the rule is not passing this by flagging everything.
+  assert.deepEqual(ids(lint('<body><div class="section-title">Work <em>Experience</em></div></body>')), []);
 });
 
 test('standard-section-headers: one heading is reported once', () => {

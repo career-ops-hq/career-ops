@@ -144,14 +144,22 @@ rules:
     source:
       - 'No hidden text, keyword stuffing, or white-font tricks. Optimize for parseability plus human review.'
     must_not_flag: >-
-      A stylesheet rule. Detection is on inline style attributes only, which is
-      where the stuffing trick actually lives, and it is a measured boundary
-      rather than a cautious one: the shipped templates/ats/cv-template.ats.html
-      hides a decorative separator with `.contact-row .separator { display: none }`,
-      so a stylesheet-wide scan fires on the template literally named "ats".
-      verify-ats.mjs already draws this same line for white text and says why.
-      Also not flagged: aria-hidden on decoration; @media print hiding a
-      screen-only control.
+      A white VALUE on a property that is not `color`: a badge or callout
+      written `style="background-color:#fff; color:#111"` is visible text, and
+      so are border-color, outline-color and text-decoration-color. The white
+      -text signal is anchored on the start of a declaration for this reason —
+      `color:#fff` is a substring of `background-color:#fff`, a badge is the
+      first thing a real template carries, and a rule that fires on it is one
+      its reader learns to ignore. Genuine white-on-white still fires wherever
+      the declaration sits in the attribute.
+      Also not flagged: a stylesheet rule. Detection is on inline style
+      attributes only, which is where the stuffing trick actually lives, and it
+      is a measured boundary rather than a cautious one: the shipped
+      templates/ats/cv-template.ats.html hides a decorative separator with
+      `.contact-row .separator { display: none }`, so a stylesheet-wide scan
+      fires on the template literally named "ats". verify-ats.mjs already draws
+      this same line for white text and says why. Also not flagged: aria-hidden
+      on decoration; @media print hiding a screen-only control.
 
 # What this lint cannot catch. Read this before treating a clean result as an
 # ATS pass.
