@@ -56,8 +56,9 @@ mkdirSync(join(sandbox, 'lib'), { recursive: true });
 copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
 // ...and its JSON render path (renderJsonToPdf) imports the CV patch layer —
 // pinned-experience → enrich-content → humanize, plus the jd-fit/align pair it
-// reads on --report and jd-skill-gap behind that. Copy them too or the copy
-// dies with ERR_MODULE_NOT_FOUND before it can parse any --max-pages arg.
+// reads on --report and jd-skill-gap behind that, and spawns generate_cv_pdf.py
+// (reportlab) for the actual PDF. Copy them too or the copy dies with
+// ERR_MODULE_NOT_FOUND before it can parse any --max-pages arg.
 for (const dep of [
   'cv-pinned-experience.mjs',
   'cv-enrich-content.mjs',
@@ -70,6 +71,10 @@ for (const dep of [
 ]) {
   copyFileSync(join(ROOT, dep), join(sandbox, dep));
 }
+// The JSON render path spawns generate_cv_pdf.py (reportlab) via findPythonBin.
+// Without it in the sandbox the copy fails with "Could not launch" before the
+// renderer can prove the payload was accepted (the point of the /tmp-input test).
+copyFileSync(join(ROOT, 'generate_cv_pdf.py'), join(sandbox, 'generate_cv_pdf.py'));
 
 // theme-style.mjs and tracker-utils.mjs both `import * as yaml from 'js-yaml'`,
 // which resolves by walking up into the repo's node_modules -- from the
@@ -347,6 +352,45 @@ try {
     pass('generate-pdf rejects external input paths before creating temporary files');
   } else {
     fail(`generate-pdf mishandled an external input path: ${externalInputRun.output.trim()}`);
+  }
+
+  // A /tmp JSON payload is the DOCUMENTED primary CV path (modes/pdf.md Step 21
+  // and run-prompts.mjs/cv-envelope.mjs both write /tmp/cv-{candidate}-{company}.json
+  // then hand it to generate-pdf.mjs). renderJsonToPdf reads the payload
+  // directly and only writes its patched copy into dirname(outputPath) (inside
+  // the separately-guarded workspace), so this file must be ACCEPTED — an
+  // unconditional input workspace guard (the pre-fix behaviour — #regression)
+  // refused every CV the documented flow produced.
+  const externalJsonInput = join(externalInputRoot, 'external-source.json');
+  writeFileSync(
+    externalJsonInput,
+    JSON.stringify({
+      candidate: { name: 'External Json', email: 'e@example.com' },
+      summary: 'External JSON regression payload.',
+      competencies: ['AI', 'Product'],
+      experience: [{ role: 'PM', company: 'TestCo', dates: '2024-01 - 2024-06', bullets: ['Shipped a thing.'] }],
+      projects: [],
+      education: [{ title: 'BSc', org: 'U', year: '2020' }],
+      skills: [{ category: 'Tools', items: ['Python'] }],
+    }),
+    'utf-8',
+  );
+  const externalJsonPdf = join(sandbox, 'external-json.pdf');
+  const externalJsonRun = runPdf([externalJsonInput, externalJsonPdf, '--format=a4']);
+  // The input guard must NOT fire for a .json input. Full render additionally
+  // needs Python + reportlab on PATH, which CI (and some checkouts) lack — so
+  // probe it and only require the PDF when the renderer is actually present.
+  const pyProbe = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', 'import reportlab']);
+  const reportlabOk = !pyProbe.error && pyProbe.status === 0;
+  if (externalJsonRun.output.includes('Refusing to write the PDF outside the tracker workspace')) {
+    fail(`generate-pdf still refuses a /tmp JSON payload (documented primary CV flow): ${externalJsonRun.output.trim()}`);
+  } else if (reportlabOk && !(externalJsonRun.status === 0 && existsSync(externalJsonPdf))) {
+    fail(`generate-pdf accepted the /tmp JSON payload but failed to render it: ${externalJsonRun.output.trim()}`);
+  } else if (reportlabOk) {
+    pass('generate-pdf accepts a /tmp JSON payload and renders it to a PDF');
+  } else {
+    warn('reportlab python not available here — verified the /tmp JSON input guard is bypassed but skipped the render assertion');
+    pass('generate-pdf accepts a /tmp JSON payload (guard bypassed)');
   }
 
   // Observe the temporary path before renderer cleanup. The CLI rejects an

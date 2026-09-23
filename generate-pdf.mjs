@@ -1416,11 +1416,25 @@ async function generatePDF() {
   // Anchored to the workspace root, not process.cwd(): running the script
   // from outside the repo used to falsely refuse in-repo outputs — and, worse,
   // would have allowed writes anywhere under an arbitrary cwd.
-  try {
-    assertInsideWorkspace(inputPath, 'input');
-  } catch (err) {
-    console.error(`Refusing to write the PDF outside the tracker workspace: ${err.message}`);
-    process.exit(1);
+  //
+  // The INPUT containment check applies to the HTML/browser path only: that
+  // renderer derives baseDir: dirname(inputPath) and writes a temp
+  // .career-ops-render-*.html into the input's directory, so an external HTML
+  // input could seed browser temp files outside the workspace. The JSON path
+  // (renderJsonToPdf) reads the payload directly and only writes its patched
+  // copy into dirname(outputPath) — inside the (separately guarded) workspace —
+  // so /tmp JSON payloads, the documented contract (modes/pdf.md Step 21,
+  // run-prompts.mjs, cv-envelope.mjs all write /tmp/cv-{candidate}-{company}.json),
+  // must pass through.
+  const isJsonInput = inputPath.toLowerCase().endsWith('.json');
+  if (!isJsonInput) {
+    try {
+      assertInsideWorkspace(inputPath, 'input');
+    } catch (err) {
+      console.error(`Refusing to write the PDF outside the tracker workspace: ${err.message}`);
+      console.error('Hint: JSON payloads render via reportlab (no browser) and are accepted from anywhere, including /tmp — e.g. `node generate-pdf.mjs /tmp/cv-person-company.json output/cv-person-company.pdf --format=a4 --report=NNN`. Only HTML inputs must live inside the tracker workspace.');
+      process.exit(1);
+    }
   }
   if (!isWorkspaceOutputPath(outputPath, workspaceRoot)) {
     console.error(`Refusing to write the PDF outside the tracker workspace: ${outputPath}`);
