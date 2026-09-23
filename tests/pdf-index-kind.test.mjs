@@ -17,6 +17,7 @@ import {
   renderHtmlToPdf,
   ARTIFACT_KINDS,
 } from '../generate-pdf.mjs';
+import { parsePdfIndex } from '../find.mjs';
 
 console.log('\nPDF manifest keys on report number and artifact kind (#3887)');
 
@@ -207,4 +208,38 @@ for (const [explicit, path, wantKind, wantSource, label] of kindCases) {
     : fail(`a rejected kind rewrote the manifest: ${JSON.stringify(after)}`);
 
   rmSync(sandbox, { recursive: true, force: true });
+}
+
+
+// The READER half of the same contract. Everything above pins what the manifest
+// writer records; this pins what the map built from it hands back.
+//
+// parsePdfIndex returns one path per report, assigned inside the loop, so it is
+// last-row-wins. Once a report legitimately carries two rows, a cover letter
+// generated after its CV takes the slot. The map is not local to one caller:
+// find.mjs prints it as the row's PDF, merge-tracker.mjs sets the tracker's PDF
+// flag from it, and outcome.mjs archives from it — so the cover-letter-as-CV
+// upload this file exists to prevent comes back through the reader.
+{
+  const kindIndex = parsePdfIndex(
+    `${HEADER}\n`
+    + '030\toutput/cv-acme.pdf\toutput/cv-acme.html\tats\t2026-06-01\tcv\n'
+    + '030\toutput/cover-acme.pdf\toutput/cover-acme.html\tats\t2026-06-02\tcover\n'
+    + '031\toutput/cover-globex.pdf\toutput/cover-globex.html\tats\t2026-06-03\tcover\n'
+    + '032\toutput/cv-initech.pdf\toutput/cv-initech.html\tats\t2026-06-04\n',
+  );
+
+  kindIndex.get('30') === 'output/cv-acme.pdf'
+    ? pass('parsePdfIndex keeps the CV row when a cover row for the same report is written later')
+    : fail(`parsePdfIndex gave ${kindIndex.get('30')} for a report whose cover was written after its CV`);
+
+  !kindIndex.has('31')
+    ? pass('parsePdfIndex omits a report that has only a cover letter and no CV')
+    : fail(`parsePdfIndex surfaced a cover-only report as a CV: ${kindIndex.get('31')}`);
+
+  // Control: without it, both cases above also pass on a parser that drops every
+  // row, and a legacy manifest written before the kind column would go dark.
+  kindIndex.get('32') === 'output/cv-initech.pdf'
+    ? pass('parsePdfIndex treats a legacy row with no kind column as a CV (control)')
+    : fail(`parsePdfIndex dropped a legacy kind-less pdf-index row: ${kindIndex.get('32')}`);
 }
