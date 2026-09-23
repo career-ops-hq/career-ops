@@ -792,15 +792,35 @@ test('acquirePipelineLock: a caller gives up near its timeoutMs even when retryM
     const timing = { timeoutMs: 150, retryMs: 5_000, maxWaitMs: 30_000 };
     const held = await acquirePipelineLock(p, timing);
     try {
-      const startedAt = Date.now();
-      await assert.rejects(() => acquirePipelineLock(p, timing), (err) => err instanceof LockTimeoutError);
-      const waited = Date.now() - startedAt;
-      // 1500ms is ten per-holder windows, and still well under the 2500ms
-      // floor of a single unclamped jittered retry, so the two outcomes cannot
-      // be confused on a slow runner.
+      // What the policy ASKS the timer for, recorded rather than timed. A
+      // stopwatch around this call measures the runner as much as the clamp,
+      // and this suite already has a slow-runner flake (#4017). The real
+      // acquirePipelineLock() path is untouched: the wrapper hands every call
+      // straight to the timer it replaced.
+      const requestedDelays = [];
+      const realSetTimeout = globalThis.setTimeout;
+      globalThis.setTimeout = (callback, delay, ...args) => {
+        requestedDelays.push(delay);
+        return realSetTimeout(callback, delay, ...args);
+      };
+      try {
+        await assert.rejects(() => acquirePipelineLock(p, timing), (err) => err instanceof LockTimeoutError);
+      } finally {
+        globalThis.setTimeout = realSetTimeout;
+      }
+
+      // A clamped waiter sleeps the time its window has left, which is at most
+      // timeoutMs. An unclamped one asks for the whole jittered retry, 2500ms
+      // at its floor here, so one overshooting delay is the bug itself.
+      const sleeps = requestedDelays.filter((ms) => typeof ms === 'number' && ms > 0);
       assert.ok(
-        waited < 1_500,
-        `waited ${waited}ms on a 150ms timeout: one backoff carried the caller past its own `
+        sleeps.length > 0,
+        'no retry delay was recorded, so this assertion proves nothing about the clamp',
+      );
+      assert.deepEqual(
+        sleeps.filter((ms) => ms > timing.timeoutMs).map((ms) => Math.round(ms)), [],
+        `retry delays ${JSON.stringify(sleeps.map((ms) => Math.round(ms)))} against a `
+        + `${timing.timeoutMs}ms per-holder window: a backoff carries the caller past its own `
         + 'deadline, and the loop only decides after the sleep returns',
       );
     } finally {
