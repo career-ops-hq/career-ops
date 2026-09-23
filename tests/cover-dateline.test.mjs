@@ -175,6 +175,10 @@ test('a city is not duplicated when the address line carries a ZIP', () => {
       recipient: { name: 'Jane', address_lines: [line] },
     }), template());
     assert.ok(!/<div>Boston, MA<\/div>/.test(html), `city appended again for: ${line}`);
+    // Suppressing the append is only half the job. Without this, a render that
+    // loses the supplied row entirely reads as a pass: no duplicate city, and
+    // no address either.
+    assert.ok(html.includes(`<div>${line}</div>`), `address line missing for: ${line}`);
   }
 });
 
@@ -183,6 +187,8 @@ test('a ZIP on its own address line still suppresses the city', () => {
     recipient: { name: 'Jane', address_lines: ['123 Main St', 'Boston, MA 02101'] },
   }), template());
   assert.ok(!/<div>Boston, MA<\/div>/.test(html));
+  assert.ok(html.includes('<div>123 Main St</div>'), 'the street line vanished');
+  assert.ok(html.includes('<div>Boston, MA 02101</div>'), 'the ZIP-bearing row must survive');
 });
 
 test('a different city is still appended even when a ZIP is present', () => {
@@ -191,4 +197,5 @@ test('a different city is still appended even when a ZIP is present', () => {
     recipient: { name: 'Jane', address_lines: ['1 Elm St, Portland, OR 97201'] },
   }), template());
   assert.ok(/<div>Boston, MA<\/div>/.test(html), 'the real city should still be added');
+  assert.ok(html.includes('<div>1 Elm St, Portland, OR 97201</div>'), 'the ZIP-bearing row must survive');
 });
