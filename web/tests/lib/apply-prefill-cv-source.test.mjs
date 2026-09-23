@@ -24,7 +24,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { register } from "node:module";
 
@@ -56,7 +56,7 @@ const loaderSrc = [
 ].join("\n");
 register("data:text/javascript," + encodeURIComponent(loaderSrc), pathToFileURL(WEB_SRC + "/"));
 
-const { resolveTailoredCv } = await import("../../src/lib/apply/cv.ts");
+const { resolveTailoredCv, resolveSessionCv } = await import("../../src/lib/apply/cv.ts");
 const { buildAnswerPrompt } = await import("../../src/lib/apply/answer-prompt.mjs");
 const { applyCvSource } = await import("../../src/lib/apply/cv-source.mjs");
 
@@ -70,18 +70,25 @@ const HTML_REL = "output/cv-acme-corp-2026-01-10.html";
 
 /** A throwaway workspace holding one tailored CV and the manifest row that
  *  generate-pdf.mjs writes for it, redirected through CAREER_OPS_ROOT. */
-async function withWorkspace(fn, { html = true, manifest = true } = {}) {
+async function withWorkspace(fn, { html = true, manifest = true, outsideHtml = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "prefill-cv-"));
   mkdirSync(join(root, "output"), { recursive: true });
   mkdirSync(join(root, "data"), { recursive: true });
   writeFileSync(join(root, "cv.md"), "# Master CV\n");
   writeFileSync(join(root, PDF_REL), "stub-pdf-bytes");
   if (html) writeFileSync(join(root, HTML_REL), "<html>tailored</html>");
+  // A hand-edited manifest row can name a real file outside the workspace. The
+  // file has to exist, or the containment check passes for the wrong reason.
+  let htmlColumn = HTML_REL;
+  if (outsideHtml) {
+    htmlColumn = `../${basename(root)}-outside.html`;
+    writeFileSync(join(root, htmlColumn), "<html>somewhere else</html>");
+  }
   if (manifest) {
     writeFileSync(
       join(root, "data", "pdf-index.tsv"),
       "# report\tpdf\thtml\tformat\tdate — written by generate-pdf.mjs, do not edit\n" +
-        `12\t${PDF_REL}\t${HTML_REL}\tletter\t2026-01-10\n`,
+        `12\t${PDF_REL}\t${htmlColumn}\tletter\t2026-01-10\n`,
     );
   }
   const prev = process.env.CAREER_OPS_ROOT;
@@ -140,6 +147,44 @@ test("applyCvSource falls back to the PDF when no rendering survives", async () 
       assert.equal(applyCvSource(root, PDF_REL), PDF_REL);
     },
     { html: false, manifest: false },
+  );
+});
+
+test("resolveSessionCv falls back to the company in the page title", async () => {
+  // The paste-a-URL flow arrives with no offer context at all, so the form title
+  // is the only key either route has.
+  await withWorkspace(async (root) => {
+    assert.equal(await resolveSessionCv({ title: "Staff Engineer @ Acme Corp" }), join(root, PDF_REL));
+  });
+});
+
+test("resolveSessionCv stops at an application number that resolved nothing", async () => {
+  // THIS role has no tailored CV. Falling through to the title would attach a
+  // sibling role's, which is the failure the number was passed to prevent.
+  await withWorkspace(async () => {
+    assert.equal(await resolveSessionCv({ application: "999", title: "Staff Engineer @ Acme Corp" }), null);
+  });
+});
+
+test("applyCvSource never names a manifest html column pointing outside the workspace", async () => {
+  await withWorkspace(
+    async (root) => {
+      const source = applyCvSource(root, PDF_REL);
+      assert.equal(source, HTML_REL, "the PDF's own sibling is the document, and it is inside the root");
+      assert.ok(!source.includes("outside"), "a hand-edited manifest row escaped the workspace");
+    },
+    { outsideHtml: true },
+  );
+
+  // Same row with no sibling to fall back on: the answer is the PDF, still
+  // inside the root.
+  await withWorkspace(
+    async (root) => {
+      const source = applyCvSource(root, PDF_REL);
+      assert.equal(source, PDF_REL);
+      assert.ok(!source.includes("outside"));
+    },
+    { html: false, outsideHtml: true },
   );
 });
 
