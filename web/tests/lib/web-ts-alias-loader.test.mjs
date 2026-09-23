@@ -22,16 +22,17 @@ import path from "node:path";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WEB = path.join(HERE, "..", "..");
+const REPO_ROOT = path.join(WEB, "..");
 // A file:// URL, not the path: an absolute path is only a usable ESM specifier
 // where it starts with "/". On Windows it starts with a drive letter, which
 // Node reads as a URL scheme ("d:") and refuses. See the file:// URL test below.
 const LOADER = pathToFileURL(path.join(HERE, "..", "helpers", "web-ts-alias-loader.mjs")).href;
 
 /** Run one ESM snippet in a fresh Node process. Never throws; reports the failure. */
-function run(src, flags = []) {
+function run(src, flags = [], cwd = WEB) {
   try {
     return { ok: true, out: execFileSync(process.execPath, [...flags, "--input-type=module", "-e", src], {
-      cwd: WEB, encoding: "utf-8", timeout: 60000, stdio: ["ignore", "pipe", "pipe"],
+      cwd, encoding: "utf-8", timeout: 60000, stdio: ["ignore", "pipe", "pipe"],
     }).trim() };
   } catch (e) {
     return { ok: false, out: (e.stdout || "").toString().trim(), err: (e.stderr || "").toString() };
@@ -50,8 +51,15 @@ function run(src, flags = []) {
 // apply-agent-interpret-fencing.test.mjs already take exactly this stance for
 // the same reason. Passing --experimental-strip-types to the child instead
 // would not rescue 22.0-22.5, where the flag does not yet exist. CI runs 24.
-const skipTs = !process.features?.typescript
-  && "this Node cannot import a .ts module (type stripping is on by default only from 22.18)";
+//
+// The gate is defined ONCE, as a function, because the positive control at the
+// bottom of this file serializes this exact source into a child process. A copy
+// of the predicate re-typed inside that child would agree with itself forever,
+// however far the gate here drifted from the behaviour it stands for.
+const tsSkipReason = () => (process.features?.typescript
+  ? false
+  : "this Node cannot import a .ts module (type stripping is on by default only from 22.18)");
+const skipTs = tsSkipReason();
 
 const IMPORT_LOADER = `await import(${JSON.stringify(LOADER)});`;
 
@@ -78,6 +86,21 @@ test("an extensionless @/ specifier resolves .ts", { skip: skipTs }, () => {
     console.log(typeof m.careerOpsRoot);`);
   assert.equal(r.ok, true, `expected @/lib/career-ops to resolve to the .ts file:\n${r.err}`);
   assert.equal(r.out, "function");
+});
+
+test("the @/ alias resolves from a cwd outside web/", { skip: skipTs }, () => {
+  // The hook anchors web/src to its own file URL, and the comment there says why:
+  // `npm test` runs from web/, a root-level `node --test web/tests/…` runs from the
+  // repo root. Every other case here runs the child from web/, where a cwd anchor
+  // and a file anchor are indistinguishable. From the repo root they are not:
+  // there is no src/ beside this repo's package.json at all.
+  const r = run(`${IMPORT_LOADER}
+    const m = await import("@/lib/career-ops");
+    console.log(process.cwd() !== ${JSON.stringify(WEB)}, typeof m.careerOpsRoot);`, [], REPO_ROOT);
+  assert.equal(r.ok, true, `@/ must resolve from the repo root too:\n${r.err}`);
+  // The first flag proves the child really ran somewhere else, so a silently
+  // ignored cwd cannot make this case pass for web/'s reasons.
+  assert.equal(r.out, "true function");
 });
 
 test("a @/ specifier that already names an extension is used as-is", () => {
@@ -140,9 +163,11 @@ test("the .ts skip gate keys on the signal that actually predicts the failure", 
   // condition is not simulated, it is the live one.
   const OFF = ["--no-experimental-strip-types"];
 
-  const predicate = run(`console.log(Boolean(process.features?.typescript));`, OFF);
-  assert.equal(predicate.ok, true, `expected the probe to run:\n${predicate.err}`);
-  assert.equal(predicate.out, "false", "skipTs reads process.features.typescript — it must go false here");
+  // The gate ITSELF runs in the child, serialized from its one definition above,
+  // so a predicate that stops tracking type stripping fails right here.
+  const gate = run(`console.log(JSON.stringify((${tsSkipReason})()));`, OFF);
+  assert.equal(gate.ok, true, `expected the probe to run:\n${gate.err}`);
+  assert.notEqual(gate.out, "false", `the gate must skip where types cannot be stripped; got ${gate.out}`);
 
   const r = run(`${IMPORT_LOADER} await import("@/lib/career-ops");`, OFF);
   assert.equal(r.ok, false, "a .ts import must fail where types cannot be stripped");
