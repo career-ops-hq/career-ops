@@ -43,7 +43,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { PAGE_CSS_SIZE, PAGE_FORMATS, resolvePageFormat } from './lib/page-format.mjs';
+import { PAGE_CSS_SIZE, PAGE_FORMATS, normalizePageFormat, resolvePageFormat } from './lib/page-format.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const trackerPath = resolveTrackerPath(getCareerOpsRoot());
@@ -1253,9 +1253,13 @@ async function generatePDF() {
   // inherit the same configured size and a bad --format fails the same way in
   // both. An explicit flag is still rejected loudly: falling through to the
   // profile would print a typo on whatever size happened to be configured.
-  if (format !== null && !PAGE_FORMATS.has(format)) {
-    console.error(`Invalid format "${format}". Use: ${[...PAGE_FORMATS].join(', ')}`);
-    process.exit(1);
+  if (format !== null) {
+    const normalized = normalizePageFormat(format);
+    if (!normalized) {
+      console.error(`Invalid format "${format}". Use: ${[...PAGE_FORMATS].join(', ')}`);
+      process.exit(1);
+    }
+    format = normalized;
   }
   format = resolvePageFormat(format, { profilePath: resolve(workspaceRoot, 'config', 'profile.yml') });
 
@@ -1468,9 +1472,10 @@ async function runBatchFromManifest(manifestPath, globals) {
         throw new Error('each entry needs a string "input" and "output"');
       }
 
-      const entryFormat = (spec.format || globals.format).toLowerCase();
-      if (!PAGE_FORMATS.has(entryFormat)) {
-        throw new Error(`invalid format "${entryFormat}" (use: ${[...PAGE_FORMATS].join(', ')})`);
+      const declaredFormat = spec.format || globals.format;
+      const entryFormat = normalizePageFormat(declaredFormat);
+      if (!entryFormat) {
+        throw new Error(`invalid format "${declaredFormat}" (use: ${[...PAGE_FORMATS].join(', ')})`);
       }
 
       const entryReport = (spec.reportNum ?? '').toString().trim();

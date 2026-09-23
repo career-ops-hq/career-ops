@@ -112,9 +112,14 @@ test('every accepted format has a body width and a @page keyword', () => {
 
 // --- the four consumers -------------------------------------------------
 
-test('injectPrintPageCss: the flagless sheet is the project default', () => {
+test('injectPrintPageCss: the flagless sheet comes from the resolver', () => {
+  // injectPrintPageCss anchors the profile to the tracker workspace, which is
+  // this checkout. Asserting DEFAULT_PAGE_FORMAT outright would fail for anyone
+  // whose own config/profile.yml sets a4, so expect what the resolver answers
+  // for that same file.
+  const expected = resolvePageFormat(undefined, { profilePath: join(ROOT, 'config', 'profile.yml') });
   const html = injectPrintPageCss('<html><head></head><body></body></html>');
-  assert.match(html, new RegExp(`@page \\{ size: ${PAGE_CSS_SIZE[DEFAULT_PAGE_FORMAT]};`));
+  assert.match(html, new RegExp(`@page \\{ size: ${PAGE_CSS_SIZE[expected]};`));
 });
 
 test('injectPrintPageCss: an explicit format still wins', () => {
