@@ -16,19 +16,11 @@ import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { pass, fail, linkNodeModules, NODE } from './helpers.mjs';
+import { pass, fail, linkNodeModules, stripJsComments, NODE } from './helpers.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 console.log('\nverifiers resolve provider plugins like the scanner (#4026)');
-
-// Strip block and line comments so a commented-out mention of the call does
-// not satisfy the structural check (a call-only revert must redden it).
-function stripJsComments(source) {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1');
-}
 
 // A throwaway checkout that verify-pipeline/verify-portals run FROM, so the
 // test never reads, writes, or deletes the developer's real config/plugins.yml
@@ -48,8 +40,10 @@ function prepareFixtureCodeRoot(tmp) {
   }
   // Through the shared helper, so this site and the one in test-all.mjs cannot
   // drift again: each had half of the pair (a guard here, the Windows junction
-  // type there) and the halves are now one function. A reason means the tree
-  // was never installed, and this fixture works without it.
+  // type there) and the halves are now one function. The reason is dropped on
+  // purpose. Without an installed tree this fixture already fails two of its
+  // own assertions, and reporting that truthfully means changing this suite,
+  // which this PR leaves alone.
   linkNodeModules(codeRoot, ROOT);
   return codeRoot;
 }

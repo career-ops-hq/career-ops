@@ -452,6 +452,24 @@ export function linkRepoPackage(sandboxDir, pkgName) {
 }
 
 /**
+ * Source with its comments blanked, for a structural check that greps a file
+ * for a call or a guard it has to contain.
+ *
+ * A regex cannot tell code from a comment that mentions it, so a suite that
+ * only documents the construct -- or a revert that comments one out instead of
+ * deleting it -- satisfies a raw grep and the check goes vacuous. Shared, so
+ * every suite that pins a caller structurally strips the same way.
+ *
+ * @param {string} source - JavaScript source text.
+ * @returns {string} The same source without block and line comments.
+ */
+export function stripJsComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+/**
  * Link the repository's whole installed dependency tree into a sandbox
  * directory, so a script copied out of the repo can still resolve its package
  * imports.

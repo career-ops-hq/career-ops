@@ -13,8 +13,8 @@
 // The suite is designed to run on a fresh clone with only Node (see the
 // tests/helpers.mjs header), where an absent node_modules is the expected state
 // and has to be reported as itself.
-import { pass, fail, ROOT } from './helpers.mjs';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, lstatSync, symlinkSync, existsSync } from 'fs';
+import { pass, fail, stripJsComments, ROOT } from './helpers.mjs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, lstatSync, symlinkSync, readlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
@@ -139,16 +139,54 @@ try {
       }
     }
 
-    // The repo's own root is the default, so call sites do not repeat it.
+    // The repo's own root is the default, so call sites do not repeat it. Held
+    // against an explicit ROOT call, because this machine's own state decides
+    // almost nothing here: where dependencies are installed, "returned null" is
+    // true of any default root that happens to have a tree, the wrong one
+    // included. Two sandboxes, since the second call would hit EEXIST on the
+    // first one's link.
     {
-      const sandbox = join(tmp, 'sandbox-default');
-      mkdirSync(sandbox, { recursive: true });
-      const reason = linkNodeModules(sandbox);
-      const installedHere = existsSync(join(ROOT, 'node_modules'));
-      if ((reason === null) === installedHere) {
-        pass(`linkNodeModules defaults to the repo root (node_modules ${installedHere ? 'installed' : 'absent'} here)`);
+      const viaDefault = join(tmp, 'sandbox-default');
+      const viaExplicit = join(tmp, 'sandbox-explicit');
+      mkdirSync(viaDefault, { recursive: true });
+      mkdirSync(viaExplicit, { recursive: true });
+
+      const defaulted = linkNodeModules(viaDefault);
+      const explicit = linkNodeModules(viaExplicit, ROOT);
+      // readlink on both sides, so the two targets come back through one API on
+      // one platform and compare verbatim. A Windows junction needs no
+      // normalization against another junction.
+      const targetOf = (sandbox) => {
+        try {
+          return readlinkSync(join(sandbox, 'node_modules'));
+        } catch (err) {
+          return err.code;
+        }
+      };
+      if (defaulted === explicit && targetOf(viaDefault) === targetOf(viaExplicit)) {
+        pass('linkNodeModules defaults its root to ROOT (same reason and same link target as passing it)');
       } else {
-        fail(`default-root call returned ${JSON.stringify(reason)} while ROOT/node_modules ${installedHere ? 'exists' : 'does not exist'}`);
+        fail(`default root gave ${JSON.stringify(defaulted)} -> ${targetOf(viaDefault)}, explicit ROOT gave ${JSON.stringify(explicit)} -> ${targetOf(viaExplicit)}`);
+      }
+    }
+
+    // The reason only helps if the call site reads it. The guard lives inside
+    // linkNodeModules now, so the one thing a caller can still get wrong is
+    // sandboxing anyway once a reason comes back: the child dies with
+    // ERR_MODULE_NOT_FOUND and the section's catch blames the contract it was
+    // testing, which is the defect this whole file exists for. That branch runs
+    // only where dependencies are absent, so no ordinary run would notice it
+    // going missing.
+    {
+      const callSite = stripJsComments(readFileSync(join(ROOT, 'test-all.mjs'), 'utf-8'));
+      const bound = callSite.match(/(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*linkNodeModules\s*\(/);
+      const guard = bound && new RegExp(`\\bif\\s*\\(\\s*${bound[1].replace(/\$/g, '\\$')}\\b`);
+      if (!bound) {
+        fail('test-all.mjs calls linkNodeModules() without binding the reason, so it cannot skip on one');
+      } else if (guard.test(callSite)) {
+        pass('test-all.mjs branches on the reason linkNodeModules returns');
+      } else {
+        fail(`test-all.mjs binds linkNodeModules() to ${bound[1]} and never branches on it; an absent tree would sandbox dangling again`);
       }
     }
   }
