@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // GENERADO por github-src/scripts/build.mjs: no editar a mano. Fuente: github-src/scripts/triage.mjs + bin/lib/triage-core.mjs + policy/*.json
-// {"builtAt":"2026-09-23T09:18:54.509Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
+// {"builtAt":"2026-09-23T13:09:46.197Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -321,9 +321,13 @@ function classify(snapshot, { labelsPolicy, trivialPolicy, priorityPolicy, now =
   const firstTimer = snapshot.authorMergedCount === 0;
   const needsRebase = snapshot.mergeable === 'CONFLICTING' || snapshot.mergeStateStatus === 'DIRTY';
   const needsSplit = n > priorityPolicy.needsSplit.maxLines || areas.length > priorityPolicy.needsSplit.maxAreas;
-  const ciHold = firstTimer && (ci.status === 'held' || ci.status === 'absent');
+  // Primerizo: GitHub no crea check-runs para los workflows retenidos, así que el head aparece sin la matriz (stale) o sin checks (absent): es CI retenida.
+  const ciHold = firstTimer && (ci.status === 'held' || ci.status === 'absent' || ci.status === 'stale');
   const responded = !!snapshot.lastMaintainerCommentAt || (snapshot.markers || []).length > 0;
-  const firstResponseMissing = !responded && hoursSince(snapshot.createdAt, now) > priorityPolicy.firstResponseHours;
+  // A un maintainer o a un bot no se le debe primera respuesta (ni disculpa): el sweep de la Action ya los excluye; aquí igual.
+  const authorIsMaintainer = (labelsPolicy.maintainers || []).includes(snapshot.author);
+  const authorIsBot = Boolean(snapshot.authorIsBot) || (labelsPolicy.bots || []).some(b => b === snapshot.author || b === `${snapshot.author}[bot]`) || /\[bot\]$/.test(String(snapshot.author || ''));
+  const firstResponseMissing = !responded && !authorIsMaintainer && !authorIsBot && hoursSince(snapshot.createdAt, now) > priorityPolicy.firstResponseHours;
   const gatesRes = evaluateGates(snapshot, trivialPolicy, { labelsPolicy, sessionCount });
   const trivialCandidate = gatesRes.gates.filter(g => g.id !== 'session-cap').every(g => g.status === 'pass');
   // waiting-author se conserva solo mientras el autor no haya actuado (push/comentario) después de nuestro último
@@ -364,7 +368,7 @@ function classify(snapshot, { labelsPolicy, trivialPolicy, priorityPolicy, now =
 
   return {
     number: snapshot.number, state, priority: pr.priority, priorityWhy: pr.why, why, labelsToAdd, labelsToRemove,
-    sizeClass: size, lines: n, areas, trivialCandidate, needsSplit, needsRebase, ciHold, firstResponseMissing, dependents, blocksOthers: !!(blocksOthers === undefined ? dependents >= priorityPolicy.p1.blocksOthersMinDependents : blocksOthers),
+    sizeClass: size, lines: n, areas, trivialCandidate, needsSplit, needsRebase, ciHold, firstResponseMissing, authorIsMaintainer, authorIsBot, dependents, blocksOthers: !!(blocksOthers === undefined ? dependents >= priorityPolicy.p1.blocksOthersMinDependents : blocksOthers),
     ci: ci.status, gates: gatesRes.gates, failingGates: gatesRes.failing, age: age(snapshot.createdAt, now),
   };
 }
@@ -655,6 +659,7 @@ export async function buildSnapshot(number) {
   // shape() viene de triage-core.mjs (la misma que usa bin/lib/snapshot.mjs): una sola forma de snapshot.
   const snap = shape(pr, { authorMergedCount: await mergedCount(norm(pr.author?.login)), maintainers: POLICIES.labels.maintainers || [], parseJev: parseJevMarkers });
   snap.authorIsBot = pr.author?.__typename === 'Bot' || isBotLogin(pr.author?.login);
+  snap.authorIsMaintainer = (POLICIES.labels.maintainers || []).includes(norm(pr.author?.login)); // a un maintainer no se le da primera respuesta
   snap.signals = null; // se rellena en triageOne (necesita el comentario del evento, si lo hay)
   return snap;
 }
@@ -664,7 +669,7 @@ export function needsFirstReply(snapshot) {
   const marked = (snapshot.markers || []).some((m) => m.startsWith(`${MARKER_SLUG}:`));
   const maintainerSpoke = !!snapshot.lastMaintainerCommentAt;
   // Borradores: la primera respuesta llega en ready_for_review, no antes (mod-core: "borrador: no se toca").
-  return { needs: !marked && !maintainerSpoke && !snapshot.authorIsBot && !snapshot.isDraft, marked, maintainerSpoke, draft: !!snapshot.isDraft };
+  return { needs: !marked && !maintainerSpoke && !snapshot.authorIsBot && !snapshot.authorIsMaintainer && !snapshot.isDraft, marked, maintainerSpoke, draft: !!snapshot.isDraft, maintainer: !!snapshot.authorIsMaintainer };
 }
 /** La Action toca labels cuyo who_sets (añadir) / who_clears (quitar) sea "action", más ACTION_MAY_ALSO_SET. */
 export const ACTION_MAY_ALSO_SET = new Set(['triage/waiting-author']);
@@ -724,7 +729,7 @@ async function triageOne(number, { now, firstReply, comment = null }) {
     await write('POST', `repos/${REPO}/issues/${number}/comments`, { body }, `primera respuesta #${number}`);
     return;
   }
-  if (firstReply) log(`#${number}: sin primera respuesta (${fr.marked ? 'ya tiene marcador' : fr.maintainerSpoke ? 'ya habló un maintainer' : fr.draft ? 'borrador' : 'autor bot'})`);
+  if (firstReply) log(`#${number}: sin primera respuesta (${fr.marked ? 'ya tiene marcador' : fr.maintainerSpoke ? 'ya habló un maintainer' : fr.draft ? 'borrador' : fr.maintainer ? 'autor maintainer' : 'autor bot'})`);
   if (jev && fr.marked) await persistJev(number, sha7(snapshot.headSha), jev);
 }
 
@@ -783,7 +788,11 @@ export async function prsFromWorkflowRun(event, fetchPulls, { defaultBranch = 'm
   if (!run.head_sha || run.head_branch === defaultBranch) return [];
   let list = (run.pull_requests || []).map((p) => ({ number: p.number, state: 'open', headSha: p.head?.sha || run.head_sha }));
   if (!list.length) list = (await fetchPulls(run)) || [];
-  return [...new Set(list.filter((p) => p.state === 'open' && (!p.headSha || p.headSha === run.head_sha)).map((p) => p.number))];
+  const open = list.filter((p) => p.state === 'open');
+  const numbers = [...new Set(open.filter((p) => !p.headSha || p.headSha === run.head_sha).map((p) => p.number))];
+  // head desfasado: la PR recibió un push después de este run; su run nuevo llegará solo (no es "sin PR")
+  const superseded = open.filter((p) => p.headSha && p.headSha !== run.head_sha && !numbers.includes(p.number)).map((p) => ({ number: p.number, headSha: p.headSha }));
+  return Object.assign(numbers, { superseded });
 }
 async function pullsForRun(run) {
   const owner = run.head_repository?.owner?.login, branch = run.head_branch;
@@ -805,7 +814,11 @@ async function main() {
   if (eventName === 'schedule' || eventName === 'workflow_dispatch') await sweep(now);
   else if (eventName === 'workflow_run') { // Tests completada: reclasificar (triage/new → ready/trivial/waiting-author) sin esperar al sweep
     const nums = await prsFromWorkflowRun(event, pullsForRun);
-    if (!nums.length) { log(`workflow_run ${event.workflow_run?.head_sha?.slice(0, 7) || '?'} (${event.workflow_run?.head_repository?.full_name || '?'}:${event.workflow_run?.head_branch || '?'}): sin PR abierta, nada`); return; }
+    if (!nums.length) {
+      const sup = nums.superseded || [];
+      log(sup.length ? `workflow_run ${String(event.workflow_run?.head_sha).slice(0, 7)}: ${sup.map((p) => `PR #${p.number} con head más nuevo (${p.headSha.slice(0, 7)})`).join(', ')}: se espera su run` : `workflow_run ${event.workflow_run?.head_sha?.slice(0, 7) || '?'} (${event.workflow_run?.head_repository?.full_name || '?'}:${event.workflow_run?.head_branch || '?'}): sin PR abierta, nada`);
+      return;
+    }
     for (const n of nums) await triageOne(n, { now, firstReply: false });
   }
   else if (eventName === 'pull_request_target') await triageOne(event.pull_request.number, { now, firstReply: ['opened', 'ready_for_review'].includes(event.action) });
