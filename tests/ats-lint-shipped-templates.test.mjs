@@ -20,6 +20,15 @@
 // fragments composed INTO these templates, not templates themselves, and
 // atsLint's signature is (path, kind). A nested table introduced in a partial
 // would reach a rendered CV without passing through here.
+//
+// Second known gap, about what this sweep is worth per rule. Every heading in
+// every shipped template is a bare `{{SECTION_*}}` placeholder, so
+// standard-section-headers has nothing literal to judge and passes each file
+// vacuously. It runs on all of them now, which is what the skip fix bought.
+// Its findings on a shipped template stay empty for a reason this sweep cannot
+// distinguish from a real pass. The rule earns its keep on a user's own
+// template or a third-party pack, where a literal `Career Timeline` heading
+// does reach it. nested-table and hidden-text are checked here for real.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';

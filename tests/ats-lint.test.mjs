@@ -277,8 +277,10 @@ test('standard-section-headers: a real non-English lang still skips', () => {
 });
 
 test('standard-section-headers: must not flag a placeholder heading', () => {
-  // Every shipped template writes these, and the rendered wording — and its
-  // language, via lang="{{LANG}}" — belongs to the payload, not the template.
+  // Every shipped template writes these, and the rendered wording belongs to
+  // the payload, not the template. The skip assertion matters as much as the
+  // findings one: quiet because the rule ran and had nothing to object to, not
+  // quiet because lang="{{LANG}}" made it stand down.
   const result = lint(
     '<html lang="{{LANG}}"><body>'
       + '<h1>{{NAME}}</h1>'
@@ -287,6 +289,18 @@ test('standard-section-headers: must not flag a placeholder heading', () => {
       + '</body></html>'
   );
   assert.deepEqual(ids(result), []);
+  assert.deepEqual(result.skipped.filter((s) => s.id === 'standard-section-headers'), []);
+});
+
+test('standard-section-headers: an unsubstituted lang placeholder is not a language', () => {
+  // Every shipped CV template declares lang="{{LANG}}". Read as a declaration,
+  // that is the language "{{lang}}", which is not "en", so the rule stood down
+  // on every CV template the project ships and ran on the cover letter alone.
+  // A template has not picked a language yet. An unsubstituted placeholder is
+  // absence, and absence already means run.
+  const r = lint('<html lang="{{LANG}}"><body><h2>Career Highlights</h2></body></html>');
+  assert.deepEqual(ids(r), ['standard-section-headers']);
+  assert.deepEqual(r.skipped.filter((s) => s.id === 'standard-section-headers'), []);
 });
 
 test('standard-section-headers: must not flag the standard or additive headers', () => {

@@ -366,15 +366,34 @@ function detectHiddenText(html) {
 }
 
 // Only a heading whose text is LITERAL is checkable. Every shipped template
-// writes `{{SECTION_EXPERIENCE}}` and declares `lang="{{LANG}}"`, so both the
-// wording and the language of a rendered heading belong to the payload, not to
-// the template — a template-time check that read those as headings would flag
-// every template in the repo and be wrong about all of them.
+// writes `{{SECTION_EXPERIENCE}}`, so the payload owns the wording of every
+// rendered heading. A template-time check that read those as headings would
+// flag every template in the repo and be wrong about all of them.
+
+// True when `text` is nothing but `{{PLACEHOLDER}}` runs and whitespace.
+// `{{...}}` is this repo's only substitution syntax. validateTemplate above
+// looks for `{{NAME}}` literally, and build-cv-html.mjs resolves the same form.
+//
+// Two parts of the same file ask this one question. A heading that is only a
+// placeholder has no wording yet. A `lang` that is only a placeholder has no
+// language yet. The two answers had already drifted apart: the heading check
+// read `{{SECTION_SUMMARY}}` as unchosen, while the language read took
+// `{{LANG}}` for a chosen language called "{{lang}}".
+function isPlaceholderOnly(text) {
+  return !text.replace(/\{\{[^}]*\}\}/g, '').trim();
+}
+
 /**
  * The document's primary language subtag, lowercased, or null when absent.
  *
- * Absent means English here. Every shipped template omits `lang` or sets `en`,
- * and a rule that refused to run without one would check nothing by default.
+ * Absent means English here. A rule that refused to run without a `lang` would
+ * check nothing by default, which is the quiet way for a lint to be useless.
+ *
+ * An unsubstituted placeholder counts as absent too. `lang="{{LANG}}"` read as
+ * the language "{{lang}}", which is not "en". Every CV template this project
+ * ships stood the rule down, and the cover letter alone was ever checked. A
+ * template has not picked a language yet, so a placeholder value says nothing
+ * about the CV rendered from it.
  *
  * @param {string} html
  * @returns {string|null}
@@ -407,8 +426,9 @@ function documentLanguage(html) {
   while ((m = attr.exec(open[1])) !== null) {
     if (m[1].toLowerCase() !== 'lang') continue;
     const value = (m[2] ?? m[3] ?? m[4] ?? '').trim().toLowerCase();
+    if (!value || isPlaceholderOnly(value)) return null;
     // BCP 47: the primary subtag decides the language. en-GB is English.
-    return value ? value.split('-')[0] : null;
+    return value.split('-')[0];
   }
   return null;
 }
@@ -439,7 +459,7 @@ function detectStandardSectionHeaders(html, rule) {
   const out = [];
   for (const heading of headings) {
     if (!heading) continue;
-    if (!heading.replace(/\{\{[^}]*\}\}/g, '').trim()) continue; // placeholder-only
+    if (isPlaceholderOnly(heading)) continue;
     if (accepted.has(heading.toLowerCase())) continue;
     out.push(`non-standard section heading: "${heading.slice(0, 60)}"`);
   }
