@@ -3118,6 +3118,14 @@ if (
   applyMode.includes('data/pdf-index.tsv') &&
   applyMode.includes('the tailored CV wins') &&
   applyMode.includes('## Step 7b — Pre-Save required-field sweep') &&
+  // The heading alone is not the contract. Pinning only it leaves the sweep's
+  // three load-bearing instructions deletable with the test still green, which
+  // is the failure this section exists to catch. Assert the inventory, the
+  // value readback, the repeat-until-stable pass and the Save gate by name.
+  applyMode.includes('List every required control') &&
+  applyMode.includes('Read back the current value of each') &&
+  applyMode.includes('Repeat 1-4 until the list stops changing') &&
+  applyMode.includes('Click Save only once a full pass adds no new required control') &&
   !applyMode.includes('generate response from the report + cv.md') &&
   !applyMode.includes('(`config/profile.yml` / `cv.md`)')
 ) {

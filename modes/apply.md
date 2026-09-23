@@ -292,7 +292,12 @@ below).
 4. Fill what is missing: profile and CV fields from the Step 4b sources, and
    question-style fields (motivation, "why this role", free-text prompts) through
    the Step 7 generation path. Re-read each one to confirm the value registered.
-5. Click Save only once every required control on the list reads non-empty.
+5. Repeat 1-4 until the list stops changing. A fill can CREATE required controls:
+   answering a disclosure "Yes" reveals its follow-up, and picking a country can
+   swap in a region field. An inventory taken before those controls existed cannot
+   contain them, so a single pass surveys the form as it was, not as it is.
+6. Click Save only once a full pass adds no new required control and every control
+   on the list reads non-empty.
 
 If a required field cannot be filled from the candidate's own sources, stop and ask
 before Save. Saving a step to see which errors come back is not a survey: one
