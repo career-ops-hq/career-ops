@@ -190,11 +190,23 @@ function buildRecipientBlock(letter) {
   // is routinely "123 Main St, Boston, MA" while letter.city is "Boston, MA":
   // the lines differ, so a whole-line compare appends the city a second time,
   // which is the duplication this whole change exists to stop.
-  const components = (v) =>
-    String(v)
+  // A trailing US ZIP is stripped from the LAST component only. "Boston, MA
+  // 02101" and the city "Boston, MA" otherwise differ in that component and the
+  // city gets appended a second time, and an address carrying a ZIP is the
+  // ordinary case rather than an edge one. Confined to the final component and
+  // to a recognisable ZIP shape, so a street number cannot be eaten; formats
+  // this cannot recognise simply keep today's behaviour.
+  const components = (v) => {
+    const parts = String(v)
       .split(",")
       .map((part) => part.toLowerCase().replace(/\s+/g, " ").trim())
       .filter(Boolean);
+    if (parts.length) {
+      const last = parts[parts.length - 1].replace(/\s+\d{5}(?:-\d{4})?$/, "").trim();
+      if (last) parts[parts.length - 1] = last;
+    }
+    return parts;
+  };
 
   /** Does `hay` contain `needle` as a contiguous run of components? */
   const containsRun = (hay, needle) => {

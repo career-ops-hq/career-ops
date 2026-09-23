@@ -162,3 +162,33 @@ test('a falsy address line is still dropped', () => {
   assert.ok(!/<div>0<\/div>/.test(html), '0 is not an address line');
   assert.equal((html.match(/Boston, MA/g) || []).length, 1);
 });
+
+test('a city is not duplicated when the address line carries a ZIP', () => {
+  // "Boston, MA 02101" and the city "Boston, MA" differ in their last
+  // component, so the contiguous-run compare missed and the city was appended
+  // again. A US address with a ZIP is the ordinary case, not an edge one.
+  for (const line of [
+    '123 Main St, Boston, MA 02101',
+    '123 Main St, Boston, MA 02101-1234',
+  ]) {
+    const html = buildHtml(payload({
+      recipient: { name: 'Jane', address_lines: [line] },
+    }), template());
+    assert.ok(!/<div>Boston, MA<\/div>/.test(html), `city appended again for: ${line}`);
+  }
+});
+
+test('a ZIP on its own address line still suppresses the city', () => {
+  const html = buildHtml(payload({
+    recipient: { name: 'Jane', address_lines: ['123 Main St', 'Boston, MA 02101'] },
+  }), template());
+  assert.ok(!/<div>Boston, MA<\/div>/.test(html));
+});
+
+test('a different city is still appended even when a ZIP is present', () => {
+  // The ZIP strip must not make two different places compare equal.
+  const html = buildHtml(payload({
+    recipient: { name: 'Jane', address_lines: ['1 Elm St, Portland, OR 97201'] },
+  }), template());
+  assert.ok(/<div>Boston, MA<\/div>/.test(html), 'the real city should still be added');
+});
