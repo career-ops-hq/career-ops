@@ -2,8 +2,8 @@ name: Label bot
 
 # Pone y quita labels como github-actions[bot], para que lo que la automatización del proyecto hace en un hilo se vea como bot y
 # nunca como una persona (CONTRIBUTING, "Someone else's open PR stays theirs"). Lo lanza la sesión del maintainer con
-# workflow_dispatch. Reglas en .github/scripts/label-bot.mjs: solo labels que ya existen, todo o nada, y si cambia una label
-# direction/* redispara direction-gate (los eventos de GITHUB_TOKEN no lanzan workflows).
+# workflow_dispatch. Reglas en .github/scripts/label-bot.mjs: solo labels que ya existen, validación todo o nada (solo PRs),
+# un fallo a mitad se informa como parcial, y si cambia una label direction/* redispara direction-gate.
 
 on:
   workflow_dispatch:
@@ -14,9 +14,8 @@ on:
         type: string
 
 permissions:
-  issues: write
-  pull-requests: write
-  actions: write   # redisparar direction-gate cuando cambia una label direction/*
+  pull-requests: write   # solo PRs (la validación rechaza issues): basta para la API de labels, como actions/labeler
+  actions: write         # redisparar direction-gate cuando cambia una label direction/*
 
 jobs:
   label:

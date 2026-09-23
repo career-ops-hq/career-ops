@@ -3,9 +3,11 @@
 // hilo sale de una cuenta de bot, nunca de la de una persona (CONTRIBUTING, "Someone else's open PR stays theirs").
 // Lo lanza la sesión del maintainer con workflow_dispatch; solo quien tiene permiso de escritura puede lanzarlo.
 //
-// Entrada: OPS = JSON [{ "pr": n, "add": ["label"], "remove": ["label"] }] (máx. MAX_OPS). Todo o nada: si una label no existe en
-// el repo (se crearía sola con un typo) o un número no existe, no se toca nada. Si cambia una label direction/*, se redispara
-// direction-gate para esa PR: los eventos que hace GITHUB_TOKEN no lanzan workflows y el check tiene que ver la label nueva.
+// Entrada: OPS = JSON [{ "pr": n, "add": ["label"], "remove": ["label"] }] (máx. MAX_OPS). La validación es todo o nada: si una label
+// no existe en el repo (se crearía sola con un typo), o un número no existe o no es una PR (label-bot solo etiqueta PRs: las issues las
+// etiquetan sus propios workflows), no se toca nada. Si una escritura falla a mitad, el resto sigue, se dice qué quedó aplicado (parcial) y el run sale en rojo. Si cambió
+// una label direction/*, se redispara direction-gate para esa PR aunque otra fallara: los eventos que hace GITHUB_TOKEN no lanzan
+// workflows y el check tiene que ver la label nueva.
 import fs from 'node:fs';
 
 const API = 'https://api.github.com';
@@ -53,19 +55,27 @@ export async function main() {
   if (!REPO || !TOKEN) throw new Error('faltan GITHUB_REPOSITORY o GITHUB_TOKEN');
   const known = (await getAll(`repos/${REPO}/labels`)).map((l) => l.name);
   const { ops } = parseOps(process.env.OPS, known);
-  for (const op of ops) await rest('GET', `repos/${REPO}/issues/${op.pr}`); // existe (PR o issue): si no, 404 y no se toca nada
-  const regate = [];
+  // Validación completa antes de escribir: cada número existe y es una PR (si no existe, 404; si es una issue, se rechaza el lote).
   for (const op of ops) {
-    if (op.add.length) await rest('POST', `repos/${REPO}/issues/${op.pr}/labels`, { labels: op.add });
-    for (const l of op.remove) { try { await rest('DELETE', `repos/${REPO}/issues/${op.pr}/labels/${encodeURIComponent(l)}`); } catch (e) { if (e.status !== 404) throw e; } }
-    log(`#${op.pr} +${op.add.join(',') || '∅'} -${op.remove.join(',') || '∅'}`);
-    if (touchesDirection(op)) regate.push(op.pr);
+    const { data } = await rest('GET', `repos/${REPO}/issues/${op.pr}`);
+    if (!data?.pull_request) throw new Error(`#${op.pr} es una issue: label-bot solo etiqueta PRs (mínimo privilegio: pull-requests, no issues)`);
+  }
+  const regate = [], failed = [];
+  for (const op of ops) {
+    let changed = false;
+    try {
+      if (op.add.length) { await rest('POST', `repos/${REPO}/issues/${op.pr}/labels`, { labels: op.add }); changed = true; }
+      for (const l of op.remove) { try { await rest('DELETE', `repos/${REPO}/issues/${op.pr}/labels/${encodeURIComponent(l)}`); changed = true; } catch (e) { if (e.status !== 404) throw e; } }
+      log(`#${op.pr} +${op.add.join(',') || '∅'} -${op.remove.join(',') || '∅'}`);
+    } catch (e) { failed.push(op.pr); log(`#${op.pr}: fallo al escribir (${e.message.slice(0, 120)})${changed ? '; parte del cambio sí quedó aplicado' : ''}`); }
+    if (changed && touchesDirection(op)) regate.push(op.pr); // aunque otra escritura de esta PR fallara: el gate debe ver lo que cambió
   }
   for (const pr of [...new Set(regate)]) {
     try { await rest('POST', `repos/${REPO}/actions/workflows/direction-gate.yml/dispatches`, { ref: 'main', inputs: { pr: String(pr) } }); log(`#${pr}: direction-gate redisparado (cambió una label direction/*)`); }
     catch (e) { log(`#${pr}: no pude redisparar direction-gate (${e.message.slice(0, 120)})`); process.exitCode = 1; }
   }
-  log(`${ops.length} cambios aplicados como github-actions[bot]`);
+  if (failed.length) { log(`PARCIAL: ${ops.length - failed.length} de ${ops.length} cambios aplicados como github-actions[bot]; fallaron ${failed.map((n) => `#${n}`).join(', ')}`); process.exitCode = 1; }
+  else log(`${ops.length} cambios aplicados como github-actions[bot]`);
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### label-bot\n\n${lines.map((l) => `- ${l}`).join('\n')}\n`);
 }
 
