@@ -382,6 +382,25 @@ test('atsLint never throws on an unreadable rules file either', () => {
   assert.ok(result.error);
 });
 
+test('a rules file that defines no rules is an error, not a clean pass', () => {
+  // A missing `rules:` key, a wrongly-typed one and an empty list all loaded
+  // as [], so the lint evaluated zero rules and reported ok. A lint that
+  // checks nothing and says it passed is worse than one that fails loudly.
+  // An unreadable rules file already surfaces through result.error; a rules
+  // file that lints nothing takes the same path.
+  for (const body of ['source_doc: nothing\n', 'source_doc: nothing\nrules: []\n', 'rules: not-a-list\n']) {
+    const rulesPath = join(mkdtempSync(join(tmpdir(), 'atsrules-')), 'ats-rules.yml');
+    writeFileSync(rulesPath, body);
+
+    assert.throws(() => loadAtsRules(rulesPath), /no rules/i, `expected a throw for: ${body}`);
+
+    const result = atsLint(join(ROOT, 'templates', 'cv-template.html'), 'cv', { rulesPath });
+    assert.equal(result.ok, false, `expected ok:false for: ${body}`);
+    assert.match(result.error, /no rules/i);
+    assert.deepEqual(result.findings, []);
+  }
+});
+
 test('the CLI refuses a non-HTML template rather than reporting it clean', () => {
   // Every detector is an HTML pattern, so a .tex template lints to zero
   // findings — a pass that checked nothing. That must be an error, not JSON.

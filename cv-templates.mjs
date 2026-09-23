@@ -238,9 +238,20 @@ const DEFAULT_ATS_RULES_PATH = resolve(__dirname, 'templates', 'ats-rules.yml');
 
 export function loadAtsRules(path = DEFAULT_ATS_RULES_PATH) {
   const doc = yaml.load(readFileSync(path, 'utf-8')) || {};
+  // A missing `rules:` key, a wrongly-typed one and an empty list used to
+  // coerce to [], and atsLint then walked zero rules and reported ok. Every
+  // other way of breaking this file already fails loudly, so a config that
+  // lints nothing has to as well. atsLint catches this and reports it through
+  // `error`, the same path an unreadable rules file takes.
+  if (!Array.isArray(doc.rules) || doc.rules.length === 0) {
+    throw new Error(
+      `ATS rules file defines no rules: ${path}. `
+        + 'An empty rule set checks nothing and would report a clean pass.'
+    );
+  }
   return {
     sourceDoc: doc.source_doc || null,
-    rules: Array.isArray(doc.rules) ? doc.rules : [],
+    rules: doc.rules,
     cannotCatch: Array.isArray(doc.cannot_catch) ? doc.cannot_catch : [],
   };
 }
