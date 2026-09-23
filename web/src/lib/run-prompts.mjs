@@ -55,11 +55,31 @@ const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
 export const BASE_CV_TEMPLATE = "templates/cv-template.html";
 
 /**
- * Shapes cv-templates.mjs can produce: a flat `templates/cv-template.<name>.html`
- * or a file inside a template pack (#3202). Anything else is not a template this
- * prompt should name.
+ * The two shapes cv-templates.mjs can produce, and nothing wider.
+ *
+ * FILENAME: its parseFilename() only ever matches
+ * `cv-template(.<name>)?.(html|tex)` with `<name>` in `[a-z0-9-]`, so the filename
+ * half can be spelled out exactly. (html only here: resolveCvTemplate asks for the
+ * html format.)
+ *
+ * PACK DIRECTORY: one level, optional (#3202). Unlike the filename, this comes
+ * straight from readdirSync — the resolver constrains it not at all, so
+ * `templates/My Pack/cv-template.ats.html` is a path it genuinely returns and the
+ * previous pattern, which allowed no space, silently fell back to the base
+ * template for exactly the users who had built a pack.
+ *
+ * The obvious widening — `[^/]+` for the directory — is the wrong trade. This path
+ * is interpolated into an agent's numbered instructions, so `;`, `$`, quotes,
+ * backticks and control characters would ride in with it; the allowlist keeps the
+ * one character real directory names actually need. A pack whose name falls
+ * outside it still renders, from the base template, which is the same outcome as
+ * before and not a new failure.
+ *
+ * `(?![\s\S])` rather than `$`: JS's `$` also matches BEFORE a final newline, so
+ * `templates/cv-template.html\n` would pass and break the step it is written into.
  */
-const CV_TEMPLATE_RE = /^templates\/[A-Za-z0-9][A-Za-z0-9._/-]*\.html$/;
+const CV_TEMPLATE_RE =
+  /^templates\/(?:[A-Za-z0-9][A-Za-z0-9._ -]*\/)?cv-template(?:\.[a-z0-9-]+)?\.html(?![\s\S])/;
 
 /**
  * The template path is interpolated into an agent's instructions, so it is a

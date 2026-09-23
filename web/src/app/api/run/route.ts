@@ -16,7 +16,7 @@ import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
 import { fencingReport } from "@/lib/cli-fencing.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
-import { resolveCvTemplate } from "@/lib/core/cv-template";
+import { resolveCvTemplate } from "@/lib/core/cv-template.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 
 export const runtime = "nodejs";
@@ -118,7 +118,9 @@ export async function POST(req: Request) {
   // is: the worker has no Bash (#2172), so it cannot run cv-templates.mjs and the
   // prompt used to name the base template outright, silently ignoring cv.template
   // (#4034). Only pdf fills a template, so nothing else pays for the lookup.
-  const cvTemplate = kind === "pdf" ? await resolveCvTemplate() : undefined;
+  // The root is passed, not re-derived: a relative CAREER_OPS_PROFILE resolves
+  // against it, and `process.cwd()` here is `<core>/web` (see cv-template.mjs).
+  const cvTemplate = kind === "pdf" ? await resolveCvTemplate(careerOpsRoot()) : undefined;
   const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, lang, cvTemplate });
 
   const isClaude = cliId === "claude";
