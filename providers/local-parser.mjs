@@ -143,23 +143,31 @@ function normalizeLocation(value) {
 const MAX_VALID_EPOCH_MS = 8_640_000_000_000_000;
 
 // NaN-safe coercion for an optional parser-supplied posting date. Accepts an
-// epoch-milliseconds number or a Date.parse-able string; an unparseable string,
-// a non-finite or out-of-range number, a non-string/non-number value, or an
-// absent field yields undefined, so the row is kept without a date rather than
-// carrying a wrong one. `|| undefined` is avoided on purpose — it would also
-// drop a legitimate epoch 0. The `typeof value !== 'string'` guard is load-
-// bearing, not redundant with the `!value` check below it: a truthy object
-// (e.g. one JSON.parse produces from `{"toString":null}`) reaching Date.parse()
-// throws TypeError (ToPrimitive can't call a non-callable toString and
-// Object.prototype.valueOf isn't primitive), which is not caught anywhere
-// between here and the parser's fetch() call.
+// epoch-milliseconds number or a Date.parse-able string; an unparseable
+// string, a non-finite or out-of-range number, a non-string/non-number
+// value, or an absent field yields undefined, so the row is kept without a
+// date rather than carrying a wrong one. The `typeof value !== 'string'`
+// guard is load-bearing, not redundant with the truthiness check below it: a
+// truthy object (e.g. one JSON.parse produces from `{"toString":null}`)
+// reaching Date.parse() throws TypeError (ToPrimitive can't call a
+// non-callable toString and Object.prototype.valueOf isn't primitive), which
+// is not caught anywhere between here and the parser's fetch() call.
+// A result at or before the Unix epoch is rejected, not preserved: no real
+// job posting predates 1970, so `0` (or negative) is a sentinel/placeholder
+// from the source, not a date, regardless of which alias or format it came
+// in as.
 function toEpochMs(value) {
+  let ms;
   if (typeof value === 'number') {
-    return Number.isFinite(value) && Math.abs(value) <= MAX_VALID_EPOCH_MS ? value : undefined;
+    if (!Number.isFinite(value)) return undefined;
+    ms = value;
+  } else if (typeof value === 'string' && value) {
+    ms = Date.parse(value);
+    if (Number.isNaN(ms)) return undefined;
+  } else {
+    return undefined;
   }
-  if (typeof value !== 'string' || !value) return undefined;
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? undefined : parsed;
+  return ms > 0 && ms <= MAX_VALID_EPOCH_MS ? ms : undefined;
 }
 
 // Tries each alias in order and keeps the first one that parses, so a garbage

@@ -32,6 +32,8 @@ if (inputArgs[0] === 'posted-at') {
     { title: 'JSON-LD spelling', url: 'https://example.com/j', datePosted: '2026-06-01' },
     { title: 'JSON-LD snake spelling', url: 'https://example.com/k', date_posted: '2026-07-04T00:00:00Z' },
     { title: 'Epoch zero', url: 'https://example.com/h', postedAt: 0 },
+    { title: 'Negative epoch', url: 'https://example.com/o', postedAt: -1000 },
+    { title: 'Pre-epoch date string', url: 'https://example.com/p', postedAt: '1969-12-31T00:00:00Z' },
     { title: 'Bad date', url: 'https://example.com/d', postedAt: 'not-a-date' },
     { title: 'No date', url: 'https://example.com/e' },
     { title: 'Out-of-range epoch', url: 'https://example.com/l', postedAt: 1e20 },

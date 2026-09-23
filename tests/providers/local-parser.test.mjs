@@ -141,10 +141,10 @@ try {
   const postedJobs = await localParser.fetch(postedEntry);
   const byTitle = Object.fromEntries(postedJobs.map(j => [j.title, j]));
 
-  if (postedJobs.length === 14) {
+  if (postedJobs.length === 16) {
     pass('localParser.fetch() keeps rows whose postedAt is bad or absent');
   } else {
-    fail(`localParser.fetch() returned ${postedJobs.length} posted-at rows, expected 14`);
+    fail(`localParser.fetch() returned ${postedJobs.length} posted-at rows, expected 16`);
   }
 
   if (byTitle['ISO date']?.postedAt === Date.parse('2026-09-08')
@@ -160,10 +160,12 @@ try {
     fail(`postedAt coercion = ${JSON.stringify(postedJobs.map(j => [j.title, j.postedAt]))}`);
   }
 
-  if (byTitle['Epoch zero']?.postedAt === 0) {
-    pass('localParser.fetch() preserves a legitimate epoch 0 postedAt');
+  if (!('postedAt' in byTitle['Epoch zero'])
+    && !('postedAt' in byTitle['Negative epoch'])
+    && !('postedAt' in byTitle['Pre-epoch date string'])) {
+    pass('localParser.fetch() omits postedAt at or before the Unix epoch (no real posting predates 1970)');
   } else {
-    fail(`epoch 0 postedAt = ${JSON.stringify(byTitle['Epoch zero'])}`);
+    fail(`at-or-before-epoch postedAt should be absent: ${JSON.stringify([byTitle['Epoch zero'], byTitle['Negative epoch'], byTitle['Pre-epoch date string']])}`);
   }
 
   if (!('postedAt' in byTitle['Bad date']) && !('postedAt' in byTitle['No date'])) {
