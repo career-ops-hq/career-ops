@@ -987,7 +987,8 @@ search_queries:
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
 # field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
-# himalayas, ibm, jobbankca, jobicy, jobstreet, justjoin, landingjobs, mycareersfuture, nofluffjobs, remoteok, remotive, senjob,
+# himalayas, ibm, jobbankca, jobicy, jobstreet, justjoin, kalibrr, landingjobs,
+# mycareersfuture, nofluffjobs, remoteok, remotive, senjob, techinasia,
 # manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent,
 # telegram-channel. Examples for every built-in provider are below.
 
@@ -2629,7 +2630,7 @@ job_boards:
     enabled: false
     notes: "Polish tech job board — newest public postings"
 
-  # -- Indonesia job boards (provider: jobstreet / glints) --
+  # -- Indonesia job boards (provider: jobstreet / glints / kalibrr / techinasia) --
 
   - name: Jobstreet Indonesia
     provider: jobstreet
@@ -2641,6 +2642,21 @@ job_boards:
     maxPages: 3
     enabled: false
     notes: "Indonesia's largest job board (SEEK group). Uses SEEK v5 JobSearch API — zero tokens."
+
+  - name: Kalibrr Indonesia
+    provider: kalibrr
+    api: https://www.kalibrr.com/kjs/job_board/search
+    searchKeywords: "engineer"        # optional: maps to the API's own `text` filter
+    pageSize: 100                     # optional (default 100; 500 is accepted)
+    maxPages: 20                      # optional (default 20); `count` in the response bounds the real total
+    enabled: false
+    notes: "SEA job board, Indonesia-heavy. Public no-auth job-board search JSON — zero tokens."
+
+  - name: Tech in Asia
+    provider: techinasia
+    maxPages: 5                       # optional (default 5; 1000 rows per page)
+    enabled: false
+    notes: "SEA startup-ecosystem job board (~300 live postings, mostly Indonesia). Reads the Algolia index the site's own UI queries; the app id + client key are discovered from the live bundle on every run, so nothing is hardcoded."
 
   - name: Glints Indonesia
     provider: glints
