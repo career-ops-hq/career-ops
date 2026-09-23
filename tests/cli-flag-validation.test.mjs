@@ -12,22 +12,30 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
-function runScript(script, ...args) {
+// `env` overrides entries of the inherited environment; pass CAREER_OPS_ROOT
+// here for any script that reads the tracker, so the child never touches the
+// checkout's data/ (or whatever root the developer's env already points at).
+function runScriptWithEnv(env, script, ...args) {
   const r = spawnSync(process.execPath, [join(ROOT, script), ...args], {
     cwd: ROOT,
     encoding: 'utf-8',
     timeout: 30_000,
+    env: { ...process.env, ...env },
   });
   assert.equal(r.error, undefined, `${script} failed to spawn: ${r.error?.message}`);
   assert.equal(r.signal, null, `${script} was killed by ${r.signal} (timeout?)`);
   return { ...r, all: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+}
+
+function runScript(script, ...args) {
+  return runScriptWithEnv({}, script, ...args);
 }
 
 // Each script paired with a realistic typo of one of ITS OWN flags
@@ -38,6 +46,7 @@ const SCRIPTS = [
   ['linkedin-join.mjs', '--sinse'],
   ['application-artifacts.mjs', '--reprot'],
   ['clean-markers.mjs', '--dryrun'],
+  ['normalize-statuses.mjs', '--dryrun'],
 ];
 
 for (const [script, typo] of SCRIPTS) {
@@ -313,4 +322,60 @@ test('linkedin-join.mjs --help --bogus still errors', () => {
   const r = runScript('linkedin-join.mjs', '--help', '--bogus');
   assert.equal(r.status, 1, `--help --bogus exited ${r.status}, want 1`);
   assert.match(r.all, /unrecognized flag/i);
+});
+
+// normalize-statuses.mjs rewrites applications.md, so a mistyped --dry-run used
+// to be ignored and the tracker was edited at exit 0.
+test('normalize-statuses.mjs --help exits 0 and prints usage', () => {
+  const r = runScript('normalize-statuses.mjs', '--help');
+  assert.equal(r.status, 0, `normalize-statuses.mjs --help exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'normalize-statuses.mjs --help printed no usage block');
+});
+
+test('normalize-statuses.mjs -h exits 0 and prints usage', () => {
+  const r = runScript('normalize-statuses.mjs', '-h');
+  assert.equal(r.status, 0, `normalize-statuses.mjs -h exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'normalize-statuses.mjs -h printed no usage block');
+});
+
+test('normalize-statuses.mjs rejects --bogus and lists the valid flags', () => {
+  const r = runScript('normalize-statuses.mjs', '--bogus');
+  assert.equal(r.status, 1, `normalize-statuses.mjs --bogus exited ${r.status}, want 1`);
+  assert.match(r.all, /unrecognized flag\(s\): --bogus/i);
+  assert.match(r.all, /--help, -h, --dry-run/, 'the valid flags were not listed');
+});
+
+test('normalize-statuses.mjs --help --bogus still errors', () => {
+  const r = runScript('normalize-statuses.mjs', '--help', '--bogus');
+  assert.equal(r.status, 1, `normalize-statuses.mjs --help --bogus exited ${r.status}, want 1`);
+  assert.match(r.all, /unrecognized flag/i);
+});
+
+// --dry-run still READS and parses the tracker, and the module creates
+// {root}/data/ on load, so the child gets its own CAREER_OPS_ROOT rather than
+// whatever tracker the checkout (or an inherited CAREER_OPS_ROOT) points at.
+// The fixture row carries a non-canonical status so the run has real work to do.
+test('normalize-statuses.mjs still accepts --dry-run as a known flag', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-normalize-'));
+  try {
+    mkdirSync(join(dir, 'data'), { recursive: true });
+    writeFileSync(join(dir, 'data', 'applications.md'), [
+      '# Applications Tracker',
+      '',
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+      '|---|------|---------|------|-------|--------|-----|--------|-------|',
+      '| 1 | 2026-01-15 | Acme | Engineer | 4.2/5 | **Aplicado** | ✅ | [1](reports/001-acme-2026-01-15.md) | — |',
+      '',
+    ].join('\n'));
+
+    const r = runScriptWithEnv(
+      { CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_TRACKER: '' },
+      'normalize-statuses.mjs', '--dry-run',
+    );
+    assert.equal(r.status, 0, `normalize-statuses.mjs --dry-run exited ${r.status}, want 0`);
+    assert.doesNotMatch(r.all, /unrecognized flag/i, '--dry-run must not be rejected as unrecognized');
+    assert.doesNotMatch(r.all, /No applications\.md found/i, 'the fixture tracker was not the one read');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

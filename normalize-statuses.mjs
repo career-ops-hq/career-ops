@@ -20,6 +20,7 @@ import {
   loadCanonicalStates, resolveCanonicalState,
 } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 // System Layer files (templates/, modes/, scripts) live in the codebase and are
@@ -30,7 +31,6 @@ import { isMainModule } from './lib/is-main-module.mjs';
 const CODEBASE_ROOT = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
-const DRY_RUN = process.argv.includes('--dry-run');
 
 // Ensure required directories exist (fresh setup)
 mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
@@ -121,6 +121,14 @@ function normalizeStatus(raw) {
 
 export { normalizeStatus };
 
+const KNOWN_FLAGS = ['--help', '-h', '--dry-run'];
+const USAGE = `Usage: node normalize-statuses.mjs [options]
+
+  Options:
+  --dry-run        Report what would change without writing applications.md
+  -h, --help       Show this help and exit
+  `;
+
 // Everything below is the CLI. It is guarded because importing this module used to
 // run it: the import alone opened a tracker transaction and rewrote applications.md.
 // That is why tests could only scrape this file's source with regexes instead of
@@ -128,12 +136,18 @@ export { normalizeStatus };
 const IS_CLI = isMainModule(import.meta.url);
 
 if (IS_CLI) {
+const args = process.argv.slice(2);
+
+// Unrecognized flags exit 1 naming the flag; --help/-h print USAGE and exit 0.
+validateFlags(args, KNOWN_FLAGS, USAGE);
+
 // Read applications.md
 if (!existsSync(APPS_FILE)) {
   console.log('No applications.md found. Nothing to normalize.');
   process.exit(0);
 }
 
+const DRY_RUN = process.argv.includes('--dry-run');
 let trackerTransaction = null;
 if (!DRY_RUN) {
   try {
