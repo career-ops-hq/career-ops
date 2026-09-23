@@ -14,7 +14,7 @@
 // tests/helpers.mjs header), where an absent node_modules is the expected state
 // and has to be reported as itself.
 import { pass, fail, ROOT } from './helpers.mjs';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, lstatSync, existsSync } from 'fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, lstatSync, symlinkSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
@@ -96,6 +96,46 @@ try {
         pass('no link entry is left behind when the tree is absent (no dangling symlink)');
       } else {
         fail(`linkNodeModules left a node_modules entry behind (lstat: ${entry}); a dangling link is what breaks the sandbox`);
+      }
+    }
+
+    // Unreadable tree: a different reason, and still a skip. `npm ci` is the
+    // wrong advice for a node_modules that is there and cannot be stat'd, and
+    // throwing would land in the call site's catch, which is the
+    // misattribution this whole guard exists to prevent. A self-referential
+    // symlink gives ELOOP without needing a chmod that root would ignore.
+    {
+      const root = join(tmp, 'looping-clone');
+      mkdirSync(root, { recursive: true });
+      const loop = join(root, 'node_modules');
+      const sandbox = join(tmp, 'sandbox-loop');
+      mkdirSync(sandbox, { recursive: true });
+
+      let made = true;
+      try {
+        symlinkSync(loop, loop);
+      } catch {
+        made = false; // Windows without the symlink privilege.
+      }
+      if (made) {
+        const reason = linkNodeModules(sandbox, root);
+        if (typeof reason === 'string' && /unreadable \(ELOOP\)/.test(reason)) {
+          pass('an unreadable tree reports its errno instead of advising npm ci');
+        } else {
+          fail(`a looping node_modules produced ${JSON.stringify(reason)}`);
+        }
+
+        let entry = 'present';
+        try {
+          lstatSync(join(sandbox, 'node_modules'));
+        } catch (err) {
+          entry = err.code;
+        }
+        if (entry === 'ENOENT') {
+          pass('no link entry is left behind when the tree is unreadable');
+        } else {
+          fail(`linkNodeModules linked against an unreadable tree (lstat: ${entry})`);
+        }
       }
     }
 
