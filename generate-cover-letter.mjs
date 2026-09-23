@@ -130,9 +130,11 @@ function buildDateline(letter, hasRecipientBlock = false) {
   // the company twice, three lines apart.
   //
   // Gated on the block actually RENDERING, not on `letter.recipient` merely
-  // being set. An empty or whitespace-only recipient produces no address block,
-  // and dropping company and city for it would lose them with nothing taking
-  // their place. The shipped base template has no address block at all, so it
+  // being set — see the caller, which needs both the data and a template slot
+  // to conclude that. An empty or whitespace-only recipient produces no address
+  // block, and a template without a {{RECIPIENT_BLOCK}} slot has nowhere to put
+  // one; either way, dropping company and city would lose them with nothing
+  // taking their place. The shipped base template is the second case, so it
   // keeps the full join exactly as before.
   const parts = hasRecipientBlock
     ? [letter.date]
@@ -267,12 +269,19 @@ export function buildHtml(payload, templatePath) {
   const signatureBlock = buildSignatureBlock(letter.signature, candidate.name);
 
   const recipientBlock = buildRecipientBlock(letter);
+  // The gate's predicate is "the address block will RENDER", which needs both
+  // halves: recipient data to put in it, and a slot in the loaded template to
+  // put it in. The shipped base template has {{DATELINE}} and no
+  // {{RECIPIENT_BLOCK}}, so a payload carrying a recipient would otherwise lose
+  // the company and city entirely — dropped from the dateline, with no address
+  // block downstream to reprint them.
+  const rendersRecipientBlock = Boolean(recipientBlock) && html.includes("{{RECIPIENT_BLOCK}}");
   const replacements = {
     "{{NAME}}": escapeHtml(candidate.name),
     "{{CONTACT_LINE}}": buildContactLine(candidate),
     "{{CREDENTIALS_BLOCK}}": buildCredentialsBlock(candidate),
     "{{ROLE_TITLE}}": escapeHtml(letter.role_title),
-    "{{DATELINE}}": buildDateline(letter, Boolean(recipientBlock)),
+    "{{DATELINE}}": buildDateline(letter, rendersRecipientBlock),
     "{{RECIPIENT_BLOCK}}": recipientBlock,
     "{{GREETING_BLOCK}}": greetingBlock,
     "{{OPENING}}": escapeHtml(letter.opening),

@@ -16,7 +16,7 @@
 // nothing today sets letter.recipient, so nothing today changes.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildHtml } from '../generate-cover-letter.mjs';
@@ -25,6 +25,14 @@ function template() {
   const dir = mkdtempSync(join(tmpdir(), 'cover-dateline-'));
   const file = join(dir, 'cover-letter-template.html');
   writeFileSync(file, '{{NAME}}{{ROLE_TITLE}}[D]{{DATELINE}}[/D]{{RECIPIENT_BLOCK}}{{OPENING}}{{PROFILE_INTRO}}');
+  return file;
+}
+
+/** A template shaped like the shipped base one: a dateline, no address block. */
+function templateWithoutRecipientSlot() {
+  const dir = mkdtempSync(join(tmpdir(), 'cover-dateline-noslot-'));
+  const file = join(dir, 'cover-letter-template.html');
+  writeFileSync(file, '{{NAME}}{{ROLE_TITLE}}[D]{{DATELINE}}[/D]{{OPENING}}{{PROFILE_INTRO}}');
   return file;
 }
 
@@ -78,4 +86,28 @@ test('a whitespace-only recipient does not trigger the gate either', () => {
   const d = dateline(buildHtml(payload({ recipient: { name: '   ', company: '\t' } }), template()));
 
   assert.equal(d, 'Example Corp &nbsp;&nbsp; Boston, MA &nbsp;&nbsp; September 8, 2026');
+});
+
+test('a template without the slot keeps the company and city in the dateline', () => {
+  // The gate's real predicate is the LOADED TEMPLATE having somewhere to put the
+  // address, not the payload having address data. The shipped base template
+  // (templates/cover-letter-template.html) has {{DATELINE}} and no
+  // {{RECIPIENT_BLOCK}}, so gating on the payload drops the company and city
+  // with nothing downstream to reprint them — the letter silently loses them.
+  const d = dateline(buildHtml(payload({
+    recipient: { name: 'Jane Reviewer', company: 'Example Corp', address_lines: ['Boston, MA'] },
+  }), templateWithoutRecipientSlot()));
+
+  assert.equal(d, 'Example Corp &nbsp;&nbsp; Boston, MA &nbsp;&nbsp; September 8, 2026');
+});
+
+test('the shipped base template has no {{RECIPIENT_BLOCK}} slot', () => {
+  // The premise of the test above, asserted directly: if the shipped template
+  // ever gains an address block, the gate starts firing for it and this test is
+  // the one that says so.
+  const shipped = readFileSync(
+    new URL('../templates/cover-letter-template.html', import.meta.url), 'utf-8');
+
+  assert.ok(shipped.includes('{{DATELINE}}'), 'the shipped template has a dateline slot');
+  assert.ok(!shipped.includes('{{RECIPIENT_BLOCK}}'), 'the shipped template has no address block');
 });
