@@ -767,15 +767,26 @@ test('createLockWaitPolicy: the backoff never sleeps past the per-holder deadlin
       timeoutMs: 1_000, retryMs: 5_000, deadline: lateNow + 40, hardDeadline: lateNow + 60_000,
     });
 
-    // 250ms sits above the 40ms this window really has left and below the
-    // 500ms a half-of-timeoutMs floor would report, so the two are told apart
-    // with no elapsed-time read and nothing to stall.
+    // Bound it by the time the window ACTUALLY has left, read immediately
+    // before the call. A fixed midpoint of 250ms separates a remaining-window
+    // clamp from a half-of-timeoutMs floor (500ms), but it still passes a
+    // clamp that returns 200ms with 40ms left — the same overshoot one order
+    // down, and invisible to the assertion meant to catch it.
+    //
+    // The tight bound is derivable rather than empirical. backoffMs() returns
+    // min(jitter, ceiling - now, perHolderDeadline - now) read at call time,
+    // and that read happens no earlier than `beforeCall`, so the result can
+    // never exceed windowLeft. The 5ms slack covers Date.now() granularity
+    // only; a 200ms answer misses it by 40x.
+    const lateDeadline = lateNow + 40;
+    const beforeCall = Date.now();
     const lateSleep = late.backoffMs();
+    const windowLeft = Math.max(0, lateDeadline - beforeCall);
     assert.ok(
-      lateSleep <= 250,
-      `backoffMs() returned ${Math.round(lateSleep)}ms with 40ms left of a 1000ms per-holder `
-      + 'window: the clamp stopped tracking the time left, so the caller overshoots its own '
-      + 'deadline on every retry but the first',
+      lateSleep <= windowLeft + 5,
+      `backoffMs() returned ${Math.round(lateSleep)}ms with ${windowLeft}ms left of a 1000ms `
+      + 'per-holder window: the clamp stopped tracking the time left, so the caller overshoots '
+      + 'its own deadline on every retry but the first',
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
