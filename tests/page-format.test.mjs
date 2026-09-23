@@ -9,18 +9,23 @@
  * and modes/pdf.md had to instruct the user to "Pass the SAME value" twice by
  * hand.
  *
- * Every test here observes a real seam: the exported @page injector, the two
- * renderer CLIs, and the resolver itself. The last one is a source check,
+ * The seams: the module's own constants, the exported @page injector, the three
+ * renderer CLIs, and the resolver itself. The last test is a source check,
  * because "no renderer keeps its own fallback" is the property that stops the
  * drift coming back and no behavioural assertion can express it.
+ *
+ * Expected page sizes are written out as literals. An assertion that reads its
+ * expected value back out of the module it pins compares that module to itself
+ * and stays green whatever the module becomes.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, realpathSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ROOT, NODE } from './helpers.mjs';
+import { pathToFileURL } from 'node:url';
+import { ROOT, NODE, linkRepoPackage } from './helpers.mjs';
 import { injectPrintPageCss } from '../generate-pdf.mjs';
 import {
   DEFAULT_PAGE_FORMAT,
@@ -102,12 +107,30 @@ test('normalizePageFormat: forgives case and padding, rejects everything else', 
   assert.equal(normalizePageFormat(undefined), null);
 });
 
-test('every accepted format has a body width and a @page keyword', () => {
-  for (const format of PAGE_FORMATS) {
-    assert.ok(PAGE_WIDTHS[format], `no PAGE_WIDTHS entry for ${format}`);
-    assert.ok(PAGE_CSS_SIZE[format], `no PAGE_CSS_SIZE entry for ${format}`);
-  }
-  assert.ok(PAGE_FORMATS.has(DEFAULT_PAGE_FORMAT));
+test('the owner pins its own values', () => {
+  // Written out, never read back from the module. Reading the expected width
+  // out of PAGE_WIDTHS compares the map to itself: with a4 and letter swapped
+  // every test here stayed green, and a payload declaring letter then rendered
+  // a 210mm body onto an 8.5in sheet. That IS the defect this file exists for.
+  assert.deepEqual([...PAGE_FORMATS].sort(), ['a4', 'letter']);
+  assert.deepEqual(PAGE_WIDTHS, { a4: '210mm', letter: '8.5in' });
+  assert.deepEqual(PAGE_CSS_SIZE, { a4: 'A4', letter: 'Letter' });
+  // The project default, as a literal, in the one place no environment can
+  // reach it. Everything below ranks it against whatever profile the machine
+  // carries, so this line is what stops it drifting back to a4.
+  assert.equal(DEFAULT_PAGE_FORMAT, 'letter');
+});
+
+test('the web agrees with the CLI about the sheet', async (t) => {
+  // web/src/lib/page-formats.mjs keeps its own copy of these two constants, and
+  // wiring it to this module means loading it at runtime, so it stays out of
+  // scope here. The two agree today and nothing says they still will, which is
+  // the drift this file exists to stop, one boundary out. It costs two lines.
+  const webOwner = join(ROOT, 'web', 'src', 'lib', 'page-formats.mjs');
+  if (!existsSync(webOwner)) return t.skip('this checkout carries no web/');
+  const web = await import(pathToFileURL(webOwner).href);
+  assert.equal(web.DEFAULT_PAGE_FORMAT, DEFAULT_PAGE_FORMAT);
+  assert.deepEqual([...web.PAGE_FORMATS].sort(), [...PAGE_FORMATS].sort());
 });
 
 // --- the four consumers -------------------------------------------------
@@ -172,6 +195,81 @@ test('generate-pdf: an unrecognized --format is still a hard error', () => {
   });
   assert.notEqual(res.status, 0);
   assert.match(res.stderr, /Invalid format "legal"/);
+});
+
+/**
+ * A throwaway checkout of generate-cover-letter.mjs and its import closure,
+ * with generate-pdf.mjs replaced by a recorder.
+ *
+ * The cover letter imports the renderer lazily, and that import is the one seam
+ * where its page-size decision becomes observable without Chromium. CI installs
+ * with --ignore-scripts and never downloads a browser, so this suite cannot
+ * render a real sheet and read its MediaBox.
+ */
+function coverSandbox() {
+  // realpathSync, not the raw mkdtemp path: isMainModule compares a realpathed
+  // import.meta.url against argv[1], and a spawned copy that fails that check
+  // exits 0 having done nothing (#3165).
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'career-ops-cover-format-')));
+  mkdirSync(join(dir, 'lib'), { recursive: true });
+  mkdirSync(join(dir, 'templates'), { recursive: true });
+  mkdirSync(join(dir, 'output'), { recursive: true });
+  for (const f of ['generate-cover-letter.mjs', 'verify-cv-facts.mjs', 'cv-templates.mjs', 'path-resolver.mjs']) {
+    copyFileSync(join(ROOT, f), join(dir, f));
+  }
+  copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(dir, 'lib', 'is-main-module.mjs'));
+  // The resolver is here so a cover letter that starts calling it fails on the
+  // assertion below and not on a missing module. Resolving early is the quiet
+  // form of this bug: it reads no profile path, so every letter gets the
+  // project default while its CV keeps the user's configured size.
+  copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(dir, 'lib', 'page-format.mjs'));
+  copyFileSync(
+    join(ROOT, 'templates', 'cover-letter-template.html'),
+    join(dir, 'templates', 'cover-letter-template.html'),
+  );
+  // cv-templates.mjs imports js-yaml, which resolves by walking up from the
+  // sandbox's realpath and never reaches the repo's node_modules.
+  linkRepoPackage(dir, 'js-yaml');
+  writeFileSync(join(dir, 'generate-pdf.mjs'), [
+    "import { writeFileSync } from 'node:fs';",
+    "import { dirname, join } from 'node:path';",
+    "import { fileURLToPath } from 'node:url';",
+    'export async function renderHtmlToPdf(html, outputPath, opts = {}) {',
+    "  const here = dirname(fileURLToPath(import.meta.url));",
+    "  writeFileSync(join(here, 'render-opts.json'), JSON.stringify({ format: opts.format ?? null }));",
+    '  return { outputPath, pageCount: 1, size: 0 };',
+    '}',
+    '',
+  ].join('\n'));
+  writeFileSync(join(dir, 'payload.json'), JSON.stringify({
+    candidate: { name: 'Test Candidate' },
+    letter: {
+      role_title: 'Test Engineer',
+      opening: 'Opening sentence.',
+      profile_intro: 'Profile intro.',
+    },
+    output_path: 'output/cover.pdf',
+  }));
+  return dir;
+}
+
+test('generate-cover-letter: the sheet is the renderer\'s to choose', () => {
+  const dir = coverSandbox();
+  const run = (...extra) => {
+    const res = spawnSync(
+      NODE,
+      [join(dir, 'generate-cover-letter.mjs'), '--payload', join(dir, 'payload.json'), ...extra],
+      { cwd: dir, encoding: 'utf-8' },
+    );
+    assert.equal(res.status, 0, res.stdout + res.stderr);
+    return JSON.parse(readFileSync(join(dir, 'render-opts.json'), 'utf-8'));
+  };
+  // Flagless, the CLI states no size, so the letter resolves the same profile
+  // its CV did and lands on the same paper. A fallback of its own here is what
+  // printed the two on different sheets.
+  assert.equal(run().format, null, 'the cover letter chose a paper size of its own');
+  // A flag travels unresolved, for the renderer to rank against the profile.
+  assert.equal(run('--format', 'a4').format, 'a4');
 });
 
 test('no renderer keeps a page-size fallback of its own', () => {
