@@ -7,7 +7,7 @@ import { CompanyLogo } from "@/components/company-logo";
 import { useJobs, type Job } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
 
-type Company = { name: string; status: string; detail: string };
+type Company = { id: string; name: string; status: string; detail: string };
 type Result = { available: boolean; configured: boolean; companies: Company[] };
 
 const TONE: Record<string, { dot: string; label: string; chip: string }> = {
@@ -97,7 +97,7 @@ export function PortalsView() {
             {sorted.map((c) => {
               const t = TONE[c.status] ?? TONE.skipped;
               return (
-                <li key={c.name} className="flex items-center gap-3 px-4 py-2.5">
+                <li key={c.id} className="flex items-center gap-3 px-4 py-2.5">
                   <CompanyLogo name={c.name} size={20} />
                   <span className={cn("size-1.5 shrink-0 rounded-full", t.dot)} />
                   <span className="shrink-0 text-sm font-medium">{c.name}</span>

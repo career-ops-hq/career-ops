@@ -1,5 +1,6 @@
-import { spawn } from "node:child_process";
 import { resolveCli } from "@/lib/clis";
+import { spawnCli } from "@/lib/cli-spawn";
+import { buildCliArgs, detectCliPlaintextError, processStreamJsonLines, usesStreamJson } from "@/lib/cli-stream";
 import { careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
 
 export const runtime = "nodejs"; // child_process (spawn) requires the Node runtime
@@ -89,27 +90,17 @@ export async function POST(req: Request) {
   // The chat CLI is READ-ONLY: all writes go through gated registry actions
   // (remember → /api/memory, setStatus → /api/status), never the CLI editing
   // files directly. Scope its tools so it can advise (read) but not blind-write.
-  const isClaude = cliId === "claude";
-  // allowedTools must be COMMA-separated; disallowedTools is the hard guardrail
-  // so the advisor can read (and WebFetch) but never blind-writes or shells out.
-  const args = isClaude
-    ? [
-        "-p",
+  const streamJson = usesStreamJson(cliId);
+  const args = streamJson
+    ? buildCliArgs(cliId, spec, {
         prompt,
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--include-partial-messages",
-        "--permission-mode",
-        "acceptEdits",
-        "--allowedTools",
-        "Read,WebFetch,Glob,Grep",
-        "--disallowedTools",
-        "Bash,Write,Edit,NotebookEdit,Task",
-      ]
+        permissionMode: cliId === "claude" ? "acceptEdits" : undefined,
+        allowedTools: "Read,WebFetch,Glob,Grep",
+        disallowedTools: "Bash,Write,Edit,NotebookEdit,Task",
+      })
     : spec.args(prompt);
 
-  const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  const child = spawnCli(binPath, args, { cwd: careerOpsRoot() });
 
   const encoder = new TextEncoder();
   // `closed` + kill timer in the OUTER scope so cancel() can flip `closed` before
@@ -155,31 +146,19 @@ export async function POST(req: Request) {
 
       child.stdout.on("data", (d: Buffer) => {
         if (closed) return;
-        if (!isClaude) {
+        if (!streamJson) {
           emit(d.toString());
           return;
         }
-        // line-buffered NDJSON → emit only assistant text deltas
-        buf += d.toString();
-        let nl: number;
-        while ((nl = buf.indexOf("\n")) !== -1) {
-          const line = buf.slice(0, nl).trim();
-          buf = buf.slice(nl + 1);
-          if (!line) continue;
-          try {
-            const obj = JSON.parse(line);
-            if (obj.type === "stream_event" && obj.event?.type === "content_block_delta") {
-              const text = obj.event.delta?.text;
-              if (typeof text === "string") emit(text);
-            }
-          } catch {
-            /* partial / non-json line — skip */
-          }
-        }
+        buf = processStreamJsonLines(cliId, buf + d.toString(), emit, (meta) => {
+          if (meta.authError) safeEnqueue(`\n**Error:** ${meta.authError}\n`);
+        });
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
-        if (/error|not found|denied|fatal/i.test(s)) {
+        const plain = detectCliPlaintextError(s);
+        if (plain) safeEnqueue(`\n**Error:** ${plain}\n`);
+        else if (/error|not found|denied|fatal|proxy is not reachable/i.test(s)) {
           safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`);
         }
       });
@@ -188,9 +167,9 @@ export async function POST(req: Request) {
         safeClose();
       });
       child.on("close", () => {
-        if (!emitted) {
-          safeEnqueue("_(no output — is the CLI authenticated?)_");
-        }
+        const tailErr = detectCliPlaintextError(buf);
+        if (tailErr) safeEnqueue(`\n**Error:** ${tailErr}\n`);
+        else if (!emitted) safeEnqueue("_(no output — is the CLI authenticated? If using FCC, ensure `fcc-server` is running on port 8082.)_");
         safeClose();
       });
     },

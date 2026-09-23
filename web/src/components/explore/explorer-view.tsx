@@ -6,18 +6,23 @@ import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import type { Application, InboxJob } from "@/lib/career-ops";
-import { paramsToFilters, paramsToAi, type ExploreFilters } from "@/lib/explore";
+import { paramsToFilters, paramsToAi, isPortalsParam, type ExploreFilters } from "@/lib/explore";
 import { FilterBuilder } from "./filter-builder";
 import { DiscoveringState } from "./discovering-state";
 import { AiHuntView } from "./ai-hunt-view";
+import { PortalsHuntView } from "./portals-hunt-view";
 import { ExploreModeToggle } from "./explore-mode-toggle";
 import { AiSearchBox } from "./ai-search-box";
+import { PortalsSearchPanel } from "./portals-search-panel";
 import { ResultsList, type EnrichedOffer } from "./results-list";
 import { useExplore } from "./explore-provider";
+// Shared company/role key (#2666) — client cannot reach the core, so the mirror.
+import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
 
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const norm = (s: string) => normalizeTextKey(s, " ");
 const CLI_NAMES: Record<string, string> = {
   claude: "Claude Code",
+  cursor: "Cursor CLI",
   codex: "Codex",
   gemini: "Gemini CLI",
   opencode: "OpenCode",
@@ -32,12 +37,12 @@ export function ExplorerView({
   appsSnapshot,
   rootExists,
 }: {
-  seed: { filters: ExploreFilters; seededFrom: string[] };
+  seed: { filters: ExploreFilters; seededFrom: string[]; profileRoles: string[] };
   inboxSnapshot: InboxJob[];
   appsSnapshot: Application[];
   rootExists: boolean;
 }) {
-  const { filters, setFilters, initFilters, phase, running, offers, discover, status, error, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
+  const { filters, setFilters, initFilters, phase, running, offers, discover, status, error, mode, setMode, aiIntent, setAiIntent, discoverAI, discoverPortals, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
   const scanNote =
     companiesScanned > 0
       ? `Scanned ${companiesScanned.toLocaleString()}${companiesAvailable > companiesScanned ? ` of ${companiesAvailable.toLocaleString()}` : ""} compan${companiesScanned === 1 ? "y" : "ies"}${partial ? " · some sources were unreachable" : ""}.`
@@ -66,6 +71,8 @@ export function ExplorerView({
     if (ai !== null) {
       setMode("ai");
       setAiIntent(ai);
+    } else if (isPortalsParam(sp)) {
+      setMode("portals");
     } else {
       initFilters(sp.toString() ? paramsToFilters(sp) : seed.filters);
       // Onboarding hand-off: ?run=1 auto-fires the free scan + flags the first-run
@@ -95,7 +102,8 @@ export function ExplorerView({
   );
 
   const isAi = mode === "ai";
-  if (running) return isAi ? <AiHuntView cliName={cli.name} /> : <DiscoveringState />;
+  const isPortals = mode === "portals";
+  if (running) return isAi ? <AiHuntView cliName={cli.name} /> : isPortals ? <PortalsHuntView cliName={cli.name} /> : <DiscoveringState />;
 
   const canDiscover = filters.ats.length > 0;
   const isResults = phase === "results";
@@ -117,7 +125,9 @@ export function ExplorerView({
           <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-muted">
             {isAi
               ? "Describe the role in plain language — an AI hunts the open web for it, on your own AI. Candidates are unverified until you evaluate."
-              : "Scan the public ATS network — Greenhouse, Lever, Ashby, Workday. Fresh postings matched to you, zero tokens. You only spend when you choose to evaluate one."}
+              : isPortals
+                ? "Agent WebSearch over your search_queries and websearch companies — broad discovery, uses CLI tokens. Direct boards (Instahyre, Wellfound, RSS) run separately via Pipeline → Portal scan. Candidates are unverified until you evaluate."
+                : "Scan the public ATS network — Greenhouse, Lever, Ashby, Workday. Fresh postings matched to you, zero tokens. You only spend when you choose to evaluate one."}
           </p>
         )}
       </header>
@@ -154,6 +164,48 @@ export function ExplorerView({
             {phase === "failed" && <FailedCard msg={error || status} onRetry={() => void discoverAI()} />}
           </div>
         )
+      ) : isPortals ? (
+        phase === "blocked" ? (
+          <BlockedCard mode="portals" />
+        ) : (
+          <div className="space-y-6">
+            {isResults ? (
+              <div className="rounded-xl border border-border bg-surface/30">
+                <button type="button" onClick={() => setRefineOpen((v) => !v)} className="flex w-full items-center gap-2 px-4 py-3 text-sm font-medium text-foreground">
+                  <Compass className="size-4 text-brand" /> Refine search
+                  <ChevronDown className={cn("ml-auto size-4 text-muted transition-transform", refineOpen && "rotate-180")} />
+                </button>
+                {refineOpen && (
+                  <div className="space-y-4 border-t border-border p-4">
+                    <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} profileRoles={seed.profileRoles} />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-border bg-surface/30 p-5">
+                <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} profileRoles={seed.profileRoles} />
+              </div>
+            )}
+            <PortalsSearchPanel
+              onSubmit={() => void discoverPortals()}
+              cliConfigured={!!cli.id}
+              cliName={cli.name}
+              onRunScan={() => setMode("scan")}
+              label={isResults ? "Search again" : "Run Portals search"}
+            />
+            {phase === "results" && <ResultsList offers={enriched} />}
+            {phase === "empty-loose" && (
+              <EmptyState
+                tone="loose"
+                title="No public matches — yet."
+                body="Your configured job boards & agencies didn't turn up anything new. Try again later, or run the free Scan over the ATS network."
+                onRerun={() => setMode("scan")}
+                rerunLabel="Run the free Scan"
+              />
+            )}
+            {phase === "failed" && <FailedCard msg={error || status} onRetry={() => void discoverPortals()} />}
+          </div>
+        )
       ) : (
         <>
           {isResults ? (
@@ -164,14 +216,14 @@ export function ExplorerView({
               </button>
               {refineOpen && (
                 <div className="space-y-4 border-t border-border p-4">
-                  <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} />
+                  <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} profileRoles={seed.profileRoles} />
                   <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Re-cast (free)" />
                 </div>
               )}
             </div>
           ) : (
             <div className="mb-6 rounded-2xl border border-border bg-surface/30 p-5">
-              <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} />
+              <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} profileRoles={seed.profileRoles} />
               <div className="mt-5">
                 <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Discover (free)" />
               </div>
@@ -367,13 +419,14 @@ function FailedCard({ msg, onRetry }: { msg: string; onRetry: () => void }) {
   );
 }
 
-function BlockedCard() {
+function BlockedCard({ mode = "ai" }: { mode?: "ai" | "portals" }) {
+  const title = mode === "portals" ? "Portals search needs a CLI" : "AI search needs a CLI";
   return (
     <div className="rounded-2xl border border-border bg-surface/30 px-6 py-12 text-center">
       <div className="mx-auto grid size-12 place-items-center rounded-full bg-brand-soft text-brand">
         <Sparkles className="size-6" />
       </div>
-      <h2 className={`${instrumentSerif.className} mt-4 text-2xl text-foreground`}>AI search needs a CLI</h2>
+      <h2 className={`${instrumentSerif.className} mt-4 text-2xl text-foreground`}>{title}</h2>
       <p className="mx-auto mt-1.5 max-w-md text-sm text-muted">
         Connect Claude Code, Gemini, or any agent CLI — your key, your tokens, your machine. The free Scan stays available without one.
       </p>

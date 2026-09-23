@@ -4,14 +4,15 @@ import { use } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X } from "lucide-react";
+import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X, RotateCcw } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { HeroGlow } from "@/components/hero-glow";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 export default function JobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { jobs } = useJobs();
+  const { jobs, retryJob } = useJobs();
   const job = jobs.find((j) => j.id === id);
 
   if (!job) {
@@ -51,6 +52,13 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
             <div className="mt-3 flex flex-wrap items-center gap-2.5">
               <Badge tone={job.result.tone}>{job.result.score}/5</Badge>
               {job.result.summary && <span className="text-sm text-muted">{job.result.summary}</span>}
+            </div>
+          )}
+          {job.status === "error" && job.kind && job.input && (
+            <div className="mt-4">
+              <Button type="button" size="sm" variant="outline" onClick={() => retryJob(job.id)}>
+                <RotateCcw className="size-3.5" /> Retry worker
+              </Button>
             </div>
           )}
         </div>

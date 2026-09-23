@@ -1,0 +1,182 @@
+import type { CliSpec } from "@/lib/clis";
+
+export function usesStreamJson(cliId: string): boolean {
+  return cliId === "claude" || cliId === "cursor";
+}
+
+export type CliSpawnOptions = {
+  prompt: string;
+  permissionMode?: string;
+  allowedTools?: string;
+  disallowedTools?: string;
+  strictMcpConfig?: boolean;
+  /** Cursor CLI: pass --force so node/bash runs aren't blocked by a tight Shell() allowlist. */
+  needsShell?: boolean;
+};
+
+/** Non-streaming headless argv (planner/prefill routes buffer stdout as plain text). */
+export function buildPlannerArgs(cliId: string, spec: CliSpec, opts: CliSpawnOptions): string[] {
+  const { prompt, permissionMode, allowedTools, disallowedTools, strictMcpConfig } = opts;
+  if (cliId === "claude") {
+    const args = ["-p", prompt];
+    if (permissionMode) args.push("--permission-mode", permissionMode);
+    if (strictMcpConfig) args.push("--strict-mcp-config");
+    if (allowedTools) args.push("--allowedTools", allowedTools);
+    if (disallowedTools) args.push("--disallowedTools", disallowedTools);
+    return args;
+  }
+  if (cliId === "cursor") {
+    const args = ["-p", prompt, "--trust"];
+    if (opts.needsShell) args.push("--force");
+    return args;
+  }
+  return spec.args(prompt);
+}
+
+/** Headless argv for a CLI run. Claude/Cursor use stream-json; others use each spec's args(). */
+export function buildCliArgs(cliId: string, spec: CliSpec, opts: CliSpawnOptions): string[] {
+  const { prompt, permissionMode, allowedTools, disallowedTools, strictMcpConfig } = opts;
+  if (cliId === "claude") {
+    const args = ["-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages"];
+    if (permissionMode) args.push("--permission-mode", permissionMode);
+    if (strictMcpConfig) args.push("--strict-mcp-config");
+    if (allowedTools) args.push("--allowedTools", allowedTools);
+    if (disallowedTools) args.push("--disallowedTools", disallowedTools);
+    return args;
+  }
+  if (cliId === "cursor") {
+    const args = ["-p", prompt, "--output-format", "stream-json", "--stream-partial-output", "--trust"];
+    // Headless web workers must run core scripts (merge-tracker, generate-pdf, …).
+    // Cursor's default approvalMode is often "allowlist" with only Shell(ls) —
+    // without --force the agent falls back to Write-only and PDF never renders.
+    if (opts.needsShell) args.push("--force");
+    return args;
+  }
+  return spec.args(prompt);
+}
+
+function claudeAssistantText(obj: Record<string, unknown>): string | null {
+  if (obj.type !== "assistant") return null;
+  const msg = obj.message as { content?: { type?: string; text?: string }[] } | undefined;
+  let text = "";
+  for (const block of msg?.content ?? []) {
+    if (block.type === "text" && block.text) text += block.text;
+  }
+  return text || null;
+}
+
+export function extractStreamText(cliId: string, obj: Record<string, unknown>): string | null {
+  if (cliId === "claude") {
+    if (obj.type === "stream_event") {
+      const e = obj.event as Record<string, unknown> | undefined;
+      if (e?.type !== "content_block_delta") return null;
+      const delta = e.delta as { text?: string } | undefined;
+      return typeof delta?.text === "string" ? delta.text : null;
+    }
+    // Auth failures often arrive as a final assistant frame, not stream_event deltas.
+    return claudeAssistantText(obj);
+  }
+  if (cliId === "cursor") {
+    if (obj.type !== "assistant") return null;
+    // Partial deltas carry timestamp_ms; the final cumulative replay does not.
+    if (!("timestamp_ms" in obj)) return null;
+    const msg = obj.message as { content?: { type?: string; text?: string }[] } | undefined;
+    let text = "";
+    for (const block of msg?.content ?? []) {
+      if (block.type === "text" && block.text) text += block.text;
+    }
+    return text || null;
+  }
+  return null;
+}
+
+/** Plain-text startup failures (e.g. fcc-claude when fcc-server is down). */
+export function detectCliPlaintextError(text: string): string | null {
+  const t = text.trim();
+  if (!t || t.startsWith("{")) return null;
+  if (/Free Claude Code proxy is not reachable/i.test(t)) {
+    const hint = /:3001\b/.test(t)
+      ? "fcc-claude was pointed at the career-ops web port (3001) instead of fcc-server (8082). Restart the web UI after updating."
+      : t.includes("fcc-server")
+        ? t
+        : `${t}\nStart the proxy in another terminal: fcc-server`;
+    return hint;
+  }
+  return null;
+}
+
+export type StreamMeta = {
+  tokens?: number;
+  costUsd?: number | null;
+  toolName?: string;
+  status?: string;
+  /** Set when the CLI reports an auth/login failure in stream-json output. */
+  authError?: string;
+};
+
+export function extractStreamMeta(cliId: string, obj: Record<string, unknown>): StreamMeta | null {
+  if (cliId === "claude") {
+    if (obj.type === "stream_event") {
+      const e = obj.event as Record<string, unknown> | undefined;
+      if (e?.type === "content_block_start") {
+        const cb = e.content_block as { type?: string; name?: string } | undefined;
+        if (cb?.type === "tool_use" && cb.name) return { toolName: cb.name };
+      }
+      return null;
+    }
+    if (obj.type === "assistant" && obj.error === "authentication_failed") {
+      const text = claudeAssistantText(obj);
+      return { authError: text || "Failed to authenticate — run `claude login` in a terminal, then retry." };
+    }
+    if (obj.type === "system" && obj.subtype === "init") return { status: "Agent ready" };
+    if (obj.type === "result") {
+      if (obj.is_error && typeof obj.result === "string" && /auth/i.test(obj.result)) {
+        return { authError: obj.result };
+      }
+      const u = obj.usage as Record<string, number> | undefined;
+      const tokens = u
+        ? (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0)
+        : undefined;
+      const costUsd = typeof obj.total_cost_usd === "number" ? obj.total_cost_usd : null;
+      return { tokens, costUsd };
+    }
+    return null;
+  }
+  if (cliId === "cursor") {
+    if (obj.type === "system" && obj.subtype === "init") return { status: "Agent ready" };
+    if (obj.type === "result" && obj.subtype === "success") {
+      const u = obj.usage as Record<string, number> | undefined;
+      const tokens = u ? (u.inputTokens || 0) + (u.outputTokens || 0) : undefined;
+      return { tokens, costUsd: null };
+    }
+    return null;
+  }
+  return null;
+}
+
+/** Line-buffer NDJSON from a stream-json CLI; returns the leftover partial line. */
+export function processStreamJsonLines(
+  cliId: string,
+  buf: string,
+  onText: (text: string) => void,
+  onMeta?: (meta: StreamMeta) => void,
+): string {
+  let remaining = buf;
+  let nl: number;
+  while ((nl = remaining.indexOf("\n")) !== -1) {
+    const line = remaining.slice(0, nl).trim();
+    remaining = remaining.slice(nl + 1);
+    if (!line) continue;
+    try {
+      const obj = JSON.parse(line) as Record<string, unknown>;
+      const text = extractStreamText(cliId, obj);
+      if (text) onText(text);
+      const meta = extractStreamMeta(cliId, obj);
+      if (meta && onMeta) onMeta(meta);
+    } catch {
+      const plainErr = detectCliPlaintextError(line);
+      if (plainErr && onMeta) onMeta({ authError: plainErr });
+    }
+  }
+  return remaining;
+}

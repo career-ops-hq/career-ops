@@ -1,10 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Bookmark, BookmarkCheck, Loader2, X } from "lucide-react";
+import { Bookmark, BookmarkCheck, ExternalLink, Loader2, X } from "lucide-react";
 import type { InboxJob } from "@/lib/career-ops";
-import type { AtsSource } from "@/lib/explore";
-import { ATS_LABEL } from "@/lib/explore";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { cn } from "@/lib/cn";
@@ -35,7 +33,7 @@ export function TriageRow({
   onSkip,
 }: {
   job: InboxJob;
-  source: AtsSource | null;
+  source: string | null;
   age: number | null;
   scored?: RowScore;
   selected: boolean;
@@ -46,6 +44,7 @@ export function TriageRow({
 }) {
   const ago = agoLabel(age);
   const evaluated = !!scored && (scored.running || scored.score != null);
+  const isWebUrl = /^https?:\/\//i.test(job.url);
 
   return (
     <li
@@ -67,14 +66,31 @@ export function TriageRow({
       <CompanyLogo name={job.company} size={20} />
 
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm">
-          <span className="font-medium text-foreground">{job.company}</span>
-          <span className="text-muted"> · {job.role}</span>
-        </p>
+        {isWebUrl ? (
+          <a
+            href={job.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open the posting"
+            className="group/link flex min-w-0 items-center gap-1.5 truncate text-sm"
+          >
+            <span className="truncate">
+              <span className="font-medium text-foreground group-hover/link:text-brand">{job.company}</span>
+              <span className="text-muted"> · {job.role}</span>
+            </span>
+            <ExternalLink className="size-3 shrink-0 text-faint transition-colors group-hover/link:text-brand" />
+          </a>
+        ) : (
+          <p className="truncate text-sm">
+            <span className="font-medium text-foreground">{job.company}</span>
+            <span className="text-muted"> · {job.role}</span>
+          </p>
+        )}
         <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-faint">
           {job.location && <span className="truncate">{job.location}</span>}
-          {source && <span className="rounded bg-surface-hover px-1 py-px font-medium text-muted">{ATS_LABEL[source]}</span>}
+          {source && <span className="rounded bg-surface-hover px-1 py-px font-medium text-muted">{source}</span>}
           {ago && <span>{ago}</span>}
+          {!isWebUrl && <span className="italic">pasted JD — no link</span>}
           {/* 🔴 CRUDA: honest "not scored" — no fabricated match%. */}
           {!evaluated && <span className="italic text-muted">not scored</span>}
         </p>

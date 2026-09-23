@@ -13,13 +13,19 @@ export type EnrichedOffer = DiscoveredOffer & { inPipeline: boolean; evaluatedN?
 export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
   const { companiesScanned, partial, addToPipeline, added, mode } = useExplore();
   const isAi = mode === "ai";
+  const isPortals = mode === "portals";
+  const spends = isAi || isPortals;
   const [sort, setSort] = useState<"fresh" | "company">("fresh");
   const [q, setQ] = useState("");
 
   const view = useMemo(() => {
     const needle = q.trim().toLowerCase();
     let list = offers;
-    if (needle) list = list.filter((o) => o.title.toLowerCase().includes(needle) || o.company.toLowerCase().includes(needle));
+    if (needle) {
+      list = list.filter(
+        (o) => o.title.toLowerCase().includes(needle) || o.company.toLowerCase().includes(needle) || o.location.toLowerCase().includes(needle),
+      );
+    }
     const sorted = [...list].sort((a, b) =>
       sort === "fresh" ? (b.postedAt || "").localeCompare(a.postedAt || "") : a.company.localeCompare(b.company),
     );
@@ -33,13 +39,15 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
       <div className="flex flex-wrap items-center gap-3">
         <div>
           <p className="text-sm text-foreground">
-            <span className="font-semibold">{offers.length}</span> {isAi ? `candidate${offers.length === 1 ? "" : "s"}` : `fresh role${offers.length === 1 ? "" : "s"}`}
-            <CostBadge kind={isAi ? "spend" : "free-network"} size="xs" className="ml-2 align-middle" />
+            <span className="font-semibold">{offers.length}</span> {spends ? `candidate${offers.length === 1 ? "" : "s"}` : `fresh role${offers.length === 1 ? "" : "s"}`}
+            <CostBadge kind={spends ? "spend" : "free-network"} size="xs" className="ml-2 align-middle" />
           </p>
           <p className="text-[12px] text-faint">
             {isAi
               ? "found by AI on the open web · unverified until you evaluate"
-              : `${companiesScanned > 0 ? `${companiesScanned.toLocaleString()} companies scanned · ` : ""}0 tokens spent${partial ? " · some boards were unreachable (normal for public directories)" : ""}`}
+              : isPortals
+                ? "found via your configured job boards & agencies · unverified until you evaluate"
+                : `${companiesScanned > 0 ? `${companiesScanned.toLocaleString()} companies scanned · ` : ""}0 tokens spent${partial ? " · some boards were unreachable (normal for public directories)" : ""}`}
           </p>
         </div>
 
@@ -49,10 +57,21 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Filter results…"
-              className="w-32 bg-transparent text-[13px] outline-none placeholder:text-faint"
+              placeholder="Filter title, company, location…"
+              className="w-40 bg-transparent text-[13px] outline-none placeholder:text-faint sm:w-52"
             />
           </div>
+          <button
+            type="button"
+            onClick={() => setQ((cur) => (cur.trim().toLowerCase() === "india" ? "" : "india"))}
+            aria-pressed={q.trim().toLowerCase() === "india"}
+            className={cn(
+              "whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-[12px] font-medium transition-colors",
+              q.trim().toLowerCase() === "india" ? "border-brand/40 bg-brand-soft text-brand" : "border-border bg-surface/40 text-muted hover:text-foreground",
+            )}
+          >
+            India only
+          </button>
           <div className="inline-flex rounded-lg border border-border bg-surface/40 p-0.5 text-xs">
             {(["fresh", "company"] as const).map((s) => (
               <button

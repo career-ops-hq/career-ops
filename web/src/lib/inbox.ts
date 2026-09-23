@@ -4,24 +4,25 @@
 // buckets so the cheap facet filters can narrow the firehose with zero tokens.
 
 import type { AtsSource } from "@/lib/explore";
+import { sourceFromJobUrl, sourceLabel as scanSourceLabel } from "@/lib/scan-sources";
 
 /** Which ATS a posting lives on, derived from its URL host (0 tokens, no network).
- *  Matches on the registrable domain anchored at a dot boundary (host === base OR
- *  host ends with ".base") — never a bare substring, so "greenhouse.io.evil.com"
- *  or "notlever.co" can't be misread as that ATS. */
+ *  Kept for callers that need the narrow AtsSource union; sourceLabel is preferred
+ *  for display (covers job boards like Instahyre / Wellfound too). */
 export function sourceFromUrl(url: string): AtsSource | null {
-  let host = "";
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
-  const domainIs = (base: string) => host === base || host.endsWith(`.${base}`);
-  if (domainIs("greenhouse.io")) return "greenhouse";
-  if (domainIs("lever.co")) return "lever";
-  if (domainIs("ashbyhq.com")) return "ashby";
-  if (domainIs("myworkdayjobs.com") || domainIs("workday.com")) return "workday";
+  const label = sourceFromJobUrl(url);
+  if (label === "Greenhouse") return "greenhouse";
+  if (label === "Lever") return "lever";
+  if (label === "Ashby") return "ashby";
+  if (label === "Workday") return "workday";
   return null;
+}
+
+/** The REAL recorded source for a posting — data/scan-history.tsv's "portal"
+ *  column (joined server-side onto InboxJob.source), e.g. "greenhouse-api" ->
+ *  "Greenhouse", "board-browser-api" -> "Board browser". */
+export function sourceLabel(url: string, recordedSource: string | undefined): string | null {
+  return scanSourceLabel(url, recordedSource);
 }
 
 // Coarse seniority buckets, detected from the title. Ordered senior→junior so the

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, X, Loader2, AlertTriangle } from "lucide-react";
+import { Check, X, Loader2, AlertTriangle, RotateCcw } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
 
@@ -24,10 +24,18 @@ const humanizeStep = (label: string): string => STEP_LABELS[label] ?? label;
 
 // Auth/sign-in failures are the most common real error — detect them so we can give
 // a concrete next step instead of a dead end (#8).
+// Require an explicit auth-failure phrase. Bare `auth` matches "author",
+// research prose, etc., and used to show "Sign your CLI…" on healthy runs.
 function isAuthError(job: Job): boolean {
   if (job.status !== "error") return false;
   const hay = `${job.steps[job.steps.length - 1]?.label ?? ""} ${job.text}`.toLowerCase();
-  return /auth|login|sign[ -]?in|credential|api[ -]?key|unauthorized|not authenticated|installed and authenticated/.test(hay);
+  return /not authenticated|authentication failed|failed to authenticate|unauthorized|sign[ -]?in|login failed|invalid api[ -]?key|no cli configured|installed and authenticated|fcc-server|proxy is not reachable/.test(hay);
+}
+
+function isFccProxyError(job: Job): boolean {
+  if (job.status !== "error") return false;
+  const hay = `${job.steps[job.steps.length - 1]?.label ?? ""} ${job.text}`.toLowerCase();
+  return /fcc-server|proxy is not reachable/.test(hay);
 }
 
 const fmtElapsed = (ms: number): string => {
@@ -72,10 +80,12 @@ export function WorkerCard({
   job,
   variant = "tray",
   trailing,
+  onRetry,
 }: {
   job: Job;
   variant?: "tray" | "inline";
   trailing?: React.ReactNode;
+  onRetry?: () => void;
 }) {
   const tone = TONE[pillTone(job)];
   const running = job.status === "running";
@@ -86,6 +96,7 @@ export function WorkerCard({
   const inline = variant === "inline";
   const hasScore = job.result?.score != null;
   const authError = isAuthError(job);
+  const fccProxyError = isFccProxyError(job);
   const tokens = job.status === "done" ? job.cost?.tokens ?? 0 : 0;
 
   return (
@@ -126,10 +137,31 @@ export function WorkerCard({
           {running ? `${last ?? "Working"} · ${fmtElapsed(elapsed)}` : bottom}
         </div>
       )}
-      {authError && (
+      {fccProxyError && (
+        <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
+          Start <code className="font-mono">fcc-server</code> in a terminal, then re-run.
+        </div>
+      )}
+      {authError && !fccProxyError && (
         <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
           Sign your CLI in from Config, then re-run.
         </div>
+      )}
+      {job.status === "error" && onRetry && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onRetry();
+          }}
+          className={cn(
+            "mt-2 inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand",
+            inline ? "text-xs" : "text-[10px]",
+          )}
+        >
+          <RotateCcw className="size-3" /> Retry
+        </button>
       )}
       {tokens > 0 && (
         <div className={cn("mt-1 text-faint tabular-nums", inline ? "text-xs" : "text-[10px]")}>

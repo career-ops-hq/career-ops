@@ -2,34 +2,91 @@ import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 
-/**
- * Locate the tailored CV PDF the real `pdf` mode wrote to output/ for a given
- * company (newest match wins). STRICT company match — never returns a CV tailored
- * for a different company (we'd rather attach nothing than the wrong CV). Mirrors
- * the matching in /api/cv-pdf so the "View tailored CV" link and the apply
- * file-upload always resolve to the SAME file. Returns an absolute path or null.
- */
-export function resolveTailoredCv(company?: string): string | null {
-  const c = (company ?? "").trim();
-  if (!c) return null;
-  const dir = path.join(careerOpsRoot(), "output");
-  let files: string[];
+const OUTPUT_DIR = () => path.join(careerOpsRoot(), "output");
+const PDF_INDEX = () => path.join(careerOpsRoot(), "data", "pdf-index.tsv");
+
+/** cv-shivanand-shah-acme-2026-01-01.pdf — not *-cover.pdf */
+function isTailoredCvFilename(name: string): boolean {
+  const l = name.toLowerCase();
+  return l.startsWith("cv-") && l.endsWith(".pdf") && !l.endsWith("-cover.pdf");
+}
+
+/** acme-senior-pm-cover.pdf */
+function isCoverLetterFilename(name: string): boolean {
+  return name.toLowerCase().endsWith("-cover.pdf");
+}
+
+/** Token slug from a company name (CodeQL-safe: extract tokens, no replace-then-trim). */
+export function companySlug(company: string): string {
+  return (company.toLowerCase().match(/[a-z0-9]+/g) ?? []).join("-");
+}
+
+/** Match company slug at a token boundary inside a filename. */
+function filenameMatchesCompany(filename: string, slug: string): boolean {
+  if (!slug) return false;
+  const re = new RegExp(`(^|[^a-z0-9])${slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`, "i");
+  return re.test(filename.toLowerCase());
+}
+
+function normReportNum(s: string): string {
+  return String(s ?? "").trim().replace(/^0+(?=\d)/, "");
+}
+
+/** Lookup tailored CV path from data/pdf-index.tsv by report number. */
+export function resolveTailoredCvByReport(report?: string): string | null {
+  const n = normReportNum(report ?? "");
+  if (!n) return null;
+  let text: string;
   try {
-    files = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith(".pdf"));
+    text = fs.readFileSync(PDF_INDEX(), "utf-8");
   } catch {
     return null;
   }
-  // Token-extract instead of replace-then-trim: same slug, and no `-+$`-style
-  // pattern that backtracks polynomially on adversarial input (CodeQL).
-  const slug = (c.toLowerCase().match(/[a-z0-9]+/g) ?? []).join("-");
-  const first = slug.split("-")[0];
-  const matches = files.filter((f) => {
-    const l = f.toLowerCase();
-    return l.includes(slug) || (first.length > 2 && l.includes(first));
-  });
-  if (!matches.length) return null;
-  matches.sort((a, b) => fs.statSync(path.join(dir, b)).mtimeMs - fs.statSync(path.join(dir, a)).mtimeMs);
-  return path.join(dir, matches[0]);
+  for (const line of text.split("\n")) {
+    if (!line.trim() || line.startsWith("#")) continue;
+    const [reportCol, pdfCol] = line.split("\t");
+    if (!reportCol?.trim() || !pdfCol?.trim()) continue;
+    if (normReportNum(reportCol) !== n) continue;
+    const rel = pdfCol.trim();
+    const abs = path.isAbsolute(rel) ? rel : path.join(careerOpsRoot(), rel);
+    if (fs.existsSync(abs) && isTailoredCvFilename(path.basename(abs))) return abs;
+  }
+  return null;
+}
+
+function newestMatchingPdf(dir: string, filter: (name: string) => boolean, slug: string): string | null {
+  let files: string[];
+  try {
+    files = fs.readdirSync(dir).filter((f) => filter(f) && filenameMatchesCompany(f, slug));
+  } catch {
+    return null;
+  }
+  if (!files.length) return null;
+  files.sort((a, b) => fs.statSync(path.join(dir, b)).mtimeMs - fs.statSync(path.join(dir, a)).mtimeMs);
+  return path.join(dir, files[0]);
+}
+
+/**
+ * Locate the tailored CV PDF the real `pdf` mode wrote to output/ for a given
+ * company (newest match wins). Only considers `cv-*.pdf` files — never cover
+ * letters. When report is provided, pdf-index.tsv is checked first.
+ */
+export function resolveTailoredCv(company?: string, report?: string): string | null {
+  const fromIndex = resolveTailoredCvByReport(report);
+  if (fromIndex) return fromIndex;
+
+  const c = (company ?? "").trim();
+  if (!c) return null;
+  return newestMatchingPdf(OUTPUT_DIR(), isTailoredCvFilename, companySlug(c));
+}
+
+/**
+ * Locate the cover letter PDF for a company (newest `*-cover.pdf` match).
+ */
+export function resolveCoverLetter(company?: string): string | null {
+  const c = (company ?? "").trim();
+  if (!c) return null;
+  return newestMatchingPdf(OUTPUT_DIR(), isCoverLetterFilename, companySlug(c));
 }
 
 /**

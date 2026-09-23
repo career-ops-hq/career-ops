@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { DEFAULT_FILTERS, cleanChips, type ExploreFilters } from "@/lib/explore";
 
@@ -62,7 +62,7 @@ export function cleanupTempPortals(file: string): void {
   }
 }
 
-function loadYaml(rel: string): Record<string, unknown> | null {
+export function loadYaml(rel: string): Record<string, unknown> | null {
   try {
     const doc = yaml.load(fs.readFileSync(path.join(careerOpsRoot(), rel), "utf8"));
     return doc && typeof doc === "object" ? (doc as Record<string, unknown>) : null;
@@ -77,9 +77,23 @@ function loadYaml(rel: string): Record<string, unknown> | null {
  * config/profile.yml (target_roles, location) for the positive keywords when
  * portals has none. Never throws — a bare checkout just yields DEFAULT_FILTERS.
  */
-export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: string[] } {
+/** Target role labels from config/profile.yml (primary + archetype names). */
+export function loadProfileRoleLabels(): string[] {
+  const profile = loadYaml("config/profile.yml");
+  const roles = (profile?.target_roles ?? {}) as Record<string, unknown>;
+  const primary = listFrom(roles.primary);
+  const archetypes = Array.isArray(roles.archetypes)
+    ? roles.archetypes
+        .map((a) => (a && typeof a === "object" && "name" in a ? String((a as { name: string }).name) : ""))
+        .filter(Boolean)
+    : [];
+  return listFrom([...primary, ...archetypes]);
+}
+
+export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: string[]; profileRoles: string[] } {
   const filters: ExploreFilters = { ...DEFAULT_FILTERS, ats: [...DEFAULT_FILTERS.ats] };
   const seededFrom: string[] = [];
+  const profileRoles = loadProfileRoleLabels();
 
   const portals = loadYaml("portals.yml");
   if (portals) {
@@ -106,7 +120,7 @@ export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: str
     }
   }
 
-  return { filters, seededFrom };
+  return { filters, seededFrom, profileRoles };
 }
 
 export { listFrom as normalizeKeywords };

@@ -1,6 +1,8 @@
-import { spawn } from "node:child_process";
 import type { Frame } from "playwright-core";
 import { resolveCli } from "@/lib/clis";
+import { spawnCli } from "@/lib/cli-spawn";
+import { buildPlannerArgs } from "@/lib/cli-stream";
+import type { CliSpec } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import type { ApplyField } from "./extract";
 
@@ -79,10 +81,16 @@ Return ONLY a JSON array, no prose, no code fence:
 [{"n":0,"skip":false,"label":"First Name","type":"text","options":[],"required":true}, ...]`;
 }
 
-function runPlanner(binPath: string, isClaude: boolean, argsFor: (p: string) => string[], prompt: string): Promise<string> {
-  const args = isClaude ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"] : argsFor(prompt);
+function runPlanner(binPath: string, cliId: string, spec: CliSpec, prompt: string): Promise<string> {
+  const args = buildPlannerArgs(cliId, spec, {
+    prompt,
+    permissionMode: cliId === "claude" ? "acceptEdits" : undefined,
+    strictMcpConfig: cliId === "claude",
+    allowedTools: "Read",
+    disallowedTools: "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch",
+  });
   return new Promise((resolve) => {
-    const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawnCli(binPath, args, { cwd: careerOpsRoot() });
     let buf = "";
     child.stdout.on("data", (d: Buffer) => (buf += d.toString()));
     child.stderr.on("data", () => {});
@@ -115,7 +123,7 @@ export async function agentInterpretForm(frame: Frame, cliId: string, title: str
   const cands = await captureCandidates(frame).catch(() => [] as Cand[]);
   if (!cands.length) return [];
 
-  const out = await runPlanner(resolved.binPath, cliId === "claude", resolved.spec.args, buildPrompt(title, cands));
+  const out = await runPlanner(resolved.binPath, cliId, resolved.spec, buildPrompt(title, cands));
   const m = out.match(/\[[\s\S]*\]/);
   if (!m) return [];
   let parsed: Interpreted[];

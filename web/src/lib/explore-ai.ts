@@ -1,5 +1,5 @@
 // Client-safe (NO node imports) tolerant streaming parser for the AI-search
-// `<<offer:{...}>>` envelopes emitted by modes/discover.md. Modeled on the
+// `<<offer:{...}>>` envelopes emitted by modes/hunt.md. Modeled on the
 // assistant console's <<act:>> envelope parsing, factored out so the grammar
 // can't drift. The load-bearing requirement: an envelope (or its opener) split
 // across stream chunk boundaries must BUFFER, never flush as garbage or drop.

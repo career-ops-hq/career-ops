@@ -66,12 +66,20 @@ export function loadHeaderAliases(rootDir) {
 }
 
 /**
- * Split a tracker line into trimmed cells (outer pipes removed).
+ * Split a tracker line into trimmed cells, matching tracker-parse.mjs's
+ * dynamic width handling (short rows without a trailing pipe stay complete;
+ * interior gaps still shift later columns and are rejected by the width check).
  * @param {string} line
- * @returns {string[]}
+ * @returns {string[]} outer-pipe-stripped cells (leading/trailing '' dropped only when the pipes are present).
  */
 function trackerCells(line) {
-  return line.split("|").slice(1, -1).map((c) => c.trim());
+  const parts = line.split('|').map((c) => c.trim());
+  // A complete row starts with '' (leading pipe) and ends with '' (trailing
+  // pipe). Hand-edited rows without the trailing pipe are one part narrower
+  // but still complete — same rule as parseTrackerRow in tracker-parse.mjs.
+  if (parts.length > 0 && parts[0] === '') parts.shift();
+  if (parts.length > 0 && parts[parts.length - 1] === '') parts.pop();
+  return parts;
 }
 
 /**
@@ -115,11 +123,21 @@ export function parseApplications(md, rootDir) {
   const lines = md.split("\n");
   const map = detectColumnMap(lines, loadHeaderAliases(rootDir));
   const rows = [];
+  // Width required by the detected map — same formula as parseTrackerRow in
+  // tracker-parse.mjs: every mapped index must be covered, not merely the
+  // highest one against a hardcoded floor. Legacy fallback keeps the 9-column
+  // fixed layout (n date company role score status pdf report notes).
+  const mapWidth = map
+    ? Math.max(...Object.values(map)) + 1
+    : 9;
   for (const raw of lines) {
     const line = raw.trim();
     if (!line.startsWith("|")) continue;
     const cells = trackerCells(line);
-    if (cells.length < 8) continue;
+    // Dynamic width guard: a missing INTERIOR cell shifts every later column
+    // left while a short row still clears a fixed floor — require the full
+    // width rather than mere coverage of the highest mapped index.
+    if (cells.length < mapWidth) continue;
     if (map) {
       const at = (/** @type {string} */ k) => cells[map[k]] ?? "";
       if (!/^\d+$/.test(at("n"))) continue; // header / separator / malformed

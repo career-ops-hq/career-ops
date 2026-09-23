@@ -1,7 +1,8 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
+import { spawnCli } from "@/lib/cli-spawn";
+import { buildPlannerArgs } from "@/lib/cli-stream";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { getSession } from "@/lib/apply/session";
 
@@ -120,7 +121,8 @@ export async function POST(req: Request) {
 
       const s = sessionId ? getSession(sessionId) : undefined;
       if (!s) return fail("apply session not found (it may have expired)");
-      const resolved = cliId ? resolveCli(cliId) : null;
+      if (!cliId) return fail("cliId required");
+      const resolved = resolveCli(cliId);
       if (!resolved) return fail(`CLI '${cliId}' not found on this machine`);
       const { spec, binPath } = resolved;
 
@@ -144,20 +146,20 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
       log(`Form: "${s.title}" · ${s.fields.length} fields · prompt ${prompt.length} chars · memory ${mem.length} chars`);
       log(`Planner: ${cliId} (${binPath})`);
 
-      const isClaude = cliId === "claude";
-      // --strict-mcp-config with no --mcp-config = load ZERO MCP servers → much
-      // faster startup (skips the user's global playwright/gmail/linear/… servers
-      // the planner doesn't need; it only reads local files).
-      const args = isClaude
-        ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read,Glob,Grep", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"]
-        : spec.args(prompt);
+      const args = buildPlannerArgs(cliId, spec, {
+        prompt,
+        permissionMode: cliId === "claude" ? "acceptEdits" : undefined,
+        strictMcpConfig: cliId === "claude",
+        allowedTools: "Read,Glob,Grep",
+        disallowedTools: "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch",
+      });
       // Scale the timeout with form size (big forms = more drafting). Cap < maxDuration.
       const killMs = Math.min(300_000, 150_000 + s.fields.length * 6_000);
       log(`Spawning planner (timeout ${Math.round(killMs / 1000)}s)…`);
 
       const result = await new Promise<{ buf: string; code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
         // stdin = /dev/null so the CLI doesn't wait 3s for piped input.
-        const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+        const child = spawnCli(binPath, args, { cwd: careerOpsRoot() });
         let buf = "";
         let firstByteAt = 0;
         const hb = setInterval(() => {

@@ -1,8 +1,9 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
+import { spawnCli } from "@/lib/cli-spawn";
+import { buildCliArgs, processStreamJsonLines, usesStreamJson } from "@/lib/cli-stream";
 import { careerOpsRoot } from "@/lib/career-ops";
 
 // Parse a CV (pasted text or an uploaded PDF) into clean cv.md markdown by running
@@ -16,7 +17,7 @@ export const maxDuration = 300;
 
 // Prefer the CANONICAL core mode (single source of truth — CLI + web parse CVs
 // identically); fall back to the inline prompt until modes/cv-ingest.md lands
-// (exactly how the explore route handles a missing discover.md).
+// (exactly how the explore route handles a missing hunt.md).
 function readCanonicalMode(): string | null {
   try {
     return fs.readFileSync(path.join(careerOpsRoot(), "modes", "cv-ingest.md"), "utf8");
@@ -75,10 +76,9 @@ export async function POST(req: Request) {
       cliId = String(form.get("cliId") || "");
       const file = form.get("file");
       if (!(file instanceof File)) return Response.json({ error: "no file" }, { status: 400 });
-      // Reading a PDF/DOCX from a path needs the CLI's file tool, which only Claude
-      // is granted here. Tell non-Claude users plainly instead of failing opaquely.
-      if (cliId !== "claude" && /\.(pdf|docx)$/i.test(file.name)) {
-        return Response.json({ error: "PDF upload needs Claude Code — paste your CV text instead." }, { status: 400 });
+      // Reading a PDF/DOCX from a path needs the CLI's file tool (Claude/Cursor).
+      if (!usesStreamJson(cliId) && /\.(pdf|docx)$/i.test(file.name)) {
+        return Response.json({ error: "PDF upload needs Claude Code or Cursor CLI — paste your CV text instead." }, { status: 400 });
       }
       const ext = (file.name.match(/\.[a-z0-9]+$/i)?.[0] || ".pdf").toLowerCase();
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-cv-"));
@@ -99,27 +99,19 @@ export async function POST(req: Request) {
   }
   const { spec, binPath } = resolved;
   const prompt = ingestPrompt(promptSource);
-  const isClaude = cliId === "claude";
-  const args = isClaude
-    ? [
-        "-p",
+  const streamJson = usesStreamJson(cliId);
+  const args = streamJson
+    ? buildCliArgs(cliId, spec, {
         prompt,
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--include-partial-messages",
-        "--permission-mode",
-        "acceptEdits",
-        "--allowedTools",
-        "Read,Glob,Grep", // read the temp PDF; CANNOT write/edit/shell (proposer)
-        "--disallowedTools",
-        "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch",
-      ]
+        permissionMode: cliId === "claude" ? "acceptEdits" : undefined,
+        allowedTools: "Read,Glob,Grep",
+        disallowedTools: "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch",
+      })
     : spec.args(prompt);
 
   let child;
   try {
-    child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+    child = spawnCli(binPath, args, { cwd: careerOpsRoot() });
   } catch (e) {
     if (tempFile) cleanupTemp(tempFile); // never leak the CV temp if spawn throws sync
     return Response.json({ error: e instanceof Error ? e.message : "failed to start the CLI" }, { status: 500 });
@@ -174,26 +166,11 @@ export async function POST(req: Request) {
 
       child.stdout.on("data", (d: Buffer) => {
         if (closed) return;
-        if (!isClaude) {
+        if (!streamJson) {
           emit(d.toString());
           return;
         }
-        buf += d.toString();
-        let nl: number;
-        while ((nl = buf.indexOf("\n")) !== -1) {
-          const line = buf.slice(0, nl).trim();
-          buf = buf.slice(nl + 1);
-          if (!line) continue;
-          try {
-            const obj = JSON.parse(line);
-            if (obj.type === "stream_event" && obj.event?.type === "content_block_delta") {
-              const text = obj.event.delta?.text;
-              if (typeof text === "string") emit(text);
-            }
-          } catch {
-            /* partial / non-json line */
-          }
-        }
+        buf = processStreamJsonLines(cliId, buf + d.toString(), emit);
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();

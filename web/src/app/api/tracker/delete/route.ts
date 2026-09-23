@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { careerOpsRoot, rootScript, trackerCanDelete } from "@/lib/career-ops";
+import { cliChildEnv } from "@/lib/cli-spawn";
 import { isTrackerWriting } from "@/lib/core/run-registry";
 
 export const runtime = "nodejs";
@@ -63,7 +64,8 @@ export async function POST(req: Request) {
       let err = "";
       let child;
       try {
-        child = spawn(process.execPath, args, { cwd: careerOpsRoot(), env: process.env });
+        const cwd = careerOpsRoot();
+        child = spawn(process.execPath, args, { cwd, env: cliChildEnv(process.execPath, cwd, process.env) });
       } catch (e) {
         resolve({ code: 1, err: e instanceof Error ? e.message : "failed to start tracker.mjs" });
         return;

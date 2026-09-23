@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { parseApplications } from "@/lib/tracker-table.mjs";
+import { resolveTailoredCv } from "@/lib/apply/cv";
 
 /**
  * Resolve the career-ops "home" — the directory holding the user's sibling
@@ -26,6 +27,19 @@ export function rootScript(nameNoExt: string): string {
   return path.join(careerOpsRoot(), `${nameNoExt}.mjs`);
 }
 
+/**
+ * Live core normalizeTextKey (tracker-parse.mjs) for server routes. Dynamic
+ * import so we always derive from the user's checkout, never a stale copy
+ * (#2666 — whats-new must key companies the same way as the tracker).
+ */
+export async function getNormalizeTextKey(): Promise<(value: unknown, separator?: string) => string> {
+  const { pathToFileURL } = await import("node:url");
+  const mod = (await import(pathToFileURL(path.join(careerOpsRoot(), "tracker-parse.mjs")).href)) as {
+    normalizeTextKey: (value: unknown, separator?: string) => string;
+  };
+  return mod.normalizeTextKey;
+}
+
 // Feature-detect the core's `tracker.mjs delete --num` row-delete (#1200) by probing
 // the local script source — older checkouts lack it, so the delete UI hides itself.
 export function trackerCanDelete(): boolean {
@@ -45,7 +59,19 @@ function read(rel: string): string | null {
   }
 }
 
-export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; done: boolean; postedAt?: string };
+export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; done: boolean; postedAt?: string; source?: string };
+
+/** Some ingest sources (career-ops-plugin-linkedin-alerts) can't always parse a
+ *  company out of an alert email subject and fall back to the literal "(LinkedIn)"
+ *  placeholder, folding the real company into the role instead — e.g. company:
+ *  "(LinkedIn)", role: "Product Manager at Nykaa". Presentation-only fix (the
+ *  underlying pipeline.md row is untouched): split it back into real company/role
+ *  wherever the placeholder shows up, so the Inbox tab doesn't show a dead company. */
+function splitLinkedinAlertPlaceholder(company: string, role: string): { company: string; role: string } {
+  if (company !== "(LinkedIn)") return { company, role };
+  const m = role.match(/^(.+?)\s+at\s+(.+)$/i);
+  return m ? { role: m[1].trim(), company: m[2].trim() } : { company, role };
+}
 
 /** A pipeline-row segment like `posted: 2026-07-14`, `trust: 62 stale` or
  *  `note: …` — the core appends these LABELED segments after whatever
@@ -79,11 +105,12 @@ export function readInbox(): InboxJob[] {
     }
     if (parts.length < 3 || !parts[0]) continue; // need at least url | company | role
     const posted = labels.get("posted");
+    const { company, role } = splitLinkedinAlertPlaceholder(parts[1], parts[2]);
     jobs.push({
       done: m[1].toLowerCase() === "x",
       url: parts[0],
-      company: parts[1],
-      role: parts[2],
+      company,
+      role,
       location: parts[3] || undefined, // optional 4th column (#1015)
       compensation: parts[4] || undefined, // optional 5th column (#1017); 6th+ ignored
       // the row's own posting date (scan.mjs `posted:` label) — a more direct
@@ -120,6 +147,29 @@ export function readScanDates(): Map<string, string> {
   return dates;
 }
 
+/**
+ * Read data/scan-history.tsv → Map<url, portal> (col 3 — e.g. "greenhouse-api",
+ * "apify-api", or a plugin id like "linkedin-alerts"). Same tolerant shape as
+ * readScanDates(): lets the Inbox tab show/filter on a REAL recorded source
+ * instead of guessing from the URL's hostname (sourceFromUrl only recognizes 4
+ * ATS domains, so anything else — LinkedIn included — showed no badge at all).
+ */
+export function readScanSources(): Map<string, string> {
+  const tsv = read("data/scan-history.tsv");
+  const sources = new Map<string, string>();
+  if (!tsv) return sources;
+  const lines = tsv.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line || (i === 0 && line.startsWith("url\t"))) continue; // skip header
+    const cols = line.split("\t");
+    const url = cols[0]?.trim();
+    const portal = cols[2]?.trim();
+    if (url && portal && !sources.has(url)) sources.set(url, portal);
+  }
+  return sources;
+}
+
 export type Application = {
   n: string;
   date: string;
@@ -132,6 +182,8 @@ export type Application = {
   pdf: string;
   report: string;
   notes: string;
+  /** Durable viewable-CV signal (tracker ✅ OR resolvable output/cv-*.pdf). Set by pipelineSummary(). */
+  cvReady?: boolean;
 };
 
 /**
@@ -204,13 +256,17 @@ export type PipelineSummary = {
 export function pipelineSummary(): PipelineSummary {
   const root = careerOpsRoot();
   const scanDates = readScanDates();
+  const scanSources = readScanSources();
   return {
     root,
     rootExists: fs.existsSync(root),
-    // join the freshness date (first_seen) onto each raw posting — the inbox's
-    // triage view orders/faceted-filters on it entirely client-side.
-    inbox: readInbox().map((j) => ({ ...j, postedAt: j.postedAt ?? scanDates.get(j.url) })),
-    applications: readApplications(),
+    // join the freshness date (first_seen) and the real recorded source (portal)
+    // onto each raw posting — the inbox's triage view orders/facets on both
+    // entirely client-side.
+    inbox: readInbox().map((j) => ({ ...j, postedAt: j.postedAt ?? scanDates.get(j.url), source: scanSources.get(j.url) })),
+    // cvReady is durable file truth (tracker ✅ OR a resolvable output/cv-*.pdf),
+    // so a wiped PDF flag or a cleared localStorage job cannot flip View → Generate.
+    applications: readApplications().map((a) => ({ ...a, cvReady: applicationCvReady(a) })),
   };
 }
 
@@ -218,6 +274,11 @@ export type ReportData = { content: string; file: string };
 
 /** Locate the evaluation report for an application number
  *  (reports/{n}-{slug}-{date}.md; the leading number may be zero-padded). */
+function reportNumFromFilename(filename: string): number {
+  const m = filename.match(/^(\d+)-/);
+  return m ? parseInt(m[1], 10) : NaN;
+}
+
 export function findReportFile(n: string): string | null {
   const target = parseInt(n, 10);
   if (Number.isNaN(target)) return null;
@@ -227,8 +288,12 @@ export function findReportFile(n: string): string | null {
   } catch {
     return null;
   }
-  const match = files.find((f) => f.endsWith(".md") && parseInt(f, 10) === target);
-  return match ? path.join(careerOpsRoot(), "reports", match) : null;
+  const candidates = files
+    .filter((f) => f.endsWith(".md") && !/-RESERVED\.md$/i.test(f))
+    .filter((f) => reportNumFromFilename(f) === target);
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => b.localeCompare(a));
+  return path.join(careerOpsRoot(), "reports", candidates[0]);
 }
 
 export function readReport(n: string): ReportData | null {
@@ -243,6 +308,40 @@ export function readReport(n: string): ReportData | null {
 
 export function findApplication(n: string): Application | null {
   return readApplications().find((a) => a.n === n) ?? null;
+}
+
+/**
+ * Primary report number linked by a tracker row's Report cell (NNN in
+ * reports/NNN-*.md). Falls back to the row # — web job inputs are tracker row
+ * ids, which equal the report number until a re-eval renumbers the report link
+ * (row 135 ↔ report 144).
+ */
+export function primaryReportNum(app: Application | null | undefined, fallback: string): string {
+  const cell = app?.report?.trim() ?? "";
+  if (!cell) return fallback;
+  const pathMatch = cell.match(/reports\/0*(\d+)-/i);
+  if (pathMatch) return pathMatch[1];
+  const labelMatch = cell.match(/\[(\d+)\]/);
+  if (labelMatch) return labelMatch[1];
+  const bare = cell.match(/^0*(\d+)$/);
+  if (bare) return bare[1];
+  return fallback;
+}
+
+/**
+ * Durable "a viewable tailored CV exists for this row" — the invariant the CV
+ * column's Generate/View gate must use. Tracker ✅ is only a cached claim (an
+ * LLM hand-edit or a re-eval merge can wipe it); an ephemeral localStorage
+ * "done" job vanishes on clear/cap/reload. Ground truth is the same resolution
+ * /api/cv-pdf uses: pdf-index by report/row key, else newest output/cv-*.pdf
+ * for the company. Never true when serve would 404.
+ */
+export function applicationCvReady(app: Pick<Application, "n" | "company" | "pdf"> | null | undefined): boolean {
+  if (!app) return false;
+  if ((app.pdf ?? "").includes("✅")) return true;
+  const company = (app.company ?? "").trim();
+  if (!company) return false;
+  return resolveTailoredCv(company, app.n) !== null;
 }
 
 /** The CANONICAL user-customization file the CLI/TUI reads. Durable facts the

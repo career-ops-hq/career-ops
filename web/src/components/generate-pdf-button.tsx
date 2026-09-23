@@ -5,6 +5,7 @@ import Link from "next/link";
 import { FileDown, Loader2, FileText, RotateCcw } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { CostBadge } from "@/components/cost/cost-badge";
+import { CvFitBadge } from "@/components/cv-fit-badge";
 
 // Fires the real career-ops `pdf` mode (worker kind "pdf") to generate an
 // ATS-optimized CV tailored to THIS offer → output/cv-… + marks the tracker.
@@ -29,9 +30,15 @@ export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company
   const ready = pdfReady || job?.status === "done";
   if (ready)
     return (
-      <span className="inline-flex items-center gap-1">
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        <CvFitBadge
+          report={n}
+          company={company}
+          pdfReady={ready}
+          refreshToken={job?.status === "done" ? job.endedAt : undefined}
+        />
         <a
-          href={`/api/cv-pdf?company=${encodeURIComponent(company)}`}
+          href={`/api/cv-pdf?company=${encodeURIComponent(company)}&report=${encodeURIComponent(n)}`}
           target="_blank"
           rel="noreferrer"
           className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400 max-sm:min-h-[44px]"

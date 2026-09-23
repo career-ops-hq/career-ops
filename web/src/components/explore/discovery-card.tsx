@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
-import { ATS_LABEL, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
+import type { DiscoveredOffer } from "@/lib/explore";
+import { discoverySourceLabel } from "@/lib/scan-sources";
 import { useJobs } from "@/components/jobs/job-store";
 import { useExplore } from "./explore-provider";
 
@@ -86,7 +87,7 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-        <span className="rounded border border-border px-1.5 py-0.5 font-medium text-muted">{ATS_LABEL[offer.ats as AtsSource] ?? offer.ats}</span>
+        <span className="rounded border border-border px-1.5 py-0.5 font-medium text-muted">{discoverySourceLabel(offer.url, offer.ats)}</span>
         {fresh && <span className="text-faint">{fresh}</span>}
         {unverified && (
           <span

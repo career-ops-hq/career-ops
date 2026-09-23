@@ -9,6 +9,7 @@ import { StatusSelect } from "@/components/status-select";
 import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
 import { GeneratePdfButton } from "@/components/generate-pdf-button";
+import { GenerateCoverLetterButton } from "@/components/generate-cover-letter-button";
 import { ApplyButton } from "@/components/apply-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
 
@@ -75,11 +76,15 @@ export function ReportView({
   id,
   app,
   report,
+  cvReady,
   canDelete = false,
 }: {
   id: string;
   app: Application | null;
   report: string | null;
+  /** Durable viewable-CV signal (tracker ✅ OR a resolvable output/cv-*.pdf),
+   *  passed by the page so Generate/View matches what /api/cv-pdf can serve. */
+  cvReady?: boolean;
   /** kept in the props contract (the page passes it) but no longer surfaced —
    *  the raw .md filename is a dev artifact, not header content. */
   file?: string | null;
@@ -112,7 +117,11 @@ export function ReportView({
         {app?.role && <p className="mt-1 text-muted">{app.role}</p>}
 
         <div className="mt-4 flex flex-wrap items-center gap-2.5">
-          {score && <Badge tone={scoreTone(score)}>{score}</Badge>}
+          {score && (
+            <Badge tone={scoreTone(score)} title="Evaluate score: master cv.md vs JD (before tailoring)">
+              {score}
+            </Badge>
+          )}
           {/* Verdict-first: the score's apply/don't-apply call (4.0 is the line,
               per the public methodology) as a <2s-scannable chip. */}
           {(() => {
@@ -122,8 +131,18 @@ export function ReportView({
           })()}
           {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{meta.legitimacy}</Badge>}
           {app && <StatusSelect n={id} current={app.status} />}
-          <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />
-          <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />
+          <GeneratePdfButton
+            n={id}
+            company={app?.company ?? meta?.title ?? id}
+            pdfReady={cvReady ?? (app?.pdf ?? "").includes("✅")}
+          />
+          <GenerateCoverLetterButton n={id} company={app?.company ?? meta?.title ?? id} />
+          <ApplyButton
+            n={id}
+            url={url && url.startsWith("http") ? url : undefined}
+            company={app?.company ?? meta?.title ?? id}
+            pdfReady={cvReady ?? (app?.pdf ?? "").includes("✅")}
+          />
         </div>
 
         {app && canDelete && (

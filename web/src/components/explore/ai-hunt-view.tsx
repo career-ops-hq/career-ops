@@ -11,7 +11,9 @@ import { useExplore } from "./explore-provider";
 // The AI hunt surface — apply-mode polish: an animated orb, a serif headline that
 // folds in the live count (no lonely giant "0"), a brand-orange effort ledger
 // (NEVER a fake $0), the CONTAINED reasoning panel, and cards materializing below.
-const STYLE = `
+// Exported so PortalsHuntView (same visual language, different copy/icon) can
+// reuse it instead of forking the CSS-in-JS block.
+export const HUNT_VIEW_STYLE = `
 .co-aihunt{position:relative;z-index:1;display:flex;min-height:72vh;flex-direction:column;align-items:center;gap:1.2rem;padding:2.5rem 1rem 2rem;text-align:center}
 .co-aiorb{position:relative;display:grid;place-items:center;width:4rem;height:4rem}
 .co-aiorb__glow{position:absolute;inset:0;border-radius:50%;background:hsl(26 80% 55% /.28);filter:blur(18px);animation:co-aiorb-pulse 2.4s ease-in-out infinite}
@@ -32,7 +34,7 @@ export function AiHuntView({ cliName }: { cliName?: string }) {
     <>
       <ApplyBackdrop intense={!revealing} />
       <div className="co-aihunt">
-        <style>{STYLE}</style>
+        <style>{HUNT_VIEW_STYLE}</style>
 
         <span className="co-aiorb">
           <span className="co-aiorb__glow" />

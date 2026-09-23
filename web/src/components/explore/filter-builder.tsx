@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { X, Ban, Clock, MapPin, ChevronDown, SlidersHorizontal } from "lucide-react";
+import { useMemo, useState } from "react";
+import { X, Ban, Clock, MapPin, ChevronDown, SlidersHorizontal, Plus, Eraser } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { ATS_LABEL, ATS_SOURCES, cleanChips, type AtsSource, type ExploreFilters } from "@/lib/explore";
+import { keywordsForRole, mergeRolePresets } from "@/lib/role-keyword-presets";
 
 const RECENCY = [
   { label: "24h", days: 1 },
@@ -37,9 +38,6 @@ function KeywordField({
   onChange: (v: string[]) => void;
 }) {
   const [draft, setDraft] = useState("");
-  // Split only on UNAMBIGUOUS item separators (comma / newline / semicolon) — never
-  // bare spaces, which are legitimate inside multi-word entries ("AI platform",
-  // "New York", "Costa Rica"). A space-only paste stays one chip on purpose (#1147).
   const commit = (text: string) => {
     const parts = text.split(/[,\n;\t\r]+/);
     const next = cleanChips([...values, ...parts]);
@@ -76,9 +74,6 @@ function KeywordField({
           e.preventDefault();
           const text = e.clipboardData.getData("text");
           const merged = draft + text;
-          // Only commit to chips when the paste contains item separators.
-          // A plain-text paste (e.g. pasting "-EMEA" after typing "Remote")
-          // stays in the input field so the user can keep editing.
           if (/[,;\n\t\r]/.test(text)) commit(merged);
           else setDraft(merged);
         }}
@@ -89,23 +84,110 @@ function KeywordField({
   );
 }
 
-function Label({ children, hint }: { children: React.ReactNode; hint?: string }) {
+function Label({ children, hint, action }: { children: React.ReactNode; hint?: string; action?: React.ReactNode }) {
   return (
-    <div className="mb-1.5 flex items-baseline justify-between">
+    <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
       <span className="text-[13px] font-medium text-foreground">{children}</span>
-      {hint && <span className="text-[11px] text-faint">{hint}</span>}
+      <div className="flex items-center gap-2">
+        {hint && <span className="text-[11px] text-faint">{hint}</span>}
+        {action}
+      </div>
     </div>
   );
+}
+
+function RoleKeywordPicker({
+  profileRoles,
+  onAdd,
+}: {
+  profileRoles: string[];
+  onAdd: (keywords: string[]) => void;
+}) {
+  const presets = useMemo(() => mergeRolePresets(profileRoles), [profileRoles]);
+  const [pick, setPick] = useState("");
+  const [customRole, setCustomRole] = useState("");
+
+  const addFromLabel = (label: string) => {
+    const kws = keywordsForRole(label, presets);
+    if (kws.length) onAdd(kws);
+  };
+
+  const onPresetChange = (value: string) => {
+    setPick(value);
+    if (value && value !== "__custom__") addFromLabel(value);
+  };
+
+  const addCustom = () => {
+    const label = customRole.trim();
+    if (!label) return;
+    addFromLabel(label);
+    setCustomRole("");
+    setPick("__custom__");
+  };
+
+  return (
+    <div className="mb-2.5 space-y-2 rounded-lg border border-dashed border-border/80 bg-surface/20 p-2.5">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-faint">Add by role</p>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <select
+          value={pick}
+          onChange={(e) => onPresetChange(e.target.value)}
+          className="w-full rounded-lg border border-border bg-surface/50 px-2.5 py-2 text-[13px] text-foreground outline-none focus:border-brand/40 sm:max-w-xs max-sm:min-h-[44px]"
+          aria-label="Pick a role preset"
+        >
+          <option value="">Choose a role…</option>
+          {presets.map((p) => (
+            <option key={p.id} value={p.label}>{p.label}</option>
+          ))}
+          <option value="__custom__">Type a custom role…</option>
+        </select>
+        {(pick === "__custom__" || pick === "") && (
+          <div className="flex min-w-0 flex-1 gap-1.5">
+            <input
+              value={customRole}
+              onChange={(e) => setCustomRole(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addCustom();
+                }
+              }}
+              placeholder="e.g. Staff ML Engineer"
+              className="min-w-0 flex-1 rounded-lg border border-border bg-surface/50 px-2.5 py-2 text-[13px] outline-none focus:border-brand/40 max-sm:min-h-[44px]"
+              aria-label="Custom role name"
+            />
+            <button
+              type="button"
+              onClick={addCustom}
+              disabled={!customRole.trim()}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-brand/30 bg-brand-soft px-2.5 py-2 text-[12px] font-medium text-brand transition-colors hover:bg-brand/15 disabled:opacity-40 max-sm:min-h-[44px]"
+            >
+              <Plus className="size-3.5" /> Add
+            </button>
+          </div>
+        )}
+      </div>
+      <p className="text-[11px] leading-relaxed text-faint">
+        Pick a role to add its search keywords, or type your own. Keywords merge with what you already have.
+      </p>
+    </div>
+  );
+}
+
+function hasAnyKeywords(f: ExploreFilters): boolean {
+  return f.positive.length > 0 || f.negative.length > 0 || f.allow.length > 0 || f.block.length > 0 || f.alwaysAllow.length > 0;
 }
 
 export function FilterBuilder({
   filters,
   onChange,
   seededFrom = [],
+  profileRoles = [],
 }: {
   filters: ExploreFilters;
   onChange: (f: ExploreFilters) => void;
   seededFrom?: string[];
+  profileRoles?: string[];
 }) {
   const [advanced, setAdvanced] = useState(false);
   const set = (patch: Partial<ExploreFilters>) => onChange({ ...filters, ...patch });
@@ -115,12 +197,43 @@ export function FilterBuilder({
     set({ ats: next.length ? next : filters.ats });
   };
 
+  const addRoleKeywords = (incoming: string[]) => {
+    set({ positive: cleanChips([...filters.positive, ...incoming]) });
+  };
+
+  const clearAllKeywords = () => {
+    onChange({
+      ...filters,
+      positive: [],
+      negative: [],
+      allow: [],
+      block: [],
+      alwaysAllow: [],
+    });
+  };
+
   return (
     <div className="space-y-4">
       <style>{STYLE}</style>
 
       <div>
-        <Label hint={filters.positive.length === 0 ? "empty = every fresh posting" : undefined}>Roles to find</Label>
+        <Label
+          hint={filters.positive.length === 0 ? "empty = every fresh posting" : undefined}
+          action={
+            hasAnyKeywords(filters) ? (
+              <button
+                type="button"
+                onClick={clearAllKeywords}
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground max-sm:min-h-[44px]"
+              >
+                <Eraser className="size-3" /> Clear all keywords
+              </button>
+            ) : null
+          }
+        >
+          Roles to find
+        </Label>
+        <RoleKeywordPicker profileRoles={profileRoles} onAdd={addRoleKeywords} />
         <KeywordField values={filters.positive} tone="inc" placeholder="AI platform, ML infrastructure, staff engineer…" onChange={(v) => set({ positive: v })} />
         {seededFrom.length > 0 && filters.positive.length > 0 && (
           <p className="mt-1 text-[11px] text-faint">Seeded from your {seededFrom.join(" + ")} — edit freely.</p>

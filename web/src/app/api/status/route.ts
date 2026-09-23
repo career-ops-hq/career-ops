@@ -1,23 +1,20 @@
 import { NextResponse } from "next/server";
-import fs from "node:fs";
-import path from "node:path";
-import { careerOpsRoot } from "@/lib/career-ops";
 import { canonicalizeStatus } from "@/lib/core/states";
-import { atomicWrite } from "@/lib/core/safe-write";
+import { runStatusUpdate } from "@/lib/core/status-update";
 
-// Writeback: UPDATE the status cell of an EXISTING tracker row only. Never adds
-// rows — per the core data contract, new rows go through the TSV + merge flow.
-// HARDENED: validate against the 8 canonical states (states.yml SSOT); reject any
-// value with table-breaking chars (| \r \n **) that would scramble the row; detect
-// the Status column from the header (8- and 9-col layouts); atomic write.
+// Writeback: UPDATE the status of an EXISTING tracker row via the core scripts —
+// set-status.mjs (status-log ledger + tracker lock) or outcome.mjs (archives +
+// feedback journal + set-status) for terminal outcomes. Never hand-edits
+// applications.md from the web layer.
 export async function POST(req: Request) {
-  let body: { n?: string; status?: string };
+  let body: { n?: string; status?: string; feedback?: string; stage?: string; note?: string; on?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "bad json" }, { status: 400 });
   }
-  const { n, status } = body;
+
+  const { n, status, feedback, stage, note, on } = body;
   if (!n || typeof status !== "string" || !status.trim()) {
     return NextResponse.json({ error: "n and status required" }, { status: 400 });
   }
@@ -28,47 +25,22 @@ export async function POST(req: Request) {
   if (!canon) {
     return NextResponse.json({ error: `not a canonical status: ${status}` }, { status: 400 });
   }
-
-  const file = path.join(careerOpsRoot(), "data", "applications.md");
-  let md: string;
-  try {
-    md = fs.readFileSync(file, "utf8");
-  } catch {
-    return NextResponse.json({ error: "tracker not found" }, { status: 404 });
+  if (on != null && !/^\d{4}-\d{2}-\d{2}$/.test(on)) {
+    return NextResponse.json({ error: "on must be YYYY-MM-DD" }, { status: 400 });
   }
 
-  const lines = md.split("\n");
-  // Find the Status column index from the header row (robust to 8- vs 9-col).
-  let statusIdx = 6;
-  for (const l of lines) {
-    if (!l.trim().startsWith("|")) continue;
-    const cells = l.split("|").map((c) => c.trim().toLowerCase());
-    const idx = cells.findIndex((c) => c === "status");
-    if (idx > 0) {
-      statusIdx = idx;
-      break;
-    }
-    if (/^:?-{2,}:?$/.test(cells[1] ?? "")) break; // hit the separator → no header match, keep default
+  const { result, error, status: httpStatus } = runStatusUpdate({
+    n: String(n),
+    status: canon,
+    feedback,
+    stage,
+    note,
+    on,
+  });
+
+  if (!result) {
+    return NextResponse.json({ error: error || "update failed" }, { status: httpStatus ?? 500 });
   }
 
-  let changed = false;
-  for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].trim().startsWith("|")) continue;
-    const parts = lines[i].split("|");
-    if (parts.length < 8) continue;
-    if (parts[1].trim() !== String(n)) continue;
-    if (statusIdx >= parts.length - 1) continue; // guard malformed row
-    parts[statusIdx] = ` ${canon} `;
-    lines[i] = parts.join("|");
-    changed = true;
-    break;
-  }
-  if (!changed) return NextResponse.json({ error: "row not found" }, { status: 404 });
-
-  try {
-    atomicWrite(file, lines.join("\n"));
-  } catch {
-    return NextResponse.json({ error: "write failed" }, { status: 500 });
-  }
-  return NextResponse.json({ ok: true, status: canon });
+  return NextResponse.json(result);
 }

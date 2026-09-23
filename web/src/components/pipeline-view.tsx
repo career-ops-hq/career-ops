@@ -9,6 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { canonStatus, scoreNum, scoreTone, statusDot } from "@/lib/format";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
+import { QuickAddPanel } from "@/components/pipeline/quick-add-panel";
+import { SourcesPanel } from "@/components/pipeline/sources-panel";
+import { TrackerBulkBar } from "@/components/pipeline/tracker-bulk-bar";
+import { CvPipelineCell } from "@/components/cv-pipeline-cell";
 import { cn } from "@/lib/cn";
 
 // INBOX (the triage queue) is the default tab; the rest filter the tracker.
@@ -55,6 +59,7 @@ export function PipelineView({
   // Search stays LOCAL for snappy typing; seeded from the URL and re-synced only
   // when the URL's q changes (i.e. the assistant set it) — never per keystroke.
   const [q, setQ] = useState(params.get("q") ?? "");
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const lastUrlQ = useRef(params.get("q") ?? "");
   useEffect(() => {
     const urlQ = params.get("q") ?? "";
@@ -63,6 +68,20 @@ export function PipelineView({
       setQ(urlQ);
     }
   }, [params]);
+
+  // Clear row selection when switching tabs or filters (inbox has its own select).
+  useEffect(() => {
+    setSelected(new Set());
+  }, [tab, minFilter]);
+
+  // A pdf/evaluate worker just wrote (or failed to write) an artifact — refresh
+  // the server snapshot so the durable cvReady gate on each row re-reads the
+  // filesystem instead of waiting for a manual reload.
+  useEffect(() => {
+    const onDone = () => router.refresh();
+    window.addEventListener("co-job-done", onDone);
+    return () => window.removeEventListener("co-job-done", onDone);
+  }, [router]);
 
   const setParams = useCallback(
     (updates: Record<string, string | number | null>) => {
@@ -116,6 +135,32 @@ export function PipelineView({
     });
   }, [applications, tab, q, sort, minFilter]);
 
+  const toggleSelect = (n: string) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(n)) next.delete(n);
+      else next.add(n);
+      return next;
+    });
+
+  const allVisibleSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.n));
+
+  const toggleSelectAll = () => {
+    if (allVisibleSelected) {
+      setSelected((s) => {
+        const next = new Set(s);
+        for (const r of filtered) next.delete(r.n);
+        return next;
+      });
+    } else {
+      setSelected((s) => {
+        const next = new Set(s);
+        for (const r of filtered) next.add(r.n);
+        return next;
+      });
+    }
+  };
+
   return (
     <div className="mx-auto max-w-6xl px-6 py-8 max-sm:pb-24">
       <div className="flex items-end justify-between gap-4">
@@ -139,6 +184,9 @@ export function PipelineView({
           </div>
         )}
       </div>
+
+      <QuickAddPanel />
+      <SourcesPanel />
 
       {/* tabs */}
       <div className="mt-6 flex flex-wrap gap-1 border-b border-border">
@@ -190,10 +238,24 @@ export function PipelineView({
         )
       ) : filtered.length > 0 ? (
         /* ── Tracker table ── */
-        <div className="mt-4 overflow-hidden rounded-2xl border border-border">
+        <>
+          <TrackerBulkBar rows={filtered} selected={selected} onClear={() => setSelected(new Set())} />
+          <div className="mt-4 overflow-hidden rounded-2xl border border-border">
           <table className="w-full text-sm">
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr>
+                <th className="w-10 px-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = !allVisibleSelected && filtered.some((r) => selected.has(r.n));
+                    }}
+                    onChange={toggleSelectAll}
+                    aria-label="Select all visible rows"
+                    className="size-4 accent-brand"
+                  />
+                </th>
                 {SORT_KEYS.map((k) => (
                   <th
                     key={k}
@@ -206,11 +268,22 @@ export function PipelineView({
                     </span>
                   </th>
                 ))}
+                <th className="px-4 py-2.5 font-medium">CV</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {filtered.map((r, i) => (
-                <tr key={`${r.n}-${i}`} className="group transition-colors hover:bg-surface/40">
+                <tr key={`${r.n}-${i}`} className={cn("group transition-colors hover:bg-surface/40", selected.has(r.n) && "bg-brand-soft/40")}>
+                  <td className="px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(r.n)}
+                      onChange={() => toggleSelect(r.n)}
+                      aria-label={`Select ${r.company}`}
+                      className="size-4 accent-brand max-sm:min-h-[44px] max-sm:min-w-[24px]"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </td>
                   <td className="px-4 py-3 font-medium">
                     <Link href={`/pipeline/${r.n}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
                       <CompanyLogo name={r.company} size={20} />
@@ -230,11 +303,19 @@ export function PipelineView({
                     </span>
                   </td>
                   <td className="px-4 py-3 text-faint tabular-nums">{r.date}</td>
+                  <td className="px-4 py-3">
+                    <CvPipelineCell
+                      n={r.n}
+                      company={r.company}
+                      pdfReady={r.cvReady ?? (r.pdf ?? "").includes("✅")}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        </>
       ) : (
         <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
           <p className="font-display text-lg">No matches</p>

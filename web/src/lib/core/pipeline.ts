@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { cliChildEnv } from "@/lib/cli-spawn";
 import type { DiscoveredOffer } from "./scan";
 
 /**
@@ -18,9 +19,13 @@ import type { DiscoveredOffer } from "./scan";
  */
 export type AddResult = { added: number; error?: string };
 
+// Accepts a real posting URL OR a local:jds/*.md reference (modes/pipeline.md's
+// own convention for a pasted JD with no public URL — see quick-add/route.ts).
+const PIPELINE_URL_RE = /^(https?:\/\/|local:jds\/)/i;
+
 export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResult> {
   const clean = offers
-    .filter((o) => o && typeof o.url === "string" && /^https?:\/\//i.test(o.url))
+    .filter((o) => o && typeof o.url === "string" && PIPELINE_URL_RE.test(o.url))
     .map((o) => ({
       url: o.url,
       company: o.company || "",
@@ -41,17 +46,18 @@ export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResul
 
   const scanUrl = pathToFileURL(rootScript("scan")).href;
   const code = `
-import { appendToPipeline, appendToScanHistory } from ${JSON.stringify(scanUrl)};
+import { appendToPipeline, appendToScanHistory, filterOffersForPipeline } from ${JSON.stringify(scanUrl)};
 let input = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (d) => { input += d; });
-process.stdin.on("end", () => {
+process.stdin.on("end", async () => {
   try {
     const offers = JSON.parse(input);
     const date = new Date().toISOString().slice(0, 10);
-    appendToPipeline(offers);
-    appendToScanHistory(offers, date, "added");
-    process.stdout.write(JSON.stringify({ added: offers.length }));
+    const { toAdd, skipped } = filterOffersForPipeline(offers);
+    const { added } = await appendToPipeline(toAdd);
+    if (added > 0) appendToScanHistory(toAdd, date, "added");
+    process.stdout.write(JSON.stringify({ added, skipped }));
   } catch (e) {
     process.stdout.write(JSON.stringify({ added: 0, error: String((e && e.message) || e) }));
   }
@@ -59,9 +65,10 @@ process.stdin.on("end", () => {
 `;
 
   return new Promise((resolve) => {
+    const cwd = careerOpsRoot();
     const child = spawn(process.execPath, ["--input-type=module", "-e", code], {
-      cwd: careerOpsRoot(),
-      env: process.env,
+      cwd,
+      env: cliChildEnv(process.execPath, cwd, process.env),
     });
     let out = "";
     let err = "";

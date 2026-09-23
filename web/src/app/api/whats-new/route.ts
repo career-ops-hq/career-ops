@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot, readApplications } from "@/lib/career-ops";
+import { careerOpsRoot, getNormalizeTextKey, readApplications } from "@/lib/career-ops";
 import type { DiscoveredOffer } from "@/lib/explore";
+import { sourceLabel } from "@/lib/scan-sources";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 // evaluated yet. No scan runs here — it reads the history a past scan already
 // wrote, so the home stays instant + free (directly answers the #1 token-cost
 // complaint). cols: url, first_seen, portal, title, company, status, location.
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+// Company keys come from the live core (getNormalizeTextKey), never an ASCII strip (#2666).
 
 export async function GET(req: Request) {
   const days = Math.min(30, Math.max(1, Number(new URL(req.url).searchParams.get("days")) || 7));
@@ -23,6 +24,7 @@ export async function GET(req: Request) {
     return Response.json({ offers: [], count: 0 });
   }
 
+  const norm = await getNormalizeTextKey();
   // Companies already evaluated → don't resurface as "new".
   const evaluated = new Set(readApplications().map((a) => norm(a.company)).filter(Boolean));
 
@@ -37,8 +39,8 @@ export async function GET(req: Request) {
       title: (title || "").trim(),
       location: (location || "").trim(),
       postedAt: /^\d{4}-\d{2}-\d{2}$/.test(firstSeen || "") ? firstSeen : "",
-      ats: (portal || "").replace(/-full$/, "").trim() || "other",
-      source: "whats-new",
+      ats: sourceLabel(url, portal) || "Scan",
+      source: portal || "whats-new",
     };
   };
 

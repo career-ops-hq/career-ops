@@ -28,6 +28,7 @@ type StartOpts = { title: string; subtitle?: string; kind: string; input: string
 type Ctx = {
   jobs: Job[];
   startJob: (opts: StartOpts) => string | null;
+  retryJob: (id: string) => string | null;
   removeJob: (id: string) => void;
   clearFinished: () => void;
 };
@@ -92,6 +93,11 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
   const startJob = useCallback(
     (opts: StartOpts): string | null => {
+      // Dedupe: one live worker per kind+input (double-submit used to spawn two
+      // evals of the same URL; the second stole wroteReport and raced git locks).
+      const clash = jobs.find((j) => j.status === "running" && j.kind === opts.kind && j.input === opts.input);
+      if (clash) return null;
+
       let cliId: string | null = null;
       try {
         const raw = localStorage.getItem(CONFIG_KEY);
@@ -166,6 +172,13 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           const reader = res.body.getReader();
           const dec = new TextDecoder();
           let buf = "";
+          let settled = false;
+          const settle = (status: "done" | "error", lastLabel?: string) => {
+            if (settled) return;
+            settled = true;
+            finish(status, lastLabel);
+            try { reader.cancel(); } catch { /* already closed */ }
+          };
           for (;;) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -189,12 +202,22 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
                   if (vm) verdictLine = vm[0];
                   text = full.slice(-8000);
                   patch(id, (j) => ({ ...j, text }));
+                } else if (ev.type === "warning") {
+                  // At most one stderr ⚠ (route already rate-limits); never finalize.
+                  const already = steps.some((s) => s.kind === "status" && s.label.startsWith("⚠ "));
+                  if (!already) {
+                    const label = `⚠ ${String(ev.msg || "").slice(0, 140)}`;
+                    steps.push({ kind: "status", label, ts: Date.now() });
+                    patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "status", label, ts: Date.now() }] }));
+                  }
                 } else if (ev.type === "done") {
-                  // finish happens on stream-close; capture the per-run cost it carries
                   if (typeof ev.tokens === "number") doneTokens = ev.tokens;
                   if (typeof ev.costUsd === "number") doneCostUsd = ev.costUsd;
+                  settle("done", "Done");
+                  return;
                 } else if (ev.type === "error") {
-                  finish("error", ev.msg || "Error");
+                  // Terminal — only the route's close/spawn gate emits this.
+                  settle("error", ev.msg || "Error");
                   return;
                 }
               } catch {
@@ -202,7 +225,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
               }
             }
           }
-          finish("done", "Done");
+          // Stream ended without a terminal event (client/server cut mid-run).
+          settle("error", "Stream ended before the run finished");
         } catch {
           finish("error", "Connection error");
         }
@@ -210,11 +234,27 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
       return id;
     },
-    [patch],
+    [jobs, patch],
+  );
+
+  const retryJob = useCallback(
+    (id: string): string | null => {
+      const j = jobs.find((x) => x.id === id);
+      if (!j?.kind || !j.input) return null;
+      return startJob({
+        title: j.title,
+        subtitle: j.subtitle,
+        kind: j.kind,
+        input: j.input,
+        page: j.page,
+        batchId: j.batchId,
+      });
+    },
+    [jobs, startJob],
   );
 
   const removeJob = useCallback((id: string) => setJobs((js) => js.filter((j) => j.id !== id)), []);
   const clearFinished = useCallback(() => setJobs((js) => js.filter((j) => j.status === "running")), []);
 
-  return <JobsContext.Provider value={{ jobs, startJob, removeJob, clearFinished }}>{children}</JobsContext.Provider>;
+  return <JobsContext.Provider value={{ jobs, startJob, retryJob, removeJob, clearFinished }}>{children}</JobsContext.Provider>;
 }

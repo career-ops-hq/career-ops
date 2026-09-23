@@ -11,8 +11,9 @@ export default function PortalsPage() {
         <h1 className="font-display text-2xl tracking-tight text-landing">Portals</h1>
       </div>
       <p className="mt-1.5 max-w-xl text-sm text-muted">
-        The companies career-ops watches for new roles. Run a health check to catch company boards that have quietly
-        broken — a broken link means that company silently disappears from every future scan.
+        ATS health for <code className="text-muted">tracked_companies</code> — catch broken Greenhouse / Ashby / Lever
+        links before they silently drop out of scans. Job boards in <code className="text-muted">job_boards</code>{" "}
+        (Instahyre, Wellfound, We Work Remotely, …) are scanned from Pipeline → Portal scan, not this page.
       </p>
       <p className="mt-1.5 text-xs text-faint">
         Backed by <code className="text-muted">portals.yml</code> — edit it directly or ask the assistant.

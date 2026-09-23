@@ -9,7 +9,11 @@ import { DEFAULT_FILTERS } from "@/lib/explore";
 export const dynamic = "force-dynamic";
 
 export default function ExplorePage() {
-  let seed: { filters: typeof DEFAULT_FILTERS; seededFrom: string[] } = { filters: DEFAULT_FILTERS, seededFrom: [] };
+  let seed: { filters: typeof DEFAULT_FILTERS; seededFrom: string[]; profileRoles: string[] } = {
+    filters: DEFAULT_FILTERS,
+    seededFrom: [],
+    profileRoles: [],
+  };
   try {
     seed = seedExploreFilters();
   } catch {

@@ -53,7 +53,7 @@ export type DiscoveredOffer = {
    *  writer (scan.mjs formatPipelineOffer). Generic and source-agnostic — an
    *  importer can attach a note; the deterministic scan omits it. */
   note?: string;
-  // ── AI-search (modes/discover.md) additions — all optional, so the
+  // ── AI-search (modes/hunt.md) additions — all optional, so the
   //    deterministic scan offer is unaffected (fields simply absent). ──
   /** present ONLY on AI offers → drives the "unverified" badge. AI finds can't be
    *  liveness-confirmed (AGENTS.md); the scan hits a live ATS API so it omits this. */
@@ -65,8 +65,11 @@ export type DiscoveredOffer = {
   confidence?: "low" | "medium" | "high";
 };
 
-/** The two discovery surfaces: free deterministic Scan vs token-spending AI search. */
-export type ExploreMode = "scan" | "ai";
+/** The three discovery surfaces: free deterministic Scan, token-spending AI search
+ *  (freeform open-web hunt), and Portals (the user's own configured search_queries /
+ *  scan_method:websearch companies from portals.yml — job boards, agencies, etc. —
+ *  also token-spending, since it needs an agent to run the actual WebSearch calls). */
+export type ExploreMode = "scan" | "ai" | "portals";
 
 /** Stream event grammar (NDJSON). `kind` discriminates. Discovery is FREE — the
  *  terminal `done` always carries cost {tokens:0, usd:0}. */
@@ -184,6 +187,18 @@ export function aiToParams(intent: string): string {
 export function paramsToAi(sp: URLSearchParams): string | null {
   if (sp.get("mode") !== "ai") return null;
   return sp.get("intent") ?? "";
+}
+
+/** Portals-mode URL marker (?mode=portals) — no free-text intent, it's fully
+ *  config-driven from portals.yml, so there's nothing else to encode. */
+export function portalsToParams(): string {
+  const sp = new URLSearchParams();
+  sp.set("mode", "portals");
+  return sp.toString();
+}
+
+export function isPortalsParam(sp: URLSearchParams): boolean {
+  return sp.get("mode") === "portals";
 }
 
 /** Is the search broad enough that "nothing found" means "you're current"

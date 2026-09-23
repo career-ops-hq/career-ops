@@ -7,6 +7,7 @@ import {
   ATS_LABEL,
   filtersToParams,
   aiToParams,
+  portalsToParams,
   isBroadSearch,
   parseExplorePatch,
   type AtsSource,
@@ -63,12 +64,15 @@ type ExploreCtx = {
   addToPipeline: (offers: DiscoveredOffer[]) => Promise<number>;
   applyPatch: (raw: Record<string, unknown>, opts?: { merge?: boolean; run?: boolean }) => void;
   reset: () => void;
-  // ── AI search (modes/discover.md) ──
+  // ── AI search (modes/hunt.md) + Portals (modes/scan.md Level 3) ──
+  // Both spawn the user's CLI headless and share the same trace/cost/offer
+  // pipeline — they only differ in what prompt the server assembles.
   mode: ExploreMode;
   setMode: (m: ExploreMode) => void;
   aiIntent: string;
   setAiIntent: (s: string) => void;
   discoverAI: () => Promise<void>;
+  discoverPortals: () => Promise<void>;
   aiTrace: AiTraceChunk[];
   aiCost: AiCost;
 };
@@ -338,11 +342,13 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // AI search — orchestrate modes/discover.md via the user's CLI, streamed.
-  const discoverAI = useCallback(async () => {
+  // Shared runner for the two "spawn the user's CLI headless, stream <<offer:>>
+  // envelopes" modes (AI search + Portals). They only differ in which endpoint/
+  // body kicks off the run and the URL history entry — everything about tracking
+  // the stream (trace, cost, offers, phase, error handling) is identical, so it
+  // lives in exactly one place instead of two hand-kept-in-sync copies.
+  const runAgentHunt = useCallback(async (endpoint: string, body: Record<string, unknown>, historyQs: string, startStatus: string) => {
     if (runningRef.current) return;
-    const intent = aiIntentRef.current.trim();
-    if (!intent) return;
     let cliId: string | null = null;
     try {
       cliId = JSON.parse(localStorage.getItem("career-ops:config") || "{}").cliId || null;
@@ -360,8 +366,8 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setAiTrace([]);
     setAiCost({ searches: 0, candidates: 0, fetches: 0 });
     setError("");
-    setStatus("Casting across the open web…");
-    if (typeof window !== "undefined") window.history.replaceState(null, "", `/explore?${aiToParams(intent)}`);
+    setStatus(startStatus);
+    if (typeof window !== "undefined") window.history.replaceState(null, "", `/explore?${historyQs}`);
 
     let knownUrls = new Set<string>();
     try {
@@ -395,10 +401,10 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     };
 
     try {
-      const r = await fetch("/api/explore/ai", {
+      const r = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: intent, cliId }),
+        body: JSON.stringify({ ...body, cliId }),
       });
       if (r.status === 404) {
         runningRef.current = false;
@@ -407,7 +413,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       }
       if (r.status === 400) {
         const d = await r.json().catch(() => ({}));
-        sawError = d.error || "AI search isn't available.";
+        sawError = d.error || "Search isn't available.";
       } else if (!r.body) {
         sawError = "No response stream.";
       } else {
@@ -438,9 +444,31 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Switch surface but PRESERVE the current results + filters — toggling scan↔AI must
-  // not throw away a completed search (disc#5). A new search (discover/discoverAI)
-  // clears + repopulates; an explicit reset() clears. Just stop any half-run.
+  // AI search — orchestrate modes/hunt.md via the user's CLI, streamed.
+  const discoverAI = useCallback(async () => {
+    const intent = aiIntentRef.current.trim();
+    if (!intent) return;
+    await runAgentHunt("/api/explore/ai", { query: intent }, aiToParams(intent), "Casting across the open web…");
+  }, [runAgentHunt]);
+
+  // Portals search — orchestrate modes/scan.md's Level 3 (the user's own
+  // search_queries + scan_method:websearch companies from portals.yml). Shares
+  // the SAME filters state as Scan (the FilterBuilder on this tab edits it too)
+  // so a title/location narrowing carries across tabs instead of living twice.
+  const discoverPortals = useCallback(async () => {
+    const f = filtersRef.current;
+    await runAgentHunt(
+      "/api/explore/portals",
+      { filters: { positive: f.positive, negative: f.negative, allow: f.allow, block: f.block, alwaysAllow: f.alwaysAllow } },
+      portalsToParams(),
+      "Running your configured job boards & agencies…",
+    );
+  }, [runAgentHunt]);
+
+  // Switch surface but PRESERVE the current results + filters — toggling between
+  // scan/portals/AI must not throw away a completed search (disc#5). A new search
+  // (discover/discoverAI/discoverPortals) clears + repopulates; an explicit
+  // reset() clears. Just stop any half-run.
   const setMode = useCallback((m: ExploreMode) => {
     runningRef.current = false;
     setModeState(m);
@@ -458,7 +486,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       snap = null;
     }
     if (!snap || snap.v !== 1 || !Array.isArray(snap.offers)) return;
-    setModeState(snap.mode === "ai" ? "ai" : "scan");
+    setModeState(snap.mode === "ai" || snap.mode === "portals" ? snap.mode : "scan");
     setOffers(snap.offers);
     setMatchCount(typeof snap.matchCount === "number" ? snap.matchCount : snap.offers.length);
     setCompaniesScanned(snap.companiesScanned ?? 0);
@@ -499,9 +527,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       running: phase === "casting" || phase === "scanning" || phase === "revealing" || phase === "hunting",
       offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, added, adding,
       discover, addToPipeline, applyPatch, reset,
-      mode, setMode, aiIntent, setAiIntent, discoverAI, aiTrace, aiCost,
+      mode, setMode, aiIntent, setAiIntent, discoverAI, discoverPortals, aiTrace, aiCost,
     }),
-    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, added, adding, discover, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
+    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, added, adding, discover, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, discoverPortals, aiTrace, aiCost],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

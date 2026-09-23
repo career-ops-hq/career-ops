@@ -13,7 +13,7 @@ export { pillTone, TONE };
 // Collapsed "worker" pills in the sidebar — each the shared <WorkerCard> wrapped
 // in a Link to its detail. Same component the assistant chat renders inline.
 export function WorkerPills() {
-  const { jobs, removeJob, clearFinished } = useJobs();
+  const { jobs, removeJob, clearFinished, retryJob } = useJobs();
   const pathname = usePathname();
   if (jobs.length === 0) return null;
   const running = jobs.filter((j) => j.status === "running").length;
@@ -48,6 +48,7 @@ export function WorkerPills() {
                 <WorkerCard
                   job={j}
                   variant="tray"
+                  onRetry={() => retryJob(j.id)}
                   trailing={
                     <button
                       onClick={(e) => {

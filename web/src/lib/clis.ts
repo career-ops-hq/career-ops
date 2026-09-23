@@ -8,6 +8,8 @@ export type CliSpec = {
   id: string;
   name: string;
   bin: string;
+  /** Alternate executable names (e.g. cursor-agent → agent). */
+  altBins?: string[];
   run: string;
   url: string;
   /** headless invocation args for a single prompt */
@@ -15,7 +17,12 @@ export type CliSpec = {
 };
 
 export const KNOWN: CliSpec[] = [
-  { id: "claude", name: "Claude Code", bin: "claude", run: "claude -p", url: "https://claude.ai/code", args: (p) => ["-p", p] },
+  // Prefer fcc-claude (Free Claude Code proxy) over stock claude when both exist —
+  // many setups route Claude Code through a local FCC proxy instead of OAuth.
+  { id: "claude", name: "Claude Code", bin: "fcc-claude", altBins: ["claude"], run: "fcc-claude -p", url: "https://claude.ai/code", args: (p) => ["-p", p] },
+  // Prefer `cursor-agent` — a generic `agent` on PATH often belongs to Grok or
+  // another CLI and breaks headless runs when mistaken for Cursor.
+  { id: "cursor", name: "Cursor CLI", bin: "cursor-agent", altBins: ["agent"], run: "cursor-agent -p", url: "https://cursor.com/docs/cli/overview", args: (p) => ["-p", p, "--trust"] },
   { id: "codex", name: "Codex", bin: "codex", run: "codex exec", url: "https://github.com/openai/codex", args: (p) => ["exec", p] },
   { id: "gemini", name: "Gemini CLI", bin: "gemini", run: "gemini -p", url: "https://github.com/google-gemini/gemini-cli", args: (p) => ["-p", p] },
   { id: "opencode", name: "OpenCode", bin: "opencode", run: "opencode run", url: "https://opencode.ai", args: (p) => ["run", p] },
@@ -24,9 +31,30 @@ export const KNOWN: CliSpec[] = [
   { id: "antigravity", name: "Antigravity CLI", bin: "agy", run: "agy -p", url: "https://antigravity.google", args: (p) => ["-p", p] },
 ];
 
+function isCursorAgentBinary(resolvedPath: string): boolean {
+  try {
+    const real = fs.realpathSync(resolvedPath);
+    return /cursor-agent|Cursor/i.test(real);
+  } catch {
+    return false;
+  }
+}
+
+function resolveSpecBin(spec: CliSpec, dirs = searchDirs()): string | null {
+  for (const bin of [spec.bin, ...(spec.altBins ?? [])]) {
+    const found = findBin(bin, dirs);
+    if (!found) continue;
+    // Grok and others ship an `agent` shim — never treat it as Cursor CLI.
+    if (spec.id === "cursor" && bin === "agent" && !isCursorAgentBinary(found)) continue;
+    return found;
+  }
+  return null;
+}
+
 function searchDirs(): string[] {
   const home = os.homedir();
   const extra = [
+    path.join(home, "free-claude-code", ".venv", "bin"),
     path.join(home, ".local/bin"),
     path.join(home, ".npm-global/bin"),
     path.join(home, ".bun/bin"),
@@ -82,18 +110,27 @@ export function findBin(bin: string, dirs = searchDirs()): string | null {
   return null;
 }
 
+function displayName(spec: CliSpec, binPath: string | null): string {
+  if (spec.id === "claude" && binPath && /fcc-claude/i.test(binPath)) {
+    return "Claude Code (FCC)";
+  }
+  return spec.name;
+}
+
 export function detectClis() {
   const dirs = searchDirs();
   return KNOWN.map((c) => {
-    const found = findBin(c.bin, dirs);
-    return { id: c.id, name: c.name, run: c.run, url: c.url, installed: !!found, path: found };
+    const found = resolveSpecBin(c, dirs);
+    const name = displayName(c, found);
+    const run = found && /fcc-claude/i.test(found) ? "fcc-claude -p" : c.run;
+    return { id: c.id, name, run, url: c.url, installed: !!found, path: found };
   });
 }
 
 export function resolveCli(id: string): { spec: CliSpec; binPath: string } | null {
   const spec = KNOWN.find((c) => c.id === id);
   if (!spec) return null;
-  const binPath = findBin(spec.bin);
+  const binPath = resolveSpecBin(spec);
   if (!binPath) return null;
   return { spec, binPath };
 }

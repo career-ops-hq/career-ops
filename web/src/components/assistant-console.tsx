@@ -136,7 +136,7 @@ export function AssistantConsole() {
   const pathname = usePathname();
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { jobs, startJob } = useJobs();
+  const { jobs, startJob, retryJob } = useJobs();
   const pipeline = usePipeline();
   const apply = useApply();
 
@@ -518,7 +518,7 @@ export function AssistantConsole() {
                     ) : (
                       <div className="space-y-2">
                         {m.parts.map((p, j) => (
-                          <PartView key={j} part={p} jobs={jobs} onConfirm={resolveConfirm} onOpen={() => {}} />
+                          <PartView key={j} part={p} jobs={jobs} onRetry={retryJob} onConfirm={resolveConfirm} onOpen={() => {}} />
                         ))}
                       </div>
                     )}
@@ -590,10 +590,12 @@ export function AssistantConsole() {
 function PartView({
   part,
   jobs,
+  onRetry,
   onConfirm,
 }: {
   part: Part;
   jobs: ReturnType<typeof useJobs>["jobs"];
+  onRetry: ReturnType<typeof useJobs>["retryJob"];
   onConfirm: (cid: string, accept: boolean) => void;
   onOpen: () => void;
 }) {
@@ -620,6 +622,7 @@ function PartView({
       <WorkerCard
         job={job}
         variant="inline"
+        onRetry={() => onRetry(job.id)}
         trailing={
           <Link href={`/jobs/${job.id}`} className="text-faint transition-colors hover:text-brand" aria-label="Open worker">
             <ArrowUpRight className="size-3.5" />
@@ -646,6 +649,7 @@ function PartView({
               key={j!.id}
               job={j!}
               variant="inline"
+              onRetry={() => onRetry(j!.id)}
               trailing={
                 <Link href={`/jobs/${j!.id}`} className="text-faint transition-colors hover:text-brand" aria-label="Open worker">
                   <ArrowUpRight className="size-3.5" />

@@ -1,13 +1,14 @@
 "use client";
 
-import { Compass, Sparkles } from "lucide-react";
+import { Compass, Sparkles, Building2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CostBadge } from "@/components/cost/cost-badge";
 import type { ExploreMode } from "@/lib/explore";
 
-// Cost honesty rendered at the POINT OF CHOICE: free deterministic Scan (default)
-// vs token-spending AI search. The AI segment stays selectable even with no CLI —
-// selecting it reveals the blocked state (more discoverable than a dead tab).
+// Cost honesty at the point of choice: free ATS Scan (scan-ats-full), token-
+// spending Portals WebSearch (search_queries), and token-spending AI search.
+// Direct job_boards (board-browser / RSS) are NOT on this toggle — they run
+// from Pipeline → Portal scan (zero tokens).
 export function ExploreModeToggle({
   mode,
   onChange,
@@ -33,6 +34,22 @@ export function ExploreModeToggle({
         <span className="hidden sm:inline-flex">
           <CostBadge kind="free-network" size="xs" />
         </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("portals")}
+        aria-pressed={mode === "portals"}
+        className={cn(
+          "flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm transition-colors sm:flex-none sm:gap-2 sm:px-3 max-sm:min-h-[44px]",
+          mode === "portals" ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground",
+        )}
+      >
+        <Building2 className="size-4" />
+        <span className="font-medium">Portals</span>
+        <span className="hidden sm:inline-flex">
+          <CostBadge kind="spend" size="xs" />
+        </span>
+        {!cliConfigured && <span className="text-[10px] text-faint">needs a CLI</span>}
       </button>
       <button
         type="button"
