@@ -479,6 +479,31 @@ try {
     fail(`city-no-dup location = ${JSON.stringify(cityOffers[1]?.location)}`);
   }
 
+  // ── Whole-word matching, not substring: "Parisian" must not shadow "Paris" ──
+  // A substring check would wrongly see "paris" inside "parisian" and skip
+  // appending the real city. Also covers a Unicode-accented edge (JS's ASCII-only
+  // \b would misfire at the edge of "Örebro" — this must match it correctly).
+  const nearMissOffers = parseRecruiteeResponse(
+    {
+      offers: [
+        {
+          title: 'Near-miss substring, not a real mention',
+          careers_url: 'https://x.recruitee.com/o/near-miss',
+          locations: [
+            { name: 'Parisian HQ', city: 'Paris', country: 'France' },
+            { name: 'Nordic Office', city: 'Örebro', country: 'Sweden' },
+          ],
+        },
+      ],
+    },
+    'X',
+  );
+  if (nearMissOffers[0]?.location === 'Parisian HQ, Paris, France · Nordic Office, Örebro, Sweden') {
+    pass('parseRecruiteeResponse appends a near-miss city ("Paris" in "Parisian HQ") and an accented one ("Örebro") correctly');
+  } else {
+    fail(`near-miss location = ${JSON.stringify(nearMissOffers[0]?.location)}`);
+  }
+
   // ── URL fallback: careers_url and url are validated independently ──
   // One bad field must not shadow an otherwise-usable other one — only when
   // NEITHER candidate resolves is the offer dropped.

@@ -77,6 +77,25 @@ function isRecruiteeSamplePosting(j) {
 }
 
 /**
+ * True when `word` appears in `text` as a whole word (case-insensitive),
+ * never merely as a substring — so `city: "Paris"` is not treated as already
+ * present in `name: "Parisian HQ"` (a substring check would wrongly match
+ * "paris" inside "parisian" and skip appending the real city). Unicode-aware
+ * boundaries (`\p{L}`/`\p{N}` lookaround, not `\b`): JS's `\b` is ASCII-only,
+ * so it misfires at either edge of an accented name like "Örebro" — the
+ * `u`-flagged lookaround here treats any Unicode letter/number as a "word"
+ * character, matching "Zürich" correctly at both edges.
+ *
+ * @param {string} text
+ * @param {string} word
+ * @returns {boolean}
+ */
+function containsWholeWord(text, word) {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu').test(text);
+}
+
+/**
  * Assemble a location string for one offer.
  *
  * Recruitee's flat `location` field carries only the offer's PRIMARY place
@@ -91,14 +110,15 @@ function isRecruiteeSamplePosting(j) {
  * through to the flat-field path below rather than discarding a possibly
  * richer flat `location` string in favor of a "join" of one place. Each name
  * gets its `city` and `country` appended when present and not already part of
- * the name text (case-insensitive substring check per field, so "Zürich,
- * Switzerland" + city "Zürich" + country "Switzerland" does not become
- * "Zürich, Switzerland, Zürich, Switzerland" — each field is checked and
- * appended independently, so a name missing only one of the two still gets
- * exactly that one added). Deduped,
- * joined with " · " like ashby/eightfold/gem/workday's multi-place handling,
- * so scan.mjs's location_filter sees every place a multi-location role is
- * open to.
+ * the name text — checked with `containsWholeWord`, not a substring check, so
+ * "Zürich, Switzerland" + city "Zürich" + country "Switzerland" does not
+ * become "Zürich, Switzerland, Zürich, Switzerland", and a name like
+ * "Parisian HQ" still gets city "Paris" appended rather than being mistaken
+ * for already naming it. Each field is checked and appended independently, so
+ * a name missing only one of the two still gets exactly that one added.
+ * Deduped, joined with " · " like ashby/eightfold/gem/workday's multi-place
+ * handling, so scan.mjs's location_filter sees every place a multi-location
+ * role is open to.
  *
  * Falls back to the pre-existing single-place logic — explicit `location`,
  * else assembled from city/country, appending "Remote" when `remote` is true
@@ -119,12 +139,11 @@ function assembleLocation(j) {
     ? j.locations.map(l => {
         const name = typeof l?.name === 'string' ? l.name.trim() : '';
         if (!name) return '';
-        const lowerName = name.toLowerCase();
         const parts = [name];
         const city = typeof l?.city === 'string' ? l.city.trim() : '';
-        if (city && !lowerName.includes(city.toLowerCase())) parts.push(city);
+        if (city && !containsWholeWord(name, city)) parts.push(city);
         const country = typeof l?.country === 'string' ? l.country.trim() : '';
-        if (country && !lowerName.includes(country.toLowerCase())) parts.push(country);
+        if (country && !containsWholeWord(name, country)) parts.push(country);
         return parts.join(', ');
       }).filter(Boolean)
     : [];
