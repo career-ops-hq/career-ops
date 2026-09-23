@@ -285,6 +285,7 @@ const SYSTEM_PATHS = [
 
   'reserve-report-num.mjs',
   'scan.mjs',
+  'migrate-scan-runs.mjs',
   'pipeline-lock.mjs',
   'portal-health-lock.mjs',
   'classify-tier.mjs',
