@@ -163,6 +163,21 @@ test('rules with no detector are reported on every run', () => {
   assert.ok(gaps.length > 0, 'a clean run must still report what is not checked');
 });
 
+test('the cached contract cannot be mutated out from under a later caller', () => {
+  // The default path is cached and returned by reference. Before this was
+  // frozen, flipping one rule's applies_to to ['rendered'] made every later
+  // atsLint() call in the process report that rule's real violations as
+  // "skipped" — the finding vanished and the result still looked well-formed.
+  const rule = loadAtsRules().find((r) => r.id === 'layout-tables');
+  assert.throws(() => { rule.applies_to = ['rendered']; }, TypeError);
+  assert.throws(() => { rule.severity = 'info'; }, TypeError);
+  assert.throws(() => { loadAtsRules().push({ id: 'injected' }); }, TypeError);
+
+  // and the contract still behaves
+  const violating = CLEAN.replace('<h1>{{NAME}}</h1>', '<table><tr><td><h1>{{NAME}}</h1></td></tr></table>');
+  assert.ok(ids(lint(violating)).includes('layout-tables'));
+});
+
 test('atsLint rejects an unknown kind rather than linting against nothing', () => {
   assert.throws(() => lint(CLEAN, 'resume'), /Unknown template kind/);
 });

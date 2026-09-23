@@ -298,6 +298,18 @@ export function loadAtsRules(rulesPath = DEFAULT_ATS_RULES_PATH) {
   if (rulesPath === DEFAULT_ATS_RULES_PATH && _atsRules) return _atsRules;
   const doc = yaml.load(readFileSync(rulesPath, 'utf-8')) || {};
   const rules = Array.isArray(doc.rules) ? doc.rules : [];
+  // Frozen because the default path is cached and handed out by reference. An
+  // unfrozen rule is process-global mutable state: flipping one rule's
+  // `applies_to` to ['rendered'] makes every later atsLint() call in the
+  // process silently report that rule's real violations as "skipped" — a
+  // finding disappears and the result still looks well-formed. Freezing turns
+  // that into a TypeError at the write, which is where the bug is.
+  for (const r of rules) {
+    if (Array.isArray(r.applies_to)) Object.freeze(r.applies_to);
+    if (Array.isArray(r.kinds)) Object.freeze(r.kinds);
+    Object.freeze(r);
+  }
+  Object.freeze(rules);
   if (rulesPath === DEFAULT_ATS_RULES_PATH) _atsRules = rules;
   return rules;
 }
