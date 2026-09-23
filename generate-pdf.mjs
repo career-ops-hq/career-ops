@@ -1376,6 +1376,15 @@ async function generatePDF() {
       console.error('--report is not valid with --batch. Set "reportNum" per entry in the manifest instead.');
       process.exit(1);
     }
+    // Same reasoning for --kind, and the same consequence if it is ignored
+    // instead. runBatchFromManifest is not given the flag, so a global
+    // --kind=cover leaves every entry on filename inference; one whose name is
+    // not cover-shaped is filed as a CV and its row supersedes the report's real
+    // CV slot in pdf-index.tsv. Per-entry "kind" is the channel that works.
+    if (kindFlag) {
+      console.error('--kind is not valid with --batch. Set "kind" per entry in the manifest instead.');
+      process.exit(1);
+    }
     return runBatchFromManifest(batchManifestPath, { format, maxPages, strictPages, allowReorder });
   }
 

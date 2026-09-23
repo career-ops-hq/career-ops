@@ -367,6 +367,45 @@ try {
   } else {
     fail(`results-write failure did not fail the batch: status=${writeFail.status}\n${writeFail.output.trim()}`);
   }
+
+  // ── A global flag the batch path drops must be refused, not ignored ────────
+  //
+  // --report already works this way, with the reason written at its check: one
+  // global value cannot label N distinct documents. --kind is the same shape and
+  // was not covered. runBatchFromManifest is called without it, so
+  // `--batch=... --kind=cover` renders the whole batch under filename inference
+  // and any entry whose name does not look cover-ish is filed as a CV. That row
+  // then supersedes the report's real CV slot in pdf-index.tsv, which is the
+  // silent substitution --kind exists to prevent.
+  const flagManifest = join(sandbox, 'flag-batch.json');
+  writeFileSync(flagManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/flag-a.pdf' },
+  ]), 'utf-8');
+
+  const kindInBatch = run([`--batch=${flagManifest}`, '--kind=cover']);
+  if (kindInBatch.status === 1 && /--kind is not valid with --batch/i.test(kindInBatch.output)) {
+    pass('generate-pdf rejects a global --kind in batch mode instead of silently dropping it');
+  } else {
+    fail(`--kind survived batch mode: status=${kindInBatch.status}\n${kindInBatch.output.trim()}`);
+  }
+
+  // The convention this mirrors, pinned here because nothing else asserted it.
+  const reportInBatch = run([`--batch=${flagManifest}`, '--report=7']);
+  if (reportInBatch.status === 1 && /--report is not valid with --batch/i.test(reportInBatch.output)) {
+    pass('generate-pdf rejects a global --report in batch mode');
+  } else {
+    fail(`--report survived batch mode: status=${reportInBatch.status}\n${reportInBatch.output.trim()}`);
+  }
+
+  // A batch with neither global flag still runs, so the guards above reject the
+  // flag rather than the batch. Without this, both checks would pass on a build
+  // that refused every batch outright.
+  const cleanBatch = run([`--batch=${flagManifest}`]);
+  if (cleanBatch.status === 0) {
+    pass('control: the same batch without a global flag still renders');
+  } else {
+    fail(`control failed: a flagless batch did not run, so the rejections above prove nothing: status=${cleanBatch.status}\n${cleanBatch.output.trim()}`);
+  }
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
 }
