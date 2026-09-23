@@ -77,10 +77,42 @@ function isRecruiteeSamplePosting(j) {
 }
 
 /**
+ * Assemble a location string for one offer.
+ *
+ * Recruitee's flat `location` field carries only the offer's PRIMARY place
+ * even when the offer is open in more than one: a live Exeon Analytics
+ * posting had `location: "Zürich, Zürich, Switzerland"` while its `locations`
+ * array also carried a `"remote in Germany"` entry — so a `location_filter`
+ * scoped to Germany never saw that the role was open there at all. `locations`
+ * holds every place as `{ name, city, country, ... }`; when it lists 2+ names,
+ * those are joined instead of trusting the flat field. Deduped, joined with
+ * " · " like ashby/eightfold/gem/workday's multi-place handling, so
+ * scan.mjs's location_filter sees every place a multi-location role is open
+ * to.
+ *
+ * Falls back to the pre-existing single-place logic — explicit `location`,
+ * else assembled from city/country, appending "Remote" when `remote` is true
+ * — when `locations` has 0 or 1 usable names.
+ *
+ * @param {any} j
+ * @returns {string}
+ */
+function assembleLocation(j) {
+  const names = Array.isArray(j.locations)
+    ? j.locations.map(l => (typeof l?.name === 'string' ? l.name.trim() : '')).filter(Boolean)
+    : [];
+  if (names.length > 1) return [...new Set(names)].join(' · ');
+  const city = j.city || '';
+  const country = j.country || '';
+  const remote = j.remote ? 'Remote' : '';
+  return j.location || [city, country, remote].filter(Boolean).join(', ');
+}
+
+/**
  * Parse a Recruitee /api/offers/ response. Exported for unit tests.
  *
  * Recruitee returns:
- *   { offers: [{ title, careers_url?, url?, city?, country?, remote?, location? }] }
+ *   { offers: [{ title, careers_url?, url?, city?, country?, remote?, location?, locations? }] }
  *
  * - url: prefer `careers_url`, fall back to `url`. Recruitee tenants commonly
  *   serve postings on their own custom domain (e.g. `careers.hostaway.com`),
@@ -90,7 +122,8 @@ function isRecruiteeSamplePosting(j) {
  *   not apply. It is sourced from the already-validated tenant API response.
  *   Requirement: a well-formed `https:` URL; a non-HTTPS or malformed URL is
  *   dropped (empty string returned per the Job contract).
- * - location: prefer the explicit `location` field; else assemble from
+ * - location: see `assembleLocation` — joins `locations[]` when it lists 2+
+ *   places, else the explicit `location` field, else assembled from
  *   city/country, appending "Remote" when `remote` is true.
  * - description: Recruitee's list payload embeds each offer's full HTML body
  *   for free (same request — verified against a live board), so it is
@@ -100,6 +133,13 @@ function isRecruiteeSamplePosting(j) {
  *   entirely (see isRecruiteeSamplePosting, #4190), so a tenant serving only
  *   its seeded sample posting resolves as empty rather than as a live board.
  *
+ * Drop rule: an offer with no usable `title` is silently omitted, never
+ * emitted half-formed with `title: ''` — same convention as `parseIbmResponse`
+ * (`providers/ibm.mjs`) and `parseEightfoldResponse` (`providers/eightfold.mjs`).
+ * `url` stays optional per-row (display-only, not the dedup key for this
+ * provider's own fetch) — a title-bearing offer with no resolvable URL is
+ * still kept with `url: ''`.
+ *
  * @param {any} json
  * @param {string} companyName
  * @returns {Array<{title: string, url: string, company: string, location: string, description?: string}>}
@@ -107,11 +147,13 @@ function isRecruiteeSamplePosting(j) {
 export function parseRecruiteeResponse(json, companyName) {
   const offers = json?.offers;
   if (!Array.isArray(offers)) return [];
-  return offers.filter(j => !isRecruiteeSamplePosting(j)).map(j => {
-    const city = j.city || '';
-    const country = j.country || '';
-    const remote = j.remote ? 'Remote' : '';
-    const location = j.location || [city, country, remote].filter(Boolean).join(', ');
+  const out = [];
+  for (const j of offers) {
+    if (isRecruiteeSamplePosting(j)) continue;
+    const title = typeof j.title === 'string' ? j.title.trim() : '';
+    if (!title) continue;
+
+    const location = assembleLocation(j);
     const description = htmlToText(j.description);
 
     // Resolve offer URL. Recruitee tenants commonly publish postings on their
@@ -133,12 +175,13 @@ export function parseRecruiteeResponse(json, companyName) {
       }
     }
 
-    return {
-      title: j.title || '',
+    out.push({
+      title,
       url,
       location,
       company: companyName,
       ...(description ? { description } : {}),
-    };
-  });
+    });
+  }
+  return out;
 }

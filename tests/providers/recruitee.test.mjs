@@ -205,6 +205,96 @@ try {
     fail('a sample-only tenant should parse to zero jobs');
   }
 
+  // ── Multi-location (`locations[]` beats the flat `location` field) ──
+  // The flat `location` field carries only the PRIMARY place even when the
+  // offer is open in more than one — this is the Exeon Analytics case
+  // (Zürich hybrid + remote-in-Germany), reproduced verbatim from the live API.
+  const multiLocOffers = parseRecruiteeResponse(
+    {
+      offers: [
+        {
+          title: 'Quality Assurance Engineer',
+          careers_url: 'https://exeon.recruitee.com/o/quality-assurance-engineer-1',
+          location: 'Zürich, Zürich, Switzerland',
+          locations: [
+            { name: 'Zürich, Switzerland', city: 'Zürich', country: 'Switzerland' },
+            { name: 'remote in Germany', city: 'remote', country: 'Germany' },
+          ],
+        },
+        {
+          // Single-entry `locations[]` must not override a more useful flat field.
+          title: 'Single location array',
+          location: 'Remote, EMEA',
+          locations: [{ name: 'Remote, EMEA' }],
+        },
+        {
+          // No usable `.name` values → falls back to the flat field.
+          title: 'Unusable locations array',
+          location: 'Berlin, Germany',
+          locations: [{ city: 'Berlin' }, { name: 42 }],
+        },
+      ],
+    },
+    'Exeon Analytics',
+  );
+  if (multiLocOffers[0]?.location === 'Zürich, Switzerland · remote in Germany') {
+    pass('parseRecruiteeResponse joins locations[] with " · " when it lists 2+ places');
+  } else {
+    fail(`row 0 location = ${JSON.stringify(multiLocOffers[0]?.location)}`);
+  }
+  if (multiLocOffers[1]?.location === 'Remote, EMEA') {
+    pass('parseRecruiteeResponse keeps the flat location field when locations[] has only 1 place');
+  } else {
+    fail(`row 1 location = ${JSON.stringify(multiLocOffers[1]?.location)}`);
+  }
+  if (multiLocOffers[2]?.location === 'Berlin, Germany') {
+    pass('parseRecruiteeResponse falls back to the flat field when locations[] has no usable names');
+  } else {
+    fail(`row 2 location = ${JSON.stringify(multiLocOffers[2]?.location)}`);
+  }
+
+  // Dedup: a tenant repeating the same place twice in locations[] must not
+  // surface it twice in the joined string.
+  const dedupOffers = parseRecruiteeResponse(
+    {
+      offers: [
+        {
+          title: 'Duplicate places',
+          locations: [{ name: 'Berlin, Germany' }, { name: 'Berlin, Germany' }, { name: 'Remote' }],
+        },
+      ],
+    },
+    'X',
+  );
+  if (dedupOffers[0]?.location === 'Berlin, Germany · Remote') {
+    pass('parseRecruiteeResponse dedupes repeated locations[] names');
+  } else {
+    fail(`dedup row location = ${JSON.stringify(dedupOffers[0]?.location)}`);
+  }
+
+  // ── Defensive parsing: title is a required field (ADDING_A_PROVIDER.md) ──
+  // A row missing/blank `title` is dropped, never emitted half-formed with
+  // `title: ''` — same convention as ibm.mjs / eightfold.mjs. `url` stays
+  // optional per-row (unaffected — already covered by the "No URL field" case
+  // above, which keeps a title-bearing row with url: '').
+  const titleDropOffers = parseRecruiteeResponse(
+    {
+      offers: [
+        { title: 'Real Offer', careers_url: 'https://channable.recruitee.com/o/real' },
+        { careers_url: 'https://channable.recruitee.com/o/no-title' },
+        { title: '', careers_url: 'https://channable.recruitee.com/o/blank-title' },
+        { title: '   ', careers_url: 'https://channable.recruitee.com/o/whitespace-title' },
+        { title: 42, careers_url: 'https://channable.recruitee.com/o/non-string-title' },
+      ],
+    },
+    'Channable',
+  );
+  if (titleDropOffers.length === 1 && titleDropOffers[0]?.title === 'Real Offer') {
+    pass('parseRecruiteeResponse drops offers with no usable title (missing, blank, whitespace-only, non-string)');
+  } else {
+    fail(`title-drop: got ${titleDropOffers.length} offer(s) = ${JSON.stringify(titleDropOffers)}`);
+  }
+
 } catch (e) {
   fail(`recruitee provider tests crashed: ${e.message}`);
 }
