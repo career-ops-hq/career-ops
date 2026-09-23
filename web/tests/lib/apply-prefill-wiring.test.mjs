@@ -8,10 +8,10 @@
  * the route passes cvSource and the provider sends the two identifiers it
  * resolves from.
  *
- * Drop `cvSource` from the buildAnswerPrompt call, or send the prefill only
- * { sessionId, cliId }. Every one of those cases still passes while the bug is
- * fully back, with the planner drafting from master cv.md beside a tailored
- * attachment.
+ * Drop `cvSource` from the buildAnswerPrompt call, pass it `cvPath`, or send
+ * the prefill only { sessionId, cliId }. Every one of those cases still passes
+ * while the bug is fully back, with the planner drafting from master cv.md, or
+ * from a raw PDF, beside a tailored attachment.
  *
  * Driving the route itself would need a live apply session and a spawned CLI.
  * So these read the source, in the style of config-form-persist-wiring.test.mjs,
@@ -30,13 +30,24 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const route = readFileSync(join(root, "src/app/api/apply/prefill/route.ts"), "utf8");
 const provider = readFileSync(join(root, "src/components/apply/apply-provider.tsx"), "utf8");
 
-test("the prefill route hands buildAnswerPrompt the resolved cvSource", () => {
+test("the prefill route hands buildAnswerPrompt the applyCvSource result", () => {
   // The call this PR exists to change. Without the argument the prompt falls
   // back to its cv.md wording and the resolver above it is dead code.
+  //
+  // The name alone is too weak. `cvSource: cvPath` carries the name and hands
+  // the planner the raw PDF that applyCvSource() exists to translate, so pin
+  // the value: the applyCvSource() call, or the name holding its result.
+  const args = promptArgs();
+  const entry = args.match(/\bcvSource\b\s*(?::([^,}]*))?/);
+  assert.ok(entry, "prefill/route.ts must pass cvSource to buildAnswerPrompt, or the planner reads master cv.md");
+
+  const value = (entry[1] ?? "cvSource").trim();
+  if (value.includes("applyCvSource(")) return;
+  assert.match(value, /^[A-Za-z_$][\w$]*$/, `cvSource is passed \`${value}\`, which this test cannot trace to applyCvSource()`);
   assert.match(
     route,
-    /buildAnswerPrompt\(\{[^}]*\bcvSource\b[^}]*\}\)/,
-    "prefill/route.ts must pass cvSource to buildAnswerPrompt, or the planner reads master cv.md",
+    new RegExp(`\\b(?:const|let|var)\\s+${value}\\s*=[^\\n;]*\\bapplyCvSource\\(`),
+    `cvSource is passed \`${value}\`, which holds no applyCvSource() result. The planner gets the untranslated path`,
   );
 });
 
@@ -44,7 +55,6 @@ test("the prefill route resolves that cvSource from the CV the fill route attach
   assert.match(route, /import\s*\{[^}]*\bresolveSessionCv\b[^}]*\}\s*from\s*"@\/lib\/apply\/cv"/);
   assert.match(route, /import\s*\{[^}]*\bapplyCvSource\b[^}]*\}\s*from\s*"@\/lib\/apply\/cv-source\.mjs"/);
   assert.match(route, /resolveSessionCv\(\{[^}]*\bcompany\b[^}]*\bapplication\b[^}]*\}\)/);
-  assert.match(route, /\bcvSource\b\s*=[^\n]*\bapplyCvSource\(/);
 
   const resolve = route.indexOf("resolveSessionCv(");
   const prompt = route.indexOf("buildAnswerPrompt(");
@@ -76,13 +86,23 @@ test("prefill and fill read the identifiers from the same two refs", () => {
   assert.match(fill, /application:\s*nRef\.current/);
 });
 
+/** The object literal buildAnswerPrompt is called with in prefill/route.ts. */
+function promptArgs() {
+  return objectArg(route, "buildAnswerPrompt({", "the buildAnswerPrompt call in prefill/route.ts");
+}
+
 /** The JSON.stringify({...}) argument of the fetch to `path`. */
 function callBody(path) {
   const at = provider.indexOf(`"${path}"`);
   assert.notEqual(at, -1, `no fetch to ${path} in apply-provider.tsx`);
-  const open = provider.indexOf("JSON.stringify({", at);
-  assert.notEqual(open, -1, `the fetch to ${path} sends no JSON body`);
-  const close = provider.indexOf("})", open);
-  assert.ok(close > open, `could not find the end of the ${path} body`);
-  return provider.slice(open, close);
+  return objectArg(provider.slice(at), "JSON.stringify({", `the JSON body of the fetch to ${path}`);
+}
+
+/** The body of the `{...}` literal opened by `opener`, up to its `})`. */
+function objectArg(text, opener, what) {
+  const open = text.indexOf(opener);
+  assert.notEqual(open, -1, `could not find ${what}`);
+  const close = text.indexOf("})", open);
+  assert.ok(close > open, `could not find the end of ${what}`);
+  return text.slice(open + opener.length, close);
 }
