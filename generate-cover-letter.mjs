@@ -171,10 +171,28 @@ function buildRecipientBlock(letter) {
   // a blank line inside the wrapper rather than as the absent field it is.
   const lines = [r.name, r.title, r.company, ...addressLines]
     .map((v) => (typeof v === "string" ? v.trim() : v))
-    .filter(Boolean)
-    .map(escapeHtml);
+    .filter(Boolean);
   if (!lines.length) return "";
-  return `<div class="recipient">\n${lines.map((l) => `    <div>${l}</div>`).join("\n")}\n  </div>`;
+
+  // Once this block renders, the dateline drops the company and city, so they
+  // have to land here or they leave the letter entirely. A recipient given as a
+  // bare name is the case that exposed it: the block held one line, the dateline
+  // went date-only, and both values were simply gone from the output.
+  //
+  // Appended only when the recipient did not already supply them, compared
+  // case-insensitively against every line including the address, so a recipient
+  // that names its own company keeps exactly one copy.
+  const seen = new Set(lines.map((l) => l.toLowerCase()));
+  for (const extra of [letter.company, letter.city]) {
+    const v = typeof extra === "string" ? extra.trim() : "";
+    if (v && !seen.has(v.toLowerCase())) {
+      lines.push(v);
+      seen.add(v.toLowerCase());
+    }
+  }
+
+  const escaped = lines.map(escapeHtml);
+  return `<div class="recipient">\n${escaped.map((l) => `    <div>${l}</div>`).join("\n")}\n  </div>`;
 }
 
 /** Build the optional achievements list for the letter body. */

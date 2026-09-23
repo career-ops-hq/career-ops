@@ -111,3 +111,24 @@ test('the shipped base template has no {{RECIPIENT_BLOCK}} slot', () => {
   assert.ok(shipped.includes('{{DATELINE}}'), 'the shipped template has a dateline slot');
   assert.ok(!shipped.includes('{{RECIPIENT_BLOCK}}'), 'the shipped template has no address block');
 });
+
+test('a name-only recipient keeps the company and city somewhere in the letter', () => {
+  // Regression. buildRecipientBlock returns a block for { name } alone, so the
+  // dateline went date-only, but the block carried only the name. company and
+  // city then appeared nowhere: the letter silently lost both.
+  const html = buildHtml(payload({ recipient: { name: 'Jane Reviewer' } }), template());
+
+  assert.ok(html.includes('Example Corp'), 'the company vanished from the letter');
+  assert.ok(html.includes('Boston, MA'), 'the city vanished from the letter');
+  // and still exactly once each, which is the duplication this PR exists to stop
+  assert.equal((html.match(/Example Corp/g) || []).length, 1);
+  assert.equal((html.match(/Boston, MA/g) || []).length, 1);
+});
+
+test('a recipient carrying its own company does not get it twice', () => {
+  const html = buildHtml(payload({
+    recipient: { name: 'Jane', company: 'Example Corp', address_lines: ['Boston, MA'] },
+  }), template());
+  assert.equal((html.match(/Example Corp/g) || []).length, 1);
+  assert.equal((html.match(/Boston, MA/g) || []).length, 1);
+});
