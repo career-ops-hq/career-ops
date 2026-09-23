@@ -33,36 +33,39 @@ const WEB_FIELD = {
 const aliasCache = new Map();
 
 /**
- * Load the shared header-alias table (lowercased header text → canonical field)
- * from `{rootDir}/tracker-aliases.json`. Cached per resolved file path so the
- * request-time read path (readApplications runs on every API route / page
- * render) doesn't re-read and re-parse the JSON each call — but the cache is
- * keyed on the file's mtime+size (one statSync per call, no full read), so a
- * system update that rewrites the alias table is picked up on the next request
- * instead of after a server restart. Failures are NEVER cached: a
- * missing/corrupt file (core checkout predating the JSON) yields an empty
- * table — no header row is then detected and parseApplications falls back to
- * the legacy fixed column order — and the cache entry is cleared so a later
- * recovered file is loaded immediately.
- * @param {string} rootDir - career-ops root (careerOpsRoot() on the web side).
+ * Load the shared header-alias table (lowercased header text → canonical field).
+ *
+ * `rootDir` is normally the data root so a complete external checkout keeps
+ * using its own matching system files. A data-only root has no alias table;
+ * `fallbackRootDir` then points at the checkout that runs the web app. Cache
+ * entries remain keyed by the resolved file's mtime+size, and failures are
+ * never cached so a recovered primary file is picked up immediately.
+ * @param {string} rootDir - primary career-ops root.
+ * @param {string} [fallbackRootDir] - running system checkout.
  * @returns {Record<string, string>}
  */
-export function loadHeaderAliases(rootDir) {
-  const file = path.resolve(rootDir, "tracker-aliases.json");
-  try {
-    const { mtimeMs, size } = fs.statSync(file);
-    const cached = aliasCache.get(file);
-    if (cached && cached.mtimeMs === mtimeMs && cached.size === size) return cached.aliases;
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    // Guard non-object JSON (null, arrays, scalars) — treat like corrupt.
-    /** @type {Record<string, string>} */
-    const aliases = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-    aliasCache.set(file, { mtimeMs, size, aliases });
-    return aliases;
-  } catch {
-    aliasCache.delete(file); // never cache failure — recovery must not need a restart
-    return {};
+export function loadHeaderAliases(rootDir, fallbackRootDir) {
+  const roots = [...new Set([rootDir, fallbackRootDir].filter(Boolean))];
+  for (const root of roots) {
+    const file = path.resolve(root, "tracker-aliases.json");
+    try {
+      const { mtimeMs, size } = fs.statSync(file);
+      const cached = aliasCache.get(file);
+      if (cached && cached.mtimeMs === mtimeMs && cached.size === size) return cached.aliases;
+      const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        aliasCache.delete(file);
+        continue;
+      }
+      /** @type {Record<string, string>} */
+      const aliases = parsed;
+      aliasCache.set(file, { mtimeMs, size, aliases });
+      return aliases;
+    } catch {
+      aliasCache.delete(file);
+    }
   }
+  return {};
 }
 
 /**
@@ -108,19 +111,20 @@ export function detectColumnMap(lines, aliases) {
 
 /**
  * Parse the tracker markdown (source of truth) into application rows.
- * Columns are mapped by header name via the shared alias table in
- * `{rootDir}/tracker-aliases.json`; the legacy fixed order
+ * Columns are mapped by header name via the shared alias table. A data-only
+ * `rootDir` falls back to `systemRootDir`; the legacy fixed order
  * (# | Date | Company | Role | Score | Status | PDF | Report | Notes)
- * is the fallback when no recognizable header row is present.
+ * remains the last resort for old trackers without recognizable headers.
  * Rows without a numeric # cell (header, separator, stray pipes) are skipped,
  * mirroring parseTrackerRow in tracker-parse.mjs.
  * @param {string} md - content of data/applications.md.
- * @param {string} rootDir - career-ops root holding tracker-aliases.json.
+ * @param {string} rootDir - data root, which may also be a full checkout.
+ * @param {string} [systemRootDir] - checkout holding system files.
  * @returns {{n: string, date: string, company: string, via: string, role: string, score: string, status: string, pdf: string, report: string, notes: string}[]}
  */
-export function parseApplications(md, rootDir) {
+export function parseApplications(md, rootDir, systemRootDir) {
   const lines = md.split("\n");
-  const map = detectColumnMap(lines, loadHeaderAliases(rootDir));
+  const map = detectColumnMap(lines, loadHeaderAliases(rootDir, systemRootDir));
   const mappedWidth = map ? Math.max(...Object.values(map)) + 1 : 0;
   const rows = [];
   for (const raw of lines) {
