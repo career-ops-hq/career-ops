@@ -295,6 +295,81 @@ try {
     fail(`title-drop: got ${titleDropOffers.length} offer(s) = ${JSON.stringify(titleDropOffers)}`);
   }
 
+  // ── Malformed offer entries (null / primitive) don't crash the whole batch ──
+  // A single bad entry in offers[] must not throw out of fetch() and lose
+  // every other offer in the response.
+  const malformedEntryOffers = parseRecruiteeResponse(
+    {
+      offers: [null, { title: 'Valid Before' }, undefined, 'not an object', 42, { title: 'Valid After' }],
+    },
+    'X',
+  );
+  if (
+    malformedEntryOffers.length === 2 &&
+    malformedEntryOffers[0]?.title === 'Valid Before' &&
+    malformedEntryOffers[1]?.title === 'Valid After'
+  ) {
+    pass('parseRecruiteeResponse skips null/undefined/primitive offer entries without crashing');
+  } else {
+    fail(`malformed-entry: got ${malformedEntryOffers.length} offer(s) = ${JSON.stringify(malformedEntryOffers)}`);
+  }
+
+  // ── locations[] with only duplicate names falls back to the flat field ──
+  // Distinct-count, not raw-count: 2 entries naming the SAME place must not
+  // "join" down to that one place when the flat `location` field is richer.
+  const dupNameFallback = parseRecruiteeResponse(
+    {
+      offers: [
+        {
+          title: 'Duplicate name, richer flat field',
+          location: 'Berlin, Germany (HQ office)',
+          locations: [{ name: 'Berlin, Germany' }, { name: 'Berlin, Germany' }],
+        },
+      ],
+    },
+    'X',
+  );
+  if (dupNameFallback[0]?.location === 'Berlin, Germany (HQ office)') {
+    pass('parseRecruiteeResponse falls back to the flat field when locations[] names are all the same place');
+  } else {
+    fail(`dup-name-fallback location = ${JSON.stringify(dupNameFallback[0]?.location)}`);
+  }
+
+  // ── Country is appended to a bare location name, without duplicating it ──
+  const countryOffers = parseRecruiteeResponse(
+    {
+      offers: [
+        {
+          // Bare city names with no country baked in — country appended.
+          title: 'Bare city names',
+          locations: [
+            { name: 'Berlin', country: 'Germany' },
+            { name: 'Paris', country: 'France' },
+          ],
+        },
+        {
+          // Name already contains the country (case-insensitive) — not duplicated.
+          title: 'Country already in name',
+          locations: [
+            { name: 'Zürich, Switzerland', country: 'Switzerland' },
+            { name: 'remote in Germany', country: 'Germany' },
+          ],
+        },
+      ],
+    },
+    'X',
+  );
+  if (countryOffers[0]?.location === 'Berlin, Germany · Paris, France') {
+    pass('parseRecruiteeResponse appends country to a bare location name');
+  } else {
+    fail(`bare-city location = ${JSON.stringify(countryOffers[0]?.location)}`);
+  }
+  if (countryOffers[1]?.location === 'Zürich, Switzerland · remote in Germany') {
+    pass('parseRecruiteeResponse does not duplicate a country already present in the location name');
+  } else {
+    fail(`no-duplicate-country location = ${JSON.stringify(countryOffers[1]?.location)}`);
+  }
+
 } catch (e) {
   fail(`recruitee provider tests crashed: ${e.message}`);
 }

@@ -84,24 +84,39 @@ function isRecruiteeSamplePosting(j) {
  * posting had `location: "Zürich, Zürich, Switzerland"` while its `locations`
  * array also carried a `"remote in Germany"` entry — so a `location_filter`
  * scoped to Germany never saw that the role was open there at all. `locations`
- * holds every place as `{ name, city, country, ... }`; when it lists 2+ names,
- * those are joined instead of trusting the flat field. Deduped, joined with
- * " · " like ashby/eightfold/gem/workday's multi-place handling, so
- * scan.mjs's location_filter sees every place a multi-location role is open
- * to.
+ * holds every place as `{ name, city, country, ... }`; when it lists 2+
+ * DISTINCT names, those are joined instead of trusting the flat field —
+ * counted after dedup, so an array that repeats the same place twice (e.g.
+ * `[{name: "Berlin, Germany"}, {name: "Berlin, Germany"}]`) still falls
+ * through to the flat-field path below rather than discarding a possibly
+ * richer flat `location` string in favor of a "join" of one place. Each name
+ * gets its `country` appended when present and not already part of the name
+ * text (case-insensitive substring check, so "Zürich, Switzerland" + country
+ * "Switzerland" does not become "Zürich, Switzerland, Switzerland"). Deduped,
+ * joined with " · " like ashby/eightfold/gem/workday's multi-place handling,
+ * so scan.mjs's location_filter sees every place a multi-location role is
+ * open to.
  *
  * Falls back to the pre-existing single-place logic — explicit `location`,
  * else assembled from city/country, appending "Remote" when `remote` is true
- * — when `locations` has 0 or 1 usable names.
+ * — when `locations` yields 0 or 1 distinct names.
  *
  * @param {any} j
  * @returns {string}
  */
 function assembleLocation(j) {
   const names = Array.isArray(j.locations)
-    ? j.locations.map(l => (typeof l?.name === 'string' ? l.name.trim() : '')).filter(Boolean)
+    ? j.locations.map(l => {
+        const name = typeof l?.name === 'string' ? l.name.trim() : '';
+        if (!name) return '';
+        const country = typeof l?.country === 'string' ? l.country.trim() : '';
+        return country && !name.toLowerCase().includes(country.toLowerCase())
+          ? `${name}, ${country}`
+          : name;
+      }).filter(Boolean)
     : [];
-  if (names.length > 1) return [...new Set(names)].join(' · ');
+  const distinctNames = [...new Set(names)];
+  if (distinctNames.length > 1) return distinctNames.join(' · ');
   const city = j.city || '';
   const country = j.country || '';
   const remote = j.remote ? 'Remote' : '';
@@ -138,7 +153,9 @@ function assembleLocation(j) {
  * (`providers/ibm.mjs`) and `parseEightfoldResponse` (`providers/eightfold.mjs`).
  * `url` stays optional per-row (display-only, not the dedup key for this
  * provider's own fetch) — a title-bearing offer with no resolvable URL is
- * still kept with `url: ''`.
+ * still kept with `url: ''`. A malformed entry (`null`, a primitive, anything
+ * that isn't a plain object) is skipped the same way, rather than throwing
+ * and losing every other offer in the response.
  *
  * @param {any} json
  * @param {string} companyName
@@ -149,6 +166,7 @@ export function parseRecruiteeResponse(json, companyName) {
   if (!Array.isArray(offers)) return [];
   const out = [];
   for (const j of offers) {
+    if (!j || typeof j !== 'object') continue;
     if (isRecruiteeSamplePosting(j)) continue;
     const title = typeof j.title === 'string' ? j.title.trim() : '';
     if (!title) continue;
