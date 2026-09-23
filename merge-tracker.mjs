@@ -33,7 +33,7 @@ import { LEGAL_SUFFIXES, GENERIC_DESCRIPTORS } from './invite-match.mjs';
 import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell } from './tracker-utils.mjs';
 // Canonical posting-URL key. Kept in its own module so scan.mjs / scan-history
 // can adopt the same key later without the definitions drifting.
-import { normalizeUrl, isAggregatorUrl } from './url-key.mjs';
+import { normalizeUrl, isAggregatorUrl, aggregatorPostingId } from './url-key.mjs';
 
 const MERGE_TRACKER_HELP_REQUESTED = process.argv.includes('--help') || process.argv.includes('-h');
 if (MERGE_TRACKER_HELP_REQUESTED) {
@@ -1419,10 +1419,28 @@ for (const file of tsvFiles) {
   // already holds this for the mirror-image case — detect-reposts skips
   // `aggregator: true` companies because "same company + same title" stops
   // meaning "same opening" there (#2703).
+  //
+  // WITH ONE EXCEPTION, AND IT IS THE POSTING ID. Reading the whole URL as
+  // unknown also swallowed two DIFFERENT requisitions listed on the SAME board:
+  // LinkedIn 4001 (already Applied) and LinkedIn 4002 folded into one row that
+  // still said Applied while pointing at a posting nobody had applied to, with
+  // the first report orphaned and no marker — the silent, unrecoverable
+  // direction. The narrower and correct signal is the requisition identity the
+  // URL carries: two IDs extracted from the SAME aggregator that differ are two
+  // postings. Same ID, one side unextractable, or two different aggregators all
+  // stay UNKNOWN, so slug-vs-id spellings and uk./www. region hosts keep
+  // collapsing and #3652 is preserved. Gating on the HOST instead was measured
+  // to split one posting across two rows, which is why the ID is the gate.
   const urlDiffers = (cand) => {
     const candUrl = normalizeUrl(cand.url);
     if (!candUrl || !addUrl) return false;   // unknown → not evidence
-    if (isAggregatorUrl(cand.url) || isAggregatorUrl(addition.url)) return false;
+    if (isAggregatorUrl(cand.url) || isAggregatorUrl(addition.url)) {
+      const candId = aggregatorPostingId(cand.url);
+      const addId = aggregatorPostingId(addition.url);
+      // Comparable only on one board: a LinkedIn id and an Indeed id differing
+      // says the two BOARDS differ, which is the non-signal above.
+      return Boolean(candId && addId && candId.domain === addId.domain && candId.id !== addId.id);
+    }
     return candUrl !== addUrl;
   };
 

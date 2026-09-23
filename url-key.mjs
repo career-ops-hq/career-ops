@@ -82,23 +82,90 @@ function foldHostname(host) {
   return h.length > 1 && h.endsWith('.') && !h.endsWith('..') ? h.slice(0, -1) : h;
 }
 
+// Posting-ID extractors, keyed by the registrable aggregator domain above.
+//
+// WHY AN ID AND NOT THE HOST. "Aggregator on either side → unknown" is too
+// coarse: it also swallows two DIFFERENT requisitions listed on the SAME board,
+// and folding those rewrites an Applied row's URL to a posting nobody applied
+// to. The host itself cannot separate the two cases — the posting ID can.
+//
+// ONLY VERIFIED SHAPES GO IN HERE, and an unmapped board is not a defect. A
+// guessed regex that reads two spellings of one posting as two IDs splits that
+// posting into two rows, which is the failure direction this file exists to
+// avoid; a missing extractor merely leaves the pair UNKNOWN, i.e. exactly the
+// behaviour shipped for #3652. The two below are the shapes this repo already
+// resolves in liveness-api.mjs (see its `linkedin` provider) and exercises in
+// tests/liveness-api-linkedin.test.mjs — not inferred from the URLs' looks.
+//
+// Extractors are keyed on the DOMAIN, never on the path: `/jobs/view/{id}` is
+// also Workable's employer-board shape, where it means something else.
+const AGGREGATOR_POSTING_ID = {
+  // linkedin.com/jobs/view/{id} · .../jobs/view/{title-slug}-{id} · any page
+  // that carries the posting in ?currentJobId= (search and collection views).
+  'linkedin.com': (u) => {
+    const path = u.pathname.match(/^\/jobs\/view\/(?:.*-)?(\d+)\/?$/);
+    if (path) return path[1];
+    const current = u.searchParams.get('currentJobId');
+    return current && /^\d+$/.test(current) ? current : null;
+  },
+  // indeed.com/viewjob?jk={id}; a results page carries the focused posting as
+  // ?vjk={id}. The job key is the requisition, so region hosts (uk./www./de.)
+  // and the two page shapes all reduce to it.
+  'indeed.com': (u) => {
+    const jk = u.searchParams.get('jk') ?? u.searchParams.get('vjk');
+    return jk && /^[\w-]+$/.test(jk) ? jk : null;
+  },
+};
+
+/**
+ * Parse a posting URL and resolve the aggregator it is hosted on.
+ *
+ * @param {string} raw - A posting URL (or any string) from a tracker row / TSV.
+ * @returns {{url: URL, domain: string}|null} null when it is not on a known one.
+ */
+function parseAggregator(raw) {
+  if (typeof raw !== 'string') return null;
+  let url;
+  try { url = new URL(raw.trim()); } catch { return null; }
+  const host = foldHostname(url.hostname);
+  // Label boundary, never a substring: `linkedin.com.evil.example` and
+  // `myindeed.com` both contain an aggregator domain and are neither.
+  const domain = AGGREGATOR_DOMAINS.find((d) => host === d || host.endsWith(`.${d}`));
+  return domain ? { url, domain } : null;
+}
+
 /**
  * Is this posting URL hosted by a multi-employer aggregator?
  *
  * Callers use it to decide whether a URL mismatch is evidence about identity.
  * Between two employer-controlled boards it is; as soon as an aggregator is on
- * either side it is not, because the same requisition appears on both.
+ * either side the HOSTS alone say nothing, because the same requisition appears
+ * on both — see aggregatorPostingId for the signal that survives that.
  *
  * @param {string} raw - A posting URL (or any string) from a tracker row / TSV.
  * @returns {boolean} True only for a parseable URL on a known aggregator.
  */
 export function isAggregatorUrl(raw) {
-  if (typeof raw !== 'string') return false;
-  let host;
-  try { host = foldHostname(new URL(raw.trim()).hostname); } catch { return false; }
-  // Label boundary, never a substring: `linkedin.com.evil.example` and
-  // `myindeed.com` both contain an aggregator domain and are neither.
-  return AGGREGATOR_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`));
+  return parseAggregator(raw) !== null;
+}
+
+/**
+ * Extract the requisition identity an aggregator URL carries.
+ *
+ * Two of these are comparable ONLY when `domain` matches: one opening is listed
+ * on LinkedIn and on Indeed at the same time, so a LinkedIn id and an Indeed id
+ * differing is a statement about two boards, not about two postings.
+ *
+ * @param {string} raw - A posting URL (or any string) from a tracker row / TSV.
+ * @returns {{domain: string, id: string}|null} null means UNKNOWN — not on a
+ *   known aggregator, no extractor for that board yet, or no id in the URL.
+ *   Callers must never read null as "the same posting".
+ */
+export function aggregatorPostingId(raw) {
+  const agg = parseAggregator(raw);
+  if (!agg) return null;
+  const id = AGGREGATOR_POSTING_ID[agg.domain]?.(agg.url) ?? null;
+  return id ? { domain: agg.domain, id } : null;
 }
 
 /**

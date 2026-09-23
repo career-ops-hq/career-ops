@@ -326,11 +326,11 @@ ok('--backfill-urls resolves a ROOT-relative reports/ link (the P0 regression)',
 // the ONLY tier that can fire and the URL pair is the single variable. An
 // aggregator re-lists a requisition the employer hosts elsewhere, so a mismatch
 // involving one says nothing about whether the rows are the same opening.
-function mergeTwoWithUrls(existingUrl, additionUrl) {
+function mergeTwoWithUrls(existingUrl, additionUrl, existingStatus = 'Evaluated') {
   const env = makeEnv();
   try {
     writeTracker(env, [
-      `| 1 | 2026-06-01 | Acme | Director of Marketing | 4.0/5 | Evaluated | ❌ | [1](reports/1-acme.md) | n |${existingUrl ? ` ${existingUrl} ` : '  '}|`,
+      `| 1 | 2026-06-01 | Acme | Director of Marketing | 4.0/5 | ${existingStatus} | ❌ | [1](reports/1-acme.md) | n |${existingUrl ? ` ${existingUrl} ` : '  '}|`,
     ]);
     const cols = ['2', '2026-06-03', 'Acme', 'Director of Marketing', 'Evaluated', '4.1/5', '❌', '[2](reports/2-acme.md)', 'n'];
     if (additionUrl) cols.push(additionUrl);
@@ -364,6 +364,59 @@ ok('REGRESSION: two employer-board URLs are still proof of two distinct openings
 ok('UNCHANGED: an addition with no URL cannot claim a row whose posting is known', () => {
   const rows = mergeTwoWithUrls('https://www.linkedin.com/jobs/view/4001', '');
   assert.equal(rows.length, 2, 'an absent key stays UNKNOWN, so the unkeyed addition inserts');
+});
+
+// ─────────────── …but the POSTING ID on one aggregator still is ───────────────
+//
+// "Aggregator on either side → unknown" was too coarse. Two DIFFERENT job IDs
+// on the SAME aggregator are not two spellings of one requisition: they are two
+// requisitions, and folding them rewrites an Applied row's URL to a posting the
+// user never applied to and orphans the report it was applied from — the silent,
+// unrecoverable direction merge-tracker exists to avoid. So the evidence is the
+// extracted posting ID, not the host: same ID (or none extractable) stays
+// UNKNOWN and the fuzzy tier decides, preserving #3652.
+
+ok('THE OVER-MERGE: two different LinkedIn job IDs stay TWO rows, Applied row intact', () => {
+  const rows = mergeTwoWithUrls(
+    'https://www.linkedin.com/jobs/view/4001',
+    'https://www.linkedin.com/jobs/view/4002', 'Applied');
+  assert.equal(rows.length, 2, 'two job IDs on one aggregator are two requisitions');
+  const applied = rows.find(r => urlCell(r) === 'https://www.linkedin.com/jobs/view/4001');
+  assert.ok(applied, 'the posting actually applied to keeps its own URL');
+  assert.ok(applied.includes('Applied'), 'its status is untouched');
+  assert.ok(applied.includes('1-acme.md'), 'its report is not orphaned');
+});
+
+ok('different IDs across the /jobs/view and ?currentJobId= shapes stay TWO rows', () => {
+  const rows = mergeTwoWithUrls(
+    'https://www.linkedin.com/jobs/view/4001',
+    'https://www.linkedin.com/jobs/search/?currentJobId=4002&keywords=marketing');
+  assert.equal(rows.length, 2, 'the id is the evidence, not the URL shape it arrived in');
+});
+
+ok('slug-vs-id spellings of ONE LinkedIn posting still collapse to ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://www.linkedin.com/jobs/view/4001',
+    'https://www.linkedin.com/jobs/view/director-of-marketing-at-acme-4001');
+  assert.equal(rows.length, 1, 'same posting id → not evidence → fuzzy tier decides');
+});
+
+ok('uk. vs www. host variants of ONE Indeed posting still collapse to ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://uk.indeed.com/viewjob?jk=abc123',
+    'https://www.indeed.com/viewjob?jk=abc123');
+  assert.equal(rows.length, 1, 'same posting id across regional hosts → ONE row');
+});
+
+ok('an aggregator whose id shape is unmapped stays UNKNOWN (#3652 preserved)', () => {
+  // Deliberate and documented: url-key.mjs only extracts IDs it can point at a
+  // verified shape for. An unmapped board keeps exactly today's behaviour
+  // rather than a guessed regex, whose failure mode is splitting one posting
+  // into two rows — the outcome the cross-host gate was rejected for.
+  const rows = mergeTwoWithUrls(
+    'https://www.glassdoor.com/job-listing/director-of-marketing-acme-JV_1.htm',
+    'https://www.glassdoor.com/job-listing/director-of-marketing-acme-JV_2.htm');
+  assert.equal(rows.length, 1, 'no id rule for this board yet → fuzzy tier still decides');
 });
 
 ok('row with `---` in its URL (Workday slug) stays visible to dedup', () => {
