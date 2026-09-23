@@ -10,13 +10,13 @@
 // (the real verifiers resolve an enabled plugin instead of flagging it).
 import {
   readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync,
-  symlinkSync, readdirSync,
+  readdirSync,
 } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { pass, fail, NODE } from './helpers.mjs';
+import { pass, fail, linkNodeModules, NODE } from './helpers.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -46,9 +46,11 @@ function prepareFixtureCodeRoot(tmp) {
   for (const dir of ['providers', 'plugins', 'templates', 'lib', 'batch']) {
     if (existsSync(join(ROOT, dir))) cpSync(join(ROOT, dir), join(codeRoot, dir), { recursive: true });
   }
-  if (existsSync(join(ROOT, 'node_modules'))) {
-    symlinkSync(join(ROOT, 'node_modules'), join(codeRoot, 'node_modules'), 'dir');
-  }
+  // Through the shared helper, so this site and the one in test-all.mjs cannot
+  // drift again: each had half of the pair (a guard here, the Windows junction
+  // type there) and the halves are now one function. A reason means the tree
+  // was never installed, and this fixture works without it.
+  linkNodeModules(codeRoot, ROOT);
   return codeRoot;
 }
 

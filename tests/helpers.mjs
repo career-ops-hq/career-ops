@@ -451,6 +451,42 @@ export function linkRepoPackage(sandboxDir, pkgName) {
   return dest;
 }
 
+/**
+ * Link the repository's whole installed dependency tree into a sandbox
+ * directory, so a script copied out of the repo can still resolve its package
+ * imports.
+ *
+ * Checking and linking are one operation on purpose. symlinkSync succeeds
+ * against a target that does not exist, so a separate check is one a call site
+ * can forget. The link is then created dangling, the sandboxed script dies with
+ * ERR_MODULE_NOT_FOUND, and the section's own catch reports that as a crash of
+ * whatever it was testing. A git worktree is the ordinary way to land in that
+ * state: test-all.mjs itself still resolves js-yaml through the parent
+ * checkout's `node_modules` by Node's upward walk, while `join(ROOT,
+ * 'node_modules')` inside the worktree does not exist. The suite is designed to
+ * run on a fresh clone with only Node (see the file header), where an absent
+ * tree is the expected state, so the caller is handed a reason to report and
+ * skip on instead of a broken sandbox.
+ *
+ * 'junction' on Windows, because a directory symlink needs
+ * SeCreateSymbolicLinkPrivilege, which a normal shell lacks unless Developer
+ * Mode is on. Junctions need no privilege, and the two constraints they add are
+ * already met: the target is absolute and is a directory on a local volume. The
+ * type argument is ignored off Windows.
+ *
+ * @param {string} destDir - Sandbox directory to receive the node_modules link.
+ * @param {string} [root=ROOT] - Repository root holding the installed tree.
+ * @returns {string|null} null once linked; otherwise why it could not be.
+ */
+export function linkNodeModules(destDir, root = ROOT) {
+  const target = join(root, 'node_modules');
+  if (!existsSync(target)) {
+    return `node_modules is not installed at ${root} -- run \`npm ci\` there`;
+  }
+  symlinkSync(target, join(destDir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+  return null;
+}
+
 let bashCache = null;
 let bashSourceCache = null;
 

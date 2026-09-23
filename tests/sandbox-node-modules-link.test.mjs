@@ -1,0 +1,119 @@
+// tests/sandbox-node-modules-link.test.mjs — linkNodeModules(), the guarded way
+// a sandbox borrows the repo's installed dependency tree.
+//
+// The defect this exists to prevent is silent and misattributes itself.
+// Sections that run a script copied out of the repo link ROOT/node_modules into
+// the sandbox so the copy can still resolve its package imports. symlinkSync
+// succeeds against a target that does not exist, so on a checkout where
+// dependencies were never installed the link is created dangling, the child
+// process dies with ERR_MODULE_NOT_FOUND, and the section's catch reports that
+// as a crash of whatever the test was actually about. That is a red assertion
+// pointing at innocent code.
+//
+// The suite is designed to run on a fresh clone with only Node (see the
+// tests/helpers.mjs header), where an absent node_modules is the expected state
+// and has to be reported as itself.
+import { pass, fail, ROOT } from './helpers.mjs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, lstatSync, existsSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { pathToFileURL } from 'url';
+
+console.log('\nsandbox node_modules link — the dependency tree a copied script borrows');
+
+const tmp = mkdtempSync(join(tmpdir(), 'career-ops-nm-link-'));
+try {
+  const { linkNodeModules } = await import(pathToFileURL(join(ROOT, 'tests/helpers.mjs')).href);
+
+  if (typeof linkNodeModules !== 'function') {
+    fail('tests/helpers.mjs does not export linkNodeModules()');
+  } else {
+    // Installed tree: the link is made, and a package behind it is readable
+    // through the sandbox path. Asserting the link merely exists would pass on
+    // a dangling one, which is the bug.
+    {
+      const root = join(tmp, 'installed');
+      mkdirSync(join(root, 'node_modules', 'demo-pkg'), { recursive: true });
+      writeFileSync(join(root, 'node_modules', 'demo-pkg', 'marker.txt'), 'reachable', 'utf-8');
+      const sandbox = join(tmp, 'sandbox-installed');
+      mkdirSync(sandbox, { recursive: true });
+
+      const reason = linkNodeModules(sandbox, root);
+      if (reason === null) {
+        pass('linkNodeModules returns null when the dependency tree is installed');
+      } else {
+        fail(`linkNodeModules refused an installed tree: ${reason}`);
+      }
+
+      let through = null;
+      try {
+        through = readFileSync(join(sandbox, 'node_modules', 'demo-pkg', 'marker.txt'), 'utf-8');
+      } catch (err) {
+        through = `unreadable: ${err.code}`;
+      }
+      if (through === 'reachable') {
+        pass('a package inside the linked tree is readable through the sandbox path');
+      } else {
+        fail(`reading through the sandbox link produced ${JSON.stringify(through)}`);
+      }
+    }
+
+    // Absent tree: the caller is told why, in terms it can act on.
+    {
+      const root = join(tmp, 'bare-clone');
+      mkdirSync(root, { recursive: true });
+      const sandbox = join(tmp, 'sandbox-bare');
+      mkdirSync(sandbox, { recursive: true });
+
+      const reason = linkNodeModules(sandbox, root);
+      if (typeof reason === 'string' && reason.length > 0) {
+        pass('linkNodeModules reports a reason when the dependency tree is absent');
+      } else {
+        fail(`linkNodeModules returned ${JSON.stringify(reason)} for a root with no node_modules`);
+      }
+      if (typeof reason === 'string' && reason.includes(root)) {
+        pass('the reason names the root whose tree is missing');
+      } else {
+        fail(`the reason does not name the root: ${JSON.stringify(reason)}`);
+      }
+      if (typeof reason === 'string' && /npm ci/.test(reason)) {
+        pass('the reason names the remedy (npm ci), so the operator can act on it');
+      } else {
+        fail(`the reason does not name the remedy: ${JSON.stringify(reason)}`);
+      }
+
+      // The load-bearing assertion. lstatSync, because existsSync follows the
+      // link and is already false for a dangling one, so it cannot tell "no
+      // link was created" from "a broken link was created". A broken link is
+      // exactly what an unguarded symlinkSync leaves behind.
+      let entry = 'present';
+      try {
+        lstatSync(join(sandbox, 'node_modules'));
+      } catch (err) {
+        entry = err.code;
+      }
+      if (entry === 'ENOENT') {
+        pass('no link entry is left behind when the tree is absent (no dangling symlink)');
+      } else {
+        fail(`linkNodeModules left a node_modules entry behind (lstat: ${entry}); a dangling link is what breaks the sandbox`);
+      }
+    }
+
+    // The repo's own root is the default, so call sites do not repeat it.
+    {
+      const sandbox = join(tmp, 'sandbox-default');
+      mkdirSync(sandbox, { recursive: true });
+      const reason = linkNodeModules(sandbox);
+      const installedHere = existsSync(join(ROOT, 'node_modules'));
+      if ((reason === null) === installedHere) {
+        pass(`linkNodeModules defaults to the repo root (node_modules ${installedHere ? 'installed' : 'absent'} here)`);
+      } else {
+        fail(`default-root call returned ${JSON.stringify(reason)} while ROOT/node_modules ${installedHere ? 'exists' : 'does not exist'}`);
+      }
+    }
+  }
+} catch (err) {
+  fail(`sandbox node_modules link suite crashed: ${err.message}`);
+} finally {
+  rmSync(tmp, { recursive: true, force: true });
+}

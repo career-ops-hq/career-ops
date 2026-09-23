@@ -55,7 +55,7 @@ import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, run, runAcrossUtcDay, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
+import { pass, fail, warn, run, runAcrossUtcDay, lastRunFailure, formatRunFailure, fileExists, finish, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { collectMjsFiles, isNestedCheckout, isUnderNestedCheckout } from './lib/mjs-files.mjs';
 
@@ -9058,7 +9058,7 @@ try {
   // the value must match how the date was actually obtained. The unit tests above
   // only cover the helper — this pins the field on the JSON consumers read, which
   // is where a silently-inferred age would actually do damage.
-  {
+  cadenceAppDateSourceE2e: {
     // NOT realpathed, deliberately. This used to be, because followup-cadence's
     // hand-rolled CLI guard compared a realpath-resolved import.meta.url against
     // a lexical argv[1], so macOS's symlinked tmpdir silently suppressed main()
@@ -9099,17 +9099,21 @@ try {
       copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(e2eTmp, 'lib', 'is-main-module.mjs'));
       mkdirSync(join(e2eTmp, 'templates'), { recursive: true });
       copyFileSync(join(ROOT, 'templates', 'states.yml'), join(e2eTmp, 'templates', 'states.yml'));
-      // 'junction' on Windows, not 'dir': a directory symlink needs
-      // SeCreateSymbolicLinkPrivilege, which a normal shell lacks unless
-      // Developer Mode is on, so this threw EPERM and failed the test on an
-      // ordinary Windows checkout. Junctions need no privilege, and the two
-      // constraints they add are already met — the target is absolute and is a
-      // directory on a local volume. The type argument is ignored off Windows.
-      symlinkSync(
-        join(ROOT, 'node_modules'),
-        join(e2eTmp, 'node_modules'),
-        process.platform === 'win32' ? 'junction' : 'dir',
-      );
+      // The sandbox resolves js-yaml (and the rest of followup-cadence's
+      // package imports) through the repo's own installed tree. linkNodeModules
+      // junction-links on Windows, where a directory symlink would need
+      // SeCreateSymbolicLinkPrivilege and threw EPERM on an ordinary checkout.
+      // It also refuses to link blind against a tree that was never installed:
+      // symlinkSync succeeds on a missing target, the dangling link killed the
+      // child with ERR_MODULE_NOT_FOUND, and the catch below reported that as a
+      // crash of the appDateSource contract, which is innocent. This suite is
+      // meant to run on a fresh clone with only Node, so an absent tree is a
+      // skip that names itself.
+      const depsReason = linkNodeModules(e2eTmp);
+      if (depsReason) {
+        warn(`analyze() appDateSource end-to-end check skipped: ${depsReason}`);
+        break cadenceAppDateSourceE2e;
+      }
       mkdirSync(join(e2eTmp, 'data'), { recursive: true });
       writeFileSync(join(e2eTmp, 'data', 'applications.md'), [
         '# Applications Tracker',
