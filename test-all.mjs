@@ -4190,6 +4190,52 @@ if (
   }
 }
 
+// ── Verdict (lead) block presence across evaluation modes ──
+// The lead block is a report-contract element, so the contract guard has to
+// assert it. It cannot join REQUIRED_HEADINGS above. That list matches literal
+// substrings, the heading noun is translated per locale, and every translated
+// mode quotes the English form in prose as an example of the convention, so a
+// literal `## Verdict (lead)` entry would pass on zh, zh-TW and ru whether or
+// not those files carry a block. The `(lead)` marker is the language-invariant
+// part, and it is what cleanHeading in web/src/lib/report-sections.mjs reads,
+// so this matches the marker on a heading LINE and a prose mention no longer
+// counts. Keyed on the report skeleton instead of the filename: a locale whose
+// evaluation mode is not named oferta.md (tr/is-ilani.md, ja/kyujin.md,
+// ar/fursah.md) is invisible to the walk above. A file still at the pre-Block-G
+// shape has no Block G for the lead block to follow, so it drops out by
+// carrying no `## H)` and no `## Risk Summary`, with no allowlist to maintain.
+{
+  const LEAD_HEADING = /^##[^\n]*\((?:lead|verdict)\)[ \t]*$/gmi;
+  const modeFiles = ['modes/oferta.md'];
+  for (const d of readdirSync(join(ROOT, 'modes'), { withFileTypes: true })) {
+    if (!d.isDirectory()) continue;
+    for (const f of readdirSync(join(ROOT, 'modes', d.name))) {
+      if (f.endsWith('.md')) modeFiles.push(`modes/${d.name}/${f}`);
+    }
+  }
+  const skeleton = modeFiles.map(f => [f, readFile(f)])
+    .filter(([, t]) => t.includes('## H)') && t.includes('## Risk Summary'));
+  const names = skeleton.map(([f]) => f);
+  if (names.length < 8 || !names.includes('modes/oferta.md') || !names.includes('modes/tr/is-ilani.md')) {
+    fail(`verdict-lead walk found ${names.length} full-skeleton modes (${names.join(', ')}) — expected ≥8 incl. modes/oferta.md and modes/tr/is-ilani.md; the check would be blind`);
+  } else {
+    const gaps = [];
+    for (const [f, t] of skeleton) {
+      LEAD_HEADING.lastIndex = 0;
+      const hits = [...t.matchAll(LEAD_HEADING)].map(m => m.index);
+      if (hits.length === 0) { gaps.push(`${f} (no \`(lead)\` heading)`); continue; }
+      const lead = hits[hits.length - 1];
+      const g = t.lastIndexOf('## G)'), rs = t.lastIndexOf('## Risk Summary');
+      if (!(g < lead && lead < rs)) gaps.push(`${f} (order G) → lead → Risk Summary)`);
+    }
+    if (gaps.length > 0) {
+      fail(`evaluation modes missing the lead verdict block: ${gaps.join('; ')}`);
+    } else {
+      pass(`Verdict (lead) block present and positioned in all ${names.length} full-skeleton evaluation modes`);
+    }
+  }
+}
+
 const batchPromptDoc = readFile('batch/batch-prompt.md');
 if (
   batchPromptDoc.includes('Company type classification (required)') &&
