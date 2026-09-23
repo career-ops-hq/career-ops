@@ -4,15 +4,17 @@ name: Auto-triage scan output
 # this repo by mistake and file their personal scan results / run reports as
 # issues here. Those are created via the API / `gh issue create`, which bypasses
 # the issue templates and `blank_issues_enabled: false` entirely — so only a
-# workflow can catch them. This one explains, labels, and closes them: it
-# protects users' personal job-search data and keeps the public tracker clean.
+# workflow can catch them. This one explains and labels them: the author learns
+# at once that their personal job-search data is public here and how to stop it.
+# It never closes them, because nothing here is closed by a bot: a maintainer
+# closes them by hand from the batch review, from their own account.
 #
 # Deliberately CONSERVATIVE — it acts only when BOTH are true:
 #   (a) the issue did NOT come through a template (no Code of Conduct checkbox), and
 #   (b) it carries an unmistakable automated-report marker (boilerplate the
 #       scheduled-scan reports ship with — not merely the word "scan", which
 #       legitimate scanner-provider features use).
-# It never locks the issue, so a real report can always be reopened.
+# It never locks or closes the issue, so a real report is never lost.
 
 on:
   issues:
@@ -24,7 +26,7 @@ permissions:
 jobs:
   triage:
     runs-on: ubuntu-latest
-    # Never auto-close issues opened by the owner or org members.
+    # Never touch issues opened by the owner or org members.
     if: ${{ github.event.issue.author_association != 'OWNER' && github.event.issue.author_association != 'MEMBER' }}
     steps:
       - uses: actions/github-script@v9
@@ -71,7 +73,7 @@ jobs:
               body: [
                 `Hey @${issue.user.login} — this looks like automated output from your own career-ops setup landing on the upstream repo. 👋`,
                 ``,
-                `career-ops runs **entirely locally**: your pipeline, scans, and reports live on your own machine (\`data/\`, \`reports/\`) — they never need to be filed here, and posting them upstream puts personal job-search data on a public tracker. Closing to keep your data private and the tracker tidy.`,
+                `career-ops runs **entirely locally**: your pipeline, scans, and reports live on your own machine (\`data/\`, \`reports/\`) — they never need to be filed here, and posting them upstream puts personal job-search data on a public tracker. If this one contains anything personal, you can edit it out now; a maintainer will close it shortly.`,
                 ``,
                 `If you have a scheduled run that opens issues, point it at your **own fork** or a private repo — not \`${owner}/${repo}\`. Real bugs are always welcome via the bug-report template. Thanks for building with career-ops! 🚀`,
               ].join('\n'),
@@ -83,5 +85,4 @@ jobs:
               core.info(`label add skipped: ${e.message}`);
             }
 
-            await github.rest.issues.update({ owner, repo, issue_number, state: 'closed', state_reason: 'not_planned' });
-            core.info(`Closed #${issue_number} as scan-output.`);
+            core.info(`Labeled #${issue_number} as scan-output: a maintainer closes it from the batch review.`);
