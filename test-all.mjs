@@ -4198,8 +4198,16 @@ if (
 // literal `## Verdict (lead)` entry would pass on zh, zh-TW and ru whether or
 // not those files carry a block. The `(lead)` marker is the language-invariant
 // part, and it is what cleanHeading in web/src/lib/report-sections.mjs reads,
-// so this matches the marker on a heading LINE and a prose mention no longer
-// counts. Keyed on the report skeleton instead of the filename: a locale whose
+// so this matches the marker on a heading line. A heading line is not by
+// itself proof of a real block: every one of these files also illustrates the
+// block inside a fenced example, and those examples carry heading lines too.
+// What separates the template from documentation about it is the window. The
+// template is the one place where `## G)` is followed by `## Risk Summary`,
+// so the lead heading is required inside that run. Anchoring the run on the
+// LAST of each marker does not work: modes/tr/is-ilani.md puts its template
+// first and its prose second, so its last `## G)` and last `## Risk Summary`
+// sit ~140 lines apart and swallow the document.
+// Keyed on the report skeleton instead of the filename: a locale whose
 // evaluation mode is not named oferta.md (tr/is-ilani.md, ja/kyujin.md,
 // ar/fursah.md) is invisible to the walk above. A file still at the pre-Block-G
 // shape has no Block G for the lead block to follow, so it drops out by
@@ -4221,17 +4229,37 @@ if (
   } else {
     const gaps = [];
     for (const [f, t] of skeleton) {
+      const g = t.indexOf('## G)');
+      const rs = g < 0 ? -1 : t.indexOf('## Risk Summary', g);
+      if (g < 0 || rs < 0) { gaps.push(`${f} (no \`## G)\` → \`## Risk Summary\` run)`); continue; }
       LEAD_HEADING.lastIndex = 0;
       const hits = [...t.matchAll(LEAD_HEADING)].map(m => m.index);
-      if (hits.length === 0) { gaps.push(`${f} (no \`(lead)\` heading)`); continue; }
-      const lead = hits[hits.length - 1];
-      const g = t.lastIndexOf('## G)'), rs = t.lastIndexOf('## Risk Summary');
-      if (!(g < lead && lead < rs)) gaps.push(`${f} (order G) → lead → Risk Summary)`);
+      if (!hits.some(i => g < i && i < rs)) {
+        gaps.push(`${f} (no \`(lead)\` heading between G) and Risk Summary)`);
+      }
     }
     if (gaps.length > 0) {
       fail(`evaluation modes missing the lead verdict block: ${gaps.join('; ')}`);
     } else {
       pass(`Verdict (lead) block present and positioned in all ${names.length} full-skeleton evaluation modes`);
+    }
+  }
+
+  // batch/batch-prompt.md carries the same contract in a different shape and so
+  // falls outside the walk above: headless workers get a bulleted list of the
+  // blocks to emit, not a fenced report template, and the file lives outside
+  // modes/. It is the only report producer a user never watches, so a missing
+  // entry here costs a whole batch of reports. Assert the same ordering on the
+  // list it actually emits from.
+  {
+    const emitted = readFile('batch/batch-prompt.md');
+    const g = emitted.indexOf('- `## G) Posting Legitimacy`');
+    const lead = g < 0 ? -1 : emitted.indexOf('- `## Verdict (lead)`', g);
+    const rs = lead < 0 ? -1 : emitted.indexOf('- `## Risk Summary`', lead);
+    if (g >= 0 && lead > g && rs > lead) {
+      pass('batch workers emit `## Verdict (lead)` between Block G and Risk Summary');
+    } else {
+      fail('batch/batch-prompt.md emitted-block list has no `## Verdict (lead)` entry between Block G and `## Risk Summary`, so batch reports would carry no lead block');
     }
   }
 }
