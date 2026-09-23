@@ -55,9 +55,16 @@ test('the English title still parses', () => {
 test('each localized title above is the one its mode actually emits', () => {
   // Guards against this suite testing titles the modes no longer use, which
   // would make every case above pass against nothing.
+  //
+  // A listed mode file that is missing FAILS here rather than being skipped.
+  // Skipping defeats the guard in the exact case it exists for: a mode file
+  // that moved leaves every case above asserting a hard-coded title that
+  // nothing emits any more, and the suite stays green while checking nothing.
+  assert.ok(LOCALIZED.length > 0, 'LOCALIZED is empty, so this guard verifies nothing');
   for (const [mode, title] of LOCALIZED) {
     const path = join(ROOT, mode);
-    if (!existsSync(path)) continue;
+    assert.ok(existsSync(path),
+      `${mode} is listed in LOCALIZED but is not in the repo — move the entry to the mode's new path, do not delete it`);
     const src = readFileSync(path, 'utf-8');
     assert.ok(src.includes(`## H) ${title}`),
       `${mode} no longer emits "## H) ${title}" — update this suite, do not delete the case`);
