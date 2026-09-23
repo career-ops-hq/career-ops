@@ -2,7 +2,7 @@
  * page-format.test.mjs — paper size has one owner (lib/page-format.mjs).
  *
  * The size a document is laid out at and the size of the sheet it prints on used
- * to be decided in four separate places, and they disagreed. build-cv-html.mjs
+ * to be decided in five separate places, and they disagreed. build-cv-html.mjs
  * fell back to letter's 8.5in body width; generate-pdf.mjs and
  * generate-cover-letter.mjs each fell back to a4. A payload declaring
  * `page_format: "letter"` therefore rendered a letter-width CV onto an A4 sheet,
@@ -135,14 +135,26 @@ test('the web agrees with the CLI about the sheet', async (t) => {
 
 // --- the four consumers -------------------------------------------------
 
-test('injectPrintPageCss: the flagless sheet comes from the resolver', () => {
-  // injectPrintPageCss anchors the profile to the tracker workspace, which is
-  // this checkout. Asserting DEFAULT_PAGE_FORMAT outright would fail for anyone
-  // whose own config/profile.yml sets a4, so expect what the resolver answers
-  // for that same file.
-  const expected = resolvePageFormat(undefined, { profilePath: join(ROOT, 'config', 'profile.yml') });
-  const html = injectPrintPageCss('<html><head></head><body></body></html>');
-  assert.match(html, new RegExp(`@page \\{ size: ${PAGE_CSS_SIZE[expected]};`));
+test('injectPrintPageCss: the flagless sheet comes from the profile', () => {
+  // A child process, because injectPrintPageCss anchors the profile to
+  // workspaceRoot and generate-pdf.mjs fixes that at import. In-process the
+  // anchor is this checkout, so the assertion computed its expected value the
+  // way the code does. It then agreed with itself: dropping the profilePath
+  // option left it green on any machine carrying no config/profile.yml.
+  // Both directions, for the same reason the CLI test below runs both. The a4
+  // case alone passed against the old hardcoded `format = 'a4'`.
+  for (const declared of ['letter', 'a4']) {
+    const dir = workspace(declared);
+    const probe = join(dir, 'probe.mjs');
+    writeFileSync(probe, [
+      `import { injectPrintPageCss } from ${JSON.stringify(pathToFileURL(join(ROOT, 'generate-pdf.mjs')).href)};`,
+      "process.stdout.write(injectPrintPageCss('<html><head></head><body></body></html>'));",
+      '',
+    ].join('\n'));
+    const res = spawnSync(NODE, [probe], { env: workspaceEnv(dir), encoding: 'utf-8' });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, new RegExp(`@page \\{ size: ${PAGE_CSS_SIZE[declared]};`), res.stdout + res.stderr);
+  }
 });
 
 test('injectPrintPageCss: an explicit format still wins', () => {
@@ -163,6 +175,25 @@ test('build-cv-html: a payload with no page_format takes the profile width', () 
   const html = readFileSync(out, 'utf-8');
   assert.ok(html.includes(PAGE_WIDTHS.a4), `expected the a4 body width ${PAGE_WIDTHS.a4}\n${res.stdout}`);
   assert.ok(!html.includes(PAGE_WIDTHS.letter), 'the letter body width leaked into an a4 render');
+});
+
+test('build-cv-html: a payload stating its own page_format outranks the profile', () => {
+  // The width test above states only the profile tier. Reading a constant in
+  // place of payload.page_format ignored payload and profile alike and stayed
+  // green, so every CV body went out 210mm while generate-pdf printed the sheet
+  // the user asked for. That is the mismatch this PR exists to remove.
+  const dir = workspace('a4');
+  const payloadPath = join(dir, 'payload.json');
+  writeFileSync(payloadPath, JSON.stringify({ ...PAYLOAD, page_format: 'letter' }));
+  const out = join(dir, 'output', 'cv.html');
+  const res = spawnSync(NODE, [join(ROOT, 'build-cv-html.mjs'), payloadPath, out], {
+    env: workspaceEnv(dir),
+    encoding: 'utf-8',
+  });
+  assert.equal(res.status, 0, res.stderr);
+  const html = readFileSync(out, 'utf-8');
+  assert.ok(html.includes(PAGE_WIDTHS.letter), `expected the letter body width ${PAGE_WIDTHS.letter}\n${res.stdout}`);
+  assert.ok(!html.includes(PAGE_WIDTHS.a4), 'the a4 body width leaked into a letter render');
 });
 
 test('generate-pdf: the flagless CLI takes the profile format', () => {
