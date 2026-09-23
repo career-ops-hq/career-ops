@@ -22,6 +22,17 @@ function collapseWhitespace(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+// A compensation figure slipping into the company slot (e.g. a board whose
+// anchor label is a salary metadata line like "$175K", "175k", "$126K $175K").
+// Never let a salary become an employer — those rows poison the tracker and the
+// web logo chain. Currency-digit+(k/M suffix), optionally a range; a bare number
+// without currency or k/M is left alone (could be a page number).
+function isSalaryLike(text) {
+  const t = String(text ?? '').trim();
+  return /^(?:[$€£¥₹]?\d[\d,.]*[kKmM]?[\s-–—to/]+)*[$€£¥₹]?\d[\d,.]*[kKmM]$/.test(t) ||
+    /^[$€£¥₹]\d[\d,.]*$/.test(t);
+}
+
 function titleFromSlug(url) {
   try {
     const path = new URL(url).pathname;
@@ -37,9 +48,9 @@ function titleFromSlug(url) {
 function splitCompanyFromLabel(label) {
   const text = collapseWhitespace(label);
   const at = text.match(/^(.+?)\s+at\s+(.+)$/i);
-  if (at) return { title: at[1].trim(), company: at[2].trim() };
+  if (at) return { title: at[1].trim(), company: isSalaryLike(at[2]) ? '' : at[2].trim() };
   const dash = text.match(/^(.+?)\s+[-–—|]\s+(.+)$/);
-  if (dash) return { title: dash[1].trim(), company: dash[2].trim() };
+  if (dash) return { title: dash[1].trim(), company: isSalaryLike(dash[2]) ? '' : dash[2].trim() };
   return { title: text, company: '' };
 }
 
@@ -47,7 +58,8 @@ function defaultCompanyFromEntry(entry) {
   const name = collapseWhitespace(entry?.name || '');
   if (!name) return '';
   const dash = name.indexOf(' — ');
-  return dash > 0 ? name.slice(0, dash).trim() : name;
+  const base = dash > 0 ? name.slice(0, dash).trim() : name;
+  return isSalaryLike(base) ? '' : base;
 }
 
 /**
@@ -183,4 +195,4 @@ export async function scrapeBoardPage(url, opts = {}) {
   }
 }
 
-export { defaultCompanyFromEntry };
+export { defaultCompanyFromEntry, isSalaryLike };

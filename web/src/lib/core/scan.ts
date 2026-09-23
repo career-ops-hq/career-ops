@@ -114,13 +114,37 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
     let errBuf = "";
     let jsonOut = ""; // --json mode: the single stdout object accumulates here
 
-    const killer = setTimeout(() => {
+    // Kill boundary: a flat 230s timer was too tight for a legal default scan
+    // (4 ATS × 150 companies) and kept cutting deep Workday walks mid-sweep.
+    // Worse, --json produces ONE object only at the very end, so an untimely cut
+    // lost the entire scan to a misleading "no output". Now: an absolute budget
+    // scaled to the workload PLUS a stall watchdog that only fires when the
+    // scanner goes silent (no line for 2 min). A slow-but-talking scan is allowed
+    // to finish; a hung one still dies. Both sit under the route's maxDuration.
+    let timedOut = false;
+    const limitPerAts = Math.max(1, filters.limitPerAts || 150);
+    const budgetMs = Math.min(840_000, Math.max(120_000, 60_000 + ats.length * 120_000 + ats.length * limitPerAts * 250));
+    const stallTimeoutMs = 120_000;
+    let budgetTimer: ReturnType<typeof setTimeout> | undefined;
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    const kill = () => {
+      timedOut = true;
       try {
         child.kill("SIGTERM");
       } catch {
         /* ignore */
       }
-    }, 230_000);
+    };
+    const clearTimers = () => {
+      if (budgetTimer) clearTimeout(budgetTimer);
+      if (stallTimer) clearTimeout(stallTimer);
+    };
+    const armStall = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(kill, stallTimeoutMs);
+    };
+    budgetTimer = setTimeout(kill, budgetMs);
+    armStall();
 
     // Live progress (atsStart / progress / atsDone) — in --json mode these human
     // lines arrive on STDERR; in legacy mode on STDOUT (handled inside handleLine).
@@ -196,6 +220,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
     };
 
     child.stdout.on("data", (d: Buffer) => {
+      armStall();
       if (useJson) {
         jsonOut += d.toString(); // one JSON object — parsed at close
         return;
@@ -206,6 +231,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
       for (const p of parts) handleLine(p);
     });
     child.stderr.on("data", (d: Buffer) => {
+      armStall();
       errBuf += d.toString();
       const parts = errBuf.split(/\r?\n/);
       errBuf = parts.pop() ?? "";
@@ -217,13 +243,13 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
     });
 
     child.on("error", (e) => {
-      clearTimeout(killer);
+      clearTimers();
       cleanupTempPortals(tempPortals);
       onEvent({ kind: "error", message: e instanceof Error ? e.message : "scanner failed to start" });
       resolve(offers);
     });
     child.on("close", () => {
-      clearTimeout(killer);
+      clearTimers();
       cleanupTempPortals(tempPortals);
       if (useJson) {
         let j: ScanJson | null = null;
@@ -262,14 +288,25 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
             postingsDroppedNoDate: j.postingsDroppedNoDate,
           });
         } else {
-          // --json requested but stdout didn't parse — surface honestly rather than
+          // --json requested but stdout didn't parse — surfaced honestly rather than
           // silently returning 0 (defensive; shouldn't happen once the probe passed).
-          onEvent({ kind: "error", message: "The scanner returned no readable output." });
+          onEvent({
+            kind: "error",
+            message: timedOut
+              ? `The scan was cut off by its time budget (~${Math.round(budgetMs / 60000)} min) while the slowest boards were still crawling — a timed-out scan loses its whole result, since the scanner emits one JSON object only at the very end. Try fewer sources or a smaller per-source limit, then rescan.`
+              : "The scanner returned no readable output.",
+          });
         }
         resolve(offers);
         return;
       }
       if (outBuf.trim()) handleLine(outBuf);
+      if (timedOut && offers.length === 0) {
+        onEvent({
+          kind: "error",
+          message: `The scan was cut off by its time budget (~${Math.round(budgetMs / 60000)} min) before it could reach the slowest boards. Everything already found is shown above — pick fewer sources or a smaller per-source limit and rescan.`,
+        });
+      }
       resolve(offers);
     });
   });

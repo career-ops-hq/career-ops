@@ -569,10 +569,14 @@ export async function probeProvider(entry, provider, baseCtx) {
  */
 export async function verifyCompanies(
   companies,
-  { fetchJson = defaultFetchJson, fetchText = defaultFetchText, providers = null, httpCtx = null } = {},
+  { fetchJson = defaultFetchJson, fetchText = defaultFetchText, providers = null, httpCtx = null, onResult = null } = {},
 ) {
   const list = Array.isArray(companies) ? companies : [];
   const results = [];
+  const push = (row) => {
+    results.push(row);
+    if (typeof onResult === 'function') onResult(row);
+  };
   for (const company of list) {
     if (!company || typeof company !== 'object') continue;
     if (company.enabled === false) continue;
@@ -582,18 +586,18 @@ export async function verifyCompanies(
     if (match) {
       const probe = await probeSlug(match.ats, match.slug, { fetchJson, eu: match.eu });
       if (probe.status === 'live' || probe.status === 'empty') {
-        results.push({ name, ...probe });
+        push({ name, ...probe });
         continue;
       }
       // Wrong slug or ATS migration — cross-probe only for slug/unknown failures.
       if (probe.errorKind === 'slug_gone' || probe.errorKind === 'unknown') {
         const suggested = await discoverAlternates(name, { fetchJson, fetchText });
         if (suggested) {
-          results.push({ name, ...probe, suggested });
+          push({ name, ...probe, suggested });
           continue;
         }
       }
-      results.push({ name, ...probe });
+      push({ name, ...probe });
       continue;
     }
 
@@ -604,12 +608,12 @@ export async function verifyCompanies(
       const resolved = resolveProvider(company, providers, { skipIds: ['local-parser'] });
       if (resolved && resolved.provider) {
         const probe = await probeProvider(company, resolved.provider, httpCtx || makeHttpCtx());
-        results.push({ name, ...probe });
+        push({ name, ...probe });
         continue;
       }
     }
 
-    results.push({
+    push({
       name,
       status: 'skipped',
       reason: 'no provider matched careers_url or api',
@@ -628,7 +632,7 @@ export async function verifyCompanies(
  */
 export async function verifyPortalsFile(
   filePath,
-  { fetchJson = defaultFetchJson, providers = null, httpCtx = null } = {},
+  { fetchJson = defaultFetchJson, providers = null, httpCtx = null, onResult = null } = {},
 ) {
   if (!existsSync(filePath)) return { found: false, results: [] };
   const config = yaml.load(readFileSync(filePath, 'utf-8'));
@@ -639,7 +643,7 @@ export async function verifyPortalsFile(
     ...(Array.isArray(config?.tracked_companies) ? config.tracked_companies : []),
     ...(Array.isArray(config?.job_boards) ? config.job_boards : []),
   ];
-  const results = await verifyCompanies(entries, { fetchJson, providers, httpCtx });
+  const results = await verifyCompanies(entries, { fetchJson, providers, httpCtx, onResult });
   return { found: true, results };
 }
 
@@ -653,27 +657,25 @@ const ERROR_KIND_LABEL = {
   unknown: 'unresolved',
 };
 
-function printResults(results) {
-  for (const r of results) {
-    const icon = ICON[r.status] || '?';
-    // ATS rows carry ats/slug; provider-layer rows carry the provider id.
-    const source = r.ats ? `${r.ats}/${r.slug}` : (r.provider || '?');
-    let detail;
-    if (r.status === 'live') {
-      detail = r.partial ? `${source} (first page live)` : `${source} (${r.jobCount} live)`;
-    } else if (r.status === 'empty') {
-      detail = `${source} (live but empty)`;
-    } else if (r.status === 'missing') {
-      const kind = ERROR_KIND_LABEL[r.errorKind] || 'unresolved';
-      detail = `${source} (${kind}) — ${r.reason || 'unresolved'}`;
-      if (r.suggested) {
-        detail += ` → try ${r.suggested.ats}/${r.suggested.slug}`;
-      }
-    } else {
-      detail = r.reason || '';
+function formatResultLine(r) {
+  const icon = ICON[r.status] || '?';
+  // ATS rows carry ats/slug; provider-layer rows carry the provider id.
+  const source = r.ats ? `${r.ats}/${r.slug}` : (r.provider || '?');
+  let detail;
+  if (r.status === 'live') {
+    detail = r.partial ? `${source} (first page live)` : `${source} (${r.jobCount} live)`;
+  } else if (r.status === 'empty') {
+    detail = `${source} (live but empty)`;
+  } else if (r.status === 'missing') {
+    const kind = ERROR_KIND_LABEL[r.errorKind] || 'unresolved';
+    detail = `${source} (${kind}) — ${r.reason || 'unresolved'}`;
+    if (r.suggested) {
+      detail += ` → try ${r.suggested.ats}/${r.suggested.slug}`;
     }
-    console.log(`  ${icon} ${r.name} — ${detail}`);
+  } else {
+    detail = r.reason || '';
   }
+  return `  ${icon} ${r.name} — ${detail}`;
 }
 
 async function runAdd(name, { fetchJson }) {
@@ -784,7 +786,19 @@ async function main() {
   const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
   await mergeProviderPlugins(providers, { root: dirname(PROVIDERS_DIR) });
   const httpCtx = makeHttpCtx();
-  const { found, results } = await verifyPortalsFile(filePath, { fetchJson, providers, httpCtx });
+  // Stream result rows as each probe completes, so a long sweep (or one cut
+  // short by a caller-side timeout) still yields the rows that DID finish
+  // instead of nothing. Print the header on the first row so CLI output order
+  // is unchanged; the summary still prints at the end from the full `results`.
+  let headerPrinted = false;
+  const onResult = (r) => {
+    if (!headerPrinted) {
+      console.log(`verify-portals: ${filePath}\n`);
+      headerPrinted = true;
+    }
+    console.log(formatResultLine(r));
+  };
+  const { found, results } = await verifyPortalsFile(filePath, { fetchJson, providers, httpCtx, onResult });
   if (!found) {
     // Graceful no-op: fresh setups (and CI, which ships no portals.yml) have
     // nothing to verify. Not an error.
@@ -793,9 +807,7 @@ async function main() {
     );
     return;
   }
-
-  console.log(`verify-portals: ${filePath}\n`);
-  printResults(results);
+  if (!headerPrinted) console.log(`verify-portals: ${filePath}\n`);
 
   const live = results.filter((r) => r.status === 'live').length;
   const empty = results.filter((r) => r.status === 'empty').length;

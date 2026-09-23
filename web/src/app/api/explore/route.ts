@@ -4,10 +4,12 @@ import { runDiscovery } from "@/lib/core/scan";
 import { rootScript } from "@/lib/career-ops";
 import { parseExplorePatch, DEFAULT_FILTERS, type DiscoveredOffer, type ScanEvent } from "@/lib/explore";
 
-// Discovery is HTTP-bound across many ATS boards; give it room. It is FREE —
-// zero LLM tokens (the scanner only does HTTP + JSON, and --dry-run writes nothing).
+// Discovery is HTTP-bound across many ATS boards; give it room. FREE — zero LLM
+// tokens (the scanner only does HTTP + JSON, and --dry-run writes nothing). 900s
+// matches the scan.ts workload-scaled budget cap (~14 min) so a legal full scan
+// is never cut by the platform before its own kill boundary.
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 900;
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {

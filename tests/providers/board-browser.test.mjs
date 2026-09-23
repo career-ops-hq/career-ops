@@ -9,7 +9,7 @@ try {
   const scrapeMod = await import(pathToFileURL(join(ROOT, 'providers/_browser-scrape.mjs')).href);
   const boardMod = await import(pathToFileURL(join(ROOT, 'providers/board-browser.mjs')).href);
   const boardBrowser = boardMod.default;
-  const { extractBoardJobs, defaultCompanyFromEntry } = scrapeMod;
+  const { extractBoardJobs, defaultCompanyFromEntry, isSalaryLike } = scrapeMod;
 
   if (boardBrowser.id === 'board-browser') pass('board-browser.id is "board-browser"');
   else fail(`board-browser.id is ${JSON.stringify(boardBrowser.id)}`);
@@ -67,6 +67,29 @@ try {
     pass('defaultCompanyFromEntry strips board suffix after em dash');
   } else {
     fail('defaultCompanyFromEntry should strip suffix');
+  }
+
+  // A salary metadata line must never become an employer ($175K recorded as the
+  // company of a WorkAtAStartup listing — the web logo chain then tried to
+  // resolve "$175K" → "$175k.com" and 400'd).
+  if (
+    defaultCompanyFromEntry({ name: '$175K' }) === '' &&
+    defaultCompanyFromEntry({ name: '$126K $175K' }) === '' &&
+    isSalaryLike('175k') &&
+    !isSalaryLike('175') &&
+    !isSalaryLike('24/7 Software')
+  ) {
+    pass('defaultCompanyFromEntry rejects salary figures as company');
+  } else {
+    fail(
+      `defaultCompanyFromEntry salary guard => ${JSON.stringify([
+        defaultCompanyFromEntry({ name: '$175K' }),
+        defaultCompanyFromEntry({ name: '$126K $175K' }),
+        isSalaryLike('175k'),
+        isSalaryLike('175'),
+        isSalaryLike('24/7 Software'),
+      ])}`,
+    );
   }
 
   let threw = false;

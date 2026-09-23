@@ -8,7 +8,14 @@ import { useJobs, type Job } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
 
 type Company = { id: string; name: string; status: string; detail: string };
-type Result = { available: boolean; configured: boolean; companies: Company[] };
+type Result = {
+  available: boolean;
+  configured: boolean;
+  companies: Company[];
+  partial?: boolean;
+  checked?: number;
+  total?: number;
+};
 
 const TONE: Record<string, { dot: string; label: string; chip: string }> = {
   live: { dot: "bg-emerald-500", label: "live", chip: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" },
@@ -47,6 +54,9 @@ export function PortalsView() {
   const broken = companies.filter((c) => c.status === "broken");
   const liveN = companies.filter((c) => c.status === "live" || c.status === "empty").length;
   const sorted = [...companies].sort((a, b) => (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9));
+  const partial = Boolean(res?.partial);
+  const checked = res?.checked ?? companies.length;
+  const total = res?.total ?? checked;
 
   return (
     <div>
@@ -59,7 +69,7 @@ export function PortalsView() {
           {loading ? <Loader2 className="size-4 animate-spin" /> : <Radar className="size-4" />}
           Check portal health
         </button>
-        {loading && <span className="text-xs text-faint">Probing each company&apos;s ATS… (~30–60s)</span>}
+        {loading && <span className="text-xs text-faint">Probing each company&apos;s ATS… (~30–60s, longer for big configs)</span>}
       </div>
 
       {res && !res.available && (
@@ -77,9 +87,20 @@ export function PortalsView() {
       {res && res.configured && (
         <div className="mt-5">
           <p className="text-sm text-muted">
-            <span className="tabular-nums text-emerald-600 dark:text-emerald-400">{liveN}</span> live ·{" "}
-            <span className="tabular-nums text-red-600 dark:text-red-400">{broken.length}</span> broken ·{" "}
-            <span className="tabular-nums">{companies.length}</span> tracked
+            {partial ? (
+              <span className="text-amber-700 dark:text-amber-400">
+                Probe timed out — showing {checked} of {total} tracked so far.{" "}
+                <button onClick={check} className="inline font-medium hover:underline">
+                  Re-check
+                </button>
+              </span>
+            ) : (
+              <>
+                <span className="tabular-nums text-emerald-600 dark:text-emerald-400">{liveN}</span> live ·{" "}
+                <span className="tabular-nums text-red-600 dark:text-red-400">{broken.length}</span> broken ·{" "}
+                <span className="tabular-nums">{companies.length}</span> tracked
+              </>
+            )}
           </p>
           {broken.length > 0 && (
             <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm">

@@ -384,7 +384,10 @@ function CappedBanner({ companiesScanned, companiesAvailable, onRefine }: { comp
 function FailedCard({ msg, onRetry }: { msg: string; onRetry: () => void }) {
   // The scanner-missing 400 (data-only / pre-scan-ats-full checkout) must NOT
   // offer a "Try again" that re-fails forever — give a real next step instead.
-  const scannerMissing = /isn'?t available|data only|complete career-ops checkout|scanner/i.test(msg);
+  // No bare `scanner` token here: all real scanner-missing messages carry
+  // "isn't available" / "data only", while a legit scan failure like
+  // "The scanner returned no readable output." must keep the amber retry card.
+  const scannerMissing = /isn'?t available|data only|complete career-ops checkout/i.test(msg);
   if (scannerMissing) {
     return (
       <div className="rounded-2xl border border-border bg-surface/30 px-6 py-10 text-center">

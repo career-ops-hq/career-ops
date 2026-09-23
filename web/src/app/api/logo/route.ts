@@ -17,12 +17,17 @@ export const dynamic = "force-dynamic";
 
 const DOMAIN_RE = /^[a-z0-9.-]{1,253}\.[a-z]{2,}$/i;
 
+// A compensation figure must never become a logo lookup: "$175K" → "175k.com"
+// would fetch a stranger's favicon. Same signature as the scraper's guard.
+const SALARY_RE = /^(?:[$€£¥₹]?\d[\d,.]*[kKmM]?[\s-–—to/]+)*[$€£¥₹]?\d[\d,.]*[kKmM]$|^[$€£¥₹]\d[\d,.]*$/i;
+
 function cacheDir(): string {
   return path.join(careerOpsRoot(), ".career-ops-web", "logo-cache");
 }
 
 /** Plausible domains for a company name, cheapest/likeliest first. */
 function companyDomains(company: string): string[] {
+  if (SALARY_RE.test(company.trim())) return [];
   const paren = company.match(/\(([A-Za-z0-9]{2,12})\)/)?.[1]; // "… (5WPR)"
   // [^()] (not [^)]) keeps the match unambiguous — no polynomial backtracking on
   // adversarial inputs full of unclosed parens (CodeQL js/polynomial-redos).
@@ -60,17 +65,20 @@ export async function GET(req: NextRequest) {
   let key: string;
   let candidates: string[];
   if (domain) {
-    if (!DOMAIN_RE.test(domain) || domain.includes("..")) return new Response("bad domain", { status: 400 });
+    // A malformed/foreign domain is simply "no logo" (monogram fallback) — the
+    // 404 contract — not a programming error (400).
+    if (!DOMAIN_RE.test(domain) || domain.includes("..")) return new Response("no logo", { status: 404 });
     key = domain.replace(/[^a-z0-9.-]/g, "_");
     candidates = [domain];
   } else if (company) {
+    if (SALARY_RE.test(company.trim())) return new Response("no logo", { status: 404 });
     const slug = company.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 40);
-    if (!slug) return new Response("bad company", { status: 400 });
+    if (!slug) return new Response("no logo", { status: 404 });
     key = `co_${slug}`;
     candidates = companyDomains(company);
     if (candidates.length === 0) return new Response("no logo", { status: 404 });
   } else {
-    return new Response("need domain or company", { status: 400 });
+    return new Response("no logo", { status: 404 });
   }
 
   // `key` is already sanitized above, but enforce containment anyway: a cache

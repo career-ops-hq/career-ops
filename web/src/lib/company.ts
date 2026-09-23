@@ -103,7 +103,14 @@ const DOMAIN_OVERRIDES: Record<string, string> = {
 
 const LEGAL_SUFFIX = /\b(inc|llc|ltd|limited|gmbh|co|corp|corporation|sa|s\.a|ag|plc|sl|s\.l|bv|oy|ab|company|group|holdings|technologies|technology|labs|systems)\b/gi;
 
-/** Normalize a company name to a likely registrable domain, or null if empty. */
+// A compensation figure must never masquerade as a company (a "$175K" row
+// recorded from a salary metadata line elsewhere would become "$175k.com").
+const SALARY_RE = /^(?:[$€£¥₹]?\d[\d,.]*[kKmM]?[\s-–—to/]+)*[$€£¥₹]?\d[\d,.]*[kKmM]$|^[$€£¥₹]\d[\d,.]*$/i;
+
+/** Normalize a company name to a likely registrable domain, or null if empty.
+ *  Also null for anything that can't be a registrable host (salary figures,
+ *  names carrying characters outside [a-z0-9-]) — the callers then fall back to
+ *  an offline monogram instead of firing a doomed logo request. */
 export function companyDomain(name: string | undefined | null): string | null {
   if (!name) return null;
   const key = name.trim().toLowerCase();
@@ -118,11 +125,14 @@ export function companyDomain(name: string | undefined | null): string | null {
     .replace(/\s+/g, " ")
     .trim();
   if (!cleaned) return null;
+  if (SALARY_RE.test(cleaned)) return null;
   // re-check overrides after stripping suffixes (e.g. "Stripe, Inc." → "stripe")
   if (DOMAIN_OVERRIDES[cleaned]) return DOMAIN_OVERRIDES[cleaned];
 
   const slug = cleaned.replace(/\s+/g, "");
   if (slug.length < 2) return null;
+  // Only host-safe chars survive to become "slug.com" — never "$175k.com".
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) return null;
   return `${slug}.com`;
 }
 

@@ -3,6 +3,7 @@ import path from "node:path";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { parseApplications } from "@/lib/tracker-table.mjs";
 import { resolveTailoredCv } from "@/lib/apply/cv";
+import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
 
 /**
  * Resolve the career-ops "home" — the directory holding the user's sibling
@@ -28,16 +29,20 @@ export function rootScript(nameNoExt: string): string {
 }
 
 /**
- * Live core normalizeTextKey (tracker-parse.mjs) for server routes. Dynamic
- * import so we always derive from the user's checkout, never a stale copy
- * (#2666 — whats-new must key companies the same way as the tracker).
+ * Live core normalizeTextKey for server routes. Returns the declared web mirror
+ * (@/lib/core/normalize-text-key.mjs) — the same function tracker-parse.mjs
+ * exports, vendored because Turbopack pins its module graph to web/ and cannot
+ * resolve a runtime import() of a file outside it (a computed path 500s with
+ * "Cannot find module as expression is too dynamic"). Parity with the core is
+ * enforced by test-all.mjs §55.7 against tests/fixtures/company-key-corpus.json
+ * (#2666) — the mirror IS the core's key, never a second opinion.
  */
 export async function getNormalizeTextKey(): Promise<(value: unknown, separator?: string) => string> {
-  const { pathToFileURL } = await import("node:url");
-  const mod = (await import(pathToFileURL(path.join(careerOpsRoot(), "tracker-parse.mjs")).href)) as {
-    normalizeTextKey: (value: unknown, separator?: string) => string;
-  };
-  return mod.normalizeTextKey;
+  // The mirror runs String(value ?? '') first, so it safely takes undefined/
+  // unknown cells — callers (whats-new) feed possibly-empty strings. The cast
+  // keeps the declared contract the wider truth instead of the module's inferred
+  // (value: string) signature.
+  return normalizeTextKey as (value: unknown, separator?: string) => string;
 }
 
 // Feature-detect the core's `tracker.mjs delete --num` row-delete (#1200) by probing
