@@ -55,8 +55,12 @@ copyFileSync(join(ROOT, 'cv-sections-core.mjs'), join(sandbox, 'cv-sections-core
 copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs'));
 // generate-pdf.mjs's main-guard lives in lib/is-main-module.mjs (#3170). Without
 // it the copy dies with ERR_MODULE_NOT_FOUND before parsing an argument.
+// lib/page-format.mjs owns the paper size the @page rule is built from, and
+// generate-pdf.mjs imports it at module scope — same ERR_MODULE_NOT_FOUND
+// without it.
 mkdirSync(join(sandbox, 'lib'), { recursive: true });
 copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
+copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(sandbox, 'lib', 'page-format.mjs'));
 
 // theme-style.mjs and tracker-utils.mjs both `import * as yaml from 'js-yaml'`,
 // which resolves by walking up into the repo's node_modules -- from the

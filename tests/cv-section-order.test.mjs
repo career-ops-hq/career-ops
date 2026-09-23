@@ -1012,6 +1012,9 @@ ${sections.join('\n')}</div>
     // before parsing an argument.
     mkdirSync(join(sandbox, 'lib'), { recursive: true });
     copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
+    // lib/page-format.mjs owns the paper size generate-pdf.mjs imports at
+    // module scope, so the copy needs it for the same reason.
+    copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(sandbox, 'lib', 'page-format.mjs'));
 
     // theme-style.mjs and tracker-utils.mjs both `import * as yaml from
     // 'js-yaml'`, resolved by walking up into the repo's node_modules -- from
@@ -1150,6 +1153,9 @@ export const chromium = {
     // before parsing an argument.
     mkdirSync(join(sandbox, 'lib'), { recursive: true });
     copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
+    // lib/page-format.mjs owns the paper size generate-pdf.mjs imports at
+    // module scope, so the copy needs it for the same reason.
+    copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(sandbox, 'lib', 'page-format.mjs'));
 
     // theme-style.mjs and tracker-utils.mjs both `import * as yaml from
     // 'js-yaml'`, resolved by walking up into the repo's node_modules -- from

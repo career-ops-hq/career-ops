@@ -170,6 +170,9 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       validateKeywordList(config.location_filter.allow, 'location_filter.allow', errors);
       validateKeywordList(config.location_filter.block, 'location_filter.block', errors);
       validateKeywordList(config.location_filter.block_hard, 'location_filter.block_hard', errors);
+      if (config.location_filter.strict !== undefined && typeof config.location_filter.strict !== 'boolean') {
+        add(errors, 'location_filter.strict', 'must be a boolean when set');
+      }
     }
   }
 
