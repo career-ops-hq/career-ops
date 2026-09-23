@@ -3109,6 +3109,23 @@ if (
   fail('apply mode missing additive Application Answers persistence instructions');
 }
 
+// The apply path fills structured fields from the TAILORED CV that gets
+// attached to the same form, not from master cv.md. The two negative assertions
+// pin the exact prose the fix replaced: both strings are present in the
+// pre-fix modes/apply.md, so neither passes vacuously.
+if (
+  applyMode.includes('## Step 4b — Resolve the tailored CV') &&
+  applyMode.includes('data/pdf-index.tsv') &&
+  applyMode.includes('the tailored CV wins') &&
+  applyMode.includes('## Step 7b — Pre-Save required-field sweep') &&
+  !applyMode.includes('generate response from the report + cv.md') &&
+  !applyMode.includes('(`config/profile.yml` / `cv.md`)')
+) {
+  pass('apply mode sources experience fields from the tailored CV and sweeps required fields before Save');
+} else {
+  fail('apply mode missing the tailored-CV-first rule or the pre-Save required-field sweep');
+}
+
 const expandMode = readFile('modes/expand.md');
 if (
   /never fetch unlinked URLs/i.test(expandMode) &&
