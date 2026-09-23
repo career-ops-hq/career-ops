@@ -756,6 +756,27 @@ test('createLockWaitPolicy: the backoff never sleeps past the per-holder deadlin
       + 'wakes long after the deadline its timeout is measured against, so timeoutMs is enforced '
       + 'at whatever moment the sleep ends',
     );
+
+    // The same read taken LATE in the window, which is where every retry after
+    // the first takes it. The bound is the time actually remaining, so the
+    // clamp has to keep tightening as the window drains. A clamp that floors
+    // at some fraction of timeoutMs satisfies the t=0 read above and still
+    // sleeps the caller past the deadline on every later pass.
+    const lateNow = Date.now();
+    const late = createLockWaitPolicy(lockDir, {
+      timeoutMs: 1_000, retryMs: 5_000, deadline: lateNow + 40, hardDeadline: lateNow + 60_000,
+    });
+
+    // 250ms sits above the 40ms this window really has left and below the
+    // 500ms a half-of-timeoutMs floor would report, so the two are told apart
+    // with no elapsed-time read and nothing to stall.
+    const lateSleep = late.backoffMs();
+    assert.ok(
+      lateSleep <= 250,
+      `backoffMs() returned ${Math.round(lateSleep)}ms with 40ms left of a 1000ms per-holder `
+      + 'window: the clamp stopped tracking the time left, so the caller overshoots its own '
+      + 'deadline on every retry but the first',
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
