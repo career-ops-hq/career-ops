@@ -439,3 +439,50 @@ test('the CLI refuses a non-HTML template rather than reporting it clean', () =>
   assert.equal(html.status, 0, `the html path must still work: ${html.stderr}`);
   assert.equal(JSON.parse(html.stdout).ok, true);
 });
+
+// A nonempty `rules:` list satisfied the loader no matter what was in it.
+// `rules: [{}]` loaded, atsLint recorded a skip carrying no rule id, and
+// returned ok:true on a document full of the things the lint exists to catch.
+// The shipped file's conformance was already asserted above; nothing stopped a
+// different --rules-path being garbage. The contract the loader enforces is the
+// one ats-rules.yml's own header states.
+test('a rules file whose entries are malformed is an error, not a clean pass', () => {
+  const VALID = 'id: x\n    rule: X\n    severity: warning\n    detect: null\n'
+    + '    unimplemented_because: pending\n    source:\n      - q\n    must_not_flag: n\n';
+  const cases = [
+    ['an empty entry', 'rules:\n  - {}\n', /id/i],
+    ['a null entry', 'rules:\n  - ~\n', /mapping/i],
+    ['a scalar entry', 'rules:\n  - just-a-string\n', /mapping/i],
+    ['no id', `rules:\n  - ${VALID.replace('id: x\n    ', '')}`, /id/i],
+    ['no rule name', `rules:\n  - ${VALID.replace('rule: X\n    ', '')}`, /rule/i],
+    ['a non-warning severity', `rules:\n  - ${VALID.replace('severity: warning', 'severity: error')}`, /severity/i],
+    ['no source quote', `rules:\n  - ${VALID.replace('source:\n      - q\n    ', '')}`, /source/i],
+    ['an empty source list', `rules:\n  - ${VALID.replace('source:\n      - q', 'source: []')}`, /source/i],
+    ['no must_not_flag', `rules:\n  - ${VALID.replace('must_not_flag: n\n', '')}`, /must_not_flag/i],
+    ['a null detector with no reason', `rules:\n  - ${VALID.replace('unimplemented_because: pending\n    ', '')}`, /unimplemented_because/i],
+    ['duplicate ids', `rules:\n  - ${VALID}  - ${VALID}`, /duplicate/i],
+  ];
+  for (const [label, body, pattern] of cases) {
+    const rulesPath = join(mkdtempSync(join(tmpdir(), 'atsrules-')), 'ats-rules.yml');
+    writeFileSync(rulesPath, body);
+    assert.throws(() => loadAtsRules(rulesPath), pattern, `expected a throw for ${label}`);
+
+    const result = atsLint(join(ROOT, 'templates', 'cv-template.html'), 'cv', { rulesPath });
+    assert.equal(result.ok, false, `expected ok:false for ${label}`);
+    assert.deepEqual(result.findings, [], `${label}: a rejected config reports no findings`);
+  }
+});
+
+// The other half. A rule with `detect: null` is agreed policy with no detector
+// yet, and has to stay loadable, or the validator would delete the open items.
+test('a valid rule with a null detector still loads and still skips', () => {
+  const rulesPath = join(mkdtempSync(join(tmpdir(), 'atsrules-')), 'ats-rules.yml');
+  writeFileSync(rulesPath, 'rules:\n  - id: x\n    rule: X\n    severity: warning\n'
+    + '    detect: null\n    unimplemented_because: pending\n    source:\n      - q\n    must_not_flag: n\n');
+  const loaded = loadAtsRules(rulesPath);
+  assert.equal(loaded.rules.length, 1);
+
+  const result = atsLint(join(ROOT, 'templates', 'cv-template.html'), 'cv', { rulesPath });
+  assert.equal(result.error, null);
+  assert.deepEqual(result.skipped.map((s) => s.id), ['x'], 'the skip has to carry the rule id');
+});

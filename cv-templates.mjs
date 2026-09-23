@@ -249,6 +249,36 @@ export function loadAtsRules(path = DEFAULT_ATS_RULES_PATH) {
         + 'An empty rule set checks nothing and would report a clean pass.'
     );
   }
+  // A nonempty list used to satisfy the check no matter what was in it, so
+  // `rules: [{}]` loaded and atsLint recorded a skip with no rule id and
+  // returned ok. The fields below are the contract this file's own header
+  // states: every rule quotes its source, severity is advisory throughout, and
+  // `detect: null` carries the reason it is still open. A rule that cannot say
+  // which policy it enforces cannot be evaluated OR honestly skipped.
+  const seen = new Set();
+  for (const [i, rule] of doc.rules.entries()) {
+    const at = `${path} rule ${i}`;
+    if (!rule || typeof rule !== 'object') throw new Error(`${at}: each rule must be a mapping`);
+    if (!rule.id) throw new Error(`${at}: needs an id`);
+    if (seen.has(rule.id)) throw new Error(`${at}: duplicate rule id "${rule.id}"`);
+    seen.add(rule.id);
+    if (!rule.rule) throw new Error(`${at} (${rule.id}): needs a human-readable rule name`);
+    if (rule.severity !== 'warning') {
+      throw new Error(`${at} (${rule.id}): severity must be "warning"; atsLint is advisory and never blocks a render`);
+    }
+    if (!Array.isArray(rule.source) || rule.source.length === 0) {
+      throw new Error(`${at} (${rule.id}): needs at least one source quote`);
+    }
+    if (!rule.must_not_flag) {
+      throw new Error(`${at} (${rule.id}): needs must_not_flag, the half that decides whether the rule is worth having`);
+    }
+    // detect: null is a rule with no detector yet, which is legitimate. It
+    // still has to say what is unsettled, or a permanent skip reads as a pass.
+    if (rule.detect === null && !rule.unimplemented_because) {
+      throw new Error(`${at} (${rule.id}): a null detector must carry unimplemented_because`);
+    }
+  }
+
   return {
     sourceDoc: doc.source_doc || null,
     rules: doc.rules,
