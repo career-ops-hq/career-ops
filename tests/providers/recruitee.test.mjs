@@ -481,8 +481,11 @@ try {
 
   // ── Whole-word matching, not substring: "Parisian" must not shadow "Paris" ──
   // A substring check would wrongly see "paris" inside "parisian" and skip
-  // appending the real city. Also covers a Unicode-accented edge (JS's ASCII-only
-  // \b would misfire at the edge of "Örebro" — this must match it correctly).
+  // appending the real city. The second offer covers the Unicode-accented edge
+  // this fix exists for: "Örebro" sits at the very start of the name, exactly
+  // where JS's ASCII-only \b misfires (no boundary between start-of-string and
+  // a non-ASCII letter) — so the city must be recognized as already present and
+  // NOT duplicated, proving the Unicode-aware lookaround actually works there.
   const nearMissOffers = parseRecruiteeResponse(
     {
       offers: [
@@ -491,15 +494,15 @@ try {
           careers_url: 'https://x.recruitee.com/o/near-miss',
           locations: [
             { name: 'Parisian HQ', city: 'Paris', country: 'France' },
-            { name: 'Nordic Office', city: 'Örebro', country: 'Sweden' },
+            { name: 'Örebro Office', city: 'Örebro', country: 'Sweden' },
           ],
         },
       ],
     },
     'X',
   );
-  if (nearMissOffers[0]?.location === 'Parisian HQ, Paris, France · Nordic Office, Örebro, Sweden') {
-    pass('parseRecruiteeResponse appends a near-miss city ("Paris" in "Parisian HQ") and an accented one ("Örebro") correctly');
+  if (nearMissOffers[0]?.location === 'Parisian HQ, Paris, France · Örebro Office, Sweden') {
+    pass('parseRecruiteeResponse appends a near-miss city ("Paris" in "Parisian HQ") and does not duplicate an accented city already at the start of the name ("Örebro" in "Örebro Office")');
   } else {
     fail(`near-miss location = ${JSON.stringify(nearMissOffers[0]?.location)}`);
   }
