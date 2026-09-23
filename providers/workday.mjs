@@ -357,13 +357,28 @@ export function workdayDedupKey(job) {
   const underscoreIdx = lastSegment.indexOf('_');
   if (underscoreIdx === -1) return null; // no title/requisition-ID separator — nothing to key on
   const raw = lastSegment.slice(underscoreIdx + 1).toLowerCase();
-  // Only treat a trailing "-N" as Workday's cross-site disambiguator when what
-  // precedes it is already requisition-ID-shaped on its own (a leading digit,
-  // 2+ trailing digits, underscores allowed in between) — otherwise the hyphen
-  // digits ARE the requisition ID and must be kept, e.g. Walmart's "R-2593225"
-  // (credit: ronanime-arch, PR #3446).
+  // A trailing "-N" is Workday's cross-site disambiguator only when two things
+  // hold (credit: ronanime-arch, PR #3446):
+  //   - N is one or two digits. This is what keeps Walmart's "R-2593225" whole:
+  //     a seven-digit tail never splits, so the base check below never runs.
+  //   - What precedes it is requisition-ID-shaped on its own: a digit, then
+  //     2+ trailing digits. This is what keeps a short "R-25" whole — its base
+  //     "r" has no digit.
+  // A hyphenated base ("req-271559-1", "jr-017459-2") is admitted too (#3882),
+  // but only with a single-digit 1-9 counter, the only values Workday was seen
+  // to emit. A tenant numbering its own IDs "req-2026-01".."-12" must not start
+  // folding into one key: "-01".."-09" are zero-padded and "-10".."-12" are two
+  // digits, so all twelve stay distinct. An unpadded "req-2026-1".."-9" sibling
+  // set cannot be told apart from a republish by the ID string alone and does
+  // fold — an accepted limitation, see #3882.
+  // Bases without a hyphen keep exactly the rule they had, so no key they
+  // produced before moves (scan history is re-keyed through this function).
   const m = raw.match(/^(.*?)-(\d{1,2})$/);
-  const reqId = m && /^[a-z]*\d[a-z0-9_]*\d{2,}$/.test(m[1]) ? m[1] : raw;
+  const base = m ? m[1] : '';
+  const isDisambiguator = base.includes('-')
+    ? /^[a-z-]*\d[a-z0-9_-]*\d{2,}$/.test(base) && /^[1-9]$/.test(m[2])
+    : /^[a-z]*\d[a-z0-9_]*\d{2,}$/.test(base);
+  const reqId = isDisambiguator ? base : raw;
   if (!reqId) return null;
   return `workday:${parsed.hostname.toLowerCase()}:${reqId}`;
 }
