@@ -16,10 +16,14 @@
 // invisible to discovery while still being a shipped template reachable via
 // `generate-pdf.mjs --template`.
 //
-// Known gap, stated rather than hidden: `templates/sections/*.html` are
-// fragments composed INTO these templates, not templates themselves, and
-// atsLint's signature is (path, kind). A nested table introduced in a partial
-// would reach a rendered CV without passing through here.
+// Section partials are in scope too. `templates/sections/*.html` are fragments
+// composed INTO these templates, and a rendered CV carries whatever they hold.
+// Measured before adding them: a `<span style="display:none">` planted inside
+// experience.html's ENTRY zone reached the rendered HTML, and this sweep stayed
+// at 11 pass / 0 fail. That is the stuffing trick no-hidden-text exists to
+// catch, shipping through the one file the sweep did not read.
+// They are linted whole. Everything outside the ENTRY zone is HTML comments
+// today, in all ten of them, and stripNonContent drops comments anyway.
 //
 // Second known gap, about what this sweep is worth per rule. Every heading in
 // every shipped template is a bare `{{SECTION_*}}` placeholder, so
@@ -31,18 +35,29 @@
 // does reach it. nested-table and hidden-text are checked here for real.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atsLint, listTemplates } from '../cv-templates.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-const shipped = [
+const templates = [
   ...listTemplates('cv').map((t) => ({ path: t.path, kind: 'cv' })),
   ...listTemplates('cover').map((t) => ({ path: t.path, kind: 'cover' })),
   { path: join(ROOT, 'templates', 'resume-template.html'), kind: 'cv' },
 ].filter((t) => existsSync(t.path));
+
+// Derived the way build-cv-html.mjs resolves them, from a sections/ directory
+// co-located with each template, so a pack that ships its own is swept the day
+// it lands and nobody has to remember this file.
+const partials = [...new Set(templates.map((t) => join(dirname(t.path), 'sections')))]
+  .filter((dir) => existsSync(dir))
+  .flatMap((dir) => readdirSync(dir)
+    .filter((f) => f.endsWith('.html'))
+    .map((f) => ({ path: join(dir, f), kind: 'cv', partial: true })));
+
+const shipped = [...templates, ...partials];
 
 test('the sweep actually has templates to sweep', () => {
   // Without this, a resolver change that returns nothing turns every assertion
@@ -51,6 +66,12 @@ test('the sweep actually has templates to sweep', () => {
   const names = shipped.map((t) => relative(ROOT, t.path));
   assert.ok(names.includes(join('templates', 'cv-template.html')), 'the default CV template must be in the sweep');
   assert.ok(names.includes(join('templates', 'cover-letter-template.html')), 'the cover-letter template must be in the sweep');
+
+  // The partial set has its own floor. Without it a rename of sections/ leaves
+  // the templates asserted and the fragments silently unswept, which is the
+  // state this suite was in before they were added.
+  assert.ok(partials.length >= 7, `expected the shipped section partials, found ${partials.length}`);
+  assert.ok(names.includes(join('templates', 'sections', 'experience.html')), 'the experience partial must be in the sweep');
 });
 
 for (const { path, kind } of shipped) {
