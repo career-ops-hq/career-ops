@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // GENERADO por github-src/scripts/build.mjs: no editar a mano. Fuente: github-src/scripts/triage.mjs + bin/lib/triage-core.mjs + policy/*.json
-// {"builtAt":"2026-09-23T18:34:35.896Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
+// {"builtAt":"2026-09-23T20:47:12.665Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -725,7 +725,7 @@ function loadPoliciesOnce() {
   if (!text) log(`sin ${p}: gate no-codeowners con patrones de respaldo`);
   return (policies = policiesForAction({ codeownersText: text }));
 }
-async function triageOne(number, { now, firstReply, backlog = false, comment = null }) {
+async function triageOne(number, { now, firstReply, backlog = false, since = null, comment = null }) {
   const snapshot = await buildSnapshot(number);
   if (snapshot.state !== 'OPEN') { log(`#${number}: ${snapshot.state.toLowerCase()}, nada que hacer`); return; }
   snapshot.signals = await collectSignals(snapshot, { comment });
@@ -738,7 +738,7 @@ async function triageOne(number, { now, firstReply, backlog = false, comment = n
   if (jev) log(`#${number}: jev ${JSON.stringify(jev.domains).slice(0, 200)}`);
   const fr = needsFirstReply(snapshot);
   if (firstReply && fr.needs) {
-    const days = Math.max(1, Math.floor((now - new Date(snapshot.createdAt)) / 864e5));
+    const days = Math.max(1, Math.floor((now - (since || new Date(snapshot.createdAt))) / 864e5));
     let body = `${backlog ? backlogReply(days) : DEFAULT_FIRST_REPLY}\n\n${marker(number, snapshot.headSha)}`;
     if (jev) body = upsertJevMarker(body, number, sha7(snapshot.headSha), jev);
     if (Buffer.byteLength(body) > MAX_COMMENT_BYTES && !jev) throw new Error(`primera respuesta #${number} supera ${MAX_COMMENT_BYTES} bytes`);
@@ -751,11 +751,14 @@ async function triageOne(number, { now, firstReply, backlog = false, comment = n
 
 const SWEEP_QUERY = `query($owner:String!,$name:String!,$after:String){ repository(owner:$owner,name:$name){
   pullRequests(states:OPEN, first:50, after:$after, orderBy:{field:CREATED_AT, direction:ASC}){ pageInfo{hasNextPage endCursor}
-    nodes{ number createdAt updatedAt isDraft author{login __typename} labels(first:30){nodes{name}} comments(first:100){nodes{author{login} body}} reviews(first:50){nodes{author{login}}} } } } }`;
+    nodes{ number createdAt updatedAt isDraft author{login __typename} labels(first:30){nodes{name}} comments(first:100){nodes{author{login} body}} reviews(first:50){nodes{author{login}}} timelineItems(itemTypes:[READY_FOR_REVIEW_EVENT], last:1){nodes{... on ReadyForReviewEvent{createdAt}}} } } } }`;
+/** Desde cuándo espera una PR a un maintainer: su creación o, si fue borrador, su último ready_for_review (un borrador no espera
+ *  a nadie: la disculpa del backlog no puede contar esos días). */
+export const waitingSince = (p) => Math.max(Date.parse(p.createdAt) || 0, Date.parse(p.timelineItems?.nodes?.[0]?.createdAt || '') || 0);
 export function sweepCandidates(prs, now, labelsPolicy = POLICIES.labels) {
   const maintainers = new Set(labelsPolicy.maintainers || []);
   return prs.filter((p) => {
-    if (p.isDraft || (now - new Date(p.createdAt)) / 36e5 <= SWEEP_HOURS) return false;
+    if (p.isDraft || (now - waitingSince(p)) / 36e5 <= SWEEP_HOURS) return false;
     if (p.author?.__typename === 'Bot' || isBotLogin(p.author?.login)) return false;
     const author = norm(p.author?.login);
     const spoke = [...p.comments.nodes, ...p.reviews.nodes].some((c) => maintainers.has(norm(c.author?.login)) && norm(c.author?.login) !== author);
@@ -767,7 +770,7 @@ export function sweepCandidates(prs, now, labelsPolicy = POLICIES.labels) {
  *  (labels + primera respuesta con disculpa, backlogReply) · stuck: `triage/new` sin tocar >stuckHours (la CI acabó, reclasificar). */
 export function sweepPlan(prs, now, labelsPolicy = POLICIES.labels, { backlogHours = BACKLOG_HOURS, stuckHours = STUCK_HOURS } = {}) {
   const cands = sweepCandidates(prs, now, labelsPolicy);
-  const age = (p) => (now - new Date(p.createdAt)) / 36e5;
+  const age = (p) => (now - waitingSince(p)) / 36e5;
   const reply = cands.filter((p) => age(p) <= backlogHours), backlog = cands.filter((p) => age(p) > backlogHours);
   const seen = new Set(cands.map((p) => p.number));
   const stuck = prs.filter((p) => !p.isDraft && !seen.has(p.number) && (p.labels?.nodes || []).some((l) => l.name === 'triage/new') && (now - new Date(p.updatedAt || p.createdAt)) / 36e5 > stuckHours);
@@ -787,7 +790,7 @@ async function sweep(now) {
   const firsts = [...reply.map((p) => ({ p, backlog: false })), ...backlog.map((p) => ({ p, backlog: true }))];
   for (const { p, backlog: late } of firsts) {
     if (done >= max) { log(`sweep: tope ${max} alcanzado, quedan ${firsts.length - done} para la próxima pasada`); break; }
-    try { await triageOne(p.number, { now, firstReply: true, backlog: late }); done++; }
+    try { await triageOne(p.number, { now, firstReply: true, backlog: late, since: waitingSince(p) }); done++; }
     catch (e) { log(`#${p.number}: fallo (${e.message.slice(0, 120)})`); }
   }
   for (const p of stuck) {

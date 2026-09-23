@@ -7,9 +7,9 @@ name: Approve CI for fork PRs
 #     y la PR no toca .github/workflows/** ni ningún package*.json
 #   - tope 20 SHAs por ejecución
 #
-# Token: `GITHUB_TOKEN` con `actions: write` (POST /actions/runs/{id}/approve); aprueba como github-actions[bot].
-# Si GitHub lo rechaza (403), el run sale en rojo y lo dice. Las opciones las decide Santiago: un token de GitHub App en
-# `CI_APPROVE_TOKEN` (aprueba como bot) o un PAT personal (aprobaría a nombre de esa persona, justo lo que evita L98).
+# Token: `CI_APPROVE_TOKEN` si está definido; si no, `GITHUB_TOKEN` con `actions: write`, que aprueba como github-actions[bot]
+# (comprobado el 23-sep). Un 403 de permisos para la pasada y la deja en rojo, sin reintentar con el otro token; un límite de tasa
+# la para sin rojo y la siguiente reintenta. Un PAT personal en CI_APPROVE_TOKEN aprobaría a nombre de esa persona: no se usa.
 # vars.TRIAGE_DRY_RUN = "true" -> solo informa en el job summary.
 
 on:

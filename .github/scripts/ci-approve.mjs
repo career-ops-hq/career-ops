@@ -26,7 +26,12 @@ async function rest(method, url, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
-  if (!res.ok) throw new Error(`${method} ${url} → ${res.status}: ${text.slice(0, 200)}`);
+  if (!res.ok) {
+    const e = new Error(`${method} ${url} → ${res.status}: ${text.slice(0, 200)}`); e.status = res.status;
+    // GitHub también da 403 (o 429) por límite de tasa, primario o secundario: eso no es un token sin permiso.
+    e.rateLimited = res.status === 429 || (res.status === 403 && (res.headers.get('x-ratelimit-remaining') === '0' || /rate limit/i.test(text)));
+    throw e;
+  }
   return { data: text ? JSON.parse(text) : null, link: res.headers.get('link') || '' };
 }
 async function getAll(url) {
@@ -45,13 +50,14 @@ async function getAll(url) {
 export const API_CAP = 1000;
 export async function listHeld(page, { repo, from, to }) {
   const iso = (d) => new Date(d).toISOString().replace(/\.\d{3}Z$/, 'Z');
-  const out = [];
+  const out = [], truncated = [];
   async function win(a, b, depth) {
     const first = await page(`repos/${repo}/actions/runs?status=action_required&created=${iso(a)}..${iso(b)}&per_page=100`);
     if ((first.data?.total_count ?? 0) > API_CAP && depth < 16 && b - a > 60e3) {
       const mid = new Date((a.getTime() + b.getTime()) / 2);
       await win(a, mid, depth + 1); await win(mid, b, depth + 1); return;
     }
+    if ((first.data?.total_count ?? 0) > API_CAP) truncated.push({ from: iso(a), to: iso(b), total: first.data.total_count }); // no se puede partir más
     for (let cur = first; ;) {
       out.push(...(cur.data?.workflow_runs || []));
       const m = /<([^>]+)>;\s*rel="next"/.exec(cur.link || ''); if (!m) break;
@@ -60,14 +66,17 @@ export async function listHeld(page, { repo, from, to }) {
   }
   await win(new Date(from), new Date(to), 0);
   const seen = new Set();
-  return out.filter((r) => r.event === 'pull_request' && !seen.has(r.id) && seen.add(r.id));
+  return Object.assign(out.filter((r) => r.event === 'pull_request' && !seen.has(r.id) && seen.add(r.id)), { truncated });
 }
 /** 403 al aprobar: el token no puede aprobar runs de forks. Se para la pasada y el run sale en rojo. Cómo arreglarlo lo decide
  *  Santiago: un token de GitHub App firma como bot; un PAT personal firmaría a nombre de esa persona (el problema de L98). */
 export const DENIED = (tok) => `${tok} no puede aprobar runs de forks (403): la CI de los primerizos sigue retenida. Opciones, las decide Santiago: token de una GitHub App en CI_APPROVE_TOKEN (aprueba como bot) o un PAT personal (aprobaría a nombre de esa persona). Mientras, se aprueba a mano.`;
 
 // ---------- Reglas puras (testeables sin red) ----------
-export const FORBIDDEN = [/^\.github\//, /^package(-lock)?\.json$/];
+/** Manifiestos y lockfiles de dependencias a CUALQUIER profundidad (web/, dashboard/, scaffolder/…): CONTRIBUTING promete que el bot
+ *  solo aprueba la CI si el cambio no toca workflows ni dependencias. Misma regla que bin/act-approve-ci.mjs (RISKY; un test las compara). */
+export const DEPENDENCY_FILE = /(^|\/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|yarn\.lock|\.yarnrc(\.yml)?|\.npmrc|bun\.lockb?|go\.(mod|sum|work)|requirements[^/]*\.txt|Pipfile(\.lock)?|pyproject\.toml|poetry\.lock|uv\.lock|setup\.(py|cfg)|Cargo\.(toml|lock)|Gemfile(\.lock)?|composer\.(json|lock))$/;
+export const FORBIDDEN = [/^\.github\//, DEPENDENCY_FILE];
 export const isBot = (u) => !u || u.type === 'Bot' || /\[bot\]$/.test(u.login || '');
 export function touchesForbidden(files) { return files.filter((f) => FORBIDDEN.some((re) => re.test(f.filename || f))); }
 export function groupByHeadSha(runs) {
@@ -104,10 +113,11 @@ export async function main() {
   const runs = await listHeld((u) => rest('GET', u), { repo: REPO, from: (oldest || Date.now() - 180 * 864e5) - 36e5, to: Date.now() });
   const groups = groupByHeadSha(runs);
   log(`${runs.length} runs esperando en ${groups.size} SHAs · ${bySha.size} PRs abiertas`);
-  let approved = 0, orphans = 0, denied = false;
+  for (const t of runs.truncated || []) log(`AVISO: la ventana ${t.from}..${t.to} tiene ${t.total} runs retenidos y la API solo da ${API_CAP}: la lista está incompleta`);
+  let tried = 0, approvedShas = 0, approvedRuns = 0, orphans = 0, stop = null;
   for (const [sha, group] of groups) {
-    if (denied) break;
-    if (approved >= MAX) { log(`tope ${MAX} alcanzado: el resto espera a la próxima pasada`); break; }
+    if (stop) break;
+    if (tried >= MAX) { log(`tope ${MAX} alcanzado: el resto espera a la próxima pasada`); break; }
     const pr = bySha.get(sha) || null;
     if (!pr) { orphans++; continue; } // no es el head de ninguna PR abierta (push encima, cerrada o fusionada): nada que aprobar
     let files = [];
@@ -115,19 +125,24 @@ export async function main() {
     catch (e) { log(`#${pr.number} ${sha.slice(0, 7)}: no pude leer sus ficheros (${e.message.slice(0, 80)}): no apruebo`); continue; }
     const d = decide({ sha, pr, files });
     if (!d.ok) { log(`#${pr.number} ${sha.slice(0, 7)}: no : ${d.why}`); continue; }
+    tried++;
+    let all = true;
     for (const r of group) {
       if (DRY) { log(`DRY-RUN aprobar run ${r.id} (${r.name}) : ${d.why}`); continue; }
-      try { await rest('POST', `repos/${REPO}/actions/runs/${r.id}/approve`); log(`aprobado run ${r.id} (${r.name}) : ${d.why}`); }
+      try { await rest('POST', `repos/${REPO}/actions/runs/${r.id}/approve`); approvedRuns++; log(`aprobado run ${r.id} (${r.name}) : ${d.why}`); }
       catch (e) {
-        if (/→ 403\b/.test(e.message)) { denied = true; log(`run ${r.id} (#${pr.number}): ${DENIED(process.env.CI_APPROVE_TOKEN ? 'CI_APPROVE_TOKEN' : 'GITHUB_TOKEN')}`); break; }
+        all = false;
+        if (e.rateLimited) { stop = 'rate'; log(`run ${r.id} (#${pr.number}): límite de tasa de GitHub (${e.status}): se para la pasada; la siguiente lo reintenta`); break; }
+        if (e.status === 403) { stop = 'denied'; log(`run ${r.id} (#${pr.number}): ${DENIED(process.env.CI_APPROVE_TOKEN ? 'CI_APPROVE_TOKEN' : 'GITHUB_TOKEN')}`); break; }
         log(`run ${r.id}: fallo al aprobar (${e.message.slice(0, 120)})`);
       }
     }
-    approved++;
+    if (all && !DRY) approvedShas++;
   }
   if (orphans) log(`${orphans} SHAs huérfanos (no son el head de ninguna PR abierta): no se aprueban`);
-  log(`${approved} SHAs ${denied ? 'intentados; ninguno aprobado por el 403' : 'aprobados'}`);
-  if (denied) process.exitCode = 1; // en rojo: que se vea en Actions y en bin/watch-runs
+  if (DRY) log(`${tried} SHAs se aprobarían (DRY_RUN)`);
+  else log(`${approvedShas} SHAs aprobados (${approvedRuns} runs)${stop === 'denied' ? '; parada por un 403 de permisos' : stop === 'rate' ? '; parada por límite de tasa' : ''}`);
+  if (stop === 'denied' || (runs.truncated || []).length) process.exitCode = 1; // en rojo: que se vea en Actions y en bin/watch-runs
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### ci-approve\n\n${lines.map((l) => `- ${l}`).join('\n')}\n`);
 }
 
