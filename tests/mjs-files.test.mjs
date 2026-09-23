@@ -367,6 +367,38 @@ test('trackedFiles skips a gitlink directory rather than throwing EISDIR', () =>
   }
 });
 
+test('trackedFiles survives a stat that throws, and names the errno', () => {
+  // `throwIfNoEntry: false` suppresses ENOENT and nothing else. When the index
+  // names `a/b.mjs` but the tree has `a` as a regular FILE, the stat throws
+  // ENOTDIR and takes the whole scan with it -- the case the docblock above
+  // promises to survive, arriving through a different errno. EACCES on an
+  // unreadable parent directory is the same shape. Skip it the way the other
+  // three are skipped: loudly, named, and with the rest of the scan intact.
+  const { dir, git } = gitRepo('co-tracked-enotdir-');
+  try {
+    writeFileSync(join(dir, 'real.mjs'), 'const a = 1;\n');
+    mkdirSync(join(dir, 'a'));
+    writeFileSync(join(dir, 'a', 'b.mjs'), 'const b = 2;\n');
+    git('add', '-A');
+
+    // Replace the directory with a file, leaving `a/b.mjs` in the index.
+    rmSync(join(dir, 'a'), { recursive: true, force: true });
+    writeFileSync(join(dir, 'a'), 'now a regular file\n');
+
+    const { value: files, warnings } = capturingWarnings(() => trackedFiles(dir));
+
+    assert.ok(relPaths(files, dir).includes('real.mjs'),
+      'one unstattable path must not cost the rest of the scan');
+    assert.ok(!relPaths(files, dir).includes('a/b.mjs'),
+      'the path behind the throwing stat must not be returned');
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /a\/b\.mjs \(ENOTDIR\)/,
+      'the warning must name the path and its errno, not a generic reason');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('trackedFiles returns an unmerged path once, not once per index stage', () => {
   // `git ls-files` prints one line per stage, so a conflicted path arrives two
   // or three times. Left as-is, every offender inside one would be reported
