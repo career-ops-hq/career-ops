@@ -418,6 +418,79 @@ try {
     fail(`--kind= survived a single render: status=${emptyKindSingle.status}\n${emptyKindSingle.output.trim()}`);
   }
 
+  // A BARE `--kind`, with no `=`, matches none of the parser's prefix branches and
+  // falls through to the positional arms. Both are already filled here, so it is
+  // dropped on the floor: the caller asked for a kind, the render infers one from
+  // the filename, and that row replaces the report's CV slot. An absent flag and a
+  // flag missing its operand are different things.
+  const bareKind = run(['a.html', 'out/bare-kind.pdf', '--report=7', '--kind']);
+  if (bareKind.status === 1 && /--kind/i.test(bareKind.output)) {
+    pass('generate-pdf rejects a bare --kind with no value');
+  } else {
+    fail(`bare --kind was swallowed: status=${bareKind.status}\n${bareKind.output.trim()}`);
+  }
+
+  // The same empty-versus-absent hole on the per-entry path. `"kind": ""` is a
+  // supplied key, but the validation reads the VALUE, so it skips and inference
+  // takes over. Fixing the global flag without this one fixes an instance rather
+  // than the class.
+  const emptyEntryManifest = join(sandbox, 'empty-entry-kind.json');
+  writeFileSync(emptyEntryManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/empty-entry.pdf', kind: '' },
+  ]), 'utf-8');
+  const emptyEntry = run([`--batch=${emptyEntryManifest}`]);
+  if (emptyEntry.status === 1 && /kind/i.test(emptyEntry.output)) {
+    pass('generate-pdf rejects a manifest entry whose kind is explicitly empty');
+  } else {
+    fail(`empty entry kind was accepted: status=${emptyEntry.status}\n${emptyEntry.output.trim()}`);
+  }
+
+  // Control: an entry that OMITS kind entirely must still render by inference,
+  // so the two rejections above cannot be passing by refusing every manifest.
+  const omittedEntryManifest = join(sandbox, 'omitted-entry-kind.json');
+  writeFileSync(omittedEntryManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/omitted-entry.pdf' },
+  ]), 'utf-8');
+  const omittedEntry = run([`--batch=${omittedEntryManifest}`]);
+  if (omittedEntry.status === 0) {
+    pass('control: an entry that omits kind still renders by inference');
+  } else {
+    fail(`control failed: omitting kind broke the batch: status=${omittedEntry.status}\n${omittedEntry.output.trim()}`);
+  }
+
+  // The two siblings the same sweep found. reportNum keys the manifest row, so an
+  // empty one is the same silent-inference hazard as kind, and a bare --report is
+  // swallowed exactly as a bare --kind was.
+  const emptyReportManifest = join(sandbox, 'empty-entry-report.json');
+  writeFileSync(emptyReportManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/empty-report.pdf', reportNum: '' },
+  ]), 'utf-8');
+  const emptyReport = run([`--batch=${emptyReportManifest}`]);
+  if (emptyReport.status === 1 && /reportNum/i.test(emptyReport.output)) {
+    pass('generate-pdf rejects a manifest entry whose reportNum is explicitly empty');
+  } else {
+    fail(`empty entry reportNum was accepted: status=${emptyReport.status}\n${emptyReport.output.trim()}`);
+  }
+
+  const bareReport = run(['a.html', 'out/bare-report.pdf', '--report']);
+  if (bareReport.status === 1 && /--report/i.test(bareReport.output)) {
+    pass('generate-pdf rejects a bare --report with no value');
+  } else {
+    fail(`bare --report was swallowed: status=${bareReport.status}\n${bareReport.output.trim()}`);
+  }
+
+  // Control: an entry omitting reportNum still renders, so neither rejection is
+  // passing by refusing everything.
+  const omittedReportManifest = join(sandbox, 'omitted-entry-report.json');
+  writeFileSync(omittedReportManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/omitted-report.pdf' },
+  ]), 'utf-8');
+  if (run([`--batch=${omittedReportManifest}`]).status === 0) {
+    pass('control: an entry that omits reportNum still renders');
+  } else {
+    fail('control failed: omitting reportNum broke the batch');
+  }
+
   // A batch with neither global flag still runs, so the guards above reject the
   // flag rather than the batch. Without this, both checks would pass on a build
   // that refused every batch outright.

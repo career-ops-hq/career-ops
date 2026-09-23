@@ -1307,7 +1307,7 @@ async function generatePDF() {
   // output filename rather than pinning every render to a CV.
   // Supplied and value are separate questions: `--kind=` yields '', which is
   // falsy, so a guard reading the value alone waves the flag through.
-  let kindFlag = '', kindSupplied = false;
+  let kindFlag = '', kindSupplied = false, reportSupplied = false;
   // No flag seen yet: null, not a paper size. The default belongs to
   // lib/page-format.mjs, which ranks it below the user's config/profile.yml.
   let inputPath, outputPath, format = null, reportNum = '', allowReorder = false;
@@ -1317,7 +1317,18 @@ async function generatePDF() {
     if (arg.startsWith('--format=')) {
       format = arg.split('=')[1].toLowerCase();
     } else if (arg.startsWith('--report=')) {
+      reportSupplied = true;
       reportNum = arg.split('=')[1].trim();
+    } else if (arg === '--report') {
+      // Same missing-operand case as --kind below. Swallowed, the render writes
+      // no manifest row for the report the caller named.
+      reportSupplied = true;
+    } else if (arg === '--kind') {
+      // A flag missing its operand, not an absent flag. Left unhandled it falls
+      // through to the positional arms below and is dropped silently, so the
+      // render infers a kind the caller never asked for. Marked supplied with an
+      // empty value, which the guard below already refuses.
+      kindSupplied = true;
     } else if (arg.startsWith('--kind=')) {
       kindSupplied = true;
       kindFlag = arg.slice('--kind='.length).trim();
@@ -1347,6 +1358,11 @@ async function generatePDF() {
   // empty value cannot be caught by its return, and the CLI has to reject it
   // here: the caller typed the flag, and silently inferring instead is the
   // substitution the flag exists to prevent.
+  if (reportSupplied && !reportNum) {
+    console.error('Invalid --report "". Use a numeric report number, e.g. --report=42.');
+    process.exit(1);
+  }
+
   if (kindSupplied && (!kindFlag || !resolveArtifactKind(kindFlag).kind)) {
     console.error(`Invalid --kind "${kindFlag}". Use: ${ARTIFACT_KINDS.join(', ')}`);
     process.exit(1);
@@ -1596,14 +1612,22 @@ async function runBatchFromManifest(manifestPath, globals) {
         throw new Error(`invalid format "${declaredFormat}" (use: ${[...PAGE_FORMATS].join(', ')})`);
       }
 
-      // An omitted kind falls through to inference from the entry's output name.
+      // An OMITTED kind falls through to inference from the entry's output name.
+      // A kind that is present but empty is a different thing: the manifest
+      // author asked for one, and inferring instead can file a cover letter as a
+      // CV and replace the report's CV row. Same distinction the --kind flag
+      // draws above, on the path that actually renders the batch.
+      const entryKindSupplied = Object.prototype.hasOwnProperty.call(spec, 'kind');
       const entryKind = (spec.kind ?? '').toString().trim();
-      if (entryKind && !resolveArtifactKind(entryKind).kind) {
+      if (entryKindSupplied && (!entryKind || !resolveArtifactKind(entryKind).kind)) {
         throw new Error(`invalid kind "${entryKind}" (use: ${ARTIFACT_KINDS.join(', ')})`);
       }
 
+      // Present but empty is a supplied value, same as kind above: reportNum is
+      // what keys the manifest row, so accepting '' writes the render nowhere.
+      const entryReportSupplied = Object.prototype.hasOwnProperty.call(spec, 'reportNum');
       const entryReport = (spec.reportNum ?? '').toString().trim();
-      if (entryReport && !/^\d+$/.test(entryReport)) {
+      if (entryReportSupplied && (!entryReport || !/^\d+$/.test(entryReport))) {
         throw new Error(`invalid reportNum "${entryReport}" (use the numeric report number)`);
       }
 
