@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // GENERADO por github-src/scripts/build.mjs: no editar a mano. Fuente: github-src/scripts/triage.mjs + bin/lib/triage-core.mjs + policy/*.json
-// {"builtAt":"2026-09-23T08:08:31.480Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
+// {"builtAt":"2026-09-23T09:18:54.509Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -775,12 +775,25 @@ async function sweep(now) {
   log(`sweep: ${done} primeras respuestas · ${re} re-triages`);
 }
 
-/** PRs abiertas de un workflow_run: el payload trae pull_requests solo para ramas del repo; para forks se buscan por head_sha. */
-export async function prsFromWorkflowRun(event, fetchPulls) {
+/** PRs abiertas de un workflow_run. El payload trae `pull_requests` solo para ramas del propio repo y `commits/{sha}/pulls`
+ *  devuelve [] para commits de fork: se busca por head `owner:rama` (viene en el payload) y, si no, por `sha:` en search.
+ *  Un run de la rama por defecto (push a main) no es una PR: nada. `fetchPulls(run)` → [{number, state, headSha}]. */
+export async function prsFromWorkflowRun(event, fetchPulls, { defaultBranch = 'main' } = {}) {
   const run = event.workflow_run || {};
-  let list = (run.pull_requests || []).map((p) => ({ number: p.number, state: 'open' }));
-  if (!list.length && run.head_sha) list = (await fetchPulls(run.head_sha)) || [];
-  return [...new Set(list.filter((p) => p.state === 'open').map((p) => p.number))];
+  if (!run.head_sha || run.head_branch === defaultBranch) return [];
+  let list = (run.pull_requests || []).map((p) => ({ number: p.number, state: 'open', headSha: p.head?.sha || run.head_sha }));
+  if (!list.length) list = (await fetchPulls(run)) || [];
+  return [...new Set(list.filter((p) => p.state === 'open' && (!p.headSha || p.headSha === run.head_sha)).map((p) => p.number))];
+}
+async function pullsForRun(run) {
+  const owner = run.head_repository?.owner?.login, branch = run.head_branch;
+  if (owner && branch) {
+    const byHead = await rest('GET', `repos/${REPO}/pulls?state=open&per_page=20&head=${encodeURIComponent(`${owner}:${branch}`)}`);
+    const list = (byHead || []).map((p) => ({ number: p.number, state: p.state, headSha: p.head?.sha }));
+    if (list.length) return list;
+  }
+  const s = await rest('GET', `search/issues?q=${encodeURIComponent(`repo:${REPO} is:pr is:open sha:${run.head_sha}`)}`);
+  return (s?.items || []).map((i) => ({ number: i.number, state: i.state, headSha: null }));
 }
 
 async function main() {
@@ -791,8 +804,8 @@ async function main() {
   log(`pr-triage ${eventName}${DRY ? ' (DRY_RUN: no escribe en GitHub)' : ''}`);
   if (eventName === 'schedule' || eventName === 'workflow_dispatch') await sweep(now);
   else if (eventName === 'workflow_run') { // Tests completada: reclasificar (triage/new → ready/trivial/waiting-author) sin esperar al sweep
-    const nums = await prsFromWorkflowRun(event, (sha) => rest('GET', `repos/${REPO}/commits/${sha}/pulls`));
-    if (!nums.length) { log(`workflow_run ${event.workflow_run?.head_sha?.slice(0, 7) || '?'}: sin PR abierta, nada`); return; }
+    const nums = await prsFromWorkflowRun(event, pullsForRun);
+    if (!nums.length) { log(`workflow_run ${event.workflow_run?.head_sha?.slice(0, 7) || '?'} (${event.workflow_run?.head_repository?.full_name || '?'}:${event.workflow_run?.head_branch || '?'}): sin PR abierta, nada`); return; }
     for (const n of nums) await triageOne(n, { now, firstReply: false });
   }
   else if (eventName === 'pull_request_target') await triageOne(event.pull_request.number, { now, firstReply: ['opened', 'ready_for_review'].includes(event.action) });
