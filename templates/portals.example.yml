@@ -1357,6 +1357,17 @@ search_queries:
 #   appendWorkType: true  # optional: title becomes "Strategy Consultant [Part time]"
 #   enabled: true
 #
+# - name: Kalibrr — Indonesia            # SEA job board (Indonesia-heavy)
+#   provider: kalibrr
+#   searchKeywords: ""    # optional — the API's own `text` filter (whole board when empty)
+#   max_pages: 20         # optional page cap (100 rows/request, default 20, max 200)
+#   enabled: true
+#
+# - name: Tech in Asia                   # SEA startup-ecosystem board
+#   provider: techinasia
+#   max_pages: 5          # optional page cap (1000 rows/request, default 5, max 50)
+#   enabled: true
+#
 # - name: IBM — Germany SWE              # IBM global careers
 #   provider: ibm
 #   ibm:

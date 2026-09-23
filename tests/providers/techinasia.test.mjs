@@ -187,9 +187,14 @@ try {
   }
 
   const algoliaUrl = jsonCalls[0]?.url || '';
-  const algoliaParams = new URL(algoliaUrl).searchParams;
+  // Parsed, not prefix-matched: `algoliaUrl.startsWith('https://<host>/…')` is the
+  // same incomplete-URL-check shape CodeQL flags, and it would also accept a URL
+  // carrying that text somewhere other than the host.
+  const algoliaParsed = new URL(algoliaUrl || 'https://invalid.example/');
+  const algoliaParams = algoliaParsed.searchParams;
   if (
-    algoliaUrl.startsWith('https://219wx3mpv4-dsn.algolia.net/1/indexes/*/queries')
+    algoliaParsed.hostname === '219wx3mpv4-dsn.algolia.net'
+    && algoliaParsed.pathname === '/1/indexes/*/queries'
     && algoliaParams.get('x-algolia-application-id') === '219WX3MPV4'
     && algoliaParams.get('x-algolia-api-key') === 'b528008a75dc1c4402bfe0d8db8b3f8e'
   ) {
@@ -266,19 +271,141 @@ try {
   else fail(`techinasia.fetch() empty index = ${JSON.stringify(emptyIndex)}`);
 
   // The provider's own page cap stops a source that reports endless results.
+  // console.warn is captured so the "raise max_pages" advice is asserted rather
+  // than assumed: it must fire here, and must NOT fire for a ctx.maxPages cap or
+  // after a fetch error.
+  const realWarn = console.warn;
+  const capWarnings = [];
+  console.warn = (msg) => capWarnings.push(String(msg));
   let capCalls = 0;
-  await techinasia.fetch(
+  try {
+    await techinasia.fetch(
+      { name: 'X', provider: 'techinasia' },
+      {
+        fetchText: async (url) => (url.includes('/jobs/search') ? sampleHtml : appJs),
+        fetchJson: async () => {
+          capCalls += 1;
+          return { results: [{ hits: [{ id: `h${capCalls}`, title: `Role ${capCalls}` }], nbPages: 999 }] };
+        },
+        sleep: async () => {},
+      },
+    );
+  } finally {
+    console.warn = realWarn;
+  }
+  if (capCalls === 5) pass('techinasia.fetch() stops at its own DEFAULT_MAX_PAGES (5) when the source reports more pages');
+  else fail(`techinasia.fetch() page cap = ${capCalls} call(s) (expected 5)`);
+  if (capWarnings.length === 1 && /raise max_pages/.test(capWarnings[0])) {
+    pass('techinasia.fetch() warns that the cap cut a healthy board short');
+  } else {
+    fail(`techinasia.fetch() truncation warnings = ${JSON.stringify(capWarnings)}`);
+  }
+
+  // A probe asks whether the board is live, not what it contains.
+  let probeCalls = 0;
+  const probeWarnings = [];
+  console.warn = (msg) => probeWarnings.push(String(msg));
+  let probe;
+  try {
+    probe = await techinasia.fetch(
+      { name: 'X', provider: 'techinasia', max_pages: 5 },
+      {
+        fetchText: async (url) => (url.includes('/jobs/search') ? sampleHtml : appJs),
+        fetchJson: async () => {
+          probeCalls += 1;
+          return { results: [{ hits: [{ id: `q${probeCalls}`, title: `Role ${probeCalls}` }], nbPages: 999 }] };
+        },
+        sleep: async () => {},
+        maxPages: 1,
+      },
+    );
+  } finally {
+    console.warn = realWarn;
+  }
+  if (probeCalls === 1 && probe.length === 1) {
+    pass('techinasia.fetch() honors ctx.maxPages (health probe reads one page only)');
+  } else {
+    fail(`techinasia.fetch() probe = ${probeCalls} request(s), ${probe.length} job(s)`);
+  }
+  if (probeWarnings.length === 0) {
+    pass('techinasia.fetch() does not advise raising max_pages for a ctx.maxPages cap');
+  } else {
+    fail(`techinasia.fetch() warned during a probe: ${JSON.stringify(probeWarnings)}`);
+  }
+
+  // ── Contentless bodies are an empty board, not a broken one ───────────
+  for (const emptyBody of [null, {}, { results: [] }]) {
+    let threwOnEmpty = false;
+    let emptyResult = null;
+    try {
+      emptyResult = await techinasia.fetch(
+        { name: 'X', provider: 'techinasia' },
+        {
+          fetchText: async (url) => (url.includes('/jobs/search') ? sampleHtml : appJs),
+          fetchJson: async () => emptyBody,
+          sleep: async () => {},
+        },
+      );
+    } catch {
+      threwOnEmpty = true;
+    }
+    if (!threwOnEmpty && Array.isArray(emptyResult) && emptyResult.length === 0) {
+      pass(`techinasia.fetch() returns [] for a contentless body ${JSON.stringify(emptyBody)}`);
+    } else {
+      fail(`techinasia.fetch() contentless body ${JSON.stringify(emptyBody)} threw=${threwOnEmpty}`);
+    }
+  }
+
+  // ── Bounded retry: a 429 is retried, then the policy applies ──────────
+  let attempts = 0;
+  let retriedThenThrew = false;
+  try {
+    await techinasia.fetch(
+      { name: 'X', provider: 'techinasia' },
+      {
+        fetchText: async (url) => (url.includes('/jobs/search') ? sampleHtml : appJs),
+        fetchJson: async () => {
+          attempts += 1;
+          const err = new Error('HTTP 429 Too Many Requests');
+          err.status = 429;
+          throw err;
+        },
+        sleep: async () => {},
+      },
+    );
+  } catch (e) {
+    retriedThenThrew = /429/.test(e.message);
+  }
+  if (retriedThenThrew && attempts === 3) {
+    pass('techinasia.fetch() retries a 429 twice (3 attempts) then fails loud on page 1');
+  } else {
+    fail(`techinasia.fetch() retry exhaustion = ${attempts} attempt(s), threw=${retriedThenThrew}`);
+  }
+
+  // ── A lone surrogate in the host-controlled id drops only that row ────
+  const surrogateRun = await techinasia.fetch(
     { name: 'X', provider: 'techinasia' },
     {
       fetchText: async (url) => (url.includes('/jobs/search') ? sampleHtml : appJs),
-      fetchJson: async () => {
-        capCalls += 1;
-        return { results: [{ hits: [{ id: `h${capCalls}`, title: `Role ${capCalls}` }], nbPages: 999 }] };
-      },
+      fetchJson: async () => ({
+        results: [
+          {
+            hits: [
+              { id: 'ok-1', title: 'Good Role', city: { name: 'Jakarta' } },
+              { id: '\uD800bad', title: 'Bad Id', city: { name: 'Jakarta' } },
+            ],
+            nbPages: 1,
+          },
+        ],
+      }),
+      sleep: async () => {},
     },
   );
-  if (capCalls === 5) pass('techinasia.fetch() stops at its own DEFAULT_MAX_PAGES (5) when the source reports more pages');
-  else fail(`techinasia.fetch() page cap = ${capCalls} call(s) (expected 5)`);
+  if (surrogateRun.length === 1 && surrogateRun[0].url === 'https://www.techinasia.com/jobs/ok-1') {
+    pass('techinasia.fetch() drops only the hit whose id holds a lone surrogate (no URIError abort)');
+  } else {
+    fail(`techinasia.fetch() surrogate run = ${JSON.stringify(surrogateRun.map((j) => j.url))}`);
+  }
 
   // Malformed payloads fail loudly.
   let threw = false;
@@ -303,7 +430,10 @@ try {
     {
       fetchText: async () => { overrideText += 1; return ''; },
       fetchJson: async (url) => {
-        if (!url.includes('abcdef123456-dsn.algolia.net')) throw new Error(`wrong host: ${url}`);
+        // Parsed hostname, not a substring sweep: `url.includes('<host>')` passes
+        // for `https://evil.test/?<host>`, which is exactly what the CodeQL alert
+        // (js/incomplete-url-substring-sanitization) is about.
+        if (new URL(url).hostname !== 'abcdef123456-dsn.algolia.net') throw new Error(`wrong host: ${url}`);
         return { results: [{ hits: [], nbPages: 1 }] };
       },
     },

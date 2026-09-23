@@ -183,26 +183,232 @@ try {
   else fail(`kalibrr.fetch() empty board = ${JSON.stringify(emptyBoard)}`);
 
   // The provider's own page cap stops a source that reports endless results.
+  // ctx.sleep is injected so the suite never wall-clock waits, and console.warn
+  // is captured so the "raise max_pages" advice can be asserted rather than
+  // assumed (it must fire here, and must NOT fire during a probe or after a
+  // fetch error).
+  const realWarn = console.warn;
+  const warnings = [];
+  console.warn = (msg) => warnings.push(String(msg));
   let capCalls = 0;
-  await kalibrr.fetch(
-    { name: 'Kalibrr', provider: 'kalibrr' },
-    {
-      fetchJson: async () => {
-        capCalls += 1;
-        return {
-          count: 999999,
-          jobs: Array.from({ length: 100 }, (_, i) => ({
-            id: capCalls * 1000 + i,
-            name: `Role ${i}`,
-            slug: `r-${capCalls}-${i}`,
-            company: { code: 'c', name: 'C' },
-          })),
-        };
+  const capSleeps = [];
+  try {
+    await kalibrr.fetch(
+      { name: 'Kalibrr', provider: 'kalibrr' },
+      {
+        fetchJson: async () => {
+          capCalls += 1;
+          return {
+            count: 999999,
+            jobs: Array.from({ length: 100 }, (_, i) => ({
+              id: `${capCalls}-${i}`,
+              name: `Role ${i}`,
+              slug: `r-${capCalls}-${i}`,
+              company: { code: 'c', name: 'C' },
+            })),
+          };
+        },
+        sleep: async (ms) => { capSleeps.push(ms); },
       },
-    },
-  );
+    );
+  } finally {
+    console.warn = realWarn;
+  }
   if (capCalls === 20) pass('kalibrr.fetch() stops at its own DEFAULT_MAX_PAGES (20) when the board never runs out');
   else fail(`kalibrr.fetch() page cap = ${capCalls} call(s) (expected 20)`);
+
+  if (capSleeps.length === 19 && capSleeps.every((ms) => ms > 0)) {
+    pass('kalibrr.fetch() paces via ctx.sleep between pages only (19 gaps for 20 pages)');
+  } else {
+    fail(`kalibrr.fetch() ctx.sleep calls = ${capSleeps.length} (expected 19, none before page 1)`);
+  }
+
+  if (warnings.length === 1 && /raise max_pages/.test(warnings[0])) {
+    pass('kalibrr.fetch() warns that the cap cut a healthy board short');
+  } else {
+    fail(`kalibrr.fetch() truncation warnings = ${JSON.stringify(warnings)}`);
+  }
+
+  // ── entry.max_pages is the canonical key; ctx.maxPages caps the walk ───
+  let keyCalls = 0;
+  console.warn = () => {}; // the truncation warning is asserted above; keep output clean
+  try {
+    await kalibrr.fetch(
+      { name: 'Kalibrr', provider: 'kalibrr', max_pages: 2, pageSize: 2 },
+      {
+        fetchJson: async () => {
+          keyCalls += 1;
+          return {
+            count: 999,
+            jobs: [
+              { id: `k${keyCalls}a`, name: 'A', slug: 'a', company: { code: 'c', name: 'C' } },
+              { id: `k${keyCalls}b`, name: 'B', slug: 'b', company: { code: 'c', name: 'C' } },
+            ],
+          };
+        },
+        sleep: async () => {},
+      },
+    );
+  } finally {
+    console.warn = realWarn;
+  }
+  if (keyCalls === 2) pass('kalibrr.fetch() reads the canonical entry.max_pages');
+  else fail(`kalibrr.fetch() entry.max_pages run made ${keyCalls} request(s) (expected 2)`);
+
+  // A probe asks whether the board is live, not what it contains.
+  let probeCalls = 0;
+  const probeWarnings = [];
+  console.warn = (msg) => probeWarnings.push(String(msg));
+  let probe;
+  try {
+    probe = await kalibrr.fetch(
+      { name: 'Kalibrr', provider: 'kalibrr', max_pages: 20 },
+      {
+        fetchJson: async () => {
+          probeCalls += 1;
+          return {
+            count: 999999,
+            jobs: [{ id: `p${probeCalls}`, name: 'A', slug: 'a', company: { code: 'c', name: 'C' } }],
+          };
+        },
+        sleep: async () => {},
+        maxPages: 1,
+      },
+    );
+  } finally {
+    console.warn = realWarn;
+  }
+  if (probeCalls === 1 && probe.length === 1) {
+    pass('kalibrr.fetch() honors ctx.maxPages (health probe reads one page only)');
+  } else {
+    fail(`kalibrr.fetch() probe = ${probeCalls} request(s), ${probe.length} job(s)`);
+  }
+  if (probeWarnings.length === 0) {
+    pass('kalibrr.fetch() does not advise raising max_pages for a ctx.maxPages cap');
+  } else {
+    fail(`kalibrr.fetch() warned during a probe: ${JSON.stringify(probeWarnings)}`);
+  }
+
+  // ── Contentless bodies are an empty board, not a broken one ───────────
+  for (const emptyBody of [null, {}, [], { jobs: null }, { jobs: [] }]) {
+    let threwOnEmpty = false;
+    let emptyResult = null;
+    try {
+      emptyResult = await kalibrr.fetch(
+        { name: 'Kalibrr', provider: 'kalibrr' },
+        { fetchJson: async () => emptyBody, sleep: async () => {} },
+      );
+    } catch {
+      threwOnEmpty = true;
+    }
+    if (!threwOnEmpty && Array.isArray(emptyResult) && emptyResult.length === 0) {
+      pass(`kalibrr.fetch() returns [] for a contentless body ${JSON.stringify(emptyBody)}`);
+    } else {
+      fail(`kalibrr.fetch() contentless body ${JSON.stringify(emptyBody)} threw=${threwOnEmpty}`);
+    }
+  }
+
+  // ── Exhaustion policy: page 1 fails loud, a later page keeps its pages ──
+  let firstPageThrew = false;
+  try {
+    await kalibrr.fetch(
+      { name: 'Kalibrr', provider: 'kalibrr' },
+      { fetchJson: async () => { throw new Error('HTTP 500 Server Error'); }, sleep: async () => {} },
+    );
+  } catch (e) {
+    firstPageThrew = /HTTP 500/.test(e.message);
+  }
+  if (firstPageThrew) pass('kalibrr.fetch() fails loud when the first page cannot be fetched (no silent empty board)');
+  else fail('kalibrr.fetch() should rethrow a first-page fetch failure');
+
+  const partialWarnings = [];
+  console.warn = (msg) => partialWarnings.push(String(msg));
+  let partial;
+  try {
+    partial = await kalibrr.fetch(
+      { name: 'Kalibrr', provider: 'kalibrr', max_pages: 3, pageSize: 2 },
+      {
+        fetchJson: async (url) => {
+          const offset = Number(new URL(url).searchParams.get('offset'));
+          if (offset > 0) throw new Error('HTTP 500 Server Error');
+          return {
+            count: 999,
+            jobs: [
+              { id: 'a', name: 'A', slug: 'a', company: { code: 'c', name: 'C' } },
+              { id: 'b', name: 'B', slug: 'b', company: { code: 'c', name: 'C' } },
+            ],
+          };
+        },
+        sleep: async () => {},
+      },
+    );
+  } finally {
+    console.warn = realWarn;
+  }
+  if (partial.length === 2) pass('kalibrr.fetch() keeps the pages already collected when a later page fails');
+  else fail(`kalibrr.fetch() partial result = ${partial.length} job(s) (expected 2)`);
+  if (!partialWarnings.some((m) => /raise max_pages/.test(m))) {
+    pass('kalibrr.fetch() does not blame max_pages for a fetch-error stop');
+  } else {
+    fail(`kalibrr.fetch() warned about max_pages after a fetch error: ${JSON.stringify(partialWarnings)}`);
+  }
+
+  // ── Bounded retry: a 429 is retried, then the policy applies ──────────
+  let attempts = 0;
+  let retriedThenThrew = false;
+  try {
+    await kalibrr.fetch(
+      { name: 'Kalibrr', provider: 'kalibrr' },
+      {
+        fetchJson: async () => {
+          attempts += 1;
+          const err = new Error('HTTP 429 Too Many Requests');
+          err.status = 429;
+          throw err;
+        },
+        sleep: async () => {},
+      },
+    );
+  } catch (e) {
+    retriedThenThrew = /429/.test(e.message);
+  }
+  if (retriedThenThrew && attempts === 3) {
+    pass('kalibrr.fetch() retries a 429 twice (3 attempts) then fails loud on page 1');
+  } else {
+    fail(`kalibrr.fetch() retry exhaustion = ${attempts} attempt(s), threw=${retriedThenThrew}`);
+  }
+
+  // ── A lone surrogate in a host-controlled segment drops only that row ──
+  const surrogateRun = await kalibrr.fetch(
+    { name: 'Kalibrr', provider: 'kalibrr' },
+    {
+      fetchJson: async () => ({
+        count: 3,
+        jobs: [
+          { id: 'ok-1', name: 'Good Role', slug: 'good-role', company: { code: 'c', name: 'C' } },
+          { id: '\uD800bad', name: 'Bad Id', slug: 'bad', company: { code: 'c', name: 'C' } },
+          { id: 'ok-2', name: 'Another', slug: '\uDFFFbad', company: { code: 'c', name: 'C' } },
+        ],
+      }),
+      sleep: async () => {},
+    },
+  );
+  if (surrogateRun.length === 1 && surrogateRun[0].url === 'https://www.kalibrr.com/c/c/jobs/ok-1/good-role') {
+    pass('kalibrr.fetch() drops only the rows whose id/slug holds a lone surrogate (no URIError abort)');
+  } else {
+    fail(`kalibrr.fetch() surrogate run = ${JSON.stringify(surrogateRun.map((j) => j.url))}`);
+  }
+
+  // ── Host-controlled segments are percent-encoded ──────────────────────
+  const escaped = normalizeKalibrrJob(
+    { id: '1/../../about', name: 'Role', slug: 'a?b#c', company: { code: 'c' } },
+    'X',
+  );
+  if (escaped && !escaped.url.includes('/about') && new URL(escaped.url).pathname.startsWith('/c/c/jobs/')) {
+    pass('normalizeKalibrrJob percent-encodes path segments so a slash cannot escape its slot');
+  } else {
+    fail(`normalizeKalibrrJob unencoded segment = ${JSON.stringify(escaped?.url)}`);
+  }
 
   // Malformed payloads fail loudly rather than reporting an empty board.
   let threw = false;

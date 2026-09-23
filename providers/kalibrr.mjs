@@ -46,6 +46,8 @@
 // salary_filter. The figures stay unused until they can be annualized honestly.
 
 import { htmlToText } from './_html-to-text.mjs';
+import { fetchJsonWithRetry, sleep } from './_http.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 const DEFAULT_API = 'https://www.kalibrr.com/kjs/job_board/search';
 const SITE_ORIGIN = 'https://www.kalibrr.com';
@@ -54,6 +56,11 @@ const DEFAULT_PAGE_SIZE = 100;
 const PAGE_SIZE_CAP = 500;
 const DEFAULT_MAX_PAGES = 20;
 const MAX_PAGES_CAP = 200;
+// Applied to pages past the first only. Kalibrr answers a 100-row page in about
+// 500 ms live and never pushed back on back-to-back requests, so this stays at
+// the low end of the guide's 150-250 ms range rather than gold-plating a source
+// that never complained.
+const INTER_PAGE_DELAY_MS = 200;
 
 /** @param {string} url */
 function assertKalibrrUrl(url) {
@@ -92,14 +99,24 @@ function toEpochMs(value) {
  * Build the canonical posting URL. Both `id` and `slug` come from the payload;
  * the company `code` segment is cosmetic, so a missing one falls back to the
  * placeholder segment that still resolves (verified live).
+ *
+ * Every segment is host-controlled, so each goes through
+ * `safeEncodeURIComponent`: a value like `a/../../x?y#z` would otherwise escape
+ * its segment and produce a URL that is not the posting's, and `url` is the
+ * scanner's dedup key. The helper returns null for a lone surrogate, and the
+ * posting is dropped instead of a URIError aborting the whole page.
+ *
  * @param {any} job
  * @returns {string}
  */
 function buildJobUrl(job) {
-  const id = job?.id;
+  const id = safeEncodeURIComponent(job?.id ?? '');
   if (!id) return '';
-  const code = typeof job?.company?.code === 'string' && job.company.code.trim() ? job.company.code.trim() : '-';
-  const slug = typeof job.slug === 'string' ? job.slug.trim() : '';
+  const rawCode = typeof job?.company?.code === 'string' && job.company.code.trim() ? job.company.code.trim() : '-';
+  const code = safeEncodeURIComponent(rawCode);
+  const rawSlug = typeof job.slug === 'string' ? job.slug.trim() : '';
+  const slug = rawSlug ? safeEncodeURIComponent(rawSlug) : '';
+  if (code === null || slug === null) return '';
   const path = slug ? `/c/${code}/jobs/${id}/${slug}` : `/c/${code}/jobs/${id}`;
   const url = `${SITE_ORIGIN}${path}`;
   try {
@@ -178,7 +195,13 @@ export default {
   async fetch(entry, ctx) {
     const api = assertKalibrrUrl(entry?.api || DEFAULT_API);
     const pageSize = resolveInt(entry?.pageSize, DEFAULT_PAGE_SIZE, PAGE_SIZE_CAP);
-    const maxPages = resolveInt(entry?.maxPages, DEFAULT_MAX_PAGES, MAX_PAGES_CAP);
+    // `max_pages` on the portals entry is the user's setting; `ctx.maxPages` is a
+    // caller-side bound (verify-portals' health probe passes 1). Reading only the
+    // latter would ignore the configuration entirely; reading only the former
+    // would walk a liveness probe across the whole board.
+    const entryMaxPages = resolveInt(entry?.max_pages ?? entry?.maxPages, DEFAULT_MAX_PAGES, MAX_PAGES_CAP);
+    const probing = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0;
+    const maxPages = Math.min(entryMaxPages, probing ? ctx.maxPages : Infinity);
     const keywords = typeof entry?.searchKeywords === 'string' ? entry.searchKeywords.trim() : '';
     const fallbackCompany = typeof entry?.name === 'string' ? entry.name : '';
 
@@ -186,8 +209,15 @@ export default {
     const seen = new Set();
     let offset = 0;
     let total = null;
+    // Set only when the walk stops on the entry/DEFAULT page cap while the board
+    // still had matches. Never set by a ctx.maxPages cap (a caller's bound is not
+    // the user's ceiling) nor by a fetch error (a broken board is not a truncated
+    // one), so the advice to raise `max_pages` cannot misfire.
+    let truncated = false;
 
     for (let page = 0; page < maxPages; page++) {
+      if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
+
       const url = new URL(api);
       url.searchParams.set('limit', String(pageSize));
       url.searchParams.set('offset', String(offset));
@@ -196,16 +226,44 @@ export default {
       // match (preferred over fetching the whole board, per rule 3's spirit).
       if (keywords) url.searchParams.set('text', keywords);
 
-      const json = /** @type {any} */ (await ctx.fetchJson(url.href, { redirect: 'error' }));
+      let json;
+      try {
+        json = /** @type {any} */ (await fetchJsonWithRetry(ctx, url.href, { redirect: 'error' }));
+      } catch (err) {
+        // A probe must see a ctx.fetch* rejection unwrapped, or verify-portals
+        // reads its own request-budget cut-off as a broken board. In a real scan
+        // the recall-first call is to keep the pages already collected rather
+        // than lose a whole board to one bad page.
+        if (probing) throw err;
+        // A first-page failure means the board itself is unreachable or has
+        // changed shape: fail loud rather than report a quiet empty board, which
+        // is indistinguishable from a healthy quiet one. A later page keeps what
+        // was already collected.
+        if (page === 0) throw err;
+        console.warn(`kalibrr: page at offset ${offset} failed after retries — ${err.message}`);
+        break;
+      }
 
-      if (!json || !Array.isArray(json.jobs)) {
+      // The guide's empty-body branch: `null`, `{}`, `[]` and `{ jobs: null }`
+      // all mean "the endpoint answered, nothing matched", which is an empty
+      // board rather than a broken one. Only a body carrying unexpected keys is
+      // a shape change worth failing on.
+      if (json == null) break;
+      if (Object.keys(json).length === 0) break;
+      if (!Object.hasOwn(json, 'jobs')) {
         throw new Error(
-          `kalibrr: unexpected API response on offset ${offset} — expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
+          `kalibrr: unexpected API response at offset ${offset} — expected { jobs: [...] }, got keys: [${Object.keys(json).join(', ')}]`,
         );
       }
+      const rows = json.jobs;
+      if (rows == null) break;
+      if (!Array.isArray(rows)) {
+        throw new Error(`kalibrr: \`jobs\` is not an array at offset ${offset}`);
+      }
+
       if (total === null && Number.isFinite(json.count) && json.count >= 0) total = json.count;
 
-      for (const row of json.jobs) {
+      for (const row of rows) {
         const normalized = normalizeKalibrrJob(row, fallbackCompany);
         if (!normalized || seen.has(normalized.url)) continue;
         seen.add(normalized.url);
@@ -216,7 +274,15 @@ export default {
       // `count` is the total match count, so it is the honest stop condition.
       // A short page is the fallback when `count` is absent or moves mid-loop.
       if (total !== null && offset >= total) break;
-      if (json.jobs.length < pageSize) break;
+      if (rows.length < pageSize) break;
+      // Reached the last permitted page with matches still on the board.
+      if (page === maxPages - 1) truncated = true;
+    }
+
+    if (truncated && !probing) {
+      console.warn(
+        `kalibrr: stopped at max_pages=${entryMaxPages} with ${total === null ? 'more' : total} matches on the board — raise max_pages to walk further`,
+      );
     }
 
     return out;

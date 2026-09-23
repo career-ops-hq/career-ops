@@ -61,6 +61,8 @@
 // so the posting day does not shift with the scanning machine's timezone.
 
 import { htmlToText } from './_html-to-text.mjs';
+import { fetchJsonWithRetry, fetchTextWithRetry, sleep } from './_http.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 const SITE_ORIGIN = 'https://www.techinasia.com';
 const SEARCH_PAGE_URL = `${SITE_ORIGIN}/jobs/search`;
@@ -71,6 +73,10 @@ const INDEX = 'job_postings';
 const HITS_PER_PAGE = 1000;
 const DEFAULT_MAX_PAGES = 5;
 const MAX_PAGES_CAP = 50;
+// Applied to pages past the first only. Today the whole board fits in one
+// request, so this exists for the day it has grown past HITS_PER_PAGE rather
+// than for the 300 postings measured live.
+const INTER_PAGE_DELAY_MS = 200;
 
 // Opaque redirectors: a link through one of these cannot be verified to reach the
 // employer, so the source's own posting page is preferred over it.
@@ -199,9 +205,17 @@ function externalLinkOf(hit) {
  * @returns {string}
  */
 export function resolveTechInAsiaUrl(hit, sharedLinks) {
-  const id = typeof hit?.id === 'string' ? hit.id.trim() : typeof hit?.objectID === 'string' ? hit.objectID.trim() : '';
   const external = externalLinkOf(hit);
   if (external && !(sharedLinks && sharedLinks.has(external))) return external;
+
+  const rawId = typeof hit?.id === 'string' ? hit.id.trim() : typeof hit?.objectID === 'string' ? hit.objectID.trim() : '';
+  // The id is host-controlled and becomes a path segment, so it is
+  // percent-encoded: `x/../../about` would otherwise point at a different
+  // techinasia.com path, and the URL is also the scanner's dedup key. The helper
+  // returns null for a lone surrogate, which drops the posting instead of
+  // aborting the page. `externalLinkOf` needs no encoding — it returns an
+  // already-parsed, normalised URL.
+  const id = rawId ? safeEncodeURIComponent(rawId) : '';
   return id ? `${SITE_ORIGIN}/jobs/${id}` : '';
 }
 
@@ -277,6 +291,19 @@ function resolveCredentialOverride(entry, key) {
   return typeof v === 'string' && v.trim() ? v.trim() : '';
 }
 
+/**
+ * Resolve the page cap. `max_pages` is the canonical portals.yml key; `maxPages`
+ * is accepted so a camelCase entry is not silently ignored.
+ */
+function resolveMaxPages(entry) {
+  const raw = Number.isInteger(entry?.max_pages) && entry.max_pages > 0
+    ? entry.max_pages
+    : Number.isInteger(entry?.maxPages) && entry.maxPages > 0
+      ? entry.maxPages
+      : DEFAULT_MAX_PAGES;
+  return Math.min(raw, MAX_PAGES_CAP);
+}
+
 /** @type {Provider} */
 export default {
   id: 'techinasia',
@@ -295,11 +322,14 @@ export default {
     let appId = resolveCredentialOverride(entry, 'appId');
     let apiKey = resolveCredentialOverride(entry, 'apiKey');
     if (!appId || !apiKey) {
-      const html = await ctx.fetchText(assertHost(SEARCH_PAGE_URL, 'www.techinasia.com', 'search page'), {
+      // Both discovery requests are retried: they run before pagination starts,
+      // so a single blip on either would otherwise fail the whole board before a
+      // single page was fetched.
+      const html = await fetchTextWithRetry(ctx, assertHost(SEARCH_PAGE_URL, 'www.techinasia.com', 'search page'), {
         redirect: 'error',
       });
       const assetUrl = findAppAssetPath(html);
-      const js = await ctx.fetchText(assetUrl, { redirect: 'error' });
+      const js = await fetchTextWithRetry(ctx, assetUrl, { redirect: 'error' });
       const discovered = parseAlgoliaCredentials(js);
       appId = appId || discovered.appId;
       apiKey = apiKey || discovered.apiKey;
@@ -310,10 +340,13 @@ export default {
     }
     const endpoint = algoliaEndpoint(appId, apiKey);
 
-    const maxPages = Math.min(
-      Number.isInteger(entry?.maxPages) && entry.maxPages > 0 ? entry.maxPages : DEFAULT_MAX_PAGES,
-      MAX_PAGES_CAP,
-    );
+    // `max_pages` on the entry is the user's setting; `ctx.maxPages` is a
+    // caller-side bound (verify-portals' health probe passes 1). Reading only the
+    // latter would ignore the configuration entirely; reading only the former
+    // would walk a liveness probe across the whole board.
+    const entryMaxPages = resolveMaxPages(entry);
+    const probing = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0;
+    const maxPages = Math.min(entryMaxPages, probing ? ctx.maxPages : Infinity);
     const fallbackCompany = typeof entry?.name === 'string' ? entry.name : '';
 
     const out = [];
@@ -321,30 +354,61 @@ export default {
     // Every hit is collected before any is normalized: deciding whether a link
     // belongs to one posting or to a batch of them needs the whole board in hand.
     const hits = [];
+    // Set only when the entry/DEFAULT cap stopped the walk while Algolia still
+    // reported more pages. Never set by a ctx.maxPages cap nor by a fetch error,
+    // so the advice to raise `max_pages` cannot misfire.
+    let truncated = false;
 
     for (let page = 0; page < maxPages; page++) {
+      if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
+
       const body = JSON.stringify({
         requests: [{ indexName: INDEX, params: `query=&hitsPerPage=${HITS_PER_PAGE}&page=${page}` }],
       });
-      const json = /** @type {any} */ (
-        await ctx.fetchJson(endpoint, {
-          method: 'POST',
-          // The site sends this content-type with a JSON body; matching it keeps
-          // the request byte-equivalent to the one the board's own UI makes.
-          headers: {
-            'content-type': 'application/x-www-form-urlencoded',
-            accept: 'application/json',
-            referer: `${SITE_ORIGIN}/`,
-          },
-          body,
-          redirect: 'error',
-        })
-      );
+      let json;
+      try {
+        json = /** @type {any} */ (
+          await fetchJsonWithRetry(ctx, endpoint, {
+            method: 'POST',
+            // The site sends this content-type with a JSON body; matching it keeps
+            // the request byte-equivalent to the one the board's own UI makes.
+            headers: {
+              'content-type': 'application/x-www-form-urlencoded',
+              accept: 'application/json',
+              referer: `${SITE_ORIGIN}/`,
+            },
+            body,
+            redirect: 'error',
+          })
+        );
+      } catch (err) {
+        // A probe must see a ctx.fetch* rejection unwrapped, or verify-portals
+        // reads its own request-budget cut-off as a broken board. In a real scan
+        // the recall-first call is to keep the pages already collected.
+        if (probing) throw err;
+        // A first-page failure means the board itself is unreachable or has
+        // changed shape: fail loud rather than report a quiet empty board, which
+        // is indistinguishable from a healthy quiet one. A later page keeps what
+        // was already collected.
+        if (page === 0) throw err;
+        console.warn(`techinasia: page ${page} failed after retries — ${err.message}`);
+        break;
+      }
 
-      const result = json?.results?.[0];
-      if (!result || !Array.isArray(result.hits)) {
+      // The guide's empty-body branch: a contentless answer is an empty board,
+      // while an envelope carrying unexpected keys is a shape change.
+      if (json == null) break;
+      if (Object.keys(json).length === 0) break;
+      if (!Object.hasOwn(json, 'results')) {
         throw new Error(
-          `techinasia: unexpected Algolia response on page ${page} — expected results[0].hits, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
+          `techinasia: unexpected Algolia response on page ${page} — got keys: [${Object.keys(json).join(', ')}]`,
+        );
+      }
+      const result = Array.isArray(json.results) ? json.results[0] : null;
+      if (!result) break; // `results: []` means the index answered with nothing
+      if (!Array.isArray(result.hits)) {
+        throw new Error(
+          `techinasia: unexpected Algolia response on page ${page} — expected results[0].hits, got keys: [${Object.keys(result).join(', ')}]`,
         );
       }
 
@@ -352,7 +416,14 @@ export default {
 
       const nbPages = Number.isFinite(result.nbPages) ? result.nbPages : 1;
       if (result.hits.length === 0 || page + 1 >= nbPages) break;
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      // Reached the last permitted page with more pages still reported.
+      if (page === maxPages - 1) truncated = true;
+    }
+
+    if (truncated && !probing) {
+      console.warn(
+        `techinasia: stopped at max_pages=${entryMaxPages} with more pages on the board — raise max_pages to walk further`,
+      );
     }
 
     // Links appearing on more than one posting are not a single posting's path.
