@@ -70,6 +70,20 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 - Distributed JD keywords: Summary (top 5), first bullet of each role, Skills section
 - No hidden text, keyword stuffing, or white-font tricks. Optimize for parseability plus human review.
 
+**The contract behind these rules lives in `templates/ats-rules.yml`.** The list above is the
+briefing; the YAML is the contract — it carries each rule's id, severity, what it must *not*
+flag, and whether it is meaningful before render. Check a template against it with
+`atsLint(path, kind)` from `cv-templates.mjs`.
+
+**What a template check cannot catch.** `atsLint` reads HTML, so every text-layer failure is
+out of its reach. Three are measured and recorded in the YAML with `detect: null` rather than
+left unsaid: tracking wide enough to fragment words in extraction (four of the shipped
+templates do this at .11em-.16em), synthesized `font-variant: small-caps` (a distinct
+mechanism — the lowest tracking value measured still corrupted), and a `::before` list marker
+under `position:absolute` on an unpositioned `<li>`, which emits zero glyphs. All measured
+through `generate-pdf.mjs` and read back with `pdftotext -layout`, which is what this repo
+uses; `pypdf` disagrees on most of them, so any figure here names its extractor.
+
 **Optional parseability check:** after generating the HTML you can score it for ATS-friendliness with `node verify-ats.mjs output/cv-{candidate}-{company}.html` (see `modes/ats.md`). This is deterministic, read-only, and advisory — it reports a 0-100 score plus concrete issues but never blocks generation (unlike the `verify-cv-facts.mjs` fact gate in Step 18).
 
 ## Recruiter Review Gates

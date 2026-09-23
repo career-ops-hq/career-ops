@@ -9,6 +9,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { auditAts } from './verify-ats.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TEMPLATES_DIR = resolve(__dirname, 'templates');
@@ -278,6 +279,104 @@ export function resolveTemplate(kind, name, opts = {}) {
 }
 
 // ---- CLI ----
+const DEFAULT_ATS_RULES_PATH = resolve(__dirname, 'templates', 'ats-rules.yml');
+
+let _atsRules = null;
+
+/**
+ * The ATS rule contract, from templates/ats-rules.yml.
+ *
+ * Cached: the file is read once per process. Tests that point at a different
+ * rules file pass `rulesPath`, which bypasses the cache.
+ *
+ * @param {string} [rulesPath]
+ * @returns {{id:string, rule:string, applies_to:string[], severity:string,
+ *            detect:string|null, must_not_flag?:string,
+ *            not_template_reason?:string, open?:string}[]}
+ */
+export function loadAtsRules(rulesPath = DEFAULT_ATS_RULES_PATH) {
+  if (rulesPath === DEFAULT_ATS_RULES_PATH && _atsRules) return _atsRules;
+  const doc = yaml.load(readFileSync(rulesPath, 'utf-8')) || {};
+  const rules = Array.isArray(doc.rules) ? doc.rules : [];
+  if (rulesPath === DEFAULT_ATS_RULES_PATH) _atsRules = rules;
+  return rules;
+}
+
+/**
+ * Check a TEMPLATE against the ATS rules the project already states.
+ *
+ * This is deliberately not a second ATS implementation. Detection is
+ * `auditAts` (verify-ats.mjs); what this adds is the part `auditAts` cannot
+ * know — that its input is a template rather than a CV.
+ *
+ * A template carries {{PLACEHOLDERS}} where content will be, so every
+ * content-dependent check has no answer yet. Run unfiltered against the eight
+ * shipped templates, `auditAts` reports a critical "No email address found" on
+ * all eight, because `{{EMAIL}}` is not an email address. A lint that fires on
+ * the project's own templates is worse than no lint: it teaches people to
+ * ignore it. So rules marked `applies_to: [rendered]` are SKIPPED and reported
+ * as skipped — never silently dropped, and never counted as passes.
+ *
+ * Never throws for a lint result: a finding is data, and the caller chooses
+ * severity. It does throw for an unusable input (unknown kind, unreadable
+ * file), which is a programming error rather than a lint verdict.
+ *
+ * @param {string} path Template file to check.
+ * @param {string} kind 'cv' or 'cover'.
+ * @param {{rulesPath?: string}} [opts]
+ * @returns {{findings: {id:string, severity:string, message:string, rule:string, mustNotFlag:string|null}[],
+ *            skipped: {id:string, reason:string}[],
+ *            gaps: {id:string, rule:string, note:string}[]}}
+ */
+export function atsLint(path, kind, { rulesPath } = {}) {
+  if (!KINDS[kind]) throw new Error(`Unknown template kind: ${kind}`);
+  const html = readFileSync(path, 'utf-8');
+  const rules = loadAtsRules(rulesPath);
+  const byId = new Map(rules.map((r) => [r.id, r]));
+
+  const findings = [];
+  const skipped = [];
+  for (const issue of auditAts(html).issues) {
+    const rule = byId.get(issue.id);
+    // An issue with no rule entry is a rule that exists in code and not in the
+    // contract. Surfacing it is the point — silently passing it through would
+    // let the two drift, which is the failure this file was written to prevent.
+    if (!rule) {
+      findings.push({
+        id: issue.id,
+        severity: issue.severity,
+        message: issue.message,
+        rule: `(not in ${rulesPath || 'templates/ats-rules.yml'})`,
+        mustNotFlag: null,
+      });
+      continue;
+    }
+    // A rule scoped to other kinds is not about this template at all. Unlike a
+    // rendered-only skip, there is nothing deferred here, so it is not reported
+    // as skipped either — it simply does not apply.
+    if (Array.isArray(rule.kinds) && !rule.kinds.includes(kind)) continue;
+    if (!rule.applies_to.includes('template')) {
+      skipped.push({ id: issue.id, reason: rule.not_template_reason || 'Not meaningful on an unrendered template.' });
+      continue;
+    }
+    findings.push({
+      id: issue.id,
+      severity: rule.severity || issue.severity,
+      message: issue.message,
+      rule: rule.rule,
+      mustNotFlag: rule.must_not_flag || null,
+    });
+  }
+
+  // Rules the project holds and does not yet check. Reported on every run so a
+  // clean result cannot be mistaken for a complete one.
+  const gaps = rules
+    .filter((r) => !r.detect)
+    .map((r) => ({ id: r.id, rule: r.rule, note: r.open || '' }));
+
+  return { findings, skipped, gaps };
+}
+
 const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const argv = process.argv.slice(2);

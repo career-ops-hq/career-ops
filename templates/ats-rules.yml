@@ -1,0 +1,214 @@
+# Career-Ops — ATS rule contract
+#
+# Source of truth for WHICH ATS rules exist, what each one must not flag, and
+# where each one is meaningful. `modes/pdf.md` keeps the short human summary and
+# points here for the contract; this file never restates the prose, and the
+# prose never restates the contract.
+#
+# Rules are keyed on `id`, which is the same id `auditAts` (verify-ats.mjs)
+# stamps on every issue it raises. Detection stays in code — a rule cannot be
+# added, removed or resilenced without this file changing, but how it is
+# detected is not expressed as data. `detect: null` marks a rule the project
+# holds and does not yet check; it is a documented gap, not an oversight.
+#
+# `kinds` narrows a rule to the template kinds it is about, defaulting to all of
+# them. Measured 2026-09-23: without it, `section-headings` raises a CRITICAL on
+# templates/cover-letter-template.html, because the enumeration it checks is
+# Experience / Education / Skills and a cover letter correctly has none of them.
+# That is the lint firing on the project's own template, which is the outcome
+# this file exists to prevent.
+#
+# `applies_to` is the half that earns this file. A template is not a CV: it
+# carries {{PLACEHOLDERS}} where content will be. Running a content-dependent
+# check against an unrendered template produces a confident wrong answer — see
+# `contact-email-missing`, which reports a critical failure on all eight shipped
+# templates because `{{EMAIL}}` is not an email address. Rules marked
+# `rendered` are skipped by `atsLint()` and reported as skipped, never as passes.
+#
+# Consumed by cv-templates.mjs `atsLint()` and tests/ats-lint.test.mjs, which
+# fails if an id here has no counterpart in verify-ats.mjs, or vice versa.
+
+rules:
+  - id: selectable-text
+    rule: UTF-8, selectable text (not rasterized)
+    applies_to: [rendered]
+    severity: critical
+    detect: text-length
+    not_template_reason: >-
+      Measures extracted body text against a minimum length. A template's body
+      is placeholders, so the measurement describes the template's boilerplate
+      rather than the CV that will be rendered from it.
+    must_not_flag: A CV that is genuinely short but fully textual.
+
+  - id: section-headings
+    rule: >-
+      Standard headers: "Professional Summary", "Work Experience", "Education",
+      "Skills", "Certifications", "Projects"
+    applies_to: [template, rendered]
+    kinds: [cv]
+    severity: critical
+    detect: heading-enumeration
+    must_not_flag: >-
+      A cover letter, which has no Experience/Education/Skills headings by
+      design — hence `kinds: [cv]`. Extra sections that are additive rather
+      than renames. Localised headers when the document language is not
+      English — the enumeration is English-only today, which is why zh-minimal
+      is exercised explicitly in the tests.
+
+  - id: contact-email-unreachable
+    rule: No critical info in PDF headers/footers (ATS ignores them)
+    applies_to: [rendered]
+    severity: critical
+    detect: semantic-header-footer
+    not_template_reason: >-
+      Asks whether the email is reachable outside a semantic <header>/<footer>.
+      A template has no email to place, so the question has no answer until
+      render.
+    must_not_flag: A page number, or a footer carrying nothing load-bearing.
+
+  - id: contact-email-missing
+    rule: A parseable contact email in the body of the CV
+    applies_to: [rendered]
+    severity: critical
+    detect: email-present
+    not_template_reason: >-
+      A template carries {{EMAIL}}. Measured 2026-09-23: this rule reports a
+      critical failure on all eight shipped templates when run against the
+      unrendered file. It is the reason `applies_to` exists.
+    must_not_flag: A CV whose email is present but formatted unusually.
+
+  - id: contact-phone-missing
+    rule: A phone number, where the market expects one
+    applies_to: [rendered]
+    severity: info
+    detect: phone-present
+    not_template_reason: Same as contact-email-missing — {{PHONE}} is not a phone number.
+    must_not_flag: A market or profile where a phone number is deliberately omitted.
+
+  - id: layout-tables
+    rule: Single-column layout (no sidebars, no parallel columns) / No nested tables
+    applies_to: [template, rendered]
+    severity: critical
+    detect: table-count
+    must_not_flag: >-
+      Nothing today: the detector flags any <table>, which is stricter than the
+      prose rule, which only forbids tables used for page structure and nested
+      tables. A template using a table for genuine tabular data would be flagged.
+      No shipped template does, so the stricter reading is untested against a
+      real counter-example and is recorded here rather than loosened on a guess.
+
+  - id: multi-column
+    rule: Single-column layout (no sidebars, no parallel columns)
+    applies_to: [template, rendered]
+    severity: warning
+    detect: css-columns
+    must_not_flag: Multi-column inside a single logical section, where reading order is preserved.
+
+  - id: absolute-positioning
+    rule: Absolute positioning can break ATS reading order
+    applies_to: [template, rendered]
+    severity: warning
+    detect: absolute-count
+    must_not_flag: >-
+      A decorative element carrying no text. Note this rule does NOT reach the
+      measured `::before` + position:absolute marker loss — see "What this
+      cannot catch" in modes/pdf.md.
+
+  - id: image-text-baked
+    rule: No text in images/SVGs
+    applies_to: [rendered]
+    severity: critical
+    detect: content-image-low-text
+    not_template_reason: >-
+      Fires on a content image only when surrounding text is short, so it is
+      coupled to the rendered payload. On a template the text is always short
+      and the verdict would be an artefact of that, not of the image.
+    must_not_flag: A raster used for a photo or a logo.
+
+  - id: image-non-photo
+    rule: No text in images/SVGs
+    applies_to: [rendered]
+    severity: warning
+    detect: content-image-present
+    not_template_reason: >-
+      Both image rules branch on the same body-text length: below 800 chars an
+      image raises the critical `image-text-baked` instead, and a template's
+      body is placeholders, so it is always below. Measured 2026-09-23 — a
+      template carrying an <img> routes to the critical every time, which means
+      this warning is unreachable on an unrendered template. Marked rendered-only
+      rather than left declared-but-unreachable: a rule that can never fire is
+      indistinguishable from one that works.
+    must_not_flag: A documented <img> inside an HTML comment or a <style> block, which renders nothing.
+
+  - id: fonts-nonstandard
+    rule: Standard, embeddable fonts, for reliable ATS text extraction
+    applies_to: [template, rendered]
+    severity: warning
+    detect: font-allowlist
+    must_not_flag: >-
+      CJK and Arabic fallbacks a truthful multilingual CV needs. Four shipped
+      templates carry these and are warned, not failed — which is the correct
+      outcome and the reason this rule is a warning.
+
+  - id: charset-missing
+    rule: UTF-8 declared
+    applies_to: [template, rendered]
+    severity: warning
+    detect: meta-charset
+    must_not_flag: A charset declared via HTTP header rather than a meta tag.
+
+  - id: hidden-text
+    rule: No hidden text, keyword stuffing, or white-font tricks
+    applies_to: [template, rendered]
+    severity: warning
+    detect: hidden-css
+    must_not_flag: >-
+      `@media print` hiding a screen-only control, and aria-hidden on
+      decoration. Neither is currently distinguished from a real evasion, so a
+      template doing either is warned; recorded as a known false-positive class
+      rather than silently accepted.
+
+  # ── Rules the project holds and does not yet check ────────────────────
+  # Each was measured on this repo's own render path, not reasoned about. All
+  # three are text-layer failures: the HTML is clean and the extracted text is
+  # not, so no HTML-side detector can reach them. They are listed so the gap is
+  # visible in the contract rather than absent from it.
+
+  - id: letter-spacing-fragmentation
+    rule: Tracking wide enough to fragment words in text extraction
+    applies_to: [template, rendered]
+    severity: warning
+    detect: null
+    open: >-
+      Measured (#3109): four of eight shipped templates split their section
+      headings, at .11em-.16em tracking, under both `pdftotext -layout` and
+      `pdfjs-dist`. A threshold is a judgment call and no value is proposed here
+      without more artifacts behind it.
+    must_not_flag: Tracking used for visual refinement that survives extraction — .06em and .09em did.
+
+  - id: small-caps-synthesis
+    rule: Synthesized small-caps splits a heading into separate font runs
+    applies_to: [template, rendered]
+    severity: warning
+    detect: null
+    open: >-
+      Measured (#3109): a distinct mechanism from tracking, and the lowest
+      tracking value in that survey still corrupted because small-caps renders
+      as separate runs at different sizes. A fix aimed at tracking leaves this
+      standing. One shipped template uses it.
+    must_not_flag: text-transform:uppercase, which is visually similar and extracts intact.
+
+  - id: generated-marker-lost
+    rule: A list marker in generated content can vanish from the text layer
+    applies_to: [template, rendered]
+    severity: info
+    detect: null
+    open: >-
+      Measured (#3109): `content:"•"` survives extraction; the same declaration
+      under `position:absolute` on an unpositioned <li> emits zero glyphs, in
+      both `pypdf` and `pdftotext -layout`. Narrow and specific.
+    must_not_flag: >-
+      Plain <ul><li> with the browser's default ::marker, which emits nothing
+      into the text layer either. The shipped templates/cv-template.html
+      produces zero U+2022 and is correct — so any rule shaped "list items carry
+      their marker into the text" would fire on our own default template.
