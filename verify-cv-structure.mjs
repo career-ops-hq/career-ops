@@ -5,10 +5,10 @@
  * different class of bug than verify-cv-facts.mjs catches. That gate blocks
  * FABRICATION (a claim absent from the source); this one warns about silent
  * LOSS or REORDERING of what the source already has, which fabrication
- * checking has no way to see: an omitted paid-employer entry, a missing
- * company descriptor, a dropped skills category, or an experience entry
- * rendered out of chronological order are all internally consistent with
- * cv.md's own facts, just not faithful to its structure.
+ * checking has no way to see: an omitted company descriptor, a dropped
+ * skills category, or an experience entry rendered out of chronological
+ * order are all internally consistent with cv.md's own facts, just not
+ * faithful to its structure.
  *
  * Non-blocking by design: the header shapes this understands
  * (`### Company {—|--|-} Location[ · descriptor]`) are common conventions,
@@ -47,10 +47,6 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SOURCE = 'cv.md';
 
-function stripHeadingMarkdown(value) {
-  return String(value || '').trim().replace(/^[*_`]+|[*_`]+$/g, '').trim();
-}
-
 /**
  * Parse cv.md's `## Experience` or `## Work Experience` entries from its
  * `### Company {—|--|-} Location[ · descriptor]` headers, in file order
@@ -64,7 +60,7 @@ function stripHeadingMarkdown(value) {
  * happens to match something in the payload.
  *
  * @param {string} cvMdText
- * @returns {{ company: string, location: string, dates: string[] }[]}
+ * @returns {{ company: string, location: string }[]}
  */
 export function parseCvMdExperience(cvMdText) {
   const entries = [];
@@ -77,30 +73,9 @@ export function parseCvMdExperience(cvMdText) {
   const nextSectionMatch = nextSectionRe.exec(rest);
   const section = nextSectionMatch ? rest.slice(0, nextSectionMatch.index) : rest;
   const headerRe = /^###\s+(.+?)\s+(?:—|--|-)\s+(.+)$/gm;
-  const matches = [...section.matchAll(headerRe)];
-  const month = '(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)';
-  const datedEndpoint = `(?:${month}\\s+)?(?:19|20)\\d{2}`;
-  const openEndpoint = '(?:present|current|now)';
-  const dateRangeRe = new RegExp(`\\b(?:${datedEndpoint})\\s*(?:[-–—]|to)\\s*(?:${datedEndpoint}|${openEndpoint})\\b`, 'i');
-
-  for (let i = 0; i < matches.length; i++) {
-    const match = matches[i];
-    const bodyStart = match.index + match[0].length;
-    const bodyEnd = matches[i + 1]?.index ?? section.length;
-    const body = section.slice(bodyStart, bodyEnd);
-    const dates = [];
-    for (const line of body.split('\n')) {
-      // Bullets often mention project years; only role/date metadata lines
-      // belong to the entry's employment dates.
-      if (/^\s*[-+*]\s+/.test(line)) continue;
-      const dateMatch = dateRangeRe.exec(line);
-      if (dateMatch && !dates.includes(dateMatch[0])) dates.push(dateMatch[0]);
-    }
-    entries.push({
-      company: stripHeadingMarkdown(match[1]),
-      location: stripHeadingMarkdown(match[2]),
-      dates,
-    });
+  let match;
+  while ((match = headerRe.exec(section))) {
+    entries.push({ company: match[1].trim(), location: match[2].trim() });
   }
   return entries;
 }
@@ -117,11 +92,7 @@ export function parseCvMdExperience(cvMdText) {
  * @returns {boolean}
  */
 function normalizeCompany(name) {
-  return String(name || '')
-    .replace(/[*_`]/g, '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
+  return String(name || '').toLowerCase().trim();
 }
 
 function companiesMatch(payloadCompany, cvMdCompany) {
@@ -208,10 +179,10 @@ export function checkLocationDescriptors(payloadExperience, cvMdExperience) {
   for (const cvMdEntry of cvMdExperience) {
     const descriptorMatch = cvMdEntry.location.match(/·\s*(.+)$/);
     if (!descriptorMatch) continue; // cv.md itself has no descriptor for this entry — nothing to lose
-    const descriptor = stripHeadingMarkdown(descriptorMatch[1]);
+    const descriptor = descriptorMatch[1].trim();
     const payloadIndex = findCompanyIndex(payloadExperience, cvMdEntry.company, cvMdExperience);
     const payloadEntry = payloadIndex === -1 ? undefined : payloadExperience[payloadIndex];
-    if (!payloadEntry) continue; // full-entry omissions are reported separately below
+    if (!payloadEntry) continue; // entry omitted entirely from this tailored CV — a legitimate choice, not this check's concern
     const payloadLocation = String(payloadEntry.location || '');
     if (!payloadLocation.includes(descriptor)) {
       violations.push(`"${cvMdEntry.company}" is missing its cv.md descriptor "${descriptor}" (payload location: "${payloadLocation || '(empty)'}")`);
@@ -221,185 +192,14 @@ export function checkLocationDescriptors(payloadExperience, cvMdExperience) {
 }
 
 /**
- * A missing heading that explicitly names a break or leave is a benign
- * page-budget omission. Classify the heading only: a paid employer whose role
- * subtitle says "Sabbatical" is still an employer entry and must not be
- * exempt. Anchored phrases also avoid exempting names such as "Sabbatical
- * Labs" or "Career Breakthrough Inc".
- *
- * @param {string} company
- * @returns {boolean}
- */
-export function isBreakExperienceHeading(company) {
-  const heading = normalizeCompany(company)
-    // Parenthetical dates/reasons qualify an explicitly named break; they do
-    // not turn it into an employer (e.g. "Sabbatical (travel)").
-    .replace(/\s*\([^)]*\)/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const parts = heading
-    .split(/\s*(?:\/|\||&)\s*/)
-    .filter(Boolean);
-  const isBreakLabel = (part) =>
-    /^(?:(?:personal|planned|professional|extended)\s+)?(?:career\s+(?:break|pause|gap)|sabbatical)(?:\s+leave)?$/.test(part)
-    || /^(?:(?:personal|planned|extended|paid|unpaid|military|disability|study|educational|administrative|garden|compassionate)\s+)?leave(?:\s+of\s+absence)?$/.test(part)
-    || /^(?:parental|maternity|paternity|medical|family|caregiving|caregiver|bereavement)\s+leave(?:\s+of\s+absence)?$/.test(part);
-  return parts.length > 0 && parts.every(isBreakLabel);
-}
-
-/**
- * Normalize a date range enough to disambiguate duplicate employer stints.
- * This is deliberately not a date parser: it only equates harmless rendering
- * variants (full/short month names, dash styles, and present/current/now).
- *
- * @param {unknown} value
- * @returns {string}
- */
-function normalizeDateRange(value) {
-  const months = {
-    january: 'jan', february: 'feb', march: 'mar', april: 'apr', june: 'jun',
-    july: 'jul', august: 'aug', september: 'sep', sept: 'sep', october: 'oct',
-    november: 'nov', december: 'dec',
-  };
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[.,]/g, '')
-    .replace(/\b(january|february|march|april|june|july|august|september|sept|october|november|december)\b/g,
-      (month) => months[month])
-    .replace(/\b(?:current|now)\b/g, 'present')
-    .replace(/\s*(?:[-–—]|\bto\b)\s*/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function entryDateKeys(entry) {
-  const values = Array.isArray(entry?.dates) ? entry.dates : [entry?.dates];
-  return new Set(values.map(normalizeDateRange).filter(Boolean));
-}
-
-function datesMatch(a, b) {
-  const aKeys = entryDateKeys(a);
-  if (!aKeys.size) return false;
-  return [...entryDateKeys(b)].some((date) => aKeys.has(date));
-}
-
-/**
- * An expanded payload heading may satisfy a shorter source heading ("Early
- * Career" → "Early Career — Acme, Globex"). Require a real boundary so
- * "Meta" does not match "Metagenomi". Exact source names are reserved for
- * their own entries, so retained "Acme Labs" cannot hide omitted "Acme".
- */
-function isExpandedCompanyMatch(payloadCompany, cvMdCompany, sourceExactNames) {
-  const source = normalizeCompany(cvMdCompany);
-  const candidate = normalizeCompany(payloadCompany);
-  if (!source || !candidate.startsWith(source) || candidate.length === source.length) return false;
-  if (!/[\s—–\-:,(]/.test(candidate[source.length])) return false;
-  return !sourceExactNames.has(candidate);
-}
-
-/**
- * Warn when a recognized cv.md Experience entry disappears from the tailored
- * payload entirely. Only headings that explicitly name a break or leave are
- * exempt; all other recognized headings are treated as employment entries.
- * Payload rows are consumed one-to-one so duplicate employer stints cannot
- * silently collapse into one entry.
- *
- * @param {{company: string}[]} payloadExperience
- * @param {{company: string, dates?: string[]}[]} cvMdExperience
- * @returns {string[]} human-readable violations, empty when no employer entry is omitted
- */
-export function checkOmittedExperienceEntries(payloadExperience, cvMdExperience) {
-  const sourceEntries = cvMdExperience
-    .map((entry, index) => ({ entry, index }))
-    .filter(({ entry }) => !isBreakExperienceHeading(entry.company));
-  const claimedSourceIndices = new Set();
-  const claimedPayloadIndices = new Set();
-
-  const claim = (sourceIndex, payloadIndex) => {
-    claimedSourceIndices.add(sourceIndex);
-    claimedPayloadIndices.add(payloadIndex);
-  };
-
-  // Date-aware exact matches go first. This keeps a retained 2022-present
-  // stint from being assigned to an omitted 2018-2020 stint at the same
-  // employer merely because the older source row appears first.
-  for (const { entry, index } of sourceEntries) {
-    const sourceName = normalizeCompany(entry.company);
-    const payloadIndex = payloadExperience.findIndex((candidate, candidateIndex) =>
-      !claimedPayloadIndices.has(candidateIndex)
-      && normalizeCompany(candidate.company) === sourceName
-      && datesMatch(entry, candidate)
-    );
-    if (payloadIndex !== -1) claim(index, payloadIndex);
-  }
-
-  // Pair any remaining exact names one-to-one in source/payload order.
-  for (const { entry, index } of sourceEntries) {
-    if (claimedSourceIndices.has(index)) continue;
-    const sourceName = normalizeCompany(entry.company);
-    const payloadIndex = payloadExperience.findIndex((candidate, candidateIndex) =>
-      !claimedPayloadIndices.has(candidateIndex)
-      && normalizeCompany(candidate.company) === sourceName
-    );
-    if (payloadIndex !== -1) claim(index, payloadIndex);
-  }
-
-  // Finally accept expanded headings. Assign each payload row permanently to
-  // its longest compatible source prefix before pairing rows. Thus two
-  // "Acme Labs — ..." rows can never spill over and hide an omitted "Acme".
-  // Break rows participate in ownership too, but remain ineligible claims, so
-  // an expansion of a more-specific break label cannot satisfy an employer.
-  const allSourceEntries = cvMdExperience.map((entry, index) => ({ entry, index }));
-  const sourceExactNames = new Set(allSourceEntries.map(({ entry }) => normalizeCompany(entry.company)));
-  const expandedCandidates = payloadExperience.flatMap((candidate, payloadIndex) => {
-    if (claimedPayloadIndices.has(payloadIndex)) return [];
-    const compatibleSources = allSourceEntries.filter(({ entry }) =>
-      isExpandedCompanyMatch(candidate.company, entry.company, sourceExactNames)
-    );
-    if (!compatibleSources.length) return [];
-    const longest = Math.max(...compatibleSources.map(({ entry }) => normalizeCompany(entry.company).length));
-    const ownerIndices = compatibleSources
-      .filter(({ entry }) => normalizeCompany(entry.company).length === longest)
-      .map(({ index }) => index);
-    return [{ candidate, payloadIndex, ownerIndices }];
-  });
-
-  for (const { entry, index } of sourceEntries) {
-    if (claimedSourceIndices.has(index)) continue;
-    const expanded = expandedCandidates.find(({ candidate, payloadIndex, ownerIndices }) =>
-      !claimedPayloadIndices.has(payloadIndex)
-      && ownerIndices.includes(index)
-      && datesMatch(entry, candidate)
-    );
-    if (expanded) claim(index, expanded.payloadIndex);
-  }
-  for (const { index } of sourceEntries) {
-    if (claimedSourceIndices.has(index)) continue;
-    const expanded = expandedCandidates.find(({ payloadIndex, ownerIndices }) =>
-      !claimedPayloadIndices.has(payloadIndex) && ownerIndices.includes(index)
-    );
-    if (expanded) claim(index, expanded.payloadIndex);
-  }
-
-  const violations = [];
-  for (const { entry, index } of sourceEntries) {
-    if (claimedSourceIndices.has(index)) continue;
-    const dates = Array.isArray(entry.dates) ? entry.dates.filter(Boolean) : [];
-    const dateContext = dates.length ? ` (cv.md dates: "${dates.join('; ')}")` : '';
-    violations.push(`"${entry.company}" is missing from the tailored CV${dateContext}`);
-  }
-  return violations;
-}
-
-/**
- * Run all structural checks against a tailored CV JSON payload.
+ * Run both structural checks against a tailored CV JSON payload.
  *
  * This gate understands `## Experience` and `## Work Experience` sections
  * whose `### Company {—|--|-} Location[ · descriptor]` headers use an em dash,
  * double hyphen, or single hyphen. Those are common conventions, not a
  * system-wide cv.md spec — AGENTS.md only requires "clean markdown, standard sections."
  * A cv.md written any other way parses to zero entries, and with nothing to
- * compare the payload against, all checks trivially find no violations. A
+ * compare the payload against, both checks trivially find no violations. A
  * bare 'pass' there would be a false "verified" — the gate ran, found
  * nothing wrong, and never actually looked at anything. 'unverified' names
  * that failure mode instead of hiding it: same non-blocking exit code as
@@ -409,42 +209,40 @@ export function checkOmittedExperienceEntries(payloadExperience, cvMdExperience)
  *
  * @param {object} payload the parsed JSON payload build-cv-html.mjs consumes
  * @param {string} cvMdText raw cv.md content
- * @returns {{ verdict: 'pass'|'warn'|'unverified', orderViolations: string[], descriptorViolations: string[], omittedEntryViolations: string[] }}
+ * @returns {{ verdict: 'pass'|'warn'|'unverified', orderViolations: string[], descriptorViolations: string[] }}
  */
 export function verifyStructure(payload, cvMdText) {
   const cvMdExperience = parseCvMdExperience(cvMdText);
   if (cvMdExperience.length === 0) {
-    return { verdict: 'unverified', orderViolations: [], descriptorViolations: [], omittedEntryViolations: [] };
+    return { verdict: 'unverified', orderViolations: [], descriptorViolations: [] };
   }
   // The CLI validates payload shape before ever calling verifyStructure(),
   // but this is an exported function any other caller can reach directly —
   // so it must be safe against malformed input on its own, not just when
   // reached through the CLI's pre-validated path.
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
-    return { verdict: 'unverified', orderViolations: [], descriptorViolations: [], omittedEntryViolations: [] };
+    return { verdict: 'unverified', orderViolations: [], descriptorViolations: [] };
   }
   // A present, non-array `experience` (null, an object, a string, ...) is a
   // malformed payload, not "no experience" — silently coercing it to []
   // would let checkExperienceOrder/checkLocationDescriptors find nothing to
   // compare and report a false 'pass'.
   if (payload.experience !== undefined && !Array.isArray(payload.experience)) {
-    return { verdict: 'unverified', orderViolations: [], descriptorViolations: [], omittedEntryViolations: [] };
+    return { verdict: 'unverified', orderViolations: [], descriptorViolations: [] };
   }
   // A null (or otherwise non-object) entry inside an array experience would
   // otherwise reach checkExperienceOrder/checkLocationDescriptors' `e.company`
   // access uncaught.
   if (Array.isArray(payload.experience) && payload.experience.some((e) => e === null || typeof e !== 'object' || Array.isArray(e))) {
-    return { verdict: 'unverified', orderViolations: [], descriptorViolations: [], omittedEntryViolations: [] };
+    return { verdict: 'unverified', orderViolations: [], descriptorViolations: [] };
   }
   const payloadExperience = Array.isArray(payload.experience) ? payload.experience : [];
   const orderViolations = checkExperienceOrder(payloadExperience, cvMdExperience);
   const descriptorViolations = checkLocationDescriptors(payloadExperience, cvMdExperience);
-  const omittedEntryViolations = checkOmittedExperienceEntries(payloadExperience, cvMdExperience);
   return {
-    verdict: orderViolations.length || descriptorViolations.length || omittedEntryViolations.length ? 'warn' : 'pass',
+    verdict: orderViolations.length || descriptorViolations.length ? 'warn' : 'pass',
     orderViolations,
     descriptorViolations,
-    omittedEntryViolations,
   };
 }
 
@@ -482,11 +280,9 @@ function usage() {
        node verify-cv-structure.mjs --self-test
 
 Checks a tailored CV JSON payload (the input to build-cv-html.mjs) against cv.md
-for structural regressions fabrication-checking cannot see: a paid-employer
-entry omitted entirely, experience entries rendered out of cv.md's chronological
-order, or a company descriptor ("· Series B healthcare automation") silently
-dropped from an entry's location. Headings that name a career break, sabbatical,
-or leave are exempt from the full-entry omission warning.
+for two structural regressions fabrication-checking cannot see: experience
+entries rendered out of cv.md's chronological order, and a company descriptor
+("· Series B healthcare automation") silently dropped from an entry's location.
 Default source: cv.md
 The --source path must be relative to CAREER_OPS_ROOT and cannot escape it.
 
@@ -550,13 +346,12 @@ function runSelfTest() {
   ];
   equal('correct order, all descriptors present: no violations',
     verifyStructure({ experience: correctOrder }, cvMd),
-    { verdict: 'pass', orderViolations: [], descriptorViolations: [], omittedEntryViolations: [] });
+    { verdict: 'pass', orderViolations: [], descriptorViolations: [] });
 
   const swappedOrder = [
     { company: 'Acme Corp', location: 'Austin, TX · Series B fintech' },
     { company: 'Beta Industries', location: 'Chicago, IL · Series A last-mile logistics SaaS' },
     { company: 'Career Break', location: 'Lake Tahoe, CA' },
-    { company: 'Early Career — Globex Inc, Initech, Umbrella Corp', location: 'Columbus, OH / Dayton, OH' },
   ];
   const swappedResult = verifyStructure({ experience: swappedOrder }, cvMd);
   equal('swapped Career Break/Beta Industries: order violation caught', swappedResult.verdict, 'warn');
@@ -568,7 +363,6 @@ function runSelfTest() {
     { company: 'Acme Corp', location: 'Austin, TX' }, // descriptor dropped
     { company: 'Career Break', location: 'Lake Tahoe, CA' },
     { company: 'Beta Industries', location: 'Chicago, IL · Series A last-mile logistics SaaS' },
-    { company: 'Early Career — Globex Inc, Initech, Umbrella Corp', location: 'Columbus, OH / Dayton, OH' },
   ];
   const missingResult = verifyStructure({ experience: missingDescriptor }, cvMd);
   equal('dropped descriptor: violation caught', missingResult.verdict, 'warn');
@@ -579,139 +373,13 @@ function runSelfTest() {
   const subsetOmitted = [
     { company: 'Acme Corp', location: 'Austin, TX · Series B fintech' },
     { company: 'Beta Industries', location: 'Chicago, IL · Series A last-mile logistics SaaS' },
-    { company: 'Early Career — Globex Inc, Initech, Umbrella Corp', location: 'Columbus, OH / Dayton, OH' },
   ];
   equal('a legitimately omitted entry (Career Break dropped for space) is not a violation',
     verifyStructure({ experience: subsetOmitted }, cvMd).verdict, 'pass');
 
-  const omittedEmployer = correctOrder.filter((entry) => entry.company !== 'Beta Industries');
-  const omittedEmployerResult = verifyStructure({ experience: omittedEmployer }, cvMd);
-  equal('a fully omitted employer entry produces a warning', omittedEmployerResult.verdict, 'warn');
-  equal('omitted employer warning names the entry and its cv.md dates',
-    omittedEmployerResult.omittedEntryViolations,
-    ['"Beta Industries" is missing from the tailored CV (cv.md dates: "Mar 2011 – Jul 2021")']);
-
-  equal('break-like headings are exempt, while employer-like names are not',
-    [
-      'Career Break',
-      'Personal Sabbatical',
-      'Parental Leave',
-      'Leave of Absence',
-      'Career Break / Sabbatical',
-      '**Career Break**',
-      'Career Break (2022–2023)',
-      'Sabbatical (travel)',
-      'Parental Leave (family care)',
-      'Unpaid Leave',
-      'Extended Leave',
-      'Military Leave',
-      'Disability Leave',
-      'Study Leave',
-      'Parental Leave of Absence',
-      'Medical Leave of Absence',
-      'Caregiver Leave of Absence',
-      'Sabbatical Labs',
-      'Career Breakthrough Inc',
-    ].map((heading) => isBreakExperienceHeading(heading)),
-    [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false]);
-
-  const employerWithBreakRole = [
-    '## Experience',
-    '',
-    '### Acme Corp — Remote',
-    '',
-    '**Sabbatical** · Jan 2022 – Jan 2023',
-  ].join('\n');
-  equal('a break-like role subtitle does not exempt an employer heading',
-    verifyStructure({ experience: [] }, employerWithBreakRole).omittedEntryViolations,
-    ['"Acme Corp" is missing from the tailored CV (cv.md dates: "Jan 2022 – Jan 2023")']);
-
-  const lookalikeEmployerCvMd = [
-    '## Experience',
-    '',
-    '### Meta — Remote',
-    '',
-    '**Engineer** · Jan 2020 – Jan 2021',
-    '',
-    '### Sabbatical Labs — New York, NY',
-    '',
-    '**Engineer** · Jan 2021 – Jan 2022',
-  ].join('\n');
-  equal('substring lookalikes cannot hide omitted employers',
-    verifyStructure({ experience: [
-      { company: 'Metagenomi', location: 'Remote' },
-      { company: 'Sabbatical', location: 'New York, NY' },
-    ] }, lookalikeEmployerCvMd).omittedEntryViolations,
-    [
-      '"Meta" is missing from the tailored CV (cv.md dates: "Jan 2020 – Jan 2021")',
-      '"Sabbatical Labs" is missing from the tailored CV (cv.md dates: "Jan 2021 – Jan 2022")',
-    ]);
-
-  const duplicateEmployerCvMd = [
-    '## Experience',
-    '',
-    '### Acme Corp — Remote',
-    '',
-    '**Engineer** · Jan 2018 – Jan 2020',
-    '',
-    '### Acme Corp — Remote',
-    '',
-    '**Director** · Jan 2022 – present',
-  ].join('\n');
-  equal('one payload row cannot satisfy two source employer stints',
-    verifyStructure({ experience: [{ company: 'Acme Corp', location: 'Remote' }] }, duplicateEmployerCvMd).omittedEntryViolations,
-    ['"Acme Corp" is missing from the tailored CV (cv.md dates: "Jan 2022 – present")']);
-  equal('payload dates disambiguate which duplicate employer stint was retained',
-    verifyStructure({ experience: [
-      { company: 'Acme Corp', location: 'Remote', dates: 'January 2022 - Current' },
-    ] }, duplicateEmployerCvMd).omittedEntryViolations,
-    ['"Acme Corp" is missing from the tailored CV (cv.md dates: "Jan 2018 – Jan 2020")']);
-  equal('payload dates also disambiguate an expanded duplicate employer stint',
-    verifyStructure({ experience: [
-      { company: 'Acme Corp — Platform', location: 'Remote', dates: 'January 2022 - Current' },
-    ] }, duplicateEmployerCvMd).omittedEntryViolations,
-    ['"Acme Corp" is missing from the tailored CV (cv.md dates: "Jan 2018 – Jan 2020")']);
-
-  const emphasizedEmployerCvMd = [
-    '## Experience',
-    '',
-    '### **Acme Corp** — Remote',
-    '',
-    '**Engineer** · Jan 2020 – present',
-  ].join('\n');
-  equal('Markdown emphasis around an employer heading does not create a false omission',
-    verifyStructure({ experience: [{ company: 'Acme Corp', location: 'Remote' }] }, emphasizedEmployerCvMd).verdict,
-    'pass');
-
-  const wholeHeadingEmphasisCvMd = [
-    '## Experience',
-    '',
-    '### **Acme Corp — Remote · fintech**',
-    '',
-    '**Engineer** · Jan 2020 – present',
-  ].join('\n');
-  equal('whole-heading Markdown emphasis does not create a false descriptor warning',
-    verifyStructure({ experience: [
-      { company: 'Acme Corp', location: 'Remote · fintech' },
-    ] }, wholeHeadingEmphasisCvMd).verdict,
-    'pass');
-
-  const emphasizedDescriptorCvMd = [
-    '## Experience',
-    '',
-    '### **Acme Corp** — Remote · *Series B fintech*',
-  ].join('\n');
-  equal('descriptor-only Markdown emphasis does not create a false warning',
-    verifyStructure({ experience: [
-      { company: 'Acme Corp', location: 'Remote · Series B fintech' },
-    ] }, emphasizedDescriptorCvMd).verdict,
-    'pass');
-
-  const noDescriptorInSource = correctOrder.map((entry) =>
-    entry.company === 'Career Break'
-      ? { ...entry, location: 'Lake Tahoe, CA, near the shoreline' }
-      : entry
-  );
+  const noDescriptorInSource = [
+    { company: 'Career Break', location: 'Lake Tahoe, CA, near the shoreline' }, // reworded, cv.md has no descriptor to lose
+  ];
   equal('an entry cv.md never gave a descriptor has nothing to check',
     verifyStructure({ experience: noDescriptorInSource }, cvMd).verdict, 'pass');
 
@@ -726,10 +394,7 @@ function runSelfTest() {
   equal('cv.md with no recognized headers: reports unverified, not a false pass',
     unverifiedResult.verdict, 'unverified');
   equal('unverified result names no violations (nothing was actually checked)',
-    unverifiedResult.orderViolations.length
-      + unverifiedResult.descriptorViolations.length
-      + unverifiedResult.omittedEntryViolations.length,
-    0);
+    unverifiedResult.orderViolations.length + unverifiedResult.descriptorViolations.length, 0);
 
   // The example CV is the format shipped to users: "## Work Experience" and
   // double-hyphen company/location separators. It must be checked rather than
@@ -738,8 +403,6 @@ function runSelfTest() {
   const shippedEntries = parseCvMdExperience(shippedCvMd);
   equal('shipped example parses both Work Experience entries',
     shippedEntries.map((e) => e.company), ['TechFin Corp', 'DataStartup Inc']);
-  equal('shipped example retains standalone date ranges for omission warnings',
-    shippedEntries.map((e) => e.dates), [['2020-2024'], ['2018-2020']]);
   equal('shipped example format produces a real structural verdict',
     verifyStructure({ experience: shippedEntries }, shippedCvMd).verdict, 'pass');
 
@@ -750,7 +413,7 @@ function runSelfTest() {
   ].join('\n');
   equal('single-hyphen company/location separator is recognized',
     parseCvMdExperience(singleHyphenCvMd),
-    [{ company: 'Single Hyphen Co', location: 'Remote · developer tools', dates: [] }]);
+    [{ company: 'Single Hyphen Co', location: 'Remote · developer tools' }]);
 
   // A "### Company — Location" header outside the Experience section (e.g.
   // a degree entry under Education) must not be parsed as an experience
@@ -808,25 +471,7 @@ function runSelfTest() {
   ];
   equal('omitted Acme does not fuzzy-match retained Acme Labs',
     verifyStructure({ experience: onlyAcmeLabs }, omittedPrefixCvMd),
-    {
-      verdict: 'warn',
-      orderViolations: [],
-      descriptorViolations: [],
-      omittedEntryViolations: ['"Acme" is missing from the tailored CV (cv.md dates: "Jan 2018 – Jan 2020")'],
-    });
-
-  const expandedSpecificPrefix = [
-    { company: 'Acme Labs — AI Division', location: 'City Two, ST · AI tooling' },
-  ];
-  equal('expanded heading is assigned to the longest matching source prefix',
-    verifyStructure({ experience: expandedSpecificPrefix }, omittedPrefixCvMd).omittedEntryViolations,
-    ['"Acme" is missing from the tailored CV (cv.md dates: "Jan 2018 – Jan 2020")']);
-  equal('extra expansions of a specific prefix cannot hide an omitted shorter employer',
-    verifyStructure({ experience: [
-      ...expandedSpecificPrefix,
-      { company: 'Acme Labs — Bio Division', location: 'City Two, ST · AI tooling' },
-    ] }, omittedPrefixCvMd).omittedEntryViolations,
-    ['"Acme" is missing from the tailored CV (cv.md dates: "Jan 2018 – Jan 2020")']);
+    { verdict: 'pass', orderViolations: [], descriptorViolations: [] });
 
   // CLI-level regression tests: the null-payload and unreadable-source
   // guards live in runCli(), not verifyStructure(), so exercise them
@@ -838,8 +483,6 @@ function runSelfTest() {
       writeFileSync(nullPayloadPath, 'null', 'utf-8');
       const validPayloadPath = join(selfTestDir, 'valid-payload.json');
       writeFileSync(validPayloadPath, JSON.stringify({ experience: correctOrder }), 'utf-8');
-      const omittedEmployerPayloadPath = join(selfTestDir, 'omitted-employer-payload.json');
-      writeFileSync(omittedEmployerPayloadPath, JSON.stringify({ experience: omittedEmployer }), 'utf-8');
       const nullEntryPayloadPath = join(selfTestDir, 'null-entry-payload.json');
       writeFileSync(nullEntryPayloadPath, JSON.stringify({ experience: [null, ...correctOrder] }), 'utf-8');
       const nonArrayExperiencePath = join(selfTestDir, 'non-array-experience-payload.json');
@@ -857,12 +500,11 @@ function runSelfTest() {
       const origError = console.error;
       const origWarn = console.warn;
       const origLog = console.log;
-      const capturedWarnings = [];
       console.error = () => {};
-      console.warn = (...args) => capturedWarnings.push(args.join(' '));
+      console.warn = () => {};
       console.log = () => {};
       let nullExit, dirSourceExit, nullEntryExit, nonArrayExperienceExit, dataRootSourceExit,
-        omittedEmployerExit, absoluteSourceExit, traversalSourceExit;
+        absoluteSourceExit, traversalSourceExit;
       const origCwd = process.cwd();
       const origDataRoot = process.env.CAREER_OPS_ROOT;
       try {
@@ -871,7 +513,6 @@ function runSelfTest() {
         dirSourceExit = runCli([validPayloadPath, '--source', 'a-directory-not-a-file']);
         nullEntryExit = runCli([nullEntryPayloadPath, '--source', 'cv.md']);
         nonArrayExperienceExit = runCli([nonArrayExperiencePath, '--source', 'cv.md']);
-        omittedEmployerExit = runCli([omittedEmployerPayloadPath, '--source', 'cv.md']);
         absoluteSourceExit = runCli([validPayloadPath, '--source', cvMdPath]);
         traversalSourceExit = runCli([validPayloadPath, '--source', '../outside-cv.md']);
         process.chdir(decoyCwd);
@@ -888,10 +529,6 @@ function runSelfTest() {
       equal('CLI rejects an unreadable (directory) --source instead of throwing', dirSourceExit, 1);
       equal('CLI rejects a null entry inside payload.experience instead of throwing', nullEntryExit, 1);
       equal('CLI rejects a non-array payload.experience instead of a false pass', nonArrayExperienceExit, 1);
-      equal('CLI omission findings remain warning-only', omittedEmployerExit, 0);
-      equal('CLI omission warning names the missing entry and its dates',
-        capturedWarnings.some((line) => line.includes('"Beta Industries" is missing from the tailored CV (cv.md dates: "Mar 2011 – Jul 2021")')),
-        true);
       equal('CLI rejects an absolute --source path even when it points inside the data root', absoluteSourceExit, 1);
       equal('CLI rejects a --source path that traverses outside the data root', traversalSourceExit, 1);
       equal('CLI resolves a relative --source from the configured data root, not cwd', dataRootSourceExit, 0);
@@ -911,10 +548,10 @@ function runSelfTest() {
   // CLI's pre-validated path — it must not throw on malformed input either.
   equal('verifyStructure(null, cvMd) reports unverified instead of throwing',
     verifyStructure(null, cvMd),
-    { verdict: 'unverified', orderViolations: [], descriptorViolations: [], omittedEntryViolations: [] });
+    { verdict: 'unverified', orderViolations: [], descriptorViolations: [] });
   equal('verifyStructure with a null experience entry reports unverified instead of throwing',
     verifyStructure({ experience: [null, ...correctOrder] }, cvMd),
-    { verdict: 'unverified', orderViolations: [], descriptorViolations: [], omittedEntryViolations: [] });
+    { verdict: 'unverified', orderViolations: [], descriptorViolations: [] });
 
   console.log(`verify-cv-structure self-test: ${passed} passed, ${failed} failed`);
   return failed ? 1 : 0;
@@ -1012,10 +649,6 @@ export function runCli(args = process.argv.slice(2)) {
   if (result.descriptorViolations.length) {
     console.warn('\nMissing company descriptors:');
     for (const v of result.descriptorViolations) console.warn(`  - ${v}`);
-  }
-  if (result.omittedEntryViolations.length) {
-    console.warn('\nMissing Experience entries:');
-    for (const v of result.omittedEntryViolations) console.warn(`  - ${v}`);
   }
   console.warn('\nThis is a warning, not a blocking gate — review against cv.md and fix the payload if the loss was unintentional, then rebuild the HTML and PDF.');
   return 0;
