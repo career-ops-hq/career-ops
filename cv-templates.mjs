@@ -682,7 +682,7 @@ if (isMain) {
         throw new Error(`lint reads HTML templates only; --format=${format} would report "no findings" without checking anything`);
       }
       const name = positionals[0];
-      process.stdout.write(JSON.stringify(atsLint(resolveTemplate(kind, name, { format }), kind), null, 2) + '\n');
+      process.stdout.write(JSON.stringify(atsLint(resolveTemplate(kind, name, { format, fallback: Boolean(flags.fallback) }), kind), null, 2) + '\n');
     } else {
       process.stderr.write('Usage: node cv-templates.mjs <list|resolve|lint> <cv|cover> [name] [--format=html|tex] [--fallback]\n');
       process.exit(2);

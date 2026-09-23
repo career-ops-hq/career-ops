@@ -557,3 +557,23 @@ test('a valid rule with a null detector still loads and still skips', () => {
   assert.equal(result.error, null);
   assert.deepEqual(result.skipped.map((s) => s.id), ['x'], 'the skip has to carry the rule id');
 });
+
+// The usage line advertises `--fallback` for list, resolve and lint together.
+// `resolve` passed it through and `lint` dropped it, so `lint cv NAME --fallback`
+// reported "Template not found" for a name `resolve cv NAME --fallback` answers.
+// The two subcommands take the same three arguments and have to resolve alike.
+test('the CLI honours --fallback on lint, the same as on resolve', () => {
+  const missing = 'definitely-not-a-real-template';
+
+  // Control: without the flag both subcommands refuse, so the flag is what differs.
+  assert.notEqual(cli(['resolve', 'cv', missing]).status, 0, 'resolve without --fallback must refuse');
+  assert.notEqual(cli(['lint', 'cv', missing]).status, 0, 'lint without --fallback must refuse');
+
+  const resolved = cli(['resolve', 'cv', missing, '--fallback']);
+  assert.equal(resolved.status, 0, `resolve --fallback must answer: ${resolved.stderr}`);
+  assert.match(resolved.stdout.trim(), /cv-template\.html$/, 'it falls back to the standard template');
+
+  const linted = cli(['lint', 'cv', missing, '--fallback']);
+  assert.equal(linted.status, 0, `lint --fallback must answer too: ${linted.stderr}`);
+  assert.equal(JSON.parse(linted.stdout).ok, true);
+});
