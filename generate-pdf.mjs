@@ -1321,14 +1321,19 @@ async function generatePDF() {
       reportNum = arg.split('=')[1].trim();
     } else if (arg === '--report') {
       // Same missing-operand case as --kind below. Swallowed, the render writes
-      // no manifest row for the report the caller named.
+      // no manifest row for the report the caller named. The value is CLEARED as
+      // well as marked supplied: the last occurrence of a flag is the caller's
+      // final intent, and this one carries no operand, so `--report=7 --report`
+      // must not keep the 7.
       reportSupplied = true;
+      reportNum = '';
     } else if (arg === '--kind') {
       // A flag missing its operand, not an absent flag. Left unhandled it falls
       // through to the positional arms below and is dropped silently, so the
-      // render infers a kind the caller never asked for. Marked supplied with an
-      // empty value, which the guard below already refuses.
+      // render infers a kind the caller never asked for. Marked supplied AND
+      // cleared, so `--kind=cover --kind` cannot reuse the earlier operand.
       kindSupplied = true;
+      kindFlag = '';
     } else if (arg.startsWith('--kind=')) {
       kindSupplied = true;
       kindFlag = arg.slice('--kind='.length).trim();

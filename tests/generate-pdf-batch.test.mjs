@@ -491,6 +491,37 @@ try {
     fail('control failed: omitting reportNum broke the batch');
   }
 
+  // Order matters, and the bare branch only set a SUPPLIED marker. A valued flag
+  // followed by a bare one left the earlier operand in place, so validation read
+  // '7' or 'cover' and waved the missing operand through. The last occurrence of a
+  // flag is the caller's final intent, and that occurrence has no value.
+  for (const [label, args, want] of [
+    ['--report=7 --report', ['a.html', 'out/ord-a.pdf', '--report=7', '--report'], /Invalid --report/i],
+    ['--kind=cover --kind', ['a.html', 'out/ord-b.pdf', '--kind=cover', '--kind'], /Invalid --kind/i],
+  ]) {
+    const r = run(args);
+    if (r.status === 1 && want.test(r.output)) {
+      pass(`generate-pdf rejects a bare flag that follows a valued one (${label})`);
+    } else {
+      fail(`${label} kept the earlier value: status=${r.status}\n${r.output.trim()}`);
+    }
+  }
+
+  // The other order is NOT an error: the last occurrence carries a value, so that
+  // value is the intent. Without this, "reject any bare occurrence" would look
+  // identical to "clear on bare", and only one of them is right.
+  for (const [label, args] of [
+    ['--report --report=7', ['a.html', 'out/ord-c.pdf', '--report', '--report=7']],
+    ['--kind --kind=cover', ['a.html', 'out/ord-d.pdf', '--kind', '--kind=cover']],
+  ]) {
+    const r = run(args);
+    if (!/Invalid --(report|kind)/i.test(r.output)) {
+      pass(`control: a valued flag after a bare one is accepted (${label})`);
+    } else {
+      fail(`${label} was wrongly rejected: status=${r.status}\n${r.output.trim()}`);
+    }
+  }
+
   // A batch with neither global flag still runs, so the guards above reject the
   // flag rather than the batch. Without this, both checks would pass on a build
   // that refused every batch outright.
