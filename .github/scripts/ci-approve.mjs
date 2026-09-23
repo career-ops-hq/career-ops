@@ -12,10 +12,11 @@
 import fs from 'node:fs';
 
 const API = 'https://api.github.com';
-const REPO = process.env.GITHUB_REPOSITORY;
-const TOKEN = process.env.CI_APPROVE_TOKEN || process.env.GITHUB_TOKEN;
-const DRY = /^(1|true|yes)$/i.test(process.env.DRY_RUN || '');
-const MAX = Number(process.env.CI_APPROVE_MAX || 20);
+let REPO, TOKEN, DRY, MAX;
+function loadEnv() { // al llamar a main, no al importar: los tests fijan el entorno antes
+  REPO = process.env.GITHUB_REPOSITORY; TOKEN = process.env.CI_APPROVE_TOKEN || process.env.GITHUB_TOKEN;
+  DRY = /^(1|true|yes)$/i.test(process.env.DRY_RUN || ''); MAX = Number(process.env.CI_APPROVE_MAX || 20);
+}
 const lines = [];
 const log = (l) => { lines.push(l); process.stdout.write(l + '\n'); };
 
@@ -59,23 +60,30 @@ export function decide({ sha, pr, files }) {
   return { ok: true, why: `#${pr.number} abierta, head actual, autor ${pr.user.login}, ${files.length} ficheros seguros` };
 }
 
-async function main() {
+/** head.sha → PR abierta. `commits/{sha}/pulls` devuelve [] para un commit de fork (comprobado con #2572 y #4403, 23-sep):
+ *  el primerizo de un fork, que es el caso normal, nunca se aprobaba. Se mapea desde la lista de PRs abiertas, como bin/act-approve-ci. */
+export function openPrBySha(openPrs) {
+  return new Map((openPrs || []).filter((p) => p.state === 'open' && p.head?.sha).map((p) => [p.head.sha, p]));
+}
+
+export async function main() {
+  loadEnv();
   if (!TOKEN || !REPO) throw new Error('faltan GITHUB_TOKEN o GITHUB_REPOSITORY');
   log(`ci-approve${DRY ? ' (DRY_RUN)' : ''}${process.env.CI_APPROVE_TOKEN ? ' con CI_APPROVE_TOKEN' : ' con GITHUB_TOKEN'}`);
   const runs = (await getAll(`repos/${REPO}/actions/runs?status=action_required`)).filter((r) => r.event === 'pull_request');
   const groups = groupByHeadSha(runs);
-  log(`${runs.length} runs esperando en ${groups.size} SHAs`);
-  let approved = 0;
+  const bySha = openPrBySha(await getAll(`repos/${REPO}/pulls?state=open`));
+  log(`${runs.length} runs esperando en ${groups.size} SHAs · ${bySha.size} PRs abiertas`);
+  let approved = 0, orphans = 0;
   for (const [sha, group] of groups) {
     if (approved >= MAX) { log(`tope ${MAX} alcanzado: el resto espera a la próxima pasada`); break; }
-    let pr = null, files = [];
-    try {
-      const prs = await getAll(`repos/${REPO}/commits/${sha}/pulls`);
-      pr = prs.find((p) => p.state === 'open') || prs[0] || null;
-      if (pr) files = await getAll(`repos/${REPO}/pulls/${pr.number}/files`);
-    } catch (e) { log(`${sha.slice(0, 7)}: no pude ver la PR (${e.message.slice(0, 80)}): no apruebo`); continue; }
+    const pr = bySha.get(sha) || null;
+    if (!pr) { orphans++; continue; } // no es el head de ninguna PR abierta (push encima, cerrada o fusionada): nada que aprobar
+    let files = [];
+    try { files = await getAll(`repos/${REPO}/pulls/${pr.number}/files`); }
+    catch (e) { log(`#${pr.number} ${sha.slice(0, 7)}: no pude leer sus ficheros (${e.message.slice(0, 80)}): no apruebo`); continue; }
     const d = decide({ sha, pr, files });
-    if (!d.ok) { log(`${sha.slice(0, 7)}: no : ${d.why}`); continue; }
+    if (!d.ok) { log(`#${pr.number} ${sha.slice(0, 7)}: no : ${d.why}`); continue; }
     for (const r of group) {
       if (DRY) { log(`DRY-RUN aprobar run ${r.id} (${r.name}) : ${d.why}`); continue; }
       try { await rest('POST', `repos/${REPO}/actions/runs/${r.id}/approve`); log(`aprobado run ${r.id} (${r.name}) : ${d.why}`); }
@@ -83,6 +91,7 @@ async function main() {
     }
     approved++;
   }
+  if (orphans) log(`${orphans} SHAs huérfanos (no son el head de ninguna PR abierta): no se aprueban`);
   log(`${approved} SHAs aprobados`);
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### ci-approve\n\n${lines.map((l) => `- ${l}`).join('\n')}\n`);
 }
