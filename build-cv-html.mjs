@@ -55,7 +55,7 @@ const DEFAULT_SECTION_TITLES = {
   summary: 'Professional Summary',
   competencies: 'Core Competencies',
   experience: 'Work Experience',
-  projects: 'Projects',
+  projects: 'Projects & Case Studies',
   education: 'Education',
   certifications: 'Certifications',
   awards: 'Awards & Honors',

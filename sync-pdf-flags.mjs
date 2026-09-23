@@ -105,7 +105,14 @@ for (let i = 0; i < lines.length; i++) {
   if (!row) continue;
   
   const reportNums = extractTrackerReportNumbers(row.report);
-  const hasPdf = reportNums.some(num => manifestReports.has(num));
+  // Join BOTH keys: report numbers from the Report cell (canonical report #)
+  // AND the tracker row # — the web pdf worker keys pdf-index by the row id
+  // (`--report=${input}` where input is `#`), so a row whose Report cell was
+  // renumbered by a re-eval (135 → 144) never matched its own manifest entry
+  // and the flag stayed ❌ forever even though output/cv-….pdf existed.
+  const rowNum = /^\d+$/.test(String(row.num ?? '').trim()) ? parseInt(row.num, 10) : NaN;
+  const hasPdf = reportNums.some(num => manifestReports.has(num))
+    || (Number.isInteger(rowNum) && rowNum > 0 && manifestReports.has(rowNum));
   
   if (hasPdf) {
     if (row.pdf !== '✅') {

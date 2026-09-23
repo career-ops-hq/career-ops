@@ -20,7 +20,7 @@
 // usable test — both windows are microseconds wide, and an earlier draft that
 // spawned ten barrier-synchronized writers caught the unlocked version once in
 // eight runs, which is a coin flip wearing a lab coat. Mutual exclusion itself
-// is already covered by test/pipeline-lock.test.mjs; what is new here is that
+// is already covered by tests/pipeline-lock.test.mjs; what is new here is that
 // this writer takes part at all, and that is deterministic.
 //
 // The writer runs in a child process because discovered suites share one

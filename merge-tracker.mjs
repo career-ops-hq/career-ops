@@ -515,12 +515,19 @@ function syncPdfFlags(existingApps, appLines, pdfIndex) {
 
   for (const app of existingApps) {
     const reportNum = extractReportNum(app.report, app.notes);
-    if (!reportNum || !pdfIndex.has(String(reportNum)) || app.pdf !== '❌') continue;
+    // Match report # (Report cell) OR tracker row # — the web pdf worker keys
+    // pdf-index.tsv by the row id, so row-keyed entries must heal the flag too
+    // (same dual-key join as sync-pdf-flags.mjs).
+    const rowNum = Number(app.num);
+    const hasManifestEntry =
+      (reportNum && pdfIndex.has(String(reportNum))) ||
+      (Number.isInteger(rowNum) && rowNum > 0 && pdfIndex.has(String(rowNum)));
+    if (!hasManifestEntry || app.pdf !== '❌') continue;
 
     const lineIdx = appLines.indexOf(app.raw);
     if (lineIdx < 0) continue;
 
-    console.log(`${DRY_RUN ? '🔄 PDF sync (dry-run)' : '🔄 PDF sync'}: #${app.num} ${app.company} — report ${reportNum} now has a generated PDF`);
+    console.log(`${DRY_RUN ? '🔄 PDF sync (dry-run)' : '🔄 PDF sync'}: #${app.num} ${app.company} — generated PDF found in manifest (report ${reportNum ?? app.num})`);
     if (!DRY_RUN) {
       const updatedLine = buildRow({ ...app, pdf: '✅' });
       appLines[lineIdx] = updatedLine;
@@ -1628,14 +1635,20 @@ for (const file of tsvFiles) {
     // PDF exists for a report that has none, and the only PDF on disk belonged
     // to the evaluation that was just superseded. Fall back to the existing
     // flag only when the report is unchanged; when it changes, the manifest is
-    // the sole authority (#2594).
+    // the sole authority (#2594) — checked against BOTH the new report number
+    // and the tracker row # (the web pdf worker keys pdf-index by row id, so a
+    // renumbered Report cell must not wipe a real output/cv-….pdf's ✅).
     // "different, INCLUDING one-side-absent". Requiring both to be truthy meant
     // a row whose report cell is `—` had oldReportNum === null, so reportChanged
     // was falsy and the stale ✅ was inherited exactly as before this fix — and a
     // `—` row with a ✅ is ordinary, it is what a tracker entry added before its
     // evaluation looks like. Both absent stays "unchanged", which is correct.
     const reportChanged = String(reportNum ?? '') !== String(oldReportNum ?? '');
-    const pdf = reportNum && pdfIndex.has(String(reportNum))
+    const dupRowNum = Number(duplicate.num);
+    const manifestHasKey =
+      (reportNum && pdfIndex.has(String(reportNum))) ||
+      (Number.isInteger(dupRowNum) && dupRowNum > 0 && pdfIndex.has(String(dupRowNum)));
+    const pdf = manifestHasKey
       ? '✅'
       : (reportChanged ? '❌' : duplicate.pdf);
     const updatedLine = buildRow({

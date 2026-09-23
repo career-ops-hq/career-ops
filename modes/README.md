@@ -19,6 +19,7 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `auto-pipeline.md` | auto | Full automatic pipeline (evaluate + PDF + tracker) on a pasted JD/URL |
 | `pipeline.md` | `pipeline` | Process the URL inbox (`data/pipeline.md`) |
 | `scan.md` | `scan` | Portal scanner (job discovery) |
+| `hunt.md` | hunt (web AI search) | Freeform open-web job hunt — prompt behind the web Explore "AI search" tab |
 | `batch.md` | `batch` | Mass processing with headless workers |
 | `apply.md` | `apply` | Live application assistant (form filling; never submits) |
 | `pdf.md` | `pdf` | ATS-optimized PDF generation |

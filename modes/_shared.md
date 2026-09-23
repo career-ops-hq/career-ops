@@ -91,6 +91,14 @@ The evaluation scores five dimensions, integrated into one global score of 1-5. 
 - 3.5-3.9 → Decent but not ideal, apply only if specific reason
 - Below 3.5 → Recommend against applying (see Ethical Use in AGENTS.md)
 
+**Scoring governance (hard, applied to every evaluation and re-evaluation):**
+
+1. **The global score is a verdict that must survive its own breakdown.** No global score may sit higher than the weakest *hard* dimension minus 0.5. Concretely: if the Comp dimension scores 3 and Culture scores 3, the global score must be ≤ 3.5 unless a written exception line explains the override. A report that says "Comp 3.5 / Culture 3.0, global 4.1" is internally contradictory and must be revised before write (#capgemini-drift). Brittle cases: a strong CV match silently compensating for a weak comp/culture dimension is exactly the failure mode this governs — the Comp/Culture score is the message, don't bury it.
+2. **Re-evaluations must carry their delta, else they don't badge.** Any re-eval that changes a score must state, in the report's note and the tracker notes, the *reason for the delta* (new data surfaced / initial over-count of X / JD corrected). Bare re-evals ("Re-eval 3.5→4.2") without a delta reason produce drift that is invisible to the pattern analyzer. A re-eval bump of +0.7 or more without a concrete new fact is flat badging and must not happen (#accenture-4.7-drift).
+3. **First-pass scores set the anchor; later passes should move ±0.5 unless a JD changes.** Emotional re-reading of the same text inflates over time. If a later re-eval wants to move a score more than 0.5, the widening must be justified in the delta note, not felt.
+4. **The "confirm before applying" block is part of the score.** A report listing confirm-before-apply items that then scores ≥4.0 is not a recommendation to apply — it is a *conditional* 4.0. Write "proceed if <item> confirmed" explicitly; a user who applies on an unconfirmed 4.0 has not actually gated (e.g. IndusInd comp floor, Google req gaps in the 2026 review).
+5. **A sub-4.0 with strong CV-match but the JD outside lane is not "decided by user discretion" randomness** — period. Matching a 2.8/5 to "a shot in the dark" throws the tracker's funnel hygiene, and the funnel is what this tool exists to keep clean.
+
 **How to score the "Cultural signals" dimension:**
 1. Read `culture_screen.require` from `config/profile.yml`. If `culture_screen` is missing or empty, skip the structural capping and score the dimension qualitatively based on company size, remote policy, and stability.
 2. Actively look for evidence in the JD + Block G company research corresponding to those requirements (e.g., team size mentions, org-chart depth/manager layers, meeting-culture language, company stage).

@@ -609,6 +609,26 @@ for (let i = 0; i < lines.length; i++) {
 }
 if (controlByteRows === 0) ok('No control characters in tracker cells');
 
+// --- Check 17: Application SLA gate on Applied rows (#apply-gate) ---
+// Advisory, never blocking: an Applied row missing its cover letter, follow-up,
+// or report JD-archive is a signal, not a corruption. Uses the same gate the
+// submit flow runs as its pre-submit blocker (verify-apply-gate.mjs — read-only).
+try {
+  const { runAll } = await import('./verify-apply-gate.mjs');
+  const report = runAll({ silent: true });
+  if (report.applied === 0) {
+    ok('No Applied rows — nothing to SLA-gate');
+  } else {
+    const clean = report.applied - report.failing;
+    ok(`SLA gate: ${clean}/${report.applied} Applied rows ready (${report.missingCover} missing cover/notes, ${report.missingFollowup} missing follow-up, ${report.missingJd} missing JD archive)`);
+    if (report.failing > 0) {
+      warn(`SLA gate gaps on rows: ${report.failingRows.join(', ')} — run node verify-apply-gate.mjs for detail`);
+    }
+  }
+} catch (err) {
+  warn(`SLA gate could not run: ${err.message}`);
+}
+
 // --- Summary ---
 console.log('\n' + '='.repeat(50));
 console.log(`📊 Pipeline Health: ${errors} errors, ${warnings} warnings`);

@@ -1000,6 +1000,9 @@ ${sections.join('\n')}</div>
     for (const f of [
       'generate-pdf.mjs', 'theme-style.mjs', 'tracker-utils.mjs',
       'tracker-parse.mjs', 'tracker-aliases.json', 'pipeline-lock.mjs',
+      // renderJsonToPdf's CV patch layer + the jd-fit/align pair behind it.
+      'cv-pinned-experience.mjs', 'cv-enrich-content.mjs', 'cv-humanize.mjs',
+      'cv-jd-fit.mjs', 'cv-jd-align.mjs', 'jd-skill-gap.mjs', 'skill-extract.mjs',
     ]) {
       copyFileSync(join(ROOT, f), join(sandbox, f));
     }
@@ -1137,6 +1140,9 @@ export const chromium = {
     for (const f of [
       'generate-pdf.mjs', 'theme-style.mjs', 'tracker-utils.mjs',
       'tracker-parse.mjs', 'tracker-aliases.json', 'pipeline-lock.mjs',
+      // renderJsonToPdf's CV patch layer + the jd-fit/align pair behind it.
+      'cv-pinned-experience.mjs', 'cv-enrich-content.mjs', 'cv-humanize.mjs',
+      'cv-jd-fit.mjs', 'cv-jd-align.mjs', 'jd-skill-gap.mjs', 'skill-extract.mjs',
     ]) {
       copyFileSync(join(ROOT, f), join(sandbox, f));
     }

@@ -9,24 +9,68 @@
  * Fills templates/cover-letter-template.html with the payload, then renders
  * it to PDF via the same Playwright pipeline used for CVs (generate-pdf.mjs).
  *
- * `buildHtml` is exported as a pure function so the template can be tested
- * without loading Playwright (renderHtmlToPdf is imported lazily inside main).
+ * `buildHtml` and `safeOutputPath` are exported as pure functions so the
+ * template and --out path guard can be tested without loading Playwright
+ * (renderHtmlToPdf is imported lazily inside main).
  */
 
-import { readFileSync, existsSync, mkdirSync } from "fs";
-import { dirname, resolve, basename, join } from "path";
-import { fileURLToPath, pathToFileURL } from "url";
+import { readFileSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from "fs";
+import { dirname, resolve, join, relative, isAbsolute } from "path";
+import { fileURLToPath } from "url";
 import { parseArgs } from "util";
+import { spawnSync } from "node:child_process";
 import { assertFacts } from "./verify-cv-facts.mjs";
 import { resolveTemplate } from "./cv-templates.mjs";
+import { humanizeCoverPayload } from "./cv-humanize.mjs";
+import { isMainModule } from "./lib/is-main-module.mjs";
 
-const OUTPUT_ROOT = resolve("output");
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const OUTPUT_ROOT = resolve(__dirname, "output");
 
-/** Sanitize a requested output filename and keep it under the output directory. */
-function safeOutputPath(raw) {
-  // Derive a sanitized filename from raw string (strip path separators and dots)
-  const filename = basename(raw).replace(/[^a-zA-Z0-9._-]/g, "-").replace(/\.{2,}/g, "-");
-  return join(OUTPUT_ROOT, filename);
+/**
+ * Resolve a requested cover-letter output path.
+ *
+ * Paths that stay inside `output/` keep their relative subdirectory (the
+ * application-bundle layout `generate-pdf.mjs` already supports). Paths that
+ * would escape `output/` — `..` traversal or an absolute path outside it —
+ * are rejected instead of being silently flattened to `output/<basename>`.
+ *
+ * @param {string} raw - Caller-supplied --out / payload.output_path value.
+ * @returns {string} Absolute path inside OUTPUT_ROOT.
+ */
+export function safeOutputPath(raw) {
+  if (raw == null || String(raw).trim() === "") {
+    throw new Error("Refusing to write the cover letter outside output/: (empty path)");
+  }
+  const trimmed = String(raw).trim();
+
+  const asWritten = resolve(trimmed);
+  if (containedInOutput(asWritten)) return asWritten;
+
+  // Absolute paths and any `..` segment already chose a location; if that
+  // location is not inside output/, refuse instead of rewriting to a basename.
+  if (isAbsolute(trimmed) || /(^|[\\/])\.\.([\\/]|$)/.test(trimmed)) {
+    throw new Error(`Refusing to write the cover letter outside output/: ${raw}`);
+  }
+
+  // Bare filename or a relative path that is not already under output/
+  // (e.g. --out cover.pdf, or --out output/foo/bar.pdf from another cwd).
+  const posix = trimmed.replace(/\\/g, "/").replace(/^\.\//, "");
+  const relativeToRoot = posix === "output" || posix === "output/"
+    ? ""
+    : posix.startsWith("output/")
+      ? posix.slice("output/".length)
+      : posix;
+  const candidate = resolve(OUTPUT_ROOT, relativeToRoot);
+  if (containedInOutput(candidate)) return candidate;
+
+  throw new Error(`Refusing to write the cover letter outside output/: ${raw}`);
+}
+
+/** True when absPath is a file (not output/ itself) still inside OUTPUT_ROOT. */
+function containedInOutput(absPath) {
+  const rel = relative(OUTPUT_ROOT, absPath);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
 /** Assert that a payload object contains the required keys. */
@@ -36,6 +80,18 @@ function _require(obj, keys, context) {
       throw new Error(`Missing required field: ${context}.${key}`);
     }
   }
+}
+
+const LEADING_BULLET_WORD_RE = /^bullet\s+/i;
+
+/** Normalize cover-letter text: strip accidental "bullet " prefixes, ban em dashes. */
+function normalizeCoverText(text) {
+  if (!text) return "";
+  return String(text)
+    .replace(/\u2014/g, ", ")
+    .replace(/\u2013/g, "-")
+    .replace(LEADING_BULLET_WORD_RE, "")
+    .trim();
 }
 
 /** Escape user-provided text before inserting it into generated HTML. */
@@ -64,10 +120,11 @@ function buildContactLine(candidate) {
   }
   if (candidate.phone) parts.push(escapeHtml(candidate.phone));
   if (candidate.linkedin) {
-    parts.push(`<a href="${escapeHtml(asUrl(candidate.linkedin))}">LinkedIn</a>`);
+    const display = candidate.linkedin.replace(/^https?:\/\//i, "");
+    parts.push(`<a href="${escapeHtml(asUrl(candidate.linkedin))}">${escapeHtml(display)}</a>`);
   }
   if (candidate.github) {
-    const display = candidate.github.replace(/^https?:\/\//, "");
+    const display = candidate.github.replace(/^https?:\/\//i, "");
     parts.push(`<a href="${escapeHtml(asUrl(candidate.github))}">${escapeHtml(display)}</a>`);
   }
   return parts.join(" &nbsp;|&nbsp; ");
@@ -86,15 +143,29 @@ function buildDateline(letter) {
   return parts.join(" &nbsp;&nbsp; ");
 }
 
+/** Sanitize letter payload fields before render (shared by HTML and reportlab paths). */
+export function sanitizeCoverPayload(payload) {
+  const out = JSON.parse(JSON.stringify(payload));
+  const letter = out.letter;
+  if (!letter || typeof letter !== "object") return out;
+  for (const key of ["opening", "profile_intro", "problems_section", "closing", "language_closing", "greeting"]) {
+    if (letter[key]) letter[key] = normalizeCoverText(letter[key]);
+  }
+  if (Array.isArray(letter.achievements)) {
+    letter.achievements = letter.achievements.map((ach) => ({
+      lead: normalizeCoverText((ach.lead || "").replace(/,\s*$/, "")),
+      impact: normalizeCoverText(ach.impact || ""),
+    }));
+  }
+  return out;
+}
+
 /** Build the optional achievements list for the letter body. */
 function buildAchievementsBlock(achievements) {
   if (!achievements || !achievements.length) return "";
   const items = achievements.map(ach => {
-    // Trim a caller-supplied trailing comma (cover.md's own bullet-format
-    // example shows the lead ending in a comma) so it never doubles up with
-    // the comma this function always appends.
-    const lead = escapeHtml((ach.lead || "").replace(/,\s*$/, ""));
-    const impact = escapeHtml(ach.impact || "");
+    const lead = escapeHtml(normalizeCoverText((ach.lead || "").replace(/,\s*$/, "")));
+    const impact = escapeHtml(normalizeCoverText(ach.impact || ""));
     return `    <li><b>${lead},</b> ${impact}</li>`;
   }).join("\n");
   return `<ul class="achievements">\n${items}\n  </ul>`;
@@ -115,6 +186,26 @@ function buildFootnotesBlock(footnotes) {
     return `    <p>${escapeHtml(fn)}</p>`;
   }).join("\n");
   return `<div class="footnotes">\n${lines}\n  </div>`;
+}
+
+/**
+ * Build the optional sign-off block: a valediction over the signing name.
+ *
+ * Accepts either a plain string (used verbatim as the valediction) or an
+ * object `{ valediction, name }`. `name` defaults to the candidate name so a
+ * payload can set only the valediction. Returns "" when unset, which keeps
+ * every pre-existing payload rendering byte-identical.
+ */
+function buildSignatureBlock(signature, candidateName) {
+  if (!signature) return "";
+  const isObject = typeof signature === "object" && signature !== null;
+  const valediction = isObject ? signature.valediction : signature;
+  const name = (isObject ? signature.name : "") || candidateName || "";
+  if (!valediction && !name) return "";
+  // Each value is escaped independently; the <br> separator is template markup
+  // emitted between them, never injected into escaped content.
+  const lines = [valediction, name].filter(Boolean).map(escapeHtml);
+  return `<p class="signature">${lines.join("<br>")}</p>`;
 }
 
 // Resolve the cover-letter template through the shared resolver so a
@@ -151,6 +242,12 @@ export function buildHtml(payload, templatePath) {
     : "";
   const problemsBlock = letter.problems_section ? `<p>${escapeHtml(letter.problems_section)}</p>` : "";
 
+  // Optional sign-off (e.g. valediction "Sincerely," over the signing name).
+  // Omitted -> no signature, preserving behavior for payloads that don't set it.
+  // The name falls back to the candidate name so a payload can set only the
+  // valediction. The <br> is emitted around escaped values, never inside one.
+  const signatureBlock = buildSignatureBlock(letter.signature, candidate.name);
+
   const replacements = {
     "{{NAME}}": escapeHtml(candidate.name),
     "{{CONTACT_LINE}}": buildContactLine(candidate),
@@ -164,6 +261,7 @@ export function buildHtml(payload, templatePath) {
     "{{PROBLEMS_BLOCK}}": problemsBlock,
     "{{CLOSING_BLOCK}}": closingBlock,
     "{{LANGUAGE_CLOSING_BLOCK}}": languageClosingBlock,
+    "{{SIGNATURE_BLOCK}}": signatureBlock,
     "{{FOOTNOTES_BLOCK}}": buildFootnotesBlock(letter.footnotes),
   };
 
@@ -171,8 +269,66 @@ export function buildHtml(payload, templatePath) {
   // the original template. A single regex pass (rather than iterative
   // split/join) ensures a substituted value that itself contains a {{TOKEN}}
   // sequence is left literal instead of being re-interpreted as a placeholder.
-  // Tokens with no entry in the map are left untouched.
-  return html.replace(/\{\{[A-Z_]+\}\}/g, (token) => replacements[token] ?? token);
+  //
+  // A token with no entry in the map is a template the renderer cannot fill —
+  // a custom cover-letter template (KINDS.cover in cv-templates.mjs) carrying a
+  // typo'd or unsupported token. Collect those DURING the pass rather than
+  // scanning the result: a scan of the output cannot tell a template token from
+  // the same sequence appearing inside a substituted value, which is exactly
+  // what the single pass above is careful to leave literal.
+  const unresolved = new Set();
+  const rendered = html.replace(/\{\{[A-Z_]+\}\}/g, (token) => {
+    const value = replacements[token];
+    if (value == null) {
+      unresolved.add(token);
+      return token;
+    }
+    return value;
+  });
+
+  // Fail loudly, matching build-cv-html.mjs and build-cv-latex.mjs. Shipping a
+  // letter with a literal {{TOKEN}} in it is worse than not producing one.
+  if (unresolved.size) {
+    throw new Error(`Unresolved placeholders: ${[...unresolved].join(', ')}`);
+  }
+  return rendered;
+}
+
+/** Locate Python for reportlab renderer (same convention as generate-pdf.mjs). */
+function findPythonBin() {
+  const scriptDir = dirname(fileURLToPath(import.meta.url));
+  const venvBin = process.platform === "win32"
+    ? resolve(scriptDir, ".venv", "Scripts", "python.exe")
+    : resolve(scriptDir, ".venv", "bin", "python3");
+  if (existsSync(venvBin)) return venvBin;
+  return process.platform === "win32" ? "python" : "python3";
+}
+
+/** Primary path: JSON payload -> reportlab (no browser). Falls back to HTML+Playwright. */
+function renderPayloadToPdf(payload, payloadPath, outputPath, opts = {}) {
+  const format = opts.format || "a4";
+  const pythonBin = findPythonBin();
+  const scriptPath = resolve(dirname(fileURLToPath(import.meta.url)), "generate_cover_letter_pdf.py");
+  if (existsSync(scriptPath)) {
+    const tmpJson = join(dirname(outputPath), `.cover-payload-${randomId()}.json`);
+    writeFileSync(tmpJson, JSON.stringify(payload, null, 2), "utf-8");
+    const result = spawnSync(
+      pythonBin,
+      [scriptPath, tmpJson, outputPath, `--format=${format}`],
+      { encoding: "utf-8" },
+    );
+    try { unlinkSync(tmpJson); } catch { /* ignore */ }
+    if (!result.error && result.status === 0) {
+      if (result.stdout) process.stdout.write(result.stdout);
+      return { via: "reportlab" };
+    }
+    if (result.stderr) console.error(`reportlab cover path failed, falling back to Playwright:\n${result.stderr}`);
+  }
+  return null;
+}
+
+function randomId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 /** Parse a payload, run the fact gate, and render the cover-letter PDF. */
@@ -183,6 +339,7 @@ async function main() {
       out:     { type: "string" },
       format:  { type: "string" },
       report:  { type: "string" },
+      "no-humanize": { type: "boolean" },
       help:    { type: "boolean", short: "h" },
     },
     strict: false,
@@ -191,12 +348,13 @@ async function main() {
   if (args.help || !args.payload) {
     console.log(`
 Usage:
-  node generate-cover-letter.mjs --payload payload.json [--out output/path.pdf] [--format letter|a4] [--report NNN]
+  node generate-cover-letter.mjs --payload payload.json [--out output/path.pdf] [--format letter|a4] [--report NNN] [--no-humanize]
 
   --payload   Path to the JSON payload file (required)
   --out       Override output path from payload (optional)
   --format    Override output PDF page format (letter|a4, default: a4)
   --report    Link the PDF to a tracker report number in data/pdf-index.tsv
+  --no-humanize  Skip deterministic anti-AI-slop pass (debug only)
 `);
     process.exit(args.help ? 0 : 1);
   }
@@ -207,7 +365,13 @@ Usage:
     process.exit(1);
   }
 
-  const payload = JSON.parse(readFileSync(payloadPath, "utf-8"));
+  let payload = JSON.parse(readFileSync(payloadPath, "utf-8"));
+  if (!args["no-humanize"]) {
+    const { payload: humanized, changes } = humanizeCoverPayload(payload);
+    payload = humanized;
+    if (changes.length) console.log(`✍️  Humanized cover letter: ${changes.join("; ")}`);
+  }
+  payload = sanitizeCoverPayload(payload);
 
   if (args.out) {
     payload.output_path = args.out;
@@ -218,33 +382,48 @@ Usage:
     const role    = (payload.letter?.role_title || "role").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
     payload.output_path = join(OUTPUT_ROOT, `${company}-${role}-cover.pdf`);
   } else {
-    payload.output_path = safeOutputPath(payload.output_path);
+    try {
+      payload.output_path = safeOutputPath(payload.output_path);
+    } catch (err) {
+      console.error(err.message);
+      process.exit(1);
+    }
   }
 
   if (!existsSync(OUTPUT_ROOT)) mkdirSync(OUTPUT_ROOT, { recursive: true });
 
   try {
     const html = buildHtml(payload);
-    // Cover letters are candidate-facing documents too. Reuse the CV fact
-    // validator before importing Playwright or writing a PDF so a failed gate
-    // cannot leave behind a misleading artifact.
     const factCheck = assertFacts(html, { label: "cover letter" });
+    // Ahead of the verdict, because it qualifies it: with no config the phrase
+    // lists are empty, so a silent gate here covers metrics and facts only.
+    if (factCheck.configMissing) {
+      console.error("No config/cv-facts.json — forbidden/advisory phrase checks did not run.");
+    }
     if (factCheck.verdict === "warn") {
       console.error(`CV fact check warning: cover letter`);
       for (const phrase of factCheck.warnings) {
         console.error(`  - advisory phrase: ${phrase}`);
       }
     }
-    // Imported only after fact validation so a failed gate does not load
-    // Playwright or create a PDF artifact.
-    const { renderHtmlToPdf } = await import("./generate-pdf.mjs");
+    if (factCheck.verdict === "block") {
+      throw new Error(`CV fact check blocked cover letter: ${factCheck.warnings?.join("; ") || "unverified claims"}`);
+    }
+
     const outputPath = resolve(payload.output_path);
-    await renderHtmlToPdf(html, outputPath, {
-      format: args.format || "a4",
-      reportNum: args.report,
-      inputPath: payloadPath,
-    });
-    console.log(`\nCover letter PDF: ${payload.output_path}`);
+    const format = args.format || "a4";
+    const reportlab = renderPayloadToPdf(payload, payloadPath, outputPath, { format });
+    if (!reportlab) {
+      const { renderHtmlToPdf } = await import("./generate-pdf.mjs");
+      await renderHtmlToPdf(html, outputPath, {
+        format,
+        reportNum: args.report,
+        inputPath: payloadPath,
+      });
+      console.log(`\nCover letter PDF (Playwright): ${payload.output_path}`);
+    } else {
+      console.log(`\nCover letter PDF (reportlab): ${payload.output_path}`);
+    }
   } catch (err) {
     console.error("ERROR generating cover letter PDF:");
     console.error(err.message);
@@ -252,5 +431,5 @@ Usage:
   }
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isMain = isMainModule(import.meta.url);
 if (isMain) main();

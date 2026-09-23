@@ -376,7 +376,7 @@ function throws(label, fn, ...patterns) {
   }
 }
 
-// NOTE: cv-templates.mjs also has a node:test suite at test/cv-templates.test.mjs
-// (singular). Nothing runs it: test-all.mjs discovers tests/**/*.test.mjs only,
-// CI runs `node test-all.mjs --quick`, and root package.json declares no `test`
-// script. Worth its own issue; not fixed here.
+// NOTE: cv-templates.mjs also has a node:test suite at tests/cv-templates.test.mjs
+// (singular), which IS discovered by test-all.mjs; the legacy pre-migration
+// copy that once sat at test/cv-templates.test.mjs was removed with the rest
+// of the orphaned root/test suites.

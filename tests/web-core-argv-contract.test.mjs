@@ -14,7 +14,7 @@
 // real script.
 import { pass, fail, ROOT, NODE, rmSync, walkFiles } from './helpers.mjs';
 import { spawnSync } from 'child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, relative, sep } from 'path';
 
@@ -50,11 +50,16 @@ const CALL_SITES = [
     probe: 'run',
   },
   {
-    source: 'web/src/app/api/status/route.ts',
+    source: 'web/src/lib/core/status-update.ts',
     script: 'set-status.mjs',
-    // The route builds ['--row', row, canon, '--source', 'web', '--json'];
-    // row 1 and Responded are the fixture tracker's row and a canonical state.
-    args: ['--row', '1', 'Responded', '--source', 'web', '--json'],
+    // runStatusUpdate builds ['--row', n, status, '--source', 'web', '--json',
+    // ...('--note', note, '--on', on)] for the set-status branch. row 1,
+    // Responded, and the fixture note/date are all fixture-safe values.
+    args: ['--row', '1', 'Responded', '--source', 'web', '--json', '--note', 'fixture', '--on', '2026-01-01'],
+    // --feedback/--stage are literals of the OUTCOME branch (outcome.mjs takes
+    // them; set-status.mjs rejects them), assembled at runtime from the request
+    // body — not probeable through this set-status argv.
+    runtimeFlags: ['--feedback', '--stage'],
     probe: 'run',
   },
   {
@@ -84,7 +89,121 @@ const CALL_SITES = [
     args: [],
     probe: 'none',
   },
+  // runCoreScript() callers — argv is assembled at runtime from the request
+  // body and dispatched through web/src/lib/core/run-core-script.ts, so there
+  // is no probeable root-script argv. Listed so the enumeration below stays
+  // complete and any new flag literal lands here via flagDrift.
+  {
+    source: 'web/src/app/api/plugins/enrich-linkedin-jobs/route.ts',
+    script: null,
+    args: ['--apply-only'],
+    probe: 'none',
+  },
+  {
+    source: 'web/src/app/api/plugins/run-linkedin-alerts/route.ts',
+    script: null,
+    args: [],
+    probe: 'none',
+  },
+  {
+    source: 'web/src/app/api/portals/run-apify/route.ts',
+    script: null,
+    args: ['--company'],
+    probe: 'none',
+  },
+  {
+    source: 'web/src/app/api/portals/run-scan/route.ts',
+    script: null,
+    args: [],
+    probe: 'none',
+  },
+  {
+    source: 'web/src/lib/core/run-core-script.ts',
+    script: null,
+    args: [],
+    probe: 'none',
+  },
 ];
+
+/**
+ * Verify the static half of the contract against a checkout root.
+ *
+ * `tests/` is deliberately shipped by the updater while `web/` is not. The
+ * dynamic argv probes above still apply to that core-only install, but there
+ * are no web call sites to inspect there. Treat that absence as a scoped skip;
+ * if web/ is present, keep every source-consistency assertion strict.
+ *
+ * @param {{root?: string, reportPass?: (message: string) => void, reportFail?: (message: string) => void}} options
+ * @returns {{skipped: boolean}}
+ */
+export function verifyWebStaticSources({ root = ROOT, reportPass = pass, reportFail = fail } = {}) {
+  // web/ ships as its own release-please component and is excluded from
+  // SYSTEM_PATHS wholesale, so `update-system.mjs apply` never installs it.
+  // An install created that way has no web/ at all, and the checks below read
+  // the web sources unconditionally: readFileSync threw ENOENT and took the
+  // whole suite with it, so the argv probes above — which need only the core
+  // scripts and are the point of this file — reported nothing either.
+  const webRoot = join(root, 'web');
+  if (!existsSync(webRoot)) {
+    reportPass('web/ is not present in this checkout — skipping static argv-source contract');
+    return { skipped: true };
+  }
+  const webSrcRoot = join(webRoot, 'src');
+  if (!existsSync(webSrcRoot)) {
+    reportFail('web/ exists but web/src is missing — cannot verify the static argv-source contract');
+    return { skipped: false };
+  }
+
+  // Every `"--flag"` literal in a listed source must appear in its argv here.
+  // This covers the argv literals the routes write inline; it does NOT cover a
+  // flag assembled at runtime from a variable or a template string.
+  // A listed source that doesn't exist in this checkout (an upstream route the
+  // web checkout predates) is reported as a skip, not fatal — one stale entry
+  // must not kill the remaining probes or leave the suite permanently red.
+  const missing = CALL_SITES.filter((s) => !existsSync(join(root, s.source)));
+  if (missing.length > 0) {
+    reportPass(`skipping ${missing.length} listed source(s) not in this checkout: ${missing.map((m) => m.source).join(', ')}`);
+  }
+  const flagDrift = [];
+  for (const site of CALL_SITES) {
+    // Sources reported as missing above are skipped here — nothing to scan.
+    if (!existsSync(join(root, site.source))) continue;
+    const src = readFileSync(join(root, site.source), 'utf-8');
+    const literals = [...new Set([...src.matchAll(/"(--[a-z][a-z0-9-]*)"/g)].map((m) => m[1]))];
+    const runtime = site.runtimeFlags ?? [];
+    for (const flag of literals) {
+      if (runtime.includes(flag)) continue; // runtime-assembled, not probeable here
+      if (!site.args.includes(flag)) flagDrift.push(`${site.source} passes ${flag}, which no probe above covers`);
+    }
+  }
+  if (flagDrift.length === 0) reportPass('every --flag literal in the listed web sources is covered by a probe');
+  else for (const d of flagDrift) reportFail(d);
+
+  // Every web source that spawns a core script must be listed. A new route is
+  // a new argv nobody has put to the script. runCoreScript( (the web layer's
+  // canonical spawn helper, run-core-script.ts) and spawnSync( both delegate to
+  // the core, so they count the same as a direct spawn.
+  const spawners = walkFiles(webSrcRoot, /\.(ts|tsx|mjs)$/)
+    .map((f) => relative(root, f).split(sep).join('/'))
+    .filter((rel) => {
+      const src = readFileSync(join(root, rel), 'utf-8');
+      const referencesCore = /\b(rootScript|runCoreScript)\(/.test(src);
+      const spawnsDirectly = /\b(execFile|spawnSync)\(|\bspawn\(/.test(src);
+      // runCoreScript( (the web layer's canonical spawn helper) delegates to the
+      // core the same way a direct spawn does, so it counts too.
+      return referencesCore && (spawnsDirectly || /\brunCoreScript\(/.test(src));
+    });
+  const listed = new Set(CALL_SITES.filter((s) => existsSync(join(root, s.source))).map((s) => s.source));
+  const unlisted = spawners.filter((f) => !listed.has(f));
+  if (unlisted.length === 0) reportPass(`all ${spawners.length} web sources that spawn a core script are listed here`);
+  else reportFail(`web sources spawning a core script with no argv probe: ${unlisted.join(', ')}`);
+
+  const stale = [...listed].filter((f) => !spawners.includes(f));
+  if (stale.length === 0) reportPass('no stale entries — every listed source still spawns a core script');
+  else reportFail(`listed sources that no longer spawn a core script: ${stale.join(', ')}`);
+
+  return { skipped: false };
+}
 
 const sandbox = mkdtempSync(join(tmpdir(), 'co-web-argv-'));
 try {
@@ -148,41 +267,12 @@ try {
   }
 
   // --- static half ---------------------------------------------------------
-  // The probes above test the argv as transcribed into this file. These two
+  // The probes above test the argv as transcribed into this file. The static
   // checks tie that transcription back to the sources, so a flag added to a
   // web route — or a whole new route that spawns a script — cannot land
-  // without going through a probe.
-
-  // Every `"--flag"` literal in a listed source must appear in its argv here.
-  // This covers the argv literals the routes write inline; it does NOT cover a
-  // flag assembled at runtime from a variable or a template string.
-  const flagDrift = [];
-  for (const site of CALL_SITES) {
-    const src = readFileSync(join(ROOT, site.source), 'utf-8');
-    const literals = [...new Set([...src.matchAll(/"(--[a-z][a-z0-9-]*)"/g)].map((m) => m[1]))];
-    for (const flag of literals) {
-      if (!site.args.includes(flag)) flagDrift.push(`${site.source} passes ${flag}, which no probe above covers`);
-    }
-  }
-  if (flagDrift.length === 0) pass('every --flag literal in the listed web sources is covered by a probe');
-  else for (const d of flagDrift) fail(d);
-
-  // Every web source that spawns a core script must be listed. A new route is
-  // a new argv nobody has put to the script.
-  const spawners = walkFiles(join(ROOT, 'web', 'src'), /\.(ts|tsx|mjs)$/)
-    .map((f) => relative(ROOT, f).split(sep).join('/'))
-    .filter((rel) => {
-      const src = readFileSync(join(ROOT, rel), 'utf-8');
-      return /\brootScript\(/.test(src) && /\b(execFile|spawn)\(/.test(src);
-    });
-  const listed = new Set(CALL_SITES.map((s) => s.source));
-  const unlisted = spawners.filter((f) => !listed.has(f));
-  if (unlisted.length === 0) pass(`all ${spawners.length} web sources that spawn a core script are listed here`);
-  else fail(`web sources spawning a core script with no argv probe: ${unlisted.join(', ')}`);
-
-  const stale = [...listed].filter((f) => !spawners.includes(f));
-  if (stale.length === 0) pass('no stale entries — every listed source still spawns a core script');
-  else fail(`listed sources that no longer spawn a core script: ${stale.join(', ')}`);
+  // without going through a probe. Extracted into verifyWebStaticSources()
+  // so a core-only install (tests/ without web/) can run it too (#4165).
+  verifyWebStaticSources();
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
 }

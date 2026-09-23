@@ -54,6 +54,22 @@ copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs')
 // it the copy dies with ERR_MODULE_NOT_FOUND before parsing an argument.
 mkdirSync(join(sandbox, 'lib'), { recursive: true });
 copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
+// ...and its JSON render path (renderJsonToPdf) imports the CV patch layer —
+// pinned-experience → enrich-content → humanize, plus the jd-fit/align pair it
+// reads on --report and jd-skill-gap behind that. Copy them too or the copy
+// dies with ERR_MODULE_NOT_FOUND before it can parse any --max-pages arg.
+for (const dep of [
+  'cv-pinned-experience.mjs',
+  'cv-enrich-content.mjs',
+  'cv-humanize.mjs',
+  'cv-jd-fit.mjs',
+  'cv-jd-align.mjs',
+  'jd-skill-gap.mjs',
+  // jd-skill-gap.mjs imports its own sibling extractor — one more level down.
+  'skill-extract.mjs',
+]) {
+  copyFileSync(join(ROOT, dep), join(sandbox, dep));
+}
 
 // theme-style.mjs and tracker-utils.mjs both `import * as yaml from 'js-yaml'`,
 // which resolves by walking up into the repo's node_modules -- from the
