@@ -79,10 +79,22 @@ jobs:
               ].join('\n'),
             });
 
-            try {
-              await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ['scan-output'] });
-            } catch (e) {
-              core.info(`label add skipped: ${e.message}`);
+            // The scan-output label is what brings this issue to the maintainers' batch review. Nothing closes it
+            // any more, so a missing label would leave personal data open and unseen: retry once, then fail the
+            // run so it shows red.
+            let labeled = false, lastError = null;
+            for (let attempt = 1; attempt <= 2 && !labeled; attempt++) {
+              try {
+                await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ['scan-output'] });
+                labeled = true;
+              } catch (e) {
+                lastError = e;
+                if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 5000));
+              }
+            }
+            if (!labeled) {
+              core.setFailed(`Could not label #${issue_number} as scan-output (${lastError?.message}): it will not reach the maintainers' review. Label it by hand.`);
+              return;
             }
 
             core.info(`Labeled #${issue_number} as scan-output: a maintainer closes it from the batch review.`);
