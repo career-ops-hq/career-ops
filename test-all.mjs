@@ -11448,6 +11448,34 @@ try {
     fail(`find.mjs fuzzy role lookup wrong: ${JSON.stringify(byFuzzy)}`);
   }
 
+  // A report gets BOTH a cv row and a cover row once generate-pdf --kind lands.
+  // The map is report# -> path, so a last-row-wins loop hands the cover letter
+  // back as the report's PDF and marks the tracker ✅ for a CV that may not
+  // exist. Cover rows are skipped; a legacy row with no kind column is a cv.
+  const kindIndex = parsePdfIndex(
+    '# report\tpdf\thtml\tformat\tdate\tkind\n' +
+    '030\toutput/cv-acme.pdf\toutput/cv-acme.html\tats\t2026-06-01\tcv\n' +
+    '030\toutput/cover-acme.pdf\toutput/cover-acme.html\tats\t2026-06-02\tcover\n' +
+    '031\toutput/cover-globex.pdf\toutput/cover-globex.html\tats\t2026-06-03\tcover\n' +
+    '032\toutput/cv-initech.pdf\toutput/cv-initech.html\tats\t2026-06-04\n');
+  if (kindIndex.get('30') === 'output/cv-acme.pdf') {
+    pass('find.mjs keeps the cv row when a cover row for the same report is written later');
+  } else {
+    fail(`find.mjs pdf-index gave ${kindIndex.get('30')} for a report whose cover was written after its cv`);
+  }
+  if (!kindIndex.has('31')) {
+    pass('find.mjs omits a report that has only a cover letter and no CV');
+  } else {
+    fail(`find.mjs pdf-index surfaced a cover-only report as a CV: ${kindIndex.get('31')}`);
+  }
+  // Control: without this, both assertions above also pass on a parser that
+  // drops every row.
+  if (kindIndex.get('32') === 'output/cv-initech.pdf') {
+    pass('find.mjs treats a legacy row with no kind column as a cv (control)');
+  } else {
+    fail(`find.mjs dropped a legacy kind-less pdf-index row: ${kindIndex.get('32')}`);
+  }
+
   if (findMatches(rows, 'no-such-company', pdfIndex).length === 0) {
     pass('find.mjs returns zero matches cleanly for an unknown query');
   } else {

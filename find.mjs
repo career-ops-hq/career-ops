@@ -79,9 +79,14 @@ export function parseTrackerRows(text) {
 }
 
 /**
- * Parse data/pdf-index.tsv (report \t pdf \t html \t format \t date) into a
- * normalized-report# → PDF-path map. Comment lines and rows generated without
- * a report number are skipped.
+ * Parse data/pdf-index.tsv (report \t pdf \t html \t format \t date \t kind)
+ * into a normalized-report# → CV-path map. Comment lines and rows generated
+ * without a report number are skipped.
+ *
+ * Cover-letter rows are skipped too: a report carries one row per artifact
+ * kind, and this map holds one path per report, so a cover written after its
+ * CV would otherwise win and be handed back as the report's CV. A row with no
+ * kind column predates --kind and is a CV.
  *
  * @param {string} text - Full contents of pdf-index.tsv.
  * @returns {Map<string,string>}
@@ -92,6 +97,7 @@ export function parsePdfIndex(text) {
     if (!line.trim() || line.startsWith('#')) continue;
     const fields = line.split('\t');
     if (!fields[0]?.trim() || !fields[1]) continue;
+    if ((fields[5] ?? '').trim() === 'cover') continue;
     map.set(normNum(fields[0]), fields[1]);
   }
   return map;

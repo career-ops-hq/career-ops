@@ -510,12 +510,16 @@ try {
   // The other order is NOT an error: the last occurrence carries a value, so that
   // value is the intent. Without this, "reject any bare occurrence" would look
   // identical to "clear on bare", and only one of them is right.
+  //
+  // The run has to SUCCEED, not merely avoid the validation message: a render
+  // that died for any other reason also has no "Invalid --report" in its
+  // output, so an absence check alone passes on a build that renders nothing.
   for (const [label, args] of [
     ['--report --report=7', ['a.html', 'out/ord-c.pdf', '--report', '--report=7']],
     ['--kind --kind=cover', ['a.html', 'out/ord-d.pdf', '--kind', '--kind=cover']],
   ]) {
     const r = run(args);
-    if (!/Invalid --(report|kind)/i.test(r.output)) {
+    if (r.status === 0 && !/Invalid --(report|kind)/i.test(r.output)) {
       pass(`control: a valued flag after a bare one is accepted (${label})`);
     } else {
       fail(`${label} was wrongly rejected: status=${r.status}\n${r.output.trim()}`);
