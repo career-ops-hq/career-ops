@@ -169,8 +169,12 @@ function buildRecipientBlock(letter) {
       : [];
   // Trim before filtering: `filter(Boolean)` alone keeps "   ", which renders as
   // a blank line inside the wrapper rather than as the absent field it is.
+  // Falsy first, so 0 / "" / null drop out as they always have, THEN coerce.
+  // Coercing first would turn 0 into the string "0" and keep it as an address
+  // line; leaving a truthy non-string uncoerced crashes the compare below.
   const lines = [r.name, r.title, r.company, ...addressLines]
-    .map((v) => (typeof v === "string" ? v.trim() : v))
+    .filter(Boolean)
+    .map((v) => String(v).trim())
     .filter(Boolean);
   if (!lines.length) return "";
 
@@ -182,13 +186,31 @@ function buildRecipientBlock(letter) {
   // Appended only when the recipient did not already supply them, compared
   // case-insensitively against every line including the address, so a recipient
   // that names its own company keeps exactly one copy.
-  const seen = new Set(lines.map((l) => l.toLowerCase()));
+  // Compared by comma-delimited component, not by whole line. An address line
+  // is routinely "123 Main St, Boston, MA" while letter.city is "Boston, MA":
+  // the lines differ, so a whole-line compare appends the city a second time,
+  // which is the duplication this whole change exists to stop.
+  const components = (v) =>
+    String(v)
+      .split(",")
+      .map((part) => part.toLowerCase().replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+
+  /** Does `hay` contain `needle` as a contiguous run of components? */
+  const containsRun = (hay, needle) => {
+    if (!needle.length || needle.length > hay.length) return false;
+    for (let i = 0; i + needle.length <= hay.length; i++) {
+      if (needle.every((n, j) => hay[i + j] === n)) return true;
+    }
+    return false;
+  };
+
   for (const extra of [letter.company, letter.city]) {
     const v = typeof extra === "string" ? extra.trim() : "";
-    if (v && !seen.has(v.toLowerCase())) {
-      lines.push(v);
-      seen.add(v.toLowerCase());
-    }
+    if (!v) continue;
+    const want = components(v);
+    if (lines.some((l) => containsRun(components(l), want))) continue;
+    lines.push(v);
   }
 
   const escaped = lines.map(escapeHtml);

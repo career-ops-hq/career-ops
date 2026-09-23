@@ -132,3 +132,33 @@ test('a recipient carrying its own company does not get it twice', () => {
   assert.equal((html.match(/Example Corp/g) || []).length, 1);
   assert.equal((html.match(/Boston, MA/g) || []).length, 1);
 });
+
+test('a city already inside an address line is not appended again', () => {
+  // The dedup compared whole lines, so "123 Main St, Boston, MA" did not match
+  // the city "Boston, MA" and the city landed in the block a second time.
+  const html = buildHtml(payload({
+    recipient: { name: 'Jane', address_lines: ['123 Main St, Boston, MA'] },
+  }), template());
+
+  assert.equal((html.match(/Boston, MA/g) || []).length, 1, 'the city was duplicated');
+  assert.equal((html.match(/Example Corp/g) || []).length, 1);
+});
+
+test('a non-string address line does not crash the render', () => {
+  // filter(Boolean) kept a truthy non-string, and the case-insensitive compare
+  // then called toLowerCase on it.
+  const html = buildHtml(payload({
+    recipient: { name: 'Jane', address_lines: [42, 'Boston, MA'] },
+  }), template());
+
+  assert.ok(html.includes('42'), 'a numeric line should still render');
+  assert.equal((html.match(/Boston, MA/g) || []).length, 1);
+});
+
+test('a falsy address line is still dropped', () => {
+  const html = buildHtml(payload({
+    recipient: { name: 'Jane', address_lines: [0, '', null, 'Boston, MA'] },
+  }), template());
+  assert.ok(!/<div>0<\/div>/.test(html), '0 is not an address line');
+  assert.equal((html.match(/Boston, MA/g) || []).length, 1);
+});
