@@ -67,10 +67,13 @@ const FIELDS = [
 
 const PDF_REL = "output/cv-acme-corp-2026-01-10.pdf";
 const HTML_REL = "output/cv-acme-corp-2026-01-10.html";
+const COVER_PDF_REL = "output/acme-corp-staff-engineer-cover.pdf";
+const COVER_HTML_REL = "output/acme-corp-staff-engineer-cover.html";
+const MANIFEST_HEADER = "# report\tpdf\thtml\tformat\tdate — written by generate-pdf.mjs, do not edit\n";
 
 /** A throwaway workspace holding one tailored CV and the manifest row that
  *  generate-pdf.mjs writes for it, redirected through CAREER_OPS_ROOT. */
-async function withWorkspace(fn, { html = true, manifest = true, outsideHtml = false } = {}) {
+async function withWorkspace(fn, { html = true, manifest = true, outsideHtml = false, coverRow = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "prefill-cv-"));
   mkdirSync(join(root, "output"), { recursive: true });
   mkdirSync(join(root, "data"), { recursive: true });
@@ -87,8 +90,19 @@ async function withWorkspace(fn, { html = true, manifest = true, outsideHtml = f
   if (manifest) {
     writeFileSync(
       join(root, "data", "pdf-index.tsv"),
-      "# report\tpdf\thtml\tformat\tdate — written by generate-pdf.mjs, do not edit\n" +
-        `12\t${PDF_REL}\t${htmlColumn}\tletter\t2026-01-10\n`,
+      MANIFEST_HEADER + `12\t${PDF_REL}\t${htmlColumn}\tletter\t2026-01-10\n`,
+    );
+  }
+  // What the manifest holds once `cover` mode renders for the same report.
+  // updatePDFManifest drops every row carrying that report number, so the CV's
+  // row is gone and only the cover letter's survives. Written last, because
+  // that's the order the eviction happens in.
+  if (coverRow) {
+    writeFileSync(join(root, COVER_PDF_REL), "stub-pdf-bytes");
+    writeFileSync(join(root, COVER_HTML_REL), "<html>cover letter</html>");
+    writeFileSync(
+      join(root, "data", "pdf-index.tsv"),
+      MANIFEST_HEADER + `12\t${COVER_PDF_REL}\t${COVER_HTML_REL}\tletter\t2026-01-11\n`,
     );
   }
   const prev = process.env.CAREER_OPS_ROOT;
@@ -147,6 +161,21 @@ test("applyCvSource falls back to the PDF when no rendering survives", async () 
       assert.equal(applyCvSource(root, PDF_REL), PDF_REL);
     },
     { html: false, manifest: false },
+  );
+});
+
+test("a cover letter that took over the report number never becomes the CV source", async () => {
+  // Rendering a cover letter for report 12 evicts the CV's manifest row. A
+  // report-number lookup would then answer with the cover letter, and the
+  // planner would draft experience answers off a letter. Keying on the `pdf`
+  // column finds no row and falls back to the CV's own rendering.
+  await withWorkspace(
+    async (root) => {
+      const source = applyCvSource(root, PDF_REL);
+      assert.equal(source, HTML_REL);
+      assert.ok(!source.includes("cover"), "the planner was handed the cover letter");
+    },
+    { coverRow: true },
   );
 });
 

@@ -6,13 +6,16 @@ import path from "node:path";
  * drafting the structured answers reads the document the reviewer is holding.
  *
  * Resolution goes through the `pdf` column of `data/pdf-index.tsv`, instead of a
- * second match over `output/`. generate-pdf.mjs writes one row per rendered
- * artifact and drops any existing row naming the same PDF, so a PDF path
- * identifies exactly one row and its `html` column is that PDF's own source.
+ * second match over `output/`. generate-pdf.mjs drops any existing row naming
+ * the same PDF, so a PDF path identifies at most one row. That row's `html`
+ * column is that PDF's own source.
+ *
  * Matching the company or the report number again would be a second, independent
- * lookup that can disagree with the first: by the company, because two roles at
- * one employer share it; by the report number, because a cover letter for the
- * same report is its own row.
+ * lookup that can disagree with the first. By the company, because two roles at
+ * one employer share it. By the report number, because updatePDFManifest also
+ * drops every row carrying the report number it is given. The manifest keeps at
+ * most one row per report. A cover letter rendered for that report evicts the
+ * CV's row and answers in its place.
  *
  * Falls back to the PDF itself when no rendering survives. A missing rendering
  * still leaves that PDF going into the form, so name it. Treating it as an
