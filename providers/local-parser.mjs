@@ -144,14 +144,20 @@ const MAX_VALID_EPOCH_MS = 8_640_000_000_000_000;
 
 // NaN-safe coercion for an optional parser-supplied posting date. Accepts an
 // epoch-milliseconds number or a Date.parse-able string; an unparseable string,
-// a non-finite or out-of-range number, or an absent field yields undefined, so
-// the row is kept without a date rather than carrying a wrong one. `|| undefined`
-// is avoided on purpose — it would also drop a legitimate epoch 0.
+// a non-finite or out-of-range number, a non-string/non-number value, or an
+// absent field yields undefined, so the row is kept without a date rather than
+// carrying a wrong one. `|| undefined` is avoided on purpose — it would also
+// drop a legitimate epoch 0. The `typeof value !== 'string'` guard is load-
+// bearing, not redundant with the `!value` check below it: a truthy object
+// (e.g. one JSON.parse produces from `{"toString":null}`) reaching Date.parse()
+// throws TypeError (ToPrimitive can't call a non-callable toString and
+// Object.prototype.valueOf isn't primitive), which is not caught anywhere
+// between here and the parser's fetch() call.
 function toEpochMs(value) {
   if (typeof value === 'number') {
     return Number.isFinite(value) && Math.abs(value) <= MAX_VALID_EPOCH_MS ? value : undefined;
   }
-  if (!value) return undefined;
+  if (typeof value !== 'string' || !value) return undefined;
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? undefined : parsed;
 }
