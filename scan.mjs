@@ -344,8 +344,13 @@ export function matchedTitleKeywords(title, titleFilter) {
 // ── Location filter ─────────────────────────────────────────────────
 // Optional. If `location_filter` is absent from portals.yml, all locations pass.
 // Semantics (case-insensitive substring, in this order):
-//   - Empty / whitespace-only / non-string location → pass (don't penalize
-//     missing or malformed provider data)
+//   - Empty / whitespace-only / non-string location AND no URL hint → pass
+//     (don't penalize missing or malformed provider data), UNLESS
+//     `location_filter.strict: true` and a restricting tier (`allow`, `block`,
+//     or `block_hard`) is configured — then reject, because a location-
+//     restricted sweep against a provider that does not return locations
+//     (iCIMS) otherwise silently inverts into "everything, plus matches from
+//     everywhere else" (#3276). Opt-in and default-unchanged.
 //   - `block_hard` matches → reject (the only tier `always_allow` cannot
 //     override; for country-level terms that are never a false rejection)
 //   - `always_allow` matches → pass (takes precedence over `block` — lets a
@@ -570,12 +575,20 @@ export function buildLocationFilter(locationFilter) {
   const allow = compileLocationKeywordList(locationFilter.allow);
   const block = compileLocationKeywordList(locationFilter.block);
   const blockHard = compileLocationKeywordList(locationFilter.block_hard);
+  // Opt-in: fail closed when there is nothing to judge on. Only meaningful when
+  // a restricting tier is configured — `{ strict: true }` alone restricts
+  // nothing and must not reject every location-less posting (#3276).
+  const strict = locationFilter.strict === true
+    && (allow.length > 0 || block.length > 0 || blockHard.length > 0);
 
   return (location, url, title) => {
     const lower = typeof location === 'string' ? location.trim().toLowerCase() : '';
     const hint = locationHintFromUrl(url);
-    // Nothing to judge on either field → pass (don't penalize missing data).
-    if (lower === '' && hint === '') return true;
+    // Nothing to judge on either field → pass (don't penalize missing data),
+    // unless the config opted into strict mode: a location-restricted sweep
+    // against a provider that never returns a location would otherwise let
+    // every out-of-region posting through (#3276).
+    if (lower === '' && hint === '') return !strict;
     const matches = (m) => (lower !== '' && m(lower)) || (hint !== '' && m(hint));
     // `block_hard` is the ONE tier always_allow cannot override. It exists because
     // a European city name can be a whole word inside a non-European location, so
@@ -2572,6 +2585,75 @@ export function loadBlacklist(filePath = BLACKLIST_PATH) {
   return parseBlacklist(readFileSync(filePath, 'utf-8'));
 }
 
+/**
+ * Parse data-static/aggregator-domains.txt into a Map keyed by domain.
+ * Format: `domain.com # reason`
+ * Skips blank lines and lines starting with `#`.
+ *
+ * @param {string} text - Raw data-static/aggregator-domains.txt content.
+ * @returns {Map<string, {domain: string, reason: string}>}
+ */
+export function parseAggregatorDomains(text) {
+  const entries = new Map();
+  for (let line of String(text ?? '').replace(/\r/g, '').split('\n')) {
+    line = line.trim();
+    if (!line || line.startsWith('#')) continue;
+    const hashIdx = line.indexOf('#');
+    let domain = line;
+    let reason = '';
+    if (hashIdx !== -1) {
+      domain = line.slice(0, hashIdx);
+      reason = line.slice(hashIdx + 1);
+    }
+    domain = domain.trim().toLowerCase();
+    reason = reason.trim();
+    if (!domain) continue;
+    entries.set(domain, { domain, reason });
+  }
+  return entries;
+}
+
+export const AGGREGATOR_DOMAINS_PATH = process.env.CAREER_OPS_AGGREGATOR_DOMAINS || path.join(CODE_ROOT, 'data-static/aggregator-domains.txt');
+
+/**
+ * Load data-static/aggregator-domains.txt dataset.
+ *
+ * @param {string} [filePath] - Override for tests.
+ * @returns {Map<string, {domain: string, reason: string}>}
+ */
+export function loadAggregatorDomains(filePath = AGGREGATOR_DOMAINS_PATH) {
+  if (!existsSync(filePath)) return new Map();
+  return parseAggregatorDomains(readFileSync(filePath, 'utf-8'));
+}
+
+/**
+ * Check if an offer's URL hostname matches a known aggregator domain.
+ * Uses the same `new URL(offer.url).hostname` pattern as `extractCareersUrlDomain()`.
+ *
+ * @param {{url: string}} offer - Offer object with a url property.
+ * @param {Map<string, {domain: string, reason: string}>} [domainsMap] - Optional map of aggregator domains.
+ * @returns {{domain: string, reason: string}|null} Matched entry or null.
+ */
+export function checkAggregatorRepost(offer, domainsMap = loadAggregatorDomains()) {
+  if (!offer || !offer.url || !domainsMap || domainsMap.size === 0) return null;
+  let hostname;
+  try {
+    hostname = new URL(offer.url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  if (hostname.endsWith('.')) {
+    hostname = hostname.slice(0, -1);
+  }
+  if (!hostname) return null;
+  for (const [domain, entry] of domainsMap) {
+    if (hostname === domain || hostname.endsWith('.' + domain)) {
+      return entry;
+    }
+  }
+  return null;
+}
+
 // ── Scan-run persistence (#1604) ────────────────────────────────────
 
 // Anchored for the same reason (#3510), and with a reader to agree with:
@@ -3611,6 +3693,25 @@ async function main() {
       console.log(`    vs ${row.url}`);
     }
     console.log(`  If one side is an agency, apply through ONE channel only — a double submission burns both (#1596).`);
+  }
+  const aggregatorMap = loadAggregatorDomains();
+  if (aggregatorMap.size > 0 && verifiedOffers.length > 0) {
+    const aggregatorMatches = [];
+    for (const offer of verifiedOffers) {
+      const match = checkAggregatorRepost(offer, aggregatorMap);
+      if (match) {
+        aggregatorMatches.push({ offer, match });
+      }
+    }
+    if (aggregatorMatches.length > 0) {
+      console.log(`\n⚠️  Possible aggregator reposts (listed on a known aggregator domain) — warn only, nothing was dropped:`);
+      for (const { offer, match } of aggregatorMatches) {
+        console.log(`  - ${offer.company} — ${offer.title}`);
+        console.log(`    ${offer.url}`);
+        console.log(`    (${match.domain}: ${match.reason || 'known aggregator'})`);
+      }
+      console.log(`  Aggregators often scrape primary boards — consider applying directly on the employer's career site (#3577).`);
+    }
   }
   // #3438. A declared field that never appeared on a single posting means
   // the provider does not supply it: the whitelist silently passed everything

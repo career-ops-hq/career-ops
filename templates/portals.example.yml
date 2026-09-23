@@ -100,6 +100,15 @@
 # Do NOT copy your whole `block` list here: a city in block_hard would kill
 # "Stockholm or London" postings, which is exactly what always_allow prevents.
 #
+# `strict: true` (optional) fails CLOSED when a posting has no location at all
+# (empty structured field AND no city in the URL). The default passes such a
+# posting — "don't penalize missing provider data" — which is right for a
+# broad sweep. But a location-*restricted* sweep over a provider that never
+# returns a location (iCIMS is the common case) then lets every out-of-region
+# posting through: the "only these places" allow list is never consulted.
+# Turn strict on for those sweeps. It only bites when a restricting tier
+# (allow / block / block_hard) is set; `strict: true` alone restricts nothing.
+#
 # Example below targets US-based remote + a couple of US metros, blocking
 # common foreign hubs. Customize to your geography.
 
@@ -108,6 +117,7 @@
 #   always_allow:
 #     - "United States"   # also admits City, ST homonyms (Dublin, OH) via USPS states
 #     - "New York"
+#   # strict: true       # reject postings with no location — see note above
 #   allow:
 #     - "Remote"
 #     - "United States"

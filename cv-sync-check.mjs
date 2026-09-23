@@ -15,9 +15,27 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
+
+// ── CLI flags + help ────────────────────────────────────────────────
+//
+// docs/SCRIPTS.md lists `node cv-sync-check.mjs` as a runnable command, but the
+// script read no arguments at all: a mistyped flag was ignored and the checks
+// ran anyway, so `--hlep` looked like a successful run of whatever the caller
+// meant (#3565). KNOWN_FLAGS is exactly --help/-h because that is every flag
+// this file parses. Unrecognized flags exit 1 naming the flag; --help/-h print
+// USAGE and exit 0.
+
+const KNOWN_FLAGS = ['--help', '-h'];
+
+const USAGE = `Usage:
+  node cv-sync-check.mjs            # run the cv.md / profile.yml / prompt checks
+  node cv-sync-check.mjs --help|-h  # print this usage block and exit`;
+
+validateFlags(process.argv.slice(2), KNOWN_FLAGS, USAGE);
 
 const warnings = [];
 const errors = [];

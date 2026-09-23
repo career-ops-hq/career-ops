@@ -7900,6 +7900,9 @@ try {
     fail('remote-title rescue changed behavior for non-remote or malformed titles');
   }
 
+  // location_filter.strict coverage lives in tests/location-filter-strict.test.mjs.
+  // Keep this central harness focused on broad scan integration behavior.
+
   if (
     shouldDedupScanHistoryRow({ firstSeen: '2026-06-01', status: 'added' }, { recheckAfterDays: 30, today: '2026-06-10' }) === true &&
     shouldDedupScanHistoryRow({ firstSeen: '2026-05-01', status: 'added' }, { recheckAfterDays: 30, today: '2026-06-10' }) === false &&
@@ -13265,7 +13268,11 @@ try {
     join(withMcp, '.claude', 'settings.json'),
     JSON.stringify({ mcpServers: { playwright: { command: 'npx', args: ['@playwright/mcp', '--headless'] } } }),
   );
-  const b = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', withMcp], doctorEnv) || '{}');
+  const b = JSON.parse(execFileSync(
+    NODE,
+    [join(ROOT, 'doctor.mjs'), '--json', '--target', withMcp],
+    { ...doctorEnv, cwd: withMcp, encoding: 'utf8' },
+  ) || '{}');
   if (Array.isArray(b.warnings) && !b.warnings.some((w) => /playwright mcp/i.test(w))) {
     pass('Playwright MCP configured → no warning');
   } else {
@@ -13280,7 +13287,11 @@ try {
     join(withLocalMcp, '.claude', 'settings.local.json'),
     JSON.stringify({ mcpServers: { browser: { command: 'npx', args: ['@playwright/mcp'] } } }),
   );
-  const c = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', withLocalMcp], doctorEnv) || '{}');
+  const c = JSON.parse(execFileSync(
+    NODE,
+    [join(ROOT, 'doctor.mjs'), '--json', '--target', withLocalMcp],
+    { ...doctorEnv, cwd: withLocalMcp, encoding: 'utf8' },
+  ) || '{}');
   if (Array.isArray(c.warnings) && !c.warnings.some((w) => /playwright mcp/i.test(w))) {
     pass('Playwright MCP configured via .claude/settings.local.json → no warning');
   } else {
@@ -16056,6 +16067,36 @@ try {
     } else {
       fail('the web _days key mapping no longer lines up with the core cadenceDefaults keys (#2369)');
     }
+    // The defaults are a CONSTANT, so an empty tracker must not withhold them.
+    // That is the first-run state (onboarding creates a header-only tracker),
+    // and it is precisely when the web form has no profile overrides to fall
+    // back on, so a missing baseline leaves every field blank (#4005).
+    const emptyEmitted = analyzeFromContent(
+      '# Applications Tracker\n\n| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n',
+      '',
+    );
+    const emptyDefaults = emptyEmitted?.cadenceDefaults;
+    // Value equality, not just shape. Returning CADENCE here (defaults PLUS the
+    // user's profile overrides) would satisfy every structural check while
+    // handing the form one of the user's own overrides as the baseline they
+    // would be reverting to, which is the #2369 mistake exactly.
+    const emptyOk = emptyDefaults && typeof emptyDefaults === 'object'
+      && Object.keys(emptyDefaults).length === cadKeys.length
+      && cadKeys.every((k) => Number.isInteger(emptyDefaults[k]) && emptyDefaults[k] === DEFAULT_CADENCE[k]);
+    if (emptyOk) {
+      pass('followup-cadence emits cadenceDefaults even when the tracker is empty (#4005)');
+    } else {
+      fail(`an empty tracker withholds cadenceDefaults, so a first-run web cadence form renders blank (#4005): ${JSON.stringify(emptyEmitted)}`);
+    }
+    // The error must SURVIVE alongside the defaults: stats.mjs short-circuits on
+    // result.error before it reads entries, so dropping it while adding the
+    // defaults would hand that caller a payload with no entries to iterate.
+    if (emptyEmitted?.error === 'No applications found in tracker.') {
+      pass('the empty-tracker payload still reports its error alongside the defaults (#4005)');
+    } else {
+      fail(`the empty-tracker error was lost, so callers that branch on result.error now fall through (#4005): ${JSON.stringify(emptyEmitted)}`);
+    }
     const webFollowups = join(ROOT, 'web', 'src', 'lib', 'followups.ts');
     if (existsSync(webFollowups)) {
       const webSrc = readFileSync(webFollowups, 'utf-8');
@@ -16303,13 +16344,13 @@ try {
         if (existsSync(join(ROOT, 'web', 'tests', 'lib'))) {
           fail('web/tests/lib contains no *.test.mjs — the #2185 unit suites are not being gated');
         }
-      } else if (run(NODE, ['--test', ...webUnits], { timeout: 180000 }) !== null) {
+      } else if (run(NODE, ['--experimental-strip-types', '--test', ...webUnits], { timeout: 180000 }) !== null) {
         pass('web pdf write-scope unit suites pass (#2185)');
       } else {
         // The signal distinguishes a timeout/kill from an assertion failure —
         // run()'s default 30s is short for six suites in one child process.
         const killed = lastRunFailure()?.signal;
-        fail(`web pdf write-scope unit suites failed${killed ? ` (killed: ${killed})` : ''} (run: node --test ${webUnits.join(' ')})`);
+        fail(`web pdf write-scope unit suites failed${killed ? ` (killed: ${killed})` : ''} (run: node --experimental-strip-types --test ${webUnits.join(' ')})`);
       }
 
       // Parity: everything web/package.json would run must be something we DO run.
@@ -18840,6 +18881,26 @@ try {
   }
 } catch (e) {
   fail(`jd-archive wiring check: ${e.message}`);
+}
+
+console.log('\n76. README sponsors section is generated from .github/sponsors.json');
+try {
+  // The Sponsors section of README.md (heading, intro, per-sponsor rows,
+  // independence note, placement between the community section and the value
+  // proposition) and the per-sponsor rows of every README.<lang>.md are
+  // rendered by .github/scripts/sponsors.mjs; a hand edit on either side is
+  // drift that the next --write would silently undo, so the two are pinned
+  // together here. The script also refuses a logo that is not a file inside
+  // docs/sponsors/ (no hotlinking), a non-https sponsor URL, and a sponsor URL
+  // carrying tracking parameters.
+  const r = spawnSync(process.execPath, [join(ROOT, '.github', 'scripts', 'sponsors.mjs'), '--check'], { cwd: ROOT, encoding: 'utf8' });
+  if (r.status === 0) {
+    pass('README.md and every README.<lang>.md match .github/sponsors.json');
+  } else {
+    fail(`README sponsors drifted or invalid: ${String(r.stderr || r.stdout).trim().split('\n')[0]}`);
+  }
+} catch (e) {
+  fail(`sponsors check: ${e.message}`);
 }
 
 await runDiscovered();
