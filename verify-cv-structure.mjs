@@ -243,7 +243,7 @@ export function isBreakExperienceHeading(company) {
   const isBreakLabel = (part) =>
     /^(?:(?:personal|planned|professional|extended)\s+)?(?:career\s+(?:break|pause|gap)|sabbatical)(?:\s+leave)?$/.test(part)
     || /^(?:(?:personal|planned|extended|paid|unpaid|military|disability|study|educational|administrative|garden|compassionate)\s+)?leave(?:\s+of\s+absence)?$/.test(part)
-    || /^(?:parental|maternity|paternity|medical|sick|family|caregiving|caregiver|bereavement)\s+leave(?:\s+of\s+absence)?$/.test(part);
+    || /^(?:parental|maternity|paternity|medical|family|caregiving|caregiver|bereavement)\s+leave(?:\s+of\s+absence)?$/.test(part);
   return parts.length > 0 && parts.every(isBreakLabel);
 }
 
@@ -609,12 +609,11 @@ function runSelfTest() {
       'Study Leave',
       'Parental Leave of Absence',
       'Medical Leave of Absence',
-      'Sick Leave',
       'Caregiver Leave of Absence',
       'Sabbatical Labs',
       'Career Breakthrough Inc',
     ].map((heading) => isBreakExperienceHeading(heading)),
-    [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false]);
+    [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false]);
 
   const employerWithBreakRole = [
     '## Experience',
