@@ -34,6 +34,9 @@ if (inputArgs[0] === 'posted-at') {
     { title: 'Epoch zero', url: 'https://example.com/h', postedAt: 0 },
     { title: 'Bad date', url: 'https://example.com/d', postedAt: 'not-a-date' },
     { title: 'No date', url: 'https://example.com/e' },
+    { title: 'Out-of-range epoch', url: 'https://example.com/l', postedAt: 1e20 },
+    { title: 'Wrong-shaped date', url: 'https://example.com/m', postedAt: { not: 'a date' } },
+    { title: 'Bad alias falls back to good one', url: 'https://example.com/n', postedAt: 'not-a-date', posted_at: '2026-08-01' },
   ]));
   process.exit(0);
 }

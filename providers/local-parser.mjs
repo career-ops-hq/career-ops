@@ -137,16 +137,35 @@ function normalizeLocation(value) {
   return String(value).trim();
 }
 
+// The ECMA-262 Date range: ±100,000,000 days from the epoch, in ms. A raw
+// number outside this range is finite but produces an Invalid Date, which
+// throws RangeError downstream (scan.mjs's postedAtIsoDate calls toISOString()).
+const MAX_VALID_EPOCH_MS = 8_640_000_000_000_000;
+
 // NaN-safe coercion for an optional parser-supplied posting date. Accepts an
 // epoch-milliseconds number or a Date.parse-able string; an unparseable string,
-// a non-finite number, or an absent field yields undefined, so the row is kept
-// without a date rather than carrying a wrong one. `|| undefined` is avoided on
-// purpose — it would also drop a legitimate epoch 0.
+// a non-finite or out-of-range number, or an absent field yields undefined, so
+// the row is kept without a date rather than carrying a wrong one. `|| undefined`
+// is avoided on purpose — it would also drop a legitimate epoch 0.
 function toEpochMs(value) {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && Math.abs(value) <= MAX_VALID_EPOCH_MS ? value : undefined;
+  }
   if (!value) return undefined;
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+// Tries each alias in order and keeps the first one that parses, so a garbage
+// value in an earlier-checked field (e.g. postedAt) doesn't hide a good date
+// in a later one (e.g. posted_at) — unlike a `??` chain, which stops at the
+// first non-nullish value regardless of whether it actually parses.
+function firstPostedAt(...candidates) {
+  for (const candidate of candidates) {
+    const parsed = toEpochMs(candidate);
+    if (parsed !== undefined) return parsed;
+  }
+  return undefined;
 }
 
 function normalizeParserJob(job, entry) {
@@ -166,9 +185,9 @@ function normalizeParserJob(job, entry) {
     location: normalizeLocation(job.location || job.locations),
   };
 
-  const postedAt = toEpochMs(
-    job.postedAt ?? job.posted_at ?? job.publishedAt ?? job.published_at
-      ?? job.published_date ?? job.datePosted ?? job.date_posted,
+  const postedAt = firstPostedAt(
+    job.postedAt, job.posted_at, job.publishedAt, job.published_at,
+    job.published_date, job.datePosted, job.date_posted,
   );
   if (postedAt !== undefined) out.postedAt = postedAt;
 

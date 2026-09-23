@@ -141,10 +141,10 @@ try {
   const postedJobs = await localParser.fetch(postedEntry);
   const byTitle = Object.fromEntries(postedJobs.map(j => [j.title, j]));
 
-  if (postedJobs.length === 11) {
+  if (postedJobs.length === 14) {
     pass('localParser.fetch() keeps rows whose postedAt is bad or absent');
   } else {
-    fail(`localParser.fetch() returned ${postedJobs.length} posted-at rows, expected 11`);
+    fail(`localParser.fetch() returned ${postedJobs.length} posted-at rows, expected 14`);
   }
 
   if (byTitle['ISO date']?.postedAt === Date.parse('2026-09-08')
@@ -170,6 +170,18 @@ try {
     pass('localParser.fetch() omits postedAt for an unparseable or missing date');
   } else {
     fail(`postedAt should be absent: ${JSON.stringify([byTitle['Bad date'], byTitle['No date']])}`);
+  }
+
+  if (!('postedAt' in byTitle['Out-of-range epoch']) && !('postedAt' in byTitle['Wrong-shaped date'])) {
+    pass('localParser.fetch() omits postedAt for an out-of-range epoch or a non-date-shaped value');
+  } else {
+    fail(`postedAt should be absent: ${JSON.stringify([byTitle['Out-of-range epoch'], byTitle['Wrong-shaped date']])}`);
+  }
+
+  if (byTitle['Bad alias falls back to good one']?.postedAt === Date.parse('2026-08-01')) {
+    pass('localParser.fetch() skips a bad earlier alias and uses the next one that parses');
+  } else {
+    fail(`alias fallback = ${JSON.stringify(byTitle['Bad alias falls back to good one'])}`);
   }
 
   // 8. Fetch - Invalid JSON
