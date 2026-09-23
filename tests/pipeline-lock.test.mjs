@@ -621,9 +621,12 @@ test('createLockWaitPolicy: the wait ceiling is the policy\'s own, so a caller n
   try {
     const lockDir = join(root, 'data', 'pipeline.md.lock');
     // retryMs far above the ceiling, so the jittered retry never wins the
-    // Math.min and backoffMs() reports the remaining ceiling itself.
+    // Math.min and backoffMs() reports the remaining ceiling itself. The
+    // per-holder deadline is pushed out past the ceiling for the same reason:
+    // backoffMs() is clamped by both, and this test reads the ceiling through
+    // it, so the other clamp has to stay out of the way.
     const policy = createLockWaitPolicy(lockDir, {
-      timeoutMs: 200, retryMs: 1_000_000, deadline: Date.now() + 200,
+      timeoutMs: 200, retryMs: 1_000_000, deadline: Date.now() + 60_000,
     });
 
     const remaining = policy.backoffMs();
@@ -722,4 +725,67 @@ test('no lock module re-derives the wait ceiling — the policy holds the only c
     + 'instead of letting createLockWaitPolicy do it — the duplicated invariant #3895 removed. '
     + 'A ceiling belongs to the policy; a copy of it stays correct only until someone edits one side',
   );
+});
+
+// ---------------------------------------------------------------------------
+// The backoff is clamped to the per-holder window too, not only to the ceiling
+// ---------------------------------------------------------------------------
+//
+// backoffMs() clamped the jittered retry against the ceiling alone, so a sleep
+// could run straight past the per-holder deadline. That deadline is the only
+// thing holderStillWedged() can fire on, and it is only ever checked at the top
+// of the loop, so a caller's timeoutMs was observed at whatever instant the
+// sleep happened to end. With retryMs above timeoutMs the overshoot is the
+// whole retry: a 150ms timeout waited five seconds.
+
+test('createLockWaitPolicy: the backoff never sleeps past the per-holder deadline', () => {
+  const root = fixtureRoot();
+  try {
+    const lockDir = join(root, 'data', 'pipeline.md.lock');
+    const now = Date.now();
+    // retryMs far above timeoutMs, and a ceiling far above both, so the only
+    // bound that can produce a correct answer here is the per-holder window.
+    const policy = createLockWaitPolicy(lockDir, {
+      timeoutMs: 100, retryMs: 5_000, deadline: now + 100, hardDeadline: now + 30_000,
+    });
+
+    const slept = policy.backoffMs();
+    assert.ok(
+      slept <= 150,
+      `backoffMs() returned ${Math.round(slept)}ms against a 100ms per-holder window: the caller `
+      + 'wakes long after the deadline its timeout is measured against, so timeoutMs is enforced '
+      + 'at whatever moment the sleep ends',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('acquirePipelineLock: a caller gives up near its timeoutMs even when retryMs is larger', async () => {
+  const root = fixtureRoot();
+  try {
+    const p = join(root, 'data', 'pipeline.md');
+    // maxWaitMs is set high on purpose. The ceiling would otherwise cap the
+    // overshoot at 10 x timeoutMs and hide how far past its own deadline the
+    // waiter sleeps.
+    const timing = { timeoutMs: 150, retryMs: 5_000, maxWaitMs: 30_000 };
+    const held = await acquirePipelineLock(p, timing);
+    try {
+      const startedAt = Date.now();
+      await assert.rejects(() => acquirePipelineLock(p, timing), (err) => err instanceof LockTimeoutError);
+      const waited = Date.now() - startedAt;
+      // 1500ms is ten per-holder windows, and still well under the 2500ms
+      // floor of a single unclamped jittered retry, so the two outcomes cannot
+      // be confused on a slow runner.
+      assert.ok(
+        waited < 1_500,
+        `waited ${waited}ms on a 150ms timeout: one backoff carried the caller past its own `
+        + 'deadline, and the loop only decides after the sleep returns',
+      );
+    } finally {
+      held.release();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
