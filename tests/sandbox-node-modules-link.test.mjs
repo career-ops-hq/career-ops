@@ -180,7 +180,11 @@ try {
     {
       const callSite = stripJsComments(readFileSync(join(ROOT, 'test-all.mjs'), 'utf-8'));
       const bound = callSite.match(/(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*linkNodeModules\s*\(/);
-      const guard = bound && new RegExp(`\\bif\\s*\\(\\s*${bound[1].replace(/\$/g, '\\$')}\\b`);
+      // The name comes out of a file this check reads, so every regex
+      // metacharacter gets escaped. A partial escape is the incomplete-escaping
+      // defect itself.
+      const name = bound && bound[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const guard = bound && new RegExp(`\\bif\\s*\\(\\s*${name}\\b`);
       if (!bound) {
         fail('test-all.mjs calls linkNodeModules() without binding the reason, so it cannot skip on one');
       } else if (guard.test(callSite)) {
