@@ -128,8 +128,14 @@ test('a body listing its own number does not block itself', () => {
 // The sweep reads every workflow, because the shape is not unique to this one.
 // Four sibling jobs run a script out of a sparse checkout the same way. Their
 // failure is loud, so they need no guard, and their paths cost nothing to pin
-// while the parser is already open. The floor test asserts the sweep found
-// something, so an extraction that quietly matches nothing cannot read as green.
+// while the parser is already open.
+//
+// Two floors keep the sweep honest. The first says it found something at all.
+// The second names this job. The first is an existence check across the whole
+// repo, so a stranger job satisfies it. Exactly one job carries an
+// absent-means-pass guard today, this one. Put its run step under a
+// `working-directory` and the sweep drops it. Add a guard anywhere else and the
+// repo-wide floor still passes, with this job swept for nothing.
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const WORKFLOWS = join(ROOT, '.github', 'workflows');
@@ -175,6 +181,17 @@ test('the workflow sweep finds paths to pin', () => {
   assert.ok(jobs.some((j) => j.invoked.length), 'no run step invokes a script');
   assert.ok(jobs.some((j) => j.guarded.length), 'no absent-means-pass guard was found');
   assert.ok(jobs.some((j) => j.sparse.length), 'no sparse-checkout was found');
+});
+
+// Every assertion below skips a job whose set is empty, and the floor above is
+// satisfied by any job in the repo. This test names the job that matters.
+// Paths still come out of the YAML; only the job's identity is written here.
+test('the depends-on job is in the sweep with its own guard', () => {
+  const job = workflowJobs().find((j) => j.file === 'depends-on.yml' && j.job === 'depends-on');
+  assert.ok(job, 'depends-on.yml no longer defines a `depends-on` job');
+  assert.ok(job.invoked.length, 'the depends-on job contributes no invoked script to the sweep');
+  assert.ok(job.guarded.length, 'the depends-on job contributes no absent-means-pass guard to the sweep');
+  assert.ok(job.sparse.length, 'the depends-on job contributes no sparse-checkout to the sweep');
 });
 
 test('every script a workflow names is on disk', () => {
