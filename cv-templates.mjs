@@ -274,8 +274,22 @@ export function loadAtsRules(path = DEFAULT_ATS_RULES_PATH) {
     }
     // detect: null is a rule with no detector yet, which is legitimate. It
     // still has to say what is unsettled, or a permanent skip reads as a pass.
-    if (rule.detect === null && !rule.unimplemented_because) {
-      throw new Error(`${at} (${rule.id}): a null detector must carry unimplemented_because`);
+    if (rule.detect === null) {
+      if (!rule.unimplemented_because) {
+        throw new Error(`${at} (${rule.id}): a null detector must carry unimplemented_because`);
+      }
+    } else if (!Object.hasOwn(ATS_DETECTORS, rule.detect)) {
+      // Any other value silently disables a detector that IS registered.
+      // Writing `detector:` for `detect:` leaves no detect key, so the null
+      // path skipped the rule as "no detector yet". That reason is false, and
+      // the document its detector catches came back clean. A name nothing
+      // registers reads the same way. Own properties only, or `detect:
+      // toString` dispatches to a function on the prototype.
+      throw new Error(
+        `${at} (${rule.id}): detect must name a registered detector `
+          + `(${Object.keys(ATS_DETECTORS).join(', ')}), or be null with unimplemented_because; `
+          + `got ${JSON.stringify(rule.detect)}`
+      );
     }
   }
 
@@ -386,8 +400,15 @@ const HIDDEN_SIGNALS = [
 // the rule's ceiling, not an oversight: see `must_not_flag` in the YAML.
 function detectHiddenText(html) {
   const out = [];
-  for (const m of stripNonContent(html).matchAll(/style\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
-    const decl = m[1] ?? m[2];
+  // `style` is anchored on a preceding space, so `data-style`, `my-style` and
+  // any other attribute merely ENDING in "style" cannot match. Those values
+  // carry data, and reading one as an inline style called visible text hidden.
+  // The third alternative is the unquoted form (`style=display:none`), valid
+  // HTML that hides text and matched nothing at all. An unquoted value ends at
+  // the first space or `>`, so it is the whole declaration. The class pass
+  // below was anchored this way already; this matcher kept the bug.
+  for (const m of stripNonContent(html).matchAll(/\sstyle\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
+    const decl = m[1] ?? m[2] ?? m[3];
     for (const [re, label] of HIDDEN_SIGNALS) {
       if (re.test(decl)) out.push(`inline style hides text (${label}): style="${decl.trim().slice(0, 80)}"`);
     }

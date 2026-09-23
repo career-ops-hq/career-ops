@@ -142,6 +142,22 @@ test('no-hidden-text: single-quoted style attributes are not a bypass', () => {
   assert.deepEqual(ids(result), ['no-hidden-text']);
 });
 
+test('no-hidden-text: an unquoted style attribute is not a bypass either', () => {
+  // `<span style=display:none>` is valid HTML and hides the text. A quote-only
+  // matcher read it as no style attribute at all and passed the document.
+  const result = lint('<body><span style=display:none>Kubernetes</span></body>');
+  assert.deepEqual(ids(result), ['no-hidden-text']);
+});
+
+test('no-hidden-text: must not flag an attribute that merely ENDS in "style"', () => {
+  // `data-style` carries data, not styling. Unanchored, the matcher read those
+  // values as the element's own inline style and called visible text hidden.
+  for (const attr of ['data-style', 'my-style']) {
+    assert.deepEqual(ids(lint(`<body><span ${attr}="display:none">Senior Director</span></body>`)), [],
+      `${attr}="…" is not an inline style and must not be reported as hidden`);
+  }
+});
+
 test('no-hidden-text: must not flag a stylesheet rule (the shipped ats template hides a separator that way)', () => {
   const result = lint(
     '<html><head><style>.contact-row .separator { display: none; }\n'
@@ -425,11 +441,19 @@ test('a rules file that defines no rules is an error, not a clean pass', () => {
   }
 });
 
+/**
+ * Run the CLI. CAREER_OPS_PROFILE picks the default template, so a developer
+ * who exports it lints a different file than CI does, and the rest of the
+ * environment is kept so node itself still works.
+ */
+const cli = (args) => {
+  const { CAREER_OPS_PROFILE, ...env } = process.env;
+  return spawnSync(process.execPath, ['cv-templates.mjs', ...args], { cwd: ROOT, encoding: 'utf-8', env });
+};
+
 test('the CLI refuses a non-HTML template rather than reporting it clean', () => {
   // Every detector is an HTML pattern, so a .tex template lints to zero
   // findings — a pass that checked nothing. That must be an error, not JSON.
-  const cli = (args) => spawnSync(process.execPath, ['cv-templates.mjs', ...args], { cwd: ROOT, encoding: 'utf-8' });
-
   const tex = cli(['lint', 'cv', '--format=tex']);
   assert.notEqual(tex.status, 0, 'a .tex lint must fail rather than print findings');
   assert.match(tex.stderr, /HTML templates only/);
@@ -438,6 +462,24 @@ test('the CLI refuses a non-HTML template rather than reporting it clean', () =>
   const html = cli(['lint', 'cv']);
   assert.equal(html.status, 0, `the html path must still work: ${html.stderr}`);
   assert.equal(JSON.parse(html.stdout).ok, true);
+});
+
+test('the CLI test helper does not inherit CAREER_OPS_PROFILE', () => {
+  // The variable picks the default CV template, so the suite passed or failed
+  // on whatever the developer happened to export. Pointed at a profile naming
+  // a template that does not exist, the inheriting helper could not resolve.
+  const profile = join(mkdtempSync(join(tmpdir(), 'atsprofile-')), 'profile.yml');
+  writeFileSync(profile, 'cv:\n  template: no-such-template\n');
+  const prior = process.env.CAREER_OPS_PROFILE;
+  process.env.CAREER_OPS_PROFILE = profile;
+  try {
+    const html = cli(['lint', 'cv']);
+    assert.equal(html.status, 0, `an ambient CAREER_OPS_PROFILE must not reach the child: ${html.stderr}`);
+    assert.equal(JSON.parse(html.stdout).ok, true);
+  } finally {
+    if (prior === undefined) delete process.env.CAREER_OPS_PROFILE;
+    else process.env.CAREER_OPS_PROFILE = prior;
+  }
 });
 
 // A nonempty `rules:` list satisfied the loader no matter what was in it.
@@ -460,6 +502,15 @@ test('a rules file whose entries are malformed is an error, not a clean pass', (
     ['an empty source list', `rules:\n  - ${VALID.replace('source:\n      - q', 'source: []')}`, /source/i],
     ['no must_not_flag', `rules:\n  - ${VALID.replace('must_not_flag: n\n', '')}`, /must_not_flag/i],
     ['a null detector with no reason', `rules:\n  - ${VALID.replace('unimplemented_because: pending\n    ', '')}`, /unimplemented_because/i],
+    // A rule whose detect key is misspelled, missing, mistyped or names
+    // nothing keeps a registered detector from ever running, and atsLint
+    // reported the silence as "no detector yet" — false about the rule, and a
+    // clean pass on a document the detector would have caught.
+    ['no detect key at all', `rules:\n  - ${VALID.replace('detect: null\n    unimplemented_because: pending\n    ', '')}`, /detect/i],
+    ['a typo\'d detect key', `rules:\n  - ${VALID.replace('detect: null', 'detector: hidden-text')}`, /detect/i],
+    ['a non-string detect', `rules:\n  - ${VALID.replace('detect: null', 'detect: 7')}`, /detect/i],
+    ['a detect naming no registered detector', `rules:\n  - ${VALID.replace('detect: null', 'detect: no-such-detector')}`, /detect/i],
+    ['a detect naming an inherited Object property', `rules:\n  - ${VALID.replace('detect: null', 'detect: toString')}`, /detect/i],
     ['duplicate ids', `rules:\n  - ${VALID}  - ${VALID}`, /duplicate/i],
   ];
   for (const [label, body, pattern] of cases) {
