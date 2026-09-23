@@ -10086,9 +10086,11 @@ try {
   const ADDITION_HELPERS = './lib/tracker-addition.mjs';
   const helperImportRe = /from\s+'\.\/lib\/tracker-addition\.mjs'/;
   const helperUseRe    = /\bnormalizedTrackerScore\s*\(/;
-  // openai-eval.mjs and ollama-eval.mjs gain the import when #3797 lands and
-  // their copies are consolidated with the rest.
-  const pendingHelperImport = ['openai-eval.mjs', 'ollama-eval.mjs'];
+  // Empty, and it should stay that way. #3797 landed while this branch was open
+  // and re-added copies to openai-eval.mjs and ollama-eval.mjs; both were
+  // consolidated on the merge, which is the exemption being spent rather than
+  // renewed. A new name here needs a reason with an issue number attached.
+  const pendingHelperImport = [];
   const missingHelperImport = evaluatorSources
     .filter(([, source]) => !helperImportRe.test(source) || !helperUseRe.test(source))
     .map(([name]) => name);
