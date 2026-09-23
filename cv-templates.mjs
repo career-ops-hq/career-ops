@@ -373,7 +373,18 @@ function documentLanguage(html) {
   // real document otherwise reads as the document's language and silences the
   // rule on an English CV, which is the dangerous direction: the lint stops
   // checking and records it only in `skipped`.
-  const open = stripNonContent(html).match(/<html\b([^>]*)>/i);
+  //
+  // The tag body is quoted strings OR characters that are neither a quote nor
+  // `>`, so the `>` that ends the tag is the first one OUTSIDE a value. `[^>]*`
+  // ended the capture at a `>` written inside a quoted value, handing the
+  // walker a tag already truncated before `lang`, and `<html data-note=">"
+  // lang="es">` read as English. That fires the rule on a Spanish CV, the
+  // opposite direction from the evasions above and just as wrong.
+  //
+  // An unterminated quote matches nothing and returns null, which reads as
+  // English and runs the rule. Malformed markup gets checked rather than
+  // silently exempted.
+  const open = stripNonContent(html).match(/<html\b((?:"[^"]*"|'[^']*'|[^>"'])*)>/i);
   if (!open) return null;
 
   // Attributes are walked as name/value pairs instead of searched as text, so

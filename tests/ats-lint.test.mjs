@@ -246,6 +246,30 @@ test('standard-section-headers: lang inside another attribute value is not the l
   assert.deepEqual(ids(lint(html)), ['standard-section-headers']);
 });
 
+test('standard-section-headers: a quoted ">" does not cut the lang off the tag', () => {
+  // The opening tag was captured with `[^>]*`, which stops at the first '>'
+  // in the source. A '>' inside a quoted attribute value ends the capture
+  // early, so the tag arrives at the attribute walker already missing `lang`.
+  // A Spanish CV then reads as English and every heading is reported.
+  //
+  // Direction matters. The two evasions above SILENCE the rule. This one makes
+  // it fire where its own must_not_flag says it must stay quiet.
+  const r = lint('<html data-note=">" lang="es"><body><h2>Experiencia Laboral</h2></body></html>');
+  assert.deepEqual(ids(r), []);
+  assert.ok(r.skipped.some((x) => x.id === 'standard-section-headers'));
+});
+
+test('standard-section-headers: quoted and unquoted lang values all read the same', () => {
+  // The tag capture and the attribute walker have to agree on where a value
+  // ends. Both quoting styles and the bare form are valid HTML, so all three
+  // skip a Spanish document.
+  for (const tag of ['<html lang="es">', "<html lang='es'>", '<html lang=es>']) {
+    const r = lint(`${tag}<body><h2>Experiencia Laboral</h2></body></html>`);
+    assert.deepEqual(ids(r), [], `expected no findings for ${tag}`);
+    assert.ok(r.skipped.some((x) => x.id === 'standard-section-headers'), `expected a skip for ${tag}`);
+  }
+});
+
 test('standard-section-headers: a real non-English lang still skips', () => {
   const r = lint('<html lang="es"><body><h2>Experiencia Laboral</h2></body></html>');
   assert.deepEqual(ids(r), []);
