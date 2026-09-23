@@ -359,6 +359,23 @@ function detectHiddenText(html) {
 // wording and the language of a rendered heading belong to the payload, not to
 // the template — a template-time check that read those as headings would flag
 // every template in the repo and be wrong about all of them.
+/**
+ * The document's primary language subtag, lowercased, or null when absent.
+ *
+ * Absent means English here. Every shipped template omits `lang` or sets `en`,
+ * and a rule that refused to run without one would check nothing by default.
+ *
+ * @param {string} html
+ * @returns {string|null}
+ */
+function documentLanguage(html) {
+  const m = html.match(/<html\b[^>]*?\slang\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+  if (!m) return null;
+  const value = (m[1] ?? m[2] ?? m[3] ?? '').trim().toLowerCase();
+  // BCP 47: the primary subtag is what decides the language. en-GB is English.
+  return value ? value.split('-')[0] : null;
+}
+
 function detectStandardSectionHeaders(html, rule) {
   const accepted = new Set((rule.headers || []).map((h) => h.toLowerCase()));
   if (accepted.size === 0) return [];
@@ -420,6 +437,23 @@ export function atsLint(path, kind, opts = {}) {
     const html = readFileSync(path, 'utf-8');
     for (const rule of rules) {
       if (Array.isArray(rule.kinds) && !rule.kinds.includes(kind)) continue;
+
+      // The accepted-header list is English. A template that declares another
+      // language and writes its headings literally would have every one of
+      // them reported, which this rule's own must_not_flag rules out. Reported
+      // as a skip so silence stays distinguishable from a pass.
+      if (rule.id === 'standard-section-headers') {
+        const lang = documentLanguage(html);
+        if (lang && lang !== 'en') {
+          result.skipped.push({
+            id: rule.id,
+            rule: rule.rule,
+            reason: `document language is "${lang}"; the accepted-header list is English only`,
+          });
+          continue;
+        }
+      }
+
       const detector = rule.detect ? ATS_DETECTORS[rule.detect] : null;
       if (!detector) {
         result.skipped.push({

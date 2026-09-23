@@ -205,6 +205,33 @@ test('standard-section-headers: must not flag data-class as a class attribute', 
   assert.deepEqual(ids(result), []);
 });
 
+test('standard-section-headers: a non-English document is not judged by the English list', () => {
+  // The header enumeration is English-only, so a template declaring lang="zh"
+  // and writing its headings literally had every one reported. The rule's own
+  // must_not_flag names localised headers as a case it must not flag.
+  const zh = lint('<html lang="zh"><body><h2>\u5de5\u4f5c\u7ecf\u5386</h2><h2>\u6559\u80b2\u80cc\u666f</h2></body></html>');
+  assert.deepEqual(ids(zh), []);
+
+  const es = lint('<html lang="es"><body><h2>Experiencia Laboral</h2></body></html>');
+  assert.deepEqual(ids(es), []);
+});
+
+test('standard-section-headers: a non-English document says the rule was skipped', () => {
+  // Silence and a pass must stay distinguishable, the same way a rendered-only
+  // rule is reported rather than dropped.
+  const r = lint('<html lang="zh"><body><h2>\u5de5\u4f5c\u7ecf\u5386</h2></body></html>');
+  assert.ok(
+    r.skipped.some((s) => s.id === 'standard-section-headers'),
+    `expected a skip entry, got ${JSON.stringify(r.skipped)}`,
+  );
+});
+
+test('standard-section-headers: an English or absent lang is still judged', () => {
+  assert.deepEqual(ids(lint('<html lang="en"><body><h2>Career Highlights</h2></body></html>')), ['standard-section-headers']);
+  assert.deepEqual(ids(lint('<html lang="en-GB"><body><h2>Career Highlights</h2></body></html>')), ['standard-section-headers']);
+  assert.deepEqual(ids(lint('<body><h2>Career Highlights</h2></body>')), ['standard-section-headers']);
+});
+
 test('standard-section-headers: must not flag a placeholder heading', () => {
   // Every shipped template writes these, and the rendered wording — and its
   // language, via lang="{{LANG}}" — belongs to the payload, not the template.
