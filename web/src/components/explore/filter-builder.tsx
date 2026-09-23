@@ -29,11 +29,13 @@ function KeywordField({
   values,
   tone,
   placeholder,
+  ariaLabel,
   onChange,
 }: {
   values: string[];
   tone: "inc" | "exc";
   placeholder: string;
+  ariaLabel?: string;
   onChange: (v: string[]) => void;
 }) {
   const [draft, setDraft] = useState("");
@@ -58,6 +60,7 @@ function KeywordField({
         </span>
       ))}
       <input
+        aria-label={ariaLabel}
         value={draft}
         onChange={(e) => {
           const val = e.target.value;
@@ -138,7 +141,13 @@ export function FilterBuilder({
             <MapPin className="size-3.5 text-muted" /> City or location
           </span>
         </Label>
-        <KeywordField values={filters.allow} tone="inc" placeholder="Toronto, New York, Remote…" onChange={(v) => set({ allow: v })} />
+        <KeywordField
+          values={filters.allow}
+          tone="inc"
+          placeholder="Toronto, New York, Remote…"
+          ariaLabel="City or location"
+          onChange={(v) => set({ allow: v })}
+        />
       </div>
 
       <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
