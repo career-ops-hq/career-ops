@@ -79,8 +79,13 @@ function sameDirectory(a, b) {
     if (sameDirectory(spelling, cwd)) pass(`toplevel guard matches the cwd spelled with ${label} (#3732)`);
     else fail(`toplevel guard matches the cwd spelled with ${label} (#3732)`);
   }
-  if (!sameDirectory(dirname(cwd), cwd)) pass('toplevel guard still tells the parent directory apart');
-  else fail('toplevel guard still tells the parent directory apart');
+  // A checkout at a filesystem root is its own parent, so there is nothing
+  // distinct to compare against there.
+  const parent = dirname(cwd);
+  if (parent !== cwd) {
+    if (!sameDirectory(parent, cwd)) pass('toplevel guard still tells the parent directory apart');
+    else fail('toplevel guard still tells the parent directory apart');
+  }
 }
 
 try {
