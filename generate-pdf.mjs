@@ -1305,7 +1305,9 @@ async function generatePDF() {
   // Parse arguments
   // Empty, not 'cv': an omitted --kind must fall through to inference from the
   // output filename rather than pinning every render to a CV.
-  let kindFlag = '';
+  // Supplied and value are separate questions: `--kind=` yields '', which is
+  // falsy, so a guard reading the value alone waves the flag through.
+  let kindFlag = '', kindSupplied = false;
   // No flag seen yet: null, not a paper size. The default belongs to
   // lib/page-format.mjs, which ranks it below the user's config/profile.yml.
   let inputPath, outputPath, format = null, reportNum = '', allowReorder = false;
@@ -1317,6 +1319,7 @@ async function generatePDF() {
     } else if (arg.startsWith('--report=')) {
       reportNum = arg.split('=')[1].trim();
     } else if (arg.startsWith('--kind=')) {
+      kindSupplied = true;
       kindFlag = arg.slice('--kind='.length).trim();
     } else if (arg.startsWith('--batch=')) {
       batchManifestPath = arg.slice('--batch='.length);
@@ -1339,7 +1342,12 @@ async function generatePDF() {
   // A --kind that was passed and is unusable is a hard error: silently filing a
   // cover letter as a CV is the failure the flag exists to prevent. Checked
   // before any rendering work starts.
-  if (kindFlag && !resolveArtifactKind(kindFlag).kind) {
+  // resolveArtifactKind treats an empty value as "not supplied" and falls back
+  // to filename inference, which is what the per-entry batch path needs. So an
+  // empty value cannot be caught by its return, and the CLI has to reject it
+  // here: the caller typed the flag, and silently inferring instead is the
+  // substitution the flag exists to prevent.
+  if (kindSupplied && (!kindFlag || !resolveArtifactKind(kindFlag).kind)) {
     console.error(`Invalid --kind "${kindFlag}". Use: ${ARTIFACT_KINDS.join(', ')}`);
     process.exit(1);
   }
@@ -1381,7 +1389,7 @@ async function generatePDF() {
     // --kind=cover leaves every entry on filename inference; one whose name is
     // not cover-shaped is filed as a CV and its row supersedes the report's real
     // CV slot in pdf-index.tsv. Per-entry "kind" is the channel that works.
-    if (kindFlag) {
+    if (kindSupplied) {
       console.error('--kind is not valid with --batch. Set "kind" per entry in the manifest instead.');
       process.exit(1);
     }

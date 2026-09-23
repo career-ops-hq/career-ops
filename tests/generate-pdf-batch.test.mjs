@@ -397,6 +397,27 @@ try {
     fail(`--report survived batch mode: status=${reportInBatch.status}\n${reportInBatch.output.trim()}`);
   }
 
+  // An explicitly EMPTY --kind is still a supplied flag. `kindFlag` holds '',
+  // which is falsy, so a guard written as `if (kindFlag)` waves it through and
+  // the batch runs on filename inference anyway — the exact outcome the
+  // rejection above exists to stop, reached by a different spelling. Supplied
+  // and value are separate questions.
+  const emptyKindBatch = run([`--batch=${flagManifest}`, '--kind=']);
+  if (emptyKindBatch.status === 1) {
+    pass('generate-pdf rejects an explicitly empty --kind in batch mode');
+  } else {
+    fail(`--kind= survived batch mode: status=${emptyKindBatch.status}\n${emptyKindBatch.output.trim()}`);
+  }
+
+  // Same hole on the single-render path. The flag was typed, so falling back to
+  // filename inference silently ignores what the caller asked for.
+  const emptyKindSingle = run(['a.html', 'out/empty-kind.pdf', '--kind=']);
+  if (emptyKindSingle.status === 1 && /Invalid --kind/i.test(emptyKindSingle.output)) {
+    pass('generate-pdf rejects an explicitly empty --kind on a single render');
+  } else {
+    fail(`--kind= survived a single render: status=${emptyKindSingle.status}\n${emptyKindSingle.output.trim()}`);
+  }
+
   // A batch with neither global flag still runs, so the guards above reject the
   // flag rather than the batch. Without this, both checks would pass on a build
   // that refused every batch outright.
