@@ -108,6 +108,51 @@ try {
     fail(`ordinary prose produced a false title claim: ${JSON.stringify(proseTitle)}`);
   }
 
+  // #3907 — "role:" or "title:" immediately followed by a bare capitalised
+  // pronoun ("I") satisfied the old `[A-Z][\w/-]*` first-token class (the
+  // `*` allows zero extra characters), so ordinary prose like a cover-letter
+  // disclaimer was misread as a one-letter job title claim and blocked
+  // rendering even though nothing false was ever asserted.
+  const roleColonPronoun = factClaims(
+    'I want to be direct about something important to this role: I do not have functional knowledge in X.',
+  );
+  if (!roleColonPronoun.some(claim => claim.kind === 'title')) {
+    pass('#3907 "role: I" is not read as a one-letter title claim');
+  } else {
+    fail(`#3907 regression: "role: I ..." produced a false title claim: ${JSON.stringify(roleColonPronoun)}`);
+  }
+
+  const titleColonArticle = factClaims('Please review the role: A candidate should have strong communication skills.');
+  if (!titleColonArticle.some(claim => claim.kind === 'title')) {
+    pass('#3907 "role: A" is not read as a one-letter title claim');
+  } else {
+    fail(`#3907 regression: "role: A ..." produced a false title claim: ${JSON.stringify(titleColonArticle)}`);
+  }
+
+  // The #3907 fix must not make the gate blind to real title fabrication,
+  // including short 2-letter acronym titles, which are common enough (VP,
+  // PM, HR) that a naive "require 2+ letters, uppercase only" fix would have
+  // broken them.
+  const unsupportedAcronymTitle = verifyFacts('Title: VP of Sales, previously unrelated experience.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (unsupportedAcronymTitle.verdict === 'block'
+      && unsupportedAcronymTitle.unsupportedFacts.some(claim => claim.kind === 'title' && claim.value === 'vp of sales')) {
+    pass('#3907 fix does not blind the gate to a fabricated acronym title (VP of Sales)');
+  } else {
+    fail(`#3907 fix broke acronym title detection: ${JSON.stringify(unsupportedAcronymTitle)}`);
+  }
+
+  const unsupportedRealTitle = verifyFacts('Title: Principal Engineer, previously unrelated experience.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (unsupportedRealTitle.verdict === 'block'
+      && unsupportedRealTitle.unsupportedFacts.some(claim => claim.kind === 'title' && claim.value === 'principal engineer')) {
+    pass('#3907 fix still flags a genuinely unsupported title claim (Principal Engineer)');
+  } else {
+    fail(`#3907 fix regressed real title detection: ${JSON.stringify(unsupportedRealTitle)}`);
+  }
+
   const boundary = verifyFacts('I am using Go and Google Cloud.', {
     sourcePaths: [source], configPath: config,
   });

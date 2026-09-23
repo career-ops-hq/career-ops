@@ -26,6 +26,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
 import {
   formatReportNumber, releaseReportNumbers, reserveReportNumbers,
@@ -55,6 +56,12 @@ const PATHS = {
   profile: join(DATA_ROOT, 'modes', '_profile.md'),
   profileYml: join(DATA_ROOT, 'config', 'profile.yml'),
   reports: join(DATA_ROOT, 'reports'),
+  // CAREER_OPS_ADDITIONS mirrors merge-tracker.mjs:43. Writing under DATA_ROOT
+  // regardless would drop the addition somewhere the merge it instructs never
+  // looks, so the evaluation would sit there unread.
+  trackerAdditions: process.env.CAREER_OPS_ADDITIONS
+    ? process.env.CAREER_OPS_ADDITIONS
+    : join(DATA_ROOT, 'batch', 'tracker-additions'),
 };
 
 // ---------------------------------------------------------------------------
@@ -79,6 +86,8 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     --file <path>    Read JD from a file instead of inline text
     --model <name>   Ollama model to use (default: llama3.3)
     --url <url>      Ollama base URL (default: http://localhost:11434)
+    --posting-url <url>  Posting URL, recorded in the report header and
+                     used as the tracker's dedup key
     --no-save        Do not save report to reports/ directory
     --help           Show this help
 
@@ -98,8 +107,17 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
 // Parse flags
 let jdText    = '';
+let postingUrl = '';
 let modelName = process.env.OLLAMA_MODEL || 'llama3.3';
 let baseUrl   = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
+// Context window for the request AND the prompt budget. Defaults to the previous hardcoded
+// 32768, so behaviour is unchanged unless OLLAMA_NUM_CTX is set. Raise it for a model with a
+// bigger window; `ollama show` reports each model's ceiling (qwen2.5 caps at 32768).
+const numCtx = parseInt(process.env.OLLAMA_NUM_CTX || '32768', 10);
+if (Number.isNaN(numCtx) || numCtx <= 0) {
+  console.error(`❌  Invalid OLLAMA_NUM_CTX: "${process.env.OLLAMA_NUM_CTX}" — must be a positive integer (tokens).`);
+  process.exit(1);
+}
 let saveReport = true;
 
 for (let i = 0; i < args.length; i++) {
@@ -120,6 +138,8 @@ for (let i = 0; i < args.length; i++) {
     modelName = args[++i];
   } else if (args[i] === '--url' && args[i + 1]) {
     baseUrl = args[++i].replace(/\/$/, '');
+  } else if (args[i] === '--posting-url' && args[i + 1]) {
+    postingUrl = args[++i];
   } else if (args[i] === '--no-save') {
     saveReport = false;
   } else if (!args[i].startsWith('--')) {
@@ -129,6 +149,17 @@ for (let i = 0; i < args.length; i++) {
 
 if (!jdText) {
   console.error('❌  No Job Description provided. Run with --help for usage.');
+  process.exit(1);
+}
+
+// A posting URL is the tracker's deterministic dedup key, so it is taken only in
+// a form that can actually become one. Parsed, not prefix-matched: `https://`
+// satisfies a prefix test and merge-tracker.mjs:697 would then classify it as
+// the URL extra, but normalizeUrl yields no key for it -- so it would sit in the
+// URL column looking like a key while deduping nothing. A placeholder written
+// there would be worse still, handing every such row the same key.
+if (postingUrl && !isPostingUrl(postingUrl)) {
+  console.error(`❌  --posting-url must be a complete http(s) URL: "${postingUrl}"`);
   process.exit(1);
 }
 
@@ -148,6 +179,80 @@ function readFile(path, label) {
     return `[${label} not found — skipping]`;
   }
   return readFileSync(path, 'utf-8').trim();
+}
+
+// ---------------------------------------------------------------------------
+// Tracker-addition helpers
+// ---------------------------------------------------------------------------
+/**
+ * Whether a value is a complete http(s) URL, and so can become a dedup key.
+ * @param {string} value - Candidate posting URL.
+ * @returns {boolean} True only for a parseable http/https URL with a host.
+ */
+function isPostingUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname !== '';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Slugify a company name for report/addition filenames.
+ * @param {string} value - Raw company name.
+ * @returns {string} Lowercase dash slug, or "unknown" when nothing survives.
+ */
+function slugifyCompany(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '') || 'unknown';
+}
+
+/**
+ * Flatten a value into a single TSV cell (tabs and newlines would shift columns).
+ * @param {*} value - Raw cell value.
+ * @returns {string} Single-line, trimmed cell.
+ */
+function tsvSafe(value) {
+  return String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
+}
+
+/**
+ * Normalize a model-reported score into the tracker's score cell.
+ *
+ * A missing or unparseable score becomes the documented `N/A` sentinel rather
+ * than an empty cell — `looksLikeScoreCell` in tracker-parse.mjs recognizes
+ * `N/A`, and a blank or unrecognized placeholder makes the row ambiguous and
+ * gets it skipped with a warning (#1799).
+ *
+ * @param {string} value - Score as extracted from the model's summary block.
+ * @returns {string} `X.X/5` or `N/A`.
+ */
+function normalizedTrackerScore(value) {
+  const clean = tsvSafe(value);
+  // Parse, do not pattern-match the string. Two bugs lived in the old guard:
+  // `/n\/?a/i` was unanchored with an optional slash, so bare `na` matched and a
+  // real score with trailing prose -- `4.2 (final)`, `4.2 (internal)`,
+  // `4.5 - strong signal` -- was recorded as `N/A`; and the `/5` early return kept
+  // the whole string, so `4.2/10` became `4.2/5` and merged as a genuine score.
+  // Trailing prose is tolerated because models produce it; a denominator that is
+  // not 5, or a value outside 0..5, is refused rather than reinterpreted.
+  const parsed = clean.match(/^(\d+(?:\.\d+)?)/);
+  if (!parsed) return 'N/A';
+  const score = parseFloat(parsed[1]);
+  // The denominator is load-bearing wherever it sits. Requiring it immediately
+  // after the number read `4.2 (strong fit)/10` -- a ten-point score with an
+  // annotation -- as a bare 4.2 and wrote `4.2/5`, the same wrong number
+  // `8/10` used to produce. The first denominator in the cell is taken and must
+  // be 5; absent one, the scale is the contract's. A cell that puts an unrelated
+  // fraction first (`4.2 (fit 3/4 axes)`) is refused rather than guessed at --
+  // N/A is recoverable, a wrong score is not.
+  const denominator = clean.match(/\/\s*(\d+(?:\.\d+)?)/);
+  const scale = denominator ? parseFloat(denominator[1]) : 5;
+  if (!Number.isFinite(score) || scale !== 5 || score < 0 || score > 5) return 'N/A';
+  return `${score}/5`;
 }
 
 // ---------------------------------------------------------------------------
@@ -217,7 +322,7 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
   profileYml,
   profileContent,
   jdText,
-  maxTokens: 32_768, // matches options.num_ctx below
+  maxTokens: numCtx, // matches options.num_ctx below
 });
 
 if (budgetReport.compressed) {
@@ -282,14 +387,18 @@ try {
         { role: 'system', content: systemPrompt },
         { role: 'user',   content: `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}` },
       ],
-      stream: false,
+      // stream:true so response headers arrive with the FIRST token. With stream:false
+      // Ollama sends nothing until the whole report is generated, and Node's undici client
+      // gives up at its own 300s headersTimeout — a deadline neither OLLAMA_TIMEOUT_MS nor
+      // AbortSignal.timeout controls, which surfaced as a bare "fetch failed" at 5:01.
+      stream: true,
       // Ollama's native /api/chat reads generation params from `options` only.
       // This call targets that endpoint (NOT the OpenAI-compatible /v1 route,
       // which ignores `options` and has no num_ctx equivalent), so both the
       // deterministic temperature and the enlarged context window actually take
       // effect. Without num_ctx here Ollama defaults to a 2048-token context and
       // silently truncates the prompt; without temperature it runs at 0.8.
-      options: { temperature: 0.4, num_ctx: 32768 },
+      options: { temperature: 0.4, num_ctx: numCtx },
     }),
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -301,14 +410,54 @@ try {
     process.exit(1);
   }
 
-  const data = await res.json();
-  evaluationText = data.message?.content?.trim();
+  // Streamed /api/chat is newline-delimited JSON: one object per token, the last carrying
+  // done:true and the token counts.
+  let acc = '', buf = '', promptCount = 0, evalCount = 0;
+  const decoder = new TextDecoder();
+  for await (const chunk of res.body) {
+    buf += decoder.decode(chunk, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      let obj;
+      try { obj = JSON.parse(line); } catch { continue; }
+      if (obj.error) {
+        console.error(`❌  Ollama error: ${obj.error}`);
+        process.exit(1);
+      }
+      if (obj.message?.content) acc += obj.message.content;
+      if (obj.done) {
+        promptCount = obj.prompt_eval_count ?? 0;
+        evalCount = obj.eval_count ?? 0;
+      }
+    }
+  }
+  // Flush a final line that arrived without a trailing newline. Ollama terminates every
+  // chunk with one, but a body that ends mid-line would otherwise be dropped silently.
+  const tail = buf.trim();
+  if (tail) {
+    try {
+      const obj = JSON.parse(tail);
+      if (obj.error) {
+        console.error(`❌  Ollama error: ${obj.error}`);
+        process.exit(1);
+      }
+      if (obj.message?.content) acc += obj.message.content;
+      if (obj.done) {
+        promptCount = obj.prompt_eval_count ?? promptCount;
+        evalCount = obj.eval_count ?? evalCount;
+      }
+    } catch { /* a truncated final line is not recoverable; the empty-response check below reports it */ }
+  }
+  evaluationText = acc.trim();
   // Native /api/chat reports tokens as prompt_eval_count / eval_count, not an
   // OpenAI-shaped `usage` object; map them through the shared normalizer.
   const usage = normalizeOpenAIUsage({
-    prompt_tokens: data.prompt_eval_count,
-    completion_tokens: data.eval_count,
-    total_tokens: (data.prompt_eval_count ?? 0) + (data.eval_count ?? 0),
+    prompt_tokens: promptCount,
+    completion_tokens: evalCount,
+    total_tokens: promptCount + evalCount,
   });
   tracker.record('evaluation', usage);
   if (!evaluationText) {
@@ -369,7 +518,7 @@ if (saveReport) {
     reservedNumbers   = await reserveReportNumbers(1, { rootDir: ROOT, reportsDir: PATHS.reports });
     const num         = formatReportNumber(reservedNumbers[0]);
     const today       = new Date().toISOString().split('T')[0];
-    const companySlug = company.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const companySlug = slugifyCompany(company);
     const filename    = `${num}-${companySlug}-${today}.md`;
     const reportPath  = join(PATHS.reports, filename);
 
@@ -378,6 +527,7 @@ if (saveReport) {
 **Date:** ${today}
 **Archetype:** ${archetype}
 **Score:** ${score}/5
+**URL:** ${postingUrl || '(pasted)'}
 **Legitimacy:** ${legitimacy}
 **PDF:** pending
 **Tool:** Ollama (${modelName})
@@ -390,8 +540,41 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
     writeFileSync(reportPath, reportContent, 'utf-8');
     console.log(`\n✅  Report saved: reports/${filename}`);
 
-    console.log(`\n📊  Tracker entry (add to data/applications.md):`);
-    console.log(`    | ${num} | ${today} | ${company} | ${role} | ${score}/5 | Evaluated | ❌ | [${num}](reports/${filename}) |`);
+    // AGENTS.md Pipeline Integrity rule 1: never hand the user a row to paste
+    // into data/applications.md. Evaluations persist as a tracker addition and
+    // merge-tracker.mjs applies dedup, status validation, report-link
+    // normalization and the tracker lock. A pasted literal skipped all of that,
+    // and at 8 cells it was also silently dropped by every reader's width guard.
+    // Field order is the TSV contract's -- status BEFORE score; merge-tracker
+    // swaps them into the tracker's own column order, resolved by name.
+    const additionName = `${num}-${companySlug}.tsv`;
+    const trackerFields = [
+      String(parseInt(num, 10)),
+      today,
+      tsvSafe(company),
+      tsvSafe(role),
+      'Evaluated',
+      normalizedTrackerScore(score),
+      '❌',
+      `[${num}](reports/${filename})`,
+      tsvSafe(`Ollama evaluation (${modelName})`),
+    ];
+    // Optional tenth field, labelled in the header below so it resolves by name.
+    // Pass 0 can then match on it instead of waiting for --backfill-urls.
+    if (postingUrl) trackerFields.push(tsvSafe(postingUrl));
+    // Header row first (#3517/#3706): merge-tracker resolves the fields by name,
+    // so this row cannot be ingested into the wrong columns. The optional URL
+    // needs its own label -- values are read BY label, so a tenth field the
+    // header does not name is not mis-mapped, it is dropped.
+    const additionHeader = postingUrl ? `${TSV_ADDITION_HEADER}\turl` : TSV_ADDITION_HEADER;
+    mkdirSync(PATHS.trackerAdditions, { recursive: true });
+    writeFileSync(
+      join(PATHS.trackerAdditions, additionName),
+      `${additionHeader}\n${trackerFields.join('\t')}\n`,
+      'utf-8',
+    );
+    console.log(`\n📊  Tracker addition saved: batch/tracker-additions/${additionName}`);
+    console.log('    Run `node merge-tracker.mjs` to merge it into the tracker.');
   } catch (err) {
     console.warn(`⚠️   Could not save report: ${err.message}`);
   } finally {

@@ -10,12 +10,14 @@
  *   node clean-markers.mjs audit  <file...>                 # report only, never modifies
  *   node clean-markers.mjs clean  <file...>                 # strip markers, then report
  *   node clean-markers.mjs clean  --ascii cover-letter.md   # also force plain-ASCII punctuation
+ *   node clean-markers.mjs --help                           # show this message (-h is an alias)
  *
  * Exit code 1 if any file FAILS audit — usable as a pre-send gate. Dependency-free: text only,
  * no package installs, no PDF metadata editing.
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { extname } from 'node:path';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const NAMED = {
   0x200B:'ZERO-WIDTH SPACE', 0x200C:'ZWNJ', 0x200D:'ZWJ', 0x2060:'WORD JOINER',
@@ -80,15 +82,27 @@ function processFile(file, mode, opts){
   return true;
 }
 
+const KNOWN_FLAGS = ['--ascii', '--help', '-h'];
+const USAGE = `Usage:
+  node clean-markers.mjs audit <file...>            # report only, never modifies
+  node clean-markers.mjs clean <file...>            # strip markers, then report
+  node clean-markers.mjs clean --ascii <file...>    # also force plain-ASCII punctuation
+  node clean-markers.mjs audit -- -draft.md         # -- ends the flags, for a path starting with a dash
+  node clean-markers.mjs --help                     # print this usage block and exit`;
+
 const argv = process.argv.slice(2);
+// Everything after `--` is a path, so a file named -draft.md is not read as a flag.
+const endOfOptions = argv.indexOf('--');
+validateFlags(endOfOptions === -1 ? argv : argv.slice(0, endOfOptions), KNOWN_FLAGS, USAGE);
 const mode = argv[0]==='clean' ? 'clean' : 'audit';
 const opts = { ascii:false };
 const files = [];
 for(let i=(argv[0]==='clean'||argv[0]==='audit')?1:0; i<argv.length; i++){
+  if(i===endOfOptions){ files.push(...argv.slice(i+1)); break; }
   if(argv[i]==='--ascii') opts.ascii = true;
   else files.push(argv[i]);
 }
-if(!files.length){ console.log('Usage: node clean-markers.mjs <audit|clean> [--ascii] <file...>'); process.exit(2); }
+if(!files.length){ console.log(USAGE); process.exit(2); }
 
 console.log(`\nclean-markers — ${mode.toUpperCase()} (${files.length} file${files.length>1?'s':''})`);
 let allOk = true;

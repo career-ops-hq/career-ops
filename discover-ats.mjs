@@ -639,7 +639,21 @@ export async function resolveCompany(company, { vendors = VENDOR_ORDER, ctx, inc
       if (cfg.api) resolved.api = cfg.api(candidate.slug);
       return { resolved };
     }
-    if (result.status === 'empty') {
+    if (result.status === 'empty' && candidate.vendor === 'smartrecruiters') {
+      // SmartRecruiters' public postings API answers 200 with totalFound:0
+      // for ANY slug, including one that does not exist — unlike every other
+      // probed vendor, "empty" here establishes nothing. Counting it in
+      // emptyBoards let a single phantom hit outrank a real "not found"
+      // verdict from every other vendor, since emptyBoards is checked first
+      // in the reason ladder below: an unmatched company name would read as
+      // "board(s) found but currently list 0 jobs — re-run later", advising
+      // a retry that can never produce a different answer (#4179). Silently
+      // excluded from both emptyBoards and errors[] — the vendor still shows
+      // up in triedVendors, it just contributes no verdict either way. The
+      // accepted cost: a genuinely existing SmartRecruiters board with zero
+      // OPEN postings right now also reads as "not found" instead of "found,
+      // empty" — cheaper than every unmatched name reading as "found".
+    } else if (result.status === 'empty') {
       emptyBoards.push({ vendor: candidate.vendor, careers_url: candidate.careers_url });
     } else {
       /** @type {any} */

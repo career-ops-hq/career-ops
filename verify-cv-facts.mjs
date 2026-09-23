@@ -13,13 +13,32 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
-import { isAbsolute, join, dirname, basename } from 'path';
-import { fileURLToPath } from 'url';
+import { isAbsolute, join, basename } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_SOURCES = ['cv.md', 'article-digest.md'];
-const DEFAULT_CONFIG = join(ROOT, 'config', 'cv-facts.json');
+// Two roots, because this gate compares user-layer files against a user-layer
+// config and previously resolved neither from the user's data root.
+//
+// cv.md and article-digest.md are the Source-of-Truth Boundary's primary files.
+// As bare relative strings they resolved against process.cwd(), so from any
+// directory that is not the data root the gate read NO sources — and a fact
+// check with no sources does not fail open quietly, it fails LOUD and WRONG:
+// every quantified claim in the generated CV is reported as "absent from
+// sources", including claims copied verbatim out of the user's own cv.md.
+//
+// config/cv-facts.json is user-layer too (it holds the user's forbidden and
+// advisory phrases). Resolved from the CODE root it was simply absent for any
+// configured data root, and the gate said so and carried on:
+//
+//     ⚠️  fact-gate config not found: <CHECKOUT>/config/cv-facts.json
+//         — forbidden/advisory phrase checks did not run.
+//
+// So one invocation both invented failures and silently skipped half its
+// checks. --source and --config still override; only the defaults move.
+const DATA_ROOT = getCareerOpsRoot();
+const DEFAULT_SOURCES = [join(DATA_ROOT, 'cv.md'), join(DATA_ROOT, 'article-digest.md')];
+const DEFAULT_CONFIG = join(DATA_ROOT, 'config', 'cv-facts.json');
 const TOOL_PROSE_WORDS = new Set([
   'a', 'an', 'and', 'at', 'built', 'by', 'containerized', 'deployment',
   'deployments', 'delivery', 'diagnosing', 'efficiency', 'feedback', 'for', 'from', 'improve',
@@ -232,6 +251,36 @@ export function stripMarkup(text, { keepLineBreaks = false } = {}) {
     .replace(/<\/?(?:li|p|div|tr|h[1-6]|section|article|ul|ol|table|br)\b[^>\n]*>/gi, '. ')
     .replace(/<\/?[a-zA-Z][^>\n]*>/g, ' ')
     .replace(/\\[a-zA-Z]+\*?(?:\[[^\]]*\])?(?:\{([^}]*)\})?/g, ' $1 ')
+    // Markdown emphasis (`**bold**`, `__bold__`, `*italic*`) — the house style
+    // used to bold nearly every metric in cv.md/article-digest.md. A closing
+    // marker sitting directly against the number severed the number-noun
+    // adjacency the claim patterns require, so a bolded metric quoted verbatim
+    // from the source was reported as "invented" (#4085). Requires
+    // non-whitespace touching each marker (the standard markdown emphasis
+    // rule), so a lone unpaired asterisk — a footnote marker like "40%*", or
+    // two of them on one line — is left alone rather than paired into a false
+    // span. Single underscores are load-bearing in these sources (snake_case,
+    // env_keys.json, file paths), so only a DOUBLED underscore is stripped.
+    // Must run AFTER the LaTeX pass above: a LaTeX star-variant command
+    // (`\section*{...}`) leaves a single bare `*` behind if consumed first,
+    // and that stray star can pair with an unrelated later `*...*` span and
+    // mangle both. Bold before italic, so the italic pass never splits a
+    // `**...**` run in two. Bold may span a wrapped line (`keepLineBreaks`);
+    // italic is deliberately kept single-line, to stay conservative about the
+    // more collision-prone single-asterisk form.
+    //
+    // Deliberately NOT letter/digit-boundary-guarded (e.g. `(?<![\p{L}\p{N}_])`)
+    // even though that would preserve literal patterns like `2*3*4` or
+    // `foo*bar*baz`: a LaTeX star command directly abutting the next word
+    // (`\section*{Foo}and*emphasis*done` -> `Foo and*emphasis*done`) leaves
+    // the italic span's markers touching letters on both sides, which such a
+    // guard rejects — turning real emphasis back into a false negative. The
+    // covered CV/article-digest sources never contain literal multiplication
+    // asterisks, so this trades an untested hypothetical for a real,
+    // regression-tested case (see the LaTeX star-command test below).
+    .replace(/\*\*(\S(?:[\s\S]*?\S)?)\*\*/g, ' $1 ')
+    .replace(/__(\S(?:[\s\S]*?\S)?)__/g, ' $1 ')
+    .replace(/\*(\S(?:[^\n*]*\S)?)\*/g, ' $1 ')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     // keepLineBreaks preserves a newline as a CLAUSE boundary for the plan-horizon
@@ -358,7 +407,18 @@ export function factClaims(text, sourceNormalized = null) {
     // passed the gate (CodeRabbit review). The connector list is closed and
     // each one must be followed by another Capitalised word, so the capture
     // cannot wander into ordinary prose.
-    ['title', /\b(?:[Ss]erved [Aa]s|[Ww]orked [Aa]s|[Tt]itle\s*:\s*|[Rr]ole\s*:\s*)\s*(?:an?\s+|the\s+)?([A-Z][\w/-]*(?:\s+(?:of|for|and|the)\s+[A-Z][\w/-]*|\s+[A-Z][\w/-]*){0,4})|\b(?:[Ww]orked [Aa]t|[Jj]oined)\s+[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,4}\s+[Aa]s\s+(?:an?\s+|the\s+)?([A-Z][\w/-]*(?:\s+(?:of|for|and|the)\s+[A-Z][\w/-]*|\s+[A-Z][\w/-]*){0,4})/g],
+    //
+    // #3907 — the first captured token used `[A-Z][\w/-]*`, whose `*` allows
+    // a bare single capital letter to satisfy it. Ordinary prose like "...to
+    // this role: I do not have..." then read the pronoun "I" as a one-letter
+    // job title. The fix requires at least one more character after the
+    // leading capital (`+` instead of `*`), which a real title always has —
+    // even a 2-letter acronym like "VP" or "PM" still matches — while a bare
+    // "I" or "A" no longer can. Only the FIRST token of each alternative is
+    // tightened; the subsequent tokens in the `{0,4}` repetition keep `*`
+    // because a later short word in a real multi-word title (e.g. the "AI"
+    // in "Head of AI") must still be allowed.
+    ['title', /\b(?:[Ss]erved [Aa]s|[Ww]orked [Aa]s|[Tt]itle\s*:\s*|[Rr]ole\s*:\s*)\s*(?:an?\s+|the\s+)?([A-Z][\w/-]+(?:\s+(?:of|for|and|the)\s+[A-Z][\w/-]*|\s+[A-Z][\w/-]*){0,4})|\b(?:[Ww]orked [Aa]t|[Jj]oined)\s+[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,4}\s+[Aa]s\s+(?:an?\s+|the\s+)?([A-Z][\w/-]+(?:\s+(?:of|for|and|the)\s+[A-Z][\w/-]*|\s+[A-Z][\w/-]*){0,4})/g],
     ['tool', /\b(?:using|built with|worked with|technologies?\s*:\s*|tech stack\s*:\s*)([^.;\n]+?)(?=\s+\bfor\b|[.;\n]|$)/gi],
   ];
   for (const [kind, pattern] of patterns) {
@@ -718,15 +778,32 @@ export function auditClaims(targetText, sourceText, config = {}) {
   return { invented, forbidden };
 }
 
-/** Load and validate the optional fact-gate configuration file. */
-function loadConfig(path) {
-  if (!existsSync(path)) return { allow_metrics: [], allow_facts: [], forbidden_phrases: [], warn_phrases: [] };
+/**
+ * Load and validate the optional fact-gate configuration file.
+ *
+ * The empty config is a fine default and a terrible silent one: forbidden_phrases
+ * and warn_phrases are the only phrase-level guard this module has, so with no
+ * file loaded the phrase check cannot fail — and a gate that is DISABLED then
+ * reads exactly like a gate that RAN AND FOUND NOTHING. `missing` is the one bit
+ * that tells them apart; callers surface it (#3894).
+ *
+ * Nothing here turns a missing config into an error. A user who has never
+ * written a cv-facts.json is in a normal state; they just should not be left
+ * believing a gate is protecting them when none is loaded.
+ *
+ * @param {string} path absolute path to the configuration file
+ * @returns {{missing: boolean, config: {allow_metrics: string[], allow_facts: string[], forbidden_phrases: string[], warn_phrases: string[]}}}
+ * @throws when the file exists but is unparseable or has a non-array key
+ */
+export function loadFactConfig(path) {
+  const keys = ['allow_metrics', 'allow_facts', 'forbidden_phrases', 'warn_phrases'];
+  if (!existsSync(path)) return { missing: true, config: Object.fromEntries(keys.map(key => [key, []])) };
   const config = JSON.parse(readFileSync(path, 'utf-8'));
-  for (const key of ['allow_metrics', 'allow_facts', 'forbidden_phrases', 'warn_phrases']) {
+  for (const key of keys) {
     if (config[key] == null) config[key] = [];
     else if (!Array.isArray(config[key])) throw new Error(`${key} must be an array in ${path}`);
   }
-  return config;
+  return { missing: false, config };
 }
 
 /** Resolve a CLI or configuration path relative to the selected working directory. */
@@ -754,7 +831,7 @@ export function verifyFacts(targetText, {
   cwd = process.cwd(),
 } = {}) {
   const sourceText = sourcePaths.map(path => readIfExists(resolveInputPath(path, cwd))).join('\n');
-  const config = loadConfig(resolveInputPath(configPath, cwd));
+  const { missing: configMissing, config } = loadFactConfig(resolveInputPath(configPath, cwd));
   const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const targetClaims = metricClaims(targetText);
   const invented = [...targetClaims].filter(claim => !allowed.has(claim));
@@ -781,6 +858,10 @@ export function verifyFacts(targetText, {
     forbidden,
     warnings,
     coverage,
+    // Deliberately outside the verdict: no config is a normal state, not a
+    // finding. It rides along so a caller can say the phrase lists were never
+    // loaded instead of printing a clean result the reader takes for "checked".
+    configMissing,
   };
 }
 
@@ -1188,6 +1269,12 @@ export function runCli(args = process.argv.slice(2)) {
       sourcePaths: parsed.sourcePaths.length ? parsed.sourcePaths : DEFAULT_SOURCES,
       configPath: parsed.configPath,
     });
+    // On stderr, before any verdict line and regardless of it: with no config
+    // the phrase lists are empty, so "passed" below means the phrase check never
+    // ran. stdout stays clean so --json remains parseable.
+    if (result.configMissing) {
+      console.error(`⚠️  fact-gate config not found: ${parsed.configPath} — forbidden/advisory phrase checks did not run.`);
+    }
     if (parsed.json) {
       console.log(JSON.stringify(result));
       return result.verdict === 'block' ? 1 : 0;
