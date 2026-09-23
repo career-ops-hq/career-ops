@@ -41,6 +41,15 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
-      - run: node .github/scripts/depends-on.mjs
+      # The checkout is `main`, so on the PR that introduces this check the script is
+      # not there yet. Missing means pass, which is also the right failure mode later:
+      # a check whose implementation went missing should not block every PR in the repo.
+      - name: depends-on
+        run: |
+          if [ ! -f .github/scripts/depends-on.mjs ]; then
+            echo "depends-on.mjs is not on main yet. Passing."
+            exit 0
+          fi
+          node .github/scripts/depends-on.mjs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
