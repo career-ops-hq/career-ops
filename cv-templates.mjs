@@ -369,11 +369,26 @@ function detectHiddenText(html) {
  * @returns {string|null}
  */
 function documentLanguage(html) {
-  const m = html.match(/<html\b[^>]*?\slang\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
-  if (!m) return null;
-  const value = (m[1] ?? m[2] ?? m[3] ?? '').trim().toLowerCase();
-  // BCP 47: the primary subtag is what decides the language. en-GB is English.
-  return value ? value.split('-')[0] : null;
+  // Comments out first. A commented-out `<html lang="es">` sitting above the
+  // real document otherwise reads as the document's language and silences the
+  // rule on an English CV, which is the dangerous direction: the lint stops
+  // checking and records it only in `skipped`.
+  const open = stripNonContent(html).match(/<html\b([^>]*)>/i);
+  if (!open) return null;
+
+  // Attributes are walked as name/value pairs instead of searched as text, so
+  // `lang` appearing INSIDE another attribute's quoted value cannot be read as
+  // the attribute itself. There is no HTML parser here by design, and a walker
+  // is the smallest thing that gets quoting right.
+  const attr = /([a-z_:][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi;
+  let m;
+  while ((m = attr.exec(open[1])) !== null) {
+    if (m[1].toLowerCase() !== 'lang') continue;
+    const value = (m[2] ?? m[3] ?? m[4] ?? '').trim().toLowerCase();
+    // BCP 47: the primary subtag decides the language. en-GB is English.
+    return value ? value.split('-')[0] : null;
+  }
+  return null;
 }
 
 function detectStandardSectionHeaders(html, rule) {

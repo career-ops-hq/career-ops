@@ -232,6 +232,26 @@ test('standard-section-headers: an English or absent lang is still judged', () =
   assert.deepEqual(ids(lint('<body><h2>Career Highlights</h2></body>')), ['standard-section-headers']);
 });
 
+test('standard-section-headers: a commented-out lang does not silence the rule', () => {
+  // The language read matched raw text, so a commented-out non-English <html>
+  // ahead of the real document made the rule skip an English CV entirely.
+  // Silence is the dangerous direction: the lint stops checking and says so
+  // only in `skipped`, which nothing gates on.
+  const html = '<!-- <html lang="es"> --><html lang="en"><body><h2>Career Highlights</h2></body></html>';
+  assert.deepEqual(ids(lint(html)), ['standard-section-headers']);
+});
+
+test('standard-section-headers: lang inside another attribute value is not the lang', () => {
+  const html = '<html data-note=" lang=es" lang="en"><body><h2>Career Highlights</h2></body></html>';
+  assert.deepEqual(ids(lint(html)), ['standard-section-headers']);
+});
+
+test('standard-section-headers: a real non-English lang still skips', () => {
+  const r = lint('<html lang="es"><body><h2>Experiencia Laboral</h2></body></html>');
+  assert.deepEqual(ids(r), []);
+  assert.ok(r.skipped.some((x) => x.id === 'standard-section-headers'));
+});
+
 test('standard-section-headers: must not flag a placeholder heading', () => {
   // Every shipped template writes these, and the rendered wording — and its
   // language, via lang="{{LANG}}" — belongs to the payload, not the template.
