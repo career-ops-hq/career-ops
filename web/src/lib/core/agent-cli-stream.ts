@@ -1,6 +1,6 @@
 import { careerOpsRoot } from "@/lib/career-ops";
 import { spawnCli } from "@/lib/cli-spawn";
-import { buildCliArgs, detectCliPlaintextError, processStreamJsonLines, usesStreamJson } from "@/lib/cli-stream";
+import { buildCliArgs, buildCliEnv, detectCliPlaintextError, processStreamJsonLines, usesStreamJson } from "@/lib/cli-stream";
 import type { CliSpec } from "@/lib/clis";
 
 /**
@@ -37,7 +37,13 @@ export function streamAgentCli({
       })
     : spec.args(prompt);
 
-  const child = spawnCli(binPath, args, { cwd: careerOpsRoot() });
+  const child = spawnCli(binPath, args, {
+    cwd: careerOpsRoot(),
+    env: {
+      ...process.env,
+      ...buildCliEnv(cliId, { allowedTools: allowedTools.join(","), disallowedTools: disallowedTools.join(",") }),
+    },
+  });
   const encoder = new TextEncoder();
   let closed = false;
   let killer: ReturnType<typeof setTimeout> | undefined;

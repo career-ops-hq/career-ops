@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { spawnCli } from "@/lib/cli-spawn";
-import { buildPlannerArgs } from "@/lib/cli-stream";
+import { buildPlannerArgs, buildCliEnv } from "@/lib/cli-stream";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { getSession } from "@/lib/apply/session";
 
@@ -159,7 +159,11 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
 
       const result = await new Promise<{ buf: string; code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
         // stdin = /dev/null so the CLI doesn't wait 3s for piped input.
-        const child = spawnCli(binPath, args, { cwd: careerOpsRoot() });
+        const cliEnv = buildCliEnv(cliId, {
+          allowedTools: "Read,Glob,Grep",
+          disallowedTools: "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch",
+        });
+        const child = spawnCli(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, ...cliEnv } });
         let buf = "";
         let firstByteAt = 0;
         const hb = setInterval(() => {

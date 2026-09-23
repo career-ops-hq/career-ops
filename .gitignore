@@ -237,5 +237,9 @@ reports/**/*.md
 __pycache__/
 tmp/
 cv/
+# cv/ guards a root scratch dir; the web CV-ingest route and tests live under
+# web/src/app/api/cv/ and must remain trackable.
+!web/src/app/api/cv/
+!web/src/app/api/cv/ingest/
 .tmp-*
 batch/linkedin-title-fix-*.tsv

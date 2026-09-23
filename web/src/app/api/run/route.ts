@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { spawnCli } from "@/lib/cli-spawn";
-import { buildCliArgs, detectCliPlaintextError, processStreamJsonLines, usesStreamJson } from "@/lib/cli-stream";
+import { buildCliArgs, buildCliEnv, detectCliPlaintextError, processStreamJsonLines, usesStreamJson } from "@/lib/cli-stream";
 import { careerOpsRoot, findApplication, primaryReportNum, readMemory } from "@/lib/career-ops";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { buildPrompt } from "@/lib/run-prompts.mjs";
@@ -78,16 +78,15 @@ export async function POST(req: Request) {
   // research is read-only; evaluate/fix-portal/pdf/cover may shell out to core
   // scripts. NEVER auto-submits — that is a prompt-level guarantee.
   const scope = toolScopeFor(kind);
-  const args = streamJson
-    ? cliId === "claude"
+  const args =
+    cliId === "claude"
       ? claudeCliArgs({ kind, prompt, permissionMode: "acceptEdits" })
       : buildCliArgs(cliId, spec, {
           prompt,
           allowedTools: scope.allowed,
           disallowedTools: scope.disallowed,
           needsShell: scope.needsShell,
-        })
-    : spec.args(prompt);
+        });
 
   // For write-needing kinds, snapshot report FILENAMES so we can verify THIS
   // run persisted (a global count races a concurrent eval of the same URL).
@@ -149,7 +148,12 @@ export async function POST(req: Request) {
 
   let child;
   try {
-    child = spawnCli(binPath, args, { cwd: careerOpsRoot() });
+    // opencode's headless scope rides in OPENCODE_CONFIG_CONTENT (no per-tool
+    // argv); everything else gets an empty env and stays CLI-agnostic. The env
+    // only DELETES or re-scopes tool permissions — the no-auto-submit guarantee
+    // is prompt-level and untouched by this.
+    const cliEnv = buildCliEnv(cliId, { allowedTools: scope.allowed, disallowedTools: scope.disallowed });
+    child = spawnCli(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, ...cliEnv } });
   } catch (e) {
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "failed to start CLI" }), {
       status: 500,

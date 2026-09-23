@@ -1,7 +1,7 @@
 import type { Frame } from "playwright-core";
 import { resolveCli } from "@/lib/clis";
 import { spawnCli } from "@/lib/cli-spawn";
-import { buildPlannerArgs } from "@/lib/cli-stream";
+import { buildPlannerArgs, buildCliEnv } from "@/lib/cli-stream";
 import type { CliSpec } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import type { ApplyField } from "./extract";
@@ -90,7 +90,11 @@ function runPlanner(binPath: string, cliId: string, spec: CliSpec, prompt: strin
     disallowedTools: "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch",
   });
   return new Promise((resolve) => {
-    const child = spawnCli(binPath, args, { cwd: careerOpsRoot() });
+    const cliEnv = buildCliEnv(cliId, {
+      allowedTools: "Read",
+      disallowedTools: "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch",
+    });
+    const child = spawnCli(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, ...cliEnv } });
     let buf = "";
     child.stdout.on("data", (d: Buffer) => (buf += d.toString()));
     child.stderr.on("data", () => {});

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { spawnCli } from "@/lib/cli-spawn";
-import { buildCliArgs, processStreamJsonLines, usesStreamJson } from "@/lib/cli-stream";
+import { buildCliArgs, buildCliEnv, processStreamJsonLines, usesStreamJson } from "@/lib/cli-stream";
 import { careerOpsRoot } from "@/lib/career-ops";
 
 // Parse a CV (pasted text or an uploaded PDF) into clean cv.md markdown by running
@@ -111,7 +111,11 @@ export async function POST(req: Request) {
 
   let child;
   try {
-    child = spawnCli(binPath, args, { cwd: careerOpsRoot() });
+    const cliEnv = buildCliEnv(cliId, {
+      allowedTools: "Read,Glob,Grep",
+      disallowedTools: "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch",
+    });
+    child = spawnCli(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, ...cliEnv } });
   } catch (e) {
     if (tempFile) cleanupTemp(tempFile); // never leak the CV temp if spawn throws sync
     return Response.json({ error: e instanceof Error ? e.message : "failed to start the CLI" }, { status: 500 });

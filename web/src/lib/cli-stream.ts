@@ -1,4 +1,5 @@
 import type { CliSpec } from "@/lib/clis";
+import { opencodePermissionBlock } from "@/lib/opencode-permission.mjs";
 
 export function usesStreamJson(cliId: string): boolean {
   return cliId === "claude" || cliId === "cursor";
@@ -16,7 +17,7 @@ export type CliSpawnOptions = {
 
 /** Non-streaming headless argv (planner/prefill routes buffer stdout as plain text). */
 export function buildPlannerArgs(cliId: string, spec: CliSpec, opts: CliSpawnOptions): string[] {
-  const { prompt, permissionMode, allowedTools, disallowedTools, strictMcpConfig } = opts;
+  const { prompt, permissionMode, allowedTools, disallowedTools, strictMcpConfig, needsShell } = opts;
   if (cliId === "claude") {
     const args = ["-p", prompt];
     if (permissionMode) args.push("--permission-mode", permissionMode);
@@ -27,15 +28,20 @@ export function buildPlannerArgs(cliId: string, spec: CliSpec, opts: CliSpawnOpt
   }
   if (cliId === "cursor") {
     const args = ["-p", prompt, "--trust"];
-    if (opts.needsShell) args.push("--force");
+    if (needsShell) args.push("--force");
     return args;
+  }
+  if (cliId === "codex") {
+    // Codex has no per-tool allowlist; its headless sandbox flag is the fence
+    // (read-only for web-only kinds, workspace-write when the worker shells out).
+    return ["exec", prompt, "--sandbox", needsShell ? "workspace-write" : "read-only"];
   }
   return spec.args(prompt);
 }
 
 /** Headless argv for a CLI run. Claude/Cursor use stream-json; others use each spec's args(). */
 export function buildCliArgs(cliId: string, spec: CliSpec, opts: CliSpawnOptions): string[] {
-  const { prompt, permissionMode, allowedTools, disallowedTools, strictMcpConfig } = opts;
+  const { prompt, permissionMode, allowedTools, disallowedTools, strictMcpConfig, needsShell } = opts;
   if (cliId === "claude") {
     const args = ["-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages"];
     if (permissionMode) args.push("--permission-mode", permissionMode);
@@ -49,10 +55,25 @@ export function buildCliArgs(cliId: string, spec: CliSpec, opts: CliSpawnOptions
     // Headless web workers must run core scripts (merge-tracker, generate-pdf, …).
     // Cursor's default approvalMode is often "allowlist" with only Shell(ls) —
     // without --force the agent falls back to Write-only and PDF never renders.
-    if (opts.needsShell) args.push("--force");
+    if (needsShell) args.push("--force");
     return args;
   }
+  if (cliId === "codex") {
+    return ["exec", prompt, "--sandbox", needsShell ? "workspace-write" : "read-only"];
+  }
   return spec.args(prompt);
+}
+
+/**
+ * Extra env a CLI run needs beyond the ambient process env. Only opencode has
+ * one today: its headless scope rides in OPENCODE_CONFIG_CONTENT (opencode has
+ * no per-tool argv flags, and its default headless run auto-rejects any tool
+ * touching a path outside its workspace — /tmp payloads). Returns {} for every
+ * other CLI so spawn sites stay CLI-agnostic.
+ */
+export function buildCliEnv(cliId: string, opts: Pick<CliSpawnOptions, "allowedTools" | "disallowedTools">): Record<string, string> {
+  if (cliId !== "opencode") return {};
+  return { OPENCODE_CONFIG_CONTENT: opencodePermissionBlock({ allowed: opts.allowedTools, disallowed: opts.disallowedTools }) };
 }
 
 function claudeAssistantText(obj: Record<string, unknown>): string | null {

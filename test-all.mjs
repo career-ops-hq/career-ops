@@ -16255,6 +16255,7 @@ try {
       'worker-capabilities.mjs': join(webLib, 'worker-capabilities.mjs'),
       'cv-envelope.mjs': join(webLib, 'cv-envelope.mjs'),
       'run-prompts.mjs': join(webLib, 'run-prompts.mjs'),
+      'opencode-permission.mjs': join(webLib, 'opencode-permission.mjs'),
       'api/run/route.ts': runRoutePath,
     };
     const missing = Object.entries(required).filter(([, f]) => !existsSync(f)).map(([name]) => name);
@@ -16264,6 +16265,7 @@ try {
       let invocation;
       let capabilities;
       let prompts;
+      let opencode; // module namespace is frozen; keep the opencode policy separate
       try {
         invocation = await import(pathToFileURL(required['claude-invocation.mjs']).href);
         // KNOWN_KINDS moved to worker-capabilities.mjs, which owns the policy both
@@ -16275,6 +16277,7 @@ try {
         // for CV_ENVELOPE_INSTRUCTION, so a break there would surface here anyway,
         // but naming it keeps the failure message specific.
         await import(pathToFileURL(required['cv-envelope.mjs']).href);
+        opencode = await import(pathToFileURL(required['opencode-permission.mjs']).href);
       } catch (err) {
         fail(`web pdf write-scope modules could not be imported (${err.message}) — the #2185 freeze cannot verify`);
       }
@@ -16387,6 +16390,33 @@ try {
           pass('web tool scopes leave no write-capable tool unmentioned for any kind (#2185)');
         } else {
           fail(`web tool scopes leave ${unmentioned.join(', ')} neither allowed nor denied — acceptEdits may auto-approve them (#2185)`);
+        }
+
+        // opencode has NO write key and NO per-tool argv flags — its scope lives
+        // in OPENCODE_CONFIG_CONTENT (opencode-permission.mjs). Same invariant,
+        // one vocabulary over: pdf must never grant opencode's write-capable key
+        // (`edit`), and the only external path a worker may touch is /tmp.
+        if (!opencode || typeof opencode.opencodePermissionBlock !== 'function') {
+          fail('opencode-permission.mjs is missing opencodePermissionBlock — the opencode scope freeze cannot verify');
+        } else {
+          const pdfOc = JSON.parse(opencode.opencodePermissionBlock(invocation.toolScopeFor('pdf')));
+          if (pdfOc.permission.edit !== 'deny') {
+            fail(`web opencode pdf block grants edit (${pdfOc.permission.edit}) — opencode's write key must be denied for pdf (#2185)`);
+          } else {
+            pass('web opencode pdf command scope grants no write-capable key (#2185)');
+          }
+          const ext = JSON.stringify(pdfOc.permission.external_directory);
+          if (ext !== JSON.stringify({ '/tmp/*': 'allow', '/tmp': 'allow' })) {
+            fail(`web opencode external_directory is ${ext}, expected /tmp-only payload scope (#2185)`);
+          } else {
+            pass('web opencode external_directory scopes exactly the /tmp payload paths (#2185)');
+          }
+          // Denied by name for research too: a read-only opencode worker must not
+          // gain the edit key silently when its scope changes.
+          const researchOc = JSON.parse(opencode.opencodePermissionBlock(invocation.toolScopeFor('research')));
+          if (researchOc.permission.edit !== 'deny') {
+            fail('web opencode research block grants edit — a read-only worker must not write (#2185)');
+          }
         }
 
         // The PROMPT is asserted by run-prompts.test.mjs, which this section already

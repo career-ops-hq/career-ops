@@ -1,6 +1,6 @@
 import { resolveCli } from "@/lib/clis";
 import { spawnCli } from "@/lib/cli-spawn";
-import { buildCliArgs, detectCliPlaintextError, processStreamJsonLines, usesStreamJson } from "@/lib/cli-stream";
+import { buildCliArgs, buildCliEnv, detectCliPlaintextError, processStreamJsonLines, usesStreamJson } from "@/lib/cli-stream";
 import { careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
 
 export const runtime = "nodejs"; // child_process (spawn) requires the Node runtime
@@ -100,7 +100,8 @@ export async function POST(req: Request) {
       })
     : spec.args(prompt);
 
-  const child = spawnCli(binPath, args, { cwd: careerOpsRoot() });
+  const cliEnv = buildCliEnv(cliId, { allowedTools: "Read,WebFetch,Glob,Grep", disallowedTools: "Bash,Write,Edit,NotebookEdit,Task" });
+  const child = spawnCli(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, ...cliEnv } });
 
   const encoder = new TextEncoder();
   // `closed` + kill timer in the OUTER scope so cancel() can flip `closed` before
