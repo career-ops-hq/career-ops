@@ -8,6 +8,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseDependsOn, prFromQueueRef } from '../.github/scripts/depends-on.mjs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import * as yaml from 'js-yaml';
 
 test('a `## Depends on` heading collects the refs beneath it', () => {
   assert.deepEqual(parseDependsOn('## Depends on\n\n#3513 — §2 lands with it.\n'), [3513]);
@@ -104,4 +108,100 @@ test('a bold span without a ref inside it collects nothing', () => {
 test('a body listing its own number does not block itself', () => {
   assert.deepEqual(parseDependsOn('## Depends on\n\n#4078 and #4076\n', 4078), [4076]);
   assert.deepEqual(parseDependsOn('## Depends on\n\n#4078\n', 4078), []);
+});
+
+// The path the workflow runs (#3880).
+//
+// `.github/workflows/depends-on.yml` passes when the script is absent. That is
+// correct on the PR introducing the check. It is correct again later: a required
+// check whose implementation went missing should not redden every open PR.
+//
+// The cost is that absent and working look identical from outside. Rename the
+// script, or edit the sparse-checkout path it arrives under, and the required
+// check reports success on every PR in the repo. The ordering gate is off, and
+// one log line nobody opens is the only signal.
+//
+// So the paths get pinned here. Every path below is read out of the workflow
+// YAML. A test carrying its own copy stops tracking the workflow the day it
+// moves, and pins nothing.
+//
+// The sweep reads every workflow, because the shape is not unique to this one.
+// Four sibling jobs run a script out of a sparse checkout the same way. Their
+// failure is loud, so they need no guard, and their paths cost nothing to pin
+// while the parser is already open. The floor test asserts the sweep found
+// something, so an extraction that quietly matches nothing cannot read as green.
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const WORKFLOWS = join(ROOT, '.github', 'workflows');
+
+/** `node <path>.mjs` inside a run block. */
+const INVOKES = /\bnode\s+([^\s;&|)'"]+\.mjs)/g;
+/** `[ ! -f <path>.mjs ]`, the absent-means-pass guard. */
+const GUARDS = /\[\s*!\s*-f\s+([^\s\]]+\.mjs)\s*\]/g;
+
+const paths = (re, text) => [...new Set([...text.matchAll(re)].map((m) => m[1]))].sort();
+
+/**
+ * Every workflow job, with the script paths its run steps name and the sparse
+ * checkout those paths have to arrive under.
+ * @returns {{file: string, job: string, sparse: string[], invoked: string[], guarded: string[]}[]}
+ */
+function workflowJobs() {
+  const out = [];
+  for (const file of readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/i.test(f))) {
+    const doc = yaml.load(readFileSync(join(WORKFLOWS, file), 'utf-8'));
+    for (const [job, spec] of Object.entries(doc?.jobs ?? {})) {
+      const steps = spec?.steps ?? [];
+      const sparse = steps.flatMap((s) => {
+        const declared = s?.with?.['sparse-checkout'];
+        const lines = Array.isArray(declared) ? declared : String(declared ?? '').split('\n');
+        return lines.map((p) => p.trim().replace(/^\/+|\/+$/g, '')).filter(Boolean);
+      });
+      // A step with its own working directory resolves its paths somewhere else.
+      // This sweep reads repo-root-relative paths only.
+      const run = steps.filter((s) => s?.run && !s['working-directory']).map((s) => s.run).join('\n');
+      out.push({ file, job, sparse, invoked: paths(INVOKES, run), guarded: paths(GUARDS, run) });
+    }
+  }
+  return out;
+}
+
+// Runs first on purpose. Every assertion below iterates what this sweep
+// collected. An empty collection passes all of them without reading a byte of
+// the workflow.
+test('the workflow sweep finds paths to pin', () => {
+  const jobs = workflowJobs();
+  assert.ok(jobs.length > 0, 'no workflow jobs were read');
+  assert.ok(jobs.some((j) => j.invoked.length), 'no run step invokes a script');
+  assert.ok(jobs.some((j) => j.guarded.length), 'no absent-means-pass guard was found');
+  assert.ok(jobs.some((j) => j.sparse.length), 'no sparse-checkout was found');
+});
+
+test('every script a workflow names is on disk', () => {
+  for (const j of workflowJobs()) {
+    for (const p of new Set([...j.invoked, ...j.guarded])) {
+      assert.ok(existsSync(join(ROOT, p)), `${j.file} (${j.job}) names ${p}, which is not in the repo`);
+    }
+  }
+});
+
+// The guard decides whether the job runs at all. A guard reading one path while
+// the step runs another passes the job whenever they disagree.
+test('an absent-means-pass guard tests the path its job runs', () => {
+  for (const j of workflowJobs()) {
+    if (!j.guarded.length) continue;
+    assert.deepEqual(j.guarded, j.invoked, `${j.file} (${j.job}) guards a different path than it runs`);
+  }
+});
+
+// The script arrives through the sparse checkout. A sparse path that stops
+// covering it makes it absent on every run, which the guard reads as a pass.
+test('a sparse checkout covers every script its job names', () => {
+  for (const j of workflowJobs()) {
+    if (!j.sparse.length) continue;
+    for (const p of new Set([...j.invoked, ...j.guarded])) {
+      const covered = j.sparse.some((s) => p === s || p.startsWith(`${s}/`));
+      assert.ok(covered, `${j.file} (${j.job}) runs ${p}, outside its sparse checkout (${j.sparse.join(', ')})`);
+    }
+  }
 });
