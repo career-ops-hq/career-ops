@@ -246,7 +246,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
                   capHitAcc = true;
                   setCapHit(true);
                 }
-                const datasetIssue = ev.datasetStatus ? Object.values(ev.datasetStatus).some((s) => s !== "ok") : false;
+                const datasetIssue =
+                  (ev.datasetStatus ? Object.values(ev.datasetStatus).some((s) => s !== "ok") : false) ||
+                  (ev.incomplete?.length ?? 0) > 0;
                 if (datasetIssue) datasetIssueAcc = true;
                 if (typeof ev.postingsDroppedNoDate === "number" && ev.postingsDroppedNoDate > 0) {
                   droppedNoDateAcc = ev.postingsDroppedNoDate;
