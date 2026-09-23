@@ -789,3 +789,64 @@ test('acquirePipelineLock: a caller gives up near its timeoutMs even when retryM
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+// ---------------------------------------------------------------------------
+// The clamp is the RE-ARMED window, so it cannot collapse into a busy-wait
+// ---------------------------------------------------------------------------
+//
+// holderStillWedged() re-arms perHolderDeadline whenever the lock changes
+// hands. It runs immediately before every backoffMs() on both sleep paths.
+// Clamping to the `deadline` parameter looks identical at t=0. It diverges on
+// the first handoff: that bound has already passed, so every later sleep
+// floors at 0. The loop still runs to the ceiling, now spinning at the
+// setTimeout floor and re-racing every waiter at once. That's the thundering
+// herd the jitter above exists to prevent. So the two clamps have to be told
+// apart, and only the re-armed one keeps the jitter alive.
+//
+// No timers here, and no elapsed-time reads. The sequence is computed
+// synchronously, and a frozen clamp yields exactly 0 every round.
+
+test('createLockWaitPolicy: a re-armed per-holder window still sleeps a full jittered retry', () => {
+  const root = fixtureRoot();
+  try {
+    const lockDir = join(root, 'data', 'pipeline.md.lock');
+    mkdirSync(lockDir, { recursive: true });
+    // One handoff, stamped the way churnLock() stamps them. A fresh token is
+    // all lockFingerprint() needs to read the lock as having moved.
+    const handOff = (n) => writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({
+      pid: process.pid, token: `handoff-${n}`, started_at: new Date().toISOString(),
+    }), 'utf-8');
+    handOff(0);
+
+    const now = Date.now();
+    // The window opens already spent, so the handoff is what the first
+    // holderStillWedged() decides on. timeoutMs dwarfs retryMs and the ceiling
+    // sits far out, leaving the jitter alone to set every sleep.
+    const policy = createLockWaitPolicy(lockDir, {
+      timeoutMs: 60_000, retryMs: 80, deadline: now - 1, hardDeadline: now + 600_000,
+    });
+    policy.noteWaiting();
+
+    const sleeps = [];
+    for (let round = 1; round <= 5; round += 1) {
+      handOff(round);
+      assert.equal(
+        policy.holderStillWedged(), false,
+        `round ${round}: the lock changed hands, so this is progress and the window re-arms`,
+      );
+      sleeps.push(policy.backoffMs());
+    }
+
+    // 40ms is the jitter floor itself, retryMs * 0.5, so the bound is exact.
+    // A clamp to the frozen `deadline` reports 0.
+    assert.ok(
+      sleeps.every((ms) => ms >= 40),
+      `backoff sequence [${sleeps.map((ms) => Math.round(ms)).join(', ')}] across five handoffs. `
+      + 'A re-armed window still owes the caller a real jittered retry. A sleep of 0 is the '
+      + 'busy-wait a clamp against the frozen deadline would produce.',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
