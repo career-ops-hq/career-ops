@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // GENERADO por github-src/scripts/build.mjs: no editar a mano. Fuente: github-src/scripts/triage.mjs + bin/lib/triage-core.mjs + policy/*.json
-// {"builtAt":"2026-09-22T21:41:27.948Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
+// {"builtAt":"2026-09-23T08:08:31.480Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -311,7 +311,7 @@ function staleApproval(snapshot, maintainers) {
 /**
  * Función pura. `extras`: { sessionCount, commitments, dependents, okGiven } (vienen del ledger/colisiones; opcionales).
  */
-function classify(snapshot, { labelsPolicy, trivialPolicy, priorityPolicy, now = Date.now(), sessionCount = null, commitments = [], dependents = 0, blocksOthers = undefined, okGiven = false } = {}) {
+function classify(snapshot, { labelsPolicy, trivialPolicy, priorityPolicy, now = Date.now(), sessionCount = null, commitments = [], dependents = 0, blocksOthers = undefined, okGiven = false, rebaseManual = new Set(), rebaseClean = new Set() } = {}) {
   const why = [];
   const files = (snapshot.files || []).map(f => f.path);
   const n = lines(snapshot);
@@ -335,7 +335,11 @@ function classify(snapshot, { labelsPolicy, trivialPolicy, priorityPolicy, now =
 
   let state;
   if (snapshot.isDraft) { state = 'triage/new'; why.push('borrador: no se toca'); }
-  else if (needsRebase) { state = 'needs-rebase'; why.push(snapshot.maintainerCanModify ? 'conflicto con main; podemos arreglarlo nosotros' : 'conflicto con main; rebase del autor'); }
+  else if (needsRebase) {
+    state = 'needs-rebase'; const key = `${snapshot.number}@${snapshot.headSha}`;
+    // "ours" solo con sondeo limpio (rebase-probe): sin sondeo no se promete nada.
+    why.push(rebaseManual.has(key) ? 'conflicto con main; el rebase automático no es limpio: rebase del autor' : !snapshot.maintainerCanModify ? 'conflicto con main; rebase del autor' : rebaseClean.has(key) ? 'conflicto con main; sondeo limpio: podemos arreglarlo nosotros' : 'conflicto con main; permite edits: sondear con rebase-probe');
+  }
   else if (ciHold) { state = 'triage/ci-hold'; why.push('primerizo con CI retenida'); }
   else if (needsSplit) { state = 'triage/needs-split'; why.push(n > priorityPolicy.needsSplit.maxLines ? `${n} líneas: pedir troceo` : `toca ${areas.length} áreas: pedir troceo`); }
   else if (waitingKept) { state = 'triage/waiting-author'; why.push('esperando al autor desde nuestro último comentario'); }
@@ -487,7 +491,11 @@ return { JEV_MARKER_RE, MAX_COMMENT_BYTES_JEV, round2, buildJevMarker, parseJevM
 // Qué hace: lee el evento (GITHUB_EVENT_PATH), construye el snapshot de la PR con la MISMA query GraphQL que
 // bin/lib/snapshot.mjs (fetch nativo, token GITHUB_TOKEN), llama a `classify`, aplica los labels de estado y
 // publica la primera respuesta con marcador `<!-- co:first-reply:N:sha7 -->` (se busca antes: nunca duplica).
-// En `schedule` hace el sweep: PRs abiertas >20h sin comentario de maintainer ni marcador.
+// En `schedule` hace el sweep: (1) PRs abiertas >20h y ≤TRIAGE_BACKLOG_HOURS sin comentario de maintainer ni marcador
+// reciben labels + primera respuesta; (2) las más viejas (backlog) solo labels: la disculpa y el compromiso los pone la
+// sesión (first-reply-backlog, con recibo y ledger); (3) las pegadas en `triage/new` >1h se re-triagean (la CI ya acabó).
+// En `workflow_run` (Tests completada) re-triagea la PR de ese head: la label `triage/new` promete "en el siguiente sweep"
+// y aquí no hay sweep hasta 6h después.
 //
 // Qué NO hace: prioridad (p0/p1/p2), direction/* ni maintainer-commitment. La prioridad necesita ledger
 // (compromisos) y colisiones, que solo tiene la sesión; si la Action la recalculara sin eso, degradaría p1.
@@ -501,13 +509,17 @@ return { JEV_MARKER_RE, MAX_COMMENT_BYTES_JEV, round2, buildJevMarker, parseJevM
 //        La señal se persiste en la PR como bloque oculto `<!-- co:jev:N:sha7 {…} -->` dentro del comentario de
 //        primera respuesta (editándolo: sin entradas nuevas en el timeline; un bloque por sha7). Sin primera
 //        respuesta (bot/borrador) no se crea comentario: la señal queda solo en el job summary.
-//      TRIAGE_SWEEP_MAX (60) → tope de PRs por sweep (evita bombardeo y el rate limit de 1000 req/h)
+//      TRIAGE_SWEEP_MAX (60) → tope de primeras respuestas por sweep (evita bombardeo y el rate limit de 1000 req/h)
+//      TRIAGE_BACKLOG_HOURS (72) → a partir de esa edad el sweep no responde (solo etiqueta): la sesión responde con first-reply-backlog
+//      TRIAGE_RETRIAGE_MAX (30) → tope de re-triages (backlog + triage/new pegadas) por sweep
 //      CODEOWNERS_PATH (.github/CODEOWNERS) → reglas reales para el gate no-codeowners (checkout de la base)
 
 
 const MARKER_SLUG = 'first-reply';
 const JEV_MODEL = 'jev-1.13.0';
 const SWEEP_HOURS = 20;
+const BACKLOG_HOURS = Number(process.env.TRIAGE_BACKLOG_HOURS || 72);
+const STUCK_HOURS = 1; // triage/new más vieja que esto y sin evento: la CI acabó y nadie la reclasificó
 const MAX_COMMENT_BYTES = 1600;
 const DEFAULT_FIRST_REPLY = [
   'Thanks for the PR: it is in the queue and a maintainer will read it by hand.',
@@ -718,7 +730,7 @@ async function triageOne(number, { now, firstReply, comment = null }) {
 
 const SWEEP_QUERY = `query($owner:String!,$name:String!,$after:String){ repository(owner:$owner,name:$name){
   pullRequests(states:OPEN, first:50, after:$after, orderBy:{field:CREATED_AT, direction:ASC}){ pageInfo{hasNextPage endCursor}
-    nodes{ number createdAt isDraft author{login __typename} comments(first:100){nodes{author{login} body}} reviews(first:50){nodes{author{login}}} } } } }`;
+    nodes{ number createdAt updatedAt isDraft author{login __typename} labels(first:30){nodes{name}} comments(first:100){nodes{author{login} body}} reviews(first:50){nodes{author{login}}} } } } }`;
 export function sweepCandidates(prs, now, labelsPolicy = POLICIES.labels) {
   const maintainers = new Set(labelsPolicy.maintainers || []);
   return prs.filter((p) => {
@@ -730,22 +742,45 @@ export function sweepCandidates(prs, now, labelsPolicy = POLICIES.labels) {
     return !spoke && !marked;
   });
 }
+/** Plan del sweep, puro. reply: sin respuesta y ≤backlogHours (labels + primera respuesta) · backlog: sin respuesta y más viejas
+ *  (solo labels; la sesión responde con first-reply-backlog) · stuck: `triage/new` sin tocar >stuckHours (la CI acabó, reclasificar). */
+export function sweepPlan(prs, now, labelsPolicy = POLICIES.labels, { backlogHours = BACKLOG_HOURS, stuckHours = STUCK_HOURS } = {}) {
+  const cands = sweepCandidates(prs, now, labelsPolicy);
+  const age = (p) => (now - new Date(p.createdAt)) / 36e5;
+  const reply = cands.filter((p) => age(p) <= backlogHours), backlog = cands.filter((p) => age(p) > backlogHours);
+  const seen = new Set(cands.map((p) => p.number));
+  const stuck = prs.filter((p) => !p.isDraft && !seen.has(p.number) && (p.labels?.nodes || []).some((l) => l.name === 'triage/new') && (now - new Date(p.updatedAt || p.createdAt)) / 36e5 > stuckHours);
+  return { reply, backlog, stuck };
+}
 async function sweep(now) {
-  const max = Number(process.env.TRIAGE_SWEEP_MAX || 60);
+  const max = Number(process.env.TRIAGE_SWEEP_MAX || 60), maxRe = Number(process.env.TRIAGE_RETRIAGE_MAX || 30);
   const all = []; let after = null;
   do {
     const d = await graphql(SWEEP_QUERY, { owner: OWNER, name: NAME, after });
     const c = d.repository.pullRequests; all.push(...c.nodes); after = c.pageInfo.hasNextPage ? c.pageInfo.endCursor : null;
   } while (after);
-  const cands = sweepCandidates(all, now);
-  log(`sweep: ${all.length} abiertas, ${cands.length} sin respuesta >${SWEEP_HOURS}h, tope ${max}`);
-  let done = 0;
-  for (const p of cands) {
-    if (done >= max) { log(`sweep: tope ${max} alcanzado, quedan ${cands.length - done} para la próxima pasada`); break; }
+  const { reply, backlog, stuck } = sweepPlan(all, now);
+  log(`sweep: ${all.length} abiertas · ${reply.length} sin respuesta >${SWEEP_HOURS}h y ≤${BACKLOG_HOURS}h (tope ${max}) · ${backlog.length} en backlog >${BACKLOG_HOURS}h (solo labels: la sesión responde) · ${stuck.length} pegadas en triage/new (tope ${maxRe} re-triages)`);
+  let done = 0, re = 0;
+  for (const p of reply) {
+    if (done >= max) { log(`sweep: tope ${max} alcanzado, quedan ${reply.length - done} para la próxima pasada`); break; }
     try { await triageOne(p.number, { now, firstReply: true }); done++; }
     catch (e) { log(`#${p.number}: fallo (${e.message.slice(0, 120)})`); }
   }
-  log(`sweep: ${done} atendidas`);
+  for (const p of [...stuck, ...backlog]) {
+    if (re >= maxRe) { log(`sweep: tope ${maxRe} re-triages alcanzado`); break; }
+    try { await triageOne(p.number, { now, firstReply: false }); re++; }
+    catch (e) { log(`#${p.number}: fallo (${e.message.slice(0, 120)})`); }
+  }
+  log(`sweep: ${done} primeras respuestas · ${re} re-triages`);
+}
+
+/** PRs abiertas de un workflow_run: el payload trae pull_requests solo para ramas del repo; para forks se buscan por head_sha. */
+export async function prsFromWorkflowRun(event, fetchPulls) {
+  const run = event.workflow_run || {};
+  let list = (run.pull_requests || []).map((p) => ({ number: p.number, state: 'open' }));
+  if (!list.length && run.head_sha) list = (await fetchPulls(run.head_sha)) || [];
+  return [...new Set(list.filter((p) => p.state === 'open').map((p) => p.number))];
 }
 
 async function main() {
@@ -755,6 +790,11 @@ async function main() {
   const event = process.env.GITHUB_EVENT_PATH ? JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')) : {};
   log(`pr-triage ${eventName}${DRY ? ' (DRY_RUN: no escribe en GitHub)' : ''}`);
   if (eventName === 'schedule' || eventName === 'workflow_dispatch') await sweep(now);
+  else if (eventName === 'workflow_run') { // Tests completada: reclasificar (triage/new → ready/trivial/waiting-author) sin esperar al sweep
+    const nums = await prsFromWorkflowRun(event, (sha) => rest('GET', `repos/${REPO}/commits/${sha}/pulls`));
+    if (!nums.length) { log(`workflow_run ${event.workflow_run?.head_sha?.slice(0, 7) || '?'}: sin PR abierta, nada`); return; }
+    for (const n of nums) await triageOne(n, { now, firstReply: false });
+  }
   else if (eventName === 'pull_request_target') await triageOne(event.pull_request.number, { now, firstReply: ['opened', 'ready_for_review'].includes(event.action) });
   else if (eventName === 'issue_comment') {
     if (!event.issue?.pull_request) { log('comentario en issue, no en PR: nada'); return; }
