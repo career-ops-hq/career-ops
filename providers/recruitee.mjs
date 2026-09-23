@@ -90,9 +90,12 @@ function isRecruiteeSamplePosting(j) {
  * `[{name: "Berlin, Germany"}, {name: "Berlin, Germany"}]`) still falls
  * through to the flat-field path below rather than discarding a possibly
  * richer flat `location` string in favor of a "join" of one place. Each name
- * gets its `country` appended when present and not already part of the name
- * text (case-insensitive substring check, so "Zürich, Switzerland" + country
- * "Switzerland" does not become "Zürich, Switzerland, Switzerland"). Deduped,
+ * gets its `city` and `country` appended when present and not already part of
+ * the name text (case-insensitive substring check per field, so "Zürich,
+ * Switzerland" + city "Zürich" + country "Switzerland" does not become
+ * "Zürich, Switzerland, Zürich, Switzerland" — each field is checked and
+ * appended independently, so a name missing only one of the two still gets
+ * exactly that one added). Deduped,
  * joined with " · " like ashby/eightfold/gem/workday's multi-place handling,
  * so scan.mjs's location_filter sees every place a multi-location role is
  * open to.
@@ -116,10 +119,13 @@ function assembleLocation(j) {
     ? j.locations.map(l => {
         const name = typeof l?.name === 'string' ? l.name.trim() : '';
         if (!name) return '';
+        const lowerName = name.toLowerCase();
+        const parts = [name];
+        const city = typeof l?.city === 'string' ? l.city.trim() : '';
+        if (city && !lowerName.includes(city.toLowerCase())) parts.push(city);
         const country = typeof l?.country === 'string' ? l.country.trim() : '';
-        return country && !name.toLowerCase().includes(country.toLowerCase())
-          ? `${name}, ${country}`
-          : name;
+        if (country && !lowerName.includes(country.toLowerCase())) parts.push(country);
+        return parts.join(', ');
       }).filter(Boolean)
     : [];
   const distinctNames = [...new Set(names)];
@@ -139,14 +145,17 @@ function assembleLocation(j) {
  * Recruitee returns:
  *   { offers: [{ title, careers_url?, url?, city?, country?, remote?, location?, locations? }] }
  *
- * - url: prefer `careers_url`, fall back to `url`. Recruitee tenants commonly
- *   serve postings on their own custom domain (e.g. `careers.hostaway.com`),
- *   so this URL is NOT host-locked to `*.recruitee.com`. Unlike the API
- *   endpoint, the per-offer URL is display-only — it is written to the pipeline
- *   and scan history but never server-fetched here, so the SSRF rationale does
- *   not apply. It is sourced from the already-validated tenant API response.
- *   Requirement: a well-formed `https:` URL; a non-HTTPS, malformed, or
- *   missing URL drops the whole offer (see Drop rule below).
+ * - url: tries `careers_url` first, falling back to `url` when `careers_url`
+ *   is absent or invalid — each candidate validated independently, so one bad
+ *   field never shadows an otherwise-usable other one. Recruitee tenants
+ *   commonly serve postings on their own custom domain (e.g.
+ *   `careers.hostaway.com`), so this URL is NOT host-locked to
+ *   `*.recruitee.com`. Unlike the API endpoint, the per-offer URL is
+ *   display-only — it is written to the pipeline and scan history but never
+ *   server-fetched here, so the SSRF rationale does not apply. It is sourced
+ *   from the already-validated tenant API response. Requirement: a
+ *   well-formed `https:` URL; when neither candidate resolves, the whole
+ *   offer is dropped (see Drop rule below).
  * - location: see `assembleLocation` — joins `locations[]` when it lists 2+
  *   distinct places (appending "Remote" when `remote` is true and no place
  *   name already says so), else the explicit `location` field, else assembled
@@ -190,18 +199,23 @@ export function parseRecruiteeResponse(json, companyName) {
     // own custom domain (e.g. careers.hostaway.com), so the per-offer URL is
     // NOT host-locked to *.recruitee.com — it is display-only (recorded in the
     // pipeline/history, never server-fetched here) and comes from the already-
-    // validated tenant API response. Require a well-formed https: URL; a
-    // non-https or malformed URL is dropped, same as a missing one.
+    // validated tenant API response. Require a well-formed https: URL. Tries
+    // `careers_url` first (preferred), falling back to `url` when
+    // `careers_url` is absent, non-https, or malformed — each candidate is
+    // validated independently, so one bad field doesn't drop an otherwise-
+    // usable offer whose other field resolves fine. Only when NEITHER
+    // candidate resolves is the offer dropped.
     let url = '';
-    const rawUrl = j.careers_url || j.url || '';
-    if (typeof rawUrl === 'string' && rawUrl) {
+    for (const candidate of [j.careers_url, j.url]) {
+      if (typeof candidate !== 'string' || !candidate) continue;
       try {
-        const parsed = new URL(rawUrl);
+        const parsed = new URL(candidate);
         if (parsed.protocol === 'https:') {
           url = parsed.href;
+          break;
         }
       } catch {
-        // malformed URL → leave url = ''
+        // malformed URL → try the next candidate
       }
     }
     if (!url) continue;

@@ -439,6 +439,80 @@ try {
     fail(`remote-flag-false location = ${JSON.stringify(remoteFlagOffers[2]?.location)}`);
   }
 
+  // ── City is appended to a non-geographic location name, without duplicating it ──
+  // Uses internal/non-place labels (not city or country names themselves) so
+  // the city-append logic is exercised independently of the name text.
+  const cityOffers = parseRecruiteeResponse(
+    {
+      offers: [
+        {
+          // Name is an internal label with no city/country baked in — both appended.
+          title: 'Internal building label',
+          careers_url: 'https://x.recruitee.com/o/internal-building-label',
+          locations: [
+            { name: 'Building A', city: 'Berlin', country: 'Germany' },
+            { name: 'Building B', city: 'Paris', country: 'France' },
+          ],
+        },
+        {
+          // City already present in the name (case-insensitive) — not duplicated;
+          // country still gets appended independently.
+          title: 'City already in name',
+          careers_url: 'https://x.recruitee.com/o/city-already-in-name',
+          locations: [
+            { name: 'Berlin Office', city: 'Berlin', country: 'Germany' },
+            { name: 'Paris HQ', city: 'Paris', country: 'France' },
+          ],
+        },
+      ],
+    },
+    'X',
+  );
+  if (cityOffers[0]?.location === 'Building A, Berlin, Germany · Building B, Paris, France') {
+    pass('parseRecruiteeResponse appends city (and country) to a non-geographic location name');
+  } else {
+    fail(`city-append location = ${JSON.stringify(cityOffers[0]?.location)}`);
+  }
+  if (cityOffers[1]?.location === 'Berlin Office, Germany · Paris HQ, France') {
+    pass('parseRecruiteeResponse does not duplicate a city already present in the location name, but still appends country');
+  } else {
+    fail(`city-no-dup location = ${JSON.stringify(cityOffers[1]?.location)}`);
+  }
+
+  // ── URL fallback: careers_url and url are validated independently ──
+  // One bad field must not shadow an otherwise-usable other one — only when
+  // NEITHER candidate resolves is the offer dropped.
+  const urlFallbackOffers = parseRecruiteeResponse(
+    {
+      offers: [
+        {
+          // careers_url is non-https (invalid) but url is a valid https URL — kept via fallback.
+          title: 'Invalid careers_url, valid url',
+          careers_url: 'http://x.recruitee.com/o/insecure',
+          url: 'https://x.recruitee.com/o/valid-fallback',
+        },
+        {
+          // careers_url is malformed but url is valid — kept via fallback.
+          title: 'Malformed careers_url, valid url',
+          careers_url: 'not a url',
+          url: 'https://x.recruitee.com/o/valid-fallback-2',
+        },
+        {
+          // Both invalid — dropped.
+          title: 'Both invalid',
+          careers_url: 'http://x.recruitee.com/o/insecure-2',
+          url: 'not a url either',
+        },
+      ],
+    },
+    'X',
+  );
+  if (urlFallbackOffers.length === 2 && urlFallbackOffers[0]?.url === 'https://x.recruitee.com/o/valid-fallback' && urlFallbackOffers[1]?.url === 'https://x.recruitee.com/o/valid-fallback-2') {
+    pass('parseRecruiteeResponse falls back to url when careers_url is invalid, and drops the offer only when both are invalid');
+  } else {
+    fail(`url-fallback: got ${urlFallbackOffers.length} offer(s) = ${JSON.stringify(urlFallbackOffers)}`);
+  }
+
 } catch (e) {
   fail(`recruitee provider tests crashed: ${e.message}`);
 }
