@@ -39,6 +39,33 @@ async function getAll(url) {
   return out;
 }
 
+/** Todos los runs `action_required` de pull_request. La API corta en 1000 resultados por búsqueda (23-sep: 1098 retenidos, los 98
+ *  más viejos no se veían): se recorre por ventanas de `created`, y una ventana de más de 1000 se parte en dos. `page(url)` →
+ *  {data, link}. Las ventanas comparten el borde y se deduplica por id: ningún run se pierde entre dos. */
+export const API_CAP = 1000;
+export async function listHeld(page, { repo, from, to }) {
+  const iso = (d) => new Date(d).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const out = [];
+  async function win(a, b, depth) {
+    const first = await page(`repos/${repo}/actions/runs?status=action_required&created=${iso(a)}..${iso(b)}&per_page=100`);
+    if ((first.data?.total_count ?? 0) > API_CAP && depth < 16 && b - a > 60e3) {
+      const mid = new Date((a.getTime() + b.getTime()) / 2);
+      await win(a, mid, depth + 1); await win(mid, b, depth + 1); return;
+    }
+    for (let cur = first; ;) {
+      out.push(...(cur.data?.workflow_runs || []));
+      const m = /<([^>]+)>;\s*rel="next"/.exec(cur.link || ''); if (!m) break;
+      cur = await page(m[1]);
+    }
+  }
+  await win(new Date(from), new Date(to), 0);
+  const seen = new Set();
+  return out.filter((r) => r.event === 'pull_request' && !seen.has(r.id) && seen.add(r.id));
+}
+/** 403 al aprobar: el token no puede aprobar runs de forks. Se para la pasada y el run sale en rojo. Cómo arreglarlo lo decide
+ *  Santiago: un token de GitHub App firma como bot; un PAT personal firmaría a nombre de esa persona (el problema de L98). */
+export const DENIED = (tok) => `${tok} no puede aprobar runs de forks (403): la CI de los primerizos sigue retenida. Opciones, las decide Santiago: token de una GitHub App en CI_APPROVE_TOKEN (aprueba como bot) o un PAT personal (aprobaría a nombre de esa persona). Mientras, se aprueba a mano.`;
+
 // ---------- Reglas puras (testeables sin red) ----------
 export const FORBIDDEN = [/^\.github\//, /^package(-lock)?\.json$/];
 export const isBot = (u) => !u || u.type === 'Bot' || /\[bot\]$/.test(u.login || '');
@@ -70,12 +97,16 @@ export async function main() {
   loadEnv();
   if (!TOKEN || !REPO) throw new Error('faltan GITHUB_TOKEN o GITHUB_REPOSITORY');
   log(`ci-approve${DRY ? ' (DRY_RUN)' : ''}${process.env.CI_APPROVE_TOKEN ? ' con CI_APPROVE_TOKEN' : ' con GITHUB_TOKEN'}`);
-  const runs = (await getAll(`repos/${REPO}/actions/runs?status=action_required`)).filter((r) => r.event === 'pull_request');
+  const openPrs = await getAll(`repos/${REPO}/pulls?state=open`);
+  const bySha = openPrBySha(openPrs);
+  // Los runs del head de una PR se crean al abrirla o después: basta con mirar desde la PR abierta más vieja (1 h de margen).
+  const oldest = openPrs.map((pr) => Date.parse(pr.created_at)).filter(Number.isFinite).sort((a, b) => a - b)[0];
+  const runs = await listHeld((u) => rest('GET', u), { repo: REPO, from: (oldest || Date.now() - 180 * 864e5) - 36e5, to: Date.now() });
   const groups = groupByHeadSha(runs);
-  const bySha = openPrBySha(await getAll(`repos/${REPO}/pulls?state=open`));
   log(`${runs.length} runs esperando en ${groups.size} SHAs · ${bySha.size} PRs abiertas`);
-  let approved = 0, orphans = 0;
+  let approved = 0, orphans = 0, denied = false;
   for (const [sha, group] of groups) {
+    if (denied) break;
     if (approved >= MAX) { log(`tope ${MAX} alcanzado: el resto espera a la próxima pasada`); break; }
     const pr = bySha.get(sha) || null;
     if (!pr) { orphans++; continue; } // no es el head de ninguna PR abierta (push encima, cerrada o fusionada): nada que aprobar
@@ -87,12 +118,16 @@ export async function main() {
     for (const r of group) {
       if (DRY) { log(`DRY-RUN aprobar run ${r.id} (${r.name}) : ${d.why}`); continue; }
       try { await rest('POST', `repos/${REPO}/actions/runs/${r.id}/approve`); log(`aprobado run ${r.id} (${r.name}) : ${d.why}`); }
-      catch (e) { log(`run ${r.id}: fallo al aprobar (${e.message.slice(0, 120)})`); }
+      catch (e) {
+        if (/→ 403\b/.test(e.message)) { denied = true; log(`run ${r.id} (#${pr.number}): ${DENIED(process.env.CI_APPROVE_TOKEN ? 'CI_APPROVE_TOKEN' : 'GITHUB_TOKEN')}`); break; }
+        log(`run ${r.id}: fallo al aprobar (${e.message.slice(0, 120)})`);
+      }
     }
     approved++;
   }
   if (orphans) log(`${orphans} SHAs huérfanos (no son el head de ninguna PR abierta): no se aprueban`);
-  log(`${approved} SHAs aprobados`);
+  log(`${approved} SHAs ${denied ? 'intentados; ninguno aprobado por el 403' : 'aprobados'}`);
+  if (denied) process.exitCode = 1; // en rojo: que se vea en Actions y en bin/watch-runs
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### ci-approve\n\n${lines.map((l) => `- ${l}`).join('\n')}\n`);
 }
 

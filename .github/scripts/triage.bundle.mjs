@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // GENERADO por github-src/scripts/build.mjs: no editar a mano. Fuente: github-src/scripts/triage.mjs + bin/lib/triage-core.mjs + policy/*.json
-// {"builtAt":"2026-09-23T13:09:46.197Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
+// {"builtAt":"2026-09-23T18:34:35.896Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -496,8 +496,9 @@ return { JEV_MARKER_RE, MAX_COMMENT_BYTES_JEV, round2, buildJevMarker, parseJevM
 // bin/lib/snapshot.mjs (fetch nativo, token GITHUB_TOKEN), llama a `classify`, aplica los labels de estado y
 // publica la primera respuesta con marcador `<!-- co:first-reply:N:sha7 -->` (se busca antes: nunca duplica).
 // En `schedule` hace el sweep: (1) PRs abiertas >20h y ≤TRIAGE_BACKLOG_HOURS sin comentario de maintainer ni marcador
-// reciben labels + primera respuesta; (2) las más viejas (backlog) solo labels: la disculpa y el compromiso los pone la
-// sesión (first-reply-backlog, con recibo y ledger); (3) las pegadas en `triage/new` >1h se re-triagean (la CI ya acabó).
+// reciben labels + primera respuesta; (2) las más viejas (backlog) reciben labels + la misma primera respuesta con una disculpa
+// por la espera y sin fechas (S18: el acuse es del bot, nunca de la cuenta de un maintainer); (3) las pegadas en
+// `triage/new` >1h se re-triagean (la CI ya acabó).
 // En `workflow_run` (Tests completada) re-triagea la PR de ese head: la label `triage/new` promete "en el siguiente sweep"
 // y aquí no hay sweep hasta 6h después.
 //
@@ -514,7 +515,7 @@ return { JEV_MARKER_RE, MAX_COMMENT_BYTES_JEV, round2, buildJevMarker, parseJevM
 //        primera respuesta (editándolo: sin entradas nuevas en el timeline; un bloque por sha7). Sin primera
 //        respuesta (bot/borrador) no se crea comentario: la señal queda solo en el job summary.
 //      TRIAGE_SWEEP_MAX (60) → tope de primeras respuestas por sweep (evita bombardeo y el rate limit de 1000 req/h)
-//      TRIAGE_BACKLOG_HOURS (72) → a partir de esa edad el sweep no responde (solo etiqueta): la sesión responde con first-reply-backlog
+//      TRIAGE_BACKLOG_HOURS (72) → a partir de esa edad la primera respuesta lleva la disculpa por la espera (backlogReply)
 //      TRIAGE_RETRIAGE_MAX (30) → tope de re-triages (backlog + triage/new pegadas) por sweep
 //      CODEOWNERS_PATH (.github/CODEOWNERS) → reglas reales para el gate no-codeowners (checkout de la base)
 
@@ -535,6 +536,20 @@ const DEFAULT_FIRST_REPLY = [
   '',
   'CONTRIBUTING.md has the rest. Thanks for the time you put into this.',
 ].join('\n');
+/** Primera respuesta a una PR que esperó más de TRIAGE_BACKLOG_HOURS: la misma, con la disculpa delante. Sin fechas: el bot
+ *  no puede registrar un compromiso, y el manifiesto no deja prometer lo que no se registra. */
+export function backlogReply(days) {
+  return [
+    `Thanks for the PR, and sorry for the wait: it went ${days} days without a reply from us. That is on us, not on you.`,
+    '',
+    'It is in the queue and a maintainer will read it by hand. What happens next:',
+    '- The `triage/*` label tells you where it stands. It is ours to move, not yours to worry about.',
+    '- If we need something from you, it will be a concrete list, not a vague "please fix".',
+    '- Nothing here gets closed by a bot.',
+    '',
+    'CONTRIBUTING.md has the rest. Thanks for the time you put into this, and for your patience.',
+  ].join('\n');
+}
 
 // ---------- GitHub (fetch nativo, sin dependencias) ----------
 const API = 'https://api.github.com';
@@ -710,7 +725,7 @@ function loadPoliciesOnce() {
   if (!text) log(`sin ${p}: gate no-codeowners con patrones de respaldo`);
   return (policies = policiesForAction({ codeownersText: text }));
 }
-async function triageOne(number, { now, firstReply, comment = null }) {
+async function triageOne(number, { now, firstReply, backlog = false, comment = null }) {
   const snapshot = await buildSnapshot(number);
   if (snapshot.state !== 'OPEN') { log(`#${number}: ${snapshot.state.toLowerCase()}, nada que hacer`); return; }
   snapshot.signals = await collectSignals(snapshot, { comment });
@@ -723,7 +738,8 @@ async function triageOne(number, { now, firstReply, comment = null }) {
   if (jev) log(`#${number}: jev ${JSON.stringify(jev.domains).slice(0, 200)}`);
   const fr = needsFirstReply(snapshot);
   if (firstReply && fr.needs) {
-    let body = `${DEFAULT_FIRST_REPLY}\n\n${marker(number, snapshot.headSha)}`;
+    const days = Math.max(1, Math.floor((now - new Date(snapshot.createdAt)) / 864e5));
+    let body = `${backlog ? backlogReply(days) : DEFAULT_FIRST_REPLY}\n\n${marker(number, snapshot.headSha)}`;
     if (jev) body = upsertJevMarker(body, number, sha7(snapshot.headSha), jev);
     if (Buffer.byteLength(body) > MAX_COMMENT_BYTES && !jev) throw new Error(`primera respuesta #${number} supera ${MAX_COMMENT_BYTES} bytes`);
     await write('POST', `repos/${REPO}/issues/${number}/comments`, { body }, `primera respuesta #${number}`);
@@ -748,7 +764,7 @@ export function sweepCandidates(prs, now, labelsPolicy = POLICIES.labels) {
   });
 }
 /** Plan del sweep, puro. reply: sin respuesta y ≤backlogHours (labels + primera respuesta) · backlog: sin respuesta y más viejas
- *  (solo labels; la sesión responde con first-reply-backlog) · stuck: `triage/new` sin tocar >stuckHours (la CI acabó, reclasificar). */
+ *  (labels + primera respuesta con disculpa, backlogReply) · stuck: `triage/new` sin tocar >stuckHours (la CI acabó, reclasificar). */
 export function sweepPlan(prs, now, labelsPolicy = POLICIES.labels, { backlogHours = BACKLOG_HOURS, stuckHours = STUCK_HOURS } = {}) {
   const cands = sweepCandidates(prs, now, labelsPolicy);
   const age = (p) => (now - new Date(p.createdAt)) / 36e5;
@@ -765,14 +781,16 @@ async function sweep(now) {
     const c = d.repository.pullRequests; all.push(...c.nodes); after = c.pageInfo.hasNextPage ? c.pageInfo.endCursor : null;
   } while (after);
   const { reply, backlog, stuck } = sweepPlan(all, now);
-  log(`sweep: ${all.length} abiertas · ${reply.length} sin respuesta >${SWEEP_HOURS}h y ≤${BACKLOG_HOURS}h (tope ${max}) · ${backlog.length} en backlog >${BACKLOG_HOURS}h (solo labels: la sesión responde) · ${stuck.length} pegadas en triage/new (tope ${maxRe} re-triages)`);
+  log(`sweep: ${all.length} abiertas · ${reply.length} sin respuesta >${SWEEP_HOURS}h y ≤${BACKLOG_HOURS}h (tope ${max}) · ${backlog.length} en backlog >${BACKLOG_HOURS}h (con disculpa) · ${stuck.length} pegadas en triage/new (tope ${maxRe} re-triages)`);
   let done = 0, re = 0;
-  for (const p of reply) {
-    if (done >= max) { log(`sweep: tope ${max} alcanzado, quedan ${reply.length - done} para la próxima pasada`); break; }
-    try { await triageOne(p.number, { now, firstReply: true }); done++; }
+  // Primero las recientes (se contestan a tiempo) y después el backlog, de la más vieja a la más nueva: mismo tope por pasada.
+  const firsts = [...reply.map((p) => ({ p, backlog: false })), ...backlog.map((p) => ({ p, backlog: true }))];
+  for (const { p, backlog: late } of firsts) {
+    if (done >= max) { log(`sweep: tope ${max} alcanzado, quedan ${firsts.length - done} para la próxima pasada`); break; }
+    try { await triageOne(p.number, { now, firstReply: true, backlog: late }); done++; }
     catch (e) { log(`#${p.number}: fallo (${e.message.slice(0, 120)})`); }
   }
-  for (const p of [...stuck, ...backlog]) {
+  for (const p of stuck) {
     if (re >= maxRe) { log(`sweep: tope ${maxRe} re-triages alcanzado`); break; }
     try { await triageOne(p.number, { now, firstReply: false }); re++; }
     catch (e) { log(`#${p.number}: fallo (${e.message.slice(0, 120)})`); }
