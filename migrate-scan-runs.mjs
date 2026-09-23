@@ -39,11 +39,11 @@
  *   node migrate-scan-runs.mjs --json            # machine-readable summary
  */
 
-import { existsSync, readFileSync, writeFileSync, copyFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
-import { SCAN_RUNS_HEADER } from './scan.mjs';
+import { SCAN_RUNS_HEADER, atomicWriteFile } from './scan.mjs';
 
 /** Current column order, taken from scan.mjs so this can never drift from the writer. */
 export const CURRENT_COLUMNS = SCAN_RUNS_HEADER.trim().split('\t');
@@ -121,6 +121,40 @@ export function migrateScanRuns(text) {
   };
 }
 
+/**
+ * Replace the scan-runs file with migrated text, but only if it still holds the
+ * snapshot the migration was computed from.
+ *
+ * appendScanRunSummary() appends a run with a bare appendFileSync and takes no
+ * lock, so a scan finishing mid-migration would otherwise be erased: the
+ * snapshot is read, the scan appends its row, and the replacement writes back a
+ * file that never contained it. The .bak does not help — it holds the snapshot,
+ * which is missing that run too — and an atomic replace does not either, since
+ * atomicity is about torn writes, not about staleness.
+ *
+ * This is a compare-and-swap, not a lock. A lock here would be theatre: the
+ * writer takes none, so serializing only this side would protect nothing
+ * without changing scan.mjs's hot path for the sake of a one-off repair.
+ * Comparing instead means the losing case is a refusal, never a lost run. The
+ * residual window is between this read and the rename rather than the whole
+ * migration; re-running the command resolves it.
+ *
+ * @param {string} target - Path to scan-runs.tsv.
+ * @param {string} snapshot - Exact text the migration was computed from.
+ * @param {string} text - Migrated text to write.
+ * @returns {{written: boolean, reason: string|null}}
+ */
+export function writeMigrated(target, snapshot, text) {
+  if (readFileSync(target, 'utf-8') !== snapshot) {
+    return { written: false, reason: 'file changed since it was read' };
+  }
+  // The backup is written from the snapshot already in memory, so the live file
+  // is not read again between the check above and the replace below.
+  writeFileSync(`${target}.bak`, snapshot, 'utf-8');
+  atomicWriteFile(target, text);
+  return { written: true, reason: null };
+}
+
 if (isMainModule(import.meta.url)) {
   const argv = process.argv.slice(2);
   const apply = argv.includes('--apply');
@@ -153,11 +187,15 @@ if (isMainModule(import.meta.url)) {
     console.log(`  header migrated: ${result.headerMigrated}`);
     console.log(`  rows migrated:   ${result.migratedRows}`);
     console.log(`  rows passed through (unrecognized width): ${result.passedThrough}`);
-    console.log(apply ? `  applied — original saved to ${target}.bak` : '  dry run — nothing written. Re-run with --apply to write.');
+    console.log(apply ? `  applying — original saved to ${target}.bak` : '  dry run — nothing written. Re-run with --apply to write.');
   }
 
   if (apply && result.changed) {
-    copyFileSync(target, `${target}.bak`);
-    writeFileSync(target, result.text, 'utf-8');
+    const { written, reason } = writeMigrated(target, before, result.text);
+    if (!written) {
+      console.error(`Refused to write ${target}: ${reason}. A scan most likely appended a run `
+        + 'while this was migrating. Nothing was changed — re-run the command.');
+      process.exit(2);
+    }
   }
 }

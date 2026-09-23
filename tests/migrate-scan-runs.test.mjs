@@ -24,7 +24,7 @@ import { pass, fail, ROOT, NODE, rmSync } from './helpers.mjs';
 // URL scheme and dynamic import rejects it. Windows is one of the three CI
 // platforms, so a bare path fails there and nowhere a local run would show it.
 const load = (m) => import(pathToFileURL(join(ROOT, m)).href);
-const { migrateScanRuns, schemasByWidth, CURRENT_COLUMNS } = await load('migrate-scan-runs.mjs');
+const { migrateScanRuns, schemasByWidth, CURRENT_COLUMNS, writeMigrated } = await load('migrate-scan-runs.mjs');
 const { computeRunStats } = await load('stats.mjs');
 const { SCAN_RUNS_HEADER } = await load('scan.mjs');
 
@@ -176,21 +176,76 @@ console.log('\n🧪 Testing migrate-scan-runs (#4423)...');
 
 // ------------------------------------------------- the payoff: stats sees them
 {
-  const before = [GEN14.join('\t'), numRow(GEN14, 1, 10, 2), numRow(GEN14, 2, 20, 4)].join('\n') + '\n';
-  // Control: the whole point is that the reader excludes these rows TODAY. If
-  // it already counted them, every assertion below would be vacuous.
-  const statsBefore = computeRunStats(before.replace(GEN14.join('\t'), CURRENT.join('\t')));
-  if (!statsBefore || statsBefore.totalRuns === 0) {
-    pass('control: stats excludes pre-drift rows before the migration');
+  // ONE file for both readings. The earlier version of this block measured the
+  // control against a DIFFERENT file (the same rows under a fabricated current
+  // header) and then migrated the original, whose 14-column rows matched their
+  // own 14-column header and were therefore already counted. computeRunStats
+  // returned totalRuns 2 on the un-migrated file, so the payoff assertion
+  // proved nothing at all.
+  //
+  // The drift that actually loses history is a STALE header with a LATER, wider
+  // row beneath it: the file was created by an old release and kept being
+  // appended to by newer ones. computeRunStats counts that row as drift and
+  // excludes it.
+  const before = [
+    GEN14.join('\t'),            // stale 14-column header
+    numRow(GEN14, 1, 10, 2),     // a row from that era — still countable
+    numRow(CURRENT, 2, 20, 4),   // a row a later release appended — excluded
+  ].join('\n') + '\n';
+
+  const statsBefore = computeRunStats(before);
+  if (statsBefore && statsBefore.totalRuns === 1 && statsBefore.driftedRows === 1) {
+    pass('control: stats excludes the wider row as drift before the migration');
   } else {
-    fail(`control failed: stats already counted ${statsBefore.totalRuns} rows, so the fix proves nothing`);
+    fail(`control failed: expected 1 counted + 1 drifted, got ${JSON.stringify(statsBefore)}`);
   }
 
   const after = computeRunStats(migrateScanRuns(before).text);
-  if (after && after.totalRuns === 2 && after.avgFoundPerRun === 15 && after.avgNewPerRun === 3) {
-    pass('stats folds the recovered rows after migration (2 runs, avg found 15, avg new 3)');
+  if (after && after.totalRuns === 2 && after.driftedRows === 0
+      && after.avgFoundPerRun === 15 && after.avgNewPerRun === 3) {
+    pass('stats folds the recovered row after migration (2 runs, no drift, avg found 15)');
   } else {
-    fail(`stats did not recover the rows: ${JSON.stringify(after)}`);
+    fail(`stats did not recover the drifted row: ${JSON.stringify(after)}`);
+  }
+}
+
+// ------------------------------------------- the write refuses a stale swap
+{
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-msr-cas-'));
+  try {
+    const file = join(dir, 'scan-runs.tsv');
+    const snapshot = [GEN14.join('\t'), rowFor(GEN14, 1)].join('\n') + '\n';
+
+    // A scan appended a run after the migration read its snapshot. Writing the
+    // migrated text now would erase that run, and neither the .bak (which holds
+    // the same snapshot) nor an atomic replace would bring it back.
+    writeFileSync(file, `${snapshot}${rowFor(GEN14, 2)}\n`, 'utf-8');
+    const onDisk = readFileSync(file, 'utf-8');
+    const refused = writeMigrated(file, snapshot, 'MIGRATED');
+
+    if (!refused.written && readFileSync(file, 'utf-8') === onDisk) {
+      pass('writeMigrated refuses a file that changed since it was read, leaving it untouched');
+    } else {
+      fail(`stale swap was written: ${JSON.stringify(refused)}`);
+    }
+    if (!existsSync(`${file}.bak`)) {
+      pass('a refused write leaves no .bak, so nothing suggests it ran');
+    } else {
+      fail('a refused write still created a .bak');
+    }
+
+    // Control: the same call succeeds when the file is untouched. Without it,
+    // "refuses" is indistinguishable from "never writes at all".
+    writeFileSync(file, snapshot, 'utf-8');
+    const ok = writeMigrated(file, snapshot, 'MIGRATED');
+    if (ok.written && readFileSync(file, 'utf-8') === 'MIGRATED'
+        && readFileSync(`${file}.bak`, 'utf-8') === snapshot) {
+      pass('control: writeMigrated replaces the file and backs up the snapshot when it is unchanged');
+    } else {
+      fail(`unchanged file was not written: ${JSON.stringify(ok)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 
