@@ -32,7 +32,7 @@ try {
     offers: [
       { title: 'Senior PM', careers_url: 'https://channable.recruitee.com/o/senior-pm', city: 'Utrecht', country: 'Netherlands', remote: false },
       { title: 'Backend Eng', url: 'https://channable.recruitee.com/o/backend', city: 'Amsterdam', country: 'Netherlands', remote: true },
-      { title: 'AI Lead', location: 'Remote, EMEA' },
+      { title: 'AI Lead', careers_url: 'https://channable.recruitee.com/o/ai-lead', location: 'Remote, EMEA' },
     ],
   };
   const jobs = parseRecruiteeResponse(sample, 'Channable');
@@ -82,8 +82,10 @@ try {
 
   // Per-offer URL validation: custom-domain https URLs are KEPT (Recruitee
   // tenants serve postings on their own domain, e.g. careers.hostaway.com);
-  // only non-https and malformed/missing URLs are dropped. The per-offer URL
-  // is display-only and not host-locked to *.recruitee.com — see #recruitee.
+  // the per-offer URL is display-only and not host-locked to *.recruitee.com
+  // — see #recruitee. A non-https, malformed, or missing URL drops the WHOLE
+  // offer (url is this provider's own dedup key downstream — see the Drop
+  // rule doc on parseRecruiteeResponse), not just the url field.
   const offerUrlOffers = parseRecruiteeResponse(
     {
       offers: [
@@ -95,10 +97,14 @@ try {
     },
     'Channable',
   );
-  if (offerUrlOffers[0]?.url === 'https://channable.recruitee.com/o/good' && offerUrlOffers[1]?.url === 'https://careers.hostaway.com/o/senior-backend' && offerUrlOffers[2]?.url === '' && offerUrlOffers[3]?.url === '') {
-    pass('parseRecruiteeResponse keeps custom-domain https URLs, drops non-https and missing');
+  if (
+    offerUrlOffers.length === 2 &&
+    offerUrlOffers[0]?.url === 'https://channable.recruitee.com/o/good' &&
+    offerUrlOffers[1]?.url === 'https://careers.hostaway.com/o/senior-backend'
+  ) {
+    pass('parseRecruiteeResponse keeps custom-domain https URLs, drops offers with non-https or missing URL entirely');
   } else {
-    fail(`URL validation: row0=${JSON.stringify(offerUrlOffers[0]?.url)}, row1=${JSON.stringify(offerUrlOffers[1]?.url)}, row2=${JSON.stringify(offerUrlOffers[2]?.url)}, row3=${JSON.stringify(offerUrlOffers[3]?.url)}`);
+    fail(`URL validation: got ${offerUrlOffers.length} offer(s) = ${JSON.stringify(offerUrlOffers)}`);
   }
 
   // fetch() — derives the API URL, forwards the SSRF guard (redirect:'error'),
@@ -144,7 +150,7 @@ try {
           description: '&lt;p&gt;Build &lt;strong&gt;pipelines&lt;/strong&gt; at Hostaway&amp;rsquo;s HQ&lt;/p&gt;&lt;script&gt;evil()&lt;/script&gt;',
         },
         { title: 'Without body', careers_url: 'https://channable.recruitee.com/o/no-body' },
-        { title: 'Empty body', description: '   ' },
+        { title: 'Empty body', careers_url: 'https://channable.recruitee.com/o/empty-body', description: '   ' },
       ],
     },
     'Channable',
@@ -207,14 +213,15 @@ try {
 
   // ── Multi-location (`locations[]` beats the flat `location` field) ──
   // The flat `location` field carries only the PRIMARY place even when the
-  // offer is open in more than one — this is the Exeon Analytics case
-  // (Zürich hybrid + remote-in-Germany), reproduced verbatim from the live API.
+  // offer is open in more than one (Zürich hybrid + remote-in-Germany is a
+  // shape observed live on a real Recruitee tenant, reproduced here with a
+  // fictional company).
   const multiLocOffers = parseRecruiteeResponse(
     {
       offers: [
         {
           title: 'Quality Assurance Engineer',
-          careers_url: 'https://exeon.recruitee.com/o/quality-assurance-engineer-1',
+          careers_url: 'https://acmecorp.recruitee.com/o/quality-assurance-engineer-1',
           location: 'Zürich, Zürich, Switzerland',
           locations: [
             { name: 'Zürich, Switzerland', city: 'Zürich', country: 'Switzerland' },
@@ -224,18 +231,20 @@ try {
         {
           // Single-entry `locations[]` must not override a more useful flat field.
           title: 'Single location array',
+          careers_url: 'https://acmecorp.recruitee.com/o/single-location',
           location: 'Remote, EMEA',
           locations: [{ name: 'Remote, EMEA' }],
         },
         {
           // No usable `.name` values → falls back to the flat field.
           title: 'Unusable locations array',
+          careers_url: 'https://acmecorp.recruitee.com/o/unusable-locations',
           location: 'Berlin, Germany',
           locations: [{ city: 'Berlin' }, { name: 42 }],
         },
       ],
     },
-    'Exeon Analytics',
+    'Acme Corp',
   );
   if (multiLocOffers[0]?.location === 'Zürich, Switzerland · remote in Germany') {
     pass('parseRecruiteeResponse joins locations[] with " · " when it lists 2+ places');
@@ -260,6 +269,7 @@ try {
       offers: [
         {
           title: 'Duplicate places',
+          careers_url: 'https://x.recruitee.com/o/duplicate-places',
           locations: [{ name: 'Berlin, Germany' }, { name: 'Berlin, Germany' }, { name: 'Remote' }],
         },
       ],
@@ -274,9 +284,10 @@ try {
 
   // ── Defensive parsing: title is a required field (ADDING_A_PROVIDER.md) ──
   // A row missing/blank `title` is dropped, never emitted half-formed with
-  // `title: ''` — same convention as ibm.mjs / eightfold.mjs. `url` stays
-  // optional per-row (unaffected — already covered by the "No URL field" case
-  // above, which keeps a title-bearing row with url: '').
+  // `title: ''` — same convention as ibm.mjs / eightfold.mjs. Every row here
+  // carries a valid `careers_url` so only the title check is under test (a
+  // missing/invalid URL is covered separately by the "URL validation" case
+  // above, which now drops the whole offer).
   const titleDropOffers = parseRecruiteeResponse(
     {
       offers: [
@@ -300,7 +311,14 @@ try {
   // every other offer in the response.
   const malformedEntryOffers = parseRecruiteeResponse(
     {
-      offers: [null, { title: 'Valid Before' }, undefined, 'not an object', 42, { title: 'Valid After' }],
+      offers: [
+        null,
+        { title: 'Valid Before', careers_url: 'https://x.recruitee.com/o/valid-before' },
+        undefined,
+        'not an object',
+        42,
+        { title: 'Valid After', careers_url: 'https://x.recruitee.com/o/valid-after' },
+      ],
     },
     'X',
   );
@@ -322,6 +340,7 @@ try {
       offers: [
         {
           title: 'Duplicate name, richer flat field',
+          careers_url: 'https://x.recruitee.com/o/dup-name-fallback',
           location: 'Berlin, Germany (HQ office)',
           locations: [{ name: 'Berlin, Germany' }, { name: 'Berlin, Germany' }],
         },
@@ -342,6 +361,7 @@ try {
         {
           // Bare city names with no country baked in — country appended.
           title: 'Bare city names',
+          careers_url: 'https://x.recruitee.com/o/bare-city-names',
           locations: [
             { name: 'Berlin', country: 'Germany' },
             { name: 'Paris', country: 'France' },
@@ -350,6 +370,7 @@ try {
         {
           // Name already contains the country (case-insensitive) — not duplicated.
           title: 'Country already in name',
+          careers_url: 'https://x.recruitee.com/o/country-already-in-name',
           locations: [
             { name: 'Zürich, Switzerland', country: 'Switzerland' },
             { name: 'remote in Germany', country: 'Germany' },
@@ -368,6 +389,54 @@ try {
     pass('parseRecruiteeResponse does not duplicate a country already present in the location name');
   } else {
     fail(`no-duplicate-country location = ${JSON.stringify(countryOffers[1]?.location)}`);
+  }
+
+  // ── Top-level `remote` flag is honored in the joined multi-place path ──
+  // `remote` is a separate signal from the named places: a fully-remote role
+  // across 2+ named countries, none of which literally say "remote", must
+  // still surface as remote. Never duplicated when a place name already says so.
+  const remoteFlagOffers = parseRecruiteeResponse(
+    {
+      offers: [
+        {
+          // remote: true, no place name says "remote" → appended once.
+          title: 'Fully remote across countries',
+          careers_url: 'https://x.recruitee.com/o/fully-remote',
+          remote: true,
+          locations: [{ name: 'Berlin, Germany' }, { name: 'Paris, France' }],
+        },
+        {
+          // remote: true, but a place name already says "remote" → not duplicated.
+          title: 'Remote already named',
+          careers_url: 'https://x.recruitee.com/o/remote-already-named',
+          remote: true,
+          locations: [{ name: 'Zürich, Switzerland' }, { name: 'remote in Germany' }],
+        },
+        {
+          // remote: false → never appended, even with 2+ distinct places.
+          title: 'Not remote',
+          careers_url: 'https://x.recruitee.com/o/not-remote',
+          remote: false,
+          locations: [{ name: 'Berlin, Germany' }, { name: 'Paris, France' }],
+        },
+      ],
+    },
+    'X',
+  );
+  if (remoteFlagOffers[0]?.location === 'Berlin, Germany · Paris, France · Remote') {
+    pass('parseRecruiteeResponse appends "Remote" to the joined location when remote:true and no place name says so');
+  } else {
+    fail(`remote-flag-append location = ${JSON.stringify(remoteFlagOffers[0]?.location)}`);
+  }
+  if (remoteFlagOffers[1]?.location === 'Zürich, Switzerland · remote in Germany') {
+    pass('parseRecruiteeResponse does not duplicate "Remote" when a joined place name already says so');
+  } else {
+    fail(`remote-flag-no-dup location = ${JSON.stringify(remoteFlagOffers[1]?.location)}`);
+  }
+  if (remoteFlagOffers[2]?.location === 'Berlin, Germany · Paris, France') {
+    pass('parseRecruiteeResponse never appends "Remote" when remote:false');
+  } else {
+    fail(`remote-flag-false location = ${JSON.stringify(remoteFlagOffers[2]?.location)}`);
   }
 
 } catch (e) {

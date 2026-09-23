@@ -80,8 +80,8 @@ function isRecruiteeSamplePosting(j) {
  * Assemble a location string for one offer.
  *
  * Recruitee's flat `location` field carries only the offer's PRIMARY place
- * even when the offer is open in more than one: a live Exeon Analytics
- * posting had `location: "Zürich, Zürich, Switzerland"` while its `locations`
+ * even when the offer is open in more than one: a live posting was observed
+ * with `location: "Zürich, Zürich, Switzerland"` while its `locations`
  * array also carried a `"remote in Germany"` entry — so a `location_filter`
  * scoped to Germany never saw that the role was open there at all. `locations`
  * holds every place as `{ name, city, country, ... }`; when it lists 2+
@@ -101,6 +101,13 @@ function isRecruiteeSamplePosting(j) {
  * else assembled from city/country, appending "Remote" when `remote` is true
  * — when `locations` yields 0 or 1 distinct names.
  *
+ * The joined multi-place path also honors the top-level `remote` flag: it is
+ * a separate signal from the named places (a "remote in Germany" entry names
+ * a place AND implies remote, but "Berlin, Germany" + "Paris, France" with
+ * `remote: true` implies a fully-remote role without either name saying so).
+ * "Remote" is appended unless a distinct name already expresses it
+ * (case-insensitive substring), so it is never duplicated.
+ *
  * @param {any} j
  * @returns {string}
  */
@@ -116,7 +123,10 @@ function assembleLocation(j) {
       }).filter(Boolean)
     : [];
   const distinctNames = [...new Set(names)];
-  if (distinctNames.length > 1) return distinctNames.join(' · ');
+  if (distinctNames.length > 1) {
+    const hasRemote = distinctNames.some(n => n.toLowerCase().includes('remote'));
+    return j.remote && !hasRemote ? [...distinctNames, 'Remote'].join(' · ') : distinctNames.join(' · ');
+  }
   const city = j.city || '';
   const country = j.country || '';
   const remote = j.remote ? 'Remote' : '';
@@ -135,11 +145,12 @@ function assembleLocation(j) {
  *   endpoint, the per-offer URL is display-only — it is written to the pipeline
  *   and scan history but never server-fetched here, so the SSRF rationale does
  *   not apply. It is sourced from the already-validated tenant API response.
- *   Requirement: a well-formed `https:` URL; a non-HTTPS or malformed URL is
- *   dropped (empty string returned per the Job contract).
+ *   Requirement: a well-formed `https:` URL; a non-HTTPS, malformed, or
+ *   missing URL drops the whole offer (see Drop rule below).
  * - location: see `assembleLocation` — joins `locations[]` when it lists 2+
- *   places, else the explicit `location` field, else assembled from
- *   city/country, appending "Remote" when `remote` is true.
+ *   distinct places (appending "Remote" when `remote` is true and no place
+ *   name already says so), else the explicit `location` field, else assembled
+ *   from city/country, appending "Remote" when `remote` is true.
  * - description: Recruitee's list payload embeds each offer's full HTML body
  *   for free (same request — verified against a live board), so it is
  *   stripped to plain text here and feeds scan.mjs's content_filter /
@@ -148,14 +159,18 @@ function assembleLocation(j) {
  *   entirely (see isRecruiteeSamplePosting, #4190), so a tenant serving only
  *   its seeded sample posting resolves as empty rather than as a live board.
  *
- * Drop rule: an offer with no usable `title` is silently omitted, never
- * emitted half-formed with `title: ''` — same convention as `parseIbmResponse`
- * (`providers/ibm.mjs`) and `parseEightfoldResponse` (`providers/eightfold.mjs`).
- * `url` stays optional per-row (display-only, not the dedup key for this
- * provider's own fetch) — a title-bearing offer with no resolvable URL is
- * still kept with `url: ''`. A malformed entry (`null`, a primitive, anything
- * that isn't a plain object) is skipped the same way, rather than throwing
- * and losing every other offer in the response.
+ * Drop rule: an offer with no usable `title`, or no resolvable absolute
+ * `url`, is silently omitted, never emitted half-formed with `title: ''` or
+ * `url: ''` — same convention as `parseIbmResponse` (`providers/ibm.mjs`) and
+ * `parseEightfoldResponse` (`providers/eightfold.mjs`). The URL requirement
+ * is load-bearing beyond the general "required field" convention: `url` is
+ * this provider's own dedup key downstream (`scan.mjs`'s `normalizeUrlForDedup`
+ * treats an empty string as a value like any other), so a second title-bearing,
+ * URL-less offer from the same tenant would silently collapse onto the first
+ * one in `seenUrls` and be dropped as a false duplicate — worse than omitting
+ * both up front. A malformed entry (`null`, a primitive, anything that isn't a
+ * plain object) is skipped the same way, rather than throwing and losing
+ * every other offer in the response.
  *
  * @param {any} json
  * @param {string} companyName
@@ -171,15 +186,12 @@ export function parseRecruiteeResponse(json, companyName) {
     const title = typeof j.title === 'string' ? j.title.trim() : '';
     if (!title) continue;
 
-    const location = assembleLocation(j);
-    const description = htmlToText(j.description);
-
     // Resolve offer URL. Recruitee tenants commonly publish postings on their
     // own custom domain (e.g. careers.hostaway.com), so the per-offer URL is
     // NOT host-locked to *.recruitee.com — it is display-only (recorded in the
     // pipeline/history, never server-fetched here) and comes from the already-
-    // validated tenant API response. Require only a well-formed https: URL;
-    // a non-https or malformed URL is dropped (empty string per the Job contract).
+    // validated tenant API response. Require a well-formed https: URL; a
+    // non-https or malformed URL is dropped, same as a missing one.
     let url = '';
     const rawUrl = j.careers_url || j.url || '';
     if (typeof rawUrl === 'string' && rawUrl) {
@@ -192,6 +204,10 @@ export function parseRecruiteeResponse(json, companyName) {
         // malformed URL → leave url = ''
       }
     }
+    if (!url) continue;
+
+    const location = assembleLocation(j);
+    const description = htmlToText(j.description);
 
     out.push({
       title,
