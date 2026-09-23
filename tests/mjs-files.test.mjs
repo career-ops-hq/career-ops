@@ -23,7 +23,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -367,14 +367,23 @@ test('trackedFiles skips a gitlink directory rather than throwing EISDIR', () =>
   }
 });
 
-test('trackedFiles survives a stat that throws, and names the errno', () => {
+test('trackedFiles survives a path it cannot stat, and names the reason', () => {
   // `throwIfNoEntry: false` suppresses ENOENT and nothing else. When the index
-  // names `a/b.mjs` but the tree has `a` as a regular FILE, the stat throws
-  // ENOTDIR and takes the whole scan with it -- the case the docblock above
-  // promises to survive, arriving through a different errno. EACCES on an
-  // unreadable parent directory is the same shape. Skip it the way the other
-  // three are skipped: loudly, named, and with the rest of the scan intact.
-  const { dir, git } = gitRepo('co-tracked-enotdir-');
+  // names `a/b.mjs` but the tree has `a` as a regular FILE, the stat takes the
+  // whole scan with it -- the case the docblock above promises to survive,
+  // arriving through an errno other than ENOENT. EACCES on an unreadable
+  // parent directory is the same shape. Skip it the way the other three are
+  // skipped: loudly, named, and with the rest of the scan intact.
+  //
+  // WHICH errno depends on the OS, so the fixture asks rather than assumes.
+  // POSIX reports ENOTDIR for a non-directory component and the catch branch
+  // names it. Windows reports ERROR_PATH_NOT_FOUND, libuv maps that to ENOENT,
+  // and `throwIfNoEntry: false` swallows it, so the same fixture reaches the
+  // missing-path branch instead (#3904). Both are the MISSING case, and the
+  // requirement is the same on both: one warning, naming the path, rest of the
+  // scan intact. Probing the real behaviour keeps the errno assertion live
+  // wherever the errno exists, without pinning a platform list.
+  const { dir, git } = gitRepo('co-tracked-unstattable-');
   try {
     writeFileSync(join(dir, 'real.mjs'), 'const a = 1;\n');
     mkdirSync(join(dir, 'a'));
@@ -385,15 +394,23 @@ test('trackedFiles survives a stat that throws, and names the errno', () => {
     rmSync(join(dir, 'a'), { recursive: true, force: true });
     writeFileSync(join(dir, 'a'), 'now a regular file\n');
 
+    let expected;
+    try {
+      lstatSync(join(dir, 'a', 'b.mjs'), { throwIfNoEntry: false });
+      expected = /a\/b\.mjs \(not in the working tree\)/;
+    } catch (err) {
+      expected = new RegExp(`a/b\\.mjs \\(${err.code}\\)`);
+    }
+
     const { value: files, warnings } = capturingWarnings(() => trackedFiles(dir));
 
     assert.ok(relPaths(files, dir).includes('real.mjs'),
       'one unstattable path must not cost the rest of the scan');
     assert.ok(!relPaths(files, dir).includes('a/b.mjs'),
-      'the path behind the throwing stat must not be returned');
+      'the path behind the failing stat must not be returned');
     assert.equal(warnings.length, 1);
-    assert.match(warnings[0], /a\/b\.mjs \(ENOTDIR\)/,
-      'the warning must name the path and its errno, not a generic reason');
+    assert.match(warnings[0], expected,
+      'the warning must name the path and why it was skipped');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
