@@ -93,9 +93,19 @@ The ladder above is for work that has been **abandoned**. An open PR with an aut
 
 **Please don't open a PR that re-resolves someone else's conflict.** Pointing out on the thread that a PR has gone into conflict is genuinely useful. Rebasing it onto a branch of your own and opening a replacement is not, however cleanly the merge is done: landing that replacement closes the original, and the author is left with a `closed` PR where their `merged` should have been. That badge is most of what a contributor takes away from a project, and it isn't ours to reassign.
 
-If the conflict came from something **we** merged, the fix is ours. We resolve it on the author's own branch (that is what "Allow edits by maintainers" is for), run the suite, and leave their PR and their authorship untouched. If it came from anywhere else, the author rebases whenever they're ready: nobody is on a clock for that.
+If the conflict came from something **we** merged and resolving it is mechanical, the fix is ours: we rebase the author's own branch (that is what "Allow edits by maintainers" is for), run the suite, and leave their PR and their authorship untouched. If the two changes really collide, only the author can say how theirs should fit, so we ask them to rebase and help on the diff if they want it. Conflicts from anywhere else, the author rebases whenever they're ready. Nobody is on a clock for any of this.
 
 This applies to automation as well. A bot opening replacement PRs on other people's branches is doing the same thing at higher volume, and automated triage posted into someone else's thread ("don't merge both", "treat #X as the primary") reads as a project decision to the person who has been waiting on one. Merge calls are the maintainers' to make. Automated agents may comment only on pull requests their operator authored; automated comments on other people's PRs are minimized as off-topic. Reviews you write yourself, under your own name, are welcome on any PR.
+
+**The project's own automation is the exception, and it is narrow.** Everything it writes in a thread comes from a bot account, so you can always tell it from a person, and it never decides anything about your PR. It may:
+
+- post one acknowledgment on each PR: it is in the queue and a maintainer will read it by hand;
+- add and remove the labels that show where a PR stands;
+- approve the CI run of a first-time contributor when the change touches no workflows and no dependencies;
+- run the policy check that holds a PR until a maintainer decides on it;
+- mark a PR as stale after 30 days of silence, without ever closing it.
+
+It never merges, closes, requests changes, picks between two PRs or says which one goes first. Those calls are the maintainers', one PR at a time or in a batch a maintainer reviews. Anything posted under a maintainer's own name was approved by that maintainer before it went out, even when a tool drafted it.
 
 Improvements that go *beyond* resolving the conflict are welcome, just not stapled onto another person's PR: raise them in the thread and let the author decide, or open your own PR once theirs has landed.
 
