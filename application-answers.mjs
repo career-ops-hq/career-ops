@@ -339,11 +339,21 @@ export function parseApplicationAnswersSection(reportText, { strict = false } = 
  * `normalizeApplicationAnswersSnapshot` accepts as-is.
  *
  * @param {string} reportText Full report markdown.
+ * The heading's title may be in any language; only the `## H)` marker is
+ * required. A heading with a marker and no title is not Block H.
+ *
  * @returns {{freeText: object[]} | null} `null` when the report has no Block H.
  */
 export function parseDraftAnswersBlockH(reportText) {
   const report = String(reportText ?? '').replace(/\r\n/g, '\n');
-  const heading = /^##\s+H\)\s*Draft Application Answers\s*$/m.exec(report);
+  // Anchored on the `H)` marker, not the title. The title is prose and five
+  // shipped market modes translate it — modes/es, modes/ru, modes/tr,
+  // modes/zh and modes/zh-TW — so matching the English words meant Block H
+  // never parsed for those markets and this returned null silently, which is
+  // indistinguishable from a report that has no Block H. The letter and paren
+  // are the structural part: every localized mode keeps `## H)` and translates
+  // only what follows.
+  const heading = /^##[ \t]+H\)[ \t]*\S[^\n]*$/m.exec(report);
   if (!heading) return null;
 
   const afterHeading = heading.index + heading[0].length;
