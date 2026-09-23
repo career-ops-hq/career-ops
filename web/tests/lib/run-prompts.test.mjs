@@ -380,18 +380,29 @@ test("buildPrompt: the pdf prompt falls back to the base template", () => {
   assert.match(prompt, /templates\/cv-template\.html/);
 });
 
-test("buildPrompt: a template pack's directory may contain spaces", () => {
+test("buildPrompt: a template pack's directory may contain a space or a plus", () => {
   // Given a template pack (#3202). cv-templates.mjs takes the pack's DIRECTORY
   // name straight from readdirSync — only the FILENAME is constrained, by
   // parseFilename's `cv-template(\.[a-z0-9-]+)?\.(html|tex)` — so `templates/My
   // Pack/cv-template.ats.html` is a path the resolver really does return.
-  const pack = "templates/My Pack/cv-template.ats.html";
-  const prompt = buildPrompt({ kind: "pdf", ...ARGS, cvTemplate: pack });
+  //
+  // `+` is the same case as the space, and reaches the guard the same way. It
+  // names no shell or prompt construct, and it is how people actually write a
+  // pack covering two things: `Design+Dev`, `C++`, `ATS+Exec`. Verified against
+  // the real resolver: a `templates/Design+Dev/` pack resolves, then the prompt
+  // named `templates/cv-template.html` instead.
+  for (const pack of [
+    "templates/My Pack/cv-template.ats.html",
+    "templates/Design+Dev/cv-template.ats.html",
+    "templates/C++/cv-template.ats.html",
+  ]) {
+    const prompt = buildPrompt({ kind: "pdf", ...ARGS, cvTemplate: pack });
 
-  // Then it survives the guard. Rejecting it is not the safe side: the run
-  // quietly fills the base template instead, which is the #4034 bug back again
-  // for exactly the users who went to the trouble of building a pack.
-  assert.ok(prompt.includes(pack), "a pack directory with a space must reach the worker");
+    // Then it survives the guard. Rejecting it is not the safe side: the run
+    // quietly fills the base template instead, which is the #4034 bug back again
+    // for exactly the users who went to the trouble of building a pack.
+    assert.ok(prompt.includes(pack), `a pack directory like ${pack} must reach the worker`);
+  }
 });
 
 test("buildPrompt: a path cv-templates.mjs could not have produced is refused", () => {
@@ -424,6 +435,17 @@ test("buildPrompt: a path cv-templates.mjs could not have produced is refused", 
     "templates/a/b/cv-template.html",
     // A real pack directory, but a filename parseFilename cannot produce.
     "templates/My Pack/notes.html",
+    // `+` widened the pack-directory class and nothing else. Each of these pairs
+    // it with a metacharacter, so a regex that let `+` in by loosening the class
+    // as a whole fails here instead of shipping.
+    "templates/Design+Dev;rm -rf ~/cv-template.html",
+    "templates/Design+Dev'/cv-template.html",
+    'templates/Design+Dev"/cv-template.html',
+    "templates/Design+`whoami`/cv-template.html",
+    "templates/Design+$HOME/cv-template.html",
+    // `+` in the FILENAME is not a path the resolver returns: parseFilename's
+    // `[a-z0-9-]` excludes it, so widening the directory must not widen this.
+    "templates/cv-template.a+b.html",
   ]) {
     const prompt = buildPrompt({ kind: "pdf", ...ARGS, cvTemplate: bad });
     assert.ok(!prompt.includes(bad), `must not interpolate ${bad}`);

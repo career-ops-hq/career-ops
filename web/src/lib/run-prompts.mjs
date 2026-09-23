@@ -71,15 +71,21 @@ export const BASE_CV_TEMPLATE = "templates/cv-template.html";
  * The obvious widening — `[^/]+` for the directory — is the wrong trade. This path
  * is interpolated into an agent's numbered instructions, so `;`, `$`, quotes,
  * backticks and control characters would ride in with it; the allowlist keeps the
- * one character real directory names actually need. A pack whose name falls
+ * characters real directory names actually need. A pack whose name falls
  * outside it still renders, from the base template, which is the same outcome as
  * before and not a new failure.
+ *
+ * `+` earns its place on the same evidence as the space: `Design+Dev`, `C++`,
+ * `ATS+Exec` are how people write a pack that covers two things, and `+` names no
+ * shell or prompt construct. It is confined to the DIRECTORY half. parseFilename
+ * cannot produce it in a filename (`[a-z0-9-]`), so `cv-template.a+b.html` is
+ * still a path the resolver never returns.
  *
  * `(?![\s\S])` rather than `$`: JS's `$` also matches BEFORE a final newline, so
  * `templates/cv-template.html\n` would pass and break the step it is written into.
  */
 const CV_TEMPLATE_RE =
-  /^templates\/(?:[A-Za-z0-9][A-Za-z0-9._ -]*\/)?cv-template(?:\.[a-z0-9-]+)?\.html(?![\s\S])/;
+  /^templates\/(?:[A-Za-z0-9][A-Za-z0-9._ +-]*\/)?cv-template(?:\.[a-z0-9-]+)?\.html(?![\s\S])/;
 
 /**
  * The template path is interpolated into an agent's instructions, so it is a
