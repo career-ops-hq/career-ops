@@ -231,3 +231,11 @@ reports/**/*.md
 !test-fixtures/**
 !documents/.gitkeep
 !documents/README.md
+
+# Local runtime/dev scratch — machine-local, never part of the project.
+.venv/
+__pycache__/
+tmp/
+cv/
+.tmp-*
+batch/linkedin-title-fix-*.tsv
