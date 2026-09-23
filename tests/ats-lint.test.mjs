@@ -191,6 +191,20 @@ test('standard-section-headers: fires on a literal heading the doc does not sanc
   assert.match(result.findings[0].detail, /Career Highlights/);
 });
 
+test('standard-section-headers: an unquoted class attribute is still a heading', () => {
+  // `<div class=section-title>` is valid HTML. The matcher required quotes, so
+  // a non-standard heading written this way was skipped and the lint passed it.
+  const result = lint('<body><div class=section-title>Career Highlights</div></body>');
+  assert.deepEqual(ids(result), ['standard-section-headers']);
+});
+
+test('standard-section-headers: must not flag data-class as a class attribute', () => {
+  // The matcher accepted any attribute whose name ENDED in "class", so
+  // data-class, ng-class and friends produced a finding for ordinary markup.
+  const result = lint('<body><div data-class="section-title">Career Highlights</div></body>');
+  assert.deepEqual(ids(result), []);
+});
+
 test('standard-section-headers: must not flag a placeholder heading', () => {
   // Every shipped template writes these, and the rendered wording — and its
   // language, via lang="{{LANG}}" — belongs to the payload, not the template.

@@ -372,7 +372,12 @@ function detectStandardSectionHeaders(html, rule) {
     // The class pass reads to the matching close (see innerHtml). The heading
     // pass does not need to: `</h[1-6]>` is already the element's own end, and
     // a heading nested in a heading is not markup anyone writes.
-    ...[...body.matchAll(/<([a-z][a-z0-9]*)\b[^>]*class\s*=\s*(?:"[^"]*\bsection-title\b[^"]*"|'[^']*\bsection-title\b[^']*')[^>]*>/gi)]
+    // `class` is anchored on a preceding space so `data-class`, `ng-class` and
+    // any other attribute merely ENDING in "class" cannot match. The third
+    // alternative is the unquoted form (`class=section-title`), which is valid
+    // HTML and was silently skipped; an unquoted value cannot contain a space,
+    // so it is the whole class list and needs no word-boundary search.
+    ...[...body.matchAll(/<([a-z][a-z0-9]*)\b[^>]*?\sclass\s*=\s*(?:"[^"]*\bsection-title\b[^"]*"|'[^']*\bsection-title\b[^']*'|section-title(?=[\s>]))[^>]*>/gi)]
       .map((m) => innerHtml(body, m[1], m.index + m[0].length)),
     ...[...body.matchAll(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/gi)].map((m) => m[1]),
   ].map(textOf))];
