@@ -308,15 +308,35 @@ test('standard-section-headers: must not flag a placeholder heading', () => {
   assert.deepEqual(result.skipped.filter((s) => s.id === 'standard-section-headers'), []);
 });
 
+test('standard-section-headers: a heading built from two placeholders is still unchosen', () => {
+  // isPlaceholderOnly strips every {{...}} run and then trims, so a heading
+  // split across two placeholders collapses to nothing and stays quiet. Anchor
+  // the check to one whole placeholder, or drop that trim, and the space
+  // between them survives. The heading then reads as literal wording, and a
+  // template that composes a heading this way is flagged for a rename it never
+  // made. Both edits pass every other case, so this fixture pins both.
+  const r = lint(
+    '<body><div class="section-title">{{SECTION_EXPERIENCE}} {{SECTION_SUFFIX}}</div></body>'
+  );
+  assert.deepEqual(ids(r), []);
+  assert.deepEqual(r.skipped.filter((s) => s.id === 'standard-section-headers'), []);
+});
+
 test('standard-section-headers: an unsubstituted lang placeholder is not a language', () => {
   // Every shipped CV template declares lang="{{LANG}}". Read as a declaration,
   // that is the language "{{lang}}", which is not "en", so the rule stood down
   // on every CV template the project ships and ran on the cover letter alone.
   // A template has not picked a language yet. An unsubstituted placeholder is
   // absence, and absence already means run.
-  const r = lint('<html lang="{{LANG}}"><body><h2>Career Highlights</h2></body></html>');
-  assert.deepEqual(ids(r), ['standard-section-headers']);
-  assert.deepEqual(r.skipped.filter((s) => s.id === 'standard-section-headers'), []);
+  //
+  // The second spelling is the point. {{LANG}} is what the repo ships today,
+  // and a check written against that one string leaves the next name silent
+  // again. The predicate has to be general, so both names are asserted.
+  for (const name of ['{{LANG}}', '{{DOC_LANG}}']) {
+    const r = lint(`<html lang="${name}"><body><h2>Career Highlights</h2></body></html>`);
+    assert.deepEqual(ids(r), ['standard-section-headers'], name);
+    assert.deepEqual(r.skipped.filter((s) => s.id === 'standard-section-headers'), [], name);
+  }
 });
 
 test('standard-section-headers: a lang in the body is not the document language', () => {
