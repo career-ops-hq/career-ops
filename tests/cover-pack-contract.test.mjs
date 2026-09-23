@@ -33,42 +33,89 @@ const CONTRACT_SLOTS = [
   'LANGUAGE_CLOSING_BLOCK', 'FOOTNOTES_BLOCK',
 ];
 
-/** A template carrying every contract slot, each tagged so it can be located. */
+/**
+ * A template carrying every contract slot, each tagged so it can be located.
+ *
+ * The wrapper is a `<section>`, not a `<div>`: several slots are filled with a
+ * block that contains its own nested `<div>`s (RECIPIENT_BLOCK emits one per
+ * address line), so a `<div>` wrapper cannot be closed unambiguously by a
+ * regex. No filler emits `</section>`, so that tag pairs exactly.
+ */
 function packTemplate() {
   const dir = mkdtempSync(join(tmpdir(), 'cover-pack-'));
   const file = join(dir, 'cover-letter-template.html');
-  writeFileSync(file, CONTRACT_SLOTS.map((s) => `<div data-slot="${s}">{{${s}}}</div>`).join('\n'));
+  writeFileSync(file, CONTRACT_SLOTS.map((s) => `<section data-slot="${s}">{{${s}}}</section>`).join('\n'));
   return file;
 }
 
-/** A payload that populates every field the contract's slots are fed from. */
+/**
+ * A payload that populates every field the contract's slots are fed from.
+ *
+ * Every value is a distinct sentinel. Two fields sharing a value (the old
+ * fixture used "Example Corp" for both `letter.company` and
+ * `recipient.company`, and "Boston, MA" for both `candidate.location` and
+ * `letter.city`) makes them indistinguishable in the output, so an assertion
+ * covers neither side: whichever slot still renders satisfies the check for
+ * both.
+ */
 const FULL = {
   candidate: {
-    name: 'A Candidate',
-    email: 'CANDIDATE-EMAIL-SENTINEL@example.com',
+    name: 'NAME-SENTINEL',
+    email: 'EMAIL-SENTINEL@example.com',
     phone: '+1 555 0100 PHONE-SENTINEL',
-    location: 'Boston, MA',
+    location: 'LOCATION-SENTINEL',
     linkedin: 'linkedin.com/in/LINKEDIN-SENTINEL',
     website: 'example.com',
-    credentials: ['CRED-ONE', 'CRED-TWO'],
+    credentials: ['CRED-ONE-SENTINEL', 'CRED-TWO-SENTINEL'],
   },
   letter: {
-    role_title: 'Head of Marketing',
-    company: 'Example Corp',
-    city: 'Boston, MA',
-    date: 'September 11, 2026',
-    recipient: { name: 'Jane Reviewer', title: 'Director of Talent', company: 'Example Corp', address_lines: ['100 Example Street'] },
-    greeting: 'Dear Jane Reviewer,',
-    opening: 'OPENING-TEXT',
-    profile_intro: 'PROFILE-INTRO-TEXT',
-    achievements: [{ lead: 'ACH-LEAD', impact: 'ACH-IMPACT' }],
-    problems_section: 'PROBLEMS-TEXT',
-    closing: 'CLOSING-TEXT',
-    language_closing: 'LANGUAGE-CLOSING-TEXT',
+    role_title: 'ROLE-TITLE-SENTINEL',
+    company: 'LETTER-COMPANY-SENTINEL',
+    city: 'LETTER-CITY-SENTINEL',
+    date: 'DATE-SENTINEL',
+    recipient: {
+      name: 'RECIPIENT-NAME-SENTINEL',
+      title: 'RECIPIENT-TITLE-SENTINEL',
+      company: 'RECIPIENT-COMPANY-SENTINEL',
+      address_lines: ['ADDRESS-LINE-SENTINEL'],
+    },
+    greeting: 'GREETING-SENTINEL',
+    opening: 'OPENING-SENTINEL',
+    profile_intro: 'PROFILE-INTRO-SENTINEL',
+    achievements: [{ lead: 'ACH-LEAD-SENTINEL', impact: 'ACH-IMPACT-SENTINEL' }],
+    problems_section: 'PROBLEMS-SENTINEL',
+    closing: 'CLOSING-SENTINEL',
+    language_closing: 'LANGUAGE-CLOSING-SENTINEL',
     signature: { valediction: 'Sincerely,' },
-    footnotes: ['FOOTNOTE-ONE'],
+    footnotes: ['FOOTNOTE-SENTINEL'],
   },
 };
+
+/** Each populated payload value, paired with the one slot that must carry it. */
+const SLOT_VALUES = [
+  ['NAME', FULL.candidate.name],
+  ['ROLE_TITLE', FULL.letter.role_title],
+  ['CONTACT_LINE', FULL.candidate.location],
+  ['CONTACT_LINE', FULL.candidate.email],
+  ['CONTACT_LINE', FULL.candidate.phone],
+  ['CONTACT_LINE', FULL.candidate.linkedin],
+  ['CREDENTIALS_BLOCK', FULL.candidate.credentials[0]],
+  ['CREDENTIALS_BLOCK', FULL.candidate.credentials[1]],
+  ['DATELINE', FULL.letter.date],
+  ['RECIPIENT_BLOCK', FULL.letter.recipient.name],
+  ['RECIPIENT_BLOCK', FULL.letter.recipient.title],
+  ['RECIPIENT_BLOCK', FULL.letter.recipient.company],
+  ['RECIPIENT_BLOCK', FULL.letter.recipient.address_lines[0]],
+  ['GREETING_BLOCK', FULL.letter.greeting],
+  ['OPENING', FULL.letter.opening],
+  ['PROFILE_INTRO', FULL.letter.profile_intro],
+  ['ACHIEVEMENTS_BLOCK', FULL.letter.achievements[0].lead],
+  ['ACHIEVEMENTS_BLOCK', FULL.letter.achievements[0].impact],
+  ['PROBLEMS_BLOCK', FULL.letter.problems_section],
+  ['CLOSING_BLOCK', FULL.letter.closing],
+  ['LANGUAGE_CLOSING_BLOCK', FULL.letter.language_closing],
+  ['FOOTNOTES_BLOCK', FULL.letter.footnotes[0]],
+];
 
 test('a template carrying every contract slot renders at all', () => {
   // The failure this replaces was a hard throw on the first unfilled slot, so
@@ -86,31 +133,40 @@ test('core fills every slot the contract declares', () => {
   assert.deepEqual(unfilled, [], `core left contract slots unsubstituted: ${unfilled.join(', ')}`);
 });
 
+/** The rendered contents of one slot, isolated from the rest of the letter. */
 function slotHtml(html, slot) {
-  const match = html.match(new RegExp(`<div data-slot="${slot}">([\\s\\S]*?)</div>`));
+  const match = html.match(new RegExp(`<section data-slot="${slot}">([\\s\\S]*?)</section>`));
   assert.ok(match, `rendered letter does not contain data-slot="${slot}"`);
   return match[1];
 }
 
-test('every value the payload supplies reaches the letter', () => {
+test('every value the payload supplies reaches its own slot', () => {
   // Substitution alone is not enough: {{ACHIEVEMENTS_BLOCK}} was "filled" with
   // empty <li> elements for the whole life of the achievements-shape bug.
+  //
+  // Each value is asserted INSIDE its slot, never against the whole document.
+  // A document-wide `html.includes(v)` cannot tell which slot rendered a value,
+  // so a slot that dropped its input still passes whenever the same string
+  // survives somewhere else — the reason a RECIPIENT_BLOCK that dropped the
+  // recipient name used to pass here, rescued by the greeting carrying it.
   const html = buildHtml(FULL, packTemplate());
 
-  for (const v of ['A Candidate', 'Head of Marketing', 'Jane Reviewer', 'Director of Talent',
-                   '100 Example Street', 'OPENING-TEXT', 'PROFILE-INTRO-TEXT', 'ACH-LEAD',
-                   'ACH-IMPACT', 'PROBLEMS-TEXT', 'CLOSING-TEXT', 'LANGUAGE-CLOSING-TEXT',
-                   'FOOTNOTE-ONE', 'September 11, 2026']) {
-    assert.ok(html.includes(v), `the payload supplied "${v}" and the letter does not carry it`);
+  for (const [slot, value] of SLOT_VALUES) {
+    assert.ok(slotHtml(html, slot).includes(value),
+      `${slot} does not carry the payload value "${value}"`);
   }
+});
 
-  for (const v of ['CANDIDATE-EMAIL-SENTINEL@example.com', '+1 555 0100 PHONE-SENTINEL',
-                   'linkedin.com/in/LINKEDIN-SENTINEL']) {
-    assert.ok(slotHtml(html, 'CONTACT_LINE').includes(v), `CONTACT_LINE does not carry "${v}"`);
-  }
-  for (const v of ['CRED-ONE', 'CRED-TWO']) {
-    assert.ok(slotHtml(html, 'CREDENTIALS_BLOCK').includes(v), `CREDENTIALS_BLOCK does not carry "${v}"`);
-  }
+test('the dateline drops company and city to the address block beneath it', () => {
+  // The second drift this suite exists for: the contract gives {{DATELINE}} the
+  // date alone once an address block renders, and the renderer used to join the
+  // company in as well, printing it twice three lines apart. Only distinct
+  // sentinels can see this — the old fixture gave letter.company and
+  // recipient.company the same string, which made the duplicate invisible.
+  const dateline = slotHtml(buildHtml(FULL, packTemplate()), 'DATELINE');
+
+  assert.ok(!dateline.includes(FULL.letter.company), 'DATELINE repeats the company the address block already carries');
+  assert.ok(!dateline.includes(FULL.letter.city), 'DATELINE repeats the city the address block already carries');
 });
 
 test('the contract list and the renderer have not drifted apart', () => {
