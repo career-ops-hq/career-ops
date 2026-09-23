@@ -255,7 +255,11 @@ try {
   if (keyCalls === 2) pass('kalibrr.fetch() reads the canonical entry.max_pages');
   else fail(`kalibrr.fetch() entry.max_pages run made ${keyCalls} request(s) (expected 2)`);
 
-  // A probe asks whether the board is live, not what it contains.
+  // A probe asks whether the board is live, not what it contains. The mock
+  // returns a FULL page (pageSize defaults to 100) so the short-page stop cannot
+  // end the walk on its own: only the ctx.maxPages cap can, which is the whole
+  // point of the assertion. With a one-row page this test would pass even if the
+  // provider ignored ctx.maxPages entirely.
   let probeCalls = 0;
   const probeWarnings = [];
   console.warn = (msg) => probeWarnings.push(String(msg));
@@ -268,7 +272,12 @@ try {
           probeCalls += 1;
           return {
             count: 999999,
-            jobs: [{ id: `p${probeCalls}`, name: 'A', slug: 'a', company: { code: 'c', name: 'C' } }],
+            jobs: Array.from({ length: 100 }, (_, i) => ({
+              id: `p${probeCalls}-${i}`,
+              name: `Role ${i}`,
+              slug: `s-${probeCalls}-${i}`,
+              company: { code: 'c', name: 'C' },
+            })),
           };
         },
         sleep: async () => {},
@@ -278,10 +287,10 @@ try {
   } finally {
     console.warn = realWarn;
   }
-  if (probeCalls === 1 && probe.length === 1) {
-    pass('kalibrr.fetch() honors ctx.maxPages (health probe reads one page only)');
+  if (probeCalls === 1 && probe.length === 100) {
+    pass('kalibrr.fetch() honors ctx.maxPages (health probe reads exactly one full page)');
   } else {
-    fail(`kalibrr.fetch() probe = ${probeCalls} request(s), ${probe.length} job(s)`);
+    fail(`kalibrr.fetch() probe = ${probeCalls} request(s), ${probe.length} job(s) (expected 1 request, 100 jobs)`);
   }
   if (probeWarnings.length === 0) {
     pass('kalibrr.fetch() does not advise raising max_pages for a ctx.maxPages cap');

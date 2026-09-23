@@ -382,6 +382,51 @@ try {
     fail(`techinasia.fetch() retry exhaustion = ${attempts} attempt(s), threw=${retriedThenThrew}`);
   }
 
+  // ── Exhaustion policy, later page: keep what was collected, and warn
+  //    about the fetch rather than blaming max_pages ────────────────────
+  let partialCalls = 0;
+  const partialWarnings = [];
+  console.warn = (msg) => partialWarnings.push(String(msg));
+  let partial;
+  try {
+    partial = await techinasia.fetch(
+      { name: 'X', provider: 'techinasia', max_pages: 3 },
+      {
+        fetchText: async (url) => (url.includes('/jobs/search') ? sampleHtml : appJs),
+        fetchJson: async () => {
+          partialCalls += 1;
+          // Page 0 succeeds with a full page and more pages reported, so the
+          // loop genuinely wants page 1; that is the page that fails.
+          if (partialCalls > 1) throw new Error('HTTP 500 Server Error');
+          return {
+            results: [{ hits: [{ id: 'a', title: 'Role A' }, { id: 'b', title: 'Role B' }], nbPages: 3 }],
+          };
+        },
+        sleep: async () => {},
+      },
+    );
+  } finally {
+    console.warn = realWarn;
+  }
+  // 4 requests = 1 successful page plus 3 attempts (the initial call and the
+  // helper's 2 retries) on the page that fails, which is the retry policy doing
+  // its job before the exhaustion branch runs.
+  if (partialCalls === 4 && partial.length === 2) {
+    pass('techinasia.fetch() keeps the pages already collected when a later page fails');
+  } else {
+    fail(`techinasia.fetch() partial run = ${partialCalls} request(s), ${partial.length} job(s) (expected 4, 2)`);
+  }
+  if (partialWarnings.some((m) => /page 1 failed/.test(m))) {
+    pass('techinasia.fetch() warns when a later page fails after retries');
+  } else {
+    fail(`techinasia.fetch() did not warn about the failed later page: ${JSON.stringify(partialWarnings)}`);
+  }
+  if (!partialWarnings.some((m) => /raise max_pages/.test(m))) {
+    pass('techinasia.fetch() does not blame max_pages for a fetch-error stop');
+  } else {
+    fail(`techinasia.fetch() warned about max_pages after a fetch error: ${JSON.stringify(partialWarnings)}`);
+  }
+
   // ── A lone surrogate in the host-controlled id drops only that row ────
   const surrogateRun = await techinasia.fetch(
     { name: 'X', provider: 'techinasia' },
