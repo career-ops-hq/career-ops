@@ -303,6 +303,16 @@ test('standard-section-headers: an unsubstituted lang placeholder is not a langu
   assert.deepEqual(r.skipped.filter((s) => s.id === 'standard-section-headers'), []);
 });
 
+test('standard-section-headers: a lang in the body is not the document language', () => {
+  // The tag capture ends at the '>' that closes <html>. Widened to run past
+  // it, the attribute walker reads the first lang ANYWHERE in the document, so
+  // one quoted foreign-language line silences the rule across the whole CV.
+  // Direction matters: this one silences, and a silenced rule reports nothing.
+  const r = lint('<html><body><h2>Career Timeline</h2><p lang="es">hola</p></body></html>');
+  assert.deepEqual(ids(r), ['standard-section-headers']);
+  assert.deepEqual(r.skipped.filter((s) => s.id === 'standard-section-headers'), []);
+});
+
 test('standard-section-headers: must not flag the standard or additive headers', () => {
   const headers = rules.find((r) => r.id === 'standard-section-headers').headers;
   const html = `<body>${headers.map((h) => `<div class="section-title">${h}</div>`).join('')}</body>`;
