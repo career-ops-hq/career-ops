@@ -39,10 +39,21 @@ function addTsv(env, name, cols) {
   writeFileSync(join(env.addDir, name), cols.join('\t'));
 }
 function runMerge(env, args = []) {
-  return execFileSync('node', [MERGE, ...args], {
-    encoding: 'utf-8',
-    env: { ...process.env, CAREER_OPS_TRACKER: env.tracker, CAREER_OPS_ADDITIONS: env.addDir },
-  });
+  // Pin the data root to the fixture and drop every other CAREER_OPS_* override,
+  // the way merge-tracker-cli-roots.test.mjs does. Spreading process.env alone
+  // let CAREER_OPS_ROOT, CAREER_OPS_DATA_DIR, CAREER_OPS_BATCH_STATE and
+  // CAREER_OPS_CODE_ROOT through from whoever ran the suite, so a developer's
+  // real batch-state could decide whether a fixture row merged.
+  const childEnv = {
+    ...process.env,
+    CAREER_OPS_ROOT: env.base,
+    CAREER_OPS_TRACKER: env.tracker,
+    CAREER_OPS_ADDITIONS: env.addDir,
+  };
+  delete childEnv.CAREER_OPS_DATA_DIR;
+  delete childEnv.CAREER_OPS_BATCH_STATE;
+  delete childEnv.CAREER_OPS_CODE_ROOT;
+  return execFileSync('node', [MERGE, ...args], { encoding: 'utf-8', env: childEnv });
 }
 function trackerRows(env) {
   // Exclude the markdown separator PRECISELY (not any `---`) so rows whose URL
@@ -434,4 +445,40 @@ ok('row with `---` in its URL (Workday slug) stays visible to dedup', () => {
     assert.equal(rows.length, 1, 'updated in place, not duplicated, despite --- in the URL');
     assert.ok(rows[0].includes('4.0/5'), 'the row was found and LWW-updated');
   } finally { cleanup(env); }
+});
+
+// runMerge spreads process.env and overrides only CAREER_OPS_TRACKER and
+// CAREER_OPS_ADDITIONS, so CAREER_OPS_ROOT, CAREER_OPS_DATA_DIR,
+// CAREER_OPS_BATCH_STATE and CAREER_OPS_CODE_ROOT leak in from whatever shell
+// runs the suite. merge-tracker.mjs:68 says CAREER_OPS_BATCH_STATE exists "used
+// by tests", and this suite was the one not using it.
+//
+// The leak is observable because a batch-state row marked `failed` for a report
+// number blocks that TSV from merging at all, by design: the worker's JSON
+// status is the authority on whether an offer was really read. So an inherited
+// batch-state can make a correct merge fail, for a reason nothing in the
+// fixture explains.
+ok('the merge ignores a batch-state inherited from the environment', () => {
+  const env = makeEnv();
+  const canary = join(env.base, '..', `leaked-batch-state-${process.pid}.tsv`);
+  const saved = process.env.CAREER_OPS_BATCH_STATE;
+  try {
+    // Six columns, status 'failed' at index 2 and the report number at index 5,
+    // which is the shape loadFailedReportNumbers() reads.
+    writeFileSync(canary, ['id\tx\tstatus\tx\tx\treport', 'w1\t-\tfailed\t-\t-\t7'].join('\n'));
+    process.env.CAREER_OPS_BATCH_STATE = canary;
+
+    writeTracker(env, []);
+    addTsv(env, '7-acme.tsv', ['7', '2026-06-25', 'Acme', 'Head of Marketing', 'Evaluated', '4.0/5', '❌',
+      '[7](reports/7-acme-2026-06-25.md)', 'n', 'https://boards.greenhouse.io/acme/jobs/7']);
+    runMerge(env);
+
+    const rows = trackerRows(env);
+    assert.equal(rows.length, 1, 'the row merged, so the inherited batch-state was not consulted');
+  } finally {
+    if (saved === undefined) delete process.env.CAREER_OPS_BATCH_STATE;
+    else process.env.CAREER_OPS_BATCH_STATE = saved;
+    rmSync(canary, { force: true });
+    cleanup(env);
+  }
 });
