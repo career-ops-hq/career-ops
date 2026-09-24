@@ -402,6 +402,23 @@ try {
       : fail(`null pcsx page: ${caught && caught.constructor.name}: ${caught && caught.message}`);
   }
 
+  // Only the first page decides the API. A 403 after v2 has served pages is an
+  // ordinary error: probing PCSX then would splice two endpoints' orderings
+  // into one walk (CodeRabbit, #4297).
+  {
+    const { ctx, calls } = recording((c) => {
+      if (c.url.includes('/api/pcsx/search')) return pcsxPage([position('99', 'Should not appear')], 1);
+      const start = Number(new URL(c.url).searchParams.get('start') || 0);
+      if (start === 0) return { positions: Array.from({ length: 10 }, (_, i) => position(String(i), `R${i}`)), count: 30 };
+      throw httpErr(403, 'Forbidden');
+    });
+    let caught = null;
+    await ef.fetch(TENANT, ctx).catch((e) => { caught = e; });
+    caught?.status === 403 && calls.every((c) => c.url.includes('/api/apply/v2/jobs'))
+      ? pass('eightfold treats a 403 after page 0 as an error and never probes PCSX mid-walk')
+      : fail(`mid-walk 403: caught=${caught && caught.status} urls=${[...new Set(calls.map((c) => c.url.split('?')[0]))].join(' ')}`);
+  }
+
   // A 200 from PCSX that is not a PCSX page means the endpoint moved again.
   {
     const { ctx } = recording((c) => {
