@@ -267,6 +267,12 @@ Field-tested across ~12 Playwright-driven applications (Ashby, Greenhouse, Lever
 - **Agent:** Before filling the email field, check whether an earlier report for the same company already exists in `reports/`. If it does, warn the candidate and pre-fill a `+tag` alias (e.g., `user+teamname@domain.com`) as the suggested value.
 - **Candidate:** Confirms or changes the email before the form is submitted.
 
+### Ashby — automated browser sessions can be rejected at submission
+
+- **Symptom:** An Ashby form (`jobs.ashbyhq.com`) may reject submission as possible spam from a Playwright-controlled browser, even when the candidate clicks Submit in its visible window. A filled form or a click is not proof of submission.
+- **Agent:** Once the actual application host is known, draft the answers and capture the exact posting/application URL, then hand the candidate off to their ordinary system browser for the final form. Open that URL in the system browser when possible; otherwise provide the direct link. Present a numbered copy-paste list of answers and the files to upload. Do not transfer browser cookies or claim the Playwright-filled state will carry over. If a Playwright submission was rejected, tell the candidate it failed and offer the same browser handoff. Do not attempt to hide automation signals or bypass the site's verification.
+- **Candidate:** Fill and review the form in their ordinary browser, complete any verification, and submit there. Confirm the site's success page or confirmation email before the agent marks the application `submitted` or updates the tracker to Applied; otherwise keep the answers as `filled`.
+
 ### Lever — hCaptcha intercepts checkbox/radio clicks
 
 - **Symptom:** Programmatic `click()` on checkboxes or radio buttons triggers an hCaptcha challenge mid-form, blocking the rest of the fill.
