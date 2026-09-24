@@ -383,8 +383,14 @@ export default {
           let pcsxJson = null;
           try {
             pcsxJson = await request('pcsx');
-          } catch {
-            throw err; // PCSX refused too: the original 403 is the real story (WAF / datacenter IP).
+          } catch (probeErr) {
+            // PCSX refusing too (403) makes the original 403 the real story: a
+            // WAF or datacenter-IP block. Any other probe failure — a 429, a 5xx,
+            // a network error — is its own problem, and reporting the v2 403 in
+            // its place would read as a deterministic block when the tenant is
+            // only busy or down.
+            if (/** @type {any} */ (probeErr)?.status === 403) throw err;
+            throw probeErr;
           }
           const page0 = normalizePcsxPage(pcsxJson);
           if (!page0) {
@@ -408,7 +414,9 @@ export default {
         }
       }
 
-      if (api === 'pcsx' && !('positions' in json)) {
+      // `in` throws on null or a primitive, so shape-check first: a PCSX page
+      // that decodes to `null` must reach the descriptive error below.
+      if (api === 'pcsx' && !(json && typeof json === 'object' && 'positions' in json)) {
         const normalized = normalizePcsxPage(json);
         if (!normalized) {
           throw new Error(`eightfold: ${entry.name} returned an unrecognized /api/pcsx/search body at start=${start}`);
