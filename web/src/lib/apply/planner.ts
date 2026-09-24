@@ -3,6 +3,7 @@ import { CAPS } from "@/lib/worker-capabilities.mjs";
 import { scopeFrom } from "@/lib/claude-invocation.mjs";
 import { fencingReport } from "@/lib/cli-fencing.mjs";
 import type { CliSpec } from "@/lib/clis";
+import { careerOpsEnv } from "@/lib/career-ops";
 
 /**
  * planner.ts - spawn the read-only planner CLI and collect what it wrote.
@@ -92,7 +93,7 @@ export function runPlanner(opts: {
       child = spawnHeadlessCli(
         binPath,
         args,
-        { cwd, env: process.env },
+        { cwd, env: careerOpsEnv() },
         // spec.id, not the caller's cliId: same value once resolveCli has
         // accepted it, but typed as the canonical id rather than the caller's
         // optional string.

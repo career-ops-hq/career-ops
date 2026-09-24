@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { careerOpsEnv, careerOpsCodeRoot, careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { PROFILE_CADENCE_KEYS, type ProfileCadenceKey } from "@/lib/followups";
 
@@ -39,7 +39,7 @@ async function readCoreDefaults(): Promise<Partial<Record<ProfileCadenceKey, num
   const script = rootScript("followup-cadence");
   if (!fs.existsSync(script)) return null;
   const stdout = await new Promise<string>((resolve) => {
-    execFile("node", [script, "--json"], { cwd: careerOpsRoot(), timeout: 12_000 }, (_e, out) => resolve(out || ""));
+    execFile("node", [script, "--json"], { cwd: careerOpsRoot(), env: careerOpsEnv(), timeout: 12_000 }, (_e, out) => resolve(out || ""));
   });
   try {
     const start = stdout.indexOf("{");
@@ -115,7 +115,7 @@ export async function POST(req: Request) {
   if (!fs.existsSync(file)) {
     // First create: seed from the example so we never leave a cadence-only profile.
     try {
-      const seeded = yaml.load(fs.readFileSync(path.join(root, "config", "profile.example.yml"), "utf8"));
+      const seeded = yaml.load(fs.readFileSync(path.join(careerOpsCodeRoot(), "config", "profile.example.yml"), "utf8"));
       base = isObj(seeded) ? seeded : {};
     } catch {
       base = {};

@@ -1,6 +1,6 @@
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { resolveCli } from "@/lib/clis";
-import { careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
+import { careerOpsEnv, careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
 import { CAPS } from "@/lib/worker-capabilities.mjs";
 import { scopeFrom } from "@/lib/claude-invocation.mjs";
 import { fencingReport } from "@/lib/cli-fencing.mjs";
@@ -130,7 +130,7 @@ export async function POST(req: Request) {
     child = spawnHeadlessCli(
       binPath,
       args,
-      { cwd: careerOpsRoot(), env: process.env },
+      { cwd: careerOpsRoot(), env: careerOpsEnv() },
       { cliId, capabilities: CAPS.networkReadOnly },
     );
   } catch (e) {

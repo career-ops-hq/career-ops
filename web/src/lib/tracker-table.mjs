@@ -44,7 +44,7 @@ const aliasCache = new Map();
  * table — no header row is then detected and parseApplications falls back to
  * the legacy fixed column order — and the cache entry is cleared so a later
  * recovered file is loaded immediately.
- * @param {string} rootDir - career-ops root (careerOpsRoot() on the web side).
+ * @param {string} rootDir - core checkout (careerOpsCodeRoot() on the web side).
  * @returns {Record<string, string>}
  */
 export function loadHeaderAliases(rootDir) {

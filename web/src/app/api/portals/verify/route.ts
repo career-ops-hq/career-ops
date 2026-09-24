@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { careerOpsEnv, careerOpsRoot, rootScript } from "@/lib/career-ops";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,7 +32,7 @@ export async function GET() {
     execFile(
       "node",
       [verifyPortals],
-      { cwd: root, timeout: 110_000, maxBuffer: 4 * 1024 * 1024 },
+      { cwd: root, env: careerOpsEnv(), timeout: 110_000, maxBuffer: 4 * 1024 * 1024 },
       (_e, out, err) => resolve((out || "") + (err || "")),
     );
   });

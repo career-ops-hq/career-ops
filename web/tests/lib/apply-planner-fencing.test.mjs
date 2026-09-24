@@ -37,7 +37,10 @@ const skip = !canImportTs && "this Node cannot import planner.ts (no type stripp
 if (canImportTs) registerHooks({
   resolve(specifier, context, nextResolve) {
     if (specifier.startsWith("@/")) {
-      return nextResolve(pathToFileURL(path.join(SRC, specifier.slice(2))).href, context);
+      const base = path.join(SRC, specifier.slice(2));
+      for (const ext of ["", ".ts", ".mjs"]) {
+        if (fs.existsSync(base + ext)) return nextResolve(pathToFileURL(base + ext).href, context);
+      }
     }
     return nextResolve(specifier, context);
   },

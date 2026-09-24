@@ -1,6 +1,6 @@
 import path from "node:path";
 import * as yaml from "js-yaml";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { careerOpsCodeRoot, careerOpsRoot } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { loadPortalsDocument, mergePortalFilters, PortalsConfigError } from "@/lib/portals-config.mjs";
 
@@ -27,7 +27,7 @@ export async function POST(req: Request) {
   const file = path.join(root, "portals.yml");
   let doc: Record<string, unknown>;
   try {
-    ({ doc } = loadPortalsDocument(file, path.join(root, "templates", "portals.example.yml")));
+    ({ doc } = loadPortalsDocument(file, path.join(careerOpsCodeRoot(), "templates", "portals.example.yml")));
   } catch (error) {
     const invalidUserConfig = error instanceof PortalsConfigError && error.kind === "invalid-user-config";
     return Response.json(

@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
 import { atomicWrite } from "@/lib/core/safe-write";
-import { resolveDataRoot } from "@/lib/core/data-root.mjs";
 import { parseApplications } from "@/lib/tracker-table.mjs";
+import { resolveWorkspaceTrackerPath, resolveWorkspacePaths } from "@/lib/workspace-paths.mjs";
 // One definition of the `{n}-RESERVED.md` convention, shared with
 // run-cli-support.mjs — see report-files.mjs for why it lives there.
 import { isReservedReportFile } from "@/lib/report-files.mjs";
@@ -13,32 +13,31 @@ import { resolvePdfIndexPath } from "@/lib/core/pdf-index";
 // index row belong to" (#2599, #2008 review).
 import { pdfIndexEntryForReport } from "@/lib/apply/cv-selection.mjs";
 
-/**
- * Resolve the career-ops "home" — the directory holding the user's sibling
- * files (cv.md, data/, reports/). In production the web/ app lives inside the
- * career-ops checkout, so the home is its parent (..). Dev overrides via
- * CAREER_OPS_ROOT to read the user's real (gitignored) data from a separate
- * checkout — see web/.env.local.
- */
+/** User files (cv.md, data/, reports/), using the core's Data Root precedence. */
 export function careerOpsRoot(): string {
-  // `process.cwd()` is `<core>/web` for `next dev`/`next start`, so its parent is
-  // the core checkout — the same directory `path-resolver.mjs` calls `__dirname`.
-  // resolveDataRoot() needs it explicitly because relative env values and marker
-  // contents resolve against it; see data-root.mjs for why that base matters.
-  const coreRoot = path.resolve(process.cwd(), "..");
-  return resolveDataRoot(
-    coreRoot,
-    (p) => {
-      try {
-        return fs.readFileSync(p, "utf8");
-      } catch {
-        return null; // absent, unreadable, or a directory — all mean "no marker"
-      }
-    },
-    process.env,
-    path.resolve,
-    path.join,
-  );
+  return resolveWorkspacePaths().dataRoot;
+}
+
+/** Hosting checkout supplying core adapters, shared modules and rootScript().
+ * AI/PDF runs retain their separate complete-workspace requirement. */
+export function careerOpsCodeRoot(): string {
+  return resolveWorkspacePaths().codeRoot;
+}
+
+/** Keep child processes on the same absolute Data Root after changing cwd or
+ *  loading a core from another checkout. Preserve all other explicit overrides. */
+export function careerOpsEnv(): NodeJS.ProcessEnv & { CAREER_OPS_ROOT: string } {
+  const { dataRoot } = resolveWorkspacePaths();
+  const env: NodeJS.ProcessEnv & { CAREER_OPS_ROOT: string } = { ...process.env, CAREER_OPS_ROOT: dataRoot };
+  // Pin the displayed tracker before children change cwd (including AI search's
+  // temporary cwd); a relative override must never select a second tracker.
+  env.CAREER_OPS_TRACKER = resolveWorkspaceTrackerPath(dataRoot);
+  return env;
+}
+
+/** Absolute tracker shared by readers, report links and spawned core writers. */
+export function careerOpsTrackerPath(): string {
+  return resolveWorkspaceTrackerPath(careerOpsRoot());
 }
 
 /**
@@ -50,7 +49,7 @@ export function careerOpsRoot(): string {
 export function rootScript(nameNoExt: string): string {
   // The core checkout is selected at runtime and must not be bundled into the
   // web server output when Turbopack sees this dynamic script path.
-  return path.join(/* turbopackIgnore: true */ careerOpsRoot(), `${nameNoExt}.mjs`);
+  return path.join(/* turbopackIgnore: true */ careerOpsCodeRoot(), `${nameNoExt}.mjs`);
 }
 
 // Feature-detect the core's `tracker.mjs delete --num` row-delete (#1200) by probing
@@ -65,8 +64,9 @@ export function trackerCanDelete(): boolean {
 }
 
 function read(rel: string): string | null {
+  const root = careerOpsRoot();
   try {
-    return fs.readFileSync(path.join(careerOpsRoot(), rel), "utf8");
+    return fs.readFileSync(path.join(root, rel), "utf8");
   } catch {
     return null;
   }
@@ -169,9 +169,18 @@ export type Application = {
  * web-side mirror to drift (#954, PR #1598 review).
  */
 export function readApplications(): Application[] {
-  const md = read("data/applications.md");
-  if (!md) return [];
-  return parseApplications(md, careerOpsRoot());
+  return readApplicationsFrom(careerOpsTrackerPath());
+}
+
+function readApplicationsFrom(tracker: string): Application[] {
+  let md: string;
+  try {
+    md = fs.readFileSync(tracker, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  return parseApplications(md, careerOpsCodeRoot());
 }
 
 /** Resolve the report-number cell in data/pdf-index.tsv for a given report id.
@@ -270,9 +279,10 @@ export function doctorState(): {
   hasCv: boolean;
   hasData: boolean;
 } {
+  const root = careerOpsRoot();
   const has = (rel: string) => {
     try {
-      return fs.existsSync(path.join(careerOpsRoot(), rel));
+      return fs.existsSync(path.join(root, rel));
     } catch {
       return false;
     }
@@ -337,10 +347,11 @@ export function findReportFile(n: string): string | null {
   const target = parseInt(n, 10);
   if (Number.isNaN(target)) return null;
   const root = careerOpsRoot();
-  const app = readApplications().find((a) => parseInt(a.n, 10) === target);
+  const tracker = careerOpsTrackerPath();
+  const app = readApplicationsFrom(tracker).find((a) => parseInt(a.n, 10) === target);
   const linked = app?.report.match(/\]\(([^)]+)\)/)?.[1];
   if (linked) {
-    const p = path.resolve(root, "data", linked);
+    const p = path.resolve(path.dirname(tracker), linked);
     // Containment: a hand-edited link must not resolve outside the project.
     if (p.endsWith(".md") && !isReservedReportFile(p) && containedRealpath(p, root)) return p;
   }
@@ -408,8 +419,10 @@ const NOTES_END = "<!-- co-web-notes:end -->";
  *  focused — the agent reads the rest of the canonical files itself). Falls back
  *  to the legacy web-only memory file for back-compat. */
 export function readMemory(): string {
+  const file = profilePath();
+  const legacyFile = path.join(careerOpsRoot(), ".career-ops-web", "memory.md");
   try {
-    const md = fs.readFileSync(profilePath(), "utf8");
+    const md = fs.readFileSync(file, "utf8");
     const i = md.indexOf(NOTES_START);
     const j = md.indexOf(NOTES_END);
     if (i !== -1 && j !== -1 && j > i) return md.slice(i + NOTES_START.length, j).trim();
@@ -417,7 +430,7 @@ export function readMemory(): string {
     /* no _profile.md yet */
   }
   try {
-    return fs.readFileSync(path.join(careerOpsRoot(), ".career-ops-web", "memory.md"), "utf8").trim();
+    return fs.readFileSync(legacyFile, "utf8").trim();
   } catch {
     return "";
   }
@@ -550,5 +563,5 @@ export function readLanguageConfig(): LanguageConfig {
   } catch {
     /* no profile yet, or malformed — defaults are correct */
   }
-  return { output, modesDir, evalModeFile: resolveEvalModeFile(root, modesDir) };
+  return { output, modesDir, evalModeFile: resolveEvalModeFile(careerOpsCodeRoot(), modesDir) };
 }

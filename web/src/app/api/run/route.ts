@@ -8,7 +8,7 @@ import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
-import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, readLanguageConfig } from "@/lib/career-ops";
+import { careerOpsEnv, readMemory, findReportFile, readInbox, readScanDates, readLanguageConfig } from "@/lib/career-ops";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
@@ -41,24 +41,29 @@ export async function POST(req: Request) {
     });
   }
   const { spec, binPath } = resolved;
+  // A marker may change while the agent runs. Keep paths, children and the
+  // eventual tracker update on the workspace selected for this request.
+  const env = careerOpsEnv();
+  const root = env.CAREER_OPS_ROOT;
 
   // These run the REAL core (modes/scripts), not just data — fail clearly if the
-  // root is incomplete instead of faking it.
+  // selected data workspace is incomplete instead of faking it. These prompts
+  // and the PDF renderer still need data and core together in one cwd.
   // The precondition must check the file the prompt will actually read. Pinning
   // it to modes/oferta.md meant a configured market passed a check on a file the
   // run never opens, and would have missed a market dir with no evaluation mode.
   const lang = readLanguageConfig();
   const needsScript: Record<string, string> = { evaluate: lang.evalModeFile, "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs" };
   const required = needsScript[kind];
-  // CAREER_OPS_ROOT is runtime user data, not a build input. Tracing this
+  // The selected Data Root is runtime user data, not a build input. Tracing this
   // dynamic path would copy the whole web project into every server bundle.
   const requiredPath = required
-    ? path.join(/* turbopackIgnore: true */ careerOpsRoot(), required)
+    ? path.join(/* turbopackIgnore: true */ root, required)
     : "";
   if (required && !fs.existsSync(/* turbopackIgnore: true */ requiredPath)) {
     return new Response(
       JSON.stringify({
-        error: `This needs a complete career-ops checkout (${required}). CAREER_OPS_ROOT has data only — point it at a full checkout.`,
+        error: `This AI run needs a complete career-ops checkout. The selected data workspace is missing ${required}; keep user files and core together to run it.`,
       }),
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
@@ -77,7 +82,7 @@ export async function POST(req: Request) {
 
   // An A–F score is meaningless without a CV to score against — the CLI would
   // hallucinate a fit narrative and still emit a VERDICT. Require cv.md first.
-  if ((kind === "evaluate" || kind === "pdf") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
+  if ((kind === "evaluate" || kind === "pdf") && !fs.existsSync(path.join(root, "cv.md"))) {
     return new Response(
       JSON.stringify({ error: "Add your CV first so I can score this against you — drop it on the home page." }),
       { status: 400, headers: { "Content-Type": "application/json" } },
@@ -93,7 +98,7 @@ export async function POST(req: Request) {
   // no longer told these paths, so a stale file cannot survive into a render.
   let pdfPaths: PdfPaths | undefined;
   if (kind === "pdf") {
-    const pathsResult = resolvePdfPaths(input, today, careerOpsRoot(), findReportFile);
+    const pathsResult = resolvePdfPaths(input, today, root, findReportFile);
     if (!pathsResult.ok) {
       return new Response(JSON.stringify({ error: pathsResult.error }), {
         status: 400,
@@ -136,7 +141,7 @@ export async function POST(req: Request) {
   // Names, not a count: reserving a number writes reports/NNN-RESERVED.md and the
   // final report REPLACES it, so the `.md` count is unchanged and a count-delta
   // gate reported "didn't save a report" for an evaluation that saved fine (#2085).
-  const reportsDir = path.join(careerOpsRoot(), "reports");
+  const reportsDir = path.join(root, "reports");
   const reportEntries = () => {
     try {
       return fs.readdirSync(reportsDir);
@@ -163,7 +168,7 @@ export async function POST(req: Request) {
     child = spawnHeadlessCli(
       binPath,
       args,
-      { cwd: careerOpsRoot(), env: process.env },
+      { cwd: root, env },
       { cliId, capabilities: capabilitiesFor(kind) },
     );
   } catch (e) {
@@ -412,7 +417,8 @@ export async function POST(req: Request) {
           const result = await renderAndMarkPdf({
             spawnFn: spawn,
             execPath: process.execPath,
-            root: careerOpsRoot(),
+            root: root,
+            env,
             pdfPaths: paths,
             format,
             reportNum: input,

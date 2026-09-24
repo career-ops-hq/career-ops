@@ -1,7 +1,7 @@
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import type { Frame } from "playwright-core";
 import { resolveCli } from "@/lib/clis";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { careerOpsEnv, careerOpsRoot } from "@/lib/career-ops";
 import type { ApplyField } from "./extract";
 import { CAPS } from "../worker-capabilities.mjs";
 import { scopeFrom } from "../claude-invocation.mjs";
@@ -98,7 +98,7 @@ function runPlanner(binPath: string, cliId: string, argsFor: (p: string) => stri
     const child = spawnHeadlessCli(
       binPath,
       args,
-      { cwd: careerOpsRoot(), env: process.env },
+      { cwd: careerOpsRoot(), env: careerOpsEnv() },
       { cliId, capabilities: CAPS.localReadOnly },
     );
     let buf = "";
