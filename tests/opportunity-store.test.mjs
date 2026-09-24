@@ -56,11 +56,6 @@ try {
   assert.equal(store.evaluatedInsights()[0].reportPath, 'reports/example.md');
   store.saveCheckpoint(first.id, 'research', 'input-hash', 'output-hash');
   assert.equal(store.checkpoint(first.id, 'research').output_hash, 'output-hash');
-  assert.equal(store.claimDelivery(first.id, 'discord', 'abc'), true);
-  assert.equal(store.releaseDelivery(first.id, 'discord', 'abc'), true);
-  assert.equal(store.claimDelivery(first.id, 'discord', 'abc'), true);
-  assert.equal(store.completeDelivery(first.id, 'discord', 'abc'), true);
-  assert.equal(store.claimDelivery(first.id, 'discord', 'abc'), false);
   assert.deepEqual(store.shortlist().map(row => row.id), [first.id]);
   const uncertain = store.ingest({ url: 'https://jobs.example.com/unknown', company: 'Example', role: 'Unknown', source: 'greenhouse', payload: {} });
   assert.equal(store.claim(uncertain.id, 'worker-a'), true);

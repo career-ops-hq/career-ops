@@ -21,6 +21,7 @@ workflow/.venv/bin/python workflow/career_ops.py cron-score
 workflow/.venv/bin/python workflow/career_ops.py show <task-or-opportunity-id>
 workflow/.venv/bin/python workflow/career_ops.py list
 workflow/.venv/bin/python workflow/career_ops.py scores
+workflow/.venv/bin/python -m workflow.notifications preview <opportunity-id>
 workflow/.venv/bin/python workflow/career_ops.py resume <task-id> [--input <scan-input.json>] [--feedback <text>] [--decision confirm|defer|accept-jd-change]
 workflow/.venv/bin/python workflow/career_ops.py cancel <task-id>
 workflow/.venv/bin/python workflow/career_ops.py application submit <opportunity-id> --confirmed --idempotency-key <operation-id>
@@ -118,3 +119,9 @@ checks so the operational database stays unchanged.
 `show` defaults to JSON for scripts; `--format markdown` presents the same
 stored version, source quotes, and review status as a human-readable draft
 without confirming or changing it.
+
+The scheduled score wrapper runs the notification graph after `cron-score` when
+`CAREER_OPS_NOTIFICATIONS_ENABLED=1`. It checks current score inputs, report
+bytes and the profile alert line before claiming a Discord delivery in SQLite.
+An interrupted or timed-out send remains uncertain and is never retried
+automatically. Both scheduled jobs remain paused during migration acceptance.

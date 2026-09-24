@@ -37,11 +37,6 @@ export async function openOpportunityStore(path) {
       input_hash TEXT NOT NULL, output_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY(opportunity_id, phase)
     );
-    CREATE TABLE IF NOT EXISTS deliveries (
-      opportunity_id INTEGER NOT NULL REFERENCES opportunities(id), channel TEXT NOT NULL,
-      report_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'claimed' CHECK(status IN ('claimed','delivered')), delivered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY(opportunity_id, channel, report_hash)
-    );
     CREATE TABLE IF NOT EXISTS scan_outcomes (
       url TEXT PRIMARY KEY, status TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
@@ -89,9 +84,6 @@ export async function openOpportunityStore(path) {
     CREATE TRIGGER IF NOT EXISTS artifact_requires_evaluated
     BEFORE INSERT ON artifacts WHEN (SELECT state FROM opportunities WHERE id = NEW.opportunity_id) != 'evaluated'
     BEGIN SELECT RAISE(ABORT, 'artifact requires evaluated opportunity'); END;
-    CREATE TRIGGER IF NOT EXISTS delivery_requires_evaluated
-    BEFORE INSERT ON deliveries WHEN (SELECT state FROM opportunities WHERE id = NEW.opportunity_id) != 'evaluated'
-    BEGIN SELECT RAISE(ABORT, 'delivery requires evaluated opportunity'); END;
   `);
   if (!db.prepare('PRAGMA table_info(opportunities)').all().some(column => column.name === 'attempts')) db.exec('ALTER TABLE opportunities ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0');
   if (!db.prepare('PRAGMA table_info(opportunities)').all().some(column => column.name === 'application_state')) db.exec("ALTER TABLE opportunities ADD COLUMN application_state TEXT NOT NULL DEFAULT 'none'");
@@ -106,7 +98,6 @@ export async function openOpportunityStore(path) {
     }
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS opportunities_identity ON opportunities(identity)');
   }
-  if (!db.prepare('PRAGMA table_info(deliveries)').all().some(column => column.name === 'status')) db.exec("ALTER TABLE deliveries ADD COLUMN status TEXT NOT NULL DEFAULT 'claimed'");
   const event = (id, type, payload = {}) => db.prepare('INSERT INTO opportunity_events (opportunity_id, type, payload) VALUES (?, ?, ?)').run(id, type, JSON.stringify(payload));
   const state = id => db.prepare('SELECT state FROM opportunities WHERE id = ?').get(id)?.state;
   const requireState = (id, expected) => {
@@ -287,23 +278,6 @@ export async function openOpportunityStore(path) {
       event(id, 'checkpoint_saved', { phase, outputHash });
     },
     checkpoint(id, phase) { return db.prepare('SELECT input_hash, output_hash FROM checkpoints WHERE opportunity_id = ? AND phase = ?').get(id, phase); },
-    claimDelivery(id, channel, reportHash) {
-      requireState(id, 'evaluated');
-      db.prepare("DELETE FROM deliveries WHERE opportunity_id = ? AND channel = ? AND report_hash = ? AND status = 'claimed' AND delivered_at < datetime('now', '-5 minutes')").run(id, channel, reportHash);
-      const result = db.prepare("INSERT INTO deliveries (opportunity_id, channel, report_hash, status) VALUES (?, ?, ?, 'claimed') ON CONFLICT DO NOTHING").run(id, channel, reportHash);
-      if (result.changes) event(id, 'delivery_claimed', { channel, reportHash });
-      return result.changes === 1;
-    },
-    releaseDelivery(id, channel, reportHash) {
-      const result = db.prepare("DELETE FROM deliveries WHERE opportunity_id = ? AND channel = ? AND report_hash = ? AND status = 'claimed'").run(id, channel, reportHash);
-      if (result.changes) event(id, 'delivery_released', { channel, reportHash });
-      return result.changes === 1;
-    },
-    completeDelivery(id, channel, reportHash) {
-      const result = db.prepare("UPDATE deliveries SET status = 'delivered', delivered_at = CURRENT_TIMESTAMP WHERE opportunity_id = ? AND channel = ? AND report_hash = ? AND status = 'claimed'").run(id, channel, reportHash);
-      if (result.changes) event(id, 'delivery_completed', { channel, reportHash });
-      return result.changes === 1;
-    },
     publish(id, { eligibility, evaluation, artifact, checkpoint }) {
       db.exec('BEGIN IMMEDIATE');
       try {
