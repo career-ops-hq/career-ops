@@ -78,7 +78,10 @@ test('generate-latex prints the usage block when no input path is given', () => 
 test('generate-latex still accepts --compile-only', () => {
   const result = runLatex('definitely-not-a-real-file.tex', '--compile-only');
 
-  assert.notEqual(result.status, 0, 'a missing input file should not succeed');
+  // Exactly 1, not merely nonzero: the missing-file path reports 1 today, and a
+  // test that accepts any nonzero status would not notice it changing (CodeRabbit,
+  // PR #4446).
+  assert.equal(result.status, 1, `exited ${result.status}, want 1`);
   assert.doesNotMatch(result.all, /unrecognized flag/i, '--compile-only was rejected as unknown');
   assert.match(result.all, /Error reading/i, 'expected the missing input file to be reported');
 });
