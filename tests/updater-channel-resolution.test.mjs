@@ -229,3 +229,23 @@ for (const tag of ['career-ops-vpreview-v1.32.0', 'career-ops-v', 'career-ops-v1
     fail(threw ? `'${expected}' threw without naming it: ${threw.message}` : `'${expected}' resolved instead of throwing`);
   }
 }
+
+// ── 12. apply() never goes back to an older release (#3845 review) ──────────
+// An install ahead of the latest release (VERSION bumped while the tag is
+// still being published, a fork, a hand-edited VERSION) would otherwise
+// bootstrap the older release's updater, which predates the release channel
+// and fetches main. newerThanTarget() names the release apply() refuses.
+{
+  const { newerThanTarget } = await import('../update-system.mjs');
+  const cases = [
+    ['1.40.0', 'career-ops-v1.39.0', '1.39.0', 'an install ahead of the release is refused'],
+    ['1.39.0', 'career-ops-v1.39.0', '', 'the same release is not refused (re-applying restores its files)'],
+    ['1.33.0', 'career-ops-v1.34.0', '', 'a newer release installs normally'],
+    ['1.40.0', 'main', '', '--channel main is never refused'],
+  ];
+  for (const [local, ref, expected, what] of cases) {
+    const got = newerThanTarget(local, ref);
+    if (got === expected) pass(what);
+    else fail(`${what}: newerThanTarget('${local}', '${ref}') = '${got}', expected '${expected}'`);
+  }
+}

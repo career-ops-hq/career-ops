@@ -1932,6 +1932,26 @@ export function releaseTagVersion(tagName) {
 }
 
 /**
+ * The release version apply() would go BACK to, or '' when there is nothing
+ * to refuse. On the default channel an install can sit ahead of the latest
+ * release (VERSION bumped on main while the tag is still being published, a
+ * fork, a hand-edited VERSION). Installing that older tag would bootstrap an
+ * older updater — one that predates the release channel and fetches main —
+ * so the command would install main's tree while claiming a release (#3845
+ * review). check() already reports such an install as up-to-date; apply()
+ * now agrees and installs nothing. The same version is not refused: re-applying
+ * the release you are on is how its files are restored.
+ *
+ * @param {string} local - the installed VERSION.
+ * @param {string} targetRef - what resolveTargetRef() returned.
+ * @returns {string}
+ */
+export function newerThanTarget(local, targetRef) {
+  const target = releaseTagVersion(targetRef);
+  return target && compareVersions(local, target) > 0 ? target : '';
+}
+
+/**
  * Resolve the git ref apply() should fetch from CANONICAL_REPO.
  *
  * Default channel ('release'): the newest published career-ops release tag,
@@ -2515,6 +2535,13 @@ async function apply() {
   const targetRef = trustsEnvTargetRef(authenticatedReexec, legacyReexec)
     ? (process.env.CAREER_OPS_UPDATE_TARGET_REF || 'main')
     : await resolveTargetRef(process.argv, process.env);
+
+  const olderTarget = newerThanTarget(local, targetRef);
+  if (olderTarget) {
+    console.log(`Installed v${local} is newer than the latest release v${olderTarget}. Nothing to install.`);
+    console.log('To follow every merge on main instead: node update-system.mjs apply --channel main --confirm');
+    return;
+  }
 
   // Check for lock
   const lockFile = join(ROOT, '.update-lock');
