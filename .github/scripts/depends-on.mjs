@@ -44,8 +44,12 @@ const REF = /#(\d+)\b/g;
 // requires the closing run to be at least as long as the opening one, so
 // ~~~~ and ```` never closed and their samples were read as declarations.
 // A fence that never closes runs to the end of the document, also per GFM.
-const FENCE_OPEN = /^[ \t]*(`{3,}|~{3,})/;
-const FENCE_CLOSE = /^[ \t]*(`{3,}|~{3,})[ \t]*$/;
+// GFM allows a fence marker to be indented at most THREE spaces. A marker under
+// four or more spaces is indented code and stays INSIDE the block, so accepting
+// any indentation here let an indented sample line close its own fence and
+// expose the text beneath it.
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
+const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 function stripFences(text) {
   const kept = [];
   let open = null;
@@ -63,12 +67,24 @@ function stripFences(text) {
 }
 
 // A code span of any delimiter length, so ``#99`` documents the format the same
-// way `#99` does.
-const CODE_SPAN = /(`+)[^\n]*?\1/g;
+// way `#99` does. GFM also permits a newline inside a span, so this crosses
+// lines; a run with no matching partner simply never matches, which is what
+// keeps a lone stray backtick from swallowing the rest of the body.
+const CODE_SPAN = /(`+)[\s\S]*?\1/g;
+
+// MASK rather than delete, replacing every non-newline character with a space.
+// Deleting a span joins the text around it and shifts the lines beneath it, and
+// the line rules below are anchored to the start of a line: ``Depends on #99``
+// would collapse to an unquoted line and become a real declaration. Masking
+// preserves both the line count and the column positions.
+function maskCodeSpans(text) {
+  return text.replace(CODE_SPAN, (m) => m.replace(/[^\n]/g, ' '));
+}
 
 export function parseDependsOn(body, self = null) {
   if (typeof body !== 'string' || !body.trim()) return [];
-  const doc = stripFences(body);
+  // Fences are block structure and resolve before inline spans, as in GFM.
+  const doc = maskCodeSpans(stripFences(body));
   const lines = doc.split(/\r?\n/);
   const collected = [];
   let inSection = false;
@@ -79,15 +95,11 @@ export function parseDependsOn(body, self = null) {
     if (HEADING.test(line)) { inSection = true; collected.push(line); continue; }
     if (inSection || LINE.test(line)) collected.push(line);
   }
-  // Scan a span-stripped copy: BOLD reads the whole body rather than one line,
-  // so against the raw text it lifted a bold anchor OUT of the code span that
-  // was documenting it, and the removal below never saw those backticks.
-  // Stripping spans from `doc` itself instead would change what the line rules
-  // above match, turning ``Depends on #99`` into a real declaration.
-  for (const m of doc.replace(CODE_SPAN, '').matchAll(BOLD)) collected.push(m[0]);
+  // Spans are already masked in `doc`, so a bold anchor written inside one is
+  // blanks by the time BOLD sees it and cannot be lifted back out.
+  for (const m of doc.matchAll(BOLD)) collected.push(m[0]);
 
-  // Code spans carry the format, not a reference: `#99` is documentation.
-  const text = collected.join('\n').replace(CODE_SPAN, '');
+  const text = collected.join('\n');
   const out = [];
   for (const m of text.matchAll(REF)) {
     const n = Number(m[1]);

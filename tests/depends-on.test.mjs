@@ -74,6 +74,28 @@ test('an unclosed fence runs to the end of the body', () => {
   assert.deepEqual(parseDependsOn('```\nDepends on #99\n'), []);
 });
 
+test('a fence marker under four spaces does not close its own fence', () => {
+  // GFM allows a fence marker at most three spaces of indentation. Deeper than
+  // that it is indented code and stays INSIDE the block, so accepting any
+  // indentation let an indented sample line close the fence and expose the
+  // text beneath it as a declaration.
+  assert.deepEqual(parseDependsOn('```\nexample\n    ```\nDepends on #42\n'), []);
+  // Controls: three spaces and none still close, so this is not just "never
+  // closes a fence".
+  assert.deepEqual(parseDependsOn('```\nexample\n   ```\nDepends on #42\n'), [42]);
+  assert.deepEqual(parseDependsOn('```\nexample\n```\nDepends on #42\n'), [42]);
+});
+
+test('a code span may contain a newline', () => {
+  // GFM permits a newline inside a span, and the line rules are anchored to the
+  // start of a line, so a span crossing lines exposed its second line as a
+  // declaration.
+  assert.deepEqual(parseDependsOn('`example\nDepends on #99`\n'), []);
+  // Control: a lone backtick with no partner must not swallow the rest of the
+  // body. Without this, masking multiline spans could hide a real declaration.
+  assert.deepEqual(parseDependsOn('Use `foo to do X\n\nDepends on #42\n'), [42]);
+});
+
 test('a code span wrapping a bold anchor is documentation', () => {
   // BOLD scanned the raw body, so it lifted the inner text out of a code span
   // before code spans were removed, and a body documenting the syntax declared
