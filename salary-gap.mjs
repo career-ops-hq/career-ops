@@ -717,6 +717,38 @@ function selfTest() {
   const sorted = fold(sortObs, mapTrackerToApps(sortRows, new Map()).apps, null);
   assert(sorted.applications.map(a => a.num).join(',') === '1,9,10', `unpadded ids sort numerically, got ${sorted.applications.map(a => a.num).join(',')}`);
 
+  // A report linked from two tracker rows (a repost / duplicate row) is one
+  // application's figure, not two: it attaches to the first row only, and the
+  // other row is reported rather than silently receiving a copy (#4368 review).
+  const dupRows = [
+    { num: '1', company: 'Acme', role: 'Eng', report: '[5](../reports/005-acme-2026-01-01.md)', notes: '' },
+    { num: '2', company: 'Acme', role: 'Eng (repost)', report: '[5](../reports/005-acme-2026-01-01.md)', notes: '' },
+  ];
+  const dup = mapTrackerToApps(dupRows, new Map([['5', reportToObservation(REPORT_FIXTURE_4351_029, '005', '2026-01-01')]]));
+  const dupAdv = dup.observations.filter(o => o.type === 'advertised');
+  assert(dupAdv.length === 1 && dupAdv[0].num === '1', `a shared report's figure attaches once, to the first row; got ${dupAdv.map(o => o.num).join(',') || 'none'}`);
+  assert(dup.sharedReports.length === 1 && dup.sharedReports[0].report === '5' && dup.sharedReports[0].owner === '1'
+    && dup.sharedReports[0].alsoLinkedBy.join(',') === '2', 'the second linking row is reported in sharedReports');
+  assert(dup.apps['2']?.company === 'Acme', 'the second row is still an application in its own right');
+  const dupFolded = fold(dup.observations, dup.apps, null);
+  assert(dupFolded.applications.filter(a => a.advertised).length === 1, 'one posting is never counted as two advertised figures in the fold');
+  assert(mapped.sharedReports.length === 0, 'a report linked from exactly one row is not reported as shared');
+
+  // The ambiguous-id remediation names each entry's own owner. Two ids owned by
+  // two different rows must not both be told to re-point at the first one.
+  const multiAmbig = fold([], { '7': { company: 'X', role: 'R' }, '9': { company: 'Y', role: 'R' } }, null);
+  multiAmbig.quality.ambiguousIds = [{ num: '7', linkedBy: '3' }, { num: '9', linkedBy: '4' }];
+  multiAmbig.quality.sharedReports = [];
+  const printed = [];
+  const realLog = console.log;
+  console.log = (...parts) => { printed.push(parts.join(' ')); };
+  try { printSummary(multiAmbig); } finally { console.log = realLog; }
+  const line7 = printed.find(l => l.includes('#7: tracker row #7'));
+  const line9 = printed.find(l => l.includes('#9: tracker row #9'));
+  assert(line7 && line7.includes('re-point it to #3') && !line7.includes('#4'), `#7's remediation names row #3 only, got: ${line7}`);
+  assert(line9 && line9.includes('re-point it to #4') && !line9.includes('#3'), `#9's remediation names row #4, not the first entry's row, got: ${line9}`);
+  assert(!printed.some(l => /re-point it at tracker row/.test(l)), 'no single shared remediation line pointing every id at one row');
+
   // --stated-for tolerates either spelling (mirror of the fold join)
   const statedPad = parseObservations('029\t2026-07-01\tstated\t90k\tCAD\tuser\t\tpanel\tJane');
   assert(getStatedObservations(statedPad, '29').length === 1, 'stated lookup by plain id finds a padded row');
@@ -755,15 +787,20 @@ const REPORT_FILE_RE = /^(\d{3})-.*-(\d{4}-\d{2}-\d{2})\.md$/;
  *      is reported in `quality.ambiguousIds`, because a log written under the old
  *      report#-join semantics means something different now and that should be
  *      visible rather than silent.
+ *   4. A report linked from more than one tracker row (a repost, a duplicate
+ *      row) belongs to the first row in tracker order. Only that row receives its
+ *      advertised figure, so one posting is never counted as two applications;
+ *      every other linking row is named in `quality.sharedReports`.
  *
  * @param {object[]} rows - Parsed tracker rows from `parseTrackerRow`.
  * @param {Map<string,object>} reportsByNum - Normalised report# -> `reportToObservation` result.
- * @returns {{apps: object, observations: object[], ambiguousIds: object[]}}
+ * @returns {{apps: object, observations: object[], ambiguousIds: object[], sharedReports: object[]}}
  */
 export function mapTrackerToApps(rows, reportsByNum) {
   const apps = {};
   const observations = [];
-  const linkedBy = new Map(); // report# -> tracker# that links it
+  const linkedBy = new Map(); // report# -> tracker# that links it FIRST (its owner)
+  const alsoLinkedBy = new Map(); // report# -> later tracker#s that link the same report
 
   for (const row of rows ?? []) {
     const id = normalizeId(row?.num);
@@ -773,12 +810,21 @@ export function mapTrackerToApps(rows, reportsByNum) {
     for (const rep of extractTrackerReportNumbers(row.report, row.notes).map(normalizeId)) {
       const report = reportsByNum.get(rep);
       if (!linkedBy.has(rep)) linkedBy.set(rep, id);
+      // A report belongs to one application. When a later row links a report an
+      // earlier row already owns (a repost, or a duplicate row), attaching its
+      // figure again would count one posting as two applications in every
+      // aggregate. The first row in tracker order keeps it; the rest are reported.
+      const owner = linkedBy.get(rep);
+      if (owner !== id) {
+        if (!alsoLinkedBy.has(rep)) alsoLinkedBy.set(rep, []);
+        if (!alsoLinkedBy.get(rep).includes(id)) alsoLinkedBy.get(rep).push(id);
+      }
       if (!report) continue;
       // A legacy report (no Machine Summary) yields null company/role; only fill
       // a gap the tracker row left, never overwrite what the row states.
       if (!company) company = report.company || null;
       if (!role) role = report.role || null;
-      if (report.observation) observations.push({ ...report.observation, num: id });
+      if (report.observation && owner === id) observations.push({ ...report.observation, num: id });
     }
     apps[id] = { company: company || null, role: role || null };
   }
@@ -796,7 +842,17 @@ export function mapTrackerToApps(rows, reportsByNum) {
     if (owner !== rep && Object.hasOwn(apps, rep)) ambiguousIds.push({ num: rep, linkedBy: owner });
   }
 
-  return { apps, observations, ambiguousIds: ambiguousIds.sort((a, b) => compareIds(a.num, b.num)) };
+  // Rule 4: a report linked from more than one row. Its figure went to the owner
+  // only; name every other row so the duplicate is visible, not silently dropped.
+  const sharedReports = [...alsoLinkedBy]
+    .map(([report, others]) => ({ report, owner: linkedBy.get(report), alsoLinkedBy: others.sort(compareIds) }))
+    .sort((a, b) => compareIds(a.report, b.report));
+
+  return {
+    apps, observations,
+    ambiguousIds: ambiguousIds.sort((a, b) => compareIds(a.num, b.num)),
+    sharedReports,
+  };
 }
 
 function readReportsByNum() {
@@ -837,12 +893,14 @@ function collectSources() {
   const observations = [];
   let apps = {};
   let ambiguousIds = [];
+  let sharedReports = [];
 
   if (rows) {
     const mapped = mapTrackerToApps(rows, reportsByNum);
     apps = mapped.apps;
     observations.push(...mapped.observations);
     ambiguousIds = mapped.ambiguousIds;
+    sharedReports = mapped.sharedReports;
   } else {
     // No readable tracker: fall back to report filenames, which is what this
     // file did before #4351. An install without applications.md keeps working.
@@ -856,7 +914,7 @@ function collectSources() {
     observations.push(...parseObservations(readFileSync(OBS_PATH, 'utf-8')));
   }
 
-  return { apps, observations, ambiguousIds };
+  return { apps, observations, ambiguousIds, sharedReports };
 }
 
 function loadProfileDesired() {
@@ -939,10 +997,17 @@ function printSummary(result) {
   }
   if (quality.ambiguousIds?.length) {
     console.log(`  ⚠ ${quality.ambiguousIds.length} id${quality.ambiguousIds.length === 1 ? '' : 's'} mean${quality.ambiguousIds.length === 1 ? 's' : ''} two different applications (column 1 is a tracker#, so these resolve to the tracker row):`);
+    // Remediation is per entry: each ambiguous id can belong to a different row,
+    // so one shared "re-point it at row N" line would send users to the wrong row.
     for (const a of quality.ambiguousIds) {
-      console.log(`      #${a.num}: tracker row #${a.num}, but report ${a.num} belongs to tracker row #${a.linkedBy}`);
+      console.log(`      #${a.num}: tracker row #${a.num}, but report ${a.num} belongs to tracker row #${a.linkedBy} — if an older observation on #${a.num} meant the report, re-point it to #${a.linkedBy}`);
     }
-    console.log('      If an older observation on one of these meant the REPORT, re-point it at tracker row #' + quality.ambiguousIds[0].linkedBy + '.');
+  }
+  if (quality.sharedReports?.length) {
+    console.log(`  ⚠ ${quality.sharedReports.length} report${quality.sharedReports.length === 1 ? ' is' : 's are'} linked from more than one tracker row (its advertised figure is counted once, on the first row):`);
+    for (const s of quality.sharedReports) {
+      console.log(`      report ${s.report}: counted on #${s.owner}, also linked from ${s.alsoLinkedBy.map(n => `#${n}`).join(', ')}`);
+    }
   }
   if (quality.currencyMismatches.length) {
     console.log(`  ⚠ ${quality.currencyMismatches.length} cross-currency comparison${quality.currencyMismatches.length === 1 ? '' : 's'} skipped (no FX conversion — excluded from all gap math):`);
@@ -976,9 +1041,10 @@ function main() {
     return;
   }
 
-  const { apps, observations, ambiguousIds } = collectSources();
+  const { apps, observations, ambiguousIds, sharedReports } = collectSources();
   const result = fold(observations, apps, loadProfileDesired());
   result.quality.ambiguousIds = ambiguousIds ?? [];
+  result.quality.sharedReports = sharedReports ?? [];
 
   if (summaryMode) {
     printSummary(result);
