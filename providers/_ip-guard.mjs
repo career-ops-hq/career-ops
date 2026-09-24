@@ -22,9 +22,11 @@
 //
 // WHY AT LOOKUP TIME. The address validated has to be the address dialled, or
 // a name that answers public-then-private (DNS rebinding) slips through a
-// pre-flight check. `net.connect` reads `dns.lookup` at call time and connects
-// to what it returns, so validating in the lookup closes that window without
-// an undici Agent — and undici is not a dependency of this project.
+// pre-flight check. Direct `net.connect` reads `dns.lookup` at call time and
+// connects to what it returns, so validating there closes that window.
+// With explicit trusted-proxy opt-in, only the proxy's own DNS lookup is
+// exempted. The proxy resolves the destination remotely, so its operator must
+// enforce the same public-address rule there; see README proxy setup.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 
@@ -40,6 +42,12 @@ export const providerFetchContext = new AsyncLocalStorage();
 /** Is a provider request in flight on this async path? */
 export function inProviderFetch() {
   return providerFetchContext.getStore() !== undefined;
+}
+
+/** Only the explicitly trusted proxy's own socket may resolve privately. */
+export function isTrustedProxyLookup(hostname) {
+  const context = providerFetchContext.getStore();
+  return Boolean(context?.proxyHost && hostname === context.proxyHost && hostname !== context.targetHost);
 }
 
 /**

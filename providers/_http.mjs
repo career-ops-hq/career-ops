@@ -2,18 +2,45 @@
 // Files prefixed with _ are never loaded as providers by scan.mjs.
 
 import './_dns-cache.mjs'; // memoize dns.lookup process-wide (see that file)
+import { isIP } from 'node:net';
+import { EnvHttpProxyAgent } from 'undici';
 import {
   DEFAULT_USER_AGENT,
   BROWSER_LIKE_USER_AGENT,
   MACOS_BROWSER_LIKE_USER_AGENT,
 } from '../user-agent.mjs';
-import { providerFetchContext } from './_ip-guard.mjs';
+import { providerFetchContext, isBlockedAddress, blockedAddressError } from './_ip-guard.mjs';
 
 export { BROWSER_LIKE_USER_AGENT, MACOS_BROWSER_LIKE_USER_AGENT };
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+let proxyAgent;
+let proxySignature;
+
+function proxyFor(url) {
+  if (process.env.CAREER_OPS_TRUST_PROXY_EGRESS !== '1') return { dispatcher: undefined, proxyHost: undefined };
+  const target = new URL(url);
+  const proxyUrl = target.protocol === 'https:'
+    ? process.env.https_proxy || process.env.HTTPS_PROXY || process.env.http_proxy || process.env.HTTP_PROXY
+    : process.env.http_proxy || process.env.HTTP_PROXY;
+  if (!proxyUrl) return { dispatcher: undefined, proxyHost: undefined };
+  const proxyHost = new URL(proxyUrl).hostname.replace(/^\[|\]$/g, '');
+  // The agent honours NO_PROXY and is scoped to this one provider request.
+  // Unrelated fetches keep their normal dispatcher. A direct NO_PROXY request
+  // still resolves its destination under the provider DNS guard.
+  const signature = [process.env.http_proxy, process.env.HTTP_PROXY, process.env.https_proxy,
+    process.env.HTTPS_PROXY, process.env.no_proxy, process.env.NO_PROXY].join('\0');
+  if (signature !== proxySignature) {
+    proxyAgent = new EnvHttpProxyAgent();
+    proxySignature = signature;
+  }
+  return { dispatcher: proxyAgent, proxyHost };
+}
 
 async function fetchWithTimeout(url, opts = {}, consume) {
+  const targetHost = new URL(url).hostname.replace(/^\[|\]$/g, '');
+  const { dispatcher, proxyHost } = proxyFor(url);
+  if (dispatcher && isIP(targetHost) && isBlockedAddress(targetHost)) throw blockedAddressError(targetHost, targetHost);
   // Mark this request as provider traffic for the whole of its async life, so
   // the patched dns.lookup validates the addresses it resolves (#3096). The
   // guard is scoped rather than global because _dns-cache.mjs patches
@@ -24,10 +51,11 @@ async function fetchWithTimeout(url, opts = {}, consume) {
   // starts it: the DNS lookup happens inside connect, well after the
   // synchronous part of fetch() has returned, and the context has to still be
   // entered when it does.
-  return providerFetchContext.run({ url: String(url) }, () => fetchInContext(url, opts, consume));
+  return providerFetchContext.run({ url: String(url), targetHost, proxyHost },
+    () => fetchInContext(url, opts, consume, dispatcher));
 }
 
-async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow' } = {}, consume) {
+async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow' } = {}, consume, dispatcher) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -44,13 +72,23 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
     // rather than a transport error. curl on the same URL returns the full
     // ~900KB. Callers can still override via `headers`.
     if (!requestHeaders.has('accept-encoding')) requestHeaders.set('accept-encoding', 'gzip, deflate, br');
-    const res = await fetch(url, {
-      method,
-      headers: requestHeaders,
-      body,
-      redirect,
-      signal: controller.signal,
-    });
+    let res;
+    try {
+      res = await fetch(url, {
+        method,
+        headers: requestHeaders,
+        body,
+        redirect,
+        signal: controller.signal,
+        dispatcher,
+      });
+    } catch (err) {
+      if (!dispatcher && ['ENOTFOUND', 'EAI_AGAIN'].includes(err?.cause?.code)
+        && (process.env.https_proxy || process.env.HTTPS_PROXY || process.env.http_proxy || process.env.HTTP_PROXY)) {
+        err.message += ' (proxy variables are set but provider requests use direct fetch; set CAREER_OPS_TRUST_PROXY_EGRESS=1 only if your proxy blocks private destination addresses)';
+      }
+      throw err;
+    }
     if (!res.ok) {
       const responseText = await res.text().catch(() => '');
       // WAF/CDN challenge pages (seen live: Workday 429s) carry no actionable
