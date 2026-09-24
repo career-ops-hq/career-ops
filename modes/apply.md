@@ -211,8 +211,9 @@ Length: [used/allowed characters or words, or "limit unknown"]
 
 ### 2. [Next question]
 > [Response]
+Length: [used/allowed characters or words, or "limit unknown"]
 
-...
+Repeat the response and length lines for every remaining question.
 
 ---
 
