@@ -368,6 +368,40 @@ try {
       : fail(`double-403: ${caught && caught.message} status=${caught && caught.status}`);
   }
 
+  // Any OTHER probe failure is reported as itself. Swapping in the v2 403 turned a
+  // busy (429), broken (5xx) or unreachable PCSX endpoint into what reads as a
+  // deterministic WAF block (CodeRabbit, #4297).
+  for (const [label, probeErr] of [
+    ['a 500', httpErr(500, 'Internal Server Error')],
+    ['a 429', httpErr(429, 'slow down')],
+    ['a network error', Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' })],
+  ]) {
+    const { ctx } = recording((c) => {
+      if (c.url.includes('/api/apply/v2/jobs')) throw httpErr(403, 'Not authorized for PCSX');
+      throw probeErr;
+    });
+    let caught = null;
+    await ef.fetch(TENANT, ctx).catch((e) => { caught = e; });
+    caught === probeErr
+      ? pass(`eightfold surfaces ${label} on the PCSX probe as itself, not as the v2 403`)
+      : fail(`pcsx probe ${label}: got ${caught && caught.message} status=${caught && caught.status}`);
+  }
+
+  // A later PCSX page that decodes to null must fail with the descriptive error,
+  // not a TypeError from `'positions' in null`.
+  {
+    const { ctx } = recording((c) => {
+      if (c.url.includes('/api/apply/v2/jobs')) throw httpErr(403, 'Not authorized for PCSX');
+      const start = Number(new URL(c.url).searchParams.get('start') || 0);
+      return start === 0 ? pcsxPage(Array.from({ length: 10 }, (_, i) => position(String(i), `R${i}`)), 25) : null;
+    });
+    let caught = null;
+    await ef.fetch(TENANT, ctx).catch((e) => { caught = e; });
+    caught && !(caught instanceof TypeError) && /unrecognized \/api\/pcsx\/search body at start=10/.test(caught.message)
+      ? pass('eightfold reports a null PCSX page as an unrecognized body, not a TypeError')
+      : fail(`null pcsx page: ${caught && caught.constructor.name}: ${caught && caught.message}`);
+  }
+
   // A 200 from PCSX that is not a PCSX page means the endpoint moved again.
   {
     const { ctx } = recording((c) => {
