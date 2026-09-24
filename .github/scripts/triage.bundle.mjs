@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // GENERADO por github-src/scripts/build.mjs: no editar a mano. Fuente: github-src/scripts/triage.mjs + bin/lib/triage-core.mjs + policy/*.json
-// {"builtAt":"2026-09-24T10:39:53.836Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
+// {"builtAt":"2026-09-24T11:17:32.264Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -714,10 +714,15 @@ export function jevPayload(signals, labelsApplied, now = Date.now()) {
   const { v, catalogVersion, model, domains, ...rest } = signals;
   return { v: String(v || catalogVersion || 'unknown'), model: String(model || JEV_MODEL), domains: domains || rest, labelsApplied, ts: new Date(now).toISOString() };
 }
+/** La primera respuesta del bot entre los comentarios REST: la marca solo cuenta si la escribió el bot de la Action. Un comentario de otra
+ *  persona con el mismo texto no es nuestro y no se edita nunca (persistJev hace PATCH del que encuentre). */
+export function botFirstReply(comments) {
+  return comments.find((c) => MARKER_BOTS.has(norm(c.user?.login)) && new RegExp(`<!--\\s*co:${MARKER_SLUG}:`).test(c.body || '')) || null;
+}
 async function persistJev(number, sha7v, payload) {
   const comments = []; let page = 1;
   for (;;) { const c = await rest('GET', `repos/${REPO}/issues/${number}/comments?per_page=100&page=${page++}`); comments.push(...c); if (c.length < 100) break; }
-  const first = comments.find((c) => new RegExp(`<!--\\s*co:${MARKER_SLUG}:`).test(c.body || ''));
+  const first = botFirstReply(comments);
   if (!first) { log(`#${number}: señal jev solo en summary (sin primera respuesta)`); return; }
   const body = upsertJevMarker(first.body, number, sha7v, payload);
   if (body === first.body) { log(`#${number}: bloque jev ya al día`); return; }
@@ -777,7 +782,8 @@ export function sweepCandidates(prs, now, labelsPolicy = POLICIES.labels) {
     if (p.author?.__typename === 'Bot' || isBotLogin(p.author?.login)) return false;
     const author = norm(p.author?.login);
     const spoke = [...p.comments.nodes, ...p.reviews.nodes].some((c) => maintainers.has(norm(c.author?.login)) && norm(c.author?.login) !== author);
-    const marked = p.comments.nodes.some((c) => new RegExp(`<!--\\s*co:${MARKER_SLUG}:`).test(c.body || ''));
+    // La marca de primera respuesta solo cuenta si la escribió el bot o un maintainer: la de un tercero suprimiría el acuse para siempre.
+    const marked = p.comments.nodes.some((c) => (MARKER_BOTS.has(norm(c.author?.login)) || maintainers.has(norm(c.author?.login))) && new RegExp(`<!--\\s*co:${MARKER_SLUG}:`).test(c.body || ''));
     return !spoke && !marked;
   });
 }
