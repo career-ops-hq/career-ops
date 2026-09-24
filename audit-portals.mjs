@@ -233,7 +233,7 @@ export async function auditCompanies(companies, {
       let result = { provider: providerId, scanMethod: entry.scan_method || null };
       if (providerId) {
         try {
-          const ctx = httpCtx || makeHttpCtx({ maxPages: AUDIT_MAX_PAGES });
+          const ctx = httpCtx || { ...makeHttpCtx(), maxPages: AUDIT_MAX_PAGES };
           result.jobs = (await resolved.provider.fetch(entry, ctx)) || [];
         } catch (err) {
           result.error = err?.message || String(err);
