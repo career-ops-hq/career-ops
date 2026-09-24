@@ -146,6 +146,21 @@ ok('the shared aggregator list feeds isAggregatorUrl', () => {
   ]) assert.equal(isAggregatorUrl(u), true, `${u} must come from the shared list`);
 });
 
+// Coverage floor. Before this change url-key.mjs owned a 13-domain literal; now
+// 7 of those live in data-static/aggregator-domains.txt, which is maintained on
+// its own schedule and for its own purpose. Dropping one there would silently
+// narrow THIS module with nothing failing, so the pre-existing 13 are pinned
+// here as a floor. This does not freeze the shared file: it only says url-key
+// may not lose ground it already held.
+ok('no domain from the pre-existing literal lost coverage', () => {
+  for (const d of [
+    'adzuna.com', 'builtin.com', 'careerbuilder.com', 'dice.com', 'glassdoor.com',
+    'indeed.com', 'jooble.org', 'linkedin.com', 'monster.com', 'simplyhired.com',
+    'talent.com', 'wellfound.com', 'ziprecruiter.com',
+  ]) assert.equal(isAggregatorUrl(`https://www.${d}/job/1`), true,
+    `${d} was an aggregator before this change and must stay one`);
+});
+
 ok('the supplement survives: boards the shared list deliberately omits', () => {
   // data-static/aggregator-domains.txt lists scrapers and leaves the big boards
   // out because employers post to them directly. This module still has to treat
