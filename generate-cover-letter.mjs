@@ -286,7 +286,8 @@ Usage:
 
   --payload   Path to the JSON payload file (required)
   --out       Override output path from payload (optional)
-  --format    Override output PDF page format (letter|a4, default: a4)
+  --format    Override output PDF page format (letter|a4). Defaults to
+              config/profile.yml page_format, then letter.
   --report    Link the PDF to a tracker report number in data/pdf-index.tsv
 `);
     process.exit(args.help ? 0 : 1);
@@ -325,6 +326,11 @@ Usage:
     // validator before importing Playwright or writing a PDF so a failed gate
     // cannot leave behind a misleading artifact.
     const factCheck = assertFacts(html, { label: "cover letter" });
+    // Ahead of the verdict, because it qualifies it: with no config the phrase
+    // lists are empty, so a silent gate here covers metrics and facts only.
+    if (factCheck.configMissing) {
+      console.error("No config/cv-facts.json — forbidden/advisory phrase checks did not run.");
+    }
     if (factCheck.verdict === "warn") {
       console.error(`CV fact check warning: cover letter`);
       for (const phrase of factCheck.warnings) {
@@ -336,7 +342,10 @@ Usage:
     const { renderHtmlToPdf } = await import("./generate-pdf.mjs");
     const outputPath = resolve(payload.output_path);
     await renderHtmlToPdf(html, outputPath, {
-      format: args.format || "a4",
+      // Passed through unresolved. renderHtmlToPdf ranks it against the user's
+      // config/profile.yml, so a cover letter and its CV cannot end up on
+      // different paper because only one of them carried a flag.
+      format: args.format,
       reportNum: args.report,
       inputPath: payloadPath,
     });

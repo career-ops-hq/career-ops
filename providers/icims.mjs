@@ -100,6 +100,41 @@ export function parseIcimsSearchPage(html, origin, companyName) {
   return jobs;
 }
 
+/**
+ * Walk one host's search pages for `entry`. Split out of fetch() so a
+ * fallback host runs exactly the same pagination and truncation rules.
+ */
+async function fetchPortal(origin, entry, ctx) {
+  const all = [];
+  let prevFirstUrl = null;
+  // Distinguishes "walked the whole board" from "stopped at the page cap".
+  // Exhausting the cap silently would drop every later posting and look
+  // identical to a complete board — the same failure mode the Workday
+  // truncation tag exists to prevent.
+  let reachedEnd = false;
+  for (let pageNum = 0; pageNum < ICIMS_MAX_PAGES; pageNum++) {
+    if (pageNum > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
+    let html;
+    try {
+      html = await ctx.fetchText(searchUrl(origin, pageNum), { headers: HEADERS, redirect: 'error' });
+    } catch (err) {
+      // Only a first-page failure says anything about whether this host
+      // has a board at all; fetch() uses the mark to decide on a fallback.
+      if (pageNum === 0 && err && typeof err === 'object') err.firstPage = true;
+      throw err;
+    }
+    const pageJobs = parseIcimsSearchPage(html, origin, entry.name);
+    if (pageJobs.length === 0) { reachedEnd = true; break; } // past the last page
+    // Some tenants serve the last real page again for an out-of-range pr
+    // instead of an empty one — a repeated first URL means we're looping.
+    if (pageJobs[0].url === prevFirstUrl) { reachedEnd = true; break; }
+    prevFirstUrl = pageJobs[0].url;
+    all.push(...pageJobs);
+  }
+  if (!reachedEnd) all.icimsTruncated = true;
+  return all;
+}
+
 /** @type {Provider} */
 export default {
   id: 'icims',
@@ -109,29 +144,35 @@ export default {
     return origin ? { url: searchUrl(origin, 0) } : null;
   },
 
+  /**
+   * Walk a tenant's search pages. An entry may carry `fallback_urls`: other
+   * hosts the same tenant could be served from (scan-ats-full.mjs builds them,
+   * because the public dataset stores some tenants bare and some as a full
+   * portal subdomain). A fallback is tried only when the previous host answers
+   * 404 on its FIRST page, the one response that means "no board here". Any
+   * other failure (throttle, timeout, DNS, a later-page 404) is rethrown as-is,
+   * so dead-board tracking still reads it as "unknown", never "dead".
+   */
   async fetch(entry, ctx) {
-    const origin = resolveOrigin(entry);
-    if (!origin) throw new Error(`icims: cannot derive portal origin for ${entry.name}`);
-    const all = [];
-    let prevFirstUrl = null;
-    // Distinguishes "walked the whole board" from "stopped at the page cap".
-    // Exhausting the cap silently would drop every later posting and look
-    // identical to a complete board — the same failure mode the Workday
-    // truncation tag exists to prevent.
-    let reachedEnd = false;
-    for (let pageNum = 0; pageNum < ICIMS_MAX_PAGES; pageNum++) {
-      if (pageNum > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
-      const html = await ctx.fetchText(searchUrl(origin, pageNum), { headers: HEADERS, redirect: 'error' });
-      const pageJobs = parseIcimsSearchPage(html, origin, entry.name);
-      if (pageJobs.length === 0) { reachedEnd = true; break; } // past the last page
-      // Some tenants serve the last real page again for an out-of-range pr
-      // instead of an empty one — a repeated first URL means we're looping.
-      if (pageJobs[0].url === prevFirstUrl) { reachedEnd = true; break; }
-      prevFirstUrl = pageJobs[0].url;
-      all.push(...pageJobs);
+    const primary = resolveOrigin(entry);
+    if (!primary) throw new Error(`icims: cannot derive portal origin for ${entry.name}`);
+    const origins = [primary];
+    for (const raw of Array.isArray(entry.fallback_urls) ? entry.fallback_urls : []) {
+      // Same https + *.icims.com gate as the primary: a fallback can never
+      // point the scanner at another host.
+      const origin = resolveOrigin({ careers_url: raw });
+      if (origin && !origins.includes(origin)) origins.push(origin);
     }
-    if (!reachedEnd) all.icimsTruncated = true;
-    return all;
+    let notFound;
+    for (const origin of origins) {
+      try {
+        return await fetchPortal(origin, entry, ctx);
+      } catch (err) {
+        if (err?.status !== 404 || !err.firstPage) throw err;
+        notFound = err;
+      }
+    }
+    throw notFound;
   },
 
   /**
@@ -179,27 +220,32 @@ export default {
 const COUNTRY_NAMES = { US: 'United States', CA: 'Canada' };
 
 // From flattened JSON-LD nodes, build "Locality, Region, Country" out of the
-// first JobPosting's first jobLocation address. Partial addresses are kept:
-// the country alone is already enough for location_filter to decide.
+// first jobLocation entry (across all JobPosting nodes) that yields any usable
+// parts. Some tenants emit an all-UNAVAILABLE entry ahead of the real address,
+// so reading only the first entry would return no location even though a
+// later one has one. Partial addresses are kept: the country alone is already
+// enough for location_filter to decide.
 function pickLocation(nodes) {
   for (const node of nodes) {
     if (!node || typeof node !== 'object' || !node.jobLocation) continue;
-    const place = Array.isArray(node.jobLocation) ? node.jobLocation[0] : node.jobLocation;
-    const addr = place?.address;
-    if (!addr || typeof addr !== 'object') continue;
-    const clean = v => {
-      const s = String(v ?? '').trim();
-      // iCIMS writes the literal string UNAVAILABLE into fields it has no value
-      // for, so an unchecked join yields "UNAVAILABLE, MD, United States".
-      return !s || /^unavailable$/i.test(s) ? '' : s;
-    };
-    const country = clean(addr.addressCountry);
-    const parts = [
-      clean(addr.addressLocality),
-      clean(addr.addressRegion),
-      COUNTRY_NAMES[country.toUpperCase()] || country,
-    ].filter(Boolean);
-    if (parts.length) return parts.join(', ');
+    const places = Array.isArray(node.jobLocation) ? node.jobLocation : [node.jobLocation];
+    for (const place of places) {
+      const addr = place?.address;
+      if (!addr || typeof addr !== 'object') continue;
+      const clean = v => {
+        const s = String(v ?? '').trim();
+        // iCIMS writes the literal string UNAVAILABLE into fields it has no value
+        // for, so an unchecked join yields "UNAVAILABLE, MD, United States".
+        return !s || /^unavailable$/i.test(s) ? '' : s;
+      };
+      const country = clean(addr.addressCountry);
+      const parts = [
+        clean(addr.addressLocality),
+        clean(addr.addressRegion),
+        COUNTRY_NAMES[country.toUpperCase()] || country,
+      ].filter(Boolean);
+      if (parts.length) return parts.join(', ');
+    }
   }
   return null;
 }

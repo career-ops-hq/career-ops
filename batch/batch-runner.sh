@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# career-ops batch runner — standalone orchestrator for claude -p workers
-# Reads batch-input.tsv, delegates each offer to a claude -p worker,
-# tracks state in batch-state.tsv for resumability.
+# career-ops batch runner — standalone orchestrator for headless agent workers
+# Reads batch-input.tsv, delegates each offer to a worker, tracks state in
+# batch-state.tsv for resumability.
 #
-# NOTE: This script is Claude Code-specific. It uses claude -p with
-# --dangerously-skip-permissions and --append-system-prompt-file flags
-# that are not available in other CLIs. Multi-CLI support is out of scope
-# for now — contributions welcome.
+# Supported CLIs (--cli flag):
+#   claude    — claude -p with --dangerously-skip-permissions (default)
+#   opencode  — opencode run (falls back to ollama launch opencode if not in PATH)
+#   gemini    — gemini -p
+#   qwen      — qwen -p
+#
+# Only claude supports --strict-mcp-config, the rate-limit/session retry loop,
+# and --parallel > 1; other CLIs run sequentially with a single attempt.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -41,11 +45,12 @@ SKIP_PDF=false
 MODEL=""  # explicit override; otherwise resolved from config/profile.yml spend_tier
 RESOLVED_MODEL=""
 RESOLVED_SPEND_TIER=""
+CLI=claude
 RATE_LIMIT_SLEEP=300
 BATCH_PAUSED=false
 STATUS_ONLY=false
 WATCH_MODE=false
-LIMIT=0
+LIMIT=0  # internal sentinel only; explicit --limit must be positive
 
 # Return success for non-negative integer or decimal strings.
 is_decimal_number() {
@@ -54,26 +59,29 @@ is_decimal_number() {
 
 usage() {
   cat <<'USAGE'
-career-ops batch runner — process job offers in batch via claude -p workers
-Uses spend_tier from config/profile.yml unless --model overrides it.
+career-ops batch runner — process job offers in batch via headless agent workers
+Defaults to claude; other CLIs via --cli. For claude the model is resolved from
+spend_tier in config/profile.yml unless --model overrides it.
 
 Usage: batch-runner.sh [OPTIONS]
 
 Options:
-  --parallel N         Number of parallel workers (default: 1)
+  --cli NAME           Agent CLI to use: claude (default), opencode, gemini, qwen
+  --model NAME         Model for the CLI (e.g. qwen2.5:32b for opencode/ollama).
+                       For claude, overrides the tier-resolved model (otherwise
+                       config/profile.yml spend_tier: economy/standard/premium;
+                       default standard).
+  --parallel N         Number of parallel workers (default: 1; claude only)
   --dry-run            Show what would be processed, don't execute
   --retry-failed       Only retry offers marked as "failed" in state
   --resume-paused      Resume offers paused by a Claude session/rate limit
   --start-from N       Start from offer ID N (skip earlier IDs)
-  --limit N            Max number of offers to process in this run
+  --limit N            Max offers: positive integer; omit for no limit
   --max-retries N      Max retry attempts per offer (default: 2)
   --min-score N        Skip PDF/tracker for offers scoring below N (default: 0 = off)
   --skip-pdf           Skip PDF generation entirely (write ❌ in tracker PDF column)
-  --rate-limit-sleep N Seconds to wait before retrying a rate-limited worker
-                       (default: 300)
-  --model NAME         Override the tier-resolved Claude model passed to
-                       `claude -p --model` (otherwise uses config/profile.yml
-                       spend_tier: economy/standard/premium; default standard)
+  --rate-limit-sleep N Maximum adaptive retry delay in seconds; 0 pauses immediately
+                       (default: 300; range: 0–2147483647; claude only)
   --status             Show batch progress and a per-job table, then exit
   --watch              Live-refresh progress until the run completes
   -h, --help           Show this help
@@ -95,20 +103,37 @@ Examples:
   # Retry only failed offers
   ./batch-runner.sh --retry-failed
 
-  # Process 2 at a time starting from ID 10
+  # Process 2 at a time starting from ID 10 (claude only)
   ./batch-runner.sh --parallel 2 --start-from 10
+
+  # Local LLM via OpenCode (free, runs sequentially)
+  ./batch-runner.sh --cli opencode --model qwen2.5:32b
 USAGE
 }
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --cli) CLI="$2"; shift 2 ;;
     --parallel) PARALLEL="$2"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     --retry-failed) RETRY_FAILED=true; shift ;;
     --resume-paused) RESUME_PAUSED=true; shift ;;
     --start-from) START_FROM="$2"; shift 2 ;;
-    --limit) LIMIT="$2"; shift 2 ;;
+    --limit)
+      if [[ $# -lt 2 ]] || ! [[ "$2" =~ ^[0-9]+$ ]] || [[ "$2" =~ ^0+$ ]]; then
+        echo "ERROR: --limit must be a positive integer; omit --limit for no limit."
+        exit 1
+      fi
+      # Remove leading zeroes before Bash arithmetic (which otherwise reads octal).
+      LIMIT="${2#"${2%%[!0]*}"}"
+      # Compare decimal strings before arithmetic can wrap an oversized integer.
+      if [[ ${#LIMIT} -gt 19 ]] || { [[ ${#LIMIT} -eq 19 ]] && [[ "$LIMIT" > 9223372036854775807 ]]; }; then
+        echo "ERROR: --limit must be at most 9223372036854775807; omit --limit for no limit."
+        exit 1
+      fi
+      shift 2
+      ;;
     --max-retries) MAX_RETRIES="$2"; shift 2 ;;
     --min-score) MIN_SCORE="$2"; shift 2 ;;
     --skip-pdf) SKIP_PDF=true; shift ;;
@@ -129,14 +154,17 @@ if ! [[ "$RATE_LIMIT_SLEEP" =~ ^[0-9]+$ ]]; then
   echo "ERROR: --rate-limit-sleep must be a non-negative integer (seconds)."
   exit 1
 fi
-
-if ! is_decimal_number "$MIN_SCORE"; then
-  echo "ERROR: --min-score must be a non-negative number."
+# Normalize decimal input before shell arithmetic (08 must not mean octal),
+# and bound it before conversion so oversized input cannot wrap around.
+RATE_LIMIT_SLEEP=$(printf '%s' "$RATE_LIMIT_SLEEP" | sed 's/^0*//')
+RATE_LIMIT_SLEEP=${RATE_LIMIT_SLEEP:-0}
+if [[ ${#RATE_LIMIT_SLEEP} -gt 10 ]] || { [[ ${#RATE_LIMIT_SLEEP} -eq 10 ]] && [[ "$RATE_LIMIT_SLEEP" > 2147483647 ]]; }; then
+  echo "ERROR: --rate-limit-sleep must not exceed 2147483647 seconds."
   exit 1
 fi
 
-if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
-  echo "ERROR: --limit must be a non-negative integer."
+if ! is_decimal_number "$MIN_SCORE"; then
+  echo "ERROR: --min-score must be a non-negative number."
   exit 1
 fi
 
@@ -178,9 +206,30 @@ check_prerequisites() {
     exit 1
   fi
 
-  if ! command -v claude &>/dev/null; then
-    echo "ERROR: 'claude' CLI not found in PATH."
+  # Resolve the binary the configured CLI actually needs. opencode can run
+  # natively or fall back to ollama, so check for either.
+  local cli_cmd
+  case "$CLI" in
+    claude)   cli_cmd="claude" ;;
+    opencode) command -v opencode &>/dev/null && cli_cmd="opencode" || cli_cmd="ollama" ;;
+    gemini)   cli_cmd="gemini" ;;
+    qwen)     cli_cmd="qwen" ;;
+    *) echo "ERROR: Unknown --cli '$CLI'. Supported: claude, opencode, gemini, qwen"; exit 1 ;;
+  esac
+
+  if ! command -v "$cli_cmd" &>/dev/null; then
+    echo "ERROR: '$cli_cmd' not found in PATH (required for --cli $CLI)."
+    if [[ "$CLI" == "opencode" ]]; then
+      echo "       Install opencode (https://opencode.ai) or Ollama (https://ollama.ai) with an opencode model."
+    fi
     exit 1
+  fi
+
+  # Parallelism, the rate-limit retry loop, and --strict-mcp-config are
+  # claude-only; local models run one at a time.
+  if [[ "$CLI" != "claude" && "$PARALLEL" -gt 1 ]]; then
+    echo "WARN: --parallel >1 is not supported for --cli $CLI (local models run sequentially). Resetting to 1."
+    PARALLEL=1
   fi
 
   mkdir -p "$LOGS_DIR" "$TRACKER_DIR" "$REPORTS_DIR"
@@ -397,11 +446,19 @@ spend_tier_to_model() {
   esac
 }
 
-# Resolve the model to pass to `claude -p --model`. --model always wins.
+# Resolve the model to pass to the worker CLI. --model always wins.
+# spend_tier maps to Claude model names, so it only applies to --cli claude;
+# other CLIs use --model verbatim, or their own default when it is unset.
 resolve_worker_model() {
   if [[ -n "$MODEL" ]]; then
     RESOLVED_MODEL="$MODEL"
     RESOLVED_SPEND_TIER="override"
+    return 0
+  fi
+
+  if [[ "$CLI" != "claude" ]]; then
+    RESOLVED_MODEL=""
+    RESOLVED_SPEND_TIER="cli-default"
     return 0
   fi
 
@@ -654,6 +711,53 @@ is_session_limit_log() {
   grep -Eiq '(session limit|resets [0-9:]+[ap]m|usage limit|limit[[:space:]]+reached)' "$log_file"
 }
 
+# Print a delay or "pause". Only standalone delta-seconds headers are trusted;
+# never feed worker text into shell arithmetic. awk compares before formatting,
+# so even an arbitrarily long integer header safely requests a pause.
+rate_limit_delay() {
+  local log_file="$1" retry="$2" base delay hint step
+  if (( RATE_LIMIT_SLEEP == 0 )); then
+    echo pause
+    return
+  fi
+  base=30
+  (( base <= RATE_LIMIT_SLEEP )) || base=$RATE_LIMIT_SLEEP
+  hint=$(LC_ALL=C awk -v cap="$RATE_LIMIT_SLEEP" '
+    tolower($0) ~ /^[[:space:]]*retry-after:[[:space:]]*[0-9]+[[:space:]]*$/ {
+      value=$0
+      sub(/^[^:]*:[[:space:]]*/, "", value)
+      if (value + 0 > cap) over=1
+      if (value + 0 > largest) largest=value + 0
+      found=1
+    }
+    END {
+      if (over) print "pause"
+      else if (found) printf "%.0f\n", largest
+    }
+  ' "$log_file")
+  if [[ "$hint" == pause ]]; then
+    echo pause
+    return
+  fi
+  delay=$base
+  if [[ -n "$hint" ]]; then
+    (( hint <= delay )) || delay=$hint
+  else
+    # Saturate before doubling, avoiding exponentiation/overflow even on resume.
+    for (( step=0; step<retry && delay<RATE_LIMIT_SLEEP; step++ )); do
+      if (( delay > RATE_LIMIT_SLEEP / 2 )); then
+        delay=$RATE_LIMIT_SLEEP
+      else
+        delay=$((delay * 2))
+      fi
+    done
+  fi
+  # Upward-only jitter never undercuts Retry-After or the base delay.
+  delay=$((delay + delay * (RANDOM % 21) / 100))
+  (( delay <= RATE_LIMIT_SLEEP )) || delay=$RATE_LIMIT_SLEEP
+  echo "$delay"
+}
+
 mark_paused_rate_limit() {
   local id="$1" url="$2" started_at="$3" report_num="$4" retries="$5" log_file="$6"
   local completed_at
@@ -741,6 +845,13 @@ process_offer() {
   # could pre-create it as a symlink and redirect or clobber the write.
   local jd_file
   jd_file="$(mktemp "${TMPDIR:-/tmp}/batch-jd-${id}.XXXXXX")"
+  # The worker is a native process. Under Git Bash / MSYS the path above is a
+  # POSIX one (/tmp/... or /c/...) that a Windows binary cannot open, so every
+  # worker read "JD source unavailable" even when curl had filled the file.
+  # cygpath -m yields C:/... which both bash and the worker resolve.
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) command -v cygpath >/dev/null 2>&1 && jd_file="$(cygpath -m "$jd_file")" ;;
+  esac
 
   # Pre-populate $jd_file with a static curl fetch so the worker reads HTML
   # directly instead of always falling through to WebFetch (#2492). WebFetch is
@@ -881,6 +992,9 @@ process_offer() {
   local esc_url esc_jd_file esc_report_num esc_date esc_id
   esc_url="${url//\\/\\\\}"
   esc_url="${esc_url//|/\\|}"
+  # In a sed replacement, & means "the whole match", so an unescaped & in a
+  # query-string URL splices {{URL}} back in and corrupts the interpolation.
+  esc_url="${esc_url//&/\\&}"
   esc_jd_file="${jd_file//\\/\\\\}"
   esc_jd_file="${esc_jd_file//|/\\|}"
   esc_report_num="${report_num//|/\\|}"
@@ -908,9 +1022,10 @@ process_offer() {
     fi
   done
 
-  # Launch claude -p worker.
-  # The model is resolved once per run from spend_tier unless --model was
-  # passed. Building the command in an array keeps quoting safe regardless.
+  # Build the launch command for the configured CLI.
+  # For claude the model is resolved once per run from spend_tier unless --model
+  # was passed; other CLIs take --model verbatim. Building claude's command in an
+  # array keeps quoting safe regardless.
   # --strict-mcp-config (with no --mcp-config) starts workers with no MCP
   # servers: they only evaluate offers and need none. Without it each parallel
   # worker inherits the parent session's MCP (e.g. Playwright) and they deadlock
@@ -921,13 +1036,51 @@ process_offer() {
   fi
   claude_args+=(--append-system-prompt-file "$resolved_prompt" "$prompt")
 
+  # Non-claude CLIs lack --append-system-prompt-file, so concatenate the
+  # resolved system prompt and the per-job prompt into a single argument.
+  # model_args is expanded with the ${arr[@]+"${arr[@]}"} idiom below: under
+  # `set -u`, bash 3.2 (macOS /bin/bash) treats an empty array expansion as an
+  # unbound variable and would abort every worker launched without --model.
+  local full_prompt=""
+  local -a model_args=()
+  if [[ "$CLI" != "claude" ]]; then
+    full_prompt="$(cat "$resolved_prompt")"$'\n\n'"$prompt"
+    [[ -n "$MODEL" ]] && model_args=(--model "$MODEL")
+  fi
+
+  # Non-claude CLIs run a single attempt (explicit break after dispatch); the
+  # rate-limit/session retry loop only applies to claude.
   local exit_code=0
   local terminal_failure_recorded=false
   local shim_retries=0
   local max_shim_retries=4
   while true; do
     exit_code=0
-    claude "${claude_args[@]}" > "$log_file" 2>&1 || exit_code=$?
+    case "$CLI" in
+      claude)
+        claude "${claude_args[@]}" > "$log_file" 2>&1 || exit_code=$?
+        ;;
+      opencode)
+        if command -v opencode &>/dev/null; then
+          opencode run ${model_args[@]+"${model_args[@]}"} "$full_prompt" > "$log_file" 2>&1 || exit_code=$?
+        else
+          ollama launch opencode ${model_args[@]+"${model_args[@]}"} -y -- run "$full_prompt" > "$log_file" 2>&1 || exit_code=$?
+        fi
+        ;;
+      gemini)
+        gemini ${model_args[@]+"${model_args[@]}"} -p "$full_prompt" > "$log_file" 2>&1 || exit_code=$?
+        ;;
+      qwen)
+        qwen ${model_args[@]+"${model_args[@]}"} -p "$full_prompt" > "$log_file" 2>&1 || exit_code=$?
+        ;;
+    esac
+
+    # Non-claude CLIs run a single attempt: the session-limit and rate-limit
+    # detection below greps generic phrases (429, quota, session limit) that
+    # another CLI's log could match by coincidence and pause or retry the batch.
+    if [[ "$CLI" != "claude" ]]; then
+      break
+    fi
 
     if [[ $exit_code -eq 0 ]]; then
       break
@@ -955,12 +1108,20 @@ process_offer() {
         terminal_failure_recorded=true
         break
       fi
+      local retry_delay
+      retry_delay=$(rate_limit_delay "$log_file" "$retries")
+      if [[ "$retry_delay" == pause ]]; then
+        mark_paused_rate_limit "$id" "$url" "$started_at" "$report_num" "$retries" "$log_file"
+        echo "    ⏸️  Retry-After exceeds --rate-limit-sleep; pausing batch without consuming retry budget."
+        terminal_failure_recorded=true
+        break
+      fi
       retries=$((retries + 1))
       local retry_completed_at
       retry_completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-      update_state_retrying "$id" "$url" "rate_limited" "$started_at" "$retry_completed_at" "$report_num" "-" "rate-limit; retrying after ${RATE_LIMIT_SLEEP}s" "$retries" || true
-      echo "    ⏳ Rate limited (attempt $retries/$MAX_RETRIES). Waiting ${RATE_LIMIT_SLEEP}s before retry..."
-      sleep "$RATE_LIMIT_SLEEP"
+      update_state_retrying "$id" "$url" "rate_limited" "$started_at" "$retry_completed_at" "$report_num" "-" "rate-limit; retrying after ${retry_delay}s" "$retries" || true
+      echo "    ⏳ Rate limited (attempt $retries/$MAX_RETRIES). Waiting ${retry_delay}s before retry..."
+      sleep "$retry_delay"
       continue
     fi
 
@@ -1069,8 +1230,10 @@ process_offer() {
     fi
 
     # Check min-score gate
-    if is_decimal_number "$score" && awk -v min="$MIN_SCORE" 'BEGIN{exit !(min > 0)}'; then
-      if awk -v score="$score" -v min="$MIN_SCORE" 'BEGIN{exit !(score < min)}'; then
+    if is_decimal_number "$score" && LC_ALL=C awk -v min="$MIN_SCORE" 'BEGIN{exit !(min > 0)}'; then
+      # LC_ALL=C: under a non-English locale awk parses "4.5" as 4, so the
+      # MIN_SCORE comparison would silently run on truncated integers.
+      if LC_ALL=C awk -v score="$score" -v min="$MIN_SCORE" 'BEGIN{exit !(score < min)}'; then
         update_state_retrying "$id" "$url" "skipped" "$started_at" "$completed_at" "$report_num" "$score" "below-min-score" "$retries" || true
         release_report_num "$report_num"
         echo "    ⏭️  Skipped (score: $score < min-score: $MIN_SCORE)"
@@ -1125,7 +1288,7 @@ print_summary() {
     case "$sstatus" in
       completed) completed=$((completed + 1))
         if is_decimal_number "$sscore"; then
-          score_sum=$(awk -v sum="$score_sum" -v score="$sscore" 'BEGIN{print sum + score}' 2>/dev/null || echo "$score_sum")
+          score_sum=$(LC_ALL=C awk -v sum="$score_sum" -v score="$sscore" 'BEGIN{print sum + score}' 2>/dev/null || echo "$score_sum")
           score_count=$((score_count + 1))
         fi
         ;;
@@ -1139,7 +1302,9 @@ print_summary() {
 
   if (( score_count > 0 )); then
     local avg
-    avg=$(awk -v sum="$score_sum" -v count="$score_count" 'BEGIN{printf "%.1f", sum / count}' 2>/dev/null || echo "N/A")
+    # LC_ALL=C: under e.g. a German locale awk formats "%.1f" as "4,5"
+    # instead of "4.5", and a decimal comma breaks every downstream parser.
+    avg=$(LC_ALL=C awk -v sum="$score_sum" -v count="$score_count" 'BEGIN{printf "%.1f", sum / count}' 2>/dev/null || echo "N/A")
     echo "Average score: $avg/5 ($score_count scored)"
   fi
 
@@ -1176,7 +1341,7 @@ print_status_table() {
       completed)
         completed=$((completed + 1))
         if is_decimal_number "$sscore"; then
-          score_sum=$(awk -v sum="$score_sum" -v score="$sscore" 'BEGIN{print sum + score}' 2>/dev/null || echo "$score_sum")
+          score_sum=$(LC_ALL=C awk -v sum="$score_sum" -v score="$sscore" 'BEGIN{print sum + score}' 2>/dev/null || echo "$score_sum")
           score_count=$((score_count + 1))
         fi
         ;;
@@ -1193,7 +1358,9 @@ print_status_table() {
   echo "Total: $total | Completed: $completed | Processing: $processing | Failed: $failed | Pending: $pending | Skipped: $skipped | Rate Limited: $rate_limited | Paused: $paused_rate_limit"
   if (( score_count > 0 )); then
     local avg
-    avg=$(awk -v sum="$score_sum" -v count="$score_count" 'BEGIN{printf "%.1f", sum / count}' 2>/dev/null || echo "N/A")
+    # LC_ALL=C: under e.g. a German locale awk formats "%.1f" as "4,5"
+    # instead of "4.5", and a decimal comma breaks every downstream parser.
+    avg=$(LC_ALL=C awk -v sum="$score_sum" -v count="$score_count" 'BEGIN{printf "%.1f", sum / count}' 2>/dev/null || echo "N/A")
     echo "Average score: $avg/5 ($score_count scored)"
   fi
   echo ""
@@ -1303,9 +1470,11 @@ main() {
     echo "Parallel: $PARALLEL | Max retries: $MAX_RETRIES"
   fi
   if [[ "$RESOLVED_SPEND_TIER" == "override" ]]; then
-    echo "Model: $RESOLVED_MODEL (explicit --model override)"
+    echo "CLI: $CLI | Model: $RESOLVED_MODEL (explicit --model override)"
+  elif [[ "$RESOLVED_SPEND_TIER" == "cli-default" ]]; then
+    echo "CLI: $CLI | Model: $CLI default"
   else
-    echo "Model: $RESOLVED_MODEL (spend_tier=${RESOLVED_SPEND_TIER})"
+    echo "CLI: $CLI | Model: $RESOLVED_MODEL (spend_tier=${RESOLVED_SPEND_TIER})"
   fi
   echo "Input: $total_input offers"
   echo ""

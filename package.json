@@ -1,6 +1,6 @@
 {
   "name": "career-ops",
-  "version": "1.32.0",
+  "version": "1.33.0",
   "description": "Open-source AI job search that runs locally in your AI coding CLI: scan job portals, evaluate listings into a structured A-H report with a 1-5 score, tailor your CV, track applications",
   "private": true,
   "engines": {
@@ -66,7 +66,7 @@
     "prepare:application": "node prepare-application.mjs",
     "application:init": "node application-artifacts.mjs --init",
     "build:dashboard": "node build-dashboard.mjs",
-    "serve:dashboard": "cd dashboard && go run . --path ..",
+    "serve:dashboard": "cd dashboard && go run .",
     "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps",
     "manifesto": "node manifesto.mjs"
   },
@@ -98,6 +98,6 @@
     "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.0.0",
     "js-yaml": "^5.3.0",
-    "playwright": "1.62.1"
+    "playwright": "1.63.0"
   }
 }

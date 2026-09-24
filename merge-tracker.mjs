@@ -14,7 +14,7 @@
  * If duplicate with higher score → update in-place, update report link
  * Validates status against states.yml (rejects non-canonical, logs warning)
  *
- * Run: node career-ops/merge-tracker.mjs [--dry-run] [--verify]
+ * Run: node merge-tracker.mjs [--dry-run] [--verify]
  */
 
 import { readFileSync, readdirSync, mkdirSync, renameSync, existsSync } from 'fs';
@@ -25,7 +25,7 @@ import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex } from './find.mjs';
-import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
+import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber } from './tracker-parse.mjs';
 // Corporate-form vocabulary, shared with invite-match.mjs rather than copied,
 // for the same reason normalizeCompany lives in tracker-utils: a second private
 // list is how company identity drifts between scripts (#2445, #3665).
@@ -35,22 +35,39 @@ import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerL
 // can adopt the same key later without the definitions drifting.
 import { normalizeUrl } from './url-key.mjs';
 
-const CAREER_OPS = getCareerOpsRoot();
+const MERGE_TRACKER_HELP_REQUESTED = process.argv.includes('--help') || process.argv.includes('-h');
+if (MERGE_TRACKER_HELP_REQUESTED) {
+  console.log(`Usage: node merge-tracker.mjs [options]
+
+Options:
+  --dry-run        Preview the merge without writing files
+  --verify         Run pipeline verification after a successful merge
+  --migrate        Rewrite legacy report links relative to the tracker
+  --migrate-via    Add the Via column to a legacy tracker
+  --backfill-urls  Add the URL column and populate it from report metadata
+  -h, --help       Show this help and exit`);
+  process.exit(0);
+}
+
+// Executable hooks live beside this script even when user data is redirected
+// through CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data.
+const CAREER_OPS_CODE_ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 // Support both layouts: data/applications.md (boilerplate) and applications.md
 // (original). CAREER_OPS_TRACKER overrides the path (used by tests and
 // non-standard layouts). Resolution lives in tracker-utils.mjs so every tracker
 // writer agrees on the same canonical path (and therefore the same lock).
-const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+const APPS_FILE = resolveTrackerPath(DATA_ROOT);
 const TRACKER_DIR = dirname(APPS_FILE);
 // CAREER_OPS_ADDITIONS overrides the additions dir (used by tests, mirrors CAREER_OPS_TRACKER).
 const ADDITIONS_DIR = process.env.CAREER_OPS_ADDITIONS
   ? process.env.CAREER_OPS_ADDITIONS
-  : join(CAREER_OPS, 'batch/tracker-additions');
+  : join(DATA_ROOT, 'batch/tracker-additions');
 const MERGED_DIR = join(ADDITIONS_DIR, 'merged');
 // CAREER_OPS_BATCH_STATE overrides the batch-state.tsv path (used by tests).
 const BATCH_STATE_FILE = process.env.CAREER_OPS_BATCH_STATE
   ? process.env.CAREER_OPS_BATCH_STATE
-  : join(CAREER_OPS, 'batch/batch-state.tsv');
+  : join(DATA_ROOT, 'batch/batch-state.tsv');
 
 // Cross-check against batch-state.tsv (found 2026-07-30): a worker can write
 // a well-formed tracker TSV even when its own JSON result said "failed" --
@@ -109,7 +126,7 @@ const PDF_INDEX_FILE = resolvePdfIndexPath(APPS_FILE);
 const normalizeReportLink = (reportField) => normalizeLink(reportField, TRACKER_DIR, REPORTS_ROOT);
 
 // Ensure required directories exist (fresh setup)
-mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
+mkdirSync(join(DATA_ROOT, 'data'), { recursive: true });
 mkdirSync(ADDITIONS_DIR, { recursive: true });
 
 /**
@@ -265,34 +282,6 @@ function resolveReportUrl(reportField) {
   // into the column would hand every such row the same key.
   const raw = m[1].replace(/^<|>$/g, '').replace(/[),.;]+$/, '');
   return normalizeUrl(raw) ? { url: raw, reason: 'ok' } : { url: '', reason: 'no-url' };
-}
-
-// Matches the req/job-number labels actually seen in this tracker's free-text
-// Notes column: `R_1488728`, `Req PRACT011038`, `Req #1311`, `REQ-2026-32061`,
-// `Job 202606-116491`, `Job ID 65136`, `Posting ID 5340`, `JR00124259`,
-// `Ref R2857957`. The label is required so we don't grab an unrelated number
-// (a salary figure, a date fragment) — only text explicitly tagged as a
-// req/job/posting/reference id counts.
-const REQ_NUMBER_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?|r_)[\s:#_-]*([a-z][a-z0-9-]*\d[a-z0-9-]*|\d[a-z0-9-]*)\b/i;
-
-/**
- * Extract a req/job/posting number from a tracker Notes cell, if present.
- *
- * Tier-3 duplicate detection (company + fuzzy role match) has no awareness of
- * req numbers on its own, which lets two distinct postings at the same company
- * with similarly-worded titles collapse into one row (#1524 — e.g. two TD Bank
- * L&D postings distinguished only by `R_1494379` vs `R_1488728`). This helper
- * pulls out that number so the caller can treat a confirmed mismatch as proof
- * the rows are NOT duplicates, without touching cases where no number is
- * present on either side.
- *
- * @param {string} notes - Raw Notes cell from a tracker row or TSV addition.
- * @returns {string|null} Uppercased req/job number, or null when none is found.
- */
-function extractReqNumber(notes) {
-  if (!notes) return null;
-  const m = String(notes).match(REQ_NUMBER_RE);
-  return m ? m[1].toUpperCase() : null;
 }
 
 /**
@@ -1030,7 +1019,7 @@ if (MIGRATE) {
     console.log(`🔎 Migration (dry-run): ${changed} row(s) would be rewritten in ${basename(APPS_FILE)}`);
   } else {
     writeFileAtomic(APPS_FILE, migrated.join('\n'));
-    console.log(`✅ Migration: rewrote ${changed} report link(s) in ${basename(APPS_FILE)} relative to ${TRACKER_DIR === CAREER_OPS ? 'repo root' : 'data/'}`);
+    console.log(`✅ Migration: rewrote ${changed} report link(s) in ${basename(APPS_FILE)} relative to ${TRACKER_DIR === DATA_ROOT ? 'repo root' : 'data/'}`);
   }
   process.exit(0);
 }
@@ -1478,7 +1467,12 @@ for (const file of tsvFiles) {
   if (!duplicate) {
     // Company + role fuzzy match
     const additionReqNum = extractReqNumber(addition.notes);
-    duplicate = existingApps.find(app => {
+    // Two passes, exact company first. With a single find() the wider
+    // corporate-form comparison (#3665) let an EARLIER "Acme Technologies" row
+    // claim an addition for "Acme" while an exact "Acme" row sat further down
+    // the table: the duplicate that comparison exists to prevent was written
+    // to a second time and the exact row never updated.
+    const fuzzyTierMatch = (app, widenToCorporateForm) => {
       // Two different posting URLs are two different postings — a fuzzy title
       // collision must never collapse them. This is the structural version of
       // the #1524 req-number guard, and the tier where an unkeyed addition is
@@ -1491,7 +1485,7 @@ for (const file of tsvFiles) {
       // tier already requires a fuzzy role match, and the req-number and URL
       // guards below and above still get to prove the rows distinct.
       if (!companiesMatch(app.company, addition.company)
-          && !companiesMatchIgnoringCorporateForm(app.company, addition.company)) return false;
+          && !(widenToCorporateForm && companiesMatchIgnoringCorporateForm(app.company, addition.company))) return false;
       if (!roleFuzzyMatch(addition.role, app.role)) return false;
       // Cross-channel guard (#1596): unknown-employer rows (`?`) all normalize
       // to the same empty company key, but the same role via two DIFFERENT
@@ -1549,7 +1543,9 @@ for (const file of tsvFiles) {
       const appReqNum = extractReqNumber(app.notes);
       if (additionReqNum && appReqNum && additionReqNum !== appReqNum) return false;
       return true;
-    });
+    };
+    duplicate = existingApps.find(app => fuzzyTierMatch(app, false))
+      || existingApps.find(app => fuzzyTierMatch(app, true));
   }
 
   if (duplicate) {
@@ -1615,7 +1611,16 @@ for (const file of tsvFiles) {
       ? '✅'
       : (reportChanged ? '❌' : duplicate.pdf);
     const updatedLine = buildRow({
-      num: duplicate.num, date: addition.date, company: addition.company,
+      num: duplicate.num, date: addition.date,
+      // A corporate-form match (#3665) pairs the row with a VARIANT spelling of
+      // its employer, so the row keeps the name it was filed under, the same
+      // rule the fuzzy tiers apply to the role below. Renaming it breaks every
+      // company-keyed join (company-history, blacklist, follow-ups,
+      // linkedin-join) and, on a table already holding both spellings, leaves
+      // two rows under one literal name. An exact, URL or report match carries
+      // the incoming spelling, as before.
+      company: (reportNumMatched || dupReason === 'url' || companiesMatch(duplicate.company, addition.company))
+        ? addition.company : duplicate.company,
       // A URL match is a CONFIRMED same-posting identity, so the incoming title
       // is authoritative the same way a report-number match is — employers do
       // edit a live posting's title. The fuzzy tiers stay conservative and keep
@@ -1779,7 +1784,7 @@ trackerLock.release();
 // Sync PDF flags (idempotent; uses its own lock/transaction)
 if (!DRY_RUN) {
   try {
-    execFileSync('node', [join(CAREER_OPS, 'sync-pdf-flags.mjs')], { stdio: 'inherit' });
+    execFileSync(process.execPath, [join(CAREER_OPS_CODE_ROOT, 'sync-pdf-flags.mjs')], { stdio: 'inherit' });
   } catch (e) {
     console.warn(`⚠️  Failed to sync PDF flags: ${e.message}`);
   }
@@ -1789,7 +1794,7 @@ if (!DRY_RUN) {
 if (VERIFY && !DRY_RUN) {
   console.log('\n--- Running verification ---');
   try {
-    execFileSync('node', [join(CAREER_OPS, 'verify-pipeline.mjs')], { stdio: 'inherit' });
+    execFileSync(process.execPath, [join(CAREER_OPS_CODE_ROOT, 'verify-pipeline.mjs')], { stdio: 'inherit' });
   } catch (e) {
     process.exit(1);
   }

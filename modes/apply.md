@@ -173,11 +173,13 @@ Classify each question:
 For each field, preserve the application form contract:
 - `field_type`: `text`, `textarea`, `select`, `radio`, `checkbox`, `number`, `file`, or `unknown`
 - `required`: `yes`, `no`, or `unknown`
-- `limit`: exact character/word limit if visible; otherwise `unknown`
+- `limit`: confirmed character/word limit from the live control or visible instructions; otherwise `unknown`
 - `options`: visible options for select/radio/checkbox fields
 - `needs_candidate_confirmation`: `yes` for legal, demographic, work authorization, visa, relocation, salary, disability, veteran, sponsorship, background-check, or self-identification questions unless the answer is explicitly present in `config/profile.yml`
 
 Never invent answers for legal, demographic, work-authorization, visa/sponsorship, salary, disability, veteran, background-check, relocation, or self-identification fields. If the answer is not present in `config/profile.yml` or visible context, mark it as needing candidate confirmation and provide the safest question to ask the candidate.
+
+For every free-text field, inspect the **rendered form control** before drafting: read its `maxlength` attribute/property and any visible word or character counter/help text. ATS question APIs may identify a field as `input_text` without exposing the actual HTML limit. Match each limit to its exact question and record its unit and source; a limit on another control is not evidence. If the candidate supplied only a screenshot or pasted questions and the limit is not shown, record `unknown` and ask for the live field constraint when possible. Do not infer a limit from the field type or a generic ATS default.
 
 
 ## Step 7 — Generate responses
@@ -192,6 +194,8 @@ For each question, generate the response following:
 6. **Recruiter-side risk map**: Use `modes/heuristics/recruiter-side.md` to identify what doubt the question is trying to resolve (motivation, stack fit, logistics, comp, work-auth, availability, seniority) and answer that doubt directly.
 7. **Disclosure discipline**: Answer logistics questions truthfully when asked, but do not volunteer sensitive or HR-only details in unrelated motivation/fit answers.
 
+Before marking any free-text answer ready for copy-paste, count the **final** response against that field's confirmed limit, including spaces and punctuation. For HTML `maxlength`, use the browser's JavaScript string length (UTF-16 code units), the same measure the control enforces. For a word limit, follow the form's displayed counter when available. Shorten and recount any over-limit answer; if it still cannot fit without losing essential facts, flag it for the candidate to revise instead of presenting it as ready. Recheck after every edit. Show `used/allowed characters` (or words) next to each answer with a confirmed limit; show `limit unknown` when no limit was confirmed. A missing limit is never proof that an answer fits.
+
 **Output format:**
 
 ```text
@@ -203,11 +207,13 @@ Based on: Report #NNN | Score: X.X/5 | Archetype: [type]
 
 ### 1. [Exact form question]
 > [Response ready for copy-paste, or "Ask candidate: ..." if the field needs confirmation]
+Length: [used/allowed characters or words, or "limit unknown"]
 
 ### 2. [Next question]
 > [Response]
+Length: [used/allowed characters or words, or "limit unknown"]
 
-...
+Repeat the response and length lines for every remaining question.
 
 ---
 
@@ -266,6 +272,12 @@ Field-tested across ~12 Playwright-driven applications (Ashby, Greenhouse, Lever
 - **Symptom:** Submitting a second application at the same company silently fails or merges into the existing candidate record. Ashby deduplicates by email per company.
 - **Agent:** Before filling the email field, check whether an earlier report for the same company already exists in `reports/`. If it does, warn the candidate and pre-fill a `+tag` alias (e.g., `user+teamname@domain.com`) as the suggested value.
 - **Candidate:** Confirms or changes the email before the form is submitted.
+
+### Ashby — automated browser sessions can be rejected at submission
+
+- **Symptom:** An Ashby form (`jobs.ashbyhq.com`) may reject submission as possible spam from a Playwright-controlled browser, even when the candidate clicks Submit in its visible window. A filled form or a click is not proof of submission.
+- **Agent:** Once the actual application host is known, draft the answers and capture the exact posting/application URL, then hand the candidate off to their ordinary system browser for the final form. Open that URL in the system browser when possible; otherwise provide the direct link. Present a numbered copy-paste list of answers and the files to upload. Do not transfer browser cookies or claim the Playwright-filled state will carry over. If a Playwright submission was rejected, tell the candidate it failed and offer the same browser handoff. Do not attempt to hide automation signals or bypass the site's verification.
+- **Candidate:** Fill and review the form in their ordinary browser, complete any verification, and submit there. Confirm the site's success page or confirmation email before the agent marks the application `submitted` or updates the tracker to Applied; otherwise keep the answers as `filled`.
 
 ### Lever — hCaptcha intercepts checkbox/radio clicks
 

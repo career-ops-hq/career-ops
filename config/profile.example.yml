@@ -116,15 +116,22 @@ language:
 # See the tier -> model mapping table in modes/_shared.md.
 spend_tier: standard
 
+# (Optional) Paper size for every generated PDF: "letter" or "a4".
+# One setting for the CV, the cover letter and the HTML body width, so they
+# cannot disagree. Absent means letter. An explicit --format flag or a payload
+# page_format still wins for a single render.
+# page_format: letter
+
 # (Optional) Visual theming for the generated CV and cover-letter PDFs (#1837).
 # Each token is injected as a CSS custom property that overrides the template
 # default — omit the block (or any key) to keep the built-in look unchanged.
-# Only these four keys are recognized; anything else is ignored.
+# Only these five keys are recognized; anything else is ignored.
 # style:
-#   accent_color: "#2563eb"              # section headings / links
-#   font_family:  "Outfit, Inter, sans-serif"
-#   font_size:    "10pt"                 # base body text size
-#   margin:       "0.5in"                # page margin (@page)
+#   accent_color:    "#2563eb"           # section headings, competency tags, project badges
+#   secondary_color: "#111827"           # company/institution names, header gradient's 2nd stop
+#   font_family:     "Outfit, Inter, sans-serif"
+#   font_size:       "10pt"              # base body text size
+#   margin:          "0.5in"             # page margin (@page)
 
 cv:
   output_format: "html" # "html" (default), "latex", or "text" (tailored markdown, no PDF)
@@ -266,6 +273,10 @@ cover_letter:
 #                   silently, so nothing breaks. `doctor` reports the active mode.
 # scan:
 #   extractor: mcp   # mcp (default) | cli
+#   timeout_seconds: 230   # web Explore scan budget (seconds) before the run is
+#                          # stopped; default 230. A broad ATS sweep probes every
+#                          # company in a source — raise this to let a large scan
+#                          # finish (bounded by the API route's 300s cap if deployed).
 
 # ── Auto-PDF threshold ──────────────────────────────────────────────────────
 #

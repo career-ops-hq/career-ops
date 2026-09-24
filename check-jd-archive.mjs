@@ -74,7 +74,7 @@
  */
 
 import { readFileSync, readdirSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, basename } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { flagValue } from './lib/cli-flags.mjs';
@@ -190,10 +190,73 @@ function isPathOnlyPointer(strippedSection) {
   return POINTER_SENTENCE_RE.test(withoutPostedLine);
 }
 
-export function hasEmbeddedJdArchive(content) {
+// A third rejection category, alongside the unfilled-template placeholder and
+// the path-only pointer sentence above: content that clears MIN_ARCHIVE_CHARS
+// on length alone but was never a job posting to begin with — a fetch that
+// hit a login/auth wall, a 404 shell, a paywall interstitial, or a "please
+// enable JavaScript" placeholder instead of the real page (#3829). Without
+// this, a report archives e.g. "Sign in to view this job · Join LinkedIn to
+// see who you know at Acme" (well past 40 chars) under a heading that
+// promises "(archived verbatim)", and the validator reports green — a false
+// positive worse than no archive at all, since the user believes the real
+// posting is saved.
+//
+// Each pattern is anchored to phrasing distinctive enough not to collide
+// with real JD prose. Deliberately NOT included: generic "this posting has
+// closed" / "no longer available" phrasing standing alone — an ATS that
+// shows a genuine "this posting has closed" message for an EXPIRED listing
+// is legitimate content worth keeping for the record (the report may still
+// need the JD's substance for a later comparison). Only the specific
+// login-wall/404-shell/paywall/JS-required shapes the issue calls out are
+// rejected here, not every possible "closed" phrasing — over-rejecting a
+// real archived-but-closed posting would be its own bug (#3829 analysis).
+const NON_CONTENT_MARKERS = [
+  {
+    category: 'login-wall',
+    reason: 'looks like a sign-in/login wall, not a posting',
+    re: /(sign in to view this job|join linkedin to see who you know at|please log in to continue|sign in to continue)/i,
+  },
+  {
+    category: '404-shell',
+    reason: 'looks like a 404 / page-not-found shell, not a posting',
+    re: /(404\s*(?:error|not found)|page not found|this job posting is no longer available)/i,
+  },
+  {
+    category: 'paywall',
+    reason: 'looks like a paywall/subscription interstitial, not a posting',
+    re: /(subscribe to continue reading|this content is for subscribers)/i,
+  },
+  {
+    category: 'js-required',
+    reason: 'looks like a "please enable JavaScript" shell, not a posting',
+    re: /(please enable javascript|this site requires javascript|<noscript)/i,
+  },
+];
+
+// Returns the first matching marker ({category, reason}) or null. Exported
+// so checkJdArchive() can surface the specific reason in a finding's detail
+// (per #3829: "`--summary` should name the reason so a user reads 'looks
+// like a sign-in wall, not a posting' rather than a generic miss") — a
+// separate lookup from the boolean hasEmbeddedJdArchive() below so the two
+// stay independently testable while sharing the exact same stripped-section
+// input.
+export function detectNonContentMarker(strippedSection) {
+  for (const marker of NON_CONTENT_MARKERS) {
+    if (marker.re.test(strippedSection)) return marker;
+  }
+  return null;
+}
+
+// Shared section extraction, used by both hasEmbeddedJdArchive() and the
+// non-content-marker lookup in checkJdArchive() so the two never drift on
+// what counts as "the stripped section text" (heading match, next-heading
+// truncation, and the fixed-point comment strip all applied identically).
+// Returns the trimmed section text, or null when there is no
+// "## Job Description" heading at all.
+export function extractStrippedJdSection(content) {
   const text = String(content ?? '');
   const m = JD_HEADING_RE.exec(text);
-  if (!m) return false;
+  if (!m) return null;
   const rest = text.slice(m.index + m[0].length);
   const nextHeadingOffset = rest.search(NEXT_REPORT_SECTION_RE);
   const section = nextHeadingOffset === -1 ? rest : rest.slice(0, nextHeadingOffset);
@@ -209,9 +272,15 @@ export function hasEmbeddedJdArchive(content) {
     prev = stripped;
     stripped = stripped.replace(/<!--[\s\S]*?-->/g, '');
   } while (stripped !== prev);
-  stripped = stripped.trim();
+  return stripped.trim();
+}
+
+export function hasEmbeddedJdArchive(content) {
+  const stripped = extractStrippedJdSection(content);
+  if (stripped === null) return false;
   if (stripped === UNFILLED_TEMPLATE_PLACEHOLDER) return false;
   if (isPathOnlyPointer(stripped)) return false;
+  if (detectNonContentMarker(stripped)) return false;
   return stripped.length >= MIN_ARCHIVE_CHARS;
 }
 
@@ -286,6 +355,65 @@ export function classifyReportsByTrackerState(trackerPath, statesPath) {
   return classification;
 }
 
+/**
+ * Map reportNum -> an existing `jds/` capture named by a tracker row.
+ *
+ * `findCaptureForReport` resolves a capture only by its FILENAME — a report-number
+ * prefix (`276-…`) or the report's company slug. A capture named freely
+ * (`xr-bug-triage-sunnyvale-agency-2026-08-19.md`) is invisible to it even when a
+ * tracker row links it explicitly, so a genuinely archived application read as
+ * unarchived. The tracker's own link is the authoritative statement that THIS
+ * capture belongs to THIS application, so consult it before reporting a miss.
+ *
+ * Only captures that exist on disk are mapped: a dangling link is not an archive.
+ * Paths are resolved against the data root (the parent of `jdsDir`) because the
+ * link is written root-relative (`jds/foo.md`).
+ *
+ * @param {string|null} trackerPath
+ * @param {string} jdsDir
+ * @returns {Map<number, string>} reportNum -> absolute capture path
+ */
+export function mapTrackerCaptureLinks(trackerPath, jdsDir) {
+  const map = new Map();
+  if (!trackerPath || !existsSync(trackerPath)) return map;
+
+  let lines;
+  try {
+    lines = readFileSync(trackerPath, 'utf-8').split('\n');
+  } catch {
+    return map; // unreadable tracker — fail soft, exactly like classifyReportsByTrackerState
+  }
+
+  const dataRoot = dirname(jdsDir);
+  const colmap = resolveColumns(lines);
+
+  for (const line of lines) {
+    const row = parseTrackerRow(line, colmap);
+    if (!row) continue;
+    const cell = `${row.report ?? ''} ${row.notes ?? ''}`;
+    const match = cell.match(JDS_PATH_RE);
+    if (!match) continue;
+    // The link is written root-relative (`jds/foo.md`), but the captures
+    // directory is overridable with --jds-dir, so the literal `jds/` segment is
+    // not guaranteed to be where they live. Try the root-relative path first,
+    // then the same basename inside the directory actually in use.
+    const abs = [join(dataRoot, match[0]), join(jdsDir, basename(match[0]))]
+      .find((candidate) => existsSync(candidate));
+    if (!abs) continue; // dangling link is not an archive
+    // extractTrackerReportNumbers only recognizes `reports/` links, so a row
+    // whose Report cell points straight at a capture — `[276](jds/foo.md)` —
+    // yields no number at all. Fall back to the row's own id so such a row is
+    // still keyed; without this the capture is found and then dropped.
+    const keys = extractTrackerReportNumbers(row.report, row.notes);
+    if (!keys.length && Number.isInteger(row.num)) keys.push(row.num);
+    for (const num of keys) {
+      if (!map.has(num)) map.set(num, abs);
+    }
+  }
+
+  return map;
+}
+
 // --- Core check ---
 // Pure function over an already-resolved reports/jds directory pair, so the
 // self-test runs entirely on its own fixtures. `trackerPath`/`statesPath` are
@@ -302,8 +430,11 @@ export function checkJdArchive(reportsDir, jdsDir, { trackerPath = null, statesP
   }
 
   const classification = classifyReportsByTrackerState(trackerPath, statesPath);
+  const trackerCaptures = mapTrackerCaptureLinks(trackerPath, jdsDir);
 
-  const files = readdirSync(reportsDir).filter((f) => f.endsWith('.md')).sort();
+  const files = readdirSync(reportsDir)
+    .filter((f) => f.endsWith('.md') && !/^\d+-RESERVED\.md$/.test(f))
+    .sort();
 
   for (const file of files) {
     reportsScanned += 1;
@@ -326,6 +457,10 @@ export function checkJdArchive(reportsDir, jdsDir, { trackerPath = null, statesP
     if (capture !== null) continue;
 
     const reportNum = meta ? meta.reportNum : null;
+    // The tracker may name a capture this report's own filename cannot resolve
+    // (freely-named capture, no number prefix, different slug). That link is an
+    // explicit statement of ownership, so honor it before reporting a miss.
+    if (reportNum !== null && trackerCaptures.has(reportNum)) continue;
     // No tracker joined at all -> legacy hard behavior (going-forward /
     // fresh-install case: nothing to classify against, so full enforcement).
     // Tracker joined -> 'terminal' skips entirely; anything else (explicit
@@ -337,9 +472,18 @@ export function checkJdArchive(reportsDir, jdsDir, { trackerPath = null, statesP
 
     if (state === 'terminal') continue; // done deal, zero retroactive risk — not even a warning
 
-    const detail = meta
-      ? `no "## Job Description" section with archived JD text, and no jds/ capture found for report ${meta.reportNum} (company slug "${meta.companySlug}")`
-      : `no "## Job Description" section with archived JD text, and the filename does not match the {###}-{company-slug}-{YYYY-MM-DD}.md convention so no jds/ capture could be resolved`;
+    // A rejected section may carry a specific reason (fetch-failure/
+    // non-content marker, #3829) rather than just being absent or too
+    // short — surface it so a user reads "looks like a sign-in wall, not a
+    // posting" instead of a generic miss.
+    const strippedSection = extractStrippedJdSection(content);
+    const marker = strippedSection !== null ? detectNonContentMarker(strippedSection) : null;
+
+    const detail = marker
+      ? `"## Job Description" section ${marker.reason} — not credited as an archive, and no jds/ capture found${meta ? ` for report ${meta.reportNum} (company slug "${meta.companySlug}")` : ''}`
+      : meta
+        ? `no "## Job Description" section with archived JD text, and no jds/ capture found for report ${meta.reportNum} (company slug "${meta.companySlug}")`
+        : `no "## Job Description" section with archived JD text, and the filename does not match the {###}-{company-slug}-{YYYY-MM-DD}.md convention so no jds/ capture could be resolved`;
 
     findings.push(state === 'live'
       ? {
@@ -362,6 +506,80 @@ export function checkJdArchive(reportsDir, jdsDir, { trackerPath = null, statesP
 }
 
 export const hasMissingArchive = (findings) => findings.some((f) => f.type === 'missing-jd-archive');
+
+// States that mean an application was actually SENT. A row in one of these has
+// a real counterparty and a real history, so having no record of what the role
+// asked for is a hole in the candidate's own archive — distinct from `SKIP` /
+// `Evaluated`, which were never applied to and are out of scope here.
+const SUBMITTED_LABELS = new Set(['Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected']);
+
+/**
+ * Applications that were SENT but have no archive of any kind.
+ *
+ * `checkJdArchive` iterates `reports/*.md`, so an application recorded as a
+ * tracker row with no report file is invisible to it — never flagged, never
+ * counted, even though it is the case where the record is *most* incomplete.
+ * Agency-sourced roles land here routinely: they arrive as a pasted description
+ * with no posting URL, so no report is ever written.
+ *
+ * Soft by design — these are returned separately and never set a non-zero exit,
+ * matching how `jd-archive-review-due` behaves.
+ *
+ * @returns {Array<{type: string, row: string, company: string, role: string, status: string, detail: string}>}
+ */
+export function findUnarchivedApplications(trackerPath, reportsDir, jdsDir, statesPath = STATES_FILE) {
+  if (!trackerPath || !existsSync(trackerPath)) return [];
+
+  let lines;
+  let states;
+  try {
+    lines = readFileSync(trackerPath, 'utf-8').split('\n');
+    states = loadCanonicalStates(statesPath);
+  } catch {
+    return []; // unreadable tracker or states.yml — fail soft, never crash a health check
+  }
+
+  const trackerCaptures = mapTrackerCaptureLinks(trackerPath, jdsDir);
+  const reportFiles = existsSync(reportsDir)
+    ? readdirSync(reportsDir).filter((f) => f.endsWith('.md'))
+    : [];
+  const reportsByNum = new Map();
+  for (const f of reportFiles) {
+    const meta = parseReportFilename(f);
+    if (meta) reportsByNum.set(meta.reportNum, f);
+  }
+
+  const colmap = resolveColumns(lines);
+  const out = [];
+
+  for (const line of lines) {
+    const row = parseTrackerRow(line, colmap);
+    if (!row) continue;
+    const label = resolveCanonicalState(row.status, states);
+    if (!label || !SUBMITTED_LABELS.has(label)) continue;
+
+    // Same fallback as mapTrackerCaptureLinks: a Report cell pointing straight
+    // at a capture carries no `reports/` link to extract a number from.
+    const nums = extractTrackerReportNumbers(row.report, row.notes);
+    const keys = nums.length ? nums : (Number.isInteger(row.num) ? [row.num] : []);
+    // Any linked capture, or any report file that exists, counts as a record.
+    const hasCapture = keys.some((n) => trackerCaptures.has(n));
+    const hasReport = keys.some((n) => reportsByNum.has(n));
+    if (hasCapture || hasReport) continue;
+
+    out.push({
+      type: 'application-no-archive',
+      row: row.num ?? '?',
+      company: row.company ?? '?',
+      role: row.role ?? '?',
+      status: label,
+      detail: 'application was sent but has no report file and no jds/ capture — '
+        + 'nothing records what the role asked for',
+    });
+  }
+
+  return out;
+}
 
 // --- Summary mode ---
 function printSummary(result) {
@@ -395,6 +613,24 @@ function printSummary(result) {
     }
     console.log('');
   }
+}
+
+function printUnarchivedApplications(rows) {
+  if (!rows.length) return;
+  console.log('  Applications sent with no archive at all (soft — never blocks):');
+  console.log('  ' + 'Row'.padEnd(8) + 'Status'.padEnd(12) + 'Company'.padEnd(28) + 'Role');
+  console.log('  ' + '-'.repeat(90));
+  for (const r of rows) {
+    console.log('  '
+      + String(r.row).padEnd(8)
+      + r.status.padEnd(12)
+      + String(r.company).substring(0, 26).padEnd(28)
+      + String(r.role).substring(0, 44));
+  }
+  console.log('\n  These were applied to, so the posting had real consequences, but nothing');
+  console.log('  on disk records what the role asked for. Capture one with:');
+  console.log('    node archive-posting.mjs --report=<N>   (live posting)');
+  console.log('  or save the original description to jds/ and link it from the tracker row.\n');
 }
 
 // --- Self-test (fixtures only — never reads the real reports/ for findings) ---
@@ -440,6 +676,59 @@ function runSelfTest() {
   check(hasEmbeddedJdArchive(
     '## Job Description (archived verbatim)\n\nThis role owns curriculum design end to end, including SCORM packaging and LMS rollout. See jds/legacy-notes.md for historical context on the prior version of this posting.\n\n## Machine Summary'),
     'hasEmbeddedJdArchive credits substantive JD prose even when it also mentions a jds/*.md path in passing — the section is not JUST the canonical pointer sentence, so it is read as archived text, not a pointer (CodeRabbit, PR #2791 round 4)');
+
+  // --- Fetch-failure / non-content markers (#3829) ---
+  // A LinkedIn-style login wall clears MIN_ARCHIVE_CHARS comfortably on
+  // length alone, so each shape needs its own rejection, mirroring the
+  // placeholder/pointer checks above.
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nSign in to view this job · Join LinkedIn to see who you know at Acme Corporation.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a LinkedIn-style login-wall shell even though it clears MIN_ARCHIVE_CHARS by length alone (#3829)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nPlease log in to continue. You must sign in to view this content and manage your job alerts.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a generic "please log in to continue" auth-wall shell (#3829)');
+  // CodeRabbit review on #3837: a bare "please log in" alternative (with no
+  // "to continue"/"to view" qualifier) was too broad and matched legitimate
+  // JD prose instructing the eventual HIRE to log in to an internal system —
+  // narrowed to the full "please log in to continue" phrase. Regression test
+  // for the exact false-positive shape CodeRabbit flagged.
+  check(hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nThis role manages our online course catalog. Please log in to our internal LMS after onboarding to review the current curriculum before your first day.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive does not false-positive on real JD prose containing a bare "Please log in" instruction unrelated to the archive itself being a login wall (CodeRabbit, PR #3837)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\n404 Not Found. The page you requested could not be located on this server.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a 404 error shell (#3829)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nThis job posting is no longer available. It may have been filled or removed by the employer.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a "this job posting is no longer available" removed-posting shell (#3829)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nSubscribe to continue reading. This content is for subscribers only — create a free account to keep reading.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a paywall/subscription interstitial (#3829)');
+  check(!hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nPlease enable JavaScript to run this application. This site requires JavaScript to display job listings.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive rejects a "please enable JavaScript" shell (#3829)');
+  check(detectNonContentMarker('Sign in to view this job · Join LinkedIn to see who you know at Acme.')?.category === 'login-wall',
+    'detectNonContentMarker classifies a login-wall shell with the login-wall category');
+  check(detectNonContentMarker('404 Not Found. Page not found.')?.category === '404-shell',
+    'detectNonContentMarker classifies a 404 shell with the 404-shell category');
+  check(detectNonContentMarker('Subscribe to continue reading this article.')?.category === 'paywall',
+    'detectNonContentMarker classifies a paywall interstitial with the paywall category');
+  check(detectNonContentMarker('Please enable JavaScript to run this application.')?.category === 'js-required',
+    'detectNonContentMarker classifies a JS-required shell with the js-required category');
+  check(detectNonContentMarker('This role owns curriculum design end to end, including SCORM packaging and LMS rollout across three teams.') === null,
+    'detectNonContentMarker returns null for substantive real JD prose with no non-content phrasing');
+  // A genuine, terse-but-real JD excerpt must still pass — proves the new
+  // rejection category is not over-aggressive on legitimate short postings.
+  check(hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nWe are hiring a part-time Instructional Design Assistant to support course updates in our LMS, 10 hours/week, remote, $28/hr. Email your resume to hiring@example.com.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive still credits a genuine, terse real JD excerpt — the non-content-marker rejection is not over-aggressive (#3829)');
+  // A real posting that legitimately says the ROLE requires signing in to an
+  // internal portal (not that the ARCHIVE itself is a login wall) should not
+  // false-positive just because it mentions "sign in" in passing without any
+  // of the anchored login-wall phrasing.
+  check(hasEmbeddedJdArchive(
+    '## Job Description (archived verbatim)\n\nOnce hired, you will sign in to our internal LMS daily to manage learner rosters and publish course updates across three regional campuses.\n\n## Machine Summary'),
+    'hasEmbeddedJdArchive does not false-positive on real JD prose that merely mentions signing in to an internal system, since it does not match the anchored login-wall phrasing (#3829)');
 
   // --- Fixture directory tree (mkdtempSync, mirrors the repo's own test convention) ---
   const tmpDir = mkdtempSync(join(tmpdir(), 'check-jd-archive-test-'));
@@ -531,9 +820,26 @@ function runSelfTest() {
     ].join('\n'));
     writeFileSync(join(jdsDir, '006-2026-01-21_oscorp_analyst.pdf'), 'fake-pdf-bytes');
 
+    // Fixture 7: the archive section is a LinkedIn-style login wall that
+    // clears MIN_ARCHIVE_CHARS on length alone, with no jds/ capture to fall
+    // back on -> flagged, and the finding's detail names the specific reason
+    // rather than a generic miss (#3829).
+    writeFileSync(join(reportsDir, '007-wayne-2026-01-22.md'), [
+      '# Evaluation: Wayne Enterprises — Analyst',
+      '',
+      '**URL:** https://linkedin.com/jobs/view/wayne-analyst',
+      '',
+      '## Job Description (archived verbatim)',
+      '',
+      'Sign in to view this job · Join LinkedIn to see who you know at Wayne Enterprises.',
+      '',
+      '## Machine Summary',
+      'score: 4.0',
+    ].join('\n'));
+
     const result = checkJdArchive(reportsDir, jdsDir);
 
-    check(result.reportsScanned === 6, `all 6 fixture reports scanned (got ${result.reportsScanned})`);
+    check(result.reportsScanned === 7, `all 7 fixture reports scanned (got ${result.reportsScanned})`);
 
     const flaggedFiles = new Set(result.findings.map((f) => f.file));
     check(flaggedFiles.has('001-acme-2026-01-15.md'), 'report with neither archive form is flagged missing-jd-archive');
@@ -541,10 +847,15 @@ function runSelfTest() {
     check(!flaggedFiles.has('003-initech-2026-01-17.md'), 'report with a matching jds/ capture (no embedded section) is not flagged');
     check(flaggedFiles.has('005-umbrella-2026-01-20.md'), 'a path-only pointer to a NONEXISTENT jds/ capture is flagged, not accepted on length alone');
     check(!flaggedFiles.has('006-oscorp-2026-01-21.md'), 'a path-only pointer to an EXISTING jds/ capture is not flagged — resolves via findCaptureForReport');
+    check(flaggedFiles.has('007-wayne-2026-01-22.md'), 'a LinkedIn-style login-wall archive is flagged, not accepted on length alone (#3829)');
     check(flaggedFiles.has('hand-named-report.md'), 'report with a non-conforming filename and no archive section is flagged');
 
     const handNamedFinding = result.findings.find((f) => f.file === 'hand-named-report.md');
     check(handNamedFinding?.report === null, 'non-conforming filename finding carries report: null instead of guessing');
+
+    const loginWallFinding = result.findings.find((f) => f.file === '007-wayne-2026-01-22.md');
+    check(loginWallFinding?.detail?.includes('sign-in/login wall'),
+      'the login-wall finding names the specific reason in its detail, not a generic miss (#3829)');
 
     check(result.findings.every((f) => f.type === 'missing-jd-archive'), 'every finding uses the missing-jd-archive type');
     check(hasMissingArchive(result.findings) === true, 'hasMissingArchive is true when findings are present');
@@ -618,6 +929,57 @@ function runSelfTest() {
     check(!hasMissingArchive(trackerResult.findings),
       'a tracker-joined run touching only terminal/live/unresolved rows never trips the hard-blocking hasMissingArchive/exit-1 path');
 
+    // --- Tracker-named jds/ captures + un-archived applications ---
+    // findCaptureForReport resolves a capture only by FILENAME (number prefix or
+    // company slug). A freely-named capture the tracker links explicitly was
+    // invisible to it, so an archived application read as unarchived.
+    const linkReportsDir = join(tmpDir, 'reports-capturelink');
+    const linkJdsDir = join(tmpDir, 'jds-capturelink');
+    mkdirSync(linkReportsDir, { recursive: true });
+    mkdirSync(linkJdsDir, { recursive: true });
+    // 201's capture is named nothing like the report: no number prefix, different slug.
+    writeFileSync(join(linkReportsDir, '201-cyberdyne-2026-02-01.md'), '# Evaluation: Cyberdyne — Analyst\n\n**URL:** https://example.com\n');
+    writeFileSync(join(linkJdsDir, 'freely-named-agency-posting-2026-02-01.md'), 'Posted: 2026-02-01\n\n' + 'A'.repeat(200));
+    // 202's linked capture does not exist -> dangling link, must NOT be credited.
+    writeFileSync(join(linkReportsDir, '202-tyrell-2026-02-02.md'), '# Evaluation: Tyrell — Analyst\n\n**URL:** https://example.com\n');
+
+    const linkTracker = join(tmpDir, 'applications-capturelink.md');
+    writeFileSync(linkTracker, [
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+      '|---|------|---------|------|-------|--------|-----|--------|-------|',
+      '| 201 | 2026-02-01 | Cyberdyne | Analyst | 4.0/5 | Applied | ✅ | [201](reports/201-cyberdyne-2026-02-01.md) | see jds/freely-named-agency-posting-2026-02-01.md |',
+      '| 202 | 2026-02-02 | Tyrell | Analyst | 4.0/5 | Applied | ✅ | [202](reports/202-tyrell-2026-02-02.md) | see jds/does-not-exist.md |',
+      // 203: Report cell points STRAIGHT at a capture, so there is no reports/
+      // link to extract a number from — the row's own id is the only key.
+      '| 203 | 2026-02-03 | Wonka | Analyst | N/A | Interview | ❌ | [203](jds/freely-named-agency-posting-2026-02-01.md) | |',
+      // 204: applied, nothing on disk at all -> the un-archived application case.
+      '| 204 | 2026-02-04 | Soylent | Analyst | N/A | Applied | ❌ | — | |',
+      // 205: never applied to -> out of scope, must not be reported.
+      '| 205 | 2026-02-05 | Initrode | Analyst | 2.0/5 | SKIP | ❌ | — | |',
+    ].join('\n'));
+
+    const linkMap = mapTrackerCaptureLinks(linkTracker, linkJdsDir);
+    check(linkMap.has(201), 'mapTrackerCaptureLinks resolves a freely-named capture via the tracker row that links it');
+    check(!linkMap.has(202), 'mapTrackerCaptureLinks refuses a dangling jds/ link — a missing file is not an archive');
+    check(linkMap.has(203), "mapTrackerCaptureLinks keys by the row's own id when the Report cell links a capture instead of a report");
+
+    const linkResult = checkJdArchive(linkReportsDir, linkJdsDir, { trackerPath: linkTracker });
+    const linkTypes = new Map(linkResult.findings.map((f) => [f.file, f.type]));
+    check(!linkTypes.has('201-cyberdyne-2026-02-01.md'),
+      'a report whose tracker row names an existing jds/ capture is NOT flagged, even though the filename cannot resolve it');
+    check(linkTypes.get('202-tyrell-2026-02-02.md') === 'jd-archive-review-due',
+      'a report whose tracker row names a MISSING capture is still flagged — the link is not taken on faith');
+
+    const unarchived = findUnarchivedApplications(linkTracker, linkReportsDir, linkJdsDir);
+    const unarchivedRows = new Set(unarchived.map((r) => String(r.row)));
+    check(unarchivedRows.has('204'), 'findUnarchivedApplications reports an applied-to row with no report and no capture');
+    check(!unarchivedRows.has('203'), 'findUnarchivedApplications does not report a row whose Report cell links an existing capture');
+    check(!unarchivedRows.has('201'), 'findUnarchivedApplications does not report a row that has a report file');
+    check(!unarchivedRows.has('205'), 'findUnarchivedApplications ignores never-applied states (SKIP) — only sent applications count');
+    check(unarchived.every((r) => r.type === 'application-no-archive'), 'every un-archived-application row carries the application-no-archive type');
+    check(findUnarchivedApplications(null, linkReportsDir, linkJdsDir).length === 0,
+      'findUnarchivedApplications fails soft to an empty list when no tracker is available');
+
     // Going-forward / no-tracker enforcement is unaffected: the SAME 4
     // fixtures, with the tracker join disabled, are the pre-existing hard
     // blocker — the retroactive softening only ever activates when there IS
@@ -661,15 +1023,18 @@ if (isMainModule(import.meta.url)) {
   const trackerPath = noTrackerMode ? null : (trackerArg || DEFAULT_TRACKER_PATH);
 
   const result = checkJdArchive(reportsDir, jdsDir, { trackerPath });
+  const unarchivedApplications = findUnarchivedApplications(trackerPath, reportsDir, jdsDir);
 
   if (summaryMode) {
     printSummary(result);
+    printUnarchivedApplications(unarchivedApplications);
   } else {
     console.log(JSON.stringify({
       generatedAt: new Date().toISOString(),
       reportsScanned: result.reportsScanned,
       findings: result.findings,
       warnings: result.warnings,
+      unarchivedApplications,
     }, null, 2));
   }
 
