@@ -380,7 +380,7 @@ try {
       && j.url === 'https://jobs.ashbyhq.com/whatnot/c7509615-34bb-4ca8-b6a0-adbdb63f6c1a'
       && j.company === 'Whatnot'
       && j.externalId === 'c7509615-34bb-4ca8-b6a0-adbdb63f6c1a'
-      && j.location === 'Los Angeles, CA; New York, NY'
+      && j.location === 'Los Angeles, CA · New York, NY'
       ? pass('ashby embed source maps title/url/company/externalId and dedupes the location list')
       : fail(`ashby embed mapping: ${JSON.stringify(jobs)}`);
 
@@ -390,6 +390,24 @@ try {
       && !calls[0].json
       ? pass('ashby embed source reads the board in one fetchText with redirect:"error"')
       : fail(`ashby embed request: ${JSON.stringify(calls.map((c) => [c.url, c.opts?.redirect, !!c.json]))}`);
+  }
+
+  // The embed path renders location exactly as the posting API path does,
+  // including the "Remote" marker scan.mjs's location_filter matches on: a
+  // remote posting whose locationName is a city must not fail allow: ["Remote"].
+  {
+    const postings = [
+      { ...POSTING, id: 'a1', title: 'Remote role', locationName: 'San Francisco, CA', workplaceType: 'Remote', secondaryLocations: [] },
+      { ...POSTING, id: 'a2', title: 'Hybrid role', locationName: 'New York, NY', workplaceType: 'Hybrid', secondaryLocations: [] },
+      { ...POSTING, id: 'a3', title: 'Already remote', locationName: 'Remote - US', workplaceType: 'Remote', secondaryLocations: [] },
+    ];
+    const { ctx } = recording(() => embedHtml({ organization: { name: 'Whatnot' }, jobBoard: { jobPostings: postings } }));
+    const byTitle = Object.fromEntries((await ashby.fetch(EMBED_ENTRY, ctx)).map((j) => [j.title, j.location]));
+    byTitle['Remote role'] === 'San Francisco, CA · Remote'
+      && byTitle['Hybrid role'] === 'New York, NY'
+      && byTitle['Already remote'] === 'Remote - US'
+      ? pass('ashby embed source appends "Remote" from workplaceType, as the posting API path does')
+      : fail(`ashby embed remote marker: ${JSON.stringify(byTitle)}`);
   }
 
   // Without the flag nothing changes: the posting API path must not gain an

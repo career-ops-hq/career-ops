@@ -346,10 +346,20 @@ async function fetchFromEmbed(entry, ctx) {
   const encodedSlug = safeEncodeURIComponent(slug);
   if (encodedSlug === null) throw new Error(`ashby: board slug for ${entry.name} cannot be URI-encoded`);
   return board.jobPostings.map((/** @type {any} */ p) => {
-    const secondary = Array.isArray(p.secondaryLocations)
-      ? p.secondaryLocations.map((/** @type {any} */ l) => l?.locationName).filter(Boolean)
-      : [];
-    const locations = [p.locationName, ...secondary].filter(Boolean);
+    // Same location rendering as the posting API path, so a board reads the
+    // same whichever source served it — in particular the "Remote" marker:
+    // scan.mjs's location_filter sees only this string, so a remote posting
+    // whose locationName is a city would otherwise fail `allow: ["Remote"]`
+    // (CodeRabbit, #4298). The embed payload names places `locationName`
+    // where the API says `location`; nothing else differs.
+    const location = formatLocation({
+      location: p.locationName,
+      secondaryLocations: Array.isArray(p.secondaryLocations)
+        ? p.secondaryLocations.map((/** @type {any} */ l) => ({ location: l?.locationName }))
+        : [],
+      workplaceType: p.workplaceType,
+      isRemote: p.isRemote,
+    });
     // The id comes from the embed payload, so it is host-controlled: a lone
     // surrogate in it would make encodeURIComponent throw and take the whole
     // board down mid-map. Drop that one posting instead (_safe-url.mjs).
@@ -359,7 +369,7 @@ async function fetchFromEmbed(entry, ctx) {
       url: encodedId === null ? '' : `https://${EMBED_HOST}/${encodedSlug}/${encodedId}`,
       company: entry.name,
       externalId: coerceId(p.id),
-      location: [...new Set(locations)].join('; '),
+      location,
       // The embed payload carries neither descriptionPlain nor publishedAt —
       // the posting API's two extras. An absent date means "unknown", never
       // "stale", so nothing is invented here.
