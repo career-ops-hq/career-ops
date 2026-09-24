@@ -314,8 +314,8 @@ function resolveEndpoint(entry) {
 // CodeRabbit, #4076). Hyphens stay in the token too: Walmart posts
 // "R-2593225", which an earlier `(?:-\d+)?$` tail cut to "R". Workday's own
 // cross-site "-N" repost suffix is stripped by the dedup key's rule. Both
-// callers go through reqTokenFromSegment(), so the captured id and the key
-// cannot disagree; the id keeps the ATS's casing and only the key lowercases.
+// callers go through reqTokenFromSegment(), so the captured requisitionId and
+// the key cannot disagree; the id keeps the ATS's casing, only the key lowercases.
 const REQ_TOKEN_CHARS_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 function reqTokenFromSegment(segment) {
@@ -417,8 +417,8 @@ export function stripWorkdayRepostSuffix(raw) {
   return stripRepostSuffixKeepCase(token);
 }
 
-// The same rule without the lowercasing, for the captured externalId and
-// requisitionId, which keep the ATS's own casing ("R-2593225"). Only the
+// The same rule without the lowercasing, for the captured requisitionId,
+// which keeps the ATS's own casing ("R-2593225"). Only the
 // dedup key is lowercased.
 function stripRepostSuffixKeepCase(token) {
   const m = token.match(/^(.*?)-(\d{1,2})$/);
@@ -452,7 +452,7 @@ export function workdayDedupKey(job) {
   const segments = parsed.pathname.split('/').filter(Boolean);
   const lastSegment = segments[segments.length - 1];
   if (!lastSegment) return null;
-  // Same token rule as the captured externalId; only the key is lowercased.
+  // Same token rule as the captured requisitionId; only the key is lowercased.
   // No underscore means no title/requisition-ID separator: nothing to key on.
   const reqId = reqTokenFromSegment(lastSegment).toLowerCase();
   if (!reqId) return null;
@@ -622,8 +622,12 @@ export function parseWorkdayResponse(json, entry) {
       // slug, so it changes on exactly the title drift this capture exists to survive
       // (Adobe: "Associate--Corporate-Strategy_R167982" -> "Sr-Associate--…_R167982-1"
       // — the path moved, R167982 did not). Abstain when no token is recoverable
-      // rather than emitting an unstable key, matching the Ashby/Lever precedent.
-      externalId: reqTokenFromPath(j.externalPath),
+      // rather than emitting an unstable key.
+      //
+      // No externalId: the list API exposes no posting id, and this token is a
+      // REQUISITION — every site a req is cross-posted to carries the same one
+      // (the "-1"/"-2" suffix stripped above), so it cannot be the per-posting key
+      // externalId promises (CodeRabbit, #4297).
       requisitionId: reqFromWorkday(j),
       location: j.locationsText || locationFromPath(j.externalPath),
       postedAt: parsePostedOn(j.postedOn),

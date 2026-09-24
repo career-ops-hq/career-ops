@@ -52,15 +52,17 @@ wd[0].requisitionId !== wd[1].requisitionId
   ? pass('two same-location workday reqs get DIFFERENT ids (no location collision)')
   : failWith('workday location collision', `both got ${wd[0].requisitionId}`);
 
-// externalId must be the stable req token, not the title-bearing path — the whole
+// requisitionId must be the stable req token, not the title-bearing path — the whole
 // point is surviving a title drift (Associate -> Sr. Associate) on a stable req.
+// externalId stays unset: the list API has no posting id, and the token is shared
+// by every cross-posted copy of the req, so it is not a per-posting key.
 const drift = parseWorkdayResponse(
   { jobPostings: [{ title: 'Sr. Associate, Corporate Strategy', externalPath: '/job/San-Francisco/Sr-Associate--Corporate-Strategy_R167982-1', bulletFields: [] }] },
   { name: 'Adobe', careers_url: 'https://adobe.wd5.myworkdayjobs.com/external_experienced' },
 );
-drift[0]?.externalId === 'R167982'
-  ? pass('workday externalId is the stable req token, not the title-bearing path')
-  : failWith('workday externalId stability', `got ${drift[0]?.externalId}`);
+drift[0]?.requisitionId === 'R167982' && drift[0]?.externalId === undefined
+  ? pass('workday requisitionId is the stable req token; externalId stays unset (no posting id in the list API)')
+  : failWith('workday id stability', `got req=${drift[0]?.requisitionId} ext=${drift[0]?.externalId}`);
 
 // Greenhouse: requisition_id + id captured off the real fetch path.
 const ghFixture = { jobs: [{ id: 7724227003, requisition_id: 'JR103948', title: 'Strategic Finance Analyst II', absolute_url: 'https://job-boards.greenhouse.io/affirm/jobs/7724227003', location: { name: 'New York' }, first_published: '2026-07-01T00:00:00Z' }] };
@@ -158,14 +160,14 @@ const reqRows = parseWorkdayResponse(
 );
 let reqTokenFailures = 0;
 REQ_TOKEN_CASES.forEach(([externalPath, expected, why], i) => {
-  const got = reqRows[i]?.externalId;
+  const got = reqRows[i]?.requisitionId;
   if (got !== expected) {
     reqTokenFailures++;
     failWith('workday req token', `${externalPath} -> ${got}, expected ${expected} (${why})`);
   }
-  if (reqRows[i]?.requisitionId !== expected) {
+  if (reqRows[i]?.externalId !== undefined) {
     reqTokenFailures++;
-    failWith('workday req id', `${externalPath} -> ${reqRows[i]?.requisitionId}, expected ${expected}`);
+    failWith('workday externalId', `${externalPath} -> ${reqRows[i]?.externalId}, expected unset (no posting id in the list API)`);
   }
 });
 reqTokenFailures === 0
@@ -176,9 +178,9 @@ reqTokenFailures === 0
 // they used to disagree, which is how "R" reached the id while the dedup key
 // still keyed on "r-2593225".
 const walmartUrl = 'https://walmart.wd5.myworkdayjobs.com/walmartexternal/job/Bentonville/Sr-Analyst_R-2593225';
-workdayDedupKey({ url: walmartUrl }) === `workday:walmart.wd5.myworkdayjobs.com:${String(reqRows[0]?.externalId).toLowerCase()}`
-  ? pass('workday dedup key and captured externalId derive the same requisition')
-  : failWith('workday dedup/id agreement', `key=${workdayDedupKey({ url: walmartUrl })} id=${reqRows[0]?.externalId}`);
+workdayDedupKey({ url: walmartUrl }) === `workday:walmart.wd5.myworkdayjobs.com:${String(reqRows[0]?.requisitionId).toLowerCase()}`
+  ? pass('workday dedup key and captured requisitionId derive the same requisition')
+  : failWith('workday dedup/id agreement', `key=${workdayDedupKey({ url: walmartUrl })} id=${reqRows[0]?.requisitionId}`);
 
 // Underscored ids used to split the two derivations: the id took the text after
 // the LAST underscore ("00123") while the key took it after the FIRST
@@ -186,9 +188,9 @@ workdayDedupKey({ url: walmartUrl }) === `workday:walmart.wd5.myworkdayjobs.com:
 const underscoredUrl = 'https://walmart.wd5.myworkdayjobs.com/walmartexternal/job/NY/Analyst_JR_2024_00123';
 const underscoredRow = reqRows[REQ_TOKEN_CASES.findIndex(([p]) => p === '/job/NY/Analyst_JR_2024_00123')];
 workdayDedupKey({ url: underscoredUrl }) === 'workday:walmart.wd5.myworkdayjobs.com:jr_2024_00123'
-  && underscoredRow?.externalId === 'JR_2024_00123'
+  && underscoredRow?.requisitionId === 'JR_2024_00123'
   ? pass('workday underscored req id: dedup key lowercases, captured id keeps its case, same requisition')
-  : failWith('workday underscored id agreement', `key=${workdayDedupKey({ url: underscoredUrl })} id=${underscoredRow?.externalId}`);
+  : failWith('workday underscored id agreement', `key=${workdayDedupKey({ url: underscoredUrl })} id=${underscoredRow?.requisitionId}`);
 
 // ── eightfold: a bad `id` must not mask a good `position_id` (CodeRabbit) ─────
 const efFallbackCtx = { transport: 'http', fetchText: async () => '', fetchJson: async () => ({ positions: [

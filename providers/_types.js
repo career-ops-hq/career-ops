@@ -56,11 +56,16 @@
  *                               empty/absent value always passes the filter.
  * @property {string} [externalId] The ATS's own stable id for this POSTING
  *                               (Greenhouse `id`, Ashby posting uuid, Lever
- *                               `id`, Workday `externalPath`). Unique within
- *                               that ATS, not across employers — always pair
- *                               it with the source when keying.
+ *                               `id`). Unique within that ATS, not across
+ *                               employers — always pair it with the source when
+ *                               keying. Unset for Workday: its list API exposes
+ *                               no posting id, and the token at the end of
+ *                               `externalPath` is a requisition shared by every
+ *                               site the req is cross-posted to (requisitionId).
  * @property {string} [requisitionId] The EMPLOYER's requisition id (Greenhouse
- *                               `requisition_id`, e.g. "JR103948") — the
+ *                               `requisition_id`, e.g. "JR103948"; Workday: the
+ *                               token ending `externalPath`, cross-site "-N"
+ *                               suffix removed) — the
  *                               schema.org/JobPosting `identifier` concept.
  *
  *                               ⚠ MANY-TO-ONE WITH POSTINGS. This is a REQ key,
