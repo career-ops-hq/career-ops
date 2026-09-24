@@ -1140,16 +1140,28 @@ export function systemTreeDiffers(systemPaths, upstreamRef = 'FETCH_HEAD', ctx =
  * NOT a merge, by design); the point is telling people what they are about to
  * lose.
  *
- * A file is at risk only when BOTH hold:
+ * A file is reported only when it can be ATTRIBUTED to a local edit, which
+ * takes two steps:
  *
- *   1. it differs from the merge-base — the last commit this install shares
- *      with upstream, i.e. the baseline it was last synced to. Anything that
- *      differs from it was changed HERE, whether committed or still in the
- *      working tree (`git diff <ref> -- <path>` compares against the worktree);
- *   2. it differs from the upstream ref. A local fix upstream has since adopted
- *      independently is byte-identical there, so the checkout costs nothing and
- *      warning about it would be noise — the exact case the #2337 reporter
- *      isolated when one of their two fixes survived an update.
+ *   1. The candidate set is the difference from the last state the install is
+ *      known to have started from: the commit it shares with upstream
+ *      (merge-base), or, when the two histories share nothing at all (a fresh
+ *      `git init` copy, a shallow clone), the install's own first commit. A
+ *      copy with no local edits therefore reports nothing, even though every
+ *      file upstream has changed since differs from upstream.
+ *   2. Each candidate is attributed to whichever side last wrote it, by two
+ *      batched history lookups:
+ *      - an update commit that changed the file: reported only while the
+ *        worktree still differs from the version that update installed. Equal
+ *        content is upstream's own version, so the checkout costs nothing
+ *        (#3094); a preserved customization is folded into the update commit
+ *        WITHOUT a change, which is why the comparison is per file and not per
+ *        update (#4170);
+ *      - no update commit ever changed the file: reported unless upstream
+ *        published that exact content for the path since the merge-base. That
+ *        is a fix upstream adopted identically and has since moved past, where
+ *        the content is upstream's now and the file must keep updating instead
+ *        of staying pinned. Anything else is the user's.
  *
  * @param {string[]} paths - manifest entries (files or `dir/` prefixes).
  * @param {string} upstreamRef - ref being checked out, normally FETCH_HEAD.
@@ -1188,76 +1200,145 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
     }
   };
 
-  // The baseline has to answer "is this content the user's", not "did anything
-  // change since the last update". Those are different questions for a file the
-  // user customized and an update then PRESERVED: the updater folds the user's
-  // version into its own commit unchanged, so from that commit onward the file
-  // diffs clean and the customization stops being protected (#4170).
-  //
-  // An earlier version of this used the newest updater commit outright, which
-  // has exactly that blind spot, and the original merge-base, which flags every
-  // file the previous update delivered. Both are wrong for the same reason:
-  // neither one separates "upstream put this here" from "the user wrote this".
-  //
-  // Per file, the reference that answers the question is the newest updater
-  // commit that CHANGED that file. An updater commit only changes a file it
-  // checked out, and the checkout skips preserved paths, so a change in an
-  // updater commit means upstream's content was installed there. The worktree
-  // differing from that version is what "the user wrote this" means.
-  //
-  // The candidate set comes from the merge-base, deliberately, because it is
-  // the most inclusive baseline available: it can only ever over-report, and
-  // the per-file refinement below removes what it over-reports. Starting from
-  // the updater commit instead would under-report and silently lose files, and
-  // a guard that misses the file it exists to protect is worse than a noisy one.
+  // The baseline has to answer "did this install change the file", not "did
+  // anything change since the last update". merge-base is the exact answer
+  // while the two histories share commits. When they share nothing at all (a
+  // fresh `git init` copy, a shallow clone) the install's own first commit is
+  // what it started from, and is used instead. The upstream difference is NOT
+  // a usable fallback here: in a copy with no local edits every file upstream
+  // has touched since reads as different from upstream, gets preserved, and
+  // never updates again without `--force`.
   let mergeBase = null;
   try {
     mergeBase = runGit('merge-base', 'HEAD', upstreamRef) || null;
   } catch {
     mergeBase = null;
   }
-
-  // `true` when the file's current content cannot be proven identical to `ref`.
-  // An unreadable ref answers `true`: keeping a candidate costs a warning, and
-  // dropping one costs the user their edits with no warning at all.
-  const fileDiffersFrom = (ref, file) => {
+  let baseline = mergeBase;
+  if (!baseline) {
     try {
-      return runGit('diff', '--ignore-cr-at-eol', '--numstat', ref, '--', file).trim().length > 0;
+      baseline = runGit('rev-list', '--max-parents=0', 'HEAD')
+        .split('\n').map((l) => l.trim()).filter(Boolean)[0] || null;
     } catch {
-      return true;
+      baseline = null;
     }
-  };
+  }
 
   const differsFromUpstream = new Set(diffNames(upstreamRef));
+  // No readable history at all leaves the previous `HEAD` fallback: it diffs
+  // against the working tree, so it finds uncommitted edits only, and the
+  // attribution below then has no history to consult.
+  const changedLocally = new Set(diffNames(baseline || 'HEAD'));
 
-  // Without a merge-base, the fallback has to stay inside the same contract:
-  // over-report, never under-report. `HEAD` is the wrong direction, because it
-  // diffs against the working tree and a customization already COMMITTED in
-  // HEAD is invisible to it — the file diffs clean, drops out of the candidate
-  // set, and apply() replaces it with no warning and no .bak. The upstream
-  // difference is the inclusive alternative, and the per-file refinement below
-  // still strips what it over-reports.
-  const changedLocally = new Set(mergeBase ? diffNames(mergeBase) : differsFromUpstream);
-  for (const file of [...changedLocally]) {
-    let delivered = null;
+  if (changedLocally.size > 0) {
+    const localRange = baseline ? `${baseline}..HEAD` : 'HEAD';
+
+    // One walk of the install's own history answers, for every candidate at
+    // once, which update commit (if any) last CHANGED the file. A preserved
+    // path is skipped by the checkout, so an update commit that changed a file
+    // installed upstream's content there; one that merely carried the user's
+    // file along does not list it (#4170).
+    const deliveredBy = new Map();
     try {
-      delivered = runGit(
-        'log', '-1', '--format=%H', '--grep=^chore: auto-update system files', 'HEAD', '--', file,
-      ).trim() || null;
+      const log = runGit(
+        'log', '--name-only', '--format=%x1e%H',
+        '--grep=^chore: auto-update system files', localRange, '--', ...paths,
+      );
+      let commit = null;
+      for (const raw of log.split('\n')) {
+        const line = raw.trim();
+        if (!line) continue;
+        if (line.startsWith('\x1e')) {
+          commit = line.slice(1).trim() || null;
+          continue;
+        }
+        if (commit && changedLocally.has(line) && !deliveredBy.has(line)) {
+          deliveredBy.set(line, commit);
+        }
+      }
     } catch {
-      // Unreadable history (shallow clone): keep the candidate rather than
+      // Unreadable history (shallow clone): report the candidates rather than
       // guess, same degradation contract as diffNames.
-      delivered = null;
     }
-    // No update ever delivered this file, so nothing upstream put it there and
-    // the merge-base difference stands as the user's.
-    if (!delivered) continue;
-    // Still differs from the version upstream installed here, or the check
-    // could not run: the user's.
-    if (fileDiffersFrom(delivered, file)) continue;
-    // Identical to what upstream delivered: the merge-base difference is the
-    // update's own work, not a local edit.
-    changedLocally.delete(file);
+
+    // Compare each candidate against the update commit that installed it,
+    // grouped so the number of diffs is the number of DISTINCT update commits,
+    // not the number of files. Identical content means the merge-base
+    // difference is the update's own work, not a local edit.
+    const byCommit = new Map();
+    for (const [file, commit] of deliveredBy) {
+      if (!byCommit.has(commit)) byCommit.set(commit, []);
+      byCommit.get(commit).push(file);
+    }
+    for (const [commit, files] of byCommit) {
+      try {
+        const stat = runGit('diff', '--ignore-cr-at-eol', '--numstat', commit, '--', ...files);
+        const stillDiffers = new Set(
+          stat.split('\n').map((l) => l.trim()).filter(Boolean)
+            .map((l) => l.split('\t')[2]).filter(Boolean),
+        );
+        for (const file of files) {
+          if (!stillDiffers.has(file)) changedLocally.delete(file);
+        }
+      } catch {
+        // An unreadable comparison keeps the candidates: over-report.
+      }
+    }
+
+    // Files no update commit ever changed. Upstream's own history decides
+    // whether the current content is still attributable to the user: content
+    // that upstream published for the path since the merge-base is upstream's
+    // (a fix it adopted identically and has since moved past), and only
+    // content upstream never shipped is the user's.
+    const undelivered = [...changedLocally].filter((file) => !deliveredBy.has(file));
+    if (undelivered.length > 0) {
+      const publishedRange = mergeBase ? `${mergeBase}..${upstreamRef}` : upstreamRef;
+      // `path -> Set<blob sha>` from a raw diff/log dump. Field 3 is the new
+      // side: the worktree for `git diff`, the commit's own version for
+      // `git log --raw`. `--no-abbrev` because the two dumps are compared
+      // against each other, and abbreviated shas are only comparable within
+      // one dump. Zero shas (additions and deletions) are skipped.
+      const rawShas = (text) => {
+        const map = new Map();
+        for (const raw of text.split('\n')) {
+          if (!raw.startsWith(':')) continue;
+          const parts = raw.split('\t')[0].split(' ');
+          const path = raw.slice(raw.indexOf('\t') + 1);
+          const sha = parts[3];
+          if (!path || !sha || /^0+$/.test(sha)) continue;
+          if (!map.has(path)) map.set(path, new Set());
+          map.get(path).add(sha);
+        }
+        return map;
+      };
+      let worktreeShas = null;
+      let publishedShas = null;
+      try {
+        worktreeShas = rawShas(runGit('diff', '--raw', '--no-abbrev', '--no-renames', upstreamRef, '--', ...undelivered));
+      } catch {
+        worktreeShas = null;
+      }
+      try {
+        publishedShas = rawShas(runGit(
+          'log', '--raw', '--no-abbrev', '--no-renames', '--format=%x1e%H', publishedRange, '--', ...undelivered,
+        ));
+      } catch {
+        publishedShas = null;
+      }
+      if (worktreeShas && publishedShas) {
+        for (const file of undelivered) {
+          const worktree = worktreeShas.get(file);
+          const published = publishedShas.get(file);
+          if (!worktree || !published) continue;
+          for (const sha of worktree) {
+            if (published.has(sha)) {
+              changedLocally.delete(file);
+              break;
+            }
+          }
+        }
+      }
+    }
   }
 
   const atRisk = [...changedLocally].filter((file) => differsFromUpstream.has(file));

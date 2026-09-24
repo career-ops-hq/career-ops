@@ -655,12 +655,15 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
 
 // ── 20. With no merge-base, a COMMITTED customization is still reported ──
 //    The candidate set normally comes from the merge-base. When that call fails
-//    (a shallow clone, or unrelated histories), the fallback has to keep the
-//    same contract: over-report, never under-report. Falling back to `HEAD`
-//    breaks it, because a diff against HEAD compares the index and working tree,
-//    so a customization already committed is invisible — the file diffs clean,
-//    leaves the candidate set, and apply() replaces it with no warning and no
-//    .bak. That is the exact loss this detector exists to prevent.
+//    (a shallow clone, unrelated histories), the baseline falls back to the
+//    install's own first commit, and a customization that differs from it is
+//    still attributed to the user: content that no update installed and
+//    upstream never published is the user's, wherever the history starts.
+//    A fallback that only diffs against `HEAD` would miss it, because it
+//    compares the index and working tree and a customization already committed
+//    is invisible there: the file diffs clean, leaves the candidate set, and
+//    apply() replaces it with no warning and no .bak. That is the exact loss
+//    this detector exists to prevent.
 //
 //    Modelled with an orphan `unreachable` branch standing in for a ref with no
 //    common ancestor, which is what makes `git merge-base HEAD upstream` fail.
@@ -695,5 +698,71 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
     fail('#20 the fixture did not break merge-base, so the fallback was never exercised');
   } else {
     fail(`#20 expected the committed customization in the candidate set, got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 21. No merge-base with NO local edits: nothing is reported ──
+//    A fresh `git init` copy shares no ancestor with the fetched ref, so
+//    merge-base fails. The upstream difference is not a usable baseline there:
+//    every file upstream has touched since the copy differs from upstream, and
+//    reporting all of them preserves them on that update and on every later
+//    one, so those files never receive another upstream version without
+//    `--force`. With no local edits there is nothing to attribute and the
+//    result is empty.
+//
+//    This is the same fixture shape as the unrelated-histories case in
+//    updater-upgrade-safety.test.mjs, with the copy spelled out: one commit
+//    holding the install, an unrelated fetched ref that moved two files on.
+{
+  const repo = makeRepo();
+  repo.g('checkout', '-q', '--orphan', 'fetched');
+  writeFileSync(join(repo.dir, 'modes', 'pdf.md'), 'shipped pdf v2\n');
+  writeFileSync(join(repo.dir, 'generate-cover-letter.mjs'), 'shipped script v2\n');
+  repo.g('add', '-A');
+  repo.g('commit', '-qm', 'unrelated fetched history');
+  repo.g('checkout', '-q', 'main');
+
+  let mergeBaseFailed = false;
+  try {
+    repo.g('merge-base', 'HEAD', 'fetched');
+  } catch {
+    mergeBaseFailed = true;
+  }
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'fetched', repo.ctx);
+  if (mergeBaseFailed && atRisk.length === 0) {
+    pass('with no merge-base and no local edits, nothing is reported');
+  } else if (!mergeBaseFailed) {
+    fail('#21 the fixture did not break merge-base, so the fallback was never exercised');
+  } else {
+    fail(`#21 expected [], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 22. A local fix upstream adopted identically and has since changed past ──
+//    The install writes a fix; upstream ships the exact same content (so the
+//    checkout that adopted it was a no-op and no update commit ever changed the
+//    file); then upstream changes it again. The content is upstream's now: the
+//    fix is inside the newer upstream version, and reporting the file as a
+//    customization would pin it to the version upstream already moved past.
+//    The comparison is against upstream's published versions, not against what
+//    the update installed, because here there is no installed version to
+//    compare: the update never changed the file.
+{
+  const repo = makeRepo();
+  writeFileSync(join(repo.dir, 'generate-cover-letter.mjs'), 'local linkedin fix\n');
+  repo.g('commit', '-qam', 'local fix');
+  upstreamChange(repo, 'generate-cover-letter.mjs', 'local linkedin fix\n');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  // The update to v2 checks the adopted file out byte-identically (no-op) and
+  // installs pdf.md.
+  replayUpdate(repo, '2');
+  upstreamChange(repo, 'generate-cover-letter.mjs', 'broader cover fix\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 0) {
+    pass('a fix upstream adopted identically and moved past is not reported');
+  } else {
+    fail(`#22 expected [], got ${JSON.stringify(atRisk)}`);
   }
 }

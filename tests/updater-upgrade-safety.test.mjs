@@ -127,23 +127,19 @@ console.log('\n🧪 Testing updater upgrade safety (#2337, #2007)...');
   rmSync(dir, { recursive: true, force: true });
 }
 
-// ── 1b. unrelated histories: no merge-base must degrade, not throw (#2337) ──
-// When HEAD and the upstream ref share no history (a shallow clone, or a foreign
-// root), `git merge-base` errors. locallyModifiedSystemFiles must swallow that
-// and still return an array: a divergence warning we cannot compute must never
-// abort the update. Kept separate from the missing-entry assertion so this
-// path is exercised on its own.
+// ── 1b. unrelated histories: no merge-base is not an invitation to over-report ──
+// When HEAD and the upstream ref share no history (a fresh `git init` copy, or
+// a foreign root), `git merge-base` errors. locallyModifiedSystemFiles must
+// swallow that and still return an array: a divergence warning we cannot
+// compute must never abort the update. Kept separate from the missing-entry
+// assertion so this path is exercised on its own.
 //
-// The candidate set in this case comes from the upstream difference rather than
-// from `HEAD`, because with no shared ancestor nothing can prove a file's
-// current content is upstream's rather than the user's. `HEAD` diffs against the
-// index and the working tree, so a customization already COMMITTED here is
-// invisible to it: the file drops out of the candidate set and apply() replaces
-// it with no warning and no `.bak`. Over-reporting costs a "keep your version?"
-// prompt on a file that was about to be overwritten anyway; under-reporting
-// costs the user's work, which is the loss this detector exists to prevent.
-// The per-file refinement in locallyModifiedSystemFiles still strips what it
-// over-reports wherever a delivered blob can be identified.
+// What it must NOT do is report the file. The fixture's file still holds the
+// exact content its own history started from, so nothing here is attributable
+// to a local edit, and the expected result is empty. Baselining on the
+// upstream difference instead (the previous shape of this fallback) reports
+// every file upstream has moved since the copy, which then gets preserved on
+// every update and never updates again without `--force`.
 {
   const { dir, g, ctx } = makeRepo('co-upgrade-orphan-');
   writeFixture(dir, 'generate-cover-letter.mjs', ['// cover base']);
@@ -163,12 +159,12 @@ console.log('\n🧪 Testing updater upgrade safety (#2337, #2007)...');
   } catch {
     threw = true;
   }
-  if (!threw && Array.isArray(result) && result.includes('generate-cover-letter.mjs')) {
-    pass('#2337: with no merge-base, a file the upstream ref would overwrite is still reported, without throwing');
+  if (!threw && Array.isArray(result) && result.length === 0) {
+    pass('#2337: with no merge-base, a file with no local edit is not reported, without throwing');
   } else if (threw || !Array.isArray(result)) {
     fail(`unrelated-histories path mishandled (threw=${threw}, got=${JSON.stringify(result)})`);
   } else {
-    fail(`#2337 regression: with no merge-base a file about to be overwritten went unreported (got: ${JSON.stringify(result)})`);
+    fail(`#2337 regression: with no merge-base an unattributable file was reported (got: ${JSON.stringify(result)})`);
   }
 
   rmSync(dir, { recursive: true, force: true });
