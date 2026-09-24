@@ -351,18 +351,36 @@ function mergeTwoWithUrls(existingUrl, additionUrl, existingStatus = 'Evaluated'
   } finally { cleanup(env); }
 }
 
+// A merge is not a row count. `rows.length === 1` alone is satisfied just as
+// well by merge-tracker SKIPPING the addition outright — the one surviving row
+// is then the ORIGINAL, and the case passes while asserting nothing about the
+// behaviour it exists to pin. The addition's own score and report link are what
+// only a real merge can produce, so assert those too. Cells are read by index
+// rather than searched for in the row: `2-acme.md` sitting in the Notes cell
+// would satisfy a row-wide match and mean nothing.
+function assertMerged(rows, why) {
+  assert.equal(rows.length, 1, `${why}: expected the row to be UPDATED, got ${rows.length} rows (duplicate)`);
+  const cells = rows[0].split('|').map(s => s.trim());
+  assert.equal(cells[5], '4.1/5',
+    `${why}: merged row must carry the ADDITION's score 4.1/5, not the original's 4.0/5 — a skipped addition also leaves exactly one row`);
+  // Substring, not equality: merge-tracker rewrites the link relative to the
+  // tracker's own directory, so this reads `[2](../reports/2-acme.md)` here.
+  assert.ok(cells[8].includes('2-acme.md'),
+    `${why}: merged row must carry the addition's report link 2-acme.md, got ${cells[8]}`);
+}
+
 ok('aggregator vs aggregator: one requisition, two boards, stays ONE row', () => {
   const rows = mergeTwoWithUrls(
     'https://www.linkedin.com/jobs/view/4001',
     'https://www.indeed.com/viewjob?jk=abc123');
-  assert.equal(rows.length, 1, `expected the row to be UPDATED, got ${rows.length} rows (duplicate)`);
+  assertMerged(rows, 'one requisition re-listed on two aggregator boards');
 });
 
 ok('aggregator vs employer board: same requisition, stays ONE row', () => {
   const rows = mergeTwoWithUrls(
     'https://www.linkedin.com/jobs/view/4001',
     'https://boards.greenhouse.io/acme/jobs/7001');
-  assert.equal(rows.length, 1, `expected the row to be UPDATED, got ${rows.length} rows (duplicate)`);
+  assertMerged(rows, 'aggregator vs employer board, same requisition');
 });
 
 ok('REGRESSION: two employer-board URLs are still proof of two distinct openings', () => {
@@ -409,25 +427,31 @@ ok('slug-vs-id spellings of ONE LinkedIn posting still collapse to ONE row', () 
   const rows = mergeTwoWithUrls(
     'https://www.linkedin.com/jobs/view/4001',
     'https://www.linkedin.com/jobs/view/director-of-marketing-at-acme-4001');
-  assert.equal(rows.length, 1, 'same posting id → not evidence → fuzzy tier decides');
+  assertMerged(rows, 'same posting id → not evidence → fuzzy tier decides');
 });
 
 ok('uk. vs www. host variants of ONE Indeed posting still collapse to ONE row', () => {
   const rows = mergeTwoWithUrls(
     'https://uk.indeed.com/viewjob?jk=abc123',
     'https://www.indeed.com/viewjob?jk=abc123');
-  assert.equal(rows.length, 1, 'same posting id across regional hosts → ONE row');
+  assertMerged(rows, 'same posting id across regional hosts');
 });
 
-ok('an aggregator whose id shape is unmapped stays UNKNOWN (#3652 preserved)', () => {
-  // Deliberate and documented: url-key.mjs only extracts IDs it can point at a
-  // verified shape for. An unmapped board keeps exactly today's behaviour
-  // rather than a guessed regex, whose failure mode is splitting one posting
-  // into two rows — the outcome the cross-host gate was rejected for.
+ok('KNOWN LIMITATION: an unmapped aggregator id shape over-merges two requisitions', () => {
+  // This pins today's behaviour; it does not endorse it. JV_1 and JV_2 are two
+  // DIFFERENT listings, and with no extractable id they fold into ONE row — the
+  // over-merge direction, which loses the second posting. It is accepted here
+  // only because the alternative available today is a guessed regex, whose own
+  // failure mode is splitting one posting into two rows: the outcome the
+  // cross-host gate was rejected for. url-key.mjs extracts only ids it can
+  // point at a verified shape for, so the fix is a verified Glassdoor shape,
+  // and the workaround meanwhile is the req-id-in-notes rule (#1524). Pinned so
+  // that adding that shape is a deliberate change with a failing test behind it
+  // rather than a silent behavioural flip.
   const rows = mergeTwoWithUrls(
     'https://www.glassdoor.com/job-listing/director-of-marketing-acme-JV_1.htm',
     'https://www.glassdoor.com/job-listing/director-of-marketing-acme-JV_2.htm');
-  assert.equal(rows.length, 1, 'no id rule for this board yet → fuzzy tier still decides');
+  assertMerged(rows, 'no id rule for this board yet → fuzzy tier still decides');
 });
 
 ok('row with `---` in its URL (Workday slug) stays visible to dedup', () => {
