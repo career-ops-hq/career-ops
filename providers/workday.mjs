@@ -119,11 +119,17 @@ const CONFIRMED_DEAD_API_STATUSES = new Set([422, 401, 403]);
  */
 async function confirmDeadViaCareersPage(ep, ctx) {
   try {
-    await ctx.fetchText(ep.jobBase, {
+    const body = await ctx.fetchText(ep.jobBase, {
       redirect: 'manual',
       headers: { 'user-agent': BROWSER_LIKE_USER_AGENT, 'accept-language': 'en-US,en;q=0.9' },
     });
-    return false; // 200 — careers page is fine, board is alive
+    // Every confirmed case so far reaches the marker through the catch below
+    // (a non-2xx status) — this only guards the shape where a tenant serves
+    // it on a 200 instead. Safe to check unconditionally: a known-live tenant
+    // (tempus, 2026-09) does NOT carry this string on its 200 response, unlike
+    // the outage-page URL, which is boilerplate present on every Workday page
+    // regardless of health and is deliberately never checked on a 200 body.
+    return typeof body === 'string' && body.includes(WORKDAY_MAINTENANCE_MARKER);
   } catch (err) {
     if (err.status >= 300 && err.status < 400) return WORKDAY_OUTAGE_REDIRECT_RE.test(err.location || '');
     return typeof err.body === 'string' && err.body.includes(WORKDAY_MAINTENANCE_MARKER);

@@ -794,6 +794,24 @@ try {
     else fail(`workday non-outage redirect: expected status 401, got ${JSON.stringify(err.status)}`);
   }
 
+  // A 200 careers page whose body still carries the maintenance marker is
+  // also relabeled — every confirmed case so far reaches the marker through
+  // a non-2xx status, but a 200-status variant is worth covering since the
+  // marker is safe to check unconditionally (confirmed live: a known-alive
+  // tenant's 200 body does NOT carry this string, unlike the outage-page URL,
+  // which is boilerplate present on every Workday page regardless of health).
+  const dead200Entry = { name: 'Dead200Co', careers_url: 'https://dead200co.wd5.myworkdayjobs.com/careers' };
+  try {
+    await workday.fetch(dead200Entry, mkWorkdayCtx(
+      async () => { const err = new Error('HTTP 422'); err.status = 422; throw err; },
+      { fetchText: async () => '<script>window.location.href = "https://community.workday.com/maintenance-page";</script>' },
+    ));
+    fail('workday.fetch() should have thrown for a confirmed-dead tenant on a 200 careers page');
+  } catch (err) {
+    if (err.status === 404) pass('workday.fetch() relabels a 422 + maintenance-page marker on a 200 careers body as a synthetic 404');
+    else fail(`workday dead-tenant relabel (200 body): expected status 404, got ${JSON.stringify(err.status)}`);
+  }
+
   // Same 422, but the careers page is clean (no maintenance marker) — the
   // original 422 must propagate unchanged, not get swept into "dead" on the
   // status code alone (measured live: 2 of 614 raw-422 tenants were like this).
