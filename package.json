@@ -48,6 +48,7 @@
     "patterns": "node analyze-patterns.mjs",
     "calibrate": "node calibrate.mjs",
     "upskill": "node upskill.mjs",
+    "career-profile": "node career-profile.mjs",
     "add": "node add-entry.mjs",
     "reposts": "node detect-reposts.mjs",
     "digest": "node weekly-digest.mjs",

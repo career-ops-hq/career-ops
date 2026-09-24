@@ -29,6 +29,7 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `contacto.md` | `contacto` | LinkedIn outreach messages |
 | `deep.md` | `deep` | Deep company-research prompt |
 | `interview.md` | `interview` | Interactive profile & CV onboarding |
+| `master-profile.md` | `master-profile` | Source-backed Master Career Profile import and review |
 | `interview-prep.md` | `interview-prep` | Company-specific interview intelligence |
 | `interview-redflag.md` | `interview-redflag` | Company red-flag detector |
 | `offer-prep.md` | `offer-prep` | Contract reading companion (offer stage) |
