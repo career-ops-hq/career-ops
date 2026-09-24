@@ -202,3 +202,30 @@ console.log('\n🧪 Testing updater channel resolution (release tag vs. main)...
     fail(threw ? `threw, but without naming the rejected tag: ${threw.message}` : 'a malformed tag resolved instead of throwing');
   }
 }
+
+// ── 11. The tag must be exactly career-ops-vX.Y.Z (#3845 review) ────────────
+// SEMVER_RE is suffix-anchored, so the prefix check plus SEMVER_RE let
+// 'career-ops-vpreview-v1.32.0' through (right prefix, valid `-v1.32.0`
+// suffix) and apply() would have fetched it. The check is now one anchored
+// match; these shapes must all throw, naming the tag.
+for (const tag of ['career-ops-vpreview-v1.32.0', 'career-ops-v', 'career-ops-v1.32', 'career-ops-v1.32.0-rc.1', 'career-ops-v1.32.0 ']) {
+  const fakeCurlGet = async () => JSON.stringify({ tag_name: tag });
+  let threw = null;
+  try {
+    await resolveTargetRef([], {}, { curlGet: fakeCurlGet });
+  } catch (err) {
+    threw = err;
+  }
+  const expected = tag.trim();
+  if (expected === 'career-ops-v1.32.0') {
+    // Surrounding whitespace is trimmed before the match, as tag_name always was.
+    if (!threw) pass(`'${JSON.stringify(tag)}' (whitespace only) still resolves after trimming`);
+    else fail(`a whitespace-padded real tag threw: ${threw.message}`);
+    continue;
+  }
+  if (threw && threw.message.includes(`'${expected}'`) && /--channel main/.test(threw.message)) {
+    pass(`'${expected}' is rejected by name, not fetched`);
+  } else {
+    fail(threw ? `'${expected}' threw without naming it: ${threw.message}` : `'${expected}' resolved instead of throwing`);
+  }
+}

@@ -1904,6 +1904,27 @@ function resolveChannel(argv, env) {
 // `web-vX.Y.Z` — see resolveTargetRef()'s doc comment for why this matters.
 const RELEASE_TAG_PREFIX = 'career-ops-v';
 
+// The whole tag, anchored at both ends. SEMVER_RE is suffix-anchored (it has
+// to be, to read `career-ops-v1.9.0` and `v1.9.0` alike), so the prefix check
+// plus SEMVER_RE on its own let `career-ops-vpreview-v1.32.0` through: right
+// prefix, and a valid `-v1.32.0` suffix. A release tag is exactly the prefix
+// followed by X.Y.Z, nothing between.
+export const RELEASE_TAG_RE = new RegExp(`^${RELEASE_TAG_PREFIX}(\\d+\\.\\d+\\.\\d+)$`);
+
+/**
+ * The version a career-ops release tag names (`career-ops-v1.33.0` → `1.33.0`),
+ * or '' for anything that is not exactly such a tag. Shared by apply()'s
+ * resolveTargetRef() and check()'s latestRelease(), so the prompt and the
+ * install agree on what counts as a release.
+ *
+ * @param {string} tagName
+ * @returns {string}
+ */
+export function releaseTagVersion(tagName) {
+  const match = String(tagName || '').trim().match(RELEASE_TAG_RE);
+  return match ? match[1] : '';
+}
+
 /**
  * Resolve the git ref apply() should fetch from CANONICAL_REPO.
  *
@@ -1964,10 +1985,10 @@ export async function resolveTargetRef(argv, env, ctx = {}) {
       'Retry, or run with --channel main to update from the latest commit on main instead.',
     );
   }
-  // Prefix AND shape: 'career-ops-vnot-a-version' passes a prefix-only check
-  // but isn't a real release tag either — SEMVER_RE (shared with the VERSION
-  // and release-tag parsing above) is the same bar a genuine tag must clear.
-  if (!tagName.startsWith(RELEASE_TAG_PREFIX) || !SEMVER_RE.test(tagName)) {
+  // Prefix AND shape, as one anchored match: 'career-ops-vnot-a-version'
+  // passes a prefix-only check, and 'career-ops-vpreview-v1.32.0' passes a
+  // prefix check plus the suffix-anchored SEMVER_RE — neither is a release.
+  if (!releaseTagVersion(tagName)) {
     // Almost certainly the sibling `web` component's tag surfacing because
     // release.yml's Latest-reassignment step didn't run (wrong prefix) — see
     // the doc comment above — or a malformed tag (right prefix, no valid
