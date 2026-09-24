@@ -41,7 +41,7 @@ test('cover-letter achievements retain DOM order in the PDF text stream', async 
     CLOSING_BLOCK: '<p>CLOSINGMARK</p>',
   });
   const text = await rawPdfText(page, html);
-  expectInOrder(text, ['OPENINGMARK', 'PROFILEMARK', 'FIRSTACHIEVEMENT', 'SECONDACHIEVEMENT', 'PROBLEMMARK', 'CLOSINGMARK']);
+  expectInOrder(text, ['OPENINGMARK', 'PROFILEMARK', '• FIRSTACHIEVEMENT', '• SECONDACHIEVEMENT', 'PROBLEMMARK', 'CLOSINGMARK']);
 });
 
 test('modern CV headings precede their section bodies in the PDF text stream', async ({ page }) => {
