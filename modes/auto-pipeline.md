@@ -12,6 +12,7 @@ If the input is a **URL** (not pasted JD text), follow this strategy to extract 
 
 1. **Playwright (preferred):** Most job portals (Lever, Ashby, Greenhouse, Workday) are SPAs. Use `browser_navigate` + `browser_snapshot` to render and read the JD.
    - **Opt-in — CLI extractor (`scan.extractor: cli` in `config/profile.yml`):** run `node browser-extract.mjs <url>` (default `--mode jd`) instead; it returns compact `{ "url", "title", "text" }` — just the distilled JD main text rather than the full page a11y tree, so the model processes fewer tokens (board-dependent — modest on clean boards, larger on chrome-heavy SPAs). Use its `text` as the JD. **Fall back silently** to `browser_navigate` + `browser_snapshot` if it errors or is missing. Read-only (navigate + read, no clicks/fills), so it never applies to the apply-form step below.
+   - The CLI extractor reads only the outer document. If its output lacks a real JD or apply path, use Playwright to check for an embedded iframe before making any closure decision, even when the extractor returned successfully.
 2. **WebFetch (fallback):** For static pages (ZipRecruiter, WeLoveProduct, company career pages).
 3. **WebSearch (last resort):** Search for the role title + company in secondary portals that index the JD in static HTML.
 

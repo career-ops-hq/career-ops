@@ -9,6 +9,7 @@ When the candidate pastes a job (text or URL), ALWAYS deliver the 7 blocks (A-F 
 When the candidate pastes a **URL** (not JD text), confirm the posting is still live before doing any evaluation. A dead link must never reach Block A — a 404/expired page wastes a full A-H evaluation, report, and PDF on phantom content.
 
 1. Get the page content: if you arrived here from `auto-pipeline` (its Step 0.5 already navigated and cleared the link), reuse that snapshot — do not navigate again. On a direct URL entry, navigate with Playwright (`browser_navigate` + `browser_snapshot`) and read the title, URL, and visible content. **Opt-in:** if `scan.extractor: cli` is set in `config/profile.yml`, run `node browser-extract.mjs <url>` (default `--mode jd`) instead and use its compact `{ "url", "title", "text" }` (the distilled JD main text rather than the full page a11y tree — fewer tokens for the model, board-dependent), **falling back silently** to `browser_navigate` + `browser_snapshot` if it errors or is missing.
+   - The CLI extractor reads only the outer document. If its output lacks a real JD or apply path, use Playwright to check for an embedded iframe before making any closure decision, even when the extractor returned successfully.
 2. Classify the posting:
    - **active posting evidence:** title/role + a real job description or an application/apply path
    - **closed posting evidence:** expired/closed/"no longer accepting applications", missing JD with only nav/footer after the iframe check below, hard redirect to a generic careers/search page, or 404/410
