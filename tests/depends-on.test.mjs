@@ -53,6 +53,37 @@ test('a fenced block is not the document', () => {
   assert.deepEqual(parseDependsOn('```\n## Depends on\n\n#99\n```\n'), []);
 });
 
+test('a fence longer than three characters is still a fence', () => {
+  // stripFences looked for a closing run matching the opening marker exactly,
+  // so a four-character fence never closed and the sample inside it was read as
+  // a declaration. A required check that blocks on a documented example is the
+  // false positive this parser exists to avoid.
+  assert.deepEqual(parseDependsOn('~~~~\nDepends on #99\n~~~~\n'), []);
+  assert.deepEqual(parseDependsOn('````\nDepends on #99\n````\n'), []);
+  // Controls: the three-character forms that already worked must keep working,
+  // otherwise "closes the 4-char hole" is indistinguishable from "drops
+  // everything".
+  assert.deepEqual(parseDependsOn('```\nDepends on #99\n```\n'), []);
+  assert.deepEqual(parseDependsOn('~~~\nDepends on #99\n~~~\n'), []);
+  // And a real declaration outside any fence still parses.
+  assert.deepEqual(parseDependsOn('```\nsample\n```\n\nDepends on #42\n'), [42]);
+});
+
+test('an unclosed fence runs to the end of the body', () => {
+  // GFM: a fence with no closing line extends to the end of the document.
+  assert.deepEqual(parseDependsOn('```\nDepends on #99\n'), []);
+});
+
+test('a code span wrapping a bold anchor is documentation', () => {
+  // BOLD scanned the raw body, so it lifted the inner text out of a code span
+  // before code spans were removed, and a body documenting the syntax declared
+  // a dependency on its own example.
+  assert.deepEqual(parseDependsOn('`**Depends on #99**`\n'), []);
+  // Control: the same bold OUTSIDE a code span is a real declaration. Without
+  // this, stripping spans before the BOLD scan could silently kill the feature.
+  assert.deepEqual(parseDependsOn('**Depends on #99**\n'), [99]);
+});
+
 test('a code span is not a reference', () => {
   assert.deepEqual(parseDependsOn('## Depends on\n\n`#99` is the format. #1 is real.\n'), [1]);
 });

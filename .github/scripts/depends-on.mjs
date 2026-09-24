@@ -37,9 +37,34 @@ const BOLD = /\*\*[^*\n]*depends on[^*\n]*\*\*/gi;
 const REF = /#(\d+)\b/g;
 
 // Fences first: a body that documents this feature shouldn't trip it.
+//
+// Scanned line by line rather than with one regex, because the regex form
+// needed a backreference to the opening marker and so only ever closed a fence
+// of exactly that length. GFM allows a fence of three OR MORE characters and
+// requires the closing run to be at least as long as the opening one, so
+// ~~~~ and ```` never closed and their samples were read as declarations.
+// A fence that never closes runs to the end of the document, also per GFM.
+const FENCE_OPEN = /^[ \t]*(`{3,}|~{3,})/;
+const FENCE_CLOSE = /^[ \t]*(`{3,}|~{3,})[ \t]*$/;
 function stripFences(text) {
-  return text.replace(/^[ \t]*(```|~~~).*$[\s\S]*?^[ \t]*\1[ \t]*$/gm, '');
+  const kept = [];
+  let open = null;
+  for (const line of text.split('\n')) {
+    if (open === null) {
+      const m = FENCE_OPEN.exec(line);
+      if (m) { open = m[1]; continue; }
+      kept.push(line);
+      continue;
+    }
+    const close = FENCE_CLOSE.exec(line);
+    if (close && close[1][0] === open[0] && close[1].length >= open.length) open = null;
+  }
+  return kept.join('\n');
 }
+
+// A code span of any delimiter length, so ``#99`` documents the format the same
+// way `#99` does.
+const CODE_SPAN = /(`+)[^\n]*?\1/g;
 
 export function parseDependsOn(body, self = null) {
   if (typeof body !== 'string' || !body.trim()) return [];
@@ -54,10 +79,15 @@ export function parseDependsOn(body, self = null) {
     if (HEADING.test(line)) { inSection = true; collected.push(line); continue; }
     if (inSection || LINE.test(line)) collected.push(line);
   }
-  for (const m of doc.matchAll(BOLD)) collected.push(m[0]);
+  // Scan a span-stripped copy: BOLD reads the whole body rather than one line,
+  // so against the raw text it lifted a bold anchor OUT of the code span that
+  // was documenting it, and the removal below never saw those backticks.
+  // Stripping spans from `doc` itself instead would change what the line rules
+  // above match, turning ``Depends on #99`` into a real declaration.
+  for (const m of doc.replace(CODE_SPAN, '').matchAll(BOLD)) collected.push(m[0]);
 
   // Code spans carry the format, not a reference: `#99` is documentation.
-  const text = collected.join('\n').replace(/`[^`\n]*`/g, '');
+  const text = collected.join('\n').replace(CODE_SPAN, '');
   const out = [];
   for (const m of text.matchAll(REF)) {
     const n = Number(m[1]);
