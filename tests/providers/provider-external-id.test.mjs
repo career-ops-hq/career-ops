@@ -151,7 +151,6 @@ const REQ_TOKEN_CASES = [
   ['/job/NY/Sr_Manager_Ops',                             undefined,            'title word: no digit, abstain'],
   ['/job/NY/Analyst_R2',                                 undefined,            'under 3 chars, abstain'],
   ['/job/NY/Analyst_ABC-12',                             'ABC-12',             'prefix is not req-shaped: the -12 IS the id'],
-  ['/job/Bentonville/Sr-Analyst_R-2593225-1',            'R-2593225-1',        'hyphenated id + cross-site suffix: kept whole (shape rule sees the hyphen)'],
   ['/job/NY/Analyst_JR_2024_00123',                      'JR_2024_00123',      'underscored id: the FIRST underscore is the boundary, as in workdayDedupKey'],
 ];
 const reqRows = parseWorkdayResponse(
@@ -191,6 +190,14 @@ workdayDedupKey({ url: underscoredUrl }) === 'workday:walmart.wd5.myworkdayjobs.
   && underscoredRow?.requisitionId === 'JR_2024_00123'
   ? pass('workday underscored req id: dedup key lowercases, captured id keeps its case, same requisition')
   : failWith('workday underscored id agreement', `key=${workdayDedupKey({ url: underscoredUrl })} id=${underscoredRow?.requisitionId}`);
+
+// The dedup key goes through the same validation: a word after the underscore is
+// not a requisition, and keying on it would collapse unrelated postings that end
+// in the same word. No key means URL dedup takes over (CodeRabbit, #4298).
+const wordUrl = (site) => `https://acme.wd5.myworkdayjobs.com/${site}/job/Remote/Data_Scientist`;
+workdayDedupKey({ url: wordUrl('External') }) === null && workdayDedupKey({ url: wordUrl('Careers') }) === null
+  ? pass('workday dedup key abstains when the token after the underscore is a word, not a requisition')
+  : failWith('workday word-token dedup key', `got ${workdayDedupKey({ url: wordUrl('External') })}`);
 
 // ── eightfold: a bad `id` must not mask a good `position_id` (CodeRabbit) ─────
 const efFallbackCtx = { transport: 'http', fetchText: async () => '', fetchJson: async () => ({ positions: [

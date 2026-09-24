@@ -324,24 +324,28 @@ function reqTokenFromSegment(segment) {
   return stripRepostSuffixKeepCase(segment.slice(underscoreIdx + 1));
 }
 
-// Position alone does not identify a req: plenty of Workday titles contain an
-// underscore, so the trailing segment of `/job/Remote/Data_Scientist` is the word
-// "Scientist", and `/job/NY/Sr_Manager_Ops` yields "Ops". Two unrelated postings
-// whose titles happen to end in the same word would then share a requisition id —
-// the same collision the location slug used to cause, one layer along.
+// Position alone does not identify a req. A segment with no requisition after
+// its underscore — `/job/Remote/Data_Scientist` — leaves the word "Scientist",
+// and two unrelated postings ending in the same word would share an id and a
+// dedup key: the same collision the location slug used to cause, one layer along.
 //
 // A Workday req id always carries at least one digit (R167982, 10154966, JR113711);
 // a title word never does. Validating the token's SHAPE is what separates them, and
 // it is why bulletFields corroboration is not needed: the format check is stronger
-// than a free-text match against a field with no guaranteed slot.
+// than a free-text match against a field with no guaranteed slot. The captured id
+// and workdayDedupKey() both go through this check, so neither keys on a word.
 const REQ_SHAPE_RE = /\d/;
+
+/** @param {string} segment @returns {string} the validated token, or '' */
+function validReqToken(segment) {
+  const token = reqTokenFromSegment(segment);
+  if (token.length < 3 || !REQ_TOKEN_CHARS_RE.test(token)) return '';
+  return REQ_SHAPE_RE.test(token) ? token : '';
+}
 
 function reqTokenFromPath(externalPath) {
   if (typeof externalPath !== 'string') return undefined;
-  const segment = externalPath.split('/').filter(Boolean).pop() || '';
-  const token = reqTokenFromSegment(segment);
-  if (token.length < 3 || !REQ_TOKEN_CHARS_RE.test(token)) return undefined;
-  return REQ_SHAPE_RE.test(token) ? token : undefined;
+  return validReqToken(externalPath.split('/').filter(Boolean).pop() || '') || undefined;
 }
 
 // bulletFields is deliberately NOT consulted. It is tenant-configurable free text
@@ -452,9 +456,10 @@ export function workdayDedupKey(job) {
   const segments = parsed.pathname.split('/').filter(Boolean);
   const lastSegment = segments[segments.length - 1];
   if (!lastSegment) return null;
-  // Same token rule as the captured requisitionId; only the key is lowercased.
-  // No underscore means no title/requisition-ID separator: nothing to key on.
-  const reqId = reqTokenFromSegment(lastSegment).toLowerCase();
+  // Same validated token as the captured requisitionId; only the key is
+  // lowercased. No requisition-shaped token (no underscore, or only a title
+  // word after it) means nothing to key on, and URL dedup takes over.
+  const reqId = validReqToken(lastSegment).toLowerCase();
   if (!reqId) return null;
   return `workday:${parsed.hostname.toLowerCase()}:${reqId}`;
 }
