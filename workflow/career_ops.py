@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
@@ -21,10 +22,10 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 try:
-    from workflow.discovery import discover
+    from workflow.discovery import capture_jd, discover
     from workflow.application_lifecycle import ApplicationStore, mutate as mutate_application
 except ModuleNotFoundError:  # Direct script invocation keeps only workflow/ on sys.path.
-    from discovery import discover
+    from discovery import capture_jd, discover
     from application_lifecycle import ApplicationStore, mutate as mutate_application
 
 os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
@@ -90,15 +91,22 @@ def canonical_score_input(value: str) -> str:
 
 
 def canonical_scan_input(value: str) -> str:
-    source = json.loads(value) if value.lstrip().startswith("{") else json.loads(Path(value).read_text())
-    if "source" in source:
-        return value
+    try:
+        source = json.loads(value) if value.lstrip().startswith("{") else json.loads(Path(value).read_text())
+    except (json.JSONDecodeError, OSError) as error:
+        raise ValueError("scan requires a scan_input_v1 JSON file or object") from error
+    if not isinstance(source, dict) or "source" in source:
+        raise ValueError("scan input must be one scan_input_v1 object, not a workflow envelope")
     required = {"schema_version", "opportunity_id", "url", "company", "role", "jd", "captured_at", "liveness"}
     missing = sorted(required - source.keys())
     if missing:
         raise ValueError("Scan input missing: " + ", ".join(missing))
     if source["schema_version"] != "scan_input_v1":
         raise ValueError("Unsupported scan input schema")
+    if any(not isinstance(source[key], str) or not source[key].strip() for key in ("opportunity_id", "url", "company", "role", "captured_at")):
+        raise ValueError("Scan input identity and capture fields must be nonempty strings")
+    if not isinstance(source["jd"], str) or source["liveness"] not in {"active", "uncertain"}:
+        raise ValueError("Scan input JD or liveness is invalid")
     inputs = {
         "source": source,
         "cv": (INPUT_ROOT / "cv.md").read_text(),
@@ -191,6 +199,7 @@ class BusinessStore:
     """Own task identity, input validity, active ownership and formal results."""
 
     def __init__(self, path: Path):
+        self.path = path
         self.db = sqlite3.connect(path, timeout=5, isolation_level=None)
         self.db.row_factory = sqlite3.Row
         existing = self.db.execute(
@@ -320,20 +329,24 @@ class BusinessStore:
         if prior and not re_evaluate:
             raise ValueError(f"A {module} result already exists; pass --re-evaluate for changed inputs")
         waiting = self.db.execute(
-            "SELECT task_id,status FROM tasks WHERE opportunity_id=? AND module=? AND status='waiting' ORDER BY rowid DESC LIMIT 1",
+            "SELECT task_id,status,input_hash FROM tasks WHERE opportunity_id=? AND module=? AND status='waiting' ORDER BY rowid DESC LIMIT 1",
             (opportunity_id, module),
         ).fetchone()
         if waiting and not re_evaluate:
-            return {**dict(waiting), "reused": False}
+            if waiting["input_hash"] != input_hash:
+                raise ValueError("Waiting task has different inputs; resume it with --input")
+            return {"task_id": waiting["task_id"], "status": waiting["status"], "reused": False}
         self.db.execute("BEGIN IMMEDIATE")
         try:
             active = self.db.execute(
-                "SELECT task_id,status FROM tasks WHERE opportunity_id=? AND (status='running' OR (status='waiting' AND module='apply'))",
+                "SELECT task_id,module,status,input_hash FROM tasks WHERE opportunity_id=? AND (status='running' OR (status='waiting' AND module='apply'))",
                 (opportunity_id,),
             ).fetchone()
             if active:
+                if active["module"] != module or active["input_hash"] != input_hash:
+                    raise ValueError("Another task owns this opportunity; resume or complete it first")
                 self.db.execute("COMMIT")
-                return {**dict(active), "reused": False}
+                return {"task_id": active["task_id"], "status": active["status"], "reused": False}
             task_id = str(uuid.uuid4())
             self.db.execute(
                 "INSERT INTO tasks(task_id,opportunity_id,module,status,input_hash,workflow_version,input_payload) VALUES(?,?,?,'running',?,?,?)",
@@ -729,6 +742,9 @@ class Runtime:
             result = subprocess.run(
                 [*command, phase], input=json.dumps(payload, ensure_ascii=False), text=True,
                 capture_output=True, timeout=max(1, remaining), cwd=ROOT,
+                env={**os.environ, "CAREER_OPS_DRAFT_ROOT": os.environ.get(
+                    "CAREER_OPS_DRAFT_ROOT", str(self.store.path.parent / "workflow-drafts")
+                )},
             )
         except subprocess.TimeoutExpired as error:
             self.store.add_usage(state["task_id"], time.monotonic() - self.started_at, 0)
@@ -998,13 +1014,10 @@ def run_task(
 
 
 def start_and_run(directory: Path, opportunity: str, module: str, input_text: str, crash_at: str | None, re_evaluate: bool = False) -> dict:
-    store = BusinessStore(directory / "opportunities.db")
     if module == "scan":
         input_text = canonical_scan_input(input_text)
-        if not input_text.startswith("{"):
-            store.close()
-            raise ValueError("scan requires a scan_input_v1 JSON file")
-    elif module == "score" and input_text.startswith("scan:"):
+    store = BusinessStore(directory / "opportunities.db")
+    if module == "score" and input_text.startswith("scan:"):
         scan = store.module_result(input_text.removeprefix("scan:"), "scan")
         if not scan or scan["outcome"] != "jd_report":
             store.close()
@@ -1023,7 +1036,7 @@ def start_and_run(directory: Path, opportunity: str, module: str, input_text: st
             store.close()
             raise ValueError("Current score is stale for the scan or candidate inputs")
         input_text = apply_inputs(scan["artifact"], score, [])
-    else:
+    elif module == "apply":
         store.close()
         raise ValueError("apply requires score:<opportunity_id>")
     inputs = json.loads(input_text) if input_text.startswith("{") else None
@@ -1041,17 +1054,118 @@ def start_and_run(directory: Path, opportunity: str, module: str, input_text: st
     return run_task(directory, task["task_id"], start_state=initial_state(task), crash_at=crash_at)
 
 
+def discovery_query(store: BusinessStore) -> tuple[str, str]:
+    """Select the latest immutable capture and JD version for a discovered row."""
+    has_source_evidence = bool(store.db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_evidence'"
+    ).fetchone())
+    has_page_versions = bool(store.db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='page_evidence_versions'"
+    ).fetchone())
+    capture_select = "(SELECT payload FROM source_evidence s WHERE s.opportunity_id=o.id ORDER BY s.id DESC LIMIT 1)" if has_source_evidence else "NULL"
+    page_join = "LEFT JOIN page_evidence_versions p ON p.id=(SELECT id FROM page_evidence_versions v WHERE v.opportunity_id=o.id ORDER BY v.id DESC LIMIT 1)" if has_page_versions else "LEFT JOIN page_evidence p ON p.opportunity_id=o.id"
+    return capture_select, page_join
+
+
+def discovered_scan_source(opportunity: sqlite3.Row, refreshed: dict | None = None) -> dict:
+    """Build one scan input only from a current, identity-bound source capture."""
+    opportunity_id = str(opportunity["id"])
+    capture = json.loads(opportunity["capture_payload"]) if opportunity["capture_payload"] else {}
+    snapshot = (
+        {"text": refreshed["text"], "retrieved_at": refreshed["retrieved_at"],
+         "final_url": refreshed["url"], "content_hash": digest(refreshed["text"])}
+        if refreshed and refreshed.get("status") == "captured"
+        else capture.get("scan_jd") or {}
+    )
+    metadata = capture.get("_capture", {})
+    jd = snapshot.get("text") or opportunity["content"] or ""
+    captured_at = snapshot.get("retrieved_at") or metadata.get("retrieved_at", "")
+    try:
+        capture_age = (datetime.now(timezone.utc) - datetime.fromisoformat(captured_at.replace("Z", "+00:00"))).total_seconds()
+    except (TypeError, ValueError):
+        capture_age = float("inf")
+    current_snapshot = (
+        (refreshed is not None or (capture.get("url") or metadata.get("url")) == opportunity["url"])
+        and snapshot.get("final_url") == opportunity["url"]
+        and isinstance(snapshot.get("text"), str)
+        and snapshot.get("content_hash") == digest(snapshot["text"])
+        and 0 <= capture_age < 86400
+    )
+    current_capture = current_snapshot or (
+        metadata.get("method") in {"workday_cxs_api", "oraclecloud_detail_api", "smartrecruiters_detail_api", "successfactors_job_page", "phenom_job_page", "beesite_job_page", "ikea_job_page", "jibeapply_job_page", "avature_job_page", "eightfold_job_page", "mtr_taleo_job_page", "official_job_page", "browser_snapshot"}
+        and metadata.get("status") == 200
+        and metadata.get("url") == opportunity["url"]
+        and metadata.get("content_hash") == digest(jd)
+        and 0 <= capture_age < 86400
+    )
+    evidence = (
+        {"method": "browser_snapshot", "status": "captured", "url": opportunity["url"],
+         "final_url": snapshot.get("final_url"), "content_hash": snapshot.get("content_hash")}
+        if current_snapshot else metadata if current_capture else {"reason": "No current verified source capture"}
+    )
+    return {
+        "schema_version": "scan_input_v1", "opportunity_id": opportunity_id,
+        "source_contract_version": 3,
+        "url": opportunity["url"], "company": opportunity["company"], "role": opportunity["role"],
+        "captured_at": captured_at or opportunity["captured_at"] or time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "capture_method": "browser_snapshot" if current_snapshot else metadata.get("method", "unknown"),
+        "liveness": "active" if current_capture else "uncertain",
+        "liveness_evidence": evidence,
+        "location_evidence": capture.get("structured_posting", {}).get("jobLocation")
+            or capture.get("jobPostingInfo", {}).get("location") or capture.get("location"),
+        "employment_evidence": capture.get("structured_posting", {}).get("employmentType"),
+        "jd": jd,
+    }
+
+
+def current_discovered_scan_source(opportunity: sqlite3.Row, directory: Path) -> dict:
+    """Keep stale or missing evidence Unknown unless one guarded refresh succeeds."""
+    source = discovered_scan_source(opportunity)
+    if source["liveness"] == "active":
+        return source
+    refreshed = capture_jd(directory, opportunity["url"])
+    return discovered_scan_source(opportunity, refreshed) if refreshed else source
+
+
+def scan_discovered(directory: Path, opportunity_id: str, re_evaluate: bool = False) -> dict:
+    """Start the scan graph from a retained provider capture by opportunity ID."""
+    store = BusinessStore(directory / "opportunities.db")
+    try:
+        capture_select, page_join = discovery_query(store)
+        row = store.db.execute(
+            f"SELECT o.id,o.url,o.company,o.role,p.content,p.captured_at,{capture_select} AS capture_payload "
+            f"FROM opportunities o {page_join} WHERE o.id=?", (opportunity_id,),
+        ).fetchone()
+        if not row:
+            raise ValueError(f"Discovered opportunity not found: {opportunity_id}")
+        source = current_discovered_scan_source(row, directory)
+        waiting = store.db.execute(
+            "SELECT task_id,input_hash FROM tasks WHERE opportunity_id=? AND module='scan' "
+            "AND status='waiting' AND waiting_reason='source_access_unknown' ORDER BY rowid DESC LIMIT 1",
+            (opportunity_id,),
+        ).fetchone()
+    finally:
+        store.close()
+    input_text = json.dumps(source, ensure_ascii=False)
+    if waiting:
+        if source["liveness"] == "active" and digest(canonical_scan_input(input_text)) != waiting["input_hash"]:
+            return resume_task(directory, waiting["task_id"], input_text, None)
+        return view(directory, waiting["task_id"])
+    return start_and_run(directory, opportunity_id, "scan", input_text, None, re_evaluate)
+
+
 def cron_score(directory: Path) -> dict:
     """Advance at most one discovered scanner record through scan and score."""
     store = BusinessStore(directory / "opportunities.db")
     try:
         if not store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='opportunities'").fetchone():
             return {"status": "idle", "reason": "scanner_store_not_initialized"}
+        capture_select, page_join = discovery_query(store)
         opportunity = store.db.execute(
-            """
-            SELECT o.id,o.url,o.company,o.role,p.content,p.captured_at
+            f"""
+            SELECT o.id,o.url,o.company,o.role,p.content,p.captured_at,{capture_select} AS capture_payload
             FROM opportunities o
-            LEFT JOIN page_evidence p ON p.opportunity_id=o.id
+            {page_join}
             WHERE NOT EXISTS (
               SELECT 1 FROM results r
               WHERE r.opportunity_id=CAST(o.id AS TEXT) AND r.module='score'
@@ -1064,8 +1178,16 @@ def cron_score(directory: Path) -> dict:
             AND NOT EXISTS (
               SELECT 1 FROM tasks t
               WHERE t.opportunity_id=CAST(o.id AS TEXT) AND t.status='waiting'
+                AND NOT (t.module='scan' AND t.waiting_reason='source_access_unknown')
             )
-            ORDER BY o.id LIMIT 1
+            ORDER BY EXISTS(
+              SELECT 1 FROM tasks t WHERE t.opportunity_id=CAST(o.id AS TEXT)
+                AND t.status='waiting' AND t.module='scan'
+            ), COALESCE((
+              SELECT json_extract(c.payload,'$.at') FROM tasks t
+              JOIN task_context c ON c.task_id=t.task_id AND c.key='source_probe'
+              WHERE t.opportunity_id=CAST(o.id AS TEXT) AND t.status='waiting' AND t.module='scan'
+            ), ''), o.id LIMIT 1
             """
         ).fetchone()
         if not opportunity:
@@ -1073,23 +1195,28 @@ def cron_score(directory: Path) -> dict:
         opportunity_id = str(opportunity["id"])
         scan = store.module_result(opportunity_id, "scan")
         active = store.db.execute(
-            "SELECT task_id,module,status FROM tasks WHERE opportunity_id=? AND status IN ('running','waiting')",
+            "SELECT task_id,module,status,waiting_reason,input_hash FROM tasks WHERE opportunity_id=? AND status IN ('running','waiting')",
             (opportunity_id,),
         ).fetchone()
     finally:
         store.close()
     if active:
+        if active["status"] == "waiting" and active["module"] == "scan" and active["waiting_reason"] == "source_access_unknown":
+            source = current_discovered_scan_source(opportunity, directory)
+            input_text = json.dumps(source, ensure_ascii=False)
+            if source["liveness"] != "active" or digest(canonical_scan_input(input_text)) == active["input_hash"]:
+                store = BusinessStore(directory / "opportunities.db")
+                try:
+                    store.set_context(active["task_id"], "source_probe", {"at": datetime.now(timezone.utc).isoformat()})
+                finally:
+                    store.close()
+                return {"status": "waiting", "opportunity_id": opportunity_id, "reason": "source_access_unknown"}
+            result = resume_task(directory, active["task_id"], input_text, None)
+            return {"status": "advanced", "opportunity_id": opportunity_id, "task": result}
         result = run_task(directory, active["task_id"])
         return {"status": "advanced", "opportunity_id": opportunity_id, "task": result}
     if not scan:
-        source = {
-            "schema_version": "scan_input_v1", "opportunity_id": opportunity_id,
-            "url": opportunity["url"], "company": opportunity["company"], "role": opportunity["role"],
-            "captured_at": opportunity["captured_at"] or time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "liveness": "active" if opportunity["content"] else "uncertain",
-            "jd": opportunity["content"] or "",
-        }
-        result = start_and_run(directory, opportunity_id, "scan", json.dumps(source), None)
+        result = start_and_run(directory, opportunity_id, "scan", json.dumps(current_discovered_scan_source(opportunity, directory), ensure_ascii=False), None)
         return {"status": "advanced", "opportunity_id": opportunity_id, "task": result}
     if scan["outcome"] == "exclude":
         return {"status": "complete", "opportunity_id": opportunity_id, "outcome": "exclude"}
@@ -1166,10 +1293,7 @@ def resume_task(
         raise ValueError(f"Terminal task cannot resume: {task['status']}")
     if input_text is not None:
         input_text = canonical_scan_input(input_text) if task["module"] == "scan" else canonical_score_input(input_text)
-        if task["module"] == "scan" and not input_text.startswith("{"):
-            store.close()
-            raise ValueError("scan requires a scan_input_v1 JSON file")
-        if task["module"] == "scan" and input_text.startswith("{"):
+        if task["module"] == "scan":
             store.retain_source(task["opportunity_id"], input_text)
     if input_text is not None:
         task = store.reset_input(task_id, input_text)
@@ -1194,7 +1318,11 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--state", help=argparse.SUPPRESS)
     run.add_argument("--crash-at", choices=("review", "publish"), help=argparse.SUPPRESS)
     commands.add_parser("cron-score")
-    commands.add_parser("discover")
+    discover_command = commands.add_parser("discover")
+    discover_command.add_argument("--company")
+    scan_discovered_command = commands.add_parser("scan-discovered")
+    scan_discovered_command.add_argument("opportunity")
+    scan_discovered_command.add_argument("--re-evaluate", action="store_true")
     resume = commands.add_parser("resume")
     resume.add_argument("task_id")
     resume.add_argument("--input")
@@ -1231,9 +1359,12 @@ def main() -> None:
         elif args.command == "cron-score":
             result = cron_score(args.directory)
         elif args.command == "discover":
-            result = discover(args.directory, INPUT_ROOT / "portals.yml")
+            result = discover(args.directory, INPUT_ROOT / "portals.yml", company_filter=args.company)
             if result["status"] == "failed":
                 raise RuntimeError(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        elif args.command == "scan-discovered":
+            started = scan_discovered(args.directory, args.opportunity, args.re_evaluate)
+            result = view(args.directory, started["task_id"])
         elif args.command == "resume":
             resume_task(
                 args.directory, args.task_id, args.input, args.crash_at,

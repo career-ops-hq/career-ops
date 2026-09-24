@@ -66,7 +66,7 @@ def scan_evaluate(payload: dict) -> dict:
     directory = DRAFT_ROOT / key
     directory.mkdir(parents=True, exist_ok=True)
     prompt = adapter.EVIDENCE + json.dumps({
-        "browser_snapshot": source,
+        "source_capture": source,
         "cv": inputs["cv"],
         "profile": inputs["profile"],
         "targeting": inputs["targeting"],
@@ -105,7 +105,14 @@ def scan_evaluate(payload: dict) -> dict:
         "jd": source["jd"],
         "captured_at": source["captured_at"],
         "liveness": evidence["liveness"],
-        "liveness_reason": evidence["liveness_reason"],
+        "liveness_reason": (
+            f"{source.get('capture_method', 'unknown')} at {source['url']} returned "
+            f"capture {source.get('liveness_evidence', {}).get('status', 'unknown')} "
+            f"on {source['captured_at']}; content hash "
+            f"{source.get('liveness_evidence', {}).get('content_hash', 'unknown')}"
+        ) if source.get("liveness_evidence", {}).get("status") in (200, "captured") else evidence["liveness_reason"],
+        "location_evidence": source.get("location_evidence"),
+        "employment_evidence": source.get("employment_evidence"),
         "prescreen": prescreen,
     }
     return {"outcome": "jd_report", "artifact": report, "tool_calls": 1}
@@ -285,7 +292,8 @@ def evaluate(payload: dict) -> dict:
         assessment = adapter.call_agent(phase, prompt, [], directory)[0]
         assessment.update(research)
     packet = {
-        "url": jd["url"], "root": str(ROOT), "directory": str(directory),
+        "url": jd["url"], "root": str(ROOT if directory.is_relative_to(ROOT) else DRAFT_ROOT.parent),
+        "directory": str(directory),
         "fingerprint": key, "sources": assessment_inputs["sources"],
     }
     evidence = {

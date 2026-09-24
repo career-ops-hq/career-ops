@@ -16,6 +16,7 @@ workflow/.venv/bin/python workflow/career_ops.py start scan <opportunity-id> <sc
 workflow/.venv/bin/python workflow/career_ops.py start score <opportunity-id> scan:<opportunity-id>
 workflow/.venv/bin/python workflow/career_ops.py start apply <opportunity-id> score:<opportunity-id>
 workflow/.venv/bin/python -m workflow.career_ops discover
+workflow/.venv/bin/python -m workflow.career_ops scan-discovered <opportunity-id> [--re-evaluate]
 workflow/.venv/bin/python workflow/career_ops.py cron-score
 workflow/.venv/bin/python workflow/career_ops.py show <task-or-opportunity-id>
 workflow/.venv/bin/python workflow/career_ops.py list
@@ -30,9 +31,19 @@ workflow/.venv/bin/python workflow/career_ops.py application view [opportunity-i
 workflow/.venv/bin/python workflow/career_ops.py application followups
 ```
 
-All commands emit JSON. `discover` reads enabled Workday sources from
-`portals.yml`, filters them with the configured title/location rules, and saves
-the full provider response before scan. Scan produces the reviewed `jd_report_v1`; score and
+All commands emit JSON. `discover` calls the existing Node provider scanner as
+a collection tool; its configured sources, filters, deduplication and source
+health remain in that layer. The scanner writes to the same SQLite database and
+retains browser JD captures for the LangGraph scan handoff. A WebSearch handoff
+or failed capture is not a completed scan. `scan-discovered` and `cron-score`
+retry one stale or missing JD snapshot through the same guarded browser reader;
+redirects away from the posting and failed reads remain Unknown. A different
+module or changed input cannot silently reuse an active task. The scheduled
+score entry retries waiting source-Unknown scan tasks after pending jobs and
+rotates failed probes so one blocked posting does not starve another.
+`scan-discovered` can resume the same waiting task when refreshed evidence
+arrives. Scan produces the reviewed
+`jd_report_v1`; score and
 apply consume reviewed upstream results by opportunity ID. The module fingerprint
 binds those results to the current CV, profile, targeting, and rules. Existing
 valid results are reused; changed inputs require `--re-evaluate`.

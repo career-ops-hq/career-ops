@@ -68,8 +68,8 @@ with tempfile.TemporaryDirectory(prefix="career-ops-apply-") as temporary:
     call(directory, inputs, "start", "score", "job-2", "scan:job-2")
     second_draft = call(directory, inputs, "start", "apply", "job-2", "score:job-2")
     ownership_probe = source(root / "ownership.json", "job-2", "Build changed agent workflows.")
-    owned = call(directory, inputs, "start", "scan", "job-2", str(ownership_probe), "--re-evaluate")
-    assert owned["task_id"] == second_draft["task_id"] and owned["module"] == "apply"
+    call(directory, inputs, "start", "scan", "job-2", str(ownership_probe), "--re-evaluate", expected=1)
+    assert call(directory, inputs, "show", second_draft["task_id"])["status"] == "waiting"
     revised = call(directory, inputs, "resume", second_draft["task_id"], "--feedback", "Emphasize verified testing work")
     assert revised["status"] == "waiting" and revised["attempt"] == 2
     assert revised["artifact"]["version"] == 2

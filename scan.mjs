@@ -38,6 +38,7 @@
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'url';
 import path from 'path';
@@ -57,7 +58,7 @@ import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { evaluatePrescreen, hashValue } from './lib/prescreen-core.mjs';
 import { writePrescreenCache } from './lib/prescreen-cache.mjs';
-import { captureScanJds } from './lib/scan-jd.mjs';
+import { captureScanJds, readScanJd } from './lib/scan-jd.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { promoteKnownFragmentIdentity } from './url-key.mjs';
 import { openOpportunityStore } from './src/opportunities/store.mjs';
@@ -2771,8 +2772,19 @@ async function main() {
 
   // 6. Write results
   if (!dryRun && verifiedOffers.length > 0) {
-    const jdCapture = await captureScanJds(verifiedOffers);
+    const captureRoot = OPPORTUNITY_DB ? path.dirname(OPPORTUNITY_DB) : process.cwd();
+    const jdCapture = await captureScanJds(verifiedOffers, captureRoot);
     console.log('JD capture: ' + JSON.stringify(jdCapture));
+    for (const offer of verifiedOffers) {
+      const snapshot = readScanJd(offer.url, captureRoot);
+      if (!snapshot) continue;
+      offer.scan_jd = {
+        text: snapshot.text,
+        final_url: snapshot.url,
+        retrieved_at: snapshot.retrieved_at,
+        content_hash: createHash('sha256').update(snapshot.text).digest('hex'),
+      };
+    }
     persistScanPrescreens(verifiedOffers);
     if (OPPORTUNITY_DB) {
       await ingestScanOffers(OPPORTUNITY_DB, verifiedOffers);
@@ -3034,7 +3046,9 @@ async function main() {
     try {
       store.recordScanRun('configured', {
         companies: summaryCompanies, boards: summaryBoards, found: totalFound, dupes: totalDupes,
-        newAdded: verifiedOffers.length, errors: errors.length,
+        newAdded: verifiedOffers.length, errors: errors.length, handoff: agentHandoff.length,
+        failures: errors.map(({ company, error, kind }) => ({ company, error, kind })),
+        handoff_sources: agentHandoff,
       }, healthRecords);
     } finally { store.close(); }
   } else if (!dryRun) {

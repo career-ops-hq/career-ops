@@ -47,4 +47,22 @@ for years, expected in [(0, None), (None, None), (3, 3), (False, False)]:
     assert evidence["prescreen"]["years"]["verified"] == expected
     assert evidence["jd"] == "Original JD"
 
+review = {"verdict": "approve", "jd_complete": {"status": "pass", "finding": "checked"}}
+cursor = review["jd_complete"]
+for name in adapter.REVIEW_CHECKS[1:]:
+    cursor[name] = {"status": "pass", "finding": "checked"}
+    cursor = cursor[name]
+cursor.update({name: "Unknown" for name in adapter.REVIEW_GATES})
+cursor["liveness"] = "Pass"
+cursor["ready"] = False
+normalized = adapter.normalize_review(review)
+assert set(normalized["checks"]) == set(adapter.REVIEW_CHECKS)
+assert normalized["gates"]["liveness"] == "Pass" and normalized["ready"] is False
+try:
+    adapter.normalize_review({"verdict": "approve", "ready": True})
+except ValueError as error:
+    assert "Incomplete review" in str(error)
+else:
+    raise AssertionError("Incomplete review was accepted")
+
 print("workflow model adapter: parsing and evidence normalization passed")

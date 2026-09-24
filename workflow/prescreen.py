@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from datetime import datetime, timezone
 
 
 def evaluate(value: dict) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError("Prescreen evidence must be an object")
     failures, unknowns, missing = [], [], []
 
     def reason(code: str, gate: str, message: str, evidence=None) -> dict:
@@ -17,17 +20,19 @@ def evaluate(value: dict) -> dict:
         missing.append("complete_jd")
     if value.get("assessment_complete") is not True:
         missing.append("assessment_complete")
+    gates = value.get("gates") if isinstance(value.get("gates"), dict) else {}
     for name in ("location", "employment", "compensation", "company_size"):
-        gate = value.get("gates", {}).get(name)
-        if not gate or gate.get("status") not in ("pass", "fail", "unknown"):
+        gate = gates.get(name)
+        if not isinstance(gate, dict) or gate.get("status") not in ("pass", "fail", "unknown"):
             missing.append(f"gates.{name}")
         elif gate["status"] == "fail":
             failures.append(reason(f"{name}_failed", name, gate.get("reason") or f"{name} gate failed", gate.get("evidence")))
         elif gate["status"] == "unknown":
             unknowns.append(reason(f"{name}_unknown", name, gate.get("reason") or f"{name} is unknown", gate.get("evidence")))
     years = value.get("years")
-    if not years or not isinstance(years.get("required"), (int, float)) or years["required"] < 0 or (
-        years.get("verified") is not None and (not isinstance(years["verified"], (int, float)) or years["verified"] < 0)
+    numeric = lambda number: isinstance(number, (int, float)) and not isinstance(number, bool) and math.isfinite(number)
+    if not isinstance(years, dict) or "verified" not in years or not numeric(years.get("required")) or years["required"] < 0 or (
+        years["verified"] is not None and (not numeric(years["verified"]) or years["verified"] < 0)
     ):
         missing.append("years")
     elif years["verified"] is None:
@@ -42,18 +47,25 @@ def evaluate(value: dict) -> dict:
     if not isinstance(capabilities, list):
         missing.append("core_capabilities")
     else:
-        gaps = [item for item in capabilities if item.get("core") is True and item.get("mandatory") is True and item.get("match") == "gap"]
+        if any(not isinstance(item, dict) or not item.get("name") or not isinstance(item.get("core"), bool)
+               or not isinstance(item.get("mandatory"), bool)
+               or item.get("match") not in ("proven", "adjacent", "gap", "unverified") for item in capabilities):
+            missing.append("core_capabilities.items")
+        gaps = [item for item in capabilities if isinstance(item, dict) and item.get("core") is True and item.get("mandatory") is True and item.get("match") == "gap"]
         if len(gaps) >= 2:
             failures.append(reason("multiple_core_capability_gaps", "core_capabilities", f"Missing {len(gaps)} core mandatory capabilities: " + ", ".join(item["name"] for item in gaps), [item.get("evidence") for item in gaps]))
         for item in capabilities:
-            if item.get("core") is True and item.get("mandatory") is True and item.get("match") in ("adjacent", "unverified"):
+            if isinstance(item, dict) and item.get("core") is True and item.get("mandatory") is True and item.get("match") in ("adjacent", "unverified"):
                 unknowns.append(reason(f"core_capability_{item['match']}", "core_capabilities", f"{item['name']} is {item['match']}", item.get("evidence")))
     credentials = value.get("credentials")
     if not isinstance(credentials, list):
         missing.append("credentials")
     else:
+        if any(not isinstance(item, dict) or not item.get("name") or not isinstance(item.get("mandatory"), bool)
+               or item.get("status") not in ("present", "absent", "unknown") for item in credentials):
+            missing.append("credentials.items")
         for item in credentials:
-            if item.get("mandatory") is not True:
+            if not isinstance(item, dict) or item.get("mandatory") is not True:
                 continue
             if item.get("status") == "absent":
                 failures.append(reason("mandatory_credential_absent", "credentials", f"Mandatory credential absent: {item['name']}", item.get("evidence")))

@@ -31,9 +31,11 @@ Use only the supplied current rules. Do not discover repository files or read hi
 At most one retry per failed URL; no repeated alternate-method loops. Preserve failure reasons, never call failed access a closed job.
 '''
 
-EVIDENCE = '''The supplied browser_snapshot was obtained by the isolated Playwright extractor at the posting URL.
-Extract full responsibilities and qualifications from that content, not a search snippet. Do not navigate again.
-Use that same browser content to verify liveness. If incomplete or blocked, return liveness=uncertain and complete_jd=false.
+EVIDENCE = '''The supplied source_capture names its capture method and contains posting evidence from the given URL.
+Extract full responsibilities and qualifications from its JD, not a search snippet. Do not navigate again.
+Assess liveness only from the stated capture method, retrieval time and direct evidence; an old JD or API text alone is not a browser snapshot. If incomplete or blocked, return liveness=uncertain and complete_jd=false.
+official_job_page, successfactors_job_page, phenom_job_page, beesite_job_page, ikea_job_page, jibeapply_job_page, avature_job_page, and eightfold_job_page mean HTTP reads of official HTML pages; workday_cxs_api, oraclecloud_detail_api, and smartrecruiters_detail_api mean HTTP reads of official JSON APIs; only browser_snapshot means Playwright. Never call HTTP evidence browser evidence.
+Use structured location_evidence and employment_evidence when supplied; they are part of the official posting capture even if the JD prose omits them.
 Return these TOP-LEVEL fields: company,role,complete_jd,liveness,liveness_reason,assessment_complete,
 location,employment,compensation,company_size,years,core_capabilities,credentials.
 The program assembles the canonical prescreen record; do not nest fields inside prescreen or gates.
@@ -46,7 +48,7 @@ Years required=0 only if the JD states no minimum. Missing verified years must s
 Absence of proof for the full requested tenure does NOT mean zero years. Count supported relevant periods; otherwise return null.
 Prescreen: a >=3-year proven shortfall or >=2 genuinely missing core mandatory capabilities fails; adjacent/unverified does not.
 Apply actual location/employment/size/payroll/compensation requirements from profile and targeting; salary absent is unknown.
-Quote the exact page evidence for liveness; closed signals take precedence over generic Apply text.
+Quote the exact source evidence for liveness; closed signals take precedence over generic Apply text.
 This is a compact gate check, not the report: keep each reason/evidence under 100 Chinese characters.
 Only list mandatory core capabilities here; preferred qualifications belong to the later report. No prose outside JSON.
 '''
@@ -72,6 +74,7 @@ compensation:{score,rationale,evidence:[]},team:{score,rationale,evidence:[]},co
 sections:{overview,capabilities,compensation,questions,legitimacy,risks,checklist}}.
 Candidate source IDs are cv/profile/targeting/articles/voice and writing1, writing2, ...; JD is jd. Research source IDs are supplied web1, web2,...
 Every quote must be a contiguous EXACT substring of the supplied source, no edits or ellipses.
+The jd_report also carries official structured location_evidence and employment_evidence. Use those fields for location and employment claims even when JD prose omits them; never claim location or employment is absent when these fields supply it.
 Compensation and team may receive a non-null integer score from convergent same-direction signals: for example, market salary benchmark plus company size plus role level/city; company culture as a clue; verifiable same-team practice supporting team; or financials supporting company. Use score:null only when there is no convergent signal, such as a genuinely anonymous employer with no data. For every non-null score, the rationale must write out the fact -> scope -> inference -> rating chain, and at least one real quoted evidence source is required.
 Sections are concise Markdown strings, no level-two headings. Capabilities map EVERY material responsibility AND required/preferred qualification
 to Proven/Adjacent/Gap/Unverified, exact candidate evidence, hiring impact and response. Use one compact row per qualification.
@@ -82,7 +85,7 @@ Do not repeat the research object, write YAML, calculate scores, hashes or sourc
 '''
 
 REVIEW = '''Independently review the final report against frozen evidence and rules. Do not trust the evaluator's conclusions.
-Check complete JD, each literal citation's substantive support, employer identity, dates/location/level/team applicability,
+Check complete JD, each literal citation's substantive support, employer identity, the jd_report's structured location_evidence and employment_evidence, dates/location/level/team applicability,
 contradictions, full capability coverage, production-vs-prototype claims, no double-counting, and all hard gates/readiness.
 Return these TOP-LEVEL fields: verdict,jd_complete,source_grounding,dimension_support,capability_coverage,
 no_double_count,gate_evidence,location,employment,size,compensation,eligibility,liveness,ready.
@@ -94,6 +97,43 @@ For passing checks, use at most 120 Chinese characters per finding; for failing 
 Approve only if all checks pass. Liveness must be supported by the supplied browser evidence, and readiness requires verified work conditions.
 Do not generate a hash or rewrite the report. Missing information may remain Unknown; fabrication is a revision.
 '''
+
+REVIEW_CHECKS = ('jd_complete', 'source_grounding', 'dimension_support', 'capability_coverage', 'no_double_count', 'gate_evidence')
+REVIEW_GATES = ('location', 'employment', 'size', 'compensation', 'eligibility', 'liveness')
+
+
+def normalize_review(value):
+    """Unnest a complete model review without inventing or dropping judgments."""
+    required = {'verdict', 'ready', *REVIEW_CHECKS, *REVIEW_GATES}
+    fields = {}
+
+    def collect(node):
+        if not isinstance(node, dict):
+            return
+        for key, item in node.items():
+            if key in required:
+                if key in fields:
+                    raise ValueError(f'Duplicate review field: {key}')
+                fields[key] = item
+            if isinstance(item, dict):
+                collect(item)
+
+    collect(value)
+    missing = required - fields.keys()
+    if missing:
+        raise ValueError(f'Incomplete review: {", ".join(sorted(missing))}')
+    if fields['verdict'] not in ('approve', 'revise') or not isinstance(fields['ready'], bool):
+        raise ValueError('Invalid review verdict or readiness')
+    checks = {}
+    for key in REVIEW_CHECKS:
+        item = fields[key]
+        if not isinstance(item, dict) or item.get('status') not in ('pass', 'fail') or not item.get('finding'):
+            raise ValueError(f'Invalid review check: {key}')
+        checks[key] = {'status': item['status'], 'finding': item['finding']}
+    gates = {key: fields[key] for key in REVIEW_GATES}
+    if any(value not in ('Pass', 'Fail', 'Unknown') for value in gates.values()):
+        raise ValueError('Invalid review gate')
+    return {'verdict': fields['verdict'], 'ready': fields['ready'], 'checks': checks, 'gates': gates}
 
 
 def parse_object(text):
@@ -222,9 +262,7 @@ def call_agent(phase, prompt, tools, directory):
     if phase == 'research':
         value = freeze_research(value, result.get('messages', []))
     elif phase == 'review':
-        value = {'verdict': value['verdict'], 'ready': value['ready'],
-                 'checks': {k: value[k] for k in ('jd_complete', 'source_grounding', 'dimension_support', 'capability_coverage', 'no_double_count', 'gate_evidence')},
-                 'gates': {k: value[k] for k in ('location', 'employment', 'size', 'compensation', 'eligibility', 'liveness')}}
+        value = normalize_review(value)
     elif phase in ('assessment', 'repair'):
         value = {'dimensions': {k: value[k] for k in ('direction', 'compensation', 'team', 'company')},
                  'sections': value['sections']}

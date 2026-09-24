@@ -3,7 +3,7 @@ import { openOpportunityStore } from '../opportunities/store.mjs';
 import { createHash } from 'node:crypto';
 
 export function normalizeDiscoveryOffer(offer) {
-  const description = offer.description ?? offer.text ?? '';
+  const description = offer.scan_jd?.text ?? offer.description ?? offer.text ?? '';
   return {
     ...offer,
     title: offer.title ?? offer.role,
