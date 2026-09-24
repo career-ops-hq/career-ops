@@ -13,13 +13,13 @@ test('doctor finds the CLI extractor in the code checkout with a separate data r
   try {
     mkdirSync(join(dataRoot, 'config'));
     writeFileSync(join(dataRoot, 'config', 'profile.yml'), 'scan:\n  extractor: cli\n');
-    const result = spawnSync(process.execPath, [join(root, 'doctor.mjs'), '--json', '--target', dataRoot], {
+    const result = spawnSync(process.execPath, [join(root, 'doctor.mjs'), '--target', dataRoot], {
       cwd: root,
       encoding: 'utf8',
     });
-    assert.equal(result.status, 0, result.stderr);
-    const state = JSON.parse(result.stdout);
-    assert.ok(!state.warnings.some(warning => warning.includes('browser-extract.mjs is missing')));
+    assert.equal(result.signal, null, result.stderr);
+    assert.match(result.stdout, /✓ Scan extractor: cli \(browser-extract\.mjs\)/);
+    assert.doesNotMatch(result.stdout, /browser-extract\.mjs is missing/);
   } finally {
     rmSync(dataRoot, { recursive: true, force: true });
   }
