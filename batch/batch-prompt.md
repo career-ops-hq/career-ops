@@ -348,6 +348,8 @@ Provide a score table:
 | Red flags | -X if any |
 | **Global** | **X.X/5** |
 
+Decide the Global Score once as the holistic judgment across these dimensions, applying any `modes/_custom.md` Scoring Rules. Do not average report blocks A–H. Copy the same value into the report header, Machine Summary `score`, and tracker addition; do not recalculate it at each write.
+
 #### Machine Summary
 
 Create a machine-readable summary from the completed A-G evaluation and global score. Keep field names exact, use YAML, and do not add prose inside the fence.

@@ -85,6 +85,8 @@ The evaluation scores five dimensions, integrated into one global score of 1-5. 
 | Red flags | Blockers, warnings (negative adjustments) |
 | **Global** | Holistic judgment integrating the five dimensions above (no arithmetic formula) |
 
+Decide the Global Score once from these dimensions, applying any user-specific Scoring Rules in `modes/_custom.md`. The report header, Machine Summary `score`, and application tracker must record that same value. A–H are report sections, not numeric inputs to average; Block B requirement importance and Block G posting legitimacy remain separate from the 1–5 score.
+
 **Score interpretation:**
 - 4.5+ → Strong match, recommend applying immediately
 - 4.0-4.4 → Good match, worth applying
