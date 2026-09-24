@@ -7,7 +7,11 @@
  * NEVER touches user data (cv.md, profile.yml, _profile.md, data/, reports/).
  *
  * Usage:
- *   node update-system.mjs check      # Check if update available
+ *   node update-system.mjs check      # Check if a newer release is published
+ *                                     # (merges to main between releases
+ *                                     # never prompt; see checkStatus())
+ *   node update-system.mjs check --force
+ *                                     # …even for a release the user dismissed
  *   node update-system.mjs apply --confirm
  *                                     # Apply update after explicit confirmation.
  *                                     # Default channel: the newest published
@@ -21,7 +25,9 @@
  *                                     # including whatever's mid-flight
  *                                     # between a bad one and its fix.
  *   node update-system.mjs rollback   # Rollback last update
- *   node update-system.mjs dismiss    # Dismiss update check
+ *   node update-system.mjs dismiss [--version X.Y.Z]
+ *                                     # Don't ask again about this release;
+ *                                     # a newer one asks again
  *
  * See DATA_CONTRACT.md for the full system/user layer definitions.
  */
@@ -2004,26 +2010,130 @@ export async function resolveTargetRef(argv, env, ctx = {}) {
   return tagName;
 }
 
-async function check() {
-  // Respect dismiss flag
-  if (existsSync(join(ROOT, '.update-dismissed'))) {
-    console.log(JSON.stringify({ status: 'dismissed' }));
-    return;
-  }
+// ── DISMISS MARKER ──────────────────────────────────────────────
 
-  // Before any git call: on an install nested inside a foreign repository the
-  // rev-parse below reads the OUTER repo's HEAD and the drift fetch writes the
-  // OUTER repo's FETCH_HEAD, so check reports a phantom system-files-changed
-  // forever on a byte-identical install (#3334). Report the layout as its own
-  // status instead; agents ignore unknown statuses by contract (AGENTS.md),
-  // and apply() refuses the same layout with the actionable message.
-  const foreignToplevel = gitToplevelMismatch();
-  if (foreignToplevel) {
-    console.log(JSON.stringify({ status: 'not-a-git-toplevel', local: localVersion(), toplevel: foreignToplevel }));
-    return;
-  }
+const DISMISS_FILE = '.update-dismissed';
 
-  const local = localVersion();
+/**
+ * Read the dismiss marker. dismiss() writes JSON naming the release the user
+ * declined: {"version":"1.34.0","at":"<ISO>"}. Installs that dismissed before
+ * that hold a bare ISO timestamp instead: when they said no, release unknown.
+ *
+ * @param {string|null} text - the marker's contents, or null when absent.
+ * @returns {{version: string, at: string}|null}
+ */
+export function parseDismissMarker(text) {
+  if (text === null || text === undefined) return null;
+  const raw = String(text).trim();
+  let parsed = null;
+  try { parsed = JSON.parse(raw); } catch { /* legacy marker: a bare timestamp */ }
+  if (parsed && typeof parsed === 'object') {
+    const version = typeof parsed.version === 'string' && /^\d+\.\d+\.\d+$/.test(parsed.version) ? parsed.version : '';
+    const at = typeof parsed.at === 'string' && !Number.isNaN(Date.parse(parsed.at)) ? parsed.at : '';
+    return { version, at };
+  }
+  return { version: '', at: Number.isNaN(Date.parse(raw)) ? '' : raw };
+}
+
+/**
+ * Whether a "no" still covers the release on offer. A "no" answers one
+ * release, not updates in general: before, any marker silenced check() for
+ * good, so declining one prompt meant never hearing about a release again.
+ *
+ *   - A marker naming a version covers that release and older ones; a newer
+ *     release asks again.
+ *   - A legacy timestamp marker covers releases published up to that moment;
+ *     one published later asks again.
+ *   - A "no" we cannot place (no version, no usable timestamps) keeps
+ *     covering: better to miss one prompt than overrule the user's answer.
+ *
+ * @param {{version: string, at: string}|null} marker
+ * @param {string} remote - the offered release's version, X.Y.Z.
+ * @param {string} publishedAt - the offered release's published_at (ISO).
+ * @returns {boolean}
+ */
+export function dismissalCovers(marker, remote, publishedAt) {
+  if (!marker) return false;
+  if (marker.version) return compareVersions(remote, marker.version) <= 0;
+  const at = Date.parse(marker.at || '');
+  const published = Date.parse(publishedAt || '');
+  if (Number.isNaN(at) || Number.isNaN(published)) return true;
+  return published <= at;
+}
+
+function readDismissMarker() {
+  const path = join(ROOT, DISMISS_FILE);
+  return existsSync(path) ? readFileSync(path, 'utf-8') : null;
+}
+
+// ── CHECK ───────────────────────────────────────────────────────
+
+/**
+ * The newest published career-ops release: the same RELEASES_API lookup
+ * resolveTargetRef() makes for apply(), held to the same tag shape, so the
+ * prompt names exactly the release an update would install. Never throws:
+ * check() runs silently at the start of every session and answers with a
+ * status instead.
+ *
+ * @param {typeof curlGet} runCurlGet
+ * @returns {Promise<{status: 'ok', tagName: string, version: string, publishedAt: string, changelog: string}
+ *   | {status: 'offline'|'no-remote-version', tag?: string}>}
+ */
+async function latestRelease(runCurlGet) {
+  const releaseRaw = await runCurlGet(RELEASES_API, [
+    '--header', 'Accept: application/vnd.github.v3+json',
+    '--header', 'User-Agent: career-ops-update-checker',
+  ]);
+  if (releaseRaw === null) return { status: 'offline' };
+  let release = null;
+  try { release = JSON.parse(releaseRaw); } catch { /* unparseable body */ }
+  const tagName = String(release?.tag_name || '').trim();
+  const version = releaseTagVersion(tagName);
+  // A web-v* tag, a malformed one or no tag at all: apply() would refuse it
+  // (resolveTargetRef), so check() must not offer it either.
+  if (!version) return { status: 'no-remote-version', ...(tagName ? { tag: tagName } : {}) };
+  return { status: 'ok', tagName, version, publishedAt: String(release.published_at || ''), changelog: String(release.body || '') };
+}
+
+/**
+ * What check() reports, as data (check() prints it; tests call it directly).
+ *
+ * Default channel ('release'): an update is offered only when a newer
+ * career-ops release is published. apply() installs that release, not main's
+ * tip (#3845), so merges landing on main between releases never prompt — the
+ * version number decides when users are asked (#3203, #3583). The local side
+ * is VERSION: an install that tracked main before this change reads as its
+ * last release, and is offered the next one.
+ *
+ * `--channel main` keeps the previous behaviour for installs that follow
+ * main: main's VERSION (or the release, whichever is higher) plus system-file
+ * drift against main's tip (#2630).
+ *
+ * `--force` ignores the dismiss marker: the user asked to check.
+ *
+ * @param {string[]} argv
+ * @param {NodeJS.ProcessEnv} env
+ * @param {{curlGet?: typeof curlGet, localVersion?: () => string, readMarker?: () => (string|null)}} [ctx] - test seams.
+ */
+export async function checkStatus(argv, env, ctx = {}) {
+  const runCurlGet = ctx.curlGet || curlGet;
+  const local = (ctx.localVersion || localVersion)();
+  const marker = argv.includes('--force') ? null : parseDismissMarker((ctx.readMarker || readDismissMarker)());
+  if (resolveChannel(argv, env) === 'main') return checkMainChannel(local, marker, runCurlGet);
+
+  const latest = await latestRelease(runCurlGet);
+  if (latest.status !== 'ok') return { status: latest.status, local, ...(latest.tag ? { tag: latest.tag } : {}) };
+  const remote = latest.version;
+  if (compareVersions(local, remote) >= 0) return { status: 'up-to-date', local, remote };
+  if (dismissalCovers(marker, remote, latest.publishedAt)) return { status: 'dismissed', local, remote };
+  return { status: 'update-available', local, remote, reason: 'version-changed', changelog: latest.changelog.slice(0, 500) };
+}
+
+/**
+ * check() for `--channel main`: the pre-#3845 logic, unchanged apart from
+ * returning its answer and honouring a per-release dismissal.
+ */
+async function checkMainChannel(local, marker, runCurlGet) {
   let remote = '';
   let releaseVersion = '';
   let changelog = '';
@@ -2034,8 +2144,8 @@ async function check() {
   // sandbox (see curlGet() above for rationale).  Two sources are tried;
   // both failing is the only true-offline signal.
   const [rawVersion, releaseRaw] = await Promise.all([
-    curlGet(RAW_VERSION_URL),
-    curlGet(RELEASES_API, [
+    runCurlGet(RAW_VERSION_URL),
+    runCurlGet(RELEASES_API, [
       '--header', 'Accept: application/vnd.github.v3+json',
       '--header', 'User-Agent: career-ops-update-checker',
     ]),
@@ -2047,7 +2157,7 @@ async function check() {
   // deliberately conservative: version checks still work offline/behind a
   // restricted git transport.
   try { localCommit = gitQuiet('rev-parse', 'HEAD'); } catch { /* no git checkout */ }
-  const remoteRef = await curlGet('https://api.github.com/repos/career-ops-hq/career-ops/git/ref/heads/main', [
+  const remoteRef = await runCurlGet('https://api.github.com/repos/career-ops-hq/career-ops/git/ref/heads/main', [
     '--header', 'Accept: application/vnd.github+json',
     '--header', 'User-Agent: career-ops-update-checker',
   ]);
@@ -2083,9 +2193,7 @@ async function check() {
     // empty strings, which still reaches the offline branch — that's the
     // right conservative behaviour (no version = can't determine status).
     const bothNetworkFailed = rawVersion === null && releaseRaw === null;
-    const status = bothNetworkFailed ? 'offline' : 'no-remote-version';
-    console.log(JSON.stringify({ status, local }));
-    return;
+    return { status: bothNetworkFailed ? 'offline' : 'no-remote-version', local };
   }
 
   // Use the higher version between VERSION file and GitHub Release
@@ -2118,11 +2226,15 @@ async function check() {
   }
 
   if (compareVersions(local, remote) >= 0 && !systemTreeDrift) {
-    console.log(JSON.stringify({ status: 'up-to-date', local, remote, local_commit: localCommit || undefined, remote_commit: remoteCommit || undefined }));
-    return;
+    return { status: 'up-to-date', local, remote, local_commit: localCommit || undefined, remote_commit: remoteCommit || undefined };
   }
 
-  console.log(JSON.stringify({
+  // A "no" to v{remote} (drift at the same version included) holds until a
+  // newer version; no release date on this channel, so a legacy timestamp
+  // marker keeps covering.
+  if (dismissalCovers(marker, remote, '')) return { status: 'dismissed', local, remote };
+
+  return {
     status: 'update-available',
     local,
     remote,
@@ -2130,7 +2242,23 @@ async function check() {
     local_commit: localCommit || undefined,
     remote_commit: remoteCommit || undefined,
     changelog: changelog.slice(0, 500),
-  }));
+  };
+}
+
+async function check() {
+  // Before any git call: on an install nested inside a foreign repository the
+  // rev-parse below reads the OUTER repo's HEAD and the drift fetch writes the
+  // OUTER repo's FETCH_HEAD, so check reports a phantom system-files-changed
+  // forever on a byte-identical install (#3334). Report the layout as its own
+  // status instead; agents ignore unknown statuses by contract (AGENTS.md),
+  // and apply() refuses the same layout with the actionable message.
+  const foreignToplevel = gitToplevelMismatch();
+  if (foreignToplevel) {
+    console.log(JSON.stringify({ status: 'not-a-git-toplevel', local: localVersion(), toplevel: foreignToplevel }));
+    return;
+  }
+
+  console.log(JSON.stringify(await checkStatus(process.argv, process.env)));
 }
 
 // ── .gitignore RECONCILE ────────────────────────────────────────
@@ -3022,9 +3150,31 @@ function rollback() {
 
 // ── DISMISS ─────────────────────────────────────────────────────
 
-function dismiss() {
-  writeFileSync(join(ROOT, '.update-dismissed'), new Date().toISOString());
-  console.log('Update check dismissed. Run "node update-system.mjs check" or say "check for updates" to re-enable.');
+/**
+ * Record a "no" to one release. The version comes from `--version X.Y.Z`
+ * (AGENTS.md passes the `remote` that check() just offered, so no network is
+ * needed); without it, from the same release lookup check() makes. If that
+ * fails too, only the moment is recorded, and dismissalCovers() falls back
+ * to publish dates: a release published afterwards asks again.
+ *
+ * @param {string[]} [argv]
+ * @param {{curlGet?: typeof curlGet, root?: string, now?: () => Date}} [ctx] - test seams.
+ */
+export async function dismiss(argv = process.argv, ctx = {}) {
+  const idx = argv.indexOf('--version');
+  let version = idx !== -1 ? String(argv[idx + 1] || '').trim().replace(/^v/i, '') : '';
+  if (idx !== -1 && !/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error(`--version '${argv[idx + 1] ?? ''}' is not a release version (X.Y.Z). Nothing was dismissed.`);
+  }
+  if (!version) {
+    const latest = await latestRelease(ctx.curlGet || curlGet);
+    if (latest.status === 'ok') version = latest.version;
+  }
+  const at = (ctx.now ? ctx.now() : new Date()).toISOString();
+  writeFileSync(join(ctx.root || ROOT, DISMISS_FILE), JSON.stringify(version ? { version, at } : { at }) + '\n');
+  console.log(version
+    ? `Update to v${version} dismissed. You will be asked again when a newer release is out; run "node update-system.mjs check --force" or say "check for updates" to see it anyway.`
+    : 'Update dismissed. You will be asked again when a newer release is out; run "node update-system.mjs check --force" or say "check for updates" to see it anyway.');
 }
 
 // ── MAIN ────────────────────────────────────────────────────────
@@ -3067,9 +3217,9 @@ if (isCli) {
       case 'check': await check(); break;
       case 'apply': await apply(); break;
       case 'rollback': rollback(); break;
-      case 'dismiss': dismiss(); break;
+      case 'dismiss': await dismiss(); break;
       default:
-        console.log('Usage: node update-system.mjs [check|apply --confirm [--force] [--channel main]|rollback|dismiss]');
+        console.log('Usage: node update-system.mjs [check [--force] [--channel main]|apply --confirm [--force] [--channel main]|rollback|dismiss [--version X.Y.Z]]');
         process.exit(1);
     }
   } catch (err) {
