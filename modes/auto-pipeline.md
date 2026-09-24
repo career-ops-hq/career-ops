@@ -25,9 +25,10 @@ Before running any evaluation, confirm the posting is still live. The Step 0 Pla
 
 1. From the Step 0 snapshot/fetched content, classify the posting:
    - **active posting evidence:** title/role + a real job description or an application/apply path
-   - **closed posting evidence:** expired/closed/"no longer accepting applications", missing JD with only nav/footer, hard redirect to a generic careers/search page, or 404/410
-2. If the posting appears closed or the page is a dead/fallback shell, **stop here**: do not run Step 1–Step 4. Tell the candidate the link is dead, and if the entry came from `data/pipeline.md`, mark it `- [x] ~~Company | Role~~ — oferta nieaktywna`.
-3. If only JD text was pasted (no URL), there is no link to verify — skip the gate and proceed.
+   - **closed posting evidence:** expired/closed/"no longer accepting applications", missing JD with only nav/footer after the iframe check below, hard redirect to a generic careers/search page, or 404/410
+2. An empty `main` or nav/footer-only snapshot is **inconclusive** when the page contains an iframe. Company careers pages commonly embed an Ashby board (`jobs.ashbyhq.com`), or another ATS, in an iframe that loads after the outer page. Wait briefly and take one fresh snapshot; inspect the iframe content directly if the browser tool exposes it. If the iframe still cannot be read, do not infer that the posting is closed from the empty outer page alone. Try the Step 0 fallback sources or ask the candidate for the JD.
+3. If the posting has confirmed closed evidence or is a dead/fallback shell after that check, **stop here**: do not run Step 1–Step 4. Tell the candidate the link is dead, and if the entry came from `data/pipeline.md`, mark it `- [x] ~~Company | Role~~ — oferta nieaktywna`.
+4. If only JD text was pasted (no URL), there is no link to verify — skip the gate and proceed.
 
 Do not continue to Step 1 until this gate is resolved.
 
