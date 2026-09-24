@@ -819,7 +819,7 @@ try {
   try {
     await workday.fetch(flakyEntry, mkWorkdayCtx(
       async () => { const err = new Error('HTTP 422'); err.status = 422; throw err; },
-      { fetchText: async () => ({ ok: true }) },
+      { fetchText: async () => '<html><body><div id="root">FlakyCo careers</div></body></html>' },
     ));
     fail('workday.fetch() should have thrown the original 422 for a live tenant');
   } catch (err) {
