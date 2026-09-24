@@ -41,6 +41,15 @@ test('Greenhouse company URL checks the per-job API after a validated embed redi
     location: 'https://evil.example/embed/job_app?for=celonis&token=7823005003',
   } }), () => checkLivenessViaApi(greenhouse));
   assert.equal(unsafe, null);
+  const callsWithSlash = [];
+  const slashBoard = await withFetch(async (url) => {
+    callsWithSlash.push(String(url));
+    return new Response(null, { status: 301, headers: {
+      location: 'https://job-boards.greenhouse.io/embed/job_app?for=acme%2Fprivate&token=7823005003',
+    } });
+  }, () => checkLivenessViaApi(greenhouse));
+  assert.equal(slashBoard, null);
+  assert.equal(callsWithSlash.length, 1);
 });
 
 test('SmartRecruiters uses active flag, never status 200 alone', async () => {

@@ -85,7 +85,9 @@ const ATS_PROVIDERS = [
       catch { return null; }
       if (target.protocol !== 'https:' || !/(^|\.)greenhouse\.io$/.test(target.hostname)) return null;
       const board = target.searchParams.get('for');
-      if (!isSafeValue(board) || target.searchParams.get('token') !== id) return null;
+      // The board is one URL path segment. isSafeValue also accepts Workday's
+      // multi-segment paths, so reject a decoded slash here explicitly.
+      if (!isSafeValue(board) || board.includes('/') || target.searchParams.get('token') !== id) return null;
       return `https://boards-api.greenhouse.io/v1/boards/${board}/jobs/${id}`;
     },
   },
