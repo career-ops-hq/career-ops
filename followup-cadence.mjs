@@ -302,13 +302,17 @@ const REQ_LABELLED_HASH_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|
  * @returns {boolean}
  */
 function isCrossReferencedMention(text, index) {
-  const window = text.slice(Math.max(0, index - CROSS_REF_LOOKBACK), index);
+  const windowStart = Math.max(0, index - CROSS_REF_LOOKBACK);
+  const window = text.slice(windowStart, index);
   let refEnd = -1;
   // A `#NNN` glued to a preceding word character or hyphen is an external tag
   // ("job-search#7", "gh#12"), not a pointer at a tracker row. Reading it as a
   // row reference discarded the row's own date: "job-search#7; Applied
   // 2026-09-21" attributed the date to row #7.
   for (const m of window.matchAll(/(?<![\w-])#\d+\b/g)) {
+    // The lookbehind cannot see past the slice, so a tag whose `#` lands exactly
+    // on the window's first character is checked against the original text.
+    if (m.index === 0 && /[\w-]/.test(text[windowStart - 1] ?? '')) continue;
     // A `#NNN` tagged as a req/job/posting/reference id is not a row reference:
     // "Req #1311 - applied 2026-08-06" is this row's own posting id followed by
     // this row's own date, and reading it as a cross-reference would discard a

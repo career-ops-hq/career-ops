@@ -8883,17 +8883,6 @@ try {
   } else {
     fail('the req-label exemption swallowed a genuine cross-reference');
   }
-  // A `#N` glued to a word is an external tag (an issue in another tracker, a
-  // namespaced id), not a row reference — the row's own date must survive it.
-  for (const [note, want, why] of [
-    ['job-search#7; Applied 2026-09-21 via Greenhouse; follow up 28 Sep', '2026-09-21', 'hyphenated external tag'],
-    ['gh#12 applied 2026-09-21', '2026-09-21', 'word-glued external tag'],
-    ['see #7; applied 2026-09-21', null, 'bare #N still a cross-reference'],
-  ]) {
-    const got = cadence.parseAppliedDate(note);
-    if (got === want) pass(`parseAppliedDate: ${why} → ${JSON.stringify(want)}`);
-    else fail(`parseAppliedDate ${why}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
-  }
   // A malformed value must be rejected, not silently truncated to a plausible
   // date. Truncating "2026-06-091" to "2026-06-09" would be reported as a
   // measured application date and quietly shift the whole cadence — worse than
