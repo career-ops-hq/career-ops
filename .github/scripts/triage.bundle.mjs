@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // GENERADO por github-src/scripts/build.mjs: no editar a mano. Fuente: github-src/scripts/triage.mjs + bin/lib/triage-core.mjs + policy/*.json
-// {"builtAt":"2026-09-23T20:47:12.665Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
+// {"builtAt":"2026-09-23T22:20:58.081Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -743,7 +743,7 @@ async function triageOne(number, { now, firstReply, backlog = false, since = nul
     if (jev) body = upsertJevMarker(body, number, sha7(snapshot.headSha), jev);
     if (Buffer.byteLength(body) > MAX_COMMENT_BYTES && !jev) throw new Error(`primera respuesta #${number} supera ${MAX_COMMENT_BYTES} bytes`);
     await write('POST', `repos/${REPO}/issues/${number}/comments`, { body }, `primera respuesta #${number}`);
-    return;
+    return true; // publicada: cuenta para el tope del sweep
   }
   if (firstReply) log(`#${number}: sin primera respuesta (${fr.marked ? 'ya tiene marcador' : fr.maintainerSpoke ? 'ya habló un maintainer' : fr.draft ? 'borrador' : fr.maintainer ? 'autor maintainer' : 'autor bot'})`);
   if (jev && fr.marked) await persistJev(number, sha7(snapshot.headSha), jev);
@@ -755,6 +755,12 @@ const SWEEP_QUERY = `query($owner:String!,$name:String!,$after:String){ reposito
 /** Desde cuándo espera una PR a un maintainer: su creación o, si fue borrador, su último ready_for_review (un borrador no espera
  *  a nadie: la disculpa del backlog no puede contar esos días). */
 export const waitingSince = (p) => Math.max(Date.parse(p.createdAt) || 0, Date.parse(p.timelineItems?.nodes?.[0]?.createdAt || '') || 0);
+/** Orden de primeras respuestas con hueco para el backlog: las recientes hasta max - reserva, el backlog entero, el resto de recientes. */
+export function backlogFirstOrder(reply, backlog, max) {
+  const reserve = Math.min(backlog.length, Math.ceil(max / 3));
+  const r = reply.map((p) => ({ p, backlog: false })), b = backlog.map((p) => ({ p, backlog: true }));
+  return [...r.slice(0, Math.max(0, max - reserve)), ...b, ...r.slice(Math.max(0, max - reserve))];
+}
 export function sweepCandidates(prs, now, labelsPolicy = POLICIES.labels) {
   const maintainers = new Set(labelsPolicy.maintainers || []);
   return prs.filter((p) => {
@@ -786,11 +792,12 @@ async function sweep(now) {
   const { reply, backlog, stuck } = sweepPlan(all, now);
   log(`sweep: ${all.length} abiertas · ${reply.length} sin respuesta >${SWEEP_HOURS}h y ≤${BACKLOG_HOURS}h (tope ${max}) · ${backlog.length} en backlog >${BACKLOG_HOURS}h (con disculpa) · ${stuck.length} pegadas en triage/new (tope ${maxRe} re-triages)`);
   let done = 0, re = 0;
-  // Primero las recientes (se contestan a tiempo) y después el backlog, de la más vieja a la más nueva: mismo tope por pasada.
-  const firsts = [...reply.map((p) => ({ p, backlog: false })), ...backlog.map((p) => ({ p, backlog: true }))];
-  for (const { p, backlog: late } of firsts) {
-    if (done >= max) { log(`sweep: tope ${max} alcanzado, quedan ${firsts.length - done} para la próxima pasada`); break; }
-    try { await triageOne(p.number, { now, firstReply: true, backlog: late, since: waitingSince(p) }); done++; }
+  // Tope por pasada con un hueco reservado para el backlog (un tercio), para que las viejas no se queden sin acuse si siempre hay
+  // recientes: primero las recientes hasta su parte, luego el backlog de la más vieja a la más nueva, y el hueco sobrante, a las recientes.
+  const firsts = backlogFirstOrder(reply, backlog, max);
+  for (const [i, { p, backlog: late }] of firsts.entries()) {
+    if (done >= max) { log(`sweep: tope ${max} alcanzado, quedan ${firsts.length - i} para la próxima pasada`); break; }
+    try { if (await triageOne(p.number, { now, firstReply: true, backlog: late, since: waitingSince(p) })) done++; } // solo cuenta lo publicado
     catch (e) { log(`#${p.number}: fallo (${e.message.slice(0, 120)})`); }
   }
   for (const p of stuck) {

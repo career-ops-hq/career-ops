@@ -122,7 +122,10 @@ export async function main() {
     if (!pr) { orphans++; continue; } // no es el head de ninguna PR abierta (push encima, cerrada o fusionada): nada que aprobar
     let files = [];
     try { files = await getAll(`repos/${REPO}/pulls/${pr.number}/files`); }
-    catch (e) { log(`#${pr.number} ${sha.slice(0, 7)}: no pude leer sus ficheros (${e.message.slice(0, 80)}): no apruebo`); continue; }
+    catch (e) {
+      if (e.rateLimited) { stop = 'rate'; log(`#${pr.number} ${sha.slice(0, 7)}: límite de tasa de GitHub al leer sus ficheros (${e.status}): se para la pasada; la siguiente lo reintenta`); break; }
+      log(`#${pr.number} ${sha.slice(0, 7)}: no pude leer sus ficheros (${e.message.slice(0, 80)}): no apruebo`); continue;
+    }
     const d = decide({ sha, pr, files });
     if (!d.ok) { log(`#${pr.number} ${sha.slice(0, 7)}: no : ${d.why}`); continue; }
     tried++;
