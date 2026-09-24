@@ -48,7 +48,7 @@ const REF = /#(\d+)\b/g;
 // four or more spaces is indented code and stays INSIDE the block, so accepting
 // any indentation here let an indented sample line close its own fence and
 // expose the text beneath it.
-const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 function stripFences(text) {
   const kept = [];
@@ -56,7 +56,12 @@ function stripFences(text) {
   for (const line of text.split('\n')) {
     if (open === null) {
       const m = FENCE_OPEN.exec(line);
-      if (m) { open = m[1]; continue; }
+      // A BACKTICK fence's info string may not contain a backtick (GFM), so
+      // ```js`sample is ordinary text, not an opener. Treating it as one opened
+      // a fence that never closed and hid every declaration beneath it — the
+      // check then passes while the dependency is still open, which is the
+      // failure direction that actually lets a bad merge through.
+      if (m && !(m[1][0] === '`' && m[2].includes('`'))) { open = m[1]; continue; }
       kept.push(line);
       continue;
     }
@@ -70,7 +75,10 @@ function stripFences(text) {
 // way `#99` does. GFM also permits a newline inside a span, so this crosses
 // lines; a run with no matching partner simply never matches, which is what
 // keeps a lone stray backtick from swallowing the rest of the body.
-const CODE_SPAN = /(`+)[\s\S]*?\1/g;
+// The lookarounds make each delimiter a WHOLE run: without them the
+// backreference could match the first two backticks of a three-backtick run,
+// ending a span early and exposing the text inside it.
+const CODE_SPAN = /(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g;
 
 // MASK rather than delete, replacing every non-newline character with a space.
 // Deleting a span joins the text around it and shifts the lines beneath it, and
@@ -83,8 +91,13 @@ function maskCodeSpans(text) {
 
 export function parseDependsOn(body, self = null) {
   if (typeof body !== 'string' || !body.trim()) return [];
+  // GFM counts CRLF and a lone CR as line endings. Splitting on \n alone left a
+  // trailing \r on every line, which no closing-fence pattern matched, so on a
+  // CRLF body — what GitHub's own web editor submits — the first fence never
+  // closed and swallowed every declaration after it.
   // Fences are block structure and resolve before inline spans, as in GFM.
-  const doc = maskCodeSpans(stripFences(body));
+  const normalized = body.replace(/\r\n?/g, '\n');
+  const doc = maskCodeSpans(stripFences(normalized));
   const lines = doc.split(/\r?\n/);
   const collected = [];
   let inSection = false;

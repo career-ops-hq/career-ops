@@ -74,6 +74,34 @@ test('an unclosed fence runs to the end of the body', () => {
   assert.deepEqual(parseDependsOn('```\nDepends on #99\n'), []);
 });
 
+test('a CRLF body still sees declarations after a fenced block', () => {
+  // GFM counts CRLF as a line ending, and GitHub's own web editor submits it.
+  // Splitting on \n alone left a trailing \r that no closing-fence pattern
+  // matched, so the first fence never closed and swallowed everything after it.
+  // The failure direction is the dangerous one: the declaration goes MISSING,
+  // so the required check passes while the dependency PR is still open.
+  assert.deepEqual(parseDependsOn('```\r\nex\r\n```\r\nDepends on #42\r\n'), [42]);
+  assert.deepEqual(parseDependsOn('Depends on #42\r\n'), [42]);
+  assert.deepEqual(parseDependsOn('Depends on #42\r'), [42]);
+});
+
+test('a backtick in a backtick fence info string is not a fence', () => {
+  // GFM: a backtick-fenced block's info string may not contain a backtick, so
+  // ```js`sample is ordinary text. Opening a fence on it hid the declaration
+  // beneath, another silent pass while the dependency is open.
+  assert.deepEqual(parseDependsOn('```js`sample\nDepends on #42\n'), [42]);
+  // Controls: a plain info string still opens a fence, and a TILDE fence may
+  // carry a backtick in its info string.
+  assert.deepEqual(parseDependsOn('```js\nDepends on #42\n```\n'), []);
+  assert.deepEqual(parseDependsOn('~~~js`x\nDepends on #42\n~~~\n'), []);
+});
+
+test('a shorter backtick run does not close a longer one', () => {
+  // The backreference could match the first two backticks of a three-backtick
+  // run, ending a span early and exposing the text inside it.
+  assert.deepEqual(parseDependsOn('`` code ``` and ` note\nDepends on #42\n``'), []);
+});
+
 test('a fence marker under four spaces does not close its own fence', () => {
   // GFM allows a fence marker at most three spaces of indentation. Deeper than
   // that it is indented code and stays INSIDE the block, so accepting any
