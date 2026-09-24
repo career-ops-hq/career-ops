@@ -745,6 +745,70 @@ try {
     fail(`workday non-retryable 4xx warning: expected "after 1 attempts", got ${JSON.stringify(non429Warnings)}`);
   }
 
+  // fetch() dead-tenant detection — a page-0 422 followed by a careers page
+  // carrying Workday's maintenance marker is relabeled as a synthetic 404, so
+  // dead-boards.mjs's existing 404 path (shared with every other provider)
+  // picks it up with no separate counter or threshold.
+  const deadEntry = { name: 'DeadCo', careers_url: 'https://deadco.wd5.myworkdayjobs.com/careers' };
+  let deadFetchTextOpts;
+  try {
+    await workday.fetch(deadEntry, mkWorkdayCtx(
+      async () => { const err = new Error('HTTP 422'); err.status = 422; throw err; },
+      { fetchText: async (_url, opts) => { deadFetchTextOpts = opts; const err = new Error('HTTP 500'); err.status = 500; err.body = '<script>window.location.href = "https://community.workday.com/maintenance-page";</script>'; throw err; } },
+    ));
+    fail('workday.fetch() should have thrown for a confirmed-dead tenant');
+  } catch (err) {
+    if (err.status === 404) pass('workday.fetch() relabels a 422 + maintenance-page careers body as a synthetic 404');
+    else fail(`workday dead-tenant relabel: expected status 404, got ${JSON.stringify(err.status)}`);
+  }
+  if (deadFetchTextOpts?.redirect === 'manual') pass('workday.fetch() passes redirect:"manual" on the careers-page confirmation fetch (inspects Location, never follows it — SSRF guard)');
+  else fail(`workday dead-tenant confirmation fetch: expected redirect:"manual", got ${JSON.stringify(deadFetchTextOpts)}`);
+
+  // fetch() dead-board detection — a page-0 401/403 followed by a careers
+  // page redirecting to Workday's own outage page is also relabeled as a
+  // synthetic 404 (a per-board signal: a restricted/retired board redirects
+  // here even while other boards on the same tenant answer normally).
+  const outageEntry = { name: 'OutageCo', careers_url: 'https://outageco.wd105.myworkdayjobs.com/careers' };
+  try {
+    await workday.fetch(outageEntry, mkWorkdayCtx(
+      async () => { const err = new Error('HTTP 403'); err.status = 403; throw err; },
+      { fetchText: async () => { const err = new Error('HTTP 302'); err.status = 302; err.location = 'https://wd105.myworkday.com/wday/drs/outage?t=outageco&s=careers'; throw err; } },
+    ));
+    fail('workday.fetch() should have thrown for a confirmed-dead board');
+  } catch (err) {
+    if (err.status === 404) pass('workday.fetch() relabels a 403 + outage-page redirect as a synthetic 404');
+    else fail(`workday outage-redirect relabel: expected status 404, got ${JSON.stringify(err.status)}`);
+  }
+
+  // A redirect to anywhere else (e.g. a tenant rename) must not be mistaken
+  // for the outage page.
+  const renamedEntry = { name: 'RenamedCo', careers_url: 'https://renamedco.wd5.myworkdayjobs.com/careers' };
+  try {
+    await workday.fetch(renamedEntry, mkWorkdayCtx(
+      async () => { const err = new Error('HTTP 401'); err.status = 401; throw err; },
+      { fetchText: async () => { const err = new Error('HTTP 302'); err.status = 302; err.location = 'https://renamedco.wd5.myworkdayjobs.com/NewSiteName'; throw err; } },
+    ));
+    fail('workday.fetch() should have thrown the original 401 for an unrelated redirect');
+  } catch (err) {
+    if (err.status === 401) pass('workday.fetch() leaves a 401 with a non-outage redirect unrelabeled');
+    else fail(`workday non-outage redirect: expected status 401, got ${JSON.stringify(err.status)}`);
+  }
+
+  // Same 422, but the careers page is clean (no maintenance marker) — the
+  // original 422 must propagate unchanged, not get swept into "dead" on the
+  // status code alone (measured live: 2 of 614 raw-422 tenants were like this).
+  const flakyEntry = { name: 'FlakyCo', careers_url: 'https://flakyco.wd5.myworkdayjobs.com/careers' };
+  try {
+    await workday.fetch(flakyEntry, mkWorkdayCtx(
+      async () => { const err = new Error('HTTP 422'); err.status = 422; throw err; },
+      { fetchText: async () => ({ ok: true }) },
+    ));
+    fail('workday.fetch() should have thrown the original 422 for a live tenant');
+  } catch (err) {
+    if (err.status === 422) pass('workday.fetch() leaves a 422 with a clean careers page unrelabeled');
+    else fail(`workday flaky-422: expected status 422, got ${JSON.stringify(err.status)}`);
+  }
+
   // fetch() early-stop — once a page's postings are all clearly past
   // ctx.sinceMs, pagination stops without hitting max_pages, and the
   // "raise max_pages" warning does NOT fire (this isn't a cap hit).
