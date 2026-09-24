@@ -66,10 +66,10 @@ export async function main() {
     const done = [];   // cada +label y -label que sí quedó escrito
     try {
       if (op.add.length) { await rest('POST', `repos/${REPO}/issues/${op.pr}/labels`, { labels: op.add }); done.push(...op.add.map((l) => `+${l}`)); }
-      for (const l of op.remove) { try { await rest('DELETE', `repos/${REPO}/issues/${op.pr}/labels/${encodeURIComponent(l)}`); } catch (e) { if (e.status !== 404) throw e; } done.push(`-${l}`); }
+      for (const l of op.remove) { try { await rest('DELETE', `repos/${REPO}/issues/${op.pr}/labels/${encodeURIComponent(l)}`); done.push(`-${l}`); } catch (e) { if (e.status !== 404) throw e; } } // 404: ya no estaba; no es una retirada
       full++; log(`#${op.pr} ${done.join(' ') || 'sin cambios'}`);
     } catch (e) { failed.push({ pr: op.pr, done }); log(`#${op.pr}: fallo al escribir (${e.message.slice(0, 120)})${done.length ? `; sí quedó: ${done.join(' ')}` : '; no quedó nada'}`); }
-    if (done.length && touchesDirection(op)) regate.push(op.pr); // el gate debe ver lo que cambió, aunque el resto fallara
+    if (done.some((x) => x.slice(1).startsWith('direction/'))) regate.push(op.pr); // solo si cambió de verdad una label direction/*, aunque el resto fallara
   }
   for (const pr of [...new Set(regate)]) {
     try { await rest('POST', `repos/${REPO}/actions/workflows/direction-gate.yml/dispatches`, { ref: 'main', inputs: { pr: String(pr) } }); log(`#${pr}: direction-gate redisparado (cambió una label direction/*)`); }

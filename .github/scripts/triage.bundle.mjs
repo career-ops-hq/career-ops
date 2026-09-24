@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // GENERADO por github-src/scripts/build.mjs: no editar a mano. Fuente: github-src/scripts/triage.mjs + bin/lib/triage-core.mjs + policy/*.json
-// {"builtAt":"2026-09-23T22:20:58.081Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
+// {"builtAt":"2026-09-24T08:32:36.236Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -758,7 +758,8 @@ export const waitingSince = (p) => Math.max(Date.parse(p.createdAt) || 0, Date.p
 /** Orden de primeras respuestas con hueco para el backlog: las recientes hasta max - reserva, el backlog entero, el resto de recientes. */
 export function backlogFirstOrder(reply, backlog, max) {
   const reserve = Math.min(backlog.length, Math.ceil(max / 3));
-  const r = reply.map((p) => ({ p, backlog: false })), b = backlog.map((p) => ({ p, backlog: true }));
+  // El backlog, de la espera más larga a la más corta (desde el último ready_for_review): el hueco reservado va a quien más esperó.
+  const r = reply.map((p) => ({ p, backlog: false })), b = [...backlog].sort((x, y) => waitingSince(x) - waitingSince(y)).map((p) => ({ p, backlog: true }));
   return [...r.slice(0, Math.max(0, max - reserve)), ...b, ...r.slice(Math.max(0, max - reserve))];
 }
 export function sweepCandidates(prs, now, labelsPolicy = POLICIES.labels) {
