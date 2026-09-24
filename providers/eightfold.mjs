@@ -342,8 +342,10 @@ export default {
     /** @type {number|null} */
     let total = null;
     // Which API this tenant serves, decided once per fetch and reused for every
-    // page: 'v2' until a 403 proves otherwise, then 'pcsx' if the PCSX endpoint
-    // answers with a well-formed page.
+    // page: 'v2' unless its FIRST page answers 403, then 'pcsx' if the PCSX
+    // endpoint answers with a well-formed page. A 403 after v2 has served pages
+    // is not a migration signal, and switching mid-walk would splice two
+    // endpoints' orderings together (duplicated or skipped postings).
     let api = 'v2';
     let rateLimited = false;
 
@@ -379,7 +381,7 @@ export default {
         // _http.mjs's isRetryableError agrees), so it is a safe point to switch
         // APIS ONCE rather than to give up: before this, every PCSX tenant read
         // as the WAF case below and the board silently returned zero postings.
-        if (api === 'v2' && status === 403) {
+        if (api === 'v2' && page === 0 && status === 403) {
           let pcsxJson = null;
           try {
             pcsxJson = await request('pcsx');
