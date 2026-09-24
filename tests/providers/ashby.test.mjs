@@ -410,6 +410,29 @@ try {
       : fail(`ashby embed remote marker: ${JSON.stringify(byTitle)}`);
   }
 
+  // A mangled row is dropped on its own: a null entry must not throw, and a row
+  // with no usable id must not mint a ".../undefined" link (CodeRabbit, #4298).
+  {
+    const postings = [null, { ...POSTING, id: undefined, title: 'No id' }, { ...POSTING, id: '', title: 'Blank id' }, POSTING];
+    const { ctx } = recording(() => embedHtml({ organization: { name: 'Whatnot' }, jobBoard: { jobPostings: postings } }));
+    let jobs = null; let err = null;
+    try { jobs = await ashby.fetch(EMBED_ENTRY, ctx); } catch (e) { err = e; }
+    !err && jobs.length === 1 && jobs[0].externalId === POSTING.id && !jobs.some((j) => /undefined/.test(j.url))
+      ? pass('ashby embed source drops null rows and rows without a usable id, keeps the rest')
+      : fail(`ashby embed bad rows: err=${err && err.message} jobs=${JSON.stringify(jobs)}`);
+  }
+
+  // detect() claims an opted-in embed entry whose careers_url is a corporate
+  // page, via ashby.board, and names the page fetch() will read.
+  {
+    const corporate = { name: 'Whatnot', careers_url: 'https://www.whatnot.com/careers', ashby: { embed: true, board: 'whatnot' } };
+    const hit = ashby.detect(corporate);
+    hit?.url === 'https://jobs.ashbyhq.com/whatnot?embed=js'
+      && ashby.detect({ name: 'Whatnot', careers_url: 'https://www.whatnot.com/careers' }) === null
+      ? pass('ashby.detect() routes an embed entry with a corporate careers_url via ashby.board')
+      : fail(`ashby.detect() embed routing: ${JSON.stringify(hit)}`);
+  }
+
   // Without the flag nothing changes: the posting API path must not gain an
   // embed request (that is the whole reason this is opt-in).
   {

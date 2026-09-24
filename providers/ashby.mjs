@@ -346,6 +346,14 @@ async function fetchFromEmbed(entry, ctx) {
   const encodedSlug = safeEncodeURIComponent(slug);
   if (encodedSlug === null) throw new Error(`ashby: board slug for ${entry.name} cannot be URI-encoded`);
   return board.jobPostings.map((/** @type {any} */ p) => {
+    // A row the payload mangled is dropped on its own, never the board: a null
+    // entry, or one with no usable id. The id is the URL's last segment, so
+    // without it `String(undefined)` minted ".../undefined" — a dead link that
+    // passed the title/url filter (CodeRabbit, #4298). The URL and externalId
+    // now come from the same coerced value.
+    if (!p || typeof p !== 'object') return null;
+    const id = coerceId(p.id);
+    if (id === undefined) return null;
     // Same location rendering as the posting API path, so a board reads the
     // same whichever source served it — in particular the "Remote" marker:
     // scan.mjs's location_filter sees only this string, so a remote posting
@@ -363,19 +371,19 @@ async function fetchFromEmbed(entry, ctx) {
     // The id comes from the embed payload, so it is host-controlled: a lone
     // surrogate in it would make encodeURIComponent throw and take the whole
     // board down mid-map. Drop that one posting instead (_safe-url.mjs).
-    const encodedId = safeEncodeURIComponent(String(p.id));
+    const encodedId = safeEncodeURIComponent(id);
     return {
       title: p.title || '',
       url: encodedId === null ? '' : `https://${EMBED_HOST}/${encodedSlug}/${encodedId}`,
       company: entry.name,
-      externalId: coerceId(p.id),
+      externalId: id,
       location,
       // The embed payload carries neither descriptionPlain nor publishedAt —
       // the posting API's two extras. An absent date means "unknown", never
       // "stale", so nothing is invented here.
       ...(p.workplaceType ? { workplaceType: String(p.workplaceType) } : {}),
     };
-  }).filter((/** @type {any} */ j) => j.title && j.url);
+  }).filter((/** @type {any} */ j) => j && j.title && j.url);
 }
 
 /** @type {Provider} */
@@ -384,6 +392,14 @@ export default {
 
   detect(entry) {
     try {
+      // An opted-in embed entry is Ashby's even when careers_url is a corporate
+      // page: `ashby.board` names the board then, and without this branch an
+      // entry with no explicit `provider:` never reached the embed source
+      // (CodeRabbit, #4298). The URL is the one fetch() will actually read.
+      if (/** @type {any} */ (entry).ashby?.embed) {
+        const slug = resolveBoardSlug(entry);
+        if (slug) return { url: buildEmbedUrl(slug) };
+      }
       const apiUrl = resolveApiUrl(entry);
       return apiUrl ? { url: apiUrl } : null;
     } catch {
