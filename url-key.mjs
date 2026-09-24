@@ -101,9 +101,30 @@ function aggregatorDomains() {
       const domain = line.split('#')[0].trim().toLowerCase();
       if (domain) domains.add(domain);
     }
-  } catch {
-    // A missing shared file leaves the supplement, which still covers the
-    // boards this module's dedup actually turns on.
+  } catch (err) {
+    // Losing the shared file is NOT a no-op, and an earlier version of this
+    // comment claimed it was. Every domain in that file is one this module
+    // turns on, so without it those hosts stop reading as aggregators and
+    // their URL mismatches start counting as employer-controlled evidence,
+    // which BLOCKS a merge. That is the under-merge direction — a visible
+    // duplicate row the user can fix — rather than the silent over-merge, so
+    // carrying on is the right call. It is still a behaviour change worth
+    // being loud about.
+    //
+    // A missing file at the DEFAULT path is the one case that stays quiet: a
+    // partial checkout legitimately lacks it. Anything else is the operator
+    // being wrong about something they asked for — a bad
+    // CAREER_OPS_AGGREGATOR_DOMAINS path, a directory, an unreadable file —
+    // and swallowing all of those identically is how a misconfiguration runs
+    // for months looking like normal operation.
+    const overridden = Boolean(process.env.CAREER_OPS_AGGREGATOR_DOMAINS);
+    if (err?.code !== 'ENOENT' || overridden) {
+      console.warn(
+        `Warning: could not read aggregator domains from ${AGGREGATOR_DOMAINS_PATH} (${err?.code || err}). `
+        + 'Falling back to the built-in supplement; hosts listed only in that file will not be treated as '
+        + 'aggregators, so some duplicate rows may stop collapsing.',
+      );
+    }
   }
   aggregatorDomainsCache = domains;
   return aggregatorDomainsCache;
