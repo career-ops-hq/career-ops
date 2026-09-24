@@ -59,7 +59,9 @@ def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
                 raise ValueError("Unretrieved research cannot provide evidence")
             continue
         if not citation.get("quote") or citation.get("source") not in files:
-            raise ValueError("Citation requires a quote from a frozen source")
+            raise ValueError(
+                f"Citation requires a quote from a frozen source: {citation.get('source')!r}"
+            )
         source = files[citation["source"]].read_text()
         match = re.search(r"\s+".join(re.escape(word) for word in citation["quote"].split()), source, re.IGNORECASE)
         if not match:
@@ -93,4 +95,4 @@ def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
         raise ValueError("Report section missing or contains extra level-two headings")
     report = "\n\n".join(f"## {heading}\n\n{bodies[heading]}" for heading in HEADINGS) + "\n"
     (directory / "report.md").write_text(report)
-    return {"report": report, "report_sha256": digest(report)}
+    return {"report": report, "report_sha256": digest(report), "attractiveness": score}

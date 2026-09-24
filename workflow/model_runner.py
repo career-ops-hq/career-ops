@@ -8,8 +8,10 @@ import os
 from pathlib import Path
 import sys
 
+import yaml
+
 from workflow.prescreen import evaluate as evaluate_prescreen
-from workflow.report import render_report
+from workflow.report import attractiveness, render_report
 
 ROOT = Path(__file__).resolve().parents[1]
 DRAFT_ROOT = Path(os.environ["CAREER_OPS_DRAFT_ROOT"]) if "CAREER_OPS_DRAFT_ROOT" in os.environ else ROOT / "data" / "workflow-drafts"
@@ -29,6 +31,31 @@ def normalize_resume_payload(resume: dict) -> dict:
         fields = ("name", "email", "phone", "location", "linkedin", "github", "portfolio")
         resume["candidate"] = {key: resume.pop(key) for key in fields if key in resume}
     return resume
+
+
+def application_package_error(decision: dict) -> str | None:
+    """Return the first strict package-contract defect, if any."""
+    required = {
+        "resume_payload", "changes", "cover_letter", "upskill",
+        "interview_prep", "questions",
+    }
+    missing = sorted(required - decision.keys())
+    if "resume_payload" in decision:
+        normalize_resume_payload(decision["resume_payload"])
+    if missing or not decision.get("resume_payload", {}).get("candidate", {}).get("name"):
+        return ", ".join(missing or ["resume candidate name"])
+    resume = decision["resume_payload"]
+    if not isinstance(resume.get("summary"), str):
+        return "resume_payload summary"
+    if any(not all(key in item for key in ("company", "role", "dates", "bullets")) or not isinstance(item["bullets"], list) for item in resume.get("experience", [])):
+        return "resume experience schema"
+    if any(not all(key in item for key in ("org", "title", "year")) for item in resume.get("education", [])):
+        return "resume education schema"
+    if any("name" not in item or not isinstance(item.get("bullets", []), list) for item in resume.get("projects", [])):
+        return "resume project schema"
+    if any("category" not in item or "items" not in item for item in resume.get("skills", [])):
+        return "resume skills schema"
+    return None
 
 
 def scan_evaluate(payload: dict) -> dict:
@@ -117,27 +144,24 @@ Write user-facing material in the configured output language. Never submit, send
         [],
         DRAFT_ROOT,
     )
-    required = {
-        "resume_payload", "changes", "cover_letter", "upskill",
-        "interview_prep", "questions",
-    }
-    missing = sorted(required - decision.keys())
-    if "resume_payload" in decision:
-        normalize_resume_payload(decision["resume_payload"])
-    if missing or not decision.get("resume_payload", {}).get("candidate", {}).get("name"):
-        raise ValueError("Invalid application package: " + ", ".join(missing or ["resume candidate name"]))
-    resume = decision["resume_payload"]
-    if not isinstance(resume.get("summary"), str):
-        raise ValueError("resume_payload summary is required")
-    if any(not all(key in item for key in ("company", "role", "dates", "bullets")) or not isinstance(item["bullets"], list) for item in resume.get("experience", [])):
-        raise ValueError("Invalid resume experience schema")
-    if any(not all(key in item for key in ("org", "title", "year")) for item in resume.get("education", [])):
-        raise ValueError("Invalid resume education schema")
-    if any("name" not in item or not isinstance(item.get("bullets", []), list) for item in resume.get("projects", [])):
-        raise ValueError("Invalid resume project schema")
-    if any("category" not in item or "items" not in item for item in resume.get("skills", [])):
-        raise ValueError("Invalid resume skills schema")
-    return {"outcome": "package", "artifact": decision, "reviewer": session, "tool_calls": 1}
+    defect = application_package_error(decision)
+    calls = 1
+    if defect:
+        decision, session = adapter.call_agent(
+            "apply_repair",
+            prompt
+            + "\nReturn the complete six-field package. Correct only this schema defect: "
+            + defect
+            + "\n"
+            + json.dumps({"inputs": payload, "incomplete_package": decision}, ensure_ascii=False),
+            [],
+            DRAFT_ROOT,
+        )
+        calls += 1
+        defect = application_package_error(decision)
+    if defect:
+        raise ValueError("Invalid application package: " + defect)
+    return {"outcome": "package", "artifact": decision, "reviewer": session, "tool_calls": calls}
 
 
 def apply_review(payload: dict) -> dict:
@@ -154,22 +178,35 @@ The prohibited artifact is application-form Q&A or drafted employer-form answers
         "source-grounding", "role-alignment", "cv-materiality",
         "employer-questions", "sensitive-fields", "artifact-consistency",
     }
-    checks = decision.get("checks", [])
-    valid = (
-        decision.get("schema") == "career-ops/application-review"
-        and decision.get("schema_version") == 1
-        and decision.get("verdict") in ("approve", "revise", "blocked")
-        and {item.get("id") for item in checks} == required_checks
-        and all(item.get("status") in ("pass", "fail", "uncertain") and item.get("finding") for item in checks)
-        and isinstance(decision.get("unsupported_claims"), list)
-        and isinstance(decision.get("required_changes"), list)
-    )
-    if not valid or decision["verdict"] == "approve" and (
-        any(item["status"] != "pass" for item in checks)
-        or decision["unsupported_claims"] or decision["required_changes"]
-    ):
+    def valid_review(value: dict) -> bool:
+        items = value.get("checks", [])
+        return (
+            value.get("schema") == "career-ops/application-review"
+            and value.get("schema_version") == 1
+            and value.get("verdict") in ("approve", "revise", "blocked")
+            and {item.get("id") for item in items} == required_checks
+            and all(item.get("status") in ("pass", "fail", "uncertain") and item.get("finding") for item in items)
+            and isinstance(value.get("unsupported_claims"), list)
+            and isinstance(value.get("required_changes"), list)
+            and not (value["verdict"] == "approve" and (
+                any(item["status"] != "pass" for item in items)
+                or value["unsupported_claims"] or value["required_changes"]
+            ))
+        )
+    calls = 1
+    if not valid_review(decision):
+        decision, reviewer = adapter.call_agent(
+            "apply_review_repair",
+            prompt
+            + "\nReturn the complete review contract. Preserve substantive findings; correct only missing or inconsistent schema fields.\n"
+            + json.dumps({"inputs": payload, "incomplete_review": decision}, ensure_ascii=False),
+            [],
+            DRAFT_ROOT,
+        )
+        calls += 1
+    if not valid_review(decision):
         raise ValueError("Invalid application review response")
-    return {**decision, "reviewer": reviewer, "tool_calls": 1}
+    return {**decision, "reviewer": reviewer, "tool_calls": calls}
 
 
 def evaluate(payload: dict) -> dict:
@@ -182,7 +219,7 @@ def evaluate(payload: dict) -> dict:
             "artifact": {
                 "type": "exclusion",
                 "reason": jd["prescreen"].get("reason") or "; ".join(item["message"] for item in reasons),
-                "evidence": jd["prescreen"].get("evidence", reasons),
+                "evidence": jd["prescreen"].get("evidence") or reasons or [jd["url"]],
             },
             "tool_calls": 0,
         }
@@ -191,15 +228,23 @@ def evaluate(payload: dict) -> dict:
     directory.mkdir(parents=True, exist_ok=True)
     report_path = directory / "report.md"
     saved_review = directory / "report.md.review.json"
+    cached_assessment = (
+        json.loads((directory / "assessment.json").read_text())
+        if (directory / "assessment.json").exists()
+        else None
+    )
     if not saved_review.exists() and report_path.exists() and (directory / "assessment.json").exists() and (directory / "evidence.json").exists():
         report = report_path.read_text()
         evidence = json.loads((directory / "evidence.json").read_text())
+        assessment = json.loads((directory / "assessment.json").read_text())
+        score = attractiveness(assessment["dimensions"], yaml.safe_load(inputs["profile"])["attractiveness"]["weights"])
         return {
             "outcome": "score",
             "artifact": {
                 "type": "score", "report": report,
                 "report_sha256": hashlib.sha256(report.encode()).hexdigest(),
                 "draft_directory": str(directory), "liveness_reason": evidence["liveness_reason"],
+                "score": score,
             },
             "tool_calls": 0,
         }
@@ -209,8 +254,8 @@ def evaluate(payload: dict) -> dict:
     previous_review = payload.get("previous_review")
     if saved_review.exists():
         previous_review = json.loads(saved_review.read_text())
-    if repairing:
-        previous = json.loads((directory / "assessment.json").read_text())
+    if repairing or cached_assessment:
+        previous = cached_assessment
         research = {"sources": previous["sources"], "research": previous["research"]}
     else:
         research_inputs = {
@@ -220,8 +265,11 @@ def evaluate(payload: dict) -> dict:
         research = adapter.call_agent(
             "research", adapter.RESEARCH + json.dumps(research_inputs, ensure_ascii=False), ["web"], directory
         )[0]
+    sources = {key: inputs[key] for key in ("cv", "profile", "targeting", "rules")}
+    sources.update({key: inputs[key] for key in ("articles", "voice") if inputs.get(key)})
+    sources.update({f"writing{index}": content for index, content in enumerate(inputs.get("writing_samples", {}).values(), 1)})
     assessment_inputs = {
-        "url": jd["url"], "sources": {key: inputs[key] for key in ("cv", "profile", "targeting", "rules")},
+        "url": jd["url"], "sources": sources,
         "evidence": jd, "research": research, "prompt": adapter.ASSESS,
     }
     prompt = adapter.ASSESS + json.dumps(assessment_inputs, ensure_ascii=False)
@@ -231,8 +279,11 @@ def evaluate(payload: dict) -> dict:
         prompt += "\nCorrect only the independent review defects using the frozen research.\n" + json.dumps(
             {"previous": previous, "review": previous_review}, ensure_ascii=False
         )
-    assessment = adapter.call_agent(phase, prompt, [], directory)[0]
-    assessment.update(research)
+    if cached_assessment and not repairing:
+        assessment = cached_assessment
+    else:
+        assessment = adapter.call_agent(phase, prompt, [], directory)[0]
+        assessment.update(research)
     packet = {
         "url": jd["url"], "root": str(ROOT), "directory": str(directory),
         "fingerprint": key, "sources": assessment_inputs["sources"],
@@ -247,14 +298,43 @@ def evaluate(payload: dict) -> dict:
     write_json(directory / "assessment.json", assessment)
     for source_id, content in packet["sources"].items():
         (directory / f"{source_id}.txt").write_text(content)
-    result = render_report(packet, evidence, assessment)
+    mechanical_revision = False
+    try:
+        result = render_report(packet, evidence, assessment)
+    except ValueError as error:
+        if repairing:
+            raise
+        frozen_sources = {**assessment_inputs["sources"], "jd": jd["jd"]}
+        frozen_sources.update({source["id"]: source["text"] for source in research["sources"]})
+        prompt = (
+            adapter.ASSESS
+            + "\nCorrect only these mechanical defects. Reuse completed research; no tools.\n"
+            + str(error)
+            + "\nOnly source IDs in frozen_sources are valid. Remove or replace every other source ID. "
+              "If a non-null dimension has no valid supporting quote, set its score to null and evidence to [].\n"
+            + json.dumps(
+                {
+                    "assessment": assessment,
+                    "frozen_sources": frozen_sources,
+                    "research": research["research"],
+                },
+                ensure_ascii=False,
+            )
+        )
+        assessment = adapter.call_agent("repair", prompt, [], directory)[0]
+        assessment.update(research)
+        write_json(directory / "assessment.json", assessment)
+        result = render_report(packet, evidence, assessment)
+        mechanical_revision = True
     return {
         "outcome": "score",
         "artifact": {
             "type": "score", "report": result["report"], "report_sha256": result["report_sha256"],
             "draft_directory": str(directory), "liveness_reason": evidence["liveness_reason"],
+            "score": result["attractiveness"],
         },
         "tool_calls": 0 if repairing else 6,
+        "revision": revision + int(mechanical_revision),
     }
 
 
@@ -267,7 +347,7 @@ def review(payload: dict) -> dict:
     if artifact["type"] == "exclusion":
         prompt = (
             "Independently review this exclusion using only the JD report and rule inputs. "
-            "Return the standard review JSON. Unknown is not evidence of mismatch.\n"
+            "Unknown is not evidence of mismatch.\n" + adapter.REVIEW
             + json.dumps(payload, ensure_ascii=False)
         )
         decision, reviewer = adapter.call_agent("review", prompt, [], DRAFT_ROOT)
@@ -278,6 +358,7 @@ def review(payload: dict) -> dict:
         "sources": json.loads((directory / "assessment.json").read_text()).get("sources", []),
         "liveness": artifact["liveness_reason"],
         "jd_report": inputs["jd_report"],
+        "candidate_facts": {key: inputs.get(key) for key in ("cv", "profile", "targeting", "rules", "articles", "voice", "writing_samples")},
     }
     decision, reviewer = adapter.call_agent(
         "review", adapter.REVIEW + json.dumps(review_inputs, ensure_ascii=False), [], directory

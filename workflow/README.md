@@ -19,6 +19,7 @@ workflow/.venv/bin/python -m workflow.career_ops discover
 workflow/.venv/bin/python workflow/career_ops.py cron-score
 workflow/.venv/bin/python workflow/career_ops.py show <task-or-opportunity-id>
 workflow/.venv/bin/python workflow/career_ops.py list
+workflow/.venv/bin/python workflow/career_ops.py scores
 workflow/.venv/bin/python workflow/career_ops.py resume <task-id> [--input <scan-input.json>] [--feedback <text>] [--decision confirm|defer|accept-jd-change]
 workflow/.venv/bin/python workflow/career_ops.py cancel <task-id>
 workflow/.venv/bin/python workflow/career_ops.py application submit <opportunity-id> --confirmed --idempotency-key <operation-id>

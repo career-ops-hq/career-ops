@@ -85,7 +85,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-apply-") as temporary:
     changed_jd.write_text(json.dumps({
         "schema_version": "jd_report_v1", "opportunity_id": "job-2",
         "url": "https://example.com/job-2", "company": "Example", "role": "AI Engineer",
-        "liveness": "active", "jd": "Build agent workflows and production evaluation.",
+        "captured_at": "2026-09-21T00:00:00Z", "liveness": "active", "jd": "Build agent workflows and production evaluation.",
         "prescreen": {"status": "pass"},
     }))
     changed = call(directory, inputs, "resume", second_draft["task_id"], "--input", str(changed_jd))
@@ -111,7 +111,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-apply-") as temporary:
     assert review_failed["reason"] == "review_budget_exhausted"
     assert review_failed["artifact"]["approved"] is False
     budgeted = call(directory, inputs, "resume", crashed_task["task_id"], "--feedback", "force-budget")
-    assert budgeted["reason"] == "review_budget_exhausted"
+    assert budgeted["reason"] == "tool_budget_exhausted"
     assert budgeted["artifact"]["approved"] is False
 
 print("workflow apply: package HITL, invalidation, JD choice and confirmation passed")

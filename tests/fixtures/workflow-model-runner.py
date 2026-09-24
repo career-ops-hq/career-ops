@@ -1,13 +1,18 @@
 """Deterministic process boundary used by the public workflow CLI test."""
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import sys
+import time
 
 
 phase = sys.argv[1]
 payload = json.load(sys.stdin)
+if path := os.environ.get("WORKFLOW_TEST_CALL_LOG"):
+    with Path(path).open("a") as stream:
+        stream.write(phase + "\n")
 if phase == "scan_evaluate":
     source = payload["inputs"]["source"]
     if source.get("test_exclude"):
@@ -58,11 +63,15 @@ elif phase == "apply_review":
         "required_changes": ["Remove claim"] if forced else [], "tool_calls": 1,
     }))
 elif phase == "evaluate":
+    if os.environ.get("WORKFLOW_TEST_SLEEP"):
+        time.sleep(float(os.environ["WORKFLOW_TEST_SLEEP"]))
+    if os.environ.get("WORKFLOW_TEST_RUNNER_FAIL") == "1":
+        raise SystemExit("injected model failure")
     report = payload["inputs"]["jd_report"]
     if report["prescreen"]["status"] == "fail":
         print(json.dumps({
             "outcome": "exclude",
-            "artifact": {"type": "exclusion", "reason": report["prescreen"]["reason"]},
+            "artifact": {"type": "exclusion", "reason": report["prescreen"]["reason"], "evidence": report["prescreen"].get("evidence", [report["url"]])},
             "tool_calls": 0,
         }))
         raise SystemExit
@@ -72,6 +81,7 @@ elif phase == "evaluate":
         "role": report["role"],
         "score": {"lower": 3.5, "upper": 4.5, "coverage": 0.75},
         "report": "# Verified score report",
+        "report_sha256": hashlib.sha256(b"# Verified score report").hexdigest(),
     }
     if os.environ.get("WORKFLOW_TEST_DRAFT_DIRECTORY"):
         artifact["draft_directory"] = os.environ["WORKFLOW_TEST_DRAFT_DIRECTORY"]
@@ -83,7 +93,16 @@ elif phase == "evaluate":
 elif phase == "review":
     if payload["artifact"]["type"] == "score":
         assert payload["artifact"]["report"] == "# Verified score report"
-    decision = {"verdict": "approve", "checks": {"grounded": "pass"}, "tool_calls": 1}
+    names = ("jd_complete", "source_grounding", "dimension_support", "capability_coverage", "no_double_count", "gate_evidence")
+    failed = os.environ.get("WORKFLOW_TEST_FAILED_CHECK") == "1"
+    decision = {
+        "verdict": "approve",
+        "checks": {name: {"status": "fail" if failed and name == "source_grounding" else "pass", "finding": "Verified"} for name in names},
+        "gates": {name: "Pass" if name == "liveness" else "Unknown" for name in ("location", "employment", "size", "compensation", "eligibility", "liveness")},
+        "ready": False,
+        "report_sha256": payload["artifact"].get("report_sha256"),
+        "tool_calls": 1,
+    }
     if os.environ.get("WORKFLOW_TEST_DRAFT_DIRECTORY"):
         path = Path(os.environ["WORKFLOW_TEST_DRAFT_DIRECTORY"]) / "report.md.review.json"
         path.parent.mkdir(parents=True, exist_ok=True)
