@@ -1160,6 +1160,10 @@ process_offer() {
         if [[ -f "$tracker_artifact" ]]; then
           mv "$tracker_artifact" "$quarantine_dir/$id-tracker.tsv"
         fi
+        local report_artifact
+        for report_artifact in ${report_artifacts[@]+"${report_artifacts[@]}"}; do
+          mv "$report_artifact" "$quarantine_dir/$id-${report_artifact##*/}"
+        done
         question="Worker violated the confirmation hold by writing artifacts; inspect the quarantined tracker/report before answering"
         update_state_retrying "$id" "$url" "needs_confirmation" "$started_at" "$completed_at" "-" "-" "$question" "$retries" || true
         echo "    ERROR: confirmation hold produced artifacts; reservation kept and tracker merge skipped." >&2

@@ -89,6 +89,23 @@ handle_result
     assert.equal(readFileSync(join(work, 'logs/quarantine/1-tracker.tsv'), 'utf8'), 'unconfirmed tracker row\n');
     rmSync(join(work, 'logs/quarantine/1-tracker.tsv'), { force: true });
   });
+  check('confirmation artifacts quarantine every report before holding the job', () => {
+    for (const name of ['042-first.md', '042-second.md']) {
+      writeFileSync(join(work, 'reports', name), `unconfirmed ${name}\n`);
+    }
+    assert.throws(() => handle({ status: 'needs_confirmation', question: 'Which agency?' }), (error) => {
+      assert.equal(error.status, 2);
+      assert.match(error.stderr, /reservation kept and tracker merge skipped/);
+      return true;
+    });
+    assert.equal(existsSync(join(work, 'released')), false);
+    assert.deepEqual(readdirSync(join(work, 'reports')), []);
+    for (const name of ['042-first.md', '042-second.md']) {
+      const quarantined = join(work, 'logs/quarantine', `1-${name}`);
+      assert.equal(readFileSync(quarantined, 'utf8'), `unconfirmed ${name}\n`);
+      rmSync(quarantined, { force: true });
+    }
+  });
   check('handoff question control characters cannot split batch state fields', () => {
     const { fields } = handle({ status: 'needs_confirmation', question: 'Agency?\tConfirm\nplease\u001fnow' });
     assert.equal(fields.length, 9);
