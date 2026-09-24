@@ -92,7 +92,7 @@ export type ScanEvent =
     }
   | { kind: "log"; line: string }
   | { kind: "error"; message: string }
-  | { kind: "done"; count: number; offers: DiscoveredOffer[]; cost?: { tokens: number; usd: number } };
+  | { kind: "done"; count: number; offers: DiscoveredOffer[]; cost?: { tokens: number; usd: number }; saved?: number };
 
 // cleanChips is defined in clean-chips.mjs (plain JS) so it can be shared
 // with the test suite without a TypeScript runner. Import for internal use
