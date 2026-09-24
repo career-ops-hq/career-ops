@@ -89,6 +89,9 @@ export type ScanEvent =
       capHit?: boolean;
       datasetStatus?: Record<string, "ok" | "stale" | "empty">;
       postingsDroppedNoDate?: number;
+      // Sources whose results are missing (ran out of time or crashed) while the
+      // others finished — a partial result, never "all caught up".
+      incomplete?: string[];
     }
   | { kind: "log"; line: string }
   | { kind: "error"; message: string }

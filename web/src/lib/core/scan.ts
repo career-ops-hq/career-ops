@@ -2,7 +2,8 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { writeTempPortals, cleanupTempPortals } from "./portals";
-import { ATS_SOURCES, type DiscoveredOffer, type ExploreFilters, type ScanEvent } from "@/lib/explore";
+import { ATS_LABEL, ATS_SOURCES, type AtsSource, type DiscoveredOffer, type ExploreFilters, type ScanEvent } from "@/lib/explore";
+import { mergeScanResults, timedOutMessage } from "./scan-merge.mjs";
 
 export type { DiscoveredOffer, ScanEvent, AtsSource } from "@/lib/explore";
 export { ATS_SOURCES } from "@/lib/explore";
@@ -80,11 +81,33 @@ type ScanJson = {
   offers?: JsonOffer[];
 };
 
-export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) => void): Promise<DiscoveredOffer[]> {
+/** The whole discovery run must fit inside the route's maxDuration (300s). */
+const DISCOVERY_DEADLINE_MS = 230_000;
+
+type ScannerRun = {
+  /** --json mode: the parsed result object, or null if the child produced none. */
+  json: ScanJson | null;
+  /** Killed at the deadline. */
+  timedOut: boolean;
+  /** Spawn/runtime failure message, when the child never produced a result. */
+  failed?: string;
+};
+
+/**
+ * Run ONE scan-ats-full.mjs child over `ats`. Live progress is forwarded as it
+ * arrives. In --json mode the parsed result is returned for the caller to merge;
+ * in legacy mode the human stdout is parsed here and offers/summary are emitted
+ * directly into `legacy`.
+ */
+function runScanner(
+  ats: string[],
+  useJson: boolean,
+  filters: ExploreFilters,
+  tempPortals: string,
+  onEvent: (e: ScanEvent) => void,
+  legacy: { offers: DiscoveredOffer[]; seen: Set<string> },
+): Promise<ScannerRun> {
   return new Promise((resolve) => {
-    const tempPortals = writeTempPortals(filters);
-    const ats = (filters.ats.length ? filters.ats : [...ATS_SOURCES]).filter((a) => (ATS_SOURCES as readonly string[]).includes(a));
-    const useJson = scannerSupportsJson();
     const args = [
       rootScript("scan-ats-full"),
       "--dry-run",
@@ -102,8 +125,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
       env: { ...process.env, CAREER_OPS_PORTALS: tempPortals },
     });
 
-    const offers: DiscoveredOffer[] = [];
-    const seen = new Set<string>();
+    const { offers, seen } = legacy;
     let currentAts: string = ats[0] || "";
     let pending: Omit<DiscoveredOffer, "url"> | null = null;
     let companiesScanned = 0;
@@ -111,14 +133,23 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
     let outBuf = "";
     let errBuf = "";
     let jsonOut = ""; // --json mode: the single stdout object accumulates here
+    let timedOut = false;
+    let settled = false;
+    const settle = (run: ScannerRun) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(killer);
+      resolve(run);
+    };
 
     const killer = setTimeout(() => {
+      timedOut = true;
       try {
         child.kill("SIGTERM");
       } catch {
         /* ignore */
       }
-    }, 230_000);
+    }, DISCOVERY_DEADLINE_MS);
 
     // Live progress (atsStart / progress / atsDone) — in --json mode these human
     // lines arrive on STDERR; in legacy mode on STDOUT (handled inside handleLine).
@@ -215,14 +246,9 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
     });
 
     child.on("error", (e) => {
-      clearTimeout(killer);
-      cleanupTempPortals(tempPortals);
-      onEvent({ kind: "error", message: e instanceof Error ? e.message : "scanner failed to start" });
-      resolve(offers);
+      settle({ json: null, timedOut, failed: e instanceof Error ? e.message : "scanner failed to start" });
     });
     child.on("close", () => {
-      clearTimeout(killer);
-      cleanupTempPortals(tempPortals);
       if (useJson) {
         let j: ScanJson | null = null;
         try {
@@ -230,45 +256,93 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
         } catch {
           j = null;
         }
-        if (j && Array.isArray(j.offers)) {
-          for (const o of j.offers) {
-            const url = (o.url || "").trim();
-            if (!url || seen.has(url) || !o.company || !o.title) continue;
-            seen.add(url);
-            const source = o.source || `${currentAts}-full`;
-            const offer: DiscoveredOffer = {
-              company: o.company,
-              title: o.title,
-              location: o.location || "",
-              postedAt: o.postedAt || "",
-              ats: source.replace(/-full$/, ""),
-              source,
-              url,
-              matchedKeyword: firstMatch(o.title, filters.positive),
-            };
-            offers.push(offer);
-            onEvent({ kind: "offer", offer });
-          }
-          onEvent({
-            kind: "summary",
-            companiesScanned: j.companiesScanned ?? 0,
-            unreachable: j.unreachableBoards ?? 0,
-            matches: j.postingsKept ?? offers.length,
-            companiesAvailable: j.companiesAvailable,
-            capHit: j.capHit,
-            datasetStatus: j.datasetStatus,
-            postingsDroppedNoDate: j.postingsDroppedNoDate,
-          });
-        } else {
-          // --json requested but stdout didn't parse — surface honestly rather than
-          // silently returning 0 (defensive; shouldn't happen once the probe passed).
-          onEvent({ kind: "error", message: "The scanner returned no readable output." });
-        }
-        resolve(offers);
+        settle({ json: j && Array.isArray(j.offers) ? j : null, timedOut });
         return;
       }
       if (outBuf.trim()) handleLine(outBuf);
-      resolve(offers);
+      settle({ json: null, timedOut });
     });
   });
+}
+
+function toOffer(o: JsonOffer, fallbackSource: string, filters: ExploreFilters): DiscoveredOffer | null {
+  const url = (o.url || "").trim();
+  if (!url || !o.company || !o.title) return null;
+  const source = o.source || fallbackSource;
+  return {
+    company: o.company,
+    title: o.title,
+    location: o.location || "",
+    postedAt: o.postedAt || "",
+    ats: source.replace(/-full$/, ""),
+    source,
+    url,
+    matchedKeyword: firstMatch(o.title, filters.positive),
+  };
+}
+
+const NO_OUTPUT = "The scanner returned no readable output.";
+
+export async function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) => void): Promise<DiscoveredOffer[]> {
+  const tempPortals = writeTempPortals(filters);
+  const ats = (filters.ats.length ? filters.ats : [...ATS_SOURCES]).filter((a) => (ATS_SOURCES as readonly string[]).includes(a));
+  const useJson = scannerSupportsJson();
+  const deadlineSec = Math.round(DISCOVERY_DEADLINE_MS / 1000);
+  const label = (a: string) => ATS_LABEL[a as AtsSource] ?? a;
+  const legacy = { offers: [] as DiscoveredOffer[], seen: new Set<string>() };
+
+  try {
+    if (!useJson) {
+      // Older checkouts: one child, human-stdout parse — unchanged except that a
+      // deadline kill now says so instead of ending silently.
+      const run = await runScanner(ats, false, filters, tempPortals, onEvent, legacy);
+      if (run.failed) onEvent({ kind: "error", message: run.failed });
+      else if (run.timedOut) onEvent({ kind: "error", message: timedOutMessage(ats.map(label), deadlineSec) });
+      return legacy.offers;
+    }
+
+    // --json: one child per source, in parallel (see scan-merge.mjs for why).
+    // Dry runs write no scanner state and each source caches its own dataset
+    // file, so the children don't contend.
+    const runs = await Promise.all(
+      ats.map((a) => runScanner([a], true, filters, tempPortals, onEvent, { offers: [], seen: new Set() })),
+    );
+
+    const offers: DiscoveredOffer[] = [];
+    const seen = new Set<string>();
+    const finished: ScanJson[] = [];
+    runs.forEach((run, i) => {
+      if (!run.json) return;
+      finished.push(run.json);
+      for (const o of run.json.offers ?? []) {
+        const offer = toOffer(o, `${ats[i]}-full`, filters);
+        if (!offer || seen.has(offer.url)) continue;
+        seen.add(offer.url);
+        offers.push(offer);
+        onEvent({ kind: "offer", offer });
+      }
+    });
+
+    const timedOut = ats.filter((_, i) => !runs[i].json && runs[i].timedOut);
+    const incomplete = ats.filter((_, i) => !runs[i].json);
+
+    if (finished.length === 0) {
+      const failed = runs.find((r) => r.failed)?.failed;
+      onEvent({
+        kind: "error",
+        message: timedOut.length ? timedOutMessage(timedOut.map(label), deadlineSec) : failed || NO_OUTPUT,
+      });
+      return offers;
+    }
+
+    if (timedOut.length) onEvent({ kind: "log", line: timedOutMessage(timedOut.map(label), deadlineSec) });
+    onEvent({
+      kind: "summary",
+      ...mergeScanResults(finished, offers.length),
+      ...(incomplete.length ? { incomplete } : {}),
+    });
+    return offers;
+  } finally {
+    cleanupTempPortals(tempPortals);
+  }
 }
