@@ -91,6 +91,26 @@ The evaluation scores five dimensions, integrated into one global score of 1-5. 
 - 3.5-3.9 → Decent but not ideal, apply only if specific reason
 - Below 3.5 → Recommend against applying (see Ethical Use in AGENTS.md)
 
+### Evidence confidence for the Global Score
+
+The Machine Summary `confidence` describes the **evidence supporting this evaluation**, not the chance of an interview or hire. It does not change the 1–5 Global Score. Block G's posting-legitimacy tier is a different judgment; `/calibrate` compares scores with recorded outcomes across applications.
+
+Before assigning `confidence`, classify evidence for each scoring dimension (CV match, North Star alignment, compensation, cultural signals, red flags):
+
+| Status | Meaning |
+|--------|---------|
+| `supported` | The conclusion traces to current JD text, primary candidate files, or a verifiable current source relevant to this dimension. |
+| `partial` | Some direct evidence exists, but a decision-relevant detail is inferred, unverified, or incomplete. |
+| `unknown` | Decision-relevant evidence is missing, contradictory, or stale; a clean finding cannot be established. |
+
+Show a short evidence table in the report with each dimension's status, its source or observation, and any unresolved question. Do not call an unchecked dimension `supported` merely because no problem was found. Apply these tier rules in order:
+
+1. **Low** if the JD is inaccessible or too incomplete to assess, CV match or North Star evidence is `unknown`, a material work-eligibility or work-model contradiction is unresolved, or at least two dimensions are `unknown`.
+2. **Medium** if no Low condition holds but any dimension is `partial` or `unknown`, or a material question remains unresolved.
+3. **High** only when all five dimensions are `supported` and no material question remains unresolved.
+
+Name up to three concrete checks that could change the decision; use an empty list only when none remain. Never convert this tier into a numeric probability or silently treat missing evidence as a neutral score. In the Machine Summary, mirror the five statuses under `score_evidence` and the checks under `confidence_gaps`; the human-readable explanation and `confidence` tier must agree.
+
 **How to score the "Cultural signals" dimension:**
 1. Read `culture_screen.require` from `config/profile.yml`. If `culture_screen` is missing or empty, skip the structural capping and score the dimension qualitatively based on company size, remote policy, and stability.
 2. Actively look for evidence in the JD + Block G company research corresponding to those requirements (e.g., team size mentions, org-chart depth/manager layers, meeting-culture language, company stage).
