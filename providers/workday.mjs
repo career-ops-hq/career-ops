@@ -306,7 +306,13 @@ function resolveEndpoint(entry) {
 // ["Burbank"] against /job/Burbank/Sr-Analyst_10154966 was "corroborated" and returned
 // "Burbank" as the requisition id. Two unrelated Burbank reqs then shared an id. The
 // check certified exactly the value it was written to exclude.
-const WORKDAY_REQ_RE = /_([A-Za-z0-9][A-Za-z0-9.]*)(?:-\d+)?$/;
+// The token keeps its hyphens: Walmart posts "R-2593225", and an earlier
+// `(?:-\d+)?$` tail ate everything after the hyphen, leaving "R" — which the
+// 3-character check below then rejected, so those postings carried no ids at
+// all (CodeRabbit, #4076). Workday's own cross-site "-N" disambiguator is
+// stripped by the rule workdayDedupKey() applies (stripWorkdayRepostSuffix),
+// through its case-preserving core, so the two cannot disagree.
+const WORKDAY_REQ_RE = /_([A-Za-z0-9][A-Za-z0-9.-]*)$/;
 
 // Position alone does not identify a req: plenty of Workday titles contain an
 // underscore, so the trailing segment of `/job/Remote/Data_Scientist` is the word
@@ -323,8 +329,10 @@ const REQ_SHAPE_RE = /\d/;
 function reqTokenFromPath(externalPath) {
   if (typeof externalPath !== 'string') return undefined;
   const m = externalPath.match(WORKDAY_REQ_RE);
-  if (!m || m[1].length < 3) return undefined;
-  return REQ_SHAPE_RE.test(m[1]) ? m[1] : undefined;
+  if (!m) return undefined;
+  const token = stripRepostSuffixKeepCase(m[1]);
+  if (token.length < 3) return undefined;
+  return REQ_SHAPE_RE.test(token) ? token : undefined;
 }
 
 // bulletFields is deliberately NOT consulted. It is tenant-configurable free text
@@ -397,8 +405,15 @@ function locationFromPath(externalPath) {
  */
 export function stripWorkdayRepostSuffix(raw) {
   const token = raw == null ? '' : String(raw).toLowerCase();
+  return stripRepostSuffixKeepCase(token);
+}
+
+// The same rule without the lowercasing, for the captured externalId and
+// requisitionId, which keep the ATS's own casing ("R-2593225"). Only the
+// dedup key is lowercased.
+function stripRepostSuffixKeepCase(token) {
   const m = token.match(/^(.*?)-(\d{1,2})$/);
-  return m && /^[a-z]*\d[a-z0-9_]*\d{2,}$/.test(m[1]) ? m[1] : token;
+  return m && /^[a-z]*\d[a-z0-9_]*\d{2,}$/i.test(m[1]) ? m[1] : token;
 }
 
 /**

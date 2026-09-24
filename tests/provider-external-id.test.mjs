@@ -16,7 +16,7 @@
 // organization's unique identifier for the job" — which is what survives a repost
 // or an ATS host move. externalId is the ATS's own posting key.
 import { pass, fail } from './helpers.mjs';
-import { parseWorkdayResponse } from '../providers/workday.mjs';
+import { parseWorkdayResponse, workdayDedupKey } from '../providers/workday.mjs';
 import greenhouse from '../providers/greenhouse.mjs';
 import ashby from '../providers/ashby.mjs';
 import lever from '../providers/lever.mjs';
@@ -128,3 +128,69 @@ titleUnderscore[0]?.requisitionId === undefined && titleUnderscore[1]?.requisiti
 titleUnderscore[2]?.requisitionId === '10154966'
   ? pass('workday still captures a real numeric req id')
   : fail('workday real req regression', `got ${titleUnderscore[2]?.requisitionId}`);
+
+// ── hyphenated requisition ids survive the token match (CodeRabbit, #4076) ────
+// `_R-2593225` used to yield "R": the old regex treated everything after the
+// hyphen as Workday's cross-site suffix, and the 3-char check then dropped BOTH
+// ids. The table pins each shape, including the cross-site suffix that must
+// still be stripped, and asserts the dedup key agrees with the captured id.
+const REQ_TOKEN_CASES = [
+  // externalPath                                        expected externalId   why
+  ['/job/Bentonville/Sr-Analyst_R-2593225',              'R-2593225',          'Walmart: hyphen is part of the id'],
+  ['/job/NY/Analyst_JR-10423',                           'JR-10423',           'two-letter prefix, hyphenated'],
+  ['/job/SF/Sr-Associate--Corporate-Strategy_R167982-1', 'R167982',            'cross-site -1 stripped'],
+  ['/job/SF/Sr-Associate_R167982-12',                    'R167982',            'cross-site -12 stripped'],
+  ['/job/Burbank/Sr-Analyst_10154966',                   '10154966',           'bare numeric req'],
+  ['/job/Remote/Data_Scientist',                         undefined,            'title word: no digit, abstain'],
+  ['/job/NY/Sr_Manager_Ops',                             undefined,            'title word: no digit, abstain'],
+  ['/job/NY/Analyst_R2',                                 undefined,            'under 3 chars, abstain'],
+  ['/job/NY/Analyst_ABC-12',                             'ABC-12',             'prefix is not req-shaped: the -12 IS the id'],
+  ['/job/Bentonville/Sr-Analyst_R-2593225-1',            'R-2593225-1',        'hyphenated id + cross-site suffix: kept whole (shape rule sees the hyphen)'],
+];
+const reqRows = parseWorkdayResponse(
+  { jobPostings: REQ_TOKEN_CASES.map(([externalPath], i) => ({ title: `Role ${i}`, externalPath, bulletFields: [] })) },
+  { name: 'Walmart', careers_url: 'https://walmart.wd5.myworkdayjobs.com/walmartexternal' },
+);
+let reqTokenFailures = 0;
+REQ_TOKEN_CASES.forEach(([externalPath, expected, why], i) => {
+  const got = reqRows[i]?.externalId;
+  if (got !== expected) {
+    reqTokenFailures++;
+    fail('workday req token', `${externalPath} -> ${got}, expected ${expected} (${why})`);
+  }
+  if (reqRows[i]?.requisitionId !== expected) {
+    reqTokenFailures++;
+    fail('workday req id', `${externalPath} -> ${reqRows[i]?.requisitionId}, expected ${expected}`);
+  }
+});
+reqTokenFailures === 0
+  ? pass(`workday req tokens keep hyphens and strip only the cross-site suffix (${REQ_TOKEN_CASES.length} shapes)`)
+  : fail('workday req token table', `${reqTokenFailures} case(s) wrong`);
+
+// The captured id and the dedup key must derive the requisition the SAME way —
+// they used to disagree, which is how "R" reached the id while the dedup key
+// still keyed on "r-2593225".
+const walmartUrl = 'https://walmart.wd5.myworkdayjobs.com/walmartexternal/job/Bentonville/Sr-Analyst_R-2593225';
+workdayDedupKey({ url: walmartUrl }) === `workday:walmart.wd5.myworkdayjobs.com:${String(reqRows[0]?.externalId).toLowerCase()}`
+  ? pass('workday dedup key and captured externalId derive the same requisition')
+  : fail('workday dedup/id agreement', `key=${workdayDedupKey({ url: walmartUrl })} id=${reqRows[0]?.externalId}`);
+
+// ── eightfold: a bad `id` must not mask a good `position_id` (CodeRabbit) ─────
+const efFallbackCtx = { transport: 'http', fetchText: async () => '', fetchJson: async () => ({ positions: [
+  { id: {}, position_id: '123456', name: 'Strategy Manager', canonicalPositionUrl: 'https://acme.eightfold.ai/careers/job/123456', locations: ['NY'] },
+  { id: '', position_id: '789012', name: 'BizOps Lead', canonicalPositionUrl: 'https://acme.eightfold.ai/careers/job/789012', locations: ['SF'] },
+] }) };
+const efFallback = await eightfold
+  .fetch({ name: 'Acme', careers_url: 'https://acme.eightfold.ai/careers' }, efFallbackCtx)
+  .catch((e) => { fail('provider fetch threw', e.message); return []; });
+efFallback[0]?.externalId === '123456' && efFallback[1]?.externalId === '789012'
+  ? pass('eightfold falls back to position_id when id is present but unusable')
+  : fail('eightfold id fallback', `got ${efFallback[0]?.externalId} / ${efFallback[1]?.externalId}`);
+
+// Agreement again, on the shape where the suffix IS stripped — the Walmart case
+// above cannot see a dedup key that skips the shared helper, because nothing is
+// stripped there.
+const adobeUrl = 'https://adobe.wd5.myworkdayjobs.com/external_experienced/job/SF/Sr-Associate--Corporate-Strategy_R167982-1';
+workdayDedupKey({ url: adobeUrl }) === 'workday:adobe.wd5.myworkdayjobs.com:r167982'
+  ? pass('workday dedup key strips the cross-site suffix through the shared helper')
+  : fail('workday dedup cross-site', `got ${workdayDedupKey({ url: adobeUrl })}`);

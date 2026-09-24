@@ -248,7 +248,10 @@ export function parseEightfoldResponse(json, tenant, companyName) {
     // REQ id, which is many-to-one with postings (see requisitionId in _types.js),
     // so falling back to it would hand a consumer asking for per-posting identity a
     // key that two sibling postings share. No posting id is better than a wrong one.
-    const ext = coerceId(p.id ?? p.position_id);
+    // Coerce each candidate on its own: `p.id ?? p.position_id` hands coerceId a
+    // present-but-unusable `id` (an object, an empty string) and never reaches the
+    // valid sibling, so the posting loses an id it had (CodeRabbit, #4076).
+    const ext = coerceId(p.id) ?? coerceId(p.position_id);
     if (ext) job.externalId = ext;
     const req = coerceId(p.ats_job_id);
     if (req) job.requisitionId = req;
