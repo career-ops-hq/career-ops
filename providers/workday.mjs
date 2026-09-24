@@ -306,13 +306,23 @@ function resolveEndpoint(entry) {
 // ["Burbank"] against /job/Burbank/Sr-Analyst_10154966 was "corroborated" and returned
 // "Burbank" as the requisition id. Two unrelated Burbank reqs then shared an id. The
 // check certified exactly the value it was written to exclude.
-// The token keeps its hyphens: Walmart posts "R-2593225", and an earlier
-// `(?:-\d+)?$` tail ate everything after the hyphen, leaving "R" — which the
-// 3-character check below then rejected, so those postings carried no ids at
-// all (CodeRabbit, #4076). Workday's own cross-site "-N" disambiguator is
-// stripped by the rule workdayDedupKey() applies (stripWorkdayRepostSuffix),
-// through its case-preserving core, so the two cannot disagree.
-const WORKDAY_REQ_RE = /_([A-Za-z0-9][A-Za-z0-9.-]*)$/;
+//
+// The token is everything after the FIRST underscore of that segment, the
+// boundary workdayDedupKey() uses: Workday title slugs use hyphens, never
+// underscores, so an id like "JR_2024_00123" stays whole (taking the LAST
+// underscore read it as "00123" while the dedup key read "jr_2024_00123" —
+// CodeRabbit, #4076). Hyphens stay in the token too: Walmart posts
+// "R-2593225", which an earlier `(?:-\d+)?$` tail cut to "R". Workday's own
+// cross-site "-N" repost suffix is stripped by the dedup key's rule. Both
+// callers go through reqTokenFromSegment(), so the captured id and the key
+// cannot disagree; the id keeps the ATS's casing and only the key lowercases.
+const REQ_TOKEN_CHARS_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function reqTokenFromSegment(segment) {
+  const underscoreIdx = segment.indexOf('_');
+  if (underscoreIdx === -1) return '';
+  return stripRepostSuffixKeepCase(segment.slice(underscoreIdx + 1));
+}
 
 // Position alone does not identify a req: plenty of Workday titles contain an
 // underscore, so the trailing segment of `/job/Remote/Data_Scientist` is the word
@@ -328,10 +338,9 @@ const REQ_SHAPE_RE = /\d/;
 
 function reqTokenFromPath(externalPath) {
   if (typeof externalPath !== 'string') return undefined;
-  const m = externalPath.match(WORKDAY_REQ_RE);
-  if (!m) return undefined;
-  const token = stripRepostSuffixKeepCase(m[1]);
-  if (token.length < 3) return undefined;
+  const segment = externalPath.split('/').filter(Boolean).pop() || '';
+  const token = reqTokenFromSegment(segment);
+  if (token.length < 3 || !REQ_TOKEN_CHARS_RE.test(token)) return undefined;
   return REQ_SHAPE_RE.test(token) ? token : undefined;
 }
 
@@ -443,9 +452,9 @@ export function workdayDedupKey(job) {
   const segments = parsed.pathname.split('/').filter(Boolean);
   const lastSegment = segments[segments.length - 1];
   if (!lastSegment) return null;
-  const underscoreIdx = lastSegment.indexOf('_');
-  if (underscoreIdx === -1) return null; // no title/requisition-ID separator — nothing to key on
-  const reqId = stripWorkdayRepostSuffix(lastSegment.slice(underscoreIdx + 1));
+  // Same token rule as the captured externalId; only the key is lowercased.
+  // No underscore means no title/requisition-ID separator: nothing to key on.
+  const reqId = reqTokenFromSegment(lastSegment).toLowerCase();
   if (!reqId) return null;
   return `workday:${parsed.hostname.toLowerCase()}:${reqId}`;
 }
