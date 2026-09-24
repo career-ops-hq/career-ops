@@ -40,7 +40,7 @@
  *   - Tracker row resolves to a TERMINAL state (Rejected, Discarded, SKIP,
  *     Hired): no finding at all, not even a warning. The application is
  *     done; a dead JD carries no further risk.
- *   - Tracker row resolves to a LIVE state (Evaluated, Applied, Responded,
+ *   - Tracker row resolves to a LIVE state (Evaluated, Applied, Responded, Assessment,
  *     Interview, Offer), OR the join can't resolve the row (no match,
  *     ambiguous match, or an unreadable/unparseable tracker) — a soft
  *     `jd-archive-review-due` finding, same severity shape as

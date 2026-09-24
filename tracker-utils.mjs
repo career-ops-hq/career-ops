@@ -696,7 +696,7 @@ export function writeFileAtomic(path, content) {
 /**
  * Load the canonical tracker states from `templates/states.yml`.
  *
- * states.yml is the single source of truth for the 8 canonical states and
+ * states.yml is the single source of truth for the canonical states and
  * their aliases. Parsing it here (instead of hardcoding the list) means a new
  * state or alias lands in one file and every consumer follows.
  *

@@ -102,6 +102,7 @@ const ALIASES = {
   'aplicado': 'applied', 'enviada': 'applied', 'aplicada': 'applied',
   'applied': 'applied', 'sent': 'applied',
   'respondido': 'responded',
+  'screening': 'assessment', 'online assessment': 'assessment', 'online_assessment': 'assessment', 'online screening': 'assessment',
   'entrevista': 'interview',
   'oferta': 'offer',
   'rechazado': 'rejected', 'rechazada': 'rejected',
@@ -121,7 +122,7 @@ export function classifyOutcome(status) {
   const s = normalizeStatus(status);
   // 'hired' is the strongest positive outcome — a landed job. It must not fall
   // through to the 'pending' default, which would drag conversion rates down.
-  if (['hired', 'interview', 'offer', 'responded'].includes(s)) return 'positive';
+  if (['hired', 'interview', 'offer', 'responded', 'assessment'].includes(s)) return 'positive';
   // 'applied' is SENT, not answered: denominator only, never the numerator.
   // Mirrors ADVANCED_STATUSES, which already excludes it.
   if (s === 'applied') return 'awaiting';
@@ -271,16 +272,16 @@ export function scoreThresholdFrom(positiveScoresRaw, negativeScoresRaw) {
 // or the posting closed) proves neither a submission nor an answer — the same
 // set stats.mjs uses for its canonical funnel. Module-scoped so the self-test
 // can assert membership and the channel-yield pass and self-test share one set.
-const SUBMITTED_STATUSES = new Set(['applied', 'responded', 'interview', 'offer', 'hired', 'rejected']);
+const SUBMITTED_STATUSES = new Set(['applied', 'responded', 'assessment', 'interview', 'offer', 'hired', 'rejected']);
 
 // Statuses that count as "advanced past screening" — STRICTER than
 // outcome=='positive': a bare 'applied' (submitted, no reply yet) does NOT
 // count. 'hired' is the furthest advance of all.
-const ADVANCED_STATUSES = new Set(['responded', 'interview', 'offer', 'hired']);
+const ADVANCED_STATUSES = new Set(['responded', 'assessment', 'interview', 'offer', 'hired']);
 
 // Print order for the CONVERSION FUNNEL summary. A status absent here is
 // silently omitted from the printed funnel, so this must track states.yml.
-const FUNNEL_ORDER = ['evaluated', 'applied', 'responded', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
+const FUNNEL_ORDER = ['evaluated', 'applied', 'responded', 'assessment', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
 
 function normalizeList(value) {
   if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);

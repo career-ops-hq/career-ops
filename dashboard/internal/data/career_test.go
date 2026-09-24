@@ -502,6 +502,8 @@ func TestNormalizeStatus(t *testing.T) {
 		{"Evaluated", "evaluated"},
 		{"Applied", "applied"},
 		{"Responded", "responded"},
+		{"Assessment", "assessment"},
+		{"online screening", "assessment"},
 		{"Interview", "interview"},
 		{"Offer", "offer"},
 		{"Rejected", "rejected"},

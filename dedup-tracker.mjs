@@ -53,13 +53,19 @@ const STATUS_RANK = {
   'evaluated': 2,
   'applied': 3,
   'responded': 4,
-  'interview': 5,
-  'offer': 6,
+  'assessment': 5,
+  'interview': 6,
+  'offer': 7,
   // Hired outranks everything: the accepted-job record must never lose a
   // dedup contest to a repost row (aliases from templates/states.yml).
-  'hired': 7,
-  'accepted': 7,
-  'accept': 7,
+  'hired': 8,
+  'accepted': 8,
+  'accept': 8,
+  // Assessment aliases from templates/states.yml.
+  'screening': 5,
+  'online assessment': 5,
+  'online_assessment': 5,
+  'online screening': 5,
   // Spanish aliases — kept for backwards compat with existing tracker data
   'no_aplicar': 0,
   'no aplicar': 0,
@@ -70,10 +76,10 @@ const STATUS_RANK = {
   'evaluada': 2,
   'aplicado': 3,
   'respondido': 4,
-  'entrevista': 5,
-  'oferta': 6,
-  'contratado': 7,
-  'contratada': 7,
+  'entrevista': 6,
+  'oferta': 7,
+  'contratado': 8,
+  'contratada': 8,
 };
 
 /**
@@ -116,7 +122,7 @@ function statusRank(status) {
  * matches from silently deleting an active application record.
  *
  * @param {string} status - Raw status value from the tracker row.
- * @returns {boolean} True when the row is Applied, Responded, Interview, or Offer.
+ * @returns {boolean} True when the row is Applied, Responded, Assessment, Interview, or Offer.
  */
 function isAdvancedStatus(status) {
   return statusRank(status) >= STATUS_RANK.applied;

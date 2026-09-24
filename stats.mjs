@@ -38,18 +38,18 @@ const STATUS_LOG_FILE = join(DATA_ROOT, 'data', 'status-log.tsv');
 const PORTALS_FILE = join(DATA_ROOT, 'portals.yml');
 const PORTAL_HEALTH_FILE = join(DATA_ROOT, 'data', 'portal-health.tsv');
 
-const CANONICAL_STATUSES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
+const CANONICAL_STATUSES = ['Evaluated', 'Applied', 'Responded', 'Assessment', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
 
 // In-flight applications. Deliberately NARROWER than the dashboard's
 // ActiveApps (which also counts Evaluated): an evaluated-but-never-sent row is
 // a candidate, not an application in flight. Hired is a terminal success, not
 // in flight, so it is intentionally excluded here (but see PURSUED/funnel).
-const ACTIVE_STATUSES = new Set(['Applied', 'Responded', 'Interview', 'Offer']);
+const ACTIVE_STATUSES = new Set(['Applied', 'Responded', 'Assessment', 'Interview', 'Offer']);
 
 // Rows that count toward avgScoreApplied — jobs the user actually pursued.
 // Plain avgScore mixes in SKIP/Discarded and understates real fit. Hired is
 // the fullest pursuit of all, so it belongs here.
-const PURSUED_STATUSES = new Set(['Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected']);
+const PURSUED_STATUSES = new Set(['Applied', 'Responded', 'Assessment', 'Interview', 'Offer', 'Hired', 'Rejected']);
 
 const round1 = (n) => Math.round(n * 10) / 10;
 const pct = (part, total) => (total > 0 ? round1((part / total) * 100) : 0);
@@ -165,8 +165,8 @@ export function computeColdAppNums(trackerContent, followupsContent) {
  */
 export function computeFunnel(byStatus) {
   const n = (k) => byStatus[k] || 0;
-  const everApplied = n('Applied') + n('Responded') + n('Interview') + n('Offer') + n('Hired') + n('Rejected');
-  const everResponded = n('Responded') + n('Interview') + n('Offer') + n('Hired');
+  const everApplied = n('Applied') + n('Responded') + n('Assessment') + n('Interview') + n('Offer') + n('Hired') + n('Rejected');
+  const everResponded = n('Responded') + n('Assessment') + n('Interview') + n('Offer') + n('Hired');
   const everInterview = n('Interview') + n('Offer') + n('Hired');
   const everOffer = n('Offer') + n('Hired');
   return {
@@ -185,7 +185,7 @@ export function computeFunnel(byStatus) {
 // pre-pipeline states (Rejected/Discarded/Evaluated/SKIP/Unknown) are absent →
 // depth 0; the ledger's from/to history is what proves the stages a row passed
 // through before it landed on a terminal snapshot.
-const STAGE_RANK = { Applied: 1, Responded: 2, Interview: 3, Offer: 4, Hired: 5 };
+const STAGE_RANK = { Applied: 1, Responded: 2, Assessment: 3, Interview: 4, Offer: 5, Hired: 6 };
 
 /**
  * Parse data/status-log.tsv into per-row transition observations. Columns are
@@ -238,8 +238,8 @@ export function computeFunnelWithHistory(statusByNum, ledger) {
   for (const rank of reached.values()) {
     if (rank >= 1) everApplied++;
     if (rank >= 2) everResponded++;
-    if (rank >= 3) everInterview++;
-    if (rank >= 4) everOffer++;
+    if (rank >= 4) everInterview++;
+    if (rank >= 5) everOffer++;
   }
   return {
     everApplied,
