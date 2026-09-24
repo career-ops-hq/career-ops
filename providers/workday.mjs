@@ -103,7 +103,7 @@ function resolveMaxPages(entry) {
 //   (other boards on the same tenant answering normally) still redirects here
 //   every time it's checked.
 // Only page-0's request is checked — a tenant that fails mid-pagination
-// already has jobs.mjs's own transient/structural handling and isn't
+// already has this file's own transient/structural handling and isn't
 // touched here.
 const WORKDAY_MAINTENANCE_MARKER = 'community.workday.com/maintenance-page';
 const WORKDAY_OUTAGE_REDIRECT_RE = /^https:\/\/[a-z0-9.-]+\.myworkday\.com\/wday\/drs\/outage(?:[/?]|$)/i;
