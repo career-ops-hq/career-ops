@@ -1,7 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 import { coerceId } from './_ids.mjs';
-import { decodeEntities } from './_html-entities.mjs';
+import { htmlToText } from './_html-to-text.mjs';
 
 // Google provider — Google Careers is server-rendered, so the results page HTML
 // contains every job link:
@@ -67,8 +67,10 @@ function titleFromSlug(slug) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-/** @param {string} s */
-const text = (s) => decodeEntities(s.replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
+// Card text goes through the shared pipeline, never a local strip-then-decode:
+// stripping tags before decoding lets "&lt;script&gt;" come back out as a live
+// "<script>" (CodeQL js/incomplete-multi-character-sanitization on #4078).
+const text = (/** @type {string} */ s) => htmlToText(s);
 
 /** Last match of a global regex in `s`, or null. */
 function lastMatch(/** @type {RegExp} */ re, /** @type {string} */ s) {

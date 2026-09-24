@@ -99,6 +99,17 @@ try {
       : fail(`google card url: ${yt?.url}`);
   }
 
+  // Entity-escaped markup in a card must not decode into live markup.
+  {
+    const hostile = card('555000111', 'x', 'Analyst &lt;script&gt;alert(1)&lt;/script&gt; Ops',
+      'Google &lt;img src=x onerror=alert(1)&gt; | <span class="r0wTof ">&lt;b&gt;Austin, TX, USA&lt;/b&gt;</span>');
+    const { ctx } = recordingCtx(() => `<ul>${hostile}</ul>`);
+    const [j] = await provider.fetch({ ...ENTRY, google: { queries: ['x'] } }, ctx);
+    j && ![j.title, j.company, j.location].some((v) => /<\/?[a-z]/i.test(v))
+      ? pass('google.fetch() never turns entity-escaped markup into live tags')
+      : fail(`google decoded markup: ${JSON.stringify(j && [j.title, j.company, j.location])}`);
+  }
+
   // max_pages does not apply here: pages past the first are unreachable without
   // the disallowed parameter, so raising it must not add requests.
   {
