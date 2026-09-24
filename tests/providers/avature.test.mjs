@@ -101,6 +101,34 @@ try {
   if (j1 && j1.location === 'Argentina') pass('parseArticles extracts the icon-address location of an "article--jobs" card');
   else fail(`parseArticles article--jobs location wrong: ${JSON.stringify(j1 && j1.location)}`);
 
+  // Query-style links (Macquarie): `/JobDetail?jobId=<id>`, no slug segment.
+  // The path-only regex dropped every article, so the board read as empty.
+  const queryStyle = `
+    <article class="article article--result clearfix ">
+      <h3 class="article__header__text__title title title--02">
+        <a class="link" href="https://recruitment.macquarie.com/en_US/careers/JobDetail?jobId=24224">
+          Quality Engineer
+        </a>
+      </h3>
+      <a class="share" href="mailto:?body=https%3A%2F%2Frecruitment.macquarie.com%2Fen_US%2Fcareers%2FJobDetail%3FjobId%3D24224">Share</a>
+    </article>
+    <article class="article article--result">
+      <h3 class="title"><a class="link" href="/en_US/careers/JobDetail?lang=en&amp;jobId=24335">Platform Engineer</a></h3>
+    </article>`;
+  const qArts = parseArticles(queryStyle, 'https://recruitment.macquarie.com');
+  const q1 = qArts.find((a) => a.id === '24224');
+  if (qArts.length === 2 && q1 && q1.title === 'Quality Engineer' && q1.url === 'https://recruitment.macquarie.com/en_US/careers/JobDetail?jobId=24224') {
+    pass('parseArticles accepts query-style /JobDetail?jobId=<id> links (Macquarie)');
+  } else {
+    fail(`parseArticles missed query-style links: ${JSON.stringify(qArts)}`);
+  }
+  const q2 = qArts.find((a) => a.id === '24335');
+  if (q2 && q2.url === 'https://recruitment.macquarie.com/en_US/careers/JobDetail?lang=en&jobId=24335') {
+    pass('parseArticles extracts jobId when it is not the first query param');
+  } else {
+    fail(`parseArticles jobId extraction wrong: ${JSON.stringify(qArts.map((a) => a.id))}`);
+  }
+
   // Pagination key — default `jobOffset`, self-heals to `offset` for tenants
   // that ignore it (Siemens). Mock fetchText with an article-less page so
   // fetch() stops after one request and we can read the URL it built.
@@ -269,6 +297,15 @@ try {
     }
     if (threw) pass('assertParsedSomething() throws when JobDetail links are present but unparsed');
     else fail('a page still carrying JobDetail links must not be reported as empty');
+
+    let threwQuery = false;
+    try {
+      assertParsedSomething('<a href="/careers/JobDetail?jobId=123">Some Role</a>', 'https://acme.avature.net/careers/SearchJobs');
+    } catch {
+      threwQuery = true;
+    }
+    if (threwQuery) pass('assertParsedSomething() throws on unparsed query-style JobDetail links too');
+    else fail('a page carrying query-style JobDetail links must not be reported as empty');
 
     let threwOnEmpty = false;
     try {
