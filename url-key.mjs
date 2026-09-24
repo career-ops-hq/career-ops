@@ -36,6 +36,10 @@
  * can adopt the same key later without the definitions drifting.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 // Query params that identify a click/campaign, never the posting itself. Keep
 // this list literal and board-specific; see the RFC note above on why generic
 // names are absent.
@@ -51,11 +55,59 @@ const TRACKING_PARAMS = [
 // list literal and conservative, for the same reason TRACKING_PARAMS is. Adding
 // an employer-controlled host here would let a fuzzy title collision merge two
 // genuinely distinct requisitions, which is the silent failure direction.
-const AGGREGATOR_DOMAINS = [
-  'adzuna.com', 'builtin.com', 'careerbuilder.com', 'dice.com', 'glassdoor.com',
-  'indeed.com', 'jooble.org', 'linkedin.com', 'monster.com', 'simplyhired.com',
-  'talent.com', 'wellfound.com', 'ziprecruiter.com',
+// The scraper list is shared with scan.mjs (data-static/aggregator-domains.txt,
+// #4263) so a newly discovered reposter is added in ONE place.
+//
+// It does not answer this module's question on its own. That file lists hosts
+// that SCRAPE AND REPOST, and deliberately omits the big job boards because
+// companies post to them directly as a primary board — its header says exactly
+// that about indeed.com. url-key.mjs asks something broader: is this URL
+// EMPLOYER-CONTROLLED? For a board that carries a company's own posting under
+// its own URL the answer is still no, because the same requisition also lives
+// on the employer's ATS, which is the duplicate this module exists to collapse.
+//
+// So the shared file is the base and these are layered on top, each named with
+// the reason it is absent there. Dropping any of them would silently un-fix the
+// case this whole change is for: one posting seen on LinkedIn and on the
+// employer board landing twice.
+const AGGREGATOR_SUPPLEMENT = [
+  'indeed.com',      // primary board; excluded from the shared file by its header
+  'linkedin.com',    // primary board; employers post directly
+  'glassdoor.com',   // primary board; employers post directly
+  'ziprecruiter.com', // primary board; employers post directly
+  'dice.com',        // primary board for tech; employers post directly
+  'wellfound.com',   // primary board for startups; employers post directly
 ];
+
+/** Path to the shared scraper list, overridable the same way scan.mjs allows. */
+const AGGREGATOR_DOMAINS_PATH = process.env.CAREER_OPS_AGGREGATOR_DOMAINS
+  || join(dirname(fileURLToPath(import.meta.url)), 'data-static/aggregator-domains.txt');
+
+// Read once, lazily: this module is imported by merge-tracker.mjs and scan.mjs
+// on every run, and it stays a pure function module until something actually
+// asks about an aggregator.
+//
+// Read directly rather than importing scan.mjs's loader: scan.mjs already
+// imports THIS module, so depending on it back would be a cycle and would pull
+// scan.mjs's whole import graph into merge-tracker's path.
+let aggregatorDomainsCache = null;
+function aggregatorDomains() {
+  if (aggregatorDomainsCache) return aggregatorDomainsCache;
+  const domains = new Set(AGGREGATOR_SUPPLEMENT);
+  try {
+    for (let line of readFileSync(AGGREGATOR_DOMAINS_PATH, 'utf-8').replace(/\r/g, '').split('\n')) {
+      line = line.trim();
+      if (!line || line.startsWith('#')) continue;
+      const domain = line.split('#')[0].trim().toLowerCase();
+      if (domain) domains.add(domain);
+    }
+  } catch {
+    // A missing shared file leaves the supplement, which still covers the
+    // boards this module's dedup actually turns on.
+  }
+  aggregatorDomainsCache = domains;
+  return aggregatorDomainsCache;
+}
 
 /**
  * Fold a hostname to its comparison form: lowercase, with the DNS root label
@@ -130,7 +182,10 @@ function parseAggregator(raw) {
   const host = foldHostname(url.hostname);
   // Label boundary, never a substring: `linkedin.com.evil.example` and
   // `myindeed.com` both contain an aggregator domain and are neither.
-  const domain = AGGREGATOR_DOMAINS.find((d) => host === d || host.endsWith(`.${d}`));
+  let domain = null;
+  for (const d of aggregatorDomains()) {
+    if (host === d || host.endsWith(`.${d}`)) { domain = d; break; }
+  }
   return domain ? { url, domain } : null;
 }
 

@@ -131,6 +131,36 @@ ok('the root label does not hide an aggregator', () => {
   assert.equal(isAggregatorUrl('https://linkedin.com.evil.example./jobs/1'), false);
 });
 
+// The domain set is the shared scraper list PLUS a named supplement. Both
+// halves are asserted, because each can fail silently in a different way: a
+// broken file read leaves only the supplement, and a literal switch to the
+// shared file alone would drop LinkedIn and Indeed — the exact pair this change
+// exists to collapse.
+ok('the shared aggregator list feeds isAggregatorUrl', () => {
+  // Entries that exist ONLY in data-static/aggregator-domains.txt, so they can
+  // only be recognized if the file is actually being read.
+  for (const u of [
+    'https://recruit.net/job/x',
+    'https://lensa.com/job/x',
+    'https://jora.com/job/x',
+  ]) assert.equal(isAggregatorUrl(u), true, `${u} must come from the shared list`);
+});
+
+ok('the supplement survives: boards the shared list deliberately omits', () => {
+  // data-static/aggregator-domains.txt lists scrapers and leaves the big boards
+  // out because employers post to them directly. This module still has to treat
+  // them as not-employer-controlled, or one posting on LinkedIn and on the
+  // employer's ATS lands twice — the bug this PR fixes.
+  for (const u of [
+    'https://www.linkedin.com/jobs/view/4001',
+    'https://uk.indeed.com/viewjob?jk=abc',
+    'https://glassdoor.com/job-listing/x',
+    'https://ziprecruiter.com/c/x/job/y',
+    'https://dice.com/jobs/detail/1',
+    'https://wellfound.com/jobs/1',
+  ]) assert.equal(isAggregatorUrl(u), true, `${u} must stay an aggregator`);
+});
+
 // ───────────────────────── aggregatorPostingId (unit) ─────────────────────────
 console.log('\naggregatorPostingId()');
 ok('LinkedIn: bare id, title slug and currentJobId are one posting id', () => {
