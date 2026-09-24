@@ -3728,6 +3728,7 @@ async function main() {
       added: verifiedOffers.length,
       added_urls: verifiedOffers.map(offer => offer.url),
       errors: errors.map(({ company, error }) => ({ company, error })),
+      unverified_zero: unverifiedZeroTargets,
       dry_run: dryRun,
     }, errors.length > 0 ? 2 : 0);
   }
