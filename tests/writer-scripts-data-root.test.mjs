@@ -110,11 +110,25 @@ test('generate-pdf does not treat the data root as outside its workspace', () =>
   const f = fixture();
   try {
     const r = run('generate-pdf.mjs', [join(f.dataRoot, 'output', 'cv.html'), join(f.dataRoot, 'output', 'cv.pdf')], f);
-    // Asserting the ABSENCE of the containment refusal, not a finished PDF, so
-    // this stays meaningful on a machine with no Chromium available.
     assert.doesNotMatch(r.all, /Refusing to write the PDF outside the tracker workspace/i,
       `the containment boundary came from the code directory, not the data root:\n${r.all.slice(0, 500)}`);
     assert.doesNotMatch(r.all, /escapes the tracker workspace/i,
       `a path inside the data root was reported as an escape:\n${r.all.slice(0, 500)}`);
+
+    // Positive proof that the containment checks actually RAN and passed, not
+    // merely that their message is absent: generate-pdf.mjs prints this line
+    // only after assertInsideWorkspace() has cleared the input and the output
+    // (generate-pdf.mjs:1325-1335). Without it a child that died earlier would
+    // satisfy both doesNotMatch assertions vacuously. (CodeRabbit, PR #4486.)
+    assert.match(r.all, /\u{1F4C4} Input:/u,
+      `validation never got far enough to report its input, so the assertions above prove `
+      + `nothing:\n${r.all.slice(0, 500)}`);
+
+    // Past that marker the browser launches, so a machine with no Chromium may
+    // still fail here. That is tolerated; anything failing EARLIER is not.
+    if (r.status !== 0) {
+      assert.match(r.all, /browser|chromium|playwright|executable|Failed to launch/i,
+        `generate-pdf failed after validation for an unexpected reason:\n${r.all.slice(0, 500)}`);
+    }
   } finally { cleanup(f); }
 });
