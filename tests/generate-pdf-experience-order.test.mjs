@@ -133,6 +133,66 @@ expectOk('does not guess a missing month against a dated role in the same year',
 expectThrows('an unreadable month still loses to a later year', () =>
   validateCvExperienceOrder(html(['Ago 2019 – Dic 2020', 'Feb 2021 – Presente'])));
 
+// --- Markup the parser must still read ---------------------------------------
+
+expectThrows('reads a single-quoted job-period class', () =>
+  validateCvExperienceOrder(
+    "<span class='job-period'>2015 – 2018</span><span class='job-period'>2019 – 2022</span>"));
+
+expectThrows('decodes a decimal entity between month and year before reading the month', () =>
+  validateCvExperienceOrder(html(['Jan&#160;2021 – Dec 2021', 'Feb 2021 – Present'])));
+
+expectThrows('decodes a hex entity between month and year before reading the month', () =>
+  validateCvExperienceOrder(html(['Jan&#xA0;2021 – Dec 2021', 'Feb 2021 – Present'])));
+
+// --- Quoting a period back to the terminal -----------------------------------
+// The period comes out of the CV and the message goes to a terminal or a log:
+// an ANSI escape or a bidi override in it could repaint the operator's
+// console. The date is still parsed from the original text.
+
+const CONTROL_OR_BIDI = /[\u0000-\u001f\u007f-\u009f؜‎‏‪-‮⁦-⁩]/;
+
+function thrownMessage(fn) {
+  try { fn(); } catch (err) { return err && err.message; }
+  return null;
+}
+
+{
+  const message = thrownMessage(() =>
+    validateCvExperienceOrder(html(['2015\u001b[2K\u001b[1G – 2018‮', '2019 – 2022'])));
+  if (message && /chronolog/i.test(message) && !CONTROL_OR_BIDI.test(message)) {
+    pass('strips terminal controls and bidi overrides from the periods an error quotes');
+  } else {
+    fail(`the error should name the inversion without control or bidi characters: ${JSON.stringify(message)}`);
+  }
+}
+
+{
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => { warnings.push(args.join(' ')); };
+  try {
+    validateCvExperienceOrder(html(['2015 – 2018\u001b]0;pwned\u0007', '2019 – 2022']), { allowNonChronological: true });
+  } catch { /* asserted below */ } finally {
+    console.warn = originalWarn;
+  }
+  if (warnings.length === 1 && !CONTROL_OR_BIDI.test(warnings[0].replace(/^⚠️\s+/, ''))) {
+    pass('strips terminal controls from the periods the escape-hatch warning quotes');
+  } else {
+    fail(`the warning should quote the periods without control characters: ${JSON.stringify(warnings)}`);
+  }
+}
+
+{
+  const message = thrownMessage(() =>
+    validateCvExperienceOrder(html([`2015 – 2018 ${'x'.repeat(5000)}`, '2019 – 2022'])));
+  if (message && /chronolog/i.test(message) && message.length < 600) {
+    pass('caps a long period quoted in the error, so it cannot bury the message');
+  } else {
+    fail(`a 5000-character period should be truncated in the error (length ${message && message.length})`);
+  }
+}
+
 // --- Every shipped template pack --------------------------------------------
 // Template packs may change tag names inside the ENTRY zone of their
 // sections/experience.html partial: the ATS pack renders the period in a
