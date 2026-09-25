@@ -20,6 +20,7 @@ export type Job = {
   text: string;
   result?: JobResult;
   cost?: { tokens: number; usd?: number }; // per-run token cost (Claude result event) — local only
+  reportN?: number | null;
   startedAt: number;
   endedAt?: number;
 };
@@ -123,6 +124,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         let verdictLine = ""; // latched separately so the 8000-char tail can't drop it
         let doneTokens = 0; // per-run token cost, forwarded on the done event (#6)
         let doneCostUsd: number | null = null;
+        let doneReportN: number | null = null;
         const steps: JobStep[] = [];
         const finish = (status: "done" | "error", lastLabel?: string) => {
           const result = status === "done" ? parseVerdict(verdictLine || text) : undefined;
@@ -132,6 +134,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             status,
             result,
             cost,
+            reportN: doneReportN,
             endedAt: Date.now(),
             steps: lastLabel ? [...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }] : j.steps,
           }));
@@ -191,6 +194,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
                   // finish happens on stream-close; capture the per-run cost it carries
                   if (typeof ev.tokens === "number") doneTokens = ev.tokens;
                   if (typeof ev.costUsd === "number") doneCostUsd = ev.costUsd;
+                  if (typeof ev.reportN === "number") doneReportN = ev.reportN;
                 } else if (ev.type === "error") {
                   finish("error", ev.msg || "Error");
                   return;

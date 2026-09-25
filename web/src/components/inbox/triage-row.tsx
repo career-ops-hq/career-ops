@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { cn } from "@/lib/cn";
 
-export type RowScore = { score: number | null; tone: "good" | "warn" | "bad" | "muted"; jobId: string; running: boolean };
+export type RowScore = { score: number | null; tone: "good" | "warn" | "bad" | "muted"; jobId: string; running: boolean; reportN?: number | null };
 
 function agoLabel(age: number | null): string | null {
   if (age == null) return null;
@@ -82,7 +82,14 @@ export function TriageRow({
 
       {/* EVALUADA state (right-aligned, visually distinct from raw rows) */}
       {evaluated ? (
-        <Link href={`/jobs/${scored!.jobId}`} className="flex shrink-0 items-center gap-1.5 text-xs">
+        <Link
+          href={
+            scored!.running || !scored!.reportN
+              ? `/jobs/${scored!.jobId}`
+              : `/pipeline/${scored!.reportN}`
+          }
+          className="flex shrink-0 items-center gap-1.5 text-xs"
+        >
           {scored!.running ? (
             <>
               <Loader2 className="size-3.5 animate-spin text-brand" />
