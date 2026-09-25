@@ -136,7 +136,7 @@ If a field matches, warn the candidate BEFORE generating or filling an answer fo
 
    - **Exit 0** → the JSON on stdout is the base snapshot of previous answers. `null` means the report has no section; treat it as a fresh application.
    - **Non-zero exit** → the section is partially unreadable and strict mode refused it, naming every unreadable line on stderr. Do NOT fall back to reading the section as prose, and do NOT proceed with a partial base — a silently dropped answer looks like an answer the candidate never gave, and an absorbed one corrupts an answer they did give. Show the candidate the named lines and ask whether to fix the report first or continue without the affected answers.
-   - A **Section H** (`## H) Draft Application Answers`, drafted during evaluation before any form was seen) has its own reader, because its body is a convention rather than a format this repo writes:
+   - A **Section H** (`## H) Draft Application Answers (draft)`, drafted during evaluation before any form was seen) has its own reader, because its body is a convention rather than a format this repo writes. The reader finds the block by the trailing `(draft)` marker, so a translated heading under any letter still resolves:
 
      ```bash
      node application-answers.mjs --report reports/NNN-company-role-date.md --read-draft

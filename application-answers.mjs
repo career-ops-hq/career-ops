@@ -317,7 +317,56 @@ export function parseApplicationAnswersSection(reportText, { strict = false } = 
 }
 
 /**
- * Read the evaluation mode's `## H) Draft Application Answers` block.
+ * The `(draft)` authoring marker, and the discriminator that replaced
+ * `/^##\s+H\)\s*Draft Application Answers\s*$/m`.
+ *
+ * NEITHER the letter NOR the name identifies this block. Both move with the
+ * locale: of the 19 evaluation modes, 3 write the English name under `H)`
+ * (canonical, `ar`, `ja`), 5 write a translated name under `H)`
+ * (`es ru tr zh zh-TW`), and 11 write a translated name under `G)`
+ * (`da de fr hi id it ko nl pl pt ua`). Matching one exact heading found the
+ * block in 3 of 19, so in sixteen languages `modes/apply.md` silently
+ * regenerated every answer the evaluation had already drafted and paid for.
+ *
+ * A trailing parenthetical marker is the signal instead, which is the
+ * convention `web/src/lib/report-sections.mjs` already established for the
+ * verdict callout: `(lead)` / `(verdict)` are stripped for display precisely
+ * because they are deliberate authoring signals that read the same in every
+ * language. `(draft)` is the same shape for the same reason, and the modes now
+ * write it (see `## H) Draft Application Answers (draft)` in `modes/oferta.md`).
+ *
+ * The English name is still accepted on its own, under any letter, for the
+ * reports users already have on disk: those were written before any mode
+ * emitted the marker, and they are the corpus `apply` reads from today.
+ * A translated heading in an OLD report stays unreadable — no discriminator
+ * can recover it without guessing, and guessing here re-submits a mispaired
+ * answer to an employer. New evaluations in every language carry the marker.
+ */
+const DRAFT_ANSWERS_MARKER_RE = /\(draft\)\s*$/i;
+const DRAFT_ANSWERS_NAME_RE = /^draft application answers$/i;
+// Same grammar as report-sections.mjs' HEADING_PREFIX: a bare letter needs a
+// real delimiter, or ordinary prose loses its first word.
+const HEADING_PREFIX_RE = /^\s*(?:Block\s+([A-Z])(?:[).:]\s*|\s+(?:[—–-]+\s*)?)|([A-Z])[).:]\s*)/i;
+
+/**
+ * Locate the draft-answers heading: the first `## ` heading carrying the
+ * `(draft)` marker, or failing that the first one whose name — with the author
+ * letter and any marker stripped — is the canonical English one.
+ * @param {string} report Report markdown, newlines already normalized.
+ * @returns {{index:number, 0:string} | null} A match-like object, or null.
+ */
+function findDraftAnswersHeading(report) {
+  /** @type {RegExpMatchArray[]} */
+  const headings = [...report.matchAll(/^##\s+(.+?)\s*$/gm)];
+  const marked = headings.find(h => DRAFT_ANSWERS_MARKER_RE.test(h[1]));
+  if (marked) return marked;
+  return headings.find(h => DRAFT_ANSWERS_NAME_RE.test(
+    h[1].replace(DRAFT_ANSWERS_MARKER_RE, '').replace(HEADING_PREFIX_RE, '').trim(),
+  )) ?? null;
+}
+
+/**
+ * Read the evaluation mode's `## H) Draft Application Answers (draft)` block.
  *
  * A DIFFERENT producer and a different format from the section above.
  * `parseApplicationAnswersSection` reads a format this module also writes, so
@@ -343,7 +392,7 @@ export function parseApplicationAnswersSection(reportText, { strict = false } = 
  */
 export function parseDraftAnswersBlockH(reportText) {
   const report = String(reportText ?? '').replace(/\r\n/g, '\n');
-  const heading = /^##\s+H\)\s*Draft Application Answers\s*$/m.exec(report);
+  const heading = findDraftAnswersHeading(report);
   if (!heading) return null;
 
   const afterHeading = heading.index + heading[0].length;

@@ -142,7 +142,7 @@ Offer की requirements पर mapped 6-10 STAR+R stories (STAR + **Reflection
 ## F) Interview Plan
 (Block F का पूरा content)
 
-## G) Application के लिए Draft Responses
+## G) Application के लिए Draft Responses (draft)
 (केवल यदि score >= 4.5 -- application form के लिए draft responses)
 
 ---

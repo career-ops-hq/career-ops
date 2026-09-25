@@ -138,7 +138,7 @@ Salvare la valutazione completa in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md
 ## F) Piano dei colloqui
 (contenuto completo del blocco F)
 
-## G) Bozze di risposta per la candidatura
+## G) Bozze di risposta per la candidatura (draft)
 (solo se punteggio >= 4.5 -- risposte pronte per i moduli del portale aziendale)
 
 ---

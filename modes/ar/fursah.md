@@ -227,7 +227,7 @@
 ## Risk Summary
 (سطر واحد لكل إشارة مخاطر، بترتيب ثابت — راجع قسم Risk Summary أعلاه)
 
-## H) Draft Application Answers
+## H) Draft Application Answers (draft)
 (يُكتب فقط إذا كان التقييم الإجمالي للمطابقة 4.5 فما فوق — مسودات إجابات جاهزة ومقترحة لنموذج التقديم)
 
 ---

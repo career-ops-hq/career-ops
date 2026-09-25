@@ -25,9 +25,21 @@ test("a block added past H needs no code change", () => {
   assert.equal(authorLetter("Z. Last One"), "Z");
 });
 
-test("the (lead) / (verdict) marker is dropped with the letter", () => {
+test("the (lead) / (verdict) / (draft) marker is dropped with the letter", () => {
   assert.equal(cleanHeading("F) Verdict (lead)"), "Verdict");
   assert.equal(cleanHeading("F) Verdict (verdict)"), "Verdict");
+  // The modes write "(draft)" on the draft-answers block so the core reader can
+  // find it in any language (#3884); the viewer must not see it either.
+  assert.equal(cleanHeading("H) Draft Application Answers (draft)"), "Draft Application Answers");
+  assert.equal(cleanHeading("G) Чернетки відповідей на форму (draft)"), "Чернетки відповідей на форму");
+});
+
+test("(draft) marks the draft-answers block, never the verdict callout", () => {
+  // Both markers are stripped for display, but only (lead)/(verdict) leads the
+  // report. A draft-answers block rendered as the Verdict callout would put
+  // unsent application answers where the hiring decision belongs.
+  assert.equal(isVerdictHeading("H) Draft Application Answers (draft)"), false);
+  assert.equal(isVerdictHeading("G) Szkice odpowiedzi do aplikacji (draft)"), false);
 });
 
 test("all three delimiters and the spelled-out Block form", () => {

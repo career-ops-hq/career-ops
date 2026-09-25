@@ -66,7 +66,9 @@ If the final score is >= 4.5, generate a draft of responses for the application 
 
 1. **Extract form questions**: Use Playwright to navigate to the form and take a snapshot. If they cannot be extracted, use the generic questions.
 2. **Generate responses** following the tone (see below).
-3. **Save in the report** as section `## H) Draft Application Answers`.
+3. **Save in the report** as section `## H) Draft Application Answers (draft)`. The trailing
+   `(draft)` is what `application-answers.mjs --read-draft` locates the block by, in every
+   language — keep it even when the heading itself is translated.
 
 ### Generic questions (use if they cannot be extracted from the form)
 

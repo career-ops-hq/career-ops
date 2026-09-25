@@ -138,7 +138,7 @@ Sla de volledige evaluatie op in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 ## F) Sollicitatiegesprekplan
 (volledige inhoud van blok F)
 
-## G) Conceptantwoorden voor de sollicitatie
+## G) Conceptantwoorden voor de sollicitatie (draft)
 (alleen bij score >= 4,5 -- conceptantwoorden voor het sollicitatieformulier)
 
 ---
