@@ -312,6 +312,154 @@ try {
       fail(`unexpected fetch error / fetchJson called=${touched}: ${e.message}`);
     }
   }
+  // ── PCSX tenants: same host, other endpoint ───────────────────────────────
+  // Eightfold is moving tenants from /api/apply/v2/jobs to /api/pcsx/search. A
+  // migrated tenant answers 403 on the classic path, which this provider used to
+  // read as the WAF case: the board returned zero postings on every run, with no
+  // error. Microsoft (2,395 postings) was dark for 3+ scans that way.
+  const httpErr = (status, message) => Object.assign(new Error(`HTTP ${status}`), { status, body: JSON.stringify({ message }) });
+  const pcsxPage = (rows, count) => ({ data: { count, positions: rows } });
+  const position = (id, name) => ({ id, name, canonicalPositionUrl: `https://microsoft.eightfold.ai/careers/job/${id}`, locations: ['Redmond, WA'] });
+  const TENANT = { name: 'Microsoft', careers_url: 'https://microsoft.eightfold.ai/careers' };
+  const recording = (respond) => {
+    const calls = [];
+    return { calls, ctx: { transport: 'http', sleep: async () => {}, fetchText: async () => { throw new Error('no fetchText'); }, fetchJson: async (url, opts) => { const c = { url, opts, n: calls.length }; calls.push(c); return respond(c); } } };
+  };
+
+  // v2 403 -> one PCSX probe on the same host -> paging continues on PCSX.
+  {
+    const { ctx, calls } = recording((c) => {
+      if (c.url.includes('/api/apply/v2/jobs')) throw httpErr(403, 'Not authorized for PCSX');
+      const start = Number(new URL(c.url).searchParams.get('start') || 0);
+      const rows = start === 0 ? Array.from({ length: 10 }, (_, i) => position(String(i), `Role ${i}`)) : [position('90', 'Last Role')];
+      return pcsxPage(rows, 11);
+    });
+    const jobs = await ef.fetch(TENANT, ctx);
+    const v2Calls = calls.filter((c) => c.url.includes('/api/apply/v2/jobs'));
+    const pcsxCalls = calls.filter((c) => c.url.includes('/api/pcsx/search'));
+    jobs.length === 11 && v2Calls.length === 1 && pcsxCalls.length === 2
+      ? pass('eightfold switches to /api/pcsx/search after one 403 and pages there (1 v2 + 2 pcsx requests, 11 jobs)')
+      : fail(`pcsx switch: ${jobs.length} jobs, ${v2Calls.length} v2 + ${pcsxCalls.length} pcsx requests`);
+    pcsxCalls.every((c) => new URL(c.url).hostname === 'microsoft.eightfold.ai' && c.opts?.redirect === 'error')
+      ? pass('eightfold PCSX requests stay on the pinned tenant host with redirect:"error"')
+      : fail(`pcsx request targets: ${JSON.stringify(pcsxCalls.map((c) => [c.url, c.opts?.redirect]))}`);
+    jobs[0]?.title === 'Role 0' && jobs[0]?.company === 'Microsoft' && jobs[0]?.url.includes('/careers/job/0')
+      ? pass('eightfold maps PCSX positions through the same Job normalizer as v2')
+      : fail(`pcsx mapping: ${JSON.stringify(jobs[0])}`);
+  }
+
+  // A classic tenant must never pay for the probe.
+  {
+    const { ctx, calls } = recording(() => ({ positions: [position('1', 'Classic Role')], count: 1 }));
+    const jobs = await ef.fetch({ name: 'Netflix', careers_url: 'https://netflix.eightfold.ai/careers' }, ctx);
+    jobs.length === 1 && calls.every((c) => c.url.includes('/api/apply/v2/jobs'))
+      ? pass('eightfold makes zero PCSX requests when the classic endpoint answers')
+      : fail(`classic tenant made ${calls.length} requests: ${calls.map((c) => c.url).join(' ')}`);
+  }
+
+  // Both endpoints refusing is the WAF case, and the ORIGINAL 403 has to survive
+  // — a 403 wrapped in a new Error stops reading as a deterministic failure.
+  {
+    const { ctx } = recording((c) => { throw httpErr(403, c.url.includes('pcsx') ? 'PCSX is not enabled for this user.' : 'Forbidden'); });
+    let caught = null;
+    await ef.fetch(TENANT, ctx).catch((e) => { caught = e; });
+    caught && caught.status === 403 && /HTTP 403/.test(caught.message)
+      ? pass('eightfold rethrows the ORIGINAL 403 when PCSX refuses too (WAF case unchanged)')
+      : fail(`double-403: ${caught && caught.message} status=${caught && caught.status}`);
+  }
+
+  // Any OTHER probe failure is reported as itself. Swapping in the v2 403 turned a
+  // busy (429), broken (5xx) or unreachable PCSX endpoint into what reads as a
+  // deterministic WAF block (CodeRabbit, #4297).
+  for (const [label, probeErr] of [
+    ['a 500', httpErr(500, 'Internal Server Error')],
+    ['a 429', httpErr(429, 'slow down')],
+    ['a network error', Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' })],
+  ]) {
+    const { ctx } = recording((c) => {
+      if (c.url.includes('/api/apply/v2/jobs')) throw httpErr(403, 'Not authorized for PCSX');
+      throw probeErr;
+    });
+    let caught = null;
+    await ef.fetch(TENANT, ctx).catch((e) => { caught = e; });
+    caught === probeErr
+      ? pass(`eightfold surfaces ${label} on the PCSX probe as itself, not as the v2 403`)
+      : fail(`pcsx probe ${label}: got ${caught && caught.message} status=${caught && caught.status}`);
+  }
+
+  // A later PCSX page that decodes to null must fail with the descriptive error,
+  // not a TypeError from `'positions' in null`.
+  {
+    const { ctx } = recording((c) => {
+      if (c.url.includes('/api/apply/v2/jobs')) throw httpErr(403, 'Not authorized for PCSX');
+      const start = Number(new URL(c.url).searchParams.get('start') || 0);
+      return start === 0 ? pcsxPage(Array.from({ length: 10 }, (_, i) => position(String(i), `R${i}`)), 25) : null;
+    });
+    let caught = null;
+    await ef.fetch(TENANT, ctx).catch((e) => { caught = e; });
+    caught && !(caught instanceof TypeError) && /unrecognized \/api\/pcsx\/search body at start=10/.test(caught.message)
+      ? pass('eightfold reports a null PCSX page as an unrecognized body, not a TypeError')
+      : fail(`null pcsx page: ${caught && caught.constructor.name}: ${caught && caught.message}`);
+  }
+
+  // Only the first page decides the API. A 403 after v2 has served pages is an
+  // ordinary error: probing PCSX then would splice two endpoints' orderings
+  // into one walk (CodeRabbit, #4297).
+  {
+    const { ctx, calls } = recording((c) => {
+      if (c.url.includes('/api/pcsx/search')) return pcsxPage([position('99', 'Should not appear')], 1);
+      const start = Number(new URL(c.url).searchParams.get('start') || 0);
+      if (start === 0) return { positions: Array.from({ length: 10 }, (_, i) => position(String(i), `R${i}`)), count: 30 };
+      throw httpErr(403, 'Forbidden');
+    });
+    let caught = null;
+    await ef.fetch(TENANT, ctx).catch((e) => { caught = e; });
+    caught?.status === 403 && calls.every((c) => c.url.includes('/api/apply/v2/jobs'))
+      ? pass('eightfold treats a 403 after page 0 as an error and never probes PCSX mid-walk')
+      : fail(`mid-walk 403: caught=${caught && caught.status} urls=${[...new Set(calls.map((c) => c.url.split('?')[0]))].join(' ')}`);
+  }
+
+  // A 200 from PCSX that is not a PCSX page means the endpoint moved again.
+  {
+    const { ctx } = recording((c) => {
+      if (c.url.includes('/api/apply/v2/jobs')) throw httpErr(403, 'Not authorized for PCSX');
+      return { message: 'hello' };
+    });
+    let msg = '';
+    await ef.fetch(TENANT, ctx).catch((e) => { msg = e.message; });
+    /neither API is readable/.test(msg)
+      ? pass('eightfold throws when the PCSX body is unrecognizable instead of returning zero jobs')
+      : fail(`unrecognized pcsx body error: ${JSON.stringify(msg)}`);
+  }
+
+  // A `data` envelope without a positions array is equally unrecognizable — an
+  // empty board and a changed schema must not look the same.
+  {
+    const { ctx } = recording((c) => {
+      if (c.url.includes('/api/apply/v2/jobs')) throw httpErr(403, 'Not authorized for PCSX');
+      return { data: { count: 5 } };
+    });
+    let msg = '';
+    await ef.fetch(TENANT, ctx).catch((e) => { msg = e.message; });
+    /neither API is readable/.test(msg)
+      ? pass('eightfold throws when the PCSX data envelope carries no positions array')
+      : fail(`pcsx data-without-positions error: ${JSON.stringify(msg)}`);
+  }
+
+  // A 429 is transient, not a migration signal: no PCSX probe, and the pages
+  // already collected survive with a loud "partial" warning.
+  {
+    const { ctx, calls } = recording((c) => {
+      const start = Number(new URL(c.url).searchParams.get('start') || 0);
+      if (start === 0) return { positions: Array.from({ length: 10 }, (_, i) => position(String(i), `R${i}`)), count: 500 };
+      throw httpErr(429, 'slow down');
+    });
+    const jobs = await ef.fetch(TENANT, ctx);
+    jobs.length === 10 && calls.every((c) => c.url.includes('/api/apply/v2/jobs'))
+      ? pass('eightfold keeps collected pages on a mid-walk 429 and never probes PCSX for it')
+      : fail(`429 handling: ${jobs.length} jobs, urls=${[...new Set(calls.map((c) => c.url.split('?')[0]))].join(' ')}`);
+  }
+
 } catch (e) {
   fail(`eightfold provider tests crashed: ${e.message}`);
 }
