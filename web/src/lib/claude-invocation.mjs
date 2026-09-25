@@ -94,7 +94,8 @@ export function scopeFrom(allowed) {
  * (reserve-report-num.mjs / merge-tracker.mjs / verify-portals.mjs), so they need
  * Write + Bash. The read-only kinds produce their result through the response
  * stream and need no write tool at all — pdf emits its CV in a `<<cv-html>>`
- * envelope the backend persists (#2185), and research only reports.
+ * envelope the backend persists (#2185), evaluate emits a `<<report-md>>`
+ * envelope the backend persists, and research only reports.
  *
  * The split between the two read-only scopes is the network axis. It used to be
  * absent: a single `readOnly` scope granted WebFetch/WebSearch to every
@@ -162,13 +163,10 @@ export function claudeCliArgs({ kind, prompt }) {
     "--verbose",
     "--include-partial-messages",
     "--permission-mode", "acceptEdits",
-    // Every non-writing kind, not just pdf. --strict-mcp-config with no --mcp-config loads ZERO
+    // Every non-writing kind. --strict-mcp-config with no --mcp-config loads ZERO
     // MCP servers, so the tool lists below describe everything the agent can
-    // reach — without it an MCP server from the user's own config could supply a
-    // write tool that appears in neither list. #2185 is about pdf, and applying
-    // this to every kind would silently stop a configured MCP server (e.g. the
-    // optional Canva server) from loading on evaluate/research runs. The same gap
-    // for the other kinds is #2507.
+    // reach. evaluate is non-writing: a posting must not be able to supply a
+    // write tool through the user's MCP config.
     ...(capabilitiesFor(kind).writes ? [] : ["--strict-mcp-config"]),
     "--allowedTools", scope.allowed,
     "--disallowedTools", scope.disallowed,

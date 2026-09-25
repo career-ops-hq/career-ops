@@ -87,7 +87,7 @@ test("a fetching worker gets workspace-write plus the network hatch", () => {
 });
 
 test("a persisting worker gets workspace-write plus the network hatch", () => {
-  // Given evaluate/fix-portal, which fetch a posting and then write artifacts
+  // Given a worker that fetches and then writes artifacts, such as fix-portal.
   const { args } = fenceArgs({ cliId: "codex", args: codexArgv(), capabilities: CAPS.workspaceWrite });
 
   // Then writes are confined to the workspace and the fetch still works.

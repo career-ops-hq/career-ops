@@ -2,13 +2,15 @@
  * run-prompts.mjs — the prompts /api/run sends each worker kind (#2185).
  *
  * The web ORCHESTRATES the real career-ops engine — it does NOT reimplement it.
- * kind "evaluate" runs the REAL modes/oferta.md and persists the canonical
- * artifacts (A–F report + tracker row) via the SAME scripts the CLI uses
- * (reserve-report-num.mjs → reports/ → batch/tracker-additions/ → merge-tracker.mjs),
- * so a web evaluation is byte-identical to a CLI one (single source of truth, no
- * drift). kind "research" stays read-only.
+ * kind "evaluate" runs the REAL modes/oferta.md scoring and emits the report in
+ * a <<report-md>> envelope; the backend persists it via the SAME scripts the
+ * CLI uses (reserve-report-num.mjs → reports/ → batch/tracker-additions/ →
+ * merge-tracker.mjs). The agent itself holds no Write/Bash — a posting is
+ * untrusted input and must not be able to aim those tools. kind "research"
+ * stays read-only.
  */
 import { CV_ENVELOPE_INSTRUCTION } from "./cv-envelope.mjs";
+import { REPORT_ENVELOPE_INSTRUCTION } from "./report-envelope.mjs";
 
 /**
  * Is this company name safe to interpolate into a shell command inside a prompt?
@@ -45,12 +47,9 @@ const SAFE_COMPANY_NAME = /^[\p{L}\p{N} .,&'()+/-]+$/u;
  * inline instead of writing it), and a guard that greps route.ts for the marker
  * text matched the route's own comments instead. See test-all.mjs §55.6.
  *
- * @param {{kind: string, input: string, memory: string, today: string}} args
+ * @param {{kind: string, input: string, memory: string, today: string, postedAt?: string, lang?: {output: string, modesDir: string, evalModeFile: string}}} args
  * @returns {string}
  */
-/** ISO calendar date, the only form the dashboard's POSTED column parses. */
-const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
-
 export function buildPrompt({ kind, input, memory, today, postedAt, lang }) {
   // AGENTS.md's "Output Language vs Market Modes" composition rule. The CLI
   // picks this up by reading AGENTS.md interactively; a one-shot headless
@@ -102,75 +101,24 @@ If NO slug variant resolves, say so clearly and leave portals.yml unchanged. Nev
 
 End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what you changed, ≤12 words}`;
   }
-  // The posting date is INTERPOLATED, not asked for. The scanner wrote it into
-  // pipeline.md from the provider's own `offer.postedAt`; the server already has
-  // it (readScanDates/readInbox) and passes it here, so the agent copies a value
-  // rather than deriving one. modes/oferta.md is explicit that a guessed date is
-  // worse than none — the dashboard's POSTED column renders an absent date as
-  // `—`, and an invented one reports a months-old req as fresh.
-  //
-  // Canonical form, taken from the regex that CONSUMES it (dashboard's
-  // rePostedOn) rather than from prose: its own trailing segment after `; `,
-  // anchored to a separator, ISO `YYYY-MM-DD`. Mid-sentence mentions are
-  // deliberately not metadata there, so this must be a segment or nothing.
-  //
-  // Absent → the empty string, so the row is byte-identical to today's. Same
-  // reason the url field is always written but may be empty: the shape an agent
-  // reliably follows is one unconditional template, and here the CONTENT is
-  // conditional precisely because "write nothing" is the required behaviour.
-  const postedSegment = ISO_DATE_RE.test(String(postedAt ?? "")) ? `; posted: ${postedAt}` : "";
+  // postedAt is owned by the backend persist path (report-persist.mjs), not
+  // interpolated into this prompt. The agent used to copy it into a TSV row it
+  // wrote itself; it no longer writes files. Unused on purpose — the signature
+  // stays so the route keeps passing the scanner date it already resolved.
+  void postedAt;
 
-  // evaluate (default) — run the REAL oferta mode + persist canonically
+  // evaluate (default) — run the REAL oferta mode; the backend persists.
   //
-  // The TSV row carries 10 fields, the 10th being the posting URL that
-  // merge-tracker dedupes on (#1298). The web is a WRITER of that file, not only
-  // a reader: emitting 9 fields stays valid forever, so nothing would ever go
-  // red — every job evaluated from the web would simply sit outside the
-  // URL dedup. Compatible and half-dead at once, which is the failure mode with
-  // no symptom.
+  // The agent used to be told to run reserve-report-num.mjs / write reports/ /
+  // write a TSV / merge-tracker.mjs, which is why it held Write + Bash. A
+  // posting is untrusted input and those tools are unscoped, so an injected
+  // instruction could aim them at cv.md. Persistence moved to report-persist.mjs.
+  // This prompt must never ask for a write, and it must not carry a TSV template.
   //
-  // ALWAYS 10 fields, empty when there is no URL, deliberately: an
-  // unconditional template is one an agent follows, "emit 9 or 10 depending"
-  // is one it sometimes forgets. Empty and absent are byte-identical in the
-  // written row (verified against merge-tracker), so the robust instruction
-  // costs nothing. Not "N/A" either — parseTsvExtras drops placeholders
-  // precisely so they can't be misread as the row's LOCATION.
-  //
-  // The HEADER row is the same argument one level up (#3517). Headerless files
-  // stay valid forever, so a stale template here would never go red either — it
-  // would just leave every web evaluation on the path where merge-tracker has to
-  // tell score from status by CONTENT, and a discarded, never-scored row (`—` in
-  // both cells) is undecidable there and is skipped. With the header, the field
-  // ORDER below stops being load-bearing at all: merge-tracker resolves each
-  // field by name. The order is kept as-is anyway, so this prompt's row stays
-  // byte-comparable to the CLI's.
-
-  // Two things this prompt deliberately does NOT do.
-  //
-  // It does not ENUMERATE the report's sections. It used to say "blocks A–F, G
-  // posting-legitimacy, and the Machine Summary", which was a hand-kept copy of
-  // a list that lives in modes/oferta.md — and it had already drifted: the
-  // template also requires Risk Summary, H) Draft Application Answers and
-  // Keywords extracted. The `EXACTLY` carried the real instruction, so nothing
-  // broke, which is precisely why the drift was invisible. The mode file is the
-  // one source of truth for which sections exist; naming a subset here can only
-  // ever go stale, never help.
-  //
-  // And it does not let a failed fetch become a scored report. WebFetch returns
-  // 200 with a login wall, a lazy-loaded shell carrying no description (#2619),
-  // an expired-ad page or a bot challenge, and none of that announces itself as
-  // an error. An agent handed that text will happily grade it: the output is a
-  // confident A–F evaluation of a login screen, shaped exactly like a real one.
-  // Reported by a user against LinkedIn URLs in #2995.
-  //
-  // The REFUSAL IS NOT THIS PROMPT'S POLICY, and saying so matters: the web is a
-  // view over the core's modes, never a parallel engine. modes/oferta.md step 3
-  // already rules that a posting which "appears closed" stops before Block A with
-  // no evaluation, report or CV, and modes/pipeline.md's LinkedIn note already
-  // says never to treat a login wall or partial shell as a verified JD. Both were
-  // written for the interactive path; headless just never had the case spelled
-  // out. So this points AT those rules rather than inventing a third one — if the
-  // core changes its mind, this follows instead of contradicting it.
+  // It also does not enumerate the report's sections. modes/oferta.md is the
+  // only source of truth for which sections exist. And it does not let a failed
+  // fetch become a scored report: a login wall, empty shell, expired ad, or bot
+  // challenge is the mode file's "posting appears closed" case (#2619, #2995).
   return `You are running the OFFICIAL career-ops job evaluation, HEADLESS, on the user's own machine. Today is ${today}. Run the REAL career-ops evaluation — do NOT improvise your own scoring.
 
 1. Read ${resolvedLang.evalModeFile} and follow it EXACTLY — EVERY section its report template specifies, in its order, including the Machine Summary. Do not treat any list of sections in THIS prompt as the set to produce; that file is the only source of truth for which sections exist. Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md.
@@ -179,17 +127,11 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
 
    **If WebFetch does not return the posting itself — a login/consent wall, a partial page shell with no job description, a 404 or expired ad, a paywall, a bot challenge, or a page whose text is not this job — this is the mode file's "posting appears closed" case: STOP BEFORE BLOCK A and do not generate an evaluation, a report or a CV.** That rule is the mode's, not this prompt's; modes/pipeline.md states the same thing for extraction — never treat a login wall or partial shell as a verified JD. Instead, say which URL you fetched and what came back, so the user can paste the job text themselves. A scored report about a login screen looks exactly like a scored report about the job, and a run that reports it could not read the posting is a correct outcome.
 
-2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
-   a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).
-   b. Write the full report to reports/{num}-{company-slug}-${today}.md  (company-slug = company lowercased, non-alphanumerics → hyphens).
-   c. Write batch/tracker-additions/{num}-{company-slug}.tsv as TWO lines (real \\t tabs): a HEADER row of the 10 column labels, then ONE data row of 10 TAB-separated columns under it. merge-tracker reads the header and resolves every field by NAME, so no value can land in the wrong column. Copy both lines exactly as shown. ALWAYS write all 10 fields on the data row — leave the last one EMPTY if there is no posting URL, never "N/A" or "-":
-      num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
-      {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}${postedSegment}\t{posting URL, or empty}
-   d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
+2. ${REPORT_ENVELOPE_INSTRUCTION}
 
-3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
+3. NEVER submit an application, fill no forms, contact no one. This is evaluation ONLY.${mem}
 
-After everything above is written and merged, output EXACTLY one final line, nothing after it:
+After the envelope, end with EXACTLY one final line, nothing after it:
 VERDICT: {score}/5 — {reason in 12 words or fewer}
 
 Posting URL: ${input}`;

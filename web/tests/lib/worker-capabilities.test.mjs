@@ -74,7 +74,7 @@ test("only the persisting kinds may write", () => {
   const writers = KNOWN_KINDS.filter((k) => capabilitiesFor(k).writes);
 
   // Then exactly those two, and nothing has quietly joined them.
-  assert.deepEqual(writers.sort(), ["evaluate", "fix-portal"]);
+  assert.deepEqual(writers.sort(), ["fix-portal"]);
 });
 
 test("the policy and Claude's tool scope agree for every kind", () => {

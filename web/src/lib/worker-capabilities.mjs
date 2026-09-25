@@ -77,8 +77,9 @@ export const KNOWN_KINDS = Object.freeze(["pdf", "research", "evaluate", "fix-po
  * - pdf       reads cv.md/profile/report/template and returns the CV inline in an
  *             envelope the backend persists — no write, and no fetch.
  * - research  "use WebFetch for URLs" — fetches, reports, never writes.
- * - evaluate  "Use WebFetch to read the posting", then writes the report and merges
- *             the tracker.
+ * - evaluate  "Use WebFetch to read the posting", then emits a <<report-md>>
+ *             envelope. The backend persists the report and tracker row, so the
+ *             agent must not receive Write or Bash. A posting is untrusted input.
  * - fix-portal rewrites one portals.yml entry after finding a working ATS URL.
  *
  * No kind here is search-only: every web-using kind is pointed at a url (the
@@ -88,7 +89,7 @@ export const KNOWN_KINDS = Object.freeze(["pdf", "research", "evaluate", "fix-po
 const KIND_CAPABILITIES = Object.freeze({
   pdf: CAPS.localReadOnly,
   research: CAPS.networkReadOnly,
-  evaluate: CAPS.workspaceWrite,
+  evaluate: CAPS.networkReadOnly,
   "fix-portal": CAPS.workspaceWrite,
 });
 
