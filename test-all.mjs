@@ -2607,8 +2607,47 @@ if (
 // gained a header row, #3517) left this matching nothing and failing on the
 // empty string rather than on the thing it asserts.
 const batchTrackerStep = batchPrompt.match(/### Step 5 \u2014 [^\n]*[\s\S]*?### Step 6 \u2014 Final JSON/)?.[0] ?? '';
-if (/\{\{REPORT_NUM\}\}\\t\{\{DATE\}\}/.test(batchTrackerStep) && !/Compute `\{next_num\}`/.test(batchTrackerStep)) {
+// The rule protected here is the #749 race: parallel workers must never compute
+// `max+1` themselves. Absence of one spelling is not that property — rewording
+// the forbidden instruction passed the old literal check (#3937) — so the
+// load-bearing assertion is positive: the step must SAY the coordinator
+// reserved the tracker number.
+//
+// It is scoped to one SENTENCE that names the coordinator, a reservation, and
+// the number, because each part checked independently over the whole step is
+// satisfiable by text that means the opposite: "The coordinator reserves the
+// meeting room. Calculate the tracker number yourself." reserves something
+// else, and "The coordinator does not, in fact, reserve this number" negates
+// the claim past any fixed-width negation guard. Word order is free, so
+// "reserved by the coordinator" reads the same as "coordinator reserves".
+//
+// The mirror-image guard on *calculate* wording is deliberately absent: the
+// sentence satisfying this gate is itself negated ("...so do not calculate a
+// local `max+1`"), so such a rule would flag the correct prompt. Negation is
+// therefore only rejected when it precedes `reserv` inside that sentence — the
+// whole prefix, and with no \b before `n't` so contractions ("doesn't reserve")
+// are caught. The original literal stays as a cheap extra, but the gate no
+// longer rests on it.
+const batchTrackerRowShape = /\{\{REPORT_NUM\}\}\\t\{\{DATE\}\}/.test(batchTrackerStep);
+const batchReserveSentence = batchTrackerStep
+  .split(/(?<=[.\n])/)
+  .find((sentence) =>
+    /coordinator/i.test(sentence) &&
+    /\breserv/i.test(sentence) &&
+    /\b(?:numbers?|tracker|REPORT_NUM)\b/i.test(sentence));
+const batchNumIsReserved =
+  batchReserveSentence !== undefined &&
+  !/(?:\bnot\b|\bnever\b|\bcannot\b|n['’]t)[^.]*\breserv/i.test(batchReserveSentence);
+if (
+  batchTrackerRowShape &&
+  batchNumIsReserved &&
+  !/Compute `\{next_num\}`/.test(batchTrackerStep)
+) {
   pass('batch workers use the coordinator-reserved tracker number');
+} else if (!batchTrackerRowShape) {
+  fail('batch Step 5 no longer shows the `{{REPORT_NUM}}\\t{{DATE}}` tracker row');
+} else if (!batchNumIsReserved) {
+  fail('batch Step 5 no longer states that the coordinator reserves the tracker number');
 } else {
   fail('batch workers still compute tracker numbers independently');
 }
@@ -4390,13 +4429,21 @@ if (upskillModeDoc.includes('regenerated fresh every run, never diffed')) {
   fail('upskill trust rule 3 (ephemeral / non-versioned resources) missing');
 }
 
-// Rule 4 — write-time URL liveness via the check-liveness pattern; dead links excluded.
+// Rule 4 — resource-specific URL liveness; job-posting heuristics excluded.
 if (
   upskillModeDoc.includes('Write-time URL liveness') &&
-  upskillModeDoc.includes('liveness-core.mjs') &&
-  upskillModeDoc.includes('dead links never enter the report')
+  upskillModeDoc.includes('successful HTTP response') &&
+  upskillModeDoc.includes('non-error title') &&
+  upskillModeDoc.includes('substantive page content') &&
+  upskillModeDoc.includes('reject 4xx/5xx responses') &&
+  upskillModeDoc.includes('error/challenge pages') &&
+  upskillModeDoc.includes('empty bodies') &&
+  upskillModeDoc.includes('redirects to unrelated destinations') &&
+  upskillModeDoc.includes('job-posting-only') &&
+  upskillModeDoc.includes('must not classify learning resources') &&
+  upskillModeDoc.includes('Dead links never enter the report')
 ) {
-  pass('upskill trust rule 4: write-time URL liveness via check-liveness pattern; dead links excluded');
+  pass('upskill trust rule 4: resource-specific URL liveness; job-posting heuristic excluded');
 } else {
   fail('upskill trust rule 4 (write-time URL liveness) missing');
 }
@@ -4817,7 +4864,7 @@ try {
 // is case- and punctuation-insensitive; loadBlacklist on an absent file is a
 // no-op (empty Map — the scan filter never fires).
 try {
-  const { parseBlacklist, loadBlacklist } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { parseBlacklist, loadBlacklist, findBlacklistEntry } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
   const bl = parseBlacklist([
     '# Company Blacklist',
     '',
@@ -4825,14 +4872,15 @@ try {
     '|---------|-------|-------|--------|',
     '| Acme Corp. | 2026-01-15 | company | post-interview process signals |',
     '| Globex | 2026-02-01 | company | zero conversion |',
+    '| ibm.com | 2026-03-01 | domain | avoid parent-company ATS hosts |',
   ].join('\n'));
   const exact = bl.get('acmecorp');
   if (
-    bl.size === 2 &&
+    bl.size === 3 &&
     exact && exact.reason === 'post-interview process signals' && exact.since === '2026-01-15' &&
-    bl.has('globex') && !bl.has('company')
+    bl.has('globex') && bl.get('domain:ibm.com')?.scope === 'domain' && !bl.has('company')
   ) {
-    pass('scan.mjs parseBlacklist parses the table and keys by normalized company (#1742)');
+    pass('scan.mjs parseBlacklist parses normalized company and domain-scope rows (#1742, #4139)');
   } else {
     fail(`scan.mjs parseBlacklist wrong: size=${bl.size} keys=${[...bl.keys()].join(',')}`);
   }
@@ -4844,6 +4892,16 @@ try {
     pass('scan.mjs blacklist matching is case/punctuation-insensitive via shared normalizeCompany (#1742)');
   } else {
     fail('scan.mjs blacklist matching misses case/punctuation company variants');
+  }
+
+  const domain = bl.get('domain:ibm.com');
+  const domainMatch = findBlacklistEntry(bl, 'Confluent', 'https://jobs.ibm.com/engineering/123');
+  const boundaryMiss = findBlacklistEntry(bl, 'Confluent', 'https://notibm.com/engineering/123');
+  const legacyMatch = findBlacklistEntry(bl, 'ACME-CORP', 'https://example.com/jobs/123');
+  if (domainMatch === domain && boundaryMiss === null && legacyMatch === exact) {
+    pass('scan.mjs blacklist domain scope matches host suffixes without weakening company matching (#4139)');
+  } else {
+    fail('scan.mjs blacklist domain scope does not preserve host boundaries and legacy company matching (#4139)');
   }
 
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-blacklist-'));
@@ -4873,6 +4931,7 @@ try {
 // scan-runs.tsv by header name, and --include-blacklisted bypasses the filter.
 if (
   scanScript.includes("args.includes('--include-blacklisted')") &&
+  scanScript.includes('findBlacklistEntry(blacklist') &&
   scanScript.includes('totalFilteredBlacklist') &&
   scanScript.includes('skipped (blacklist)') &&
   scanScript.includes('filtered_blacklist')
@@ -5112,11 +5171,14 @@ try {
 try {
   const { filterBlacklistedOffers } = await import(pathToFileURL(join(ROOT, 'scan-ats-full.mjs')).href);
   const blacklist = new Map([
-    ['acmecorp', { company: 'Acme Corp', reason: 'example reason' }],
+    ['acmecorp', { company: 'Acme Corp', scope: 'company', reason: 'example reason' }],
+    ['ibmcom', { company: 'ibm.com', scope: 'domain', reason: 'parent ATS host' }],
   ]);
   const offers = [
     { company: 'Acme Corp.', title: 'Software Engineer', url: 'https://example.com/acme' },
     { company: 'Globex', title: 'Software Engineer', url: 'https://example.com/globex' },
+    { company: 'Confluent', title: 'Software Engineer', url: 'https://jobs.ibm.com/confluent' },
+    { company: 'Not IBM', title: 'Software Engineer', url: 'https://notibm.com/role' },
   ];
   const skipped = typeof filterBlacklistedOffers === 'function'
     ? filterBlacklistedOffers(offers, blacklist, { includeBlacklisted: false })
@@ -5125,16 +5187,19 @@ try {
     ? filterBlacklistedOffers(offers, blacklist, { includeBlacklisted: true })
     : null;
   const ok =
-    skipped?.filteredBlacklist === 1 &&
-    skipped.offers.length === 1 &&
+    skipped?.filteredBlacklist === 2 &&
+    skipped.offers.length === 2 &&
     skipped.offers[0].company === 'Globex' &&
-    audited?.annotatedBlacklisted === 1 &&
-    audited.offers.length === 2 &&
+    skipped.offers[1].company === 'Not IBM' &&
+    audited?.annotatedBlacklisted === 2 &&
+    audited.offers.length === 4 &&
     audited.offers[0].blacklisted === true &&
     audited.offers[0].note.includes('blacklisted: example reason') &&
+    audited.offers[2].blacklisted === true &&
+    audited.offers[2].note.includes('blacklisted: parent ATS host') &&
     offers[0].blacklisted === undefined;
-  if (ok) pass('scan-ats-full filters data/blacklist.md matches by default and annotates them under --include-blacklisted (#1911)');
-  else fail('scan-ats-full missing blacklist filter/audit semantics (#1911)');
+  if (ok) pass('scan-ats-full applies company and domain blacklist scopes in default and audit modes (#1911, #4139)');
+  else fail('scan-ats-full missing company/domain blacklist filter/audit semantics (#1911, #4139)');
 } catch (e) {
   fail(`scan-ats-full blacklist test crashed: ${e.message}`);
 }
@@ -7900,6 +7965,9 @@ try {
     fail('remote-title rescue changed behavior for non-remote or malformed titles');
   }
 
+  // location_filter.strict coverage lives in tests/location-filter-strict.test.mjs.
+  // Keep this central harness focused on broad scan integration behavior.
+
   if (
     shouldDedupScanHistoryRow({ firstSeen: '2026-06-01', status: 'added' }, { recheckAfterDays: 30, today: '2026-06-10' }) === true &&
     shouldDedupScanHistoryRow({ firstSeen: '2026-05-01', status: 'added' }, { recheckAfterDays: 30, today: '2026-06-10' }) === false &&
@@ -10057,6 +10125,48 @@ try {
     fail(`stale #3797 exemption — these now carry the **URL:** header, remove them from pendingUrlHeader: ${staleExemptions.join(', ')}`);
   } else {
     pass('every headless evaluator outside the #3797 exemption writes **URL:** and takes a posting URL');
+  }
+
+  // Same family, third contract (#3796): the tracker-addition helpers are
+  // imported, never redefined. Four evaluators carried private copies of
+  // `tsvSafe` / `normalizedTrackerScore` and they drifted -- gemini-eval.mjs's
+  // concatenated instead of parsing, so `SCORE: 4.2 (strong fit)` produced
+  // `4.2 (strong fit)/5`, which is neither a score nor a sentinel and is the
+  // undecidable cell merge-tracker.mjs refuses outright. The evaluation was
+  // skipped wholly while the sibling copy had been immune all along.
+  //
+  // tests/evaluator-score-cell.test.mjs asserts the helpers exist exactly once;
+  // this asserts the family reaches that one definition, which is the half a
+  // fifth evaluator can fail without redefining anything -- by hand-rolling a
+  // score cell inline instead, which is exactly what openrouter-runner.mjs did:
+  // it never held a copy, so a copy-scan never saw it, while it wrote
+  // `${value.toFixed(1)}/5` from a numeric prefix that discarded the
+  // denominator, and the empty string when nothing parsed.
+  //
+  // USE, not merely import: an evaluator can import an unrelated helper from the
+  // module and still build its score cell by hand, which would pass an
+  // import-only check while the behaviour this contract exists to protect had
+  // drifted again. Both halves are required -- the import proves it reaches the
+  // shared definition, the call proves it is the definition actually used.
+  const ADDITION_HELPERS = './lib/tracker-addition.mjs';
+  const helperImportRe = /from\s+'\.\/lib\/tracker-addition\.mjs'/;
+  const helperUseRe    = /\bnormalizedTrackerScore\s*\(/;
+  // Empty, and it should stay that way. #3797 landed while this branch was open
+  // and re-added copies to openai-eval.mjs and ollama-eval.mjs; both were
+  // consolidated on the merge, which is the exemption being spent rather than
+  // renewed. A new name here needs a reason with an issue number attached.
+  const pendingHelperImport = [];
+  const missingHelperImport = evaluatorSources
+    .filter(([, source]) => !helperImportRe.test(source) || !helperUseRe.test(source))
+    .map(([name]) => name);
+  const staleHelperExemptions = pendingHelperImport.filter(name => !missingHelperImport.includes(name));
+  const unexemptedHelperGaps  = missingHelperImport.filter(name => !pendingHelperImport.includes(name));
+  if (unexemptedHelperGaps.length > 0) {
+    fail(`headless evaluators build their tracker-addition cells without importing AND calling ${ADDITION_HELPERS}'s normalizedTrackerScore, the drift #3796 consolidated: ${unexemptedHelperGaps.join(', ')}`);
+  } else if (staleHelperExemptions.length > 0) {
+    fail(`stale #3796 exemption — these now import ${ADDITION_HELPERS}, remove them from pendingHelperImport: ${staleHelperExemptions.join(', ')}`);
+  } else {
+    pass(`every headless evaluator outside the #3796 exemption imports AND calls the shared tracker-addition helpers`);
   }
 
   // --count N: contiguous range from an empty dir.
@@ -13265,7 +13375,11 @@ try {
     join(withMcp, '.claude', 'settings.json'),
     JSON.stringify({ mcpServers: { playwright: { command: 'npx', args: ['@playwright/mcp', '--headless'] } } }),
   );
-  const b = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', withMcp], doctorEnv) || '{}');
+  const b = JSON.parse(execFileSync(
+    NODE,
+    [join(ROOT, 'doctor.mjs'), '--json', '--target', withMcp],
+    { ...doctorEnv, cwd: withMcp, encoding: 'utf8' },
+  ) || '{}');
   if (Array.isArray(b.warnings) && !b.warnings.some((w) => /playwright mcp/i.test(w))) {
     pass('Playwright MCP configured → no warning');
   } else {
@@ -13280,7 +13394,11 @@ try {
     join(withLocalMcp, '.claude', 'settings.local.json'),
     JSON.stringify({ mcpServers: { browser: { command: 'npx', args: ['@playwright/mcp'] } } }),
   );
-  const c = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', withLocalMcp], doctorEnv) || '{}');
+  const c = JSON.parse(execFileSync(
+    NODE,
+    [join(ROOT, 'doctor.mjs'), '--json', '--target', withLocalMcp],
+    { ...doctorEnv, cwd: withLocalMcp, encoding: 'utf8' },
+  ) || '{}');
   if (Array.isArray(c.warnings) && !c.warnings.some((w) => /playwright mcp/i.test(w))) {
     pass('Playwright MCP configured via .claude/settings.local.json → no warning');
   } else {
@@ -16056,6 +16174,36 @@ try {
     } else {
       fail('the web _days key mapping no longer lines up with the core cadenceDefaults keys (#2369)');
     }
+    // The defaults are a CONSTANT, so an empty tracker must not withhold them.
+    // That is the first-run state (onboarding creates a header-only tracker),
+    // and it is precisely when the web form has no profile overrides to fall
+    // back on, so a missing baseline leaves every field blank (#4005).
+    const emptyEmitted = analyzeFromContent(
+      '# Applications Tracker\n\n| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n',
+      '',
+    );
+    const emptyDefaults = emptyEmitted?.cadenceDefaults;
+    // Value equality, not just shape. Returning CADENCE here (defaults PLUS the
+    // user's profile overrides) would satisfy every structural check while
+    // handing the form one of the user's own overrides as the baseline they
+    // would be reverting to, which is the #2369 mistake exactly.
+    const emptyOk = emptyDefaults && typeof emptyDefaults === 'object'
+      && Object.keys(emptyDefaults).length === cadKeys.length
+      && cadKeys.every((k) => Number.isInteger(emptyDefaults[k]) && emptyDefaults[k] === DEFAULT_CADENCE[k]);
+    if (emptyOk) {
+      pass('followup-cadence emits cadenceDefaults even when the tracker is empty (#4005)');
+    } else {
+      fail(`an empty tracker withholds cadenceDefaults, so a first-run web cadence form renders blank (#4005): ${JSON.stringify(emptyEmitted)}`);
+    }
+    // The error must SURVIVE alongside the defaults: stats.mjs short-circuits on
+    // result.error before it reads entries, so dropping it while adding the
+    // defaults would hand that caller a payload with no entries to iterate.
+    if (emptyEmitted?.error === 'No applications found in tracker.') {
+      pass('the empty-tracker payload still reports its error alongside the defaults (#4005)');
+    } else {
+      fail(`the empty-tracker error was lost, so callers that branch on result.error now fall through (#4005): ${JSON.stringify(emptyEmitted)}`);
+    }
     const webFollowups = join(ROOT, 'web', 'src', 'lib', 'followups.ts');
     if (existsSync(webFollowups)) {
       const webSrc = readFileSync(webFollowups, 'utf-8');
@@ -16303,13 +16451,13 @@ try {
         if (existsSync(join(ROOT, 'web', 'tests', 'lib'))) {
           fail('web/tests/lib contains no *.test.mjs — the #2185 unit suites are not being gated');
         }
-      } else if (run(NODE, ['--test', ...webUnits], { timeout: 180000 }) !== null) {
+      } else if (run(NODE, ['--experimental-strip-types', '--test', ...webUnits], { timeout: 180000 }) !== null) {
         pass('web pdf write-scope unit suites pass (#2185)');
       } else {
         // The signal distinguishes a timeout/kill from an assertion failure —
         // run()'s default 30s is short for six suites in one child process.
         const killed = lastRunFailure()?.signal;
-        fail(`web pdf write-scope unit suites failed${killed ? ` (killed: ${killed})` : ''} (run: node --test ${webUnits.join(' ')})`);
+        fail(`web pdf write-scope unit suites failed${killed ? ` (killed: ${killed})` : ''} (run: node --experimental-strip-types --test ${webUnits.join(' ')})`);
       }
 
       // Parity: everything web/package.json would run must be something we DO run.
@@ -17523,6 +17671,25 @@ try {
     pass('computePortalStats counts auth/server streaks as persistently dead; recovery resets');
   } else {
     fail(`computePortalStats auth/server streaks wrong: ${JSON.stringify(p2?.persistentlyDead)}`);
+  }
+
+  // A streak from an entry that is no longer probed (moved to
+  // scan_method: websearch, provider dropped, renamed) must not stand as a
+  // permanent 🚨 — nothing it can write will ever clear it. Staleness is
+  // relative to the newest row in the file, not the wall clock.
+  const portalsYml3 = 'tracked_companies:\n  - name: MovedToWebsearch\n  - name: StillFailing\njob_boards: []';
+  const staleHealthTsv = 'timestamp\tcompany\tstatus\n' +
+    '2026-07-01\tMovedToWebsearch\tslug_gone\n' +
+    '2026-07-02\tMovedToWebsearch\tslug_gone\n' +
+    '2026-07-03\tMovedToWebsearch\tslug_gone\n' +
+    '2026-08-10\tStillFailing\tslug_gone\n' +
+    '2026-08-11\tStillFailing\tslug_gone\n' +
+    '2026-08-12\tStillFailing\tslug_gone\n';
+  const p3 = stats.computePortalStats(portalsYml3, null, [], staleHealthTsv);
+  if (p3 && p3.persistentlyDead === 1) {
+    pass('computePortalStats ignores failure streaks from entries no longer probed');
+  } else {
+    fail(`computePortalStats stale-streak gate wrong: ${JSON.stringify(p3?.persistentlyDead)}`);
   }
 
   // scan.mjs computeConsecutiveFailures — same inverted rule at the source:

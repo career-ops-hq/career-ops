@@ -58,6 +58,51 @@ const DSG_FACETS = [
   },
 ];
 
+// The same board with `locationMainGroup` in the fuller shape a live tenant
+// ships (page 0, 2026-08-28): the id-less group parents above, each carrying
+// nested children that *do* have their own ids and counts.
+//
+// Those children double-count. A requisition open in several locations is
+// counted once per location, so the live facet's 938 children summed to 16,732
+// against a board of ~8,366 — almost exactly 2.00x — while every other counted
+// facet on the board agreed within 0.9% and erred downward. The children below
+// are collapsed from 938 to 4 with that sum preserved, since the sum is the
+// property under test.
+//
+// Neither function should reach them: `facetCoverage()` sums a facet's own
+// `values`, and `chooseSplitFacet()` filters on a string `id`. Recursing into
+// `values[].values` looks like a free improvement — more values, a finer
+// partition — and would instead double the true total, so every healthy board
+// would compare its honest `total` against it and read as offset-clamped. The
+// two assertions below go red if that refactor ever lands. See #3875.
+const DSG_NESTED_FACETS = [
+  ...DSG_FACETS.filter((f) => f.facetParameter !== 'locationMainGroup'),
+  {
+    facetParameter: 'locationMainGroup',
+    descriptor: null,
+    values: [
+      {
+        id: null,
+        descriptor: 'Location - State',
+        count: null,
+        values: [
+          { id: 'loc-pa', descriptor: 'Pennsylvania', count: 4183 },
+          { id: 'loc-ny', descriptor: 'New York', count: 4183 },
+        ],
+      },
+      {
+        id: null,
+        descriptor: 'Locations',
+        count: null,
+        values: [
+          { id: 'loc-pgh', descriptor: 'Pittsburgh', count: 4183 },
+          { id: 'loc-nyc', descriptor: 'New York City', count: 4183 },
+        ],
+      },
+    ],
+  },
+];
+
 try {
   const workdayModule = await import(pathToFileURL(join(ROOT, 'providers/workday.mjs')).href);
   const workday = workdayModule.default;
@@ -90,6 +135,19 @@ try {
     pass('trueTotalFromFacets() ignores facets whose values carry no usable counts');
   } else {
     fail(`trueTotalFromFacets(uncounted) returned ${uncounted}, expected null`);
+  }
+
+  // The board size must not move when the nested children are present. An
+  // implementation that summed them would return 16,732 and, because this
+  // function takes the maximum, every healthy tenant would then read as clamped.
+  const nestedTrue = trueTotalFromFacets(DSG_NESTED_FACETS);
+  if (nestedTrue === 8425) {
+    pass('trueTotalFromFacets() ignores nested facet children — locationMainGroup cannot double the board');
+  } else {
+    fail(
+      `trueTotalFromFacets(DSG_NESTED) returned ${nestedTrue}, expected 8425` +
+        ' — 16732 means the nested children were summed (#3875)',
+    );
   }
 
   // ── chooseSplitFacet ──────────────────────────────────────────────
@@ -134,6 +192,17 @@ try {
     pass('chooseSplitFacet() rejects facets whose values have no id (id-less group headers)');
   } else {
     fail('chooseSplitFacet() should reject id-less facet values');
+  }
+
+  // Same rejection, but against the shape that makes descending tempting: the
+  // parents are still id-less, yet their children carry usable ids and counts.
+  const nestedChosen = chooseSplitFacet(DSG_NESTED_FACETS);
+  if (nestedChosen && nestedChosen.facetParameter === 'jobFamily') {
+    pass('chooseSplitFacet() never picks a nested group facet, even when its children carry ids and counts');
+  } else {
+    fail(
+      `chooseSplitFacet(DSG_NESTED) chose ${JSON.stringify(nestedChosen?.facetParameter)}, expected "jobFamily" (#3875)`,
+    );
   }
 
   const locationFirst = chooseSplitFacet([

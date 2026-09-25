@@ -5,8 +5,10 @@ name: PR triage
 #
 #   pull_request_target  -> triage de esa PR; en `opened`/`ready_for_review` publica la primera respuesta
 #   issue_comment        -> re-triage de la PR comentada (solo comentarios humanos, solo en PRs)
-#   schedule (cada 6h)   -> sweep: PRs >20h sin comentario de maintainer ni marcador reciben la primera
-#                           respuesta (tope TRIAGE_SWEEP_MAX por pasada, para no bombardear)
+#   workflow_run (Tests) -> re-triage de la PR de ese head al acabar su CI (triage/new -> ready/trivial/...)
+#   schedule (cada 6h)   -> sweep: PRs >20h sin comentario de maintainer ni marcador reciben labels y la primera
+#                           respuesta (tope TRIAGE_SWEEP_MAX por pasada); las de más de TRIAGE_BACKLOG_HOURS (72)
+#                           también, con una disculpa por la espera y sin fechas; las pegadas en triage/new se re-triagean
 #
 # Seguridad: `pull_request_target` corre con permisos de escritura, así que NUNCA se hace checkout del
 # código del fork. El checkout es de la rama BASE (ref por defecto del evento) y solo para leer el script,
@@ -22,6 +24,9 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   issue_comment:
     types: [created]
+  workflow_run:
+    workflows: [Tests]
+    types: [completed]
   schedule:
     - cron: '17 */6 * * *'
   workflow_dispatch:
@@ -32,7 +37,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pr-triage-${{ github.event.pull_request.number || github.event.issue.number || 'sweep' }}
+  group: pr-triage-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.head_sha || 'sweep' }}
   cancel-in-progress: false
 
 jobs:
@@ -59,4 +64,6 @@ jobs:
           JEV_API_KEY: ${{ secrets.JEV_API_KEY }}
           JEV_URL: ${{ vars.JEV_URL }}
           TRIAGE_SWEEP_MAX: ${{ vars.TRIAGE_SWEEP_MAX }}
+          TRIAGE_BACKLOG_HOURS: ${{ vars.TRIAGE_BACKLOG_HOURS }}
+          TRIAGE_RETRIAGE_MAX: ${{ vars.TRIAGE_RETRIAGE_MAX }}
         run: node .github/scripts/triage.bundle.mjs

@@ -15,14 +15,23 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
   merge_group:
+  # Manual: evalúa la PR y CREA el check `direction-gate` en su head (Checks API). Para PRs cuyo merge ref es anterior a este
+  # workflow (GitHub no lanza pull_request para ellas) o cuando un aluvión de labels no generó runs. Lo lanza bin/act-gate.mjs.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'Número de PR'
+        required: true
+        type: string
 
 permissions:
   pull-requests: read
   contents: read
+  checks: write   # solo para workflow_dispatch: crear el check en el head de la PR
 
-concurrency:
-  group: direction-gate-${{ github.event.pull_request.number || github.event.merge_group.head_ref || github.ref }}
-  cancel-in-progress: true
+# Sin concurrency a propósito: con cancel-in-progress, dos eventos de label casi a la vez (labeler + pr-triage al abrir una PR)
+# dejaban un run CANCELADO en el head, y GitHub cuenta todos los checks direction-gate: la PR quedaba BLOCKED aunque otro estuviera
+# en verde (#3974 y 10 más, 24-sep). Cada run lee los labels actuales y tarda segundos: correr en paralelo es inofensivo.
 
 jobs:
   direction-gate:
@@ -41,4 +50,5 @@ jobs:
       - name: Check direction label
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.inputs.pr }}
         run: node .github/scripts/direction-gate.mjs
