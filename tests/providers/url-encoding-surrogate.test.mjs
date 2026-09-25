@@ -225,7 +225,8 @@ try {
   // regression this list catches.
   const CONVERTED = [
     'alibaba.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
-    'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'phenom.mjs', 'thehub.mjs', 'tkms.mjs', 'vdab.mjs',
+    'kalibrr.mjs', 'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'phenom.mjs', 'techinasia.mjs',
+    'thehub.mjs', 'tkms.mjs', 'vdab.mjs',
   ];
 
   // Bare `encodeURIComponent` on a url line that is reviewed as safe: the value
