@@ -14,7 +14,6 @@
     "application:lifecycle": "workflow/.venv/bin/python -B workflow/career_ops.py application",
     "interview:context": "node interview-context.mjs",
     "cv:maintain": "workflow/.venv/bin/python -B workflow/cv_maintenance.py",
-    "draft:context": "node grounded-draft.mjs",
     "migrate": "node scripts/migrate/opportunities.mjs"
   },
   "keywords": [

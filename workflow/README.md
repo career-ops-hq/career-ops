@@ -39,6 +39,8 @@ workflow/.venv/bin/python -m workflow.career_ops reply confirm <message-id> --op
 workflow/.venv/bin/python -m workflow.career_ops insights stats|reposts|company|company-signals|salary|stated|upskill|jd-skill-gap|preparation-plan [options]
 workflow/.venv/bin/python -m workflow.career_ops insights preparation-plan --jd <jd.md> --company <name> --role <title> [--report <score.md>] [--output <plan.json>]
 workflow/.venv/bin/python -m workflow.career_ops salary record <observation.json> --idempotency-key <operation-id> --confirmed
+workflow/.venv/bin/python -m workflow.communications draft <opportunity-id>
+workflow/.venv/bin/python -m workflow.communications show <opportunity-id>
 ```
 
 All commands emit JSON. `discover` calls the existing Node provider scanner as
@@ -79,3 +81,12 @@ Reply import retains the original user-provided message, deterministic
 classification, match signals, and ranked invite candidates. It only suggests
 a status. Confirmation runs the application lifecycle graph; an unmatched or
 ambiguous application or a different status needs an explicit reason.
+
+Communication drafts use the same reviewed scan and current score, candidate
+sources, and application language/market rules. The LangGraph draft and
+independent review must both succeed before the pair is saved. No contact
+record is needed; these commands never send messages.
+`python -m workflow.communications draft <opportunity-id> --statement '<current user statement>'`
+optionally adds one explicit user statement as a candidate source for that
+draft. Repeat the same `--statement` with `show` to retrieve its version;
+without it, the statement cannot validate a claim in another draft.

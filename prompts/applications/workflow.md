@@ -6,6 +6,6 @@ verified artifacts, then stop before submission or sending.
 Resolve cover letters, emails, and outreach from one grounded application
 context: the canonical SQLite opportunity, its source evidence, `cv.md`,
 `config/profile.yml`, and optional `article-digest.md`. Use
-`language.output` for every user-facing draft. Contacts use the canonical
-`contacts.mjs` key and are linked to that opportunity only after the candidate
-confirms the saved contact. Never send or submit.
+`language.output` for every user-facing draft. Do not invent a recipient or
+assert a personal relationship with anyone named in a posting. Never send or
+submit.

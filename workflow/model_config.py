@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 
-def create_agent(*, system_prompt: str, tools: list[str], session_id: str):
+def create_agent(*, system_prompt: str, tools: list[str], session_id: str, max_iterations: int | None = None):
     """Create a fresh agent while keeping Hermes as the configuration authority."""
     hermes = Path.home() / ".hermes" / "hermes-agent"
     if str(hermes) not in sys.path:
@@ -27,7 +27,7 @@ def create_agent(*, system_prompt: str, tools: list[str], session_id: str):
             "requested_provider", "request_overrides",
         )},
         enabled_toolsets=tools,
-        max_iterations=12 if tools else 1,
+        max_iterations=max_iterations if max_iterations is not None else 12 if tools else 1,
         skip_context_files=True,
         skip_memory=True,
         load_soul_identity=False,

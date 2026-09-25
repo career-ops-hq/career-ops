@@ -64,10 +64,6 @@ export async function openOpportunityStore(path) {
     CREATE TABLE IF NOT EXISTS repost_inputs (
       opportunity_id INTEGER PRIMARY KEY REFERENCES opportunities(id), fingerprint TEXT NOT NULL, first_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
-    CREATE TABLE IF NOT EXISTS outreach_contacts (
-      opportunity_id INTEGER NOT NULL REFERENCES opportunities(id), contact_key TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY(opportunity_id, contact_key)
-    );
     CREATE TABLE IF NOT EXISTS application_lifecycle (
       opportunity_id INTEGER PRIMARY KEY REFERENCES opportunities(id), status TEXT NOT NULL CHECK(status IN ('applied','responded','interview','offer','rejected','discarded','hired')),
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -285,13 +281,6 @@ export async function openOpportunityStore(path) {
     evaluatedInsights() {
       return db.prepare("SELECT o.id, e.lower_score AS score, a.path AS reportPath FROM opportunities o JOIN evaluations e ON e.opportunity_id = o.id JOIN artifacts a ON a.opportunity_id = o.id AND a.kind = 'report' WHERE o.state = 'evaluated' ORDER BY o.id").all();
     },
-    linkOutreachContact(id, contactKey) {
-      if (!this.shortlist().some(opportunity => opportunity.id === id)) throw new Error(`Opportunity ${id} must be a shortlist opportunity`);
-      if (!String(contactKey).trim()) throw new Error('contactKey is required');
-      const result = db.prepare('INSERT INTO outreach_contacts (opportunity_id, contact_key) VALUES (?, ?) ON CONFLICT DO NOTHING').run(id, contactKey);
-      if (result.changes) event(id, 'outreach_contact_linked', { contactKey });
-    },
-    outreachContacts(id) { return db.prepare('SELECT contact_key AS contactKey FROM outreach_contacts WHERE opportunity_id = ? ORDER BY contact_key').all(id); },
     saveCheckpoint(id, phase, inputHash, outputHash) {
       if (!['evaluating', 'eligible', 'evaluated', 'ineligible'].includes(state(id))) throw new Error(`Opportunity ${id} cannot save a checkpoint`);
       db.prepare("INSERT INTO checkpoints (opportunity_id, phase, input_hash, output_hash) VALUES (?, ?, ?, ?) ON CONFLICT(opportunity_id, phase) DO UPDATE SET input_hash = excluded.input_hash, output_hash = excluded.output_hash").run(id, phase, inputHash, outputHash);

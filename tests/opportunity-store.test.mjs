@@ -28,10 +28,6 @@ try {
   assert.throws(() => store.recordEvaluation(first.id, { lower: 4.2, upper: 4.6, coverage: 1, reportHash: 'abc' }), /must be eligible/);
   store.recordEligibility(first.id, { status: 'pass', evidence: { location: 'Shanghai' } });
   store.recordEvaluation(first.id, { lower: 4.2, upper: 4.6, coverage: 1, reportHash: 'abc' });
-  store.linkOutreachContact(first.id, 'careerops-jane--example');
-  store.linkOutreachContact(first.id, 'careerops-jane--example');
-  assert.equal(store.outreachContacts(first.id)[0].contactKey, 'careerops-jane--example');
-  assert.equal(store.events(first.id).filter(event => event.type === 'outreach_contact_linked').length, 1);
   store.recordArtifact(first.id, { kind: 'report', path: 'reports/example.md', sha256: 'abc' });
   assert.equal(store.startApplication(first.id).applicationState, 'preparing');
   assert.throws(() => store.confirmSubmitted(first.id, 'yes'), /explicit confirmation/);
