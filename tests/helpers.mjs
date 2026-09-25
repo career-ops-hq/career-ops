@@ -2,7 +2,7 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync as _rmSync, symlinkSync, writeFileSync } from 'fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync as _rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -449,6 +449,70 @@ export function linkRepoPackage(sandboxDir, pkgName) {
     cpSync(source, dest, { recursive: true });
   }
   return dest;
+}
+
+/**
+ * Source with its comments blanked, for a structural check that greps a file
+ * for a call or a guard it has to contain.
+ *
+ * A regex cannot tell code from a comment that mentions it, so a suite that
+ * only documents the construct -- or a revert that comments one out instead of
+ * deleting it -- satisfies a raw grep and the check goes vacuous. Shared, so
+ * every suite that pins a caller structurally strips the same way.
+ *
+ * @param {string} source - JavaScript source text.
+ * @returns {string} The same source without block and line comments.
+ */
+export function stripJsComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+/**
+ * Link the repository's whole installed dependency tree into a sandbox
+ * directory, so a script copied out of the repo can still resolve its package
+ * imports.
+ *
+ * Checking and linking are one operation on purpose. symlinkSync succeeds
+ * against a target that does not exist, so a separate check is one a call site
+ * can forget. The link is then created dangling, the sandboxed script dies with
+ * ERR_MODULE_NOT_FOUND, and the section's own catch reports that as a crash of
+ * whatever it was testing. A git worktree is the ordinary way to land in that
+ * state: test-all.mjs itself still resolves js-yaml through the parent
+ * checkout's `node_modules` by Node's upward walk, while `join(ROOT,
+ * 'node_modules')` inside the worktree does not exist. The suite is designed to
+ * run on a fresh clone with only Node (see the file header), where an absent
+ * tree is the expected state, so the caller is handed a reason to report and
+ * skip on instead of a broken sandbox.
+ *
+ * 'junction' on Windows, because a directory symlink needs
+ * SeCreateSymbolicLinkPrivilege, which a normal shell lacks unless Developer
+ * Mode is on. Junctions need no privilege, and the two constraints they add are
+ * already met: the target is absolute and is a directory on a local volume. The
+ * type argument is ignored off Windows.
+ *
+ * @param {string} destDir - Sandbox directory to receive the node_modules link.
+ * @param {string} [root=ROOT] - Repository root holding the installed tree.
+ * @returns {string|null} null once linked; otherwise why it could not be.
+ */
+export function linkNodeModules(destDir, root = ROOT) {
+  const target = join(root, 'node_modules');
+  try {
+    statSync(target);
+  } catch (err) {
+    // statSync, because existsSync collapses EACCES and ELOOP into the same
+    // false an absent tree produces, and `npm ci` is the wrong advice for a
+    // tree that is there and unreadable. Both cases still skip: throwing here
+    // lands in the call site's catch, which is where the misattribution this
+    // function exists to prevent came from.
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') {
+      return `node_modules is not installed at ${root} -- run \`npm ci\` there`;
+    }
+    return `node_modules at ${target} is unreadable (${err.code})`;
+  }
+  symlinkSync(target, join(destDir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+  return null;
 }
 
 let bashCache = null;
