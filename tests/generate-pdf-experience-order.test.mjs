@@ -10,8 +10,11 @@
 // expect newest-first, so deviation reads as concealment. Tailoring belongs in
 // the summary, the competencies block, and bullet selection within each role.
 
+import { existsSync, readFileSync } from 'fs';
+import { dirname, join, relative } from 'path';
 import { validateCvExperienceOrder } from '../cv-experience-order.mjs';
-import { pass, fail } from './helpers.mjs';
+import { listTemplates } from '../cv-templates.mjs';
+import { pass, fail, ROOT } from './helpers.mjs';
 
 console.log('\n📄 generate-pdf: experience ordering guard');
 
@@ -111,3 +114,56 @@ expectOk('ignores unparseable entries but still checks parseable neighbours', ()
 
 expectThrows('still catches an inversion around an unparseable entry', () =>
   validateCvExperienceOrder(html(['Jan 2015 – Dec 2016', 'ongoing', 'Jan 2022 – Present'])));
+
+// --- Month names the parser cannot read -------------------------------------
+// MONTHS only knows English. A month it cannot read (Spanish "Ago", German
+// "Dez") or no month at all must not count as January: a correctly ordered CV
+// then failed as soon as a role started later in the same year than a role
+// whose month the parser could read.
+
+expectOk('does not guess an unreadable month (Spanish) within the same year', () =>
+  validateCvExperienceOrder(html(['Ago 2021 – Presente', 'Feb 2021 – Jul 2021'])));
+
+expectOk('does not guess an unreadable month (German) within the same year', () =>
+  validateCvExperienceOrder(html(['Dez 2022 – heute', 'Apr 2022 – Nov 2022'])));
+
+expectOk('does not guess a missing month against a dated role in the same year', () =>
+  validateCvExperienceOrder(html(['2021 – Present', 'Mar 2021 – Dec 2021'])));
+
+expectThrows('an unreadable month still loses to a later year', () =>
+  validateCvExperienceOrder(html(['Ago 2019 – Dic 2020', 'Feb 2021 – Presente'])));
+
+// --- Every shipped template pack --------------------------------------------
+// Template packs may change tag names inside the ENTRY zone of their
+// sections/experience.html partial: the ATS pack renders the period in a
+// <div>, the default pack in a <span>. A guard that reads only one of them
+// silently no-ops for every CV built from the other.
+
+/** Fill a shipped experience partial with the given periods, one entry each. */
+function fromPartial(path, periods) {
+  const entry = readFileSync(path, 'utf-8')
+    .match(/<!--ENTRY-->([\s\S]*?)<!--\/ENTRY-->/)[1]
+    .replace(/<!--LOCATION_BLOCK-->[\s\S]*?<!--\/LOCATION_BLOCK-->/, '');
+  const fields = { COMPANY: 'Example Corp', ROLE: 'Engineer', LOCATION_BLOCK: '', BULLETS: '<li>Shipped it</li>' };
+  const jobs = periods.map(period =>
+    entry.replace(/\{\{(\w+)\}\}/g, (_, key) => (key === 'PERIOD' ? period : fields[key] ?? '')));
+  return `<html><body><h2>Work Experience</h2>${jobs.join('\n')}</body></html>`;
+}
+
+// The sections/experience.html beside each CV template, where build-cv-html.mjs
+// looks for it.
+let partials = [];
+try {
+  partials = [...new Set(listTemplates('cv')
+    .map(t => join(dirname(t.path), 'sections', 'experience.html'))
+    .filter(existsSync))];
+} catch (err) {
+  fail(`could not list the CV templates: ${err.message}`);
+}
+if (partials.length >= 2) pass(`found ${partials.length} shipped experience partials`);
+else fail(`expected at least the default and ATS experience partials, found ${partials.length}`);
+
+for (const path of partials) {
+  expectThrows(`reads the job periods rendered by ${relative(ROOT, path)}`, () =>
+    validateCvExperienceOrder(fromPartial(path, ['2015 – 2018', '2019 – 2022'])));
+}
