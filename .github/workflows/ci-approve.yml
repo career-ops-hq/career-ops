@@ -7,10 +7,10 @@ name: Approve CI for fork PRs
 #     y la PR no toca .github/workflows/** ni ningún package*.json
 #   - tope 20 SHAs por ejecución
 #
-# Token: `GITHUB_TOKEN` con `actions: write` puede aprobar runs (POST /actions/runs/{id}/approve).
-# Si en el laboratorio devuelve 403 para runs de forks, crea un fine-grained PAT de Santiago con
-# permiso Actions: write en el repo, guárdalo como secret `CI_APPROVE_TOKEN` y el script lo usa
-# automáticamente en lugar de GITHUB_TOKEN.
+# Token: `CI_APPROVE_TOKEN` si está definido; si no, `GITHUB_TOKEN` con `actions: write`, que aprueba como github-actions[bot]
+# (comprobado el 23-sep). Un 403 de permisos para la pasada y la deja en rojo, sin reintentar con el otro token; un límite de tasa
+# la para sin rojo y la siguiente reintenta. CI_APPROVE_TOKEN tiene prioridad y firma las aprobaciones: déjalo sin definir, o pon
+# solo un token que no sea de una persona (GitHub App). Con un PAT personal, cada aprobación saldría a nombre de su dueño.
 # vars.TRIAGE_DRY_RUN = "true" -> solo informa en el job summary.
 
 on:

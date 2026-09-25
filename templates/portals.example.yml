@@ -100,6 +100,15 @@
 # Do NOT copy your whole `block` list here: a city in block_hard would kill
 # "Stockholm or London" postings, which is exactly what always_allow prevents.
 #
+# `strict: true` (optional) fails CLOSED when a posting has no location at all
+# (empty structured field AND no city in the URL). The default passes such a
+# posting — "don't penalize missing provider data" — which is right for a
+# broad sweep. But a location-*restricted* sweep over a provider that never
+# returns a location (iCIMS is the common case) then lets every out-of-region
+# posting through: the "only these places" allow list is never consulted.
+# Turn strict on for those sweeps. It only bites when a restricting tier
+# (allow / block / block_hard) is set; `strict: true` alone restricts nothing.
+#
 # Example below targets US-based remote + a couple of US metros, blocking
 # common foreign hubs. Customize to your geography.
 
@@ -108,6 +117,7 @@
 #   always_allow:
 #     - "United States"   # also admits City, ST homonyms (Dublin, OH) via USPS states
 #     - "New York"
+#   # strict: true       # reject postings with no location — see note above
 #   allow:
 #     - "Remote"
 #     - "United States"
@@ -178,11 +188,23 @@
 #   max: 0
 #   currency: "USD"
 
+# Read-only portal housekeeping: `node stats.mjs --prune --summary`.
+# Uses exact-lowercase company names, scan history and recent health evidence.
+# First health observation is a lower bound, not the date config was added.
+# No configuration is removed automatically; review filters/names before pruning.
+# portal_prune_quiet_days: 30
+# Failure suggestions use portal_health_threshold (default 3).
+
 # -- Posting-age filter (optional) --
 # Opt-in freshness gate. Skips offers whose posting date (postedAt, supplied by
 # the provider) is older than N days. Offers from providers that expose no date
 # are never skipped — same "don't penalize missing data" rule as location_filter.
 # Absent, 0, or non-positive → disabled (all ages pass).
+# This applies to every source, including an employer's own ATS board.
+# An old posting date does not prove a role is closed: evergreen roles may
+# remain open for months. Increase the window or disable this filter to include
+# them, then verify the specific posting before applying. There is currently
+# no per-source exemption; disabling this filter affects all sources.
 #
 # max_posting_age_days: 45
 #

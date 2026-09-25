@@ -4,6 +4,7 @@ import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { companyDomain } from "@/lib/company";
 import { companyCacheKey } from "@/lib/core/logo-cache-key.mjs";
+import { companyDomains } from "@/lib/core/company-domains.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,29 +23,6 @@ const DOMAIN_RE = /^[a-z0-9.-]{1,253}\.[a-z]{2,}$/i;
 
 function cacheDir(): string {
   return path.join(careerOpsRoot(), ".career-ops-web", "logo-cache");
-}
-
-/** Plausible domains for a company name, cheapest/likeliest first.
- *  The curated override map in lib/company wins when it knows the brand (it is
- *  the only source for non-.com marks like notion.so / zoom.us / deepmind.google);
- *  the slug guesses below cover everything else. Keeping both matters because ATS
- *  postings carry legal entity names ("Amazon.com Services LLC") that no single
- *  slug rule resolves — the firstWord stem is what rescues those.
- *  Changing which domains this returns, or their order, means bumping
- *  COMPANY_KEY_VERSION — warm caches would otherwise never see the change. */
-function companyDomains(company: string): string[] {
-  const paren = company.match(/\(([A-Za-z0-9]{2,12})\)/)?.[1]; // "… (5WPR)"
-  // [^()] (not [^)]) keeps the match unambiguous — no polynomial backtracking on
-  // adversarial inputs full of unclosed parens (CodeQL js/polynomial-redos).
-  const base = company.replace(/\([^()]*\)/g, "").trim();
-  const compact = base.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]/g, "");
-  const firstWord = base.toLowerCase().split(/\s+/)[0].replace(/[^a-z0-9]/g, "");
-  const stems = [...new Set([compact, paren?.toLowerCase(), firstWord].filter((s): s is string => !!s && s.length >= 2 && s.length <= 30))];
-  const out: string[] = [];
-  const curated = companyDomain(base);
-  if (curated) out.push(curated);
-  for (const t of [".com", ".ai", ".io", ".co"]) for (const s of stems) out.push(s + t);
-  return [...new Set(out)].slice(0, 5);
 }
 
 /** Fetch a real favicon for one domain (Google's tokenless service). Returns the
@@ -82,7 +60,7 @@ export async function GET(req: NextRequest) {
     const companyKey = companyCacheKey(company);
     if (!companyKey) return new Response("bad company", { status: 400 });
     key = companyKey;
-    candidates = companyDomains(company);
+    candidates = companyDomains(company, companyDomain);
     if (candidates.length === 0) return new Response("no logo", { status: 404 });
   } else {
     return new Response("need domain or company", { status: 400 });
