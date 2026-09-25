@@ -157,6 +157,69 @@ const NOUN_SYNONYMS = new Map([
   ['personnel', 'staff'],
   ['labs', 'laboratories'],
 ]);
+// Source-side EVIDENCE in Spanish. A user can keep cv.md in their own language
+// and generate each CV in the posting's language (language.output governs the
+// prose), so an English CV restates Spanish source facts. Read with the
+// English-only METRIC_NOUNS, the source line "leía 43 documentos" yielded no
+// claim, and its faithful translation "43 documents" was blocked as invented.
+//
+// Deliberately SOURCE-ONLY: these nouns fold onto the canonical English noun
+// and only ever add to the allowed set. The generated document is still read
+// with METRIC_NOUNS alone, so a Spanish CV gains no new claims to fail on, and
+// the plan-horizon / disclosed-requirement exceptions (English-worded) never
+// have to understand Spanish. Widening evidence cannot make the gate block more.
+const SOURCE_NOUN_TRANSLATIONS = new Map([
+  ['usuarios', 'users'], ['clientes', 'clients'], ['empleados', 'employees'],
+  ['ingenieros', 'engineers'], ['equipos', 'teams'], ['empresas', 'companies'],
+  ['socios', 'partners'], ['organizaciones', 'organizations'], ['marcas', 'brands'],
+  ['países', 'countries'], ['paises', 'countries'],
+  ['horas', 'hours'], ['días', 'days'], ['dias', 'days'], ['semanas', 'weeks'],
+  ['meses', 'months'], ['años', 'years'], ['minutos', 'minutes'], ['segundos', 'seconds'],
+  ['solicitudes', 'requests'], ['documentos', 'documents'], ['flujos', 'workflows'],
+  ['agentes', 'agents'], ['entrevistas', 'interviews'], ['ofertas', 'offers'],
+  ['informes', 'reports'], ['reportes', 'reports'], ['cursos', 'courses'],
+  ['certificaciones', 'certifications'], ['sesiones', 'sessions'], ['encuestas', 'surveys'],
+  ['contribuciones', 'contributions'], ['repositorios', 'repositories'],
+  ['módulos', 'modules'], ['modulos', 'modules'], ['herramientas', 'tools'],
+  ['servidores', 'servers'], ['guías', 'guides'], ['guias', 'guides'],
+  ['artículos', 'guides'], ['articulos', 'guides'], ['despliegues', 'deployments'],
+  ['servicios', 'services'], ['descargas', 'downloads'], ['estrellas', 'stars'],
+  ['líneas', 'lines'], ['lineas', 'lines'], ['proyectos', 'projects'],
+  ['integraciones', 'integrations'], ['pruebas', 'tests'],
+  ['personal', 'staff'], ['colaboradores', 'staff'], ['personas', 'people'],
+  ['técnicos', 'technicians'], ['tecnicos', 'technicians'], ['operarios', 'operators'],
+  ['contratistas', 'contractors'], ['proveedores', 'vendors'],
+  ['investigadores', 'researchers'], ['voluntarios', 'volunteers'],
+  ['estudiantes', 'students'], ['alumnos', 'students'], ['pacientes', 'patients'],
+  ['instalaciones', 'facilities'], ['sitios', 'sites'], ['sedes', 'sites'],
+  ['edificios', 'buildings'], ['laboratorios', 'laboratories'], ['plantas', 'plants'],
+  ['máquinas', 'machines'], ['maquinas', 'machines'], ['dispositivos', 'devices'],
+  ['vehículos', 'vehicles'], ['vehiculos', 'vehicles'], ['unidades', 'units'],
+  ['sucursales', 'locations'], ['locales', 'locations'], ['turnos', 'shifts'],
+  ['inspecciones', 'inspections'], ['auditorías', 'audits'], ['auditorias', 'audits'],
+  ['incidentes', 'incidents'], ['candidatos', 'candidates'],
+  ['participantes', 'participants'], ['escuelas', 'schools'], ['programas', 'programs'],
+  ['talleres', 'workshops'], ['exámenes', 'exams'], ['examenes', 'exams'],
+]);
+// Same shape as COUNT_CLAIM_RE (lazy modifier window, nearest noun wins), but
+// Unicode-aware: Spanish modifiers and nouns carry accents, which `[A-Za-z]`
+// and `\b` do not see.
+const SOURCE_COUNT_RE = new RegExp(
+  String.raw`(?<![\p{L}\p{N}])(\d[\d,.]*(?:[kKmMbB](?![\p{L}]))?)\s*\+?\s*(?:[\p{L}][\p{L}\p{M}-]*\s+){0,${MODIFIER_WINDOW}}?(${[...SOURCE_NOUN_TRANSLATIONS.keys()].join('|')})(?![\p{L}])`,
+  'giu',
+);
+
+/** Spanish count claims in a SOURCE text, folded onto canonical English claims. */
+function translatedSourceClaims(sourceText) {
+  const clean = stripMarkup(sourceText, { keepLineBreaks: true });
+  const claims = new Set();
+  SOURCE_COUNT_RE.lastIndex = 0;
+  for (const match of clean.matchAll(SOURCE_COUNT_RE)) {
+    const english = SOURCE_NOUN_TRANSLATIONS.get(match[2].toLowerCase());
+    claims.add(normalizeClaim(`${match[1]} ${NOUN_SYNONYMS.get(english) ?? english}`));
+  }
+  return claims;
+}
 const SIMPLE_CLAIM_PATTERNS = [
   /\b\d+(?:\.\d+)?\s?%/g,
   /(?<![\w$€£])[$€£]\s?\d[\d,.]*(?:\s?[kKmMbB])?/g,
@@ -866,7 +929,7 @@ export function diagnoseCoverage(targetText) {
  * instead of widening them. The union can only ever allow more, never less.
  */
 function allowedMetricSet(sourceText, allowMetrics) {
-  const allowed = new Set(metricClaims(sourceText));
+  const allowed = new Set([...metricClaims(sourceText), ...translatedSourceClaims(sourceText)]);
   for (const entry of allowMetrics || []) {
     allowed.add(normalizeClaim(entry));
     for (const canonical of metricClaims(String(entry))) allowed.add(canonical);
