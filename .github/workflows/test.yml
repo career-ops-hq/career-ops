@@ -3,6 +3,17 @@ name: Tests
 on:
   pull_request:
     branches: [main]
+  # The merge queue builds a temporary merge commit per group and needs the
+  # same required checks to report on it; without this trigger every queued
+  # PR would wait forever on `test (...)`.
+  merge_group:
+
+# merge_group runs carry the base repo's GITHUB_TOKEN (write-capable by
+# default, unlike a fork pull_request) while executing code that came from a
+# fork. Nothing in this workflow needs to write, and no other secret is
+# referenced here, so the token is pinned read-only and never persisted.
+permissions:
+  contents: read
 
 # A force-push supersedes the running matrix; cancel it instead of letting
 # stale legs occupy runners (3 jobs per push at this repo's PR volume).
@@ -27,6 +38,9 @@ jobs:
         if: runner.os == 'Windows'
         run: git config --global core.autocrlf false
       - uses: actions/checkout@v7
+        with:
+          # Test code (fork code, in a merge_group) must not find a token in .git/config.
+          persist-credentials: false
       - name: Set up Node 18 for syntax compatibility
         uses: actions/setup-node@v7
         with:
