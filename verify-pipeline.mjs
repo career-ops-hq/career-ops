@@ -31,6 +31,7 @@ import {
   looksLikeScoreCell, isSeparatorRow, isHeaderRow, resolveColumns,
   normalizeTextKey, normalizeVia,
 } from './tracker-parse.mjs';
+import { distinctOpeningEvidence } from './tracker-identity.mjs';
 import { CONTROL_CHARS } from './tracker-utils.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
 import { normalizeStatus } from './followup-cadence.mjs';
@@ -121,6 +122,7 @@ for (const line of lines) {
     pdf: parts[COLMAP.pdf],
     report: parts[COLMAP.report],
     notes: COLMAP.notes != null ? (parts[COLMAP.notes] || '') : '',
+    url: COLMAP.url != null ? (parts[COLMAP.url] || '') : '',
   });
 }
 
@@ -163,9 +165,16 @@ for (const e of entries) {
   if (!companyRoleMap.has(key)) companyRoleMap.set(key, []);
   companyRoleMap.get(key).push(e);
 }
+// A shared company+role is not enough: one employer posting the same title per
+// city or country gives rows with different posting URLs or req/job ids, which
+// merge-tracker keeps apart on purpose (#1298, #1524). Only rows that have at
+// least one partner NOT provably distinct from them are reported, so a group of
+// fully distinct openings is clean instead of warning forever.
 for (const [key, group] of companyRoleMap) {
-  if (group.length > 1) {
-    warn(`Possible duplicates: ${group.map(e => `#${e.num}`).join(', ')} (${group[0].company} — ${group[0].role})`);
+  if (group.length < 2) continue;
+  const suspects = group.filter((e, i) => group.some((o, j) => j !== i && !distinctOpeningEvidence(e, o)));
+  if (suspects.length > 1) {
+    warn(`Possible duplicates: ${suspects.map(e => `#${e.num}`).join(', ')} (${group[0].company} — ${group[0].role})`);
     dupes++;
   }
 }
@@ -298,24 +307,39 @@ const reportFiles = existsSync(REPORTS_DIR)
   ? readdirSync(REPORTS_DIR).filter(f => REPORT_FILE_RE.test(f))
   : [];
 
+// The report's own `**URL:**` header — same pattern as merge-tracker.mjs's
+// resolveReportUrl (inline, not line-anchored; \S+ so an empty header cannot
+// reach into the next line). Not imported: merge-tracker.mjs runs its merge as
+// a side effect of module load. Two reports whose URLs differ are evaluations
+// of two postings, not a duplicate, whatever their company+role says.
+function extractReportUrl(reportContent) {
+  const m = reportContent.match(/\*\*URL:\*\*[ \t]*(\S+)/);
+  return m ? m[1].replace(/^<|>$/g, '').replace(/[),.;]+$/, '') : '';
+}
+
 let dupReports = 0;
 const reportsByRole = new Map();
 for (const name of reportFiles) {
   const companySlug = name.match(REPORT_FILE_RE)[2];
   let role = null;
+  let url = '';
   try {
-    role = extractRole(readFileSync(join(REPORTS_DIR, name), 'utf-8'));
+    const content = readFileSync(join(REPORTS_DIR, name), 'utf-8');
+    role = extractRole(content);
+    url = extractReportUrl(content);
   } catch {
     // Unreadable report — the orphan check below still sees it.
   }
   if (!role) continue;
   const key = normalizeKey(companySlug) + '::' + normalizeKey(role);
   if (!reportsByRole.has(key)) reportsByRole.set(key, []);
-  reportsByRole.get(key).push(name);
+  reportsByRole.get(key).push({ name, url });
 }
 for (const group of reportsByRole.values()) {
-  if (group.length > 1) {
-    warn(`Duplicate reports for same company+role: ${group.join(', ')}`);
+  if (group.length < 2) continue;
+  const suspects = group.filter((r, i) => group.some((o, j) => j !== i && !distinctOpeningEvidence(r, o)));
+  if (suspects.length > 1) {
+    warn(`Duplicate reports for same company+role: ${suspects.map(r => r.name).join(', ')}`);
     dupReports++;
   }
 }

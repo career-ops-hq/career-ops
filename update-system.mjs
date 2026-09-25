@@ -285,6 +285,7 @@ const SYSTEM_PATHS = [
   'role-matcher.mjs',
   'tracker-utils.mjs',
   'tracker-parse.mjs',
+  'tracker-identity.mjs',
   'tracker-aliases.json',
   'set-status.mjs',
   'set-status-tests.mjs',

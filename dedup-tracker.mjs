@@ -19,6 +19,7 @@ import {
   openTrackerTransaction, rebuildRow, normalizeCompany,
 } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
+import { distinctOpeningEvidence } from './tracker-identity.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
@@ -175,6 +176,7 @@ function pairKey(a, b) {
 }
 
 const protectedTitlePairs = new Set();
+const distinctOpeningPairs = new Set();
 
 /**
  * Normalize a role title into the key used for exact same-opening comparison.
@@ -206,6 +208,12 @@ function normalizeRole(role) {
  * company (e.g. "Software Engineer, Data Infrastructure" vs "Senior Software
  * Engineer, Agent Infrastructure"), causing real data loss.
  *
+ * Even an exact title can be two openings: one employer posting the same title
+ * per city or country, each with its own URL and job id. When both rows carry a
+ * posting URL or a req/job id in Notes and those differ (distinctOpeningEvidence),
+ * they are kept apart — the same proof merge-tracker.mjs honours (#1298, #1524),
+ * so dedup no longer deletes a row merge-tracker deliberately added.
+ *
  * When titles match exactly but either row is already Applied or later, dedup
  * still keeps both and warns: deleting an in-flight application would lose its
  * status, report link, and notes unless the rows are the exact same report
@@ -218,6 +226,18 @@ function normalizeRole(role) {
 function roleMatch(a, b) {
   if (sameReportIdentity(a, b)) return true;
   if (normalizeRole(a.role) !== normalizeRole(b.role)) return false;
+
+  // Checked before the advanced-status guard so the logged reason is the more
+  // specific one.
+  const distinct = distinctOpeningEvidence(a, b);
+  if (distinct) {
+    const key = pairKey(a, b);
+    if (!distinctOpeningPairs.has(key)) {
+      distinctOpeningPairs.add(key);
+      console.warn(`⚠️  Keep #${a.num} and #${b.num}: exact-title match but ${distinct}`);
+    }
+    return false;
+  }
 
   // Exact-title duplicates that have entered the real application pipeline are
   // kept separate. A user may already have applied to one row; deleting it
