@@ -217,12 +217,23 @@ function buildRecipientBlock(letter) {
     return false;
   };
 
-  for (const extra of [letter.company, letter.city]) {
+  // Where each one belongs differs, so they are not both appended. A company
+  // goes straight after the recipient's name and title and ABOVE the street
+  // address; pushing it to the end put it below the street, which is not an
+  // address block (#4069 review). The city stays last, where it already sat.
+  // `lines` starts as name, title, company, then the address lines, all through
+  // the same filters, so the first `headCount` entries are exactly that head.
+  const headCount = [r.name, r.title, r.company]
+    .filter(Boolean)
+    .map((v) => String(v).trim())
+    .filter(Boolean).length;
+  for (const [extra, insertAt] of [[letter.company, headCount], [letter.city, null]]) {
     const v = typeof extra === "string" ? extra.trim() : "";
     if (!v) continue;
     const want = components(v);
     if (lines.some((l) => containsRun(components(l), want))) continue;
-    lines.push(v);
+    if (insertAt === null) lines.push(v);
+    else lines.splice(insertAt, 0, v);
   }
 
   const escaped = lines.map(escapeHtml);
