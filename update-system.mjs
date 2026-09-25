@@ -599,6 +599,7 @@ export function localUserPaths(root = ROOT) {
   const reject = (path, why) => {
     throw new Error(`${LOCAL_PATHS_FILE}: refusing "${path}" — ${why}`);
   };
+  const underSystemPath = [];
 
   for (const path of declared) {
     if (path === LOCAL_PATHS_FILE) {
@@ -636,16 +637,40 @@ export function localUserPaths(root = ROOT) {
     if (segments.includes('.')) {
       reject(path, 'paths must be written plainly, with no "." segment (use "merge-tracker.mjs", not "./merge-tracker.mjs")');
     }
-    const collision = SYSTEM_PATHS.find((sys) =>
-      sys.endsWith('/') ? path.startsWith(sys) : path === sys,
-    );
-    if (collision) {
+    // A SYSTEM_PATHS collision splits in two, because the two entry shapes
+    // make different claims.
+    //
+    // An EXACT entry is upstream saying "we ship this file". Declaring it is a
+    // statement the updater cannot honour and evaluate at once, so it still
+    // fails closed — unchanged, and what --local-paths pins.
+    //
+    // A `dir/` entry is a WILDCARD and proves nothing about any one file under
+    // it: `providers/` covers upstream's greenhouse.mjs and a provider that
+    // exists only in a fork alike. Refusing there fired on precisely the files
+    // this mechanism exists for — a fork's own provider, skill or doc under an
+    // owned prefix — leaving them undeclarable, after which staleSystemFiles()
+    // deleted them as though upstream had dropped them. Answering "does
+    // upstream ship THIS file?" needs the fetched tree, which this function
+    // cannot reach: it is also called by validate-system-paths-coverage.mjs,
+    // offline. So warn, which keeps the original rationale (it was about
+    // *silence*, not refusal): fork a genuinely shipped file and you are told
+    // it stops updating.
+    const exact = SYSTEM_PATHS.find((sys) => !sys.endsWith('/') && sys === path);
+    if (exact) {
       reject(
         path,
-        `the system layer ships it (SYSTEM_PATHS entry "${collision}"). `
+        `the system layer ships it (SYSTEM_PATHS entry "${exact}"). `
         + 'Declaring it would stop updates to it with no other signal',
       );
     }
+    const prefix = SYSTEM_PATHS.find((sys) => sys.endsWith('/') && path.startsWith(sys));
+    if (prefix) underSystemPath.push({ path, collision: prefix });
+  }
+  for (const { path, collision } of underSystemPath) {
+    console.error(
+      `${LOCAL_PATHS_FILE}: "${path}" is inside system path "${collision}" — treating it as yours. `
+      + 'If upstream ships this file, it will no longer receive updates.',
+    );
   }
   return declared;
 }
@@ -897,9 +922,21 @@ function assertOwnGitToplevel() {
  * out when the next script crashes with ERR_MODULE_NOT_FOUND (#1998).
  *
  * @param {string[]} targetPaths - SYSTEM_PATHS read from the target updater.
+ * @param {string[]} [declaredLocal] - config/local-paths.txt declarations; files
+ *   under them are held back from the checkout on purpose, so they are never
+ *   counted as missing. Defaults to reading the declaration file.
  * @returns {string[]} Entries present in FETCH_HEAD but absent locally.
  */
-function missingFromTargetManifest(targetPaths) {
+function missingFromTargetManifest(targetPaths, declaredLocal = localUserPaths(ROOT)) {
+  // A file the user declared theirs (config/local-paths.txt) is deliberately
+  // held back from the checkout, so its absence is the declaration working, not
+  // a partial update. Without this, declaring a directory upstream keeps adding
+  // files to — `providers/`, the wildcard form a fork writes for "every
+  // provider in here is mine" — made every apply report "Update incomplete" and
+  // exit 1, with nothing actually wrong. Per-FILE, not per-manifest-entry: a
+  // declaration covering only part of a directory must still let the rest of
+  // that directory be verified.
+  const isDeclared = (f) => declaredLocal.some((d) => (d.endsWith('/') ? f.startsWith(d) : f === d));
   const missing = [];
   for (const path of targetPaths) {
     const spec = path.endsWith('/') ? path.slice(0, -1) : path;
@@ -918,11 +955,11 @@ function missingFromTargetManifest(targetPaths) {
         continue; // FETCH_HEAD unreadable for this spec — treat as stale, not missing
       }
       // Empty tree ⇒ the target ships nothing here (stale manifest entry).
-      if (treeFiles.some(f => !existsSync(join(ROOT, f)))) missing.push(path);
+      if (treeFiles.some(f => !isDeclared(f) && !existsSync(join(ROOT, f)))) missing.push(path);
       continue;
     }
 
-    if (existsSync(join(ROOT, spec))) continue;
+    if (isDeclared(path) || existsSync(join(ROOT, spec))) continue;
     // Only count it as missing when the target actually ships it — a manifest
     // entry the target no longer carries is a stale entry, not a failed update.
     try {
@@ -1411,7 +1448,12 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
  *    than folded in here, since that means matching on git's stderr text.
  *
  * @param {string} path - a SYSTEM_PATHS entry, file or `dir/`-suffixed directory.
- * @param {string[]} preservedPaths - files this run is keeping local content for.
+ * @param {string[]} preservedPaths - what this run is keeping local content for.
+ *   Usually files, but a config/local-paths.txt declaration may be a `dir/`
+ *   entry, which covers every file under it — the same prefix rule
+ *   userLayerViolations() uses. Matching those by string equality left a
+ *   declared `providers/` reaching the checkout as both a path and its own
+ *   exclusion, which cancel out and abort the update.
  * @param {Set<string>} preservedSet - the same paths, as a Set, for lookup.
  * @param {{git?: Function}} [ctx] - injection point for tests; defaults to gitQuiet.
  * @returns {boolean}
@@ -1420,8 +1462,11 @@ export function pathFullyPreserved(path, preservedPaths, preservedSet, ctx = {})
   if (preservedSet.size === 0) return false;
   const runGitQuiet = ctx.git || gitQuiet;
   const isDirectory = path.endsWith('/');
-  const preservedHere = preservedPaths.filter((f) => (isDirectory ? f.startsWith(path) : f === path));
-  if (preservedHere.length === 0) return false;
+  const preservedDirs = preservedPaths.filter((f) => f.endsWith('/'));
+  const coveredByPreserved = (f) => preservedSet.has(f) || preservedDirs.some((d) => f.startsWith(d));
+  const preservedHere = coveredByPreserved(path)
+    || (isDirectory && preservedPaths.some((f) => f.startsWith(path)));
+  if (!preservedHere) return false;
   if (!isDirectory) return true;
   let upstreamFiles = [];
   try {
@@ -1430,7 +1475,7 @@ export function pathFullyPreserved(path, preservedPaths, preservedSet, ctx = {})
   } catch {
     return false;
   }
-  return upstreamFiles.length > 0 && upstreamFiles.every((f) => preservedSet.has(f));
+  return upstreamFiles.length > 0 && upstreamFiles.every(coveredByPreserved);
 }
 
 /**
@@ -1802,7 +1847,9 @@ export function stagingFileList(pathsToStage, preserved = [], ref = 'FETCH_HEAD'
  * legitimately begin or end with a space and trimming would rewrite it.
  *
  * @param {string[]} owned
- * @param {string[]} [preserved] exact paths the update leaves to the user
+ * @param {string[]} [preserved] paths the update leaves to the user. A trailing
+ *   `/` makes an entry a directory prefix covering the files under it; anything
+ *   else matches exactly.
  * @param {(...args: string[]) => string} [run] raw git runner; defaults to ROOT
  * @returns {string[]} staged paths the update does not own (empty ⇒ safe to commit the index)
  */
@@ -1824,13 +1871,29 @@ export function stagedPathsOutside(owned, preserved = [], run = (...args) => git
   }
   // Preservation wins over ownership, hence the check BEFORE the owned lookups:
   // being inside an owned directory is exactly the case that would otherwise
-  // claim a preserved file. Exact paths only — the preserved list comes from
-  // `git diff --name-only` / `git ls-files`, which never emit directories.
-  const preservedFiles = new Set(preserved);
+  // claim a preserved file.
+  //
+  // A `dir/` entry covers the files under it. Most of this list is exact paths
+  // — it comes from `git diff --name-only` / `git ls-files`, which never emit
+  // directories — but apply() also folds in config/local-paths.txt, and a
+  // declaration may be a directory. Matching those exactly meant a staged
+  // `providers/my-own-board.mjs` under a declared `providers/` fell through to
+  // the owned lookups, where the `providers/` OWNED entry claimed it: the guard
+  // reported nothing unrelated, the bare index commit was selected, and the
+  // user's staged work went in under "chore: auto-update system files". Same
+  // shape as the #2337 case below it, reached through the declaration instead.
+  const preservedFiles = new Set();
+  const preservedDirs = [];
+  for (const entry of preserved) {
+    if (entry.endsWith('/')) preservedDirs.push(entry);
+    else preservedFiles.add(entry);
+  }
+  const isPreserved = (path) =>
+    preservedFiles.has(path) || preservedDirs.some((dir) => path.startsWith(dir));
 
   return staged.split('\0')
     .filter(path => path !== '')
-    .filter(path => preservedFiles.has(path)
+    .filter(path => isPreserved(path)
       || (!files.has(path) && !dirs.some(dir => path.startsWith(dir))));
 }
 
@@ -2688,9 +2751,20 @@ async function apply() {
     // checking out and restoring afterwards would leave the index holding the
     // upstream blob, so the scoped commit below would record the very content
     // the user asked to keep out.
-    const preserveSpecs = preservedPaths.map((file) => `${EXCLUDE_PATHSPEC_PREFIX}${file}`);
+    // Declared fork-local paths (config/local-paths.txt) are excluded from the
+    // raw checkout too, not only from the stale-file prune below: that file's
+    // whole contract is "apply will never write to it". A declared path upstream
+    // does not ship is unreachable by the checkout anyway, so this matters for
+    // the one upstream DOES ship — which would otherwise be overwritten despite
+    // the declaration. Unconditional, and deliberately outside the `--force`
+    // branch: --force means "discard my local edits to system files", not
+    // "discard the files I told you are mine".
+    const keptFromCheckout = mergePathLists(preservedPaths, localUserPaths(ROOT));
+    const preserveSpecs = keptFromCheckout.map((file) => `${EXCLUDE_PATHSPEC_PREFIX}${file}`);
 
-    const preservedSet = new Set(preservedPaths);
+    // Tracks preserveSpecs, not the .bak messaging (which stays keyed to
+    // atRisk — a declared path is not necessarily a modified one).
+    const preservedSet = new Set(keptFromCheckout);
 
     const skippedPaths = [];
     for (const path of updatePaths) {
@@ -2699,7 +2773,7 @@ async function apply() {
       // that error is indistinguishable from a genuine failure at the catch
       // below, so it would abort the entire update. Skip the entry instead when
       // nothing would be left to check out (see pathFullyPreserved).
-      if (pathFullyPreserved(path, preservedPaths, preservedSet)) continue;
+      if (pathFullyPreserved(path, keptFromCheckout, preservedSet)) continue;
       try {
         // stderr is piped rather than inherited here. A path absent upstream is
         // an EXPECTED skip (a stale manifest entry such as `.gemini/commands/`),
@@ -2749,7 +2823,13 @@ async function apply() {
         // be deleted here as "stale" — the two checks used to run independently,
         // so a preserved file with no upstream counterpart was backed up to
         // .bak by the block above and then unlinked by this one in the same run.
-        const staleCandidates = staleSystemFiles(localFiles, remoteFiles, SYSTEM_PATHS, mergePathLists(USER_PATHS, preservedPaths));
+        // effectiveUserPaths(), not USER_PATHS: a fork's own file living under a
+        // SYSTEM_PATHS directory prefix (a new provider in providers/, a custom
+        // skill in .claude/skills/, a design doc in docs/) is absent upstream and
+        // therefore looks exactly like a stale system file here. Reading only the
+        // built-in list deleted them. Protection also must not depend on the file
+        // having uncommitted edits, which is all that put it in preservedPaths.
+        const staleCandidates = staleSystemFiles(localFiles, remoteFiles, SYSTEM_PATHS, mergePathLists(effectiveUserPaths(), preservedPaths));
         for (const f of staleCandidates) {
           if (isReferencedByPreservedFile(f, preservedPaths)) {
             console.log(`Kept stale asset still referenced by a preserved file: ${f}`);
@@ -2999,9 +3079,14 @@ async function apply() {
       // `providers/acme.mjs`) — so strip the exclusions out and pass the
       // preserved list separately, where preservation outranks ownership.
       const ownedPaths = pathsToStage.filter((spec) => !spec.startsWith(EXCLUDE_PATHSPEC_PREFIX));
+      // keptFromCheckout, not preservedPaths: a config/local-paths.txt
+      // declaration is a statement that the file is the fork's, and a file the
+      // updater must not WRITE is equally a file it must not COMMIT. Passing
+      // only preservedPaths left a staged declared file classified as
+      // updater-owned and swept into the auto-update commit.
       const unrelated = stagedPathsOutside(
         [...ownedPaths, ...materializedSkillEntrypoints],
-        preservedPaths,
+        keptFromCheckout,
       );
       usedIndexCommit = unrelated.length === 0;
       if (usedIndexCommit) {

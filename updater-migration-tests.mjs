@@ -402,8 +402,12 @@ const twoPassManifestChecks = [
     // existsSync on a pre-existing directory (docs/) would call it materialized
     // even when the target added files under it — the verification must recurse
     // into directory entries against FETCH_HEAD (#1998 CodeRabbit review).
+    // The gap before !existsSync admits the per-file declaration guard (#3934):
+    // a path config/local-paths.txt claims is held back from the checkout on
+    // purpose, so its absence is not a failed materialization. What stays
+    // pinned is the recursion itself and that disk is what gets checked.
     name: 'manifest verification recurses into directory entries via ls-tree (#1998)',
-    pattern: /ls-tree', '-r', '--name-only', 'FETCH_HEAD'[\s\S]{0,400}?treeFiles\.some\(f => !existsSync/,
+    pattern: /ls-tree', '-r', '--name-only', 'FETCH_HEAD'[\s\S]{0,400}?treeFiles\.some\(f => [\s\S]{0,60}?!existsSync/,
   },
   {
     // A checkout failure is only an expected skip when the path is truly absent

@@ -241,3 +241,48 @@ console.log('\n🧪 Testing update-commit file-mode preservation...');
   }
   rmSync(dir, { recursive: true, force: true });
 }
+
+// ── 12-13. A DECLARED local directory, staged (#3934 review) ───────────
+// Same shape as 9-11, reached the other way. config/local-paths.txt lets a fork
+// say "everything under providers/ is mine", and apply() folds those
+// declarations into the list it hands this guard. The preserved list was matched
+// exactly, so a directory declaration matched nothing: a staged
+// providers/my-own-board.mjs fell through to the owned lookups, where the
+// `providers/` OWNED entry claimed it. Bare index commit selected, user's staged
+// work committed under "chore: auto-update system files".
+//
+// 12 is the NEGATIVE CONTROL — the exact-match behaviour — so 13 shows a fix
+// rather than describing an absence.
+{
+  const { dir, g, raw } = makeRepo();
+  mkdirSync(join(dir, 'providers'));
+  writeFileSync(join(dir, 'providers/greenhouse.mjs'), 'upstream v1\n');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+
+  // The fork's own provider, staged; plus a genuine update to an upstream one
+  // under the same owned directory.
+  writeFileSync(join(dir, 'providers/my-own-board.mjs'), 'fork-only provider\n');
+  writeFileSync(join(dir, 'providers/greenhouse.mjs'), 'upstream v2\n');
+  g('add', 'providers/my-own-board.mjs', 'providers/greenhouse.mjs');
+
+  const ownedPaths = ['providers/'];
+  const declaredDir = ['providers/'];          // config/local-paths.txt entry
+
+  const exactOnly = stagedPathsOutside(ownedPaths, ['providers/my-own-board.mjs'], raw);
+  const dirDeclared = stagedPathsOutside(ownedPaths, declaredDir, raw);
+
+  if (exactOnly.includes('providers/my-own-board.mjs')) {
+    pass('negative control: the same file declared as an exact path is already reported');
+  } else {
+    fail(`negative control did not hold, got [${exactOnly}]`);
+  }
+
+  if (dirDeclared.includes('providers/my-own-board.mjs')) {
+    pass('stagedPathsOutside: a declared DIRECTORY covers its staged children');
+  } else {
+    fail(`declared directory did not cover its staged child, got [${dirDeclared}]`);
+  }
+
+  rmSync(dir, { recursive: true, force: true });
+}

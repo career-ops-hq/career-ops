@@ -349,6 +349,99 @@ function canary() {
   process.exit(1);
 }
 
+/** Local-paths scenario 2 (#3934): a fork's OWN file under a SYSTEM_PATHS
+ *  DIRECTORY prefix must survive `apply`.
+ *
+ *  The mirror is NOT poisoned here — upstream has never heard of
+ *  `providers/my-own-board.mjs`, which is the whole point: absent upstream, it
+ *  looks exactly like a system file upstream dropped, and the stale-file prune
+ *  deleted it. The install declares the directory `providers/`, the wildcard
+ *  form, which is what a fork writes for "every provider in here is mine".
+ *
+ *  Why this leg and not a unit test. The prune's predicate is covered in
+ *  tests/updater-local-paths.test.mjs (case 7b), but that test hands
+ *  `staleSystemFiles` its fourth argument directly — which is the very wiring
+ *  that was wrong. Reverting apply()'s
+ *  `mergePathLists(effectiveUserPaths(), preservedPaths)` back to `USER_PATHS`
+ *  leaves it green. Only driving apply() pins the call site, so this leg is
+ *  where that revert goes red.
+ *
+ *  Applied TWICE, which is what makes it load-bearing. On the first apply the
+ *  fork file is still spared by accident: `locallyModifiedSystemFiles` diffs
+ *  against the merge-base, the fork's commit sits after it, so the file reads
+ *  as a local edit and lands in `preservedPaths`. The first apply then writes a
+ *  `chore: auto-update system files` commit, which becomes the baseline — and
+ *  on the second apply the file no longer differs from it, drops out of
+ *  `preservedPaths`, and meets the prune with nothing but the declaration
+ *  between them. That is the reported shape: an install that has updated once
+ *  before, which is every install.
+ *
+ *  Assertions, and why byte-identity is not one of the load-bearing ones:
+ *    - both applies exit 0 — a declared `dir/` reached the checkout as both a
+ *                      path and its own `:(exclude)`, which cancel out; git
+ *                      exits 1 and apply rethrew it, aborting the update.
+ *    - never pruned  — the direct signal. On the unfixed wiring apply prints
+ *                      `Pruned stale system file: providers/my-own-board.mjs`,
+ *                      and only THEN does the SAFETY VIOLATION check notice a
+ *                      user file moved and roll the whole update back. So the
+ *                      file IS byte-identical afterwards, restored by a net
+ *                      that also aborts every future update. Asserting on the
+ *                      prune line names the defect; asserting on the bytes
+ *                      alone would read green.
+ *    - byte-identical — kept anyway, as the backstop if that net ever changes.
+ */
+function forkUnderSystemDirScenario(baseSha, oldTag, ok, commit) {
+  const DECLARED_DIR = 'providers/';
+  const FORK_FILE = 'providers/my-own-board.mjs';
+  const work = realpathSync(mkdtempSync(join(tmpdir(), 'upgrade-localpaths-dir-')));
+
+  try {
+    const mirror = buildMirror(work, baseSha);
+    const cfg = writeGitConfig(work, mirror);
+    const install = join(work, 'install');
+    git(ROOT, 'clone', '--quiet', '--branch', oldTag, ROOT, install);
+    git(install, 'remote', 'set-url', 'origin', CANONICAL);
+    seedFixture(install, { state: fixtureStateFor(oldTag) });
+
+    const forkContent = '// fork-only job board provider — no upstream counterpart\n';
+    mkdirSync(join(install, 'providers'), { recursive: true });
+    writeFileSync(join(install, FORK_FILE), forkContent);
+    mkdirSync(join(install, 'config'), { recursive: true });
+    writeFileSync(join(install, 'config', 'local-paths.txt'), `# every provider in here is mine\n${DECLARED_DIR}\n`);
+    git(install, 'add', '-f', FORK_FILE);
+    commit(install, 'fork: own provider under an upstream-owned directory');
+    const before = sha256(join(install, FORK_FILE));
+
+    const runApply = () => {
+      try {
+        return { exitCode: 0, output: execFileSync(process.execPath, ['update-system.mjs', 'apply', '--confirm'], {
+          cwd: install, encoding: 'utf-8', timeout: 300000,
+          env: hermeticEnv(cfg),
+        }) };
+      } catch (e) { return { exitCode: e.status ?? 1, output: `${e.stdout ?? ''}${e.stderr ?? ''}` }; }
+    };
+
+    const first = runApply();
+    ok(first.exitCode === 0, `first apply completes with a declared directory instead of aborting on a cancelled pathspec (exit ${first.exitCode})`);
+    const second = runApply();
+    ok(second.exitCode === 0, `second apply completes (exit ${second.exitCode})`);
+    const exitCode = first.exitCode || second.exitCode;
+    const output = `${first.output}${second.output}`;
+
+    const pruned = output.includes(`Pruned stale system file: ${FORK_FILE}`);
+    ok(!pruned, `the stale-file prune leaves the declared file alone (${FORK_FILE})`);
+    const survived = existsSync(join(install, FORK_FILE)) && sha256(join(install, FORK_FILE)) === before;
+    ok(survived, `committed fork-local file under a declared directory is byte-identical after a SECOND apply: ${FORK_FILE}`);
+
+    if ((exitCode !== 0 || pruned || !survived) && output) {
+      console.log('  --- apply output tail [local-paths/dir] ---');
+      console.log(output.split('\n').slice(-20).join('\n'));
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
 /** Local-paths leg (#2421): a file a fork DECLARED as its own must not be
  *  silently overwritten when upstream later starts shipping a file at that
  *  same path.
@@ -442,6 +535,8 @@ function localPathsLeg() {
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+
+  forkUnderSystemDirScenario(baseSha, oldTag, ok, commit);
 
   console.log(failures.length ? `RED: ${failures.length} failure(s)` : 'GREEN');
   process.exit(failures.length ? 1 : 0);
