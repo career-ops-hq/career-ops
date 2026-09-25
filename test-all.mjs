@@ -4390,13 +4390,21 @@ if (upskillModeDoc.includes('regenerated fresh every run, never diffed')) {
   fail('upskill trust rule 3 (ephemeral / non-versioned resources) missing');
 }
 
-// Rule 4 — write-time URL liveness via the check-liveness pattern; dead links excluded.
+// Rule 4 — resource-specific URL liveness; job-posting heuristics excluded.
 if (
   upskillModeDoc.includes('Write-time URL liveness') &&
-  upskillModeDoc.includes('liveness-core.mjs') &&
-  upskillModeDoc.includes('dead links never enter the report')
+  upskillModeDoc.includes('successful HTTP response') &&
+  upskillModeDoc.includes('non-error title') &&
+  upskillModeDoc.includes('substantive page content') &&
+  upskillModeDoc.includes('reject 4xx/5xx responses') &&
+  upskillModeDoc.includes('error/challenge pages') &&
+  upskillModeDoc.includes('empty bodies') &&
+  upskillModeDoc.includes('redirects to unrelated destinations') &&
+  upskillModeDoc.includes('job-posting-only') &&
+  upskillModeDoc.includes('must not classify learning resources') &&
+  upskillModeDoc.includes('Dead links never enter the report')
 ) {
-  pass('upskill trust rule 4: write-time URL liveness via check-liveness pattern; dead links excluded');
+  pass('upskill trust rule 4: resource-specific URL liveness; job-posting heuristic excluded');
 } else {
   fail('upskill trust rule 4 (write-time URL liveness) missing');
 }
@@ -4817,7 +4825,7 @@ try {
 // is case- and punctuation-insensitive; loadBlacklist on an absent file is a
 // no-op (empty Map — the scan filter never fires).
 try {
-  const { parseBlacklist, loadBlacklist } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { parseBlacklist, loadBlacklist, findBlacklistEntry } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
   const bl = parseBlacklist([
     '# Company Blacklist',
     '',
@@ -4825,14 +4833,15 @@ try {
     '|---------|-------|-------|--------|',
     '| Acme Corp. | 2026-01-15 | company | post-interview process signals |',
     '| Globex | 2026-02-01 | company | zero conversion |',
+    '| ibm.com | 2026-03-01 | domain | avoid parent-company ATS hosts |',
   ].join('\n'));
   const exact = bl.get('acmecorp');
   if (
-    bl.size === 2 &&
+    bl.size === 3 &&
     exact && exact.reason === 'post-interview process signals' && exact.since === '2026-01-15' &&
-    bl.has('globex') && !bl.has('company')
+    bl.has('globex') && bl.get('domain:ibm.com')?.scope === 'domain' && !bl.has('company')
   ) {
-    pass('scan.mjs parseBlacklist parses the table and keys by normalized company (#1742)');
+    pass('scan.mjs parseBlacklist parses normalized company and domain-scope rows (#1742, #4139)');
   } else {
     fail(`scan.mjs parseBlacklist wrong: size=${bl.size} keys=${[...bl.keys()].join(',')}`);
   }
@@ -4844,6 +4853,16 @@ try {
     pass('scan.mjs blacklist matching is case/punctuation-insensitive via shared normalizeCompany (#1742)');
   } else {
     fail('scan.mjs blacklist matching misses case/punctuation company variants');
+  }
+
+  const domain = bl.get('domain:ibm.com');
+  const domainMatch = findBlacklistEntry(bl, 'Confluent', 'https://jobs.ibm.com/engineering/123');
+  const boundaryMiss = findBlacklistEntry(bl, 'Confluent', 'https://notibm.com/engineering/123');
+  const legacyMatch = findBlacklistEntry(bl, 'ACME-CORP', 'https://example.com/jobs/123');
+  if (domainMatch === domain && boundaryMiss === null && legacyMatch === exact) {
+    pass('scan.mjs blacklist domain scope matches host suffixes without weakening company matching (#4139)');
+  } else {
+    fail('scan.mjs blacklist domain scope does not preserve host boundaries and legacy company matching (#4139)');
   }
 
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-blacklist-'));
@@ -4873,6 +4892,7 @@ try {
 // scan-runs.tsv by header name, and --include-blacklisted bypasses the filter.
 if (
   scanScript.includes("args.includes('--include-blacklisted')") &&
+  scanScript.includes('findBlacklistEntry(blacklist') &&
   scanScript.includes('totalFilteredBlacklist') &&
   scanScript.includes('skipped (blacklist)') &&
   scanScript.includes('filtered_blacklist')
@@ -5112,11 +5132,14 @@ try {
 try {
   const { filterBlacklistedOffers } = await import(pathToFileURL(join(ROOT, 'scan-ats-full.mjs')).href);
   const blacklist = new Map([
-    ['acmecorp', { company: 'Acme Corp', reason: 'example reason' }],
+    ['acmecorp', { company: 'Acme Corp', scope: 'company', reason: 'example reason' }],
+    ['ibmcom', { company: 'ibm.com', scope: 'domain', reason: 'parent ATS host' }],
   ]);
   const offers = [
     { company: 'Acme Corp.', title: 'Software Engineer', url: 'https://example.com/acme' },
     { company: 'Globex', title: 'Software Engineer', url: 'https://example.com/globex' },
+    { company: 'Confluent', title: 'Software Engineer', url: 'https://jobs.ibm.com/confluent' },
+    { company: 'Not IBM', title: 'Software Engineer', url: 'https://notibm.com/role' },
   ];
   const skipped = typeof filterBlacklistedOffers === 'function'
     ? filterBlacklistedOffers(offers, blacklist, { includeBlacklisted: false })
@@ -5125,16 +5148,19 @@ try {
     ? filterBlacklistedOffers(offers, blacklist, { includeBlacklisted: true })
     : null;
   const ok =
-    skipped?.filteredBlacklist === 1 &&
-    skipped.offers.length === 1 &&
+    skipped?.filteredBlacklist === 2 &&
+    skipped.offers.length === 2 &&
     skipped.offers[0].company === 'Globex' &&
-    audited?.annotatedBlacklisted === 1 &&
-    audited.offers.length === 2 &&
+    skipped.offers[1].company === 'Not IBM' &&
+    audited?.annotatedBlacklisted === 2 &&
+    audited.offers.length === 4 &&
     audited.offers[0].blacklisted === true &&
     audited.offers[0].note.includes('blacklisted: example reason') &&
+    audited.offers[2].blacklisted === true &&
+    audited.offers[2].note.includes('blacklisted: parent ATS host') &&
     offers[0].blacklisted === undefined;
-  if (ok) pass('scan-ats-full filters data/blacklist.md matches by default and annotates them under --include-blacklisted (#1911)');
-  else fail('scan-ats-full missing blacklist filter/audit semantics (#1911)');
+  if (ok) pass('scan-ats-full applies company and domain blacklist scopes in default and audit modes (#1911, #4139)');
+  else fail('scan-ats-full missing company/domain blacklist filter/audit semantics (#1911, #4139)');
 } catch (e) {
   fail(`scan-ats-full blacklist test crashed: ${e.message}`);
 }
@@ -10060,6 +10086,48 @@ try {
     fail(`stale #3797 exemption — these now carry the **URL:** header, remove them from pendingUrlHeader: ${staleExemptions.join(', ')}`);
   } else {
     pass('every headless evaluator outside the #3797 exemption writes **URL:** and takes a posting URL');
+  }
+
+  // Same family, third contract (#3796): the tracker-addition helpers are
+  // imported, never redefined. Four evaluators carried private copies of
+  // `tsvSafe` / `normalizedTrackerScore` and they drifted -- gemini-eval.mjs's
+  // concatenated instead of parsing, so `SCORE: 4.2 (strong fit)` produced
+  // `4.2 (strong fit)/5`, which is neither a score nor a sentinel and is the
+  // undecidable cell merge-tracker.mjs refuses outright. The evaluation was
+  // skipped wholly while the sibling copy had been immune all along.
+  //
+  // tests/evaluator-score-cell.test.mjs asserts the helpers exist exactly once;
+  // this asserts the family reaches that one definition, which is the half a
+  // fifth evaluator can fail without redefining anything -- by hand-rolling a
+  // score cell inline instead, which is exactly what openrouter-runner.mjs did:
+  // it never held a copy, so a copy-scan never saw it, while it wrote
+  // `${value.toFixed(1)}/5` from a numeric prefix that discarded the
+  // denominator, and the empty string when nothing parsed.
+  //
+  // USE, not merely import: an evaluator can import an unrelated helper from the
+  // module and still build its score cell by hand, which would pass an
+  // import-only check while the behaviour this contract exists to protect had
+  // drifted again. Both halves are required -- the import proves it reaches the
+  // shared definition, the call proves it is the definition actually used.
+  const ADDITION_HELPERS = './lib/tracker-addition.mjs';
+  const helperImportRe = /from\s+'\.\/lib\/tracker-addition\.mjs'/;
+  const helperUseRe    = /\bnormalizedTrackerScore\s*\(/;
+  // Empty, and it should stay that way. #3797 landed while this branch was open
+  // and re-added copies to openai-eval.mjs and ollama-eval.mjs; both were
+  // consolidated on the merge, which is the exemption being spent rather than
+  // renewed. A new name here needs a reason with an issue number attached.
+  const pendingHelperImport = [];
+  const missingHelperImport = evaluatorSources
+    .filter(([, source]) => !helperImportRe.test(source) || !helperUseRe.test(source))
+    .map(([name]) => name);
+  const staleHelperExemptions = pendingHelperImport.filter(name => !missingHelperImport.includes(name));
+  const unexemptedHelperGaps  = missingHelperImport.filter(name => !pendingHelperImport.includes(name));
+  if (unexemptedHelperGaps.length > 0) {
+    fail(`headless evaluators build their tracker-addition cells without importing AND calling ${ADDITION_HELPERS}'s normalizedTrackerScore, the drift #3796 consolidated: ${unexemptedHelperGaps.join(', ')}`);
+  } else if (staleHelperExemptions.length > 0) {
+    fail(`stale #3796 exemption — these now import ${ADDITION_HELPERS}, remove them from pendingHelperImport: ${staleHelperExemptions.join(', ')}`);
+  } else {
+    pass(`every headless evaluator outside the #3796 exemption imports AND calls the shared tracker-addition helpers`);
   }
 
   // --count N: contiguous range from an empty dir.

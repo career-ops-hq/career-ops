@@ -30,6 +30,12 @@ Read `portals.yml` which contains:
 - `tracked_companies[].parser`: Optional local parser for SSR pages or stable HTML
 - `title_filter`: Keywords (positive/negative/seniority_boost) for filtering job titles
 
+Before using saved per-company WebSearch queries, run `node audit-portals.mjs --queries`.
+It checks enabled `scan_method: websearch` entries against `title_filter.positive`
+offline, and flags queries with no keyword overlap. Review warnings especially
+after changing target roles; synonyms or another language may legitimately differ.
+This is advisory: do not automatically rewrite queries or exclude a company.
+
 ## Discovery Strategy (4 Levels)
 
 ### Level 0 — Local Parser (CHEAPEST)
@@ -229,6 +235,7 @@ Levels are additive — they are executed in order, and results are merged and d
    - Opt-in. If the key is absent, 0, or non-positive, all ages pass (default behavior).
    - An offer is skipped only when the provider supplied a posting date (`postedAt`) AND it is older than N days.
    - Offers from providers that expose no date always pass (do not penalize missing data).
+   - The filter applies to every source, including an employer's own ATS board; there is no per-source exemption. An old posting date is not evidence that a role is closed — evergreen roles may remain open for months. To include them, increase the window or disable `max_posting_age_days` (affects all sources), then verify the specific posting before applying. CLI date-window flags still apply independently.
 
 7. **Deduplicate** against 3 sources:
    - `scan-history.tsv` → exact URL already seen

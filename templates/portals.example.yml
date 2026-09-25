@@ -188,11 +188,23 @@
 #   max: 0
 #   currency: "USD"
 
+# Read-only portal housekeeping: `node stats.mjs --prune --summary`.
+# Uses exact-lowercase company names, scan history and recent health evidence.
+# First health observation is a lower bound, not the date config was added.
+# No configuration is removed automatically; review filters/names before pruning.
+# portal_prune_quiet_days: 30
+# Failure suggestions use portal_health_threshold (default 3).
+
 # -- Posting-age filter (optional) --
 # Opt-in freshness gate. Skips offers whose posting date (postedAt, supplied by
 # the provider) is older than N days. Offers from providers that expose no date
 # are never skipped — same "don't penalize missing data" rule as location_filter.
 # Absent, 0, or non-positive → disabled (all ages pass).
+# This applies to every source, including an employer's own ATS board.
+# An old posting date does not prove a role is closed: evergreen roles may
+# remain open for months. Increase the window or disable this filter to include
+# them, then verify the specific posting before applying. There is currently
+# no per-source exemption; disabling this filter affects all sources.
 #
 # max_posting_age_days: 45
 #

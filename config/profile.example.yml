@@ -273,6 +273,10 @@ cover_letter:
 #                   silently, so nothing breaks. `doctor` reports the active mode.
 # scan:
 #   extractor: mcp   # mcp (default) | cli
+#   timeout_seconds: 230   # web Explore scan budget (seconds) before the run is
+#                          # stopped; default 230. A broad ATS sweep probes every
+#                          # company in a source — raise this to let a large scan
+#                          # finish (bounded by the API route's 300s cap if deployed).
 
 # ── Auto-PDF threshold ──────────────────────────────────────────────────────
 #

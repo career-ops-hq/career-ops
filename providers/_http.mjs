@@ -27,7 +27,7 @@ async function fetchWithTimeout(url, opts = {}, consume) {
   return providerFetchContext.run({ url: String(url) }, () => fetchInContext(url, opts, consume));
 }
 
-async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow' } = {}, consume) {
+async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow', onResponse } = {}, consume) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -51,6 +51,7 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
       redirect,
       signal: controller.signal,
     });
+    onResponse?.(res);
     if (!res.ok) {
       const responseText = await res.text().catch(() => '');
       // WAF/CDN challenge pages (seen live: Workday 429s) carry no actionable
@@ -332,11 +333,26 @@ export async function fetchTextWithRetry(ctx, url, opts = {}, policy = {}) {
   return withRetry(() => ctx.fetchText(url, opts), ctx, policy);
 }
 
-export function makeHttpCtx() {
-  return {
+export function makeHttpCtx(observer) {
+  const ctx = {
     transport: 'http',
     fetchJson,
     fetchText,
     fetchResponse,
   };
+  if (!observer) return ctx;
+  for (const method of ['fetchJson', 'fetchText', 'fetchResponse']) {
+    const original = ctx[method];
+    ctx[method] = (url, opts = {}) => {
+      observer.onRequest?.();
+      return original(url, {
+        ...opts,
+        onResponse: response => {
+          opts.onResponse?.(response);
+          observer.onResponse?.(response.status);
+        },
+      });
+    };
+  }
+  return ctx;
 }
