@@ -1238,6 +1238,36 @@ export function systemTreeDiffers(systemPaths, upstreamRef = 'FETCH_HEAD', ctx =
 }
 
 /**
+ * Parses `Preserved-Path: <path>` trailers out of an auto-update commit
+ * message — the record of which files THAT SPECIFIC run left untouched
+ * because they were locally modified. See preservedPathsTrailer() for the
+ * writer side and the #4355 note on locallyModifiedSystemFiles() for why this
+ * distinction has to survive in the commit history at all.
+ *
+ * @param {string} message - full commit message (subject + body).
+ * @returns {Set<string>} paths that commit's run preserved, possibly empty.
+ */
+export function preservedPathsFromCommitMessage(message) {
+  return new Set([...message.matchAll(/^Preserved-Path: (.+)$/gm)].map((m) => m[1]));
+}
+
+/**
+ * Serializes preserved paths as commit-message trailers, appended to an
+ * auto-update commit's subject line.
+ *
+ * A run that preserved nothing returns '', so the ordinary case still
+ * produces the exact single-line message it always has — this is purely
+ * additive, and only auto-update commits going forward carry it.
+ *
+ * @param {string[]} preservedPaths - paths this run left untouched.
+ * @returns {string} '' or a `\n\nPreserved-Path: ...` block, one per line.
+ */
+export function preservedPathsTrailer(preservedPaths) {
+  if (!preservedPaths || preservedPaths.length === 0) return '';
+  return '\n\n' + [...preservedPaths].sort().map((p) => `Preserved-Path: ${p}`).join('\n');
+}
+
+/**
  * System-layer files this install changed locally that the update is about to
  * overwrite (#2337).
  *
@@ -1249,14 +1279,34 @@ export function systemTreeDiffers(systemPaths, upstreamRef = 'FETCH_HEAD', ctx =
  *
  * A file is at risk only when BOTH hold:
  *
- *   1. it differs from the merge-base — the last commit this install shares
- *      with upstream, i.e. the baseline it was last synced to. Anything that
- *      differs from it was changed HERE, whether committed or still in the
- *      working tree (`git diff <ref> -- <path>` compares against the worktree);
+ *   1. it differs from its baseline — the last point this install is known to
+ *      have actually matched what upstream shipped for that file (see below
+ *      for what "baseline" means per file). Anything that differs from it was
+ *      changed HERE, whether committed or still in the working tree
+ *      (`git diff <ref> -- <path>` compares against the worktree);
  *   2. it differs from the upstream ref. A local fix upstream has since adopted
  *      independently is byte-identical there, so the checkout costs nothing and
  *      warning about it would be noise — the exact case the #2337 reporter
  *      isolated when one of their two fixes survived an update.
+ *
+ * Baseline resolution is PER FILE, not one shared commit for the whole run
+ * (#4355). The naive version — "the most recent `chore: auto-update system
+ * files` commit" — self-poisons: when a run PRESERVES a file (skips its
+ * checkout because it was locally modified), the resulting auto-update
+ * commit's tree still contains the local edit for that file, and that same
+ * commit is exactly what the next run would pick as ITS baseline. Diffing the
+ * file against a baseline that already equals its own local content comes
+ * back empty — the file silently stops reading as "changed locally," even
+ * though it still differs from the newer upstream, and the raw checkout in
+ * apply() overwrites it with no warning and no `.bak`. So for each file, walk
+ * the auto-update commits newest-first and skip any commit whose message
+ * records that file under `Preserved-Path:` (parsed by
+ * preservedPathsFromCommitMessage) — that run's tree cannot be trusted as
+ * "what this file was actually synced to," because it wasn't. The first
+ * commit that did NOT preserve the file is its baseline. A commit predating
+ * this fix has no trailers at all, which is indistinguishable from "preserved
+ * nothing" — exactly the old single-baseline behavior, so a pre-existing
+ * history degrades to it rather than breaking.
  *
  * @param {string[]} paths - manifest entries (files or `dir/` prefixes).
  * @param {string} upstreamRef - ref being checked out, normally FETCH_HEAD.
@@ -1267,7 +1317,7 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
   const runGit = ctx.git || git;
   if (!paths || paths.length === 0) return [];
 
-  const diffNames = (ref) => {
+  const diffNames = (ref, pathsArg) => {
     try {
       // `--ignore-cr-at-eol`: a file whose only difference is a CRLF/LF line
       // ending must not read as a local edit. Installs that last synced before
@@ -1285,7 +1335,7 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
       // actually applied and a CR-only file drops out of the output entirely.
       // The path is field 3 (a binary file renders as `-\t-\tpath`, still field
       // 3). Reads less obviously than `--name-only`; keep it as-is.
-      return runGit('diff', '--ignore-cr-at-eol', '--numstat', ref, '--', ...paths)
+      return runGit('diff', '--ignore-cr-at-eol', '--numstat', ref, '--', ...pathsArg)
         .split('\n').map((l) => l.trim()).filter(Boolean)
         .map((l) => l.split('\t')[2]).filter(Boolean);
     } catch {
@@ -1295,32 +1345,108 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
     }
   };
 
-  // An updater commit is the installed system snapshot. On a later update,
-  // using the original merge-base would mistake the previous update's files
-  // for user edits. Keep the merge-base fallback for installations without a
-  // recorded updater commit.
-  let baseline = null;
+  // Every `chore: auto-update system files` commit reachable from HEAD,
+  // newest first, together with whatever it recorded as preserved. One `git
+  // log` call up front, not one per path: RECORD_SEP/FIELD_SEP are ASCII
+  // control characters (0x1e/0x1f) that never occur in ordinary commit
+  // messages, so the whole history can be split back into (sha, body) pairs
+  // without a per-commit round trip.
+  const RECORD_SEP = '\x1e';
+  const FIELD_SEP = '\x1f';
+  let autoUpdateCommits = [];
   try {
-    const updaterCommit = runGit(
-      'log', '-1', '--format=%H', '--grep=^chore: auto-update system files', 'HEAD',
-    ).trim();
-    if (updaterCommit) {
-      runGit('merge-base', '--is-ancestor', updaterCommit, 'HEAD');
-      baseline = updaterCommit;
-    }
+    const raw = runGit(
+      'log', `--format=${RECORD_SEP}%H${FIELD_SEP}%B`,
+      '--grep=^chore: auto-update system files', 'HEAD',
+    );
+    autoUpdateCommits = raw.split(RECORD_SEP).slice(1).map((chunk) => {
+      const sep = chunk.indexOf(FIELD_SEP);
+      return { sha: chunk.slice(0, sep), preserved: preservedPathsFromCommitMessage(chunk.slice(sep + 1)) };
+    });
   } catch {
-    baseline = null;
-  }
-  if (!baseline) {
-    try {
-      baseline = runGit('merge-base', 'HEAD', upstreamRef) || null;
-    } catch {
-      baseline = null;
-    }
+    // Same degradation contract as diffNames below: unreadable history (a
+    // shallow clone, unrelated histories) must never abort the update.
+    autoUpdateCommits = [];
   }
 
-  const changedLocally = new Set(diffNames(baseline || 'HEAD'));
-  const differsFromUpstream = new Set(diffNames(upstreamRef));
+  // The merge-base fallback for a path with no trustworthy auto-update commit
+  // at all — a fresh install's first update, or history this ref cannot read.
+  // Computed at most once and shared by every path that needs it, same call
+  // volume as the single shared baseline this replaces.
+  let mergeBaseComputed = false;
+  let mergeBaseValue = null;
+  const mergeBaseFallback = () => {
+    if (!mergeBaseComputed) {
+      mergeBaseComputed = true;
+      try { mergeBaseValue = runGit('merge-base', 'HEAD', upstreamRef).trim() || null; }
+      catch { mergeBaseValue = null; }
+    }
+    return mergeBaseValue;
+  };
+
+  const baselineForPath = (path) => {
+    for (const commit of autoUpdateCommits) {
+      if (!commit.preserved.has(path)) return commit.sha;
+    }
+    return mergeBaseFallback();
+  };
+
+  // `Preserved-Path:` trailers only ever name concrete files — atRisk (what
+  // apply() records as preservedPaths) always comes from `git diff --numstat`
+  // output, which expands directories itself and never emits a bare
+  // directory pathspec. So this is the complete set of concrete files any
+  // run has EVER individually preserved, regardless of which manifest entry
+  // — a plain file or a `dir/` entry like `modes/` — they fall under.
+  const everPreservedPaths = new Set();
+  for (const commit of autoUpdateCommits) {
+    for (const p of commit.preserved) everPreservedPaths.add(p);
+  }
+
+  const byBaseline = new Map();
+  const pushToGroup = (baseline, ...specs) => {
+    if (!byBaseline.has(baseline)) byBaseline.set(baseline, []);
+    byBaseline.get(baseline).push(...specs);
+  };
+
+  // Group paths by their resolved baseline so each distinct baseline costs
+  // exactly one `git diff` call. When no path has ever been individually
+  // preserved (every real-world case until this fix ships, and every existing
+  // test fixture), every path resolves to the same single commit — the exact
+  // one-call shape this replaces.
+  for (const path of paths) {
+    if (!path.endsWith('/')) {
+      pushToGroup(baselineForPath(path) || 'HEAD', path); // null → diff against self → empty, same degrade as before
+      continue;
+    }
+    // A directory-shaped manifest entry cannot share ONE baseline with the
+    // files inside it: one file under it may have been individually
+    // preserved on a run that otherwise fully synced the rest of the
+    // directory, and diffing the whole directory against that run's baseline
+    // would either re-poison every OTHER file in it, or — the other
+    // direction — diff that one file against a baseline that never saw it
+    // preserved at all (#4362 review; CodeRabbit caught this before merge).
+    // So: every descendant this manifest entry has EVER individually
+    // preserved gets pulled out and resolved on its own, exactly like a
+    // plain top-level path; what is left of the directory is diffed against
+    // the ordinary "most recent auto-update commit" baseline — valid because
+    // apply()'s checkout only ever excludes the paths it names, so anything
+    // never named was genuinely checked out, and therefore genuinely synced,
+    // on every single run — with those known descendants excluded from its
+    // pathspec so they are never diffed twice against two different
+    // baselines.
+    const descendants = [...everPreservedPaths].filter((p) => p.startsWith(path));
+    for (const child of descendants) {
+      pushToGroup(baselineForPath(child) || 'HEAD', child);
+    }
+    const directoryBaseline = (autoUpdateCommits[0] && autoUpdateCommits[0].sha) || mergeBaseFallback() || 'HEAD';
+    pushToGroup(directoryBaseline, path, ...descendants.map((d) => `${EXCLUDE_PATHSPEC_PREFIX}${d}`));
+  }
+
+  const changedLocally = new Set();
+  for (const [baseline, group] of byBaseline) {
+    for (const file of diffNames(baseline, group)) changedLocally.add(file);
+  }
+  const differsFromUpstream = new Set(diffNames(upstreamRef, paths));
   const atRisk = [...changedLocally].filter((file) => differsFromUpstream.has(file));
 
   // `git diff` never lists untracked files, so a file created locally at a path
@@ -2955,6 +3081,16 @@ async function apply() {
     // recovery command. Declared outside the try because the catch reads it.
     let usedIndexCommit = false;
 
+    // The trailer records exactly which paths THIS run preserved, so a later
+    // update can tell "this file's baseline commit already IS its local
+    // content" from "this file was genuinely synced here" and never trusts
+    // the former (#4355). Computed once, outside the try, and reused for both
+    // commit forms and the recovery hint below — the catch block needs it
+    // too, and recomputing it there from a stale in-memory `preservedPaths`
+    // would silently drop the trailer for exactly the run where the recovery
+    // path is already the unusual one.
+    const commitMessage = `chore: auto-update system files to v${remote}${preservedPathsTrailer(preservedPaths)}`;
+
     // The staging and scoped-commit paths must use the same concrete file list.
     // Passing a manifest directory to `git commit -- <dir>` reads matching
     // tracked files from the working tree, including files the target tree no
@@ -3005,9 +3141,9 @@ async function apply() {
       );
       usedIndexCommit = unrelated.length === 0;
       if (usedIndexCommit) {
-        git('commit', '-m', `chore: auto-update system files to v${remote}`);
+        git('commit', '-m', commitMessage);
       } else {
-        git('commit', '-m', `chore: auto-update system files to v${remote}`, '--', ...expandedPathsToStage);
+        git('commit', '-m', commitMessage, '--', ...expandedPathsToStage);
       }
     } catch (e) {
       let commitFailed = false;
@@ -3029,9 +3165,15 @@ async function apply() {
         // pathspec form after the index form was selected would tell the user to
         // run the very thing that drops the staged mode bits — a recovery step
         // that quietly reintroduces the bug it is recovering from.
+        //
+        // `-F -` with a heredoc, not `-m "..."`: when preservedPaths is
+        // non-empty, commitMessage is multi-line (the Preserved-Path trailer
+        // block), and a single-line `-m "..."` recovery command would drop it
+        // — reintroducing the exact #4355 self-poisoning this fix exists to
+        // close, for precisely the one run whose commit needed a manual retry.
         const recovery = usedIndexCommit
-          ? `git commit -m "chore: auto-update system files to v${remote}"`
-          : `git commit -m "chore: auto-update system files to v${remote}" -- ${pathspec}`;
+          ? `git commit -F - <<'EOF'\n${commitMessage}\nEOF`
+          : `git commit -F - -- ${pathspec} <<'EOF'\n${commitMessage}\nEOF`;
         throw new Error(
           `Update commit failed (files may be staged but not committed).\n` +
           `    Error: ${e.message.split('\n')[0]}\n` +
