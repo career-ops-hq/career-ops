@@ -298,6 +298,64 @@ function resolveEndpoint(entry) {
   return null;
 }
 
+// Workday externalPath is `/job/{Location}/{Title-slug}_{REQ}(-{n})?`. The req token
+// is the ANCHORED trailing segment — that anchoring is the whole point.
+//
+// An earlier version corroborated bulletFields with `externalPath.includes(v)`, which
+// is unanchored, and externalPath always embeds the location slug — so bulletFields
+// ["Burbank"] against /job/Burbank/Sr-Analyst_10154966 was "corroborated" and returned
+// "Burbank" as the requisition id. Two unrelated Burbank reqs then shared an id. The
+// check certified exactly the value it was written to exclude.
+//
+// The token is everything after the FIRST underscore of that segment, the
+// boundary workdayDedupKey() uses: Workday title slugs use hyphens, never
+// underscores, so an id like "JR_2024_00123" stays whole (taking the LAST
+// underscore read it as "00123" while the dedup key read "jr_2024_00123" —
+// CodeRabbit, #4076). Hyphens stay in the token too: Walmart posts
+// "R-2593225", which an earlier `(?:-\d+)?$` tail cut to "R". Workday's own
+// cross-site "-N" repost suffix is stripped by the dedup key's rule. Both
+// callers go through reqTokenFromSegment(), so the captured requisitionId and
+// the key cannot disagree; the id keeps the ATS's casing, only the key lowercases.
+const REQ_TOKEN_CHARS_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function reqTokenFromSegment(segment) {
+  const underscoreIdx = segment.indexOf('_');
+  if (underscoreIdx === -1) return '';
+  return stripRepostSuffixKeepCase(segment.slice(underscoreIdx + 1));
+}
+
+// Position alone does not identify a req. A segment with no requisition after
+// its underscore — `/job/Remote/Data_Scientist` — leaves the word "Scientist",
+// and two unrelated postings ending in the same word would share an id and a
+// dedup key: the same collision the location slug used to cause, one layer along.
+//
+// A Workday req id always carries at least one digit (R167982, 10154966, JR113711);
+// a title word never does. Validating the token's SHAPE is what separates them, and
+// it is why bulletFields corroboration is not needed: the format check is stronger
+// than a free-text match against a field with no guaranteed slot. The captured id
+// and workdayDedupKey() both go through this check, so neither keys on a word.
+const REQ_SHAPE_RE = /\d/;
+
+/** @param {string} segment @returns {string} the validated token, or '' */
+function validReqToken(segment) {
+  const token = reqTokenFromSegment(segment);
+  if (token.length < 3 || !REQ_TOKEN_CHARS_RE.test(token)) return '';
+  return REQ_SHAPE_RE.test(token) ? token : '';
+}
+
+function reqTokenFromPath(externalPath) {
+  if (typeof externalPath !== 'string') return undefined;
+  return validReqToken(externalPath.split('/').filter(Boolean).pop() || '') || undefined;
+}
+
+// bulletFields is deliberately NOT consulted. It is tenant-configurable free text
+// (location, job family, req number, …) with no guaranteed slot, so it cannot
+// identify a req on its own — and as corroboration it added nothing the anchored
+// path match had not already established.
+function reqFromWorkday(j) {
+  return reqTokenFromPath(j.externalPath);
+}
+
 function parsePostedOn(label) {
   if (!label) return undefined;
   if (/posted\s+today/i.test(label)) return Date.now();
@@ -360,8 +418,15 @@ function locationFromPath(externalPath) {
  */
 export function stripWorkdayRepostSuffix(raw) {
   const token = raw == null ? '' : String(raw).toLowerCase();
+  return stripRepostSuffixKeepCase(token);
+}
+
+// The same rule without the lowercasing, for the captured requisitionId,
+// which keeps the ATS's own casing ("R-2593225"). Only the
+// dedup key is lowercased.
+function stripRepostSuffixKeepCase(token) {
   const m = token.match(/^(.*?)-(\d{1,2})$/);
-  return m && /^[a-z]*\d[a-z0-9_]*\d{2,}$/.test(m[1]) ? m[1] : token;
+  return m && /^[a-z]*\d[a-z0-9_]*\d{2,}$/i.test(m[1]) ? m[1] : token;
 }
 
 /**
@@ -391,9 +456,10 @@ export function workdayDedupKey(job) {
   const segments = parsed.pathname.split('/').filter(Boolean);
   const lastSegment = segments[segments.length - 1];
   if (!lastSegment) return null;
-  const underscoreIdx = lastSegment.indexOf('_');
-  if (underscoreIdx === -1) return null; // no title/requisition-ID separator — nothing to key on
-  const reqId = stripWorkdayRepostSuffix(lastSegment.slice(underscoreIdx + 1));
+  // Same validated token as the captured requisitionId; only the key is
+  // lowercased. No requisition-shaped token (no underscore, or only a title
+  // word after it) means nothing to key on, and URL dedup takes over.
+  const reqId = validReqToken(lastSegment).toLowerCase();
   if (!reqId) return null;
   return `workday:${parsed.hostname.toLowerCase()}:${reqId}`;
 }
@@ -557,6 +623,17 @@ export function parseWorkdayResponse(json, entry) {
       title: j.title || '',
       url: jobBase + j.externalPath,
       company: entry.name,
+      // The req token, NOT the whole externalPath. externalPath embeds the title
+      // slug, so it changes on exactly the title drift this capture exists to survive
+      // (Adobe: "Associate--Corporate-Strategy_R167982" -> "Sr-Associate--…_R167982-1"
+      // — the path moved, R167982 did not). Abstain when no token is recoverable
+      // rather than emitting an unstable key.
+      //
+      // No externalId: the list API exposes no posting id, and this token is a
+      // REQUISITION — every site a req is cross-posted to carries the same one
+      // (the "-1"/"-2" suffix stripped above), so it cannot be the per-posting key
+      // externalId promises (CodeRabbit, #4297).
+      requisitionId: reqFromWorkday(j),
       location: j.locationsText || locationFromPath(j.externalPath),
       postedAt: parsePostedOn(j.postedOn),
     });
