@@ -103,3 +103,13 @@ test('a "Block H" heading is not Block H, for the same reason', () => {
   const r = '# Report\n\n## Block H — Internal Notes\n\n**Q?**\n\nA.\n';
   assert.equal(parseDraftAnswersBlockH(r), null);
 });
+
+// `\s+` after `##` also matches a newline, so a bare `##` line consumed it and
+// the matcher captured the FOLLOWING line as the heading. Combined with the
+// letter rule, `##` then `H) Internal Notes` made an unrelated section parse as
+// draft answers, which modes/apply.md later offers as a base for what a user
+// sends to an employer (#4400 review).
+test('a bare ## does not capture the next line as its heading', () => {
+  const r = '# Report\n\n##\nH) Internal Notes\n\n**Q?**\n\nA.\n';
+  assert.equal(parseDraftAnswersBlockH(r), null);
+});

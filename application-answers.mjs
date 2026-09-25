@@ -362,7 +362,11 @@ const DRAFT_ANSWERS_LETTER_RE = /^H\)\s*(.*)$/i;
  */
 function findDraftAnswersHeading(report) {
   /** @type {RegExpMatchArray[]} */
-  const headings = [...report.matchAll(/^##\s+(.+?)\s*$/gm)];
+  // Horizontal whitespace only. `\s+` also matches the newline, so a bare `##`
+  // line consumed it and captured the NEXT line as the heading text. With the
+  // letter rule below, `##` followed by `H) Internal Notes` then read that
+  // section's bold text as draft answers (#4400 review).
+  const headings = [...report.matchAll(/^##[ \t]+(.+?)\s*$/gm)];
   const marked = headings.find(h => DRAFT_ANSWERS_MARKER_RE.test(h[1]));
   if (marked) return marked;
   const named = headings.find(h => DRAFT_ANSWERS_NAME_RE.test(
