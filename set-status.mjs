@@ -100,6 +100,8 @@ import {
   normalizeCompany, cell, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli,
 } from './tracker-utils.mjs';
 
+import { getCareerOpsRoot } from './path-resolver.mjs';
+
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
 
@@ -325,7 +327,12 @@ if (!newStatus) {
 
 // ── tracker access ───────────────────────────────────────────────
 
-const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+// getCareerOpsRoot(), not CAREER_OPS: the tracker is user-layer data under the
+// data root, which may sit outside the checkout via CAREER_OPS_ROOT /
+// CAREER_OPS_DATA_DIR or a .career-ops-data marker (#4389). CAREER_OPS stays
+// right for STATES_FILE above, which is system-layer code shipped beside this
+// script and is meant to resolve from the install directory.
+const APPS_FILE = resolveTrackerPath(getCareerOpsRoot());
 if (!existsSync(APPS_FILE)) {
   failWith(EXIT_NOT_FOUND, 'no-tracker', `No tracker found at ${APPS_FILE}`);
 }

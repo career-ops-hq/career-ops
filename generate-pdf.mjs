@@ -66,11 +66,24 @@ const PDF_PAGE_MARGIN = '0.6in';
 // self-correcting the moment it does. Same defect class as #3159.
 let __rootCache = { key: null, root: null, canonical: null };
 function refreshRootCache() {
-  const key = process.env.CAREER_OPS_TRACKER || '';
+  // Every input the derivation below reads. CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR
+  // join the key because getCareerOpsRoot() reads them too; keying on the tracker
+  // variable alone would reintroduce #3162 for the other two.
+  const key = [
+    process.env.CAREER_OPS_TRACKER || '',
+    process.env.CAREER_OPS_ROOT || '',
+    process.env.CAREER_OPS_DATA_DIR || '',
+  ].join('\u0000');
   if (__rootCache.key !== key) {
     // Always re-derive: falling back to the import-time const when the variable
     // is unset would hand back the very value the poisoned import froze.
-    const root = resolveWorkspaceRoot(resolveTrackerPath(__dirname));
+    // getCareerOpsRoot(), not __dirname: the data root is the env vars, then a
+    // .career-ops-data marker, then the repo, and only the last of those is the
+    // script's own directory. With the user layer outside the checkout this
+    // derived the workspace from the CODE directory, so every path under the
+    // real data root read as an escape and the PDF was refused (#4389). Line 49
+    // already used getCareerOpsRoot(), so the two disagreed inside one module.
+    const root = resolveWorkspaceRoot(resolveTrackerPath(getCareerOpsRoot()));
     __rootCache = { key, root, canonical: realpathSync(root) };
   }
   return __rootCache;
