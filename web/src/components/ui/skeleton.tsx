@@ -7,5 +7,5 @@ import type { CSSProperties } from "react";
  * the muted surface and sweeping sheen.
  */
 export function Skeleton({ className, style }: { className?: string; style?: CSSProperties }) {
-  return <div className={cn("skeleton", className)} style={style} aria-hidden="true" />;
+  return <div className={cn("skeleton rounded-xl", className)} style={style} aria-hidden="true" />;
 }

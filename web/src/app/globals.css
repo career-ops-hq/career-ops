@@ -135,7 +135,6 @@ html {
   position: relative;
   overflow: hidden;
   background: color-mix(in srgb, var(--fg) 7%, transparent);
-  border-radius: 0.75rem;
 }
 
 .skeleton::after {

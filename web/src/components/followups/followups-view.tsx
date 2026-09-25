@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CalendarClock, ChevronDown, ChevronRight, Loader2, Pin, Search, Trash2 } from "lucide-react";
@@ -21,8 +21,6 @@ import {
   urgencyTone,
 } from "@/lib/followups";
 import { cn } from "@/lib/cn";
-import { FollowupsTableRowsSkeleton } from "@/components/page-loading-skeletons";
-import { startRouteProgress } from "@/components/route-progress";
 
 // The /followups tracker: WHO needs a nudge today, HOW urgent, WHEN the next
 // touch is due, and the permanent history of every follow-up sent. The verdict
@@ -84,7 +82,6 @@ export function FollowupsView() {
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const [isPending, startTransition] = useTransition();
 
   const [data, setData] = useState<CadenceResponse | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -127,13 +124,9 @@ export function FollowupsView() {
         else sp.set(k, String(v));
       }
       const qs = sp.toString();
-      if (qs === params.toString()) return;
-      startRouteProgress();
-      startTransition(() => {
-        router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
-      });
+      router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
     },
-    [params, router, pathname, startTransition],
+    [params, router, pathname],
   );
 
   const entries = useMemo(() => (data?.available ? data.entries : []), [data]);
@@ -242,7 +235,7 @@ export function FollowupsView() {
 
       {!data ? null : !data.available ? (
         <EmptyPanel title="Cadence unavailable" body="The cadence engine (followup-cadence.mjs) returned nothing — check that the core scripts are present." />
-      ) : !isPending && filtered.length === 0 ? (
+      ) : filtered.length === 0 ? (
         filtering ? (
           <EmptyPanel title="No matches" body="Try a different urgency filter or clear the search." />
         ) : (
@@ -278,8 +271,8 @@ export function FollowupsView() {
                 <th className="px-2.5 py-2.5 font-medium">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border" aria-busy={isPending}>
-              {isPending ? <FollowupsTableRowsSkeleton /> : filtered.map((e) => (
+            <tbody className="divide-y divide-border">
+              {filtered.map((e) => (
                 <FollowupRow
                   key={e.num}
                   entry={e}
