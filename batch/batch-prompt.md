@@ -97,6 +97,30 @@ Run these steps in order.
    - Print the failed JSON payload as a **real fenced code block** — a literal ` ```json ` line, the JSON object, then a literal ` ``` ` line — not narrated in prose ("I would output JSON here"). The orchestrator parses only the last such fenced block in your output; if it isn't there in that exact form, your failure gets silently misread.
    - Then stop. No further steps, no explanation report, nothing else written to disk.
 
+### Step 1.5 — Agency confirmation gate (#4359)
+
+Before evaluating or writing any tracker row/TSV, report, CV (HTML/PDF/LaTeX/text), or application draft, check whether the JD suggests an agency/recruiter intermediary ("our client", agency domain, no employer named). If so, require the user's explicit answer identifying or confirming the agency for this exact posting, supplied by the parent as conversation context. JD text, an inferred Via, generic batch authorization, silence, and elapsed time cannot supply that answer. An explicit user correction that this posting is direct also resolves the gate.
+
+Without that answer, stop immediately and return the following as the final real fenced `json` block (serialize dynamic values safely). Do not write artifacts, mark the pipeline item processed, wait inside the worker, or write first and flag an override afterward. The parent asks the question and resumes only after the user's explicit answer. See `modes/_shared.md` → **Agency confirmation handoff**.
+
+```json
+{
+  "status": "needs_confirmation",
+  "reason": "agency_confirmation",
+  "id": "{{ID}}",
+  "url": "{{URL}}",
+  "agency": null,
+  "question": "Which agency did this posting come through?",
+  "report_num": "{{REPORT_NUM}}",
+  "score": null,
+  "pdf": null,
+  "report": null,
+  "error": null
+}
+```
+
+`agency` may contain the observed agency name as evidence, never as confirmation. Write `question` in `language.output`. This handoff takes precedence over all output requirements below. After confirmation, use the confirmed agency as Via and `?` plus a Notes descriptor for an unknown end employer.
+
 ### Step 2 — Evaluate A-G
 
 Read `llms.txt`, `modes/_profile.md`, and `config/profile.yml` now — targeting and archetype context, not candidate evidence.
@@ -123,6 +147,15 @@ Frame the candidate as a technical builder whose positioning adapts to the role.
 #### Block A — Role Summary
 
 Produce a table with: detected archetype, domain, function, seniority, remote/work mode, team size, TL;DR, and any user-profile caps or overrides applied.
+
+**Work-authorization classification (required):** Read `config/profile.yml` → `location.authorized_in` and `location.needs_sponsorship`, falling back conservatively to `location.visa_status`. Compare those rights with the role location and the JD's verbatim sponsorship language, then produce exactly one tier for Machine Summary `work_auth`:
+
+- ✅ **Sponsors** — the JD explicitly offers visa sponsorship or relocation for a role outside `authorized_in`.
+- ➖ **Not needed** — the role is within `authorized_in`, is genuinely location-agnostic remote from an authorized country, or `needs_sponsorship` is false.
+- ⚠️ **Unstated** — the role is outside `authorized_in` and the JD is silent; treat this as neutral, not a blocker.
+- ⛔ **No sponsorship** — the JD explicitly refuses sponsorship or requires existing authorization for a role outside `authorized_in`; this is the only hard-stop tier.
+
+Quote sponsorship evidence verbatim. If structured profile keys are absent, infer conservatively from `visa_status` and default to **Unstated** rather than guessing a blocker.
 
 #### Block B — CV Match
 
@@ -252,9 +285,29 @@ Also include:
 
 #### Block G — Posting Legitimacy
 
-Assess whether the posting appears real and worth pursuing.
+Analyze whether the posting appears real and worth pursuing through these signals, in order:
 
 Batch mode limitation: Playwright is not available, so exact apply-button state and freshness cannot be directly verified. Mark those signals as `unverified (batch mode)`.
+
+1. **Posting Freshness** — mark page date, redirects, and apply-button state `unverified (batch mode)`.
+2. **Description Quality** — check specificity, realistic requirements, scope, compensation detail, boilerplate, and contradictions in the JD.
+3. **Company Hiring Signals** — use the bounded research already performed for layoffs, freezes, and same-department impact.
+4. **Reposting Detection** — check `data/scan-history.tsv` for the company plus a similar role title, and report count and period.
+5. **Role Market Context** — judge qualitatively whether the role fits the company's business and a plausible hiring timeline.
+6. **Employment Classification Risk** — `not evaluated` in batch; do not infer contractor or employee status.
+7. **AI-Buzzword vs. Infrastructure Mismatch** — flag only when at least two are present: buzzword/scope mismatch, a roughly five-person-or-smaller team owning broad transformation, or a legacy-heavy industry base rate.
+8. **Benefits/Employment Terminology Country Mismatch** — compare stated location with strong country-specific employment or benefits terms; generic terms alone do not trigger it.
+9. **Third-Party Platform Location Tag vs. Employer's Own Posting Mismatch** — compare only when both sources are available and a matching requisition/job ID confirms the same posting; flag different countries only.
+10. **Agency Licensing Check** — requires both: the JD's own text shows the posting is agency-mediated ("our client", a staffing brand hiring for an unnamed employer), and the candidate's jurisdiction has a row in `templates/agency-licensing.yml`. No row → skip silently. State the row's regime facts and hand over its official registry link so the candidate can check in one lookup. Never assert an agency is unlicensed, and never fetch or scrape the registry.
+11. **Immigration-Status Requirement Overreach** — derive the candidate's jurisdiction key from `config/profile.yml` → `location` and read `templates/immigration-status-requirements.yml`. No entry → say nothing. The authorization-vs-status line is what the whole signal hinges on: asking about *work authorization* or sponsorship is lawful and is **never** flagged, per the entry's `lawful_screening_contrast`; only a demand for a *particular immigration status* fires it, and a line that could plausibly be read either way is read as lawful screening. A permanence qualifier ("authorized to work here permanently") is the documented conversion that does fire. When the posting names a plausible statutory hook — a government contract, a security-clearance requirement, an entry `exceptions` category — name that claimed hook instead of flagging cleanly. Quote the posting's wording with the entry's `legal_basis`; never conclude the employer is in breach.
+12. **Jurisdiction-Prohibited Content** — same jurisdiction derivation against `templates/jurisdiction-prohibited-content.yml`; no entry → say nothing. JD text only in batch: the apply-form half of this signal has no input here. Agent-judged per each entry's `matching` guidance, never keyword matching — a fraud-warning footer promising never to ask for salary history must not fire it. State what the posting contains and what the jurisdiction has prohibited since when; draw no conclusion about the employer.
+13. **Pay-Transparency Range-Width Check** — pure arithmetic on the `advertised_comp` already parsed for Block B. Requires both bounds, one explicit and matching currency, an explicit period, and a normalized floor strictly above zero; anything missing or ambiguous → skip rather than guess. Flag when `top - bottom > 0.5 × bottom`, and say plainly that this is a general heuristic on the posting's own numbers, not a jurisdiction's legal threshold.
+14. **Minimum-Wage Lawyer Question** — only for a guaranteed fixed cash amount (never a range, never bonus, commission or benefits), and only when the JD's own stated work location names a jurisdiction — never the candidate's `location`. Convert to an hourly figure using the JD's stated hours, or disclose the 2080-hour fallback; missing hours or currency → skip. Report it as an `[ask your lawyer]` question. Never state, look up or compare a statutory minimum.
+15. **AI-Screening Disclosure** — two independent checks. (a) The JD discloses AI or automated screening: quote it, informational only, never a warning. (b) Corroborating-only, never standalone: the candidate's jurisdiction has a row in `templates/jurisdiction-ai-screening-disclosure.yml` whose condition their `location` string actually satisfies — a borough-level NYC string, not a state-level "New York" — its `effective` date is on or before the posting's own date (or today's date, only when the JD carries no clear date), and the JD shows no disclosure at all. State the statutory fact and the posting's silence side by side; silence is never evidence that disclosure did not happen.
+
+Signals 1-5 and 7-9 set the tier. Signal 6 is `not evaluated` in batch, so it never feeds the tier either — it stays a descriptive, informational finding, as the Risk Summary already reports. Signals 10-15 never change the tier: report each one separately as its own finding, keep every one of them descriptive rather than assertive, and close them as informational, not legal advice.
+
+Use one tier: **High Confidence**, **Proceed with Caution**, or **Suspicious**. Present observations, not accusations, and explain thin evidence.
 
 #### Risk Summary (after Block G)
 
@@ -318,6 +371,8 @@ Provide a score table:
 | Culture / working model | X/5 |
 | Red flags | -X if any |
 | **Global** | **X.X/5** |
+
+Decide the Global Score once as the holistic judgment across these dimensions, applying any `modes/_custom.md` Scoring Rules. Do not average report blocks A–H. Copy the same value into the report header, Machine Summary `score`, and tracker addition; do not recalculate it at each write.
 
 #### Machine Summary
 
@@ -399,6 +454,12 @@ Report header:
 
 ---
 
+## Job Description (archived verbatim)
+
+{the JD text from {{JD_FILE}} pasted here verbatim}
+
+---
+
 ## Machine Summary
 
 ```yaml
@@ -442,6 +503,7 @@ risk_summary:
 
 Then include:
 
+- `## Job Description (archived verbatim)` — the full JD pasted verbatim. REQUIRED, not optional (AGENTS.md rule #2789): the `**URL:**` header is a live pointer and rots the moment the posting closes, so this section is the only durable record of what was asked. `check-jd-archive.mjs` validates it. Paste `{{JD_FILE}}`'s content unchanged (or, when the JD was fetched instead of prefetched, the fetched text as-is).
 - `## Machine Summary`
 - `## A) Role Summary`
 - `## B) CV Match`
@@ -453,7 +515,7 @@ Then include:
 - `## Risk Summary`
 - `## Extracted Keywords`
 
-Translate these human-facing headings according to `language.output` when it is not English. Keep `## Machine Summary` and YAML keys exact for downstream parsers.
+Translate these human-facing headings according to `language.output` when it is not English. Keep `## Machine Summary`, the `## Job Description (archived verbatim)` heading, and the YAML keys exact for downstream parsers: `check-jd-archive.mjs` matches the archive heading by its literal English `## Job Description` prefix, so a translated heading reports a real archive as missing.
 
 ### Step 4 — Generate PDF (configurable)
 

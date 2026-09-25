@@ -57,9 +57,25 @@ function runSetStatus(args, sandbox, extraEnv = {}) {
   }
 }
 
+const sandboxes = [];
+
+// Most cases remove their sandbox inline, but not all of them, and a case that
+// throws skips its removal. Removing every sandbox on exit covers both; the
+// inline removals stay harmless under `force: true`.
+process.on('exit', () => {
+  for (const dir of sandboxes) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // A sandbox that cannot be removed must not change the suite's verdict.
+    }
+  }
+});
+
 // Create a sandbox dir holding a tracker file.
 function makeSandbox(trackerContent) {
   const dir = mkdtempSync(join(tmpdir(), 'co-setstatus-'));
+  sandboxes.push(dir);
   const tracker = join(dir, 'applications.md');
   writeFileSync(tracker, trackerContent);
   // The lock env value must live under tmpdir and use the career-ops prefix

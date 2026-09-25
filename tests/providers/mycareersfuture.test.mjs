@@ -1,5 +1,5 @@
 // tests/providers/mycareersfuture.test.mjs
-import { pass, fail, ROOT } from '../helpers.mjs';
+import { pass, fail, ROOT, rmSync } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
@@ -211,6 +211,7 @@ try {
         return await run();
       } finally {
         process.chdir(cwdBefore);
+        rmSync(tmp, { recursive: true, force: true });
       }
     };
 

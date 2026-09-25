@@ -27,7 +27,7 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 
    > ⚠️ **Skill-gap check inconclusive:** [Render in {language.output}: state that the automated skill-gap check returned no classified skills for this JD and so cannot be read as "no gaps"; name which of the three shapes occurred from the reason code (requirements section never found, or found but no candidates extracted, or the JD file was empty); for an empty file, say the JD may not have been saved correctly and should be checked; otherwise say that you will read the JD directly to identify required skills before drafting. Keep the CLI's own English diagnostic out of the user-facing message.]
 5. Use `language.output` for the CV language. The JD language and `language.modes_dir` supply market vocabulary and evaluation context, but never override the configured output language.
-6. Detect company location → paper format:
+6. Detect company location → paper format. Skip this when `config/profile.yml` sets `page_format` to `letter` or `a4`, in any casing and with any surrounding spaces; that is the user's standing answer and it already reaches every renderer. Any other value there is ignored, so keep detecting.
    - US/Canada → `letter`
    - Rest of the world → `a4`
 7. Detect role archetype → adapt framing
@@ -172,7 +172,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
     { "name": "Project Name", "url": "https://github.com/...", "badge": "Open Source", "tech": "Python, FastAPI", "description": "What it does." }
   ],
   "education": [
-    { "title": "B.S. Computer Science", "org": "University Name", "year": "2022", "description": "Optional line." }
+    { "title": "B.S. Computer Science", "org": "University Name", "location": "City, ST", "year": "2022", "description": "Optional line." }
   ],
   "certifications": [
     { "title": "Certified Kubernetes Administrator", "org": "CNCF", "year": "2024" }
@@ -192,7 +192,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | Field | Type | Notes |
 |-------|------|-------|
 | `lang` | string | CV language code (`en`, `es`, `zh-CN`, `ja`, `ar`). Drives language-specific CSS: `zh-CN` enables Simplified Chinese fonts and strict CJK line breaking; `ja` enables a Japanese CJK font fallback; `ar` enables RTL + Arabic fonts. Defaults to `en`. |
-| `page_format` | string | `letter` → `8.5in` page width, `a4` → `210mm`. Defaults to `letter`. Pass the SAME value to `generate-pdf.mjs --format`. |
+| `page_format` | string | `letter` → `8.5in` page width, `a4` → `210mm`. Omit it and both the body width and the sheet fall back to `config/profile.yml` `page_format`, then to `letter`. Set it and you should pass the SAME value to `generate-pdf.mjs --format`, so the body and the sheet match. |
 | `candidate.name` | string | From `profile.yml`. |
 | `candidate.phone` | string | Optional — **omit or leave empty** to drop the `tel:` link and its separator (no empty cell). |
 | `candidate.email` | string | From `profile.yml`. |
@@ -207,7 +207,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | `competencies` | string[] | 6-8 keyword phrases → competency tags. |
 | `experience[]` | object | `company`, `role`, `location` (optional), `dates`, `bullets` (reordered, keyword-injected; `**…**` emphasis supported). Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Only for candidates with no professional history to list (students, new graduates, career changers); never drop it to hide a gap. |
 | `projects[]` | object | `name`, `url` (optional project/repo link), `badge` (optional), `tech` (optional), `description` (a `bullets` array is also accepted and joined into the description line). |
-| `education[]` | object | `title` (degree), `org` (institution), `year`, `description` (optional). |
+| `education[]` | object | `title` (degree), `org` (institution), `location` (optional, city/state), `year`, `description` (optional). |
 | `certifications[]` | object | `title`, `org`, `year`. |
 | `awards[]` | object | `title` (award name), `org` (issuing body, optional), `year` (optional). Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Use it for competitive or academic distinctions (olympiad medals, hackathon wins, dean's list) that carry more signal than a thin experience section. |
 | `skills[]` | object | `items` (**required**): a non-blank comma-separated string, or a non-empty array of non-blank strings — every element must be text, since the builder joins the whole array. `category` (optional): omitted, the line renders without its prefix. |

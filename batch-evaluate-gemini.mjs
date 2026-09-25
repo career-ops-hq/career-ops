@@ -21,6 +21,9 @@ import { promisify } from 'util';
 import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
+import {
+  normalizedTrackerScore, slugifyCompany, tsvSafe,
+} from './lib/tracker-addition.mjs';
 const execFileAsync = promisify(execFile);
 try {
   const { config } = await import('dotenv');
@@ -99,20 +102,6 @@ function readFile(path, label) {
 async function nextReportNumber() { // outdate-bot
   const { stdout } = await execFileAsync(process.execPath, [join(ROOT, 'reserve-report-num.mjs')], { encoding: 'utf-8' });
   return stdout.trim();
-}
-
-function slugifyCompany(value) {
-  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
-}
-
-function tsvSafe(value) {
-  return String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
-}
-
-function normalizedTrackerScore(value) {
-  const clean = tsvSafe(value);
-  if (!clean || clean === '?' || /n\/?a/i.test(clean) || isNaN(parseFloat(clean))) return 'N/A';
-  return /\/5$/i.test(clean) ? clean : parseFloat(clean) + '/5';
 }
 
 let systemPromptTemplate;

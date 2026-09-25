@@ -30,6 +30,12 @@ Read `portals.yml` which contains:
 - `tracked_companies[].parser`: Optional local parser for SSR pages or stable HTML
 - `title_filter`: Keywords (positive/negative/seniority_boost) for filtering job titles
 
+Before using saved per-company WebSearch queries, run `node audit-portals.mjs --queries`.
+It checks enabled `scan_method: websearch` entries against `title_filter.positive`
+offline, and flags queries with no keyword overlap. Review warnings especially
+after changing target roles; synonyms or another language may legitimately differ.
+This is advisory: do not automatically rewrite queries or exclude a company.
+
 ## Discovery Strategy (4 Levels)
 
 ### Level 0 — Local Parser (CHEAPEST)
@@ -217,7 +223,8 @@ Levels are additive — they are executed in order, and results are merged and d
 
 6b. **Filter by Location (Optional)** using `location_filter` from `portals.yml`:
    - If the `location_filter` block is absent, all locations pass (default behavior).
-   - Empty location on a posting → passes (do not penalize missing data).
+   - Empty location on a posting → passes by default (do not penalize missing data) — **unless** `strict: true` is set AND a restricting tier (`allow`, `block`, or `block_hard`) is configured, in which case an empty location is rejected instead. `strict` exists for a location-restricted sweep over a provider that never returns a location (iCIMS is the common case): without it, every out-of-region posting from that provider silently passes because the restricting tier is never consulted. `strict: true` alone, with no restricting tier, restricts nothing.
+   - Any keyword from `block_hard` (like `block`, but `always_allow` cannot override it) matches → reject.
    - Any keyword from `block` present → reject (precedes allow).
    - Empty `allow` → passes (already cleared block).
    - Non-empty `allow` → must match at least one keyword.
@@ -228,6 +235,7 @@ Levels are additive — they are executed in order, and results are merged and d
    - Opt-in. If the key is absent, 0, or non-positive, all ages pass (default behavior).
    - An offer is skipped only when the provider supplied a posting date (`postedAt`) AND it is older than N days.
    - Offers from providers that expose no date always pass (do not penalize missing data).
+   - The filter applies to every source, including an employer's own ATS board; there is no per-source exemption. An old posting date is not evidence that a role is closed — evergreen roles may remain open for months. To include them, increase the window or disable `max_posting_age_days` (affects all sources), then verify the specific posting before applying. CLI date-window flags still apply independently.
 
 7. **Deduplicate** against 3 sources:
    - `scan-history.tsv` → exact URL already seen

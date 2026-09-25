@@ -113,27 +113,16 @@ version: 1.0.0
   /* === SECTIONS === */
   .section { margin-bottom: 14px; }
 
-  /* Accent bar sits to the left of the heading text via a pseudo-element, so
-     the heading remains a single inline text run for extraction. */
+  /* Keep the accent bar in normal flow so PDF text follows section order. */
   .section-title {
-    position: relative;
+    border-left: 3px solid var(--accent-color);
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.13em;
     color: #0d0f13;
-    padding-left: 10px;
+    padding-left: 7px;
     margin-bottom: 8px;
-  }
-  .section-title::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 1px;
-    bottom: 1px;
-    width: 3px;
-    background: var(--accent-color);
-    border-radius: 2px;
   }
 
   .summary-text {
@@ -269,6 +258,8 @@ version: 1.0.0
     white-space: nowrap;
   }
 
+  .edu-location { font-size: 9px; color: #7b8391; margin-top: 0.5px; }
+
   .edu-desc { margin-top: 1.5px; text-align: justify; color: #3a4048; }
 
   /* === CERTIFICATIONS === */
@@ -316,6 +307,7 @@ version: 1.0.0
   .job-company,
   .job-role,
   .job-location,
+  .edu-location,
   .project-title {
     break-after: avoid;
     page-break-after: avoid;
@@ -334,8 +326,7 @@ version: 1.0.0
     text-align: right;
     font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
   }
-  html[lang="ar"] .section-title { padding-left: 0; padding-right: 10px; }
-  html[lang="ar"] .section-title::before { left: auto; right: 0; }
+  html[lang="ar"] .section-title { padding-left: 0; padding-right: 7px; border-left: none; border-right: 3px solid var(--accent-color); }
   html[lang="ar"] .summary-text {
     border-left: none;
     border-right: 2px solid var(--accent-color);

@@ -1,0 +1,44 @@
+name: GFI handoff to coding agent
+
+# Martes 08:00 UTC: las `good first issue` que nadie reclamó (sin assignee, sin PR enlazada, >30 días,
+# >14 días sin /assign) dejan de esperar a una persona y pasan a la cola de agentes:
+# quita `good first issue`, pone `agent-candidate`, comenta con marcador y asigna a Copilot coding agent.
+# Tope 3 por ejecución. Nunca toca `first-timers-only` ni `claim-pinned`. gfi-claims.yml sigue mandando
+# mientras el label `good first issue` esté puesto; este workflow solo actúa cuando esa ventana ya pasó.
+#
+# Asignar a Copilot por API exige un token user-to-server (docs: "Using Copilot cloud agent via the API").
+# GITHUB_TOKEN es server-to-server y NO arranca al agente: hace falta el secret COPILOT_ASSIGN_TOKEN
+# (fine-grained PAT de Santiago: Issues write + Pull requests write en este repo; su Copilot Pro es el que
+# paga la sesión). Sin ese secret el script solo informa y no cambia labels.
+# El agente se llama `copilot-swe-agent[bot]` (REST) / Bot `copilot-swe-agent` (GraphQL suggestedActors).
+
+on:
+  schedule:
+    - cron: '0 8 * * 2'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+concurrency:
+  group: gfi-handoff
+  cancel-in-progress: false
+
+jobs:
+  handoff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Hand off unclaimed good first issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COPILOT_ASSIGN_TOKEN: ${{ secrets.COPILOT_ASSIGN_TOKEN }}
+          DRY_RUN: ${{ vars.TRIAGE_DRY_RUN }}
+        run: node .github/scripts/gfi-handoff.mjs
