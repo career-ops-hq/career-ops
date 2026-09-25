@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Undo2 } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
-import type { InboxJob } from "@/lib/career-ops";
+import type { InboxJob, TriageProfile } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_SOURCES } from "@/lib/explore";
-import { daysSince, seniorityFromTitle, sourceFromUrl, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
+import { daysSince, eligibilityFromLocation, seniorityFromTitle, sourceFromUrl, stackHits, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
 import { FacetChips } from "./facet-chips";
 import { TriageRow, type RowScore } from "./triage-row";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
@@ -21,7 +21,10 @@ const BATCH = 20;
 // Default is a small fresh batch (never the full wall); free facets + Save/Skip narrow
 // it; only "Score shortlist" spends tokens. 🔴 The shell is agnostic to what makes a
 // role relevant — order is freshness with a single documented plug point.
-export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
+export function InboxTriage({ inbox, triage }: { inbox: InboxJob[]; triage?: TriageProfile }) {
+  const keywords = triage?.keywords ?? [];
+  const authorizedRegions = triage?.authorizedRegions ?? [];
+  const targetSeniority = triage?.targetSeniority ?? null;
   const { jobs, startJob } = useJobs();
 
   // facets
@@ -73,14 +76,21 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   // triages once (and Save/Skip/score, all keyed by URL, act on it coherently).
   const enriched = useMemo(() => {
     const seen = new Set<string>();
-    const out: { job: InboxJob; source: AtsSource | null; seniority: Seniority | null; age: number | null }[] = [];
+    const out: { job: InboxJob; source: AtsSource | null; seniority: Seniority | null; age: number | null; eligibility: "ok" | "warn" | null; stack: string[] }[] = [];
     for (const job of inbox) {
       if (seen.has(job.url)) continue;
       seen.add(job.url);
-      out.push({ job, source: sourceFromUrl(job.url), seniority: seniorityFromTitle(job.role), age: daysSince(job.postedAt, now) });
+      out.push({
+        job,
+        source: sourceFromUrl(job.url),
+        seniority: seniorityFromTitle(job.role),
+        age: daysSince(job.postedAt, now),
+        eligibility: eligibilityFromLocation(job.location, authorizedRegions),
+        stack: stackHits(job.role, keywords),
+      });
     }
     return out;
-  }, [inbox, now]);
+  }, [inbox, now, keywords, authorizedRegions]);
 
   // EVALUADA lookup: the latest evaluate worker per posting URL (running → badge).
   const scoreByUrl = useMemo(() => {
@@ -233,6 +243,10 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
               job={e.job}
               source={e.source}
               age={e.age}
+              seniority={e.seniority}
+              eligibility={e.eligibility}
+              stack={e.stack}
+              targetSeniority={targetSeniority}
               scored={scoreByUrl.get(e.job.url)}
               selected={selected.has(e.job.url)}
               shortlisted={isShortlisted(e.job.url)}
