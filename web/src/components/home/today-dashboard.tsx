@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Bell, CircleHelp, Sparkles, ArrowRight } from "lucide-react";
@@ -12,6 +12,7 @@ import { DiscoveryCard } from "@/components/explore/discovery-card";
 import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
 import { DecisionCard } from "@/components/home/decision-card";
 import { QuickEvaluate } from "@/components/quick-evaluate";
+import { FollowupsDueSectionSkeleton } from "@/components/page-loading-skeletons";
 import { scoreNum } from "@/lib/format";
 import { pickAwaitingDecision } from "@/lib/home/awaiting.mjs";
 
@@ -31,16 +32,29 @@ export function TodayDashboard({
 }) {
   const [followups, setFollowups] = useState<FollowUp[]>([]);
   const [overdue, setOverdue] = useState(0);
+  const [followupsLoading, setFollowupsLoading] = useState(true);
+  const [followupsError, setFollowupsError] = useState(false);
   const [nextUpcoming, setNextUpcoming] = useState<FollowUp | null>(null);
   const [fresh, setFresh] = useState<DiscoveredOffer[]>([]);
   const [freshCount, setFreshCount] = useState(0);
+  const [freshLoading, setFreshLoading] = useState(true);
+  const [freshError, setFreshError] = useState(false);
+  const requestGeneration = useRef(0);
   const router = useRouter();
   const dateLabel = useMemo(() => new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" }), []);
 
   const refetch = useCallback(() => {
+    const generation = ++requestGeneration.current;
+    const isLatest = () => generation === requestGeneration.current;
+    setFollowupsLoading(true);
+    setFollowupsError(false);
     fetch("/api/followups")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error("Follow-ups request failed");
+        return r.json();
+      })
       .then((d) => {
+        if (!isLatest()) return;
         // /api/followups already filters to urgency 'urgent'/'overdue' — due
         // now, never 'waiting'/'cold' (#86). Both count toward "due"; a
         // missing metadata.overdue must read as 0 due, never as "every entry
@@ -49,16 +63,24 @@ export function TodayDashboard({
         setOverdue((d.metadata?.overdue ?? 0) + (d.metadata?.urgent ?? 0));
         setNextUpcoming(d.nextUpcoming ?? null);
       })
-      .catch(() => {});
+      .catch(() => { if (isLatest()) setFollowupsError(true); })
+      .finally(() => { if (isLatest()) setFollowupsLoading(false); });
+    setFreshLoading(true);
+    setFreshError(false);
     fetch("/api/whats-new")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error("Fresh matches request failed");
+        return r.json();
+      })
       .then((d) => {
+        if (!isLatest()) return;
         const offers = Array.isArray(d.offers) ? d.offers : [];
         const count = Number(d.count);
         setFresh(offers);
         setFreshCount(Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : offers.length);
       })
-      .catch(() => {});
+      .catch(() => { if (isLatest()) setFreshError(true); })
+      .finally(() => { if (isLatest()) setFreshLoading(false); });
   }, []);
 
   useEffect(() => {
@@ -71,7 +93,10 @@ export function TodayDashboard({
       refetch();
     };
     window.addEventListener("co-job-done", onDone);
-    return () => window.removeEventListener("co-job-done", onDone);
+    return () => {
+      window.removeEventListener("co-job-done", onDone);
+      requestGeneration.current += 1;
+    };
   }, [refetch, router]);
 
   // Awaiting decision: scored (Evaluated) but no terminal status yet. The
@@ -80,7 +105,9 @@ export function TodayDashboard({
   const awaiting = useMemo(() => pickAwaitingDecision(applications, scoreNum), [applications]);
 
   const newThisWeek = freshCount;
-  const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0;
+  const dataLoading = followupsLoading || freshLoading;
+  const dataError = followupsError || freshError;
+  const allClear = !dataLoading && !dataError && newThisWeek === 0 && overdue === 0 && awaiting.length === 0;
   const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
 
   return (
@@ -94,7 +121,11 @@ export function TodayDashboard({
             <span className="text-faint">//</span> today · <span className="tabular-nums">{dateLabel}</span>
           </p>
           <h1 className={`${instrumentSerif.className} mt-3 text-4xl leading-[1.05] text-landing md:text-5xl`}>
-            {allClear ? (
+            {dataLoading ? (
+              <>Your career queue is loading.</>
+            ) : dataError ? (
+              <>Some updates are unavailable.</>
+            ) : allClear ? (
               <>You&apos;re all caught up.</>
             ) : (
               <>
@@ -113,7 +144,7 @@ export function TodayDashboard({
             )}
           </h1>
           <p className="mt-4 max-w-xl text-sm text-muted">
-            {allClear ? "I'll keep scanning the market in the background and surface anything that fits." : "Your action queue for today — discovery and follow-ups, in one place."}
+            {dataError ? "We couldn't load all of today's updates. Try again." : allClear ? "I'll keep scanning the market in the background and surface anything that fits." : "Your action queue for today — discovery and follow-ups, in one place."}
           </p>
           <div className="mt-6 flex flex-wrap gap-2.5">
             <Link href="/explore" className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground transition hover:bg-brand-200 max-sm:min-h-[44px]">
@@ -127,8 +158,19 @@ export function TodayDashboard({
         </div>
       </section>
 
+      {dataError && !dataLoading && (
+        <div role="alert" className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface/40 px-5 py-4 text-sm text-muted">
+          <p>{followupsError && freshError ? "Follow-ups and fresh matches" : followupsError ? "Follow-ups" : "Fresh matches"} could not be loaded.</p>
+          <button type="button" onClick={refetch} className="font-medium text-brand hover:underline">Retry updates</button>
+        </div>
+      )}
+
       {/* A. Follow-ups due (demand loop) */}
-      {followups.length > 0 ? (
+      {followupsLoading ? (
+        <FollowupsDueSectionSkeleton />
+      ) : followupsError ? (
+        null
+      ) : followups.length > 0 ? (
         <Section icon={Bell} title="Follow-ups due" hint="Keep your applications alive — a nudge beats silence">
           <div className="grid gap-2.5">
             {followups.map((f) => (
@@ -165,7 +207,7 @@ export function TodayDashboard({
       )}
 
       {/* C. Fresh matches this week (supply loop) */}
-      {fresh.length > 0 && (
+      {!freshError && fresh.length > 0 && (
         <Section icon={Sparkles} title="Fresh matches this week" hint="Found by your free scans · 0 tokens">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {fresh.slice(0, 6).map((o) => (
