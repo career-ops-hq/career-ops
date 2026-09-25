@@ -1,0 +1,39 @@
+# portals-tsmc.yml — starting entries for the TSMC search.
+# 台積電求職用的 portals.yml 起始設定。
+#
+# Copy the entry you need under `tracked_companies:` in your own portals.yml
+# (portals.yml is user layer and gitignored). Then run:
+# 把需要的項目複製到你自己 portals.yml 的 `tracked_companies:` 底下，然後執行：
+#
+#   node audit-portals.mjs --summary
+#
+# UNVERIFIED: which ATS runs TSMC's careers site. Open the site in a browser,
+# note the URL of its job-search page, and let audit-portals.mjs tell you
+# whether any provider claims it. Record the answer in fork-notes/tsmc/journal.md.
+# 尚未驗證：台積電徵才網站用的是哪一套 ATS。用瀏覽器打開網站，記下職缺搜尋頁的網址，
+# 讓 audit-portals.mjs 判斷有沒有串接程式能讀取。結果記到 fork-notes/tsmc/journal.zh-TW.md。
+
+tracked_companies:
+
+  # Option A — works whatever the ATS is: search-engine discovery.
+  # 選項 A：不管背後是哪套 ATS 都能用，透過搜尋引擎找職缺。
+  - name: TSMC
+    careers_url: https://careers.tsmc.com/
+    scan_method: websearch
+    scan_query: 'site:careers.tsmc.com "Engineer" OR "工程師"'
+    enabled: true
+
+  # Option B — if the job-search page URL looks like .../careers/SearchJobs
+  # (the Avature shape), try the Avature provider and confirm with the audit.
+  # Keep only one of A/B enabled.
+  # 選項 B：如果職缺搜尋頁網址長得像 .../careers/SearchJobs（Avature 的格式），
+  # 試用 Avature 串接程式，並用稽核確認。A、B 只保留一個 enabled。
+  # - name: TSMC
+  #   careers_url: https://careers.tsmc.com/
+  #   provider: avature
+  #   api: https://careers.tsmc.com/en_US/careers/SearchJobs   # replace with the real search URL / 換成實際搜尋頁網址
+  #   max_pages: 50
+  #   enabled: true
+
+# 104 人力銀行: no provider. Paste posting URLs or JD text into the chat instead.
+# 104 人力銀行：沒有串接程式，請把職缺網址或 JD 文字直接貼進對話。

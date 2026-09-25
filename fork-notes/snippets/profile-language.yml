@@ -1,0 +1,16 @@
+# profile-language.yml — merge this block into config/profile.yml (user layer, gitignored).
+# 把這個區塊合併進 config/profile.yml（使用者層，已 gitignore）。
+#
+# output: en          -> English is the primary language of every human-facing output.
+#                        英文是所有對外產出的主要語言。
+# modes_dir: modes/zh-TW -> Taiwan market rules and vocabulary (labor law, benefits, 104/1111/CakeResume).
+#                        台灣市場規則與詞彙（勞動法規、福利、104／1111／CakeResume）。
+#
+# The zh-TW twin of each output is NOT configured here: language.output takes one
+# language. The second copy comes from the house rule in snippets/custom-bilingual.md.
+# 每份產出的繁中版不是在這裡設定：language.output 只能填一種語言。
+# 第二份由 snippets/custom-bilingual.md 的自訂規則產生。
+
+language:
+  output: en
+  modes_dir: modes/zh-TW

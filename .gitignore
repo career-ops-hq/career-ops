@@ -216,3 +216,7 @@ documents/*
 # Intake fingerprints — the recorded source filenames may themselves carry
 # PII (e.g. cv/jane-doe-master-cv.pdf). #1723
 data/intake-state.json
+
+# Fork: track config/local-paths.txt so CI sees the fork-local declarations
+# (see config/local-paths.example.txt, "Running the suite in CI in a fork").
+!config/local-paths.txt
