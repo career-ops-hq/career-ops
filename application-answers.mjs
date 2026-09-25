@@ -347,6 +347,11 @@ const DRAFT_ANSWERS_NAME_RE = /^draft application answers$/i;
 // Same grammar as report-sections.mjs' HEADING_PREFIX: a bare letter needs a
 // real delimiter, or ordinary prose loses its first word.
 const HEADING_PREFIX_RE = /^\s*(?:Block\s+([A-Z])(?:[).:]\s*|\s+(?:[—–-]+\s*)?)|([A-Z])[).:]\s*)/i;
+// The draft-answers block's own marker. Deliberately tighter than
+// HEADING_PREFIX_RE, which also accepts `H:` and `Block H`: every mode that
+// defines this block writes `## H)`, so the wider grammar would only let an
+// unrelated `H:` section be read as draft answers (#4400 review).
+const DRAFT_ANSWERS_LETTER_RE = /^H\)\s*(.*)$/i;
 
 /**
  * Locate the draft-answers heading: the first `## ` heading carrying the
@@ -376,11 +381,7 @@ function findDraftAnswersHeading(report) {
   // title only. It is deliberately LAST so the marker and the English name stay
   // authoritative where they apply, and it requires a non-empty title so a bare
   // `## H)` does not qualify.
-  return headings.find((h) => {
-    const [, blockLetter, bareLetter] = HEADING_PREFIX_RE.exec(h[1]) ?? [];
-    return (blockLetter ?? bareLetter ?? '').toUpperCase() === 'H'
-      && h[1].replace(HEADING_PREFIX_RE, '').trim() !== '';
-  }) ?? null;
+  return headings.find(h => Boolean(DRAFT_ANSWERS_LETTER_RE.exec(h[1])?.[1]?.trim())) ?? null;
 }
 
 /**

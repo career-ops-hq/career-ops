@@ -87,3 +87,19 @@ test('the marker must start the line, so prose mentioning it does not match', ()
   const prose = '# Report\n\nSee the ## H) Draft Application Answers block.\n';
   assert.equal(parseDraftAnswersBlockH(prose), null);
 });
+
+// The letter rule is the last resort and the only one that reads a translated
+// heading, so its grammar is the one that decides what ELSE gets read as draft
+// answers. HEADING_PREFIX_RE, which this rule first used, also accepts `H:` and
+// `Block H`; no mode writes either for this block, so the wider grammar bought
+// nothing and let an unrelated `H:` section be parsed as answers a user later
+// sends to an employer. Both forms are pinned as rejected (#4400 review).
+test('an H: section is not Block H, because no mode writes that form', () => {
+  const r = '# Report\n\n## H: Internal Notes\n\n**Q?**\n\nA.\n';
+  assert.equal(parseDraftAnswersBlockH(r), null);
+});
+
+test('a "Block H" heading is not Block H, for the same reason', () => {
+  const r = '# Report\n\n## Block H — Internal Notes\n\n**Q?**\n\nA.\n';
+  assert.equal(parseDraftAnswersBlockH(r), null);
+});
