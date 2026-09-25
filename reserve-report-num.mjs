@@ -58,6 +58,36 @@ function trackerPathFor(options = {}) {
     : resolveTrackerPath(options.rootDir || ROOT);
 }
 
+function batchStateFileFor(options = {}) {
+  return resolve(options.batchStateFile
+    || process.env.CAREER_OPS_BATCH_STATE
+    || join(options.rootDir || ROOT, 'batch/batch-state.tsv'));
+}
+
+// Mirrors merge-tracker.mjs's loadFailedReportNumbers: a report number the
+// batch runner itself recorded as "failed" must not be handed out again, or
+// the two scripts disagree by construction — this script re-issues the
+// number, then merge-tracker.mjs refuses to merge a tracker line for it.
+function occupiedFromFailedBatchState(batchStateFile) {
+  const failed = new Set();
+  if (!existsSync(batchStateFile)) return failed;
+  for (const line of readFileSync(batchStateFile, 'utf-8').split(/\r?\n/)) {
+    if (!line.trim() || line.startsWith('id\t')) continue;
+    const cols = line.split('\t');
+    if (cols.length < 6) continue;
+    const status = cols[2];
+    const reportNum = cols[5];
+    if (status === 'failed' && reportNum && reportNum !== '-') {
+      // Digits only, positive, safe: parseInt would accept "12abc" and
+      // 9007199254740992, and an unsafe number in the occupied set makes
+      // reserveReportNumbers throw "No safe report-number range remains".
+      const n = /^\d+$/.test(reportNum) ? Number(reportNum) : NaN;
+      if (Number.isSafeInteger(n) && n > 0) failed.add(n);
+    }
+  }
+  return failed;
+}
+
 // A bare date file is not a report. `scan-ats-full.mjs --md-out reports/` writes
 // its digest as `reports/YYYY-MM-DD.md`, which matches `/^(\d+)-/` and is read
 // as report #2026 — pushing every later reservation to 2027+, silently and
@@ -99,9 +129,10 @@ function occupiedFromTracker(trackerPath) {
   return occupied;
 }
 
-function collectOccupied(reportsDir, trackerPath) {
+function collectOccupied(reportsDir, trackerPath, batchStateFile) {
   const occupied = occupiedFromReports(reportsDir);
   for (const num of occupiedFromTracker(trackerPath)) occupied.add(num);
+  for (const num of occupiedFromFailedBatchState(batchStateFile)) occupied.add(num);
   return occupied;
 }
 
@@ -174,6 +205,7 @@ export async function reserveReportNumbers(count = 1, options = {}) {
 
   const reportsDir = reportsDirFor(options);
   const trackerPath = trackerPathFor(options);
+  const batchStateFile = batchStateFileFor(options);
   mkdirSync(reportsDir, { recursive: true });
 
   const lock = await acquireTrackerLock(trackerLockDirFor(trackerPath), {
@@ -185,7 +217,7 @@ export async function reserveReportNumbers(count = 1, options = {}) {
   });
 
   try {
-    let occupied = collectOccupied(reportsDir, trackerPath);
+    let occupied = collectOccupied(reportsDir, trackerPath, batchStateFile);
     let base = highestNumber(occupied) + 1;
     const token = randomUUID();
 
@@ -210,7 +242,7 @@ export async function reserveReportNumbers(count = 1, options = {}) {
       }
 
       for (const num of claimed) releaseSlot(reportsDir, num, { token });
-      occupied = collectOccupied(reportsDir, trackerPath);
+      occupied = collectOccupied(reportsDir, trackerPath, batchStateFile);
       base = Math.max(failedAt + 1, highestNumber(occupied) + 1);
     }
   } finally {

@@ -21,10 +21,10 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
 // Scenarios that exercise the plugin path pass their own CLAUDE_CONFIG_DIR.
 const EMPTY_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'co-mcp-emptycfg-'));
 
-function runDoctor(cwd, args, env) {
+function runDoctor(cwd, args, env, { executionCwd = cwd } = {}) {
   try {
     const out = execFileSync(NODE, [DOCTOR, '--json', '--target', cwd, ...args], {
-      cwd,
+      cwd: executionCwd,
       // Order matters: the empty dir must override an ambient CLAUDE_CONFIG_DIR
       // from the developer's own shell, while a scenario's explicit env still wins.
       env: { ...process.env, CLAUDE_CONFIG_DIR: EMPTY_CONFIG_DIR, ...env },
@@ -34,6 +34,19 @@ function runDoctor(cwd, args, env) {
     return JSON.parse(out);
   } catch (e) {
     return { _error: e.message, _stderr: e.stderr ? String(e.stderr) : '' };
+  }
+}
+
+function runDoctorHuman(cwd, env, { executionCwd = cwd } = {}) {
+  try {
+    return execFileSync(NODE, [DOCTOR, '--target', cwd], {
+      cwd: executionCwd,
+      env: { ...process.env, CLAUDE_CONFIG_DIR: EMPTY_CONFIG_DIR, ...env },
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (e) {
+    return `${e.stdout ? String(e.stdout) : ''}${e.stderr ? String(e.stderr) : ''}`;
   }
 }
 
@@ -61,6 +74,39 @@ function expectWarn(state, msg) {
 const PLAYWRIGHT_RE = /playwright mcp/i;
 
 try {
+  // Split checkout: MCP config lives beside doctor.mjs, while --target points
+  // at the user-data root. The CLI never reads a decoy config in that data root.
+  {
+    const dataRoot = mkdtempSync(join(tmpdir(), 'co-mcp-split-data-'));
+    const codeRoot = mkdtempSync(join(tmpdir(), 'co-mcp-split-code-'));
+    const codeConfig = join(codeRoot, '.mcp.json');
+    try {
+      writeFileSync(join(dataRoot, '.mcp.json'), JSON.stringify({
+        mcpServers: { unrelated: { command: 'false' } },
+      }));
+      writeFileSync(codeConfig, JSON.stringify({
+        mcpServers: { playwright: { command: 'npx', args: ['@playwright/mcp@latest'] } },
+      }));
+      const state = runDoctor(dataRoot, [], {}, { executionCwd: codeRoot });
+      if (state.playwright_mcp?.claude === true
+          && !state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('split checkout reads Playwright MCP config from code root');
+      } else {
+        fail(`split checkout ignored code-root MCP config: ${JSON.stringify(state)}`);
+      }
+      const human = runDoctorHuman(dataRoot, {}, { executionCwd: codeRoot });
+      if (/Playwright MCP server configured \(claude\)/.test(human)
+          && !/Playwright MCP tools not detected/.test(human)) {
+        pass('human doctor output reads Playwright MCP config from code root');
+      } else {
+        fail(`human doctor output ignored code-root MCP config: ${human}`);
+      }
+    } finally {
+      rmSync(codeRoot, { recursive: true, force: true });
+      rmSync(dataRoot, { recursive: true, force: true });
+    }
+  }
+
   // 1. Default CLI (no flag/env/.env), no MCP config anywhere → warning fires.
   {
     const dir = mkdtempSync(join(tmpdir(), 'co-mcp-1-'));

@@ -158,9 +158,18 @@ function cssTrim(text) {
  * @returns {string}
  */
 function describeFontName(name) {
-  return name.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Zs}]/gu, ch =>
-    ch === ' ' ? ch : `\\u${ch.codePointAt(0).toString(16).padStart(4, '0')}`
-  );
+  return name.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Zs}]/gu, ch => {
+    if (ch === ' ') return ch;
+    const code = ch.codePointAt(0);
+    // `\uXXXX` is only unambiguous up to U+FFFF. Above it the escape runs to
+    // five or six hex digits, and the reader has no way to tell where it ends:
+    // U+E0001 printed bare is `1`, which reads as `` followed by a
+    // literal "1", naming a different character than the one that was flagged.
+    // The braced form is the spelling that terminates itself.
+    return code > 0xffff
+      ? `\\u{${code.toString(16)}}`
+      : `\\u${code.toString(16).padStart(4, '0')}`;
+  });
 }
 
 /**
@@ -669,6 +678,15 @@ function runSelfTest() {
   // under the plain name its invisible prefix trimmed onto.
   const nbspUnsafe = auditAts(buildCleanHtml({ font: "' Comic Sans MS', sans-serif" }));
   check('a flagged font keeps its real name', hasIssue(nbspUnsafe.issues, '\\u00a0comic sans ms'));
+
+  // Above the BMP a bare `\uXXXXX` does not say where it ends: U+E0001 printed
+  // as `1` reads as `` then "1", which is a different character.
+  const astralFont = auditAts(buildCleanHtml({ font: "'\u{E0001}Arial', sans-serif" }));
+  check('a format character above the BMP is escaped in braces', hasIssue(astralFont.issues, '\\u{e0001}arial'));
+
+  // …and the BMP spelling stays the familiar four-digit one, so the common
+  // case is not churned for the sake of the rare one.
+  check('a BMP character keeps the bare four-digit escape', hasIssue(nbspFont.issues, '\\u00a0arial'));
 
   // The Korean and Traditional Chinese stacks the template declares
   // unconditionally must not penalise a CV that never renders them.
