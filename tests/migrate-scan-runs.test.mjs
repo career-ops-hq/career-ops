@@ -221,7 +221,7 @@ console.log('\n🧪 Testing migrate-scan-runs (#4423)...');
     // the same snapshot) nor an atomic replace would bring it back.
     writeFileSync(file, `${snapshot}${rowFor(GEN14, 2)}\n`, 'utf-8');
     const onDisk = readFileSync(file, 'utf-8');
-    const refused = writeMigrated(file, snapshot, 'MIGRATED');
+    const refused = await writeMigrated(file, snapshot, 'MIGRATED');
 
     if (!refused.written && readFileSync(file, 'utf-8') === onDisk) {
       pass('writeMigrated refuses a file that changed since it was read, leaving it untouched');
@@ -237,7 +237,7 @@ console.log('\n🧪 Testing migrate-scan-runs (#4423)...');
     // Control: the same call succeeds when the file is untouched. Without it,
     // "refuses" is indistinguishable from "never writes at all".
     writeFileSync(file, snapshot, 'utf-8');
-    const ok = writeMigrated(file, snapshot, 'MIGRATED');
+    const ok = await writeMigrated(file, snapshot, 'MIGRATED');
     if (ok.written && readFileSync(file, 'utf-8') === 'MIGRATED'
         && readFileSync(`${file}.bak`, 'utf-8') === snapshot) {
       pass('control: writeMigrated replaces the file and backs up the snapshot when it is unchanged');
@@ -275,6 +275,61 @@ console.log('\n🧪 Testing migrate-scan-runs (#4423)...');
       pass('CLI --apply writes the original beside the file as .bak before replacing it');
     } else {
       fail('no .bak, or .bak does not hold the original text');
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ------------------------------------- the write waits for the scanner's lock
+//
+// The compare alone left a window: it proves nothing about what lands between
+// the read and the rename. Measured at about 9ms, and reproduced at 48 lost
+// rows over 120 trials, every one reporting written: true and exiting 0.
+//
+// Holding the lock here stands in for a scan that is mid-append. The migration
+// must not replace a file it could not lock. On the compare-only version it
+// does: writeMigrated ignores the lock entirely, returns written: true, and the
+// file is already gone by the time the scanner writes its row.
+//
+// No mkfifo and no timing race, so this runs the same on Windows CI.
+{
+  const { acquirePipelineLock } = await load('pipeline-lock.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-msr-lock-'));
+  try {
+    const file = join(dir, 'scan-runs.tsv');
+    const snapshot = [GEN14.join('\t'), rowFor(GEN14, 1)].join('\n') + '\n';
+    writeFileSync(file, snapshot, 'utf-8');
+
+    const held = await acquirePipelineLock(file, { timeoutMs: 2_000 });
+    let outcome = null;
+    let threw = null;
+    try {
+      outcome = await writeMigrated(file, snapshot, 'MIGRATED', { timeoutMs: 150 });
+    } catch (err) {
+      threw = err;
+    } finally {
+      await held.release();
+    }
+
+    if (readFileSync(file, 'utf-8') === snapshot) {
+      pass('writeMigrated leaves the file untouched while the scanner holds the lock');
+    } else {
+      fail(`migration replaced a file it could not lock: outcome=${JSON.stringify(outcome)} threw=${threw && threw.name}`);
+    }
+    if (!existsSync(`${file}.bak`)) {
+      pass('and it wrote no .bak, so nothing suggests the swap ran');
+    } else {
+      fail('a lock-blocked write still created a .bak');
+    }
+
+    // Control: the same call succeeds once the lock is free. Without it,
+    // "waits for the lock" is indistinguishable from "never writes at all".
+    const free = await writeMigrated(file, snapshot, 'MIGRATED');
+    if (free.written && readFileSync(file, 'utf-8') === 'MIGRATED') {
+      pass('control: the same write succeeds once the lock is released');
+    } else {
+      fail(`unlocked write did not land: ${JSON.stringify(free)}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

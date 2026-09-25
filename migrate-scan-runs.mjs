@@ -44,6 +44,7 @@ import path from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { SCAN_RUNS_HEADER, atomicWriteFile } from './scan.mjs';
+import { withPipelineLock } from './pipeline-lock.mjs';
 
 /** Current column order, taken from scan.mjs so this can never drift from the writer. */
 export const CURRENT_COLUMNS = SCAN_RUNS_HEADER.trim().split('\t');
@@ -132,27 +133,44 @@ export function migrateScanRuns(text) {
  * which is missing that run too — and an atomic replace does not either, since
  * atomicity is about torn writes, not about staleness.
  *
- * This is a compare-and-swap, not a lock. A lock here would be theatre: the
- * writer takes none, so serializing only this side would protect nothing
- * without changing scan.mjs's hot path for the sake of a one-off repair.
- * Comparing instead means the losing case is a refusal, never a lost run. The
- * residual window is between this read and the rename rather than the whole
- * migration; re-running the command resolves it.
+ * Locked AND compared, because neither alone is enough.
+ *
+ * An earlier version of this comment claimed a lock here would be theatre and
+ * that comparing made the losing case "a refusal, never a lost run". Both were
+ * wrong. scan.mjs already imports withPipelineLock and already wraps the
+ * sibling append-only TSV in it at appendToScanHistory, so the pattern was one
+ * function away, not a new hot-path cost. And the compare alone left a window
+ * between the read and the rename: measured at about 9ms, and reproduced at 48
+ * lost rows over 120 trials, every one of them reporting written: true.
+ *
+ * So the completed-run append in scan.mjs now takes this same lock, and this
+ * side takes it too. The compare stays inside the lock: it still catches an
+ * append that landed before the lock was acquired, and it is what makes the
+ * refusal meaningful rather than decorative.
+ *
+ * One writer stays outside it. writeRunFailureRow runs from the SIGINT and
+ * fatal paths, which exit with nothing able to await, so a failure row can
+ * still be lost to a concurrent migration. That is stated at its definition.
  *
  * @param {string} target - Path to scan-runs.tsv.
  * @param {string} snapshot - Exact text the migration was computed from.
  * @param {string} text - Migrated text to write.
  * @returns {{written: boolean, reason: string|null}}
  */
-export function writeMigrated(target, snapshot, text) {
-  if (readFileSync(target, 'utf-8') !== snapshot) {
-    return { written: false, reason: 'file changed since it was read' };
-  }
-  // The backup is written from the snapshot already in memory, so the live file
-  // is not read again between the check above and the replace below.
-  writeFileSync(`${target}.bak`, snapshot, 'utf-8');
-  atomicWriteFile(target, text);
-  return { written: true, reason: null };
+export async function writeMigrated(target, snapshot, text, lockOptions = {}) {
+  // lockOptions is the same escape hatch acquirePipelineLock documents: a
+  // caller (or a test standing in for a mid-append scan) can shorten the wait
+  // without threading options through every frame.
+  return withPipelineLock(target, () => {
+    if (readFileSync(target, 'utf-8') !== snapshot) {
+      return { written: false, reason: 'file changed since it was read' };
+    }
+    // The backup is written from the snapshot already in memory, so the live
+    // file is not read again between the check above and the replace below.
+    writeFileSync(`${target}.bak`, snapshot, 'utf-8');
+    atomicWriteFile(target, text);
+    return { written: true, reason: null };
+  }, lockOptions);
 }
 
 if (isMainModule(import.meta.url)) {
@@ -191,7 +209,7 @@ if (isMainModule(import.meta.url)) {
   }
 
   if (apply && result.changed) {
-    const { written, reason } = writeMigrated(target, before, result.text);
+    const { written, reason } = await writeMigrated(target, before, result.text);
     if (!written) {
       console.error(`Refused to write ${target}: ${reason}. A scan most likely appended a run `
         + 'while this was migrating. Nothing was changed — re-run the command.');
