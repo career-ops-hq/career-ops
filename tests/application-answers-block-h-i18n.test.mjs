@@ -113,3 +113,15 @@ test('a bare ## does not capture the next line as its heading', () => {
   const r = '# Report\n\n##\nH) Internal Notes\n\n**Q?**\n\nA.\n';
   assert.equal(parseDraftAnswersBlockH(r), null);
 });
+
+// The opener accepts `##` plus a tab, so the terminator has to as well. While it
+// matched only `## `, a later `##\tI) ...` section stayed inside Block H and its
+// bold text came back as draft answers, which is the same leak as the bare `##`
+// case one layer further on (#4400 review).
+test('a tab-separated later heading still ends Block H', () => {
+  const r = '# Report\n\n## H) Draft Application Answers\n\n**Q1?**\n\nA1.\n'
+    + '\n##\tI) Internal Notes\n\n**Not an answer?**\n\nStays out.\n';
+  const out = parseDraftAnswersBlockH(r);
+  assert.equal(out.freeText.length, 1, 'only Block H own pair is returned');
+  assert.equal(out.freeText[0].answer, 'A1.');
+});

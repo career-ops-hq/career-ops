@@ -422,7 +422,10 @@ export function parseDraftAnswersBlockH(reportText) {
   if (!heading) return null;
 
   const afterHeading = heading.index + heading[0].length;
-  const nextHeading = /^## .+$/m.exec(report.slice(afterHeading));
+  // Same grammar as the opener above. That one accepts `##` plus a tab, so a
+  // terminator matching only `## ` let a later `##\tI) ...` section stay inside
+  // Block H and its bold text come back as draft answers (#4400 review).
+  const nextHeading = /^##[ \t]+.+$/m.exec(report.slice(afterHeading));
   const body = report.slice(
     afterHeading,
     nextHeading ? afterHeading + nextHeading.index : report.length,
