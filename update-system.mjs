@@ -232,6 +232,7 @@ const SYSTEM_PATHS = [
   'KIMI.md',
   'build-dashboard.mjs',
   'clean-markers.mjs',
+  'cv-experience-order.mjs',
   'generate-pdf.mjs',
   'hired-share.mjs',
   'hired-wall-build.mjs',

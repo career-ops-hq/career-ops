@@ -53,7 +53,12 @@ export function validateCvExperienceOrder(html, { allowNonChronological = false 
 
   const entries = [];
   for (const match of html.matchAll(JOB_PERIOD_RE)) {
-    const raw = match[1].replace(/<[^>]*>/g, '').trim();
+    // Strip tags to a fixed point: one pass can leave text that re-forms a
+    // tag (`<scr<b>ipt>` -> `<script>`).
+    let text = match[1];
+    let prev;
+    do { prev = text; text = text.replace(/<[^>]*>/g, ''); } while (text !== prev);
+    const raw = text.trim();
     const start = parseExperienceStart(raw);
     if (start !== null) entries.push({ raw, start });
   }

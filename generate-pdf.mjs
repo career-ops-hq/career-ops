@@ -5,7 +5,7 @@
  *
  * Usage:
  *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]
- *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--max-pages=N] [--strict-pages]
+ *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages]
  *
  * --batch renders every document in a JSON manifest (an array of
  * {input, output, format?, reportNum?}) through ONE shared Chromium instead of
@@ -1310,9 +1310,10 @@ async function generatePDF() {
   format = resolvePageFormat(format, { profilePath: resolve(workspaceRoot, 'config', 'profile.yml') });
 
   // Batch mode (#2384): render every document in the manifest through one
-  // Chromium. Applies the global --max-pages/--strict-pages/--allow-reorder to
-  // all entries; each entry supplies its own input/output and may override
-  // format/reportNum. Takes no positional input/output.
+  // Chromium. Applies the global --max-pages/--strict-pages/--allow-reorder/
+  // --allow-nonchronological to all entries; each entry supplies its own
+  // input/output and may override format/reportNum. Takes no positional
+  // input/output.
   if (batchManifestPath) {
     // --report keys a single PDF to one tracker row; a batch renders N distinct
     // CVs, so one global --report would mislabel them all. Per-entry "reportNum"
@@ -1322,12 +1323,12 @@ async function generatePDF() {
       console.error('--report is not valid with --batch. Set "reportNum" per entry in the manifest instead.');
       process.exit(1);
     }
-    return runBatchFromManifest(batchManifestPath, { format, maxPages, strictPages, allowReorder });
+    return runBatchFromManifest(batchManifestPath, { format, maxPages, strictPages, allowReorder, allowNonChronological });
   }
 
   if (!inputPath || !outputPath) {
     console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages]');
-    console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--max-pages=N] [--strict-pages]');
+    console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages]');
     console.error('');
     console.error('Batch mode renders every document in the JSON manifest (an array of');
     console.error('{input, output, format?, reportNum?}) through one shared Chromium and writes');
@@ -1456,7 +1457,7 @@ async function generatePDF() {
  * for success; it exits zero only when every document rendered.
  *
  * @param {string} manifestPath - Path to the JSON manifest.
- * @param {{format: string, maxPages: number, strictPages: boolean, allowReorder: boolean}} globals
+ * @param {{format: string, maxPages: number, strictPages: boolean, allowReorder: boolean, allowNonChronological: boolean}} globals
  * @returns {Promise<{ok: number, failed: number, results: Array}>}
  */
 async function runBatchFromManifest(manifestPath, globals) {
@@ -1552,6 +1553,7 @@ async function runBatchFromManifest(manifestPath, globals) {
       // rendered N CVs with cv.sections silently inert.
       html = reorderCvSections(html, cvSectionOrder);
       validateCvSectionOrder(html, cvMarkdown, { allowReorder: globals.allowReorder });
+      validateCvExperienceOrder(html, { allowNonChronological: globals.allowNonChronological });
       html = normalizeTextForATS(html).html;
 
       entries.push({

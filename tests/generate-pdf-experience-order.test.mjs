@@ -11,7 +11,7 @@
 // the summary, the competencies block, and bullet selection within each role.
 
 import { validateCvExperienceOrder } from '../cv-experience-order.mjs';
-import { pass, fail, finish } from './helpers.mjs';
+import { pass, fail } from './helpers.mjs';
 
 console.log('\n📄 generate-pdf: experience ordering guard');
 
@@ -78,8 +78,22 @@ expectOk('accepts concurrent roles sharing a start month', () =>
 
 // --- Escape hatch ------------------------------------------------------------
 
-expectOk('downgrades to a warning when allowNonChronological is set', () =>
-  validateCvExperienceOrder(html(['2010 – 2014', '2020 – 2024']), { allowNonChronological: true }));
+{
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => { warnings.push(args.join(' ')); };
+  try {
+    expectOk('downgrades to a warning when allowNonChronological is set', () =>
+      validateCvExperienceOrder(html(['2010 – 2014', '2020 – 2024']), { allowNonChronological: true }));
+  } finally {
+    console.warn = originalWarn;
+  }
+  if (warnings.length === 1 && /reverse-chronological/.test(warnings[0]) && /--allow-nonchronological/.test(warnings[0])) {
+    pass('the escape hatch warns once, naming the inversion and the flag');
+  } else {
+    fail(`the escape hatch should warn exactly once, got ${warnings.length}: ${JSON.stringify(warnings)}`);
+  }
+}
 
 // --- Don't-penalize-missing-data discipline ---------------------------------
 
@@ -97,5 +111,3 @@ expectOk('ignores unparseable entries but still checks parseable neighbours', ()
 
 expectThrows('still catches an inversion around an unparseable entry', () =>
   validateCvExperienceOrder(html(['Jan 2015 – Dec 2016', 'ongoing', 'Jan 2022 – Present'])));
-
-finish();
