@@ -1,7 +1,7 @@
 ---
 name: career-ops
 description: >-
-  AI job search command center -- evaluate offers, generate CVs, scan portals,
+  Open-source AI job search agent -- evaluate offers, generate CVs, scan portals,
   track applications. Use when the user pastes a job URL or JD, asks to scan
   portals, generate a CV/PDF, track applications, prepare for interviews, draft
   outreach/emails, or run any career-ops mode.
@@ -14,7 +14,7 @@ license: MIT
 
 # career-ops -- Router
 
-career-ops is a multi-CLI job-search command center. The routing below is shared across supported agent CLIs even when the invocation surface differs.
+career-ops is a multi-CLI AI job search agent. The routing below is shared across supported agent CLIs even when the invocation surface differs.
 
 ## Project Root Resolution
 
@@ -124,7 +124,7 @@ Concrete equivalents for Codex prompt-driven sessions:
 Show this menu:
 
 ```
-career-ops -- Command Center
+career-ops -- AI Job Search Agent
 
 Available commands:
   /career-ops {JD}      → AUTO-PIPELINE: evaluate + report + PDF + tracker (paste text or URL)
