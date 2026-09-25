@@ -15997,7 +15997,7 @@ try {
   }
 
   // 55.3b Every web status list must carry every canonical state. states.yml is
-  // the source of truth; the web keeps SIX hardcoded copies (title-case canonical
+  // the source of truth; the web keeps FOUR hardcoded copies (title-case canonical
   // lists + UPPERCASE tab/stage lists). `Hired` (#2050) had silently drifted out
   // of ALL of them — a landed job was unsettable, uncounted in the funnel, and a
   // gray "unknown" dot (#2249). Cross-check each so a future core state can't
@@ -16009,7 +16009,8 @@ try {
     { file: 'web/src/app/actions/registry.ts', re: /CANON_STATUS\s*=\s*\[([\s\S]*?)\]/, upper: false, exclude: [] },
     { file: 'web/src/app/actions/registry.ts', re: /TAB_VALUES\s*=\s*\[([\s\S]*?)\]/, upper: true, exclude: [] },
     { file: 'web/src/components/pipeline-view.tsx', re: /TABS\s*=\s*\[([\s\S]*?)\]/, upper: true, exclude: [] },
-    { file: 'web/src/app/analytics/page.tsx', re: /STAGES[^=]*=\s*\[([\s\S]*?)\];/, upper: true, exclude: ['SKIP'] },
+    // Analytics now derives its funnel from canonStatus in analytics-metrics;
+    // it no longer owns a hardcoded status-list copy to keep in sync.
     // The states ACL used to be checked here too. It moved to its own block
     // below, because it now has TWO valid shapes and this table only knows one.
   ];
@@ -16028,6 +16029,42 @@ try {
       pass('every web status list covers all canonical states from states.yml (#2249)');
     } else {
       fail(`web status list(s) missing canonical state(s) — dashboard can't set/count them (#2249): ${drift.join(' | ')}`);
+    }
+
+    // Analytics derives its funnel from canonical status values rather than
+    // keeping another copy of the dashboard's status list. Exercise every
+    // non-SKIP state through the real module so a future refactor cannot drop
+    // a lifecycle state without the root contract gate noticing.
+    const analyticsPath = join(ROOT, 'web', 'src', 'lib', 'analytics-metrics.mjs');
+    if (existsSync(analyticsPath)) {
+      try {
+        const { computeProgressMetrics } = await import(pathToFileURL(analyticsPath).href);
+        const canonical = stateLabels.map((label) => label.toUpperCase()).filter((label) => label !== 'SKIP');
+        const synthetic = canonical.map((status) => ({ status, score: '4.0/5', date: '2026-09-18' }));
+        const countIn = (allowed) => canonical.filter((status) => allowed.has(status)).length;
+        const applied = countIn(new Set(['APPLIED', 'RESPONDED', 'ASSESSMENT', 'INTERVIEW', 'OFFER', 'HIRED', 'REJECTED']));
+        const responded = countIn(new Set(['RESPONDED', 'ASSESSMENT', 'INTERVIEW', 'OFFER', 'HIRED']));
+        const interview = countIn(new Set(['INTERVIEW', 'OFFER', 'HIRED']));
+        const offer = countIn(new Set(['OFFER', 'HIRED']));
+        const expectedFunnel = [canonical.length, applied, responded, interview, offer];
+        const metrics = computeProgressMetrics(synthetic);
+        const actualFunnel = metrics.funnel?.map((stage) => stage.count) ?? [];
+        const expectedActive = countIn(new Set(canonical.filter((status) => !['REJECTED', 'DISCARDED'].includes(status))));
+        const expectedOffers = offer;
+        const contractOk = metrics.tracked === canonical.length
+          && JSON.stringify(actualFunnel) === JSON.stringify(expectedFunnel)
+          && metrics.activeApps === expectedActive
+          && metrics.totalOffers === expectedOffers;
+        if (contractOk) {
+          pass('analytics progress covers every canonical non-SKIP state, including terminal states');
+        } else {
+          fail(`analytics progress dropped or misclassified a canonical non-SKIP state: expected ${JSON.stringify(expectedFunnel)}, got ${JSON.stringify(actualFunnel)}`);
+        }
+      } catch (e) {
+        fail(`analytics progress contract test crashed: ${e.message}`);
+      }
+    } else {
+      fail('analytics progress contract module is missing: web/src/lib/analytics-metrics.mjs');
     }
 
     // 55.3b+ the degraded-path FALLBACK in the states ACL (career-ops-ui's
