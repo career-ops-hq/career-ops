@@ -25,7 +25,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, realpathSync, copyFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -131,4 +131,109 @@ test('generate-pdf does not treat the data root as outside its workspace', () =>
         `generate-pdf failed after validation for an unexpected reason:\n${r.all.slice(0, 500)}`);
     }
   } finally { cleanup(f); }
+});
+
+// ── the .career-ops-data marker ─────────────────────────────────────────────
+//
+// The cases above drive CAREER_OPS_ROOT, which is precedence rule 1. #4389 was
+// reported against the MARKER, which is rule 3, and no existing suite exercises
+// it for either of these scripts. Both rules end at the same getCareerOpsRoot()
+// call, but only a marker case proves that path end to end.
+//
+// The marker has to live beside the script, so the script is run from a COPIED
+// code root rather than the checkout -- writing .career-ops-data into the repo
+// would leak into other tests and survive a crash. Same shape as
+// tests/story-provenance-data-root.test.mjs.
+
+// Local import closure of each script, measured from its `from './...'`
+// specifiers. Small enough to copy; kept explicit so a new import that is not
+// copied fails loudly here instead of silently resolving to the checkout.
+const CLOSURE = {
+  'set-status.mjs': [
+    'set-status.mjs', 'path-resolver.mjs', 'tracker-utils.mjs', 'pipeline-lock.mjs',
+    'tracker-parse.mjs', 'lib/local-today.mjs', 'role-matcher.mjs', 'templates/states.yml',
+    // Runtime assets, not imports: an import scan does not see these and each
+    // one only announces itself by crashing the child.
+    'tracker-aliases.json',
+  ],
+  'generate-pdf.mjs': [
+    'generate-pdf.mjs', 'path-resolver.mjs', 'tracker-utils.mjs', 'pipeline-lock.mjs',
+    'tracker-parse.mjs', 'theme-style.mjs', 'lib/page-format.mjs', 'lib/is-main-module.mjs',
+    'tracker-aliases.json',
+  ],
+};
+
+function markerFixture(script) {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'career-ops-marker-')));
+  const codeRoot = join(dir, 'code');
+  const dataRoot = join(dir, 'data');
+  for (const sub of ['lib', 'templates']) mkdirSync(join(codeRoot, sub), { recursive: true });
+  mkdirSync(join(dataRoot, 'data'), { recursive: true });
+  mkdirSync(join(dataRoot, 'output'), { recursive: true });
+
+  for (const file of CLOSURE[script]) copyFileSync(join(ROOT, file), join(codeRoot, file));
+  // generate-pdf.mjs imports playwright at module scope, so without this the
+  // child dies before it can print anything and the assertions say nothing.
+  try { symlinkSync(join(ROOT, 'node_modules'), join(codeRoot, 'node_modules'), 'dir'); } catch { /* already there */ }
+
+  // The marker: rule 3. No CAREER_OPS_* variable is set when this is used.
+  writeFileSync(join(codeRoot, '.career-ops-data'), `${dataRoot}\n`);
+
+  writeFileSync(join(dataRoot, 'data', 'applications.md'), [
+    '# Applications Tracker',
+    '',
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|---|---|---|---|---|---|---|---|',
+    '| 1 | 2026-01-05 | Acme | Backend Engineer | 4.2/5 | Applied | ❌ | — | seed |',
+    '',
+  ].join('\n'));
+  writeFileSync(join(dataRoot, 'output', 'cv.html'),
+    '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>CV</title></head><body>'
+    + '<h1>Jane Doe</h1><div>jane@example.com | +1 415 555 0100</div>'
+    + '<h2>Experience</h2><p>Process engineering across deposition, etch and yield analysis '
+    + 'in high volume semiconductor manufacturing over more than a decade of practice.</p>'
+    + '<h2>Education</h2><p>BS Chemical Engineering, 2014.</p>'
+    + '<h2>Skills</h2><p>Python, MATLAB, SPC.</p></body></html>');
+  return { dir, codeRoot, dataRoot };
+}
+
+function runFromCodeRoot(f, script, args) {
+  const r = spawnSync(process.execPath, [join(f.codeRoot, script), ...args], {
+    cwd: f.dir,
+    encoding: 'utf-8',
+    timeout: 120_000,
+    // Every override blank on purpose: the marker must be what is doing the work.
+    env: { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '', CAREER_OPS_TRACKER: '' },
+  });
+  assert.equal(r.error, undefined, `spawn failed: ${r.error?.message}`);
+  return { ...r, all: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+}
+
+const markerCleanup = (f) => rmSync(f.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+
+test('set-status honours a .career-ops-data marker, not just CAREER_OPS_ROOT', () => {
+  const f = markerFixture('set-status.mjs');
+  try {
+    const r = runFromCodeRoot(f, 'set-status.mjs', ['1', 'Interview', '--note', 'marker check']);
+    // Positive first. Every assertion below is an ABSENCE, and a child that
+    // died at module load satisfies all of them while proving nothing -- the
+    // same vacuity CodeRabbit caught in the generate-pdf case on #4486.
+    assert.equal(r.status, 0, `set-status exited ${r.status}:\n${r.all.slice(0, 600)}`);
+    assert.doesNotMatch(r.all, /No tracker found/i,
+      `the marker was ignored and it looked beside the script:\n${r.all.slice(0, 400)}`);
+    const tracker = readFileSync(join(f.dataRoot, 'data', 'applications.md'), 'utf-8');
+    assert.match(tracker, /\|\s*Interview\s*\|/, `the status never reached the marked tracker:\n${tracker}`);
+  } finally { markerCleanup(f); }
+});
+
+test('generate-pdf honours a .career-ops-data marker for its workspace boundary', () => {
+  const f = markerFixture('generate-pdf.mjs');
+  try {
+    const r = runFromCodeRoot(f, 'generate-pdf.mjs',
+      [join(f.dataRoot, 'output', 'cv.html'), join(f.dataRoot, 'output', 'cv.pdf')]);
+    assert.doesNotMatch(r.all, /escapes the tracker workspace/i,
+      `a path inside the marked data root was reported as an escape:\n${r.all.slice(0, 500)}`);
+    assert.match(r.all, /\u{1F4C4} Input:/u,
+      `validation never reported its input, so the assertion above proves nothing:\n${r.all.slice(0, 500)}`);
+  } finally { markerCleanup(f); }
 });
