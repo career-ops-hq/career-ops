@@ -378,21 +378,61 @@ export function harnessMatches(literals, name) {
 /**
  * The `name:` values of the entries in test-all.mjs's `scripts` list.
  *
- * Scoped to that array, not to the whole file. `name:` is an ordinary property
- * key — test-all.mjs carries 64 of them and only 45 are registrations; the
- * rest are test titles, fixture names and plugin ids ("Jane Doe",
- * "career-ops-plugin-gmail", "filterPipeline tab enum"). None of those happens
- * to be a root suite filename today, but "a property named `name` anywhere in
- * the file" is not what registration means, and the whole point of this rule
- * is that resemblance is not evidence (CodeRabbit, #3765).
+ * Scoped to that array, and within it to the DIRECT `name:` property of an
+ * entry — brace depth 1, outside any string. `name:` is an ordinary property
+ * key and an ordinary run of characters: test-all.mjs carries 64 of them and
+ * only 41 are registrations, the rest being test titles, fixture names and
+ * plugin ids. Scoping to the array removed those. It did not remove a `name:`
+ * written INSIDE a quoted value on an entry, e.g.
  *
- * Comments are stripped first, so a commented-out entry does not register.
+ *     { name: 'real.mjs', note: "see name: 'x-tests.mjs' for the sandbox" },
+ *
+ * which a text match read as two registrations (CodeRabbit, #3765). A note that
+ * mentions a suite is a mention, not a registration — the premise this whole
+ * file rests on.
+ *
+ * Hence a scan rather than a regex: strings are skipped, so text inside one
+ * cannot open a property, and depth is tracked, so a `name:` nested deeper in
+ * an entry is not mistaken for the entry's own.
  */
 export function registeredNames(src) {
   const block = src.match(/const scripts\s*=\s*\[([\s\S]*?)\n\];/);
   if (!block) return [];
-  const scan = block[1].replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1 ');
-  return Array.from(scan.matchAll(/\bname:\s*(['"`])([^'"`]+)\1/g), (m) => m[2]);
+  const b = block[1];
+  const out = [];
+  let i = 0, depth = 0;
+  const readString = () => {
+    const q = b[i];
+    i++;
+    let v = '';
+    while (i < b.length && b[i] !== q) {
+      if (b[i] === '\\') { v += b[i + 1] ?? ''; i += 2; continue; }
+      v += b[i];
+      i++;
+    }
+    i++;
+    return v;
+  };
+  while (i < b.length) {
+    const c = b[i];
+    if (c === '/' && b[i + 1] === '/') { while (i < b.length && b[i] !== '\n') i++; continue; }
+    if (c === '/' && b[i + 1] === '*') { i += 2; while (i < b.length && !(b[i] === '*' && b[i + 1] === '/')) i++; i += 2; continue; }
+    if (c === "'" || c === '"' || c === '`') { readString(); continue; }
+    if (c === '{' || c === '[') { depth++; i++; continue; }
+    if (c === '}' || c === ']') { depth--; i++; continue; }
+    // A direct property of an entry: `name` at depth 1, then `:`, then a string.
+    if (depth === 1 && b.startsWith('name', i) && !/[A-Za-z0-9_$]/.test(b[i - 1] ?? '')) {
+      let j = i + 4;
+      while (j < b.length && /\s/.test(b[j])) j++;
+      if (b[j] === ':') {
+        j++;
+        while (j < b.length && /\s/.test(b[j])) j++;
+        if (b[j] === "'" || b[j] === '"' || b[j] === '`') { i = j; out.push(readString()); continue; }
+      }
+    }
+    i++;
+  }
+  return out;
 }
 
 // ── Fixtures for the two match rules ────────────────────────────────────────
@@ -409,6 +449,10 @@ const HARNESS_CASES = [
   [wrap("  { name:'x-tests.mjs' },"), true, 'no space after the colon'],
   [wrap("  // { name: 'x-tests.mjs' },"), false, 'a commented-out registration'],
   ["const cases = [{ name: 'x-tests.mjs' }];", false, 'a name: in an unrelated object (#3765)'],
+  [wrap("  { name: 'real.mjs', note: \"see name: 'x-tests.mjs' for the sandbox\" },"), false,
+   'a fake name: inside a quoted note on a real entry (#3765)'],
+  [wrap("  { name: 'real.mjs', env: { name: 'x-tests.mjs' } },"), false,
+   'a name: nested deeper than the entry itself'],
   ['fail("expected { name: \'x-tests.mjs\' }");', false, 'a name: inside a string (#3765)'],
   [wrap("  { name: 'a.mjs' },") + '\nfail("expected { name: \'x-tests.mjs\' }");', false, 'a name: string AFTER a real scripts list'],
   ["fail(`x-tests.mjs is gone`);", false, 'a name in an error message'],
