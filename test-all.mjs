@@ -13394,8 +13394,14 @@ try {
 
   // No project MCP config → doctor surfaces a (non-fatal) warning instead of
   // letting SPA job boards fail silently.
+  //
+  // cwd must be the empty fixture, like the two cases below: since #4377 doctor
+  // reads project MCP config from the directory it is LAUNCHED in, not from
+  // --target. run() defaults cwd to the checkout, so on any developer machine
+  // whose checkout registers Playwright MCP (.mcp.json — what the setup docs
+  // tell users to do) this "no config" case found the real config and failed.
   const noMcp = mkdtempSync(join(tmpdir(), 'co-nomcp-'));
-  const a = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', noMcp], doctorEnv) || '{}');
+  const a = JSON.parse(run(NODE, [join(ROOT, 'doctor.mjs'), '--json', '--target', noMcp], { ...doctorEnv, cwd: noMcp }) || '{}');
   if (Array.isArray(a.warnings) && a.warnings.some((w) => /playwright mcp/i.test(w))) {
     pass('No Playwright MCP config → warning surfaced');
   } else {
