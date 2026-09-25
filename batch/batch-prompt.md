@@ -97,6 +97,30 @@ Run these steps in order.
    - Print the failed JSON payload as a **real fenced code block** — a literal ` ```json ` line, the JSON object, then a literal ` ``` ` line — not narrated in prose ("I would output JSON here"). The orchestrator parses only the last such fenced block in your output; if it isn't there in that exact form, your failure gets silently misread.
    - Then stop. No further steps, no explanation report, nothing else written to disk.
 
+### Step 1.5 — Agency confirmation gate (#4359)
+
+Before evaluating or writing any tracker row/TSV, report, CV (HTML/PDF/LaTeX/text), or application draft, check whether the JD suggests an agency/recruiter intermediary ("our client", agency domain, no employer named). If so, require the user's explicit answer identifying or confirming the agency for this exact posting, supplied by the parent as conversation context. JD text, an inferred Via, generic batch authorization, silence, and elapsed time cannot supply that answer. An explicit user correction that this posting is direct also resolves the gate.
+
+Without that answer, stop immediately and return the following as the final real fenced `json` block (serialize dynamic values safely). Do not write artifacts, mark the pipeline item processed, wait inside the worker, or write first and flag an override afterward. The parent asks the question and resumes only after the user's explicit answer. See `modes/_shared.md` → **Agency confirmation handoff**.
+
+```json
+{
+  "status": "needs_confirmation",
+  "reason": "agency_confirmation",
+  "id": "{{ID}}",
+  "url": "{{URL}}",
+  "agency": null,
+  "question": "Which agency did this posting come through?",
+  "report_num": "{{REPORT_NUM}}",
+  "score": null,
+  "pdf": null,
+  "report": null,
+  "error": null
+}
+```
+
+`agency` may contain the observed agency name as evidence, never as confirmation. Write `question` in `language.output`. This handoff takes precedence over all output requirements below. After confirmation, use the confirmed agency as Via and `?` plus a Notes descriptor for an unknown end employer.
+
 ### Step 2 — Evaluate A-G
 
 Read `llms.txt`, `modes/_profile.md`, and `config/profile.yml` now — targeting and archetype context, not candidate evidence.
@@ -347,6 +371,8 @@ Provide a score table:
 | Culture / working model | X/5 |
 | Red flags | -X if any |
 | **Global** | **X.X/5** |
+
+Decide the Global Score once as the holistic judgment across these dimensions, applying any `modes/_custom.md` Scoring Rules. Do not average report blocks A–H. Copy the same value into the report header, Machine Summary `score`, and tracker addition; do not recalculate it at each write.
 
 #### Machine Summary
 

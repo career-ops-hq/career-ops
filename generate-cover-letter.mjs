@@ -286,7 +286,8 @@ Usage:
 
   --payload   Path to the JSON payload file (required)
   --out       Override output path from payload (optional)
-  --format    Override output PDF page format (letter|a4, default: a4)
+  --format    Override output PDF page format (letter|a4). Defaults to
+              config/profile.yml page_format, then letter.
   --report    Link the PDF to a tracker report number in data/pdf-index.tsv
 `);
     process.exit(args.help ? 0 : 1);
@@ -341,7 +342,10 @@ Usage:
     const { renderHtmlToPdf } = await import("./generate-pdf.mjs");
     const outputPath = resolve(payload.output_path);
     await renderHtmlToPdf(html, outputPath, {
-      format: args.format || "a4",
+      // Passed through unresolved. renderHtmlToPdf ranks it against the user's
+      // config/profile.yml, so a cover letter and its CV cannot end up on
+      // different paper because only one of them carried a flag.
+      format: args.format,
       reportNum: args.report,
       inputPath: payloadPath,
     });

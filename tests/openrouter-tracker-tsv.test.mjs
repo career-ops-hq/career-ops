@@ -20,6 +20,8 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
+import { looksLikeScoreCell } from '../tracker-parse.mjs';
+import { normalizedTrackerScore } from '../lib/tracker-addition.mjs';
 
 console.log('\nopenrouter-runner.mjs — tracker-addition TSV merges (headed and headerless)');
 
@@ -147,6 +149,87 @@ try {
     pass('openrouter-runner.mjs writes the shared header row above the data line');
   } else {
     fail(`openrouter-runner.mjs must write TSV_ADDITION_HEADER above the data row (imports=${importsHeader}, writes=${writesHeader})`);
+  }
+
+  // ── Score cell (#3796) ───────────────────────────────────────────────────
+  // openrouter-runner never held a copy of normalizedTrackerScore, so the
+  // copy-scan in tests/evaluator-score-cell.test.mjs never covered it, and it
+  // built its cell inline instead: a numeric prefix that DISCARDED the
+  // denominator, formatted as `X.X/5`, or the empty string when nothing parsed.
+  // Both ends were wrong. `Score: 8/10` became `8.0/5`, which satisfies
+  // SCORE_CELL_RE and so merged as a genuine score into stats.mjs's averages;
+  // an unparseable score became a blank required cell, which merge-tracker
+  // refuses outright, skipping the whole evaluation.
+  //
+  // The regex is inline and unexported, so it is LIFTED FROM THE SOURCE and
+  // composed with the real helper. Asserting on a restatement of the pattern
+  // would pass no matter what the file actually does.
+  const scoreRe = src.match(/result\.match\((\/\(\?:score\|puntuaci\[o[^\]]*\]n\)[^\n]*?)\/i\)/);
+  if (!scoreRe) {
+    fail('could not lift the score-extraction regex out of openrouter-runner.mjs — this guard is no longer testing the real pattern');
+  } else {
+    const extract = new RegExp(`${scoreRe[1].slice(1)}`, 'i');
+    // Report-shaped inputs: what the model actually writes into the markdown.
+    const scoreCases = [
+      ['**Score:** 4.2/5',            '4.2/5'],
+      ['**Score:** 4.2',              '4.2/5'],
+      ['Score: 5/5',                  '5/5'],
+      ['Score: 4.0 (strong fit)',     '4/5'],
+      // The two defects this block exists for.
+      ['**Score:** 8/10',             'N/A'],
+      ['Score: 4.2 / 10',             'N/A'],
+      // A denominator separated from the number by an annotation. Stopping the
+      // capture at an ADJACENT denominator read this as a bare 4.2 and wrote
+      // `4.2/5` -- a ten-point score recorded as a five-point one.
+      ['**Score:** 4.2 (strong fit)/10', 'N/A'],
+      // The documented cost of running the capture to end of line: an unrelated
+      // fraction later in the line is refused rather than guessed at. Pinned so
+      // nobody quietly relaxes it back into producing a wrong score.
+      ['Score: 4.2 — matched 3/4 axes',  'N/A'],
+      ['Score: 7',                    'N/A'],
+      ['Puntuación: 8/10',            'N/A'],
+      ['no score anywhere in here',   'N/A'],
+      ['Score: not applicable',       'N/A'],
+    ];
+    const scoreProblems = [];
+    for (const [report, expected] of scoreCases) {
+      const m = report.match(extract);
+      const got = normalizedTrackerScore(m ? m[1] : '');
+      if (got !== expected) {
+        scoreProblems.push(`${JSON.stringify(report)} -> ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
+      }
+      // Whatever it returns, merge-tracker has to accept it. The empty string
+      // this used to emit is precisely what fails here.
+      if (!looksLikeScoreCell(got)) {
+        scoreProblems.push(`${JSON.stringify(report)} -> ${JSON.stringify(got)}, which looksLikeScoreCell rejects`);
+      }
+    }
+    if (scoreProblems.length === 0) {
+      pass(`openrouter-runner's score extraction feeds the shared helper a denominator and never emits a blank cell (${scoreCases.length} cases)`);
+    } else {
+      fail(`openrouter score cell: ${scoreProblems.join('; ')}`);
+    }
+  }
+
+  // And the inline formatter is gone for good: the cell must come from the
+  // shared helper, not from a local toFixed with a hardcoded `/5`.
+  //
+  // The argument is pinned too, not just the call. The block above lifts the
+  // regex and composes it with the helper ITSELF, which proves the pattern and
+  // the helper agree -- but not that the runner hands the helper that same
+  // capture. A runner that stripped the denominator before calling
+  // (`scoreMatch[1].split('/')[0]`) would keep every case above green while
+  // writing the wrong score, so the call site must pass the capture unmodified.
+  // Running the runner itself against a fixture would prove more, but it needs
+  // an API key and a network round trip; pinning the expression is the bounded
+  // check that closes this specific gap.
+  const usesHelper = /const\s+scoreStr\s*=\s*normalizedTrackerScore\(/.test(src);
+  const passesRawCapture = /normalizedTrackerScore\(\s*scoreMatch\s*\?\s*scoreMatch\[1\]\s*:\s*''\s*\)/.test(src);
+  const inlineFormat = /toFixed\(1\)\}\/5`\s*:\s*''/.test(src);
+  if (usesHelper && passesRawCapture && !inlineFormat) {
+    pass('openrouter-runner.mjs passes the unmodified capture to normalizedTrackerScore, with no blank-string fallback');
+  } else {
+    fail(`openrouter-runner.mjs must hand the shared helper its raw capture (usesHelper=${usesHelper}, passesRawCapture=${passesRawCapture}, inlineFormat still present=${inlineFormat})`);
   }
 } finally {
   try { rmSync(work, { recursive: true, force: true }); } catch { /* best effort */ }

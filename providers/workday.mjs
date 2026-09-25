@@ -339,46 +339,76 @@ function locationFromPath(externalPath) {
 // requisition filled 3 of 7 results in a sweep). Left un-stripped, that
 // disambiguator defeats the entire point of this function: the three sites'
 // URLs would each key to a different requisition ID and never collapse.
-export function workdayDedupKey(job) {
+/**
+ * Lowercase a raw requisition token and drop Workday's cross-site repost
+ * disambiguator, a trailing `-N`. The suffix is a disambiguator only when two
+ * things hold (credit: ronanime-arch, PR #3446):
+ *   - N is one or two digits. This is what keeps Walmart's "R-2593225" whole:
+ *     a seven-digit tail never splits, so the base check never runs.
+ *   - What precedes it is requisition-ID-shaped on its own: a digit, then 2+
+ *     trailing digits, underscores allowed. This is what keeps a short "R-25"
+ *     whole — its base "r" has no digit.
+ *
+ * A hyphenated base ("req-271559-1", "jr-017459-2") is admitted too (#3882),
+ * but only with a single-digit 1-9 counter, the only values Workday was seen
+ * to emit. A tenant numbering its own IDs "req-2026-01".."-12" must not start
+ * folding into one key: "-01".."-09" are zero-padded and "-10".."-12" are two
+ * digits, so all twelve stay distinct. An unpadded "req-2026-1".."-9" sibling
+ * set cannot be told apart from a republish by the ID string alone and does
+ * fold — an accepted limitation, see #3882. Bases without a hyphen keep
+ * exactly the rule they had, so no key they produced before moves (scan
+ * history is re-keyed through workdayDedupKey).
+ *
+ * Shared with scan.mjs's `requisitionIdForDedup` so that a tracker note which
+ * copied the URL tail (`req JR25919-1`) and the URL itself name the same
+ * requisition: without one rule for both, the note read as `259191` while the
+ * URL read as `25919`, and the already-applied posting was re-queued as a new
+ * requisition (PR #4267 review).
+ *
+ * @param {unknown} raw - Token as found after the URL's `_` or a note's label.
+ * @returns {string} Lowercased requisition ID ('' when `raw` is empty).
+ */
+export function stripWorkdayRepostSuffix(raw) {
+  const token = raw == null ? '' : String(raw).toLowerCase();
+  const m = token.match(/^(.*?)-(\d{1,2})$/);
+  if (!m) return token;
+  const base = m[1];
+  const isDisambiguator = base.includes('-')
+    ? /^[a-z-]*\d[a-z0-9_-]*\d{2,}$/.test(base) && /^[1-9]$/.test(m[2])
+    : /^[a-z]*\d[a-z0-9_]*\d{2,}$/.test(base);
+  return isDisambiguator ? base : token;
+}
+
+/**
+ * Whether a URL points at a Workday-hosted posting.
+ *
+ * @param {unknown} url
+ * @returns {boolean|null} `true`/`false` for a parseable URL, `null` when
+ *   `url` is absent or unparseable (no evidence either way).
+ */
+export function isWorkdayJobUrl(url) {
   let parsed;
   try {
-    parsed = new URL(job?.url);
+    parsed = new URL(url);
   } catch {
     return null;
   }
+  return parsed.hostname.toLowerCase().endsWith('.myworkdayjobs.com');
+}
+
+export function workdayDedupKey(job) {
   // Non-Workday URLs must fall back to normalized-URL dedup, not produce a
   // bogus workday: key just because their last path segment happens to
   // contain an underscore (e.g. a Lever/Greenhouse job whose slug does) —
   // reported by CodeRabbit against this exact function.
-  if (!parsed.hostname.toLowerCase().endsWith('.myworkdayjobs.com')) return null;
+  if (!isWorkdayJobUrl(job?.url)) return null;
+  const parsed = new URL(job.url);
   const segments = parsed.pathname.split('/').filter(Boolean);
   const lastSegment = segments[segments.length - 1];
   if (!lastSegment) return null;
   const underscoreIdx = lastSegment.indexOf('_');
   if (underscoreIdx === -1) return null; // no title/requisition-ID separator — nothing to key on
-  const raw = lastSegment.slice(underscoreIdx + 1).toLowerCase();
-  // A trailing "-N" is Workday's cross-site disambiguator only when two things
-  // hold (credit: ronanime-arch, PR #3446):
-  //   - N is one or two digits. This is what keeps Walmart's "R-2593225" whole:
-  //     a seven-digit tail never splits, so the base check below never runs.
-  //   - What precedes it is requisition-ID-shaped on its own: a digit, then
-  //     2+ trailing digits. This is what keeps a short "R-25" whole — its base
-  //     "r" has no digit.
-  // A hyphenated base ("req-271559-1", "jr-017459-2") is admitted too (#3882),
-  // but only with a single-digit 1-9 counter, the only values Workday was seen
-  // to emit. A tenant numbering its own IDs "req-2026-01".."-12" must not start
-  // folding into one key: "-01".."-09" are zero-padded and "-10".."-12" are two
-  // digits, so all twelve stay distinct. An unpadded "req-2026-1".."-9" sibling
-  // set cannot be told apart from a republish by the ID string alone and does
-  // fold — an accepted limitation, see #3882.
-  // Bases without a hyphen keep exactly the rule they had, so no key they
-  // produced before moves (scan history is re-keyed through this function).
-  const m = raw.match(/^(.*?)-(\d{1,2})$/);
-  const base = m ? m[1] : '';
-  const isDisambiguator = base.includes('-')
-    ? /^[a-z-]*\d[a-z0-9_-]*\d{2,}$/.test(base) && /^[1-9]$/.test(m[2])
-    : /^[a-z]*\d[a-z0-9_]*\d{2,}$/.test(base);
-  const reqId = isDisambiguator ? base : raw;
+  const reqId = stripWorkdayRepostSuffix(lastSegment.slice(underscoreIdx + 1));
   if (!reqId) return null;
   return `workday:${parsed.hostname.toLowerCase()}:${reqId}`;
 }
