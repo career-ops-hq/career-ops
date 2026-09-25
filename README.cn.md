@@ -1,116 +1,162 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
-<p align="center">
-  <em>我花了好几个月用最费力的方式找工作。所以我打造了一个当初就希望拥有的系统。</em><br>
-  公司用 AI 筛选候选人。<strong>我把 AI 交给候选人，让他们来<em>挑选</em>公司。</strong><br>
-  它评估、排序、起草。<strong>它从不提交，提交的是你。</strong> 开源，本地运行，属于你。
-</p>
+<table align="center">
+<tr>
+<td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
+<td valign="middle">
+<strong>几个月投出的简历，全都石沉大海。</strong>于是我做了自己需要的那个过滤器。<br>
+<strong>740 个职位。68 个已投递。12 次面试。1 份 offer。</strong><br>
+我是它的第一个用户。<strong>我拿到了那份工作。</strong>然后把它开源了。
+</td>
+</tr>
+</table>
 
-<p align="center">
-  <a href="https://x.com/santifer/status/2041403685696053741"><img src="docs/demo.gif" alt="career-ops 流水线：已打分的职位，219 个标记为不申请，然后是一份完整评估" width="800"></a>
-</p>
-
-<p align="center"><sub>求职中途的一个截面：流水线，然后打开一个职位，从头到尾完整评估。</sub></p>
-
-<p align="center"><strong>740 个职位中，值得申请的有 68 个。12 次面试。1 个 offer。</strong></p>
-<p align="center"><sub>一次求职，作者本人的 2026 年记录。重要的数字是筛掉了多少，而不是总数。全部数据见<a href="https://santifer.io/career-ops-system">案例研究</a>。</sub></p>
-
-<p align="center"><sub>从不提交、从不发邮件、从不回传数据：<a href="#career-ops-不做的事">它不做的事</a> · 运行在你已经在用的 AI CLI 里，<a href="docs/RUNNING_ON_A_BUDGET.md">支持免费和本地模型</a>。</sub></p>
-
+<div align="center">
 <details>
-<summary>用 17 种语言阅读</summary>
+<summary>🌍 用 17 种语言阅读</summary>
 <div align="center">
 
 [English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [தமிழ்](README.ta.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md) | [Türkçe](README.tr.md)
 
 </div>
 </details>
-
-<hr>
-
-<p align="center">
-  <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20verified&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="通过 career-ops 获得录用：已核实数量"></a>
-</p>
-
-<p align="center"><sub>拿到 offer 了？<a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">分享一下 →</a> · 你的卡片会让正在求职的人看到出路是存在的。</sub></p>
+</div>
 
 <p align="center">
-  <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="最近三个录用故事" width="800"></a>
+  公司用 AI 筛选候选人。<strong>我把 AI 交给候选人，让他们来<em>挑选</em>公司。</strong><br>
+  在你自己的机器上，它告诉你哪些职位是真的，哪些适合你，并且<strong>绝不以你的名义投递。</strong>
 </p>
 
-<p align="center"><sub>每一个数字都是<a href="HIRED.md">可以核查的 →</a>公开故事 · 每一个都从你现在所在的位置开始。</sub></p>
+<p align="center">
+  <a href="https://x.com/santifer/status/2041403685696053741"><img src="docs/demo.gif" alt="作者本人的求职过程：在任何一份简历发出之前，就已用红色标为不要投的职位" width="800"></a>
+</p>
 
-<p align="center"><sub>媒体报道</sub></p>
+<p align="center"><sub>那个红色标签就是产品。<em>不要投。</em> <a href="https://santifer.io/career-ops-system">完整故事 →</a></sub></p>
+
+<br>
+
+<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20verified&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="通过 career-ops 获得录用：已核实数量"></a></p>
+
+<p align="center">在我之后来的人，写下了他们是怎么拿到 offer 的。</p>
+
+<p align="center">
+  <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="可以打开阅读的录用故事" width="800"></a>
+</p>
+
+<p align="center"><sub>每张卡片都是一个可以打开的公开 issue。你也上岸了？<a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">留下你的卡片 →</a></sub></p>
+
+<br>
 
 <p align="center">
   <a href="https://wired.com.gr/article/to-ai-ergaleio-pou-fernei-epanastasi-ston-tropo-pou-psachnoume-douleia/" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/wired-dark.svg"><img src="docs/press/wired.svg" alt="WIRED" height="32"></picture></a>
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://www.businessinsider.com/how-i-built-tool-filter-job-listings-landed-head-ai-2026-4" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/business-insider-dark.svg"><img src="docs/press/business-insider.svg" alt="Business Insider" height="32"></picture></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="Featured on Product Hunt" width="206" height="54"></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://trendshift.io/repositories/25195" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="GitHub Trending: #1 repository of the day (Trendshift)" width="250" height="55"></a>
 </p>
+
+## 轮到你了
+
+把你今晚本来打算投的一个职位粘贴进来。如果返回的是<em>不要投</em>，你刚刚把这个晚上赢回来了。如果返回的是一份计划，你就知道下一步该做什么。
+
+```bash
+npx @santifer/career-ops init
+```
+
+<p align="center"><sub>开源。本地运行。就在你已经在用的 AI CLI 里。<a href="docs/RUNNING_ON_A_BUDGET.md">包含免费模型和本地模型。</a></sub></p>
+
+
+## 你不必一个人找工作
+
+点下发送之后的沉默，与你无关。看到同一件事的人足够多，于是把这套实践写了下来，只有六行：
+
+> 投得更少，投得更好。信号胜过数量。证据胜过关键词。由人来决定。本地优先。桌子两边都有尊严。
+
+<p align="center"><a href="https://career-ops.org/manifesto?utm_source=readme"><img src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2FSIGNATURES.md&search=n%3A(%5Cd%2B)%5Cs*%24&replace=%241%20signatories&label=THE%20CAREEROPS%20MANIFESTO&color=DD7627&style=for-the-badge&labelColor=2b3137" alt="CareerOps 宣言：实时签署人数"></a></p>
+
+<p align="center">其中几位，用他们自己的话。</p>
 
 <p align="center">
-  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
-  &nbsp;&nbsp;
-  <a href="https://trendshift.io/repositories/25195" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+  <a href="https://career-ops.org/manifesto?utm_source=readme"><img src="docs/manifesto-wall.svg" alt="CareerOps 宣言的三个签名，用他们自己的话" width="800"></a>
 </p>
 
-<p align="center"><sub>由 <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a>（<a href="https://github.com/santifer">@santifer</a>）创建并维护</sub></p>
+<p align="center"><sub>每一个签名都是一次可审计的提交。<a href="https://career-ops.org/manifesto?utm_source=readme">读完全部，或加上你的 →</a></sub></p>
 
-## 这是什么
+<br>
 
-career-ops（[career-ops.org](https://career-ops.org)，也叫 **careerops**）是一个开源的 AI 求职工具，在任何 AI 编码 CLI 里本地运行：它评估职位、定制你的简历、追踪每一次申请，而最终决定始终由你作出。你不需要再手动用电子表格追踪申请流程，而是获得一个 AI 驱动的流水线，能够：
+招聘不会自己修好。正在经历它的人可以，而且他们已经在这个房间里，交换笔记，互相修各自的配置。[修复就是在这里写出来的](CONTRIBUTING.md)。是房间，不是俱乐部。**一起来建。**
 
-- **评估职位**，输出结构化报告：A 到 H 各个区块，以及一个 1 到 5 的总评分。评分来自对五个维度的整体判断，而不是算术公式。区块 B 的逐项要求重要度列和区块 G 的职位真实性评估是独立的、不影响评分的信号；区块 H 只在 4.5 分及以上时才会撰写
-- **生成定制 PDF**：针对每份职位描述输出 ATS 优化简历
-- **自动扫描招聘平台**（Greenhouse、Ashby、Lever、公司招聘页）
-- **批量处理**：通过子代理并行评估 10 份以上职位
-- **集中管理一切**：用单一事实来源配合完整性检查
-- **调研公司并找到该联系的人**：申请让你排进队伍，调研让你获得对话
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord：career-ops 服务器的实时成员数"></a></p>
 
-> **重要：这不是海投工具。** career-ops 是一个过滤器：帮你从数百个职位里找出真正值得投入时间的少数机会。系统强烈建议不要申请评分低于 4.0/5 的职位。你的时间很宝贵，招聘方的时间也一样。提交前一定要自己复核。
+## 赞助商
 
-career-ops 具备代理式工作能力：你选择的 AI 编码 CLI 会用 Playwright 浏览招聘页面，通过推理你的简历与职位描述是否匹配来评估契合度，而不是只做关键词匹配；同时它也会根据每个职位调整你的简历。
+career-ops 对求职者永久免费。下面这些公司资助维护者的时间，让这一点得以延续。
 
-> **提醒：最开始几次评估不会特别准。** 系统还不了解你。请给它更多上下文：你的简历、职业故事、成果证明、个人偏好、擅长的事、想避开的事。你喂给它的信息越多，它就越准确。把它当成在培养一个新招聘顾问：第一周它需要先了解你，之后就会变得非常有价值。
+<p align="center">
+  <a href="https://serpapi.com/career-ops-org" title="SerpApi"><img src="docs/sponsors/serpapi.svg" alt="SerpApi" height="48"></a>
+</p>
 
-作者用它评估了 740 个职位，申请了 68 个，拿到了 Head of Applied AI 的职位。[阅读完整案例研究](https://santifer.io/career-ops-system)。
+<p align="center"><strong>SerpApi</strong> · Build a portfolio project with live search data. SerpApi gives developers structured JSON/Markdown from Google Search, Maps, Shopping, and other engines through a simple API call.</p>
+
+> 赞助买到的是清楚标注的曝光，绝不是影响力：再多的钱也改变不了路线图，也放不进产品里任何东西。赞助商绝不会出现在评估、排名或推荐中。
+
+## career-ops 为你做什么
+
+粘贴一个职位。它告诉你这个晚上值不值得。
+
+- **假的还是过期的？** 在你写下一个字之前，就标出幽灵职位和骗局。
+- **不是你？** 用你真实的简历给职位打分，匹配度弱就让你跳过。你可以不听。
+- **值得投？** 它起草简历、求职信和申请答案。你来读。你来发。
+- **该找谁聊？** 它找到那个人，起草那条消息。它从不替你发出。
+- **这些东西都去哪了？** 每一份申请都留在你的机器上。没有任何东西上传给我们。
+- **我该学什么？** 连续被拒之后，它说出差距在哪。
+
+最初几次运行会很粗糙。它还不了解你。跟它聊：你的简历、你想要什么、你拒绝什么。把它当成一个招聘顾问的第一周。
+
+第一次启动时，它会在聊天里把这些都问一遍。没有任何需要手动配置的东西。
 
 ## career-ops 不做的事
 
-- **提交申请。** 它只准备答案；打开表单、点击提交的是你。脚本从不发送 POST（`prepare-application.mjs`）。
+- **自动提交申请。** 它为每个字段起草答案；你审阅，然后点击提交。脚本从不发出 POST（`prepare-application.mjs`）。
 - **发送邮件。** 只写草稿。整个代码库里没有任何邮件发送模块。
 - **回传数据。** 没有遥测，没有我们的后端。你的简历只从你的机器发往你选择的 AI 提供商，不去任何别的地方。唯一的公开记录就是这个仓库：`HIRED.md` 和它的 issue。
 - **催你申请低于 4.0/5 的职位。** 它会告诉你别申请。你可以不听，它会明说。
 
 它会改写你的简历，但绝不能编造。目前这条规则写在提示词里，还没有变成代码里的强制检查。每份简历发出前都请自己读一遍。详情见 [FAQ](#常见问题faq)。
 
-## CareerOps 宣言
-
-career-ops 是 [CareerOps 宣言](https://career-ops.org/manifesto?utm_source=readme)的首个参考实现。读一读。如果它说出了你的想法，就签名。你的签名会成为一次 commit。
-
 ## 功能特性
 
 | 功能                     | 说明                                                                                                                                     |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **自动流水线**           | 粘贴一个 URL，获得完整评估 + PDF + 追踪记录                                                                                               |
 | **A-H 评估**             | 职位摘要、简历匹配（标注每条要求在这个职位里有多重要，以及权重来自职位描述的措辞、结构还是估算，逐条标注；估算永远不能进入最高档）、级别策略、薪酬调研、个性化、面试准备（STAR+R），再加上区块 G 的职位真实性检查（标记骗局和幽灵职位），以及一个工作许可信号（把明确不提供签证担保的职位描述标记为硬性阻碍） |
-| **面试故事库**           | 跨评估积累 STAR+反思故事：5 到 10 个能回答任何行为面试问题的主故事                                                                         |
-| **谈判话术**             | 薪资谈判框架、应对地域折价、利用竞争 offer 作为筹码                                                                                       |
+| **Human-in-the-Loop**    | AI 评估并推荐，你决定并行动。系统从不提交申请：最终决定始终在你手中 <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->               |
 | **ATS PDF 生成**         | 注入关键词的简历，Space Grotesk + DM Sans 设计                                                                                            |
 | **求职信生成器**         | 基于调研的求职信：关键词呼应、四个交互式角度提问（为什么/问题/方法/语气）、在聊天中审批草稿，以及通过与简历相同的 HTML + Playwright 流水线生成 A4 PDF。每次评估自动起草；用 `/career-ops cover` 按需完成并生成 |
+| **简历之外**             | 公司调研（[`deep`](modes/deep.md)）揭示 AI 战略、近期动向、工程文化，以及你的简历应该采取的角度。联系人发现（[`contacto`](modes/contacto.md)）找出值得联系的招聘经理、招聘人员或团队成员，并起草一条不超过 300 字符、针对联系人类型调整过的 LinkedIn 消息。正式申请邮件草稿（[`email`](modes/email.md)）把已评估的报告或粘贴的职位描述变成主题、正文和附件清单，不发送、不提交、不点击任何内容。申请让你排进队伍，调研让你获得对话。 |
+| **模式分析**             | 拒信模式和各 ATS 渠道的推进率（`analyze-patterns.mjs`）、整个求职周期的漏斗统计（`stats.mjs`）、重复发布和幽灵职位检测（`detect-reposts.mjs`） |
+
+<details>
+<summary><b>它还能做的所有事</b></summary>
+
+| 功能                     | 说明                                                                                                                                     |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **自动流水线**           | 粘贴一个 URL，获得完整评估 + PDF + 追踪记录                                                                                               |
+| **面试故事库**           | 跨评估积累 STAR+反思故事：5 到 10 个能回答任何行为面试问题的主故事                                                                         |
+| **谈判话术**             | 薪资谈判框架、应对地域折价、利用竞争 offer 作为筹码                                                                                       |
 | **申请邮件草稿**         | 从报告或粘贴的职位描述生成给招聘人员、内推或冷申请的正式邮件，包含主题、附件清单、有据可查的匹配点和来自你个人资料的联系信息块。仅限草稿：career-ops 从不发送、提交或点击任何内容。 |
 | **招聘平台扫描器**       | 预配置 100+ 家公司（Anthropic、OpenAI、ElevenLabs、Retool、n8n…）+ 跨 Ashby、Greenhouse、Lever、Wellfound 的自定义查询                     |
 | **已融资公司发现**       | 以审阅为先的 `company:funded` 命令从结构化的公开数据源中列出近期获得融资的公司和来源诊断，不改动你的数据                                    |
 | **批量处理**             | 用无头 CLI worker（`claude -p` / `opencode run`）并行评估                                                                                  |
 | **Dashboard TUI**        | 在终端里浏览、筛选和排序你的流水线                                                                                                        |
-| **Human-in-the-Loop**    | AI 评估并推荐，你决定并行动。系统从不提交申请：最终决定始终在你手中 <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->               |
 | **流水线完整性**         | 自动合并、去重、状态规范化、健康检查                                                                                                      |
 | **面试套件**             | 按时间块安排的准备计划、带反馈的练习环节、面试后复盘（[`interview/`](modes/interview/README.md)），以及公司危险信号检测器（[`interview-redflag`](modes/interview-redflag.md)） |
 | **Offer 阶段**           | 合同阅读助手：逐条款解读加上给律师的问题清单（[`offer-prep`](modes/offer-prep.md)），以及期望/公布/实际薪资差距分析器（`salary-gap.mjs`）   |
 | **跟进与回复**           | 跟进节奏计算器和预置提醒（`followup-cadence.mjs`、`followup-seed.mjs`）；把雇主回复归类为追踪记录更新（[`reply-watch`](modes/reply-watch.md)） |
-| **模式分析**             | 拒信模式和各 ATS 渠道的推进率（`analyze-patterns.mjs`）、整个求职周期的漏斗统计（`stats.mjs`）、重复发布和幽灵职位检测（`detect-reposts.mjs`） |
 | **插件系统**             | 可选集成（Gmail、Notion、Apify + 社区注册表），默认关闭；见 [docs/PLUGINS.md](docs/PLUGINS.md)                                              |
-| **简历之外**             | 公司调研（[`deep`](modes/deep.md)）揭示 AI 战略、近期动向、工程文化，以及你的简历应该采取的角度。联系人发现（[`contacto`](modes/contacto.md)）找出值得联系的招聘经理、招聘人员或团队成员，并起草一条不超过 300 字符、针对联系人类型调整过的 LinkedIn 消息。正式申请邮件草稿（[`email`](modes/email.md)）把已评估的报告或粘贴的职位描述变成主题、正文和附件清单，不发送、不提交、不点击任何内容。申请让你排进队伍，调研让你获得对话。 |
+
+</details>
 
 ## 快速开始
 
@@ -187,6 +233,79 @@ npm i -g @santifer/career-ops
 > **这个系统就是设计成由你的 AI 编码 CLI 自己来定制的。** 模式、原型、评分权重、谈判话术：直接让它改就行。它读取的正是它自己使用的文件，所以它清楚该改哪里。
 
 完整安装指南见 [docs/SETUP.md](docs/SETUP.md)；用自定义或本地模型低成本运行 career-ops 的方法见 [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md)（在 Antigravity CLI 免费层零成本运行见 [docs/FREE_TIER.md](docs/FREE_TIER.md)）；定时扫描和零 token 的"初筛到短名单"配方见 [docs/AUTOMATION.md](docs/AUTOMATION.md)；ATS 自动填表流程的细节见 [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md)；把 LinkedIn 联系人导出与漏斗中的公司交叉比对见 [docs/LINKEDIN_JOIN.md](docs/LINKEDIN_JOIN.md)；常见设置问题的解答见 [docs/FAQ.md](docs/FAQ.md)，包括[故事溯源如何防止编造数字](docs/FAQ.md#why-does-career-ops-refuse-to-use-a-number-from-my-story-bank)。设计原则在 [ARCHITECTURE.md](ARCHITECTURE.md)；运行时流程在 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+
+## 用法
+
+career-ops 使用共享的命令路由。在会注册斜杠命令的 CLI 里，它看起来是这样：
+
+```
+/career-ops           → 显示所有可用命令
+/career-ops {JD}      → 自动流水线：评估 + 报告 + PDF + 追踪记录（粘贴文本或 URL）
+/career-ops pipeline  → 处理收件箱里待处理的 URL（data/pipeline.md）
+/career-ops oferta    → 仅评估，区块 A 到 H（不自动生成 PDF）
+/career-ops ofertas   → 比较并排序多个职位
+/career-ops contacto  → LinkedIn 妙招：找到联系人 + 起草消息
+/career-ops deep      → 针对公司的深度调研提示词
+/career-ops interview-prep → 生成针对特定公司的面试准备文档
+/career-ops interview    → 交互式的个人资料/简历入门访谈
+/career-ops eu-swe    → 在简历/申请/面试前校准一份欧洲 SWE 申请
+/career-ops eu-fintech → 扫描 21 个欧洲金融科技招聘平台的 Product Manager 职位（零 token）
+/career-ops interview/plan → 为即将到来的面试制定按时间块安排的准备计划
+/career-ops interview/practice → 模拟面试，一次一个问题并给出反馈
+/career-ops interview/debrief → 面试后复盘：补上短板，预测下一轮
+/career-ops interview-redflag → 入职前分析雇主的危险信号
+/career-ops pdf       → 仅生成 PDF，ATS 优化简历
+/career-ops text      → 定制的 markdown 简历（镜像 cv.md，不生成 PDF）
+/career-ops latex     → 把简历导出为 LaTeX/Overleaf .tex
+/career-ops latex-tex → 就地定制你自己的 resume.tex（可选；cv.md 仍是默认）
+/career-ops cover     → 求职信：单独粘贴职位描述，或 /career-ops cover {slug}
+/career-ops email     → 正式申请邮件草稿（仅草稿；从不发送、提交或点击）
+/career-ops add       → 向简历添加项目/论文/职位（抓取 + 预览 + 确认）
+/career-ops expand    → 从个人资料链接自动发现并补充缺失的能力
+/career-ops training  → 对照你的 North Star 评估课程/证书
+/career-ops project   → 评估一个作品集项目点子
+/career-ops tracker   → 申请状态总览
+/career-ops agent-inbox → 为下一个会话排队/清空请求（data/agent-inbox.md）
+/career-ops apply     → 实时申请助手（读取表单 + 生成答案）
+/career-ops scan      → 扫描招聘平台并发现新职位
+/career-ops discover  → 把公司列表解析为可扫描的 ATS 板块 + 追加到 portals.yml（零 token）
+/career-ops batch     → 用并行 worker 批量处理
+/career-ops patterns  → 分析拒信模式并改进目标定位
+/career-ops offer-prep → 和候选人一起阅读收到的 offer/合同：逐条款解读 + 给律师的问题（不是法律建议）
+/career-ops titles    → 根据你的简历推荐相近的职位名称以扩大搜索范围
+/career-ops upskill   → 基于已评估报告的综合技能差距分析
+/career-ops followup  → 跟进节奏追踪：标记逾期，生成草稿
+/career-ops reply-watch → 归类雇主回复并建议追踪记录更新
+/career-ops outcome   → 记录申请结果并归档产物
+/career-ops calibrate → 咨询性报告：你的评估分数能预测真实结果吗？读取 /outcome 数据；从不改变评分
+/career-ops update    → 更新 career-ops 系统文件，带 diff 预览 + 兼容性检查
+```
+
+或者直接粘贴一个职位 URL 或描述：career-ops 会自动识别并运行完整流水线。
+
+Codex 里不保证有斜杠命令。请改用同样的模式名称写在提示词里，或者通过 `codex exec` 调用。
+
+## 工作原理
+
+```
+You paste a job URL or description
+        │
+        ▼
+┌──────────────────┐
+│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
+│  Detection       │
+└────────┬─────────┘
+         │
+┌────────▼─────────┐
+│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
+│  (reads cv.md)   │
+└────────┬─────────┘
+         │
+    ┌────┼────┐
+    ▼    ▼    ▼
+ Report  PDF  Tracker
+  .md   .pdf  entry
+```
 
 ## Antigravity CLI 集成
 
@@ -281,79 +400,6 @@ npm run gemini:eval -- "JD text here"
 ```
 
 > **免费层：** 两种方式都无需付费。原生 CLI 使用 Google OAuth；API 脚本使用 `gemini-3.6-flash`（速率限制取决于模型和层级；当前配额见 Google AI 文档）。
-
-## 用法
-
-career-ops 使用共享的命令路由。在会注册斜杠命令的 CLI 里，它看起来是这样：
-
-```
-/career-ops           → 显示所有可用命令
-/career-ops {JD}      → 自动流水线：评估 + 报告 + PDF + 追踪记录（粘贴文本或 URL）
-/career-ops pipeline  → 处理收件箱里待处理的 URL（data/pipeline.md）
-/career-ops oferta    → 仅评估，区块 A 到 G（不自动生成 PDF）
-/career-ops ofertas   → 比较并排序多个职位
-/career-ops contacto  → LinkedIn 妙招：找到联系人 + 起草消息
-/career-ops deep      → 针对公司的深度调研提示词
-/career-ops interview-prep → 生成针对特定公司的面试准备文档
-/career-ops interview    → 交互式的个人资料/简历入门访谈
-/career-ops eu-swe    → 在简历/申请/面试前校准一份欧洲 SWE 申请
-/career-ops eu-fintech → 扫描 21 个欧洲金融科技招聘平台的 Product Manager 职位（零 token）
-/career-ops interview/plan → 为即将到来的面试制定按时间块安排的准备计划
-/career-ops interview/practice → 模拟面试，一次一个问题并给出反馈
-/career-ops interview/debrief → 面试后复盘：补上短板，预测下一轮
-/career-ops interview-redflag → 入职前分析雇主的危险信号
-/career-ops pdf       → 仅生成 PDF，ATS 优化简历
-/career-ops text      → 定制的 markdown 简历（镜像 cv.md，不生成 PDF）
-/career-ops latex     → 把简历导出为 LaTeX/Overleaf .tex
-/career-ops latex-tex → 就地定制你自己的 resume.tex（可选；cv.md 仍是默认）
-/career-ops cover     → 求职信：单独粘贴职位描述，或 /career-ops cover {slug}
-/career-ops email     → 正式申请邮件草稿（仅草稿；从不发送、提交或点击）
-/career-ops add       → 向简历添加项目/论文/职位（抓取 + 预览 + 确认）
-/career-ops expand    → 从个人资料链接自动发现并补充缺失的能力
-/career-ops training  → 对照你的 North Star 评估课程/证书
-/career-ops project   → 评估一个作品集项目点子
-/career-ops tracker   → 申请状态总览
-/career-ops agent-inbox → 为下一个会话排队/清空请求（data/agent-inbox.md）
-/career-ops apply     → 实时申请助手（读取表单 + 生成答案）
-/career-ops scan      → 扫描招聘平台并发现新职位
-/career-ops discover  → 把公司列表解析为可扫描的 ATS 板块 + 追加到 portals.yml（零 token）
-/career-ops batch     → 用并行 worker 批量处理
-/career-ops patterns  → 分析拒信模式并改进目标定位
-/career-ops offer-prep → 和候选人一起阅读收到的 offer/合同：逐条款解读 + 给律师的问题（不是法律建议）
-/career-ops titles    → 根据你的简历推荐相近的职位名称以扩大搜索范围
-/career-ops upskill   → 基于已评估报告的综合技能差距分析
-/career-ops followup  → 跟进节奏追踪：标记逾期，生成草稿
-/career-ops reply-watch → 归类雇主回复并建议追踪记录更新
-/career-ops outcome   → 记录申请结果并归档产物
-/career-ops calibrate → 咨询性报告：你的评估分数能预测真实结果吗？读取 /outcome 数据；从不改变评分
-/career-ops update    → 更新 career-ops 系统文件，带 diff 预览 + 兼容性检查
-```
-
-或者直接粘贴一个职位 URL 或描述：career-ops 会自动识别并运行完整流水线。
-
-Codex 里不保证有斜杠命令。请改用同样的模式名称写在提示词里，或者通过 `codex exec` 调用。
-
-## 工作原理
-
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
 
 ## 预配置平台
 
@@ -465,6 +511,33 @@ Go 版仪表板 TUI、Node.js 脚本和 AI 代理模式都会自动遵循这一�
 - **仪表板**：Go + Bubble Tea + Lipgloss（Catppuccin Mocha 主题）
 - **数据**：Markdown 表格 + YAML 配置 + TSV 批处理文件
 
+<p align="center">
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+</p>
+
+<p align="center">
+  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
+</p>
+
+<p align="center">
+  <sub>也可以在任何遵循 agent skill 标准的 CLI 中运行。见<a href="docs/SUPPORTED_CLIS.md">支持的 CLI</a>。</sub><br>
+  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
+  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
+  <img src="https://img.shields.io/badge/Antigravity_CLI-4285F4?style=flat&logo=google&logoColor=white" alt="Antigravity CLI">
+  <img src="https://img.shields.io/badge/Codex-412991?style=flat&logo=openai&logoColor=white" alt="Codex">
+  <img src="https://img.shields.io/badge/Qwen-615CED?style=flat" alt="Qwen">
+  <img src="https://img.shields.io/badge/Kimi-FF4B4B?style=flat" alt="Kimi">
+  <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
+  <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
+  <br>
+  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
+  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
+  <img src="https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white" alt="Bubble Tea">
+  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
+  <a href="TRADEMARK.md"><img src="https://img.shields.io/badge/Trademark-Policy-blue.svg" alt="Trademark Policy"></a>
+</p>
+
 ## 也已开源
 
 - **[cv-santiago](https://github.com/santifer/cv-santiago)**：作品集网站（santifer.io），带 AI 聊天机器人、LLMOps 仪表板和案例研究。如果你需要一个配合求职展示的作品集，fork 它，改成你自己的。
@@ -472,7 +545,7 @@ Go 版仪表板 TUI、Node.js 脚本和 AI 代理模式都会自动遵循这一�
 ## 常见问题（FAQ）
 
 **career-ops 是什么？**
-career-ops 是一个开源的 AI 求职工具，在你的 AI 编码 CLI（Claude Code、Codex、OpenCode 等）里本地运行，把每一个决定都留给你。它根据你的简历评估职位，生成适配 ATS 的 PDF，找到合适的联系人，并在一个地方追踪所有进展：最终决定始终在你手中。它是 CareerOps 宣言的首个参考实现。详情见 [career-ops.org](https://career-ops.org)。
+career-ops（[career-ops.org](https://career-ops.org)，也称 **careerops**） 是一个开源的 AI 求职工具，在你的 AI 编码 CLI（Claude Code、Codex、OpenCode 等）里本地运行，把每一个决定都留给你。它根据你的简历评估职位，生成适配 ATS 的 PDF，找到合适的联系人，并在一个地方追踪所有进展：最终决定始终在你手中。它是 [CareerOps 宣言](https://career-ops.org/manifesto)的首个参考实现。
 
 **定制简历会编造内容吗？**
 不应该，提示词里也这么写：只改写，绝不编造。但这条规则还没有由代码里的检查强制执行。两个未关闭的 issue 在跟进：[#2677](https://github.com/career-ops-hq/career-ops/issues/2677)（职位名称必须与 cv.md 一致）和 [#1411](https://github.com/career-ops-hq/career-ops/issues/1411)（不通过即阻止的真实性检查）。在它们合并之前，每份简历发出前都请自己读一遍。[法律声明](LEGAL_DISCLAIMER.md) 用更长的篇幅说了同样的话。
@@ -534,7 +607,7 @@ Wikidata：[Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org
 品牌受[商标政策](TRADEMARK.md)约束：对社区使用宽松，
 对商业产品命名和背书保留权利。
 
-## 荣誉与报道
+## Star 历史
 
 <p align="center">
   <a href="https://warpchart.dev/hq">
@@ -545,36 +618,7 @@ Wikidata：[Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org
   </a>
 </p>
 
-<p align="center">
-  <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Join_the_community-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
-</p>
-
-<p align="center">
-  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
-</p>
-
-<p align="center">
-  <sub>也可以在任何符合 agent-skill 标准的 CLI 上运行。见<a href="docs/SUPPORTED_CLIS.md">支持的 CLI</a>。</sub><br>
-  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
-  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
-  <img src="https://img.shields.io/badge/Antigravity_CLI-4285F4?style=flat&logo=google&logoColor=white" alt="Antigravity CLI">
-  <img src="https://img.shields.io/badge/Codex-412991?style=flat&logo=openai&logoColor=white" alt="Codex">
-  <img src="https://img.shields.io/badge/Qwen-615CED?style=flat" alt="Qwen">
-  <img src="https://img.shields.io/badge/Kimi-FF4B4B?style=flat" alt="Kimi">
-  <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
-  <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
-  <br>
-  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
-  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
-  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
-  <img src="https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white" alt="Bubble Tea">
-  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
-  <a href="TRADEMARK.md"><img src="https://img.shields.io/badge/Trademark-Policy-blue.svg" alt="Trademark Policy"></a>
-</p>
+<p align="center"><sub>由 <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a>（<a href="https://github.com/santifer">@santifer</a>）创建并维护</sub></p>
 
 ## 联系我们
 

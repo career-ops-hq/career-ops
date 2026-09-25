@@ -308,15 +308,15 @@ const twoPassManifestChecks = [
   },
   {
     name: 'apply resolves the re-exec checkout closure from the durable paired target (#1245)',
-    pattern: /resolveReexecCheckout\(targetRef,\s*'update-system\.mjs'\)/,
+    pattern: /resolveReexecCheckout\(pairedTargetRef,\s*'update-system\.mjs'\)/,
   },
   {
     name: 'apply checks out the resolved re-exec files literally from the durable paired target (#1245)',
-    pattern: /git\('--literal-pathspecs',\s*'checkout',\s*targetRef,\s*'--',\s*\.\.\.reexecFiles\)/,
+    pattern: /git\('--literal-pathspecs',\s*'checkout',\s*pairedTargetRef,\s*'--',\s*\.\.\.reexecFiles\)/,
   },
   {
     name: 'apply validates the self-bootstrap import closure against protected user paths',
-    pattern: /const reexecFiles = assertSafeManifestPaths\([\s\S]{0,240}?resolveReexecCheckout\(targetRef,\s*'update-system\.mjs'\)[\s\S]{0,240}?'Target updater import closure'/,
+    pattern: /const reexecFiles = assertSafeManifestPaths\([\s\S]{0,240}?resolveReexecCheckout\(pairedTargetRef,\s*'update-system\.mjs'\)[\s\S]{0,240}?'Target updater import closure'/,
   },
   {
     name: 'apply rejects self-bootstrap files outside the validated merged manifest',
@@ -387,7 +387,7 @@ const twoPassManifestChecks = [
     // paths, so everything added upstream since is silently absent and apply
     // still printed "Update complete" (#1998).
     name: 'apply verifies the target manifest materialized before claiming success (#1998)',
-    pattern: /missingFromTargetManifest\(remoteSystemPaths,\s*targetRef\)/,
+    pattern: /missingFromTargetManifest\(remoteSystemPaths,\s*pairedTargetRef\)/,
   },
   {
     name: 'an incomplete apply exits non-zero instead of reporting success (#1998)',
@@ -399,13 +399,13 @@ const twoPassManifestChecks = [
     // The trailing spread is the #2337 preserve-exclusions; the property this
     // pins is the runner (gitQuiet, not git) and the ref, not the arity.
     name: 'per-path checkout pipes stderr so expected skips stay quiet (#1998)',
-    pattern: /gitQuiet\('checkout',\s*targetRef,\s*'--',\s*path(?:,\s*\.\.\.\w+)?\)/,
+    pattern: /gitQuiet\('checkout',\s*pairedTargetRef,\s*'--',\s*path(?:,\s*\.\.\.\w+)?\)/,
   },
   {
     // #2337: a system file this install edited must be listed and backed up
     // before the checkout, not overwritten in silence.
     name: 'locally edited system files are detected before checkout (#2337)',
-    pattern: /const atRisk = locallyModifiedSystemFiles\(updatePaths, targetRef\)/,
+    pattern: /const atRisk = locallyModifiedSystemFiles\(updatePaths, pairedTargetRef\)/,
   },
   {
     name: 'the local copy is saved as .bak before any overwrite (#2337)',
@@ -514,8 +514,8 @@ const rollbackSource = rollbackSectionValid
   ? source.slice(rollbackStart, dismissMarker)
   : '';
 
-const fetchCall = "git('fetch', CANONICAL_REPO, 'main');";
-const pairCall = "git('update-ref', targetRef, 'FETCH_HEAD');";
+const fetchCall = "git('fetch', CANONICAL_REPO, targetRef);";
+const pairCall = "git('update-ref', pairedTargetRef, 'FETCH_HEAD');";
 const fetchAt = applySource.indexOf(fetchCall);
 const pairAt = applySource.indexOf(pairCall, fetchAt + fetchCall.length);
 const gitBetweenFetchAndPair = fetchAt >= 0 && pairAt >= 0
@@ -532,7 +532,7 @@ if (appearsInOrder(applySource, [
   fail('apply does not pin the canonical fetch to its backup-paired target before another git operation');
 }
 
-const targetRefDeclaration = 'const targetRef = targetRefForBackup(backupBranch);';
+const targetRefDeclaration = 'const pairedTargetRef = targetRefForBackup(backupBranch);';
 const branchCreation = "git('branch', backupBranch);";
 if (applySource.indexOf(targetRefDeclaration) >= 0
   && applySource.indexOf(branchCreation) > applySource.indexOf(targetRefDeclaration)) {
@@ -549,14 +549,14 @@ if (appearsInOrder(applySource, [pairCall, 'pruneStaleTargetRefs();'])) {
 
 if (appearsInOrder(applySource, [
   pairCall,
-  "remoteUpdaterSource = git('show', `${targetRef}:update-system.mjs`);",
+  "remoteUpdaterSource = git('show', `${pairedTargetRef}:update-system.mjs`);",
   "remoteSystemPaths = assertSafeManifestPaths(remoteSystemPaths, manifestUserPaths, 'Target SYSTEM_PATHS');",
   'const updatePaths = assertSafeManifestPaths(',
   "'Merged updater manifest',",
-  "resolveReexecCheckout(targetRef, 'update-system.mjs')",
+  "resolveReexecCheckout(pairedTargetRef, 'update-system.mjs')",
   "'Target updater import closure',",
   'uncoveredReexecFiles.length > 0',
-  "git('--literal-pathspecs', 'checkout', targetRef, '--', ...reexecFiles)",
+  "git('--literal-pathspecs', 'checkout', pairedTargetRef, '--', ...reexecFiles)",
 ])) {
   pass('apply validates target and merged manifests before any self-bootstrap checkout');
 } else {

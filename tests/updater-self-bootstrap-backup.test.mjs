@@ -35,9 +35,9 @@ try {
   const source = readFileSync(join(root, 'update-system.mjs'), 'utf8');
   const closureAt = source.indexOf('const reexecFiles = assertSafeManifestPaths(');
   const coverageAt = source.indexOf('uncoveredReexecFiles.length > 0', closureAt);
-  const detectAt = source.indexOf('locallyModifiedSystemFiles(reexecFiles, targetRef)', coverageAt);
+  const detectAt = source.indexOf('locallyModifiedSystemFiles(reexecFiles, pairedTargetRef)', coverageAt);
   const backUpAt = source.indexOf('backupSystemFiles(bootstrapAtRisk)', detectAt);
-  const checkoutAt = source.indexOf("git('--literal-pathspecs', 'checkout', targetRef, '--', ...reexecFiles)", detectAt);
+  const checkoutAt = source.indexOf("git('--literal-pathspecs', 'checkout', pairedTargetRef, '--', ...reexecFiles)", detectAt);
   if (closureAt !== -1 && coverageAt > closureAt && detectAt > coverageAt
       && backUpAt > detectAt && checkoutAt > backUpAt) {
     pass('apply validates, detects, and backs up bootstrap edits before literal checkout');

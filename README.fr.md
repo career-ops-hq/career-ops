@@ -1,116 +1,162 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
-<p align="center">
-  <em>J'ai passé des mois à postuler à des emplois à la dure. J'ai donc conçu le système que j'aurais aimé avoir.</em><br>
-  Les entreprises utilisent l'IA pour filtrer les candidats. <strong>Je viens de donner aux candidats une IA pour <em>choisir</em> leurs entreprises.</strong><br>
-  Il évalue, classe et rédige. <strong>Il n'envoie jamais rien : c'est toi qui envoies.</strong> Open source, en local, à toi.
-</p>
+<table align="center">
+<tr>
+<td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
+<td valign="middle">
+<strong>Des mois à envoyer des CV dans le silence.</strong> Alors j'ai construit le filtre dont j'avais besoin.<br>
+<strong>740 annonces. 68 candidatures. 12 entretiens. 1 offre.</strong><br>
+J'en ai été le premier utilisateur. <strong>J'ai eu le poste.</strong> Puis je l'ai publié en open source.
+</td>
+</tr>
+</table>
 
-<p align="center">
-  <a href="https://x.com/santifer/status/2041403685696053741"><img src="docs/demo.gif" alt="pipeline career-ops : offres notées, 219 marquées ne pas postuler, puis une évaluation complète" width="800"></a>
-</p>
-
-<p align="center"><sub>Un instantané en pleine recherche : le pipeline, puis une offre ouverte et évaluée de bout en bout.</sub></p>
-
-<p align="center"><strong>Sur 740 offres, 68 valaient une candidature. 12 entretiens. 1 offre.</strong></p>
-<p align="center"><sub>Une seule recherche, celle de l'auteur, 2026. Le chiffre qui compte, c'est le tri, pas le volume. Tous les chiffres dans l'<a href="https://santifer.io/career-ops-system">étude de cas</a>.</sub></p>
-
-<p align="center"><sub>N'envoie jamais, n'expédie jamais d'e-mail, ne téléphone jamais à la maison : <a href="#ce-que-career-ops-ne-fait-pas">ce qu'il ne fait pas</a> · tourne dans la CLI d'IA que tu utilises déjà, <a href="docs/RUNNING_ON_A_BUDGET.md">modèles gratuits et locaux compris</a>.</sub></p>
-
+<div align="center">
 <details>
-<summary>Lire en 17 langues</summary>
+<summary>🌍 Lire en 17 langues</summary>
 <div align="center">
 
 [English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [தமிழ்](README.ta.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md) | [Türkçe](README.tr.md)
 
 </div>
 </details>
-
-<hr>
-
-<p align="center">
-  <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20verified&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Embauchés avec career-ops : décompte vérifié"></a>
-</p>
-
-<p align="center"><sub>Tu as décroché le tien ? <a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">Partage-le →</a> · ta carte montre à quelqu'un en pleine recherche que la sortie existe.</sub></p>
+</div>
 
 <p align="center">
-  <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="Les trois dernières histoires d'embauche" width="800"></a>
+  Les entreprises utilisent l'IA pour filtrer les candidats. <strong>Je viens de donner aux candidats une IA pour <em>choisir</em> leurs entreprises.</strong><br>
+  Sur ta machine, il te dit quelles offres sont réelles, lesquelles te correspondent, et <strong>ne postule jamais en ton nom.</strong>
 </p>
 
-<p align="center"><sub>Chaque décompte est une histoire publique que tu peux <a href="HIRED.md">auditer →</a> · chacune a commencé là où tu es maintenant.</sub></p>
+<p align="center">
+  <a href="https://x.com/santifer/status/2041403685696053741"><img src="docs/demo.gif" alt="La recherche de l'auteur lui-même : des annonces marquées « ne pas postuler », en rouge, avant qu'un seul CV ne parte" width="800"></a>
+</p>
 
-<p align="center"><sub>VU DANS</sub></p>
+<p align="center"><sub>Cet onglet rouge, c'est le produit. <em>Ne pas postuler.</em> <a href="https://santifer.io/career-ops-system">L'histoire complète →</a></sub></p>
+
+<br>
+
+<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20verified&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Embauchés avec career-ops : décompte vérifié"></a></p>
+
+<p align="center">Ceux qui sont venus après moi ont écrit comment ils ont été embauchés.</p>
+
+<p align="center">
+  <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="Des histoires d'embauche que tu peux ouvrir et lire" width="800"></a>
+</p>
+
+<p align="center"><sub>Chaque carte est une issue publique que tu peux ouvrir. Tu as décroché le tien ? <a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">Laisse ta carte →</a></sub></p>
+
+<br>
 
 <p align="center">
   <a href="https://wired.com.gr/article/to-ai-ergaleio-pou-fernei-epanastasi-ston-tropo-pou-psachnoume-douleia/" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/wired-dark.svg"><img src="docs/press/wired.svg" alt="WIRED" height="32"></picture></a>
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://www.businessinsider.com/how-i-built-tool-filter-job-listings-landed-head-ai-2026-4" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/business-insider-dark.svg"><img src="docs/press/business-insider.svg" alt="Business Insider" height="32"></picture></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="Featured on Product Hunt" width="206" height="54"></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://trendshift.io/repositories/25195" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="GitHub Trending: #1 repository of the day (Trendshift)" width="250" height="55"></a>
 </p>
+
+## À toi
+
+Colle une offre à laquelle tu allais postuler ce soir. Si elle revient en <em>ne pas postuler</em>, tu viens de récupérer ta soirée. Si elle revient avec un plan, tu sais quoi faire ensuite.
+
+```bash
+npx @santifer/career-ops init
+```
+
+<p align="center"><sub>Open source. En local. Dans la CLI d'IA que tu utilises déjà. <a href="docs/RUNNING_ON_A_BUDGET.md">Modèles gratuits et locaux inclus.</a></sub></p>
+
+
+## Tu n'as pas à chercher seul
+
+Le silence après avoir cliqué sur envoyer ne dit rien de toi. Assez de gens ont vu la même chose pour écrire la pratique noir sur blanc, en six lignes :
+
+> Mieux postuler, à moins d'offres. Le signal plutôt que le volume. Les preuves plutôt que les mots-clés. Un humain décide. Local d'abord. La dignité des deux côtés de la table.
+
+<p align="center"><a href="https://career-ops.org/manifesto?utm_source=readme"><img src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2FSIGNATURES.md&search=n%3A(%5Cd%2B)%5Cs*%24&replace=%241%20signatories&label=THE%20CAREEROPS%20MANIFESTO&color=DD7627&style=for-the-badge&labelColor=2b3137" alt="Le manifeste CareerOps : nombre de signataires en direct"></a></p>
+
+<p align="center">Quelques-uns d'entre eux, avec leurs propres mots.</p>
 
 <p align="center">
-  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
-  &nbsp;&nbsp;
-  <a href="https://trendshift.io/repositories/25195" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+  <a href="https://career-ops.org/manifesto?utm_source=readme"><img src="docs/manifesto-wall.svg" alt="Trois signatures du manifeste CareerOps, avec leurs propres mots" width="800"></a>
 </p>
 
-<p align="center"><sub>Créé et maintenu par <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
+<p align="center"><sub>Chaque signature est un commit que tu peux auditer. <a href="https://career-ops.org/manifesto?utm_source=readme">Les lire toutes, ou ajouter la tienne →</a></sub></p>
 
-## Qu'est-ce que c'est
+<br>
 
-career-ops ([career-ops.org](https://career-ops.org), aussi connu sous le nom de **careerops**) est une recherche d'emploi par IA, open source, qui tourne en local dans n'importe quelle CLI de codage IA : elle évalue les offres, adapte ton CV et suit chaque candidature, et c'est toujours toi qui as le dernier mot. Au lieu de suivre tes candidatures à la main dans un tableur, tu obtiens un pipeline propulsé par l'IA qui :
+Le recrutement ne se réparera pas tout seul. Les gens qui le subissent, eux, le peuvent, et ils sont déjà dans la salle, à comparer leurs notes et à réparer les setups les uns des autres. [C'est ici que le correctif s'écrit](CONTRIBUTING.md). Une salle, pas un club. **Construisons ensemble.**
 
-- **Évalue les offres** dans un rapport structuré : blocs A à H, avec un score global de 1 à 5 obtenu par un jugement d'ensemble sur cinq dimensions plutôt que par une formule arithmétique. La colonne d'importance par exigence du bloc B et l'évaluation de légitimité de l'annonce du bloc G sont deux signaux à part, neutres pour le score, qui ne l'affectent jamais ; le bloc H n'est rédigé qu'à partir de 4,5
-- **Génère des PDF sur mesure** : des CV optimisés pour les ATS, personnalisés pour chaque description de poste
-- **Scanne les portails** automatiquement (Greenhouse, Ashby, Lever, pages carrières des entreprises)
-- **Traite par lots** : évalue 10+ offres en parallèle avec des sous-agents
-- **Suit tout** dans une source de vérité unique avec des contrôles d'intégrité
-- **Recherche les entreprises et trouve la bonne personne à contacter** : la candidature te met dans la file d'attente ; la recherche t'obtient une conversation
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord : nombre de membres du serveur career-ops en direct"></a></p>
 
-> **Important : ce n'est PAS un outil pour postuler en rafale.** career-ops est un filtre : il t'aide à trouver, parmi des centaines d'offres, les quelques-unes qui valent ton temps. Le système déconseille fortement de postuler à tout ce qui obtient moins de 4,0/5. Ton temps est précieux, et celui du recruteur aussi. Relis toujours avant d'envoyer.
+## Sponsors
 
-career-ops est agentique : la CLI de codage IA de ton choix navigue sur les pages carrières avec Playwright, évalue l'adéquation en raisonnant sur ton CV face à la description du poste (pas de simple correspondance de mots-clés) et adapte ton CV à chaque offre.
+career-ops est gratuit pour les candidats, pour toujours. Les entreprises ci-dessous financent le temps du mainteneur et font que ça le reste.
 
-> **Attention : les premières évaluations ne seront pas fameuses.** Le système ne te connaît pas encore. Donne-lui du contexte : ton CV, ton parcours, tes preuves de réussite, tes préférences, ce que tu sais bien faire, ce que tu veux éviter. Plus tu le nourris, meilleur il devient. Vois ça comme l'intégration d'un nouveau recruteur : la première semaine, il doit apprendre à te connaître, ensuite il devient indispensable.
+<p align="center">
+  <a href="https://serpapi.com/career-ops-org" title="SerpApi"><img src="docs/sponsors/serpapi.svg" alt="SerpApi" height="48"></a>
+</p>
 
-Construit par quelqu'un qui s'en est servi pour évaluer 740 offres, postuler à 68 et décrocher un poste de Head of Applied AI. [Lire l'étude de cas complète](https://santifer.io/career-ops-system).
+<p align="center"><strong>SerpApi</strong> · Build a portfolio project with live search data. SerpApi gives developers structured JSON/Markdown from Google Search, Maps, Shopping, and other engines through a simple API call.</p>
+
+> Le sponsoring achète une visibilité clairement signalée, jamais de l'influence : aucune somme d'argent ne change la feuille de route ni ne place quoi que ce soit dans le produit. Les sponsors n'apparaissent jamais dans les évaluations, les classements ou les recommandations.
+
+## Ce que career-ops fait pour toi
+
+Colle une offre. Il te dit si la soirée en vaut la peine.
+
+- **Fausse ou périmée ?** Il signale les offres fantômes et les arnaques avant que tu n'écrives un mot.
+- **Pas pour toi ?** Il note le poste face à ton vrai CV et te dit de passer si ça colle mal. Tu peux passer outre.
+- **Ça vaut le coup ?** Il rédige le CV, la lettre de motivation et les réponses. Tu les lis. Tu les envoies.
+- **À qui je parle ?** Il trouve la personne et rédige le message. Il ne l'envoie jamais.
+- **Où va tout ça ?** Chaque candidature reste sur ta machine. Rien n'est envoyé chez nous.
+- **Qu'est-ce que je devrais apprendre ?** Après une série de non, il nomme la lacune.
+
+Les premiers passages sont bruts. Il ne te connaît pas encore. Parle-lui : ton CV, ce que tu veux, ce que tu refuses. Vois ça comme la première semaine d'un recruteur.
+
+Au premier lancement, il te demande tout ça dans le chat. Rien à configurer à la main.
 
 ## Ce que career-ops ne fait pas
 
-- **Envoyer une candidature.** Il prépare les réponses ; tu ouvres le formulaire et tu cliques sur Envoyer. Le script ne fait jamais de POST (`prepare-application.mjs`).
+- **Envoyer une candidature automatiquement.** Il rédige la réponse de chaque champ ; tu relis et tu cliques sur Envoyer. Le script ne fait jamais de POST (`prepare-application.mjs`).
 - **Envoyer un e-mail.** Brouillons uniquement. Il n'y a aucun transport de courrier dans ce code.
 - **Téléphoner à la maison.** Pas de télémétrie, pas de backend à nous. Ton CV va de ta machine au fournisseur d'IA que tu as choisi, et nulle part ailleurs. Le seul registre public, c'est ce dépôt : `HIRED.md` et ses issues.
 - **Te pousser à postuler sous 4,0/5.** Il te dira de ne pas le faire. Tu peux passer outre, et il te le dira.
 
 Il reformule ton CV ; il ne doit jamais l'inventer. Aujourd'hui cette règle vit dans les prompts, pas encore dans un contrôle bloquant. Relis chaque CV avant de l'envoyer. Détails dans la [FAQ](#faq).
 
-## Le Manifeste CareerOps
-
-career-ops est la première implémentation de référence du [Manifeste CareerOps](https://career-ops.org/manifesto?utm_source=readme). lis-le. s'il dit ce que tu crois, signe-le. ta signature devient un commit.
-
 ## Fonctionnalités
 
 | Fonctionnalité           | Description                                                                                                                              |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Pipeline automatique** | Colle une URL, obtiens une évaluation complète + PDF + entrée dans le tracker                                                            |
 | **Évaluation A-H**       | Résumé du poste, correspondance avec le CV (avec le poids de chaque exigence pour cette annonce et l'origine de ce poids : formulation de la description, structure ou estimation, indiquée exigence par exigence ; une estimation ne peut jamais atteindre le niveau le plus élevé), stratégie de niveau, recherche de rémunération, personnalisation, préparation à l'entretien (STAR+R), plus une vérification de légitimité de l'annonce au bloc G qui signale les arnaques et les offres fantômes, et un signal d'autorisation de travail qui marque comme bloquant toute description excluant explicitement le parrainage de visa |
-| **Banque d'histoires d'entretien** | Accumule des récits STAR+Réflexion au fil des évaluations : 5 à 10 histoires maîtresses qui répondent à n'importe quelle question comportementale |
-| **Scripts de négociation** | Cadres de négociation salariale, réponse aux décotes géographiques, levier des offres concurrentes                                     |
+| **Human-in-the-Loop**    | L'IA évalue et recommande, tu décides et tu agis. Le système ne soumet jamais une candidature : c'est toujours toi qui as le dernier mot <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->               |
 | **Génération de PDF ATS** | CV avec injection de mots-clés et design Space Grotesk + DM Sans                                                                         |
 | **Générateur de lettres de motivation** | Lettres fondées sur la recherche avec reflet des mots-clés, quatre questions interactives d'angle (pourquoi/problèmes/approche/ton), validation du brouillon dans le chat et PDF A4 via le même pipeline HTML + Playwright que les CV. Rédige un brouillon à chaque évaluation ; complète et génère à la demande avec `/career-ops cover` |
+| **Au-delà du CV**        | La recherche sur l'entreprise ([`deep`](modes/deep.md)) fait remonter sa stratégie IA, ses mouvements récents, sa culture d'ingénierie et l'angle que ton profil devrait adopter. La découverte de contacts ([`contacto`](modes/contacto.md)) identifie le hiring manager, le recruteur ou le pair d'équipe qu'il vaut la peine de contacter et rédige un message LinkedIn de ≤300 caractères adapté à chaque type de contact. Les brouillons d'e-mails formels de candidature ([`email`](modes/email.md)) transforment un rapport évalué ou une description collée en objet, corps et liste de pièces jointes sans rien envoyer, soumettre ni cliquer. La candidature te met dans la file d'attente ; la recherche t'obtient une conversation. |
+| **Analyse des tendances** | Schémas de refus et taux d'avancement par canal ATS (`analyze-patterns.mjs`), statistiques d'entonnoir sur toute la recherche (`stats.mjs`), détection des republications et des offres fantômes (`detect-reposts.mjs`) |
+
+<details>
+<summary><b>Tout le reste</b></summary>
+
+| Fonctionnalité           | Description                                                                                                                              |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Pipeline automatique** | Colle une URL, obtiens une évaluation complète + PDF + entrée dans le tracker                                                            |
+| **Banque d'histoires d'entretien** | Accumule des récits STAR+Réflexion au fil des évaluations : 5 à 10 histoires maîtresses qui répondent à n'importe quelle question comportementale |
+| **Scripts de négociation** | Cadres de négociation salariale, réponse aux décotes géographiques, levier des offres concurrentes                                     |
 | **Brouillons d'e-mails de candidature** | E-mails formels pour recruteur, cooptation ou candidature spontanée à partir d'un rapport ou d'une description collée, avec objet, liste des pièces jointes, points d'adéquation sourcés et bloc de contact issu de ton profil. Brouillon uniquement : career-ops n'envoie, ne soumet et ne clique jamais rien. |
 | **Scanner de portails**  | 100+ entreprises préconfigurées (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + requêtes personnalisées sur Ashby, Greenhouse, Lever, Wellfound |
 | **Découverte d'entreprises financées** | La commande `company:funded`, pensée pour relire avant d'agir, fait remonter les entreprises récemment financées et des diagnostics de source à partir de flux publics structurés, sans toucher à tes données |
 | **Traitement par lots**  | Évaluation en parallèle avec des workers CLI sans interface (`claude -p` / `opencode run`)                                               |
 | **Dashboard TUI**        | Interface terminal pour parcourir, filtrer et trier ton pipeline                                                                         |
-| **Human-in-the-Loop**    | L'IA évalue et recommande, tu décides et tu agis. Le système ne soumet jamais une candidature : c'est toujours toi qui as le dernier mot <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->               |
 | **Intégrité du pipeline** | Fusion automatique, déduplication, normalisation des statuts, contrôles de santé                                                        |
 | **Suite d'entretien**    | Plans de préparation par blocs de temps, sessions d'entraînement avec retour, débriefs après entretien ([`interview/`](modes/interview/README.md)) et un détecteur de signaux d'alerte sur l'entreprise ([`interview-redflag`](modes/interview-redflag.md)) |
 | **Phase d'offre**        | Compagnon de lecture du contrat : parcours clause par clause plus une liste de questions pour l'avocat ([`offer-prep`](modes/offer-prep.md)), et un analyseur d'écart entre salaire souhaité, annoncé et réel (`salary-gap.mjs`) |
 | **Relances et réponses** | Calculateur de cadence de relance et rappels préprogrammés (`followup-cadence.mjs`, `followup-seed.mjs`) ; classification des réponses de l'employeur en mises à jour du tracker ([`reply-watch`](modes/reply-watch.md)) |
-| **Analyse des tendances** | Schémas de refus et taux d'avancement par canal ATS (`analyze-patterns.mjs`), statistiques d'entonnoir sur toute la recherche (`stats.mjs`), détection des republications et des offres fantômes (`detect-reposts.mjs`) |
 | **Système de plugins**   | Intégrations optionnelles (Gmail, Notion, Apify + un registre communautaire), désactivées par défaut ; voir [docs/PLUGINS.md](docs/PLUGINS.md) |
-| **Au-delà du CV**        | La recherche sur l'entreprise ([`deep`](modes/deep.md)) fait remonter sa stratégie IA, ses mouvements récents, sa culture d'ingénierie et l'angle que ton profil devrait adopter. La découverte de contacts ([`contacto`](modes/contacto.md)) identifie le hiring manager, le recruteur ou le pair d'équipe qu'il vaut la peine de contacter et rédige un message LinkedIn de ≤300 caractères adapté à chaque type de contact. Les brouillons d'e-mails formels de candidature ([`email`](modes/email.md)) transforment un rapport évalué ou une description collée en objet, corps et liste de pièces jointes sans rien envoyer, soumettre ni cliquer. La candidature te met dans la file d'attente ; la recherche t'obtient une conversation. |
+
+</details>
 
 ## Démarrage rapide
 
@@ -187,6 +233,79 @@ Cela installe le binaire `career-ops` globalement pour que tu puisses l'exécute
 > **Le système est conçu pour être personnalisé par ta CLI de codage IA elle-même.** Modes, archétypes, pondérations du score, scripts de négociation : demande-lui simplement de les changer. Elle lit les mêmes fichiers qu'elle utilise, donc elle sait exactement quoi éditer.
 
 Voir [docs/SETUP.md](docs/SETUP.md) pour le guide d'installation complet, [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) pour faire tourner career-ops à moindre coût avec des modèles personnalisés ou locaux (et [docs/FREE_TIER.md](docs/FREE_TIER.md) pour le faire tourner gratuitement sur l'offre gratuite d'Antigravity CLI), [docs/AUTOMATION.md](docs/AUTOMATION.md) pour planifier des scans récurrents et une recette de tri vers une liste courte sans dépenser de tokens, [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md) pour les détails du flux de remplissage automatique des ATS, [docs/LINKEDIN_JOIN.md](docs/LINKEDIN_JOIN.md) pour croiser un export de tes relations LinkedIn avec les entreprises de ton entonnoir, et [docs/FAQ.md](docs/FAQ.md) pour les réponses aux questions courantes de configuration, dont [comment la provenance des histoires empêche les chiffres inventés](docs/FAQ.md#why-does-career-ops-refuse-to-use-a-number-from-my-story-bank). Les principes de conception sont dans [ARCHITECTURE.md](ARCHITECTURE.md) ; les flux d'exécution dans [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Utilisation
+
+career-ops utilise un routeur de commandes partagé. Dans les CLI qui enregistrent des commandes slash, ça ressemble à ceci :
+
+```
+/career-ops           → Afficher toutes les commandes disponibles
+/career-ops {JD}      → PIPELINE AUTOMATIQUE : évaluation + rapport + PDF + tracker (colle du texte ou une URL)
+/career-ops pipeline  → Traiter les URL en attente de la boîte d'entrée (data/pipeline.md)
+/career-ops oferta    → Évaluation seule, blocs A à H (sans PDF automatique)
+/career-ops ofertas   → Comparer et classer plusieurs offres
+/career-ops contacto  → Coup de maître LinkedIn : trouver des contacts + rédiger le message
+/career-ops deep      → Prompt de recherche approfondie sur l'entreprise
+/career-ops interview-prep → Générer un document de préparation d'entretien propre à l'entreprise
+/career-ops interview    → Entretien interactif d'intégration du profil et du CV
+/career-ops eu-swe    → Calibrer une candidature SWE européenne avant le CV, la candidature ou l'entretien
+/career-ops eu-fintech → Scanner 21 portails fintech européens pour des postes de Product Manager (sans tokens)
+/career-ops interview/plan → Plan de préparation par blocs de temps pour un entretien à venir
+/career-ops interview/practice → Entretien d'entraînement, une question à la fois avec retour
+/career-ops interview/debrief → Débrief après entretien : combler les lacunes, anticiper le prochain tour
+/career-ops interview-redflag → Analyser les signaux d'alerte de l'employeur avant de rejoindre une entreprise
+/career-ops pdf       → PDF uniquement, CV optimisé pour les ATS
+/career-ops text      → CV adapté en markdown (reflète cv.md, sans PDF)
+/career-ops latex     → Exporter le CV en LaTeX/Overleaf .tex
+/career-ops latex-tex → Adapter ton propre resume.tex sur place (optionnel ; cv.md reste la valeur par défaut)
+/career-ops cover     → Lettre de motivation : description collée seule ou /career-ops cover {slug}
+/career-ops email     → Brouillon d'e-mail formel de candidature (brouillon uniquement ; n'envoie, ne soumet et ne clique jamais)
+/career-ops add       → Ajouter un projet, un article ou un poste à ton CV (récupération + aperçu + confirmation)
+/career-ops expand    → Découvrir et ajouter automatiquement les compétences manquantes à partir des liens de ton profil
+/career-ops training  → Évaluer un cours ou une certification par rapport à ton North Star
+/career-ops project   → Évaluer une idée de projet de portfolio
+/career-ops tracker   → Vue d'ensemble de l'état des candidatures
+/career-ops agent-inbox → Mettre en file ou vider les demandes pour la prochaine session (data/agent-inbox.md)
+/career-ops apply     → Assistant de candidature en direct (lit le formulaire + génère les réponses)
+/career-ops scan      → Scanner les portails et découvrir de nouvelles offres
+/career-ops discover  → Convertir une liste d'entreprises en tableaux ATS scannables + les ajouter à portals.yml (sans tokens)
+/career-ops batch     → Traitement par lots avec des workers en parallèle
+/career-ops patterns  → Analyser les schémas de refus et améliorer le ciblage
+/career-ops offer-prep → Lire une offre ou un contrat reçu avec le candidat : parcours des clauses + questions pour l'avocat (pas un conseil juridique)
+/career-ops titles    → Suggérer des intitulés de poste voisins à partir de ton CV pour élargir la recherche
+/career-ops upskill   → Analyse agrégée des lacunes de compétences à partir de tes rapports évalués
+/career-ops followup  → Suivi de la cadence de relance : signaler les retards, générer des brouillons
+/career-ops reply-watch → Classer les réponses de l'employeur et suggérer des mises à jour du tracker
+/career-ops outcome   → Enregistrer le résultat de la candidature et archiver les artefacts
+/career-ops calibrate → Rapport consultatif : tes scores d'évaluation prédisent-ils tes résultats réels ? Lit les données /outcome ; ne modifie jamais le scoring
+/career-ops update    → Mettre à jour les fichiers système de career-ops avec aperçu du diff + contrôle de compatibilité
+```
+
+Ou colle simplement une URL ou une description de poste : career-ops la détecte automatiquement et lance le pipeline complet.
+
+Dans Codex, les commandes slash ne sont pas garanties. Utilise plutôt les mêmes noms de mode dans un prompt, ou appelle-les depuis `codex exec`.
+
+## Comment ça fonctionne
+
+```
+You paste a job URL or description
+        │
+        ▼
+┌──────────────────┐
+│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
+│  Detection       │
+└────────┬─────────┘
+         │
+┌────────▼─────────┐
+│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
+│  (reads cv.md)   │
+└────────┬─────────┘
+         │
+    ┌────┼────┐
+    ▼    ▼    ▼
+ Report  PDF  Tracker
+  .md   .pdf  entry
+```
 
 ## Intégration Antigravity CLI
 
@@ -281,79 +400,6 @@ npm run gemini:eval -- "JD text here"
 ```
 
 > **Offre gratuite :** les deux options fonctionnent sans facturation. La CLI native utilise Google OAuth ; le script API utilise `gemini-3.6-flash` (les limites de débit dépendent du modèle et du palier ; consulte la documentation Google AI pour les quotas en vigueur).
-
-## Utilisation
-
-career-ops utilise un routeur de commandes partagé. Dans les CLI qui enregistrent des commandes slash, ça ressemble à ceci :
-
-```
-/career-ops           → Afficher toutes les commandes disponibles
-/career-ops {JD}      → PIPELINE AUTOMATIQUE : évaluation + rapport + PDF + tracker (colle du texte ou une URL)
-/career-ops pipeline  → Traiter les URL en attente de la boîte d'entrée (data/pipeline.md)
-/career-ops oferta    → Évaluation seule, blocs A à G (sans PDF automatique)
-/career-ops ofertas   → Comparer et classer plusieurs offres
-/career-ops contacto  → Coup de maître LinkedIn : trouver des contacts + rédiger le message
-/career-ops deep      → Prompt de recherche approfondie sur l'entreprise
-/career-ops interview-prep → Générer un document de préparation d'entretien propre à l'entreprise
-/career-ops interview    → Entretien interactif d'intégration du profil et du CV
-/career-ops eu-swe    → Calibrer une candidature SWE européenne avant le CV, la candidature ou l'entretien
-/career-ops eu-fintech → Scanner 21 portails fintech européens pour des postes de Product Manager (sans tokens)
-/career-ops interview/plan → Plan de préparation par blocs de temps pour un entretien à venir
-/career-ops interview/practice → Entretien d'entraînement, une question à la fois avec retour
-/career-ops interview/debrief → Débrief après entretien : combler les lacunes, anticiper le prochain tour
-/career-ops interview-redflag → Analyser les signaux d'alerte de l'employeur avant de rejoindre une entreprise
-/career-ops pdf       → PDF uniquement, CV optimisé pour les ATS
-/career-ops text      → CV adapté en markdown (reflète cv.md, sans PDF)
-/career-ops latex     → Exporter le CV en LaTeX/Overleaf .tex
-/career-ops latex-tex → Adapter ton propre resume.tex sur place (optionnel ; cv.md reste la valeur par défaut)
-/career-ops cover     → Lettre de motivation : description collée seule ou /career-ops cover {slug}
-/career-ops email     → Brouillon d'e-mail formel de candidature (brouillon uniquement ; n'envoie, ne soumet et ne clique jamais)
-/career-ops add       → Ajouter un projet, un article ou un poste à ton CV (récupération + aperçu + confirmation)
-/career-ops expand    → Découvrir et ajouter automatiquement les compétences manquantes à partir des liens de ton profil
-/career-ops training  → Évaluer un cours ou une certification par rapport à ton North Star
-/career-ops project   → Évaluer une idée de projet de portfolio
-/career-ops tracker   → Vue d'ensemble de l'état des candidatures
-/career-ops agent-inbox → Mettre en file ou vider les demandes pour la prochaine session (data/agent-inbox.md)
-/career-ops apply     → Assistant de candidature en direct (lit le formulaire + génère les réponses)
-/career-ops scan      → Scanner les portails et découvrir de nouvelles offres
-/career-ops discover  → Convertir une liste d'entreprises en tableaux ATS scannables + les ajouter à portals.yml (sans tokens)
-/career-ops batch     → Traitement par lots avec des workers en parallèle
-/career-ops patterns  → Analyser les schémas de refus et améliorer le ciblage
-/career-ops offer-prep → Lire une offre ou un contrat reçu avec le candidat : parcours des clauses + questions pour l'avocat (pas un conseil juridique)
-/career-ops titles    → Suggérer des intitulés de poste voisins à partir de ton CV pour élargir la recherche
-/career-ops upskill   → Analyse agrégée des lacunes de compétences à partir de tes rapports évalués
-/career-ops followup  → Suivi de la cadence de relance : signaler les retards, générer des brouillons
-/career-ops reply-watch → Classer les réponses de l'employeur et suggérer des mises à jour du tracker
-/career-ops outcome   → Enregistrer le résultat de la candidature et archiver les artefacts
-/career-ops calibrate → Rapport consultatif : tes scores d'évaluation prédisent-ils tes résultats réels ? Lit les données /outcome ; ne modifie jamais le scoring
-/career-ops update    → Mettre à jour les fichiers système de career-ops avec aperçu du diff + contrôle de compatibilité
-```
-
-Ou colle simplement une URL ou une description de poste : career-ops la détecte automatiquement et lance le pipeline complet.
-
-Dans Codex, les commandes slash ne sont pas garanties. Utilise plutôt les mêmes noms de mode dans un prompt, ou appelle-les depuis `codex exec`.
-
-## Comment ça fonctionne
-
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
 
 ## Portails préconfigurés
 
@@ -465,6 +511,33 @@ Le dashboard TUI en Go, les scripts Node.js et les modes d'agent IA respectent t
 - **Dashboard** : Go + Bubble Tea + Lipgloss (thème Catppuccin Mocha)
 - **Données** : tableaux Markdown + configuration YAML + fichiers TSV de lot
 
+<p align="center">
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+</p>
+
+<p align="center">
+  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
+</p>
+
+<p align="center">
+  <sub>Fonctionne aussi dans toute CLI compatible avec le standard des agent skills. Voir <a href="docs/SUPPORTED_CLIS.md">CLI prises en charge</a>.</sub><br>
+  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
+  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
+  <img src="https://img.shields.io/badge/Antigravity_CLI-4285F4?style=flat&logo=google&logoColor=white" alt="Antigravity CLI">
+  <img src="https://img.shields.io/badge/Codex-412991?style=flat&logo=openai&logoColor=white" alt="Codex">
+  <img src="https://img.shields.io/badge/Qwen-615CED?style=flat" alt="Qwen">
+  <img src="https://img.shields.io/badge/Kimi-FF4B4B?style=flat" alt="Kimi">
+  <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
+  <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
+  <br>
+  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
+  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
+  <img src="https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white" alt="Bubble Tea">
+  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
+  <a href="TRADEMARK.md"><img src="https://img.shields.io/badge/Trademark-Policy-blue.svg" alt="Trademark Policy"></a>
+</p>
+
 ## Également en open source
 
 - **[cv-santiago](https://github.com/santifer/cv-santiago)** : le site portfolio (santifer.io) avec chatbot IA, tableau de bord LLMOps et études de cas. Si tu as besoin d'un portfolio pour accompagner ta recherche d'emploi, forke-le et fais-en le tien.
@@ -472,7 +545,7 @@ Le dashboard TUI en Go, les scripts Node.js et les modes d'agent IA respectent t
 ## FAQ
 
 **Qu'est-ce que career-ops ?**
-career-ops est une recherche d'emploi par IA, open source, qui tourne en local dans ta CLI de codage IA (Claude Code, Codex, OpenCode et autres) et te laisse chaque décision. Il évalue les offres face à ton CV, génère des PDF adaptés aux ATS, trouve la bonne personne à contacter et suit tout au même endroit : c'est toujours toi qui as le dernier mot. C'est la première implémentation de référence du Manifeste CareerOps. Plus d'infos sur [career-ops.org](https://career-ops.org).
+career-ops ([career-ops.org](https://career-ops.org), aussi connu sous le nom de **careerops**) est une recherche d'emploi par IA, open source, qui tourne en local dans ta CLI de codage IA (Claude Code, Codex, OpenCode et autres) et te laisse chaque décision. Il évalue les offres face à ton CV, génère des PDF adaptés aux ATS, trouve la bonne personne à contacter et suit tout au même endroit : c'est toujours toi qui as le dernier mot. C'est la première implémentation de référence du [Manifeste CareerOps](https://career-ops.org/manifesto).
 
 **Le CV personnalisé peut-il inventer des choses ?**
 Il ne doit pas, et les prompts le disent : reformuler, jamais inventer. Cette règle n'est pas encore imposée par un contrôle dans le code. Deux issues ouvertes la suivent : [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (les intitulés de poste doivent correspondre à cv.md) et [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (contrôle de fidélité bloquant). Tant qu'elles ne sont pas fusionnées, relis chaque CV avant de l'envoyer. L'[avertissement légal](LEGAL_DISCLAIMER.md) dit la même chose en plus long.
@@ -535,7 +608,7 @@ Le code est distribué sous [Licence MIT](LICENSE). Le nom et la marque
 permissive pour l'usage communautaire, réservée pour la dénomination de
 produits commerciaux et les endossements.
 
-## Reconnaissance
+## Historique des étoiles
 
 <p align="center">
   <a href="https://warpchart.dev/hq">
@@ -546,36 +619,7 @@ produits commerciaux et les endossements.
   </a>
 </p>
 
-<p align="center">
-  <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Join_the_community-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
-</p>
-
-<p align="center">
-  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
-</p>
-
-<p align="center">
-  <sub>Tourne aussi sur n'importe quelle CLI conforme au standard agent-skill. Voir <a href="docs/SUPPORTED_CLIS.md">CLI prises en charge</a>.</sub><br>
-  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
-  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
-  <img src="https://img.shields.io/badge/Antigravity_CLI-4285F4?style=flat&logo=google&logoColor=white" alt="Antigravity CLI">
-  <img src="https://img.shields.io/badge/Codex-412991?style=flat&logo=openai&logoColor=white" alt="Codex">
-  <img src="https://img.shields.io/badge/Qwen-615CED?style=flat" alt="Qwen">
-  <img src="https://img.shields.io/badge/Kimi-FF4B4B?style=flat" alt="Kimi">
-  <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
-  <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
-  <br>
-  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
-  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
-  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
-  <img src="https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white" alt="Bubble Tea">
-  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
-  <a href="TRADEMARK.md"><img src="https://img.shields.io/badge/Trademark-Policy-blue.svg" alt="Trademark Policy"></a>
-</p>
+<p align="center"><sub>Créé et maintenu par <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
 
 ## Connectons-nous
 
