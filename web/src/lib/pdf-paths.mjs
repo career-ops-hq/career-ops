@@ -21,16 +21,18 @@ export function slugify(s) {
 
 /**
  * @typedef {Object} PdfPaths
+ * @property {string} reportNum - Canonical report number, used for filenames and the PDF manifest.
+ * @property {string} reportFile - Resolved report path relative to the data root, used by the tailoring prompt.
  * @property {string} html - Where the backend writes the tailored HTML it parsed out of the agent's envelope (#2185).
- * @property {string} finalPdf - Where the backend renders the final PDF (output/cv-{candidate}-{company}-{date}.pdf).
+ * @property {string} finalPdf - Where the backend renders the final PDF (output/cv-{candidate}-{report}-{company}-{date}.pdf).
  */
 
 /**
  * Precompute the scratch HTML and final PDF paths for a
  * "pdf" run, so the agent never chooses its own filenames — the backend owns
- * naming, writing (#2185) and rendering. Resolves the report (for the company slug)
- * and config/profile.yml (for the candidate slug) — same naming convention
- * modes/pdf.md documents, so web and CLI output stay byte-identical.
+ * naming, writing (#2185) and rendering. Resolves the report for its identity
+ * and company slug, and config/profile.yml for the candidate slug. Including
+ * the report number keeps same-company CVs generated on one day separate.
  *
  * Framework-agnostic: returns a result instead of constructing a Response, so
  * the caller (a Next.js route today) decides how to surface `ok: false`.
@@ -39,7 +41,7 @@ export function slugify(s) {
  * exist yet (the backend writes the parsed envelope there, #2185) — this is
  * NOT a pure path computation, despite the name.
  *
- * @param {string} input - The report number (e.g. "018").
+ * @param {string} input - The application/report selector (e.g. "018").
  * @param {string} today - YYYY-MM-DD.
  * @param {string} root - careerOpsRoot().
  * @param {(input: string) => string | null} findReportFile - career-ops.ts's findReportFile.
@@ -49,8 +51,7 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
   // Reject anything but a bare report number before it ever reaches a path.
   // findReportFile()'s parseInt-based matching can still resolve a crafted
   // selector like "123/../../etc/passwd" to a legitimate report file, but the
-  // raw string is also used verbatim below to build cv-web-${input}.html —
-  // path.join would then honor those ".." segments and escape scratchDir.
+  // selector must never become a path segment unless it is purely numeric.
   if (!/^\d+$/.test(input)) {
     return { ok: false, error: `Invalid report selector: "${input}"` };
   }
@@ -58,7 +59,14 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
   if (!reportFile) {
     return { ok: false, error: `No report #${input} found — evaluate this posting first.` };
   }
-  const companyMatch = path.basename(reportFile).match(/^\d+-(.+)-\d{4}-\d{2}-\d{2}\.md$/);
+  const reportName = path.basename(reportFile);
+  // A tracker application can point to a differently numbered report. Use
+  // that resolved report's number, not the selector, for the file and manifest.
+  // Normalize padding without converting to Number, which can lose digits.
+  const reportNum = (reportName.match(/^(\d+)-/)?.[1] ?? input)
+    .replace(/^0+(?=\d)/, "")
+    .padStart(3, "0");
+  const companyMatch = reportName.match(/^\d+-(.+)-\d{4}-\d{2}-\d{2}\.md$/);
   const companySlug = companyMatch ? companyMatch[1] : "company";
   let candidateSlug = "candidate";
   try {
@@ -81,8 +89,10 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
   return {
     ok: true,
     paths: {
-      html: path.join(scratchDir, `cv-web-${input}.html`),
-      finalPdf: path.join(root, "output", `cv-${candidateSlug}-${companySlug}-${today}.pdf`),
+      reportNum,
+      reportFile: path.relative(root, reportFile).split(path.sep).join("/"),
+      html: path.join(scratchDir, `cv-web-${reportNum}.html`),
+      finalPdf: path.join(root, "output", `cv-${candidateSlug}-${reportNum}-${companySlug}-${today}.pdf`),
     },
   };
 }
