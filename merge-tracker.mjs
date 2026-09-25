@@ -25,7 +25,7 @@ import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex } from './find.mjs';
-import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
+import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber } from './tracker-parse.mjs';
 // Corporate-form vocabulary, shared with invite-match.mjs rather than copied,
 // for the same reason normalizeCompany lives in tracker-utils: a second private
 // list is how company identity drifts between scripts (#2445, #3665).
@@ -88,8 +88,11 @@ function loadFailedReportNumbers(path) {
     const status = cols[2];
     const reportNum = cols[5];
     if (status === 'failed' && reportNum && reportNum !== '-') {
-      const n = parseInt(reportNum, 10);
-      if (!isNaN(n)) failed.add(n);
+      // Digits only, positive, safe: parseInt would accept "12abc" and
+      // 9007199254740992, and an unsafe number in the occupied set makes
+      // reserveReportNumbers throw "No safe report-number range remains".
+      const n = /^\d+$/.test(reportNum) ? Number(reportNum) : NaN;
+      if (Number.isSafeInteger(n) && n > 0) failed.add(n);
     }
   }
   return failed;
@@ -282,34 +285,6 @@ function resolveReportUrl(reportField) {
   // into the column would hand every such row the same key.
   const raw = m[1].replace(/^<|>$/g, '').replace(/[),.;]+$/, '');
   return normalizeUrl(raw) ? { url: raw, reason: 'ok' } : { url: '', reason: 'no-url' };
-}
-
-// Matches the req/job-number labels actually seen in this tracker's free-text
-// Notes column: `R_1488728`, `Req PRACT011038`, `Req #1311`, `REQ-2026-32061`,
-// `Job 202606-116491`, `Job ID 65136`, `Posting ID 5340`, `JR00124259`,
-// `Ref R2857957`. The label is required so we don't grab an unrelated number
-// (a salary figure, a date fragment) — only text explicitly tagged as a
-// req/job/posting/reference id counts.
-const REQ_NUMBER_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?|r_)[\s:#_-]*([a-z][a-z0-9-]*\d[a-z0-9-]*|\d[a-z0-9-]*)\b/i;
-
-/**
- * Extract a req/job/posting number from a tracker Notes cell, if present.
- *
- * Tier-3 duplicate detection (company + fuzzy role match) has no awareness of
- * req numbers on its own, which lets two distinct postings at the same company
- * with similarly-worded titles collapse into one row (#1524 — e.g. two TD Bank
- * L&D postings distinguished only by `R_1494379` vs `R_1488728`). This helper
- * pulls out that number so the caller can treat a confirmed mismatch as proof
- * the rows are NOT duplicates, without touching cases where no number is
- * present on either side.
- *
- * @param {string} notes - Raw Notes cell from a tracker row or TSV addition.
- * @returns {string|null} Uppercased req/job number, or null when none is found.
- */
-function extractReqNumber(notes) {
-  if (!notes) return null;
-  const m = String(notes).match(REQ_NUMBER_RE);
-  return m ? m[1].toUpperCase() : null;
 }
 
 /**

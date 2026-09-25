@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { isRealISODate, localISODate } from "@/lib/followups";
+import { parseFollowupId } from "@/lib/followup-id.mjs";
 import { followupsLogPath, withFollowupsWrite, followupsWriteError } from "@/lib/followups-server";
 
 export const runtime = "nodejs";
@@ -23,8 +24,8 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const appNum = Number.parseInt(String(body.appNum ?? ""), 10);
-  if (!Number.isInteger(appNum) || appNum < 0) {
+  const appNum = parseFollowupId(body.appNum);
+  if (appNum === null) {
     return Response.json({ error: "appNum (application #) required" }, { status: 400 });
   }
   const date = (body.date ?? "").trim();
@@ -59,8 +60,8 @@ export async function DELETE(req: Request) {
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const appNum = Number.parseInt(String(body.appNum ?? ""), 10);
-  if (!Number.isInteger(appNum) || appNum < 0) {
+  const appNum = parseFollowupId(body.appNum);
+  if (appNum === null) {
     return Response.json({ error: "appNum (application #) required" }, { status: 400 });
   }
 

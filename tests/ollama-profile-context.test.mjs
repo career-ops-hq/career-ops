@@ -34,6 +34,10 @@ for (const relativePath of [
   // path-resolver.mjs (CAREER_OPS_ROOT), so the fixture carries that too.
   'path-resolver.mjs',
   'lib/context-budget.mjs',
+  // ollama-eval builds its tracker-addition row with the shared helpers
+  // (#3796), so the fixture has to carry the module they were consolidated
+  // into -- same reason pipeline-lock.mjs is on this list.
+  'lib/tracker-addition.mjs',
   // reserve-report-num.mjs's main-guard comes from lib/is-main-module.mjs
   // (#3170), so a fixture that carries it has to carry the helper too.
   'lib/is-main-module.mjs',

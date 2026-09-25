@@ -257,9 +257,9 @@ const CROSS_REF_LOOKBACK = 120;
 // identifier for THIS row, not a pointer at another tracker row. Anchored at the
 // end so it only matches a label sitting directly before the `#`, and the
 // separator excludes `.!?` so a sentence boundary cannot be swallowed into it.
-// Same vocabulary as merge-tracker.mjs's REQ_NUMBER_RE, which reads the same
+// Same vocabulary as tracker-parse.mjs's REQ_NUMBER_RE (used by merge-tracker.mjs), which reads the same
 // Notes column.
-const REQ_LABELLED_HASH_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?)[\s:_-]*$/i;
+const REQ_LABELLED_HASH_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?|r_)[\s:_-]*$/i;
 
 /**
  * Whether the apply-date at `index` is being cited ABOUT ANOTHER ROW.
@@ -309,7 +309,7 @@ function isCrossReferencedMention(text, index) {
     // "Req #1311 - applied 2026-08-06" is this row's own posting id followed by
     // this row's own date, and reading it as a cross-reference would discard a
     // genuine date. The label vocabulary is the one merge-tracker.mjs already
-    // recognises in this same Notes column (REQ_NUMBER_RE), kept in sync by
+    // recognises in this same Notes column (tracker-parse.mjs REQ_NUMBER_RE), kept in sync by
     // being written the same way rather than imported — merge-tracker's regex
     // also captures the id itself, which is not wanted here.
     if (REQ_LABELLED_HASH_RE.test(window.slice(0, m.index))) continue;
@@ -795,7 +795,12 @@ export function computeNextFollowupDate(status, appDate, lastFollowupDate, follo
 export function analyzeFromContent(trackerContent, followupsContent = '') {
   const apps = parseTrackerContent(trackerContent);
   if (apps.length === 0) {
-    return { error: 'No applications found in tracker.' };
+    // cadenceDefaults rides along on the error. It is a constant, so it is just
+    // as valid with no applications as with a hundred, and this is the ONE
+    // state where a consumer cannot do without it: on a first run the web
+    // cadence form has no profile overrides to fall back on either, so
+    // withholding it renders six empty fields with nothing to type back in.
+    return { error: 'No applications found in tracker.', cadenceDefaults: DEFAULT_CADENCE };
   }
 
   const followups = parseFollowups(followupsContent);

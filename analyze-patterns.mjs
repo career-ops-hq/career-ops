@@ -20,7 +20,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
-import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -79,21 +79,11 @@ const USAGE = `Usage:
 
 // --- CLI args ---
 const summaryMode = args.includes('--summary');
-const MIN_THRESHOLD = (() => {
-  const raw = flagValue(args, '--min-threshold');
-  if (raw === undefined) return 5;
 
-  const value = parseInt(raw, 10);
-  return Number.isNaN(value) ? 5 : value;
-})();
-
-const MIN_VENDOR_N = (() => {
-  const raw = flagValue(args, '--min-vendor-n');
-  if (raw === undefined) return 8;
-
-  const value = parseInt(raw, 10);
-  return Number.isNaN(value) || value < 1 ? 8 : value;
-})();
+// CLI values stay at their defaults when this module is imported by tests.
+// Parsing/validation is performed only in the main-module guard below.
+let MIN_THRESHOLD = 5;
+let MIN_VENDOR_N = 8;
 
 // --- Status normalization (mirrors verify-pipeline.mjs) ---
 const ALIASES = {
@@ -1679,6 +1669,27 @@ if (isMainModule(import.meta.url)) {
     valueFlags: VALUE_FLAGS,
     requireOperand: true,
   });
+
+  const rawMinThreshold = flagValue(args, '--min-threshold');
+  const rawMinVendorN = flagValue(args, '--min-vendor-n');
+
+  if (hasFlag(args, '--min-threshold')) {
+    if (rawMinThreshold === undefined || !/^\d+$/.test(String(rawMinThreshold)) ||
+        !Number.isSafeInteger(Number(rawMinThreshold))) {
+      console.error(`Error: --min-threshold requires a non-negative integer, got "${rawMinThreshold ?? ''}"`);
+      process.exit(1);
+    }
+    MIN_THRESHOLD = Number(rawMinThreshold);
+  }
+
+  if (hasFlag(args, '--min-vendor-n')) {
+    if (rawMinVendorN === undefined || !/^\d+$/.test(String(rawMinVendorN)) ||
+        !Number.isSafeInteger(Number(rawMinVendorN)) || Number(rawMinVendorN) < 1) {
+      console.error(`Error: --min-vendor-n requires a positive integer, got "${rawMinVendorN ?? ''}"`);
+      process.exit(1);
+    }
+    MIN_VENDOR_N = Number(rawMinVendorN);
+  }
 
   if (args.includes('--self-test')) {
     runSelfTest();
