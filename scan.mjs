@@ -2118,9 +2118,8 @@ export const ANY_REQUISITION = '*';
  *   Guessing one form was wrong in both directions: stripping changed the
  *   Lever ID, while keeping only the suffix-bearing form missed Workday.
  *
- * The suffix rule (`stripWorkdayRepostSuffix`) only fires when the part before
- * the hyphen is already requisition-shaped, so Walmart's `R-2593225` is one
- * form on every path.
+ * The suffix rule (`stripWorkdayRepostSuffix`) only strips a one- or
+ * two-digit tail, so Walmart's `R-2593225` is one form on every path.
  *
  * Comparison ignores case only: prefixes and punctuation identify distinct
  * requisitions. Bare JR/R_ tokens retain the prefix consumed as a label by
