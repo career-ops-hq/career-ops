@@ -111,7 +111,8 @@ async function testDeadPostingOutcome() {
       mockBrowser,
       '- [ ] https://example.com/job | Acme Corp | Senior Engineer',
       1,
-      async () => '---DEAD_POSTING---\nThis posting has expired.'
+      async () => '---DEAD_POSTING---\nThis posting has expired.',
+      async () => ({ result: 'expired' })
     );
 
     if (result.processed && result.outcome === 'dead-posting'
@@ -120,6 +121,45 @@ async function testDeadPostingOutcome() {
     } else {
       fail(`dead-posting marker returned unexpected result: ${JSON.stringify(result)}`);
     }
+    let pagesClosed = 0;
+    const goneBrowser = {
+      newPage: async () => {
+        let reads = 0;
+        return {
+          url: () => 'https://example.com/job', route: async () => {},
+          goto: async () => ({ status: () => 410 }),
+          waitForTimeout: async () => {},
+          evaluate: async () => ++reads === 1 ? 'This job has expired. '.repeat(8) : [],
+          close: async () => { pagesClosed++; }
+        };
+      }
+    };
+    const verified = await processOffer(goneBrowser,
+      '- [ ] https://example.com/job', 2, async () => '---DEAD_POSTING---');
+    if (verified.processed && verified.outcome === 'dead-posting' && pagesClosed === 2) {
+      pass('default liveness verifier confirms HTTP 410 and closes both pages');
+    } else { fail(`default verifier failed: ${JSON.stringify(verified)}, closed=${pagesClosed}`); }
+    const urlOnly = '- [ ] https://example.com/job';
+    const closed = await processOffer(mockBrowser, urlOnly, 2,
+      async () => '---DEAD_POSTING---', async () => ({ result: 'expired' }));
+    if (closed.line === '- [x] ~~https://example.com/job~~ — oferta nieaktywna') {
+      pass('URL-only closed posting preserves its source URL');
+    } else { fail(`lost source URL: ${closed.line}`); }
+    for (const verdict of ['active', 'uncertain']) {
+      const pending = await processOffer(mockBrowser, urlOnly, 3,
+        async () => '---DEAD_POSTING---', async (_browser, url) => {
+          if (url !== 'https://example.com/job') throw new Error('wrong verification URL');
+          return { result: verdict };
+        });
+      if (!pending.processed && pending.line === urlOnly) {
+        pass(`${verdict} posting stays pending despite model closure marker`);
+      } else { fail(`model closed ${verdict} posting`); }
+    }
+    const failedCheck = await processOffer(mockBrowser, urlOnly, 4,
+      async () => '---DEAD_POSTING---', async () => { throw new Error('verification unavailable'); });
+    if (!failedCheck.processed && failedCheck.line === urlOnly) {
+      pass('liveness verification errors leave the entry pending');
+    } else { fail('verification error closed the entry'); }
     if (!existsSync(PATHS.reports) && !existsSync(PATHS.trackerAdditions)) {
       pass('dead posting writes no report or tracker addition');
     } else {

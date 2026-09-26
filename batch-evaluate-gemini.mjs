@@ -18,7 +18,7 @@ import { fileURLToPath } from 'url';
 import { chromium } from 'playwright';
 import { execFileSync, execFile } from 'child_process';
 import { promisify } from 'util';
-import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
+import { rejectPrivateOrInvalid, checkUrlLiveness, LIVENESS_CONTEXT_OPTIONS } from './liveness-browser.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
@@ -238,7 +238,16 @@ async function evaluateWithRetry(jdText, retries = 5) {
   }
 }
 
-export async function processOffer(browser, line, idx, _evaluate = evaluateWithRetry) {
+async function verifyPostingLiveness(browser, url) {
+  const page = await browser.newPage(LIVENESS_CONTEXT_OPTIONS);
+  try {
+    return await checkUrlLiveness(page, url);
+  } finally {
+    await page.close();
+  }
+}
+
+export async function processOffer(browser, line, idx, _evaluate = evaluateWithRetry, _checkLiveness = verifyPostingLiveness) {
   const match = line.match(/- \[\s*\]\s+(https?:\/\/\S+)(?:\s*\|\s*([^|]+)\s*\|\s*(.+))?/);
   if (!match) return { line, processed: false };
 
@@ -261,7 +270,14 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
 
     // Parse output
     if (/^---DEAD_POSTING---\s*$/m.test(evaluationText)) {
-      const newLine = `- [x] ~~${companyHint} | ${titleHint}~~ — oferta nieaktywna`;
+      // Model output is not evidence: verify the URL independently before
+      // removing an entry from pending work. Uncertain/active entries stay open.
+      const liveness = await _checkLiveness(browser, url);
+      if (liveness?.result !== 'expired') {
+        return { line, processed: false, outcome: 'unconfirmed-dead-posting' };
+      }
+      const label = match[2] ? `${companyHint} | ${titleHint}` : url;
+      const newLine = `- [x] ~~${label}~~ — oferta nieaktywna`;
       console.log(`⏭️ Closed posting: ${companyHint} - ${titleHint}`);
       return { line: newLine, processed: true, outcome: 'dead-posting' };
     }
