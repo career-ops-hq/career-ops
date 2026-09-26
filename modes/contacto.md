@@ -86,6 +86,11 @@ short message; otherwise run the LinkedIn power move below.
    candidate confirming first. Saved contacts export to the phone with
    `node contacts.mjs --vcf` (vCard).
 
+   When the contact comes from a pasted recruiter/interviewer reply, run
+   `node contact-extract.mjs --file <email.txt>` instead. It reuses the reply
+   matcher, confirms before writing, and updates an existing name+company row;
+   it never sends a message or changes tracker status.
+
 **Contact channel preference:** Read `contact_preferences.preferred_channel` from
 `config/profile.yml`. If it is absent or set to `"either"`, write the CTA
 sentence exactly as specified above — no change. If it is set to `"email"` or

@@ -378,6 +378,8 @@ const SYSTEM_PATHS = [
   'reply-watch.mjs',
   'paste-reply.mjs',
   'paste-reply-tests.mjs',
+  'contact-extract.mjs',
+  'contact-extract-tests.mjs',
   'outcome.mjs',
   'batch/batch-prompt.md',
   'batch/batch-runner.sh',

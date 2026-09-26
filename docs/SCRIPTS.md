@@ -457,6 +457,23 @@ Contact line format (TSV, one per line, `#`-prefixed lines are comments):
 
 **Exit codes:** `0` always (an empty/missing store prints an explanatory message and writes no file), `1` self-test failure or a `--vcf` path escaping the project directory.
 
+## contact-extract
+
+Extract a recruiter or interviewer from a pasted reply, attach the contact to a
+matching tracker row, and create or update the corresponding name+company row
+in `data/contacts.tsv`. The script is local-only: it never sends a message and
+never changes application status. Without `--yes`, it asks before writing.
+
+```bash
+node contact-extract.mjs --file email.txt
+node contact-extract.mjs --file email.txt --company "Acme Inc" --tracker 42
+```
+
+The input format is `Subject:`, `From:`, a blank line, then the message body.
+Use `--type recruiter|hiring-manager|peer|interviewer|other` to override the
+inferred type. `--company` and `--tracker` are validated against the same
+tracker row, so a contact cannot be attached across companies.
+
 ---
 
 ## weekly-digest

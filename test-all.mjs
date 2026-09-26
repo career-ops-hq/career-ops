@@ -468,6 +468,7 @@ const scripts = [
   { name: 'agent-inbox-tests.mjs', expectExit: 0 },
   { name: 'followup-seed-tests.mjs', expectExit: 0 },
   { name: 'paste-reply-tests.mjs', expectExit: 0 },
+  { name: 'contact-extract-tests.mjs', expectExit: 0 },
   { name: 'set-status-tests.mjs', expectExit: 0 },
   // The one script in this list that genuinely needs longer than the shared
   // budget. It spawns competing writer processes for 27 contention cases, and
