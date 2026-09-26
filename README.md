@@ -252,6 +252,7 @@ career-ops uses a shared command router. In CLIs that register slash commands, i
 /career-ops deep      → Deep research prompt about company
 /career-ops interview-prep → Generate company-specific interview prep doc
 /career-ops interview    → Interactive profile/CV onboarding interview
+/career-ops master-profile → Import, review, and validate your Master Career Profile
 /career-ops eu-swe    → Calibrate a European SWE application before CV/apply/interview
 /career-ops eu-fintech → Scan 21 EU fintech portals for Product Manager roles (zero-token)
 /career-ops interview/plan → Time-blocked prep plan for an upcoming interview
