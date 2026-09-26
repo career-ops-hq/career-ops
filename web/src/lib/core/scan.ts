@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { rootScript, coreCheckoutRoot } from "@/lib/career-ops";
 import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
@@ -156,7 +157,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
     if (useJson) args.push("--json");
 
     const child = spawn(process.execPath, args, {
-      cwd: careerOpsRoot(),
+      cwd: coreCheckoutRoot(),
       env: { ...process.env, CAREER_OPS_PORTALS: tempPortals },
     });
 
