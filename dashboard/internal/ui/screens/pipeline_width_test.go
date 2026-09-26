@@ -35,6 +35,7 @@ func TestRowWidthMatchesTerminalWidthForEveryColumnCombination(t *testing.T) {
 		Role:        "Senior Backend Engineer",
 		Status:      "Applied",
 		Score:       4.2,
+		HasScore:    true,
 		Location:    "Santa Clara, CA",
 		WorkMode:    "Remote",
 		PayRange:    "$174,986-209,983",

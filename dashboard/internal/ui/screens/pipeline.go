@@ -1786,11 +1786,16 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 	scoreStyle := m.scoreStyle(app.Score)
 	scoreText := fmt.Sprintf("%.1f", app.Score)
 	if !app.HasScore {
+		// Show the tracker's own sentinel (— / N/A / -). Fall back to an em
+		// dash when the cell is empty or too wide for the score column.
 		scoreStyle = lipgloss.NewStyle().Foreground(m.theme.Subtext)
-		scoreText = "\u2014"
+		scoreText = strings.TrimSpace(app.ScoreRaw)
+		if scoreText == "" || lipgloss.Width(scoreText) > 3 {
+			scoreText = "\u2014"
+		}
 	}
-	// Width(3) so the one-rune sentinel occupies the same column as "4.2"
-	// and the row keeps its measured width.
+	// Width(3) so the sentinel occupies the same column as "4.2" and the
+	// row keeps its measured width.
 	score := scoreStyle.Width(3).Render(scoreText)
 
 	// Company (truncate)

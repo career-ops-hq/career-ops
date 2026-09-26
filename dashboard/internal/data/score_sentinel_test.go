@@ -22,14 +22,15 @@ func TestScoreSentinelLeavesHasScoreFalse(t *testing.T) {
 | 2 | 2026-08-11 | EmDash | Software Test Engineer | Munich, DE | — | Evaluated | — | — | no evaluation |
 | 3 | 2026-08-11 | NotAvail | QA Lead | Dublin, IE | N/A | Evaluated | — | — | no evaluation |
 | 4 | 2026-08-11 | Hyphen | SDET | Madrid, ES | - | Evaluated | — | — | no evaluation |
+| 5 | 2026-08-11 | Zero | QA Analyst | Paris, FR | 0/5 | Evaluated | — | — | genuine zero |
 `
 	if err := os.WriteFile(tracker, []byte(content), 0o644); err != nil {
 		t.Fatalf("write tracker: %v", err)
 	}
 
 	apps := ParseApplications(dir)
-	if len(apps) != 4 {
-		t.Fatalf("expected 4 rows, got %d", len(apps))
+	if len(apps) != 5 {
+		t.Fatalf("expected 5 rows, got %d", len(apps))
 	}
 
 	byCompany := map[string]bool{}
@@ -44,6 +45,14 @@ func TestScoreSentinelLeavesHasScoreFalse(t *testing.T) {
 	}
 	if got := scores["Scored"]; got != 4.2 {
 		t.Errorf("Scored: Score = %v, want 4.2", got)
+	}
+
+	// A genuine zero is an evaluation, not an absence.
+	if !byCompany["Zero"] {
+		t.Errorf("Zero: HasScore = false, want true (0/5 is a real score)")
+	}
+	if got := scores["Zero"]; got != 0 {
+		t.Errorf("Zero: Score = %v, want 0", got)
 	}
 
 	for _, company := range []string{"EmDash", "NotAvail", "Hyphen"} {
