@@ -32,6 +32,21 @@ learned. Newest entry on top. Keep the zh-TW twin in sync in the same commit.
 
 ## Entries
 
+### 2026-09-26 — Three more TSMC postings, reports #005–#007
+
+- **Stage:** evaluation
+- **Done:** Full A–H evaluations of three postings the user picked: an agentic AI engineering lead and a
+  digital-transformation manager (both on the **Manager / Executive** track), and an AI product manager
+  (engineer track). The user's local Claude Code session now reads the private data repo, and a CV update
+  pushed from there was picked up before scoring.
+- **System output:** #005 **3.6**, #006 **3.8**, #007 **3.6**. All "Research first". EN + zh-TW, tracker rows,
+  `check-jd-archive.mjs` and `verify-pipeline.mjs` clean.
+- **Learned:** the manager-track postings fit the level target best (#006 carries a real Manager title), and the
+  HackerRank evidence found so far concerns the engineer track. #007 is the third posting that lists a complete
+  process with no coding test. Among the manager-track roles, the recurring gaps are domain (planning and
+  supply chain) and stack (RAG, vector DB, MCP, evals).
+- **Next:** one recruiter call covering grade and process for #003, #005, #006 and #007.
+
 ### 2026-09-26 — Re-score of #003 and a US role, report #004
 
 - **Stage:** evaluation
