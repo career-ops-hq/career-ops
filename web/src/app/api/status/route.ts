@@ -211,12 +211,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "status update returned no result" }, { status: 500 });
   }
 
-  // Response shape is unchanged for existing callers; `changed` and
-  // `statusLogged` are additive.
+  // Response shape is unchanged for existing callers; `changed`,
+  // `statusLogged` and `followupSeeded` are additive.
+  //
+  // followupSeeded is forwarded rather than recomputed: since #3470 the CLI
+  // seeds the follow-up itself on a transition into Applied, so the web
+  // inherits the behaviour by delegating and has nothing of its own to do
+  // here. Building the response from explicit fields is what would otherwise
+  // drop it on the floor — the CLI would report it and no caller would see it.
   return NextResponse.json({
     ok: true,
     status: canon,
     changed: parsed.changed === true,
     statusLogged: parsed.statusLogged === true,
+    ...(parsed.followupSeeded ? { followupSeeded: parsed.followupSeeded } : {}),
   });
 }
