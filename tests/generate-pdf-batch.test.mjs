@@ -432,6 +432,174 @@ await renderHtmlToPdf(${JSON.stringify(htmlDoc('Solo CV'))}, outputPath, {
   } else {
     fail(`results-write failure did not fail the batch: status=${writeFail.status}\n${writeFail.output.trim()}`);
   }
+
+  // ── A global flag the batch path drops must be refused, not ignored ────────
+  //
+  // --report already works this way, with the reason written at its check: one
+  // global value cannot label N distinct documents. --kind is the same shape and
+  // was not covered. runBatchFromManifest is called without it, so
+  // `--batch=... --kind=cover` renders the whole batch under filename inference
+  // and any entry whose name does not look cover-ish is filed as a CV. That row
+  // then supersedes the report's real CV slot in pdf-index.tsv, which is the
+  // silent substitution --kind exists to prevent.
+  const flagManifest = join(sandbox, 'flag-batch.json');
+  writeFileSync(flagManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/flag-a.pdf' },
+  ]), 'utf-8');
+
+  const kindInBatch = run([`--batch=${flagManifest}`, '--kind=cover']);
+  if (kindInBatch.status === 1 && /--kind is not valid with --batch/i.test(kindInBatch.output)) {
+    pass('generate-pdf rejects a global --kind in batch mode instead of silently dropping it');
+  } else {
+    fail(`--kind survived batch mode: status=${kindInBatch.status}\n${kindInBatch.output.trim()}`);
+  }
+
+  // The convention this mirrors, pinned here because nothing else asserted it.
+  const reportInBatch = run([`--batch=${flagManifest}`, '--report=7']);
+  if (reportInBatch.status === 1 && /--report is not valid with --batch/i.test(reportInBatch.output)) {
+    pass('generate-pdf rejects a global --report in batch mode');
+  } else {
+    fail(`--report survived batch mode: status=${reportInBatch.status}\n${reportInBatch.output.trim()}`);
+  }
+
+  // An explicitly EMPTY --kind is still a supplied flag. `kindFlag` holds '',
+  // which is falsy, so a guard written as `if (kindFlag)` waves it through and
+  // the batch runs on filename inference anyway — the exact outcome the
+  // rejection above exists to stop, reached by a different spelling. Supplied
+  // and value are separate questions.
+  const emptyKindBatch = run([`--batch=${flagManifest}`, '--kind=']);
+  if (emptyKindBatch.status === 1) {
+    pass('generate-pdf rejects an explicitly empty --kind in batch mode');
+  } else {
+    fail(`--kind= survived batch mode: status=${emptyKindBatch.status}\n${emptyKindBatch.output.trim()}`);
+  }
+
+  // Same hole on the single-render path. The flag was typed, so falling back to
+  // filename inference silently ignores what the caller asked for.
+  const emptyKindSingle = run(['a.html', 'out/empty-kind.pdf', '--kind=']);
+  if (emptyKindSingle.status === 1 && /Invalid --kind/i.test(emptyKindSingle.output)) {
+    pass('generate-pdf rejects an explicitly empty --kind on a single render');
+  } else {
+    fail(`--kind= survived a single render: status=${emptyKindSingle.status}\n${emptyKindSingle.output.trim()}`);
+  }
+
+  // A BARE `--kind`, with no `=`, matches none of the parser's prefix branches and
+  // falls through to the positional arms. Both are already filled here, so it is
+  // dropped on the floor: the caller asked for a kind, the render infers one from
+  // the filename, and that row replaces the report's CV slot. An absent flag and a
+  // flag missing its operand are different things.
+  const bareKind = run(['a.html', 'out/bare-kind.pdf', '--report=7', '--kind']);
+  if (bareKind.status === 1 && /--kind/i.test(bareKind.output)) {
+    pass('generate-pdf rejects a bare --kind with no value');
+  } else {
+    fail(`bare --kind was swallowed: status=${bareKind.status}\n${bareKind.output.trim()}`);
+  }
+
+  // The same empty-versus-absent hole on the per-entry path. `"kind": ""` is a
+  // supplied key, but the validation reads the VALUE, so it skips and inference
+  // takes over. Fixing the global flag without this one fixes an instance rather
+  // than the class.
+  const emptyEntryManifest = join(sandbox, 'empty-entry-kind.json');
+  writeFileSync(emptyEntryManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/empty-entry.pdf', kind: '' },
+  ]), 'utf-8');
+  const emptyEntry = run([`--batch=${emptyEntryManifest}`]);
+  if (emptyEntry.status === 1 && /kind/i.test(emptyEntry.output)) {
+    pass('generate-pdf rejects a manifest entry whose kind is explicitly empty');
+  } else {
+    fail(`empty entry kind was accepted: status=${emptyEntry.status}\n${emptyEntry.output.trim()}`);
+  }
+
+  // Control: an entry that OMITS kind entirely must still render by inference,
+  // so the two rejections above cannot be passing by refusing every manifest.
+  const omittedEntryManifest = join(sandbox, 'omitted-entry-kind.json');
+  writeFileSync(omittedEntryManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/omitted-entry.pdf' },
+  ]), 'utf-8');
+  const omittedEntry = run([`--batch=${omittedEntryManifest}`]);
+  if (omittedEntry.status === 0) {
+    pass('control: an entry that omits kind still renders by inference');
+  } else {
+    fail(`control failed: omitting kind broke the batch: status=${omittedEntry.status}\n${omittedEntry.output.trim()}`);
+  }
+
+  // The two siblings the same sweep found. reportNum keys the manifest row, so an
+  // empty one is the same silent-inference hazard as kind, and a bare --report is
+  // swallowed exactly as a bare --kind was.
+  const emptyReportManifest = join(sandbox, 'empty-entry-report.json');
+  writeFileSync(emptyReportManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/empty-report.pdf', reportNum: '' },
+  ]), 'utf-8');
+  const emptyReport = run([`--batch=${emptyReportManifest}`]);
+  if (emptyReport.status === 1 && /reportNum/i.test(emptyReport.output)) {
+    pass('generate-pdf rejects a manifest entry whose reportNum is explicitly empty');
+  } else {
+    fail(`empty entry reportNum was accepted: status=${emptyReport.status}\n${emptyReport.output.trim()}`);
+  }
+
+  const bareReport = run(['a.html', 'out/bare-report.pdf', '--report']);
+  if (bareReport.status === 1 && /--report/i.test(bareReport.output)) {
+    pass('generate-pdf rejects a bare --report with no value');
+  } else {
+    fail(`bare --report was swallowed: status=${bareReport.status}\n${bareReport.output.trim()}`);
+  }
+
+  // Control: an entry omitting reportNum still renders, so neither rejection is
+  // passing by refusing everything.
+  const omittedReportManifest = join(sandbox, 'omitted-entry-report.json');
+  writeFileSync(omittedReportManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/omitted-report.pdf' },
+  ]), 'utf-8');
+  if (run([`--batch=${omittedReportManifest}`]).status === 0) {
+    pass('control: an entry that omits reportNum still renders');
+  } else {
+    fail('control failed: omitting reportNum broke the batch');
+  }
+
+  // Order matters, and the bare branch only set a SUPPLIED marker. A valued flag
+  // followed by a bare one left the earlier operand in place, so validation read
+  // '7' or 'cover' and waved the missing operand through. The last occurrence of a
+  // flag is the caller's final intent, and that occurrence has no value.
+  for (const [label, args, want] of [
+    ['--report=7 --report', ['a.html', 'out/ord-a.pdf', '--report=7', '--report'], /Invalid --report/i],
+    ['--kind=cover --kind', ['a.html', 'out/ord-b.pdf', '--kind=cover', '--kind'], /Invalid --kind/i],
+  ]) {
+    const r = run(args);
+    if (r.status === 1 && want.test(r.output)) {
+      pass(`generate-pdf rejects a bare flag that follows a valued one (${label})`);
+    } else {
+      fail(`${label} kept the earlier value: status=${r.status}\n${r.output.trim()}`);
+    }
+  }
+
+  // The other order is NOT an error: the last occurrence carries a value, so that
+  // value is the intent. Without this, "reject any bare occurrence" would look
+  // identical to "clear on bare", and only one of them is right.
+  //
+  // The run has to SUCCEED, not merely avoid the validation message: a render
+  // that died for any other reason also has no "Invalid --report" in its
+  // output, so an absence check alone passes on a build that renders nothing.
+  for (const [label, args] of [
+    ['--report --report=7', ['a.html', 'out/ord-c.pdf', '--report', '--report=7']],
+    ['--kind --kind=cover', ['a.html', 'out/ord-d.pdf', '--kind', '--kind=cover']],
+  ]) {
+    const r = run(args);
+    if (r.status === 0 && !/Invalid --(report|kind)/i.test(r.output)) {
+      pass(`control: a valued flag after a bare one is accepted (${label})`);
+    } else {
+      fail(`${label} was wrongly rejected: status=${r.status}\n${r.output.trim()}`);
+    }
+  }
+
+  // A batch with neither global flag still runs, so the guards above reject the
+  // flag rather than the batch. Without this, both checks would pass on a build
+  // that refused every batch outright.
+  const cleanBatch = run([`--batch=${flagManifest}`]);
+  if (cleanBatch.status === 0) {
+    pass('control: the same batch without a global flag still renders');
+  } else {
+    fail(`control failed: a flagless batch did not run, so the rejections above prove nothing: status=${cleanBatch.status}\n${cleanBatch.output.trim()}`);
+  }
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
 }

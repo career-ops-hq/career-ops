@@ -383,6 +383,9 @@ Usage:
       // different paper because only one of them carried a flag.
       format: args.format,
       reportNum: args.report,
+      // Declared, never inferred: this script always renders a cover letter, and
+      // the manifest must not file it as the report's CV (#3887).
+      kind: 'cover',
       inputPath: payloadPath,
     });
     console.log(`\nCover letter PDF: ${payload.output_path}`);
