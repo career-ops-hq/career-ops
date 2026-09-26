@@ -42,7 +42,9 @@
  * State validation is strict against templates/states.yml (labels, ids, and
  * aliases resolve to the canonical label; anything else is rejected before the
  * tracker is touched). --note appends to the Notes cell with "; " and is
- * idempotent — re-running the same command is always safe.
+ * idempotent — re-running the same command is always safe. With --replace-note
+ * OLD, --note NEW instead corrects matching text in place (including retries
+ * where NEW contains OLD); a missing match fails without writing anything.
  *
  * The read-modify-write runs under the shared tracker lock (tracker-utils.mjs,
  * same lock as merge-tracker.mjs) and the file is replaced atomically. Only the
@@ -116,6 +118,7 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
   --row N            Select by tracker # explicitly (unambiguous; skips the mismatch guard)
   --report N         Select the row whose Report cell links report #N
   --note "..."       Append to the Notes cell ("; "-separated, idempotent)
+  --replace-note "OLD" Replace OLD with --note text; fail if neither is present
   --role "..."       Disambiguate when several rows share the company (fuzzy match)
   --on YYYY-MM-DD    Real event date for the status-log entry (defaults to today —
                      pass it when the transition happened earlier than it's recorded)
@@ -173,8 +176,8 @@ function renderStatesSection() {
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, role: null, on: null, row: null, report: null, source: null, force: false, dryRun: false, json: false };
-const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--source': 'source' };
+const flags = { note: null, replaceNote: null, role: null, on: null, row: null, report: null, source: null, force: false, dryRun: false, json: false };
+const VALUE_FLAGS = { '--note': 'note', '--replace-note': 'replaceNote', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--source': 'source' };
 
 /**
  * Is the caller asking for help, rather than passing "--help" as a VALUE?
@@ -237,6 +240,10 @@ for (let i = 0; i < rawArgs.length; i++) {
   else if (a === '--json') { flags.json = true; }
   else if (a === '-h' || a.startsWith('--')) { failUsage(`Unknown flag: ${a}`); }
   else { positional.push(a); }
+}
+
+if (flags.replaceNote !== null && (!cell(flags.replaceNote) || flags.note === null || !cell(flags.note))) {
+  failUsage('--replace-note requires non-empty OLD and --note NEW values');
 }
 
 // --row and --report ARE the selector, so they replace the positional one.
@@ -565,24 +572,38 @@ const statusChanged = parts[colmap.status] !== newStatus;
 parts[colmap.status] = newStatus;
 
 let noteChanged = false;
+const replacedNote = flags.replaceNote !== null ? cell(flags.replaceNote) : null;
 if (note) {
   if (colmap.notes == null) {
     failWith(EXIT_USAGE, 'no-notes-column', 'Tracker has no Notes column — cannot apply --note');
   }
   const existing = parts[colmap.notes] ?? '';
-  // Delimiter-aware idempotency: the note counts as already present only when
-  // it appears as a whole "; "-delimited entry (or as the entire field) — a
-  // bare substring of a longer entry ("sent" inside "sent CV") must not
-  // suppress a genuinely new note. Matching the full note text at entry
-  // boundaries (instead of splitting the field into segments) keeps retries
-  // idempotent even when the note itself contains "; ".
-  const hasNote = existing === note
-    || existing.startsWith(`${note}; `)
-    || existing.endsWith(`; ${note}`)
-    || existing.includes(`; ${note}; `);
-  if (!hasNote) {
-    parts[colmap.notes] = existing && existing !== '—' && existing !== '-' ? `${existing}; ${note}` : note;
-    noteChanged = true;
+  if (replacedNote !== null) {
+    // Protect already-replaced spans: NEW may itself contain OLD. Replace only
+    // outside those spans so a retry cannot grow the same note again.
+    const updated = note.includes(replacedNote)
+      ? existing.split(note).map(part => part.split(replacedNote).join(note)).join(note)
+      : existing.split(replacedNote).join(note);
+    if (updated === existing && !existing.includes(note)) {
+      failWith(EXIT_USAGE, 'replace-note-not-found', 'Neither --replace-note text nor --note text exists in the Notes cell');
+    }
+    parts[colmap.notes] = updated;
+    noteChanged = updated !== existing;
+  } else {
+    // Delimiter-aware idempotency: the note counts as already present only when
+    // it appears as a whole "; "-delimited entry (or as the entire field) — a
+    // bare substring of a longer entry ("sent" inside "sent CV") must not
+    // suppress a genuinely new note. Matching the full note text at entry
+    // boundaries (instead of splitting the field into segments) keeps retries
+    // idempotent even when the note itself contains "; ".
+    const hasNote = existing === note
+      || existing.startsWith(`${note}; `)
+      || existing.endsWith(`; ${note}`)
+      || existing.includes(`; ${note}; `);
+    if (!hasNote) {
+      parts[colmap.notes] = existing && existing !== '—' && existing !== '-' ? `${existing}; ${note}` : note;
+      noteChanged = true;
+    }
   }
 }
 
@@ -700,6 +721,7 @@ const result = {
   oldStatus,
   newStatus,
   ...(note != null ? { note } : {}),
+  ...(replacedNote !== null ? { replacedNote } : {}),
   ...(flags.dryRun ? { dryRun: true } : {}),
   // Fire the #1430 hook only on an actual transition INTO Applied — an
   // idempotent re-run of an already-Applied row must not invite a consumer
