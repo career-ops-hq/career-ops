@@ -25,7 +25,12 @@ async function withProxyEnv(values, run) {
 }
 
 for (const emptyLowercase of [false, true]) {
-test(`opted-in provider request uses a scoped proxy (empty lowercase: ${emptyLowercase})`, async () => {
+test(`opted-in provider request uses a scoped proxy (empty lowercase: ${emptyLowercase})`, {
+  // Windows aliases HTTP_PROXY and http_proxy, so assigning the empty lowercase
+  // value also clears the uppercase URL. This two-variable state only exists
+  // on platforms with case-sensitive environment variable names.
+  skip: emptyLowercase && process.platform === 'win32',
+}, async () => {
   const destinations = [];
   const proxy = http.createServer();
   proxy.on('connect', (req, socket) => {
