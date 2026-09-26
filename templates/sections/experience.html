@@ -7,6 +7,7 @@
     ROLE             — job title
     BULLETS          — rendered <li> tags
     LOCATION_BLOCK   — conditional: .job-location div when location present; omitted when absent
+    CONTEXT_BLOCK    — conditional: .job-context div (un-bulleted company/scope note) when context present; omitted when absent
 
   Template packs: edit tag names, class names, and field order freely inside the ENTRY zone.
 -->
@@ -18,9 +19,11 @@
   </div>
   <div class="job-role">{{ROLE}}</div>
   {{LOCATION_BLOCK}}
+  {{CONTEXT_BLOCK}}
   <ul>
     {{BULLETS}}
   </ul>
 </div>
 <!--LOCATION_BLOCK--><div class="job-location">{{LOCATION}}</div><!--/LOCATION_BLOCK-->
+<!--CONTEXT_BLOCK--><div class="job-context">{{CONTEXT}}</div><!--/CONTEXT_BLOCK-->
 <!--/ENTRY-->
