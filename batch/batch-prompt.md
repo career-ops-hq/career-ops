@@ -89,8 +89,9 @@ Run these steps in order.
 ### Step 1 — Load the JD
 
 1. Read `{{JD_FILE}}`.
-2. If the file is empty or missing, try to fetch the JD from `{{URL}}` with WebFetch.
-3. If both fail, this is a hard stop — do ALL of the following, in this exact order, and nothing else:
+2. If the file is empty or missing, run `node fetch-jd.mjs "{{URL}}"` from the repo root. It reads the posting through the ATS provider API (Greenhouse, Lever, Ashby, Workday), so it succeeds on the client-rendered pages where the curl prefetch left the file empty. Exit code 0 with text on stdout is a hit: use that text as the JD.
+3. If that also fails, try to fetch the JD from `{{URL}}` with WebFetch.
+4. If all three fail, this is a hard stop — do ALL of the following, in this exact order, and nothing else:
    - Do **NOT** write a report file to `reports/`.
    - Do **NOT** write a tracker TSV line to `batch/tracker-additions/`.
    - Do **NOT** invent, estimate, or guess a score, legitimacy tier, or company/role name for a posting you never actually read — "Unknown" or a placeholder score is still fabrication of a judgment you have no basis for (found 2026-07-30: two workers wrote fake scores like `0.0/5` and `"Suspicious"` for postings they never saw, and the fake rows made it into the tracker).
