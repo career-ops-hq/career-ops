@@ -1,0 +1,8 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e6]:
+    - heading "Sorry, we couldn't find anything here" [level=2] [ref=e7]
+    - paragraph [ref=e8]: The job posting you're looking for might have closed, or it has been removed. (404 error).
+  - link "Jobs powered by Lever logo" [ref=e11] [cursor=pointer]:
+    - /url: https://www.lever.co/job-seeker-support/
+    - generic [ref=e12]: Jobs powered by
+    - img "Lever logo" [ref=e13]

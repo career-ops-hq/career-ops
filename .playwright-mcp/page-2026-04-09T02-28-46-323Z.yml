@@ -1,0 +1,537 @@
+- generic [ref=e2]:
+  - list [ref=e4]:
+    - listitem [ref=e5]:
+      - link "LangChain" [ref=e6] [cursor=pointer]:
+        - /url: https://www.langchain.com/
+        - img "LangChain" [ref=e7]
+    - listitem
+    - listitem
+  - generic [ref=e8]:
+    - status [ref=e10]:
+      - text: Open Positions
+      - generic [ref=e11]: (84)
+    - generic [ref=e12]:
+      - generic [ref=e13]:
+        - generic [ref=e14]:
+          - generic [ref=e15]: "Filters:"
+          - button "Reset filters" [disabled]:
+            - img
+            - text: Reset filters
+        - generic [ref=e16]:
+          - generic [ref=e17]:
+            - combobox "Department" [ref=e18]:
+              - option "All Departments"
+              - option "Customer Engineering (16)"
+              - option "Deployed Engineering (19)"
+              - option "Engineering (14)"
+              - option "Marketing (9)"
+              - option "Partnerships (1)"
+              - option "People (4)"
+              - option "Product (1)"
+              - option "Sales (18)"
+              - option "Sales Operations (2)"
+            - generic:
+              - img
+          - generic [ref=e19]:
+            - combobox "Employment" [ref=e20]:
+              - option "All Employment Types"
+              - option "Full time (84)"
+            - generic:
+              - img
+          - generic [ref=e21]:
+            - combobox "Location" [ref=e22]:
+              - option "All Locations"
+              - option "Amsterdam (3)"
+              - option "Atlanta, GA (1)"
+              - option "Austin, TX (4)"
+              - option "Australia (1)"
+              - option "Boston, MA (10)"
+              - option "Charlotte, NC (2)"
+              - option "Chicago, IL (3)"
+              - option "Chicago, IL (2)"
+              - option "Dallas, TX (4)"
+              - option "Detroit, MI (1)"
+              - option "Europe (3)"
+              - option "Germany (1)"
+              - option "London (6)"
+              - option "Los Angeles, CA (2)"
+              - option "Minneapolis, MN (1)"
+              - option "New York, NY (27)"
+              - option "Newark, NJ (1)"
+              - option "Raleigh, NC (1)"
+              - option "remote (1)"
+              - option "San Diego, CA (2)"
+              - option "San Francisco, CA (37)"
+              - option "Seattle, WA (2)"
+              - option "Sweden (2)"
+              - option "Toronto (1)"
+              - option "Washington DC (1)"
+            - generic:
+              - img
+          - generic [ref=e23]:
+            - combobox "Location Type" [ref=e24]:
+              - option "All Location Types"
+              - option "Hybrid (2)"
+              - option "On-site (51)"
+              - option "Remote (25)"
+            - generic:
+              - img
+        - status [ref=e25]: No filters applied
+      - generic [ref=e26]:
+        - heading "Customer Engineering" [level=2] [ref=e27]:
+          - generic [ref=e28]: Customer Engineering
+        - generic [ref=e29]:
+          - link "Customer Engineer Customer Engineering • Europe • Full time • Remote" [ref=e30] [cursor=pointer]:
+            - /url: /langchain/f0cd9c72-4f1d-480b-85b6-d36615a6a92d
+            - generic [ref=e31]:
+              - heading "Customer Engineer" [level=3] [ref=e32]
+              - paragraph [ref=e34]: Customer Engineering • Europe • Full time • Remote
+          - link "Customer Engineer (Amsterdam) Customer Engineering • Amsterdam • Full time • On-site" [ref=e35] [cursor=pointer]:
+            - /url: /langchain/1b28dcf7-04c1-4bc1-9e16-d288ce634cd2
+            - generic [ref=e36]:
+              - heading "Customer Engineer (Amsterdam)" [level=3] [ref=e37]
+              - paragraph [ref=e39]: Customer Engineering • Amsterdam • Full time • On-site
+          - link "Customer Engineer (London) Customer Engineering • London • Full time • On-site" [ref=e40] [cursor=pointer]:
+            - /url: /langchain/a16d58f7-e210-495c-9e6f-82222267de3a
+            - generic [ref=e41]:
+              - heading "Customer Engineer (London)" [level=3] [ref=e42]
+              - paragraph [ref=e44]: Customer Engineering • London • Full time • On-site
+          - link "Education Engineer, Fullstack Customer Engineering • San Francisco, CA; Boston, MA; New York, NY • Full time • On-site" [ref=e45] [cursor=pointer]:
+            - /url: /langchain/9037a071-eef2-4083-83f3-d6a5b531aa1d
+            - generic [ref=e46]:
+              - heading "Education Engineer, Fullstack" [level=3] [ref=e47]
+              - paragraph [ref=e49]: Customer Engineering • San Francisco, CA; Boston, MA; New York, NY • Full time • On-site
+          - link "Education Engineer, Machine Learning Customer Engineering • San Francisco, CA • Full time • On-site" [ref=e50] [cursor=pointer]:
+            - /url: /langchain/defd4191-7a83-464c-a297-91ebd52981e1
+            - generic [ref=e51]:
+              - heading "Education Engineer, Machine Learning" [level=3] [ref=e52]
+              - paragraph [ref=e54]: Customer Engineering • San Francisco, CA • Full time • On-site
+          - link "Engagement Manager Customer Engineering • San Francisco, CA • Full time • Remote" [ref=e55] [cursor=pointer]:
+            - /url: /langchain/43d28b41-f3f2-4b43-a57e-bd372a8138ca
+            - generic [ref=e56]:
+              - heading "Engagement Manager" [level=3] [ref=e57]
+              - paragraph [ref=e59]: Customer Engineering • San Francisco, CA • Full time • Remote
+          - link "Engagement Manager (San Francisco) Customer Engineering • San Francisco, CA • Full time • On-site" [ref=e60] [cursor=pointer]:
+            - /url: /langchain/36bfd743-8e8d-4393-8d47-d69097fb1f51
+            - generic [ref=e61]:
+              - heading "Engagement Manager (San Francisco)" [level=3] [ref=e62]
+              - paragraph [ref=e64]: Customer Engineering • San Francisco, CA • Full time • On-site
+          - link "Engagement Manager (NYC) Customer Engineering • New York, NY • Full time • On-site" [ref=e65] [cursor=pointer]:
+            - /url: /langchain/15489f24-874c-44d2-b8fa-ca54834ba9f4
+            - generic [ref=e66]:
+              - heading "Engagement Manager (NYC)" [level=3] [ref=e67]
+              - paragraph [ref=e69]: Customer Engineering • New York, NY • Full time • On-site
+          - link "GTM Engineer Customer Engineering • San Francisco, CA • Full time • On-site" [ref=e70] [cursor=pointer]:
+            - /url: /langchain/32c6fe13-76e0-49a2-849d-991014416987
+            - generic [ref=e71]:
+              - heading "GTM Engineer" [level=3] [ref=e72]
+              - paragraph [ref=e74]: Customer Engineering • San Francisco, CA • Full time • On-site
+          - link "Solutions Architect (Amsterdam) Customer Engineering • Amsterdam • Full time • Remote" [ref=e75] [cursor=pointer]:
+            - /url: /langchain/fc868832-3865-4f4a-8222-33422a7d3d96
+            - generic [ref=e76]:
+              - heading "Solutions Architect (Amsterdam)" [level=3] [ref=e77]
+              - paragraph [ref=e79]: Customer Engineering • Amsterdam • Full time • Remote
+          - link "Solutions Architect (Austin) Customer Engineering • Austin, TX • Full time • Remote" [ref=e80] [cursor=pointer]:
+            - /url: /langchain/da7cbabd-ceed-4d7d-ae25-f226cac0c1c1
+            - generic [ref=e81]:
+              - heading "Solutions Architect (Austin)" [level=3] [ref=e82]
+              - paragraph [ref=e84]: Customer Engineering • Austin, TX • Full time • Remote
+          - link "Solutions Architect (Dallas) Customer Engineering • Dallas, TX • Full time • Remote" [ref=e85] [cursor=pointer]:
+            - /url: /langchain/933a41a3-43ca-44de-a0ae-f541149151b7
+            - generic [ref=e86]:
+              - heading "Solutions Architect (Dallas)" [level=3] [ref=e87]
+              - paragraph [ref=e89]: Customer Engineering • Dallas, TX • Full time • Remote
+          - link "Solutions Architect (London) Customer Engineering • London • Full time • Remote" [ref=e90] [cursor=pointer]:
+            - /url: /langchain/faeb56fd-e7d6-47d6-babe-e35315969206
+            - generic [ref=e91]:
+              - heading "Solutions Architect (London)" [level=3] [ref=e92]
+              - paragraph [ref=e94]: Customer Engineering • London • Full time • Remote
+          - link "Solutions Architect (NYC) Customer Engineering • New York, NY • Full time • On-site" [ref=e95] [cursor=pointer]:
+            - /url: /langchain/f71210f9-12e1-4726-88b9-ebafa194d5b2
+            - generic [ref=e96]:
+              - heading "Solutions Architect (NYC)" [level=3] [ref=e97]
+              - paragraph [ref=e99]: Customer Engineering • New York, NY • Full time • On-site
+          - link "Solutions Architect (San Francisco) Customer Engineering • San Francisco, CA • Full time • On-site" [ref=e100] [cursor=pointer]:
+            - /url: /langchain/e12d7176-8b9f-438a-8f3b-0cbbffab9c5c
+            - generic [ref=e101]:
+              - heading "Solutions Architect (San Francisco)" [level=3] [ref=e102]
+              - paragraph [ref=e104]: Customer Engineering • San Francisco, CA • Full time • On-site
+          - link "Technical Support Engineer Customer Engineering • San Francisco, CA; Austin, TX; Chicago, IL; Los Angeles, CA; San Diego, CA; Seattle, WA • Full time • Remote" [ref=e105] [cursor=pointer]:
+            - /url: /langchain/8aa63e71-b431-49d7-ab4a-bf4b3630d8e6
+            - generic [ref=e106]:
+              - heading "Technical Support Engineer" [level=3] [ref=e107]
+              - paragraph [ref=e109]: Customer Engineering • San Francisco, CA; Austin, TX; Chicago, IL; Los Angeles, CA; San Diego, CA; Seattle, WA • Full time • Remote
+        - heading "Deployed Engineering" [level=2] [ref=e110]:
+          - generic [ref=e111]: Deployed Engineering
+        - generic [ref=e112]:
+          - link "Deployed Engineer (Amsterdam) Deployed Engineering • Amsterdam • Full time • Remote" [ref=e113] [cursor=pointer]:
+            - /url: /langchain/671f9372-8646-4f6a-a473-61bfa7cafa4b
+            - generic [ref=e114]:
+              - heading "Deployed Engineer (Amsterdam)" [level=3] [ref=e115]
+              - paragraph [ref=e117]: Deployed Engineering • Amsterdam • Full time • Remote
+          - link "Deployed Engineer (Atlanta) Deployed Engineering • Atlanta, GA • Full time • On-site" [ref=e118] [cursor=pointer]:
+            - /url: /langchain/3e31c750-67f2-4d3d-ac29-48a2b57cf4bd
+            - generic [ref=e119]:
+              - heading "Deployed Engineer (Atlanta)" [level=3] [ref=e120]
+              - paragraph [ref=e122]: Deployed Engineering • Atlanta, GA • Full time • On-site
+          - link "Deployed Engineer (Austin) Deployed Engineering • Austin, TX • Full time • Remote" [ref=e123] [cursor=pointer]:
+            - /url: /langchain/937e131f-1055-4f1f-bd8a-f036e4ba0666
+            - generic [ref=e124]:
+              - heading "Deployed Engineer (Austin)" [level=3] [ref=e125]
+              - paragraph [ref=e127]: Deployed Engineering • Austin, TX • Full time • Remote
+          - link "Deployed Engineer (Boston) Deployed Engineering • Boston, MA • Full time • On-site" [ref=e128] [cursor=pointer]:
+            - /url: /langchain/34083fce-1e80-4595-9ce9-76387b735c70
+            - generic [ref=e129]:
+              - heading "Deployed Engineer (Boston)" [level=3] [ref=e130]
+              - paragraph [ref=e132]: Deployed Engineering • Boston, MA • Full time • On-site
+          - link "Deployed Engineer (Charlotte) Deployed Engineering • Charlotte, NC • Full time • Remote" [ref=e133] [cursor=pointer]:
+            - /url: /langchain/d7454c6d-7025-4e46-befc-e23bedd8f452
+            - generic [ref=e134]:
+              - heading "Deployed Engineer (Charlotte)" [level=3] [ref=e135]
+              - paragraph [ref=e137]: Deployed Engineering • Charlotte, NC • Full time • Remote
+          - link "Deployed Engineer (Chicago) Deployed Engineering • Chicago, IL • Full time • Remote" [ref=e138] [cursor=pointer]:
+            - /url: /langchain/38947013-3d0c-4257-aa58-ab8fe247ea3e
+            - generic [ref=e139]:
+              - heading "Deployed Engineer (Chicago)" [level=3] [ref=e140]
+              - paragraph [ref=e142]: Deployed Engineering • Chicago, IL • Full time • Remote
+          - link "Deployed Engineer (Dallas) Deployed Engineering • Dallas, TX • Full time • Remote" [ref=e143] [cursor=pointer]:
+            - /url: /langchain/8b533cc4-6654-44b4-b3fc-004def2a9927
+            - generic [ref=e144]:
+              - heading "Deployed Engineer (Dallas)" [level=3] [ref=e145]
+              - paragraph [ref=e147]: Deployed Engineering • Dallas, TX • Full time • Remote
+          - link "Deployed Engineer (Germany) Deployed Engineering • Germany • Full time • Remote" [ref=e148] [cursor=pointer]:
+            - /url: /langchain/31ff2b5b-d5c5-443e-bf11-ef02481df579
+            - generic [ref=e149]:
+              - heading "Deployed Engineer (Germany)" [level=3] [ref=e150]
+              - paragraph [ref=e152]: Deployed Engineering • Germany • Full time • Remote
+          - link "Deployed Engineer (Los Angeles) Deployed Engineering • Los Angeles, CA • Full time" [ref=e153] [cursor=pointer]:
+            - /url: /langchain/2d920c9c-abf2-4c46-a01b-03e61a03c8e6
+            - generic [ref=e154]:
+              - heading "Deployed Engineer (Los Angeles)" [level=3] [ref=e155]
+              - paragraph [ref=e157]: Deployed Engineering • Los Angeles, CA • Full time
+          - link "Deployed Engineer (NYC) Deployed Engineering • New York, NY • Full time • On-site" [ref=e158] [cursor=pointer]:
+            - /url: /langchain/25d40647-c821-46ff-bf25-bacf21fa38b5
+            - generic [ref=e159]:
+              - heading "Deployed Engineer (NYC)" [level=3] [ref=e160]
+              - paragraph [ref=e162]: Deployed Engineering • New York, NY • Full time • On-site
+          - link "Deployed Engineer (Raleigh) Deployed Engineering • Raleigh, NC • Full time • Remote" [ref=e163] [cursor=pointer]:
+            - /url: /langchain/733417d6-7b74-4260-95d9-3cabf85ce0b8
+            - generic [ref=e164]:
+              - heading "Deployed Engineer (Raleigh)" [level=3] [ref=e165]
+              - paragraph [ref=e167]: Deployed Engineering • Raleigh, NC • Full time • Remote
+          - link "Deployed Engineer (San Diego) Deployed Engineering • San Diego, CA • Full time" [ref=e168] [cursor=pointer]:
+            - /url: /langchain/86d0df4d-e000-403d-aca8-ee6896aa5420
+            - generic [ref=e169]:
+              - heading "Deployed Engineer (San Diego)" [level=3] [ref=e170]
+              - paragraph [ref=e172]: Deployed Engineering • San Diego, CA • Full time
+          - link "Deployed Engineer (San Francisco) Deployed Engineering • San Francisco, CA • Full time • On-site" [ref=e173] [cursor=pointer]:
+            - /url: /langchain/e773649c-4ea7-47c2-9987-74d525474e82
+            - generic [ref=e174]:
+              - heading "Deployed Engineer (San Francisco)" [level=3] [ref=e175]
+              - paragraph [ref=e177]: Deployed Engineering • San Francisco, CA • Full time • On-site
+          - link "Deployed Engineer (Seattle) Deployed Engineering • Seattle, WA • Full time • Hybrid" [ref=e178] [cursor=pointer]:
+            - /url: /langchain/7ed7ca6f-2b4a-4dcd-8c14-c0f85fcf9ae2
+            - generic [ref=e179]:
+              - heading "Deployed Engineer (Seattle)" [level=3] [ref=e180]
+              - paragraph [ref=e182]: Deployed Engineering • Seattle, WA • Full time • Hybrid
+          - link "Deployed Engineer (Stockholm) Deployed Engineering • Sweden • Full time" [ref=e183] [cursor=pointer]:
+            - /url: /langchain/31483b31-68c5-4603-8a84-0051634100c0
+            - generic [ref=e184]:
+              - heading "Deployed Engineer (Stockholm)" [level=3] [ref=e185]
+              - paragraph [ref=e187]: Deployed Engineering • Sweden • Full time
+          - link "Deployed Engineer (Sydney) Deployed Engineering • Australia • Full time" [ref=e188] [cursor=pointer]:
+            - /url: /langchain/650a8598-2b20-40b8-a4d7-4a9196fe3609
+            - generic [ref=e189]:
+              - heading "Deployed Engineer (Sydney)" [level=3] [ref=e190]
+              - paragraph [ref=e192]: Deployed Engineering • Australia • Full time
+          - link "Deployed Engineer (Toronto) Deployed Engineering • Toronto • Full time • Remote" [ref=e193] [cursor=pointer]:
+            - /url: /langchain/58edb2a9-a1b7-4b10-86a4-4bf6957cc6f4
+            - generic [ref=e194]:
+              - heading "Deployed Engineer (Toronto)" [level=3] [ref=e195]
+              - paragraph [ref=e197]: Deployed Engineering • Toronto • Full time • Remote
+          - link "Deployed Engineer (UK) Deployed Engineering • London • Full time • On-site" [ref=e198] [cursor=pointer]:
+            - /url: /langchain/5f5f8239-603c-47ca-a1ee-5a7ed34b502d
+            - generic [ref=e199]:
+              - heading "Deployed Engineer (UK)" [level=3] [ref=e200]
+              - paragraph [ref=e202]: Deployed Engineering • London • Full time • On-site
+          - link "Director, Deployed Engineering - Central Deployed Engineering • remote; Austin, TX; Chicago, IL; Dallas, TX; Minneapolis, MN • Full time • Remote" [ref=e203] [cursor=pointer]:
+            - /url: /langchain/c9c70de7-c162-46c5-a784-e5a45ff24061
+            - generic [ref=e204]:
+              - heading "Director, Deployed Engineering - Central" [level=3] [ref=e205]
+              - paragraph [ref=e207]: Deployed Engineering • remote; Austin, TX; Chicago, IL; Dallas, TX; Minneapolis, MN • Full time • Remote
+        - heading "Engineering" [level=2] [ref=e208]:
+          - generic [ref=e209]: Engineering
+        - generic [ref=e210]:
+          - link "Developer Productivity Engineering • San Francisco, CA; New York, NY • Full time • On-site" [ref=e211] [cursor=pointer]:
+            - /url: /langchain/e725293d-c27b-4a79-959d-19f5618f2f8e
+            - generic [ref=e212]:
+              - heading "Developer Productivity" [level=3] [ref=e213]
+              - paragraph [ref=e215]: Engineering • San Francisco, CA; New York, NY • Full time • On-site
+          - link "FullStack Engineer, Observability & Evals Platform (LangSmith) Engineering • San Francisco, CA; Boston, MA; New York, NY • Full time • On-site" [ref=e216] [cursor=pointer]:
+            - /url: /langchain/ddf92275-1cc3-49c0-9f25-e8ded43b07f6
+            - generic [ref=e217]:
+              - heading "FullStack Engineer, Observability & Evals Platform (LangSmith)" [level=3] [ref=e218]
+              - paragraph [ref=e220]: Engineering • San Francisco, CA; Boston, MA; New York, NY • Full time • On-site
+          - link "Fullstack Software Engineer, Applied AI Engineering • San Francisco, CA; New York, NY • Full time • On-site" [ref=e221] [cursor=pointer]:
+            - /url: /langchain/c75915ba-a32b-4e17-873d-19b47564170d
+            - generic [ref=e222]:
+              - heading "Fullstack Software Engineer, Applied AI" [level=3] [ref=e223]
+              - paragraph [ref=e225]: Engineering • San Francisco, CA; New York, NY • Full time • On-site
+          - link "JavaScript Engineer (Open Source Team) Engineering • San Francisco, CA • Full time • On-site" [ref=e226] [cursor=pointer]:
+            - /url: /langchain/05efa205-8560-43fd-bfcc-3f7697561cfb
+            - generic [ref=e227]:
+              - heading "JavaScript Engineer (Open Source Team)" [level=3] [ref=e228]
+              - paragraph [ref=e230]: Engineering • San Francisco, CA • Full time • On-site
+          - link "Python OSS Engineer Engineering • San Francisco, CA; Boston, MA • Full time • On-site" [ref=e231] [cursor=pointer]:
+            - /url: /langchain/74e5f9f4-e44a-4594-ba26-abdf71bf287d
+            - generic [ref=e232]:
+              - heading "Python OSS Engineer" [level=3] [ref=e233]
+              - paragraph [ref=e235]: Engineering • San Francisco, CA; Boston, MA • Full time • On-site
+          - link "Senior Backend Engineer, Enterprise Readiness & Identity Engineering • New York, NY • Full time • On-site" [ref=e236] [cursor=pointer]:
+            - /url: /langchain/6f32998b-111c-447b-b593-2b64c7de245d
+            - generic [ref=e237]:
+              - heading "Senior Backend Engineer, Enterprise Readiness & Identity" [level=3] [ref=e238]
+              - paragraph [ref=e240]: Engineering • New York, NY • Full time • On-site
+          - link "Senior Backend Engineer, LangSmith Deployments Engineering • San Francisco, CA; Boston, MA • Full time • On-site" [ref=e241] [cursor=pointer]:
+            - /url: /langchain/cb61f821-d8c4-4ec5-940d-3fd83be63a5f
+            - generic [ref=e242]:
+              - heading "Senior Backend Engineer, LangSmith Deployments" [level=3] [ref=e243]
+              - paragraph [ref=e245]: Engineering • San Francisco, CA; Boston, MA • Full time • On-site
+          - link "Senior Backend Software Engineer, Observability & Evals Platform (LangSmith) Engineering • San Francisco, CA; Boston, MA; New York, NY • Full time • On-site" [ref=e246] [cursor=pointer]:
+            - /url: /langchain/f07c1416-f126-4925-8606-5dd7c5a90f6f
+            - generic [ref=e247]:
+              - heading "Senior Backend Software Engineer, Observability & Evals Platform (LangSmith)" [level=3] [ref=e248]
+              - paragraph [ref=e250]: Engineering • San Francisco, CA; Boston, MA; New York, NY • Full time • On-site
+          - link "Senior Frontend Engineer, AI Observability & Evals Platform Engineering • San Francisco, CA; Boston, MA; New York, NY • Full time • On-site" [ref=e251] [cursor=pointer]:
+            - /url: /langchain/afb91b9b-46d5-4c9d-aa84-a4f1a3f74263
+            - generic [ref=e252]:
+              - heading "Senior Frontend Engineer, AI Observability & Evals Platform" [level=3] [ref=e253]
+              - paragraph [ref=e255]: Engineering • San Francisco, CA; Boston, MA; New York, NY • Full time • On-site
+          - link "Senior Fullstack Engineer, AI Observability & Evals Platform Engineering • San Francisco, CA; Boston, MA; New York, NY • Full time • On-site" [ref=e256] [cursor=pointer]:
+            - /url: /langchain/a03b3e54-495d-4960-aee7-0194a3cef57d
+            - generic [ref=e257]:
+              - heading "Senior Fullstack Engineer, AI Observability & Evals Platform" [level=3] [ref=e258]
+              - paragraph [ref=e260]: Engineering • San Francisco, CA; Boston, MA; New York, NY • Full time • On-site
+          - link "Senior Fullstack Engineer, Growth & Monetization Engineering • San Francisco, CA; Boston, MA; New York, NY • Full time • On-site" [ref=e261] [cursor=pointer]:
+            - /url: /langchain/7b4aad6c-db46-489d-8426-72217e2923f2
+            - generic [ref=e262]:
+              - heading "Senior Fullstack Engineer, Growth & Monetization" [level=3] [ref=e263]
+              - paragraph [ref=e265]: Engineering • San Francisco, CA; Boston, MA; New York, NY • Full time • On-site
+          - link "Senior Security Engineer Engineering • San Francisco, CA; New York, NY • Full time • On-site" [ref=e266] [cursor=pointer]:
+            - /url: /langchain/7b1e5ff7-4531-4d4a-8379-52a21b6d386d
+            - generic [ref=e267]:
+              - heading "Senior Security Engineer" [level=3] [ref=e268]
+              - paragraph [ref=e270]: Engineering • San Francisco, CA; New York, NY • Full time • On-site
+          - link "Software Engineering Manager, AI Observability & Evals Platform (New York, NY) Engineering • New York, NY • Full time • On-site" [ref=e271] [cursor=pointer]:
+            - /url: /langchain/e1263bfe-b638-4019-b4d5-0aacca93b2b3
+            - generic [ref=e272]:
+              - heading "Software Engineering Manager, AI Observability & Evals Platform (New York, NY)" [level=3] [ref=e273]
+              - paragraph [ref=e275]: Engineering • New York, NY • Full time • On-site
+          - link "Software Engineering Manager, AI Observability & Evals Platform (San Francisco, CA) Engineering • San Francisco, CA • Full time • On-site" [ref=e276] [cursor=pointer]:
+            - /url: /langchain/33f6d721-f75f-4fcc-8df9-e2a13c018e1c
+            - generic [ref=e277]:
+              - heading "Software Engineering Manager, AI Observability & Evals Platform (San Francisco, CA)" [level=3] [ref=e278]
+              - paragraph [ref=e280]: Engineering • San Francisco, CA • Full time • On-site
+        - heading "Marketing" [level=2] [ref=e281]:
+          - generic [ref=e282]: Marketing
+        - generic [ref=e283]:
+          - link "Brand Lead Marketing • New York, NY • Full time • On-site" [ref=e284] [cursor=pointer]:
+            - /url: /langchain/45bf17bb-3334-46b2-b816-7fab70cebb85
+            - generic [ref=e285]:
+              - heading "Brand Lead" [level=3] [ref=e286]
+              - paragraph [ref=e288]: Marketing • New York, NY • Full time • On-site
+          - link "Brand Lead Marketing • San Francisco, CA • Full time • On-site" [ref=e289] [cursor=pointer]:
+            - /url: /langchain/c09fd1a4-3d40-4ac0-9df4-a44e7ba416a1
+            - generic [ref=e290]:
+              - heading "Brand Lead" [level=3] [ref=e291]
+              - paragraph [ref=e293]: Marketing • San Francisco, CA • Full time • On-site
+          - link "Flagship Events & Experiences Lead Marketing • San Francisco, CA; New York, NY • Full time • Remote" [ref=e294] [cursor=pointer]:
+            - /url: /langchain/0f8d1529-fcf7-4291-9f76-d0b01c2b7614
+            - generic [ref=e295]:
+              - heading "Flagship Events & Experiences Lead" [level=3] [ref=e296]
+              - paragraph [ref=e298]: Marketing • San Francisco, CA; New York, NY • Full time • Remote
+          - link "Head of Marketing Operations and GTM Analytics Marketing • New York, NY • Full time • On-site" [ref=e299] [cursor=pointer]:
+            - /url: /langchain/87f5f961-7551-4440-a56d-5445d9e7748d
+            - generic [ref=e300]:
+              - heading "Head of Marketing Operations and GTM Analytics" [level=3] [ref=e301]
+              - paragraph [ref=e303]: Marketing • New York, NY • Full time • On-site
+          - link "Head of Marketing Operations and GTM Analytics Marketing • San Francisco, CA • Full time • On-site" [ref=e304] [cursor=pointer]:
+            - /url: /langchain/d8a8be3c-5e34-44a1-b4a8-e8c85b86b077
+            - generic [ref=e305]:
+              - heading "Head of Marketing Operations and GTM Analytics" [level=3] [ref=e306]
+              - paragraph [ref=e308]: Marketing • San Francisco, CA • Full time • On-site
+          - link "Lifecycle Marketing Manager Marketing • San Francisco, CA • Full time • On-site" [ref=e309] [cursor=pointer]:
+            - /url: /langchain/4d544e1e-a38c-4933-92a0-aab9534fda51
+            - generic [ref=e310]:
+              - heading "Lifecycle Marketing Manager" [level=3] [ref=e311]
+              - paragraph [ref=e313]: Marketing • San Francisco, CA • Full time • On-site
+          - link "Product Marketing - Agent Infrastructure Marketing • San Francisco, CA • Full time • On-site" [ref=e314] [cursor=pointer]:
+            - /url: /langchain/c0706500-4575-4150-88a7-e189ecb96d60
+            - generic [ref=e315]:
+              - heading "Product Marketing - Agent Infrastructure" [level=3] [ref=e316]
+              - paragraph [ref=e318]: Marketing • San Francisco, CA • Full time • On-site
+          - link "Product Marketing - Agent Infrastructure Marketing • New York, NY • Full time • On-site" [ref=e319] [cursor=pointer]:
+            - /url: /langchain/7bb07844-ffa2-4a76-932e-204ea6a406b5
+            - generic [ref=e320]:
+              - heading "Product Marketing - Agent Infrastructure" [level=3] [ref=e321]
+              - paragraph [ref=e323]: Marketing • New York, NY • Full time • On-site
+          - link "Product Marketing - Observability Marketing • San Francisco, CA • Full time • On-site" [ref=e324] [cursor=pointer]:
+            - /url: /langchain/fc61254d-2dd2-4b92-b01a-162e805b921c
+            - generic [ref=e325]:
+              - heading "Product Marketing - Observability" [level=3] [ref=e326]
+              - paragraph [ref=e328]: Marketing • San Francisco, CA • Full time • On-site
+        - heading "Partnerships" [level=2] [ref=e329]:
+          - generic [ref=e330]: Partnerships
+        - link "Partner Alliances Lead - Cloud Partnerships • San Francisco, CA • Full time • On-site" [ref=e332] [cursor=pointer]:
+          - /url: /langchain/4cc17d44-c8b6-4133-abc3-9932782b05c9
+          - generic [ref=e333]:
+            - heading "Partner Alliances Lead - Cloud" [level=3] [ref=e334]
+            - paragraph [ref=e336]: Partnerships • San Francisco, CA • Full time • On-site
+        - heading "People" [level=2] [ref=e337]:
+          - generic [ref=e338]: People
+        - generic [ref=e339]:
+          - link "Head of Tech Recruiting People • San Francisco, CA; New York, NY • Full time • On-site" [ref=e340] [cursor=pointer]:
+            - /url: /langchain/59112f79-9227-4fd0-89ac-418647389622
+            - generic [ref=e341]:
+              - heading "Head of Tech Recruiting" [level=3] [ref=e342]
+              - paragraph [ref=e344]: People • San Francisco, CA; New York, NY • Full time • On-site
+          - link "People Partner People • San Francisco, CA; New York, NY • Full time • On-site" [ref=e345] [cursor=pointer]:
+            - /url: /langchain/72eefb77-605d-4616-adda-820eb5208ac8
+            - generic [ref=e346]:
+              - heading "People Partner" [level=3] [ref=e347]
+              - paragraph [ref=e349]: People • San Francisco, CA; New York, NY • Full time • On-site
+          - link "People Programs and Total Rewards Architect People • San Francisco, CA • Full time • On-site" [ref=e350] [cursor=pointer]:
+            - /url: /langchain/ff53c1cd-830e-4e18-b6fe-9e69b3cf4f57
+            - generic [ref=e351]:
+              - heading "People Programs and Total Rewards Architect" [level=3] [ref=e352]
+              - paragraph [ref=e354]: People • San Francisco, CA • Full time • On-site
+          - link "Talent Systems and Recruiting Automation Lead People • San Francisco, CA; New York, NY • Full time • Remote" [ref=e355] [cursor=pointer]:
+            - /url: /langchain/729b3249-5b5e-4806-b838-1c631700ea9b
+            - generic [ref=e356]:
+              - heading "Talent Systems and Recruiting Automation Lead" [level=3] [ref=e357]
+              - paragraph [ref=e359]: People • San Francisco, CA; New York, NY • Full time • Remote
+        - heading "Product" [level=2] [ref=e360]:
+          - generic [ref=e361]: Product
+        - link "Product Manager, LangSmith Product • New York, NY; San Francisco, CA • Full time • On-site" [ref=e363] [cursor=pointer]:
+          - /url: /langchain/27af5f96-b287-4bcc-8679-f96686dc7c8d
+          - generic [ref=e364]:
+            - heading "Product Manager, LangSmith" [level=3] [ref=e365]
+            - paragraph [ref=e367]: Product • New York, NY; San Francisco, CA • Full time • On-site
+        - heading "Sales" [level=2] [ref=e368]:
+          - generic [ref=e369]: Sales
+        - generic [ref=e370]:
+          - link "Account Executive ( Germany) Sales • Europe • Full time • Remote" [ref=e371] [cursor=pointer]:
+            - /url: /langchain/c8150807-d346-47d5-9242-b0994d77ca87
+            - generic [ref=e372]:
+              - heading "Account Executive ( Germany)" [level=3] [ref=e373]
+              - paragraph [ref=e375]: Sales • Europe • Full time • Remote
+          - link "Account Executive (Australia) Sales • Europe • Full time" [ref=e376] [cursor=pointer]:
+            - /url: /langchain/dddb3751-8ecc-4bea-951c-09826dcc4d88
+            - generic [ref=e377]:
+              - heading "Account Executive (Australia)" [level=3] [ref=e378]
+              - paragraph [ref=e380]: Sales • Europe • Full time
+          - link "Account Executive (Stockholm) Sales • Sweden • Full time" [ref=e381] [cursor=pointer]:
+            - /url: /langchain/9ef63e88-b1ff-4e88-9bf8-20c01439b80a
+            - generic [ref=e382]:
+              - heading "Account Executive (Stockholm)" [level=3] [ref=e383]
+              - paragraph [ref=e385]: Sales • Sweden • Full time
+          - link "Account Executive (UK) Sales • London • Full time • Remote" [ref=e386] [cursor=pointer]:
+            - /url: /langchain/c16d44ab-faf0-4111-9ca7-8acb5dffcf46
+            - generic [ref=e387]:
+              - heading "Account Executive (UK)" [level=3] [ref=e388]
+              - paragraph [ref=e390]: Sales • London • Full time • Remote
+          - link "Commercial Account Executive Sales • San Francisco, CA • Full time • Hybrid" [ref=e391] [cursor=pointer]:
+            - /url: /langchain/426359a5-3a48-4b81-ba25-b2f32678b153
+            - generic [ref=e392]:
+              - heading "Commercial Account Executive" [level=3] [ref=e393]
+              - paragraph [ref=e395]: Sales • San Francisco, CA • Full time • Hybrid
+          - link "Commercial Account Executive (UK) Sales • London • Full time • On-site" [ref=e396] [cursor=pointer]:
+            - /url: /langchain/65dbb419-ca80-4fda-b1b7-b81c08878992
+            - generic [ref=e397]:
+              - heading "Commercial Account Executive (UK)" [level=3] [ref=e398]
+              - paragraph [ref=e400]: Sales • London • Full time • On-site
+          - link "Commercial Account Manager (East Coast) Sales • New York, NY; Boston, MA; Charlotte, NC; Newark, NJ • Full time • Remote" [ref=e401] [cursor=pointer]:
+            - /url: /langchain/22bd243f-4088-49e0-bf02-fbad4442b0cb
+            - generic [ref=e402]:
+              - heading "Commercial Account Manager (East Coast)" [level=3] [ref=e403]
+              - paragraph [ref=e405]: Sales • New York, NY; Boston, MA; Charlotte, NC; Newark, NJ • Full time • Remote
+          - link "Commercial Account Manager (UK) Sales • London • Full time • On-site" [ref=e406] [cursor=pointer]:
+            - /url: /langchain/e408177e-54e8-4c08-8a70-d9bbd510b7ec
+            - generic [ref=e407]:
+              - heading "Commercial Account Manager (UK)" [level=3] [ref=e408]
+              - paragraph [ref=e410]: Sales • London • Full time • On-site
+          - link "Enterprise Account Executive (Chicago) Sales • Chicago, IL • Full time • Remote" [ref=e411] [cursor=pointer]:
+            - /url: /langchain/3c38ac0d-4cb5-4c04-86c0-37b20166c8ec
+            - generic [ref=e412]:
+              - heading "Enterprise Account Executive (Chicago)" [level=3] [ref=e413]
+              - paragraph [ref=e415]: Sales • Chicago, IL • Full time • Remote
+          - link "Enterprise Account Executive (Dallas) Sales • Dallas, TX • Full time • Remote" [ref=e416] [cursor=pointer]:
+            - /url: /langchain/fd3767ba-6247-47bd-85ae-7e76be3871e6
+            - generic [ref=e417]:
+              - heading "Enterprise Account Executive (Dallas)" [level=3] [ref=e418]
+              - paragraph [ref=e420]: Sales • Dallas, TX • Full time • Remote
+          - link "Enterprise Account Executive (Detroit) Sales • Detroit, MI; Chicago, IL • Full time • Remote" [ref=e421] [cursor=pointer]:
+            - /url: /langchain/c4432849-e3fd-402d-b21d-c8bdac30d8fd
+            - generic [ref=e422]:
+              - heading "Enterprise Account Executive (Detroit)" [level=3] [ref=e423]
+              - paragraph [ref=e425]: Sales • Detroit, MI; Chicago, IL • Full time • Remote
+          - link "Enterprise Account Executive (Federal) Sales • Washington DC • Full time • Remote" [ref=e426] [cursor=pointer]:
+            - /url: /langchain/6847e38f-ec98-4fb2-a2cb-a97cdd9be108
+            - generic [ref=e427]:
+              - heading "Enterprise Account Executive (Federal)" [level=3] [ref=e428]
+              - paragraph [ref=e430]: Sales • Washington DC • Full time • Remote
+          - link "Enterprise Account Executive (NYC) Sales • New York, NY • Full time • On-site" [ref=e431] [cursor=pointer]:
+            - /url: /langchain/b9cf3229-c257-4536-bae6-e9b63134dc68
+            - generic [ref=e432]:
+              - heading "Enterprise Account Executive (NYC)" [level=3] [ref=e433]
+              - paragraph [ref=e435]: Sales • New York, NY • Full time • On-site
+          - link "Enterprise Account Executive (San Francisco Bay Area) Sales • San Francisco, CA • Full time • On-site" [ref=e436] [cursor=pointer]:
+            - /url: /langchain/9930dd01-d12e-42e1-b751-5240c3814f85
+            - generic [ref=e437]:
+              - heading "Enterprise Account Executive (San Francisco Bay Area)" [level=3] [ref=e438]
+              - paragraph [ref=e440]: Sales • San Francisco, CA • Full time • On-site
+          - link "Sales Development Representative Sales • San Francisco, CA • Full time • On-site" [ref=e441] [cursor=pointer]:
+            - /url: /langchain/8b83f97a-12fb-42a6-9697-c3ef07646335
+            - generic [ref=e442]:
+              - heading "Sales Development Representative" [level=3] [ref=e443]
+              - paragraph [ref=e445]: Sales • San Francisco, CA • Full time • On-site
+          - link "Sales Development Representative Sales • New York, NY • Full time • On-site" [ref=e446] [cursor=pointer]:
+            - /url: /langchain/3efc7bc8-657c-4986-b39b-ce30e5d6cb17
+            - generic [ref=e447]:
+              - heading "Sales Development Representative" [level=3] [ref=e448]
+              - paragraph [ref=e450]: Sales • New York, NY • Full time • On-site
+          - link "Sales Development Representative Manager Sales • San Francisco, CA • Full time • On-site" [ref=e451] [cursor=pointer]:
+            - /url: /langchain/6dc92e79-0018-43a8-9319-64bf2302339f
+            - generic [ref=e452]:
+              - heading "Sales Development Representative Manager" [level=3] [ref=e453]
+              - paragraph [ref=e455]: Sales • San Francisco, CA • Full time • On-site
+          - link "Sales Development Representative Manager Sales • New York, NY • Full time • On-site" [ref=e456] [cursor=pointer]:
+            - /url: /langchain/e8020aeb-207f-4a4d-9df4-0cca5183e657
+            - generic [ref=e457]:
+              - heading "Sales Development Representative Manager" [level=3] [ref=e458]
+              - paragraph [ref=e460]: Sales • New York, NY • Full time • On-site
+        - heading "Sales Operations" [level=2] [ref=e461]:
+          - generic [ref=e462]: Sales Operations
+        - generic [ref=e463]:
+          - link "Deal Strategy & Operations Manager Sales Operations • San Francisco, CA • Full time • On-site" [ref=e464] [cursor=pointer]:
+            - /url: /langchain/31d5241e-78ac-492e-9a84-5838cd183e94
+            - generic [ref=e465]:
+              - heading "Deal Strategy & Operations Manager" [level=3] [ref=e466]
+              - paragraph [ref=e468]: Sales Operations • San Francisco, CA • Full time • On-site
+          - link "Deal Strategy & Operations Manager Sales Operations • New York, NY • Full time • On-site" [ref=e469] [cursor=pointer]:
+            - /url: /langchain/87430164-6617-4ad6-908f-79356be83445
+            - generic [ref=e470]:
+              - heading "Deal Strategy & Operations Manager" [level=3] [ref=e471]
+              - paragraph [ref=e473]: Sales Operations • New York, NY • Full time • On-site
+  - contentinfo [ref=e474]:
+    - link "Learn more about Ashby" [ref=e475] [cursor=pointer]:
+      - /url: https://www.ashbyhq.com
+      - generic [ref=e476]: Powered by
+      - img "Ashby" [ref=e477]
+    - paragraph [ref=e483]:
+      - link "Privacy Policy" [ref=e484] [cursor=pointer]:
+        - /url: https://www.ashbyhq.com/privacy
+      - link "Security" [ref=e485] [cursor=pointer]:
+        - /url: https://www.ashbyhq.com/security
+      - link "Vulnerability Disclosure" [ref=e486] [cursor=pointer]:
+        - /url: https://www.ashbyhq.com/disclosure

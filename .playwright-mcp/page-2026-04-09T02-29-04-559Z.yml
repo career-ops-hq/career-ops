@@ -1,0 +1,67 @@
+- generic [active] [ref=e1]:
+  - link "HighLevel logo" [ref=e4] [cursor=pointer]:
+    - /url: https://jobs.lever.co/gohighlevel
+    - img "HighLevel logo" [ref=e5]
+  - generic [ref=e7]:
+    - generic [ref=e9]:
+      - generic [ref=e10]:
+        - heading "Software Development Engineer in Test III - AI" [level=2] [ref=e11]
+        - generic [ref=e12]:
+          - generic [ref=e13]: India
+          - generic [ref=e14]: Engineering – SDET /
+          - generic [ref=e15]: Employee India /
+          - generic [ref=e16]: Remote
+      - link "apply for this job" [ref=e18] [cursor=pointer]:
+        - /url: https://jobs.lever.co/gohighlevel/3299d482-4ae7-4f34-abcf-3d1b01e58d38/apply
+    - generic [ref=e19]:
+      - generic [ref=e20]:
+        - generic [ref=e21]: "About HighLevel:"
+        - generic [ref=e22]: HighLevel is an AI powered, all-in-one white-label sales & marketing platform that empowers agencies, entrepreneurs, and businesses to elevate their digital presence and drive growth. We are proud to support a global and growing community of over 1 million businesses, comprised of agencies, consultants, and businesses of all sizes and industries. HighLevel empowers users with all the tools needed to capture, nurture, and close new leads into repeat customers. As of mid 2025, HighLevel processes over 4 billion API hits and handles more than 2.5 billion message events every day. Our platform manages over 470 terabytes of data distributed across five databases, operates with a network of over 250 microservices, and supports over 1 million hostnames.
+        - generic [ref=e24]: "Our People:"
+        - generic [ref=e25]: With over 1,500 team members across 15+ countries, we operate in a global, remote-first environment. We are building more than software; we are building a global community rooted in creativity, collaboration, and impact. We take pride in cultivating a culture where innovation thrives, ideas are celebrated, and people come first, no matter where they call home.
+        - generic [ref=e27]: "Our Impact:"
+        - generic [ref=e28]: As of mid 2025, our platform powers over 1.5 billion messages, helps generate over 200 million leads, and facilitates over 20 million conversations for the more than 1 million businesses we serve each month. Behind those numbers are real people growing their companies, connecting with customers, and making their mark - and we get to help make that happen.
+        - generic [ref=e30]: "About the Role:"
+        - generic [ref=e31]: We are looking for a Senior Software Development Engineer in Test (SDET 3) with strong expertise in AI tools and testing AI-driven products. This role requires a hands-on individual who can design and execute test strategies for AI systems, automate intelligently, and mentor junior team members. You will work independently, drive tasks to closure, and play a key role in ensuring the quality of our AI initiatives.
+      - generic [ref=e33]:
+        - heading "Requirements:" [level=3] [ref=e34]
+        - list [ref=e37]:
+          - listitem [ref=e38]: 5+ years of overall experience in QA/SDET roles
+          - listitem [ref=e39]: Proven experience working with AI tools (e.g., OpenAI, Claude, or similar LLM platforms)
+          - listitem [ref=e40]: Strong understanding of testing AI/ML products and their unique challenges
+          - listitem [ref=e41]: Hands-on knowledge of RAG pipelines and their testing methodologies
+          - listitem [ref=e42]: Proficiency in automation frameworks (e.g., Playwright, Cypress, Selenium, or similar)
+          - listitem [ref=e43]: Experience with API testing (Postman, REST, GraphQL, gRPC)
+          - listitem [ref=e44]: Strong problem-solving skills with the ability to work independently
+          - listitem [ref=e45]: Mentorship and leadership skills in guiding peers or junior engineers
+      - generic [ref=e47]:
+        - heading "Responsibilities:" [level=3] [ref=e48]
+        - list [ref=e51]:
+          - listitem [ref=e52]: Design, develop, and maintain automation frameworks and test strategies for AI products
+          - listitem [ref=e53]: Test and validate AI-powered features (including OpenAI, Claude, and other AI integrations)
+          - listitem [ref=e54]: Evaluate and improve RAG (Retrieval-Augmented Generation) flows, ensuring accuracy and performance
+          - listitem [ref=e55]: Leverage AI automation tools to optimize test coverage and efficiency
+          - listitem [ref=e56]: Collaborate closely with developers, product managers, and AI researchers to ensure high-quality releases
+          - listitem [ref=e57]: Own tasks end-to-end, working independently to deliver on commitments.
+          - listitem [ref=e58]: Mentor and guide junior SDETs, fostering a culture of quality and continuous learning
+      - generic [ref=e60]:
+        - heading "Nice to have" [level=3] [ref=e61]
+        - list [ref=e64]:
+          - listitem [ref=e65]: Experience with CI/CD pipelines and cloud platforms (AWS/GCP/Azure)
+          - listitem [ref=e66]: Familiarity with MLOps pipelines and monitoring AI systems
+          - listitem [ref=e67]: Exposure to performance and scalability testing of AI workloads
+      - generic [ref=e68]:
+        - generic [ref=e69]: "EEO Statement:"
+        - generic [ref=e70]: The company is an Equal Opportunity Employer. As an employer subject to affirmative action regulations, we invite you to voluntarily provide the following demographic information. This information is used solely for compliance with government record-keeping, reporting, and other legal requirements. Providing this information is voluntary and refusal to do so will not affect your application status. This data will be kept separate from your application and will not be used in the hiring decision.
+        - generic [ref=e72]: "#LI-Remote #LI-JM1"
+      - generic [ref=e74]: We may use artificial intelligence (AI) tools to support parts of the hiring process, such as reviewing applications, analyzing resumes, or assessing responses. These tools assist our recruitment team but do not replace human judgment. Final hiring decisions are ultimately made by humans. If you would like more information about how your data is processed, please contact us.
+      - link "apply for this job" [ref=e76] [cursor=pointer]:
+        - /url: https://jobs.lever.co/gohighlevel/3299d482-4ae7-4f34-abcf-3d1b01e58d38/apply
+  - generic [ref=e78]:
+    - paragraph [ref=e79]:
+      - link "HighLevel Home Page" [ref=e80] [cursor=pointer]:
+        - /url: https://www.gohighlevel.com/
+    - link "Jobs powered by Lever logo" [ref=e81] [cursor=pointer]:
+      - /url: https://www.lever.co/job-seeker-support/
+      - generic [ref=e82]: Jobs powered by
+      - img "Lever logo" [ref=e83]
