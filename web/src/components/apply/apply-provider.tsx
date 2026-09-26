@@ -231,7 +231,9 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       setMeta(m);
     };
     try {
-      const r = await fetch("/api/apply/prefill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId() }) });
+      // company + application travel with the pre-fill for the same reason they
+      // travel with the fill: both halves resolve the one tailored CV from them.
+      const r = await fetch("/api/apply/prefill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId(), company: companyRef.current, application: nRef.current }) });
       if (generation.current !== gen) return; // left mid-prefill
       if (!r.body) {
         setError("Couldn't pre-fill — no response stream.");
