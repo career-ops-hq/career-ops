@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot, readApplications } from "@/lib/career-ops";
 import { getNormalizeTextKey } from "@/lib/core/text-key";
+import { evaluatedKeys, isEvaluated } from "@/lib/whats-new-suppression.mjs";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { collectWhatsNew, resolveOfferLimit } from "@/lib/whats-new.mjs";
 
@@ -33,16 +34,17 @@ export async function GET(req: Request) {
     return Response.json({ offers: [], count: 0 });
   }
 
-  // Companies already evaluated → don't resurface as "new".
+  // Roles already evaluated → don't resurface as "new". Keyed on company AND
+  // role, not company alone: suppressing by employer removed that employer's
+  // entire board after one evaluation (#3131). See lib/whats-new-suppression.
   const normalizeTextKey = await getNormalizeTextKey();
-  const norm = (s: string) => normalizeTextKey(s, " ");
-  const evaluated = new Set(readApplications().map((a) => norm(a.company)).filter(Boolean));
+  const evaluated = evaluatedKeys(readApplications(), normalizeTextKey);
 
   const toOffer = (c: string[]): DiscoveredOffer | null => {
     const [url, firstSeen, portal, title, company, status, location] = c;
     if (!url || !/^https?:\/\//i.test(url)) return null;
     if (status && /skipped|expired/i.test(status)) return null;
-    if (company && evaluated.has(norm(company))) return null;
+    if (isEvaluated(evaluated, normalizeTextKey, company, title)) return null;
     return {
       url,
       company: (company || "").trim(),

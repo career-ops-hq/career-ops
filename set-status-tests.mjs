@@ -31,6 +31,9 @@ import { acquireTrackerLock } from './tracker-utils.mjs';
 // and fail for the hours of the day where they differ — a test that passes
 // only in part of the UTC day.
 import { localToday } from './lib/local-today.mjs';
+// Shared with tests/mark-pdf-ready.test.mjs so the two write-failure setups
+// cannot drift apart again (#3423).
+import { directoryDenyBinds } from './tests/helpers.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const NODE = process.execPath;
@@ -59,9 +62,25 @@ function runSetStatus(args, sandbox, extraEnv = {}) {
   }
 }
 
+const sandboxes = [];
+
+// Most cases remove their sandbox inline, but not all of them, and a case that
+// throws skips its removal. Removing every sandbox on exit covers both; the
+// inline removals stay harmless under `force: true`.
+process.on('exit', () => {
+  for (const dir of sandboxes) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // A sandbox that cannot be removed must not change the suite's verdict.
+    }
+  }
+});
+
 // Create a sandbox dir holding a tracker file.
 function makeSandbox(trackerContent) {
   const dir = mkdtempSync(join(tmpdir(), 'co-setstatus-'));
+  sandboxes.push(dir);
   const tracker = join(dir, 'applications.md');
   writeFileSync(tracker, trackerContent);
   // The lock env value must live under tmpdir and use the career-ops prefix
@@ -769,6 +788,11 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
 {
   if (process.platform !== 'win32' && process.getuid?.() === 0) {
     pass('write-failure: skipped (running as root — directory permissions are not enforced)');
+  } else if (process.platform === 'win32' && !directoryDenyBinds()) {
+    // Same escape hatch as root above, for the platform whose privilege model
+    // most often bypasses a permission bit. Loud on purpose: it names what was
+    // measured, so nobody reads it as the write-failure path being exercised.
+    pass('write-failure: skipped (an icacls write-deny does not bind this token - elevated shell)');
   } else {
     const dir = mkdtempSync(join(tmpdir(), 'co-setstatus-wf-'));
     const roDir = join(dir, 'ro');

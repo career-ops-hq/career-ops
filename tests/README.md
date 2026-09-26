@@ -16,13 +16,15 @@ Node.js (`tests/helpers.mjs`).
   `fail`, `warn`, plus `ROOT` (repo root), `QUICK` (`--quick` flag), and
   `NODE` (current Node binary).
 - `providers/{name}.test.mjs` — one file per scanner provider (see
-  [providers/README.md](../providers/README.md) for the test pattern), plus
-  shared cross-provider tests such as `ats-ssrf-hardening.test.mjs`.
+  [providers/ADDING_A_PROVIDER.md](../providers/ADDING_A_PROVIDER.md) for the
+  test pattern), plus shared cross-provider tests such as
+  `ats-ssrf-hardening.test.mjs`.
   Underscore-prefixed files (e.g. `_html-entities.test.mjs`) test shared
   helper modules.
 - Other `*.test.mjs` files at this level (e.g. `stats.test.mjs`) cover root
-  scripts. Note: standalone `*.test.mjs` files in the repo root are run by
-  `test-all.mjs`'s inline script list, not by this directory's discovery.
+  scripts. Note: standalone `*.test.mjs` files in the repo root are not
+  discovered and will not run — `tests/no-root-suites.test.mjs` fails the
+  build if one shows up (see "Why the flat root" in ARCHITECTURE.md).
 
 **Web tests do not live here.** `web/` runs its own `npm test` over
 `web/tests/**/*.test.mjs` (see [../web/README.md](../web/README.md)); this

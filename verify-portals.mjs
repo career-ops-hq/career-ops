@@ -3,39 +3,103 @@
 /**
  * verify-portals.mjs — ATS slug validator for portals.yml.
  *
- * When a company is added to portals.yml, its ATS slug (the path segment in
+ * When an entry is added to portals.yml, its ATS slug (the path segment in
  * `careers_url`, e.g. `jobs.lever.co/<slug>`) is easy to guess wrong — and a
- * wrong slug 404s silently on every future scan, so the company never appears
- * in results and the mistake is invisible. This script probes the public
- * Greenhouse / Ashby / Lever endpoints for a company's slug (or for candidate
- * slugs derived from its name) and reports which resolve.
+ * wrong slug 404s silently on every future scan, so the entry never appears in
+ * results and the mistake is invisible. This script probes each entry and
+ * reports which resolve, in two tiers (see verifyCompanies() below):
+ *   1. Greenhouse / Ashby / Lever — the URL carries a parseable slug, hit
+ *      directly; `--add` also cross-probes candidate slugs derived from a name.
+ *   2. Every other host (Workday, SmartRecruiters, the aggregator feeds …) —
+ *      routed through the same provider plugins the scanner uses.
  *
  * A 200 that returns an empty job list is reported as 'live but empty' — a
  * legitimate state during between-hires periods — kept distinct from an
  * unresolved (404/wrong) slug so a quiet board isn't mistaken for a typo.
  *
  * Usage:
- *   node verify-portals.mjs                 # sweep tracked_companies in portals.yml
+ *   node verify-portals.mjs                 # sweep tracked_companies + job_boards in portals.yml
  *   node verify-portals.mjs --add cursor    # probe slug variants for one name
  *   node verify-portals.mjs --strict        # exit non-zero if any slug is unresolved
  *   node verify-portals.mjs --file <path>   # use a specific portals file
+ *   node verify-portals.mjs --help          # print this usage block and exit
  *
  * Network: only the sweep / --add paths hit the network. Importing the module
  * (for tests) runs nothing — main() is guarded — and all network access goes
  * through an injectable `fetchJson`, so the pure logic is testable offline.
+ * `--help`/`-h` and an unrecognized flag are both handled BEFORE that network
+ * work starts (#4250) — this script had never adopted `lib/cli-flags.mjs`'s
+ * `validateFlags()`, unlike its siblings (audit-portals.mjs, scan.mjs), so
+ * `--help` fell through main()'s argument checks untouched and ran the exact
+ * same full portals.yml sweep as no flags at all. On a config with ~170
+ * tracked companies that is minutes of sequential network probing with zero
+ * output until it finishes — indistinguishable from a genuine hang, which is
+ * exactly how it was reported: "`--help` behaves the same [as no args]".
  */
 
 import { existsSync, readFileSync } from 'fs';
-import { dirname, resolve } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { isIP } from 'net';
+import { dirname, join, resolve } from 'path';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 
 import { fetchJson as defaultFetchJson, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
+import { isBlockedAddress } from './providers/_ip-guard.mjs';
+
+// The portal probes are the one place that keeps following redirects: they hit
+// the ATS vendors' own hosts, and a moved board answers with a 3xx. `_http.mjs`
+// refuses redirects by default (#4079), so the probes follow them here, one hop
+// at a time under redirect:'manual', and each hop is checked like the first
+// request. A hostname is checked where it resolves (providers/_ip-guard.mjs),
+// but a literal address is dialled without a lookup, so it is checked here.
+const MAX_PROBE_REDIRECTS = 5;
+
+/** Where a refused 3xx points, or null when the probe must not go there. */
+function probeRedirectTarget(err, from) {
+  const status = err?.status;
+  if (typeof status !== 'number' || status < 300 || status >= 400 || !err.location) return null;
+  let next;
+  try {
+    next = new URL(err.location, from);
+  } catch {
+    return null;
+  }
+  if (next.protocol !== 'https:' && next.protocol !== 'http:') return null;
+  const host = next.hostname.replace(/^\[|\]$/g, '');
+  if (isIP(host) && isBlockedAddress(host)) return null;
+  return next.href;
+}
+
+const followRedirects = (fetchFn) => async (url, opts = {}) => {
+  let current = url;
+  for (let hop = 0; ; hop++) {
+    try {
+      return await fetchFn(current, { ...opts, redirect: 'manual' });
+    } catch (err) {
+      const next = hop < MAX_PROBE_REDIRECTS ? probeRedirectTarget(err, current) : null;
+      if (next === null) throw err;
+      current = next;
+    }
+  }
+};
+const probeFetchJson = followRedirects(defaultFetchJson);
+const probeFetchText = followRedirects(defaultFetchText);
 import { decodeEntities } from './providers/_html-entities.mjs';
 import { asciiFold } from './lib/ascii-fold.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
+// getCareerOpsRoot() (not a bare 'portals.yml'): scan.mjs, scan-ats-full.mjs
+// and audit-portals.mjs all resolve their default portals.yml against the
+// Data Root (CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data —
+// AGENTS.md's Path Resolution Override & Precedence), so this script was the
+// one place still assuming the Data Root equals the current working
+// directory — the same split-checkout mismatch class as #3867, just for
+// this script's default path (CodeRabbit, #4254 review).
+const DATA_ROOT = getCareerOpsRoot();
+const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(DATA_ROOT, 'portals.yml');
 
 // The core providers/ directory — the SAME plugins the scanner loads. Resolved
 // from this file's location so it's independent of the caller's cwd.
@@ -228,7 +292,7 @@ export function classifyFetchError(err) {
 export async function probeSlug(
   ats,
   slug,
-  { fetchJson = defaultFetchJson, eu = false } = {},
+  { fetchJson = probeFetchJson, eu = false } = {},
 ) {
   const spec = ATS[ats];
   if (!spec)
@@ -403,6 +467,21 @@ async function ownerConfirmed(ats, slug, companyName, { fetchJson, fetchText, eu
 }
 
 /**
+ * Strip control characters from text before it reaches a terminal.
+ *
+ * Owner names come from a remote board page's ``<title>``, so a hostile or
+ * merely broken board can put ANSI escapes in our CLI output. Escape sequences
+ * can recolour or rewrite prior lines, which is a misleading report rather than
+ * a cosmetic problem: this command's whole job is telling an operator what is
+ * live. Tab and newline are dropped too, since the row is one line.
+ */
+function sanitizeForTerminal(text) {
+  if (typeof text !== 'string') return '';
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').slice(0, 120).trim();
+}
+
+/**
  * Probe slug variants across all ATSes; prefer live boards over empty ones.
  *
  * No first-word suffix variants (#2937). Nothing downstream re-checks identity:
@@ -414,6 +493,12 @@ async function ownerConfirmed(ats, slug, companyName, { fetchJson, fetchText, eu
  */
 async function discoverAlternates(name, { fetchJson, fetchText }) {
   let bestEmpty = null;
+  // A live board whose identity could not be confirmed is NOT a suggestion: it is
+  // never adopted, and `fix-slugs` still refuses to write it. It is worth
+  // reporting all the same, because "your slug 404s and there is a live board at
+  // ashby/<slug> owned by someone else" and "your slug 404s and nothing answers"
+  // are different facts about a company and the summary showed neither (#4230).
+  let bestRejected = null;
   // One owner lookup per (ats, eu, slug) per company, so the added identity check
   // cannot multiply requests when candidates repeat across the probe order.
   const cache = new Map();
@@ -427,13 +512,24 @@ async function discoverAlternates(name, { fetchJson, fetchText }) {
         const r = await probeSlug(ats, slug, { fetchJson, eu });
         if (r.status !== 'live' && r.status !== 'empty') continue;
         const owner = await ownerConfirmed(ats, slug, name, { fetchJson, fetchText, eu, cache });
-        if (!owner.ok) continue;
+        if (!owner.ok) {
+          // Only a live board is worth reporting. An empty unconfirmed board says
+          // nothing the operator can act on, and `!bestRejected` keeps the first
+          // (widest-derived) candidate rather than the last one probed.
+          if (r.status === 'live' && !bestRejected) {
+            bestRejected = { ...r, ownerReason: owner.reason, ownerBoardName: owner.boardName || '' };
+          }
+          continue;
+        }
         if (r.status === 'live') return r;
         if (!bestEmpty) bestEmpty = r;
       }
     }
   }
-  return bestEmpty;
+  // The winner still wins; the rejection rides along so the caller can report it
+  // without the gate moving.
+  if (bestEmpty) return { ...bestEmpty, rejectedAlternate: bestRejected };
+  if (bestRejected) return { rejectedAlternate: bestRejected };
 }
 
 /**
@@ -484,9 +580,9 @@ function boundedProbeCtx(base) {
 }
 
 /**
- * Probe one non-ATS company through the provider plugin the scanner would use.
+ * Probe one non-ATS entry through the provider plugin the scanner would use.
  *
- * @param {object} entry - tracked_companies entry.
+ * @param {object} entry - portals.yml entry (tracked_companies or job_boards).
  * @param {import('./providers/_types.js').Provider} provider
  * @param {import('./providers/_types.js').Context} baseCtx
  * @returns {Promise<{provider,status,jobCount?,partial?,httpStatus?,errorKind?,reason?}>}
@@ -526,7 +622,7 @@ export async function probeProvider(entry, provider, baseCtx) {
 }
 
 /**
- * Verify each enabled tracked company's board is reachable.
+ * Verify each enabled portals.yml entry's board is reachable.
  *
  * Two tiers, cheapest first:
  *   1. Greenhouse/Ashby/Lever slugs are probed directly (one JSON request each),
@@ -535,18 +631,18 @@ export async function probeProvider(entry, provider, baseCtx) {
  *      uses (Workday, SuccessFactors, SmartRecruiters, Avature, …), bounded to
  *      a few requests. This catches broken non-ATS boards that used to be
  *      reported as an un-actionable "skipped".
- * A company reaches `skipped` only when no provider claims it. Probing is
+ * An entry reaches `skipped` only when no provider claims it. Probing is
  * sequential to stay gentle on rate limits.
  *
- * @param {Array<object>} companies - tracked_companies entries.
+ * @param {Array<object>} companies - portals.yml entries (tracked_companies and/or job_boards).
  * @param {{fetchJson?: Function, providers?: Map, httpCtx?: object}} [deps]
  *   `providers`/`httpCtx` enable tier 2; omit them (as the ATS unit tests do) to
  *   get tier-1-only behavior where non-ATS entries stay `skipped`.
- * @returns {Promise<Array<object>>} One result row per company.
+ * @returns {Promise<Array<object>>} One result row per entry.
  */
 export async function verifyCompanies(
   companies,
-  { fetchJson = defaultFetchJson, fetchText = defaultFetchText, providers = null, httpCtx = null } = {},
+  { fetchJson = probeFetchJson, fetchText = probeFetchText, providers = null, httpCtx = null } = {},
 ) {
   const list = Array.isArray(companies) ? companies : [];
   const results = [];
@@ -596,7 +692,7 @@ export async function verifyCompanies(
 }
 
 /**
- * Read a portals file and verify its tracked companies' slugs.
+ * Read a portals file and verify its tracked_companies and job_boards slugs.
  *
  * @param {string} filePath - Path to a portals.yml.
  * @param {{fetchJson?: Function}} [deps]
@@ -605,14 +701,18 @@ export async function verifyCompanies(
  */
 export async function verifyPortalsFile(
   filePath,
-  { fetchJson = defaultFetchJson, providers = null, httpCtx = null } = {},
+  { fetchJson = probeFetchJson, providers = null, httpCtx = null } = {},
 ) {
   if (!existsSync(filePath)) return { found: false, results: [] };
   const config = yaml.load(readFileSync(filePath, 'utf-8'));
-  const companies = Array.isArray(config?.tracked_companies)
-    ? config.tracked_companies
-    : [];
-  const results = await verifyCompanies(companies, { fetchJson, providers, httpCtx });
+  // tracked_companies and job_boards carry the same entry shape and both feed the
+  // scanner, so sweep both — a job board going dark is exactly as worth surfacing
+  // as a company board 404ing.
+  const entries = [
+    ...(Array.isArray(config?.tracked_companies) ? config.tracked_companies : []),
+    ...(Array.isArray(config?.job_boards) ? config.job_boards : []),
+  ];
+  const results = await verifyCompanies(entries, { fetchJson, providers, httpCtx });
   return { found: true, results };
 }
 
@@ -626,7 +726,7 @@ const ERROR_KIND_LABEL = {
   unknown: 'unresolved',
 };
 
-function printResults(results) {
+export function printResults(results) {
   for (const r of results) {
     const icon = ICON[r.status] || '?';
     // ATS rows carry ats/slug; provider-layer rows carry the provider id.
@@ -639,8 +739,26 @@ function printResults(results) {
     } else if (r.status === 'missing') {
       const kind = ERROR_KIND_LABEL[r.errorKind] || 'unresolved';
       detail = `${source} (${kind}) — ${r.reason || 'unresolved'}`;
-      if (r.suggested) {
+      // Only an *adoptable* suggestion gets the "try" line. A rejected-only
+      // result carries `rejectedAlternate` and no top-level ats/slug, so gating
+      // on `r.suggested` alone rendered `try undefined/undefined`.
+      if (r.suggested && r.suggested.ats && r.suggested.slug) {
         detail += ` → try ${r.suggested.ats}/${r.suggested.slug}`;
+      }
+      // A live alternate whose identity could not be confirmed is reported, never
+      // suggested: the operator learns the board exists and why it was refused,
+      // and `fix-slugs` still will not write it (#4230).
+      const rejected = r.suggested?.rejectedAlternate;
+      if (rejected) {
+        // The observed owner and the refusal reason are two different facts: the
+        // first is what the board calls itself, the second is why we would not
+        // adopt it. Printing one in place of the other told the operator
+        // "identity unconfirmed" even when the identity was confirmed and simply
+        // did not match.
+        const board = sanitizeForTerminal(rejected.ownerBoardName);
+        const reason = rejected.ownerReason || 'identity unconfirmed';
+        const who = board ? `owned by "${board}" — ${reason}` : reason;
+        detail += `; also found live ${rejected.ats}/${rejected.slug} ${who}`;
       }
     } else {
       detail = r.reason || '';
@@ -696,26 +814,66 @@ async function runAdd(name, { fetchJson }) {
   }
 }
 
+const KNOWN_FLAGS = ['--add', '--strict', '--file', '--help', '-h'];
+const VALUE_FLAGS = ['--add', '--file'];
+
+const USAGE = `Usage:
+  node verify-portals.mjs                 # sweep tracked_companies + job_boards in portals.yml
+  node verify-portals.mjs --add cursor    # probe slug variants for one name
+  node verify-portals.mjs --strict        # exit non-zero if any slug is unresolved
+  node verify-portals.mjs --file <path>   # use a specific portals file
+  node verify-portals.mjs --help          # print this usage block and exit`;
+
 async function main() {
   const args = process.argv.slice(2);
-  const strict = args.includes('--strict');
-  const fetchJson = defaultFetchJson;
+  // Before any network work: an unrecognized flag exits 1, --help/-h prints
+  // USAGE and exits 0. Neither used to be checked at all (#4250) — --help
+  // fell through untouched and triggered the exact same full portals.yml
+  // sweep as no flags, which on a large config can run for minutes with zero
+  // output and reads exactly like a hang.
+  // requireOperand: without it, `--file --strict` reads --strict as the file
+  // path (flagValue() returns args[idx+1] unconditionally, with no check that
+  // it isn't itself another flag), and a bare `--file`/`--file=` reaches
+  // resolve('') — the current directory — which readFileSync() then rejects
+  // with a raw EISDIR instead of a usage error (CodeRabbit, #4254 review).
+  // Same shape already fixed the same way in process-quality.mjs, doctor.mjs,
+  // detect-reposts.mjs and others.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
-  const addFlag = args.indexOf('--add');
-  if (addFlag !== -1) {
-    await runAdd(args[addFlag + 1] || '', { fetchJson });
+  const strict = hasFlag(args, '--strict');
+  const fetchJson = probeFetchJson;
+
+  if (hasFlag(args, '--add')) {
+    await runAdd(flagValue(args, '--add') || '', { fetchJson });
     return;
   }
 
-  const fileFlag = args.indexOf('--file');
+  // requireOperand above catches a bare `--file` (nothing follows) and
+  // `--file --anotherflag` (the next token looks like a flag), but not
+  // `--file=` — an explicit empty value after `=` is a single token
+  // (`--file=`) that never matches the bare `--file` requireOperand checks
+  // for, so it would otherwise reach resolve('') the same way.
+  const fileArg = flagValue(args, '--file');
+  if (hasFlag(args, '--file') && !fileArg) {
+    console.error('Error: --file requires a value');
+    process.exit(1);
+  }
+
   const filePath = resolve(
-    fileFlag === -1 ? DEFAULT_PORTALS_PATH : args[fileFlag + 1] || '',
+    hasFlag(args, '--file') ? fileArg : DEFAULT_PORTALS_PATH,
   );
 
   // Load the scanner's provider plugins so non-ATS boards (Workday,
   // SuccessFactors, SmartRecruiters, …) get a real reachability probe instead
   // of an un-actionable "skipped".
   const providers = await loadProviders(PROVIDERS_DIR);
+  // Fold in enabled keyed/auth-gated provider plugins, exactly as scan.mjs does
+  // — without this the verifier resolves only providers/*.mjs and disagrees
+  // with the scanner on every plugin-provider entry (#4026). No-op for a
+  // plugin-free install (mergeProviderPlugins returns before config/plugins.yml
+  // is read when it is absent).
+  const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
+  await mergeProviderPlugins(providers, { root: dirname(PROVIDERS_DIR) });
   const httpCtx = makeHttpCtx();
   const { found, results } = await verifyPortalsFile(filePath, { fetchJson, providers, httpCtx });
   if (!found) {
@@ -757,7 +915,7 @@ async function main() {
 
 // Only run main() when invoked directly (`node verify-portals.mjs`), not when
 // imported by tests. `|| ''` guards `node -e` invocations with no script arg.
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`verify-portals failed: ${err.message}`);
     process.exit(1);

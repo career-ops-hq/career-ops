@@ -21,10 +21,10 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
 // Scenarios that exercise the plugin path pass their own CLAUDE_CONFIG_DIR.
 const EMPTY_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'co-mcp-emptycfg-'));
 
-function runDoctor(cwd, args, env) {
+function runDoctor(cwd, args, env, { executionCwd = cwd } = {}) {
   try {
     const out = execFileSync(NODE, [DOCTOR, '--json', '--target', cwd, ...args], {
-      cwd,
+      cwd: executionCwd,
       // Order matters: the empty dir must override an ambient CLAUDE_CONFIG_DIR
       // from the developer's own shell, while a scenario's explicit env still wins.
       env: { ...process.env, CLAUDE_CONFIG_DIR: EMPTY_CONFIG_DIR, ...env },
@@ -34,6 +34,19 @@ function runDoctor(cwd, args, env) {
     return JSON.parse(out);
   } catch (e) {
     return { _error: e.message, _stderr: e.stderr ? String(e.stderr) : '' };
+  }
+}
+
+function runDoctorHuman(cwd, env, { executionCwd = cwd } = {}) {
+  try {
+    return execFileSync(NODE, [DOCTOR, '--target', cwd], {
+      cwd: executionCwd,
+      env: { ...process.env, CLAUDE_CONFIG_DIR: EMPTY_CONFIG_DIR, ...env },
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (e) {
+    return `${e.stdout ? String(e.stdout) : ''}${e.stderr ? String(e.stderr) : ''}`;
   }
 }
 
@@ -61,6 +74,39 @@ function expectWarn(state, msg) {
 const PLAYWRIGHT_RE = /playwright mcp/i;
 
 try {
+  // Split checkout: MCP config lives beside doctor.mjs, while --target points
+  // at the user-data root. The CLI never reads a decoy config in that data root.
+  {
+    const dataRoot = mkdtempSync(join(tmpdir(), 'co-mcp-split-data-'));
+    const codeRoot = mkdtempSync(join(tmpdir(), 'co-mcp-split-code-'));
+    const codeConfig = join(codeRoot, '.mcp.json');
+    try {
+      writeFileSync(join(dataRoot, '.mcp.json'), JSON.stringify({
+        mcpServers: { unrelated: { command: 'false' } },
+      }));
+      writeFileSync(codeConfig, JSON.stringify({
+        mcpServers: { playwright: { command: 'npx', args: ['@playwright/mcp@latest'] } },
+      }));
+      const state = runDoctor(dataRoot, [], {}, { executionCwd: codeRoot });
+      if (state.playwright_mcp?.claude === true
+          && !state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('split checkout reads Playwright MCP config from code root');
+      } else {
+        fail(`split checkout ignored code-root MCP config: ${JSON.stringify(state)}`);
+      }
+      const human = runDoctorHuman(dataRoot, {}, { executionCwd: codeRoot });
+      if (/Playwright MCP server configured \(claude\)/.test(human)
+          && !/Playwright MCP tools not detected/.test(human)) {
+        pass('human doctor output reads Playwright MCP config from code root');
+      } else {
+        fail(`human doctor output ignored code-root MCP config: ${human}`);
+      }
+    } finally {
+      rmSync(codeRoot, { recursive: true, force: true });
+      rmSync(dataRoot, { recursive: true, force: true });
+    }
+  }
+
   // 1. Default CLI (no flag/env/.env), no MCP config anywhere → warning fires.
   {
     const dir = mkdtempSync(join(tmpdir(), 'co-mcp-1-'));
@@ -614,6 +660,144 @@ try {
         pass('empty CLAUDE_CONFIG_DIR → warns cleanly, no crash');
       } else {
         fail(`#25 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  // 26. A literal `null` inside a plugin's entry array. This is valid JSON and
+  //     a half-written install can leave it behind, so doctor has to survive
+  //     it. Destructuring the entry threw a TypeError - `= {}` defaults only
+  //     for `undefined`, never for `null` - which killed the run before the
+  //     report printed, turning one unconfigured plugin into "career-ops is
+  //     broken here". The assertion is that doctor still WARNS: a crash and a
+  //     clean miss both leave playwright_mcp false, so only checking the flag
+  //     would pass on the bug.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-26-'));
+    const home = mkdtempSync(join(tmpdir(), 'co-mcp-nullentry-'));
+    try {
+      mkdirSync(join(home, 'plugins'), { recursive: true });
+      writeFileSync(join(home, 'settings.json'), JSON.stringify({ enabledPlugins: { [PLUGIN_KEY]: true } }));
+      writeFileSync(
+        join(home, 'plugins', 'installed_plugins.json'),
+        JSON.stringify({ version: 2, plugins: { [PLUGIN_KEY]: [null] } }),
+      );
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: home });
+      if (state._error) {
+        fail(`#26 null plugin entry crashed doctor: ${state._error}`);
+      } else if (state.playwright_mcp?.claude === false
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('null entry in installed_plugins.json → warns cleanly, no crash');
+      } else {
+        fail(`#26 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  // 27. Plugin enabled in project .claude/settings.json (not user config) (#3698).
+  //     Running `/plugin install playwright@claude-plugins-official` with project
+  //     scope writes enabledPlugins to `<project>/.claude/settings.json`.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-27-'));
+    const home = makePluginHome({ key: PLUGIN_KEY, enabled: false, mcpJson: PLUGIN_MCP });
+    try {
+      // Clear user-level enabledPlugins from home/settings.json
+      writeFileSync(join(home, 'settings.json'), JSON.stringify({}));
+      // Write project-level enabledPlugins
+      mkdirSync(join(dir, '.claude'), { recursive: true });
+      writeFileSync(join(dir, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { [PLUGIN_KEY]: true } }));
+
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: home });
+      if (!expectWarn(state, '#27 project-scoped enabled plugin')) {
+        // already failed
+      } else if (state.playwright_mcp?.claude === true
+          && Array.isArray(state.warnings)
+          && !state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('project-scoped enabled plugin (.claude/settings.json) → detected, no warning (#3698)');
+      } else {
+        fail(`#27 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  // 28. Plugin enabled in project .claude/settings.local.json (#3698).
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-28-'));
+    const home = makePluginHome({ key: PLUGIN_KEY, enabled: false, mcpJson: PLUGIN_MCP });
+    try {
+      writeFileSync(join(home, 'settings.json'), JSON.stringify({}));
+      mkdirSync(join(dir, '.claude'), { recursive: true });
+      writeFileSync(join(dir, '.claude', 'settings.local.json'), JSON.stringify({ enabledPlugins: { [PLUGIN_KEY]: true } }));
+
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: home });
+      if (!expectWarn(state, '#28 project-local enabled plugin')) {
+        // already failed
+      } else if (state.playwright_mcp?.claude === true
+          && Array.isArray(state.warnings)
+          && !state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('project-local enabled plugin (.claude/settings.local.json) → detected, no warning (#3698)');
+      } else {
+        fail(`#28 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  // 29. Plugin enabled globally in user config, but explicitly disabled in project (.claude/settings.json) (#3698).
+  //     Project config overrides user config.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-29-'));
+    const home = makePluginHome({ key: PLUGIN_KEY, enabled: true, mcpJson: PLUGIN_MCP });
+    try {
+      mkdirSync(join(dir, '.claude'), { recursive: true });
+      writeFileSync(join(dir, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { [PLUGIN_KEY]: false } }));
+
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: home });
+      if (!expectWarn(state, '#29 project disabled plugin overrides user')) {
+        // already failed
+      } else if (state.playwright_mcp?.claude === false
+          && Array.isArray(state.warnings)
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('project-level disable overrides user-level enable → warns (#3698)');
+      } else {
+        fail(`#29 unexpected state: ${JSON.stringify(state)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  // 30. Plugin enabled in project .claude/settings.json, but disabled in project .claude/settings.local.json (#3698).
+  //     Local project config overrides shared project config.
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'co-mcp-30-'));
+    const home = makePluginHome({ key: PLUGIN_KEY, enabled: true, mcpJson: PLUGIN_MCP });
+    try {
+      mkdirSync(join(dir, '.claude'), { recursive: true });
+      writeFileSync(join(dir, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { [PLUGIN_KEY]: true } }));
+      writeFileSync(join(dir, '.claude', 'settings.local.json'), JSON.stringify({ enabledPlugins: { [PLUGIN_KEY]: false } }));
+
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: home });
+      if (!expectWarn(state, '#30 project-local disabled plugin overrides project shared')) {
+        // already failed
+      } else if (state.playwright_mcp?.claude === false
+          && Array.isArray(state.warnings)
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('project-local disable overrides project-shared enable → warns (#3698)');
+      } else {
+        fail(`#30 unexpected state: ${JSON.stringify(state)}`);
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });

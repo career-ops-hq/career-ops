@@ -11,12 +11,16 @@
 import { mkdirSync, writeFileSync } from 'fs';
 import { isIP } from 'net';
 import { dirname, join } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 
 import { decodeEntities } from './providers/_html-entities.mjs';
+import { safeEncodeURIComponent } from './providers/_safe-url.mjs';
 import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 const DEFAULT_LIMIT = 20;
 const DEFAULT_MONTHS = 3;
 const DEFAULT_SORT = 'date';
@@ -787,7 +791,11 @@ async function fetchHnDiscovery({ months = DEFAULT_MONTHS, diagnostics = [] } = 
     for (const hit of hits) {
       const title = compact(hit.title || hit.story_title || '');
       if (!title) continue;
-      const fallbackUrl = `https://news.ycombinator.com/item?id=${encodeURIComponent(String(hit.objectID || ''))}`;
+      // A lone surrogate in objectID would throw URIError out of
+      // encodeURIComponent and abort the loop over the remaining hits; fall back
+      // to no synthetic URL (hit.url is tried first anyway).
+      const encodedId = safeEncodeURIComponent(hit.objectID || '');
+      const fallbackUrl = encodedId === null ? '' : `https://news.ycombinator.com/item?id=${encodedId}`;
       const itemUrl = trustedEvidenceUrl(hit.url || '', '') || trustedEvidenceUrl(fallbackUrl, 'hacker_news');
       const item = {
         source: 'hacker_news',
@@ -883,8 +891,8 @@ export function renderReport(result) {
 }
 
 function writeArtifacts(result) {
-  const outDir = join(ROOT, 'output');
-  const reportDir = join(ROOT, 'reports');
+  const outDir = join(DATA_ROOT, 'output');
+  const reportDir = join(DATA_ROOT, 'reports');
   mkdirSync(outDir, { recursive: true });
   mkdirSync(reportDir, { recursive: true });
   const jsonPath = join(outDir, `funded-companies-${result.generated_at}.json`);
@@ -1015,7 +1023,7 @@ async function main() {
   else printHuman(result);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`company-funded: ${err.message}`);
     process.exit(1);

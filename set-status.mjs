@@ -128,7 +128,46 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
 
   Tracker row IDs and report IDs are separate counters that diverge permanently
   once any row exists without a report. Prefer --row/--report (or the company
-  name) over a bare number, and prefer any of them over --force.`;
+  name) over a bare number, and prefer any of them over --force.
+
+Examples:
+  node set-status.mjs --report 12 Applied
+  node set-status.mjs --report 12 Interview --note "recruiter screen booked"
+  node set-status.mjs "Acme Corp" Rejected --on 2026-08-01
+  node set-status.mjs "Acme Corp" Applied --role "Platform Engineer"
+  node set-status.mjs --row 7 Discarded --dry-run`;
+
+/**
+ * Render the canonical states from states.yml for `--help`.
+ *
+ * A broken states.yml degrades to a pointer rather than throwing: that failure
+ * belongs to the run that tries to WRITE a state, not to `--help`.
+ *
+ * @returns {string} The states section, or a pointer line when unreadable.
+ */
+function renderStatesSection() {
+  let states;
+  try {
+    states = loadCanonicalStates(STATES_FILE);
+  } catch {
+    return `\nCanonical states: see ${STATES_FILE}`;
+  }
+  if (!states.length) return `\nCanonical states: see ${STATES_FILE}`;
+  const width = Math.max(...states.map(st => st.label.length));
+  const lines = states.map((st) => {
+    const terminal = st.terminal ? '  (terminal)' : '';
+    const desc = st.description ? `  ${st.description}` : '';
+    return `  ${st.label.padEnd(width)}${desc}${terminal}`;
+  });
+  return [
+    '',
+    'Canonical states (aliases also accepted — see templates/states.yml):',
+    ...lines,
+    '',
+    '  A terminal state ends the application. Discarded is YOUR decision or a',
+    '  closed req; Rejected is theirs; SKIP means never applied for.',
+  ].join('\n');
+}
 
 // ── argument parsing ─────────────────────────────────────────────
 
@@ -136,6 +175,31 @@ const rawArgs = process.argv.slice(2);
 const positional = [];
 const flags = { note: null, role: null, on: null, row: null, report: null, source: null, force: false, dryRun: false, json: false };
 const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--source': 'source' };
+
+/**
+ * Is the caller asking for help, rather than passing "--help" as a VALUE?
+ *
+ * Runs before the main loop so help answers a line that still carries the bad
+ * arguments from a failed run. Value positions are skipped but never validated
+ * — validation stays in the loop, which owns the error messages and exit codes.
+ *
+ * @param {string[]} args - argv slice.
+ * @returns {boolean}
+ */
+function wantsHelp(args) {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (Object.hasOwn(VALUE_FLAGS, a)) { i++; continue; } // skip this flag's value
+    if (a === '--help' || a === '-h') return true;
+  }
+  return false;
+}
+
+// Exits 0 so `cmd --help` works in CI smoke checks and `|| true` idioms.
+if (wantsHelp(rawArgs)) {
+  console.log(`${USAGE}\n${renderStatesSection()}`);
+  process.exit(EXIT_OK);
+}
 
 // Who is driving this write. A caller that delegates here instead of touching
 // the tracker itself — the web status route — needs its ledger rows to stay
@@ -146,7 +210,7 @@ const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row':
 // allow-list, so an unrecognized label would be persisted here and then
 // silently dropped there. Rejecting it at the boundary keeps the two ends from
 // disagreeing about what a valid source is.
-const WRITER_SOURCES = new Set(['set-status', 'web']);
+const WRITER_SOURCES = new Set(['set-status', 'web', 'reply-watch']);
 
 for (let i = 0; i < rawArgs.length; i++) {
   const a = rawArgs[i];
@@ -171,7 +235,7 @@ for (let i = 0; i < rawArgs.length; i++) {
   else if (a === '--force') { flags.force = true; }
   else if (a === '--dry-run') { flags.dryRun = true; }
   else if (a === '--json') { flags.json = true; }
-  else if (a.startsWith('--')) { failUsage(`Unknown flag: ${a}`); }
+  else if (a === '-h' || a.startsWith('--')) { failUsage(`Unknown flag: ${a}`); }
   else { positional.push(a); }
 }
 
@@ -235,6 +299,7 @@ const failWith = makeCliFailWith(flags.json);
 function failUsage(message) {
   const msg = message ?? 'Expected 2 arguments: <report#|company> <state>';
   if (rawArgs.includes('--json')) {
+    // JSON must be the last thing written to stdout; machine callers parse stdout as one JSON document.
     console.log(JSON.stringify({ error: msg, code: 'usage' }));
     console.error(`❌ ${msg}`);
   } else {
@@ -559,6 +624,72 @@ if (statusChanged && !flags.dryRun) {
 }
 lock?.release();
 
+// ── follow-up seeding (#1430) ────────────────────────────────────
+//
+// The transition into Applied is where the first follow-up gets scheduled.
+// set-status.mjs used to only ANNOUNCE that — `followupSeedCandidate: true` —
+// and nothing consumed the flag: the only callers of followup-seed.mjs were
+// modes/apply.md and modes/followup.md, both agent instructions. So recording
+// an application from the web UI, or from this CLI directly, wrote the tracker
+// and the ledger correctly and scheduled nothing, silently (#3459).
+//
+// Seeding HERE rather than in each caller is what makes that one fix instead of
+// three: #2901 converged /api/status onto this script, so the web path inherits
+// it, and so does every future caller that delegates here rather than editing
+// the table.
+//
+// AFTER the tracker lock is released, deliberately. seedFollowup() re-reads the
+// tracker to resolve the applied date, and it must read the row this run just
+// wrote. It takes its own followups lock, never the tracker lock, so there is
+// no lock ordering to get wrong.
+//
+// A seeding failure NEVER fails the status change. The write has already
+// committed and the caller's exit code is about that write — same policy, and
+// the same wording, as the status-log append above. It is also idempotent
+// (`already-seeded` → seeded:false), so a re-run cannot stack duplicate pins.
+let followupSeeded = null;
+if (statusChanged && newStatus === 'Applied') {
+  try {
+    const { seedFollowup } = await import('./followup-seed.mjs');
+    // followupsPath is derived from the tracker's own directory, not left to
+    // followup-seed's default. Its default is the REPO's data/follow-ups.md,
+    // so with CAREER_OPS_TRACKER pointing elsewhere — tests, and any install
+    // whose data lives outside the checkout — the status would be written to
+    // one tracker and the follow-up seeded next to a different one. The
+    // status-log append above derives its path the same way.
+    const seed = await seedFollowup(target.num, {
+      trackerPath: APPS_FILE,
+      followupsPath: join(dirname(APPS_FILE), 'follow-ups.md'),
+      // --on is the day the transition REALLY happened, and for a transition
+      // into Applied that day is the day the application was sent. Nothing
+      // else carries it here: the tracker's date column is the evaluation
+      // date and this script never rewrites it, so without passing it on,
+      // seedFollowup falls back to that column or to today. Backdating a
+      // week-old application would then schedule its first follow-up a week
+      // late — from the wrong anchor, silently.
+      date: flags.on,
+      dryRun: flags.dryRun,
+      // assumeApplied on a DRY RUN only, and deliberately not `force`.
+      // seedFollowup refuses a row that is not Applied, and on a dry run the
+      // tracker was not written — so the row it re-reads still holds the old
+      // status and the preview would report a failure for the one thing the
+      // real run is about to do. `force` would fix that by ALSO suppressing
+      // the already-seeded check, which is the opposite of a preview: a row
+      // that already has a pin would be promised a new one here and refused
+      // on the real run. assumeApplied relaxes the status guard only. In a
+      // real run the row IS Applied by this point and neither is needed.
+      ...(flags.dryRun ? { assumeApplied: true } : {}),
+    });
+    followupSeeded = { seeded: seed.seeded, nextDate: seed.nextDate ?? null, ...(seed.reason ? { reason: seed.reason } : {}) };
+    if (!flags.json && seed.seeded) {
+      console.log(`📅 Follow-up ${flags.dryRun ? 'would be seeded' : 'seeded'} for #${target.num}: next ${seed.nextDate}`);
+    }
+  } catch (err) {
+    followupSeeded = { seeded: false, reason: 'error', error: err.message };
+    console.error(`⚠ follow-up seeding failed (status change itself succeeded): ${err.message}`);
+  }
+}
+
 // ── report ───────────────────────────────────────────────────────
 
 const result = {
@@ -573,17 +704,25 @@ const result = {
   // Fire the #1430 hook only on an actual transition INTO Applied — an
   // idempotent re-run of an already-Applied row must not invite a consumer
   // to seed a duplicate follow-up.
+  // followupSeedCandidate is kept for any consumer already reading it; the
+  // seeding it used to merely advertise now actually happens, and its outcome
+  // travels beside it.
   ...(statusChanged && newStatus === 'Applied' ? { followupSeedCandidate: true } : {}),
+  ...(followupSeeded ? { followupSeeded } : {}),
   ...(statusChanged && !flags.dryRun ? { statusLogged } : {}),
   tracker: APPS_FILE,
 };
 
 if (flags.json) {
+  // JSON must be the last thing written to stdout; machine callers parse stdout as one JSON document.
   console.log(JSON.stringify(result, null, 2));
 } else {
   const verb = flags.dryRun ? 'would set' : changed ? 'set' : 'already';
   console.log(`✅ #${target.num} ${target.company} — ${target.role}: ${verb} ${oldStatus} → ${newStatus}${note ? ` (note: ${note})` : ''}`);
-  if (statusChanged && !flags.dryRun && newStatus === 'Applied') {
+  // Only when seeding did NOT happen. The advisory predates the seeding above
+  // and asked the user to do by hand what now runs for them; leaving it
+  // unconditional would read as a contradiction right under "Follow-up seeded".
+  if (statusChanged && !flags.dryRun && newStatus === 'Applied' && !followupSeeded?.seeded) {
     console.error('ℹ️  Status is Applied — consider seeding follow-ups in data/follow-ups.md (#1430: node followup-cadence.mjs)');
   }
 }

@@ -19,6 +19,12 @@ import { chromium } from 'playwright';
 import { execFileSync, execFile } from 'child_process';
 import { promisify } from 'util';
 import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
+import {
+  normalizedTrackerScore, slugifyCompany, tsvSafe,
+} from './lib/tracker-addition.mjs';
 const execFileAsync = promisify(execFile);
 try {
   const { config } = await import('dotenv');
@@ -26,17 +32,38 @@ try {
 } catch {}
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 export const PATHS = {
   shared:      join(ROOT, 'modes', '_shared.md'),
   oferta:      join(ROOT, 'modes', 'oferta.md'),
-  cv:          join(ROOT, 'cv.md'),
-  profile:     join(ROOT, 'modes', '_profile.md'),
-  profileYml:  join(ROOT, 'config', 'profile.yml'),
-  reports:     join(ROOT, 'reports'),
-  trackerAdditions: join(ROOT, 'batch', 'tracker-additions'),
-  pipeline:    join(ROOT, 'data', 'pipeline.md')
+  cv:          join(DATA_ROOT, 'cv.md'),
+  // DATA_ROOT, not ROOT. modes/_profile.md is USER LAYER in the Data Contract
+  // — doctor.mjs auto-copies it into the user's root from
+  // modes/_profile.template.md — and it carries the archetypes and North Star
+  // every A-F evaluation scores against.
+  //
+  // Read from the CODE root it resolves to the shipped template, which is the
+  // exact failure AGENTS.md's `unpersonalized` warning exists to prevent:
+  // "offers get scored against the template author's targeting rather than
+  // yours". Silently, and for every offer in the batch.
+  //
+  // gemini-eval.mjs:89 and ollama-eval.mjs:56 both already use DATA_ROOT here.
+  profile:     join(DATA_ROOT, 'modes', '_profile.md'),
+  profileYml:  join(DATA_ROOT, 'config', 'profile.yml'),
+  reports:     join(DATA_ROOT, 'reports'),
+  // DATA_ROOT, matching gemini-eval.mjs:93. These TSVs are the batch's OUTPUT —
+  // one per evaluated offer, for merge-tracker.mjs to fold into the tracker —
+  // so they are user data living under a system-layer directory name.
+  //
+  // Written to the CODE root they land in the checkout while merge-tracker,
+  // run normally, looks under the data root and finds nothing. The batch
+  // reports success, the tracker gains no rows, and the evidence sits in a
+  // directory the user has no reason to open.
+  trackerAdditions: join(DATA_ROOT, 'batch', 'tracker-additions'),
+  pipeline:    join(DATA_ROOT, 'data', 'pipeline.md')
 };
 
 let apiKey;
@@ -95,20 +122,6 @@ function readFile(path, label) {
 async function nextReportNumber() { // outdate-bot
   const { stdout } = await execFileAsync(process.execPath, [join(ROOT, 'reserve-report-num.mjs')], { encoding: 'utf-8' });
   return stdout.trim();
-}
-
-function slugifyCompany(value) {
-  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
-}
-
-function tsvSafe(value) {
-  return String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
-}
-
-function normalizedTrackerScore(value) {
-  const clean = tsvSafe(value);
-  if (!clean || clean === '?' || /n\/?a/i.test(clean) || isNaN(parseFloat(clean))) return 'N/A';
-  return /\/5$/i.test(clean) ? clean : parseFloat(clean) + '/5';
 }
 
 let systemPromptTemplate;
@@ -270,7 +283,17 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
     mkdirSync(PATHS.trackerAdditions, { recursive: true });
 
     const num = await nextReportNumber();
-    const today = new Date().toISOString().split('T')[0];
+    // LOCAL calendar day (#3070). This one value becomes three things that have to
+    // agree with each other and with the user's calendar: the report FILENAME
+    // ({num}-{slug}-{today}.md), the report's own `**Date:**` header, and the date
+    // column of the tracker row written for it.
+    //
+    // On the UTC day an evaluation run on a Sunday evening in the Americas produces
+    // 042-acme-2026-08-18.md, dated the 18th, in a tracker row dated the 18th —
+    // while every other date the user sees, and every date the other scripts now
+    // stamp, says the 17th. The filename is the part that cannot be corrected
+    // later: reports are addressed by it.
+    const today = localToday();
     const companySlug = slugifyCompany(company);
     const filename = `${num}-${companySlug}-${today}.md`;
     const reportPath = join(PATHS.reports, filename);
@@ -294,7 +317,9 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
       'Evaluated', normalizedTrackerScore(score), '❌', `[${num}](reports/${filename})`,
       'Batch Gemini evaluation'
     ];
-    writeFileSync(trackerPath, `${trackerFields.join('\t')}\n`, 'utf-8');
+    // Header row first: merge-tracker resolves the fields by name, so this row
+    // cannot be ingested into the wrong columns (#3517).
+    writeFileSync(trackerPath, `${TSV_ADDITION_HEADER}\n${trackerFields.join('\t')}\n`, 'utf-8');
 
     console.log(`✅ Success: ${company} - ${role} | Score: ${score}/5 | Saved as ${filename}`);
     
@@ -362,7 +387,7 @@ async function main() {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMainModule(import.meta.url)) {
   main().catch(err => {
     console.error(err);
     process.exit(1);

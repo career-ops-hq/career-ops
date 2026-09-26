@@ -4,13 +4,17 @@
  * fix-slugs.mjs — write verify-portals.mjs's suggested ATS slug fixes back
  * into portals.yml.
  *
- * verify-portals.mjs already probes every tracked company's ATS slug and, for
- * a failing Greenhouse/Ashby/Lever entry, cross-probes slug variants across
- * all three ATSes and attaches `suggested: { ats, slug }` when one resolves
- * (see discoverAlternates() in verify-portals.mjs). That tool is read-only —
- * this script is the write side: it reuses the SAME probe/suggestion logic
- * (no re-implementation, no HTML scraping, no hardcoded company list) and
- * patches the matching `tracked_companies` entry in portals.yml.
+ * verify-portals.mjs already probes every tracked company's ATS slug. Its
+ * "tier 1" fast path is hardcoded to the three ATSes whose board URL carries a
+ * parseable slug — Greenhouse, Ashby, Lever — and for a failing entry it
+ * cross-probes slug variants across those three, attaching
+ * `suggested: { ats, slug }` when one resolves (see discoverAlternates() in
+ * verify-portals.mjs). Any other host is a provider-plugin (tier 2) entry and
+ * never gets a `suggested`, so this script only ever rewrites Greenhouse / Ashby
+ * / Lever slugs. That tool is read-only — this is the write side: it reuses the
+ * SAME probe/suggestion logic (no re-implementation, no HTML scraping, no
+ * hardcoded company list) and patches the matching `tracked_companies` entry in
+ * portals.yml.
  *
  * Only entries verify-portals classifies as `missing` AND carries a
  * `suggested` alternate for are touched. Live/empty entries and genuinely
@@ -31,13 +35,19 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'fs';
-import { resolve } from 'path';
-import { pathToFileURL } from 'url';
+import { join, resolve } from 'path';
 
 import { verifyPortalsFile } from './verify-portals.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
+// The data root's portals.yml, the same default verify-portals.mjs sweeps
+// (#4254). A bare 'portals.yml' resolved against the cwd, so under an external
+// data root (CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data) this
+// reported "nothing to fix" for the file verify-portals had just flagged, or
+// with --fix rewrote a stale copy in whatever directory it was run from.
+const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(getCareerOpsRoot(), 'portals.yml');
 
 const KNOWN_FLAGS = ['--apply', '--dry-run', '--file', '--fix', '--help', '-h'];
 const VALUE_FLAGS = ['--file'];
@@ -292,7 +302,13 @@ export function computeFixes(rawText, results, { dateStr = new Date().toISOStrin
   // invalidated by a fix applied further down.
   const pending = [];
   for (const r of results) {
+    // `suggested` must carry a writable ats/slug. A result can now also carry
+    // `suggested.rejectedAlternate` — a live board the identity gate refused — and
+    // that is reporting only. Without this guard a rejected-only result would pass
+    // the truthiness check below and applyFix would write `undefined/undefined`
+    // into portals.yml (#4230).
     if (r.status !== 'missing' || !r.suggested) continue;
+    if (!r.suggested.ats || !r.suggested.slug) continue;
     const block = blocksByName.get(r.name);
     if (!block) continue; // name mismatch — leave untouched rather than guess
     pending.push({ r, block });
@@ -370,7 +386,7 @@ async function main() {
 }
 
 // Only run main() when invoked directly, not when imported by tests.
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`fix-slugs failed: ${err.message}`);
     process.exit(1);

@@ -22,6 +22,20 @@
 // colon-suffixed "word", and an entry is one keyword, not a sentence.
 export const WORD_PREFIX = 'word:';
 
+// `stem:` is the other half of the same question, and it exists because the two
+// halves are NOT the same setting seen from two sides.
+//
+// `word:agent` says "agent, and nothing longer" — it rejects Agentforce.
+// `stem:agent` says "a word that STARTS with agent" — it keeps Agentforce and
+// Agentic, and drops Reagents, where the keyword lands mid-word.
+// A bare `agent`, today's default, keeps all three.
+//
+// So a plain substring is not "the loose option"; it is two loosenesses at once,
+// and only one of them is usually wanted. `stem:` lets an entry ask for the one
+// it means. Under today's substring default that is already a narrowing rather
+// than a no-op: it is what separates Agentforce from Reagents (#3103).
+export const STEM_PREFIX = 'stem:';
+
 function escapeForRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -36,6 +50,48 @@ function escapeForRegExp(s) {
 // to the literal characters p, {, L, } — no error, and the anchor is simply off.
 const WORD_CHAR = String.raw`[\p{L}\p{M}\p{N}_]`;
 const anchoredPattern = (body) => new RegExp(`(?<!${WORD_CHAR})${body}(?!${WORD_CHAR})`, 'u');
+// Same left boundary, no right one: the keyword must start a word, and the word
+// may continue past it.
+const stemPattern = (body) => new RegExp(`(?<!${WORD_CHAR})${body}`, 'u');
+
+// `word:` and `stem:` mean the same thing wherever a keyword list is matched
+// against text, so their handling lives here once rather than being copied into
+// each compiler — the drift this module exists to prevent. Returns a matcher
+// when `kw` carries a recognised prefix, or null when it is an ordinary keyword
+// the caller compiles its own way (the title filter auto-anchors short
+// acronyms and falls back to substring; the content filter goes straight to
+// substring — see #3103, #3274).
+//
+// Explicit alphanumeric lookarounds rather than \b, because \b's meaning
+// depends on the characters at the keyword's own edges: for `word:c++` a
+// trailing \b would sit after "+" and assert the opposite of the intent.
+// WORD_CHAR rather than [a-z0-9_]: an ASCII-only lookaround treats every
+// accented letter as a separator, so `word:intern` matched inside "preintern"
+// spelled with an accent and vetoed exactly the international titles this
+// prefix exists to protect. \p{M} covers combining marks, so a decomposed "é"
+// does not split a word either.
+function compilePrefixedKeyword(kw) {
+  if (kw.startsWith(WORD_PREFIX)) {
+    const bare = kw.slice(WORD_PREFIX.length).trim();
+    // A bare `word:` is a config typo. Matching NOTHING is the safe reading: as
+    // a positive it simply contributes no match, while the alternative — an
+    // empty pattern matching everything — would veto an entire scan from one
+    // stray colon. Same trade as the "C++" note on scan.mjs's AND_SEPARATOR:
+    // prefer a silent drop of one entry over a silent flood.
+    if (!bare) return () => false;
+    const re = anchoredPattern(escapeForRegExp(bare));
+    return (lower) => re.test(lower);
+  }
+  if (kw.startsWith(STEM_PREFIX)) {
+    const bare = kw.slice(STEM_PREFIX.length).trim();
+    // Same reading as a bare `word:`: a stray prefix with nothing after it is a
+    // typo, and matching nothing is the safe half of that trade.
+    if (!bare) return () => false;
+    const re = stemPattern(escapeForRegExp(bare));
+    return (lower) => re.test(lower);
+  }
+  return null;
+}
 
 /**
  * Compile a lowercased keyword into a matcher.
@@ -50,26 +106,21 @@ const anchoredPattern = (body) => new RegExp(`(?<!${WORD_CHAR})${body}(?!${WORD_
  * @param {string} kw - already trimmed and lowercased.
  * @returns {(lower: string) => boolean}
  */
+// Fold diacritics so a keyword and a title compare equal regardless of accents.
+// Spanish/Portuguese boards routinely publish titles in UPPERCASE WITHOUT
+// accents ("TECNICO CONTROL DE PRODUCCION") while portals.yml is written with
+// them ("Producción"); with toLowerCase() alone they never match, and every
+// such posting is silently counted as filtered_title. BOTH sides are folded,
+// so the comparison stays symmetric.
+// Not lib/ascii-fold.mjs: that one deletes everything outside [a-z0-9]
+// (spaces, ".NET", "L&D"), and here those characters are part of the keyword.
+export function foldAccents(s) {
+  return String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 export function compileKeyword(kw) {
-  if (kw.startsWith(WORD_PREFIX)) {
-    const bare = kw.slice(WORD_PREFIX.length).trim();
-    // A bare `word:` is a config typo. Matching NOTHING is the safe reading: as
-    // a positive it simply contributes no match, while the alternative — an
-    // empty pattern matching every title — would veto an entire scan from one
-    // stray colon. Same trade as the "C++" note on scan.mjs's AND_SEPARATOR:
-    // prefer a silent drop of one entry over a silent flood.
-    if (!bare) return () => false;
-    // Explicit alphanumeric lookarounds rather than \b, because \b's meaning
-    // depends on the characters at the keyword's own edges: for `word:c++` a
-    // trailing \b would sit after "+" and assert the opposite of the intent.
-    // WORD_CHAR rather than [a-z0-9_]: an ASCII-only lookaround treats every
-    // accented letter as a separator, so `word:intern` matched inside
-    // "preintern" spelled with an accent and vetoed exactly the international
-    // titles this prefix exists to protect. \p{M} covers combining marks, so a
-    // decomposed "é" does not split a word either.
-    const re = anchoredPattern(escapeForRegExp(bare));
-    return (lower) => re.test(lower);
-  }
+  const prefixed = compilePrefixedKeyword(kw);
+  if (prefixed) return prefixed;
   if (/^[a-z]{2,3}$/.test(kw)) {
     // The same boundary as above, not \b: \b is ASCII-only, so "vp" matched
     // inside an accented word while `word:vp` did not. Two spellings of one
@@ -78,6 +129,31 @@ export function compileKeyword(kw) {
     return (lower) => re.test(lower);
   }
   return (lower) => lower.includes(kw);
+}
+
+/**
+ * Compile a lowercased `content_filter` keyword into a matcher.
+ *
+ * `content_filter` matches against the job DESCRIPTION, not the title, and its
+ * default has always been a plain case-insensitive substring. That default is
+ * why a bare negative `java` rejects every posting that merely mentions
+ * "JavaScript", and `ios` rejects "curiosity" (#3274). Flipping the default is
+ * a breaking change for every configured install — the same conclusion #3103
+ * reached for `title_filter` — so the fix is opt-in: a `word:` or `stem:`
+ * prefix asks for boundary-anchored matching on that one entry (identical
+ * semantics to the title filter), and every other entry keeps the substring
+ * behaviour byte-for-byte.
+ *
+ * Unlike compileKeyword(), there is no automatic anchoring of short keywords.
+ * The title filter anchors 2-3 letter acronyms because "COO" inside
+ * "Coordinator" is always wrong; a 2-3 letter run inside a paragraph of
+ * description prose is routinely intended ("aws", "gcp", "sql", "go").
+ *
+ * @param {string} kw - already trimmed and lowercased.
+ * @returns {(lower: string) => boolean}
+ */
+export function compileContentKeyword(kw) {
+  return compilePrefixedKeyword(kw) ?? ((lower) => lower.includes(kw));
 }
 
 // An AND-group: " + " (whitespace-delimited) between terms means EVERY term
@@ -144,7 +220,7 @@ export function buildTitleFilter(titleFilter) {
   // non-string entry in the YAML) must not crash the scan via k.toLowerCase().
   const normalize = (arr, compile) => (Array.isArray(arr) ? arr : [])
     .filter(k => typeof k === 'string')
-    .map(k => k.trim().toLowerCase())
+    .map(k => foldAccents(k.trim().toLowerCase()))
     .filter(k => k.length > 0)
     .map(compile);
   // AND-groups are a POSITIVE-side feature only. On the negative side an entry
@@ -159,7 +235,7 @@ export function buildTitleFilter(titleFilter) {
     // non-string. Consolidating on scan.mjs's version would have carried that
     // throw onto a path that never had it, where it aborts jobs.filter and
     // drops a whole company's results for one malformed title.
-    const lower = String(title ?? '').toLowerCase();
+    const lower = foldAccents(String(title ?? '').toLowerCase());
     // An empty positive list is "no positive constraint", not "match nothing":
     // a negative-only title_filter is a legitimate config that rejects a few
     // roles and keeps the rest.

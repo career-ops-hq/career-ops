@@ -22,8 +22,8 @@
 // clone with only Node (#1440), and reproducing the orphan needs Chromium plus a
 // payload tuned to one template's exact geometry. The rule is the contract; the
 // render is how the rule was arrived at.
-import { readFileSync } from 'fs';
-import { relative } from 'path';
+import { readFileSync, existsSync } from 'fs';
+import { relative, join, dirname } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
 import { listTemplates } from '../cv-templates.mjs';
 
@@ -64,12 +64,53 @@ function declares(parsed, selector, prop, value) {
   return parsed.some((r) => r.selectors.some((s) => exact.test(s)) && decl.test(r.decls));
 }
 
-const templates = listTemplates('cv').filter((t) => t.format === 'html');
+/**
+ * Whether a template emits `.project-tech` markup it did not author.
+ *
+ * The assertions below rest on one premise: the markup is not the template's to
+ * opt out of, because it comes from the shared templates/sections/projects.html
+ * (or, with no partial there, from the built-in builder in build-cv-html.mjs,
+ * which emits the same classes). A template that never styles .project-tech is
+ * still on the hook, because it still renders the div.
+ *
+ * A template pack (#3202) is the one case where that premise can fail. A pack
+ * ships its own sections/ next to its template, and loadSectionPartials()
+ * resolves partials relative to the template file — so a pack that authors its
+ * own projects.html chooses that section's DOM outright, and a pack whose
+ * projects.html has no .project-tech cannot orphan a line it never emits.
+ *
+ * The exemption is deliberately narrow, and follows the premise rather than the
+ * template's name:
+ *   - flat template            → held (shared partial / built-in builder)
+ *   - pack, no projects.html   → held (falls through to the built-in builder,
+ *                                 which emits .project-tech regardless)
+ *   - pack with projects.html  → held only if that partial emits project-tech
+ */
+function emitsProjectTech(t) {
+  if (!t.pack) return true;
+  const partial = join(dirname(t.path), 'sections', 'projects.html');
+  if (!existsSync(partial)) return true; // built-in builder still emits it
+  return /project-tech/.test(readFileSync(partial, 'utf-8'));
+}
 
-if (templates.length === 0) {
+const discovered = listTemplates('cv').filter((t) => t.format === 'html');
+
+if (discovered.length === 0) {
   fail('no HTML CV templates discovered — listTemplates("cv") returned nothing');
 } else {
-  pass(`discovered ${templates.length} HTML CV templates to check`);
+  pass(`discovered ${discovered.length} HTML CV templates to check`);
+}
+
+const templates = [];
+for (const t of discovered) {
+  if (emitsProjectTech(t)) {
+    templates.push(t);
+    continue;
+  }
+  pass(
+    `${relative(ROOT, t.path).replace(/\\/g, '/')}: pack authors its own sections/projects.html `
+      + 'with no .project-tech — nothing to orphan, page-break rules not applicable'
+  );
 }
 
 for (const t of templates) {

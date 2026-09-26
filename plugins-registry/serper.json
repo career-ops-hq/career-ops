@@ -9,6 +9,6 @@
   "hooks": ["provider"],
   "requiredEnv": ["SERPER_API_KEY"],
   "allowedHosts": ["google.serper.dev"],
-  "registrationIssue": "https://github.com/santifer/career-ops/issues/1645",
+  "registrationIssue": "https://github.com/career-ops-hq/career-ops/issues/1645",
   "addedAt": "2026-07-07"
 }

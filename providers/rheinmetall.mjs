@@ -39,8 +39,13 @@ export function resolveListUrl(entry) {
   const raw = entry.api || entry.careers_url || '';
   try {
     const u = new URL(raw);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
     const host = u.host.toLowerCase();
     if (host !== 'rheinmetall.com' && !host.endsWith('.rheinmetall.com')) return null;
+    // The apex 301s to www and http 301s to https (same registrable domain). Pin
+    // both here so the transport's redirect:'error' never refuses a URL detect() accepts.
+    if (host === 'rheinmetall.com') u.host = 'www.rheinmetall.com';
+    u.protocol = 'https:';
     if (/\/career\/vacancies\/?$/.test(u.pathname)) return `${u.origin}${u.pathname.replace(/\/$/, '')}`;
     // Any other rheinmetall.com URL (e.g. the branded career hub) → EN default.
     return `${u.origin}/en/career/vacancies`;
@@ -68,7 +73,19 @@ export function parseVacancies(html, origin) {
     // the markup shifts, so a styling change degrades titles instead of
     // dropping postings.
     const titleM = block.match(/md:text-xl[^"]*">([\s\S]*?)<\/div>/);
-    const title = titleM ? clean(titleM[1]) : clean(decodeURIComponent(link[1].split('/')[3] || '').replace(/_/g, ' '));
+    let title;
+    if (titleM) {
+      title = clean(titleM[1]);
+    } else {
+      // Fallback: reconstruct the title from the URL slug. decodeURIComponent
+      // throws URIError on a malformed percent-sequence in the scraped href, so
+      // decode defensively — a bad link falls back to its raw slug instead of
+      // aborting the whole page's parse loop.
+      const slug = link[1].split('/')[3] || '';
+      let decoded;
+      try { decoded = decodeURIComponent(slug); } catch { decoded = slug; }
+      title = clean(decoded.replace(/_/g, ' '));
+    }
     if (!title) continue;
     // "{Company GmbH} | {City}" line; the city is what location filters need.
     const orgM = block.match(/class="flex flex-wrap mr-6">([\s\S]*?)<\/div>/);

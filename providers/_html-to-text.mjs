@@ -10,6 +10,18 @@ import { decodeEntities } from './_html-entities.mjs';
 // normal on these boards, and scan payloads must stay sane.
 export const DESCRIPTION_CAP = 4000;
 
+// A tag ends at an unquoted `>`. Attribute values may contain angle brackets,
+// so the common `<[^>]+>` shortcut can stop midway through a tag and expose
+// the remaining attributes as description text. Requiring content between the
+// brackets preserves a literal `<>`, as the old matcher did.
+const HTML_TAG_RE = /<(?:[^>"']|"[^"]*"|'[^']*')+>/g;
+const HTML_MEDIA_RE = /<(script|style)\b(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/\1\s*>/gi;
+
+/** @param {string} content */
+function stripMarkup(content) {
+  return content.replace(HTML_MEDIA_RE, ' ').replace(HTML_TAG_RE, ' ');
+}
+
 /**
  * Entity-decoded markup → stripped plain text.
  *
@@ -27,7 +39,17 @@ export const DESCRIPTION_CAP = 4000;
  */
 export function htmlToText(content) {
   if (typeof content !== 'string' || !content) return '';
-  const html = decodeEntities(content);
-  const noMedia = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ');
-  return decodeEntities(noMedia.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_CAP);
+  // Strip literal markup before decoding: quote entities inside a quoted
+  // attribute are data, and decoding them first would turn them into false
+  // delimiters. Each decode is followed by a strip so double-encoded active
+  // markup cannot become the final plain-text output. A final incomplete tag
+  // opener has no closing `>` for stripMarkup() to consume, so drop only its
+  // leading angle bracket; this keeps the text visible while making it inert.
+  const decoded = decodeEntities(stripMarkup(content));
+  const decodedTwice = decodeEntities(stripMarkup(decoded));
+  return stripMarkup(decodedTwice)
+    .replace(/<(?=\/?[a-z!?])/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, DESCRIPTION_CAP);
 }

@@ -12,6 +12,7 @@ If the input is a **URL** (not pasted JD text), follow this strategy to extract 
 
 1. **Playwright (preferred):** Most job portals (Lever, Ashby, Greenhouse, Workday) are SPAs. Use `browser_navigate` + `browser_snapshot` to render and read the JD.
    - **Opt-in — CLI extractor (`scan.extractor: cli` in `config/profile.yml`):** run `node browser-extract.mjs <url>` (default `--mode jd`) instead; it returns compact `{ "url", "title", "text" }` — just the distilled JD main text rather than the full page a11y tree, so the model processes fewer tokens (board-dependent — modest on clean boards, larger on chrome-heavy SPAs). Use its `text` as the JD. **Fall back silently** to `browser_navigate` + `browser_snapshot` if it errors or is missing. Read-only (navigate + read, no clicks/fills), so it never applies to the apply-form step below.
+   - The CLI extractor reads only the outer document. If its output lacks a real JD or apply path, use Playwright to check for an embedded iframe before making any closure decision, even when the extractor returned successfully.
 2. **WebFetch (fallback):** For static pages (ZipRecruiter, WeLoveProduct, company career pages).
 3. **WebSearch (last resort):** Search for the role title + company in secondary portals that index the JD in static HTML.
 
@@ -25,15 +26,16 @@ Before running any evaluation, confirm the posting is still live. The Step 0 Pla
 
 1. From the Step 0 snapshot/fetched content, classify the posting:
    - **active posting evidence:** title/role + a real job description or an application/apply path
-   - **closed posting evidence:** expired/closed/"no longer accepting applications", missing JD with only nav/footer, hard redirect to a generic careers/search page, or 404/410
-2. If the posting appears closed or the page is a dead/fallback shell, **stop here**: do not run Step 1–Step 4. Tell the candidate the link is dead, and if the entry came from `data/pipeline.md`, mark it `- [x] ~~Company | Role~~ — oferta nieaktywna`.
-3. If only JD text was pasted (no URL), there is no link to verify — skip the gate and proceed.
+   - **closed posting evidence:** expired/closed/"no longer accepting applications", missing JD with only nav/footer after the iframe check below, hard redirect to a generic careers/search page, or 404/410
+2. An empty `main` or nav/footer-only snapshot is **inconclusive** when the page contains an iframe. Company careers pages commonly embed an Ashby board (`jobs.ashbyhq.com`), or another ATS, in an iframe that loads after the outer page. Wait briefly and take one fresh snapshot; inspect the iframe content directly if the browser tool exposes it. If the iframe still cannot be read, do not infer that the posting is closed from the empty outer page alone. Try the Step 0 fallback sources or ask the candidate for the JD.
+3. If the posting has confirmed closed evidence or is a dead/fallback shell after that check, **stop here**: do not run Step 1–Step 4. Tell the candidate the link is dead, and if the entry came from `data/pipeline.md`, mark it `- [x] ~~Company | Role~~ — oferta nieaktywna`.
+4. If only JD text was pasted (no URL), there is no link to verify — skip the gate and proceed.
 
 Do not continue to Step 1 until this gate is resolved.
 
 ## Step 0.6 — Blacklist gate (#1742)
 
-If `data/blacklist.md` exists, check the posting's company against it before running any evaluation — the file is the candidate's own do-not-apply list (user layer, opt-in; absent file = skip this gate). Match case- and punctuation-insensitively.
+If `data/blacklist.md` exists, check both the posting's company and posting URL against it before running any evaluation — the file is the candidate's own do-not-apply list (user layer, opt-in; absent file = skip this gate). For `Scope: company` (also the default for blank or unsupported scopes), match the company case- and punctuation-insensitively. For `Scope: domain`, treat the Company cell as a hostname suffix: compare it with the posting URL's hostname, ignoring case and a trailing dot, and match only the exact host or a subdomain (`ibm.com` matches `jobs.ibm.com`, never `notibm.com`). Keep dots and hyphens distinct. If the URL is missing or invalid, domain rules cannot match; still check company rules.
 
 On a hit, **stop before Step 1** and surface the candidate's own recorded decision: tell them which entry matched and quote their recorded reason ("{Company} is on your blacklist (since {Since}): *{Reason}*. Do you still want me to evaluate it?"). Wait for an explicit answer — never silently refuse, never silently proceed. The candidate's call always wins (same HITL spirit as the score < 4.0 rule): an explicit yes continues to Step 1 as normal; anything else stops the pipeline here, and if the entry came from `data/pipeline.md`, mark it `- [x] ~~Company | Role~~ — blacklisted`. A blacklist entry never changes any score.
 
@@ -41,7 +43,7 @@ On a hit, **stop before Step 1** and surface the candidate's own recorded decisi
 
 Execute the same as the `oferta` mode (read `modes/oferta.md` for all A-F blocks + Block G Posting Legitimacy). Read `modes/_custom.md` → Evaluation Rules, if it exists, and apply its override here. Default (if absent or silent): standard A-G evaluation.
 
-**Agency-mediated postings (#1596):** if the JD smells like a recruiter/agency listing ("our client", agency domain, no employer named), ask the user which agency it came through BEFORE writing the tracker row. Record the end employer as `?` (never "Confidential"), the agency in the Via field / `via=` TSV tag, and a distinguishing descriptor in Notes — see `modes/oferta.md` and `modes/tracker.md` for the full convention and reveal workflow.
+**Agency-mediated postings (#1596, #4359):** before evaluation or any tracker, report, or CV write, apply `modes/_shared.md` → **Agency confirmation handoff**. Ask which agency this posting came through and wait for an explicit answer. A delegated/headless worker instead returns `needs_confirmation` to the parent and stops without artifacts; the parent asks and resumes only with the user's explicit answer for this posting. This is a gate, not a failed step to continue past. After confirmation, record an unknown end employer as `?` (never "Confidential"), the confirmed agency in Via / `via=`, and a distinguishing descriptor in Notes — see `modes/tracker.md` for the reveal workflow.
 
 The evaluation inherits `oferta`'s bounded research budget. Company, compensation, and hiring-signal lookup must not invoke `deep-research`, must not spawn subagents, and must stop at the shared query cap instead of escalating into open-ended research.
 
@@ -55,6 +57,7 @@ Include Block G in the saved report. Add **URL:** {url} and **Legitimacy:** {tie
 Read `config/profile.yml`. Check `cv.output_format`:
 
 - If `"latex"`, execute the full pipeline from `modes/latex.md`
+- If `"text"`, execute the full pipeline from `modes/text.md`
 - Otherwise (default), execute the full pipeline from `modes/pdf.md`
 
 ## Step 4 — Draft Application Answers (only if score >= 4.5)

@@ -21,18 +21,22 @@ import { validateFlags } from './lib/cli-flags.mjs';
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeStatus, analyzeFromContent } from './followup-cadence.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
-const APPS_FILE = join(ROOT, 'data', 'applications.md');
-const SCAN_HISTORY_FILE = join(ROOT, 'data', 'scan-history.tsv');
-const FOLLOWUPS_FILE = join(ROOT, 'data', 'follow-ups.md');
-const SCAN_RUNS_FILE = join(ROOT, 'data', 'scan-runs.tsv');
-const PORTALS_FILE = join(ROOT, 'portals.yml');
-const PORTAL_HEALTH_FILE = join(ROOT, 'data', 'portal-health.tsv');
+const DATA_ROOT = getCareerOpsRoot();
+const APPS_FILE = resolveTrackerPath(DATA_ROOT);
+const SCAN_HISTORY_FILE = join(DATA_ROOT, 'data', 'scan-history.tsv');
+const FOLLOWUPS_FILE = join(DATA_ROOT, 'data', 'follow-ups.md');
+const SCAN_RUNS_FILE = join(DATA_ROOT, 'data', 'scan-runs.tsv');
+const STATUS_LOG_FILE = join(DATA_ROOT, 'data', 'status-log.tsv');
+const PORTALS_FILE = join(DATA_ROOT, 'portals.yml');
+const PORTAL_HEALTH_FILE = join(DATA_ROOT, 'data', 'portal-health.tsv');
 
 const CANONICAL_STATUSES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
 
@@ -177,6 +181,79 @@ export function computeFunnel(byStatus) {
   };
 }
 
+// Canonical pipeline depth per stage, for "ever reached" math. Terminal and
+// pre-pipeline states (Rejected/Discarded/Evaluated/SKIP/Unknown) are absent →
+// depth 0; the ledger's from/to history is what proves the stages a row passed
+// through before it landed on a terminal snapshot.
+const STAGE_RANK = { Applied: 1, Responded: 2, Interview: 3, Offer: 4, Hired: 5 };
+
+/**
+ * Parse data/status-log.tsv into per-row transition observations. Columns are
+ * {num}\t{date}\t{from}\t{to}\t{source}\t{note}; only num/from/to are read here.
+ * Torn or non-numeric-num rows are skipped — this is a display aid, never throws.
+ * @returns {Array<{num:number, from:string, to:string}>}
+ */
+export function parseStatusLogStages(content) {
+  const out = [];
+  for (const line of String(content ?? '').replace(/\r/g, '').split('\n')) {
+    if (!line.trim()) continue;
+    const c = line.split('\t');
+    const rawNum = String(c[0] || '').trim();
+    const date = String(c[1] || '').trim();
+    const from = String(c[2] || '').trim();
+    const to = String(c[3] || '').trim();
+    if (!/^\d+$/.test(rawNum) || !date || !from || !to) continue;
+    out.push({ num: Number(rawNum), from, to });
+  }
+  return out;
+}
+
+/**
+ * Ledger-aware funnel: everX counts DISTINCT tracker rows that ever reached
+ * stage X, folding the transition ledger so a row now sitting in a terminal
+ * snapshot still counts for the stages it passed through — an Offer that was
+ * declined (now Discarded) counts into everOffer; a Rejected that reached
+ * Interview counts into everInterview. This resolves the snapshot limitation
+ * computeFunnel() documents (#1428) for every row the ledger covers; a row with
+ * no ledger history falls back to its current status alone, so pre-ledger middle
+ * stages stay lower bounds. A current Rejected still proves everApplied (rank 1)
+ * with no ledger, matching the snapshot math. Same shape as computeFunnel() plus
+ * `basis:'ledger'`.
+ *
+ * @param {Map<number,string>} statusByNum - num → current canonical status.
+ * @param {Array<{num:number,from:string,to:string}>} ledger - parseStatusLogStages output.
+ */
+export function computeFunnelWithHistory(statusByNum, ledger) {
+  const reached = new Map(); // num → highest stage rank ever held (distinct rows)
+  const bump = (num, rank) => { if (rank > (reached.get(num) || 0)) reached.set(num, rank); };
+  for (const [num, status] of statusByNum) {
+    bump(num, STAGE_RANK[status] || (status === 'Rejected' ? 1 : 0));
+  }
+  for (const { num, from, to } of ledger) {
+    if (!statusByNum.has(num)) continue; // ledger row whose tracker row is gone
+    bump(num, STAGE_RANK[from] || 0);
+    bump(num, STAGE_RANK[to] || 0);
+  }
+  let everApplied = 0, everResponded = 0, everInterview = 0, everOffer = 0;
+  for (const rank of reached.values()) {
+    if (rank >= 1) everApplied++;
+    if (rank >= 2) everResponded++;
+    if (rank >= 3) everInterview++;
+    if (rank >= 4) everOffer++;
+  }
+  return {
+    everApplied,
+    everResponded,
+    everInterview,
+    everOffer,
+    responseRate: pct(everResponded, everApplied),
+    interviewRate: pct(everInterview, everApplied),
+    offerRate: pct(everOffer, everApplied),
+    smallSample: everApplied < 10,
+    basis: 'ledger',
+  };
+}
+
 // ── Lifetime scanner totals ─────────────────────────────────────────
 
 /** ISO week key ("2026-W27") for a YYYY-MM-DD string; null for bad input. Exported for the year-boundary tests. */
@@ -285,10 +362,12 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
       if (!line) continue;
       const parts = line.split('\t');
       if (parts.length >= 3) {
-        healthRecords.push({ company: parts[1], status: parts[2] });
+        healthRecords.push({ ts: Date.parse(parts[0]), company: parts[1], status: parts[2] });
       }
     }
     const streaks = new Map();
+    const lastProbed = new Map();
+    let newestProbe = 0;
     for (const r of healthRecords) {
       // Mirrors scan.mjs computeConsecutiveFailures: healthy statuses reset,
       // every other status (slug_gone/network/auth/server/unknown) counts.
@@ -297,12 +376,31 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
       } else {
         streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
       }
+      if (Number.isFinite(r.ts)) {
+        if (r.ts > (lastProbed.get(r.company) || 0)) lastProbed.set(r.company, r.ts);
+        if (r.ts > newestProbe) newestProbe = r.ts;
+      }
     }
+    // A failure streak is evidence of a dead portal only while the entry is
+    // still being PROBED. An entry that stops resolving to a provider writes
+    // no further health rows — scan.mjs skips it at resolveEntries(), before
+    // the fetch loop that records health — so its final streak would stand as
+    // a permanent 🚨 that no fix can clear. That is how switching a broken
+    // board to scan_method: websearch (the documented remedy) leaves the
+    // warning lit forever, and a warning that cannot clear trains the reader
+    // to ignore the whole line.
+    //
+    // Staleness is measured against the newest row in this file rather than
+    // the wall clock, so a checkout whose scanner has been idle for months
+    // still reports its last known state instead of silently going green.
+    const staleMs = (cfg.portal_health_stale_days || 14) * 86400000;
     const threshold = cfg.portal_health_threshold || 3;
     for (const [company, streak] of streaks.entries()) {
-      if (streak >= threshold && configuredNames.has(String(company).toLowerCase())) {
-        persistentlyDead++;
-      }
+      if (streak < threshold) continue;
+      if (!configuredNames.has(String(company).toLowerCase())) continue;
+      const seen = lastProbed.get(company);
+      if (newestProbe && seen && newestProbe - seen > staleMs) continue;
+      persistentlyDead++;
     }
   }
 
@@ -317,6 +415,67 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
 }
 
 // ── Follow-up compliance ────────────────────────────────────────────
+
+/** Read-only suggestions based on observed history, never config creation time.
+ * Company identity deliberately uses the same exact-lowercase contract as
+ * computePortalStats. Missing evidence never proves a board is dead.
+ */
+export function computePortalRecommendations(portalsContent, scanContent, healthContent, now = Date.now()) {
+  let cfg;
+  try { cfg = yaml.load(String(portalsContent ?? '')) || {}; } catch { return null; }
+  const positive = (n, fallback) => Number.isInteger(n) && n > 0 ? n : fallback;
+  const days = positive(cfg.portal_prune_quiet_days, 30);
+  const threshold = positive(cfg.portal_health_threshold, 3);
+  const cutoff = now - days * 86400000;
+  const validDate = (s) => /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)?$/.test(s || '') && Number.isFinite(Date.parse(s)) && Date.parse(s) <= now;
+  const produced = new Set(scanCompanyNames(scanContent));
+  const lastMatch = new Map();
+  for (const line of String(scanContent ?? '').split('\n')) {
+    const c = line.trimEnd().split('\t');
+    if (!/^https?:\/\//.test(c[0]) || !validDate(c[1]) || !c[4]) continue;
+    const key = c[4].trim().toLowerCase();
+    if (!lastMatch.has(key) || c[1] > lastMatch.get(key)) lastMatch.set(key, c[1]);
+  }
+  const health = new Map();
+  const healthRows = [];
+  for (const line of String(healthContent ?? '').split('\n')) {
+    const [date, company, status] = line.trimEnd().split('\t');
+    if (!validDate(date) || !company || !['reachable', 'empty', 'slug_gone', 'network', 'auth', 'server', 'unknown'].includes(status)) continue;
+    healthRows.push({ date, company, status });
+  }
+  healthRows.sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
+  for (const { date, company, status } of healthRows) {
+    const key = company.toLowerCase();
+    const h = health.get(key) || { firstObserved: date, lastObserved: date, streak: 0, status };
+    h.firstObserved = date < h.firstObserved ? date : h.firstObserved;
+    h.lastObserved = date;
+    h.status = status;
+    h.streak = status === 'reachable' || status === 'empty' ? 0 : h.streak + 1;
+    health.set(key, h);
+  }
+  const buckets = { neverProduced: [], rotted: [], healthyButQuiet: [] };
+  if (scanContent == null) return { quietDays: days, failureThreshold: threshold, ...buckets };
+  const seen = new Set();
+  for (const company of Array.isArray(cfg.tracked_companies) ? cfg.tracked_companies : []) {
+    if (!company?.name || company.enabled === false || company.scan_method === 'websearch') continue;
+    const key = String(company.name).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const h = health.get(key);
+    // Old health from a board no longer probed is not current evidence.
+    if (!h || Date.parse(h.lastObserved) < cutoff) continue;
+    const lastProduced = lastMatch.get(key) || null;
+    const row = { company: company.name, ...h, lastProduced };
+    if (produced.has(key) && h.streak >= threshold) {
+      buckets.rotted.push({ ...row, recommendation: 'Verify reachability and find the current ATS slug before considering removal; failures do not prove closure.' });
+    } else if (!produced.has(key) && Date.parse(h.firstObserved) <= cutoff) {
+      buckets.neverProduced.push({ ...row, recommendation: 'Review title_filter and company-name matching before considering removal; no recorded matches does not prove a dead board.' });
+    } else if (produced.has(key) && lastProduced && Date.parse(lastProduced) <= cutoff && h.streak === 0) {
+      buckets.healthyButQuiet.push({ ...row, recommendation: 'Keep monitoring: recently reachable, with no recent recorded matches.' });
+    }
+  }
+  return { quietDays: days, failureThreshold: threshold, ...buckets };
+}
 
 /**
  * Follow-up compliance from follow-ups.md (same table shape followup-cadence
@@ -426,8 +585,17 @@ export function computeRunStats(content) {
   if (idx.timestamp == null || idx.found == null) return null; // unknown schema
   const filterCols = header.filter((h) => h.startsWith('filtered_'));
   const rows = [];
+  // A row WIDER than the header is the dangerous case, and only the narrow one was guarded.
+  // SCAN_RUNS_HEADER is written by appendScanRunSummary only when the file does not yet exist, so
+  // when a release appends or inserts a counter the on-disk header silently stops describing the
+  // rows beneath it. Every name-based lookup then reads a neighbouring column, and the result is a
+  // confident, precise, wrong number rather than an obvious break. Count these and exclude them:
+  // the averages must describe the rows the header can still describe, and the caller has to be
+  // able to see when that is a minority of the file.
+  let driftedRows = 0;
   for (const line of lines.slice(1)) {
     const cols = line.split('\t');
+    if (cols.length > header.length) { driftedRows++; continue; } // header no longer describes this row
     if (cols.length < header.length) continue; // torn row
     if (!/^\d{4}-\d{2}-\d{2}/.test(cols[idx.timestamp] || '')) continue;
     const num = (name) => { const v = Number(cols[idx[name]]); return Number.isNaN(v) ? 0 : v; };
@@ -439,7 +607,14 @@ export function computeRunStats(content) {
       newAdded: num('new_added'),
     });
   }
-  if (rows.length === 0) return null;
+  // Distinguish "no runs recorded" from "every run was excluded as drifted". Returning null for
+  // the second case hides the reason: the caller would report an absent scan section on a file
+  // that is full of rows the header can no longer describe.
+  if (rows.length === 0) {
+    return driftedRows > 0
+      ? { totalRuns: 0, driftedRows, failedRuns: 0, lastRunDate: null, avgFoundPerRun: 0, avgNewPerRun: 0, filterRemovalPct: 0 }
+      : null;
+  }
   // Inclusion by 'completed', not exclusion by known failure names: any
   // status a future scan.mjs writes is excluded from trend averages until
   // this aggregator learns what it means. Rows from pre-status files default
@@ -455,6 +630,7 @@ export function computeRunStats(content) {
   const sum = (arr, k) => arr.reduce((a, r) => a + r[k], 0);
   return {
     totalRuns: rows.length,
+    driftedRows,
     failedRuns: rows.length - completed.length,
     lastRunDate: rows.map((r) => r.date).sort().at(-1),
     avgFoundPerRun: completed.length ? round1(sum(completed, 'found') / completed.length) : 0,
@@ -476,6 +652,8 @@ export function computeAllStats({
   scanRunsFile = SCAN_RUNS_FILE,
   portalsFile = PORTALS_FILE,
   portalHealthFile = PORTAL_HEALTH_FILE,
+  statusLogFile = STATUS_LOG_FILE,
+  prune = false,
 } = {}) {
   const read = (f) => (existsSync(f) ? readFileSync(f, 'utf-8') : null);
   const apps = read(appsFile);
@@ -484,6 +662,7 @@ export function computeAllStats({
   const portals = read(portalsFile);
   const runs = read(scanRunsFile);
   const portalHealth = read(portalHealthFile);
+  const statusLog = read(statusLogFile);
   const trackerBase = apps ? computeTrackerStats(apps) : null;
   const scan = scanHist ? computeScanStats(scanHist) : null;
 
@@ -521,12 +700,20 @@ export function computeAllStats({
         portals: !!portals,
         scanRuns: !!runs,
         portalHealth: !!portalHealth,
+        statusLog: !!statusLog,
       },
     },
     tracker,
-    funnel: tracker ? computeFunnel(tracker.byStatus) : null,
+    // Prefer the ledger-aware funnel once a transition log exists (#1428); fall
+    // back to the pure status snapshot when it does not, so nothing regresses.
+    funnel: !tracker
+      ? null
+      : statusLog
+        ? computeFunnelWithHistory(trackerStatusByNum(apps), parseStatusLogStages(statusLog))
+        : computeFunnel(tracker.byStatus),
     scan,
     portals: portals ? computePortalStats(portals, scan, scanHist ? scanCompanyNames(scanHist) : [], portalHealth) : null,
+    ...(prune ? { portalRecommendations: portals ? computePortalRecommendations(portals, scanHist, portalHealth) : null } : {}),
     followups: fups && apps ? computeFollowupStats(fups, trackerStatusByNum(apps)) : null,
     runs: runs ? computeRunStats(runs) : null,
   };
@@ -556,7 +743,8 @@ function printSummary(stats) {
   const f = stats.funnel;
   if (f) {
     const small = f.smallSample ? ' (small sample — rates indicative only)' : '';
-    console.log(`Funnel:     ever applied ${f.everApplied} → responded ${f.everResponded} (${f.responseRate}%) → interview ${f.everInterview} (${f.interviewRate}%) → offer ${f.everOffer} (${f.offerRate}%)${small}`);
+    const basis = f.basis === 'ledger' ? ' · ledger-adjusted (folds status-log history)' : '';
+    console.log(`Funnel:     ever applied ${f.everApplied} → responded ${f.everResponded} (${f.responseRate}%) → interview ${f.everInterview} (${f.interviewRate}%) → offer ${f.everOffer} (${f.offerRate}%)${small}${basis}`);
   }
   const s = stats.scan;
   if (s) {
@@ -579,30 +767,51 @@ function printSummary(stats) {
     console.log('Follow-ups: — no data (data/follow-ups.md missing)');
   }
   const r = stats.runs;
-  if (r) {
+  if (r && r.totalRuns === 0 && r.driftedRows > 0) {
+    // Every row was excluded, so there is no last run to name and no average worth printing.
+    // Rendering the normal line here would read `0 recorded (last null) | avg 0 found`, which
+    // looks like an empty file rather than an unreadable one.
+    console.log(`Runs:       none readable — all ${r.driftedRows} row(s) in scan-runs.tsv are wider than its header, so their columns cannot be read by name.`);
+    console.log('            Recover by moving scan-runs.tsv aside; the next scan writes a fresh file with a current header.');
+  } else if (r) {
     const failed = r.failedRuns > 0 ? ` | ${r.failedRuns} failed` : '';
     console.log(`Runs:       ${r.totalRuns} recorded (last ${r.lastRunDate})${failed} | avg ${r.avgFoundPerRun} found / ${r.avgNewPerRun} new per run | filters remove ${r.filterRemovalPct}%`);
+    if (r.driftedRows > 0) {
+      // Say it rather than quietly averaging whichever rows still line up: those may be a small
+      // and unrepresentative tail of the file.
+      console.log(`            ${r.driftedRows} row(s) excluded — wider than scan-runs.tsv's header, so their columns cannot be read by name. Move the file aside to start a fresh one.`);
+    }
   } else {
     console.log('Runs:       — no data (data/scan-runs.tsv missing; created by the next scan)');
   }
   console.log('');
+  if (stats.portalRecommendations) {
+    console.log('Portal recommendations (read-only; exact-lowercase company matching):');
+    for (const [key, label] of [['neverProduced', 'Never produced'], ['rotted', 'Previously producing, failing now'], ['healthyButQuiet', 'Healthy but quiet']]) {
+      const rows = stats.portalRecommendations[key];
+      console.log(`  ${label}: ${rows.length}`);
+      for (const row of rows) console.log(`    ${row.company}: ${row.recommendation}`);
+    }
+    console.log('No suggestion means insufficient evidence or no current concern, not verified health.');
+  }
 }
 
 // ── CLI flags + help ────────────────────────────────────────────────
 
-const KNOWN_FLAGS = ['--summary', '--help', '-h'];
+const KNOWN_FLAGS = ['--summary', '--prune', '--help', '-h'];
 
 const USAGE = `Usage:
   node stats.mjs             # full JSON stats to stdout
   node stats.mjs --summary   # human-readable table
+  node stats.mjs --prune     # include read-only portal recommendations (also with --summary)
   node stats.mjs --help|-h   # print this usage block and exit`;
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
 
   validateFlags(args, KNOWN_FLAGS, USAGE);
 
-  const stats = computeAllStats();
+  const stats = computeAllStats({ prune: args.includes('--prune') });
   if (args.includes('--summary')) printSummary(stats);
   else console.log(JSON.stringify(stats, null, 2));
 }

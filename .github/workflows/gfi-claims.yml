@@ -46,7 +46,11 @@ jobs:
             const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: num });
             const labels = issue.labels.map(l => (l.name || '').toLowerCase());
             const isFto = labels.includes('first-timers-only');
-            if (!labels.includes('good first issue') && !isFto) return;
+            if (!labels.includes('good first issue') && !isFto) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: num,
+                body: "This one isn't in the good-first-issue pool, so I can't assign it automatically. A maintainer will pick it up from here, and it's yours unless someone says otherwise." });
+              return;
+            }
             const user = context.payload.comment.user.login;
             const say = (body) => github.rest.issues.createComment({ owner, repo, issue_number: num, body });
             const FREE = `https://github.com/${owner}/${repo}/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22+no%3Aassignee`;

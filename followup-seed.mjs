@@ -57,7 +57,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, statSync, realpathSync } from 'fs';
 import { join, dirname, basename, resolve, isAbsolute, relative, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { createHash, randomUUID } from 'crypto';
 // Third copy of the directory-lock protocol in this repo, and the one #2984
 // missed: that fix declared "one definition, no sibling drift" while patching
@@ -80,8 +80,10 @@ import {
   parseDate,
   addDays,
 } from './followup-cadence.mjs';
+import { getCareerOpsRoot, resolveTrackerPath as sharedResolveTrackerPath } from './path-resolver.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 
 /** Canonical header written when data/follow-ups.md doesn't exist yet. */
 export const FOLLOWUPS_HEADER = [
@@ -203,10 +205,7 @@ export function formatPinLine(appNum, nextDate, setDate) {
 
 function resolveTrackerPath(override) {
   if (override) return override;
-  if (process.env.CAREER_OPS_TRACKER) return process.env.CAREER_OPS_TRACKER;
-  return existsSync(join(CAREER_OPS, 'data/applications.md'))
-    ? join(CAREER_OPS, 'data/applications.md')
-    : join(CAREER_OPS, 'applications.md');
+  return sharedResolveTrackerPath(CAREER_OPS);
 }
 
 function resolveFollowupsPath(override) {
@@ -327,10 +326,12 @@ async function acquireFollowupsLock(lockDir, followupsPath, options = {}) {
   // from the definition: waiters woke in lockstep and re-raced, and a caller
   // waiting on a healthy lock being handed round briskly was killed anyway.
   //
-  // There is no separate maxWaitMs knob here, so the ceiling is the same
-  // multiple of timeoutMs the definition defaults to.
+  // There is no separate maxWaitMs knob here, so no hardDeadline is passed and
+  // the policy applies its own ceiling. Writing one out here would put a fourth
+  // copy of that bound in the tree, and a copy that drifts changes retry timing
+  // silently — nothing fails, so nothing reports it (#3895).
   const { backoffMs, holderStillWedged, noteWaiting, ceilingReached } = createLockWaitPolicy(lockDir, {
-    timeoutMs, retryMs, deadline: Date.now() + timeoutMs, hardDeadline: Date.now() + timeoutMs * 10,
+    timeoutMs, retryMs, deadline: Date.now() + timeoutMs,
   });
   for (;;) {
     if (holderStillWedged() || ceilingReached()) break;
@@ -469,6 +470,11 @@ function appendPins(existingContent, pinLines) {
  * @param {object} [options]
  * @param {string} [options.date] - Explicit apply date (YYYY-MM-DD), already validated.
  * @param {boolean} [options.force] - Bypass idempotency guard and the Applied-status guard.
+ * @param {boolean} [options.assumeApplied] - Relax the Applied-status guard ONLY, keeping
+ *   idempotency intact. For a caller that is about to make the row Applied and wants a
+ *   truthful preview of what will happen: `force` would answer that question by also
+ *   suppressing `already-seeded`, so the preview would promise a pin the real run then
+ *   declines to write. This says "treat the status as Applied", not "write regardless".
  * @param {boolean} [options.dryRun] - Compute and report, but write nothing (no lock taken).
  * @param {string} [options.trackerPath]
  * @param {string} [options.followupsPath]
@@ -555,7 +561,7 @@ export async function seedFollowup(appNum, options = {}) {
   }
 
   const normalized = normalizeStatus(row.status);
-  if (normalized !== 'applied' && !options.force) {
+  if (normalized !== 'applied' && !options.force && !options.assumeApplied) {
     throw new SeedError('NOT_APPLIED', `Application #${appNum} is not Applied (status: "${row.status.trim()}"); use --force to seed anyway`);
   }
 
@@ -819,6 +825,6 @@ async function main() {
 }
 
 // Run (CLI only; guarded so the module is safely importable for tests).
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main();
 }

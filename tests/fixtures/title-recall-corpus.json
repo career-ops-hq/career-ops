@@ -1,6 +1,6 @@
 {
   "_why": "Recall regression corpus for the shared title matcher (title-keywords.mjs). Guards the guarantee established in #3103/#3104: a change to keyword matching must not silently stop matching real roles. The failure mode is invisible - a narrowed matcher drops postings and the scan summary reports one lower number, which reads identically to a quiet week. Every entry below is a real title observed on a public ATS board; `matches` is what the CURRENT matcher returns. A diff here is not automatically a bug, but it is always a decision that has to be made deliberately rather than discovered months later.",
-  "_provenance": "675 distinct titles observed by scan.mjs and scan-ats-full.mjs across public Greenhouse, Lever, Ashby, Workday and iCIMS boards, 2026-04-20 to 2026-08-22. Titles only - no company, URL, board, or date. Contributed from the corpus used to measure #3103, #3104 and #2970.",
+  "_provenance": "663 distinct titles observed by scan.mjs and scan-ats-full.mjs across public Greenhouse, Lever, Ashby, Workday and iCIMS boards, 2026-04-20 to 2026-08-22. Titles only - no company, URL, board, or date. Board-state annotation rows carried by the same scan-history column (\"(no openings)\", \"(bot check / blocked)\", and similar) are not titles and are excluded. Contributed from the corpus used to measure #3103, #3104 and #2970.",
   "_filter_note": "The filter is deliberately small and self-contained rather than a copy of any real portals.yml: it holds exactly the keywords whose matching behaviour those issues discussed, so the corpus exercises the documented edge cases without depending on a user config that can change underneath the test.",
   "title_filter": {
     "positive": [
@@ -24,34 +24,6 @@
   },
   "titles": [
     {
-      "title": "(2 listings: PM-Platform + CSM, 0 SC)",
-      "matches": false
-    },
-    {
-      "title": "(31 listings, 0 SC: SRE/Infra/Data/Capital Markets/Sales/PM/Security-IR)",
-      "matches": false
-    },
-    {
-      "title": "(9 Eng listings, 0 SC: Distinguished/Staff/Data/Forward Deployed — all platform/payment infra)",
-      "matches": false
-    },
-    {
-      "title": "(DNS fail, careers_url dead)",
-      "matches": false
-    },
-    {
-      "title": "(Greenhouse board returns 404)",
-      "matches": false
-    },
-    {
-      "title": "(JS-rendered, listings not in a11y tree)",
-      "matches": false
-    },
-    {
-      "title": "(Notion page timeout 60s, careers board unreachable)",
-      "matches": false
-    },
-    {
       "title": "(Senior) Backend Engineer",
       "matches": true
     },
@@ -74,26 +46,6 @@
     {
       "title": "(Senior) Systems Engineer (Solana) - Remote Germany/Europe (m/f/d)",
       "matches": true
-    },
-    {
-      "title": "(board open, 0 engineering roles, only iGaming/Design)",
-      "matches": false
-    },
-    {
-      "title": "(bot check / blocked)",
-      "matches": false
-    },
-    {
-      "title": "(careers index — 12 listings, 0 SC)",
-      "matches": false
-    },
-    {
-      "title": "(no SC roles, all 8 eng titles previously seen)",
-      "matches": false
-    },
-    {
-      "title": "(no openings)",
-      "matches": false
     },
     {
       "title": "AI Backend Product Engineer",

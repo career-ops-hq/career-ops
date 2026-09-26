@@ -142,3 +142,43 @@ public commit with a stated reason.
 - @gunjanjaswal | Gunjan Jaswal | 2026-08-21 | id:400143 | src:https://github.com/santifer/career-ops/discussions/3151 | n:94
 - @miguel-fg | Miguel Fierro | 2026-08-21 | "one shouldn't need to apply hundreds of times to get one interview" | id:72409412 | src:https://github.com/santifer/career-ops/discussions/3187 | n:95
 - @elefino | 2026-08-22 | "This is a good thing. I'm going to boost this signal." | id:319961379 | src:https://github.com/santifer/career-ops/discussions/3206 | n:96
+- @chorrell | Christopher Horrell | 2026-08-24 | id:2781 | src:https://github.com/santifer/career-ops/discussions/3275 | n:97
+- @qoodboop | qoodboop | 2026-08-25 | "really good we can focus on something else than doomscrolling hiring contracts" | id:23255979 | src:https://github.com/santifer/career-ops/discussions/3313 | n:98
+- @Nardohsu | 2026-08-25 | "Let's get into the AI world!" | id:25312922 | src:https://github.com/santifer/career-ops/discussions/3336 | n:99
+- @prateeksingh1092 | 2026-08-26 | "A non-bloat, grounded in truth, a true example of leveraging AI as a human counterpart." | id:269049851 | src:https://github.com/santifer/career-ops/discussions/3389 | n:100
+- @nourischw | Nouris Wong | 2026-08-28 | "if you can't beat them join them" | id:8112770 | src:https://github.com/santifer/career-ops/discussions/3490 | n:101
+- @akhil451 | akhil | 2026-08-29 | "akhil451" | id:16731293 | src:https://github.com/santifer/career-ops/discussions/3512 | n:102
+- @jaishankarsurya | 2026-08-31 | "Let’s hope this works" | id:58153836 | src:https://github.com/santifer/career-ops/discussions/3555 | n:103
+- @fabdull1 | 2026-09-02 | "No time to waste" | id:250269279 | src:https://github.com/career-ops-hq/career-ops/discussions/3630 | n:104
+- @zyxc2024 | 2026-09-02 | id:194247172 | src:https://github.com/career-ops-hq/career-ops/discussions/3625 | n:105
+- @9jaswag | Chuks Opia | 2026-09-02 | id:8125356 | src:https://github.com/career-ops-hq/career-ops/discussions/3663 | n:106
+- @violetsea555 | violet | 2026-08-08 | "If a system rejects you, you have the right to know it was a system." | id:88992496 | src:https://github.com/career-ops-hq/career-ops/pull/2634 | n:107
+- @PKDT-93 | Peter Tran | 2026-09-02 | "A first step to landing on my feet after being laid off" | id:75346912 | src:https://github.com/career-ops-hq/career-ops/discussions/3694 | n:108
+- @brianmgray | Brian Gray | 2026-09-03 | "People-first" | id:638937 | src:https://github.com/career-ops-hq/career-ops/discussions/3730 | n:109
+- @ivan1velasquez | ivan1velasquezzz | 2026-09-03 | "La definición de IA como herramienta" | id:147756951 | src:https://github.com/career-ops-hq/career-ops/discussions/3746 | n:110
+- @nessuarez | Nestor Suarez Alfonso | 2026-09-03 | "My career now belongs to me." | id:1491974 | src:https://github.com/career-ops-hq/career-ops/discussions/3777 | n:111
+- @digerati9 | 2026-09-04 | id:19416174 | src:https://github.com/career-ops-hq/career-ops/discussions/3806 | n:112
+- @mortee | 2026-09-04 | id:338540 | src:https://github.com/career-ops-hq/career-ops/discussions/3827 | n:113
+- @adityap | Aditya Poddar | 2026-09-07 | id:7117191 | src:https://github.com/career-ops-hq/career-ops/discussions/3970 | n:114
+- @cooldashing24 | Vishnu | 2026-09-07 | "May the Force be with us all" | id:4034728 | src:https://github.com/career-ops-hq/career-ops/discussions/3977 | n:115
+- @infosolutiondmdc | EnggNbs | 2026-09-08 | id:242919430 | src:https://github.com/career-ops-hq/career-ops/discussions/4021 | n:116
+- @prasta1 | patrick ruster | 2026-09-08 | id:155988469 | src:https://github.com/career-ops-hq/career-ops/discussions/4022 | n:117
+- @krishnaS137 | 2026-09-08 | "Hiring has become automated and seeing the increasing amount of competition in the field and the rate at which we are expected to level up. We should also have the leverage to use automated pipelines…" | id:127772632 | src:https://github.com/career-ops-hq/career-ops/discussions/4025 | n:118
+- @nastya-uiux | Anastasiya Dvindenko | 2026-09-08 | "I want hiring to value thoughtful design, real skills, and human potential." | id:202688373 | src:https://github.com/career-ops-hq/career-ops/discussions/4031 | n:119
+- @E-Lucid-At0r | Ashwin Ravikumar | 2026-09-09 | id:95267475 | src:https://github.com/career-ops-hq/career-ops/discussions/4044 | n:120
+- @7datawin-arch | 2026-09-10 | id:292077187 | src:https://github.com/career-ops-hq/career-ops/discussions/4061 | n:121
+- @colincomstock | Colin Comstock | 2026-09-10 | id:95597475 | src:https://github.com/career-ops-hq/career-ops/discussions/4063 | n:122
+- @ddroid | Ahmad Munir | 2026-09-13 | id:142005659 | src:https://github.com/career-ops-hq/career-ops/discussions/4140 | n:123
+- @ttiimmothy | Timothy | 2026-09-13 | "Thanks for oss" | id:80472344 | src:https://github.com/career-ops-hq/career-ops/discussions/4141 | n:124
+- @wpu3325 | Wilson Pu | 2026-09-13 | "wpu3325 I want hiring processes to be as intentional, unbiased, and fair as possible." | id:22037720 | src:https://github.com/career-ops-hq/career-ops/discussions/4163 | n:125
+- @jcalcan | 2026-09-15 | id:149669723 | src:https://github.com/career-ops-hq/career-ops/discussions/4196 | n:126
+- @manueldejodar | 2026-09-15 | id:329440006 | src:https://github.com/career-ops-hq/career-ops/discussions/4213 | n:127
+- @khushibansal0999-lang | Khushi Bansal | 2026-09-15 | id:291288340 | src:https://github.com/career-ops-hq/career-ops/discussions/4225 | n:128
+- @KaustubhTrivedi | Kaustubh Trivedi | 2026-09-16 | "Career ops simplifies a job search and reduces labor-intensive tasks." | id:41857947 | src:https://github.com/career-ops-hq/career-ops/discussions/4231 | n:129
+- @ktavabi | Kambiz Tavabi | 2026-09-17 | "AI is a tool and I am using it to work smarter." | id:4381290 | src:https://github.com/career-ops-hq/career-ops/discussions/4243 | n:130
+- @xucian | 2026-09-17 | id:5688727 | src:https://github.com/career-ops-hq/career-ops/discussions/4268 | n:131
+- @PrinceGarth | 2026-09-18 | id:279495077 | src:https://github.com/career-ops-hq/career-ops/discussions/4294 | n:132
+- @abirislam910 | Abir Islam | 2026-09-19 | "The hiring process needs to be revolutionized, plain and simple" | id:68037470 | src:https://github.com/career-ops-hq/career-ops/discussions/4327 | n:133
+- @Hoodliife | 2026-09-20 | "Smooth like butta" | id:239451005 | src:https://github.com/career-ops-hq/career-ops/discussions/4344 | n:134
+- @bravely | Jake Demarest-Mays | 2026-09-23 | id:301293 | src:https://github.com/career-ops-hq/career-ops/discussions/4424 | n:135
+- @samayoade10 | 2026-09-24 | "I want to explore the best way to find opportunities that ordinarily I won’t look at exploring." | id:42525188 | src:https://github.com/career-ops-hq/career-ops/discussions/4447 | n:136

@@ -66,6 +66,17 @@ const EXCLUDES = [
   'batch/logs/.gitkeep',
   'batch/tracker-additions/.gitkeep',
   'interview-prep/.gitkeep',
+  // The declaration file itself. Normally untracked, so normally invisible to
+  // this check — but a FORK that runs this suite in CI has to commit it, or CI
+  // checks out the repo without it, every declared path is an orphan there, and
+  // the suite is red on a machine the author cannot inspect. Committing it made
+  // it its own orphan, and it cannot declare itself (localUserPaths refuses,
+  // correctly: its reason is that nothing updates a gitignored file). That loop
+  // sent forks back to editing USER_PATHS in update-system.mjs, which is exactly
+  // the permanent conflict #2421 removed. Excluded rather than declared, because
+  // like the entries above it never reaches an install: what ships is
+  // config/local-paths.example.txt.
+  LOCAL_PATHS_FILE,
 ];
 
 // .gitignore is excluded from the manifest but NOT from installs, and the
@@ -81,6 +92,17 @@ const EXCLUDES = [
 // this repository only, leaving a candidate's CV stageable in every fork.
 const RECONCILED_NOT_CHECKED_OUT = ['.gitignore'];
 
+// Repo-only files: tracked here, deliberately never shipped to an install.
+//
+// SIGNATURES.md is the append-only ledger of who signed the manifesto. It is
+// read by nobody on an install — manifesto.mjs parses MANIFESTO.md and never
+// touches it — and it changes far more often than the code does, so while it
+// sat in SYSTEM_PATHS every new signature made check()'s content diff report
+// `system-files-changed` on every install in the world, with no `apply` able
+// to clear it for long (#4062). Excluded rather than shipped: the fix is that
+// installs stop tracking a ledger they never use.
+const REPO_ONLY = ['SIGNATURES.md'];
+
 // Trees that live in the repo but deliberately OUTSIDE the updater's world:
 // web/ is the experimental web UI — its own release-please component, never
 // shipped by update-system.mjs, never in the npm package. Excluding it here is
@@ -91,6 +113,7 @@ function covered(file) {
   // If explicitly excluded, it is covered
   if (EXCLUDES.includes(file)) return true;
   if (RECONCILED_NOT_CHECKED_OUT.includes(file)) return true;
+  if (REPO_ONLY.includes(file)) return true;
   if (EXCLUDE_PREFIXES.some((p) => file.startsWith(p))) return true;
 
   return ALL_PATHS.some((path) =>
@@ -112,6 +135,21 @@ if (process.argv.includes('--self-test')) {
   assert(covered('.gitignore') === true, '.gitignore must be covered (excluded)');
   assert(covered('.coderabbit.yaml') === true, '.coderabbit.yaml must be covered (excluded)');
   assert(covered('.editorconfig') === true, '.editorconfig must be covered (excluded, #1438/#1613)');
+  // Pinned as the CONSTANT, not the literal: if the declaration file is ever
+  // renamed, an assertion on 'config/local-paths.txt' would keep passing while
+  // the real file went back to being an orphan in a fork's CI.
+  // How a fork makes it visible to CI without tripping `user-layer-untracked`:
+  // append `!config/local-paths.txt` to .gitignore and commit it, so it is tracked
+  // and NOT ignored (#4128). `config/local-paths.example.txt` carries the recipe.
+  assert(covered(LOCAL_PATHS_FILE) === true, 'the local-paths declaration file must be covered when a fork commits it (excluded, #2991)');
+  // The example is asserted through its MECHANISM, not just through covered().
+  // covered() answers true for any of them, EXCLUDES included, so a single
+  // covered() assertion would keep passing if the example were ever folded into
+  // the exclude above; it would then stop shipping, silently, which is the one
+  // failure this pair of assertions exists to catch.
+  assert(!EXCLUDES.includes('config/local-paths.example.txt'), 'the shipped example must NOT ride the exclude: it has to keep reaching installs');
+  assert(SYSTEM_PATHS.includes('config/local-paths.example.txt'), 'the shipped example must stay in SYSTEM_PATHS (#2991)');
+  assert(covered('config/local-paths.example.txt') === true, 'the shipped example must stay covered by SYSTEM_PATHS, not by the exclude');
 
   // Test exact matches in SYSTEM_PATHS / USER_PATHS
   assert(covered('CLAUDE.md') === true, 'CLAUDE.md must be covered (exact match)');
@@ -126,6 +164,11 @@ if (process.argv.includes('--self-test')) {
   assert(covered('web/package.json') === true, 'web/ tree must be covered (isolation-contract prefix exclude)');
   assert(covered('web-dashboard/index.html') === false, 'web-dashboard/ must NOT ride the web/ prefix exclude');
   assert(covered('.npmignore') === true, '.npmignore must be covered (excluded)');
+  // Asserted through the MECHANISM as well as covered(): if SIGNATURES.md ever
+  // went back into SYSTEM_PATHS, covered() would still answer true while the
+  // #4062 false-positive drift came back on every install.
+  assert(covered('SIGNATURES.md') === true, 'SIGNATURES.md must be covered (repo-only exclude, #4062)');
+  assert(!SYSTEM_PATHS.includes('SIGNATURES.md'), 'SIGNATURES.md must NOT re-enter SYSTEM_PATHS: its churn reads as system-files-changed drift on every install (#4062)');
 
   // Test unrelated file
   assert(covered('untracked-orphan-file-xyz.js') === false, 'untracked-orphan-file-xyz.js must NOT be covered');

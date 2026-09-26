@@ -7,21 +7,36 @@
  * NEVER touches user data (cv.md, profile.yml, _profile.md, data/, reports/).
  *
  * Usage:
- *   node update-system.mjs check      # Check if update available
- *   node update-system.mjs apply      # Apply update (after user confirms)
- *   node update-system.mjs apply --force
+ *   node update-system.mjs check      # Check if a newer release is published
+ *                                     # (merges to main between releases
+ *                                     # never prompt; see checkStatus())
+ *   node update-system.mjs check --force
+ *                                     # …even for a release the user dismissed
+ *   node update-system.mjs apply --confirm
+ *                                     # Apply update after explicit confirmation.
+ *                                     # Default channel: the newest published
+ *                                     # release tag, not main's current tip.
+ *   node update-system.mjs apply --force --confirm
  *                                     # …and overwrite system files this
  *                                     # install edited locally (#2337). Without
  *                                     # it those files are kept and listed.
+ *   node update-system.mjs apply --channel main --confirm
+ *                                     # …track main instead: every merge,
+ *                                     # including whatever's mid-flight
+ *                                     # between a bad one and its fix.
  *   node update-system.mjs rollback   # Rollback last update
- *   node update-system.mjs dismiss    # Dismiss update check
+ *   node update-system.mjs dismiss [--version X.Y.Z]
+ *                                     # Don't ask again about this release;
+ *                                     # a newer one asks again
  *
  * See DATA_CONTRACT.md for the full system/user layer definitions.
  */
 
 import { execFile, execFileSync, execSync } from 'child_process';
-import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'fs';
-import { join, dirname, posix as pathPosix } from 'path';
+import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, lstatSync, mkdtempSync, realpathSync } from 'fs';
+import { join, dirname, basename, resolve, posix as pathPosix } from 'path';
+import { tmpdir } from 'os';
+import { randomBytes, timingSafeEqual } from 'crypto';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 // NOTE: this file must stay *self-loading* — no static (top-level) relative
@@ -37,9 +52,70 @@ import { fileURLToPath, pathToFileURL } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = __dirname;
 
-const CANONICAL_REPO = 'https://github.com/santifer/career-ops.git';
-const RAW_VERSION_URL = 'https://raw.githubusercontent.com/santifer/career-ops/main/VERSION';
-const RELEASES_API = 'https://api.github.com/repos/santifer/career-ops/releases/latest';
+export function createReexecMarker() {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'career-ops-reexec-')));
+  const path = join(directory, 'marker');
+  const token = randomBytes(32).toString('hex');
+  writeFileSync(path, token, { encoding: 'utf8', mode: 0o600 });
+  return { path, token };
+}
+
+export function consumeReexecMarker() {
+  const suppliedPath = process.env.CAREER_OPS_UPDATE_REEXEC_MARKER;
+  const token = process.env.CAREER_OPS_UPDATE_REEXEC_TOKEN;
+  if (!suppliedPath || !token) {
+    return false;
+  }
+  try {
+    const tmpRoot = realpathSync(tmpdir());
+    const path = resolve(suppliedPath);
+    const parent = dirname(path);
+    if (dirname(parent) !== tmpRoot || !basename(parent).startsWith('career-ops-reexec-') || basename(path) !== 'marker') {
+      return false;
+    }
+    if (realpathSync(parent) !== parent || !lstatSync(parent).isDirectory() ||
+        realpathSync(path) !== path || !lstatSync(path).isFile()) {
+      return false;
+    }
+    const expected = readFileSync(path, 'utf8');
+    const expectedBuffer = Buffer.from(expected);
+    const tokenBuffer = Buffer.from(token);
+    const valid = expectedBuffer.length === tokenBuffer.length && timingSafeEqual(expectedBuffer, tokenBuffer);
+    unlinkSync(path);
+    rmSync(dirname(path), { recursive: true, force: true });
+    return valid;
+  } catch {
+    return false;
+  }
+}
+
+function isLegacyReexec() {
+  if (process.env.CAREER_OPS_UPDATE_REEXEC !== '1') {
+    return false;
+  }
+  // A matching backup branch is durable state, not proof that a parent updater
+  // is currently running. Legacy children have no authenticated marker, so
+  // the parent's active update lock is the remaining proof of a real reexec.
+  if (!existsSync(join(ROOT, '.update-lock'))) {
+    return false;
+  }
+  const backupBranch = process.env.CAREER_OPS_UPDATE_BACKUP_BRANCH || '';
+  if (!/^backup-pre-update-\d+\.\d+\.\d+-\d{8}T\d{6}Z$/.test(backupBranch)) {
+    return false;
+  }
+  try {
+    execFileSync('git', [
+      'show-ref', '--verify', '--quiet', `refs/heads/${backupBranch}`,
+    ], { cwd: ROOT, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const CANONICAL_REPO = 'https://github.com/career-ops-hq/career-ops.git';
+const RAW_VERSION_URL = 'https://raw.githubusercontent.com/career-ops-hq/career-ops/main/VERSION';
+const RELEASES_API = 'https://api.github.com/repos/career-ops-hq/career-ops/releases/latest';
 
 // Matches a semver, with or without a leading `v` and an optional
 // Release Please component prefix (e.g. `career-ops-v1.9.0` → `1.9.0`).
@@ -62,7 +138,13 @@ export const REEXEC_BUFFER_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_
 
 // System layer paths — ONLY these files get updated
 const SYSTEM_PATHS = [
+  // .gitattributes governs how every other path below is written to disk, and
+  // `apply` checks paths out one at a time in this order: if it landed later,
+  // everything before it would be written under the old core.autocrlf setting
+  // on an existing install, silently (once text=auto is live, git status stays
+  // clean and only a second update would repair it).
   '.gitattributes',
+  'dead-boards.mjs',
   'modes/README.md',
   'modes/_shared.md',
   'modes/_writing.md',
@@ -72,6 +154,8 @@ const SYSTEM_PATHS = [
   'voice-dna.template.md',
   'modes/oferta.md',
   'modes/pdf.md',
+  'modes/ats.md',
+  'modes/text.md',
   'modes/pdf/',
   'modes/cover.md',
   'modes/email.md',
@@ -101,6 +185,7 @@ const SYSTEM_PATHS = [
   'interview-prep/sessions/.gitkeep',
   'interview-prep/sessions/README.md',
   'modes/patterns.md',
+  'modes/calibrate.md',
   'modes/titles.md',
   'modes/upskill.md',
   'modes/intake.md',
@@ -133,6 +218,7 @@ const SYSTEM_PATHS = [
   'modes/ru/interview/',
   'modes/tr/',
   'modes/ua/',
+  'modes/ua/interview/',
   'modes/heuristics/',
   'modes/regional/',
   'modes/zh/',
@@ -145,7 +231,11 @@ const SYSTEM_PATHS = [
   'GEMINI.md',
   'KIMI.md',
   'build-dashboard.mjs',
+  'clean-markers.mjs',
   'generate-pdf.mjs',
+  'hired-share.mjs',
+  'hired-wall-build.mjs',
+  'HIRED.md',
   'theme-style.mjs',
   'generate-latex.mjs',
   'extract-latex-content.mjs',
@@ -154,12 +244,26 @@ const SYSTEM_PATHS = [
   'lib/cli-flags.mjs',
   'lib/gemini-node-floor.mjs',
   'lib/local-today.mjs',
+  'lib/placeholder-cell.mjs',
+  'lib/tracker-addition.mjs',
+  'lib/scan-summary-marker.mjs',
+  'lib/is-main-module.mjs',
+  'lib/mjs-files.mjs',
+  'lib/outcome-dir.mjs',
+  'lib/outcome-types.mjs',
   'lib/latex-escape.mjs',
+  'lib/cv-payload-schema.mjs',
+  'lib/page-format.mjs',
   'scan-hn.mjs',
   'scripts/check-syntax.mjs',
+  'scripts/export-ats-text.mjs',
+  'scripts/followup-sweep.sh',
   'story-provenance-check.mjs',
   'lib/latex-content.mjs',
   'lib/context-budget.mjs',
+  // Retired 2026-09-05: the suite moved to tests/context-budget.test.mjs. The
+  // entry stays so staleSystemFiles() prunes the orphan on an upgraded install;
+  // drop it once a release has shipped past that move.
   'lib/context-budget.test.mjs',
   'lib/golden-budget-analysis.mjs',
   'img-to-pdf.mjs',
@@ -174,6 +278,7 @@ const SYSTEM_PATHS = [
   'tracker.mjs',
   'find.mjs',
   'verify-pipeline.mjs',
+  'discard-analytics.mjs',
   'reconcile-pipeline.mjs',
   'dedup-tracker.mjs',
   'add-entry.mjs',
@@ -187,9 +292,13 @@ const SYSTEM_PATHS = [
   'normalize-statuses.mjs',
   'cv-sync-check.mjs',
   'verify-cv-facts.mjs',
+  'verify-ats.mjs',
   'update-system.mjs',
+  'path-resolver.mjs',
+
   'reserve-report-num.mjs',
   'scan.mjs',
+  'migrate-scan-runs.mjs',
   'pipeline-lock.mjs',
   'portal-health-lock.mjs',
   'classify-tier.mjs',
@@ -202,6 +311,7 @@ const SYSTEM_PATHS = [
   'application-artifacts.mjs',
   'batch-evaluate-gemini.mjs',
   'providers/',
+  'data-static/',
   'seeds/',
   'tests/',
   'user-agent.mjs',
@@ -212,7 +322,9 @@ const SYSTEM_PATHS = [
   'liveness-api.mjs',
   'liveness-browser.mjs',
   'browser-extract.mjs',
+  'fetch-jd.mjs',
   'analyze-patterns.mjs',
+  'calibrate.mjs',
   'upskill.mjs',
   'skill-extract.mjs',
   'intake.mjs',
@@ -220,26 +332,23 @@ const SYSTEM_PATHS = [
   'detect-reposts.mjs',
   'rank-pipeline.mjs',
   'discover-ats.mjs',
-  'discover-ats.test.mjs',
+  'discover-new-companies.mjs',
   'check-table-freshness.mjs',
+  'check-jd-archive.mjs',
   'fingerprint-core.mjs',
   'process-quality.mjs',
-  'process-quality.test.mjs',
   'company-history.mjs',
-  'company-history.test.mjs',
   'rejection-latency.mjs',
   'salary-gap.mjs',
   'negotiation-roi.mjs',
   'funnel-velocity.mjs',
   'assessment-log.mjs',
   'contacts.mjs',
-  'contacts.test.mjs',
+  'linkedin-join.mjs',
   'weekly-digest.mjs',
   'tracker-sync-check.mjs',
   'followup-cadence.mjs',
-  'followup-cadence.test.mjs',
   'invite-match.mjs',
-  'invite-match.test.mjs',
   'agent-inbox.mjs',
   'followup-seed.mjs',
   'followup-seed-tests.mjs',
@@ -253,27 +362,23 @@ const SYSTEM_PATHS = [
   'evals/',
   'openrouter-runner.mjs',
   'jd-similarity.mjs',
-  'jd-similarity.test.mjs',
   'test-all.mjs',
-  'detect-reposts.test.mjs',
-  'test-salary-filter.mjs',
-  'test-trust-validator.mjs',
   'tracker-columns-tests.mjs',
   'tracker-writer-lock-tests.mjs',
   'agent-inbox-tests.mjs',
   'validate-portals.mjs',
+  'validate-profile.mjs',
   'verify-portals.mjs',
+  'audit-portals.mjs',
   'fix-slugs.mjs',
   'updater-migration-tests.mjs',
   'validate-system-paths-coverage.mjs',
   'validate-untrusted-content-coverage.mjs',
   'reply-matcher.mjs',
-  'reply-matcher.test.mjs',
   'reply-watch.mjs',
   'paste-reply.mjs',
   'paste-reply-tests.mjs',
   'outcome.mjs',
-  'tests/outcome.test.mjs',
   'batch/batch-prompt.md',
   'batch/batch-runner.sh',
   'batch/aggregate-tokens.mjs',
@@ -295,6 +400,7 @@ const SYSTEM_PATHS = [
   '.opencode/skills/',
   '.opencode/commands/',
   '.claude-plugin/',
+  '.codex-plugin/',
   '.qwen/',
   '.antigravitycli/skills/',
   '.grok/skills/',
@@ -305,7 +411,29 @@ const SYSTEM_PATHS = [
   'DATA_CONTRACT.md',
   'MANIFESTO.md',
   'manifesto.mjs',
-  'SIGNATURES.md',
+  // SIGNATURES.md cannot join SYSTEM_PATHS: unlike every other system file it
+  // is a pure append-only ledger of who signed the manifesto, and it churns
+  // far faster than the code it would ship beside (49 commits in the 30 days
+  // before this was written). Nothing on an install reads it — manifesto.mjs
+  // parses MANIFESTO.md and never opens it — so shipping it buys an install
+  // nothing, while listing it here puts it in the pathspec check() diffs via
+  // systemTreeDiffers, which turns every new signature into a
+  // system-files-changed report on every install in the world that no apply
+  // can clear for long (#4062). That is one cause of the #3149 class of
+  // permanent update-available, beside the SHA-vs-content bug of #2630, the
+  // ignore-rule route of #2756, and the symlinked skill entrypoints that a
+  // core.symlinks=false checkout materialises into regular files. Do not fix
+  // that last one the way this entry was fixed: the entrypoints must stay in
+  // SYSTEM_PATHS and be excluded from the drift comparison instead, because
+  // ensureSkillEntrypoints only refreshes an entry that still holds the
+  // pointer, so an entrypoint dropped from the manifest silently freezes.
+  // The SIGNATURES.md repo-only coverage is declared in
+  // validate-system-paths-coverage.mjs, and the behaviour is pinned by
+  // tests/updater-signature-ledger-drift.test.mjs.
+  //
+  // Keep this comment free of straight quotes: updater-migration-tests.mjs
+  // parses this array with a comment-blind regex, so an apostrophe here
+  // becomes a phantom manifest entry.
   'CONTRIBUTING.md',
   'MAINTAINERS.md',
   'ARCHITECTURE.md',
@@ -337,6 +465,7 @@ const SYSTEM_PATHS = [
   'TRADEMARK.md',
   'LICENSE',
   'CITATION.cff',
+  'funding.json',
   '.editorconfig',
   '.github/',
   'package.json',
@@ -345,13 +474,6 @@ const SYSTEM_PATHS = [
   'cv-sections-core.mjs',
   'cv-templates.mjs',
   'playwright.cv.config.mjs',
-  'test/cv-templates.test.mjs',
-  'test/cover-resolver.test.mjs',
-  'test/pipeline-lock.test.mjs',
-  'test/profile-photo.test.mjs',
-  'templates/cv-template.zh-minimal.html',
-  'test/zh-minimal-template.test.mjs',
-  'test/cv-visual/',
   'scaffolder/',
   'Dockerfile',
   'docker-compose.yml',
@@ -714,6 +836,62 @@ function gitQuiet(...args) {
 }
 
 /**
+ * The enclosing repository's toplevel when ROOT is not a git toplevel itself,
+ * or null when ROOT is its own toplevel (or not inside any worktree at all).
+ *
+ * Every git call in this file runs with `cwd: ROOT` and assumes that resolves
+ * to the career-ops checkout. An install with no `.git` of its own that sits
+ * INSIDE another repository — a ZIP unpacked into an existing project — breaks
+ * that silently: git walks up, finds the outer repo, and every rev-parse,
+ * fetch, branch and checkout lands there, with pathspecs failing because at
+ * that root the files are prefixed by the install's subpath (#3334). Callers
+ * use this to refuse before the first side effect.
+ *
+ * A ROOT inside no worktree at all returns null: that layout has no foreign
+ * repo to damage, and each command already has its own handling for git
+ * being unavailable.
+ *
+ * @param {string} [root=ROOT] - Directory to test.
+ * @returns {string|null} The foreign toplevel path, or null.
+ */
+export function gitToplevelMismatch(root = ROOT) {
+  let toplevel;
+  try {
+    toplevel = gitIn(root, 'rev-parse', '--show-toplevel');
+  } catch {
+    return null;
+  }
+  if (!toplevel) return null;
+  // Realpath both sides: git resolves symlinks and reports on-disk casing
+  // (macOS /tmp -> /private/tmp; Windows 8.3 names), while `root` keeps
+  // whatever spelling the process was launched with. Same policy as the CLI
+  // guard at the bottom of this file. On a realpath failure fall back to
+  // resolve(): a false MISMATCH refuses an update, a false match fetches into
+  // a stranger's repo, so the fallback only ever errs toward refusing.
+  const canonicalize = realpathSync.native ?? realpathSync;
+  let same;
+  try {
+    same = canonicalize(toplevel) === canonicalize(root);
+  } catch {
+    same = resolve(toplevel) === resolve(root);
+  }
+  return same ? null : toplevel;
+}
+
+/**
+ * Throw when git operations from ROOT would land in an enclosing repository.
+ * First statement of apply() and rollback(); check() reports a status instead.
+ */
+function assertOwnGitToplevel() {
+  const foreignToplevel = gitToplevelMismatch();
+  if (foreignToplevel) {
+    throw new Error(
+      `career-ops at ${ROOT} is not a git checkout of its own, so git operations would land in the enclosing repository at ${foreignToplevel} — this happens when the install was unpacked from a ZIP or copied without its .git directory. Nothing was changed. To make updates work, clone career-ops fresh (git clone ${CANONICAL_REPO}) and move your user-layer files (cv.md, config/, data/, reports/ — see DATA_CONTRACT.md) into the new clone.`,
+    );
+  }
+}
+
+/**
  * Paths the target manifest ships that did not materialize on disk.
  *
  * apply() reports success without checking that the checkout loop actually
@@ -758,35 +936,46 @@ function missingFromTargetManifest(targetPaths) {
   return missing;
 }
 
-// Must read UNTRIMMED output: gitIn() trims the whole buffer, and the
-// first `--porcelain` line of a worktree/index change begins with a space
-// (` M path`). Trimming rewrites it into `M path`, and the path parse below
-// then drops the first character — a mangled path that no longer matches the
-// real user file in the safety checks. gitRawIn keeps the leading space.
+// Parses the NUL-delimited output of `git status --porcelain -z`. `-z` is the
+// only form that round-trips every path byte-for-byte, which is what the
+// user-layer safety checks depend on — they compare the parsed `path` against
+// real files on disk, and a mangled path is a blind spot (#3048, and the
+// follow-up this replaces):
+//   - never quoted: the newline form C-quotes any path with a space, a quote,
+//     a control char, or (under git's default core.quotepath) a non-ASCII
+//     byte, e.g. ` M "data/my notes.md"` / ` M "data/caf\303\251.md"`. `-z`
+//     emits the raw path, so no dequoting is needed.
+//   - renames/copies as two fields, not one line: the newline form writes
+//     `R  old -> new` on a single line, so a naive slice yields the blob
+//     `old -> new` as the "path". `-z` writes the destination and origin as
+//     two separate NUL-delimited fields; both are surfaced as their own entry
+//     below so the safety check sees every path the move touched.
+//   - no CRLF: `-z` suppresses git's line-ending translation, so there is no
+//     trailing CR to strip on Windows.
 //
-// The parsing itself is extracted as parsePorcelainStatus so the CRLF case can
-// be unit-tested without a real repo: Windows git terminates the last
-// `--porcelain` line with CRLF (its native EOL), and without stripping the
-// trailing CR the sliced `path` would carry a phantom `\r` that matches
-// nothing (same bug class as #3048 — a safety check comparing a mangled path).
+// gitRawIn (not gitIn) because a `-z` field may legitimately begin or end with
+// a space, and trimming the buffer would rewrite it into a different path.
 export function parsePorcelainStatus(status) {
   if (!status) return [];
-  return status
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => {
-      // git never writes a CR inside a path, so a line-terminal '\r' is always
-      // the CRLF half of the line ending, never a path character.
-      const clean = line.endsWith('\r') ? line.slice(0, -1) : line;
-      return {
-        code: clean.slice(0, 2),
-        path: clean.slice(3),
-      };
-    });
+  const fields = status.split('\0');
+  const entries = [];
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i];
+    if (!field) continue;
+    const code = field.slice(0, 2);
+    entries.push({ code, path: field.slice(3) });
+    // R (rename) and C (copy) always sit in the first status column and are
+    // followed by one extra field — the origin path. Emit it too.
+    if (code[0] === 'R' || code[0] === 'C') {
+      const origin = fields[++i];
+      if (origin) entries.push({ code, path: origin });
+    }
+  }
+  return entries;
 }
 
 export function gitStatusEntries(root = ROOT) {
-  return parsePorcelainStatus(gitRawIn(root, 'status', '--porcelain'));
+  return parsePorcelainStatus(gitRawIn(root, 'status', '--porcelain', '-z'));
 }
 
 export function extractArrayFromSource(source, name) {
@@ -821,6 +1010,35 @@ function pathMatchesManifest(file, entry) {
   return normalizedFile === normalizedEntry || normalizedFile.startsWith(`${normalizedEntry}/`);
 }
 
+// Per-application generated CVs/cover letters that some installs save
+// directly under `templates/` (the documented `templates/cv-{candidate}-
+// {company-slug}.html` / `templates/cover-{candidate}-{company-slug}.html`
+// convention — see modes/pdf.md / modes/_custom.md, #3636). These are user
+// data, not system template files, but they sit inside the SAME directory as
+// the real shipped templates (`cv-template.html`, `cv-template.zh-minimal.html`,
+// `cover-letter-template.html`, ...), so the `templates/` directory-prefix
+// entry in SYSTEM_PATHS can't tell them apart, and USER_PATHS' plain
+// prefix/exact matching (pathMatchesManifest) can't either — both sides share
+// the `templates/` prefix, so a prefix-based carve-out for one would swallow
+// the other. This checks the basename shape instead of the directory.
+//
+// Every real system template file under templates/ is named `cv-template*`
+// or `cover-letter-template*`; nothing generated from a real candidate/company
+// slug collides with that, because the slug is never literally "template" /
+// "letter-template". The one theoretical miss — a company slug that itself
+// starts with "template" (e.g. "Template Corp") — leaves that one generated
+// file classified as a system file, i.e. still exposed to the pre-#3636
+// behavior. That is a no-op for safety (unchanged, not worsened) rather than
+// a new failure mode, so it is an acceptable trade-off for a heuristic that
+// needs no maintenance when new system template variants ship.
+const GENERATED_CV_ARTIFACT_RE = /^templates\/cv-(?!template(?:[.-]|$))[^/]+\.html$/;
+const GENERATED_COVER_ARTIFACT_RE = /^templates\/cover-(?!letter-template(?:[.-]|$))[^/]+\.html$/;
+
+export function isGeneratedTemplateArtifact(file) {
+  const normalized = normalizeRepoPath(file);
+  return GENERATED_CV_ARTIFACT_RE.test(normalized) || GENERATED_COVER_ARTIFACT_RE.test(normalized);
+}
+
 export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths = USER_PATHS) {
   const remote = new Set([...remoteFiles].map(normalizeRepoPath));
   if (remote.size === 0) return [];
@@ -828,7 +1046,70 @@ export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths
     .map(normalizeRepoPath)
     .filter((file) => !remote.has(file))
     .filter((file) => systemPaths.some((entry) => pathMatchesManifest(file, entry)))
-    .filter((file) => !userPaths.some((entry) => pathMatchesManifest(file, entry)));
+    .filter((file) => !userPaths.some((entry) => pathMatchesManifest(file, entry)))
+    .filter((file) => !isGeneratedTemplateArtifact(file));
+}
+
+// A stale-file prune candidate can still be load-bearing for a file this same
+// run just decided to KEEP because the user modified it (see
+// `locallyModifiedSystemFiles` + the `preservedPaths` handling in `apply()`) —
+// e.g. a user's custom CV template referencing a font file upstream no longer
+// ships. Deleting the referenced asset out from under a preserved file leaves
+// the preserved file silently broken (missing font, broken image) even though
+// the file itself survived. Scoped to preserved HTML/CSS files' on-disk
+// content, since those are the only preserved file types known to reference
+// other system files by relative path.
+export function isReferencedByPreservedFile(candidatePath, preservedPaths, readFile = (path) => readFileSync(path, 'utf-8')) {
+  const basename = normalizeRepoPath(candidatePath).split('/').pop();
+  if (!basename) return false;
+  return preservedPaths.some((preservedPath) => {
+    if (!/\.(html|css)$/i.test(preservedPath)) return false;
+    try {
+      return readFile(join(ROOT, ...preservedPath.split('/'))).includes(basename);
+    } catch {
+      return false;
+    }
+  });
+}
+
+// A stale-file prune candidate may never have been an upstream file at all.
+// `staleSystemFiles()` selects on "absent from upstream's CURRENT tree", which
+// cannot tell a file upstream retired from a file upstream never carried — a
+// provider, test or registry entry a fork added under one of the ~50
+// directory-prefix SYSTEM_PATHS entries (`providers/`, `tests/`, `templates/`,
+// `docs/`, `modes/*/`, ...). Both are "local, not in the new tree", and the
+// prune deleted both (#3971; same root cause as #3636 and #3696 on a third
+// surface, where no USER_PATHS carve-out applies because the file genuinely IS
+// system-layer, and no filename shape distinguishes it — a fork's
+// `providers/acme.mjs` is spelled exactly like a shipped provider).
+//
+// Upstream's HISTORY settles it, and `apply()` already fetched it: a path that
+// appears in no commit reachable from the fetched ref was never shipped, so its
+// absence from the current tree is not evidence of anything. A path that DOES
+// appear there, but is gone now, is a real removal and still prunes — including
+// the case of a file upstream MOVED (its old path is in history), which is why
+// this does not simply disable the feature.
+//
+// Fails safe: pruning requires positive proof the file was shipped. On a
+// shallow clone the walk returns empty, and on a broken ref it throws; both
+// answer "not proven", so the file is kept.
+// Keeping a retired file is a cosmetic regression (#2532); deleting a fork's
+// source file is not recoverable from the update itself.
+export function wasEverShippedUpstream(candidatePath, ref = 'FETCH_HEAD', revList = (...args) => gitQuiet(...args)) {
+  const file = normalizeRepoPath(candidatePath);
+  if (!file) return false;
+  try {
+    // --literal-pathspecs: `-- <path>` is a PATHSPEC, so a tracked filename
+    // containing glob metacharacters would be matched as a pattern. A local
+    // `modes/_share[a-z].md` matches upstream's `modes/_shared.md`, reads as
+    // "shipped", and is pruned — the exact deletion this function prevents.
+    return revList('--literal-pathspecs', 'rev-list', '--max-count=1', ref, '--', file) !== '';
+  } catch {
+    // No evidence either way. The caller prunes only on a TRUE return, so
+    // false is the safe answer: pruning requires positive proof the file was
+    // shipped, never the mere absence of a usable answer.
+    return false;
+  }
 }
 
 // Files the self-reexec stage must check out so the TARGET update-system.mjs
@@ -960,6 +1241,46 @@ export function systemTreeDiffers(systemPaths, upstreamRef = 'FETCH_HEAD', ctx =
 }
 
 /**
+ * Pathspecs for systemTreeDiffers()'s drift diff, with the CLI skill
+ * entrypoints excluded (#3149, second cause).
+ *
+ * Upstream ships those entrypoints (`.claude/skills/career-ops/SKILL.md` and
+ * its siblings) as symlinks (git mode 120000) pointing at
+ * `.agents/skills/career-ops/SKILL.md`. On a filesystem without symlink
+ * support (core.symlinks=false — mostly Windows), apply() materializes a
+ * REAL copy of that file's content in their place and commits it (logged as
+ * "Materialized N skill entrypoint(s)..."), because the install genuinely
+ * needs a real file there — see ensureSkillEntrypoints(). That materialized
+ * blob's mode and content can then never equal upstream's symlink blob
+ * again: the two are, by design, different git objects forever after. A
+ * plain content diff over SYSTEM_PATHS therefore reported drift on every
+ * such install, on every check, permanently — the false positive never
+ * clears, unlike ordinary drift which a re-`apply()` resolves.
+ *
+ * Excluding these paths from the comparison hides nothing: the materialized
+ * content is a byte-for-byte copy of `.agents/skills/career-ops/SKILL.md`,
+ * which SYSTEM_PATHS already covers via the `.agents/` entry, so a genuine
+ * upstream change to the skill document still surfaces there. A change to
+ * the entrypoint MECHANISM itself (the pointer paths in
+ * scaffolder/bin/skill-entrypoints.mjs) is caught too, via the `scaffolder/`
+ * SYSTEM_PATHS entry.
+ *
+ * Uses git's `:(exclude)` pathspec magic rather than dropping the parent
+ * directory entries (e.g. `.claude/skills/`) wholesale, so a real change to
+ * some OTHER file added later under one of those directories still reports
+ * as drift.
+ *
+ * @param {string[]} systemPaths - SYSTEM_PATHS (or a test's substitute).
+ * @param {{path: string}[]} skillEntrypoints - SKILL_ENTRYPOINTS-shaped list.
+ * @returns {string[]} systemPaths with one `:(exclude)<path>` pathspec
+ *   appended per entrypoint.
+ */
+export function driftPathspecExcludingSkillEntrypoints(systemPaths, skillEntrypoints) {
+  const excludes = (skillEntrypoints || []).map((entry) => `:(exclude)${entry.path}`);
+  return [...systemPaths, ...excludes];
+}
+
+/**
  * System-layer files this install changed locally that the update is about to
  * overwrite (#2337).
  *
@@ -1076,10 +1397,170 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
   // re-running reproduces the same state, so the install stayed stuck. Filtering
   // here also gives the `.bak` failure branch back its single meaning: a backup
   // that genuinely could not be written (permissions, full disk).
+  //
+  // A generated per-application CV/cover-letter under templates/ (#3636) has
+  // no upstream counterpart by construction, so it always "differs from
+  // upstream" here — without this filter every one of a user's generated CVs
+  // would be reported as a locally-modified system file about to be
+  // overwritten and get a needless `.bak` copy written next to it.
   const root = ctx.root || ROOT;
   return [...new Set(atRisk)]
     .filter((file) => existsSync(join(root, ...file.split('/'))))
+    .filter((file) => !isGeneratedTemplateArtifact(file))
     .sort();
+}
+
+/**
+ * True when checking out `path` from upstream with `preservedPaths` excluded
+ * would leave nothing to check out — i.e. `path` itself is (for a single
+ * file) or entirely consists of (for a `dir/`-suffixed directory) preserved
+ * content. apply()'s checkout loop uses this to skip such an entry outright:
+ * `git checkout FETCH_HEAD -- <path> :(exclude)<path>` errors with "did not
+ * match any file(s)" when the exclusions cancel the whole pathspec, and that
+ * error is indistinguishable from a genuine checkout failure at the call
+ * site, so it would abort the entire update over a file the user asked to
+ * keep.
+ *
+ * A single-file `path` that exactly matches a preserved entry is fully
+ * preserved by definition — the match IS the file's only content, so no
+ * upstream lookup can add information. Only a directory `path` needs the
+ * upstream ls-tree lookup, to confirm EVERY file it would check out is
+ * preserved.
+ *
+ * Tri-state, because for a directory the ls-tree lookup can fail and `false`
+ * would then mean two different things (#3824):
+ *
+ *   - `true`    — nothing is left to check out; apply() skips the entry.
+ *   - `false`   — real upstream content is not preserved; apply() checks it
+ *                 out and any error it hits is a genuine failure.
+ *   - `'unknown'` — the directory's upstream content could not be enumerated
+ *                 (unreadable ls-tree). apply() still checks it out, but a
+ *                 "did not match any file(s)" cancel-out error is then benign:
+ *                 the directory may in fact have been fully preserved, and
+ *                 that is not distinguishable here from a real failure without
+ *                 matching git's stderr at the call site.
+ *
+ * One limit is deliberate, raised in review of #3781: the single-file
+ * shortcut diverges from the pre-extraction inline check for a preserved file
+ * ABSENT from FETCH_HEAD (that check fell through to the real checkout and
+ * listed the path in apply()'s "Skipped N path(s) absent upstream" summary;
+ * this returns true and skips it silently). Unreachable while preserved paths
+ * come from `locallyModifiedSystemFiles`, which only reports files that exist
+ * upstream, but a future caller sourcing preservedPaths another way would hit
+ * it.
+ *
+ * @param {string} path - a SYSTEM_PATHS entry, file or `dir/`-suffixed directory.
+ * @param {string[]} preservedPaths - files this run is keeping local content for.
+ * @param {Set<string>} preservedSet - the same paths, as a Set, for lookup.
+ * @param {{git?: Function}} [ctx] - injection point for tests; defaults to gitQuiet.
+ * @returns {boolean | 'unknown'}
+ */
+export function pathFullyPreserved(path, preservedPaths, preservedSet, ctx = {}) {
+  if (preservedSet.size === 0) return false;
+  const runGitQuiet = ctx.git || gitQuiet;
+  const isDirectory = path.endsWith('/');
+  const preservedHere = preservedPaths.filter((f) => (isDirectory ? f.startsWith(path) : f === path));
+  if (preservedHere.length === 0) return false;
+  if (!isDirectory) return true;
+  let upstreamFiles = [];
+  try {
+    upstreamFiles = runGitQuiet('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', path)
+      .split('\n').map((f) => f.trim()).filter(Boolean);
+  } catch {
+    // Can't enumerate the directory's upstream content: it might be fully
+    // preserved (skip) or not (check out). The call site checks it out and
+    // treats a cancel-out error as benign — see checkoutErrorIsBenign.
+    return 'unknown';
+  }
+  return upstreamFiles.length > 0 && upstreamFiles.every((f) => preservedSet.has(f));
+}
+
+// git's pathspec cancel-out message. `git checkout <ref> -- <dir>/ :(exclude)…`
+// prints `error: pathspec '<dir>/' did not match any file(s) known to git` when
+// the exclusions leave nothing to check out. Match loosely: the wording has
+// been stable for years but the quoting and the "known to git" tail vary.
+const PATHSPEC_CANCELLED_RE = /did not match any file/i;
+
+/**
+ * Whether a checkout error thrown inside apply()'s per-path loop is a benign
+ * skip rather than a real failure that must abort the update.
+ *
+ * Two benign shapes:
+ *   - `absentUpstream` — the path is genuinely gone from FETCH_HEAD (a stale
+ *     SYSTEM_PATHS entry such as an old `.gemini/commands/` directory).
+ *   - a `pathFullyPreserved` result of `'unknown'` paired with git's pathspec
+ *     cancel-out message — the directory's upstream content could not be
+ *     enumerated up front, the exclusion pathspecs cancelled the whole
+ *     checkout out, and nothing was left to install (#3824).
+ *
+ * Anything else — timeouts, permission errors, repo corruption — is a real
+ * failure and is rethrown by the caller.
+ *
+ * @param {unknown} err - the error execFileSync threw.
+ * @param {{absentUpstream: boolean, preservedState: boolean | 'unknown'}} opts
+ * @returns {boolean}
+ */
+export function checkoutErrorIsBenign(err, { absentUpstream, preservedState }) {
+  // absentUpstream/preservedState prove WHY a checkout of this path would
+  // legitimately have nothing to check out — they say nothing about whether
+  // THIS error is that. Requiring git's own pathspec-cancellation message
+  // first (CodeRabbit, #3955) means an absent path with an unrelated real
+  // failure — a corrupted index, a permissions error, a timeout — still
+  // rethrows instead of being swallowed just because the path happens to be
+  // gone from FETCH_HEAD too.
+  const text = `${(err && err.stderr) || ''}\n${(err && err.message) || ''}`;
+  if (!PATHSPEC_CANCELLED_RE.test(text)) return false;
+  return absentUpstream || preservedState === 'unknown';
+}
+
+/**
+ * Whether `spec` is absent from FETCH_HEAD's tree — the answer that makes a
+ * checkout failure in apply()'s per-path loop a benign skip rather than a real
+ * error to rethrow (#1998, #3824).
+ *
+ * Only a SUCCESSFUL empty `git ls-tree --name-only FETCH_HEAD -- <spec>` counts:
+ * ls-tree prints the entry when the path is in the tree and nothing when it is
+ * not, both at exit 0. A THROW (bad ref, unreadable repo, timeout) is the probe
+ * failing to run, not an answer — return false so the checkout error rethrows
+ * instead of being masked as a skip. Extracted from apply()'s catch so the
+ * throwing-probe path is testable without running apply() (#3955 review).
+ *
+ * @param {string} spec - path to probe; a `dir/` entry is passed without its trailing slash.
+ * @param {{git?: Function}} [ctx] - injection point for tests; defaults to gitQuiet.
+ * @returns {boolean}
+ */
+export function probeAbsentUpstream(spec, ctx = {}) {
+  const runGitQuiet = ctx.git || gitQuiet;
+  try {
+    return runGitQuiet('ls-tree', '--name-only', 'FETCH_HEAD', '--', spec).trim() === '';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Preserve byte-for-byte copies of system files before an unavoidable
+ * overwrite. The self-bootstrap stage cannot use the normal "keep local"
+ * path: it must load the fetched updater to remain forward-compatible. A
+ * sibling .bak makes that exceptional overwrite recoverable instead.
+ *
+ * @param {string[]} files - Repo-relative files already proven at risk.
+ * @param {{root?: string, copyFile?: Function}} [ctx] - Test seams.
+ * @returns {{file: string, backup: string, error?: string}[]}
+ */
+export function backupSystemFiles(files, ctx = {}) {
+  const root = ctx.root || ROOT;
+  const copyFile = ctx.copyFile || copyFileSync;
+  return files.map((file) => {
+    const source = join(root, ...file.split('/'));
+    const backup = `${source}.bak`;
+    try {
+      copyFile(source, backup);
+      return { file, backup: `${file}.bak` };
+    } catch (err) {
+      return { file, backup: `${file}.bak`, error: err.message };
+    }
+  });
 }
 
 export function revertPaths(paths, protectedPaths = new Set(), ctx = {}) {
@@ -1164,9 +1645,194 @@ export function removeAdditionsNotInHead(pathspec, protectedPaths = new Set(), c
   }
 }
 
-function addPaths(paths) {
+/**
+ * Is a repo-relative path present in the index?
+ *
+ * Used to tell "tracked but ignored" (stageable, and `-f` will do it) apart from
+ * "never tracked" (a deleted one is an unmatched pathspec, which no flag fixes).
+ *
+ * Expects a literal single-file path: it reports whether `ls-files` matched
+ * anything, not whether it matched this exact entry. A directory pathspec would
+ * report true for any tracked file beneath it, and a wrong-case path reports
+ * false even on a case-insensitive filesystem, since `ls-files` does not fold.
+ *
+ * @param {string} path - Repo-relative path.
+ * @param {{git?: Function}} [ctx] - Test seam; defaults to the ROOT-bound runner.
+ * @returns {boolean}
+ */
+export function isTracked(path, ctx = {}) {
+  const runGit = ctx.git || git;
+  // Deliberately uncaught. `ls-files` exits 0 with empty output for a path it
+  // does not know, so the untracked case never throws — which means a throw
+  // here is a real failure (unreadable repo, timeout, launch error), and
+  // reporting it as "untracked" would silently drop a genuine deletion from the
+  // update commit. --literal-pathspecs so a name containing pathspec syntax
+  // cannot answer this question about some other file.
+  return runGit('--literal-pathspecs', 'ls-files', '--', path).trim().length > 0;
+}
+
+/**
+ * Resolve staging pathspecs to the concrete files the target tree ships.
+ *
+ * The staging list is the update manifest, and 53 of its 283 entries are
+ * DIRECTORIES (`modes/de/`, `docs/`, `tests/`, …). That distinction decides
+ * whether the force-add below is safe: `git add -f -- docs/` stages every
+ * ignored file underneath it, so a user's `career-dashboard` binary, `.DS_Store`
+ * or `.env` lands in the update commit. Plain `git add -- docs/` skips them.
+ *
+ * Expanding here removes the hazard at the source rather than guarding it
+ * downstream — a `-f` on an explicit filename cannot sweep a sibling. It also
+ * cannot reach a user file at all, because every name comes out of the TARGET
+ * TREE: by construction each one is a file upstream ships. That is the property
+ * that matters, and it is why the expansion asks FETCH_HEAD rather than the
+ * user's index — `ls-files`/`status` read the user's checkout to decide what to
+ * force into a commit, which is the same class of mistake in the other
+ * direction. A status-based guard cannot even see the problem: `git status`
+ * does not list ignored files.
+ *
+ * Non-directory entries pass through untouched: manifest file entries, pruned
+ * deletions (already absent from the target tree, so nothing to expand), and
+ * materialized skill entrypoints, which may have just been `git rm --cached`ed
+ * and can only be restaged by name.
+ *
+ * @param {string[]} paths - Staging pathspecs; directory entries end in '/'.
+ * @param {string} [ref] - Tree to resolve against.
+ * @param {{git?: Function}} [ctx] - Test seam; defaults to the ROOT-bound runner.
+ * @returns {string[]} De-duplicated file paths, never a directory.
+ */
+export function expandToShippedFiles(paths, ref = 'FETCH_HEAD', ctx = {}) {
+  const runGit = ctx.git || git;
+  const seen = new Set();
+  const files = [];
+  const take = (p) => { if (p && !seen.has(p)) { seen.add(p); files.push(p); } };
+
+  for (const path of paths) {
+    if (!path.endsWith('/')) { take(path); continue; }
+    // Deliberately uncaught, for the same reason as isTracked: `ls-tree --
+    // absent/` exits 0 with empty output, so a stale manifest entry needs no
+    // handling here. A throw is therefore a real failure — an unreadable ref,
+    // a timeout, a corrupt object store — and swallowing it would report "this
+    // directory ships nothing" and drop every file under it from staging.
+    //
+    // -z: raw, NUL-separated names. Without it git quotes anything non-ASCII
+    // per core.quotePath, and a quoted name is not a usable pathspec.
+    // --literal-pathspecs: a directory prefix still resolves, but no name is
+    // ever reinterpreted as a glob.
+    const listed = runGit('--literal-pathspecs', 'ls-tree', '-r', '--name-only', '-z', ref, '--', path);
+    for (const file of listed.split('\0')) take(file);
+  }
+  return files;
+}
+
+/**
+ * Cap on the argv bytes handed to one `git add`.
+ *
+ * Expanding directories multiplies the pathspec count (283 manifest entries →
+ * 817 files, ~22 KB of argv today), and Windows caps a whole command line at
+ * 32,767 characters. Left as one call, this fix would carry the updater to
+ * roughly two-thirds of that ceiling on the day it lands and grow with every
+ * release — failing, eventually, inside the one tool a user cannot easily
+ * repair by hand. Batching is a consequence of the expansion, not a flourish.
+ */
+const ADD_ARGV_BUDGET = 8000;
+
+/**
+ * Stage the update's own system-layer files.
+ *
+ * `-f` is required, not defensive. Every path here is one the updater just
+ * wrote from the target tree, but `git add` refuses an explicitly-named ignored
+ * path and exits 1 — and because .gitignore is intentionally not in
+ * SYSTEM_PATHS, a user's own rule can shadow a system file at any time.
+ *
+ * The trigger is specifically a DIRECTORY-level rule. git skips ignore rules for
+ * an already-tracked file, so `writing-samples/README.md` under a `writing-
+ * samples/README.md` rule stages fine — but under a blanket `writing-samples/`
+ * it does not, because the match comes from the ignored directory. That blanket
+ * shape is the one users reach for when hardening a checkout.
+ *
+ * The failure is quiet in the worst way: git stages the paths it accepted and
+ * still exits non-zero, so apply() aborts before committing and leaves the
+ * update on disk, staged, uncommitted — and repeats it on every later release.
+ *
+ * Callers must pass files, not directory pathspecs — see expandToShippedFiles.
+ *
+ * @param {string[]} paths - Repo-relative FILE paths to stage.
+ * @param {{git?: Function}} [ctx] - Test seam; defaults to the ROOT-bound runner.
+ */
+export function addPaths(paths, ctx = {}) {
   if (paths.length === 0) return;
-  git('add', '--', ...paths);
+  // Enforced, not merely documented. Two call sites feed this function and both
+  // build their list from SYSTEM_PATHS, so "callers must pass files" is exactly
+  // the kind of precondition that holds until someone adds a third caller — and
+  // the failure is a user's ignored files committed silently, which nothing
+  // downstream reports. A comment could not have caught rollback(); this does.
+  // Validate the WHOLE list before staging any of it. Checking inside the batch
+  // loop meant a directory in a late batch was caught only after earlier batches
+  // had already been added — the refusal would report a problem it had partly
+  // committed to.
+  rejectDirectories(paths, ctx.root || ROOT);
+  const runGit = ctx.git || git;
+  let batch = [];
+  let budget = 0;
+  // --literal-pathspecs: these are filenames, and a name like `docs/[x].env`
+  // read as a glob would force-add an ignored sibling `docs/x.env`. `--` ends
+  // option parsing but does not stop pathspec interpretation.
+  const flush = () => {
+    if (batch.length === 0) return;
+    runGit('--literal-pathspecs', 'add', '-f', '--', ...batch);
+    batch = [];
+    budget = 0;
+  };
+  for (const path of paths) {
+    // A single path wider than the budget still goes out on its own.
+    if (batch.length > 0 && budget + path.length + 1 > ADD_ARGV_BUDGET) flush();
+    batch.push(path);
+    budget += path.length + 1;
+  }
+  flush();
+}
+
+/**
+ * Refuse anything that would make `git add -f` recurse.
+ *
+ * A trailing slash is the shape SYSTEM_PATHS uses, but it is not the hazard —
+ * `git add -f -- docs` sweeps exactly as `docs/` does, and rollback() builds a
+ * `removed` list in precisely that slash-stripped form a few lines from a call
+ * site. Checking the string alone would guard the spelling and miss the bug.
+ *
+ * The question reduces to one `lstat`, because a path that is NOT on disk
+ * cannot sweep anything: `git add -f` on an absent path can only stage
+ * deletions of entries already in the index, and an ignored file cannot be one.
+ * So the whole hazard is "does this name resolve to a directory right now".
+ *
+ * Asking the filesystem rather than the index also settles three cases an
+ * index-descendant test gets wrong: a directory replaced by a regular file of
+ * the same name (stale index entries below it would read as a directory), a
+ * non-canonical spelling like `./docs` or `docs/.` (whose ls-files output is
+ * canonical and never prefix-matches), and an untracked directory such as
+ * `node_modules` (no index entries at all, yet fully sweepable).
+ *
+ * @param {string[]} paths - Repo-relative paths about to be force-added.
+ * @param {string} root - Repository root; injectable so the test seam resolves
+ *   against its fixture instead of the module-level ROOT.
+ */
+function rejectDirectories(paths, root) {
+  const dirs = paths.filter(p => {
+    if (p.endsWith('/')) return true;
+    try {
+      return lstatSync(join(root, p)).isDirectory();
+    } catch {
+      // Absent from the worktree: a staged deletion, or a file this run is
+      // about to create. Neither can recurse.
+      return false;
+    }
+  });
+  if (dirs.length > 0) {
+    throw new Error(
+      `addPaths received directory pathspec(s), which -f would sweep ignored files from: ` +
+      `${dirs.join(', ')}. Resolve them with expandToShippedFiles() first.`
+    );
+  }
 }
 
 // Git's "exclude this from the pathspec" magic prefix. Preserved files are held
@@ -1174,6 +1840,40 @@ function addPaths(paths) {
 // place that has to recognise such an entry again — the index-commit guard —
 // reads the prefix from here rather than re-spelling it.
 const EXCLUDE_PATHSPEC_PREFIX = ':(exclude)';
+
+/**
+ * The concrete FILE list to stage and scope-commit for an update.
+ *
+ * `pathsToStage` is a git PATHSPEC list: positive manifest entries (files, and
+ * directory entries ending in '/') plus `:(exclude)<path>` specs for files this
+ * install preserved (#2337). Two consumers need a plain file list, not that
+ * pathspec list:
+ *
+ *   - addPaths force-adds under `--literal-pathspecs`, where a `:(exclude)`
+ *     spec is read as a LITERAL, nonexistent filename. git aborts with "pathspec
+ *     did not match any files" and the whole update commit dies half-done — the
+ *     exact break a preserved local edit (a Docker/sandbox `Dockerfile`) hit in
+ *     the field. The exclude specs simply must not reach it.
+ *   - the scoped commit is clearest, and mode-safe, naming exactly what staged.
+ *
+ * So expand only the positive specs against the target tree, then SUBTRACT the
+ * preserved files. Subtraction is what the exclude spec was meant to do and,
+ * during staging, never did: a preserved file living under a positive DIRECTORY
+ * entry (`providers/` over a preserved `providers/acme.mjs`) is pulled in by the
+ * expansion and has to be removed here, not merely appended as a spec the
+ * expansion ignores.
+ *
+ * @param {string[]} pathsToStage - positive specs + `:(exclude)<path>` specs.
+ * @param {string[]|Set<string>} [preserved] - exact preserved file paths.
+ * @param {string} [ref] - tree the directory entries resolve against.
+ * @param {{git?: Function}} [ctx] - test seam; defaults to the ROOT-bound runner.
+ * @returns {string[]} concrete file paths, preserved files removed, no exclusions.
+ */
+export function stagingFileList(pathsToStage, preserved = [], ref = 'FETCH_HEAD', ctx = {}) {
+  const preservedSet = preserved instanceof Set ? preserved : new Set(preserved);
+  const positives = pathsToStage.filter((spec) => !spec.startsWith(EXCLUDE_PATHSPEC_PREFIX));
+  return expandToShippedFiles(positives, ref, ctx).filter((path) => !preservedSet.has(path));
+}
 
 /**
  * Staged paths that are NOT covered by `owned`.
@@ -1289,14 +1989,276 @@ function curlGet(url, extraArgs = []) {
   });
 }
 
-async function check() {
-  // Respect dismiss flag
-  if (existsSync(join(ROOT, '.update-dismissed'))) {
-    console.log(JSON.stringify({ status: 'dismissed' }));
-    return;
+// ── CHANNEL RESOLUTION ──────────────────────────────────────────
+
+/**
+ * Which channel apply() should fetch from: the `--channel` flag wins over
+ * CAREER_OPS_UPDATE_CHANNEL (the re-exec'd child's copy of the parent's
+ * resolved choice — see resolveTargetRef()'s callers). Unset means the
+ * default, 'release'. Anything else is a typo, not a third channel, so it
+ * throws before any lock or network call rather than silently doing
+ * something the caller didn't ask for.
+ *
+ * @param {string[]} argv - process.argv (or a test double).
+ * @param {NodeJS.ProcessEnv} env - process.env (or a test double).
+ * @returns {'release'|'main'}
+ */
+function resolveChannel(argv, env) {
+  const idx = argv.indexOf('--channel');
+  const requested = idx !== -1 ? argv[idx + 1] : env.CAREER_OPS_UPDATE_CHANNEL;
+  if (requested === undefined || requested === 'release') return 'release';
+  if (requested === 'main') return 'main';
+  throw new Error(`Unknown --channel '${requested}'. Supported channels: release (default), main.`);
+}
+
+// release-please-config.json also releases a sibling `web` component, tagged
+// `web-vX.Y.Z` — see resolveTargetRef()'s doc comment for why this matters.
+const RELEASE_TAG_PREFIX = 'career-ops-v';
+
+// The whole tag, anchored at both ends. SEMVER_RE is suffix-anchored (it has
+// to be, to read `career-ops-v1.9.0` and `v1.9.0` alike), so the prefix check
+// plus SEMVER_RE on its own let `career-ops-vpreview-v1.32.0` through: right
+// prefix, and a valid `-v1.32.0` suffix. A release tag is exactly the prefix
+// followed by X.Y.Z, nothing between.
+export const RELEASE_TAG_RE = new RegExp(`^${RELEASE_TAG_PREFIX}(\\d+\\.\\d+\\.\\d+)$`);
+
+/**
+ * The version a career-ops release tag names (`career-ops-v1.33.0` → `1.33.0`),
+ * or '' for anything that is not exactly such a tag. Shared by apply()'s
+ * resolveTargetRef() and check()'s latestRelease(), so the prompt and the
+ * install agree on what counts as a release.
+ *
+ * @param {string} tagName
+ * @returns {string}
+ */
+export function releaseTagVersion(tagName) {
+  const match = String(tagName || '').trim().match(RELEASE_TAG_RE);
+  return match ? match[1] : '';
+}
+
+/**
+ * The release version apply() would go BACK to, or '' when there is nothing
+ * to refuse. On the default channel an install can sit ahead of the latest
+ * release (VERSION bumped on main while the tag is still being published, a
+ * fork, a hand-edited VERSION). Installing that older tag would bootstrap an
+ * older updater — one that predates the release channel and fetches main —
+ * so the command would install main's tree while claiming a release (#3845
+ * review). check() already reports such an install as up-to-date; apply()
+ * now agrees and installs nothing. The same version is not refused: re-applying
+ * the release you are on is how its files are restored.
+ *
+ * @param {string} local - the installed VERSION.
+ * @param {string} targetRef - what resolveTargetRef() returned.
+ * @returns {string}
+ */
+export function newerThanTarget(local, targetRef) {
+  const target = releaseTagVersion(targetRef);
+  return target && compareVersions(local, target) > 0 ? target : '';
+}
+
+/**
+ * Resolve the git ref apply() should fetch from CANONICAL_REPO.
+ *
+ * Default channel ('release'): the newest published career-ops release tag,
+ * read from RELEASES_API. main's tip is not a safe default — release-please
+ * can bump VERSION on main hours before the matching tag lands, so a
+ * same-moment `main` checkout can carry a version string with none of that
+ * release's guarantees (an intermediate commit, not a reproducible one).
+ * `--channel main` opts back into the old behavior: every merge, including
+ * whatever's mid-flight between a bad one and its fix.
+ *
+ * Fails loudly on the default channel instead of falling back to 'main' —
+ * a silent fallback would reintroduce the exact bug this exists to close,
+ * and on exactly the network blip that makes it matter most. This includes
+ * a tag returned by GitHub that isn't ours: this is a manifest-mode
+ * monorepo (release-please-config.json also releases a `web` component,
+ * tagged `web-vX.Y.Z`), and RELEASES_API's `/releases/latest` returns
+ * whichever release was created most recently across BOTH components —
+ * correct only because release.yml's "Keep the career-ops release marked
+ * as Latest" step re-asserts it on every push. If that step ever silently
+ * stopped running, this would otherwise fetch and install a `web` tag
+ * without complaint; the RELEASE_TAG_PREFIX + SEMVER_RE check makes that
+ * fail loudly and diagnosably instead, naming the unexpected tag rather
+ * than silently installing it or fetching a ref that doesn't exist.
+ *
+ * @param {string[]} argv - process.argv (or a test double).
+ * @param {NodeJS.ProcessEnv} env - process.env (or a test double).
+ * @param {{curlGet?: typeof curlGet}} [ctx] - injection seam for tests.
+ * @returns {Promise<string>} A ref fetchable from CANONICAL_REPO: a release
+ *   tag verbatim (e.g. `career-ops-v1.32.0`) or the literal `main`.
+ */
+export async function resolveTargetRef(argv, env, ctx = {}) {
+  const runCurlGet = ctx.curlGet || curlGet;
+  if (resolveChannel(argv, env) === 'main') {
+    return 'main';
   }
 
-  const local = localVersion();
+  const releaseRaw = await runCurlGet(RELEASES_API, [
+    '--header', 'Accept: application/vnd.github.v3+json',
+    '--header', 'User-Agent: career-ops-update-checker',
+  ]);
+  if (releaseRaw === null) {
+    throw new Error(
+      `Could not reach ${RELEASES_API} to resolve the latest career-ops release. ` +
+      'Retry, or run with --channel main to update from the latest commit on main instead.',
+    );
+  }
+
+  let tagName = '';
+  try {
+    tagName = String(JSON.parse(releaseRaw)?.tag_name || '').trim();
+  } catch {
+    // Unparseable body; tagName stays empty and falls through to the throw below.
+  }
+  if (!tagName) {
+    throw new Error(
+      `GitHub returned no usable release tag from ${RELEASES_API}. ` +
+      'Retry, or run with --channel main to update from the latest commit on main instead.',
+    );
+  }
+  // Prefix AND shape, as one anchored match: 'career-ops-vnot-a-version'
+  // passes a prefix-only check, and 'career-ops-vpreview-v1.32.0' passes a
+  // prefix check plus the suffix-anchored SEMVER_RE — neither is a release.
+  if (!releaseTagVersion(tagName)) {
+    // Almost certainly the sibling `web` component's tag surfacing because
+    // release.yml's Latest-reassignment step didn't run (wrong prefix) — see
+    // the doc comment above — or a malformed tag (right prefix, no valid
+    // version). Fetching either anyway would silently install the wrong
+    // content or crash on a nonexistent ref; naming it here turns that into
+    // an actionable report instead.
+    throw new Error(
+      `${RELEASES_API} returned '${tagName}', which is not a valid ${RELEASE_TAG_PREFIX}X.Y.Z release tag — ` +
+      `likely the sibling 'web' component's release surfacing instead of career-ops's, or a malformed tag. ` +
+      'Retry, or run with --channel main to update from the latest commit on main instead.',
+    );
+  }
+  return tagName;
+}
+
+// ── DISMISS MARKER ──────────────────────────────────────────────
+
+const DISMISS_FILE = '.update-dismissed';
+
+/**
+ * Read the dismiss marker. dismiss() writes JSON naming the release the user
+ * declined: {"version":"1.34.0","at":"<ISO>"}. Installs that dismissed before
+ * that hold a bare ISO timestamp instead: when they said no, release unknown.
+ *
+ * @param {string|null} text - the marker's contents, or null when absent.
+ * @returns {{version: string, at: string}|null}
+ */
+export function parseDismissMarker(text) {
+  if (text === null || text === undefined) return null;
+  const raw = String(text).trim();
+  let parsed = null;
+  try { parsed = JSON.parse(raw); } catch { /* legacy marker: a bare timestamp */ }
+  if (parsed && typeof parsed === 'object') {
+    const version = typeof parsed.version === 'string' && /^\d+\.\d+\.\d+$/.test(parsed.version) ? parsed.version : '';
+    const at = typeof parsed.at === 'string' && !Number.isNaN(Date.parse(parsed.at)) ? parsed.at : '';
+    return { version, at };
+  }
+  return { version: '', at: Number.isNaN(Date.parse(raw)) ? '' : raw };
+}
+
+/**
+ * Whether a "no" still covers the release on offer. A "no" answers one
+ * release, not updates in general: before, any marker silenced check() for
+ * good, so declining one prompt meant never hearing about a release again.
+ *
+ *   - A marker naming a version covers that release and older ones; a newer
+ *     release asks again.
+ *   - A legacy timestamp marker covers releases published up to that moment;
+ *     one published later asks again.
+ *   - A "no" we cannot place (no version, no usable timestamps) keeps
+ *     covering: better to miss one prompt than overrule the user's answer.
+ *
+ * @param {{version: string, at: string}|null} marker
+ * @param {string} remote - the offered release's version, X.Y.Z.
+ * @param {string} publishedAt - the offered release's published_at (ISO).
+ * @returns {boolean}
+ */
+export function dismissalCovers(marker, remote, publishedAt) {
+  if (!marker) return false;
+  if (marker.version) return compareVersions(remote, marker.version) <= 0;
+  const at = Date.parse(marker.at || '');
+  const published = Date.parse(publishedAt || '');
+  if (Number.isNaN(at) || Number.isNaN(published)) return true;
+  return published <= at;
+}
+
+function readDismissMarker() {
+  const path = join(ROOT, DISMISS_FILE);
+  return existsSync(path) ? readFileSync(path, 'utf-8') : null;
+}
+
+// ── CHECK ───────────────────────────────────────────────────────
+
+/**
+ * The newest published career-ops release: the same RELEASES_API lookup
+ * resolveTargetRef() makes for apply(), held to the same tag shape, so the
+ * prompt names exactly the release an update would install. Never throws:
+ * check() runs silently at the start of every session and answers with a
+ * status instead.
+ *
+ * @param {typeof curlGet} runCurlGet
+ * @returns {Promise<{status: 'ok', tagName: string, version: string, publishedAt: string, changelog: string}
+ *   | {status: 'offline'|'no-remote-version', tag?: string}>}
+ */
+async function latestRelease(runCurlGet) {
+  const releaseRaw = await runCurlGet(RELEASES_API, [
+    '--header', 'Accept: application/vnd.github.v3+json',
+    '--header', 'User-Agent: career-ops-update-checker',
+  ]);
+  if (releaseRaw === null) return { status: 'offline' };
+  let release = null;
+  try { release = JSON.parse(releaseRaw); } catch { /* unparseable body */ }
+  const tagName = String(release?.tag_name || '').trim();
+  const version = releaseTagVersion(tagName);
+  // A web-v* tag, a malformed one or no tag at all: apply() would refuse it
+  // (resolveTargetRef), so check() must not offer it either.
+  if (!version) return { status: 'no-remote-version', ...(tagName ? { tag: tagName } : {}) };
+  return { status: 'ok', tagName, version, publishedAt: String(release.published_at || ''), changelog: String(release.body || '') };
+}
+
+/**
+ * What check() reports, as data (check() prints it; tests call it directly).
+ *
+ * Default channel ('release'): an update is offered only when a newer
+ * career-ops release is published. apply() installs that release, not main's
+ * tip (#3845), so merges landing on main between releases never prompt — the
+ * version number decides when users are asked (#3203, #3583). The local side
+ * is VERSION: an install that tracked main before this change reads as its
+ * last release, and is offered the next one.
+ *
+ * `--channel main` keeps the previous behaviour for installs that follow
+ * main: main's VERSION (or the release, whichever is higher) plus system-file
+ * drift against main's tip (#2630).
+ *
+ * `--force` ignores the dismiss marker: the user asked to check.
+ *
+ * @param {string[]} argv
+ * @param {NodeJS.ProcessEnv} env
+ * @param {{curlGet?: typeof curlGet, localVersion?: () => string, readMarker?: () => (string|null)}} [ctx] - test seams.
+ */
+export async function checkStatus(argv, env, ctx = {}) {
+  const runCurlGet = ctx.curlGet || curlGet;
+  const local = (ctx.localVersion || localVersion)();
+  const marker = argv.includes('--force') ? null : parseDismissMarker((ctx.readMarker || readDismissMarker)());
+  if (resolveChannel(argv, env) === 'main') return checkMainChannel(local, marker, runCurlGet);
+
+  const latest = await latestRelease(runCurlGet);
+  if (latest.status !== 'ok') return { status: latest.status, local, ...(latest.tag ? { tag: latest.tag } : {}) };
+  const remote = latest.version;
+  if (compareVersions(local, remote) >= 0) return { status: 'up-to-date', local, remote };
+  if (dismissalCovers(marker, remote, latest.publishedAt)) return { status: 'dismissed', local, remote };
+  return { status: 'update-available', local, remote, reason: 'version-changed', changelog: latest.changelog.slice(0, 500) };
+}
+
+/**
+ * check() for `--channel main`: the pre-#3845 logic, unchanged apart from
+ * returning its answer and honouring a per-release dismissal.
+ */
+async function checkMainChannel(local, marker, runCurlGet) {
   let remote = '';
   let releaseVersion = '';
   let changelog = '';
@@ -1307,8 +2269,8 @@ async function check() {
   // sandbox (see curlGet() above for rationale).  Two sources are tried;
   // both failing is the only true-offline signal.
   const [rawVersion, releaseRaw] = await Promise.all([
-    curlGet(RAW_VERSION_URL),
-    curlGet(RELEASES_API, [
+    runCurlGet(RAW_VERSION_URL),
+    runCurlGet(RELEASES_API, [
       '--header', 'Accept: application/vnd.github.v3+json',
       '--header', 'User-Agent: career-ops-update-checker',
     ]),
@@ -1320,7 +2282,7 @@ async function check() {
   // deliberately conservative: version checks still work offline/behind a
   // restricted git transport.
   try { localCommit = gitQuiet('rev-parse', 'HEAD'); } catch { /* no git checkout */ }
-  const remoteRef = await curlGet('https://api.github.com/repos/santifer/career-ops/git/ref/heads/main', [
+  const remoteRef = await runCurlGet('https://api.github.com/repos/career-ops-hq/career-ops/git/ref/heads/main', [
     '--header', 'Accept: application/vnd.github+json',
     '--header', 'User-Agent: career-ops-update-checker',
   ]);
@@ -1356,9 +2318,7 @@ async function check() {
     // empty strings, which still reaches the offline branch — that's the
     // right conservative behaviour (no version = can't determine status).
     const bothNetworkFailed = rawVersion === null && releaseRaw === null;
-    const status = bothNetworkFailed ? 'offline' : 'no-remote-version';
-    console.log(JSON.stringify({ status, local }));
-    return;
+    return { status: bothNetworkFailed ? 'offline' : 'no-remote-version', local };
   }
 
   // Use the higher version between VERSION file and GitHub Release
@@ -1384,18 +2344,31 @@ async function check() {
   if (localCommit && remoteCommit && localCommit !== remoteCommit) {
     try {
       gitQuiet('fetch', '--quiet', CANONICAL_REPO, 'main');
-      systemTreeDrift = systemTreeDiffers(SYSTEM_PATHS, 'FETCH_HEAD');
+      // Lazy import: keep update-system.mjs self-loading (see apply()'s note
+      // on the same import). Exclude the materialized CLI skill entrypoints
+      // from the drift diff — see driftPathspecExcludingSkillEntrypoints()
+      // for why (#3149, second cause: permanent false drift on a
+      // core.symlinks=false install).
+      const { SKILL_ENTRYPOINTS } = await import('./scaffolder/bin/skill-entrypoints.mjs');
+      systemTreeDrift = systemTreeDiffers(
+        driftPathspecExcludingSkillEntrypoints(SYSTEM_PATHS, SKILL_ENTRYPOINTS),
+        'FETCH_HEAD',
+      );
     } catch {
       systemTreeDrift = true;
     }
   }
 
   if (compareVersions(local, remote) >= 0 && !systemTreeDrift) {
-    console.log(JSON.stringify({ status: 'up-to-date', local, remote, local_commit: localCommit || undefined, remote_commit: remoteCommit || undefined }));
-    return;
+    return { status: 'up-to-date', local, remote, local_commit: localCommit || undefined, remote_commit: remoteCommit || undefined };
   }
 
-  console.log(JSON.stringify({
+  // A "no" to v{remote} (drift at the same version included) holds until a
+  // newer version; no release date on this channel, so a legacy timestamp
+  // marker keeps covering.
+  if (dismissalCovers(marker, remote, '')) return { status: 'dismissed', local, remote };
+
+  return {
     status: 'update-available',
     local,
     remote,
@@ -1403,7 +2376,23 @@ async function check() {
     local_commit: localCommit || undefined,
     remote_commit: remoteCommit || undefined,
     changelog: changelog.slice(0, 500),
-  }));
+  };
+}
+
+async function check() {
+  // Before any git call: on an install nested inside a foreign repository the
+  // rev-parse below reads the OUTER repo's HEAD and the drift fetch writes the
+  // OUTER repo's FETCH_HEAD, so check reports a phantom system-files-changed
+  // forever on a byte-identical install (#3334). Report the layout as its own
+  // status instead; agents ignore unknown statuses by contract (AGENTS.md),
+  // and apply() refuses the same layout with the actionable message.
+  const foreignToplevel = gitToplevelMismatch();
+  if (foreignToplevel) {
+    console.log(JSON.stringify({ status: 'not-a-git-toplevel', local: localVersion(), toplevel: foreignToplevel }));
+    return;
+  }
+
+  console.log(JSON.stringify(await checkStatus(process.argv, process.env)));
 }
 
 // ── .gitignore RECONCILE ────────────────────────────────────────
@@ -1515,16 +2504,36 @@ export function reconcileGitignore(localText, upstreamText) {
   // pattern (only comments start with '#'), so membership answers both "does
   // this install already have this rule?" and "has this rationale block already
   // been copied by an earlier update?" with no second structure to keep in sync.
-  const seen = new Set(localText.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== ''));
+  const localLines = new Set(localText.split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== ''));
+  const seen = new Set(localLines);
 
+  const upstreamLines = upstreamText.split(/\r?\n/);
   const block = [];
   const added = [];
   let pendingComments = [];
-  for (const raw of upstreamText.split(/\r?\n/)) {
+  for (const raw of upstreamLines) {
     const line = raw.trim();
     if (line === '') { pendingComments = []; continue; }
     if (line.startsWith('#')) { pendingComments.push([raw, line]); continue; }
-    if (seen.has(line)) { pendingComments = []; continue; }
+    if (seen.has(line)) {
+      pendingComments = [];
+      // Restore the precedence upstream gave its own negations. `!test-fixtures/**` sits
+      // AFTER `applications.md` in upstream's .gitignore so that it wins; an install that
+      // already had the negation but not the newer pattern skipped it as present and got
+      // the pattern appended after it, which inverted that and re-ignored files upstream's
+      // own suite requires to be committed (#4127). Repeating it HERE, at the point
+      // upstream lists it, is what keeps the interleaving intact: a negation upstream puts
+      // between two appended rules must land between them, not after both.
+      //
+      // Only a negation the local file ALREADY has needs this: one it lacks was appended
+      // by this same loop, in upstream's own order. And only after something has been
+      // appended — before that there is nothing to outrank, so repeating it would hand it
+      // a win upstream never gave it. Repeating a line is not the same as rewriting one,
+      // so the promise never to modify a local line still holds, and a duplicate negation
+      // is a no-op to git.
+      if (added.length > 0 && line.startsWith('!') && localLines.has(line)) block.push(raw);
+      continue;
+    }
     // Carry the rule's own rationale across with it. Several of these comments
     // are the only record of WHY a path is ignored (which ones hold PII, why a
     // glob has a trailing `*`), and an install that gets the pattern without
@@ -1564,14 +2573,89 @@ export function reconcileGitignore(localText, upstreamText) {
 
 // ── APPLY ───────────────────────────────────────────────────────
 
+/**
+ * Whether apply() should trust CAREER_OPS_UPDATE_TARGET_REF from the
+ * environment for this invocation, rather than resolving a fresh ref via
+ * resolveTargetRef(). True only when reexec status was actually PROVEN: a
+ * cryptographically authenticated marker (consumeReexecMarker()) or the more
+ * heavily guarded legacy path (isLegacyReexec(): a real lock file plus a
+ * really-existing, correctly-named backup branch).
+ *
+ * Deliberately narrower than isReexec as a whole: isReexec's own third,
+ * unauthenticated disjunct (`--confirm` in argv plus a bare
+ * CAREER_OPS_UPDATE_REEXEC=1 in env — no marker, no lock, no backup branch)
+ * proves nothing and is satisfiable from a clean state with one stray env
+ * var. Letting THAT alone reach this fallback would skip resolveTargetRef()
+ * entirely on what looks like a fresh invocation, silently reverting to
+ * 'main' regardless of channel — the exact bug this file exists to close.
+ *
+ * Extracted as its own function (rather than inlined in apply()'s targetRef
+ * ternary) so the decision is unit-testable without spawning apply() itself:
+ * apply() has real git/network side effects and no ctx-injection seam, so a
+ * subprocess-level test needing this gate's THREE inputs to differ (marker,
+ * lock file, backup branch) is disproportionately heavy machinery for what
+ * is, underneath, one boolean expression.
+ *
+ * @param {boolean} authenticatedReexec - consumeReexecMarker()'s result.
+ * @param {boolean} legacyReexec - isLegacyReexec()'s result.
+ * @returns {boolean}
+ */
+export function trustsEnvTargetRef(authenticatedReexec, legacyReexec) {
+  return authenticatedReexec || legacyReexec;
+}
+
 async function apply() {
+  assertOwnGitToplevel();
   const local = localVersion();
-  // --force overwrites system files this install edited locally (#2337). The
-  // env var carries the flag across the self-reexec, which re-invokes the
-  // TARGET updater as `update-system.mjs apply` with a fixed argv.
-  const updateForce = process.argv.includes('--force') || process.env.CAREER_OPS_UPDATE_FORCE === '1';
+  // Environment variables are a private one-use channel for the self-reexec;
+  // they must not authorize the initial invocation (#2866).
+  const authenticatedReexec = consumeReexecMarker();
+  const legacyReexec = isLegacyReexec();
+  const isReexec = authenticatedReexec || legacyReexec ||
+    (process.argv.includes('--confirm') && process.env.CAREER_OPS_UPDATE_REEXEC === '1');
+  const updateForce = process.argv.includes('--force') ||
+    (isReexec && process.env.CAREER_OPS_UPDATE_FORCE === '1');
+  const updateConfirmed = process.argv.includes('--confirm') ||
+    (isReexec && (process.env.CAREER_OPS_UPDATE_CONFIRM === '1' || legacyReexec));
   const initialStatusPaths = new Set(gitStatusEntries().map(entry => entry.path));
-  const isReexec = process.env.CAREER_OPS_UPDATE_REEXEC === '1';
+  // Backups created by this apply run are expected updater output, not user
+  // files the checkout modified. Record only successful copies so an unrelated
+  // pre-existing .bak can never receive this exemption.
+  const generatedBackupPaths = new Set();
+
+  if (!updateConfirmed) {
+    throw new Error(
+      `Installation requires explicit confirmation. Re-run with ` +
+      `\`node update-system.mjs apply${updateForce ? ' --force' : ''} --confirm\`. ` +
+      'A scheduled update check never installs files.',
+    );
+  }
+
+  // Which ref to fetch from CANONICAL_REPO. Resolved once — a real network
+  // call on the default channel — and threaded to the re-exec'd child via
+  // CAREER_OPS_UPDATE_TARGET_REF below, so both fetches in a self-reexec pair
+  // land on the exact same content; resolving independently in each process
+  // would leave a window where a new release lands between the two fetches.
+  //
+  // See trustsEnvTargetRef()'s doc comment for why this is gated on that
+  // function rather than the broader isReexec.
+  //
+  // A legacy parent (pre-dating this env var) leaves it unset — falling back
+  // to 'main' there matches what that parent itself did, since it never
+  // resolved a channel either. An authenticated reexec missing the env var
+  // shouldn't happen in practice (this process always sets it when it spawns
+  // one), but the same fallback covers it as a safety net rather than crashing
+  // mid-update.
+  const targetRef = trustsEnvTargetRef(authenticatedReexec, legacyReexec)
+    ? (process.env.CAREER_OPS_UPDATE_TARGET_REF || 'main')
+    : await resolveTargetRef(process.argv, process.env);
+
+  const olderTarget = newerThanTarget(local, targetRef);
+  if (olderTarget) {
+    console.log(`Installed v${local} is newer than the latest release v${olderTarget}. Nothing to install.`);
+    console.log('To follow every merge on main instead: node update-system.mjs apply --channel main --confirm');
+    return;
+  }
 
   // Check for lock
   const lockFile = join(ROOT, '.update-lock');
@@ -1607,8 +2691,8 @@ async function apply() {
     }
 
     // 2. Fetch from canonical repo
-    console.log('Fetching latest from upstream...');
-    git('fetch', CANONICAL_REPO, 'main');
+    console.log(`Fetching ${targetRef} from upstream...`);
+    git('fetch', CANONICAL_REPO, targetRef);
 
     if (!isReexec) {
       const timeout = reexecTimeoutMs();
@@ -1618,16 +2702,44 @@ async function apply() {
         // relative-import closure and check out exactly those files, so a future
         // new top-level import can't reintroduce the self-reexec crash (#1245).
         const reexecFiles = resolveReexecCheckout('FETCH_HEAD', 'update-system.mjs');
+        const bootstrapAtRisk = locallyModifiedSystemFiles(reexecFiles, 'FETCH_HEAD');
+        if (bootstrapAtRisk.length > 0) {
+          console.log('');
+          console.log(`${bootstrapAtRisk.length} self-bootstrap file(s) differ from upstream because THIS install changed them:`);
+          for (const result of backupSystemFiles(bootstrapAtRisk)) {
+            if (result.error) {
+              console.log(`  ${result.file}  (could not write ${result.backup}: ${result.error})`);
+            } else {
+              console.log(`  ${result.file}  (local copy saved: ${result.backup})`);
+            }
+          }
+          console.log('Self-bootstrap must load the upstream versions; the local versions remain in the backups above.');
+          console.log('');
+        }
         git('checkout', 'FETCH_HEAD', '--', ...reexecFiles);
-        execFileSync(process.execPath, ['update-system.mjs', 'apply'], {
+        const marker = createReexecMarker();
+        execFileSync(process.execPath, [
+          'update-system.mjs',
+          'apply',
+          '--confirm',
+          ...(updateForce ? ['--force'] : []),
+        ], {
           cwd: ROOT,
           stdio: 'inherit',
           timeout,
           env: {
             ...process.env,
+            CAREER_OPS_UPDATE_REEXEC_MARKER: marker.path,
+            CAREER_OPS_UPDATE_REEXEC_TOKEN: marker.token,
+            // Compatibility for target updaters before the authenticated
+            // marker was introduced; only the authenticated child receives it.
             CAREER_OPS_UPDATE_REEXEC: '1',
             CAREER_OPS_UPDATE_BACKUP_BRANCH: backupBranch,
+            CAREER_OPS_UPDATE_TARGET_REF: targetRef,
             ...(updateForce ? { CAREER_OPS_UPDATE_FORCE: '1' } : {}),
+            // Keep the legacy confirmation channel for older target updaters;
+            // this process still requires the authenticated marker above.
+            CAREER_OPS_UPDATE_CONFIRM: '1',
           },
         });
         return;
@@ -1667,15 +2779,14 @@ async function apply() {
     if (atRisk.length > 0) {
       console.log('');
       console.log(`${atRisk.length} system file(s) differ from upstream because THIS install changed them:`);
-      for (const file of atRisk) {
-        const backup = `${join(ROOT, ...file.split('/'))}.bak`;
-        try {
-          copyFileSync(join(ROOT, ...file.split('/')), backup);
-          console.log(`  ${file}  (local copy saved: ${file}.bak)`);
-        } catch (err) {
+      for (const result of backupSystemFiles(atRisk)) {
+        if (result.error) {
           // A .bak we could not write is worth saying out loud, but it must not
           // abort the update — the file itself is still listed either way.
-          console.log(`  ${file}  (could not write ${file}.bak: ${err.message})`);
+          console.log(`  ${result.file}  (could not write ${result.backup}: ${result.error})`);
+        } else {
+          generatedBackupPaths.add(result.backup);
+          console.log(`  ${result.file}  (local copy saved: ${result.backup})`);
         }
       }
       if (updateForce) {
@@ -1683,7 +2794,7 @@ async function apply() {
       } else {
         preservedPaths.push(...atRisk);
         console.log('Keeping your versions. They will NOT receive upstream changes.');
-        console.log('Re-run with `node update-system.mjs apply --force` to take the upstream version instead.');
+        console.log('Re-run with `node update-system.mjs apply --force --confirm` to take the upstream version instead.');
       }
       console.log('');
     }
@@ -1700,23 +2811,12 @@ async function apply() {
       // `git checkout <ref> -- <path> :(exclude)<path>` errors with "did not
       // match any file(s)" when the exclusions cancel the whole pathspec — and
       // that error is indistinguishable from a genuine failure at the catch
-      // below, so it would abort the entire update. Skip the entry instead when
-      // nothing would be left to check out. Only entries that actually contain
-      // a preserved file pay for the extra ls-tree, normally none.
-      if (preservedSet.size > 0) {
-        const preservedHere = preservedPaths.filter((f) => (path.endsWith('/') ? f.startsWith(path) : f === path));
-        if (preservedHere.length > 0) {
-          let upstreamFiles = [];
-          try {
-            upstreamFiles = gitQuiet('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', path)
-              .split('\n').map((f) => f.trim()).filter(Boolean);
-          } catch {
-            // Unreadable entry — fall through to the normal checkout, which
-            // reports the real failure with its own diagnostics.
-          }
-          if (upstreamFiles.length > 0 && upstreamFiles.every((f) => preservedSet.has(f))) continue;
-        }
-      }
+      // below, so it would abort the entire update. Skip the entry outright
+      // when nothing would be left to check out; when the directory's upstream
+      // content could not be enumerated ('unknown'), still check it out but let
+      // the catch treat a cancel-out error as benign (#3824).
+      const preservedState = pathFullyPreserved(path, preservedPaths, preservedSet);
+      if (preservedState === true) continue;
       try {
         // stderr is piped rather than inherited here. A path absent upstream is
         // an EXPECTED skip (a stale manifest entry such as `.gemini/commands/`),
@@ -1732,11 +2832,13 @@ async function apply() {
         // reported them as skips too — letting a partial update reach the
         // success banner (#1998). Confirm the path is actually absent from
         // FETCH_HEAD before treating the failure as benign; otherwise rethrow.
+        // A fully-preserved directory whose upstream content we could not
+        // enumerate up front ('unknown') is the second benign shape: the
+        // exclusions cancelled the checkout out and git said "did not match
+        // any file(s)" (#3824).
         const spec = path.endsWith('/') ? path.slice(0, -1) : path;
-        let absentUpstream = false;
-        try { gitQuiet('cat-file', '-e', `FETCH_HEAD:${spec}`); }
-        catch { absentUpstream = true; }
-        if (!absentUpstream) throw err;
+        const absentUpstream = probeAbsentUpstream(spec);
+        if (!checkoutErrorIsBenign(err, { absentUpstream, preservedState })) throw err;
         skippedPaths.push(path);
       }
     }
@@ -1761,7 +2863,21 @@ async function apply() {
       }
       if (remoteFiles.size > 0) {
         const localFiles = git('ls-files').split('\n').filter(Boolean);
-        for (const f of staleSystemFiles(localFiles, remoteFiles, SYSTEM_PATHS)) {
+        // A file just preserved above because THIS install modified it (e.g. a
+        // custom cv-template.*.html no longer shipped upstream) must never also
+        // be deleted here as "stale" — the two checks used to run independently,
+        // so a preserved file with no upstream counterpart was backed up to
+        // .bak by the block above and then unlinked by this one in the same run.
+        const staleCandidates = staleSystemFiles(localFiles, remoteFiles, SYSTEM_PATHS, mergePathLists(USER_PATHS, preservedPaths));
+        for (const f of staleCandidates) {
+          if (isReferencedByPreservedFile(f, preservedPaths)) {
+            console.log(`Kept stale asset still referenced by a preserved file: ${f}`);
+            continue;
+          }
+          if (!wasEverShippedUpstream(f, 'FETCH_HEAD')) {
+            console.log(`Kept local file upstream has never shipped: ${f}`);
+            continue;
+          }
           try {
             unlinkSync(join(ROOT, f));
             updated.push(f);
@@ -1773,58 +2889,6 @@ async function apply() {
       }
     } catch (err) {
       console.error(`Stale system-file prune step failed: ${err.message}`);
-    }
-
-    // tests/ and test-fixtures/ are both auto-discovered and EXECUTED
-    // (tests/**/*.test.mjs run directly; test-fixtures/upgrade/<state>/ dirs are
-    // enumerated by seed-fixture.mjs's listStates() and exercised by its
-    // --self-test, which fails if a stale state lacks expected.json/required
-    // files). Stale files left behind by upstream renames would run twice,
-    // crash the suite, or make the self-test iterate a state that no longer
-    // ships upstream. `git checkout` never deletes upstream-removed files (see
-    // the limitation note in rollback below) — prune tracked extras against
-    // FETCH_HEAD. Only git-tracked files are removed: a user's untracked local
-    // experiments in these dirs are never touched.
-    for (const prunePrefix of ['tests/', 'test-fixtures/']) {
-      try {
-        let remoteFiles = new Set();
-        try {
-          remoteFiles = new Set(
-            git('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', prunePrefix)
-              .split('\n').filter(Boolean).map((p) => p.replace(/\\/g, '/'))
-          );
-        } catch {
-          // The dir may not exist in older targets (ls-tree throws) — nothing
-          // to prune. This is the only expected-and-silent failure here.
-        }
-        // An empty set means FETCH_HEAD has no such dir at all (older target, or
-        // ls-tree quietly returning nothing) — pruning against it would delete
-        // every local file under the prefix. Only prune when the remote actually
-        // ships the directory.
-        if (remoteFiles.size > 0) {
-          const localFiles = git('ls-files', '--', prunePrefix).split('\n').filter(Boolean);
-          for (const f of localFiles) {
-            if (!remoteFiles.has(f.replace(/\\/g, '/'))) {
-              // Per-file isolation: one failed unlink (locked file, permissions)
-              // must not abort pruning the rest.
-              try {
-                unlinkSync(join(ROOT, f));
-                // Raw path only: `updated` entries are reused as git pathspecs by
-                // revertPaths() and the scoped commit below. Pushed only after a
-                // successful unlink so failed deletions never enter `updated`.
-                updated.push(f);
-                console.log(`Pruned stale file: ${f}`);
-              } catch (err) {
-                console.error(`Failed to prune stale file ${f}: ${err.message}`);
-              }
-            }
-          }
-        }
-      } catch (err) {
-        // Unexpected failure (e.g. ls-files threw) — surface it instead of
-        // silently skipping the prune step.
-        console.error(`Stale-file prune step failed for ${prunePrefix}: ${err.message}`);
-      }
     }
 
     // 3c. Reconcile .gitignore (#2756). Every other system file is checked out
@@ -1908,7 +2972,7 @@ async function apply() {
       // (e.g. writing-samples/README.md is system-owned doc inside a user dir).
       const changed = gitStatusEntries()
         .map((entry) => entry.path)
-        .filter((file) => !initialStatusPaths.has(file));
+        .filter((file) => !initialStatusPaths.has(file) && !generatedBackupPaths.has(file));
       for (const file of userLayerViolations(changed, updatePaths, effectiveUserPaths())) {
         console.error(`SAFETY VIOLATION: User file was modified: ${file}`);
         violatedUserPaths.add(file);
@@ -1986,17 +3050,47 @@ async function apply() {
     const pathsToStage = [...updated, ...preserveSpecs];
     const dismissFile = join(ROOT, '.update-dismissed');
     if (existsSync(dismissFile)) {
+      // Only stage the marker when git actually tracks it. It is gitignored by
+      // default, so on a stock checkout it is not in the index — and `git add`
+      // on a deleted, never-tracked path is a fatal "pathspec did not match any
+      // files" (exit 128) that `-f` does not rescue. Staging it unconditionally
+      // meant that dismissing an update and then applying one broke the commit
+      // in a stock checkout, with no local customization involved.
+      //
+      // Probe BEFORE unlinking. isTracked reads the index, which a worktree
+      // deletion does not touch, so the answer is the same either way — but it
+      // deliberately does not catch, so an abnormal git failure throws here.
+      // Probing first leaves the marker on disk when that happens, and a retry
+      // re-enters this block and re-probes. Unlinking first would delete it,
+      // fail, and then find `existsSync` false on the retry — skipping a
+      // deletion the commit still owed, and leaving the worktree dirty after an
+      // update that printed success. (Ported from #2591, @calebwhite-io #1996.)
+      const dismissMarkerTracked = isTracked('.update-dismissed');
       unlinkSync(dismissFile);
-      pathsToStage.push('.update-dismissed');
+      if (dismissMarkerTracked) pathsToStage.push('.update-dismissed');
     }
 
     // Which commit form was used, so the failure path can suggest the matching
     // recovery command. Declared outside the try because the catch reads it.
     let usedIndexCommit = false;
 
+    // The staging and scoped-commit paths must use the same concrete file list.
+    // Passing a manifest directory to `git commit -- <dir>` reads matching
+    // tracked files from the working tree, including files the target tree no
+    // longer ships, which can sweep a user's unstaged edit into the updater
+    // commit even though staging never touched it (#3504). stagingFileList
+    // expands the positive specs and subtracts the preserved files, so no
+    // `:(exclude)` spec reaches addPaths (where --literal-pathspecs would read
+    // it as a literal filename and abort the commit) and no preserved file is
+    // staged. preservedSet is the same Set built at the top of apply().
+    const expandedPathsToStage = stagingFileList(pathsToStage, preservedSet);
+
     try {
       prepareMaterializedSkillEntrypointsForStage(materializedSkillEntrypoints);
-      addPaths(pathsToStage);
+      // Stage per filename, never per directory. pathsToStage is the manifest,
+      // so it carries directory entries, and `-f` on one of those sweeps every
+      // ignored file underneath into the commit.
+      addPaths(expandedPathsToStage);
       // Scope the commit to only the staged update paths (#915 bug 2).
       // A bare `git commit` would sweep any unrelated pre-staged files into
       // the update commit. Passing the explicit pathspec list constrains the
@@ -2032,22 +3126,24 @@ async function apply() {
       if (usedIndexCommit) {
         git('commit', '-m', `chore: auto-update system files to v${remote}`);
       } else {
-        git('commit', '-m', `chore: auto-update system files to v${remote}`, '--', ...pathsToStage);
+        git('commit', '-m', `chore: auto-update system files to v${remote}`, '--', ...expandedPathsToStage);
       }
     } catch (e) {
       let commitFailed = false;
       try {
         const entries = gitStatusEntries();
         const changedPaths = new Set(entries.map(entry => entry.path));
-        const allTargetPaths = [...pathsToStage, ...materializedSkillEntrypoints];
+        const allTargetPaths = [
+          ...expandedPathsToStage.filter((spec) => !spec.startsWith(EXCLUDE_PATHSPEC_PREFIX)),
+          ...materializedSkillEntrypoints,
+        ];
         commitFailed = allTargetPaths.some(p => changedPaths.has(p));
       } catch (err) {
         commitFailed = true;
       }
 
       if (commitFailed) {
-        const allTargetPaths = [...pathsToStage, ...materializedSkillEntrypoints];
-        const pathspec = allTargetPaths.map(p => `'${p.replace(/'/g, "'\\''")}'`).join(' ');
+        const pathspec = expandedPathsToStage.map(p => `'${p.replace(/'/g, "'\\''")}'`).join(' ');
         // Print the command matching the path actually taken. Suggesting the
         // pathspec form after the index form was selected would tell the user to
         // run the very thing that drops the staged mode bits — a recovery step
@@ -2078,7 +3174,7 @@ async function apply() {
       console.error(`${unmaterialized.length} path(s) from the target manifest were not checked out:`);
       for (const path of unmaterialized) console.error(`  ${path}`);
       console.error('\nThis happens when the installed updater predates the paths the target adds.');
-      console.error('Run `node update-system.mjs apply` again — the updater itself is now current,');
+      console.error('Run `node update-system.mjs apply --confirm` again — the updater itself is now current,');
       console.error('so the second pass uses the target manifest and picks up what this one missed.');
       process.exit(1);
     }
@@ -2101,6 +3197,9 @@ async function apply() {
 // ── ROLLBACK ────────────────────────────────────────────────────
 
 function rollback() {
+  // Same precondition as apply(): a nested .git-less install would look its
+  // backup branches up — and check files out — in the enclosing repo (#3334).
+  assertOwnGitToplevel();
   // Find most recent backup branch
   try {
     const branches = git('for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads/backup-pre-update-*');
@@ -2160,13 +3259,22 @@ function rollback() {
       }
     }
 
-    if (restored.length > 0) addPaths(restored);
+    // Same expansion as apply(), against the backup tree this rollback is
+    // restoring from. `restored` comes straight off SYSTEM_PATHS, so it carries
+    // the 53 directory entries, and addPaths forces every path it is given —
+    // `git add -f -- docs/` here would sweep the user's ignored files into the
+    // rollback commit exactly as it would have in apply().
+    if (restored.length > 0) addPaths(expandToShippedFiles(restored, latest));
     const rollbackPaths = [...restored, ...removed];
+    // Keep rollback's scoped commit aligned with the file-level staging list.
+    // A directory pathspec would otherwise include tracked files still present
+    // in the worktree but absent from the backup tree (#3504).
+    const expandedRollbackPaths = expandToShippedFiles(rollbackPaths, latest);
     try {
       // Scope the commit to the rollback paths (#915 bug 2). A bare
       // `git commit` would sweep unrelated staged files into the rollback.
-      if (rollbackPaths.length > 0) {
-        git('commit', '-m', `chore: rollback system files from ${latest}`, '--', ...rollbackPaths);
+      if (expandedRollbackPaths.length > 0) {
+        git('commit', '-m', `chore: rollback system files from ${latest}`, '--', ...expandedRollbackPaths);
       }
     } catch {
       // Tolerate any commit failure here — the common case is the
@@ -2188,9 +3296,31 @@ function rollback() {
 
 // ── DISMISS ─────────────────────────────────────────────────────
 
-function dismiss() {
-  writeFileSync(join(ROOT, '.update-dismissed'), new Date().toISOString());
-  console.log('Update check dismissed. Run "node update-system.mjs check" or say "check for updates" to re-enable.');
+/**
+ * Record a "no" to one release. The version comes from `--version X.Y.Z`
+ * (AGENTS.md passes the `remote` that check() just offered, so no network is
+ * needed); without it, from the same release lookup check() makes. If that
+ * fails too, only the moment is recorded, and dismissalCovers() falls back
+ * to publish dates: a release published afterwards asks again.
+ *
+ * @param {string[]} [argv]
+ * @param {{curlGet?: typeof curlGet, root?: string, now?: () => Date}} [ctx] - test seams.
+ */
+export async function dismiss(argv = process.argv, ctx = {}) {
+  const idx = argv.indexOf('--version');
+  let version = idx !== -1 ? String(argv[idx + 1] || '').trim().replace(/^v/i, '') : '';
+  if (idx !== -1 && !/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error(`--version '${argv[idx + 1] ?? ''}' is not a release version (X.Y.Z). Nothing was dismissed.`);
+  }
+  if (!version) {
+    const latest = await latestRelease(ctx.curlGet || curlGet);
+    if (latest.status === 'ok') version = latest.version;
+  }
+  const at = (ctx.now ? ctx.now() : new Date()).toISOString();
+  writeFileSync(join(ctx.root || ROOT, DISMISS_FILE), JSON.stringify(version ? { version, at } : { at }) + '\n');
+  console.log(version
+    ? `Update to v${version} dismissed. You will be asked again when a newer release is out; run "node update-system.mjs check --force" or say "check for updates" to see it anyway.`
+    : 'Update dismissed. You will be asked again when a newer release is out; run "node update-system.mjs check --force" or say "check for updates" to see it anyway.');
 }
 
 // ── MAIN ────────────────────────────────────────────────────────
@@ -2198,7 +3328,34 @@ function dismiss() {
 // Only run the CLI when executed directly, so importing this module
 // (e.g. from test-all.mjs to exercise SEMVER_RE) does not trigger a
 // live update check.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+//
+// This is the ONE place that inlines lib/is-main-module.mjs instead of importing
+// it (#3170). #1706 requires this file to be SELF-LOADING: a pre-#1245 client's
+// apply() checks out only update-system.mjs and re-execs it, so any static
+// relative import crashes the old→new jump with ERR_MODULE_NOT_FOUND. The
+// semantics must still match the helper exactly — realpath BOTH sides, because
+// `import.meta.url` is realpath-resolved by Node while argv[1] keeps whatever
+// spelling the caller typed, and a mismatch makes the updater a silent no-op
+// that exits 0. tests/main-guard-convention.test.mjs exempts this file BY NAME
+// from its no-hand-rolled-guard source scan (the #1706 constraint is why), and
+// pins the semantics behaviourally instead: it invokes this file through a
+// symlink and requires the CLI tail to answer. Keep that in mind when editing —
+// the scan will not catch a regression here; only that behaviour test will.
+//
+// `.native` matches lib/is-main-module.mjs's canonicalize(): it expands Windows
+// 8.3 short names and reports on-disk casing, which the JS realpath leaves
+// alone. Both sides go through the SAME function, which is the property that
+// actually matters — a divergence here would make this copy answer differently
+// from the helper on exactly the platforms the helper was hardened for.
+const canonicalizePath = realpathSync.native ?? realpathSync;
+const entryPath = process.argv[1] ? resolve(process.argv[1]) : '';
+const selfPath = fileURLToPath(import.meta.url);
+let isCli = Boolean(process.argv[1]) && entryPath === selfPath;
+if (process.argv[1] && !isCli) {
+  try { isCli = canonicalizePath(entryPath) === canonicalizePath(selfPath); } catch { isCli = false; }
+}
+
+if (isCli) {
   const cmd = process.argv[2] || 'check';
 
   try {
@@ -2206,9 +3363,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case 'check': await check(); break;
       case 'apply': await apply(); break;
       case 'rollback': rollback(); break;
-      case 'dismiss': dismiss(); break;
+      case 'dismiss': await dismiss(); break;
       default:
-        console.log('Usage: node update-system.mjs [check|apply [--force]|rollback|dismiss]');
+        console.log('Usage: node update-system.mjs [check [--force] [--channel main]|apply --confirm [--force] [--channel main]|rollback|dismiss [--version X.Y.Z]]');
         process.exit(1);
     }
   } catch (err) {

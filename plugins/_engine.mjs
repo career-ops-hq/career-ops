@@ -28,6 +28,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'f
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { resolveAndValidate } from './_net.mjs';
+import { normalizeUrl } from '../url-key.mjs';
 import { readLock, writeLockEntry, diffPlugin, hashPluginTree, consentSurface } from './_lock.mjs';
 import { loadRegistry } from './_registry.mjs';
 
@@ -203,6 +204,7 @@ export function validateManifest(m, dir, dirName) {
     if (!existsSync(skillAbs)) { warnSkip(label, `skill file not found: ${m.skill}`); return null; }
     skill = m.skill;
   }
+
 
   return {
     id: m.id,
@@ -476,6 +478,11 @@ export function buildCtx(manifest, opts = {}) {
     settings: Object.freeze({ ...(opts.settings || {}) }),
     log,
     dryRun: opts.dryRun === true,
+    // The canonical posting-URL key, so a plugin can deduplicate the postings it
+    // returns the way the tracker and scanner do. Reaching it through ctx keeps
+    // plugin and core callers equivalent without a repository-relative import or
+    // a copied body, which is the whole point of the capability (#4218).
+    normalizePostingUrl: normalizeUrl,
   });
 }
 
@@ -593,9 +600,10 @@ export function lockGate(manifest, root) {
   }
 }
 
-export async function loadPlugins(kind, { root, dryRun = false }) {
+export async function loadPlugins(kind, { root, dryRun = false, pluginId = null }) {
   const cfg = await loadPluginConfig(root);
-  const manifests = discoverPlugins(pluginRoots(root), resolveSuccessorIds(root)).filter(m => m.hooks.includes(kind));
+  let manifests = discoverPlugins(pluginRoots(root), resolveSuccessorIds(root)).filter(m => m.hooks.includes(kind));
+  if (pluginId) manifests = manifests.filter(m => m.id === pluginId);
   const out = [];
   for (const manifest of manifests) {
     if (!pluginStatus(manifest, cfg).enabled) continue;
@@ -630,12 +638,12 @@ export async function loadDotenvOnce() {
  *
  * @param {string} kind
  * @param {*} payload   For provider this is unused; for ingest none; search a query; export a snapshot; notify a payload.
- * @param {{ root: string, dryRun?: boolean, timeoutMs?: number }} opts
+ * @param {{ root: string, dryRun?: boolean, timeoutMs?: number, pluginId?: string }} opts
  * @returns {Promise<Array<{ id: string, ok: boolean, result?: any, error?: string }>>}
  */
-export async function runHook(kind, payload, { root, dryRun = false, timeoutMs = DEFAULT_HOOK_TIMEOUT_MS }) {
+export async function runHook(kind, payload, { root, dryRun = false, timeoutMs = DEFAULT_HOOK_TIMEOUT_MS, pluginId = null }) {
   await loadDotenvOnce();
-  const loaded = await loadPlugins(kind, { root, dryRun });
+  const loaded = await loadPlugins(kind, { root, dryRun, pluginId });
   const results = [];
   for (const { id, hook, ctx } of loaded) {
     const invoke = kind === 'search'
@@ -656,6 +664,10 @@ export async function runHook(kind, payload, { root, dryRun = false, timeoutMs =
     }
   }
   return results;
+}
+
+export function filterResultsForId(results, id) {
+  return results.filter(r => r.id === id);
 }
 
 /**

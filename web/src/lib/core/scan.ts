@@ -6,6 +6,7 @@ import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { writeTempPortals, cleanupTempPortals } from "./portals";
 import { profileTargetKeywords } from "@/lib/profile-keywords.mjs";
 import { titleFit } from "@/lib/title-fit.mjs";
+import { resolveScanTimeoutMs, scanTimeoutMessage } from "./scan-timeout.mjs";
 import { ATS_SOURCES, type DiscoveredOffer, type ExploreFilters, type FitBand, type ScanEvent } from "@/lib/explore";
 
 export type { DiscoveredOffer, ScanEvent, AtsSource } from "@/lib/explore";
@@ -67,6 +68,50 @@ function fitField(title: string, targets: string[]): { fit: { band: FitBand; sco
   return f ? { fit: { band: f.band as FitBand, score: f.score } } : {};
 }
 
+function ingestJsonOffer(
+  o: JsonOffer,
+  currentAts: string,
+  filters: ExploreFilters,
+  seen: Set<string>,
+  offers: DiscoveredOffer[],
+  onEvent: (e: ScanEvent) => void,
+  roleTargets: string[] = [],
+): void {
+  const url = (o.url || "").trim();
+  if (!url || seen.has(url) || !o.company || !o.title) return;
+  seen.add(url);
+  const source = o.source || `${currentAts}-full`;
+  const offer: DiscoveredOffer = {
+    company: o.company,
+    title: o.title,
+    location: o.location || "",
+    postedAt: o.postedAt || "",
+    ats: source.replace(/-full$/, ""),
+    source,
+    url,
+    matchedKeyword: firstMatch(o.title, filters.positive),
+    ...fitField(o.title, roleTargets),
+  };
+  offers.push(offer);
+  onEvent({ kind: "offer", offer });
+}
+
+/** Mirrors `parseLiveOfferLine` in scan-ats-full.mjs — keep the two in sync. */
+function parseLiveOfferLine(line: string): JsonOffer | null {
+  const raw = line.trim();
+  const start = raw.indexOf("{");
+  if (start < 0) return null;
+  try {
+    const ev = JSON.parse(raw.slice(start)) as JsonOffer & { kind?: string };
+    if (ev?.kind !== "offer") return null;
+    const url = (ev.url || "").trim();
+    if (!url || !ev.company || !ev.title) return null;
+    return ev;
+  } catch {
+    return null;
+  }
+}
+
 function parseOfferLine(source: string, date: string, rest: string): Omit<DiscoveredOffer, "url"> | null {
   const fields = rest.split(" | ");
   if (fields.length < 2) return null;
@@ -105,8 +150,21 @@ type ScanJson = {
   postingsKept?: number;
   postingsDroppedNoDate?: number;
   unreachableBoards?: number;
+  stoppedEarly?: boolean;
   offers?: JsonOffer[];
 };
+
+// Scan budget (ms) from config/profile.yml `scan.timeout_seconds` — the same
+// place `scan.extractor` lives. Never throws: a missing/malformed profile keeps
+// the default (a broken config must not block scanning).
+function readScanTimeoutMs(): number {
+  try {
+    const parsed = yaml.load(fs.readFileSync(path.join(careerOpsRoot(), "config", "profile.yml"), "utf8"));
+    return resolveScanTimeoutMs(parsed);
+  } catch {
+    return resolveScanTimeoutMs(undefined);
+  }
+}
 
 export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) => void): Promise<DiscoveredOffer[]> {
   return new Promise((resolve) => {
@@ -141,32 +199,56 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
     let errBuf = "";
     let jsonOut = ""; // --json mode: the single stdout object accumulates here
 
+    // A broad ATS sweep can legitimately outlast the default budget (the scanner
+    // probes every company in a source, not just --limit of them). Extend it in
+    // config/profile.yml via scan.timeout_seconds. If our own timer fires, remember
+    // it so the close handler can say so honestly (and the scanner flushes the
+    // matches found so far as a partial --json result on SIGTERM).
+    const timeoutMs = readScanTimeoutMs();
+    let timedOut = false;
+    let hardKiller: ReturnType<typeof setTimeout> | undefined;
     const killer = setTimeout(() => {
+      timedOut = true;
       try {
         child.kill("SIGTERM");
       } catch {
         /* ignore */
       }
-    }, 230_000);
+      // Grace period: if the child can't flush its partial JSON and exit, force it
+      // so a wedged scan can't hold the request open to the route's maxDuration.
+      hardKiller = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* ignore */
+        }
+      }, 5_000);
+    }, timeoutMs);
 
     // Live progress (atsStart / progress / atsDone) — in --json mode these human
     // lines arrive on STDERR; in legacy mode on STDOUT (handled inside handleLine).
     const handleProgressLine = (line: string) => {
+      const live = parseLiveOfferLine(line);
+      if (live) {
+        ingestJsonOffer(live, currentAts, filters, seen, offers, onEvent, roleTargets);
+        return true;
+      }
       const atsM = line.match(ATS_START_RE);
       if (atsM) {
         currentAts = atsM[1];
         onEvent({ kind: "atsStart", ats: atsM[1], companies: Number(atsM[2]) });
-        return;
+        return false;
       }
       const progM = line.match(PROGRESS_RE);
       if (progM) {
         onEvent({ kind: "progress", ats: currentAts, scanned: Number(progM[1]), total: Number(progM[2]), matches: Number(progM[3]) });
-        return;
+        return false;
       }
       const doneAtsM = line.match(ATS_DONE_RE);
       if (doneAtsM) {
         onEvent({ kind: "atsDone", ats: currentAts, unreachable: Number(doneAtsM[1]) });
       }
+      return false;
     };
 
     const handleLine = (line: string) => {
@@ -238,19 +320,24 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
       errBuf = parts.pop() ?? "";
       for (const p of parts) {
         if (!p.trim()) continue;
-        if (useJson) handleProgressLine(p); // human progress lives on stderr in --json mode
+        if (useJson) {
+          // human progress + live offer JSON live on stderr in --json mode
+          if (handleProgressLine(p)) continue;
+        }
         onEvent({ kind: "log", line: p.trim() });
       }
     });
 
     child.on("error", (e) => {
       clearTimeout(killer);
+      if (hardKiller) clearTimeout(hardKiller);
       cleanupTempPortals(tempPortals);
       onEvent({ kind: "error", message: e instanceof Error ? e.message : "scanner failed to start" });
       resolve(offers);
     });
     child.on("close", () => {
       clearTimeout(killer);
+      if (hardKiller) clearTimeout(hardKiller);
       cleanupTempPortals(tempPortals);
       if (useJson) {
         let j: ScanJson | null = null;
@@ -261,23 +348,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
         }
         if (j && Array.isArray(j.offers)) {
           for (const o of j.offers) {
-            const url = (o.url || "").trim();
-            if (!url || seen.has(url) || !o.company || !o.title) continue;
-            seen.add(url);
-            const source = o.source || `${currentAts}-full`;
-            const offer: DiscoveredOffer = {
-              company: o.company,
-              title: o.title,
-              location: o.location || "",
-              postedAt: o.postedAt || "",
-              ats: source.replace(/-full$/, ""),
-              source,
-              url,
-              matchedKeyword: firstMatch(o.title, filters.positive),
-              ...fitField(o.title, roleTargets),
-            };
-            offers.push(offer);
-            onEvent({ kind: "offer", offer });
+            ingestJsonOffer(o, currentAts, filters, seen, offers, onEvent, roleTargets);
           }
           onEvent({
             kind: "summary",
@@ -289,15 +360,28 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
             datasetStatus: j.datasetStatus,
             postingsDroppedNoDate: j.postingsDroppedNoDate,
           });
+          // Stopped before finishing (our budget, or the scanner self-limited): the
+          // offers above are what it found so far — surface WHY without discarding them.
+          if (timedOut || j.stoppedEarly) {
+            const found = offers.length ? ` Showing the ${offers.length} match${offers.length === 1 ? "" : "es"} found so far.` : "";
+            onEvent({ kind: "error", message: scanTimeoutMessage(timeoutMs) + found });
+          }
         } else {
-          // --json requested but stdout didn't parse — surface honestly rather than
-          // silently returning 0 (defensive; shouldn't happen once the probe passed).
-          onEvent({ kind: "error", message: "The scanner returned no readable output." });
+          // No parseable JSON. Either our timer stopped the scanner before it could
+          // emit its single stdout object (a full sweep outran the budget), or —
+          // defensively — the probe passed yet stdout still didn't parse. Say which.
+          onEvent({
+            kind: "error",
+            message: timedOut ? scanTimeoutMessage(timeoutMs) : "The scanner returned no readable output.",
+          });
         }
         resolve(offers);
         return;
       }
       if (outBuf.trim()) handleLine(outBuf);
+      // Legacy mode streams offers as they arrive, so any collected so far are
+      // returned; still tell the user the run was cut short if our timer fired.
+      if (timedOut) onEvent({ kind: "error", message: scanTimeoutMessage(timeoutMs) });
       resolve(offers);
     });
   });

@@ -13,17 +13,21 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname, relative, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { loadCanonicalStates, foldStatusInput } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
+// templates/states.yml is System Layer — resolved from the codebase, not from
+// the user's data root (#3500).
+const CODEBASE_ROOT = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
+const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+
 const FOLLOWUPS_FILE = join(CAREER_OPS, 'data/follow-ups.md');
 const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS, 'config/profile.yml');
 
@@ -119,16 +123,19 @@ function statusAliasMap() {
   if (aliasMapCache) return aliasMapCache;
   const map = new Map();
   try {
-    for (const st of loadCanonicalStates(join(CAREER_OPS, 'templates', 'states.yml'))) {
+    for (const st of loadCanonicalStates(join(CODEBASE_ROOT, 'templates', 'states.yml'))) {
       const id = st.id.toLowerCase();
       map.set(foldStatusInput(id), id);
       if (st.label) map.set(foldStatusInput(st.label), id);
       for (const a of st.aliases) map.set(foldStatusInput(a), id);
     }
-  } catch {
+  } catch (err) {
     // A missing/malformed states.yml is a broken install. Degrade to
     // identity-normalization rather than resurrecting a hardcoded table: a
     // fallback copy is the same copy in disguise and drifts the same way.
+    // Report it, though — degrading silently is what hid #3500, and here it
+    // costs every localized status its place in the funnel.
+    console.error(`[followup-cadence] cannot read canonical states from templates/states.yml: ${err.message}`);
     return (aliasMapCache = new Map());
   }
   return (aliasMapCache = map);
@@ -179,6 +186,32 @@ export function parseDate(dateStr) {
 // silently fell back to the evaluation date — the exact wrong-age failure this
 // lookup exists to prevent. The leading \b still refuses "reapplied".
 //
+// A bounded gap between "applied" and the date covers the channel phrasing
+// career-ops' own apply modes write -- "Applied via Ashby 2026-08-31",
+// "Applied on 2026-08-25 via Ashby" -- which the original adjacent-only match
+// missed entirely, silently degrading to the evaluation-date fallback on the
+// exact notes this project generates (#4084). Bounded to 40 chars total and
+// unable to cross a sentence boundary (`.`/`;`/`?`/`!`) or a line break so it
+// cannot reach into a neighbouring sentence or a different requisition's
+// date; isCrossReferencedMention below reuses the same source so its "does
+// the citation already have a date" check stays in sync with what this one
+// actually matches.
+//
+// The {0,39} quantifier, not {0,40}: the mandatory separator right after it
+// is part of the gap too, so the true maximum distance between "applied" and
+// the date is quantifier-plus-one. Two CodeRabbit rounds on #4143:
+//   - `?`/`!` join `.`/`;` as sentence boundaries the gap cannot cross --
+//     "Applied? 2026-08-31" no longer reaches a foreign date.
+//   - The mandatory separator is [^\S\r\n\u2028\u2029] (whitespace that is
+//     not itself a line terminator), not \s: \s matches \r/\n/U+2028/U+2029
+//     the same as a space, so "Applied via Ashby\n2026-08-31" would have
+//     matched even with the gap itself excluding line terminators -- the
+//     separator character is the one place a line break could still sneak
+//     through.
+const APPLIED_DATE_SOURCE = String.raw`\bapplied\b[^.;?!\r\n\u2028\u2029]{0,39}?[^\S\r\n\u2028\u2029]~?(\d{4}-\d{2}-\d{2})(?![\w-])`;
+const APPLIED_DATE_RE = new RegExp(APPLIED_DATE_SOURCE, 'gi');
+const APPLIED_DATE_HAS_DATE_RE = new RegExp(APPLIED_DATE_SOURCE, 'i');
+
 // The trailing (?![\w-]) is the mirror of that leading \b: without it a
 // malformed value ("2026-06-091", "2026-06-09-2026-06-10") is truncated to a
 // plausible-looking date and then reported as a *measured* apply date. That is
@@ -209,7 +242,7 @@ export function parseAppliedDate(notes, options = {}) {
   const text = String(notes);
 
   const matches = [];
-  for (const m of text.matchAll(/\bapplied\s+~?(\d{4}-\d{2}-\d{2})(?![\w-])/gi)) {
+  for (const m of text.matchAll(APPLIED_DATE_RE)) {
     if (!validateCalendar || isRealCalendarDate(m[1])) matches.push({ date: m[1], index: m.index });
   }
   if (matches.length === 0) return null;
@@ -250,9 +283,9 @@ const CROSS_REF_LOOKBACK = 120;
 // identifier for THIS row, not a pointer at another tracker row. Anchored at the
 // end so it only matches a label sitting directly before the `#`, and the
 // separator excludes `.!?` so a sentence boundary cannot be swallowed into it.
-// Same vocabulary as merge-tracker.mjs's REQ_NUMBER_RE, which reads the same
+// Same vocabulary as tracker-parse.mjs's REQ_NUMBER_RE (used by merge-tracker.mjs), which reads the same
 // Notes column.
-const REQ_LABELLED_HASH_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?)[\s:_-]*$/i;
+const REQ_LABELLED_HASH_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?|r_)[\s:_-]*$/i;
 
 /**
  * Whether the apply-date at `index` is being cited ABOUT ANOTHER ROW.
@@ -295,14 +328,22 @@ const REQ_LABELLED_HASH_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|
  * @returns {boolean}
  */
 function isCrossReferencedMention(text, index) {
-  const window = text.slice(Math.max(0, index - CROSS_REF_LOOKBACK), index);
+  const windowStart = Math.max(0, index - CROSS_REF_LOOKBACK);
+  const window = text.slice(windowStart, index);
   let refEnd = -1;
-  for (const m of window.matchAll(/#\d+\b/g)) {
+  // A `#NNN` glued to a preceding word character or hyphen is an external tag
+  // ("job-search#7", "gh#12"), not a pointer at a tracker row. Reading it as a
+  // row reference discarded the row's own date: "job-search#7; Applied
+  // 2026-09-21" attributed the date to row #7.
+  for (const m of window.matchAll(/(?<![\w-])#\d+\b/g)) {
+    // The lookbehind cannot see past the slice, so a tag whose `#` lands exactly
+    // on the window's first character is checked against the original text.
+    if (m.index === 0 && /[\w-]/.test(text[windowStart - 1] ?? '')) continue;
     // A `#NNN` tagged as a req/job/posting/reference id is not a row reference:
     // "Req #1311 - applied 2026-08-06" is this row's own posting id followed by
     // this row's own date, and reading it as a cross-reference would discard a
     // genuine date. The label vocabulary is the one merge-tracker.mjs already
-    // recognises in this same Notes column (REQ_NUMBER_RE), kept in sync by
+    // recognises in this same Notes column (tracker-parse.mjs REQ_NUMBER_RE), kept in sync by
     // being written the same way rather than imported — merge-tracker's regex
     // also captures the id itself, which is not wanted here.
     if (REQ_LABELLED_HASH_RE.test(window.slice(0, m.index))) continue;
@@ -343,7 +384,7 @@ function isCrossReferencedMention(text, index) {
   const lastSeparator = [...sinceRef.matchAll(/[;|]/g)].pop();
   if (lastSeparator) {
     const beforeSeparator = sinceRef.slice(0, lastSeparator.index);
-    if (/\bapplied\s+~?\d{4}-\d{2}-\d{2}/i.test(beforeSeparator)) return false;
+    if (APPLIED_DATE_HAS_DATE_RE.test(beforeSeparator)) return false;
   }
   return true;
 }
@@ -556,7 +597,13 @@ export function isRetired(cleared, lastFollowupDate) {
 // Emitted shape is `{ name, email, channel }`. `email` stays first-class (and
 // remains non-null for email contacts) so existing consumers keep working;
 // `channel` is additive.
-const EMAIL_RE = /[\w.-]+@[\w.-]+\.\w+/g;
+// `+` must be in the local part. \w is [A-Za-z0-9_], so the previous class silently TRUNCATED a
+// plus-addressed address at the plus — `mayank+6a88…@reply.cutshort.io` was captured as
+// `6a88…@reply.cutshort.io`, a different mailbox that would bounce. Recruiting platforms route
+// replies through exactly this form (CutShort, Greenhouse, Lever, Workable all use
+// `name+token@reply.domain`), so the addresses most worth capturing were the ones being corrupted
+// — and corrupted into something that still looks like a valid address, so nothing notices.
+const EMAIL_RE = /[\w.+%-]+@[\w.-]+\.\w+/g;
 
 // Name-shaped contacts are gated on an explicit outreach verb or role word, so
 // a capitalized company name ("Acme Corp") can never be mistaken for a person.
@@ -577,7 +624,43 @@ function splitStatements(notes) {
   return String(notes).split(/[;\n]+|\.\s+(?=[A-Z])/).filter(s => s.trim());
 }
 
-export function extractContacts(notes) {
+/**
+ * The candidate's own addresses, so a note that mentions them is not reported as somebody to chase.
+ *
+ * Tracker notes routinely cite your own mailbox while recording where a search ran — e.g. "searched
+ * both accounts (personal + me@work.example) for this thread" written to establish that a reply was
+ * NOT received. extractContacts has no concept of self, so it reads that as a repliable human and
+ * the row advertises a contact that cannot be written to. That is worse than reporting no contact:
+ * it makes an un-chaseable row look actionable.
+ *
+ * Read from config/profile.yml rather than hardcoded, so it stays correct per profile. Fails open —
+ * an absent or unreadable profile yields an empty set, because a missing profile must never start
+ * deleting real contacts.
+ */
+export function loadSelfIdentities(profilePath = PROFILE_FILE) {
+  if (!profilePath || !existsSync(profilePath)) return new Set();
+  let raw;
+  try {
+    raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+  } catch {
+    return new Set();
+  }
+  const out = new Set();
+  const push = (v) => { if (typeof v === 'string' && v.includes('@')) out.add(v.trim().toLowerCase()); };
+  push(raw.candidate?.email);
+  // Only iterate an actual array. A hand-edited profile can reasonably hold a mapping here
+  // (`alternate_emails: { work: me@example.com }`), and `for...of` on an object throws — at module
+  // load, because SELF_IDENTITIES is initialised at import time. That would take followup-cadence
+  // down entirely over a cosmetic config mistake, which is the opposite of the fail-open behaviour
+  // this function promises everywhere else.
+  const alternates = raw.candidate?.alternate_emails;
+  if (Array.isArray(alternates)) for (const alt of alternates) push(alt);
+  return out;
+}
+
+const SELF_IDENTITIES = loadSelfIdentities();
+
+export function extractContacts(notes, selfIdentities = SELF_IDENTITIES) {
   if (!notes) return [];
   const byEmail = new Map();  // normalized email -> contact
   const byName = new Map();   // normalized name  -> contact
@@ -648,7 +731,8 @@ export function extractContacts(notes) {
     for (const name of names) add({ name, email: null, channel });
   }
 
-  return contacts;
+  // A note citing your own mailbox is not a person to follow up with.
+  return contacts.filter((c) => !(c.email && selfIdentities.has(c.email.toLowerCase())));
 }
 
 // The channel a single statement names, when it names one. Null rather than a
@@ -745,7 +829,12 @@ export function computeNextFollowupDate(status, appDate, lastFollowupDate, follo
 export function analyzeFromContent(trackerContent, followupsContent = '') {
   const apps = parseTrackerContent(trackerContent);
   if (apps.length === 0) {
-    return { error: 'No applications found in tracker.' };
+    // cadenceDefaults rides along on the error. It is a constant, so it is just
+    // as valid with no applications as with a hundred, and this is the ONE
+    // state where a consumer cannot do without it: on a first run the web
+    // cadence form has no profile overrides to fall back on either, so
+    // withholding it renders six empty fields with nothing to type back in.
+    return { error: 'No applications found in tracker.', cadenceDefaults: DEFAULT_CADENCE };
   }
 
   const followups = parseFollowups(followupsContent);
@@ -936,18 +1025,26 @@ function printSummary(result) {
 
 // ── CLI flags + help ────────────────────────────────────────────────
 
-const KNOWN_FLAGS = ['--summary', '--overdue-only', '--applied-days', '--help', '-h'];
+// --json is the DEFAULT output form, not a mode switch: it names what the
+// script already does with no flag at all. It is listed here because callers
+// pass it explicitly — web/src/app/api/followups/route.ts and
+// web/src/app/api/followups/cadence/route.ts both spawn `[script, '--json']`
+// — and validateFlags() rejects any flag not on this list, so omitting it
+// made both routes exit 1 and read as "no follow-ups" (#3196 added the
+// validation without the flag the web already passed).
+const KNOWN_FLAGS = ['--summary', '--json', '--overdue-only', '--applied-days', '--help', '-h'];
 const VALUE_FLAGS = ['--applied-days'];
 
 const USAGE = `Usage:
   node followup-cadence.mjs                    # full JSON analysis to stdout
-  node followup-cadence.mjs --summary          # human-readable dashboard
+  node followup-cadence.mjs --json             # same as above, JSON is the default
+  node followup-cadence.mjs --summary          # human-readable dashboard (wins over --json)
   node followup-cadence.mjs --overdue-only     # only show overdue/urgent entries
   node followup-cadence.mjs --applied-days 10  # override applied_first cadence (days)
   node followup-cadence.mjs --help|-h          # print this usage block and exit`;
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   // Must run inside this guard, not at module top level: CADENCE (above) is a
   // module-level singleton built at import time, and test-all.mjs section 12
   // dynamic-imports this module in-process to read it — validating the host
@@ -966,6 +1063,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
   const result = analyze();
 
+  // --summary wins when both are given: it is the flag that asks for something
+  // other than the default, so it is the one carrying an intention.
   if (summaryMode) {
     printSummary(result);
   } else {
