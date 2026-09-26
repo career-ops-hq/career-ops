@@ -1,6 +1,6 @@
 import { pass, fail, rmSync, ROOT } from './helpers.mjs';
 import { processPipelineBatch, processOffer, PATHS } from '../batch-evaluate-gemini.mjs';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync } from 'fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -91,6 +91,124 @@ LEGITIMACY: High Confidence
   }
 }
 
+async function testDeadPostingOutcome() {
+  const work = mkdtempSync(join(tmpdir(), 'cops-batcheval-dead-'));
+  const oldReports = PATHS.reports;
+  const oldAdditions = PATHS.trackerAdditions;
+
+  try {
+    PATHS.reports = join(work, 'reports');
+    PATHS.trackerAdditions = join(work, 'tracker-additions');
+    const mockBrowser = {
+      newPage: async () => ({
+        url: () => 'https://example.com/job', route: async () => {}, goto: async () => {},
+        waitForTimeout: async () => {},
+        evaluate: async () => 'Expired job posting content. '.repeat(8),
+        close: async () => {}
+      })
+    };
+    const result = await processOffer(
+      mockBrowser,
+      '- [ ] https://example.com/job | Acme Corp | Senior Engineer',
+      1,
+      async () => '---DEAD_POSTING---\nThis posting has expired.',
+      async () => ({ result: 'expired' })
+    );
+
+    if (result.processed && result.outcome === 'dead-posting'
+      && result.line === '- [x] ~~Acme Corp | Senior Engineer~~ — oferta nieaktywna') {
+      pass('dead-posting marker resolves the pipeline entry without a score');
+    } else {
+      fail(`dead-posting marker returned unexpected result: ${JSON.stringify(result)}`);
+    }
+    let pagesClosed = 0;
+    const goneBrowser = {
+      newPage: async () => {
+        let reads = 0;
+        return {
+          url: () => 'https://example.com/job', route: async () => {},
+          goto: async () => ({ status: () => 410 }),
+          waitForTimeout: async () => {},
+          evaluate: async () => ++reads === 1 ? 'Job not found' : [],
+          close: async () => { pagesClosed++; }
+        };
+      }
+    };
+    const verified = await processOffer(goneBrowser,
+      '- [ ] https://example.com/job', 2, async () => { throw new Error('short page must bypass model'); });
+    if (verified.processed && verified.outcome === 'dead-posting' && pagesClosed === 2) {
+      pass('default liveness verifier confirms HTTP 410 and closes both pages');
+    } else { fail(`default verifier failed: ${JSON.stringify(verified)}, closed=${pagesClosed}`); }
+    const urlOnly = '- [ ] https://example.com/job';
+    const closed = await processOffer(mockBrowser, urlOnly, 2,
+      async () => '---DEAD_POSTING---', async () => ({ result: 'expired' }));
+    if (closed.line === '- [x] ~~https://example.com/job~~ — oferta nieaktywna') {
+      pass('URL-only closed posting preserves its source URL');
+    } else { fail(`lost source URL: ${closed.line}`); }
+    for (const verdict of ['active', 'uncertain']) {
+      const pending = await processOffer(mockBrowser, urlOnly, 3,
+        async () => '---DEAD_POSTING---', async (_browser, url) => {
+          if (url !== 'https://example.com/job') throw new Error('wrong verification URL');
+          return { result: verdict };
+        });
+      if (!pending.processed && pending.line === urlOnly) {
+        pass(`${verdict} posting stays pending despite model closure marker`);
+      } else { fail(`model closed ${verdict} posting`); }
+    }
+    for (const scrapeFails of [false, true]) {
+      for (const verdict of ['active', 'uncertain', 'expired']) {
+        let evaluated = false;
+        const browser = { newPage: async () => ({
+          url: () => 'https://example.com/job', route: async () => {},
+          goto: async () => { if (scrapeFails) throw new Error('navigation failed'); },
+          waitForTimeout: async () => {}, evaluate: async () => 'Job not found', close: async () => {}
+        }) };
+        const result = await processOffer(browser, urlOnly, 5,
+          async () => { evaluated = true; return '---DEAD_POSTING---'; },
+          async () => ({ result: verdict }));
+        if (!evaluated && (verdict === 'expired'
+          ? result.processed && result.outcome === 'dead-posting'
+          : !result.processed && result.line === urlOnly)) {
+          pass(`${scrapeFails ? 'failed' : 'short'} scrape respects independent ${verdict} verdict`);
+        } else { fail(`unsafe scrape fallback: ${JSON.stringify(result)}`); }
+      }
+    }
+    const loadingBrowser = { newPage: async () => {
+      let reads = 0;
+      return {
+        url: () => 'https://example.com/job', route: async () => {},
+        goto: async () => ({ status: () => 200 }), waitForTimeout: async () => {},
+        evaluate: async () => ++reads === 1 ? 'Loading...' : [], close: async () => {}
+      };
+    } };
+    const loading = await processOffer(loadingBrowser, urlOnly, 6,
+      async () => { throw new Error('loading page must bypass model'); });
+    if (!loading.processed && loading.line === urlOnly) {
+      pass('HTTP 200 loading shell stays pending with the default verifier');
+    } else { fail(`loading shell closed: ${JSON.stringify(loading)}`); }
+    const thin = await processOffer(mockBrowser, urlOnly, 7,
+      async () => '---DEAD_POSTING---',
+      async () => ({ result: 'expired', code: 'insufficient_content' }));
+    if (!thin.processed && thin.line === urlOnly) {
+      pass('model closure marker cannot override insufficient-content evidence');
+    } else { fail('model closed posting without sufficient evidence'); }
+    const failedCheck = await processOffer(mockBrowser, urlOnly, 4,
+      async () => '---DEAD_POSTING---', async () => { throw new Error('verification unavailable'); });
+    if (!failedCheck.processed && failedCheck.line === urlOnly) {
+      pass('liveness verification errors leave the entry pending');
+    } else { fail('verification error closed the entry'); }
+    if (!existsSync(PATHS.reports) && !existsSync(PATHS.trackerAdditions)) {
+      pass('dead posting writes no report or tracker addition');
+    } else {
+      fail('dead posting unexpectedly wrote evaluation artifacts');
+    }
+  } finally {
+    PATHS.reports = oldReports;
+    PATHS.trackerAdditions = oldAdditions;
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
 async function testProcessPipelineBatch() {
   const pendingIndices = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
   const concurrency = 4;
@@ -137,6 +255,7 @@ async function run() {
   try {
     await testProcessPipelineBatch();
     await testProcessOffer();
+    await testDeadPostingOutcome();
   } catch (err) {
     fail(`batch-evaluate tests crashed: ${err.message}`);
   }
