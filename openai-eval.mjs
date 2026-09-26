@@ -454,7 +454,7 @@ if (saveReport) {
       mkdirSync(PATHS.reports, { recursive: true });
     }
 
-    reservedNumbers   = await reserveReportNumbers(1, { rootDir: ROOT, reportsDir: PATHS.reports });
+    reservedNumbers   = await reserveReportNumbers(1, { rootDir: DATA_ROOT, reportsDir: PATHS.reports });
     const num         = formatReportNumber(reservedNumbers[0]);
     // LOCAL calendar day (#3070). This one value becomes three things that have to
     // agree with each other and with the user's calendar: the report FILENAME
