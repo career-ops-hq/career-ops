@@ -5,7 +5,7 @@
 <td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
 <td valign="middle">
 <strong>幾個月投出去的履歷，全都石沉大海。</strong>所以我做了自己需要的那個過濾器。<br>
-<strong>740 個職缺。68 個值得投。12 場面試。1 份 offer。</strong><br>
+<strong>740 個職缺。68 個已投遞。12 場面試。1 份 offer。</strong><br>
 我是它的第一個使用者。<strong>我拿到了那份工作。</strong>然後把它開源了。
 </td>
 </tr>
@@ -23,7 +23,7 @@
 </div>
 
 <p align="center">
-  公司用 AI 篩選候選人。<strong>我把 AI 交給候選人，讓他們來<em>挑選</em>公司。</strong><br>
+  企業用 AI 篩選候選人。<strong>我把 AI 交給候選人，讓他們來<em>挑選</em>企業。</strong><br>
   在你自己的機器上，它告訴你哪些職缺是真的、哪些適合你，並且<strong>絕不以你的名義投遞。</strong>
 </p>
 
@@ -242,7 +242,7 @@ career-ops 使用共用的指令路由。在會註冊斜線指令的 CLI 裡，�
 /career-ops           → 顯示所有可用指令
 /career-ops {JD}      → 自動流程：評估 + 報告 + PDF + 追蹤紀錄（貼上文字或 URL）
 /career-ops pipeline  → 處理收件匣裡待處理的 URL（data/pipeline.md）
-/career-ops oferta    → 僅評估，區塊 A 到 G（不自動產生 PDF）
+/career-ops oferta    → 僅評估，區塊 A 到 H（不自動產生 PDF）
 /career-ops ofertas   → 比較並排序多個職缺
 /career-ops contacto  → LinkedIn 妙招：找到聯絡人 + 草擬訊息
 /career-ops deep      → 針對企業的深度調查提示詞

@@ -443,6 +443,87 @@ try {
   fail(`merge-tracker placeholder-notes tests crashed: ${e.message}`);
 }
 
+// ── #4275: a one-sided req number must not be treated as proof of a duplicate ─
+// The #1524 guard only refused to merge when BOTH sides had an extractable
+// req number and they disagreed. An existing row written before req numbers
+// were consistently captured has none, so a new addition for a genuinely
+// different posting — with a req number, at the same company, with a
+// fuzzy-matching title — fell through to "not proven distinct" and merged
+// into the old row, silently overwriting its date/score/report/notes.
+//
+// The fix is direction-sensitive (see merge-tracker.mjs comment at the guard):
+// only the addition-has/existing-lacks direction is blocked. The reverse
+// direction is exercised separately below and by the pre-existing "downgrade"
+// tests above (SEED row carries "Req R5639", the re-eval TSV's notes don't
+// repeat it) — that must keep merging, since it's the ordinary re-evaluation
+// shape, not a masked duplicate.
+console.log('\nmerge-tracker.mjs — one-sided req number blocks the merge (#4275)');
+try {
+  // Case: existing row has NO req number, new addition HAS one — this is the
+  // exact shape that silently corrupted a tracker row before this fix.
+  const NO_REQ_ROW =
+    '| 1 | 2026-01-01 | Acme | Administrative Assistant | 3.5/5 | Applied | ✅ | ' +
+    '[1](reports/001-acme-2026-01-01.md) | on-site, general admin support |\n';
+  const oneSided = runMergeDetailed({
+    '002-acme.tsv': '2\t2026-01-15\tAcme\tAdministrative Assistant\tEvaluated\t3.2/5\t✅\t[2](reports/002-acme-2026-01-15.md)\treq ADMIN-4471, different department\n',
+  }, { rows: NO_REQ_ROW });
+  const oneSidedRows = dataRows(oneSided.tracker);
+  if (oneSidedRows.length === 2) {
+    pass('addition with a req number does not merge into a req-less existing row');
+  } else {
+    fail(`one-sided req number (addition has one, existing row does not) still merged: ${oneSidedRows.join(' // ')}`);
+  }
+
+  // Mirror direction: existing row HAS a req number, new addition has NONE.
+  // This is the common re-evaluation shape (fresh commentary, no restated req
+  // number) and must still merge — the guard is intentionally asymmetric.
+  const HAS_REQ_ROW =
+    '| 1 | 2026-01-01 | Acme | Administrative Assistant | 3.5/5 | Applied | ✅ | ' +
+    '[1](reports/001-acme-2026-01-01.md) | req ADMIN-1001, first posting |\n';
+  const oneSidedReverse = runMergeDetailed({
+    '002-acme.tsv': '2\t2026-01-15\tAcme\tAdministrative Assistant\tEvaluated\t3.9/5\t✅\t[2](reports/002-acme-2026-01-15.md)\tre-scored, JD refreshed\n',
+  }, { rows: HAS_REQ_ROW });
+  const reverseRows = dataRows(oneSidedReverse.tracker);
+  if (reverseRows.length === 1 && /3\.9\/5/.test(reverseRows[0]) && /ADMIN-1001/.test(reverseRows[0])) {
+    pass('addition with no req number still merges into a row that has one (ordinary re-eval)');
+  } else {
+    fail(`re-eval regressed: addition with no req number failed to merge into a row that has one: ${reverseRows.join(' // ')}`);
+  }
+
+  // Control: both sides carry the SAME req number — this is a genuine
+  // re-evaluation of one posting and must still merge, not double up.
+  const SAME_REQ_ROW =
+    '| 1 | 2026-01-01 | Acme | Administrative Assistant | 3.5/5 | Applied | ✅ | ' +
+    '[1](reports/001-acme-2026-01-01.md) | req ADMIN-4471, first pass |\n';
+  const sameReq = runMergeDetailed({
+    '002-acme.tsv': '2\t2026-01-15\tAcme\tAdministrative Assistant\tEvaluated\t4.0/5\t✅\t[2](reports/002-acme-2026-01-15.md)\treq ADMIN-4471, re-scored\n',
+  }, { rows: SAME_REQ_ROW });
+  const sameReqRows = dataRows(sameReq.tracker);
+  if (sameReqRows.length === 1 && /4\.0\/5/.test(sameReqRows[0])) {
+    pass('matching req numbers on both sides still merge as one re-evaluated row');
+  } else {
+    fail(`same req number on both sides failed to merge as a re-evaluation: ${sameReqRows.join(' // ')}`);
+  }
+
+  // Control: NEITHER side has a req number — the guard steps aside and the
+  // existing fuzzy-match-only behavior (same company + fuzzy title = duplicate)
+  // is unchanged.
+  const NEITHER_REQ_ROW =
+    '| 1 | 2026-01-01 | Acme | Administrative Assistant | 3.5/5 | Applied | ✅ | ' +
+    '[1](reports/001-acme-2026-01-01.md) | on-site, general admin support |\n';
+  const neitherReq = runMergeDetailed({
+    '002-acme.tsv': '2\t2026-01-15\tAcme\tAdministrative Assistant\tEvaluated\t4.0/5\t✅\t[2](reports/002-acme-2026-01-15.md)\tre-scored, still no req number\n',
+  }, { rows: NEITHER_REQ_ROW });
+  const neitherReqRows = dataRows(neitherReq.tracker);
+  if (neitherReqRows.length === 1 && /4\.0\/5/.test(neitherReqRows[0])) {
+    pass('no req number on either side falls back to fuzzy-match-only, unchanged');
+  } else {
+    fail(`no-req-number fallback behavior regressed: ${neitherReqRows.join(' // ')}`);
+  }
+} catch (e) {
+  fail(`merge-tracker one-sided req-number tests crashed: ${e.message}`);
+}
+
 // ── #2394: a tracker with no separator row dropped everything, silently ─────
 // The insert point comes from SEPARATOR_ROW_RE. With no match, insertIdx
 // stayed -1, the splice was skipped with no else, and the run went on to write

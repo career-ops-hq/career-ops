@@ -20,7 +20,11 @@ import { execFileSync, execFile } from 'child_process';
 import { promisify } from 'util';
 import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
+import {
+  normalizedTrackerScore, slugifyCompany, tsvSafe,
+} from './lib/tracker-addition.mjs';
 const execFileAsync = promisify(execFile);
 try {
   const { config } = await import('dotenv');
@@ -36,10 +40,29 @@ export const PATHS = {
   shared:      join(ROOT, 'modes', '_shared.md'),
   oferta:      join(ROOT, 'modes', 'oferta.md'),
   cv:          join(DATA_ROOT, 'cv.md'),
-  profile:     join(ROOT, 'modes', '_profile.md'),
+  // DATA_ROOT, not ROOT. modes/_profile.md is USER LAYER in the Data Contract
+  // — doctor.mjs auto-copies it into the user's root from
+  // modes/_profile.template.md — and it carries the archetypes and North Star
+  // every A-F evaluation scores against.
+  //
+  // Read from the CODE root it resolves to the shipped template, which is the
+  // exact failure AGENTS.md's `unpersonalized` warning exists to prevent:
+  // "offers get scored against the template author's targeting rather than
+  // yours". Silently, and for every offer in the batch.
+  //
+  // gemini-eval.mjs:89 and ollama-eval.mjs:56 both already use DATA_ROOT here.
+  profile:     join(DATA_ROOT, 'modes', '_profile.md'),
   profileYml:  join(DATA_ROOT, 'config', 'profile.yml'),
   reports:     join(DATA_ROOT, 'reports'),
-  trackerAdditions: join(ROOT, 'batch', 'tracker-additions'),
+  // DATA_ROOT, matching gemini-eval.mjs:93. These TSVs are the batch's OUTPUT —
+  // one per evaluated offer, for merge-tracker.mjs to fold into the tracker —
+  // so they are user data living under a system-layer directory name.
+  //
+  // Written to the CODE root they land in the checkout while merge-tracker,
+  // run normally, looks under the data root and finds nothing. The batch
+  // reports success, the tracker gains no rows, and the evidence sits in a
+  // directory the user has no reason to open.
+  trackerAdditions: join(DATA_ROOT, 'batch', 'tracker-additions'),
   pipeline:    join(DATA_ROOT, 'data', 'pipeline.md')
 };
 
@@ -99,39 +122,6 @@ function readFile(path, label) {
 async function nextReportNumber() { // outdate-bot
   const { stdout } = await execFileAsync(process.execPath, [join(ROOT, 'reserve-report-num.mjs')], { encoding: 'utf-8' });
   return stdout.trim();
-}
-
-function slugifyCompany(value) {
-  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
-}
-
-function tsvSafe(value) {
-  return String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
-}
-
-function normalizedTrackerScore(value) {
-  const clean = tsvSafe(value);
-  // Parse, do not pattern-match the string. Two bugs lived in the old guard:
-  // `/n\/?a/i` was unanchored with an optional slash, so bare `na` matched and a
-  // real score with trailing prose -- `4.2 (final)`, `4.2 (internal)`,
-  // `4.5 - strong signal` -- was recorded as `N/A`; and the `/5` early return kept
-  // the whole string, so `4.2/10` became `4.2/5` and merged as a genuine score.
-  // Trailing prose is tolerated because models produce it; a denominator that is
-  // not 5, or a value outside 0..5, is refused rather than reinterpreted.
-  const parsed = clean.match(/^(\d+(?:\.\d+)?)/);
-  if (!parsed) return 'N/A';
-  const score = parseFloat(parsed[1]);
-  // The denominator is load-bearing wherever it sits. Requiring it immediately
-  // after the number read `4.2 (strong fit)/10` -- a ten-point score with an
-  // annotation -- as a bare 4.2 and wrote `4.2/5`, the same wrong number
-  // `8/10` used to produce. The first denominator in the cell is taken and must
-  // be 5; absent one, the scale is the contract's. A cell that puts an unrelated
-  // fraction first (`4.2 (fit 3/4 axes)`) is refused rather than guessed at --
-  // N/A is recoverable, a wrong score is not.
-  const denominator = clean.match(/\/\s*(\d+(?:\.\d+)?)/);
-  const scale = denominator ? parseFloat(denominator[1]) : 5;
-  if (!Number.isFinite(score) || scale !== 5 || score < 0 || score > 5) return 'N/A';
-  return `${score}/5`;
 }
 
 let systemPromptTemplate;
@@ -299,7 +289,17 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
     mkdirSync(PATHS.trackerAdditions, { recursive: true });
 
     const num = await nextReportNumber();
-    const today = new Date().toISOString().split('T')[0];
+    // LOCAL calendar day (#3070). This one value becomes three things that have to
+    // agree with each other and with the user's calendar: the report FILENAME
+    // ({num}-{slug}-{today}.md), the report's own `**Date:**` header, and the date
+    // column of the tracker row written for it.
+    //
+    // On the UTC day an evaluation run on a Sunday evening in the Americas produces
+    // 042-acme-2026-08-18.md, dated the 18th, in a tracker row dated the 18th —
+    // while every other date the user sees, and every date the other scripts now
+    // stamp, says the 17th. The filename is the part that cannot be corrected
+    // later: reports are addressed by it.
+    const today = localToday();
     const companySlug = slugifyCompany(company);
     const filename = `${num}-${companySlug}-${today}.md`;
     const reportPath = join(PATHS.reports, filename);

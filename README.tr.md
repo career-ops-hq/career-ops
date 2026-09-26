@@ -5,7 +5,7 @@
 <td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
 <td valign="middle">
 <strong>Aylarca sessizliğe CV gönderdim.</strong> Ben de ihtiyacım olan filtreyi kendim yaptım.<br>
-<strong>740 ilan. Başvurmaya değer 68. 12 mülakat. 1 teklif.</strong><br>
+<strong>740 ilan. 68 başvuru. 12 mülakat. 1 teklif.</strong><br>
 İlk kullanıcısı bendim. <strong>İşi aldım.</strong> Sonra açık kaynak yaptım.
 </td>
 </tr>
@@ -23,7 +23,7 @@
 </div>
 
 <p align="center">
-  Şirketler adayları elemek için yapay zekâ kullanıyor. <strong>Ben adaylara şirketleri <em>seçmeleri</em> için yapay zekâ verdim.</strong><br>
+  Şirketler adayları elemek için yapay zekâ kullanıyor. <strong>Ben de adaylara şirket <em>seçmek</em> için yapay zekâ verdim.</strong><br>
   Kendi makinende, hangi ilanların gerçek olduğunu, hangilerinin sana uyduğunu söyler ve <strong>asla senin adına başvurmaz.</strong>
 </p>
 
@@ -242,7 +242,7 @@ career-ops ortak bir komut yönlendiricisi kullanır. Eğik çizgi komutlarını
 /career-ops           → Tüm kullanılabilir komutları göster
 /career-ops {JD}      → OTOMATİK HAT: değerlendirme + rapor + PDF + takipçi (metin veya URL yapıştır)
 /career-ops pipeline  → Gelen kutusundaki bekleyen URL'leri işle (data/pipeline.md)
-/career-ops oferta    → Yalnızca değerlendirme, A'dan G'ye bloklar (otomatik PDF yok)
+/career-ops oferta    → Yalnızca değerlendirme, A'dan H'ye bloklar (otomatik PDF yok)
 /career-ops ofertas   → Birden çok ilanı karşılaştır ve sırala
 /career-ops contacto  → LinkedIn hamlesi: kişileri bul + mesaj taslağı yaz
 /career-ops deep      → Şirket hakkında derin araştırma prompt'u

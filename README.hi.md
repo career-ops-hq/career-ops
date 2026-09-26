@@ -5,7 +5,7 @@
 <td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
 <td valign="middle">
 <strong>महीनों तक CV भेजता रहा, जवाब में सिर्फ़ खामोशी।</strong> तो मैंने वह फ़िल्टर खुद बना लिया जिसकी मुझे ज़रूरत थी।<br>
-<strong>740 लिस्टिंग। 68 भेजने लायक। 12 इंटरव्यू। 1 ऑफ़र।</strong><br>
+<strong>740 लिस्टिंग। 68 आवेदन भेजे। 12 इंटरव्यू। 1 ऑफ़र।</strong><br>
 इसका पहला यूज़र मैं था। <strong>मुझे नौकरी मिल गई।</strong> फिर मैंने इसे ओपन सोर्स कर दिया।
 </td>
 </tr>
@@ -23,7 +23,7 @@
 </div>
 
 <p align="center">
-  कंपनियाँ उम्मीदवारों को छाँटने के लिए AI इस्तेमाल करती हैं। <strong>मैंने उम्मीदवारों को कंपनियाँ <em>चुनने</em> के लिए AI दिया।</strong><br>
+  कंपनियाँ candidates को filter करने के लिए AI use करती हैं। <strong>मैंने candidates को कंपनियाँ <em>चुनने</em> के लिए AI दे दिया।</strong><br>
   आपकी अपनी मशीन पर, यह बताता है कि कौन सी नौकरियाँ असली हैं, कौन सी आप पर फ़िट बैठती हैं, और <strong>आपके नाम से कभी अप्लाई नहीं करता।</strong>
 </p>
 
@@ -242,7 +242,7 @@ career-ops एक साझा कमांड राउटर इस्ते�
 /career-ops           → सभी उपलब्ध कमांड दिखाएँ
 /career-ops {JD}      → AUTO-PIPELINE: मूल्यांकन + रिपोर्ट + PDF + ट्रैकर (टेक्स्ट या URL पेस्ट करें)
 /career-ops pipeline  → इनबॉक्स के लंबित URL प्रोसेस करें (data/pipeline.md)
-/career-ops oferta    → सिर्फ़ मूल्यांकन, ब्लॉक A से G (ऑटो PDF नहीं)
+/career-ops oferta    → सिर्फ़ मूल्यांकन, ब्लॉक A से H (ऑटो PDF नहीं)
 /career-ops ofertas   → कई ऑफ़र की तुलना और रैंकिंग
 /career-ops contacto  → LinkedIn पावर मूव: संपर्क ढूँढें + संदेश ड्राफ़्ट करें
 /career-ops deep      → कंपनी पर गहन रिसर्च प्रॉम्प्ट

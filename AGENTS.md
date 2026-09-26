@@ -78,14 +78,13 @@ On the first message of each session, run silently:
 node update-system.mjs check
 ```
 
-If `{"status": "update-available", "reason": ..., "local": ..., "remote": ..., "changelog": ...}` → tell the user:
+It reports an update only when a newer career-ops release is published; changes merged to `main` between releases never prompt, because an update installs the release, not `main`.
 
-- If `reason` is `system-files-changed`:
-  > "career-ops system files differ from v{local}. Re-apply v{local} to restore them? Your data (CV, profile, tracker, reports) will NOT be touched."
-- Otherwise:
-  > "career-ops update available (v{local} → v{remote}). Your data (CV, profile, tracker, reports) will NOT be touched. Want me to update?"
+If `{"status": "update-available", "local": ..., "remote": ..., "changelog": ...}` → tell the user:
 
-If yes → `node update-system.mjs apply --confirm`. If no → `node update-system.mjs dismiss`. Every other status (`up-to-date`, `dismissed`, `offline`, `no-remote-version`) → say nothing. The user can force a check anytime ("check for updates" / "update career-ops"); rollback: `node update-system.mjs rollback`.
+> "career-ops update available (v{local} → v{remote}). Your data (CV, profile, tracker, reports) will NOT be touched. Want me to update?"
+
+If yes → `node update-system.mjs apply --confirm`. If no → `node update-system.mjs dismiss --version {remote}`: that quiets v{remote} only, and a newer release asks again. Every other status (`up-to-date`, `dismissed`, `offline`, `no-remote-version`) → say nothing. The user can check anytime, even after saying no ("check for updates" / "update career-ops") → `node update-system.mjs check --force`. To follow every merge on `main` instead of releases: `node update-system.mjs apply --channel main --confirm`. Rollback: `node update-system.mjs rollback`.
 
 ## What is career-ops
 

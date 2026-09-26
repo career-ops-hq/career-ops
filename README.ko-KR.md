@@ -5,7 +5,7 @@
 <td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
 <td valign="middle">
 <strong>몇 달 동안 이력서를 보내도 답이 없었습니다.</strong> 그래서 내게 필요한 필터를 직접 만들었습니다.<br>
-<strong>공고 740건. 지원할 만한 곳 68건. 면접 12번. 오퍼 1개.</strong><br>
+<strong>공고 740건. 지원 68건. 면접 12번. 오퍼 1개.</strong><br>
 내가 첫 번째 사용자였습니다. <strong>그 일자리를 얻었습니다.</strong> 그리고 오픈 소스로 공개했습니다.
 </td>
 </tr>
@@ -23,7 +23,7 @@
 </div>
 
 <p align="center">
-  기업은 AI로 지원자를 거릅니다. <strong>나는 지원자에게 기업을 <em>고를</em> AI를 주었습니다.</strong><br>
+  기업은 AI로 지원자를 걸러냅니다. <strong>저는 지원자에게 AI를 줘서 <em>기업을 고르게</em> 했습니다.</strong><br>
   당신의 컴퓨터에서, 어떤 공고가 진짜인지, 어떤 공고가 맞는지 알려주고, <strong>당신 이름으로 지원하는 일은 절대 없습니다.</strong>
 </p>
 
@@ -242,7 +242,7 @@ career-ops는 공유 명령 라우터를 사용합니다. 슬래시 명령을 �
 /career-ops           → 사용 가능한 모든 명령 표시
 /career-ops {JD}      → 자동 파이프라인: 평가 + 리포트 + PDF + 트래커 (텍스트 또는 URL 붙여넣기)
 /career-ops pipeline  → 인박스의 대기 중인 URL 처리 (data/pipeline.md)
-/career-ops oferta    → 평가만 수행, 블록 A~G (자동 PDF 없음)
+/career-ops oferta    → 평가만 수행, 블록 A~H (자동 PDF 없음)
 /career-ops ofertas   → 여러 공고 비교 및 순위 매기기
 /career-ops contacto  → LinkedIn 파워 무브: 연락처 찾기 + 메시지 초안 작성
 /career-ops deep      → 기업에 대한 심층 리서치 프롬프트
