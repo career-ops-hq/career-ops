@@ -78,6 +78,110 @@ export function normalizeCompany(name) {
   return normalizeTextKey(name);
 }
 
+// True legal-entity suffixes, stripped repeatedly (chained) since a name can
+// legitimately carry more than one ("Acme Holdings Inc." → "acme holdings").
+// These are unambiguous enough that removing several in a row is safe.
+//
+// Shared by invite-match.mjs's normalizeCompanyName() (which chain-strips them)
+// and companiesMatchIgnoringCorporateForm() below (which accepts them as a
+// corporate-form tail). Exported so both read one vocabulary: a private second
+// copy is exactly the identity drift #2445 set out to remove. International
+// forms are included because a company cell may quote the employer with its
+// local legal form ("Foo, GmbH", "Foo, APC"); keep every entry a single
+// space-free word so normalizeTextKey() tokenizes it to one token the tail
+// check can match and normalizeCompanyName()'s `\s<suffix>$` anchor stays
+// literal (no regex metacharacters to escape).
+export const LEGAL_SUFFIXES = [
+  // US / UK
+  'incorporated', 'inc', 'corporation', 'corp', 'company', 'co',
+  'limited', 'ltd', 'llc', 'llp', 'lp', 'plc', 'pc', 'apc',
+  // DE / AT / CH
+  'gmbh', 'ag', 'kgaa', 'mbh', 'ug',
+  // FR / BE / CH / LU
+  'sas', 'sarl', 'eurl', 'snc', 'scs', 'sca', 'sa',
+  // IT / ES / PT / LATAM
+  'spa', 'srl', 'ltda', 'saa', 'sl', 'sll', 'slu',
+  // NL / BE
+  'bv', 'nv', 'cv',
+  // Nordics / Baltics
+  'ab', 'as', 'oy', 'oyj', 'kf', 'sf', 'aps', 'se',
+  // Central / Eastern Europe
+  'jsc', 'pjsc', 'zao', 'ooo', 'doo', 'kft', 'rt', 'zrt',
+  // Commonwealth / Asia
+  'pty', 'pte', 'pvt', 'sdn', 'bhd',
+];
+
+// Generic business-descriptor words that vary between how a recruiter signs
+// an email and how the tracker recorded the company, but are common enough
+// as substantive parts of a name (e.g. "Data Solutions" vs "Data Corp") that
+// chaining their removal risks collapsing two different companies to the
+// same key. Stripped at most once, and only after legal suffixes are gone —
+// never chained with each other or with LEGAL_SUFFIXES.
+export const GENERIC_DESCRIPTORS = [
+  'group', 'holdings', 'technologies', 'technology', 'solutions',
+  'canada', 'international',
+];
+
+// Words that name a legal form or a generic business descriptor rather than the
+// employer. The union is safe here in a way chaining them in normalizeCompanyName
+// is not, because the prefix rule below never lets two names disagree on a
+// substantive token.
+const CORPORATE_FORM_WORDS = new Set([...LEGAL_SUFFIXES, ...GENERIC_DESCRIPTORS]);
+
+// A one-token stem carries almost no identity, and a two-letter one is usually
+// an initialism that several unrelated employers share. Refusing them costs the
+// duplicate row that exists today; accepting them risks deleting a real one.
+const MIN_STEM_CHARS = 3;
+
+/**
+ * True when two company cells are the same employer written with a different
+ * corporate suffix ("Acme" vs "Acme Technologies Inc.").
+ *
+ * normalizeCompany() folds case, punctuation and width but not corporate
+ * forms, so a suffix variant of one employer never matches the plain name and
+ * the same opening is written twice. This is the narrow rule that closes that:
+ * used where the role title already matches and neither a req-number nor an
+ * employer-board URL has proved the rows distinct. The exact tier above is
+ * untouched — callers OR this with an exact-key comparison, because two
+ * IDENTICAL names have equal token length and so return false here.
+ *
+ * The rule is a token PREFIX plus a corporate-form tail, not a stripped key.
+ * Stripping suffixes before comparing looks equivalent and is not: it maps
+ * "Acme Solutions" and "Acme Technologies" to the same "acme", which folds two
+ * genuinely different employers and deletes one row. Requiring the shorter name
+ * to be a prefix of the longer makes that structurally impossible, since
+ * neither of those is a prefix of the other. It also means an extra token that
+ * is NOT a corporate form ("Acme Robotics") still reads as a different
+ * employer, which is the conservative direction: over-merging is unrecoverable
+ * here (dedup-tracker.mjs drops the losing line, and applications.md is
+ * gitignored with no backup), while under-merging leaves a duplicate row the
+ * user can already see.
+ *
+ * Tokens come from normalizeTextKey(name, ' ') so this shares the Unicode,
+ * NFKC and Turkish dotted-I handling every other identity key uses (#2445,
+ * #2736) instead of a private strip. Scripts written without spaces produce a
+ * single token and never match here, so CJK corporate forms are unaffected and
+ * remain #2570's subject.
+ *
+ * @param {string} a - Company cell from one side of the comparison.
+ * @param {string} b - Company cell from the other side.
+ * @returns {boolean} True when the two cells name the same employer under a
+ *   different corporate form.
+ */
+export function companiesMatchIgnoringCorporateForm(a, b) {
+  const ta = normalizeTextKey(a, ' ').split(' ').filter(Boolean);
+  const tb = normalizeTextKey(b, ' ').split(' ').filter(Boolean);
+  const [stem, full] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
+  // Equal lengths are either the exact tier's business or a genuine
+  // disagreement on a substantive token. An empty stem is the blind-employer
+  // `?` marker and every other punctuation-only cell, which must never match a
+  // named employer.
+  if (stem.length === 0 || stem.length === full.length) return false;
+  if (stem.join('').length < MIN_STEM_CHARS) return false;
+  if (stem.some((token, i) => token !== full[i])) return false;
+  return full.slice(stem.length).every(token => CORPORATE_FORM_WORDS.has(token));
+}
+
 /**
  * Control characters that are invisible in every rendered view of the tracker.
  *
