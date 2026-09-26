@@ -168,7 +168,7 @@ npx @santifer/career-ops init
 
 > 💡 `npx` kommt mit [Node.js](https://nodejs.org): Es führt den Installer einmal aus,
 > ohne etwas global zu installieren. Noch kein Node? Installiere es zuerst.
-> (Nutzt du schon eine Claude Code / Gemini / Codex CLI? Dann hast du es bereits.)
+> (Nutzt du schon eine Claude Code / Codex CLI? Dann hast du es bereits.)
 
 Das klont das neueste Release nach `./career-ops` und installiert die Abhängigkeiten. Dann:
 
