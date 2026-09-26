@@ -45,6 +45,7 @@ writeFileSync(join(sandbox, 'data', 'pdf-index.tsv'), '', 'utf-8');
 
 copyFileSync(join(ROOT, 'generate-pdf.mjs'), script);
 copyFileSync(join(ROOT, 'theme-style.mjs'), join(sandbox, 'theme-style.mjs'));
+copyFileSync(join(ROOT, 'cv-experience-order.mjs'), join(sandbox, 'cv-experience-order.mjs'));
 copyFileSync(join(ROOT, 'tracker-utils.mjs'), join(sandbox, 'tracker-utils.mjs'));
 copyFileSync(join(ROOT, 'tracker-parse.mjs'), join(sandbox, 'tracker-parse.mjs'));
 copyFileSync(join(ROOT, 'tracker-aliases.json'), join(sandbox, 'tracker-aliases.json'));
@@ -431,6 +432,42 @@ await renderHtmlToPdf(${JSON.stringify(htmlDoc('Solo CV'))}, outputPath, {
     pass('generate-pdf --batch exits 1 when the results manifest write fails despite all renders succeeding');
   } else {
     fail(`results-write failure did not fail the batch: status=${writeFail.status}\n${writeFail.output.trim()}`);
+  }
+
+  // --- Test 9: the experience-order guard holds in batch mode too. A CV with
+  // an older role above a newer one fails its own entry while the rest still
+  // render; --allow-nonchronological downgrades that to a warning. ---
+  writeFileSync(join(sandbox, 'unordered.html'), htmlDoc(
+    '<span class="job-period">2015 – 2018</span><span class="job-period">2019 – 2022</span>',
+  ), 'utf-8');
+  const orderManifest = join(sandbox, 'order.json');
+  writeFileSync(orderManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/order-a.pdf' },
+    { input: 'unordered.html', output: 'out/order-unordered.pdf' },
+  ]), 'utf-8');
+  const unorderedPdf = join(sandbox, 'out', 'order-unordered.pdf');
+  const strictOrder = run([`--batch=${orderManifest}`]);
+  const strictLeftNoPdf = !existsSync(unorderedPdf);
+  if (
+    strictOrder.status === 1 &&
+    strictLeftNoPdf &&
+    existsSync(join(sandbox, 'out', 'order-a.pdf')) &&
+    /not in reverse-chronological order/.test(strictOrder.output) &&
+    strictOrder.output.includes('1 ok, 1 failed')
+  ) {
+    pass('generate-pdf --batch fails an entry whose work experience is out of order and renders the rest');
+  } else {
+    fail(`batch skipped the experience-order guard: status=${strictOrder.status} pdfWritten=${!strictLeftNoPdf}\n${strictOrder.output.trim()}`);
+  }
+  const allowedOrder = run([`--batch=${orderManifest}`, '--allow-nonchronological']);
+  if (
+    allowedOrder.status === 0 &&
+    existsSync(unorderedPdf) &&
+    allowedOrder.output.includes('--allow-nonchronological set')
+  ) {
+    pass('generate-pdf --batch --allow-nonchronological renders the out-of-order CV with a warning');
+  } else {
+    fail(`--allow-nonchronological did not reach the batch path: status=${allowedOrder.status}\n${allowedOrder.output.trim()}`);
   }
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
