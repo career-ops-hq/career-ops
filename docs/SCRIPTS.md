@@ -24,6 +24,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run update:check` | `update-system.mjs check` | Check for a newer published release |
 | `npm run update` | `update-system.mjs apply --confirm` | Apply upstream update |
 | `npm run rollback` | `update-system.mjs rollback` | Rollback last update |
+| `node update-system.mjs status` | `update-system.mjs status` | Print installed version + short SHA |
 | `npm run liveness` | `check-liveness.mjs` | Test if job URLs are still active |
 | `npm run extract` | `browser-extract.mjs` | Headless read-only page extractor (opt-in `scan.extractor: cli`) — compact JSON for scan/JD; Greenhouse, Lever, Ashby and Workday postings are read from their public JSON endpoints instead of the client-rendered page, and an empty jd extraction exits 1 with `code: empty_text` |
 | `node fetch-jd.mjs <url>` | `fetch-jd.mjs` | JD text on stdout from a known ATS API (Greenhouse/Lever/Ashby/Workday) — exit 1 with empty stdout when the host has no JD-bearing API, so a caller falls back to its browser/WebFetch path |
@@ -559,6 +560,32 @@ Possible JSON responses:
 | `no-remote-version` | GitHub answered without a usable `career-ops-vX.Y.Z` release |
 
 `check --force` ignores a dismissal. `check --channel main` keeps the previous behaviour for installs that follow `main`: main's `VERSION` plus system-file drift (`reason: system-files-changed`).
+
+The `local` field in the JSON output stays a bare semver string (e.g., `"1.32.0"`). A separate `local_sha` field is provided alongside it when the install is a git checkout — containing the short commit SHA (e.g., `"ae919b6f"`). For tarball installs without git metadata, `local_sha` will be omitted. This lets a bug report identify the exact tree under test, not just the release name (two installs pulled days apart can share a version string while running different code — see #3203).
+
+**Exit codes:** `0` always.
+
+---
+
+## status
+
+Prints the installed version to stdout — a quick human-readable alternative to parsing `check` JSON.
+
+```bash
+node update-system.mjs status
+```
+
+Example output:
+
+```
+career-ops v1.32.0 (ae919b6f)
+```
+
+On a tarball install with no git metadata the short SHA is omitted:
+
+```
+career-ops v1.32.0
+```
 
 **Exit codes:** `0` always.
 
