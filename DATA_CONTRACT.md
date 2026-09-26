@@ -13,6 +13,7 @@ These files contain your personal data, customizations, and work product. Update
 | `config/cv-facts.json` | Your CV fact-check allowlist and forbidden phrases |
 | `config/benchmarks.yml` | Your market calibration benchmark overrides (optional; copy `templates/benchmarks.yml` here and edit — read by `funnel-velocity.mjs`) |
 | `config/local-paths.txt` | Files *this clone* owns that upstream does not ship — one repo-relative path per line (optional; copy `config/local-paths.example.txt` here and edit). See [Fork-local paths](#fork-local-paths) below |
+| `config/system-overlay.txt` | System-layer files this install explicitly customizes and merges on updates — one repo-relative path per line (optional). See [System File Overlays](#system-file-overlays) below |
 | `modes/_profile.md` | Your archetypes, narrative, negotiation scripts |
 | `modes/_custom.md` | Your house rules, custom workflows & output preferences (procedural — survives updates) |
 | `modes/_brief.md` | Your compact profile brief (~1.5–2K tokens) read by the two-pass triage first pass |
@@ -78,6 +79,30 @@ Three declarations are refused, loudly, naming the entry:
 | An absolute path, or one containing `..` | Would extend "never touch" over files outside the checkout |
 | A path the system layer already ships | The file would silently stop receiving updates, with no other signal that it had been frozen |
 | `config/local-paths.txt` itself | It is gitignored by default, so nothing updates it; listing it protects against a threat that does not exist and reads as though it did. A fork whose CI runs the suite un-ignores and commits it (see `config/local-paths.example.txt`); it is then tracked and not ignored, which both guards accept |
+
+### System File Overlays
+
+Direct edits to a system-layer file keep the whole local file as-is and skip upstream changes for it entirely (the default behavior for un-declared local system edits). If you need to make durable local customizations that automatically merge with upstream updates (like modifying a dashboard script, provider wiring, or the updater itself), doing so without an overlay requires you to manually re-apply upstream changes.
+
+`config/system-overlay.txt` provides an explicit allowlist for these system files.
+
+```text
+# one repo-relative path per line; blank lines and # comments ignored
+dashboard/main.go
+update-system.mjs
+```
+
+When a system file is listed in `config/system-overlay.txt`, the updater changes its behavior for that file:
+1. It reads the base upstream version (from the last known update).
+2. It checks out the new upstream version.
+3. It performs a 3-way merge (`git merge-file`) to reapply your local customizations on top of the new upstream content.
+
+If the merge is clean, your edits survive transparently. If there is a conflict, the update stops and reports the conflict so you can resolve the standard git conflict markers (and a `.bak` backup is preserved).
+
+**Guidance**: 
+- Use the **User Layer files** (like `modes/_custom.md` or `config/profile.yml`) for user-specific data or house rules.
+- Use **Plugins** for integrating new features or external tools cleanly.
+- Use **System File Overlays** only as a last resort to modify core behavior that is not configurable elsewhere.
 
 ## System Layer (safe to auto-update)
 
