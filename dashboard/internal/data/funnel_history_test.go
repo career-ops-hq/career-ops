@@ -56,3 +56,29 @@ func TestBackfilledDisplayNumberDoesNotJoinHistory(t *testing.T) {
 		t.Fatal("synthetic display number joined another row's history")
 	}
 }
+
+func TestFunnelHistoryDuplicateRanksAndSkip(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		apps := []model.CareerApplication{
+			{Number: 7, Status: "Applied"},
+			{Number: 7, Status: "Offer"},
+			{Number: 8, Status: "SKIP"},
+			{Number: 9, Status: "skip"},
+			{Number: 10, Status: "Discarded"},
+		}
+		if reverse {
+			for i, j := 0, len(apps)-1; i < j; i, j = i+1, j-1 {
+				apps[i], apps[j] = apps[j], apps[i]
+			}
+		}
+		pm := ComputeProgressMetrics(apps, map[int]int{7: 2, 8: 4, 9: 3, 10: 3})
+		for i, want := range []int{5, 2, 2, 2, 1} {
+			if pm.FunnelStages[i].Count != want {
+				t.Errorf("reverse=%v stage %d: got %d want %d", reverse, i, pm.FunnelStages[i].Count, want)
+			}
+		}
+		if pm.TotalOffers != 1 {
+			t.Errorf("offers = %d", pm.TotalOffers)
+		}
+	}
+}

@@ -1032,18 +1032,28 @@ func ComputeProgressMetrics(apps []model.CareerApplication, history ...map[int]i
 	offer := statusCounts["offer"] + statusCounts["hired"]
 	if len(history) > 0 {
 		applied, responded, interview, offer = 0, 0, 0, 0
-		seen := make(map[int]bool)
+		ranks := make(map[int]int)
+		var unnumberedRanks []int
 		for _, app := range apps {
-			if !app.TrackerNumberMissing && seen[app.Number] {
+			if strings.EqualFold(app.Status, "skip") {
 				continue
 			}
-			if !app.TrackerNumberMissing {
-				seen[app.Number] = true
-			}
 			rank := funnelRank(app.Status)
-			if !app.TrackerNumberMissing && history[0][app.Number] > rank {
+			if app.TrackerNumberMissing {
+				unnumberedRanks = append(unnumberedRanks, rank)
+				continue
+			}
+			if history[0][app.Number] > rank {
 				rank = history[0][app.Number]
 			}
+			if rank > ranks[app.Number] {
+				ranks[app.Number] = rank
+			}
+		}
+		for _, rank := range ranks {
+			unnumberedRanks = append(unnumberedRanks, rank)
+		}
+		for _, rank := range unnumberedRanks {
 			if rank >= 1 {
 				applied++
 			}
