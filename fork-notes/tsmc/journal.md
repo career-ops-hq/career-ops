@@ -32,6 +32,20 @@ learned. Newest entry on top. Keep the zh-TW twin in sync in the same commit.
 
 ## Entries
 
+### 2026-09-26 — Software-role sweep and third evaluation, report #003
+
+- **Stage:** sourcing + evaluation
+- **Done:** Triaged 10 more "software" postings. All 10 are individual-contributor engineer roles, so none meets the
+  manager-level target. One (jobId 21610, Senior AI Software Engineer) directly manages a team, so it got a full A–H.
+  A triage note that misread a "Master's or Ph.D." requirement as a gap was corrected: the user holds an M.S. in CSIE.
+- **System output:** report #003, **3.5/5, "Research first"**, EN + zh-TW, tracker row.
+- **Learned:** this is the best fit in direction so far (an agentic AI engineering lead), but also the highest
+  coding-test risk: 2026 third-party accounts put HackerRank in TSMC's senior engineering hiring. Several stated
+  requirements (SDD/DDD/TDD, AI coding tools, hands-on AI coding) aren't claimed in the CV, so the user needs to
+  confirm them. A manager-titled "Agentic AI Engineering Lead" at TSMC Arizona surfaced during research.
+- **Next:** recruiter call covering #001–#003; the user confirms which AI tools and practices they actually use;
+  consider evaluating the Arizona manager role.
+
 ### 2026-09-26 — Second evaluation: Enterprise Business Systems PM, report #002
 
 - **Stage:** evaluation
