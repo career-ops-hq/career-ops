@@ -2,12 +2,13 @@
 // Files prefixed with _ are never loaded as providers by scan.mjs.
 
 import './_dns-cache.mjs'; // memoize dns.lookup process-wide (see that file)
+import { isIP } from 'node:net';
 import {
   DEFAULT_USER_AGENT,
   BROWSER_LIKE_USER_AGENT,
   MACOS_BROWSER_LIKE_USER_AGENT,
 } from '../user-agent.mjs';
-import { providerFetchContext } from './_ip-guard.mjs';
+import { providerFetchContext, isBlockedAddress, blockedAddressError } from './_ip-guard.mjs';
 import { normalizeUrl } from '../url-key.mjs';
 
 /** @typedef {import('./_types.js').Context} Context */
@@ -26,6 +27,41 @@ export { BROWSER_LIKE_USER_AGENT, MACOS_BROWSER_LIKE_USER_AGENT };
 
 /** Per-request abort deadline; override per call with `opts.timeoutMs`. */
 const DEFAULT_TIMEOUT_MS = 10_000;
+let proxyAgent;
+let proxySignature;
+
+async function proxyFor(url) {
+  if (process.env.CAREER_OPS_TRUST_PROXY_EGRESS !== '1') return { dispatcher: undefined, proxyHost: undefined };
+  const target = new URL(url);
+  const httpProxy = process.env.http_proxy || process.env.HTTP_PROXY || '';
+  const httpsProxy = process.env.https_proxy || process.env.HTTPS_PROXY || httpProxy;
+  const noProxy = process.env.no_proxy || process.env.NO_PROXY || '';
+  const proxyUrl = target.protocol === 'https:' ? httpsProxy : httpProxy;
+  if (!proxyUrl) return { dispatcher: undefined, proxyHost: undefined };
+  for (const configuredProxy of [httpProxy, httpsProxy]) {
+    if (!configuredProxy) continue;
+    const parsed = new URL(configuredProxy);
+    if ((parsed.username || parsed.password) && parsed.protocol !== 'https:') {
+      throw new Error('Proxy URLs containing credentials must use HTTPS to protect proxy authentication.');
+    }
+  }
+  const proxyHost = new URL(proxyUrl).hostname.replace(/^\[|\]$/g, '');
+  // The agent honours NO_PROXY and is scoped to this one provider request.
+  // Unrelated fetches keep their normal dispatcher. A direct NO_PROXY request
+  // still resolves its destination under the provider DNS guard.
+  const signature = [process.env.http_proxy, process.env.HTTP_PROXY, process.env.https_proxy,
+    process.env.HTTPS_PROXY, process.env.no_proxy, process.env.NO_PROXY].join('\0');
+  // Existing installations can keep direct transport without installing undici.
+  // Resolve the optional transport only after both the trust flag and proxy URL.
+  const { EnvHttpProxyAgent } = await import('undici').catch((cause) => {
+    throw new Error('Trusted proxy egress requires undici; run npm install in the career-ops directory, then retry.', { cause });
+  });
+  if (signature !== proxySignature) {
+    proxyAgent = new EnvHttpProxyAgent({ httpProxy, httpsProxy, noProxy });
+    proxySignature = signature;
+  }
+  return { dispatcher: proxyAgent, proxyHost };
+}
 
 /**
  * Run a fetch under an `AbortController` timeout, inside the provider-fetch
@@ -38,6 +74,9 @@ const DEFAULT_TIMEOUT_MS = 10_000;
  * @returns {Promise<any>}
  */
 async function fetchWithTimeout(url, opts = {}, consume) {
+  const targetHost = new URL(url).hostname.replace(/^\[|\]$/g, '');
+  const { dispatcher, proxyHost } = await proxyFor(url);
+  if (dispatcher && isIP(targetHost) && isBlockedAddress(targetHost)) throw blockedAddressError(targetHost, targetHost);
   // Mark this request as provider traffic for the whole of its async life, so
   // the patched dns.lookup validates the addresses it resolves (#3096). The
   // guard is scoped rather than global because _dns-cache.mjs patches
@@ -48,7 +87,8 @@ async function fetchWithTimeout(url, opts = {}, consume) {
   // starts it: the DNS lookup happens inside connect, well after the
   // synchronous part of fetch() has returned, and the context has to still be
   // entered when it does.
-  return providerFetchContext.run({ url: String(url) }, () => fetchInContext(url, opts, consume));
+  return providerFetchContext.run({ url: String(url), targetHost, proxyHost },
+    () => fetchInContext(url, opts, consume, dispatcher));
 }
 
 // redirect defaults to 'error': a provider fetch must never follow a 3xx, or a
@@ -59,9 +99,10 @@ async function fetchWithTimeout(url, opts = {}, consume) {
  * @param {string} url
  * @param {FetchOptions} [opts]
  * @param {(res: Response) => Promise<any>} consume
+ * @param {import('undici').Dispatcher} [dispatcher]
  * @returns {Promise<any>}
  */
-async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'error', onResponse } = {}, consume) {
+async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'error', onResponse } = {}, consume, dispatcher) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -78,13 +119,23 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
     // rather than a transport error. curl on the same URL returns the full
     // ~900KB. Callers can still override via `headers`.
     if (!requestHeaders.has('accept-encoding')) requestHeaders.set('accept-encoding', 'gzip, deflate, br');
-    const res = await fetch(url, {
-      method,
-      headers: requestHeaders,
-      body,
-      redirect,
-      signal: controller.signal,
-    });
+    let res;
+    try {
+      res = await fetch(url, {
+        method,
+        headers: requestHeaders,
+        body,
+        redirect,
+        signal: controller.signal,
+        dispatcher,
+      });
+    } catch (err) {
+      if (!dispatcher && ['ENOTFOUND', 'EAI_AGAIN'].includes(err?.cause?.code)
+        && (process.env.https_proxy || process.env.HTTPS_PROXY || process.env.http_proxy || process.env.HTTP_PROXY)) {
+        err.message += ' (proxy variables are set but provider requests use direct fetch; set CAREER_OPS_TRUST_PROXY_EGRESS=1 only if your proxy blocks private destination addresses)';
+      }
+      throw err;
+    }
     onResponse?.(res);
     if (!res.ok) {
       const responseText = await res.text().catch(() => '');
