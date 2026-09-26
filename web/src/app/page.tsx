@@ -2,6 +2,7 @@ import { readApplications, readInbox, doctorState } from "@/lib/career-ops";
 import { todaySnapshot } from "@/lib/home/today-snapshot.mjs";
 import { scoreNum } from "@/lib/format";
 import { OnboardingBanner } from "@/components/onboarding-banner";
+import { OnboardingProgress } from "@/components/home/onboarding-progress";
 import { FirstRunHome } from "@/components/home/first-run-home";
 import { TodayDashboard } from "@/components/home/today-dashboard";
 
@@ -21,6 +22,11 @@ export default function Home() {
   return (
     <>
       {onboardingNeeded && <OnboardingBanner />}
+      {/* The growing-profile panel stays until every prerequisite AND every
+          personalization section is theirs — it renders nothing once complete. */}
+      <div className="mx-auto max-w-5xl px-6 pt-6">
+        <OnboardingProgress />
+      </div>
       <TodayDashboard applications={applications} inbox={inbox} inBetween={phase === "in-between"} />
     </>
   );
