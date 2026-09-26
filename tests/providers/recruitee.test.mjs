@@ -160,6 +160,51 @@ try {
     fail(`rows 1-2 = ${JSON.stringify(descOffers.slice(1))}`);
   }
 
+  // ── Demo-tenant filtering (#4190) ──────────────────────────────────────────
+  // Recruitee itself stamps "(Sample)" on its own seeded posting — captured
+  // live, byte-identical, from two unrelated tenants (adecco, accenture).
+  const demoOffers = parseRecruiteeResponse(
+    {
+      offers: [
+        { title: 'Senior Marketer (Sample)', careers_url: 'https://exampleco.recruitee.com/o/sample' },
+        { title: 'senior marketer (sample)', careers_url: 'https://exampleco.recruitee.com/o/lowercase' },
+        { title: 'Real Backend Engineer', careers_url: 'https://exampleco.recruitee.com/o/real' },
+      ],
+    },
+    'ExampleCo',
+  );
+  if (demoOffers.length === 1 && demoOffers[0].title === 'Real Backend Engineer') {
+    pass('parseRecruiteeResponse drops any posting whose title carries the "(Sample)" marker, case-insensitively (#4190)');
+  } else {
+    fail(`parseRecruiteeResponse demo-filter kept ${demoOffers.length} offers: ${JSON.stringify(demoOffers.map(o => o.title))}`);
+  }
+
+  // Negative control: a real title merely containing the word "sample"
+  // without parentheses (e.g. a QA/sample-testing role) must survive — the
+  // marker is specifically the parenthesized "(Sample)" tag, not the word.
+  const realSampleWord = parseRecruiteeResponse(
+    { offers: [{ title: 'Sample Preparation Technician', careers_url: 'https://acme.recruitee.com/o/1' }] },
+    'Acme',
+  );
+  if (realSampleWord.length === 1) {
+    pass('parseRecruiteeResponse keeps a real title containing "sample" without the "(Sample)" tag');
+  } else {
+    fail('parseRecruiteeResponse should only match the parenthesized "(Sample)" marker, not the bare word');
+  }
+
+  // A tenant whose ONLY posting is the seeded sample must resolve as empty —
+  // this is what makes discover-ats.mjs's existing "empty board" handling
+  // apply automatically, with no changes needed there.
+  const onlySample = parseRecruiteeResponse(
+    { offers: [{ title: 'Senior Marketer (Sample)', careers_url: 'https://deadtenant.recruitee.com/o/sample' }] },
+    'Dead Tenant',
+  );
+  if (onlySample.length === 0) {
+    pass('a tenant serving only the seeded sample posting parses to zero jobs (resolves as empty upstream)');
+  } else {
+    fail('a sample-only tenant should parse to zero jobs');
+  }
+
 } catch (e) {
   fail(`recruitee provider tests crashed: ${e.message}`);
 }

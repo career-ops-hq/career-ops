@@ -57,6 +57,25 @@ export default {
   },
 };
 
+// Recruitee serves a shared demo/trial-account posting for tenants that
+// never launched real hiring — the API still answers 200 with well-formed
+// job data (#4190). Verified live against 2 unrelated tenants (adecco,
+// accenture): both return the identical title "Senior Marketer (Sample)"
+// with the identical description text, byte-for-byte. Recruitee itself
+// stamps the "(Sample)" marker on the title, so this is the platform's own
+// label for seeded content, not a heuristic guess — a real employer would
+// not title a real opening "(Sample)". Known gap, left uncaught: a demo
+// tenant can carry OTHER leftover postings with no "(Sample)" tag (observed:
+// personio's "API Job - Berlin - Musterstr 1, 10111", accenture's generic
+// "sales executive") — those have no reliable platform-provided marker and
+// are not addressed here.
+const RECRUITEE_SAMPLE_TITLE_RE = /\(sample\)/i;
+
+function isRecruiteeSamplePosting(j) {
+  const title = typeof j?.title === 'string' ? j.title : '';
+  return RECRUITEE_SAMPLE_TITLE_RE.test(title);
+}
+
 /**
  * Parse a Recruitee /api/offers/ response. Exported for unit tests.
  *
@@ -77,6 +96,9 @@ export default {
  *   for free (same request — verified against a live board), so it is
  *   stripped to plain text here and feeds scan.mjs's content_filter /
  *   visa_filter. Omitted when the offer carries no usable body.
+ * - a posting Recruitee itself marks "(Sample)" in the title is dropped
+ *   entirely (see isRecruiteeSamplePosting, #4190), so a tenant serving only
+ *   its seeded sample posting resolves as empty rather than as a live board.
  *
  * @param {any} json
  * @param {string} companyName
@@ -85,7 +107,7 @@ export default {
 export function parseRecruiteeResponse(json, companyName) {
   const offers = json?.offers;
   if (!Array.isArray(offers)) return [];
-  return offers.map(j => {
+  return offers.filter(j => !isRecruiteeSamplePosting(j)).map(j => {
     const city = j.city || '';
     const country = j.country || '';
     const remote = j.remote ? 'Remote' : '';

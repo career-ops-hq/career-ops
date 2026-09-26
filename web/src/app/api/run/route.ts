@@ -16,7 +16,9 @@ import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
 import { fencingReport } from "@/lib/cli-fencing.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
+import { resolveCvTemplate } from "@/lib/core/cv-template.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
+import { createRunFinalizer } from "@/lib/run-finalizer.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -113,7 +115,14 @@ export async function POST(req: Request) {
     kind === "evaluate"
       ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
       : undefined;
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, lang });
+  // Which CV template the worker fills. Resolved HERE, for the same reason `lang`
+  // is: the worker has no Bash (#2172), so it cannot run cv-templates.mjs and the
+  // prompt used to name the base template outright, silently ignoring cv.template
+  // (#4034). Only pdf fills a template, so nothing else pays for the lookup.
+  // The root is passed, not re-derived: a relative CAREER_OPS_PROFILE resolves
+  // against it, and `process.cwd()` here is `<core>/web` (see cv-template.mjs).
+  const cvTemplate = kind === "pdf" ? await resolveCvTemplate(careerOpsRoot()) : undefined;
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, lang, cvTemplate });
 
   const isClaude = cliId === "claude";
   // Which tools each kind gets, and the whole claude argv, live in
@@ -201,13 +210,11 @@ export async function POST(req: Request) {
   // until that work actually settles, instead of releasing the tracker-delete
   // guard while mark-pdf-ready.mjs is still actively writing applications.md.
   let pdfRenderPromise: Promise<void> | null = null;
-  let writeTokenReleased = false;
-  const releaseWriteTokenOnce = () => {
-    if (writeToken !== null && !writeTokenReleased) {
-      writeTokenReleased = true;
-      releaseTrackerWrite(writeToken);
-    }
-  };
+  // Cancellation only requests termination. Keep the guard until the child
+  // actually closes and any render/mark work has finished.
+  const finishRun = createRunFinalizer(child, () => {
+    if (writeToken !== null) releaseTrackerWrite(writeToken);
+  });
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let buf = "";
@@ -298,11 +305,12 @@ export async function POST(req: Request) {
       // Unknown event types are ignored by the client's switch, so old tabs are safe.
       heartbeat = setInterval(() => send({ type: "keepalive" }), 10_000);
       const close = () => {
+        // Resource cleanup is independent of whether the client can still read.
+        finishRun();
         if (!closed) {
           closed = true;
           if (heartbeat) clearInterval(heartbeat);
           if (killer) clearTimeout(killer);
-          releaseWriteTokenOnce();
           try { controller.close(); } catch { /* */ }
         }
       };
@@ -436,12 +444,10 @@ export async function POST(req: Request) {
       child.on("close", (code) => {
         // A trailing line with no newline would otherwise never be tested.
         if (stderrBuf) { flagStderrLine(stderrBuf); stderrBuf = ""; }
-        // A client disconnect can fire cancel() (which kills `child`) before
-        // this event finally arrives — killing a process doesn't make its
-        // 'close' event disappear, just delays it. Without this guard a pdf
-        // run could still start a brand-new render (and re-touch the tracker)
-        // after the stream — and its writeToken guard — is already gone.
-        if (closed) return;
+        // A disconnected client must not start a new PDF render. Still finish
+        // the run here: an enqueue failure closes the transport without calling
+        // cancel(), and must not leave the tracker guard held forever.
+        if (closed) return close();
         // A timeout is the ROOT cause behind every "no report / not clean"
         // symptom the gates below test, so classify it FIRST, for any kind.
         // Otherwise a run we cut off at the time limit reads as "the CLI couldn't
@@ -549,9 +555,9 @@ export async function POST(req: Request) {
         // Render/mark keeps running after this client disconnects — wait for
         // it to settle before releasing the guard, so a concurrent tracker
         // delete can't race mark-pdf-ready.mjs's still-in-flight write.
-        pdfRenderPromise.finally(releaseWriteTokenOnce);
+        pdfRenderPromise.finally(finishRun);
       } else {
-        releaseWriteTokenOnce();
+        finishRun();
       }
     },
   });

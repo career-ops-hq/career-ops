@@ -298,6 +298,7 @@ const SYSTEM_PATHS = [
 
   'reserve-report-num.mjs',
   'scan.mjs',
+  'migrate-scan-runs.mjs',
   'pipeline-lock.mjs',
   'portal-health-lock.mjs',
   'classify-tier.mjs',
@@ -331,6 +332,7 @@ const SYSTEM_PATHS = [
   'detect-reposts.mjs',
   'rank-pipeline.mjs',
   'discover-ats.mjs',
+  'discover-new-companies.mjs',
   'check-table-freshness.mjs',
   'check-jd-archive.mjs',
   'fingerprint-core.mjs',
@@ -365,6 +367,7 @@ const SYSTEM_PATHS = [
   'tracker-writer-lock-tests.mjs',
   'agent-inbox-tests.mjs',
   'validate-portals.mjs',
+  'validate-profile.mjs',
   'verify-portals.mjs',
   'audit-portals.mjs',
   'fix-slugs.mjs',
@@ -1238,6 +1241,46 @@ export function systemTreeDiffers(systemPaths, upstreamRef = 'FETCH_HEAD', ctx =
 }
 
 /**
+ * Pathspecs for systemTreeDiffers()'s drift diff, with the CLI skill
+ * entrypoints excluded (#3149, second cause).
+ *
+ * Upstream ships those entrypoints (`.claude/skills/career-ops/SKILL.md` and
+ * its siblings) as symlinks (git mode 120000) pointing at
+ * `.agents/skills/career-ops/SKILL.md`. On a filesystem without symlink
+ * support (core.symlinks=false — mostly Windows), apply() materializes a
+ * REAL copy of that file's content in their place and commits it (logged as
+ * "Materialized N skill entrypoint(s)..."), because the install genuinely
+ * needs a real file there — see ensureSkillEntrypoints(). That materialized
+ * blob's mode and content can then never equal upstream's symlink blob
+ * again: the two are, by design, different git objects forever after. A
+ * plain content diff over SYSTEM_PATHS therefore reported drift on every
+ * such install, on every check, permanently — the false positive never
+ * clears, unlike ordinary drift which a re-`apply()` resolves.
+ *
+ * Excluding these paths from the comparison hides nothing: the materialized
+ * content is a byte-for-byte copy of `.agents/skills/career-ops/SKILL.md`,
+ * which SYSTEM_PATHS already covers via the `.agents/` entry, so a genuine
+ * upstream change to the skill document still surfaces there. A change to
+ * the entrypoint MECHANISM itself (the pointer paths in
+ * scaffolder/bin/skill-entrypoints.mjs) is caught too, via the `scaffolder/`
+ * SYSTEM_PATHS entry.
+ *
+ * Uses git's `:(exclude)` pathspec magic rather than dropping the parent
+ * directory entries (e.g. `.claude/skills/`) wholesale, so a real change to
+ * some OTHER file added later under one of those directories still reports
+ * as drift.
+ *
+ * @param {string[]} systemPaths - SYSTEM_PATHS (or a test's substitute).
+ * @param {{path: string}[]} skillEntrypoints - SKILL_ENTRYPOINTS-shaped list.
+ * @returns {string[]} systemPaths with one `:(exclude)<path>` pathspec
+ *   appended per entrypoint.
+ */
+export function driftPathspecExcludingSkillEntrypoints(systemPaths, skillEntrypoints) {
+  const excludes = (skillEntrypoints || []).map((entry) => `:(exclude)${entry.path}`);
+  return [...systemPaths, ...excludes];
+}
+
+/**
  * System-layer files this install changed locally that the update is about to
  * overwrite (#2337).
  *
@@ -1382,39 +1425,35 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
  * preserved by definition — the match IS the file's only content, so no
  * upstream lookup can add information. Only a directory `path` needs the
  * upstream ls-tree lookup, to confirm EVERY file it would check out is
- * preserved; an unreadable lookup degrades to "not fully preserved" so the
- * real checkout runs and reports its own diagnostics, same contract as
- * `locallyModifiedSystemFiles`.
+ * preserved.
  *
- * Two limits are deliberate, both raised in review of #3781:
+ * Tri-state, because for a directory the ls-tree lookup can fail and `false`
+ * would then mean two different things (#3824):
  *
- * 1. The single-file shortcut diverges from the pre-extraction inline check
- *    for a preserved file ABSENT from FETCH_HEAD. That check fell through to
- *    the real checkout, which failed and put the path in apply()'s "Skipped
- *    N path(s) absent upstream" summary; this returns true and skips it
- *    silently. Unreachable while preserved paths come from
- *    `locallyModifiedSystemFiles`, which only reports files that exist
- *    upstream (it gates each candidate on `cat-file -e <ref>:<file>`), so
- *    nothing today can construct the case — but it is a real divergence, not
- *    a behaviour-preserving one, and a future caller sourcing preservedPaths
- *    some other way would hit it.
+ *   - `true`    — nothing is left to check out; apply() skips the entry.
+ *   - `false`   — real upstream content is not preserved; apply() checks it
+ *                 out and any error it hits is a genuine failure.
+ *   - `'unknown'` — the directory's upstream content could not be enumerated
+ *                 (unreadable ls-tree). apply() still checks it out, but a
+ *                 "did not match any file(s)" cancel-out error is then benign:
+ *                 the directory may in fact have been fully preserved, and
+ *                 that is not distinguishable here from a real failure without
+ *                 matching git's stderr at the call site.
  *
- * 2. The directory branch's `catch → false` does NOT close the cancel-out
- *    abort for directories. A throwing ls-tree still falls through to
- *    `git checkout FETCH_HEAD -- modes/ :(exclude)modes/pdf.md`, which
- *    aborts the update when the directory happens to be fully preserved.
- *    That is exactly the pre-extraction behaviour, carried over unchanged —
- *    this function makes the check testable and drops a redundant lookup for
- *    the single-file case; it does not fix the directory case. Closing it
- *    needs a tri-state result whose "unknown" makes the checkout's "did not
- *    match any file(s)" benign at the call site; tracked separately rather
- *    than folded in here, since that means matching on git's stderr text.
+ * One limit is deliberate, raised in review of #3781: the single-file
+ * shortcut diverges from the pre-extraction inline check for a preserved file
+ * ABSENT from FETCH_HEAD (that check fell through to the real checkout and
+ * listed the path in apply()'s "Skipped N path(s) absent upstream" summary;
+ * this returns true and skips it silently). Unreachable while preserved paths
+ * come from `locallyModifiedSystemFiles`, which only reports files that exist
+ * upstream, but a future caller sourcing preservedPaths another way would hit
+ * it.
  *
  * @param {string} path - a SYSTEM_PATHS entry, file or `dir/`-suffixed directory.
  * @param {string[]} preservedPaths - files this run is keeping local content for.
  * @param {Set<string>} preservedSet - the same paths, as a Set, for lookup.
  * @param {{git?: Function}} [ctx] - injection point for tests; defaults to gitQuiet.
- * @returns {boolean}
+ * @returns {boolean | 'unknown'}
  */
 export function pathFullyPreserved(path, preservedPaths, preservedSet, ctx = {}) {
   if (preservedSet.size === 0) return false;
@@ -1428,9 +1467,75 @@ export function pathFullyPreserved(path, preservedPaths, preservedSet, ctx = {})
     upstreamFiles = runGitQuiet('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', path)
       .split('\n').map((f) => f.trim()).filter(Boolean);
   } catch {
-    return false;
+    // Can't enumerate the directory's upstream content: it might be fully
+    // preserved (skip) or not (check out). The call site checks it out and
+    // treats a cancel-out error as benign — see checkoutErrorIsBenign.
+    return 'unknown';
   }
   return upstreamFiles.length > 0 && upstreamFiles.every((f) => preservedSet.has(f));
+}
+
+// git's pathspec cancel-out message. `git checkout <ref> -- <dir>/ :(exclude)…`
+// prints `error: pathspec '<dir>/' did not match any file(s) known to git` when
+// the exclusions leave nothing to check out. Match loosely: the wording has
+// been stable for years but the quoting and the "known to git" tail vary.
+const PATHSPEC_CANCELLED_RE = /did not match any file/i;
+
+/**
+ * Whether a checkout error thrown inside apply()'s per-path loop is a benign
+ * skip rather than a real failure that must abort the update.
+ *
+ * Two benign shapes:
+ *   - `absentUpstream` — the path is genuinely gone from FETCH_HEAD (a stale
+ *     SYSTEM_PATHS entry such as an old `.gemini/commands/` directory).
+ *   - a `pathFullyPreserved` result of `'unknown'` paired with git's pathspec
+ *     cancel-out message — the directory's upstream content could not be
+ *     enumerated up front, the exclusion pathspecs cancelled the whole
+ *     checkout out, and nothing was left to install (#3824).
+ *
+ * Anything else — timeouts, permission errors, repo corruption — is a real
+ * failure and is rethrown by the caller.
+ *
+ * @param {unknown} err - the error execFileSync threw.
+ * @param {{absentUpstream: boolean, preservedState: boolean | 'unknown'}} opts
+ * @returns {boolean}
+ */
+export function checkoutErrorIsBenign(err, { absentUpstream, preservedState }) {
+  // absentUpstream/preservedState prove WHY a checkout of this path would
+  // legitimately have nothing to check out — they say nothing about whether
+  // THIS error is that. Requiring git's own pathspec-cancellation message
+  // first (CodeRabbit, #3955) means an absent path with an unrelated real
+  // failure — a corrupted index, a permissions error, a timeout — still
+  // rethrows instead of being swallowed just because the path happens to be
+  // gone from FETCH_HEAD too.
+  const text = `${(err && err.stderr) || ''}\n${(err && err.message) || ''}`;
+  if (!PATHSPEC_CANCELLED_RE.test(text)) return false;
+  return absentUpstream || preservedState === 'unknown';
+}
+
+/**
+ * Whether `spec` is absent from FETCH_HEAD's tree — the answer that makes a
+ * checkout failure in apply()'s per-path loop a benign skip rather than a real
+ * error to rethrow (#1998, #3824).
+ *
+ * Only a SUCCESSFUL empty `git ls-tree --name-only FETCH_HEAD -- <spec>` counts:
+ * ls-tree prints the entry when the path is in the tree and nothing when it is
+ * not, both at exit 0. A THROW (bad ref, unreadable repo, timeout) is the probe
+ * failing to run, not an answer — return false so the checkout error rethrows
+ * instead of being masked as a skip. Extracted from apply()'s catch so the
+ * throwing-probe path is testable without running apply() (#3955 review).
+ *
+ * @param {string} spec - path to probe; a `dir/` entry is passed without its trailing slash.
+ * @param {{git?: Function}} [ctx] - injection point for tests; defaults to gitQuiet.
+ * @returns {boolean}
+ */
+export function probeAbsentUpstream(spec, ctx = {}) {
+  const runGitQuiet = ctx.git || gitQuiet;
+  try {
+    return runGitQuiet('ls-tree', '--name-only', 'FETCH_HEAD', '--', spec).trim() === '';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -2239,7 +2344,16 @@ async function checkMainChannel(local, marker, runCurlGet) {
   if (localCommit && remoteCommit && localCommit !== remoteCommit) {
     try {
       gitQuiet('fetch', '--quiet', CANONICAL_REPO, 'main');
-      systemTreeDrift = systemTreeDiffers(SYSTEM_PATHS, 'FETCH_HEAD');
+      // Lazy import: keep update-system.mjs self-loading (see apply()'s note
+      // on the same import). Exclude the materialized CLI skill entrypoints
+      // from the drift diff — see driftPathspecExcludingSkillEntrypoints()
+      // for why (#3149, second cause: permanent false drift on a
+      // core.symlinks=false install).
+      const { SKILL_ENTRYPOINTS } = await import('./scaffolder/bin/skill-entrypoints.mjs');
+      systemTreeDrift = systemTreeDiffers(
+        driftPathspecExcludingSkillEntrypoints(SYSTEM_PATHS, SKILL_ENTRYPOINTS),
+        'FETCH_HEAD',
+      );
     } catch {
       systemTreeDrift = true;
     }
@@ -2697,9 +2811,12 @@ async function apply() {
       // `git checkout <ref> -- <path> :(exclude)<path>` errors with "did not
       // match any file(s)" when the exclusions cancel the whole pathspec — and
       // that error is indistinguishable from a genuine failure at the catch
-      // below, so it would abort the entire update. Skip the entry instead when
-      // nothing would be left to check out (see pathFullyPreserved).
-      if (pathFullyPreserved(path, preservedPaths, preservedSet)) continue;
+      // below, so it would abort the entire update. Skip the entry outright
+      // when nothing would be left to check out; when the directory's upstream
+      // content could not be enumerated ('unknown'), still check it out but let
+      // the catch treat a cancel-out error as benign (#3824).
+      const preservedState = pathFullyPreserved(path, preservedPaths, preservedSet);
+      if (preservedState === true) continue;
       try {
         // stderr is piped rather than inherited here. A path absent upstream is
         // an EXPECTED skip (a stale manifest entry such as `.gemini/commands/`),
@@ -2715,11 +2832,13 @@ async function apply() {
         // reported them as skips too — letting a partial update reach the
         // success banner (#1998). Confirm the path is actually absent from
         // FETCH_HEAD before treating the failure as benign; otherwise rethrow.
+        // A fully-preserved directory whose upstream content we could not
+        // enumerate up front ('unknown') is the second benign shape: the
+        // exclusions cancelled the checkout out and git said "did not match
+        // any file(s)" (#3824).
         const spec = path.endsWith('/') ? path.slice(0, -1) : path;
-        let absentUpstream = false;
-        try { gitQuiet('cat-file', '-e', `FETCH_HEAD:${spec}`); }
-        catch { absentUpstream = true; }
-        if (!absentUpstream) throw err;
+        const absentUpstream = probeAbsentUpstream(spec);
+        if (!checkoutErrorIsBenign(err, { absentUpstream, preservedState })) throw err;
         skippedPaths.push(path);
       }
     }

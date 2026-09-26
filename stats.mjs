@@ -362,10 +362,12 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
       if (!line) continue;
       const parts = line.split('\t');
       if (parts.length >= 3) {
-        healthRecords.push({ company: parts[1], status: parts[2] });
+        healthRecords.push({ ts: Date.parse(parts[0]), company: parts[1], status: parts[2] });
       }
     }
     const streaks = new Map();
+    const lastProbed = new Map();
+    let newestProbe = 0;
     for (const r of healthRecords) {
       // Mirrors scan.mjs computeConsecutiveFailures: healthy statuses reset,
       // every other status (slug_gone/network/auth/server/unknown) counts.
@@ -374,12 +376,31 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
       } else {
         streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
       }
+      if (Number.isFinite(r.ts)) {
+        if (r.ts > (lastProbed.get(r.company) || 0)) lastProbed.set(r.company, r.ts);
+        if (r.ts > newestProbe) newestProbe = r.ts;
+      }
     }
+    // A failure streak is evidence of a dead portal only while the entry is
+    // still being PROBED. An entry that stops resolving to a provider writes
+    // no further health rows — scan.mjs skips it at resolveEntries(), before
+    // the fetch loop that records health — so its final streak would stand as
+    // a permanent 🚨 that no fix can clear. That is how switching a broken
+    // board to scan_method: websearch (the documented remedy) leaves the
+    // warning lit forever, and a warning that cannot clear trains the reader
+    // to ignore the whole line.
+    //
+    // Staleness is measured against the newest row in this file rather than
+    // the wall clock, so a checkout whose scanner has been idle for months
+    // still reports its last known state instead of silently going green.
+    const staleMs = (cfg.portal_health_stale_days || 14) * 86400000;
     const threshold = cfg.portal_health_threshold || 3;
     for (const [company, streak] of streaks.entries()) {
-      if (streak >= threshold && configuredNames.has(String(company).toLowerCase())) {
-        persistentlyDead++;
-      }
+      if (streak < threshold) continue;
+      if (!configuredNames.has(String(company).toLowerCase())) continue;
+      const seen = lastProbed.get(company);
+      if (newestProbe && seen && newestProbe - seen > staleMs) continue;
+      persistentlyDead++;
     }
   }
 

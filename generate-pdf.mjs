@@ -43,6 +43,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { stripEmptyRenderedSections } from './cv-sections-core.mjs';
 import { PAGE_CSS_SIZE, PAGE_FORMATS, normalizePageFormat, resolvePageFormat } from './lib/page-format.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -304,6 +305,43 @@ const SECTION_ALIASES = new Map([
   ['nagrody i wyróżnienia', 'awards'],
   ['umiejętności', 'skills'],
   ['umiejętności techniczne', 'skills'],
+  // Spanish — the same failure again: with no entries here, a Spanish CV
+  // rendered in the documented modes/pdf.md order (Experiencia before Formación)
+  // was rejected against a cv.md listing Formación first, and --allow-reorder was
+  // the only way through. The vocabulary is what generated Spanish CVs render
+  // (Perfil Profesional, Competencias Clave, Experiencia Profesional, Formación,
+  // Certificaciones, Habilidades) plus each section's everyday synonyms. Keys are
+  // folded through foldDiacritics below, so accented and unaccented spellings
+  // both resolve.
+  ['perfil', 'summary'],
+  ['perfil profesional', 'summary'],
+  ['resumen', 'summary'],
+  ['resumen profesional', 'summary'],
+  ['competencias', 'competencies'],
+  ['competencias clave', 'competencies'],
+  ['competencias principales', 'competencies'],
+  ['experiencia', 'experience'],
+  ['experiencia profesional', 'experience'],
+  ['experiencia laboral', 'experience'],
+  ['trayectoria profesional', 'experience'],
+  ['proyectos', 'projects'],
+  ['proyectos destacados', 'projects'],
+  ['proyectos personales', 'projects'],
+  ['proyectos y laboratorios', 'projects'],
+  ['formación', 'education'],
+  ['formación académica', 'education'],
+  ['educación', 'education'],
+  ['estudios', 'education'],
+  ['certificaciones', 'certifications'],
+  ['certificados', 'certifications'],
+  ['premios', 'awards'],
+  ['reconocimientos', 'awards'],
+  ['premios y reconocimientos', 'awards'],
+  ['habilidades', 'skills'],
+  ['habilidades técnicas', 'skills'],
+  ['conocimientos técnicos', 'skills'],
+  ['herramientas e idiomas', 'skills'],
+  ['intereses', 'interests'],
   // Chinese — the same failure the Polish block above fixes, for the two Chinese
   // markets this repo ships modes for: Traditional (modes/zh-TW) and Simplified
   // (modes/zh), rendered through templates/cv-template.zh-minimal.html. Both
@@ -1344,6 +1382,15 @@ async function generatePDF() {
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
+  // Drop the optional sections that came in as a bare header — a title with
+  // nothing under it (#3986). The builders already strip these from the payload
+  // side, but neither builder is on every path here: the web pdf flow has the
+  // agent emit finished HTML, which reaches this script with the empty wrappers
+  // still in place. Deciding from the rendered content covers both, and running
+  // it before the reorder and the guard means they judge the document that will
+  // actually be printed. A CV with nothing empty comes through unchanged.
+  html = stripEmptyRenderedSections(html);
+
   // Apply the user's declared section order (config/profile.yml `cv.sections`)
   // before the guard runs, so the guard judges the document that will be
   // printed. Anchored to workspaceRoot, NOT __dirname: readStyleTokens() reads
@@ -1472,11 +1519,11 @@ async function runBatchFromManifest(manifestPath, globals) {
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
-  // One profile governs the whole batch, so the declared order is read once
-  // rather than per entry. Anchored to workspaceRoot for the same reason the
-  // single render is: it is the anchor readStyleTokens() and the cv.md read
-  // already use, so one profile.yml supplies every setting.
-  const cvSectionOrder = readCvSectionOrder(resolve(workspaceRoot, 'config', 'profile.yml'));
+  // Read one workspace profile for the batch. The working directory must not
+  // choose a different theme from the single-document render.
+  const profilePath = resolve(workspaceRoot, 'config', 'profile.yml');
+  const cvSectionOrder = readCvSectionOrder(profilePath);
+  const styleTokens = readStyleTokens(profilePath);
 
   for (let i = 0; i < manifest.length; i++) {
     const spec = manifest[i];
@@ -1513,9 +1560,11 @@ async function runBatchFromManifest(manifestPath, globals) {
       }
 
       let html = await readFile(entryInput, 'utf-8');
-      // Same order as the single render: reorder first so the guard judges the
-      // document that will actually be printed. Without this the batch path
-      // rendered N CVs with cv.sections silently inert.
+      // Same order as the single render: strip the bare-header sections, then
+      // reorder, so the guard judges the document that will actually be
+      // printed. Without this the batch path rendered N CVs with cv.sections
+      // silently inert.
+      html = stripEmptyRenderedSections(html);
       html = reorderCvSections(html, cvSectionOrder);
       validateCvSectionOrder(html, cvMarkdown, { allowReorder: globals.allowReorder });
       html = normalizeTextForATS(html).html;
@@ -1530,6 +1579,7 @@ async function runBatchFromManifest(manifestPath, globals) {
         inputPath: entryInput,
         maxPages: globals.maxPages,
         strictPages: globals.strictPages,
+        styleTokens,
       });
     } catch (err) {
       console.error(`❌ Skipping batch entry ${i} (${spec?.output ?? '?'}): ${err.message}`);
@@ -1731,7 +1781,7 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
   // properties so the templates' var(--x, <default>) reads pick them up (#1837).
   // No `style:` block → no tokens → byte-identical output. Both the CV path and
   // the cover-letter path flow through here, so both are themed from one place.
-  const styleTokens = opts.styleTokens ?? readStyleTokens();
+  const styleTokens = opts.styleTokens ?? readStyleTokens(resolve(outputRoot, 'config', 'profile.yml'));
   html = injectThemeStyle(html, styleTokens);
 
   html = injectPrintPageCss(html, format);
