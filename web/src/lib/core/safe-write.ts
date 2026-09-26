@@ -58,19 +58,19 @@ export function atomicWrite(file: string, content: string): void {
 
 /** Snapshot the file (if it has content) to a timestamped .bak before a write. */
 export function backup(file: string): string | null {
-  let cur: string;
+  let cur: Buffer;
   try {
-    cur = fs.readFileSync(file, "utf8");
+    cur = fs.readFileSync(file);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw err;
   }
-  if (!cur.trim()) return null;
+  if (!cur.toString("utf8").trim()) return null;
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const bak = `${file}.bak-${ts}`;
   // Once there is prior content, a failed backup must stop the replacement.
   // Even ENOENT here means backup creation failed, not that no source existed.
-  fs.writeFileSync(bak, cur, "utf8");
+  fs.writeFileSync(bak, cur);
   return bak;
 }
 

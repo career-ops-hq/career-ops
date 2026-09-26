@@ -56,10 +56,10 @@ test("an empty source keeps the existing no-backup behavior", (t) => {
 });
 
 test("successful replacement backs up the exact original bytes", (t) => {
-  const original = "# Fixture\r\n\r\nOriginal text.\n";
+  const original = Buffer.from("# Fixture\r\n\r\nOriginal \xfftext.\n", "latin1");
   const { file } = fixture(t, original);
   const backup = atomicWriteWithBackup(file, "REPLACED");
   assert.ok(backup);
-  assert.equal(fs.readFileSync(backup, "utf8"), original);
+  assert.deepEqual(fs.readFileSync(backup), original);
   assert.equal(fs.readFileSync(file, "utf8"), "REPLACED");
 });
