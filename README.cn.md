@@ -168,7 +168,7 @@ npx @santifer/career-ops init
 
 > 💡 `npx` 随 [Node.js](https://nodejs.org) 一起提供：它只运行一次安装程序，
 > 不会全局安装任何东西。还没有 Node？先安装它。
-> （已经在用 Claude Code / Gemini / Codex CLI？那你已经有了。）
+> （已经在用 Claude Code / Codex CLI？那你已经有了。）
 
 这会把最新版本克隆到 `./career-ops` 并安装依赖。然后：
 

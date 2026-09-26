@@ -168,7 +168,7 @@ npx @santifer/career-ops init
 
 > 💡 `npx` は [Node.js](https://nodejs.org) に同梱されています：グローバルに何もインストールせず、
 > インストーラーを 1 回だけ実行します。Node がまだ？ 先にインストールしてください。
-> （すでに Claude Code / Gemini / Codex の CLI を使っている？ ならもう入っています。）
+> （すでに Claude Code / Codex の CLI を使っている？ ならもう入っています。）
 
 これで最新リリースが `./career-ops` にクローンされ、依存関係がインストールされます。次に：
 
