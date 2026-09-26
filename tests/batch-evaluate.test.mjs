@@ -173,6 +173,25 @@ async function testDeadPostingOutcome() {
         } else { fail(`unsafe scrape fallback: ${JSON.stringify(result)}`); }
       }
     }
+    const loadingBrowser = { newPage: async () => {
+      let reads = 0;
+      return {
+        url: () => 'https://example.com/job', route: async () => {},
+        goto: async () => ({ status: () => 200 }), waitForTimeout: async () => {},
+        evaluate: async () => ++reads === 1 ? 'Loading...' : [], close: async () => {}
+      };
+    } };
+    const loading = await processOffer(loadingBrowser, urlOnly, 6,
+      async () => { throw new Error('loading page must bypass model'); });
+    if (!loading.processed && loading.line === urlOnly) {
+      pass('HTTP 200 loading shell stays pending with the default verifier');
+    } else { fail(`loading shell closed: ${JSON.stringify(loading)}`); }
+    const thin = await processOffer(mockBrowser, urlOnly, 7,
+      async () => '---DEAD_POSTING---',
+      async () => ({ result: 'expired', code: 'insufficient_content' }));
+    if (!thin.processed && thin.line === urlOnly) {
+      pass('model closure marker cannot override insufficient-content evidence');
+    } else { fail('model closed posting without sufficient evidence'); }
     const failedCheck = await processOffer(mockBrowser, urlOnly, 4,
       async () => '---DEAD_POSTING---', async () => { throw new Error('verification unavailable'); });
     if (!failedCheck.processed && failedCheck.line === urlOnly) {

@@ -263,7 +263,7 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
     // Neither model output nor a failed scrape proves closure. Verify the URL
     // independently; active/uncertain results preserve pending work.
     const liveness = await _checkLiveness(browser, url);
-    if (liveness?.result !== 'expired') {
+    if (liveness?.result !== 'expired' || liveness?.code === 'insufficient_content') {
       return { line, processed: false, outcome: 'unconfirmed-dead-posting' };
     }
     const label = match[2] ? `${companyHint} | ${titleHint}` : url;
