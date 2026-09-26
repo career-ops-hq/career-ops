@@ -405,9 +405,7 @@ score_evidence:
   compensation: "{supported | partial | unknown}"
   culture: "{supported | partial | unknown}"
   red_flags: "{supported | partial | unknown}"
-confidence_gaps:
-  - "{decision-relevant fact to verify}"
-# When no verification priorities remain, use confidence_gaps: [] instead.
+confidence_gaps: []
 next_action: "{one concrete next step}"
 work_auth: "{sponsors | not_needed | unstated | no_sponsorship}"
 discard_reasons:
@@ -432,6 +430,7 @@ risk_summary:
 ```
 
 Rules:
+- Populate `confidence_gaps` with up to three non-empty strings naming the verification priorities; the examples show the empty form, `confidence_gaps: []`.
 - Use `[]` for `hard_stops`, `soft_gaps`, `top_strengths`, `discard_reasons`, `requirement_importance`, or `confidence_gaps` when empty.
 - `score` is numeric only, without `/5`.
 - `final_decision` must reflect the full evaluation, not only the CV match.
@@ -498,9 +497,7 @@ score_evidence:
   compensation: "{supported | partial | unknown}"
   culture: "{supported | partial | unknown}"
   red_flags: "{supported | partial | unknown}"
-confidence_gaps:
-  - "{decision-relevant fact to verify}"
-# When no verification priorities remain, use confidence_gaps: [] instead.
+confidence_gaps: []
 next_action: "{one concrete next step}"
 work_auth: "{sponsors | not_needed | unstated | no_sponsorship}"
 discard_reasons:
