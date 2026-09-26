@@ -1007,45 +1007,75 @@ export function buildSalaryFilter(salaryFilter) {
 // merges" rule #2445/#2569 protects was written to prevent.
 const CORPORATE_FORMS = [
   '株式会社', '合同会社', '有限会社',   // Japanese
-  '股份有限公司', '有限公司',           // Chinese (longer form first)
-  '주식회사',                           // Korean
+  '合名会社', '合資会社', '一般社団法人',
+  '股份有限公司',                       // Chinese (longer forms first)
+  '有限责任公司', '有限責任公司',       // no 有限公司 suffix: 责任 sits between
+  '有限公司',
+  '주식회사', '유한회사',               // Korean
 ];
 
-// Split an already normalizeTextKey'd string into [form, remainder], where
-// `form` is the one leading or trailing corporate-form marker found, or null.
+// Split an already normalizeTextKey'd string into [forms, remainder], where
+// `forms` names the corporate-form markers found at its leading and trailing
+// edges, in that order, or null when there are none. Order is kept rather than
+// sorted: 株式会社アカネ有限会社 and 有限会社アカネ株式会社 stay apart, the
+// conservative reading when a name carries two forms.
 // No space anchor: unlike LEGAL_SUFFIXES these forms are frequently written
 // unspaced (株式会社メルカリ), which is exactly the case the \b-based approach
 // cannot reach. The spaced variant (株式会社 メルカリ) already matched before
 // #2570, through the punctuation-to-space key and the containment fallback
-// below; the unspaced one is the gap. At most one strip — a name is not
-// expected to carry two forms — and longer forms are checked first
+// below; the unspaced one is the gap. Longer forms are checked first
 // (股份有限公司 before 有限公司) so a strip cannot leave a dangling 股份 behind.
 //
-// Returning the form rather than just the remainder is what lets companyMatch
+// BOTH edges are inspected, not just the first form list order finds. A name
+// carrying a form at each end (合同会社 アカネ株式会社) is rare, but reading
+// only one of them let the other slip past the different-form check below:
+// the shared 株式会社 was compared, the 合同会社 never was, and containment
+// merged the pair.
+//
+// Returning the forms rather than just the remainder is what lets companyMatch
 // tell "one side omitted the form" from "the two sides carry DIFFERENT forms".
 // A bare remainder cannot express that difference, and collapsing it merges
 // 株式会社アカネ with 合同会社アカネ — a KK and a GK are two different legal
 // entities sharing a trade name, so that is a false merge, the one direction
 // #2445/#2569's "splits, never merges" rule exists to forbid.
 function stripCorporateForm(key) {
-  for (const form of CORPORATE_FORMS) {
-    if (key.startsWith(form)) return [form, key.slice(form.length)];
-    if (key.endsWith(form)) return [form, key.slice(0, -form.length)];
+  const forms = [];
+  let rest = key;
+  const prefix = CORPORATE_FORMS.find((form) => rest.startsWith(form));
+  if (prefix) {
+    forms.push(prefix);
+    rest = rest.slice(prefix.length);
   }
-  return [null, key];
+  const suffix = CORPORATE_FORMS.find((form) => rest.endsWith(form));
+  if (suffix) {
+    forms.push(suffix);
+    rest = rest.slice(0, -suffix.length);
+  }
+  return [forms.length ? forms.join('|') : null, rest];
 }
 
-// Apply the strip to a pair of keys, or decline to. Two DIFFERENT explicit
-// forms are positive evidence of two different entities, the same way a
-// mismatched req number is (#1524), so the raw keys are kept and the pair is
-// left to fail on its own merits. Otherwise strip, falling back to the raw key
-// when the strip empties it (a name that IS just the marker, e.g. "株式会社"
-// alone) so neither the equality check nor the containment fallback is ever
-// handed an empty "no signal" string.
+// Apply the strip to a pair of keys, or return null: a verdict that the pair
+// is NOT the same company, which companyMatch returns before any equality or
+// containment check. Two cases earn it:
+//
+//  - DIFFERENT explicit forms on the two sides are positive evidence of two
+//    different entities, the same way a mismatched req number is (#1524).
+//    Merely declining to strip was not enough: the raw keys still reached the
+//    containment fallback, where 株式会社アカネ is a bounded substring of
+//    合同会社 株式会社アカネ.
+//  - Exactly one side is ONLY a marker ("株式会社" alone). That side carries no
+//    trade name to compare, and falling back to its raw key let it equal
+//    株式会社株式会社 once that was stripped. Two identical bare markers still
+//    compare equal, since both then keep their raw keys.
+//
+// Otherwise strip, falling back to the raw key when the strip empties it, so
+// neither the equality check nor the containment fallback is ever handed an
+// empty "no signal" string.
 function stripFormPair(rawA, rawB) {
-  const [formA, restA] = stripCorporateForm(rawA);
-  const [formB, restB] = stripCorporateForm(rawB);
-  if (formA && formB && formA !== formB) return [rawA, rawB];
+  const [formsA, restA] = stripCorporateForm(rawA);
+  const [formsB, restB] = stripCorporateForm(rawB);
+  if (formsA && formsB && formsA !== formsB) return null;
+  if (Boolean(formsA && !restA) !== Boolean(formsB && !restB)) return null;
   return [restA || rawA, restB || rawB];
 }
 
@@ -1058,18 +1088,26 @@ export function companyMatch(jobCompany, windowCompany) {
   //
   // Corporate-form stripping (#2570) happens right here, before either the
   // equality check or the containment fallback below, so both benefit. See
-  // stripFormPair: it declines to strip when the two sides carry different
-  // forms, so this stays a split, never a merge.
-  const [c1NoSpaces, c2NoSpaces] = stripFormPair(
+  // stripFormPair: it returns null when the forms show two different
+  // entities, and that ends the comparison, so this stays a split, never a
+  // merge. The no-space key reaches every such verdict first in practice (an
+  // exhaustive search over prefix/suffix/separator combinations found no
+  // exception); the spaced key's null check is defensive, and keeps a null
+  // from ever being destructured.
+  const noSpaces = stripFormPair(
     normalizeTextKey(jobCompany),
     normalizeTextKey(windowCompany),
   );
+  if (!noSpaces) return false;
+  const [c1NoSpaces, c2NoSpaces] = noSpaces;
   if (c1NoSpaces && c1NoSpaces === c2NoSpaces) return true;
 
-  const [c1WithSpaces, c2WithSpaces] = stripFormPair(
+  const withSpaces = stripFormPair(
     normalizeTextKey(jobCompany, ' '),
     normalizeTextKey(windowCompany, ' '),
   );
+  if (!withSpaces) return false;
+  const [c1WithSpaces, c2WithSpaces] = withSpaces;
   if (!c1WithSpaces || !c2WithSpaces) return false;
 
   // Containment: a short window name should still match a longer official one
