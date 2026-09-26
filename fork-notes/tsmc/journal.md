@@ -32,6 +32,17 @@ learned. Newest entry on top. Keep the zh-TW twin in sync in the same commit.
 
 ## Entries
 
+### 2026-09-26 — Targeting rules settled
+
+- **Stage:** setup
+- **Done:** The user resolved the compensation open item. The profile now holds an ideal total annual range
+  and a separate monthly-base floor. Because Taiwanese bonuses vary widely, offers are compared on total
+  annual comp, with the guaranteed part reported separately. The older figure in the 104-exported CV is
+  marked outdated.
+- **Changed:** LeetCode-style coding tests went from a −0.5 soft flag to a **hard disqualifier** (免刷題).
+  Only direct evidence disqualifies; indirect hints become a question for the recruiter.
+- **Next:** evaluate the first real TSMC posting by URL.
+
 ### 2026-09-26 — Onboarding complete
 
 - **Stage:** setup
