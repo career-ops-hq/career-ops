@@ -27,7 +27,18 @@ import path from "node:path";
 const WEB_FIELD = {
   num: "n", date: "date", company: "company", via: "via", role: "role", location: "location",
   score: "score", status: "status", pdf: "pdf", report: "report", notes: "notes",
+  // The tracker's Apply Link / Follow-up columns (already in the shared alias
+  // table) were mapped nowhere, so the web read path silently dropped them.
+  applylink: "applyLink", followup: "followUp",
 };
+
+/**
+ * The web field names, in map order — the row shape, exported so a test can
+ * assert the emitter still delivers everything the map can name rather than
+ * checking fields one at a time.
+ * @type {string[]}
+ */
+export const WEB_FIELD_NAMES = Object.values(WEB_FIELD);
 
 /** @type {Map<string, {mtimeMs: number, size: number, aliases: Record<string, string>}>} */
 const aliasCache = new Map();
@@ -116,8 +127,27 @@ export function detectColumnMap(lines, aliases) {
  * mirroring parseTrackerRow in tracker-parse.mjs.
  * @param {string} md - content of data/applications.md.
  * @param {string} rootDir - career-ops root holding tracker-aliases.json.
- * @returns {{n: string, date: string, company: string, via: string, role: string, score: string, status: string, pdf: string, report: string, notes: string}[]}
+ * @returns {Record<string, string>[]} One entry per tracker row, carrying every
+ *   field in WEB_FIELD — the web `Application` shape (career-ops.ts).
  */
+/**
+ * One row with every web field the map can name, filled by `pick`.
+ *
+ * The single place the row's shape is decided. Adding a tracker column is two
+ * edits — `WEB_FIELD` here and `Application` in career-ops.ts — and neither
+ * can be forgotten quietly, because the emitter can no longer disagree with
+ * the map it reads from.
+ *
+ * @param {(field: string) => string} pick
+ * @returns {Record<string, string>}
+ */
+function emptyRow(pick) {
+  /** @type {Record<string, string>} */
+  const row = {};
+  for (const field of Object.values(WEB_FIELD)) row[field] = pick(field);
+  return row;
+}
+
 export function parseApplications(md, rootDir) {
   const lines = md.split("\n");
   const map = detectColumnMap(lines, loadHeaderAliases(rootDir));
@@ -135,18 +165,24 @@ export function parseApplications(md, rootDir) {
       // for every mapped column. Without this the reader rendered a
       // pre-`--migrate-via` row with Score in Role and Status in Score (#2369).
       if (cells.length < mappedWidth) continue;
-      const at = (/** @type {string} */ k) => cells[map[k]] ?? "";
+      const at = (/** @type {string} */ k) => (map[k] == null ? "" : cells[map[k]] ?? "");
       if (!/^\d+$/.test(at("n"))) continue; // header / separator / malformed
-      rows.push({
-        n: at("n"), date: at("date"), company: at("company"), via: at("via"), role: at("role"),
-        score: at("score"), status: at("status"), pdf: at("pdf"), report: at("report"),
-        notes: at("notes"),
-      });
+      // Derived from WEB_FIELD, never listed by hand: a column the alias table
+      // resolves has to REACH the caller, not merely be recognized. Spelling
+      // the fields out here is what let `location` sit in the map for months
+      // while the emitter dropped it, and Apply Link / Follow-up be resolved
+      // by the shared alias table and thrown away the same way. A field the
+      // map has no index for reads "", exactly as before.
+      rows.push(emptyRow((k) => at(k)));
     } else {
       // Legacy fixed order; tolerate the 8-cell variant where Notes is absent.
       if (!/^\d+$/.test(cells[0])) continue; // header / separator / malformed
       const [n, date, company, role, score, status, pdf, report, ...rest] = cells;
-      rows.push({ n, date, company, via: "", role, score, status, pdf, report, notes: rest.join(" | ") });
+      // Same derivation, then the positional fields on top: everything the
+      // fixed layout does not carry (via, location, applyLink, followUp)
+      // stays "" without anyone having to remember to write it down.
+      const positional = { n, date, company, role, score, status, pdf, report, notes: rest.join(" | ") };
+      rows.push(emptyRow((k) => positional[k] ?? ""));
     }
   }
   return rows;
