@@ -306,7 +306,37 @@ export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
   };
   if (colmap.location != null) row.location = at('location');
   if (colmap.via != null) row.via = at('via');
+  if (colmap.url != null) row.url = at('url');
   return row;
+}
+
+// Matches the req/job-number labels actually seen in this tracker's free-text
+// Notes column: `R_1488728`, `Req PRACT011038`, `Req #1311`, `REQ-2026-32061`,
+// `Job 202606-116491`, `Job ID 65136`, `Posting ID 5340`, `JR00124259`,
+// `Ref R2857957`. The label is required so we don't grab an unrelated number
+// (a salary figure, a date fragment) — only text explicitly tagged as a
+// req/job/posting/reference id counts.
+export const REQ_NUMBER_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?|r_)[\s:#_-]*([a-z][a-z0-9-]*\d[a-z0-9-]*|\d[a-z0-9-]*)\b/i;
+
+/**
+ * Extract a req/job/posting number from a tracker Notes cell, if present.
+ *
+ * Tier-3 duplicate detection (company + fuzzy role match) has no awareness of
+ * req numbers on its own, which lets two distinct postings at the same company
+ * with similarly-worded titles collapse into one row (#1524 — e.g. two TD Bank
+ * L&D postings distinguished only by `R_1494379` vs `R_1488728`). This helper
+ * pulls out that number so the caller can treat a confirmed mismatch as proof
+ * the rows are NOT duplicates, without touching cases where no number is
+ * present on either side. Shared by merge-tracker.mjs (tracker merge) and
+ * scan.mjs (company+role scan dedupe).
+ *
+ * @param {string} notes - Raw Notes cell from a tracker row or TSV addition.
+ * @returns {string|null} Uppercased req/job number, or null when none is found.
+ */
+export function extractReqNumber(notes) {
+  if (!notes) return null;
+  const m = String(notes).match(REQ_NUMBER_RE);
+  return m ? m[1].toUpperCase() : null;
 }
 
 /**

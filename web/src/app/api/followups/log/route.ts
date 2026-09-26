@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { CHANNELS, isRealISODate, localISODate } from "@/lib/followups";
+import { parseFollowupId } from "@/lib/followup-id.mjs";
 import { followupsLogPath, withFollowupsWrite, followupsWriteError } from "@/lib/followups-server";
 
 export const runtime = "nodejs";
@@ -44,8 +45,8 @@ export async function POST(req: Request) {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
 
-  const appNum = Number.parseInt(String(body.appNum ?? body.num ?? ""), 10);
-  if (!Number.isInteger(appNum) || appNum < 0) {
+  const appNum = parseFollowupId(body.appNum ?? body.num);
+  if (appNum === null) {
     return Response.json({ error: "appNum (application #) required" }, { status: 400 });
   }
   const company = cell(body.company, 80);
@@ -115,8 +116,8 @@ export async function DELETE(req: Request) {
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const num = Number.parseInt(String(body.num ?? ""), 10);
-  if (!Number.isInteger(num) || num <= 0) return Response.json({ error: "num required" }, { status: 400 });
+  const num = parseFollowupId(body.num);
+  if (num === null) return Response.json({ error: "num required" }, { status: 400 });
 
   const file = followupsLogPath();
   if (!fs.existsSync(file)) return Response.json({ error: "no follow-up log" }, { status: 404 });

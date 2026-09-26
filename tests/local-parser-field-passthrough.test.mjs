@@ -54,6 +54,31 @@ const entry = { name: 'Job Bank — help desk', careers_url: 'https://www.jobban
   else fail('expected dept to survive');
 }
 
+// Posting dates are validated, not passed through (#4057). The date aliases
+// are consumed like the other normalized keys, so an unparseable raw date
+// cannot ride along in the passthrough beside the validated postedAt.
+{
+  const bad = normalizeParserJob(
+    { title: 'Analyst', url: 'https://example.com/4', postedAt: 'not a date', date_posted: 'also not', noc: '22221' },
+    entry,
+  );
+  if (bad && bad.noc === '22221' && !('postedAt' in bad) && !('date_posted' in bad)) {
+    pass('an unparseable posting date is dropped, not carried through with the extra keys');
+  } else {
+    fail(`raw date leaked or extra key lost: ${JSON.stringify(bad)}`);
+  }
+
+  const good = normalizeParserJob(
+    { title: 'Analyst', url: 'https://example.com/5', posted_at: '2026-09-01T00:00:00Z', noc: '22221' },
+    entry,
+  );
+  if (good && good.postedAt === Date.parse('2026-09-01T00:00:00Z') && !('posted_at' in good) && good.noc === '22221') {
+    pass('a parseable date alias arrives as postedAt only, next to the extra keys');
+  } else {
+    fail(`expected postedAt only: ${JSON.stringify(good)}`);
+  }
+}
+
 // Guard rails unchanged.
 {
   if (normalizeParserJob(null, entry) === null) pass('null job still rejected');

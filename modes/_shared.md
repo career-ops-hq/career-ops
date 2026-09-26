@@ -85,6 +85,8 @@ The evaluation scores five dimensions, integrated into one global score of 1-5. 
 | Red flags | Blockers, warnings (negative adjustments) |
 | **Global** | Holistic judgment integrating the five dimensions above (no arithmetic formula) |
 
+Decide the Global Score once from these dimensions, applying any user-specific Scoring Rules in `modes/_custom.md`. The report header, Machine Summary `score`, and application tracker must record that same value. A–H are report sections, not numeric inputs to average; Block B requirement importance and Block G posting legitimacy remain separate from the 1–5 score.
+
 **Score interpretation:**
 - 4.5+ → Strong match, recommend applying immediately
 - 4.0-4.4 → Good match, worth applying
@@ -213,7 +215,7 @@ After detecting archetype, read `modes/_profile.md` for the user's specific fram
 |------|-----|
 | WebSearch | Comp research, trends, company culture, LinkedIn contacts, fallback for JDs |
 | WebFetch | Fallback for extracting JDs from static pages |
-| Playwright | Verify offers (browser_navigate + browser_snapshot). **NEVER 2+ agents with Playwright in parallel.** |
+| Playwright | Verify offers (browser_navigate + browser_snapshot). **NEVER let 2+ agents drive the same Playwright/MCP browser session concurrently.** This is a per-session rule, not a per-agent-count one: agents each holding their own isolated browser session are fine in parallel; agents sharing one interactive MCP browser session are not — they race for control and can silently read or act on each other's page state. |
 | Read | cv.md, _profile.md, article-digest.md, cv-template.html |
 | Write | Temporary HTML for PDF, applications.md, reports .md |
 | Edit | Update tracker |
@@ -225,8 +227,19 @@ After detecting archetype, read `modes/_profile.md` for the user's specific fram
 A mode may tell you to run work in a background subagent (e.g. `scan`, or parallel `pipeline` URLs) to spare the main agent's context. Any subagent you spawn for career-ops is a **single-pass worker**:
 
 - It MUST NOT spawn further subagents, and MUST NOT invoke other skills — especially open-ended or recursive research skills (e.g. a `deep-research` skill). Those fan out into nested agents and can burn tens of millions of tokens on one run.
+- If the work involves Playwright (e.g. parallel `pipeline` workers each verifying a posting), the Playwright rule above still applies in full: parallel subagents must never share one interactive Playwright/MCP browser session. Each worker needs its own isolated session, or the Playwright-touching step must run sequentially.
 - Company, role, and compensation research is ALWAYS done **inline**, with the small explicit set of WebSearch/WebFetch queries the mode names (e.g. `oferta` Blocks C/D) — never delegated to a recursive research harness.
 - One `/career-ops <JD>` evaluates one role; it must never explode into a self-replicating swarm of agents. If you are about to delegate research or nest agents, stop and do it inline, bounded.
+
+<!-- guardrail:agency-confirmation -->
+**RULE: Agency confirmation must happen before any tracker, report, or CV write.** If the JD suggests an agency/recruiter intermediary ("our client", agency domain, undisclosed end employer), and the user has not explicitly identified or confirmed the agency for this posting, stop before evaluating or writing artifacts. A guessed agency, a Via value from the JD, blanket batch authorization, silence, and elapsed time are not confirmation.
+
+### Agency confirmation handoff (#4359)
+
+- **Interactive session:** ask which agency this posting came through. Wait for an explicit answer for this URL (or local JD reference). If the user cannot identify it or declines, leave it pending; do not invent a Via value. A direct-employer correction resolves the gate only when the user explicitly says this posting is direct.
+- **Delegated/headless worker:** return `status: needs_confirmation`, `reason: agency_confirmation`, the posting `url`, observed `agency` (string or null, evidence only), and the `question` for the parent. Stop immediately: no tracker row or TSV, no report, no CV in any format, no application drafts, and no pipeline completion. Return through the worker hand-back/stdout, never a placeholder report. Do not wait for a human inside the worker, spawn another agent, or write first and flag an override afterward.
+- **Parent/orchestrator:** surface the question with the URL and evidence; keep this item pending and show it separately from completed/failed evaluations. Other URLs may continue. Release any unused report-number reservation. Resume only after the user's explicit answer, passing that answer and its exact posting identity to a fresh single-pass worker or handling the posting interactively. Re-check liveness and other gates; reserve a fresh report number if the old reservation was released. A new URL needs its own answer. Only actual completed artifacts may enter the tracker merge and completion summary.
+- After confirmation, use the confirmed agency as Via; use `?` for an undisclosed end employer plus a distinguishing Notes descriptor. Never substitute the agency for the end employer. This gate also applies to localized modes and overrides unconditional "always write/register" instructions. It is not a new tracker lifecycle status.
 
 ### Time-to-offer priority
 - Working demo + metrics > perfection

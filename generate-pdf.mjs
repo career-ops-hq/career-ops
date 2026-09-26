@@ -291,6 +291,43 @@ const SECTION_ALIASES = new Map([
   ['nagrody i wyróżnienia', 'awards'],
   ['umiejętności', 'skills'],
   ['umiejętności techniczne', 'skills'],
+  // Spanish — the same failure again: with no entries here, a Spanish CV
+  // rendered in the documented modes/pdf.md order (Experiencia before Formación)
+  // was rejected against a cv.md listing Formación first, and --allow-reorder was
+  // the only way through. The vocabulary is what generated Spanish CVs render
+  // (Perfil Profesional, Competencias Clave, Experiencia Profesional, Formación,
+  // Certificaciones, Habilidades) plus each section's everyday synonyms. Keys are
+  // folded through foldDiacritics below, so accented and unaccented spellings
+  // both resolve.
+  ['perfil', 'summary'],
+  ['perfil profesional', 'summary'],
+  ['resumen', 'summary'],
+  ['resumen profesional', 'summary'],
+  ['competencias', 'competencies'],
+  ['competencias clave', 'competencies'],
+  ['competencias principales', 'competencies'],
+  ['experiencia', 'experience'],
+  ['experiencia profesional', 'experience'],
+  ['experiencia laboral', 'experience'],
+  ['trayectoria profesional', 'experience'],
+  ['proyectos', 'projects'],
+  ['proyectos destacados', 'projects'],
+  ['proyectos personales', 'projects'],
+  ['proyectos y laboratorios', 'projects'],
+  ['formación', 'education'],
+  ['formación académica', 'education'],
+  ['educación', 'education'],
+  ['estudios', 'education'],
+  ['certificaciones', 'certifications'],
+  ['certificados', 'certifications'],
+  ['premios', 'awards'],
+  ['reconocimientos', 'awards'],
+  ['premios y reconocimientos', 'awards'],
+  ['habilidades', 'skills'],
+  ['habilidades técnicas', 'skills'],
+  ['conocimientos técnicos', 'skills'],
+  ['herramientas e idiomas', 'skills'],
+  ['intereses', 'interests'],
   // Chinese — the same failure the Polish block above fixes, for the two Chinese
   // markets this repo ships modes for: Traditional (modes/zh-TW) and Simplified
   // (modes/zh), rendered through templates/cv-template.zh-minimal.html. Both
@@ -1459,11 +1496,11 @@ async function runBatchFromManifest(manifestPath, globals) {
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
-  // One profile governs the whole batch, so the declared order is read once
-  // rather than per entry. Anchored to workspaceRoot for the same reason the
-  // single render is: it is the anchor readStyleTokens() and the cv.md read
-  // already use, so one profile.yml supplies every setting.
-  const cvSectionOrder = readCvSectionOrder(resolve(workspaceRoot, 'config', 'profile.yml'));
+  // Read one workspace profile for the batch. The working directory must not
+  // choose a different theme from the single-document render.
+  const profilePath = resolve(workspaceRoot, 'config', 'profile.yml');
+  const cvSectionOrder = readCvSectionOrder(profilePath);
+  const styleTokens = readStyleTokens(profilePath);
 
   for (let i = 0; i < manifest.length; i++) {
     const spec = manifest[i];
@@ -1517,6 +1554,7 @@ async function runBatchFromManifest(manifestPath, globals) {
         inputPath: entryInput,
         maxPages: globals.maxPages,
         strictPages: globals.strictPages,
+        styleTokens,
       });
     } catch (err) {
       console.error(`❌ Skipping batch entry ${i} (${spec?.output ?? '?'}): ${err.message}`);
@@ -1718,7 +1756,7 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
   // properties so the templates' var(--x, <default>) reads pick them up (#1837).
   // No `style:` block → no tokens → byte-identical output. Both the CV path and
   // the cover-letter path flow through here, so both are themed from one place.
-  const styleTokens = opts.styleTokens ?? readStyleTokens();
+  const styleTokens = opts.styleTokens ?? readStyleTokens(resolve(outputRoot, 'config', 'profile.yml'));
   html = injectThemeStyle(html, styleTokens);
 
   html = injectPrintPageCss(html, format);

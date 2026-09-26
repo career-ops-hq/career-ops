@@ -11,7 +11,7 @@ import { useExplore } from "./explore-provider";
 export type EnrichedOffer = DiscoveredOffer & { inPipeline: boolean; evaluatedN?: string };
 
 export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
-  const { companiesScanned, partial, addToPipeline, added, mode } = useExplore();
+  const { companiesScanned, partial, addToPipeline, added, mode, running } = useExplore();
   const isAi = mode === "ai";
   const [sort, setSort] = useState<"fresh" | "company">("fresh");
   const [q, setQ] = useState("");
@@ -83,7 +83,9 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
         ))}
       </div>
 
-      {view.length === 0 && <p className="py-10 text-center text-sm text-faint">No results match “{q}”.</p>}
+      {view.length === 0 && (q.trim() || !running) && (
+        <p className="py-10 text-center text-sm text-faint">No results match “{q}”.</p>
+      )}
     </div>
   );
 }
