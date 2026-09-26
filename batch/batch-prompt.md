@@ -406,7 +406,8 @@ score_evidence:
   culture: "{supported | partial | unknown}"
   red_flags: "{supported | partial | unknown}"
 confidence_gaps:
-  - "{decision-relevant fact to verify, or [] when none}"
+  - "{decision-relevant fact to verify}"
+# When no verification priorities remain, use confidence_gaps: [] instead.
 next_action: "{one concrete next step}"
 work_auth: "{sponsors | not_needed | unstated | no_sponsorship}"
 discard_reasons:
@@ -498,7 +499,8 @@ score_evidence:
   culture: "{supported | partial | unknown}"
   red_flags: "{supported | partial | unknown}"
 confidence_gaps:
-  - "{decision-relevant fact to verify, or [] when none}"
+  - "{decision-relevant fact to verify}"
+# When no verification priorities remain, use confidence_gaps: [] instead.
 next_action: "{one concrete next step}"
 work_auth: "{sponsors | not_needed | unstated | no_sponsorship}"
 discard_reasons:
