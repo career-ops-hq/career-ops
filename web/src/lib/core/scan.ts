@@ -4,8 +4,10 @@ import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { writeTempPortals, cleanupTempPortals } from "./portals";
+import { profileTargetKeywords } from "@/lib/profile-keywords.mjs";
+import { titleFit } from "@/lib/title-fit.mjs";
 import { resolveScanTimeoutMs, scanTimeoutMessage } from "./scan-timeout.mjs";
-import { ATS_SOURCES, type DiscoveredOffer, type ExploreFilters, type ScanEvent } from "@/lib/explore";
+import { ATS_SOURCES, type DiscoveredOffer, type ExploreFilters, type FitBand, type ScanEvent } from "@/lib/explore";
 
 export type { DiscoveredOffer, ScanEvent, AtsSource } from "@/lib/explore";
 export { ATS_SOURCES } from "@/lib/explore";
@@ -42,6 +44,30 @@ function firstMatch(title: string, positives: string[]): string | undefined {
   return undefined;
 }
 
+/**
+ * Profile target roles for the free fit band (#3260), loaded ONCE per scan run
+ * (tolerantly: missing/unreadable profile.yml just means no chips — same
+ * posture as seedExploreFilters in portals.ts). Annotation only: the result
+ * never feeds filtering, ordering, or the summary counts.
+ */
+function loadProfileTargets(): string[] {
+  try {
+    const doc = yaml.load(fs.readFileSync(path.join(careerOpsRoot(), "config", "profile.yml"), "utf8"));
+    return profileTargetKeywords(doc && typeof doc === "object" ? (doc as Record<string, unknown>) : null);
+  } catch {
+    return [];
+  }
+}
+
+/** Spread-in helper: {} when there is no band (keeps `fit` truly absent rather
+ *  than explicitly undefined, so the offer objects stay JSON-clean). titleFit
+ *  is plain JS, so its band arrives typed as string — narrowed here to the
+ *  FitBand union the offer type promises. */
+function fitField(title: string, targets: string[]): { fit: { band: FitBand; score: number } } | Record<string, never> {
+  const f = titleFit(title, targets);
+  return f ? { fit: { band: f.band as FitBand, score: f.score } } : {};
+}
+
 function ingestJsonOffer(
   o: JsonOffer,
   currentAts: string,
@@ -49,6 +75,7 @@ function ingestJsonOffer(
   seen: Set<string>,
   offers: DiscoveredOffer[],
   onEvent: (e: ScanEvent) => void,
+  roleTargets: string[] = [],
 ): void {
   const url = (o.url || "").trim();
   if (!url || seen.has(url) || !o.company || !o.title) return;
@@ -63,6 +90,7 @@ function ingestJsonOffer(
     source,
     url,
     matchedKeyword: firstMatch(o.title, filters.positive),
+    ...fitField(o.title, roleTargets),
   };
   offers.push(offer);
   onEvent({ kind: "offer", offer });
@@ -162,6 +190,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
 
     const offers: DiscoveredOffer[] = [];
     const seen = new Set<string>();
+    const roleTargets = loadProfileTargets();
     let currentAts: string = ats[0] || "";
     let pending: Omit<DiscoveredOffer, "url"> | null = null;
     let companiesScanned = 0;
@@ -201,7 +230,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
     const handleProgressLine = (line: string) => {
       const live = parseLiveOfferLine(line);
       if (live) {
-        ingestJsonOffer(live, currentAts, filters, seen, offers, onEvent);
+        ingestJsonOffer(live, currentAts, filters, seen, offers, onEvent, roleTargets);
         return true;
       }
       const atsM = line.match(ATS_START_RE);
@@ -228,7 +257,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
         const url = trimmed.split(/\s+/)[0];
         if (!seen.has(url)) {
           seen.add(url);
-          const offer: DiscoveredOffer = { ...pending, url, matchedKeyword: firstMatch(pending.title, filters.positive) };
+          const offer: DiscoveredOffer = { ...pending, url, matchedKeyword: firstMatch(pending.title, filters.positive), ...fitField(pending.title, roleTargets) };
           offers.push(offer);
           onEvent({ kind: "offer", offer });
         }
@@ -319,7 +348,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
         }
         if (j && Array.isArray(j.offers)) {
           for (const o of j.offers) {
-            ingestJsonOffer(o, currentAts, filters, seen, offers, onEvent);
+            ingestJsonOffer(o, currentAts, filters, seen, offers, onEvent, roleTargets);
           }
           onEvent({
             kind: "summary",
