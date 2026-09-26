@@ -1,0 +1,118 @@
+// tests/scan-field-filters.test.mjs — #3438: a target declares WHICH FIELD its
+// whitelist reads. A title whitelist cannot express "this posting is in an
+// occupation I want" on a board that publishes an occupation code, so those
+// matches were dropped silently — the title never matched, and nothing was
+// counted as rejected for the reason that actually applied.
+import { join } from 'path';
+import { pathToFileURL } from 'url';
+import { pass, fail, ROOT } from './helpers.mjs';
+
+console.log('\nscan — declared-field whitelists (filter_on / field_filters)');
+
+const scan = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+const { normalizeFilterOn, buildTitleFilter } = scan;
+const titleKeywords = await import(pathToFileURL(join(ROOT, 'title-keywords.mjs')).href);
+
+// ── normalizeFilterOn ──────────────────────────────────────────────
+// The default is the whole backward-compatibility guarantee: every existing
+// portals.yml has no filter_on at all, and must keep gating on title.
+{
+  const cases = [
+    [undefined, ['title'], 'absent filter_on defaults to title'],
+    [null, ['title'], 'null filter_on defaults to title'],
+    ['', ['title'], 'empty string defaults to title'],
+    ['noc', ['noc'], 'a bare string becomes a one-field list'],
+    [['noc'], ['noc'], 'a one-element array is kept'],
+    [['company', 'title'], ['company', 'title'], 'a multi-field array is kept in order'],
+    ['  noc  ', ['noc'], 'surrounding whitespace is trimmed'],
+    [[], ['title'], 'an empty array defaults to title'],
+    [[null, 'noc', 42], ['noc'], 'non-string entries are dropped'],
+    [['noc', 'noc'], ['noc'], 'a repeated field collapses to one'],
+    [['title', 'noc', ' title '], ['title', 'noc'], 'duplicates collapse after trimming, first position kept'],
+  ];
+  for (const [input, want, label] of cases) {
+    const got = normalizeFilterOn(input);
+    if (JSON.stringify(got) === JSON.stringify(want)) pass(label);
+    else fail(`${label}: expected ${JSON.stringify(want)}, got ${JSON.stringify(got)}`);
+  }
+}
+
+// ── The bug this issue is about ────────────────────────────────────
+// Real shape: Job Bank publishes NOC 22221 (TEER 2, help desk) on a posting
+// titled "Analyst, Client Services". No title whitelist can enumerate the
+// titles an occupation is advertised under, so the match is lost.
+{
+  const titleFilter = buildTitleFilter({ positive: ['help desk', 'service desk'] });
+  const job = { title: 'Analyst, Client Services', noc: '22221' };
+
+  if (!titleFilter(job.title)) pass('title whitelist drops the posting — the bug, reproduced');
+  else fail('expected the title whitelist to miss this posting');
+
+  const nocFilter = buildTitleFilter({ positive: ['stem:22', 'stem:13'] });
+  if (nocFilter(job.noc)) pass('a noc whitelist keeps it — the fix');
+  else fail('expected the noc whitelist to match 22221');
+}
+
+// ── No new matching semantics ──────────────────────────────────────
+// field_filters blocks go through the same compiler as title_filter, so the
+// word-boundary rules from #3103 cannot drift between fields.
+{
+  if (typeof titleKeywords.buildTitleFilter === 'function'
+      && buildTitleFilter === titleKeywords.buildTitleFilter) {
+    pass('field blocks compile with the same buildTitleFilter as title_filter');
+  } else {
+    fail('scan.mjs re-exports a different compiler than title-keywords.mjs');
+  }
+
+  const f = buildTitleFilter({ positive: ['stem:22'], negative: ['22222'] });
+  if (f('22221')) pass('stem: prefix matches on a non-title field');
+  else fail('stem:22 should match 22221');
+  if (!f('22222')) pass('negative entries veto on a non-title field too');
+  else fail('22222 should have been vetoed');
+}
+
+// ── declaredFieldKey ───────────────────────────────────────────────
+// The absence counters are keyed per (target, field), and by the target's
+// INDEX rather than its name: a duplicate enabled name is only a
+// validate-portals warning, so two real targets can share one.
+{
+  const { declaredFieldKey } = scan;
+  if (declaredFieldKey(0, 'noc') !== declaredFieldKey(0, 'company')) pass('two fields of one target get distinct keys');
+  else fail('expected distinct keys per field');
+
+  if (declaredFieldKey(0, 'noc') !== declaredFieldKey(1, 'noc')) pass('two targets get distinct keys for one field');
+  else fail('expected distinct keys per target');
+
+  // Two enabled targets may share a name — that is only a validate-portals
+  // warning — so the id, not the name, is what must separate them.
+  if (declaredFieldKey(10, 'noc') !== declaredFieldKey(1, '0noc')) pass('adjacent ids cannot run together into one key');
+  else fail('key collision between two distinct (id, field) pairs');
+}
+
+// ── isFieldAbsent ──────────────────────────────────────────────────
+// Presence accounting and the gate both read this, so they cannot disagree on
+// what "absent" means. A whitespace-only value carries no code: judged as
+// present, it would be rejected by every positive list — a silent drop.
+{
+  const { isFieldAbsent } = scan;
+  const cases = [
+    [undefined, true, 'undefined is absent'],
+    [null, true, 'null is absent'],
+    ['', true, 'an empty string is absent'],
+    ['   ', true, 'a whitespace-only string is absent'],
+    ['22221', false, 'a code is present'],
+    [22221, false, 'a numeric code is present'],
+    [0, false, 'zero is a value, not an absence'],
+    [false, false, 'false is a value, not an absence'],
+  ];
+  for (const [input, want, label] of cases) {
+    if (isFieldAbsent(input) === want) pass(label);
+    else fail(`${label}: expected ${want} for ${JSON.stringify(input)}`);
+  }
+}
+
+// Behaviour of the gate itself — which fields are read, what an absent field
+// does, AND semantics, rejection attribution and the dead-declaration warning
+// — is asserted against the real scan in tests/scan-field-filters-e2e.test.mjs.
+// Re-implementing the loop here would only prove the copy still agrees with
+// itself, and would stay green if scan.mjs stopped applying filter_on.

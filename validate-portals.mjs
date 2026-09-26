@@ -123,6 +123,13 @@ async function loadProviderIds() {
 }
 
 const TITLE_FILTER_FIELDS = ['positive', 'negative', 'seniority_boost'];
+// #3438. field_filters blocks are compiled by buildTitleFilter(), which reads
+// positive and negative and nothing else — seniority_boost is a title-level
+// concept with no consumer here. A block containing only seniority_boost would
+// otherwise validate clean and compile to an empty positive list, which reads
+// as "no positive constraint" and matches every posting: the pass-all
+// whitelist this validation exists to catch.
+const FIELD_FILTER_FIELDS = ['positive', 'negative'];
 
 export async function validatePortalsConfig(config, { providerIds = new Set() } = {}) {
   const errors = [];
@@ -165,6 +172,57 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       validateKeywordList(config.title_filter_full.positive, 'title_filter_full.positive', errors);
       validateKeywordList(config.title_filter_full.negative, 'title_filter_full.negative', errors);
       validateKeywordList(config.title_filter_full.seniority_boost, 'title_filter_full.seniority_boost', errors);
+    }
+  }
+
+  // #3438. Per-field whitelists a target can gate on instead of title. Each
+  // block has the same shape as title_filter and is compiled by the same
+  // buildTitleFilter(), so it gets the same structural checks for the same
+  // reason: a misspelled `positve:` leaves positive empty, and an empty
+  // positive list means "no positive constraint" — the whitelist would match
+  // everything while looking configured.
+  if (config.field_filters !== undefined) {
+    if (!isObject(config.field_filters)) {
+      add(errors, 'field_filters', 'field_filters must be an object keyed by field name');
+    } else {
+      for (const [field, block] of Object.entries(config.field_filters)) {
+        if (field === 'title') {
+          // title routes to the top-level title_filter by definition. A block
+          // here would be silently ignored, so say so rather than ignore it.
+          add(errors, 'field_filters.title', 'field_filters.title is not read - filter_on: title uses the top-level title_filter');
+          continue;
+        }
+        if (!isObject(block)) {
+          add(errors, `field_filters.${field}`, `field_filters.${field} must be an object`);
+          continue;
+        }
+        for (const key of Object.keys(block)) {
+          if (!FIELD_FILTER_FIELDS.includes(key)) {
+            add(errors, `field_filters.${field}.${key}`, `unknown field_filters field - expected one of ${FIELD_FILTER_FIELDS.join(', ')}`);
+          }
+        }
+        // Stricter than title_filter on purpose: a bare-string list is dropped
+        // by buildTitleFilter, and a block with no keyword at all matches every
+        // posting. title_filter keeps that leniency for existing configs;
+        // field_filters is new and has none to preserve. scan.mjs applies the
+        // same rules at startup.
+        let keywordCount = 0;
+        let malformedList = false;
+        for (const key of FIELD_FILTER_FIELDS) {
+          const list = block[key];
+          if (list === undefined || list === null) continue;
+          if (!Array.isArray(list)) {
+            add(errors, `field_filters.${field}.${key}`, 'must be a list of strings - a bare string is ignored');
+            malformedList = true;
+            continue;
+          }
+          validateKeywordList(list, `field_filters.${field}.${key}`, errors);
+          keywordCount += list.length;
+        }
+        if (keywordCount === 0 && !malformedList) {
+          add(errors, `field_filters.${field}`, 'no keyword in positive or negative - it would match every posting');
+        }
+      }
     }
   }
 
@@ -271,6 +329,30 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
           add(errors, `${base}.provider`, 'provider must be a non-empty string when set');
         } else if (!providerIds.has(entry.provider)) {
           add(errors, `${base}.provider`, `unknown provider "${entry.provider}"`);
+        }
+      }
+
+      // #3438. Which field this target's whitelist reads. scan.mjs exits on a
+      // name with no field_filters block; this catches the shape earlier and
+      // checks the cross-reference here too, where the whole config is in hand.
+      if (entry.filter_on !== undefined) {
+        const declared = Array.isArray(entry.filter_on) ? entry.filter_on : [entry.filter_on];
+        if (declared.length === 0) {
+          add(errors, `${base}.filter_on`, 'filter_on must not be an empty list - omit the key to gate on title');
+        }
+        for (const field of declared) {
+          if (typeof field !== 'string' || field.trim() === '') {
+            add(errors, `${base}.filter_on`, 'filter_on must be a non-empty string or a list of them');
+            continue;
+          }
+          const name = field.trim();
+          // Own keys only: `filter_on: __proto__` must not find Object.prototype.
+          const block = isObject(config.field_filters) && Object.hasOwn(config.field_filters, name)
+            ? config.field_filters[name]
+            : undefined;
+          if (name !== 'title' && !isObject(block)) {
+            add(errors, `${base}.filter_on`, `filter_on "${name}" has no field_filters.${name} block`);
+          }
         }
       }
 
