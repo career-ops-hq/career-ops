@@ -220,3 +220,8 @@ data/intake-state.json
 # Fork: track config/local-paths.txt so CI sees the fork-local declarations
 # (see config/local-paths.example.txt, "Running the suite in CI in a fork").
 !config/local-paths.txt
+
+# Fork: translated CVs (e.g. cv.zh-TW.md) carry the same PII as cv.md. Unanchored,
+# like the cv.md rule above, so they stay ignored at the root, under local/, or
+# under a relative CAREER_OPS_ROOT inside the checkout.
+cv.*.md
