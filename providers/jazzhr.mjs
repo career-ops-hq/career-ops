@@ -35,7 +35,7 @@ import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry, sleep } from './_http.mjs'
 import { htmlToText } from './_html-to-text.mjs';
 
 const HOST_RE = /^[a-z0-9][a-z0-9-]*\.applytojob\.com$/i;
-const MAX_JOBS = 1000;
+const MAX_JOBS = 1000; // generous cap; a single tenant's board is never this large
 const DETAIL_DEFAULT_LIMIT = 25;
 // Courtesy delay between back-to-back detail-page requests to the same
 // tenant, same pattern as the inter-page delays in providers/careerviet.mjs
@@ -162,17 +162,14 @@ export function parseJazzHRList(html, boardHref, companyName) {
     if (jobs.length >= MAX_JOBS) break;
   }
 
-  // Presence checks below require a real segment after `/apply/`, matching
-  // `resolvePostingUrl`'s own requirement — a bare `/apply/` href (JazzHR's
-  // own "back to listings" nav link, present even on a genuinely empty
-  // board) otherwise reads as evidence of an unparsed posting and throws a
-  // false alarm on a tenant with zero open positions.
+  // Requires a real segment after `/apply/`, matching `resolvePostingUrl`'s
+  // own requirement — a bare `/apply/` href (JazzHR's own "back to listings"
+  // nav link, present even on a genuinely empty board) otherwise reads as
+  // evidence of an unparsed posting and throws a false alarm on a tenant
+  // with zero open positions.
   const POSTING_HREF_RE = /<a\b[^>]*href=["'][^"']*\/apply\/[^"']+["']/i;
   if (jobs.length === 0 && POSTING_HREF_RE.test(html)) {
     throw new Error('jazzhr: found ApplyToJob links but could not parse any posting cards');
-  }
-  if (jobs.length >= MAX_JOBS && [...html.matchAll(new RegExp(POSTING_HREF_RE.source, 'gi'))].length > MAX_JOBS) {
-    console.error(`⚠️  jazzhr: capped results at max_jobs=${MAX_JOBS}; additional postings were not returned`);
   }
   return jobs;
 }
