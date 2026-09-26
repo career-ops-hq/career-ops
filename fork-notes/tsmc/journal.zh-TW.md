@@ -34,6 +34,17 @@
 
 ## 紀錄
 
+### 2026-09-26 — 完成初始設定
+
+- **階段：** 設定
+- **完成事項：** 在私人資料 repo 建立 `config/profile.yml`、`modes/_profile.md`、`modes/_brief.md`、
+  `modes/_custom.md`（含雙語規則）、`portals.yml` 與空白追蹤表。目標：台積電軟體相關、經理級以上職務，可接受三個工作地點。
+  使用者偏好不需刷 LeetCode 類題目的招募流程；這列為扣 0.5 分的軟性警訊，不是直接淘汰條件。
+- **系統產出：** `node doctor.mjs` 回報 `onboardingNeeded: false`，沒有未個人化的檔案。
+  `validate-portals.mjs` 與 `validate-profile.mjs` 都沒有問題。
+- **待解決：** 對話中提到的期望薪資，和 104 匯出履歷上的數字不一致。確認之前，設定檔兩個數字都保留。
+- **下一步：** 用網址評估第一個真實的台積電職缺。
+
 ### 2026-09-26 — 接上私人資料 repo
 
 - **階段：** 設定

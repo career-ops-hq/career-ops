@@ -32,6 +32,19 @@ learned. Newest entry on top. Keep the zh-TW twin in sync in the same commit.
 
 ## Entries
 
+### 2026-09-26 — Onboarding complete
+
+- **Stage:** setup
+- **Done:** Wrote `config/profile.yml`, `modes/_profile.md`, `modes/_brief.md`, `modes/_custom.md` (with the
+  bilingual house rules), `portals.yml` and an empty tracker, all in the private data repo. Target: software
+  roles at manager level and above at TSMC, in three acceptable locations. The user prefers hiring processes
+  without LeetCode-style tests; that is a −0.5 soft flag, not a disqualifier.
+- **System output:** `node doctor.mjs` reports `onboardingNeeded: false` with nothing unpersonalized.
+  `validate-portals.mjs` and `validate-profile.mjs` are clean.
+- **Open item:** the compensation target stated in chat and the one in the 104-exported CV disagree. The
+  profile records both until the user confirms one.
+- **Next:** evaluate the first real TSMC posting by URL.
+
 ### 2026-09-26 — Private data repo connected
 
 - **Stage:** setup
