@@ -92,6 +92,37 @@ try {
     fail(`connector-separated tool claims were not extracted: ${JSON.stringify(connectorTools)}`);
   }
 
+  // #4394. The connector split above is correct for a tool list, but the same
+  // `using X in Y` shape carries a place name just as often, and a bare
+  // capitalized proper noun clears isLikelyTool either way. Django and Figma
+  // are in the source and pass; the city and the region are fabricated tool
+  // claims that block a truthful CV.
+  const placeAfterIn = factClaims('Built the platform using Django in Berlin.');
+  if (placeAfterIn.some(c => c.kind === 'tool' && c.value === 'django')
+      && !placeAfterIn.some(c => c.value === 'berlin')) {
+    pass('a place name after "in" is not a tool claim');
+  } else {
+    fail(`a place name was extracted as a tool: ${JSON.stringify(placeAfterIn)}`);
+  }
+
+  const placeAfterWith = factClaims('Shipped the redesign using Figma with the brand team in EMEA.');
+  if (placeAfterWith.some(c => c.kind === 'tool' && c.value === 'figma')
+      && !placeAfterWith.some(c => c.value === 'emea')) {
+    pass('a region after "with ... in" is not a tool claim');
+  } else {
+    fail(`a region was extracted as a tool: ${JSON.stringify(placeAfterWith)}`);
+  }
+
+  // Skaidon's report on #4004, which #4006 does not clear either. The comma is
+  // joining clauses, not separating list items, and `building` is the second
+  // fragment nobody has hit yet because `ai` blocks the render first.
+  const commaClause = factClaims('Uses agentic workflows daily, not just using AI, building for it.');
+  if (!commaClause.some(c => c.value === 'ai') && !commaClause.some(c => c.value === 'building')) {
+    pass('a comma joining clauses does not split a tool list');
+  } else {
+    fail(`clause prose was extracted as a tool: ${JSON.stringify(commaClause)}`);
+  }
+
   const proseTools = factClaims('I worked with the team in London.');
   const contextualTool = factClaims('I built using React in production.');
   if (contextualTool.some(claim => claim.value === 'react')
