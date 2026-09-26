@@ -581,7 +581,9 @@ if (note) {
   if (replacedNote !== null) {
     // Protect already-replaced spans: NEW may itself contain OLD. Replace only
     // outside those spans so a retry cannot grow the same note again.
-    const updated = existing.split(note).map(part => part.split(replacedNote).join(note)).join(note);
+    const updated = note.includes(replacedNote)
+      ? existing.split(note).map(part => part.split(replacedNote).join(note)).join(note)
+      : existing.split(replacedNote).join(note);
     if (updated === existing && !existing.includes(note)) {
       failWith(EXIT_USAGE, 'replace-note-not-found', 'Neither --replace-note text nor --note text exists in the Notes cell');
     }

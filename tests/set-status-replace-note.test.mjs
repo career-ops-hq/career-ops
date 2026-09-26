@@ -45,6 +45,11 @@ try {
     assert.equal(readFileSync(tracker, 'utf8'), after);
   }
   pass('rejects missing or empty replacement arguments before writing');
+  reset('CV ready, not applied; keep me');
+  r = run(['--replace-note', 'CV ready, not applied', '--note', 'CV ready']);
+  assert.equal(r.status, 0);
+  assert.ok(readFileSync(tracker, 'utf8').includes('CV ready; keep me'));
+  pass('OLD containing NEW still replaces the entire stale text');
   reset('a.b $&; a.b $&');
   r = run(['--replace-note', 'a.b $&', '--note', 'literal $1']);
   assert.equal(r.status, 0);
