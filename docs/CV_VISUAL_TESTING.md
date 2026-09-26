@@ -29,7 +29,7 @@ npm run test:cv-visual
 ```
 
 Review every changed PNG rather than accepting snapshots mechanically. Update
-`test/cv-visual/baselines.json` only when the expected PDF page range changes.
+`tests/cv-visual/baselines.json` only when the expected PDF page range changes.
 Unexpected page growth, even with a visually acceptable screenshot, should be
 treated as a regression until the new density is explicitly approved.
 

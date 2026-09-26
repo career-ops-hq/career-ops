@@ -5,11 +5,24 @@ import { Send, Lock } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { useApply } from "@/components/apply/apply-provider";
 
-// The "Apply" CTA — brand orange, paper-plane. Enabled ONLY when the tailored CV
+// The "Apply" CTA. Brand fill only when the score is at/above the apply line
+// and legitimacy is not caution (#4206). Enabled ONLY when the tailored CV
 // for THIS offer is ready (the tracker's PDF column is ✅, or a pdf worker for
 // this #n just finished). On click it opens the apply form-proxy for the offer
 // (where the user reviews and submits it themselves — never auto-submit).
-export function ApplyButton({ n, url, company, pdfReady }: { n: string; url?: string; company: string; pdfReady: boolean }) {
+export function ApplyButton({
+  n,
+  url,
+  company,
+  pdfReady,
+  quiet = false,
+}: {
+  n: string;
+  url?: string;
+  company: string;
+  pdfReady: boolean;
+  quiet?: boolean;
+}) {
   const router = useRouter();
   const { jobs } = useJobs();
   const apply = useApply();
@@ -34,11 +47,25 @@ export function ApplyButton({ n, url, company, pdfReady }: { n: string; url?: st
     <button
       type="button"
       onClick={() => {
-        apply.open(url!, { prefill: true, company });
+        // n + from ride along so the Apply page can mark this row Applied,
+        // return the user to the page they left, and resolve THIS report's own
+        // tailored CV rather than the newest one for the company. Read straight
+        // off the handler's own location: usePathname() drops the query and
+        // hash, which is where the list filter and the row anchor live.
+        const { pathname, search, hash } = window.location;
+        apply.open(url!, { prefill: true, company, n, from: `${pathname}${search}${hash}` });
         router.push("/apply");
       }}
-      className="inline-flex items-center justify-center gap-1.5 rounded-full bg-brand px-3.5 py-1 text-xs font-medium text-brand-foreground shadow-sm transition-colors hover:bg-brand-200 max-sm:min-h-[44px]"
-      title="Apply — opens the form pre-filled, you review and submit yourself"
+      className={
+        quiet
+          ? "inline-flex items-center justify-center gap-1.5 rounded-full border border-border bg-transparent px-3.5 py-1 text-xs font-medium text-muted transition-colors hover:border-foreground/20 hover:text-foreground max-sm:min-h-[44px]"
+          : "inline-flex items-center justify-center gap-1.5 rounded-full bg-brand px-3.5 py-1 text-xs font-medium text-brand-foreground shadow-sm transition-colors hover:bg-brand-200 max-sm:min-h-[44px]"
+      }
+      title={
+        quiet
+          ? "Apply — below the apply line or caution; opens the form pre-filled, you review and submit yourself"
+          : "Apply — opens the form pre-filled, you review and submit yourself"
+      }
     >
       <Send className="size-3.5" /> Apply
     </button>

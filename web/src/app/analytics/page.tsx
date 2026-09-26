@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { pipelineSummary } from "@/lib/career-ops";
 import { canonStatus, scoreNum } from "@/lib/format";
+import { cumulativeTiles } from "@/lib/funnel-tiles.mjs";
 
 export const dynamic = "force-dynamic";
 
@@ -40,13 +41,17 @@ export default function Analytics() {
   const topCompanies = [...companyCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
   const maxCompany = Math.max(1, ...topCompanies.map((c) => c[1]));
 
-  const offers = stageCounts.find((s) => s.key === "OFFER")?.n ?? 0;
-  const interviews = stageCounts.find((s) => s.key === "INTERVIEW")?.n ?? 0;
+  // CUMULATIVE, unlike the stage bars above: these two tiles are achievement
+  // counters whose zero-state shows a coaching nudge, so a candidate who has
+  // already advanced past a stage must not read 0 for it (an offer-holder was
+  // told "Interviews follow replies — keep follow-ups warm"). Mirrors
+  // everInterview/everOffer in stats.mjs's computeFunnel().
+  const { interviews, offers } = cumulativeTiles(applications.map((a) => canonStatus(a.status)));
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
       <h1 className="font-display text-2xl tracking-tight text-landing">Analytics</h1>
-      <p className="mt-1 text-sm text-muted">Across {total} tracked evaluations.</p>
+      <p className="mt-1 text-sm text-muted">Across {total} tracked evaluation{total === 1 ? "" : "s"}.</p>
 
       {/* headline stats */}
       <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">

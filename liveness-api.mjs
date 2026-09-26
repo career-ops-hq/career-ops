@@ -13,7 +13,7 @@
  * anything ambiguous (unknown ATS, redirect, 429/5xx, network/timeout) we return
  * `null` (→ caller falls back to Playwright).
  *
- * Two endpoint shapes:
+ * Three endpoint shapes:
  *   - Per-job (Greenhouse, Lever, Workday): the URL maps to a single-job endpoint,
  *     so a 200 is itself proof the posting is live.
  *   - Org-level (Ashby): the URL maps to the org's whole job board. A 200 only
@@ -21,11 +21,17 @@
  *     and confirms THIS posting is still listed before returning active/expired.
  *     (Ashby pages are JS-rendered, so the browser/static rung sees only nav/footer
  *     and false-reports live postings as expired — this API rung is authoritative.)
+ *   - Per-job HTML (LinkedIn): the guest endpoint returns the rendered posting as
+ *     HTML and answers 200 for closed postings too, so `interpret` reads two
+ *     independent signals out of the body and only concludes when they agree.
  *
  * SSRF-safe by construction: the request URL is built from a FIXED, hard-coded API
  * host plus path segments extracted from the posting URL with a strict charset
  * (no slashes / traversal), and server-side redirects are refused.
  */
+
+import { DEFAULT_USER_AGENT } from './user-agent.mjs';
+import { parseWwrFeed } from './providers/weworkremotely.mjs';
 
 const TIMEOUT_MS = 8_000;
 // Strict path-segment charset. Anything with a slash, dot-dot, or other char is
@@ -52,9 +58,39 @@ function isSafeValue(v) {
 // `match` returns the extracted path params (or null); `api` builds the FIXED-host URL.
 // Optional per-provider fields:
 //   `timeoutMs`  — override the default fetch timeout (slow/rate-limited APIs).
+//   `throttleMs` — minimum interval between our requests to this provider.
+//   `accept`     — override the Accept header (providers that answer in HTML).
 //   `interpret`  — read the 200 response body to decide liveness (org-level APIs
-//                  where a 200 alone doesn't prove THIS posting is live).
+//                  where a 200 alone doesn't prove THIS posting is live, and
+//                  per-job APIs that answer 200 for a closed posting).
+//   `api404Authoritative` — defaults to true (a 404/410 means gone). Set to
+//                  false when the provider's public API can 404 a posting that
+//                  is still genuinely live elsewhere (see the `lever` entry).
 const ATS_PROVIDERS = [
+  {
+    id: 'greenhouse-embedded',
+    // Company careers pages can expose only gh_jid, with no Greenhouse board.
+    // The embed redirect supplies the board; a second per-job API request is
+    // still required because even closed jobs can have an embed redirect.
+    match(u) {
+      if (/(^|\.)greenhouse\.io$/.test(u.hostname)) return null;
+      const id = u.searchParams.get('gh_jid');
+      return id && /^\d+$/.test(id) ? { id } : null;
+    },
+    api: ({ id }) => `https://boards.greenhouse.io/embed/job_app?token=${id}`,
+    async followEmbed(res, { id }) {
+      if (res.status !== 301 && res.status !== 302) return null;
+      let target;
+      try { target = new URL(res.headers.get('location'), 'https://boards.greenhouse.io'); }
+      catch { return null; }
+      if (target.protocol !== 'https:' || !/(^|\.)greenhouse\.io$/.test(target.hostname)) return null;
+      const board = target.searchParams.get('for');
+      // The board is one URL path segment. isSafeValue also accepts Workday's
+      // multi-segment paths, so reject a decoded slash here explicitly.
+      if (!isSafeValue(board) || board.includes('/') || target.searchParams.get('token') !== id) return null;
+      return `https://boards-api.greenhouse.io/v1/boards/${board}/jobs/${id}`;
+    },
+  },
   {
     id: 'greenhouse',
     // boards.greenhouse.io/{board}/jobs/{id} · job-boards[.eu].greenhouse.io/{board}/jobs/{id}
@@ -75,6 +111,13 @@ const ATS_PROVIDERS = [
       return m ? { apiHost: `api.${host[1]}`, slug: m[1], id: m[2] } : null;
     },
     api: ({ apiHost, slug, id }) => `https://${apiHost}/v0/postings/${slug}/${id}`,
+    // Lever's Confidential/Internal Postings feature explicitly excludes some
+    // live postings from the public v0/postings API while the direct
+    // jobs.lever.co page keeps serving them normally. Real-world repro
+    // (2026-08-09): api.lever.co 404s two postings whose jobs.lever.co pages
+    // return 200 with the real job title and a working Apply control. A 404
+    // here is NOT proof of removal — fall through to Playwright instead.
+    api404Authoritative: false,
   },
   {
     id: 'ashby',
@@ -129,7 +172,173 @@ const ATS_PROVIDERS = [
     api: ({ tenant, shard, site, jobPath }) =>
       `https://${tenant}.${shard}.myworkdayjobs.com/wday/cxs/${tenant}/${site}/job/${jobPath}`,
   },
+  {
+    id: 'smartrecruiters',
+    match(u) {
+      if (u.hostname !== 'jobs.smartrecruiters.com') return null;
+      const m = u.pathname.match(/^\/([^/]+)\/([A-Za-z0-9]+)(?:-[^/]*)?\/?$/);
+      return m ? { company: m[1], id: m[2] } : null;
+    },
+    api: ({ company, id }) => `https://api.smartrecruiters.com/v1/companies/${company}/postings/${id}`,
+    api404Authoritative: false, // the API also uses 400 for unknown IDs
+    async interpret(res, { id }) {
+      let posting;
+      try { posting = await res.json(); } catch { return null; }
+      if (String(posting?.id) !== id || typeof posting.active !== 'boolean') return null;
+      return posting.active
+        ? { result: 'active', code: 'smartrecruiters_api_active', reason: 'SmartRecruiters marks the posting active' }
+        : { result: 'expired', code: 'smartrecruiters_api_inactive', reason: 'SmartRecruiters marks the posting inactive' };
+    },
+  },
+  {
+    id: 'arbeitsagentur',
+    match(u) {
+      if (u.hostname !== 'www.arbeitsagentur.de') return null;
+      const m = u.pathname.match(/^\/jobsuche\/jobdetail\/([^/]+)\/?$/);
+      return m ? { refnr: m[1] } : null;
+    },
+    api: ({ refnr }) => `https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobdetails/${Buffer.from(refnr).toString('base64url')}`,
+    headers: { 'X-API-Key': 'jobboerse-jobsuche' },
+    api404Authoritative: false, // no expired real-job control; absence stays unknown
+    async interpret(res, { refnr }) {
+      let posting;
+      try { posting = await res.json(); } catch { return null; }
+      return posting?.referenznummer === refnr && posting?.stellenangebotsTitel
+        ? { result: 'active', code: 'arbeitsagentur_api_active', reason: 'Arbeitsagentur returns the matching job detail' }
+        : null;
+    },
+  },
+  {
+    id: 'weworkremotely',
+    match(u) {
+      if (u.hostname !== 'weworkremotely.com' || !/^\/remote-jobs\/[^/]+\/?$/.test(u.pathname)) return null;
+      return { slug: u.pathname.split('/')[2] };
+    },
+    api: () => 'https://weworkremotely.com/remote-jobs.rss',
+    accept: 'application/rss+xml',
+    api404Authoritative: false,
+    async interpret(res, { slug }) {
+      let feed;
+      try { feed = await res.text(); } catch { return null; }
+      if (!/<rss\b/i.test(feed)) return null;
+      const listed = parseWwrFeed(feed).some((job) => new URL(job.url).pathname.replace(/\/$/, '') === `/remote-jobs/${slug}`);
+      return listed
+        ? { result: 'active', code: 'weworkremotely_feed_listed', reason: 'Posting is listed in the current RSS feed' }
+        : null; // feed is bounded; absence cannot prove expiry
+    },
+  },
+  {
+    id: 'linkedin',
+    // linkedin.com/jobs/view/{id} · .../jobs/view/{title-slug}-{id} · any page that
+    // carries the posting in ?currentJobId= (search and collection views).
+    //
+    // LinkedIn had no rung here, so every LinkedIn URL fell through to Playwright —
+    // where /jobs/view/{id} redirects to a generic search page and no verdict can be
+    // trusted. The guest endpoint below returns the rendered posting as HTML with no
+    // auth and no browser, and it answers 200 for closed postings as well as live
+    // ones, so liveness has to come from the body (`interpret`), never from the
+    // status code alone.
+    match(u) {
+      if (!/(^|\.)linkedin\.com$/.test(u.hostname)) return null;
+      const path = u.pathname.match(/^\/jobs\/view\/(?:.*-)?(\d+)\/?$/);
+      if (path) return { id: path[1] };
+      const current = u.searchParams.get('currentJobId');
+      return current && /^\d+$/.test(current) ? { id: current } : null;
+    },
+    api: ({ id }) => `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${id}`,
+    // The endpoint is unauthenticated and rate-limited. Space our calls; the
+    // interval sits on the provider so it holds for every caller rather than only
+    // the loop in check-liveness.mjs.
+    throttleMs: 3_500,
+    // We parse HTML here, so ask for it. The endpoint also serves HTML under an
+    // application/json Accept, but a request that misdescribes what it wants is one
+    // content-negotiation change away from breaking silently.
+    accept: 'text/html',
+    async interpret(res) {
+      let html;
+      try {
+        html = await res.text();
+      } catch {
+        return null; // unreadable body → inconclusive, let the browser decide
+      }
+      return classifyLinkedInPosting(html);
+    },
+  },
 ];
+
+// LinkedIn renders a closed posting with an explicit banner
+// (`<figcaption class="closed-job__flavor--closed">No longer accepting
+// applications</figcaption>`) and drops the apply control. A live posting shows one
+// of two apply controls: the on-site button, or the off-site sign-in modal.
+const LINKEDIN_CLOSED_MARKER = /No longer accepting applications/i;
+const LINKEDIN_APPLY_CONTROL = /public_jobs_apply-link-onsite|job-details-topcard-apply-modal/;
+
+/**
+ * Decide liveness for one LinkedIn posting from its guest-endpoint HTML.
+ * Pure + deterministic (no I/O), mirroring classifyLiveness in liveness-core.mjs.
+ *
+ * The two signals are read independently and must agree before this concludes
+ * anything. A body carrying the closed banner AND an apply control, or neither, is
+ * a page we do not recognise — a layout change, a partial render, an interstitial —
+ * and it returns `uncertain` rather than picking the likelier answer.
+ *
+ * The asymmetry is deliberate and is the whole reason for the two-signal rule, and
+ * it is this module's CONSERVATIVE BY DESIGN rule applied to a body read rather than
+ * a status code: a wrong `expired` costs the user a real job they never see again,
+ * while a wrong `uncertain` costs one re-check on the next sweep.
+ *
+ * @param {any} html - the guest endpoint's response body
+ * @returns {{ result: 'active' | 'expired' | 'uncertain', code: string, reason: string } | null}
+ *   null = nothing to read (empty or non-string body) → caller falls back.
+ */
+export function classifyLinkedInPosting(html) {
+  if (typeof html !== 'string' || html.length === 0) return null;
+  const closed = LINKEDIN_CLOSED_MARKER.test(html);
+  const apply = LINKEDIN_APPLY_CONTROL.test(html);
+  if (closed && !apply) {
+    return {
+      result: 'expired',
+      code: 'linkedin_closed_marker',
+      reason: 'LinkedIn shows "No longer accepting applications" and no apply control',
+    };
+  }
+  if (apply && !closed) {
+    return {
+      result: 'active',
+      code: 'linkedin_apply_control',
+      reason: 'LinkedIn shows an apply control and no closure banner (live)',
+    };
+  }
+  return {
+    result: 'uncertain',
+    code: 'linkedin_signals_disagree',
+    reason: closed
+      ? 'LinkedIn shows both a closure banner and an apply control — unrecognised page'
+      : 'LinkedIn shows neither a closure banner nor an apply control — unrecognised page',
+  };
+}
+
+// Reserved send times per provider, so back-to-back callers queue behind each
+// other instead of all reading the same "last request" timestamp and firing
+// together.
+const nextRequestAt = new Map();
+
+/**
+ * Wait until this provider's next request slot, then reserve the one after it.
+ *
+ * @param {string} providerId
+ * @param {number} [intervalMs] - minimum spacing; falsy means no throttling
+ * @returns {Promise<number>} milliseconds actually waited
+ */
+export async function throttleProviderRequest(providerId, intervalMs) {
+  if (!intervalMs) return 0;
+  const now = Date.now();
+  const earliest = Math.max(now, nextRequestAt.get(providerId) ?? 0);
+  nextRequestAt.set(providerId, earliest + intervalMs);
+  const wait = earliest - now;
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  return wait;
+}
 
 /**
  * Decide liveness for one Ashby posting from its org's job-board API payload.
@@ -159,7 +368,7 @@ export function classifyAshbyBoard(json, jobId) {
  * Map a posting URL to its ATS API URL, or null if it isn't a known ATS posting
  * (or any extracted segment fails the strict charset). Pure + deterministic.
  * @param {string} rawUrl
- * @returns {{ ats: string, apiUrl: string, parts: Record<string, string>, timeoutMs?: number, interpret?: (res: Response, parts: Record<string, string>) => Promise<{ result: 'active' | 'expired', code: string, reason: string } | null> } | null}
+ * @returns {{ ats: string, apiUrl: string, parts: Record<string, string>, timeoutMs?: number, throttleMs?: number, accept?: string, interpret?: (res: Response, parts: Record<string, string>) => Promise<{ result: 'active' | 'expired' | 'uncertain', code: string, reason: string } | null>, api404Authoritative: boolean } | null}
  */
 export function resolveAtsApi(rawUrl) {
   let u;
@@ -176,7 +385,18 @@ export function resolveAtsApi(rawUrl) {
     // most providers, or (Workday) a slash-separated sequence of safe segments.
     // isSafeValue enforces the same charset + no-".." rule either way.
     if (!Object.values(parts).every(isSafeValue)) return null;
-    return { ats: provider.id, apiUrl: provider.api(parts), parts, timeoutMs: provider.timeoutMs, interpret: provider.interpret };
+    return {
+      ats: provider.id,
+      apiUrl: provider.api(parts),
+      parts,
+      timeoutMs: provider.timeoutMs,
+      throttleMs: provider.throttleMs,
+      accept: provider.accept,
+      headers: provider.headers,
+      followEmbed: provider.followEmbed,
+      interpret: provider.interpret,
+      api404Authoritative: provider.api404Authoritative !== false,
+    };
   }
   return null;
 }
@@ -186,16 +406,32 @@ export function isAtsPosting(url) {
   return resolveAtsApi(url) !== null;
 }
 
+// ATS ids whose public API returns the actual JD body (not just a liveness
+// signal). Greenhouse (`content`), Lever (`descriptionPlain`), Ashby
+// (`descriptionPlain` on the org board), Workday (`jobPostingInfo.jobDescription`
+// on the per-job CXS endpoint) all ship full text for free in the same payload
+// resolveAtsApi() already points at. Microsoft and LinkedIn are on ATS_PROVIDERS
+// for liveness only — their public endpoints answer search/status, never body
+// text — so they are deliberately excluded here; see fetch-jd.mjs / the
+// fetch*Jd() family in browser-extract.mjs for the per-provider fetchers.
+export const JD_TEXT_API_ATS = new Set(['greenhouse', 'lever', 'ashby', 'workday']);
+
 /**
  * Zero-token liveness check via the posting's ATS API.
  * @param {string} url
- * @returns {Promise<{ result: 'active' | 'expired', code: string, reason: string } | null>}
+ * @returns {Promise<{ result: 'active' | 'expired' | 'uncertain', code: string, reason: string } | null>}
  *   null = not a known ATS posting, or inconclusive → caller should fall back to Playwright.
+ *   `uncertain` is a conclusion in its own right: the provider reached the posting
+ *   and could not read it, and no other rung would do better.
  */
 export async function checkLivenessViaApi(url) {
   const resolved = resolveAtsApi(url);
   if (!resolved) return null;
-  const { ats, apiUrl, parts, interpret, timeoutMs } = resolved;
+  const { ats, apiUrl, parts, interpret, timeoutMs, throttleMs, accept, headers, followEmbed, api404Authoritative } = resolved;
+
+  // Wait out any provider rate limit BEFORE arming the timeout, so the spacing
+  // does not eat the budget the request itself needs.
+  await throttleProviderRequest(ats, throttleMs);
 
   // The timeout guards the whole classification (fetch + any `interpret` body read),
   // since aborting the shared signal also tears down an in-flight res.json().
@@ -206,15 +442,26 @@ export async function checkLivenessViaApi(url) {
     try {
       res = await fetch(apiUrl, {
         method: 'GET',
-        headers: { 'user-agent': 'career-ops-liveness/1.0', accept: 'application/json' },
-        redirect: 'error', // refuse server-side redirects (SSRF + ambiguity guard)
+        headers: { 'user-agent': DEFAULT_USER_AGENT, accept: accept || 'application/json', ...headers },
+        redirect: followEmbed ? 'manual' : 'error',
         signal: controller.signal,
       });
+      if (followEmbed) {
+        const jobApiUrl = await followEmbed(res, parts);
+        if (!jobApiUrl) return null;
+        res = await fetch(jobApiUrl, {
+          method: 'GET',
+          headers: { 'user-agent': DEFAULT_USER_AGENT, accept: 'application/json' },
+          redirect: 'error',
+          signal: controller.signal,
+        });
+      }
     } catch {
       return null; // network / timeout / redirect → inconclusive, let Playwright decide
     }
 
     if (res.status === 404 || res.status === 410) {
+      if (!api404Authoritative) return null; // inconclusive → let Playwright check the real page
       return { result: 'expired', code: `${ats}_api_gone`, reason: `ATS API ${res.status} — posting removed` };
     }
     if (res.status === 200) {

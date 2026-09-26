@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { scoreTone } from "@/lib/format";
+import { resolveCliId } from "@/lib/saved-cli";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
 export type JobResult = { score: number | null; summary: string; tone: "good" | "warn" | "bad" | "muted" };
@@ -39,7 +40,6 @@ export function useJobs() {
   return c;
 }
 
-const CONFIG_KEY = "career-ops:config";
 const JOBS_KEY = "career-ops:jobs";
 
 function parseVerdict(text: string): JobResult {
@@ -92,13 +92,6 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
   const startJob = useCallback(
     (opts: StartOpts): string | null => {
-      let cliId: string | null = null;
-      try {
-        const raw = localStorage.getItem(CONFIG_KEY);
-        cliId = raw ? JSON.parse(raw).cliId || null : null;
-      } catch {
-        cliId = null;
-      }
       const id = `job-${Date.now()}-${seq.current++}`;
       const job: Job = {
         id,
@@ -115,17 +108,37 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       };
       setJobs((js) => [job, ...js]);
 
-      if (!cliId) {
-        patch(id, (j) => ({ ...j, status: "error", endedAt: Date.now(), steps: [...j.steps, { kind: "status", label: "No CLI configured — open Config", ts: Date.now() }] }));
-        return id;
-      }
-
+      // Declared before resolveCliId() so its stale-CLI notice lands in the log
+      // sent to /api/runs/save, not only in the live job.
+      const steps: JobStep[] = [];
       (async () => {
+        // resolveCliId() validates the saved id against what is installed; a
+        // bare readSavedCliId() here would short-circuit that check and launch
+        // a run against an uninstalled CLI (#4012).
+        // A stale saved id is replaced silently otherwise — name the switch in
+        // the job log so a transient "not installed" can't rewrite the user's
+        // choice without a record.
+        const cliId = await resolveCliId((stale, replacement) => {
+          const label = replacement
+            ? `Saved CLI '${stale}' is not installed — using '${replacement}'`
+            : `Saved CLI '${stale}' is not installed`;
+          const step: JobStep = { kind: "status", label, ts: Date.now() };
+          steps.push(step);
+          patch(id, (j) => ({ ...j, steps: [...j.steps, step] }));
+        });
+        if (!cliId) {
+          patch(id, (j) => ({
+            ...j,
+            status: "error",
+            endedAt: Date.now(),
+            steps: [...j.steps, { kind: "status", label: "No CLI configured — open Config and click Save config", ts: Date.now() }],
+          }));
+          return;
+        }
         let text = "";
         let verdictLine = ""; // latched separately so the 8000-char tail can't drop it
         let doneTokens = 0; // per-run token cost, forwarded on the done event (#6)
         let doneCostUsd: number | null = null;
-        const steps: JobStep[] = [];
         const finish = (status: "done" | "error", lastLabel?: string) => {
           const result = status === "done" ? parseVerdict(verdictLine || text) : undefined;
           const cost = status === "done" && doneTokens > 0 ? { tokens: doneTokens, usd: doneCostUsd ?? undefined } : undefined;

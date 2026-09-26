@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { isRealISODate, localISODate } from "@/lib/followups";
-import { followupsLogPath, withLogLock } from "@/lib/followups-server";
+import { parseFollowupId } from "@/lib/followup-id.mjs";
+import { followupsLogPath, withFollowupsWrite, followupsWriteError } from "@/lib/followups-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,8 +24,8 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const appNum = Number.parseInt(String(body.appNum ?? ""), 10);
-  if (!Number.isInteger(appNum) || appNum < 0) {
+  const appNum = parseFollowupId(body.appNum);
+  if (appNum === null) {
     return Response.json({ error: "appNum (application #) required" }, { status: 400 });
   }
   const date = (body.date ?? "").trim();
@@ -34,7 +35,7 @@ export async function POST(req: Request) {
 
   const file = followupsLogPath();
   try {
-    return await withLogLock(() => {
+    return await withFollowupsWrite(() => {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       let existing = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "# Follow-ups\n\n";
       // Supersede: drop any previous pin lines for this application (the parser
@@ -47,7 +48,7 @@ export async function POST(req: Request) {
       return Response.json({ ok: true, appNum, date });
     });
   } catch (e) {
-    return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
+    return followupsWriteError(e, "write failed");
   }
 }
 
@@ -59,15 +60,15 @@ export async function DELETE(req: Request) {
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const appNum = Number.parseInt(String(body.appNum ?? ""), 10);
-  if (!Number.isInteger(appNum) || appNum < 0) {
+  const appNum = parseFollowupId(body.appNum);
+  if (appNum === null) {
     return Response.json({ error: "appNum (application #) required" }, { status: 400 });
   }
 
   const file = followupsLogPath();
   if (!fs.existsSync(file)) return Response.json({ error: "no follow-up log" }, { status: 404 });
   try {
-    return await withLogLock(() => {
+    return await withFollowupsWrite(() => {
       const lines = fs.readFileSync(file, "utf8").split("\n");
       const kept = lines.filter((line) => !pinRe(appNum).test(line));
       if (kept.length === lines.length) {
@@ -77,6 +78,6 @@ export async function DELETE(req: Request) {
       return Response.json({ ok: true, appNum });
     });
   } catch (e) {
-    return Response.json({ error: e instanceof Error ? e.message : "delete failed" }, { status: 500 });
+    return followupsWriteError(e, "delete failed");
   }
 }

@@ -2,6 +2,9 @@ import { NextRequest } from "next/server";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { companyDomain } from "@/lib/company";
+import { companyCacheKey } from "@/lib/core/logo-cache-key.mjs";
+import { companyDomains } from "@/lib/core/company-domains.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,26 +16,13 @@ export const dynamic = "force-dynamic";
 // (a hit, or an empty sentinel for a known miss). On any miss → 404 so the
 // client's <img onError> falls back to the offline monogram. Because the cache is
 // keyed by company, once a company's logo resolves it's instant for that card AND
-// every other card (this search or any future one), forever.
+// every other card (this search or any future one), forever. "Forever" is why
+// company keys are versioned — see lib/core/logo-cache-key.
 
 const DOMAIN_RE = /^[a-z0-9.-]{1,253}\.[a-z]{2,}$/i;
 
 function cacheDir(): string {
   return path.join(careerOpsRoot(), ".career-ops-web", "logo-cache");
-}
-
-/** Plausible domains for a company name, cheapest/likeliest first. */
-function companyDomains(company: string): string[] {
-  const paren = company.match(/\(([A-Za-z0-9]{2,12})\)/)?.[1]; // "… (5WPR)"
-  // [^()] (not [^)]) keeps the match unambiguous — no polynomial backtracking on
-  // adversarial inputs full of unclosed parens (CodeQL js/polynomial-redos).
-  const base = company.replace(/\([^()]*\)/g, "").trim();
-  const compact = base.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]/g, "");
-  const firstWord = base.toLowerCase().split(/\s+/)[0].replace(/[^a-z0-9]/g, "");
-  const stems = [...new Set([compact, paren?.toLowerCase(), firstWord].filter((s): s is string => !!s && s.length >= 2 && s.length <= 30))];
-  const out: string[] = [];
-  for (const t of [".com", ".ai", ".io", ".co"]) for (const s of stems) out.push(s + t);
-  return out.slice(0, 5);
 }
 
 /** Fetch a real favicon for one domain (Google's tokenless service). Returns the
@@ -64,10 +54,13 @@ export async function GET(req: NextRequest) {
     key = domain.replace(/[^a-z0-9.-]/g, "_");
     candidates = [domain];
   } else if (company) {
-    const slug = company.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 40);
-    if (!slug) return new Response("bad company", { status: 400 });
-    key = `co_${slug}`;
-    candidates = companyDomains(company);
+    // Versioned + digested (see lib/core/logo-cache-key): the cache never
+    // expires, so the key has to carry both the resolver version and enough of
+    // the name to keep two companies apart.
+    const companyKey = companyCacheKey(company);
+    if (!companyKey) return new Response("bad company", { status: 400 });
+    key = companyKey;
+    candidates = companyDomains(company, companyDomain);
     if (candidates.length === 0) return new Response("no logo", { status: 404 });
   } else {
     return new Response("need domain or company", { status: 400 });

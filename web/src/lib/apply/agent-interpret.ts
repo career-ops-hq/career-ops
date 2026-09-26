@@ -1,8 +1,15 @@
-import { spawn } from "node:child_process";
+import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import type { Frame } from "playwright-core";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import type { ApplyField } from "./extract";
+import { CAPS } from "../worker-capabilities.mjs";
+import { scopeFrom } from "../claude-invocation.mjs";
+
+// Deny list DERIVED, never hand-written: every one of the six advisor argvs
+// that spelled its own omitted MultiEdit, which --permission-mode acceptEdits
+// then auto-approves (#2185, #2507).
+const ADVISOR_SCOPE = scopeFrom("Read");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AGENTIC FALLBACK — the AI interprets the LIVE form, like a human does with
@@ -79,10 +86,21 @@ Return ONLY a JSON array, no prose, no code fence:
 [{"n":0,"skip":false,"label":"First Name","type":"text","options":[],"required":true}, ...]`;
 }
 
-function runPlanner(binPath: string, isClaude: boolean, argsFor: (p: string) => string[], prompt: string): Promise<string> {
-  const args = isClaude ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"] : argsFor(prompt);
+// Takes cliId rather than a precomputed isClaude: spawnHeadlessCli needs the id
+// to pick this runtime's permission mechanism, and deriving the boolean here
+// keeps the two from disagreeing about which CLI is being run.
+function runPlanner(binPath: string, cliId: string, argsFor: (p: string) => string[], prompt: string): Promise<string> {
+  const isClaude = cliId === "claude";
+  const args = isClaude ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", ADVISOR_SCOPE.allowed, "--disallowedTools", ADVISOR_SCOPE.disallowed] : argsFor(prompt);
   return new Promise((resolve) => {
-    const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    // Reads the captured controls and returns JSON — the narrowest scope here:
+    // the Claude branch allows Read alone and denies fetching outright.
+    const child = spawnHeadlessCli(
+      binPath,
+      args,
+      { cwd: careerOpsRoot(), env: process.env },
+      { cliId, capabilities: CAPS.localReadOnly },
+    );
     let buf = "";
     child.stdout.on("data", (d: Buffer) => (buf += d.toString()));
     child.stderr.on("data", () => {});
@@ -106,23 +124,34 @@ function runPlanner(binPath: string, isClaude: boolean, argsFor: (p: string) => 
 
 type Interpreted = { n: number; skip?: boolean; label?: string; type?: string; options?: string[]; required?: boolean };
 
-/** The agentic interpreter: capture the live form, let the LLM read+classify it,
- *  re-tag the chosen controls with data-co-field, and return clean ApplyField[].
- *  Returns [] if the CLI is missing or interpretation fails (caller falls back). */
-export async function agentInterpretForm(frame: Frame, cliId: string, title: string): Promise<ApplyField[]> {
-  const resolved = resolveCli(cliId);
-  if (!resolved) return [];
-  const cands = await captureCandidates(frame).catch(() => [] as Cand[]);
-  if (!cands.length) return [];
+/** What the agentic interpreter did. `fields` is the interpretation; `spawned`
+ *  says whether the user's CLI was actually launched over the form. The two are
+ *  independent — a launched agent can return nothing usable, and a missing CLI
+ *  or an empty form never launches one — and the fencing notice the callers
+ *  surface is about the launch, not about the result (#2507). */
+export type AgentInterpretation = { fields: ApplyField[]; spawned: boolean };
 
-  const out = await runPlanner(resolved.binPath, cliId === "claude", resolved.spec.args, buildPrompt(title, cands));
+/** The agentic interpreter: capture the live form, let the LLM read+classify it,
+ *  re-tag the chosen controls with data-co-field, and return clean ApplyField[]
+ *  together with whether the CLI ran. `fields` is [] if the CLI is missing, the
+ *  form has no controls, or interpretation fails (caller falls back). */
+export async function interpretFormWithAgent(frame: Frame, cliId: string, title: string): Promise<AgentInterpretation> {
+  const resolved = resolveCli(cliId);
+  if (!resolved) return { fields: [], spawned: false };
+  const cands = await captureCandidates(frame).catch(() => [] as Cand[]);
+  if (!cands.length) return { fields: [], spawned: false };
+
+  // From here on the CLI has been launched: every early return below still
+  // reports spawned: true, so a caller can warn about an unfenced runtime even
+  // when the interpretation came back empty.
+  const out = await runPlanner(resolved.binPath, cliId, resolved.spec.args, buildPrompt(title, cands));
   const m = out.match(/\[[\s\S]*\]/);
-  if (!m) return [];
+  if (!m) return { fields: [], spawned: true };
   let parsed: Interpreted[];
   try {
     parsed = JSON.parse(m[0]);
   } catch {
-    return [];
+    return { fields: [], spawned: true };
   }
 
   const byN = new Map(cands.map((c) => [c.n, c]));
@@ -138,7 +167,7 @@ export async function agentInterpretForm(frame: Frame, cliId: string, title: str
       fields.push({ id: fid, type, label: (p.label || cand.ctx || "").slice(0, 160), required: !!p.required || cand.req, options: options.length ? options : undefined, combobox: type === "select" && cand.tag !== "select" });
       tagMap.push({ candN: p.n, fid, type, options });
     });
-  if (!fields.length) return [];
+  if (!fields.length) return { fields: [], spawned: true };
 
   // Re-tag the live elements: data-co-field on the chosen control (+ per-option
   // data-co-option for radios) so fillSession can locate them deterministically.
@@ -159,5 +188,11 @@ export async function agentInterpretForm(frame: Frame, cliId: string, title: str
     }, tagMap)
     .catch(() => {});
 
-  return fields;
+  return { fields, spawned: true };
+}
+
+/** Fields only — the original contract, for callers that do not surface the
+ *  fencing notice themselves. */
+export async function agentInterpretForm(frame: Frame, cliId: string, title: string): Promise<ApplyField[]> {
+  return (await interpretFormWithAgent(frame, cliId, title)).fields;
 }

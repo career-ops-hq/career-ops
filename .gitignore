@@ -11,22 +11,30 @@ data/*
 !data/offers/
 !data/parser-output/
 # Received offers/contracts, promise notes, prep reports (PII — never commit)
-data/offers/*
+data/offers/*   
 !data/offers/.gitkeep
 data/parser-output/**
 !data/parser-output/**/
 !data/parser-output/.gitkeep
 !data/parser-output/**/.gitkeep
 reports/*.md
+# Single-level glob above misses subdirectories (e.g. reports/superseded/).
+# Kept alongside it rather than replacing it, so update-system.mjs does not
+# re-append the original pattern as "missing".
+reports/**/*.md
 !reports/.gitkeep
 output/*
 !output/.gitkeep
 batch/logs/*
 !batch/logs/.gitkeep
 batch/batch-state.tsv
+batch/batch-state-recovery.d/
 batch/batch-input.tsv
 batch/tracker-additions/**/*.tsv
 !batch/tracker-additions/.gitkeep
+# Worker scratch: prefetched JD text plus whatever compile cache the worker CLI
+# drops here. Fetched postings are user data — never stage them.
+batch/tmp/
 jds/*
 !jds/.gitkeep
 
@@ -57,10 +65,15 @@ writing-samples/*
 config/profile.yml
 config/cv-facts.json
 config/benchmarks.yml
+# Fork-local path declarations — this checkout's own files, read by
+# update-system.mjs. Gitignored on purpose: it describes THIS clone, not the
+# project, and must survive the sync that overwrites update-system.mjs (#2421).
+config/local-paths.txt
 portals.yml
 modes/_profile.md
 modes/_custom.md
 modes/_brief.md
+voice-dna.md
 .update-dismissed
 .update-lock
 .manifesto-noted
@@ -80,7 +93,7 @@ plugins.lock
 
 # Generated
 .resolved-prompt-*
-node_modules/
+node_modules
 bun.lock
 # Working copy the test suite makes under the repo root (test-all.mjs
 # `mkdtempSync(join(ROOT, '.tmp-script-test-'))`). A clean run deletes it; a
@@ -97,6 +110,59 @@ reports/*-RESERVED.md
 # form, which for cv.md or portals.yml leaves a file holding the same PII as the
 # original sitting untracked in the repo root. Trailing `*` covers both.
 *.bak*
+
+# Atomic-write temp files, the sibling of the backups above and from the same
+# two writers: `.{name}.{pid}.{ts}.{uuid}.tmp` (tracker-utils.mjs
+# writeFileAtomic, web/src/lib/core/safe-write.ts atomicWrite). They exist only
+# between the write and the rename — but a rename that throws (Windows
+# destination-handle contention, ENOSPC, a read-only mount) leaves one behind
+# holding a byte-for-byte copy of cv.md / profile.yml / portals.yml, under a
+# name the `*.bak*` rule does not match. Same PII, same reflexive `git add .`.
+*.tmp*
+
+# The tracker and its follow-ups file in the LEGACY ROOT LAYOUT. resolveTrackerPath()
+# documents its own fallback chain — CAREER_OPS_TRACKER > <root>/data/applications.md
+# > <root>/applications.md — and that third entry is a supported install shape, not a
+# mistake. data/ is covered by the blanket rule at the top of this file; the root
+# spelling was not covered by anything.
+#
+# The content is the user's whole job search: company, role, score, status, notes.
+# cv.md, portals.yml, article-digest.md and voice-dna.md are all ignored at the root
+# already, and #3469 ignores the derived .db index on the argument that it "holds the
+# same PII as the tracker" — while the tracker itself sat beside it, unignored.
+#
+# Unanchored, like the .db rule below and for the same reason: getCareerOpsRoot()
+# resolves a relative CAREER_OPS_ROOT (or .career-ops-data marker) against the
+# codebase directory, so a data root configured as `career-data` puts these inside
+# the checkout, where an anchored rule would not reach them. The upgrade fixtures
+# that share these names stay tracked via the `!test-fixtures/**` rule further down,
+# which is a later pattern and therefore wins.
+applications.md
+follow-ups.md
+
+# The tracker's derived SQLite index (tracker.mjs, #918). It sits beside the
+# tracker markdown, so on the standard layout it lands in data/ and is already
+# covered by the rules above — but resolveTrackerPath() falls back to
+# `<root>/applications.md` when data/applications.md is absent, and the index
+# follows it there. That is the legacy install layout, and it is also every
+# fresh clone: `node test-all.mjs` leaves a 36KB applications.db in the repo
+# root, which `git add .` then stages.
+#
+# Its content is the whole tracker — company, role, score, status, notes — so it
+# carries the same PII as the file it indexes, under a name none of the rules
+# above match. SQLite's -wal/-shm sidecars travel with it.
+#
+# Deliberately not root-anchored. The index follows the tracker markdown, and
+# getCareerOpsRoot() resolves a relative CAREER_OPS_ROOT (or .career-ops-data
+# marker) against the codebase directory — so a data root configured as
+# `career-data` puts both inside the checkout, in neither of the two places an
+# anchored rule would cover. Nothing tracked in this repo ends in .db, and an
+# ignore rule cannot untrack a file that is already tracked, so the cost of the
+# wider glob is a `git add -f` on a .db fixture nobody has added yet; the cost
+# of the narrower one is this leak, for every non-default data root.
+*.db
+*.db-wal
+*.db-shm
 
 # OpenRouter runner — generated data (personal, never commit)
 data/model-blacklist.json
@@ -141,3 +207,12 @@ plan/
 # (see DATA_CONTRACT.md). Re-include them past the unanchored user-layer
 # patterns above (cv.md, portals.yml).
 !test-fixtures/**
+
+# Profile intake sources (master CV / LinkedIn export / diplomas / references
+# — user PII, never commit). Ship only the system-owned scaffold. #1723
+documents/*
+!documents/.gitkeep
+!documents/README.md
+# Intake fingerprints — the recorded source filenames may themselves carry
+# PII (e.g. cv/jane-doe-master-cv.pdf). #1723
+data/intake-state.json

@@ -16,6 +16,7 @@ import { pass, fail, ROOT, NODE } from './helpers.mjs';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { pathToFileURL } from 'url';
 import { execFileSync } from 'child_process';
 
 console.log('\nscan.mjs - pipeline and scan-history paths are env-overridable (#2271)');
@@ -47,12 +48,43 @@ function makeLane() {
   return { dir, portals };
 }
 
-const runScan = (dir, env) => execFileSync(NODE, [join(ROOT, 'scan.mjs')], {
-  cwd: dir,
-  env: { ...process.env, ...env },
-  encoding: 'utf-8',
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
+// Every variable scan.mjs resolves a path from. Cleared before each spawn so a
+// test's environment is only what that test asked for.
+//
+// This matters more here than in a typical suite, because the audience for
+// these variables is precisely the person running the suite with them set: the
+// docs added alongside this feature tell a second-lane user to export
+// CAREER_OPS_PIPELINE and CAREER_OPS_SCAN_HISTORY. With the parent environment
+// inherited wholesale, check 1 below - the one asserting DEFAULT behavior -
+// would follow that user's override and append fixture postings to their real
+// inbox, and the corresponding scan-history write would poison their dedup
+// source. A test suite must not be able to write into the data it is testing
+// the handling of (CodeRabbit, reviewing #2568).
+const SCANNER_PATH_VARS = [
+  'CAREER_OPS_PORTALS',
+  'CAREER_OPS_PROFILE',
+  'CAREER_OPS_PIPELINE',
+  'CAREER_OPS_SCAN_HISTORY',
+  // The data-root pair joined this list with CAREER_OPS_ROOT itself: they are
+  // now the FIRST variables scan resolves paths from, so an ambient value
+  // would redirect every "default" assertion below at once.
+  'CAREER_OPS_ROOT',
+  'CAREER_OPS_DATA_DIR',
+];
+
+const runScan = (dir, env) => {
+  const childEnv = { ...process.env };
+  for (const name of SCANNER_PATH_VARS) delete childEnv[name];
+  // The sandbox IS the lane's data root. scan's defaults are anchored to
+  // CAREER_OPS_ROOT (no longer to the child's cwd), so "default behavior"
+  // here means: root pinned to the fixture, no per-file overrides.
+  return execFileSync(NODE, [join(ROOT, 'scan.mjs')], {
+    cwd: dir,
+    env: { ...childEnv, CAREER_OPS_ROOT: dir, ...env },
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+};
 
 /** Pending rows in a pipeline file; [] when the file was never created. */
 function entries(pipelinePath) {
@@ -169,6 +201,84 @@ function entries(pipelinePath) {
     }
   } catch (err) {
     fail(`scan into a new directory failed: ${err.message}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// 5. The suite's own isolation, asserted rather than assumed. Check 1 claims to
+//    exercise DEFAULT paths, but it can only do that if nothing ambient reaches
+//    the child - and the user most likely to run this suite with these variables
+//    exported is the second-lane user this feature was built for. Simulate that
+//    environment and confirm the fixture's writes land in the lane's own
+//    directory and nowhere else.
+//
+//    Goes through the same runScan() the checks above use, deliberately. A case
+//    that spawned scan.mjs with its own hand-built environment would keep
+//    passing if the clearing were dropped, which is the whole failure mode: on a
+//    machine with these variables unset, removing it changes nothing observable.
+{
+  const { dir, portals } = makeLane();
+  const ambientRoot = mkdtempSync(join(tmpdir(), 'scan-outpaths-ambient-'));
+  const ambientPipeline = join(ambientRoot, 'pipeline.md');
+  const ambientHistory = join(ambientRoot, 'scan-history.tsv');
+  const saved = SCANNER_PATH_VARS.map((name) => [name, process.env[name]]);
+  try {
+    process.env.CAREER_OPS_PIPELINE = ambientPipeline;
+    process.env.CAREER_OPS_SCAN_HISTORY = ambientHistory;
+    runScan(dir, { CAREER_OPS_PORTALS: portals });
+    const laneEntries = entries(join(dir, 'data', 'pipeline.md')).length;
+    const leaked = existsSync(ambientPipeline) || existsSync(ambientHistory);
+    if (laneEntries > 0 && !leaked) {
+      pass('an ambient CAREER_OPS_PIPELINE / CAREER_OPS_SCAN_HISTORY cannot redirect this suite (#2568)');
+    } else {
+      fail(`suite is not isolated from the ambient environment: ${laneEntries} lane entr(y/ies), ambient files ${leaked ? 'WRITTEN' : 'untouched'} (#2568)`);
+    }
+  } catch (err) {
+    fail(`ambient-environment isolation check failed: ${err.message}`);
+  } finally {
+    for (const [name, value] of saved) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(ambientRoot, { recursive: true, force: true });
+  }
+}
+
+
+// 6. Importing scan.mjs must not create data/ on its own - the module has three
+//    write-time paths (pipeline, scan-history, scan-runs) and none of them
+//    should fire before a caller actually asks for a write (#3159).
+//
+//    CAREER_OPS_ROOT is pinned to the temp dir, and that pin is the whole test.
+//    scan.mjs anchors its paths to getCareerOpsRoot(), NOT to the cwd, so with
+//    the variable unset an import-time mkdir lands in the REPO's own data/ --
+//    a directory that already exists on every developer machine and in CI. The
+//    assertion below would look at the empty temp dir, see no data/, and pass
+//    while the regression it guards was live. Setting cwd alone is inert here.
+//    With the root pinned, the only data/ scan.mjs can create is this one.
+{
+  const dir = mkdtempSync(join(tmpdir(), 'scan-outpaths-import-'));
+  try {
+    const scanUrl = pathToFileURL(join(ROOT, 'scan.mjs')).href;
+    // The two overrides are cleared so an ambient value in the developer's own
+    // shell cannot redirect scan-history/pipeline out of the directory watched.
+    const env = { ...process.env, CAREER_OPS_ROOT: dir };
+    delete env.CAREER_OPS_SCAN_HISTORY;
+    delete env.CAREER_OPS_PIPELINE;
+    execFileSync(NODE, ['--input-type=module', '-e', `import(${JSON.stringify(scanUrl)})`], {
+      cwd: dir,
+      env,
+      encoding: 'utf-8',
+    });
+    if (!existsSync(join(dir, 'data'))) {
+      pass('importing scan.mjs does not create data/ as a side effect (#3159)');
+    } else {
+      fail('importing scan.mjs created a data/ directory with no write ever requested (#3159)');
+    }
+  } catch (err) {
+    fail(`import-only spawn failed: ${err.message}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

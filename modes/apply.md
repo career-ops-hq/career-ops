@@ -31,7 +31,7 @@ Interactive mode for when the candidate is filling out an application form in Ch
 
 Before generating any application answers, verify that the form still points to the intended active job. This gate runs after the page has been detected, the company/role has been identified, and the matching report has been loaded.
 
-**Blacklist check (#1742):** before any form filling starts, if `data/blacklist.md` exists, check the visible company against it (case- and punctuation-insensitive). The file is the candidate's own do-not-apply list — on a hit, STOP and surface their own recorded decision: "{Company} is on your blacklist (since {Since}): *{Reason}*. Do you still want to apply?" Require an explicit yes before generating or filling anything — never silently refuse, never silently proceed; the candidate's call always wins. Absent file = skip this check.
+**Blacklist check (#1742):** before any form filling starts, if `data/blacklist.md` exists, check both the visible company and posting URL against it. For `Scope: company` (also the default for blank or unsupported scopes), match the company case- and punctuation-insensitively. For `Scope: domain`, treat the Company cell as a hostname suffix: compare it with the posting URL's hostname, ignoring case and a trailing dot, and match only the exact host or a subdomain (`ibm.com` matches `jobs.ibm.com`, never `notibm.com`). Keep dots and hyphens distinct. If the URL is missing or invalid, domain rules cannot match; still check company rules. The file is the candidate's own do-not-apply list — on a hit, STOP and surface their own recorded decision: "{Company} is on your blacklist (since {Since}): *{Reason}*. Do you still want to apply?" Require an explicit yes before generating or filling anything — never silently refuse, never silently proceed; the candidate's call always wins. Absent file = skip this check.
 
 **Cross-channel check (#1596):** before drafting — and ALWAYS before the user authorizes an agency to submit on their behalf — check `data/applications.md` for an existing row with the same company+role under a different Via (agency vs direct, or two agencies). A double submission burns the candidate with both the agency and the employer. If found, stop and ask the user which channel owns the candidacy. If the end employer is still unknown (Company `?`), the check still runs in degraded form — it is never silently skipped:
 
@@ -128,7 +128,23 @@ If a field matches, warn the candidate BEFORE generating or filling an answer fo
 1. Extract company name and role title from the page
 2. Search in `reports/` by company name (case-insensitive grep)
 3. If there is a match → load the full report
-4. If there is a Section H or `## Application Answers` → load previous answers as a base
+4. If there is a `## Application Answers` section → recover it through the strict reader, never by re-reading the rendered markdown as prose:
+
+   ```bash
+   node application-answers.mjs --report reports/NNN-company-role-date.md --read --strict
+   ```
+
+   - **Exit 0** → the JSON on stdout is the base snapshot of previous answers. `null` means the report has no section; treat it as a fresh application.
+   - **Non-zero exit** → the section is partially unreadable and strict mode refused it, naming every unreadable line on stderr. Do NOT fall back to reading the section as prose, and do NOT proceed with a partial base — a silently dropped answer looks like an answer the candidate never gave, and an absorbed one corrupts an answer they did give. Show the candidate the named lines and ask whether to fix the report first or continue without the affected answers.
+   - A **Section H** (`## H) Draft Application Answers`, drafted during evaluation before any form was seen) has its own reader, because its body is a convention rather than a format this repo writes:
+
+     ```bash
+     node application-answers.mjs --report reports/NNN-company-role-date.md --read-draft
+     ```
+
+     - Prints `{"freeText": [...]}`, or `null` when the report has no Block H. There is no `--strict` counterpart: an empty `freeText` means the block exists but did not follow the convention, which is an expected outcome and not a corrupted report.
+     - Prefer `## Application Answers` when both exist. Block H is what the evaluation *drafted*, not what the candidate actually sent.
+     - An empty `freeText` on a Block H that clearly has content is the one case to fall back to prose. Say that is what you are doing.
 5. If there is NO match → notify and offer to run a quick auto-pipeline
 
 ## Step 3 — Detect changes in the role
@@ -157,11 +173,13 @@ Classify each question:
 For each field, preserve the application form contract:
 - `field_type`: `text`, `textarea`, `select`, `radio`, `checkbox`, `number`, `file`, or `unknown`
 - `required`: `yes`, `no`, or `unknown`
-- `limit`: exact character/word limit if visible; otherwise `unknown`
+- `limit`: confirmed character/word limit from the live control or visible instructions; otherwise `unknown`
 - `options`: visible options for select/radio/checkbox fields
 - `needs_candidate_confirmation`: `yes` for legal, demographic, work authorization, visa, relocation, salary, disability, veteran, sponsorship, background-check, or self-identification questions unless the answer is explicitly present in `config/profile.yml`
 
 Never invent answers for legal, demographic, work-authorization, visa/sponsorship, salary, disability, veteran, background-check, relocation, or self-identification fields. If the answer is not present in `config/profile.yml` or visible context, mark it as needing candidate confirmation and provide the safest question to ask the candidate.
+
+For every free-text field, inspect the **rendered form control** before drafting: read its `maxlength` attribute/property and any visible word or character counter/help text. ATS question APIs may identify a field as `input_text` without exposing the actual HTML limit. Match each limit to its exact question and record its unit and source; a limit on another control is not evidence. If the candidate supplied only a screenshot or pasted questions and the limit is not shown, record `unknown` and ask for the live field constraint when possible. Do not infer a limit from the field type or a generic ATS default.
 
 
 ## Step 7 — Generate responses
@@ -176,6 +194,8 @@ For each question, generate the response following:
 6. **Recruiter-side risk map**: Use `modes/heuristics/recruiter-side.md` to identify what doubt the question is trying to resolve (motivation, stack fit, logistics, comp, work-auth, availability, seniority) and answer that doubt directly.
 7. **Disclosure discipline**: Answer logistics questions truthfully when asked, but do not volunteer sensitive or HR-only details in unrelated motivation/fit answers.
 
+Before marking any free-text answer ready for copy-paste, count the **final** response against that field's confirmed limit, including spaces and punctuation. For HTML `maxlength`, use the browser's JavaScript string length (UTF-16 code units), the same measure the control enforces. For a word limit, follow the form's displayed counter when available. Shorten and recount any over-limit answer; if it still cannot fit without losing essential facts, flag it for the candidate to revise instead of presenting it as ready. Recheck after every edit. Show `used/allowed characters` (or words) next to each answer with a confirmed limit; show `limit unknown` when no limit was confirmed. A missing limit is never proof that an answer fits.
+
 **Output format:**
 
 ```text
@@ -187,11 +207,13 @@ Based on: Report #NNN | Score: X.X/5 | Archetype: [type]
 
 ### 1. [Exact form question]
 > [Response ready for copy-paste, or "Ask candidate: ..." if the field needs confirmation]
+Length: [used/allowed characters or words, or "limit unknown"]
 
 ### 2. [Next question]
 > [Response]
+Length: [used/allowed characters or words, or "limit unknown"]
 
-...
+Repeat the response and length lines for every remaining question.
 
 ---
 
@@ -229,8 +251,8 @@ If the candidate confirms that they submitted the application:
 4. Suggest next step: run the `contacto` mode (`/career-ops contacto` where available) for LinkedIn outreach
 
 **Confirmed resume-verification failure at this vendor? Check the rest of the pipeline (#1870).** If the candidate confirms the ATS silently dropped or altered resume content that they had submitted (see the SuccessFactors-family quirk below), don't treat it as a one-off. Tracker rows in `data/applications.md` don't carry a canonical ATS-vendor field, so don't grep the tracker text for a vendor name — it will miss rows silently. Instead, resolve the vendor per row from its linked report's `**URL:**` field:
-- For clean-fingerprint vendors (Greenhouse, Lever, Ashby, Workday), match the URL's hostname the same way `detectVendor()` in `analyze-patterns.mjs` does — reuse that function/pattern rather than re-deriving it, so the two stay in sync.
-- White-labeled ATS (SuccessFactors, iCIMS, UKG, Dayforce, and similar) are **not** detectable from the URL alone — the very vendor family this quirk was confirmed on falls in this bucket. For those, don't guess from the domain: ask the candidate directly which other in-flight rows (`Applied`, `Responded`, `Interview`) went through the same portal, since neither the tracker nor the URL structurally exposes it.
+- For clean-fingerprint vendors (Greenhouse, Lever, Ashby, Workday, iCIMS), match the URL's hostname the same way `detectVendor()` in `analyze-patterns.mjs` does — reuse that function/pattern rather than re-deriving it, so the two stay in sync.
+- White-labeled ATS (SuccessFactors, UKG, Dayforce, and similar) are **not** detectable from the URL alone — the very vendor family this quirk was confirmed on falls in this bucket. For those, don't guess from the domain: ask the candidate directly which other in-flight rows (`Applied`, `Responded`, `Interview`) went through the same portal, since neither the tracker nor the URL structurally exposes it.
 
 Once the same-vendor rows are identified (by URL match or candidate confirmation), surface that list and prompt the candidate to spot-check each one via that portal's preview/profile step if one exists. One confirmed silent-truncation case at a vendor raises the prior that it happened elsewhere in-flight through the same vendor too.
 
@@ -250,6 +272,12 @@ Field-tested across ~12 Playwright-driven applications (Ashby, Greenhouse, Lever
 - **Symptom:** Submitting a second application at the same company silently fails or merges into the existing candidate record. Ashby deduplicates by email per company.
 - **Agent:** Before filling the email field, check whether an earlier report for the same company already exists in `reports/`. If it does, warn the candidate and pre-fill a `+tag` alias (e.g., `user+teamname@domain.com`) as the suggested value.
 - **Candidate:** Confirms or changes the email before the form is submitted.
+
+### Ashby — automated browser sessions can be rejected at submission
+
+- **Symptom:** An Ashby form (`jobs.ashbyhq.com`) may reject submission as possible spam from a Playwright-controlled browser, even when the candidate clicks Submit in its visible window. A filled form or a click is not proof of submission.
+- **Agent:** Once the actual application host is known, draft the answers and capture the exact posting/application URL, then hand the candidate off to their ordinary system browser for the final form. Open that URL in the system browser when possible; otherwise provide the direct link. Present a numbered copy-paste list of answers and the files to upload. Do not transfer browser cookies or claim the Playwright-filled state will carry over. If a Playwright submission was rejected, tell the candidate it failed and offer the same browser handoff. Do not attempt to hide automation signals or bypass the site's verification.
+- **Candidate:** Fill and review the form in their ordinary browser, complete any verification, and submit there. Confirm the site's success page or confirmation email before the agent marks the application `submitted` or updates the tracker to Applied; otherwise keep the answers as `filled`.
 
 ### Lever — hCaptcha intercepts checkbox/radio clicks
 

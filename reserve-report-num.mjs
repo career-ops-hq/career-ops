@@ -23,14 +23,16 @@ import {
 import { randomUUID } from 'crypto';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import {
   extractTrackerReportNumbers, parseTrackerRow, resolveColumns,
 } from './tracker-parse.mjs';
 import {
   acquireTrackerLock, canonicalizeTrackerPath, resolveTrackerPath, trackerLockDirFor,
 } from './tracker-utils.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
+const ROOT = getCareerOpsRoot();
 const MAX_SENTINEL_AGE_MS = 4 * 60 * 60 * 1000;
 const MAX_RETRIES = 50;
 const MAX_COUNT = 50;
@@ -56,10 +58,52 @@ function trackerPathFor(options = {}) {
     : resolveTrackerPath(options.rootDir || ROOT);
 }
 
+function batchStateFileFor(options = {}) {
+  return resolve(options.batchStateFile
+    || process.env.CAREER_OPS_BATCH_STATE
+    || join(options.rootDir || ROOT, 'batch/batch-state.tsv'));
+}
+
+// Mirrors merge-tracker.mjs's loadFailedReportNumbers: a report number the
+// batch runner itself recorded as "failed" must not be handed out again, or
+// the two scripts disagree by construction — this script re-issues the
+// number, then merge-tracker.mjs refuses to merge a tracker line for it.
+function occupiedFromFailedBatchState(batchStateFile) {
+  const failed = new Set();
+  if (!existsSync(batchStateFile)) return failed;
+  for (const line of readFileSync(batchStateFile, 'utf-8').split(/\r?\n/)) {
+    if (!line.trim() || line.startsWith('id\t')) continue;
+    const cols = line.split('\t');
+    if (cols.length < 6) continue;
+    const status = cols[2];
+    const reportNum = cols[5];
+    if (status === 'failed' && reportNum && reportNum !== '-') {
+      // Digits only, positive, safe: parseInt would accept "12abc" and
+      // 9007199254740992, and an unsafe number in the occupied set makes
+      // reserveReportNumbers throw "No safe report-number range remains".
+      const n = /^\d+$/.test(reportNum) ? Number(reportNum) : NaN;
+      if (Number.isSafeInteger(n) && n > 0) failed.add(n);
+    }
+  }
+  return failed;
+}
+
+// A bare date file is not a report. `scan-ats-full.mjs --md-out reports/` writes
+// its digest as `reports/YYYY-MM-DD.md`, which matches `/^(\d+)-/` and is read
+// as report #2026 — pushing every later reservation to 2027+, silently and
+// permanently.
+//
+// Deliberately narrow: report filenames in the wild are not all
+// `NNN-slug-DATE.md` (`1001-taken.md` and `NNN-RESERVED.md` are both real), so
+// requiring a trailing date would drop legitimate occupancy. Exclude only names
+// that are *entirely* a date. See tests/reserve-report-num.test.mjs.
+const BARE_DATE_FILE_RE = /^\d{4}-\d{2}-\d{2}\.md$/;
+
 function occupiedFromReports(reportsDir) {
   const occupied = new Set();
   if (!existsSync(reportsDir)) return occupied;
   for (const name of readdirSync(reportsDir)) {
+    if (BARE_DATE_FILE_RE.test(name)) continue;
     const match = name.match(/^(\d+)-/);
     if (!match) continue;
     const num = parseInt(match[1], 10);
@@ -85,9 +129,10 @@ function occupiedFromTracker(trackerPath) {
   return occupied;
 }
 
-function collectOccupied(reportsDir, trackerPath) {
+function collectOccupied(reportsDir, trackerPath, batchStateFile) {
   const occupied = occupiedFromReports(reportsDir);
   for (const num of occupiedFromTracker(trackerPath)) occupied.add(num);
+  for (const num of occupiedFromFailedBatchState(batchStateFile)) occupied.add(num);
   return occupied;
 }
 
@@ -160,6 +205,7 @@ export async function reserveReportNumbers(count = 1, options = {}) {
 
   const reportsDir = reportsDirFor(options);
   const trackerPath = trackerPathFor(options);
+  const batchStateFile = batchStateFileFor(options);
   mkdirSync(reportsDir, { recursive: true });
 
   const lock = await acquireTrackerLock(trackerLockDirFor(trackerPath), {
@@ -171,7 +217,7 @@ export async function reserveReportNumbers(count = 1, options = {}) {
   });
 
   try {
-    let occupied = collectOccupied(reportsDir, trackerPath);
+    let occupied = collectOccupied(reportsDir, trackerPath, batchStateFile);
     let base = highestNumber(occupied) + 1;
     const token = randomUUID();
 
@@ -196,7 +242,7 @@ export async function reserveReportNumbers(count = 1, options = {}) {
       }
 
       for (const num of claimed) releaseSlot(reportsDir, num, { token });
-      occupied = collectOccupied(reportsDir, trackerPath);
+      occupied = collectOccupied(reportsDir, trackerPath, batchStateFile);
       base = Math.max(failedAt + 1, highestNumber(occupied) + 1);
     }
   } finally {
@@ -287,6 +333,19 @@ async function runCli() {
   const [,, cmd, arg] = process.argv;
   const options = {};
 
+  if (cmd === '--help' || cmd === '-h') {
+    process.stdout.write([
+      'Usage: node reserve-report-num.mjs [--count <1-N>] [--release <NNN>[-<MMM>]] [--gc]',
+      '',
+      '  (no flags)                Reserve 1 report number (default)',
+      `  --count <1-${MAX_COUNT}>            Reserve N report numbers, printed as a range`,
+      '  --release <NNN>[-<MMM>]  Release a previously reserved number or range',
+      '  --gc                      Garbage-collect stale reservation sentinels',
+      '',
+    ].join('\n'));
+    return 0;
+  }
+
   if (cmd === '--release') {
     const match = (arg || '').match(/^(\d+)(?:-(\d+))?$/);
     if (!match) {
@@ -338,15 +397,6 @@ async function runCli() {
   }
 }
 
-function isDirectInvocation() {
-  if (!process.argv[1]) return false;
-  try {
-    return realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url));
-  } catch {
-    return resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
-  }
-}
-
-if (isDirectInvocation()) {
+if (isMainModule(import.meta.url)) {
   process.exitCode = await runCli();
 }

@@ -18,19 +18,41 @@
  * Synchronizes tracker status using set-status.mjs under shared tracker lock.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from 'fs';
-import { join, dirname, resolve } from 'path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, rmSync } from 'fs';
+import { join, dirname, resolve, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
+import { createHash } from 'crypto';
 import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers } from './tracker-parse.mjs';
+// The vocabulary this CLI accepts is also READ by calibrate.mjs, which cannot
+// import this file (top-level CLI, exits on load). Shared so the two cannot
+// drift — they already had (#3315 shipped a 7-entry copy of these 14).
+import { OUTCOME_MAP } from './lib/outcome-types.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { resolveTrackerPath, normalizeCompany } from './tracker-utils.mjs';
+import {
+  normalizeCompany,
+  pathIsInsideCanonical,
+  resolvePdfIndexPath,
+  resolveTrackerPath,
+  resolveWorkspaceRoot,
+} from './tracker-utils.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { resolveOutcomeDir } from './lib/outcome-dir.mjs';
 import { parsePdfIndex } from './find.mjs';
+import { findCaptureForReport } from './jd-capture.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+// Two roots. CODE_ROOT locates the sibling scripts this file shells out to and
+// is the cwd it runs them from; DATA_ROOT is where the user's tracker and
+// outcome journals live. One constant named CAREER_OPS did both, so
+// resolveTrackerPath() looked inside the checkout and `outcome.mjs 1 rejected`
+// answered "Tracker not found at <CHECKOUT>/applications.md" — a path the user
+// never configured.
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 const NODE = process.execPath;
-const SET_STATUS_SCRIPT = join(CAREER_OPS, 'set-status.mjs');
-const ARCHIVE_POSTING_SCRIPT = join(CAREER_OPS, 'archive-posting.mjs');
+const SET_STATUS_SCRIPT = join(CODE_ROOT, 'set-status.mjs');
+const ARCHIVE_POSTING_SCRIPT = join(CODE_ROOT, 'archive-posting.mjs');
 
 const EXIT_OK = 0;
 const EXIT_USAGE = 1;
@@ -46,26 +68,19 @@ function slugify(text) {
     .slice(0, 60) || 'unknown';
 }
 
+// LOCAL calendar day, not the UTC one (#3070). This stamps the outcome journal
+// under data/outcomes/ — the `## Entry:` header and `**Date**:` — which
+// calibrate.mjs and funnel-velocity.mjs then read.
+//
+// tests/local-today-gates.test.mjs already covers assessment-log.mjs for
+// exactly this reason ("the date written into a user's assessments.tsv row").
+// This is the same kind of date, in an append-only file, and it was the UTC
+// one: an outcome recorded on a Sunday evening anywhere in the Americas was
+// journaled as Monday, moving it into the next week and the next funnel bucket.
 function today() {
-  return new Date().toISOString().split('T')[0];
+  return localToday();
 }
 
-const OUTCOME_MAP = {
-  interview_progress: { state: 'Interview', defaultNote: 'Stage updated' },
-  stage_reached: { state: 'Interview', defaultNote: 'Stage updated' },
-  interview: { state: 'Interview', defaultNote: 'Interview stage' },
-  offer_received: { state: 'Offer', defaultNote: 'Offer received' },
-  offer: { state: 'Offer', defaultNote: 'Offer received' },
-  hired: { state: 'Hired', defaultNote: 'Offer accepted' },
-  accepted: { state: 'Hired', defaultNote: 'Offer accepted' },
-  offer_declined: { state: 'Discarded', defaultNote: 'Offer declined by candidate' },
-  declined: { state: 'Discarded', defaultNote: 'Offer declined by candidate' },
-  rejected: { state: 'Rejected', defaultNote: 'Application rejected' },
-  rejection: { state: 'Rejected', defaultNote: 'Application rejected' },
-  no_response: { state: 'Discarded', defaultNote: 'No response / ghosted' },
-  ghosted: { state: 'Discarded', defaultNote: 'No response / ghosted' },
-  interview_only: { state: 'Interview', defaultNote: 'Interview process completed' },
-};
 
 const USAGE = `Usage: node outcome.mjs <report#|company> <outcome_type> [options]
 
@@ -78,6 +93,7 @@ const USAGE = `Usage: node outcome.mjs <report#|company> <outcome_type> [options
   --cv "..."         Path to submitted CV (defaults to cv.md)
   --cover "..."      Path to submitted cover letter
   --url "..."        Job posting URL (overrides auto-detection from tracker notes)
+  --clean-output     Remove the tailored PDF/HTML from output/ once archived to data/outcomes/
   --dry-run          Preview outcome logging without writing
   --json             Machine-readable JSON output`;
 
@@ -91,6 +107,7 @@ const flags = {
   cv: null,
   cover: null,
   url: null,
+  cleanOutput: false,
   dryRun: false,
   json: rawArgs.includes('--json'),
 };
@@ -114,6 +131,8 @@ for (let i = 0; i < rawArgs.length; i++) {
     const key = a.slice(2);
     flags[key] = val;
     i++;
+  } else if (a === '--clean-output') {
+    flags.cleanOutput = true;
   } else if (a === '--dry-run') {
     flags.dryRun = true;
   } else if (a === '--json') {
@@ -141,7 +160,7 @@ if (!outcomeConfig) {
   failExit(`Invalid outcome_type "${rawOutcomeType}". Valid types: ${validTypes}`, 'invalid-outcome', EXIT_USAGE);
 }
 
-const appsFile = resolveTrackerPath(CAREER_OPS);
+const appsFile = resolveTrackerPath(DATA_ROOT);
 if (!existsSync(appsFile)) {
   failExit(`Tracker not found at ${appsFile}`, 'tracker-not-found', EXIT_NOT_FOUND);
 }
@@ -197,37 +216,33 @@ matchedRow = candidates[0];
 
 const companySlug = slugify(matchedRow.company);
 const roleSlug = slugify(matchedRow.role);
-const trackerDir = dirname(appsFile);
-const repoRoot = dirname(trackerDir);
-const outcomeDir = join(trackerDir, 'outcomes', `${matchedRow.num}_${companySlug}_${roleSlug}`);
+const repoRoot = resolveWorkspaceRoot(appsFile);
+// Reuse this row's existing journal directory when it has one. The name used to
+// be rebuilt from the tracker's CURRENT text every time, so editing the Role
+// cell between two recordings sent the second entry to a different directory
+// and split an append-only journal in half — with every reader keying on the
+// leading `{num}_` and picking whichever it read last. The row NUMBER is the
+// identity; the slugs are a label on it.
+const outcomesRoot = join(repoRoot, 'data', 'outcomes');
+const { name: outcomeDirName, existing: existingOutcomeDirs } =
+  resolveOutcomeDir(outcomesRoot, matchedRow.num, `${matchedRow.num}_${companySlug}_${roleSlug}`);
+const outcomeDir = join(outcomesRoot, outcomeDirName);
+// A split that predates this fix is not repaired automatically — moving a
+// user's recorded artifacts is not this command's job — but it is said out
+// loud, because until it is merged some readers will see only one half.
+if (existingOutcomeDirs.length > 1) {
+  console.error(
+    `⚠ #${matchedRow.num} has ${existingOutcomeDirs.length} outcome directories, so its journal is split: ` +
+    `${existingOutcomeDirs.join(', ')}. Appending to ${outcomeDirName} (most recently written). ` +
+    'Merge the entries into one directory to get a single history.',
+  );
+}
 
 const noteToAppend = flags.note || (flags.stage ? `${outcomeConfig.defaultNote}: ${flags.stage}` : outcomeConfig.defaultNote);
 
-if (flags.dryRun) {
-  const dryRunResult = {
-    dryRun: true,
-    num: matchedRow.num,
-    company: matchedRow.company,
-    role: matchedRow.role,
-    outcomeType: normalizedOutcomeKey,
-    canonicalState: outcomeConfig.state,
-    stage: flags.stage,
-    feedback: flags.feedback,
-    note: noteToAppend,
-    outcomeDir,
-  };
-  if (flags.json) {
-    console.log(JSON.stringify(dryRunResult, null, 2));
-  } else {
-    console.log(`🔍 Dry-run: would record outcome "${normalizedOutcomeKey}" for #${matchedRow.num} ${matchedRow.company} (${outcomeConfig.state}) in ${outcomeDir}`);
-  }
-  process.exit(EXIT_OK);
-}
-
-mkdirSync(outcomeDir, { recursive: true });
-
-// 1. Snapshot submitted CV
-// Try to locate a tailored generated PDF CV first, to ensure we capture the EXACT submitted CV.
+// Resolve the submitted CV artifact up front (read-only lookups) so both the
+// --dry-run preview and the real run agree on exactly what would be archived
+// and, if --clean-output is set, what would be removed from output/ afterward.
 let cvResolvedPath = null;
 let isPdf = false;
 
@@ -248,7 +263,7 @@ if (flags.cv) {
 
   // Case C: Lookup data/pdf-index.tsv to find PDF mapping for the linked report number.
   if (!cvResolvedPath) {
-    const manifestPath = join(repoRoot, 'data', 'pdf-index.tsv');
+    const manifestPath = resolvePdfIndexPath(appsFile);
     if (existsSync(manifestPath)) {
       try {
         const manifestText = readFileSync(manifestPath, 'utf-8');
@@ -272,13 +287,96 @@ if (flags.cv) {
   }
 }
 
+// Any resolved PDF — auto-detected (Cases B/C) or an explicit --cv (Case A) —
+// is eligible for cleanup as long as it resolves inside output/: that boundary,
+// not which case found it, is what keeps deletion scoped to generated CVs. An
+// explicit --cv pointing outside output/ (e.g. into the user's home directory)
+// is never a candidate, and neither is the cv.md fallback (Case D), since it
+// never sets isPdf. pathIsInsideCanonical() (tracker-utils.mjs) is applied to
+// BOTH the PDF and its manifest-sourced HTML companion — the manifest is
+// host-writable data, so a malformed or manipulated html column must never be
+// trusted to point outside output/ without being re-checked here too.
+//
+// Canonical, not merely lexical: resolve() does not follow symlinks, so a link
+// inside output/ pointing elsewhere would otherwise spell itself as contained
+// and have its target deleted. Deletion is unrecoverable, so this boundary
+// resolves symlinks before trusting it.
+let cvFromOutputDir = false;
+let htmlResolvedPath = null;
+const outputDir = resolve(repoRoot, 'output');
+const resolvedCvAbs = cvResolvedPath ? resolve(cvResolvedPath) : null;
+if (isPdf && resolvedCvAbs && pathIsInsideCanonical(resolvedCvAbs, outputDir)) {
+  cvFromOutputDir = true;
+  const manifestPath = resolvePdfIndexPath(appsFile);
+  if (existsSync(manifestPath)) {
+    try {
+      const manifestText = readFileSync(manifestPath, 'utf-8');
+      for (const line of manifestText.split('\n')) {
+        if (!line.trim() || line.startsWith('#')) continue;
+        const fields = line.split('\t');
+        if (!fields[1]) continue;
+        const rowPdfPath = resolve(join(repoRoot, fields[1].replace(/^local:/, '')));
+        if (rowPdfPath === resolvedCvAbs && fields[2]) {
+          const htmlFull = join(repoRoot, fields[2].replace(/^local:/, ''));
+          if (existsSync(htmlFull) && pathIsInsideCanonical(htmlFull, outputDir)) {
+            htmlResolvedPath = htmlFull;
+          }
+          break;
+        }
+      }
+    } catch (err) {
+      // Fallback gracefully on parsing issues
+    }
+  }
+}
+
+if (flags.dryRun) {
+  const cleanupCandidates = flags.cleanOutput
+    ? [cvFromOutputDir ? cvResolvedPath : null, htmlResolvedPath].filter(Boolean)
+    : [];
+  const dryRunResult = {
+    dryRun: true,
+    num: matchedRow.num,
+    company: matchedRow.company,
+    role: matchedRow.role,
+    outcomeType: normalizedOutcomeKey,
+    canonicalState: outcomeConfig.state,
+    stage: flags.stage,
+    feedback: flags.feedback,
+    note: noteToAppend,
+    outcomeDir,
+    cleanOutput: flags.cleanOutput,
+    cleanupCandidates,
+  };
+  if (flags.json) {
+    console.log(JSON.stringify(dryRunResult, null, 2));
+  } else {
+    console.log(`🔍 Dry-run: would record outcome "${normalizedOutcomeKey}" for #${matchedRow.num} ${matchedRow.company} (${outcomeConfig.state}) in ${outcomeDir}`);
+    if (flags.cleanOutput) {
+      if (cleanupCandidates.length) {
+        console.log(`🔍 Dry-run: would archive then remove from output/ (after verifying the archive):`);
+        for (const p of cleanupCandidates) console.log(`   - ${p}`);
+      } else {
+        console.log(`🔍 Dry-run: --clean-output requested but no matching output/ PDF/HTML found for this row`);
+      }
+    }
+  }
+  process.exit(EXIT_OK);
+}
+
+mkdirSync(outcomeDir, { recursive: true });
+
+// 1. Snapshot submitted CV
 // Write or copy resolved CV artifact to outcomeDir, preserving existing files instead of overwriting.
+let archivedCvPdfPath = null;
+let archivedCvHtmlPath = null;
 if (cvResolvedPath && existsSync(cvResolvedPath)) {
   const destName = isPdf ? 'submitted_cv.pdf' : 'submitted_cv.md';
   const cvDestPath = join(outcomeDir, destName);
   if (!existsSync(cvDestPath)) {
     copyFileSync(cvResolvedPath, cvDestPath);
   }
+  if (isPdf) archivedCvPdfPath = cvDestPath;
 } else {
   // Case D: Fallback to the master root cv.md.
   const masterCv = resolve(repoRoot, 'cv.md');
@@ -290,6 +388,16 @@ if (cvResolvedPath && existsSync(cvResolvedPath)) {
       writeFileSync(cvDestPath, `# Submitted CV — #${matchedRow.num} ${matchedRow.company}\n\nNo CV source file found at ${masterCv} on ${today()}.\n`);
     }
   }
+}
+
+// 1b. Snapshot the companion HTML CV — only archived (and thus only eligible for
+// cleanup) when --clean-output is set, since it isn't needed by any other outcome.
+if (flags.cleanOutput && htmlResolvedPath && existsSync(htmlResolvedPath)) {
+  const htmlDestPath = join(outcomeDir, 'submitted_cv.html');
+  if (!existsSync(htmlDestPath)) {
+    copyFileSync(htmlResolvedPath, htmlDestPath);
+  }
+  archivedCvHtmlPath = htmlDestPath;
 }
 
 // 2. Snapshot submitted cover letter if provided, preserving existing files instead of overwriting.
@@ -315,19 +423,33 @@ if (notesLink) {
   }
 }
 
-// Case 2: Run archive-posting.mjs to generate a new archive if not resolved or not found
+// Case 2: Look for a capture already keyed to this report number. Covers captures
+// made on any earlier day, and postings whose URL has since gone dead — the case
+// the archive exists for, and the one a same-day filename rebuild cannot serve.
+if (!resolvedPostingPath) {
+  const found = findCaptureForReport(resolve(repoRoot, 'jds'), matchedRow.num, {
+    companySlug: slugify(matchedRow.company),
+  });
+  if (found) {
+    resolvedPostingPath = found.path;
+    postingArchived = true;
+  }
+}
+
+// Case 3: Archive the posting now, keyed to the report so it resolves next time.
 if (!resolvedPostingPath && targetUrl) {
   try {
-    execFileSync(NODE, [ARCHIVE_POSTING_SCRIPT, targetUrl, `--company=${matchedRow.company}`, `--role=${matchedRow.role}`], {
-      cwd: CAREER_OPS,
+    execFileSync(NODE, [ARCHIVE_POSTING_SCRIPT, targetUrl, `--company=${matchedRow.company}`, `--role=${matchedRow.role}`, `--report=${matchedRow.num}`], {
+      cwd: CODE_ROOT,
       env: process.env,
       stdio: 'ignore',
       timeout: 45000,
     });
-    const expectedFilename = `${today()}_${slugify(matchedRow.company)}_${slugify(matchedRow.role)}.pdf`;
-    const expectedFullPath = resolve(repoRoot, 'jds', expectedFilename);
-    if (existsSync(expectedFullPath)) {
-      resolvedPostingPath = expectedFullPath;
+    const found = findCaptureForReport(resolve(repoRoot, 'jds'), matchedRow.num, {
+      companySlug: slugify(matchedRow.company),
+    });
+    if (found) {
+      resolvedPostingPath = found.path;
       postingArchived = true;
     }
   } catch {
@@ -335,9 +457,11 @@ if (!resolvedPostingPath && targetUrl) {
   }
 }
 
-// Copy posting snapshot to the outcomes directory, preserving the original if it exists
+// Copy posting snapshot to the outcomes directory, preserving the original if it exists.
+// The destination keeps the capture's own extension: captures are .pdf, .txt or .md,
+// and naming a text capture posting.pdf would misrepresent its contents.
 if (postingArchived && resolvedPostingPath) {
-  const postingDest = join(outcomeDir, 'posting.pdf');
+  const postingDest = join(outcomeDir, `posting${extname(resolvedPostingPath) || '.pdf'}`);
   if (!existsSync(postingDest)) {
     copyFileSync(resolvedPostingPath, postingDest);
   }
@@ -397,10 +521,46 @@ if (matchedRow.role) {
 
 let setStatusResult = null;
 try {
-  const statusOutput = execFileSync(NODE, setStatusArgs, { cwd: CAREER_OPS, env: process.env, encoding: 'utf-8' });
+  const statusOutput = execFileSync(NODE, setStatusArgs, { cwd: CODE_ROOT, env: process.env, encoding: 'utf-8' });
   setStatusResult = JSON.parse(statusOutput);
 } catch (err) {
   failExit(`Tracker update via set-status.mjs failed: ${err.message}`, 'tracker-update-failed', 1);
+}
+
+// 6. Clean up output/ — only ever removes a file whose archived copy in
+// data/outcomes/ has already been verified byte-for-byte (sha256) against the
+// original. Never a bare unlink: archiving comes first, deletion is refused
+// if it can't be confirmed the only copy would survive. Size alone isn't
+// enough here — two renders of the same CV can coincidentally match in size,
+// so this hashes the same way tracker.mjs and seed-fixture.mjs do.
+function sha256(path) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+function archivedCopyVerified(srcPath, destPath) {
+  if (!srcPath || !destPath || !existsSync(srcPath) || !existsSync(destPath)) return false;
+  return sha256(srcPath) === sha256(destPath);
+}
+
+const cleanup = { requested: flags.cleanOutput, removed: [], refused: [] };
+if (flags.cleanOutput) {
+  const cleanupTargets = [
+    [cvFromOutputDir ? cvResolvedPath : null, archivedCvPdfPath],
+    [htmlResolvedPath, archivedCvHtmlPath],
+  ];
+  for (const [srcPath, destPath] of cleanupTargets) {
+    if (!srcPath) continue;
+    if (!archivedCopyVerified(srcPath, destPath)) {
+      cleanup.refused.push({ path: srcPath, reason: 'archived copy in data/outcomes/ missing or does not match (sha256)' });
+      continue;
+    }
+    try {
+      rmSync(srcPath);
+      cleanup.removed.push(srcPath);
+    } catch (err) {
+      cleanup.refused.push({ path: srcPath, reason: err.message });
+    }
+  }
 }
 
 const result = {
@@ -416,12 +576,20 @@ const result = {
   outcomeDir,
   postingArchived,
   setStatusResult,
+  cleanup,
 };
 
 if (flags.json) {
   console.log(JSON.stringify(result, null, 2));
 } else {
   console.log(`✅ Recorded outcome "${normalizedOutcomeKey}" for #${matchedRow.num} ${matchedRow.company} (${outcomeConfig.state}) in ${outcomeDir}`);
+  if (flags.cleanOutput) {
+    for (const p of cleanup.removed) console.log(`🗑️  Removed from output/ (archived copy verified): ${p}`);
+    for (const r of cleanup.refused) console.log(`⚠️  Left in output/ (${r.reason}): ${r.path}`);
+    if (!cleanup.removed.length && !cleanup.refused.length) {
+      console.log(`ℹ️  --clean-output requested but no matching output/ PDF/HTML found for this row`);
+    }
+  }
 }
 
 process.exit(EXIT_OK);

@@ -3,6 +3,17 @@ name: Tests
 on:
   pull_request:
     branches: [main]
+  # The merge queue builds a temporary merge commit per group and needs the
+  # same required checks to report on it; without this trigger every queued
+  # PR would wait forever on `test (...)`.
+  merge_group:
+
+# merge_group runs carry the base repo's GITHUB_TOKEN (write-capable by
+# default, unlike a fork pull_request) while executing code that came from a
+# fork. Nothing in this workflow needs to write, and no other secret is
+# referenced here, so the token is pinned read-only and never persisted.
+permissions:
+  contents: read
 
 # A force-push supersedes the running matrix; cancel it instead of letting
 # stale legs occupy runners (3 jobs per push at this repo's PR volume).
@@ -27,12 +38,21 @@ jobs:
         if: runner.os == 'Windows'
         run: git config --global core.autocrlf false
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+        with:
+          # Test code (fork code, in a merge_group) must not find a token in .git/config.
+          persist-credentials: false
+      - name: Set up Node 18 for syntax compatibility
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: npm run lint
+      - name: Set up Node 24 for the test suite
+        uses: actions/setup-node@v7
         with:
           node-version: '24'
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26'
+          go-version: '1.27'
       # Skip the postinstall (npx playwright install chromium); the tests
       # never launch a browser, so the ~170 MB download is pure CI overhead.
       - run: npm install --ignore-scripts
@@ -57,7 +77,7 @@ jobs:
       - run: npm run test:cv-visual
       - name: Upload CV visual diffs and rendered previews
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cv-visual-artifacts
           path: |
@@ -77,9 +97,11 @@ jobs:
           node-version: '24'
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26'   # old updaters rebuild the dashboard during apply
+          go-version: '1.27'   # old updaters rebuild the dashboard during apply
       - run: npm install --ignore-scripts
       - name: Upgrade PR gate (newest old release -> this commit)
         run: node upgrade-tests.mjs --pr-gate
       - name: Canary (harness must be able to fail)
         run: node upgrade-tests.mjs --canary
+      - name: Local-paths declaration survives a real apply (#2421)
+        run: node upgrade-tests.mjs --local-paths
