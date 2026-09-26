@@ -110,10 +110,14 @@ function runGeminiEval(modesDirYaml) {
     const stderr = result.stderr || '';
     const childSucceeded = !result.error && result.status === 0;
     check(childSucceeded, 'gemini-eval.mjs context-only child exits successfully');
-    if (!childSucceeded) return { stdout, stderr, tokenBudget: NaN };
+    if (!childSucceeded) {
+      console.error(stderr || result.error?.message || `child exited ${result.status}`);
+      return { stdout, stderr, tokenBudget: NaN, evalModeFile: null };
+    }
 
     const tokenBudget = Number(stdout.match(/Token budget: (\d+) tokens/)?.[1] ?? NaN);
-    return { stdout, stderr, tokenBudget };
+    const evalModeFile = stdout.match(/Evaluation mode: ([^\r\n]+)/)?.[1]?.trim() ?? null;
+    return { stdout, stderr, tokenBudget, evalModeFile };
   } finally {
     if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   }
@@ -168,7 +172,7 @@ check(
 
 const arabicMarket = runGeminiEval('  modes_dir: modes/ar');
 check(
-  !arabicMarket.stderr.includes('modes/ar/fursah.md not found') && Number.isFinite(arabicMarket.tokenBudget),
+  arabicMarket.evalModeFile === 'modes/ar/fursah.md' && Number.isFinite(arabicMarket.tokenBudget),
   'gemini-eval.mjs resolves the Arabic fursah evaluation mode',
 );
 

@@ -387,6 +387,11 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
   maxTokens: 1_048_576, // gemini-2.5-flash context window
 });
 
+if (contextOnly) {
+  const resolvedEvalMode = relative(CODE_ROOT, PATHS.oferta).replaceAll('\\', '/');
+  console.log(`🧭  Evaluation mode: ${resolvedEvalMode}`);
+}
+
 // Log token budget info
 if (budgetReport.compressed) {
   console.log(`📊  Token budget: ${budgetReport.beforeTokens} → ${budgetReport.afterTokens} tokens (saved ${budgetReport.beforeTokens - budgetReport.afterTokens})`);
