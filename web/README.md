@@ -117,7 +117,8 @@ removed after its disk write succeeds. Empty greetings are not saved.
 
 Writes are atomic and revision-checked: a stale tab cannot overwrite newer
 messages. Save failures stay visible, and switching waits for the current save.
-Files with invalid JSON are reported rather than treated as empty. A crashed
+Files with invalid JSON are reported individually without blocking healthy
+conversations; damaged files are never overwritten. A crashed
 writer can leave a `.json.lock` file; after stopping the web server, remove that
 lock and restart to retry. Conversation files contain personal text and should
 stay local and gitignored. They are conversation history, not new verified CV
@@ -127,4 +128,6 @@ Stored messages are not truncated. Model input is bounded to 24 recent messages
 (up to 24,000 characters) plus literal excerpts of earlier user messages (up to
 8,000 characters). Long excerpts may be shortened; this is not unlimited model
 memory. Conversations are limited to 2,000 messages and 1 MB; a larger save is
-rejected visibly without overwriting the previous file.
+rejected visibly without overwriting the previous file. On a save failure, export
+the live conversation (including unsaved text) or explicitly confirm discarding
+unsaved changes to start a new chat. Saved conversations remain on disk.

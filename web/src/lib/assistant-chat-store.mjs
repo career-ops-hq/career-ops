@@ -24,13 +24,23 @@ export function readChat(root, id) {
 export function listChats(root) {
   let files;
   try { files = readdirSync(join(root, '.career-ops-web', 'chats')); }
-  catch (err) { if (err.code === 'ENOENT') return []; throw err; }
-  return files.filter(f => /^[a-f0-9-]{36}\.json$/.test(f)).map(f => {
-    const chat = readChat(root, f.slice(0, -5));
-    if (!chat) return null;
-    const { messages, ...summary } = chat;
-    return summary;
-  }).filter(Boolean).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  catch (err) { if (err.code === 'ENOENT') return { chats: [], errors: [] }; throw err; }
+  const chats = [], errors = [];
+  for (const file of files.filter(f => /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.json$/.test(f))) {
+    const id = file.slice(0, -5);
+    try {
+      const chat = readChat(root, id);
+      if (chat) {
+        const { messages, ...summary } = chat;
+        chats.push(summary);
+      }
+    } catch (err) {
+      // Isolate damaged documents, but do not disguise filesystem failures.
+      if (!(err instanceof ChatError)) throw err;
+      errors.push({ id, error: err.message });
+    }
+  }
+  return { chats: chats.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), errors };
 }
 function withLock(root, id, operation) {
   const file = chatPath(root, id);

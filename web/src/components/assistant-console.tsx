@@ -140,6 +140,7 @@ export function AssistantConsole() {
   const [chatReady, setChatReady] = useState(false);
   const [chatPending, setChatPending] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [chatWarnings, setChatWarnings] = useState<{ id: string; error: string }[]>([]);
   const activeChat = useRef<{ id: string; revision: number; title?: string }>({ id: "", revision: 0 });
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -225,6 +226,7 @@ export function AssistantConsole() {
   async function refreshChats() {
     const data = await chatRequest("/api/assistant/chats");
     setChats(data.chats);
+    setChatWarnings(data.errors);
   }
   function flushChat(title?: string): Promise<void> {
     const current = activeChat.current;
@@ -300,16 +302,16 @@ export function AssistantConsole() {
     return () => { cancelled = true; };
   }, []);
   useEffect(() => {
-    if (!chatReady) return;
+    if (!chatReady || chatPending) return;
     const timer = setTimeout(() => { void flushRef.current().catch(() => {}); }, 400);
     return () => clearTimeout(timer);
-  }, [messages, chatReady]);
+  }, [messages, chatReady, chatPending]);
   useEffect(() => {
-    if (!chatReady) return;
+    if (!chatReady || chatPending) return;
     const save = () => { if (document.visibilityState === "hidden") void flushRef.current().catch(() => {}); };
     document.addEventListener("visibilitychange", save);
     return () => document.removeEventListener("visibilitychange", save);
-  }, [chatReady]);
+  }, [chatReady, chatPending]);
 
   async function selectChat(id?: string) {
     if (busy || chatPending || !chatReady) return;
@@ -326,6 +328,32 @@ export function AssistantConsole() {
       confirmRuns.current.clear();
     } catch (e) { setSaveError(e instanceof Error ? e.message : "Could not switch conversations"); }
     finally { setChatPending(false); }
+  }
+  function exportChat() {
+    // Export the live draft even if it exceeds the storage limits.
+    const blob = new Blob([JSON.stringify({ ...activeChat.current, messages: messagesRef.current, draft: input }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `conversation-${activeChat.current.id}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  async function discardAndStartChat() {
+    if (busy || chatPending || !chatReady) return;
+    if (!window.confirm("Discard unsaved changes and start a new conversation? Saved conversations stay on disk. Export this conversation first if you want to keep the unsaved text.")) return;
+    setChatPending(true);
+    try {
+      // Let writes already in flight finish before changing the active id.
+      await saveQueue.current.catch(() => {});
+      activeChat.current = { id: crypto.randomUUID(), revision: 0 };
+      savedSnapshot.current = "";
+      messagesRef.current = [];
+      setMessages([]);
+      setInput("");
+      confirmRuns.current.clear();
+      setSaveError("");
+    } finally { setChatPending(false); }
   }
   async function renameChat() {
     const title = window.prompt("Conversation name", activeChat.current.title || "");
@@ -664,7 +692,15 @@ export function AssistantConsole() {
             <button className="text-xs text-muted disabled:opacity-40" disabled={busy || chatPending || !activeChat.current.revision} onClick={() => void renameChat()}>Rename</button>
             <button className="text-xs text-muted disabled:opacity-40" disabled={busy || chatPending || !activeChat.current.revision} onClick={() => void removeChat()}>Delete</button>
           </div>
-          {saveError && <div role="alert" className="px-4 py-2 text-sm text-amber-600">{saveError} {chatReady ? <button className="underline" onClick={() => void flushChat().catch(() => {})}>Retry save</button> : <button className="underline" onClick={() => window.location.reload()}>Reload</button>}</div>}
+          {chatWarnings.map(warning => <div key={warning.id} role="alert" className="px-4 py-2 text-sm text-amber-600">{warning.error}. Other conversations are still available.</div>)}
+          {saveError && <div role="alert" className="space-y-2 px-4 py-2 text-sm text-amber-600">
+            <p>{saveError}</p>
+            {chatReady ? <div className="flex flex-wrap gap-3">
+              <button className="underline" disabled={busy || chatPending} onClick={() => void flushChat().catch(() => {})}>Retry save</button>
+              <button className="underline" disabled={busy || chatPending} onClick={exportChat}>Export conversation</button>
+              <button className="underline" disabled={busy || chatPending} onClick={() => void discardAndStartChat()}>Discard unsaved changes and start new chat</button>
+            </div> : <button className="underline" onClick={() => window.location.reload()}>Reload</button>}
+          </div>}
           <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
             {messages.map((m, i) => {
               const hasVisible = m.parts.some((p) => (p.type === "text" && p.text.trim()) || p.type !== "text");

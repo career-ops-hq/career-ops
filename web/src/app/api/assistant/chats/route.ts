@@ -10,7 +10,7 @@ function failure(error: unknown) {
 export async function GET(req: Request) {
   try {
     const id = new URL(req.url).searchParams.get("id");
-    if (!id) return Response.json({ chats: listChats(careerOpsRoot()) });
+    if (!id) return Response.json(listChats(careerOpsRoot()));
     const chat = readChat(careerOpsRoot(), id);
     return chat ? Response.json(chat) : Response.json({ error: "Conversation not found" }, { status: 404 });
   } catch (error) { return failure(error); }
