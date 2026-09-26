@@ -7,11 +7,13 @@
 #
 #   node audit-portals.mjs --summary
 #
-# UNVERIFIED: which ATS runs TSMC's careers site. Open the site in a browser,
-# note the URL of its job-search page, and let audit-portals.mjs tell you
-# whether any provider claims it. Record the answer in fork-notes/tsmc/journal.md.
-# 尚未驗證：台積電徵才網站用的是哪一套 ATS。用瀏覽器打開網站，記下職缺搜尋頁的網址，
-# 讓 audit-portals.mjs 判斷有沒有串接程式能讀取。結果記到 fork-notes/tsmc/journal.zh-TW.md。
+# VERIFIED 2026-09-26: TSMC's careers site runs on Avature, behind Cloudflare.
+# From a cloud session only a real (non-headless) browser gets through, so the
+# plain-HTTP Avature provider may be challenged there. From a home connection in
+# Taiwan, try option B and confirm with the audit. See fork-notes/tsmc/journal.md.
+# 已驗證（2026-09-26）：台積電徵才網站使用 Avature，前面有 Cloudflare。
+# 在雲端工作階段只有真正的（非 headless）瀏覽器能通過，一般 HTTP 的 Avature 串接程式可能被擋。
+# 在台灣的家用網路下，可以試選項 B，再用稽核確認。詳見 fork-notes/tsmc/journal.zh-TW.md。
 
 tracked_companies:
 
@@ -23,15 +25,14 @@ tracked_companies:
     scan_query: 'site:careers.tsmc.com "Engineer" OR "工程師"'
     enabled: true
 
-  # Option B — if the job-search page URL looks like .../careers/SearchJobs
-  # (the Avature shape), try the Avature provider and confirm with the audit.
+  # Option B — the Avature provider (confirmed ATS). Works only where Cloudflare
+  # lets plain HTTP through; confirm with the audit.
   # Keep only one of A/B enabled.
-  # 選項 B：如果職缺搜尋頁網址長得像 .../careers/SearchJobs（Avature 的格式），
-  # 試用 Avature 串接程式，並用稽核確認。A、B 只保留一個 enabled。
+  # 選項 B：Avature 串接程式（已確認的 ATS）。只有在 Cloudflare 放行一般 HTTP 請求時才有效，請用稽核確認。A、B 只保留一個 enabled。
   # - name: TSMC
   #   careers_url: https://careers.tsmc.com/
   #   provider: avature
-  #   api: https://careers.tsmc.com/en_US/careers/SearchJobs   # replace with the real search URL / 換成實際搜尋頁網址
+  #   api: https://careers.tsmc.com/en_US/careers/SearchJobs
   #   max_pages: 50
   #   enabled: true
 

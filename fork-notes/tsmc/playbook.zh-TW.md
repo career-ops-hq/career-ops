@@ -92,7 +92,7 @@ cp modes/_custom.template.md modes/_custom.md       # 已經存在就跳過
 
 | 來源 | career-ops 的用法 |
 |------|------------------|
-| 台積電官方徵才網站 | 在 `portals.yml` 的 `tracked_companies` 加一筆（見 [snippets/portals-tsmc.yml](../snippets/portals-tsmc.yml)）。**網站背後用的是哪套 ATS 尚未驗證。** 加入後執行 `node audit-portals.mjs`；若顯示 `no-provider`，代表 `scan.mjs` 讀不到，改用貼網址的方式評估。 |
+| 台積電官方徵才網站 | 在 `portals.yml` 的 `tracked_companies` 加一筆（見 [snippets/portals-tsmc.yml](../snippets/portals-tsmc.yml)）。網站使用 **Avature**，前面有 Cloudflare（2026-09-26 已驗證）。在雲端用一般 HTTP 掃描會被擋，只有真正的瀏覽器能通過，詳見[日誌](journal.zh-TW.md)。加入後執行 `node audit-portals.mjs`；若出現錯誤，改用貼網址的方式評估。 |
 | 104 職缺 | 沒有串接程式，把職缺網址或 JD 文字貼進對話即可。 |
 | Yourator | 有串接程式（`provider: yourator`），適合台灣新創與數位職缺，可作為比較用；台積電本身不太可能在上面。 |
 

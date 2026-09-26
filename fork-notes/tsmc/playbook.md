@@ -106,7 +106,7 @@ Append the contents of [snippets/custom-bilingual.md](../snippets/custom-bilingu
 
 | Source | How career-ops uses it |
 |--------|-----------------------|
-| TSMC's own careers site | A `tracked_companies` entry in `portals.yml` (see [snippets/portals-tsmc.yml](../snippets/portals-tsmc.yml)). **The ATS behind it is not yet verified.** Run `node audit-portals.mjs` after adding it. `no-provider` means `scan.mjs` can't read it, so evaluate postings by URL instead. |
+| TSMC's own careers site | A `tracked_companies` entry in `portals.yml` (see [snippets/portals-tsmc.yml](../snippets/portals-tsmc.yml)). It runs on **Avature** behind Cloudflare (verified 2026-09-26). Plain-HTTP scanning is challenged from the cloud, where only a real browser gets through; see the [journal](journal.md). Run `node audit-portals.mjs` after adding it. If it errors, evaluate postings by URL instead. |
 | 104 postings | No provider. Paste the posting URL or JD text into the chat. |
 | Yourator | Provider exists (`provider: yourator`) for Taiwan startup and digital roles. Useful for comparison roles; TSMC itself is unlikely to be there. |
 

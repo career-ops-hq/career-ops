@@ -32,6 +32,25 @@ learned. Newest entry on top. Keep the zh-TW twin in sync in the same commit.
 
 ## Entries
 
+### 2026-09-26 — Connectivity test from the cloud environment
+
+- **Stage:** setup
+- **Done:** Switched the cloud environment's network access to **Full**, then probed TSMC and 104 from a cloud session.
+- **Found:**
+  - Both sites sit behind **Cloudflare**. A plain HTTP request (curl, and therefore `scan.mjs` and
+    `fetch-jd.mjs`) gets a 403 challenge page from the cloud environment.
+  - **TSMC careers loads in a real, non-headless Chromium** (`xvfb-run`). It is an **Avature** site: the
+    Avature markup is present, `/en_US/careers/SearchJobs` works and reported 797 results. This settles the
+    "unverified ATS" note, but `scan.mjs`'s Avature provider uses plain HTTP, so it will still be
+    challenged from the cloud.
+  - **104 refuses even the real browser from the cloud** (403, 104's own error page). A block on
+    non-Taiwan or datacenter IPs is the likely cause, but that's an inference, not proven.
+  - Cloud Chromium needs the session proxy and its CA trusted
+    (`--ignore-certificate-errors-spki-list=<proxy CA SPKI>`). Otherwise every HTTPS page fails with
+    `ERR_CERT_AUTHORITY_INVALID`.
+- **Next:** in the cloud, evaluate TSMC postings by URL through the headful browser. For 104, paste the JD
+  text. On a machine in Taiwan, retry `node audit-portals.mjs` with the Avature entry.
+
 ### 2026-09-25 — Fork prepared for the TSMC search
 
 - **Stage:** setup

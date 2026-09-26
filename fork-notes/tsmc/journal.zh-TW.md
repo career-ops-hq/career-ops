@@ -34,6 +34,19 @@
 
 ## 紀錄
 
+### 2026-09-26 — 從雲端環境測試連線
+
+- **階段：** 設定
+- **完成事項：** 把雲端環境的網路存取改成 **Full**，再從雲端工作階段測試台積電與 104 的連線。
+- **發現：**
+  - 兩個網站都在 **Cloudflare** 後面。一般 HTTP 請求（curl，因此也包括 `scan.mjs` 和 `fetch-jd.mjs`）在雲端會拿到 403 驗證頁。
+  - **台積電徵才網站在真正的、有畫面的 Chromium 中可以開啟**（使用 `xvfb-run`）。它是 **Avature** 網站：頁面上有 Avature 的標記，
+    `/en_US/careers/SearchJobs` 可以正常使用，顯示 797 筆職缺。原本「ATS 尚未驗證」的註記就此確認；但 `scan.mjs` 的 Avature 串接程式用的是一般 HTTP 請求，在雲端仍會被擋。
+  - **104 在雲端連真正的瀏覽器也拒絕**（403，104 自己的錯誤頁）。可能是封鎖非台灣或資料中心的 IP，但這只是推測，尚未證實。
+  - 雲端的 Chromium 必須透過工作階段的 proxy，並信任它的 CA（`--ignore-certificate-errors-spki-list=<proxy CA 的 SPKI>`），
+    否則所有 HTTPS 頁面都會出現 `ERR_CERT_AUTHORITY_INVALID`。
+- **下一步：** 在雲端用有畫面的瀏覽器、貼網址評估台積電職缺；104 職缺改貼 JD 文字。之後若在台灣的電腦上，再用 Avature 設定重跑 `node audit-portals.mjs`。
+
 ### 2026-09-25 — 為台積電求職準備好 fork
 
 - **階段：** 設定
