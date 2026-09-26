@@ -212,7 +212,12 @@ export default {
 // ISO country codes are what iCIMS emits, but location_filter matches on the
 // words a human wrote in portals.yml ("Canada", "United States"), so a bare
 // "US" would sail past a block list that spells the country out.
-const COUNTRY_NAMES = { US: 'United States', CA: 'Canada' };
+const regionNames = new Intl.DisplayNames(['en'], { type: 'region', fallback: 'none' });
+
+function countryName(country) {
+  if (!/^[a-z]{2}$/i.test(country) || country.toUpperCase() === 'ZZ') return country;
+  return regionNames.of(country.toUpperCase()) || country;
+}
 
 // From flattened JSON-LD nodes, build "Locality, Region, Country" out of the
 // first jobLocation entry (across all JobPosting nodes) that yields any usable
@@ -237,7 +242,7 @@ function pickLocation(nodes) {
       const parts = [
         clean(addr.addressLocality),
         clean(addr.addressRegion),
-        COUNTRY_NAMES[country.toUpperCase()] || country,
+        countryName(country),
       ].filter(Boolean);
       if (parts.length) return parts.join(', ');
     }
