@@ -3,6 +3,7 @@ import path from "node:path";
 import * as yaml from "js-yaml";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { resolveDataRoot } from "@/lib/core/data-root.mjs";
+import { readTrackerFile } from "@/lib/core/tracker-files.mjs";
 import { parseApplications } from "@/lib/tracker-table.mjs";
 // Pipeline rows are parsed in a plain .mjs for the same reason as
 // tracker-table.mjs: so `node --test` can exercise the real parser.
@@ -133,9 +134,14 @@ export type Application = {
  * web-side mirror to drift (#954, PR #1598 review).
  */
 export function readApplications(): Application[] {
-  const md = read("data/applications.md");
+  const md = readTrackerFile(careerOpsRoot());
   if (!md) return [];
   return parseApplications(md, careerOpsRoot());
+}
+
+/** Ledger sibling of the same tracker readApplications consumes. */
+export function readApplicationStatusLog(): string | null {
+  return readTrackerFile(careerOpsRoot(), "status-log.tsv");
 }
 
 /** Resolve the report-number cell in data/pdf-index.tsv for a given report id.

@@ -1,3 +1,6 @@
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
 // Cumulative "how far has this search actually got?" counters for the analytics
 // headline tiles. Pure JS (no TS types) so it can be imported by the analytics
 // page and unit-tested under `node --test`, matching clean-chips.mjs /
@@ -16,9 +19,8 @@
 //   everInterview = Interview + Offer + Hired
 //   everOffer     = Offer + Hired
 // — on the reasoning that a landed job proves the offer and everything before
-// it. Rejected is deliberately NOT folded in: a status is a snapshot, so a
-// rejection never reveals which stage it came from (stats.mjs calls the middle
-// stages lower bounds for exactly this reason).
+// it. A rejection proves a response, but not an interview or offer. The
+// ledger-aware variant below recovers those stages from actual transitions.
 
 /**
  * Count applications whose canonical status is any of `keys`.
@@ -43,4 +45,26 @@ export function cumulativeTiles(canonStatuses) {
     interviews: countOf(list, ["INTERVIEW", "OFFER", "HIRED"]),
     offers: countOf(list, ["OFFER", "HIRED"]),
   };
+}
+
+/** Recover interview/offer achievements by tracker identity, not row position.
+ * Malformed transitions and history for deleted tracker rows are ignored.
+ * @param {{n: string, status: string}[]} applications
+ * @param {string|null} content
+ * @param {string} [coreRoot] Code checkout, never the separate user data root.
+ */
+export async function cumulativeTilesWithHistory(applications, content, coreRoot = path.resolve(process.cwd(), '..')) {
+  // Turbopack is intentionally confined to web/ for Windows stability. Load
+  // the core at runtime, as the other core accessors do; do not widen its root
+  // or silently substitute a second engine if the installation is incomplete.
+  const file = path.join(coreRoot, 'funnel-stages.mjs');
+  const { parseStatusLogStages, recoverFunnelStages } = await import(/* webpackIgnore: true */ pathToFileURL(file).href);
+  const statuses = new Map();
+  for (const app of applications) {
+    // Non-numeric backfill IDs retain snapshot counts but cannot join history.
+    const id = /^\d+$/.test(app.n) ? Number(app.n) : Symbol();
+    statuses.set(id, app.status);
+  }
+  const values = [...recoverFunnelStages(statuses, parseStatusLogStages(content)).values()];
+  return { interviews: values.filter(n => n >= 3).length, offers: values.filter(n => n >= 4).length };
 }

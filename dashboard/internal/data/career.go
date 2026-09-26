@@ -129,17 +129,22 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 
 		num++
 		trackerNumber := num
-		if parsedNumber, err := strconv.Atoi(at("num")); err == nil {
+		rawNumber := at("num")
+		missingNumber := rawNumber == "" || strings.IndexFunc(rawNumber, func(r rune) bool { return r < '0' || r > '9' }) >= 0
+		if parsedNumber, err := strconv.Atoi(rawNumber); err == nil && !missingNumber {
 			trackerNumber = parsedNumber
+		} else {
+			missingNumber = true
 		}
 		app := model.CareerApplication{
-			Number:  trackerNumber,
-			Date:    at("date"),
-			Company: at("company"),
-			Role:    at("role"),
-			JobURL:  at("url"),
-			Status:  at("status"),
-			HasPDF:  strings.Contains(at("pdf"), "\u2705"),
+			Number:               trackerNumber,
+			TrackerNumberMissing: missingNumber,
+			Date:                 at("date"),
+			Company:              at("company"),
+			Role:                 at("role"),
+			JobURL:               at("url"),
+			Status:               at("status"),
+			HasPDF:               strings.Contains(at("pdf"), "\u2705"),
 		}
 
 		// Parse score from the Score column.
@@ -984,7 +989,7 @@ func StatusPriority(status string) int {
 }
 
 // ComputeProgressMetrics computes progress-oriented analytics from applications.
-func ComputeProgressMetrics(apps []model.CareerApplication) model.ProgressMetrics {
+func ComputeProgressMetrics(apps []model.CareerApplication, history ...map[int]int) model.ProgressMetrics {
 	pm := model.ProgressMetrics{}
 
 	// Count by normalized status
@@ -1004,11 +1009,6 @@ func ComputeProgressMetrics(apps []model.CareerApplication) model.ProgressMetric
 			}
 		}
 
-		// A hire proves an offer was received and accepted, so it counts here
-		// too — same reasoning as everOffer in stats.mjs's computeFunnel().
-		if norm == "offer" || norm == "hired" {
-			pm.TotalOffers++
-		}
 		if norm != "skip" && norm != "rejected" && norm != "discarded" {
 			pm.ActiveApps++
 		}
@@ -1027,9 +1027,50 @@ func ComputeProgressMetrics(apps []model.CareerApplication) model.ProgressMetric
 	// math as mirroring this function.
 	total := len(apps)
 	applied := statusCounts["applied"] + statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"] + statusCounts["rejected"]
-	responded := statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"]
+	responded := statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"] + statusCounts["rejected"]
 	interview := statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"]
 	offer := statusCounts["offer"] + statusCounts["hired"]
+	if len(history) > 0 {
+		applied, responded, interview, offer = 0, 0, 0, 0
+		ranks := make(map[int]int)
+		var unnumberedRanks []int
+		for _, app := range apps {
+			if NormalizeStatus(app.Status) == "skip" {
+				continue
+			}
+			rank := funnelRank(app.Status)
+			if app.TrackerNumberMissing {
+				unnumberedRanks = append(unnumberedRanks, rank)
+				continue
+			}
+			if history[0][app.Number] > rank {
+				rank = history[0][app.Number]
+			}
+			if rank > ranks[app.Number] {
+				ranks[app.Number] = rank
+			}
+		}
+		for _, rank := range ranks {
+			unnumberedRanks = append(unnumberedRanks, rank)
+		}
+		for _, rank := range unnumberedRanks {
+			if rank >= 1 {
+				applied++
+			}
+			if rank >= 2 {
+				responded++
+			}
+			if rank >= 3 {
+				interview++
+			}
+			if rank >= 4 {
+				offer++
+			}
+		}
+	}
+
+	// The Progress headline and funnel must report the same historical offers.
+	pm.TotalOffers = offer
 
 	// Top stage counts every tracked row, including rows backfilled without a
 	// score (#1799) — hence "Tracked", not "Evaluated", which already means both

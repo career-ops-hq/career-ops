@@ -4,10 +4,24 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
+import assert from 'node:assert/strict';
 
 console.log('\nstats.mjs — lifetime pipeline stats aggregator (#1604)');
 try {
   const stats = await import(pathToFileURL(join(ROOT, 'stats.mjs')).href);
+  const states = [...Array(10).fill('Applied'), ...Array(5).fill('Responded'), ...Array(2).fill('Interview'), ...Array(12).fill('Rejected')];
+  const numbered = new Map(states.map((s,i) => [i+1,s]));
+  const transitions = [18,19,20].map(n => `${n}\t2026-09-01\tInterview\tRejected\tset-status\t`).join('\n');
+  const recovered = stats.computeFunnelWithHistory(numbered, stats.parseStatusLogStages(transitions + '\n' + transitions));
+  assert.equal(recovered.everApplied, 29);
+  assert.equal(recovered.everResponded, 19);
+  assert.equal(recovered.everInterview, 5);
+  assert.equal(recovered.responseRate, 65.5);
+  assert.equal(recovered.interviewRate, 17.2);
+  assert.equal(stats.computeFunnel({Rejected:2, Discarded:3}).everResponded, 2);
+  assert.equal(stats.computeFunnelWithHistory(new Map([[1,'Discarded']]), [{num:1,from:'Rejected',to:'Discarded'}]).everResponded, 1);
+  assert.equal(stats.computeFunnelWithHistory(new Map([[1,'Discarded']]), [{num:1,from:'offer',to:'discarded'}]).everOffer, 1);
+  pass('rejections count as replies and distinct ledger history retains reached stages');
 
   // Tracker roll-up — CRLF input on purpose (Windows checkouts).
   const trackerMd = [
@@ -46,8 +60,8 @@ try {
 
   // Funnel — Rejected counts into everApplied (mirrors dashboard ComputeProgressMetrics).
   const f = stats.computeFunnel({ Applied: 4, Responded: 2, Interview: 1, Offer: 1, Rejected: 2, Evaluated: 9 });
-  if (f.everApplied === 10 && f.everResponded === 4 && f.everInterview === 2 && f.everOffer === 1
-      && f.responseRate === 40 && f.offerRate === 10 && f.smallSample === false) {
+  if (f.everApplied === 10 && f.everResponded === 6 && f.everInterview === 2 && f.everOffer === 1
+      && f.responseRate === 60 && f.offerRate === 10 && f.smallSample === false) {
     pass('computeFunnel cumulative ever* stages match the dashboard math');
   } else {
     fail(`computeFunnel wrong output: ${JSON.stringify(f)}`);
@@ -70,7 +84,7 @@ try {
   // Ledger-aware funnel (#1428): a declined offer (now Discarded) and a
   // rejected-after-interview must count for the stages they passed through,
   // which the status snapshot alone cannot see. Row 3 has no ledger history and
-  // must fall back to its current status (Rejected proves everApplied only).
+  // must fall back to its current status (Rejected proves a reply, not an interview).
   const statusByNum = new Map([[1, 'Discarded'], [2, 'Rejected'], [3, 'Rejected'], [4, 'Interview']]);
   const ledgerTsv = [
     '1\t2026-08-19\tInterview\tOffer\tset-status\t',   // row 1 reached Offer, then declined

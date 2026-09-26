@@ -130,5 +130,5 @@ function foldStatus(s) {
 export function canonStatus(s) {
   const k = foldStatus(s);
   if (k === "" || k === "—" || k === "-") return "DISCARDED";
-  return STATUS_ALIAS[k] ?? String(s ?? "").toUpperCase();
+  return STATUS_ALIAS[k] ?? k.toUpperCase();
 }

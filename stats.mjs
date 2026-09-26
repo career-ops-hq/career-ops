@@ -27,6 +27,8 @@ import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeStatus, analyzeFromContent } from './followup-cadence.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { parseStatusLogStages, recoverFunnelStages } from './funnel-stages.mjs';
+export { parseStatusLogStages } from './funnel-stages.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -146,7 +148,7 @@ export function computeColdAppNums(trackerContent, followupsContent) {
 /**
  * Cumulative funnel: everX = "reached stage X or beyond, ever". The math
  * mirrors the dashboard's ComputeProgressMetrics (career.go): Rejected counts
- * into everApplied (a rejection proves a submission), Hired counts into every
+ * into everApplied and everResponded (a rejection is a reply), Hired counts into every
  * stage through everOffer (a landed job proves the offer and everything before
  * it), and each later stage sums itself plus everything beyond it. Rates are
  * relative to everApplied.
@@ -155,9 +157,8 @@ export function computeColdAppNums(trackerContent, followupsContent) {
  * "currently in Applied" while `everApplied` is "ever applied"; the same word
  * for two different numbers would read as a bug.
  *
- * Known limitation: statuses are snapshots, so a Rejected row that never got a
- * response is indistinguishable from one rejected after interviews — middle
- * stages are lower bounds until status-transition logging exists (#1428).
+ * Snapshot interview/offer counts are lower bounds; use ledger history to
+ * recover stages reached before a rejection or withdrawal (#3273).
  *
  * This is the canonical funnel definition for career-ops going forward;
  * dashboard/web consuming this JSON instead of keeping independent copies is
@@ -166,7 +167,7 @@ export function computeColdAppNums(trackerContent, followupsContent) {
 export function computeFunnel(byStatus) {
   const n = (k) => byStatus[k] || 0;
   const everApplied = n('Applied') + n('Responded') + n('Interview') + n('Offer') + n('Hired') + n('Rejected');
-  const everResponded = n('Responded') + n('Interview') + n('Offer') + n('Hired');
+  const everResponded = n('Responded') + n('Interview') + n('Offer') + n('Hired') + n('Rejected');
   const everInterview = n('Interview') + n('Offer') + n('Hired');
   const everOffer = n('Offer') + n('Hired');
   return {
@@ -181,33 +182,6 @@ export function computeFunnel(byStatus) {
   };
 }
 
-// Canonical pipeline depth per stage, for "ever reached" math. Terminal and
-// pre-pipeline states (Rejected/Discarded/Evaluated/SKIP/Unknown) are absent →
-// depth 0; the ledger's from/to history is what proves the stages a row passed
-// through before it landed on a terminal snapshot.
-const STAGE_RANK = { Applied: 1, Responded: 2, Interview: 3, Offer: 4, Hired: 5 };
-
-/**
- * Parse data/status-log.tsv into per-row transition observations. Columns are
- * {num}\t{date}\t{from}\t{to}\t{source}\t{note}; only num/from/to are read here.
- * Torn or non-numeric-num rows are skipped — this is a display aid, never throws.
- * @returns {Array<{num:number, from:string, to:string}>}
- */
-export function parseStatusLogStages(content) {
-  const out = [];
-  for (const line of String(content ?? '').replace(/\r/g, '').split('\n')) {
-    if (!line.trim()) continue;
-    const c = line.split('\t');
-    const rawNum = String(c[0] || '').trim();
-    const date = String(c[1] || '').trim();
-    const from = String(c[2] || '').trim();
-    const to = String(c[3] || '').trim();
-    if (!/^\d+$/.test(rawNum) || !date || !from || !to) continue;
-    out.push({ num: Number(rawNum), from, to });
-  }
-  return out;
-}
-
 /**
  * Ledger-aware funnel: everX counts DISTINCT tracker rows that ever reached
  * stage X, folding the transition ledger so a row now sitting in a terminal
@@ -216,7 +190,7 @@ export function parseStatusLogStages(content) {
  * Interview counts into everInterview. This resolves the snapshot limitation
  * computeFunnel() documents (#1428) for every row the ledger covers; a row with
  * no ledger history falls back to its current status alone, so pre-ledger middle
- * stages stay lower bounds. A current Rejected still proves everApplied (rank 1)
+ * stages stay lower bounds. A current Rejected proves a response (rank 2)
  * with no ledger, matching the snapshot math. Same shape as computeFunnel() plus
  * `basis:'ledger'`.
  *
@@ -224,16 +198,7 @@ export function parseStatusLogStages(content) {
  * @param {Array<{num:number,from:string,to:string}>} ledger - parseStatusLogStages output.
  */
 export function computeFunnelWithHistory(statusByNum, ledger) {
-  const reached = new Map(); // num → highest stage rank ever held (distinct rows)
-  const bump = (num, rank) => { if (rank > (reached.get(num) || 0)) reached.set(num, rank); };
-  for (const [num, status] of statusByNum) {
-    bump(num, STAGE_RANK[status] || (status === 'Rejected' ? 1 : 0));
-  }
-  for (const { num, from, to } of ledger) {
-    if (!statusByNum.has(num)) continue; // ledger row whose tracker row is gone
-    bump(num, STAGE_RANK[from] || 0);
-    bump(num, STAGE_RANK[to] || 0);
-  }
+  const reached = recoverFunnelStages(statusByNum, ledger);
   let everApplied = 0, everResponded = 0, everInterview = 0, everOffer = 0;
   for (const rank of reached.values()) {
     if (rank >= 1) everApplied++;
