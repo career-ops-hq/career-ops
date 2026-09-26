@@ -40,6 +40,11 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   'top_strengths',
   'risk_level',
   'confidence',
+  // Evidence states and unresolved checks behind the existing confidence tier.
+  // Preserved for report consumers; historical outcome analysis does not use
+  // them to change the Global Score or calibration rates.
+  'score_evidence',
+  'confidence_gaps',
   'next_action',
   // Optional context fields accepted for future reports.
   'domain',
@@ -285,7 +290,7 @@ function normalizeScalar(value) {
   return null;
 }
 
-function parseMachineSummary(content) {
+export function parseMachineSummary(content) {
   const fenceMatch = content.match(/##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
   if (!fenceMatch) return null;
 

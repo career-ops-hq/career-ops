@@ -652,6 +652,8 @@ Apply all language rules from `_writing.md` Professional Writing section to the 
 
 ## Post-evaluation
 
+Before saving the report, apply `modes/_shared.md` → Evidence confidence for the Global Score. After Risk Summary, include `## Score Evidence` with one row per scoring dimension (`CV match`, `North Star alignment`, `Compensation`, `Cultural signals`, `Red flags`): evidence status (`supported`, `partial`, `unknown`), concrete source or observation, and unresolved question. Follow it with `**Evidence confidence:** {High | Medium | Low} — {main reason}` and up to three verification priorities. This is confidence in the score's evidence, separate from Block G's posting-legitimacy tier. Mirror the five statuses and priorities in Machine Summary `score_evidence` and `confidence_gaps` using the canonical schema in `batch/batch-prompt.md`.
+
 **ALWAYS** after generating blocks A-G:
 
 ### 1. Save report .md
@@ -705,6 +707,9 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
 ## Risk Summary
 (one row per risk signal, fixed order — see the Risk Summary section above)
+
+## Score Evidence
+(five scoring dimensions, evidence status and source, unresolved questions, evidence-confidence tier, and verification priorities)
 
 ## H) Draft Application Answers
 (only if score >= 4.5 — draft answers for the application form)
