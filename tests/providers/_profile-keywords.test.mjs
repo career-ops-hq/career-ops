@@ -2,7 +2,7 @@
 import { writeFileSync, mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { pass, fail, ROOT } from '../helpers.mjs';
+import { pass, fail, ROOT, rmSync } from '../helpers.mjs';
 import { pathToFileURL } from 'url';
 
 console.log('\nProvider helper — _profile-keywords');
@@ -70,6 +70,7 @@ try {
   } else {
     fail('resolveProfileKeywords should return [] for unparseable YAML');
   }
+  rmSync(tmp, { recursive: true, force: true });
 } catch (e) {
   fail(`_profile-keywords tests crashed: ${e.message}`);
 }

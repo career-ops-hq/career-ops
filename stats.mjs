@@ -327,10 +327,12 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
       if (!line) continue;
       const parts = line.split('\t');
       if (parts.length >= 3) {
-        healthRecords.push({ company: parts[1], status: parts[2] });
+        healthRecords.push({ ts: Date.parse(parts[0]), company: parts[1], status: parts[2] });
       }
     }
     const streaks = new Map();
+    const lastProbed = new Map();
+    let newestProbe = 0;
     for (const r of healthRecords) {
       // Mirrors scan.mjs computeConsecutiveFailures: healthy statuses reset,
       // every other status (slug_gone/network/auth/server/unknown) counts.
@@ -339,12 +341,31 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
       } else {
         streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
       }
+      if (Number.isFinite(r.ts)) {
+        if (r.ts > (lastProbed.get(r.company) || 0)) lastProbed.set(r.company, r.ts);
+        if (r.ts > newestProbe) newestProbe = r.ts;
+      }
     }
+    // A failure streak is evidence of a dead portal only while the entry is
+    // still being PROBED. An entry that stops resolving to a provider writes
+    // no further health rows — scan.mjs skips it at resolveEntries(), before
+    // the fetch loop that records health — so its final streak would stand as
+    // a permanent 🚨 that no fix can clear. That is how switching a broken
+    // board to scan_method: websearch (the documented remedy) leaves the
+    // warning lit forever, and a warning that cannot clear trains the reader
+    // to ignore the whole line.
+    //
+    // Staleness is measured against the newest row in this file rather than
+    // the wall clock, so a checkout whose scanner has been idle for months
+    // still reports its last known state instead of silently going green.
+    const staleMs = (cfg.portal_health_stale_days || 14) * 86400000;
     const threshold = cfg.portal_health_threshold || 3;
     for (const [company, streak] of streaks.entries()) {
-      if (streak >= threshold && configuredNames.has(String(company).toLowerCase())) {
-        persistentlyDead++;
-      }
+      if (streak < threshold) continue;
+      if (!configuredNames.has(String(company).toLowerCase())) continue;
+      const seen = lastProbed.get(company);
+      if (newestProbe && seen && newestProbe - seen > staleMs) continue;
+      persistentlyDead++;
     }
   }
 
@@ -359,6 +380,67 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
 }
 
 // ── Follow-up compliance ────────────────────────────────────────────
+
+/** Read-only suggestions based on observed history, never config creation time.
+ * Company identity deliberately uses the same exact-lowercase contract as
+ * computePortalStats. Missing evidence never proves a board is dead.
+ */
+export function computePortalRecommendations(portalsContent, scanContent, healthContent, now = Date.now()) {
+  let cfg;
+  try { cfg = yaml.load(String(portalsContent ?? '')) || {}; } catch { return null; }
+  const positive = (n, fallback) => Number.isInteger(n) && n > 0 ? n : fallback;
+  const days = positive(cfg.portal_prune_quiet_days, 30);
+  const threshold = positive(cfg.portal_health_threshold, 3);
+  const cutoff = now - days * 86400000;
+  const validDate = (s) => /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)?$/.test(s || '') && Number.isFinite(Date.parse(s)) && Date.parse(s) <= now;
+  const produced = new Set(scanCompanyNames(scanContent));
+  const lastMatch = new Map();
+  for (const line of String(scanContent ?? '').split('\n')) {
+    const c = line.trimEnd().split('\t');
+    if (!/^https?:\/\//.test(c[0]) || !validDate(c[1]) || !c[4]) continue;
+    const key = c[4].trim().toLowerCase();
+    if (!lastMatch.has(key) || c[1] > lastMatch.get(key)) lastMatch.set(key, c[1]);
+  }
+  const health = new Map();
+  const healthRows = [];
+  for (const line of String(healthContent ?? '').split('\n')) {
+    const [date, company, status] = line.trimEnd().split('\t');
+    if (!validDate(date) || !company || !['reachable', 'empty', 'slug_gone', 'network', 'auth', 'server', 'unknown'].includes(status)) continue;
+    healthRows.push({ date, company, status });
+  }
+  healthRows.sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
+  for (const { date, company, status } of healthRows) {
+    const key = company.toLowerCase();
+    const h = health.get(key) || { firstObserved: date, lastObserved: date, streak: 0, status };
+    h.firstObserved = date < h.firstObserved ? date : h.firstObserved;
+    h.lastObserved = date;
+    h.status = status;
+    h.streak = status === 'reachable' || status === 'empty' ? 0 : h.streak + 1;
+    health.set(key, h);
+  }
+  const buckets = { neverProduced: [], rotted: [], healthyButQuiet: [] };
+  if (scanContent == null) return { quietDays: days, failureThreshold: threshold, ...buckets };
+  const seen = new Set();
+  for (const company of Array.isArray(cfg.tracked_companies) ? cfg.tracked_companies : []) {
+    if (!company?.name || company.enabled === false || company.scan_method === 'websearch') continue;
+    const key = String(company.name).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const h = health.get(key);
+    // Old health from a board no longer probed is not current evidence.
+    if (!h || Date.parse(h.lastObserved) < cutoff) continue;
+    const lastProduced = lastMatch.get(key) || null;
+    const row = { company: company.name, ...h, lastProduced };
+    if (produced.has(key) && h.streak >= threshold) {
+      buckets.rotted.push({ ...row, recommendation: 'Verify reachability and find the current ATS slug before considering removal; failures do not prove closure.' });
+    } else if (!produced.has(key) && Date.parse(h.firstObserved) <= cutoff) {
+      buckets.neverProduced.push({ ...row, recommendation: 'Review title_filter and company-name matching before considering removal; no recorded matches does not prove a dead board.' });
+    } else if (produced.has(key) && lastProduced && Date.parse(lastProduced) <= cutoff && h.streak === 0) {
+      buckets.healthyButQuiet.push({ ...row, recommendation: 'Keep monitoring: recently reachable, with no recent recorded matches.' });
+    }
+  }
+  return { quietDays: days, failureThreshold: threshold, ...buckets };
+}
 
 /**
  * Follow-up compliance from follow-ups.md (same table shape followup-cadence
@@ -536,6 +618,7 @@ export function computeAllStats({
   portalsFile = PORTALS_FILE,
   portalHealthFile = PORTAL_HEALTH_FILE,
   statusLogFile = STATUS_LOG_FILE,
+  prune = false,
 } = {}) {
   const read = (f) => (existsSync(f) ? readFileSync(f, 'utf-8') : null);
   const apps = read(appsFile);
@@ -595,6 +678,7 @@ export function computeAllStats({
         : computeFunnel(tracker.byStatus),
     scan,
     portals: portals ? computePortalStats(portals, scan, scanHist ? scanCompanyNames(scanHist) : [], portalHealth) : null,
+    ...(prune ? { portalRecommendations: portals ? computePortalRecommendations(portals, scanHist, portalHealth) : null } : {}),
     followups: fups && apps ? computeFollowupStats(fups, trackerStatusByNum(apps)) : null,
     runs: runs ? computeRunStats(runs) : null,
   };
@@ -666,15 +750,25 @@ function printSummary(stats) {
     console.log('Runs:       — no data (data/scan-runs.tsv missing; created by the next scan)');
   }
   console.log('');
+  if (stats.portalRecommendations) {
+    console.log('Portal recommendations (read-only; exact-lowercase company matching):');
+    for (const [key, label] of [['neverProduced', 'Never produced'], ['rotted', 'Previously producing, failing now'], ['healthyButQuiet', 'Healthy but quiet']]) {
+      const rows = stats.portalRecommendations[key];
+      console.log(`  ${label}: ${rows.length}`);
+      for (const row of rows) console.log(`    ${row.company}: ${row.recommendation}`);
+    }
+    console.log('No suggestion means insufficient evidence or no current concern, not verified health.');
+  }
 }
 
 // ── CLI flags + help ────────────────────────────────────────────────
 
-const KNOWN_FLAGS = ['--summary', '--help', '-h'];
+const KNOWN_FLAGS = ['--summary', '--prune', '--help', '-h'];
 
 const USAGE = `Usage:
   node stats.mjs             # full JSON stats to stdout
   node stats.mjs --summary   # human-readable table
+  node stats.mjs --prune     # include read-only portal recommendations (also with --summary)
   node stats.mjs --help|-h   # print this usage block and exit`;
 
 if (isMainModule(import.meta.url)) {
@@ -682,7 +776,7 @@ if (isMainModule(import.meta.url)) {
 
   validateFlags(args, KNOWN_FLAGS, USAGE);
 
-  const stats = computeAllStats();
+  const stats = computeAllStats({ prune: args.includes('--prune') });
   if (args.includes('--summary')) printSummary(stats);
   else console.log(JSON.stringify(stats, null, 2));
 }

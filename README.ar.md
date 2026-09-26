@@ -5,7 +5,7 @@
 <td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
 <td valign="middle" dir="rtl">
 <strong>أشهر من إرسال السير الذاتية إلى الصمت.</strong> فبنيت المرشّح الذي كنت أحتاجه.<br>
-<strong>740 إعلان وظيفة. 68 تستحق التقديم. 12 مقابلة. عرض واحد.</strong><br>
+<strong>740 إعلان وظيفة. 68 تقدّمت إليها. 12 مقابلة. عرض واحد.</strong><br>
 كنت أول مستخدم له. <strong>حصلت على الوظيفة.</strong> ثم جعلته مفتوح المصدر.
 </td>
 </tr>
@@ -23,7 +23,7 @@
 </div>
 
 <p align="center" dir="rtl">
-  الشركات تستخدم الذكاء الاصطناعي لتصفية المرشحين. <strong>أنا أعطيت المرشحين ذكاءً اصطناعيًا <em>لاختيار</em> الشركات.</strong><br>
+  تستخدم الشركات الذكاء الاصطناعي لتصفية المرشحين. <strong>أنا ببساطة أعطيت المرشحين الذكاء الاصطناعي ليختاروا هم الشركات المناسبة.</strong><br>
   على جهازك، يخبرك أي الوظائف حقيقية، وأيها يناسبك، و<strong>لا يقدّم أبدًا باسمك.</strong>
 </p>
 
@@ -242,7 +242,7 @@ npm i -g @santifer/career-ops
 /career-ops           → عرض كل الأوامر المتاحة
 /career-ops {JD}      → خط العمل التلقائي: تقييم + تقرير + PDF + متتبع (الصق نصًا أو رابطًا)
 /career-ops pipeline  → معالجة الروابط المعلّقة من صندوق الوارد (data/pipeline.md)
-/career-ops oferta    → تقييم فقط، الكتل من A إلى G (بدون PDF تلقائي)
+/career-ops oferta    → تقييم فقط، الكتل من A إلى H (بدون PDF تلقائي)
 /career-ops ofertas   → مقارنة عدة عروض وترتيبها
 /career-ops contacto  → حركة LinkedIn الذكية: إيجاد جهات الاتصال + صياغة رسالة
 /career-ops deep      → أمر بحث معمّق عن الشركة

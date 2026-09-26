@@ -13,6 +13,7 @@ const requiredGuardrails = [
   '<!-- guardrail:no-fabrication -->',
   '<!-- guardrail:source-exclusivity -->',
   '<!-- guardrail:human-approval -->',
+  '<!-- guardrail:agency-confirmation -->',
 ];
 const expectedLocalizedModes = [
   'ar', 'da', 'de', 'es', 'fr', 'hi', 'id', 'it', 'ja',

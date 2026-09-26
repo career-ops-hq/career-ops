@@ -5,7 +5,7 @@
 <td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
 <td valign="middle">
 <strong>Monatelang Lebensläufe ins Leere geschickt.</strong> Also habe ich den Filter gebaut, den ich brauchte.<br>
-<strong>740 Stellen. 68 waren eine Bewerbung wert. 12 Interviews. 1 Angebot.</strong><br>
+<strong>740 Stellen. 68 Bewerbungen. 12 Interviews. 1 Angebot.</strong><br>
 Ich war der erste Nutzer. <strong>Ich habe den Job bekommen.</strong> Dann habe ich es als Open Source freigegeben.
 </td>
 </tr>
@@ -23,7 +23,7 @@ Ich war der erste Nutzer. <strong>Ich habe den Job bekommen.</strong> Dann habe 
 </div>
 
 <p align="center">
-  Unternehmen nutzen KI, um Kandidaten zu filtern. <strong>Ich habe Kandidaten KI gegeben, um Unternehmen <em>auszuwählen</em>.</strong><br>
+  Unternehmen nutzen KI, um Bewerber:innen zu filtern. <strong>Ich habe Bewerber:innen KI gegeben, um Unternehmen zu <em>bewerten</em>.</strong><br>
   Auf deinem Rechner sagt es dir, welche Stellen echt sind, welche passen, und <strong>bewirbt sich nie in deinem Namen.</strong>
 </p>
 
@@ -242,7 +242,7 @@ career-ops nutzt einen gemeinsamen Befehls-Router. In CLIs, die Slash Commands r
 /career-ops           → Alle verfügbaren Befehle anzeigen
 /career-ops {JD}      → AUTO-PIPELINE: Bewertung + Report + PDF + Tracker (Text oder URL einfügen)
 /career-ops pipeline  → Ausstehende URLs aus der Inbox verarbeiten (data/pipeline.md)
-/career-ops oferta    → Nur Bewertung, Blöcke A bis G (kein automatisches PDF)
+/career-ops oferta    → Nur Bewertung, Blöcke A bis H (kein automatisches PDF)
 /career-ops ofertas   → Mehrere Angebote vergleichen und ranken
 /career-ops contacto  → LinkedIn-Power-Move: Kontakte finden + Nachricht entwerfen
 /career-ops deep      → Tiefen-Recherche-Prompt zum Unternehmen

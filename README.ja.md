@@ -5,7 +5,7 @@
 <td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
 <td valign="middle">
 <strong>何か月も履歴書を送り続けて、返事は沈黙。</strong> だから、自分に必要なフィルターを作った。<br>
-<strong>求人 740 件。送る価値があったのは 68 件。面接 12 回。オファー 1 件。</strong><br>
+<strong>求人 740 件。応募 68 件。面接 12 回。オファー 1 件。</strong><br>
 最初のユーザーは私だった。<strong>仕事を得た。</strong> そしてオープンソースにした。
 </td>
 </tr>
@@ -23,7 +23,7 @@
 </div>
 
 <p align="center">
-  企業は AI で候補者をふるいにかける。<strong>私は候補者に、企業を<em>選ぶ</em>ための AI を渡した。</strong><br>
+  企業はAIで候補者をフィルタリングしている。<strong>ならば候補者にもAIを渡し、企業を<em>選ばせる</em>側にした。</strong><br>
   あなたのマシン上で、どの求人が本物か、どれが合うかを教え、<strong>あなたの名前で応募することは決してない。</strong>
 </p>
 
@@ -242,7 +242,7 @@ career-ops は共有のコマンドルーターを使います。スラッシュ
 /career-ops           → 利用できるコマンドをすべて表示
 /career-ops {JD}      → 自動パイプライン：評価 + レポート + PDF + トラッカー（テキストまたは URL を貼り付け）
 /career-ops pipeline  → 受信箱の未処理 URL を処理（data/pipeline.md）
-/career-ops oferta    → 評価のみ、ブロック A〜G（自動 PDF なし）
+/career-ops oferta    → 評価のみ、ブロック A〜H（自動 PDF なし）
 /career-ops ofertas   → 複数の求人を比較してランク付け
 /career-ops contacto  → LinkedIn の一手：連絡先を探してメッセージを下書き
 /career-ops deep      → 企業についての詳細リサーチ用プロンプト

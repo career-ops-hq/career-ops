@@ -5,7 +5,7 @@
 <td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
 <td valign="middle">
 <strong>几个月投出的简历，全都石沉大海。</strong>于是我做了自己需要的那个过滤器。<br>
-<strong>740 个职位。68 个值得投。12 次面试。1 份 offer。</strong><br>
+<strong>740 个职位。68 个已投递。12 次面试。1 份 offer。</strong><br>
 我是它的第一个用户。<strong>我拿到了那份工作。</strong>然后把它开源了。
 </td>
 </tr>
@@ -242,7 +242,7 @@ career-ops 使用共享的命令路由。在会注册斜杠命令的 CLI 里，�
 /career-ops           → 显示所有可用命令
 /career-ops {JD}      → 自动流水线：评估 + 报告 + PDF + 追踪记录（粘贴文本或 URL）
 /career-ops pipeline  → 处理收件箱里待处理的 URL（data/pipeline.md）
-/career-ops oferta    → 仅评估，区块 A 到 G（不自动生成 PDF）
+/career-ops oferta    → 仅评估，区块 A 到 H（不自动生成 PDF）
 /career-ops ofertas   → 比较并排序多个职位
 /career-ops contacto  → LinkedIn 妙招：找到联系人 + 起草消息
 /career-ops deep      → 针对公司的深度调研提示词

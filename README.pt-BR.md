@@ -5,7 +5,7 @@
 <td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
 <td valign="middle">
 <strong>Meses mandando currículos para o silêncio.</strong> Então construí o filtro de que eu precisava.<br>
-<strong>740 vagas. 68 valiam uma candidatura. 12 entrevistas. 1 oferta.</strong><br>
+<strong>740 vagas. 68 candidaturas. 12 entrevistas. 1 oferta.</strong><br>
 Fui o primeiro usuário. <strong>Consegui a vaga.</strong> Depois abri o código.
 </td>
 </tr>
@@ -23,7 +23,7 @@ Fui o primeiro usuário. <strong>Consegui a vaga.</strong> Depois abri o código
 </div>
 
 <p align="center">
-  As empresas usam IA para filtrar candidatos. <strong>Eu dei aos candidatos IA para <em>escolher</em> empresas.</strong><br>
+  Empresas usam IA para filtrar candidatos. <strong>Eu dei aos candidatos IA para <em>escolher</em> empresas.</strong><br>
   Na sua máquina, ele diz quais vagas são reais, quais combinam com você, e <strong>nunca se candidata em seu nome.</strong>
 </p>
 
@@ -242,7 +242,7 @@ O career-ops usa um roteador de comandos compartilhado. Nas CLIs que registram c
 /career-ops           → Mostra todos os comandos disponíveis
 /career-ops {JD}      → AUTO-PIPELINE: avaliação + relatório + PDF + tracker (cole texto ou URL)
 /career-ops pipeline  → Processa as URLs pendentes da caixa de entrada (data/pipeline.md)
-/career-ops oferta    → Só avaliação, blocos A a G (sem PDF automático)
+/career-ops oferta    → Só avaliação, blocos A a H (sem PDF automático)
 /career-ops ofertas   → Compara e ranqueia várias vagas
 /career-ops contacto  → Jogada de mestre no LinkedIn: encontra contatos + redige a mensagem
 /career-ops deep      → Prompt de pesquisa aprofundada sobre a empresa

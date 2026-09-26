@@ -5,7 +5,7 @@
 <td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
 <td valign="middle">
 <strong>Months of sending CVs into silence.</strong> So I built the filter I needed.<br>
-<strong>740 listings. 68 worth sending. 12 interviews. 1 offer.</strong><br>
+<strong>740 listings. 68 applied. 12 interviews. 1 offer.</strong><br>
 I was its first user. <strong>I got the job.</strong> Then I open-sourced it.
 </td>
 </tr>
@@ -23,7 +23,7 @@ I was its first user. <strong>I got the job.</strong> Then I open-sourced it.
 </div>
 
 <p align="center">
-  Companies use AI to filter candidates. <strong>I gave candidates AI to <em>choose</em> companies.</strong><br>
+  Companies use AI to filter candidates. <strong>I just gave candidates AI to <em>choose</em> companies.</strong><br>
   On your machine, it tells you which jobs are real, which ones fit, and <strong>never applies in your name.</strong>
 </p>
 
@@ -186,6 +186,10 @@ claude   # or codex / qwen / opencode / agy / grok — open your AI CLI here
 git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # only needed for PDF generation
+# On a non-Debian/Ubuntu Linux distro (Fedora, Arch, ...), Chromium's system
+# libraries aren't installed by the line above — install them yourself with
+# your distro's package manager if PDF generation fails to launch the browser
+# (Playwright's own docs list the required libraries per platform).
 
 # 2. Check setup
 npm run doctor                     # Validates all prerequisites
@@ -242,7 +246,7 @@ career-ops uses a shared command router. In CLIs that register slash commands, i
 /career-ops           → Show all available commands
 /career-ops {JD}      → AUTO-PIPELINE: evaluate + report + PDF + tracker (paste text or URL)
 /career-ops pipeline  → Process pending URLs from inbox (data/pipeline.md)
-/career-ops oferta    → Evaluation only, blocks A to G (no auto PDF)
+/career-ops oferta    → Evaluation only, blocks A to H (no auto PDF)
 /career-ops ofertas   → Compare and rank multiple offers
 /career-ops contacto  → LinkedIn power move: find contacts + draft message
 /career-ops deep      → Deep research prompt about company
