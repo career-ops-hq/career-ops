@@ -55,6 +55,8 @@ for (const [name, body] of [
   ["boolean location", '{"location":true}'],
   ["mixed roles", '{"roles":["Engineer",42]}'],
   ["null roles", '{"roles":null}'],
+  ["only minimum with another update", '{"name":"Updated Fixture","compMin":100}'],
+  ["only maximum with another update", '{"name":"Updated Fixture","compMax":200}'],
   ["string salary", '{"compMin":"100","compMax":200}'],
   ["infinite salary", '{"compMin":1e400,"compMax":200}'],
   ["negative salary", '{"compMin":-1,"compMax":200}'],
