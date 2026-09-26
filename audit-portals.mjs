@@ -46,6 +46,7 @@
  *   node audit-portals.mjs --baseline prev.json  # flag boards that lost postings
  *   node audit-portals.mjs --small-threshold 10  # what counts as a small board
  *   node audit-portals.mjs --strict              # exit 1 on any non-ok verdict
+ *   node audit-portals.mjs --queries             # offline search-query drift advice
  *   node audit-portals.mjs --help
  *
  * Network: only main() and auditCompanies() hit the network, and every call
@@ -54,7 +55,8 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 
 import { makeHttpCtx } from './providers/_http.mjs';
@@ -63,14 +65,24 @@ import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
-// Anchored to the career-ops root, not the cwd. Both paths below used to be
-// bare relative strings, which silently audited nothing the moment the script
-// was invoked from anywhere but the repo root — `node /path/to/audit-portals.mjs`
-// from a home directory would throw on portals.yml and, worse, load zero
-// providers and report every board as `no-provider`.
+// Anchored, not cwd-relative. Both paths below used to be bare relative
+// strings, which silently audited nothing the moment the script was invoked
+// from anywhere but the repo root — `node /path/to/audit-portals.mjs` from a
+// home directory would throw on portals.yml and, worse, load zero providers
+// and report every board as `no-provider`.
+//
+// The two anchors are different roots and must stay that way (#4171).
+// `portals.yml` is user layer and follows the DATA root, which is wherever
+// CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR or the `.career-ops-data` marker
+// points. `providers/` is system layer: it ships with the checkout and never
+// travels to a user's data root. Anchoring it to the data root reproduced the
+// exact failure the paragraph above describes — loadProviders() reads a
+// directory that does not exist, returns an empty registry, and the audit
+// reports `0 audited` and exits 0. scan.mjs already splits the two this way.
 const ROOT = getCareerOpsRoot();
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(ROOT, 'portals.yml');
-const PROVIDERS_DIR = join(ROOT, 'providers');
+export const PROVIDERS_DIR = join(CODE_ROOT, 'providers');
 
 /** Boards at or under this many postings are worth a second look, not an error. */
 export const DEFAULT_SMALL_THRESHOLD = 5;
@@ -222,7 +234,7 @@ export async function auditCompanies(companies, {
       let result = { provider: providerId, scanMethod: entry.scan_method || null };
       if (providerId) {
         try {
-          const ctx = httpCtx || makeHttpCtx({ maxPages: AUDIT_MAX_PAGES });
+          const ctx = httpCtx || { ...makeHttpCtx(), maxPages: AUDIT_MAX_PAGES };
           result.jobs = (await resolved.provider.fetch(entry, ctx)) || [];
         } catch (err) {
           result.error = err?.message || String(err);
@@ -307,10 +319,45 @@ export function loadCompanies(filePath = DEFAULT_PORTALS_PATH) {
   return Array.isArray(cfg.tracked_companies) ? cfg.tracked_companies : [];
 }
 
+// This is lexical advice, not semantic validation: synonyms and another
+// language can legitimately share no words. Never rewrite a user's query.
+function queryWords(text) {
+  return String(text).normalize('NFKC').toLowerCase()
+    .match(/[\p{L}\p{N}][\p{L}\p{M}\p{N}+#]*/gu) || [];
+}
+
+export function findStaleScanQueries(companies, positiveKeywords) {
+  const keywords = Array.isArray(positiveKeywords)
+    ? positiveKeywords.filter((v) => typeof v === 'string' && v.trim()) : [];
+  const targets = new Set(keywords.flatMap(queryWords));
+  if (!targets.size) return [];
+  const findings = [];
+  for (const company of Array.isArray(companies) ? companies : []) {
+    if (!company || company.enabled === false || company.scan_method !== 'websearch') continue;
+    // Follow scan.mjs's handoff precedence, but a careers URL alone isn't a query.
+    const query = company.scan_query || company.search_query;
+    if (typeof query !== 'string' || !query.trim()) continue;
+    const terms = query
+      .replace(/\bNOT\s+(?:"[^"]*"|\([^)]*\)|\S+)/g, ' ')
+      .replace(/(?:^|[\s(])-(?:"[^"]*"|\([^)]*\)|[^\s)]+)/g, ' ')
+      .replace(/\b(?:site|inurl|filetype):(?:"[^"]*"|\S+)/gi, ' ')
+      .replace(/https?:\/\/\S+/gi, ' ')
+      .replace(/\b(?:OR|AND|NOT)\b/g, ' ');
+    const words = queryWords(terms);
+    if (!words.length || words.some((word) => targets.has(word))) continue;
+    findings.push({
+      name: typeof company.name === 'string' ? company.name : '(unnamed)',
+      query,
+      detail: 'possibly stale — no positive-keyword overlap with current targeting',
+    });
+  }
+  return findings;
+}
+
 const ICON = { ok: '✅', small: '🟡', empty: '⚪', 'no-provider': '🚨', error: '❌' };
 
 const KNOWN_FLAGS = [
-  '--summary', '--json', '--strict', '--company', '--file',
+  '--summary', '--json', '--strict', '--queries', '--company', '--file',
   '--baseline', '--small-threshold', '--help', '-h',
 ];
 const VALUE_FLAGS = ['--company', '--file', '--baseline', '--small-threshold'];
@@ -324,6 +371,7 @@ const USAGE = `Usage:
   node audit-portals.mjs --baseline prev.json  # flag boards that lost postings
   node audit-portals.mjs --small-threshold 10  # what counts as a small board
   node audit-portals.mjs --strict              # exit 1 on any non-ok verdict
+  node audit-portals.mjs --queries             # offline advisory; never rewrites queries
   node audit-portals.mjs --help                # print this usage block and exit`;
 
 async function main() {
@@ -355,6 +403,20 @@ async function main() {
       console.error(`Error: no tracked company matches "${only}" in ${filePath}`);
       process.exit(1);
     }
+  }
+
+  if (hasFlag(args, '--queries')) {
+    const cfg = yaml.load(readFileSync(filePath, 'utf-8')) || {};
+    const warnings = findStaleScanQueries(companies, cfg.title_filter?.positive);
+    if (asJson) console.log(JSON.stringify({ warnings }, null, 2));
+    else {
+      console.log('Search-query drift advice (lexical overlap only; synonyms may differ):');
+      for (const warning of warnings) {
+        console.log(`  ${warning.name}: ${warning.detail}\n    ${warning.query}`);
+      }
+      console.log(`${warnings.length} query warning(s). Review manually; no files changed.`);
+    }
+    return; // advisory even with --strict; no providers loaded or network calls
   }
 
   const providers = await loadProviders(PROVIDERS_DIR);

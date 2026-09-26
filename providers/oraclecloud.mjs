@@ -42,7 +42,7 @@
 // User-Agent is sent to reduce (not eliminate) WAF friction.
 
 import { decodeEntities } from './_html-entities.mjs';
-import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, sleep } from './_http.mjs';
 
 // `oraclecloud(?:[1-9][0-9]?)?` = oraclecloud.com plus oraclecloud1.com …
 // oraclecloud99.com. No leading zero, at most two digits — a bounded family,
@@ -78,11 +78,6 @@ function toEpochMs(value) {
   if (!value) return undefined;
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? undefined : parsed;
-}
-
-function sleep(ms, ctx) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -258,12 +253,20 @@ export default {
 
       // Stop conditions. NOTE: `hasMore` is unreliable on some tenants (e.g.
       // JPMC returns hasMore:false on EVERY page even with 7000+ jobs), so it's
-      // NOT used to stop — trusting it caps the scan at one page. The
-      // authoritative signals are the returned list length and TotalJobsCount:
-      //   - an empty or short page means we've reached the end;
-      //   - once we've paged past TotalJobsCount there's nothing left to fetch.
-      if (listLen === 0 || listLen < PAGE_SIZE) break;
-      if (total !== null && offset + PAGE_SIZE >= total) break;
+      // NOT used to stop — trusting it caps the scan at one page.
+      //
+      // An empty page is always the end. A SHORT page is not: ORC serves fewer
+      // rows than the limit mid-list (American Express reports TotalJobsCount
+      // 454 and serves 200, 199, 54 — one row is filtered server-side), and
+      // treating that 199 as the end dropped the last 54 postings, 12% of the
+      // board. Matching the wider convention: "the API may return fewer results
+      // than the number requested … even if not at the end of the collection"
+      // (Google AIP-158). So a short page only ends the walk when the tenant
+      // reports no total to check it against.
+      if (listLen === 0) break;
+      if (total !== null) {
+        if (offset + PAGE_SIZE >= total) break;
+      } else if (listLen < PAGE_SIZE) break;
     }
     return all;
   },

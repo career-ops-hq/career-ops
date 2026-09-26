@@ -55,7 +55,7 @@ import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, run, runAcrossUtcDay, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
+import { pass, fail, warn, run, runAcrossUtcDay, lastRunFailure, formatRunFailure, fileExists, finish, results, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { collectMjsFiles, isNestedCheckout, isUnderNestedCheckout } from './lib/mjs-files.mjs';
 
@@ -128,6 +128,56 @@ function discoverTests(dir) {
   return out;
 }
 
+// Strip comment lines before grepping a discovered suite's source for a
+// forbidden call: a suite that only MENTIONS a call in a comment (e.g.
+// documenting why it doesn't make it) must not be flagged.
+//
+// Removed: whole-line `//` comments, and every line of a `/* ... */` block,
+// including unstarred interior lines. Kept: any code that shares a line with a
+// comment, on either side of it, so a real call can never hide behind one:
+// `/* why */ process.exit(1)` and `*gen() { finish() }` are still scanned.
+// Trailing `//` comments on a code line are deliberately still scanned,
+// erring toward a loud false positive, never a silent miss.
+//
+// Comment markers inside a multi-line template literal are text, not
+// comments, and an interpolation there IS executable — so nothing is stripped
+// while the kept code has an odd number of unescaped backticks (quoted
+// strings and trailing `//` comments excluded from the count). An opener that
+// never closes is not a comment we understand either; the raw source is
+// scanned instead. Both limits fail loud, never silent.
+function stripCommentLines(src) {
+  let inBlock = false;
+  let inTemplate = false;
+  const kept = [];
+  for (const line of src.split('\n')) {
+    let rest = line;
+    if (!inTemplate) {
+      if (inBlock) {
+        const end = rest.indexOf('*/');
+        if (end === -1) continue;
+        inBlock = false;
+        rest = rest.slice(end + 2);
+      }
+      // A block comment opening at the start of the (remaining) line: drop it,
+      // then look again — `/* a */ /* b */ code` keeps `code`.
+      let open;
+      while ((open = /^\s*\/\*/.exec(rest))) {
+        const end = rest.indexOf('*/', open[0].length);
+        if (end === -1) { inBlock = true; rest = ''; break; }
+        rest = rest.slice(end + 2);
+      }
+      if (/^\s*(\/\/|$)/.test(rest)) continue;
+    }
+    kept.push(rest);
+    const code = rest
+      .replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g, '')
+      .replace(/\/\/.*$/, '');
+    if (((code.match(/(?<!\\)`/g) ?? []).length) % 2 === 1) inTemplate = !inTemplate;
+  }
+  if (inBlock) return src;
+  return kept.join('\n');
+}
+
 async function runDiscovered(filter = null) {
   let files = discoverTests(TESTS_DIR);
   if (filter) {
@@ -146,7 +196,9 @@ async function runDiscovered(filter = null) {
     // process.exit() inside one would terminate test-all mid-run with a forged
     // exit code — every later section (and finish()) would silently never run.
     // Refuse to import such a suite and fail loudly instead (#1916 regression).
-    if (/\bprocess\.exit\s*\(/.test(src)) {
+    // stripCommentLines() first: a suite that only MENTIONS process.exit() in
+    // a comment (e.g. documenting why it doesn't call it) must not be flagged.
+    if (/\bprocess\.exit\s*\(/.test(stripCommentLines(src))) {
       fail(`${rel} calls process.exit() — discovered suites must use pass/fail from tests/helpers.mjs and never exit`);
       continue;
     }
@@ -181,7 +233,10 @@ async function runDiscovered(filter = null) {
     // finish() prints the global summary and exits — inside a discovered suite
     // it forges the verdict line and decapitates every suite sorting after it,
     // sailing past the process.exit() check above (the exit lives in helpers).
-    if (/\bfinish\s*\(\s*\)/.test(src)) {
+    // Same stripCommentLines() treatment as the process.exit() guard above: a
+    // suite that only MENTIONS finish() in a comment (e.g. documenting why it
+    // doesn't call it) must not be flagged.
+    if (/\bfinish\s*\(\s*\)/.test(stripCommentLines(src))) {
       fail(`${f.slice(ROOT.length + 1)} calls finish() — only test-all.mjs may print the global summary; discovered suites use pass/fail and return`);
       continue;
     }
@@ -195,10 +250,38 @@ async function runDiscovered(filter = null) {
     // checks with it, with no verdict line at all — #2828.) A discovered suite
     // is a guest, not a co-host: its crash is one failure, not the end of the
     // run.
+    const before = results();
     try {
       await import(pathToFileURL(f).href);
     } catch (err) {
+      const ran = (results().passed - before.passed) + (results().failed - before.failed);
       fail(`${rel} — suite threw and was contained (${err?.code ?? err?.name ?? 'Error'}): ${err?.message ?? err}`);
+      // How much this counts as "one failure" actually cost: the reported
+      // totals only ever include the `ran` assertions above, and nothing else
+      // says the rest never happened — on one platform a suite's crash reads
+      // as one broken assertion, on another the same file's assertions run
+      // and pass, and the two summaries look the same shape (#3976).
+      //
+      // An earlier version of this line also estimated how many assertions
+      // never ran, from a static count of pass()/fail() call sites in the
+      // file. artemtrofymenko (the issue's author) measured that estimate
+      // against real suites and found it wrong in both directions badly
+      // enough to make the diagnostic worse than none: a suite asserting
+      // through a local wrapper (`function ok(cond) { if (cond) pass(...)
+      // else fail(...) }`) has far more real assertions than call sites
+      // (tests/discover-ats.test.mjs: 155 executed, 4 call sites — the
+      // estimate goes negative, `lost > 0` is false, and the line silently
+      // does not print, reverting to exactly the pre-fix silence for the
+      // suites this was built for — 38 of 278 in-process suites use this
+      // shape); a suite writing `if (cond) pass(...); else fail(...)` pairs
+      // has roughly twice as many call sites as real assertions
+      // (tests/providers/_http.test.mjs: ~2x), so the estimate invents lost
+      // assertions that never existed. A signal present for some suites and
+      // silently absent for others turns its own absence into a false
+      // reassurance — worse than never estimating at all. `ran` alone does
+      // not have that failure mode: it is an exact count in every case, so
+      // it is printed unconditionally instead.
+      console.log(`      ${ran} assertion${ran === 1 ? '' : 's'} ran before the throw; everything after it in this file did not run`);
       // The throw site, not just the message: a suite that dies mid-import
       // leaves no other clue how far it got.
       for (const line of String(err?.stack ?? '').split('\n').slice(1, 4)) {
@@ -365,7 +448,23 @@ const scripts = [
   { name: 'invite-match.mjs --self-test', expectExit: 0 },
   { name: 'tracker-sync-check.mjs --self-test', expectExit: 0 },
   { name: 'updater-migration-tests.mjs', expectExit: 0 },
-  { name: 'tracker-columns-tests.mjs', expectExit: 0 },
+  // The second outlier, on the same grounds as tracker-writer-lock-tests.mjs
+  // below and measured the same way. It spawns five node subprocesses
+  // (merge-tracker, verify-pipeline) against throwaway mkdtempSync trees, and
+  // that cost is the behaviour under test rather than slack to be trimmed.
+  //
+  // Measured on windows-latest across six green runs: 10.9s, 11.7s, 11.9s,
+  // 12.0s, 12.4s, 13.8s, which makes it the SLOWEST script in this section
+  // there, a hair above tracker-writer-lock-tests.mjs at 11.6s on the same run.
+  // A seventh run ran past the 30s default and was killed mid-suite
+  // (`exit null, signal SIGTERM`) while ubuntu, macos and every other check on
+  // that commit passed (#4010, same shape as #2906). Locally on an idle box it
+  // is 4.2s, so the spread is Windows process creation under runner load.
+  //
+  // SLOW_SCRIPT_WARN_FRACTION could not have given notice: at a typical 12s of
+  // 30s this never reaches the 75% warning, so it goes from silent to killed
+  // with nothing in between. The ceiling is the only signal it has.
+  { name: 'tracker-columns-tests.mjs', expectExit: 0, timeoutMs: 180_000 },
   { name: 'agent-inbox-tests.mjs', expectExit: 0 },
   { name: 'followup-seed-tests.mjs', expectExit: 0 },
   { name: 'paste-reply-tests.mjs', expectExit: 0 },
@@ -401,6 +500,9 @@ const scripts = [
   // default portals.yml because end-user workspaces often have a real user-layer
   // portals file that would trigger a live remote sweep during tests.
   { name: 'verify-portals.mjs --file .tmp-test-missing-portals.yml', expectExit: 0 },
+  // Pins #4250: --help must exit fast on its own, never fall through to the
+  // full network sweep (which is what "no output for minutes" looks like).
+  { name: 'verify-portals.mjs --help', expectExit: 0 },
   { name: 'update-system.mjs check', expectExit: 0 },
   { name: 'seed-fixture.mjs --self-test', expectExit: 0 },
   { name: 'archive-posting.mjs --help', expectExit: 0 },
@@ -1977,6 +2079,30 @@ const allowedFiles = [
   'dashboard/internal/ui/screens/progress.go',
 ];
 
+// Paths added for #4131, checked by EXACT match rather than folded into
+// allowedFiles above. allowedFiles.some(a => file.includes(a)) is a
+// substring test, which every pre-existing entry already relies on (a
+// nested path containing e.g. "README.md" is exempted too) — widening that
+// same list with plain root-relative basenames like 'funding.json' or
+// 'HIRED.md' would also silently exempt an unrelated tracked file that
+// merely shares a basename, such as a future fixtures/funding.json or
+// snapshots/tests/hired-wall.test.mjs (luochen211, #4144 review). These are
+// the ones this PR actually intends to allow, so they get the tighter
+// check instead of loosening the shared one.
+const exactAllowedFiles = new Set([
+  // GitHub Sponsors funding target + Codex plugin manifest (#4131) — same
+  // maintainer-credit shape as the .claude-plugin/.github/plugin ones above.
+  'funding.json', '.codex-plugin/plugin.json',
+  // Hired Wall: celebrates a hire with a link back to the project, and the
+  // scripts/tests that build and cover that feature necessarily carry the
+  // same URL (#4131).
+  'HIRED.md', 'hired-wall-build.mjs', 'tests/hired-wall.test.mjs', 'tests/project-identity.test.mjs',
+  // Dashboard credit string (#4131) — same substring-vs-exact reasoning as
+  // the entries above; the pre-existing pipeline.go/progress.go entries stay
+  // in the broad allowedFiles list above since they predate this PR.
+  'dashboard/internal/ui/screens/stats.go',
+]);
+
 // Build pathspec for git grep — only scan tracked files matching these
 // extensions. This is what `grep -rn` was trying to do, but git-aware:
 // untracked files (debate artifacts, AI tool scratch, local plans/) and
@@ -1988,15 +2114,45 @@ const grepPathspecs = scanExtensions.map(e => `*.${e}`);
 
 let leakFound = false;
 for (const pattern of leakPatterns) {
-  const result = run(
-    'git',
-    ['grep', '-n', pattern, '--', ...grepPathspecs],
-    { stdio: ['pipe', 'pipe', 'ignore'] }
-  );
+  // --name-only -z NUL-delimits filenames only — no line number, no matching
+  // line, nothing but the path is ever needed here. A prior version used
+  // plain `-n -z` (path\0line\0matching-line\n) and split on '\n' first to
+  // recover records, but a tracked filename containing a literal embedded
+  // newline byte — legal on Linux and macOS — would then be truncated at
+  // that byte, before the real end of the record. A truncated name that
+  // happens to collide with an allowed one (or with the empty string) would
+  // then skip the warning for whatever the file actually leaks (CodeRabbit,
+  // #4144 review). `--name-only -z` sidesteps the ambiguity entirely: NUL is
+  // the only delimiter, so a raw newline inside a filename is preserved
+  // verbatim and splitting purely on '\0' recovers the exact path every time.
+  //
+  // execFileSync() directly, NOT the shared run() helper: run()'s documented
+  // contract is "trimmed stdout" (tests/helpers.mjs), and .trim() strips
+  // whitespace from the very ends of the whole NUL-joined blob. A tracked
+  // filename that legitimately starts or ends with a space — legal on
+  // Linux/macOS — would have that space silently stripped if it happened to
+  // be the first or last match, corrupting the one thing this whole fix
+  // exists to keep exact (CodeRabbit, #4144 review).
+  let result = null;
+  try {
+    result = execFileSync(
+      'git',
+      ['grep', '--name-only', '-z', pattern, '--', ...grepPathspecs],
+      { cwd: ROOT, encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'ignore'] },
+    );
+  } catch (error) {
+    // git grep exits 1 with no matches — nothing to warn about. Any other
+    // failure (a real git error, or the 30s timeout above firing) must not
+    // be swallowed the same way: silently treating it as "no matches" would
+    // let this whole check report a false "no leaks" on a run where it
+    // never actually completed (CodeRabbit, #4144 review).
+    if (error?.status !== 1) throw error;
+  }
   if (result) {
-    for (const line of result.split('\n')) {
-      const file = line.split(':')[0];
+    for (const file of result.split('\0')) {
+      if (!file) continue;
       if (allowedFiles.some(a => file.includes(a))) continue;
+      if (exactAllowedFiles.has(file)) continue;
       if (file.includes('dashboard/go.mod')) continue;
       warn(`Possible personal data in ${file}: "${pattern}"`);
       leakFound = true;
@@ -2479,8 +2635,47 @@ if (
 // gained a header row, #3517) left this matching nothing and failing on the
 // empty string rather than on the thing it asserts.
 const batchTrackerStep = batchPrompt.match(/### Step 5 \u2014 [^\n]*[\s\S]*?### Step 6 \u2014 Final JSON/)?.[0] ?? '';
-if (/\{\{REPORT_NUM\}\}\\t\{\{DATE\}\}/.test(batchTrackerStep) && !/Compute `\{next_num\}`/.test(batchTrackerStep)) {
+// The rule protected here is the #749 race: parallel workers must never compute
+// `max+1` themselves. Absence of one spelling is not that property — rewording
+// the forbidden instruction passed the old literal check (#3937) — so the
+// load-bearing assertion is positive: the step must SAY the coordinator
+// reserved the tracker number.
+//
+// It is scoped to one SENTENCE that names the coordinator, a reservation, and
+// the number, because each part checked independently over the whole step is
+// satisfiable by text that means the opposite: "The coordinator reserves the
+// meeting room. Calculate the tracker number yourself." reserves something
+// else, and "The coordinator does not, in fact, reserve this number" negates
+// the claim past any fixed-width negation guard. Word order is free, so
+// "reserved by the coordinator" reads the same as "coordinator reserves".
+//
+// The mirror-image guard on *calculate* wording is deliberately absent: the
+// sentence satisfying this gate is itself negated ("...so do not calculate a
+// local `max+1`"), so such a rule would flag the correct prompt. Negation is
+// therefore only rejected when it precedes `reserv` inside that sentence — the
+// whole prefix, and with no \b before `n't` so contractions ("doesn't reserve")
+// are caught. The original literal stays as a cheap extra, but the gate no
+// longer rests on it.
+const batchTrackerRowShape = /\{\{REPORT_NUM\}\}\\t\{\{DATE\}\}/.test(batchTrackerStep);
+const batchReserveSentence = batchTrackerStep
+  .split(/(?<=[.\n])/)
+  .find((sentence) =>
+    /coordinator/i.test(sentence) &&
+    /\breserv/i.test(sentence) &&
+    /\b(?:numbers?|tracker|REPORT_NUM)\b/i.test(sentence));
+const batchNumIsReserved =
+  batchReserveSentence !== undefined &&
+  !/(?:\bnot\b|\bnever\b|\bcannot\b|n['’]t)[^.]*\breserv/i.test(batchReserveSentence);
+if (
+  batchTrackerRowShape &&
+  batchNumIsReserved &&
+  !/Compute `\{next_num\}`/.test(batchTrackerStep)
+) {
   pass('batch workers use the coordinator-reserved tracker number');
+} else if (!batchTrackerRowShape) {
+  fail('batch Step 5 no longer shows the `{{REPORT_NUM}}\\t{{DATE}}` tracker row');
+} else if (!batchNumIsReserved) {
+  fail('batch Step 5 no longer states that the coordinator reserves the tracker number');
 } else {
   fail('batch workers still compute tracker numbers independently');
 }
@@ -4023,7 +4218,7 @@ if (
 // loudly otherwise), so the list can only shrink. Denominator asserted: the
 // locale walk must find the known files, or the whole check is blind.
 {
-  const FROZEN_OFERTA = new Set(['da', 'es', 'pl', 'pt', 'ua']);
+  const FROZEN_OFERTA = new Set(['da', 'pl', 'pt', 'ua']);
   const REQUIRED_HEADINGS = ['## A)', '## B)', '## C)', '## D)', '## E)', '## F)', '## G)', '## Risk Summary', '## H)'];
   const REQUIRED_LABELS = ['**Date:**', '**URL:**', '**Archetype:**', '**Score:**', '**Legitimacy:**', '**PDF:**'];
   const withOferta = readdirSync(join(ROOT, 'modes'), { withFileTypes: true })
@@ -4262,13 +4457,21 @@ if (upskillModeDoc.includes('regenerated fresh every run, never diffed')) {
   fail('upskill trust rule 3 (ephemeral / non-versioned resources) missing');
 }
 
-// Rule 4 — write-time URL liveness via the check-liveness pattern; dead links excluded.
+// Rule 4 — resource-specific URL liveness; job-posting heuristics excluded.
 if (
   upskillModeDoc.includes('Write-time URL liveness') &&
-  upskillModeDoc.includes('liveness-core.mjs') &&
-  upskillModeDoc.includes('dead links never enter the report')
+  upskillModeDoc.includes('successful HTTP response') &&
+  upskillModeDoc.includes('non-error title') &&
+  upskillModeDoc.includes('substantive page content') &&
+  upskillModeDoc.includes('reject 4xx/5xx responses') &&
+  upskillModeDoc.includes('error/challenge pages') &&
+  upskillModeDoc.includes('empty bodies') &&
+  upskillModeDoc.includes('redirects to unrelated destinations') &&
+  upskillModeDoc.includes('job-posting-only') &&
+  upskillModeDoc.includes('must not classify learning resources') &&
+  upskillModeDoc.includes('Dead links never enter the report')
 ) {
-  pass('upskill trust rule 4: write-time URL liveness via check-liveness pattern; dead links excluded');
+  pass('upskill trust rule 4: resource-specific URL liveness; job-posting heuristic excluded');
 } else {
   fail('upskill trust rule 4 (write-time URL liveness) missing');
 }
@@ -4689,7 +4892,7 @@ try {
 // is case- and punctuation-insensitive; loadBlacklist on an absent file is a
 // no-op (empty Map — the scan filter never fires).
 try {
-  const { parseBlacklist, loadBlacklist } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { parseBlacklist, loadBlacklist, findBlacklistEntry } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
   const bl = parseBlacklist([
     '# Company Blacklist',
     '',
@@ -4697,14 +4900,15 @@ try {
     '|---------|-------|-------|--------|',
     '| Acme Corp. | 2026-01-15 | company | post-interview process signals |',
     '| Globex | 2026-02-01 | company | zero conversion |',
+    '| ibm.com | 2026-03-01 | domain | avoid parent-company ATS hosts |',
   ].join('\n'));
   const exact = bl.get('acmecorp');
   if (
-    bl.size === 2 &&
+    bl.size === 3 &&
     exact && exact.reason === 'post-interview process signals' && exact.since === '2026-01-15' &&
-    bl.has('globex') && !bl.has('company')
+    bl.has('globex') && bl.get('domain:ibm.com')?.scope === 'domain' && !bl.has('company')
   ) {
-    pass('scan.mjs parseBlacklist parses the table and keys by normalized company (#1742)');
+    pass('scan.mjs parseBlacklist parses normalized company and domain-scope rows (#1742, #4139)');
   } else {
     fail(`scan.mjs parseBlacklist wrong: size=${bl.size} keys=${[...bl.keys()].join(',')}`);
   }
@@ -4716,6 +4920,16 @@ try {
     pass('scan.mjs blacklist matching is case/punctuation-insensitive via shared normalizeCompany (#1742)');
   } else {
     fail('scan.mjs blacklist matching misses case/punctuation company variants');
+  }
+
+  const domain = bl.get('domain:ibm.com');
+  const domainMatch = findBlacklistEntry(bl, 'Confluent', 'https://jobs.ibm.com/engineering/123');
+  const boundaryMiss = findBlacklistEntry(bl, 'Confluent', 'https://notibm.com/engineering/123');
+  const legacyMatch = findBlacklistEntry(bl, 'ACME-CORP', 'https://example.com/jobs/123');
+  if (domainMatch === domain && boundaryMiss === null && legacyMatch === exact) {
+    pass('scan.mjs blacklist domain scope matches host suffixes without weakening company matching (#4139)');
+  } else {
+    fail('scan.mjs blacklist domain scope does not preserve host boundaries and legacy company matching (#4139)');
   }
 
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-blacklist-'));
@@ -4745,6 +4959,7 @@ try {
 // scan-runs.tsv by header name, and --include-blacklisted bypasses the filter.
 if (
   scanScript.includes("args.includes('--include-blacklisted')") &&
+  scanScript.includes('findBlacklistEntry(blacklist') &&
   scanScript.includes('totalFilteredBlacklist') &&
   scanScript.includes('skipped (blacklist)') &&
   scanScript.includes('filtered_blacklist')
@@ -4984,11 +5199,14 @@ try {
 try {
   const { filterBlacklistedOffers } = await import(pathToFileURL(join(ROOT, 'scan-ats-full.mjs')).href);
   const blacklist = new Map([
-    ['acmecorp', { company: 'Acme Corp', reason: 'example reason' }],
+    ['acmecorp', { company: 'Acme Corp', scope: 'company', reason: 'example reason' }],
+    ['ibmcom', { company: 'ibm.com', scope: 'domain', reason: 'parent ATS host' }],
   ]);
   const offers = [
     { company: 'Acme Corp.', title: 'Software Engineer', url: 'https://example.com/acme' },
     { company: 'Globex', title: 'Software Engineer', url: 'https://example.com/globex' },
+    { company: 'Confluent', title: 'Software Engineer', url: 'https://jobs.ibm.com/confluent' },
+    { company: 'Not IBM', title: 'Software Engineer', url: 'https://notibm.com/role' },
   ];
   const skipped = typeof filterBlacklistedOffers === 'function'
     ? filterBlacklistedOffers(offers, blacklist, { includeBlacklisted: false })
@@ -4997,16 +5215,19 @@ try {
     ? filterBlacklistedOffers(offers, blacklist, { includeBlacklisted: true })
     : null;
   const ok =
-    skipped?.filteredBlacklist === 1 &&
-    skipped.offers.length === 1 &&
+    skipped?.filteredBlacklist === 2 &&
+    skipped.offers.length === 2 &&
     skipped.offers[0].company === 'Globex' &&
-    audited?.annotatedBlacklisted === 1 &&
-    audited.offers.length === 2 &&
+    skipped.offers[1].company === 'Not IBM' &&
+    audited?.annotatedBlacklisted === 2 &&
+    audited.offers.length === 4 &&
     audited.offers[0].blacklisted === true &&
     audited.offers[0].note.includes('blacklisted: example reason') &&
+    audited.offers[2].blacklisted === true &&
+    audited.offers[2].note.includes('blacklisted: parent ATS host') &&
     offers[0].blacklisted === undefined;
-  if (ok) pass('scan-ats-full filters data/blacklist.md matches by default and annotates them under --include-blacklisted (#1911)');
-  else fail('scan-ats-full missing blacklist filter/audit semantics (#1911)');
+  if (ok) pass('scan-ats-full applies company and domain blacklist scopes in default and audit modes (#1911, #4139)');
+  else fail('scan-ats-full missing company/domain blacklist filter/audit semantics (#1911, #4139)');
 } catch (e) {
   fail(`scan-ats-full blacklist test crashed: ${e.message}`);
 }
@@ -5602,7 +5823,12 @@ try {
     [{ name: 'Nimbus Data', careers_url: 'https://job-boards.greenhouse.io/nimbusdata' }],
     { fetchJson: bareFetch },
   );
-  if (bare.status === 'missing' && !bare.suggested) {
+  // The refusal must still refuse: no top-level ats/slug, so nothing is adoptable
+  // and `fix-slugs` cannot write it. A refused board is REPORTED under
+  // `rejectedAlternate` (#4230), which is a record of what was found, not an
+  // invitation to use it.
+  if (bare.status === 'missing' && !bare.suggested?.ats && !bare.suggested?.slug
+      && bare.suggested?.rejectedAlternate?.ownerReason === 'owner-mismatch') {
     pass('verify-portals refuses a live board whose Greenhouse owner is a different company');
   } else {
     fail(`verify-portals adopted a mismatched owner: ${JSON.stringify(bare.suggested)}`);
@@ -5713,7 +5939,9 @@ try {
     [{ name: 'Nimbus Data', careers_url: 'https://job-boards.greenhouse.io/nimbusdata' }],
     { fetchJson: leverJson, fetchText: leverText },
   );
-  if (leverMismatch.status === 'missing' && !leverMismatch.suggested) {
+  if (leverMismatch.status === 'missing' && !leverMismatch.suggested?.ats
+      && !leverMismatch.suggested?.slug
+      && leverMismatch.suggested?.rejectedAlternate?.ownerReason === 'owner-mismatch') {
     pass('verify-portals refuses a Lever board whose page title names a different company');
   } else {
     fail(`verify-portals adopted a mismatched Lever owner: ${JSON.stringify(leverMismatch.suggested)}`);
@@ -7771,6 +7999,9 @@ try {
   } else {
     fail('remote-title rescue changed behavior for non-remote or malformed titles');
   }
+
+  // location_filter.strict coverage lives in tests/location-filter-strict.test.mjs.
+  // Keep this central harness focused on broad scan integration behavior.
 
   if (
     shouldDedupScanHistoryRow({ firstSeen: '2026-06-01', status: 'added' }, { recheckAfterDays: 30, today: '2026-06-10' }) === true &&
@@ -9929,6 +10160,48 @@ try {
     fail(`stale #3797 exemption — these now carry the **URL:** header, remove them from pendingUrlHeader: ${staleExemptions.join(', ')}`);
   } else {
     pass('every headless evaluator outside the #3797 exemption writes **URL:** and takes a posting URL');
+  }
+
+  // Same family, third contract (#3796): the tracker-addition helpers are
+  // imported, never redefined. Four evaluators carried private copies of
+  // `tsvSafe` / `normalizedTrackerScore` and they drifted -- gemini-eval.mjs's
+  // concatenated instead of parsing, so `SCORE: 4.2 (strong fit)` produced
+  // `4.2 (strong fit)/5`, which is neither a score nor a sentinel and is the
+  // undecidable cell merge-tracker.mjs refuses outright. The evaluation was
+  // skipped wholly while the sibling copy had been immune all along.
+  //
+  // tests/evaluator-score-cell.test.mjs asserts the helpers exist exactly once;
+  // this asserts the family reaches that one definition, which is the half a
+  // fifth evaluator can fail without redefining anything -- by hand-rolling a
+  // score cell inline instead, which is exactly what openrouter-runner.mjs did:
+  // it never held a copy, so a copy-scan never saw it, while it wrote
+  // `${value.toFixed(1)}/5` from a numeric prefix that discarded the
+  // denominator, and the empty string when nothing parsed.
+  //
+  // USE, not merely import: an evaluator can import an unrelated helper from the
+  // module and still build its score cell by hand, which would pass an
+  // import-only check while the behaviour this contract exists to protect had
+  // drifted again. Both halves are required -- the import proves it reaches the
+  // shared definition, the call proves it is the definition actually used.
+  const ADDITION_HELPERS = './lib/tracker-addition.mjs';
+  const helperImportRe = /from\s+'\.\/lib\/tracker-addition\.mjs'/;
+  const helperUseRe    = /\bnormalizedTrackerScore\s*\(/;
+  // Empty, and it should stay that way. #3797 landed while this branch was open
+  // and re-added copies to openai-eval.mjs and ollama-eval.mjs; both were
+  // consolidated on the merge, which is the exemption being spent rather than
+  // renewed. A new name here needs a reason with an issue number attached.
+  const pendingHelperImport = [];
+  const missingHelperImport = evaluatorSources
+    .filter(([, source]) => !helperImportRe.test(source) || !helperUseRe.test(source))
+    .map(([name]) => name);
+  const staleHelperExemptions = pendingHelperImport.filter(name => !missingHelperImport.includes(name));
+  const unexemptedHelperGaps  = missingHelperImport.filter(name => !pendingHelperImport.includes(name));
+  if (unexemptedHelperGaps.length > 0) {
+    fail(`headless evaluators build their tracker-addition cells without importing AND calling ${ADDITION_HELPERS}'s normalizedTrackerScore, the drift #3796 consolidated: ${unexemptedHelperGaps.join(', ')}`);
+  } else if (staleHelperExemptions.length > 0) {
+    fail(`stale #3796 exemption — these now import ${ADDITION_HELPERS}, remove them from pendingHelperImport: ${staleHelperExemptions.join(', ')}`);
+  } else {
+    pass(`every headless evaluator outside the #3796 exemption imports AND calls the shared tracker-addition helpers`);
   }
 
   // --count N: contiguous range from an empty dir.
@@ -13137,7 +13410,11 @@ try {
     join(withMcp, '.claude', 'settings.json'),
     JSON.stringify({ mcpServers: { playwright: { command: 'npx', args: ['@playwright/mcp', '--headless'] } } }),
   );
-  const b = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', withMcp], doctorEnv) || '{}');
+  const b = JSON.parse(execFileSync(
+    NODE,
+    [join(ROOT, 'doctor.mjs'), '--json', '--target', withMcp],
+    { ...doctorEnv, cwd: withMcp, encoding: 'utf8' },
+  ) || '{}');
   if (Array.isArray(b.warnings) && !b.warnings.some((w) => /playwright mcp/i.test(w))) {
     pass('Playwright MCP configured → no warning');
   } else {
@@ -13152,7 +13429,11 @@ try {
     join(withLocalMcp, '.claude', 'settings.local.json'),
     JSON.stringify({ mcpServers: { browser: { command: 'npx', args: ['@playwright/mcp'] } } }),
   );
-  const c = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', withLocalMcp], doctorEnv) || '{}');
+  const c = JSON.parse(execFileSync(
+    NODE,
+    [join(ROOT, 'doctor.mjs'), '--json', '--target', withLocalMcp],
+    { ...doctorEnv, cwd: withLocalMcp, encoding: 'utf8' },
+  ) || '{}');
   if (Array.isArray(c.warnings) && !c.warnings.some((w) => /playwright mcp/i.test(w))) {
     pass('Playwright MCP configured via .claude/settings.local.json → no warning');
   } else {
@@ -15928,6 +16209,36 @@ try {
     } else {
       fail('the web _days key mapping no longer lines up with the core cadenceDefaults keys (#2369)');
     }
+    // The defaults are a CONSTANT, so an empty tracker must not withhold them.
+    // That is the first-run state (onboarding creates a header-only tracker),
+    // and it is precisely when the web form has no profile overrides to fall
+    // back on, so a missing baseline leaves every field blank (#4005).
+    const emptyEmitted = analyzeFromContent(
+      '# Applications Tracker\n\n| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n',
+      '',
+    );
+    const emptyDefaults = emptyEmitted?.cadenceDefaults;
+    // Value equality, not just shape. Returning CADENCE here (defaults PLUS the
+    // user's profile overrides) would satisfy every structural check while
+    // handing the form one of the user's own overrides as the baseline they
+    // would be reverting to, which is the #2369 mistake exactly.
+    const emptyOk = emptyDefaults && typeof emptyDefaults === 'object'
+      && Object.keys(emptyDefaults).length === cadKeys.length
+      && cadKeys.every((k) => Number.isInteger(emptyDefaults[k]) && emptyDefaults[k] === DEFAULT_CADENCE[k]);
+    if (emptyOk) {
+      pass('followup-cadence emits cadenceDefaults even when the tracker is empty (#4005)');
+    } else {
+      fail(`an empty tracker withholds cadenceDefaults, so a first-run web cadence form renders blank (#4005): ${JSON.stringify(emptyEmitted)}`);
+    }
+    // The error must SURVIVE alongside the defaults: stats.mjs short-circuits on
+    // result.error before it reads entries, so dropping it while adding the
+    // defaults would hand that caller a payload with no entries to iterate.
+    if (emptyEmitted?.error === 'No applications found in tracker.') {
+      pass('the empty-tracker payload still reports its error alongside the defaults (#4005)');
+    } else {
+      fail(`the empty-tracker error was lost, so callers that branch on result.error now fall through (#4005): ${JSON.stringify(emptyEmitted)}`);
+    }
     const webFollowups = join(ROOT, 'web', 'src', 'lib', 'followups.ts');
     if (existsSync(webFollowups)) {
       const webSrc = readFileSync(webFollowups, 'utf-8');
@@ -16124,6 +16435,7 @@ try {
     // than skip, because a skip is how this freeze would silently stop guarding.
     const required = {
       'claude-invocation.mjs': join(webLib, 'claude-invocation.mjs'),
+      'worker-capabilities.mjs': join(webLib, 'worker-capabilities.mjs'),
       'cv-envelope.mjs': join(webLib, 'cv-envelope.mjs'),
       'run-prompts.mjs': join(webLib, 'run-prompts.mjs'),
       'api/run/route.ts': runRoutePath,
@@ -16133,9 +16445,14 @@ try {
       fail(`web/ exists but ${missing.join(', ')} is missing — the #2185 write-scope freeze cannot verify (was it moved?)`);
     } else {
       let invocation;
+      let capabilities;
       let prompts;
       try {
         invocation = await import(pathToFileURL(required['claude-invocation.mjs']).href);
+        // KNOWN_KINDS moved to worker-capabilities.mjs, which owns the policy both
+        // CLIs read: the set of run kinds is a fact about the route's workers, not
+        // about Claude (#2507).
+        capabilities = await import(pathToFileURL(required['worker-capabilities.mjs']).href);
         prompts = await import(pathToFileURL(required['run-prompts.mjs']).href);
         // Imported for its side effect of resolving: run-prompts pulls cv-envelope
         // for CV_ENVELOPE_INSTRUCTION, so a break there would surface here anyway,
@@ -16169,13 +16486,13 @@ try {
         if (existsSync(join(ROOT, 'web', 'tests', 'lib'))) {
           fail('web/tests/lib contains no *.test.mjs — the #2185 unit suites are not being gated');
         }
-      } else if (run(NODE, ['--test', ...webUnits], { timeout: 180000 }) !== null) {
+      } else if (run(NODE, ['--experimental-strip-types', '--test', ...webUnits], { timeout: 180000 }) !== null) {
         pass('web pdf write-scope unit suites pass (#2185)');
       } else {
         // The signal distinguishes a timeout/kill from an assertion failure —
         // run()'s default 30s is short for six suites in one child process.
         const killed = lastRunFailure()?.signal;
-        fail(`web pdf write-scope unit suites failed${killed ? ` (killed: ${killed})` : ''} (run: node --test ${webUnits.join(' ')})`);
+        fail(`web pdf write-scope unit suites failed${killed ? ` (killed: ${killed})` : ''} (run: node --experimental-strip-types --test ${webUnits.join(' ')})`);
       }
 
       // Parity: everything web/package.json would run must be something we DO run.
@@ -16242,7 +16559,7 @@ try {
         // can still be auto-approved by --permission-mode acceptEdits, and a
         // pdf-only probe let exactly that ship for the persisting kinds.
         const unmentioned = [];
-        for (const kind of invocation.KNOWN_KINDS) {
+        for (const kind of capabilities.KNOWN_KINDS) {
           const scope = invocation.toolScopeFor(kind);
           const named = [...toolNames(scope.allowed), ...toolNames(scope.disallowed)];
           for (const tool of WRITE_CAPABLE_TOOLS) {
@@ -16320,8 +16637,35 @@ try {
           .split('\n')
           .filter((l) => !/^\s*import\b/.test(l))
           .join('\n');
-        const spelledFlags = ['--allowedTools', '--disallowedTools', '--permission-mode']
-          .filter((flag) => routeCode.includes(flag));
+        // The sandbox flags join the tool flags here (#2507). Permission is no
+        // longer Claude-only: Codex is fenced with `-c sandbox_mode=…` applied at
+        // the spawn boundary, and the same reasoning applies — a route that spells
+        // its own sandbox policy makes the value assertions above describe an argv
+        // that is not the one shipped. Comments are stripped before this runs, so
+        // the route's prose about sandboxes is exempt; only real strings count.
+        //
+        // Anchored patterns, not bare substrings: `read-only` and `workspace-write`
+        // as plain `includes()` would fire on any prose or identifier containing
+        // them, and a bare `-s` cannot be matched that way at all because
+        // `--strict-mcp-config` contains it. Each pattern below names the flag form
+        // it is actually looking for.
+        const SANDBOX_PATTERNS = [
+          [/--allowedTools/, '--allowedTools'],
+          [/--disallowedTools/, '--disallowedTools'],
+          [/--permission-mode/, '--permission-mode'],
+          [/--sandbox\b/, '--sandbox'],
+          [/\bsandbox_mode\s*=/, 'sandbox_mode='],
+          [/\bsandbox_workspace_write\./, 'sandbox_workspace_write.*'],
+          // Approval policy and web access are permission too, and are what a
+          // route reaching for its own Codex invocation spells first — #2361 did
+          // exactly that, inline, in another route.
+          [/--ask-for-approval/, '--ask-for-approval'],
+          [/--search\b/, '--search'],
+          // `-s` as a standalone argv token: quoted on its own, as an argv element
+          // would be. Does not match the `-s` inside `--strict-mcp-config`.
+          [/(['"`])-s\1/, '-s'],
+        ];
+        const spelledFlags = SANDBOX_PATTERNS.filter(([re]) => re.test(routeCode)).map(([, name]) => name);
         const argvCallSites = (routeCode.match(/claudeCliArgs\s*\(/g) ?? []).length;
         // `kind` must reach claudeCliArgs as a SHORTHAND property. Property order
         // and line wrapping are free, but `{ kind: <anything> }` is refused:
@@ -17225,6 +17569,23 @@ try {
   }
   rmSync(runsTmp, { recursive: true, force: true });
 
+  // Scan-run persistence, missing parent directory: filePath nested inside a
+  // directory that does not exist yet, proving appendScanRunSummary creates its
+  // own parent rather than relying on a folder some earlier step happened to make.
+  {
+    const nestedTmp = mkdtempSync(join(tmpdir(), 'scanruns-nested-'));
+    const nestedFile = join(nestedTmp, 'nested', 'deep', 'scan-runs.tsv');
+    appendScanRunSummary(counters, nestedFile);
+    const nestedRows = readFileSync(nestedFile, 'utf-8').trim().split('\n');
+    if (nestedRows[0] === SCAN_RUNS_HEADER.trim() && nestedRows.length === 2
+      && nestedRows[1].startsWith('2026-07-03T14:02:11Z\tcompleted\t45\t3\t120\t')) {
+      pass('appendScanRunSummary creates a missing nested parent directory and writes header + row');
+    } else {
+      fail(`appendScanRunSummary with missing nested parent: wrong file contents: ${JSON.stringify(nestedRows)}`);
+    }
+    rmSync(nestedTmp, { recursive: true, force: true });
+  }
+
   // computeRunStats: header-name parsing, torn rows skipped, failed runs
   // excluded from averages.
   const stats = await import(pathToFileURL(join(ROOT, 'stats.mjs')).href);
@@ -17345,6 +17706,25 @@ try {
     pass('computePortalStats counts auth/server streaks as persistently dead; recovery resets');
   } else {
     fail(`computePortalStats auth/server streaks wrong: ${JSON.stringify(p2?.persistentlyDead)}`);
+  }
+
+  // A streak from an entry that is no longer probed (moved to
+  // scan_method: websearch, provider dropped, renamed) must not stand as a
+  // permanent 🚨 — nothing it can write will ever clear it. Staleness is
+  // relative to the newest row in the file, not the wall clock.
+  const portalsYml3 = 'tracked_companies:\n  - name: MovedToWebsearch\n  - name: StillFailing\njob_boards: []';
+  const staleHealthTsv = 'timestamp\tcompany\tstatus\n' +
+    '2026-07-01\tMovedToWebsearch\tslug_gone\n' +
+    '2026-07-02\tMovedToWebsearch\tslug_gone\n' +
+    '2026-07-03\tMovedToWebsearch\tslug_gone\n' +
+    '2026-08-10\tStillFailing\tslug_gone\n' +
+    '2026-08-11\tStillFailing\tslug_gone\n' +
+    '2026-08-12\tStillFailing\tslug_gone\n';
+  const p3 = stats.computePortalStats(portalsYml3, null, [], staleHealthTsv);
+  if (p3 && p3.persistentlyDead === 1) {
+    pass('computePortalStats ignores failure streaks from entries no longer probed');
+  } else {
+    fail(`computePortalStats stale-streak gate wrong: ${JSON.stringify(p3?.persistentlyDead)}`);
   }
 
   // scan.mjs computeConsecutiveFailures — same inverted rule at the source:
@@ -18527,141 +18907,27 @@ try {
   fail(`gmail isCleanUrl tests crashed: ${e.message}`);
 }
 
-// check-jd-archive.mjs's own --self-test (invoked above via the CLI-check
-// table) covers the finding logic on synthetic fixtures. This section pins
-// the wiring: the script ships, updates, is documented, the mode files state
-// the archival step as required (not conditional), and the checker stays
-// strictly read-only — it reports missing archives; it must never be able to
-// "fix" one itself by writing a report or a jds/ file.
+// JD-archive validator wiring + read-only boundary (#2789) moved to
+// tests/jd-archive-wiring.test.mjs (#3935) — discovered automatically below.
 
-console.log('\n75. JD-archive validator wiring + read-only boundary (#2789)');
-
+console.log('\n76. README sponsors section is generated from .github/sponsors.json');
 try {
-  const jdArchiveSrc = readFile('check-jd-archive.mjs');
-
-  const updaterSrc = readFile('update-system.mjs');
-  const jdArchiveSysBlock = (updaterSrc.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
-  if (jdArchiveSysBlock.includes("'check-jd-archive.mjs'")) {
-    pass('check-jd-archive.mjs is in update-system.mjs SYSTEM_PATHS (shipped + updatable)');
+  // The Sponsors section of README.md (heading, intro, per-sponsor rows,
+  // independence note, placement between the community section and the value
+  // proposition) and the per-sponsor rows of every README.<lang>.md are
+  // rendered by .github/scripts/sponsors.mjs; a hand edit on either side is
+  // drift that the next --write would silently undo, so the two are pinned
+  // together here. The script also refuses a logo that is not a file inside
+  // docs/sponsors/ (no hotlinking), a non-https sponsor URL, and a sponsor URL
+  // carrying tracking parameters.
+  const r = spawnSync(process.execPath, [join(ROOT, '.github', 'scripts', 'sponsors.mjs'), '--check'], { cwd: ROOT, encoding: 'utf8' });
+  if (r.status === 0) {
+    pass('README.md and every README.<lang>.md match .github/sponsors.json');
   } else {
-    fail('check-jd-archive.mjs is NOT in SYSTEM_PATHS — updates would never deliver it');
-  }
-
-  const pkg = JSON.parse(readFile('package.json'));
-  if (pkg.scripts && pkg.scripts['jd-archive'] === 'node check-jd-archive.mjs') {
-    pass('package.json exposes npm run jd-archive');
-  } else {
-    fail('package.json missing the jd-archive script entry');
-  }
-
-  const scriptsDoc = readFile('docs/SCRIPTS.md');
-  if (scriptsDoc.includes('## check-jd-archive') && scriptsDoc.includes('missing-jd-archive')) {
-    pass('docs/SCRIPTS.md documents check-jd-archive (section + finding type)');
-  } else {
-    fail('docs/SCRIPTS.md missing the check-jd-archive section');
-  }
-
-  const agentsDoc = readFile('AGENTS.md');
-  if (agentsDoc.includes('`check-jd-archive.mjs`')) {
-    pass('AGENTS.md Main Files table lists check-jd-archive.mjs');
-  } else {
-    fail('AGENTS.md Main Files table missing check-jd-archive.mjs');
-  }
-  if (/REQUIRED.*Job Description \(archived verbatim\)|Job Description \(archived verbatim\).*REQUIRED/.test(agentsDoc)) {
-    pass('AGENTS.md states the JD-archive section as required, not conditional');
-  } else {
-    fail('AGENTS.md does not state the JD-archive section as required');
-  }
-
-  const ofertaDoc = readFile('modes/oferta.md');
-  if (ofertaDoc.includes('## Job Description (archived verbatim)')) {
-    pass('modes/oferta.md report template carries a Job Description (archived verbatim) section');
-  } else {
-    fail('modes/oferta.md report template missing the Job Description (archived verbatim) section');
-  }
-  if (/JD archival \(required, #2789\)/.test(ofertaDoc)) {
-    pass('modes/oferta.md states JD archival as required (matches the Machine Summary "required" phrasing style)');
-  } else {
-    fail('modes/oferta.md does not state JD archival as a required step');
-  }
-
-  const pdfDoc = readFile('modes/pdf.md');
-  if (!/write the JD to a scratch file[\s\S]{0,20}if it isn't already one/.test(pdfDoc)) {
-    pass('modes/pdf.md no longer phrases JD archival as conditional ("if it isn\'t already one")');
-  } else {
-    fail('modes/pdf.md still phrases JD archival as conditional, not required');
-  }
-  if (pdfDoc.includes('JD archival (required, #2789)')) {
-    pass('modes/pdf.md states JD archival as a required step');
-  } else {
-    fail('modes/pdf.md does not state JD archival as a required step');
-  }
-
-  // Read-only import boundary: the ONLY fs capabilities check-jd-archive.mjs
-  // may hold for scanning reports/jds are readFileSync/readdirSync/existsSync.
-  // It also imports mkdtempSync/mkdirSync/writeFileSync/rmSync — but ONLY for
-  // building its own self-test fixtures in a temp dir, never for reports/ or
-  // jds/. The boundary check below allows the self-test-fixture write APIs by
-  // name but asserts they never appear outside the self-test function body.
-  const SELF_TEST_ONLY_FS = new Set(['mkdtempSync', 'mkdirSync', 'writeFileSync', 'rmSync']);
-  const READ_ONLY_FS = new Set(['readFileSync', 'readdirSync', 'existsSync']);
-  const fsImportMatch = jdArchiveSrc.match(/import\s*\{([^}]*)\}\s*from\s*['"](?:node:)?fs['"]/);
-  const fsNames = fsImportMatch ? fsImportMatch[1].split(',').map(s => s.trim()).filter(Boolean) : [];
-  const unexpected = fsNames.filter(n => !READ_ONLY_FS.has(n) && !SELF_TEST_ONLY_FS.has(n));
-  if (fsNames.length > 0 && unexpected.length === 0) {
-    pass('check-jd-archive.mjs fs imports are limited to read-only scanning APIs plus self-test-fixture builders');
-  } else {
-    fail(`check-jd-archive.mjs fs import boundary violated: ${unexpected.join(', ') || 'no fs import matched'}`);
-  }
-
-  // The self-test-only write APIs must never be called from checkJdArchive,
-  // hasEmbeddedJdArchive, or parseReportFilename — only from runSelfTest.
-  // Extracting that function's body needs brace-counting, not a greedy
-  // regex: `[\s\S]*` backtracks to the LAST `\n}` in the whole file (e.g. the
-  // CLI-invocation block at the end), so `.replace(selfTestBody, '')` could
-  // strip out everything from runSelfTest onward — including real code after
-  // it — and a stray write call there would never get scanned, silently
-  // passing the very boundary check this is meant to enforce (CodeRabbit,
-  // PR #2791). Walk brace depth from the opening `{` instead, so nested
-  // blocks/arrow functions inside runSelfTest don't end the match early
-  // either.
-  const runSelfTestStart = jdArchiveSrc.indexOf('function runSelfTest()');
-  let selfTestBody = '';
-  if (runSelfTestStart !== -1) {
-    const openBrace = jdArchiveSrc.indexOf('{', runSelfTestStart);
-    let depth = 0;
-    let i = openBrace;
-    for (; i < jdArchiveSrc.length; i += 1) {
-      if (jdArchiveSrc[i] === '{') depth += 1;
-      else if (jdArchiveSrc[i] === '}') {
-        depth -= 1;
-        if (depth === 0) break;
-      }
-    }
-    selfTestBody = jdArchiveSrc.slice(openBrace, i + 1);
-  }
-  const outsideSelfTest = jdArchiveSrc
-    .replace(selfTestBody, '')
-    .split('\n')
-    .filter(line => [...SELF_TEST_ONLY_FS].some(fn => line.includes(`${fn}(`)) && !/^\s*import\b/.test(line));
-  if (outsideSelfTest.length === 0) {
-    pass('check-jd-archive.mjs never calls a write-capable fs API outside its own self-test fixtures');
-  } else {
-    fail(`check-jd-archive.mjs calls a write-capable fs API outside runSelfTest: ${outsideSelfTest.join(' | ')}`);
-  }
-
-  if (!/from\s*['"](?:node:)?fs\/promises['"]/.test(jdArchiveSrc)) {
-    pass('check-jd-archive.mjs does not import fs/promises');
-  } else {
-    fail('check-jd-archive.mjs imports fs/promises — write-capable API surface');
-  }
-  if (!/\brequire\s*\(/.test(jdArchiveSrc)) {
-    pass('check-jd-archive.mjs has no require() escape hatch');
-  } else {
-    fail('check-jd-archive.mjs uses require() — bypasses the import whitelist');
+    fail(`README sponsors drifted or invalid: ${String(r.stderr || r.stdout).trim().split('\n')[0]}`);
   }
 } catch (e) {
-  fail(`jd-archive wiring check: ${e.message}`);
+  fail(`sponsors check: ${e.message}`);
 }
 
 await runDiscovered();

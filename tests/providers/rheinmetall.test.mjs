@@ -18,6 +18,13 @@ try {
   else fail('rheinmetall.resolveListUrl() should keep /de/career/vacancies');
   if (resolveListUrl({ careers_url: 'https://www.rheinmetall.com/en/career' }) === 'https://www.rheinmetall.com/en/career/vacancies') pass('rheinmetall.resolveListUrl() defaults non-list URLs to /en/career/vacancies');
   else fail('rheinmetall.resolveListUrl() should default to the EN list');
+  // The apex 301s to www; with redirect:'error' as the transport default it has to be pinned, not followed.
+  if (resolveListUrl({ api: 'https://rheinmetall.com/en/career/vacancies' }) === 'https://www.rheinmetall.com/en/career/vacancies') pass('rheinmetall.resolveListUrl() pins the apex host to www');
+  else fail(`rheinmetall.resolveListUrl() should pin the apex to www: ${resolveListUrl({ api: 'https://rheinmetall.com/en/career/vacancies' })}`);
+  if (resolveListUrl({ api: 'http://rheinmetall.com/en/career/vacancies' }) === 'https://www.rheinmetall.com/en/career/vacancies') pass('rheinmetall.resolveListUrl() upgrades http to https');
+  else fail(`rheinmetall.resolveListUrl() should upgrade http to https: ${resolveListUrl({ api: 'http://rheinmetall.com/en/career/vacancies' })}`);
+  if (resolveListUrl({ api: 'ftp://www.rheinmetall.com/en/career/vacancies' }) === null) pass('rheinmetall.resolveListUrl() rejects non-http schemes');
+  else fail('rheinmetall.resolveListUrl() should reject non-http schemes');
   if (resolveListUrl({ careers_url: 'https://evil.com/x.rheinmetall.com' }) === null) pass('rheinmetall.resolveListUrl() rejects path-spoofed host');
   else fail('rheinmetall.resolveListUrl() should reject path-spoofed host');
   if (rheinmetall.detect({ careers_url: 'https://rheinmetall.com.evil.com/en/career/vacancies' }) === null) pass('rheinmetall.detect() rejects suffix-spoofed host');
@@ -73,6 +80,31 @@ try {
     if (badThrew) fail(`rheinmetall.parseVacancies() threw ${badThrew.name} on an out-of-range numeric entity (unguarded String.fromCodePoint): ${badThrew.message}`);
     else if (badRows.length === 1 && badRows[0].title === 'Overflow &#99999999; & Hex &#xFFFFFFFF; Surrogate &#xD800;') pass('rheinmetall.parseVacancies() tolerates out-of-range / surrogate entities, degrading them to literal text while still decoding &amp; (no RangeError crash)');
     else fail(`rheinmetall.parseVacancies() out-of-range entity wrong: ${JSON.stringify(badRows)}`);
+  }
+
+  // Slug-fallback branch — when the md:text-xl headline div is absent (a markup
+  // shift), the title is rebuilt from the URL slug via decodeURIComponent, which
+  // throws URIError on a malformed percent-sequence. A bad scraped href must
+  // degrade to its raw slug, not abort the whole page's parse.
+  {
+    const noHeadlineCard = (id, slug, org) =>
+      '<div class="flex gap-0.5 group">' +
+      `<a href="/en/job/${slug}/${id}" target="_blank">img</a>` +
+      `<div><a href="/en/job/${slug}/${id}">link</a>` +
+      `<div class="flex flex-wrap mr-6"> ${org} </div></div>` +
+      '</div>';
+    const fallbackPage = '<html>'
+      + noHeadlineCard('9100', 'Bad%ZZ_Slug', 'Rheinmetall AG | Kassel')
+      + noHeadlineCard('9101', 'Data_Engineer_Bremen', 'Rheinmetall AG | Bremen')
+      + '</html>';
+    let fbRows, fbThrew = null;
+    try { fbRows = parseVacancies(fallbackPage, 'https://www.rheinmetall.com'); } catch (e) { fbThrew = e; }
+    if (fbThrew) fail(`rheinmetall.parseVacancies() threw ${fbThrew.name} on a malformed percent-sequence in a scraped slug: ${fbThrew.message}`);
+    else if (fbRows.length === 2 && fbRows[0].title === 'Bad%ZZ Slug' && fbRows[1].title === 'Data Engineer Bremen') {
+      pass('rheinmetall.parseVacancies() slug fallback tolerates a malformed percent-sequence and keeps the other card');
+    } else {
+      fail(`rheinmetall.parseVacancies() slug-fallback rows wrong: ${JSON.stringify(fbRows)}`);
+    }
   }
 } catch (e) {
   fail(`rheinmetall provider tests crashed: ${e.message}`);

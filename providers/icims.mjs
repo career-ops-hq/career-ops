@@ -12,7 +12,7 @@
 // cheap title/location filters, so a 10k-tenant sweep pays detail-page
 // requests for real candidates only, never for noise.
 
-import { BROWSER_LIKE_USER_AGENT } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 
 // ~20 postings/page → 30 pages covers 600 postings; tenants bigger than that
@@ -27,11 +27,6 @@ const HEADERS = {
   'user-agent': BROWSER_LIKE_USER_AGENT,
   'accept-language': 'en-US,en;q=0.9',
 };
-
-function sleep(ms, ctx) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function resolveOrigin(entry) {
   // entry.api takes precedence over careers_url (mirrors greenhouse/ashby).
@@ -100,6 +95,41 @@ export function parseIcimsSearchPage(html, origin, companyName) {
   return jobs;
 }
 
+/**
+ * Walk one host's search pages for `entry`. Split out of fetch() so a
+ * fallback host runs exactly the same pagination and truncation rules.
+ */
+async function fetchPortal(origin, entry, ctx) {
+  const all = [];
+  let prevFirstUrl = null;
+  // Distinguishes "walked the whole board" from "stopped at the page cap".
+  // Exhausting the cap silently would drop every later posting and look
+  // identical to a complete board — the same failure mode the Workday
+  // truncation tag exists to prevent.
+  let reachedEnd = false;
+  for (let pageNum = 0; pageNum < ICIMS_MAX_PAGES; pageNum++) {
+    if (pageNum > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
+    let html;
+    try {
+      html = await ctx.fetchText(searchUrl(origin, pageNum), { headers: HEADERS, redirect: 'error' });
+    } catch (err) {
+      // Only a first-page failure says anything about whether this host
+      // has a board at all; fetch() uses the mark to decide on a fallback.
+      if (pageNum === 0 && err && typeof err === 'object') err.firstPage = true;
+      throw err;
+    }
+    const pageJobs = parseIcimsSearchPage(html, origin, entry.name);
+    if (pageJobs.length === 0) { reachedEnd = true; break; } // past the last page
+    // Some tenants serve the last real page again for an out-of-range pr
+    // instead of an empty one — a repeated first URL means we're looping.
+    if (pageJobs[0].url === prevFirstUrl) { reachedEnd = true; break; }
+    prevFirstUrl = pageJobs[0].url;
+    all.push(...pageJobs);
+  }
+  if (!reachedEnd) all.icimsTruncated = true;
+  return all;
+}
+
 /** @type {Provider} */
 export default {
   id: 'icims',
@@ -109,29 +139,35 @@ export default {
     return origin ? { url: searchUrl(origin, 0) } : null;
   },
 
+  /**
+   * Walk a tenant's search pages. An entry may carry `fallback_urls`: other
+   * hosts the same tenant could be served from (scan-ats-full.mjs builds them,
+   * because the public dataset stores some tenants bare and some as a full
+   * portal subdomain). A fallback is tried only when the previous host answers
+   * 404 on its FIRST page, the one response that means "no board here". Any
+   * other failure (throttle, timeout, DNS, a later-page 404) is rethrown as-is,
+   * so dead-board tracking still reads it as "unknown", never "dead".
+   */
   async fetch(entry, ctx) {
-    const origin = resolveOrigin(entry);
-    if (!origin) throw new Error(`icims: cannot derive portal origin for ${entry.name}`);
-    const all = [];
-    let prevFirstUrl = null;
-    // Distinguishes "walked the whole board" from "stopped at the page cap".
-    // Exhausting the cap silently would drop every later posting and look
-    // identical to a complete board — the same failure mode the Workday
-    // truncation tag exists to prevent.
-    let reachedEnd = false;
-    for (let pageNum = 0; pageNum < ICIMS_MAX_PAGES; pageNum++) {
-      if (pageNum > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
-      const html = await ctx.fetchText(searchUrl(origin, pageNum), { headers: HEADERS, redirect: 'error' });
-      const pageJobs = parseIcimsSearchPage(html, origin, entry.name);
-      if (pageJobs.length === 0) { reachedEnd = true; break; } // past the last page
-      // Some tenants serve the last real page again for an out-of-range pr
-      // instead of an empty one — a repeated first URL means we're looping.
-      if (pageJobs[0].url === prevFirstUrl) { reachedEnd = true; break; }
-      prevFirstUrl = pageJobs[0].url;
-      all.push(...pageJobs);
+    const primary = resolveOrigin(entry);
+    if (!primary) throw new Error(`icims: cannot derive portal origin for ${entry.name}`);
+    const origins = [primary];
+    for (const raw of Array.isArray(entry.fallback_urls) ? entry.fallback_urls : []) {
+      // Same https + *.icims.com gate as the primary: a fallback can never
+      // point the scanner at another host.
+      const origin = resolveOrigin({ careers_url: raw });
+      if (origin && !origins.includes(origin)) origins.push(origin);
     }
-    if (!reachedEnd) all.icimsTruncated = true;
-    return all;
+    let notFound;
+    for (const origin of origins) {
+      try {
+        return await fetchPortal(origin, entry, ctx);
+      } catch (err) {
+        if (err?.status !== 404 || !err.firstPage) throw err;
+        notFound = err;
+      }
+    }
+    throw notFound;
   },
 
   /**

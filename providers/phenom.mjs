@@ -1,13 +1,14 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
-import { fetchJsonWithRetry } from './_http.mjs';
+import { fetchJsonWithRetry, sleep } from './_http.mjs';
 // Titles arrive HTML-escaped, so the tag strip below is not enough on its own:
 // an undecoded "R&amp;D Engineer" fails the user's own title_filter positive
 // "r&d" and is silently dropped, and a negative like "sales & marketing" never
 // vetoes "Sales &amp; Marketing Lead". Shared decoder, same as softgarden and
 // radancy (#2487, #2921).
 import { decodeEntities } from './_html-entities.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 // Phenom People provider — the "CareerConnect" career sites many large
 // enterprises run (branded domains like careers.exampleco.com). The search
@@ -137,10 +138,14 @@ export function parseRefineSearch(json, cfg) {
     const id = job.jobId != null ? String(job.jobId) : '';
     const title = decodeEntities(String(job.title || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
     if (!id || !title) continue;
+    // A lone surrogate in id throws URIError out of encodeURIComponent and
+    // aborts this loop; id is also the dedup key. Drop just this one.
+    const encodedId = safeEncodeURIComponent(id);
+    if (encodedId === null) continue;
     rows.push({
       id,
       title,
-      url: `${cfg.origin}/${cfg.urlPrefix}/job/${encodeURIComponent(id)}/${slugify(title)}`,
+      url: `${cfg.origin}/${cfg.urlPrefix}/job/${encodedId}/${slugify(title)}`,
       location: jobLocation(job),
       postedAt: parsePhenomDate(job.postedDate || job.dateCreated),
     });
@@ -163,7 +168,6 @@ export default {
     const cfg = resolveConfig(entry);
     if (!cfg) throw new Error(`phenom: cannot resolve origin for ${entry.name}`);
 
-    const wait = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     const maxPages = resolveMaxPages(entry);
     // Honor a context page cap — verify-portals' liveness probe sets
     // `ctx.maxPages: 1` so it only needs to know a board is live, not its
@@ -185,7 +189,7 @@ export default {
     let page = 0;
     let anyPageSucceeded = false;
     for (; page < pagesToFetch; page++) {
-      if (page > 0) await wait(PAGE_DELAY_MS);
+      if (page > 0) await sleep(PAGE_DELAY_MS, ctx);
       let json;
       try {
         // Retries transient failures (429/5xx/timeout) with backoff before

@@ -12,7 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +37,8 @@ const SCRIPTS = [
   ['linkedin-join.mjs', '--csvv'],
   ['linkedin-join.mjs', '--sinse'],
   ['application-artifacts.mjs', '--reprot'],
+  ['clean-markers.mjs', '--dryrun'],
+  ['cv-sync-check.mjs', '--hlep'],
 ];
 
 for (const [script, typo] of SCRIPTS) {
@@ -93,6 +95,64 @@ test('application-artifacts.mjs --help wins over the missing-required-args error
   assert.doesNotMatch(r.all, /Unknown option/i, '--help was still treated as an unrecognized option');
 });
 
+
+test('clean-markers.mjs --help exits 0 and prints usage', () => {
+  const r = runScript('clean-markers.mjs', '--help');
+  assert.equal(r.status, 0, `clean-markers.mjs --help exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'clean-markers.mjs --help printed no usage block');
+  assert.doesNotMatch(r.all, /not found/i, '--help was still read as a filename');
+});
+
+test('clean-markers.mjs -h exits 0 and prints usage', () => {
+  const r = runScript('clean-markers.mjs', '-h');
+  assert.equal(r.status, 0, `clean-markers.mjs -h exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'clean-markers.mjs -h printed no usage block');
+});
+
+test('clean-markers.mjs --help --bogus still errors', () => {
+  const r = runScript('clean-markers.mjs', '--help', '--bogus');
+  assert.equal(r.status, 1, `clean-markers.mjs --help --bogus exited ${r.status}, want 1`);
+  assert.match(r.all, /unrecognized flag/i);
+});
+
+// Exit 2 means no files were given and exit 1 means a file failed the audit.
+// A pre-send gate needs both codes to stay distinct.
+test('clean-markers.mjs still exits 2 with usage when given no files', () => {
+  const r = runScript('clean-markers.mjs');
+  assert.equal(r.status, 2, `no-args exited ${r.status}, want 2`);
+  assert.match(r.all, /Usage:/i);
+});
+
+test('clean-markers.mjs still accepts --ascii as a known flag', () => {
+  const r = runScript('clean-markers.mjs', 'clean', '--ascii', join(tmpdir(), 'career-ops-no-such-file.md'));
+  assert.doesNotMatch(r.all, /unrecognized flag/i, '--ascii must not be rejected as unrecognized');
+});
+
+// The argument has to start with a dash for this to test anything, so the child
+// runs inside the fixture dir and gets the bare relative name. An absolute path
+// would begin with a slash and never reach the flag check.
+test('clean-markers.mjs audits a dash-leading path after --', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-clean-markers-'));
+  try {
+    writeFileSync(join(dir, '-draft.md'), 'plain text\n');
+    const r = spawnSync(process.execPath, [join(ROOT, 'clean-markers.mjs'), 'audit', '--', '-draft.md'], {
+      cwd: dir, encoding: 'utf-8', timeout: 30_000,
+    });
+    const all = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+    assert.equal(r.status, 0, `dash-leading path exited ${r.status}, want 0`);
+    assert.doesNotMatch(all, /unrecognized flag/i, '-draft.md must not be read as a flag after --');
+    assert.match(all, /PASS/, 'the dash-leading path should have been audited');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('clean-markers.mjs still rejects an unknown flag before --', () => {
+  const r = runScript('clean-markers.mjs', 'audit', '--dryrun', '--', 'x.md');
+  assert.equal(r.status, 1, `unknown flag before -- exited ${r.status}, want 1`);
+  assert.match(r.all, /unrecognized flag\(s\): --dryrun/);
+});
+
 test('fix-slugs rejects unknown flags before checking or reading portals file', () => {
   const r = runScript('fix-slugs.mjs', '--file', join(tmpdir(), 'non-existent-portals.yml'), '--unknown-flag');
   assert.equal(r.status, 1);
@@ -104,7 +164,6 @@ test('fix-slugs honours both --file <path> and --file=<path> syntax', () => {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-fixslugs-flag-'));
   try {
     const customPortals = join(dir, 'custom.yml');
-    // Non-existent custom path should be reported when flags are valid
     const r1 = runScript('fix-slugs.mjs', '--file', customPortals);
     assert.match(r1.all, new RegExp(`no portals file at ${customPortals.replace(/\\/g, '\\\\')}`));
 
@@ -146,6 +205,48 @@ test('fix-slugs rejects missing --file values (bare, empty, or next-is-flag)', (
   assert.match(rShortFlagEq.all, /--file requires a value/);
   assert.doesNotMatch(rShortFlagEq.all, /no portals file at/i);
 });
+
+// --- analyze-patterns specific: numeric value flags must be strict ----------
+for (const [form, args] of [
+  ['space-separated', ['--min-threshold', 'abc']],
+  ['negative', ['--min-threshold', '-5']],
+  ['decimal', ['--min-threshold', '1.5']],
+  ['extra characters', ['--min-threshold', '10abc']],
+  ['unsafe integer', ['--min-threshold=9007199254740992']],
+]) {
+  test(`analyze-patterns rejects ${form} threshold values`, () => {
+    const r = runScript('analyze-patterns.mjs', ...args);
+    assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+    assert.match(r.all, /--min-threshold requires a non-negative integer, got/);
+  });
+}
+
+for (const [form, args] of [
+  ['space-separated', ['--min-vendor-n', 'abc']],
+  ['zero', ['--min-vendor-n', '0']],
+  ['negative', ['--min-vendor-n=-1']],
+  ['decimal', ['--min-vendor-n=1.5']],
+  ['unsafe integer', ['--min-vendor-n', '9007199254740992']],
+]) {
+  test(`analyze-patterns rejects ${form} vendor sample values`, () => {
+    const r = runScript('analyze-patterns.mjs', ...args);
+    assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+    assert.match(r.all, /--min-vendor-n requires a positive integer, got/);
+  });
+}
+
+test('analyze-patterns rejects a trailing --min-threshold without an operand', () => {
+  const r = runScript('analyze-patterns.mjs', '--min-threshold');
+  assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+  assert.match(r.all, /--min-threshold requires a value/);
+});
+
+test('analyze-patterns rejects a trailing --min-vendor-n without an operand', () => {
+  const r = runScript('analyze-patterns.mjs', '--min-vendor-n');
+  assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+  assert.match(r.all, /--min-vendor-n requires a value/);
+});
+
 
 // --- missing operand for a RECOGNIZED value-taking flag (#3087) ------------
 //
@@ -253,5 +354,29 @@ test('linkedin-join.mjs --help exits 0 and prints usage', () => {
 test('linkedin-join.mjs --help --bogus still errors', () => {
   const r = runScript('linkedin-join.mjs', '--help', '--bogus');
   assert.equal(r.status, 1, `--help --bogus exited ${r.status}, want 1`);
+  assert.match(r.all, /unrecognized flag/i);
+});
+
+// cv-sync-check.mjs parsed no arguments before #3565, so a mistyped flag ran
+// the whole check suite and the caller had no way to discover the right
+// spelling. Its exit code is data-dependent (1 when cv.md is missing, which is
+// the normal state of a checkout), so the flag paths are asserted on their own
+// rather than through the bare-invocation expectation in test-all.mjs.
+test('cv-sync-check.mjs --help exits 0 and prints usage', () => {
+  const r = runScript('cv-sync-check.mjs', '--help');
+  assert.equal(r.status, 0, `cv-sync-check.mjs --help exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'cv-sync-check.mjs --help printed no usage block');
+  assert.doesNotMatch(r.all, /sync check/i, '--help still ran the checks');
+});
+
+test('cv-sync-check.mjs -h exits 0 and prints usage', () => {
+  const r = runScript('cv-sync-check.mjs', '-h');
+  assert.equal(r.status, 0, `cv-sync-check.mjs -h exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'cv-sync-check.mjs -h printed no usage block');
+});
+
+test('cv-sync-check.mjs --help --bogus still errors', () => {
+  const r = runScript('cv-sync-check.mjs', '--help', '--bogus');
+  assert.equal(r.status, 1, `cv-sync-check.mjs --help --bogus exited ${r.status}, want 1`);
   assert.match(r.all, /unrecognized flag/i);
 });

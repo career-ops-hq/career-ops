@@ -11,7 +11,29 @@
 // "Posted 5 Days Ago", "Posted 30+ Days Ago"); postedAt is derived from it
 // and omitted for the unbounded "30+ Days Ago" form.
 
-import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, sleep } from './_http.mjs';
+
+// Why one paginated pass (the unfaceted root crawl, or one facet-split slice)
+// stopped. COMPLETE covers both "ran out of pages" and "hit the offset
+// ceiling" — `clamped` (derived separately) tells those two apart.
+const STOP_REASON = {
+  COMPLETE: 'complete',
+  EARLY_STOP: 'early-stop',
+  NO_DATE_SKIP: 'no-date-skip',
+  FETCH_ERROR: 'fetch-error',
+  CAP: 'cap',
+};
+
+// jobs.workdayTruncated: whether the board is worth a second attempt.
+// TRANSIENT is a fetch failure that a plain retry can plausibly clear;
+// STRUCTURAL is a fixed bound (facet-split depth/slice/page budget, or a
+// split facet that materially under-covers the board) that a repeat run
+// reaches again for the same result. Exported so scan-ats-full.mjs's retry
+// gate reads the same values rather than its own copy of the strings.
+export const WORKDAY_TRUNCATED_REASON = {
+  TRANSIENT: 'transient',
+  STRUCTURAL: 'structural',
+};
 
 const PAGE_SIZE = 20;
 
@@ -86,6 +108,56 @@ function resolveMaxPages(entry) {
   return DEFAULT_MAX_PAGES;
 }
 
+// ── Dead-tenant detection ────────────────────────────────────────
+//
+// The CXS API's 422/401/403 bodies carry no marker of their own (a bare
+// `{"errorCode":"HTTP_422",...}`, identical whether the board is genuinely
+// gone or just hit a transient WAF blip), so raw status alone isn't safe to
+// hand to dead-boards.mjs — a spread sample of 1200 tenants (2026-09) found
+// HTTP 500 failures whose careers page loads fine (live tenant, unrelated
+// hiccup), and even 2 of 614 raw-422 tenants with a clean careers page.
+// Two signals held across a repeat pass days later, always the same result:
+// - 422, careers page bounces to `community.workday.com/maintenance-page`
+//   (612 of 614 raw 422s, ~99.7%).
+// - 401/403, careers page redirects to `*.myworkday.com/wday/drs/outage`
+//   ("Workday is currently unavailable") — this is a per-board signal, not a
+//   per-tenant one: a restricted/retired board on an otherwise-live tenant
+//   (other boards on the same tenant answering normally) still redirects here
+//   every time it's checked.
+// Only page-0's request is checked — a tenant that fails mid-pagination
+// already has this file's own transient/structural handling and isn't
+// touched here.
+const WORKDAY_MAINTENANCE_MARKER = 'community.workday.com/maintenance-page';
+const WORKDAY_OUTAGE_REDIRECT_RE = /^https:\/\/[a-z0-9.-]+\.myworkday\.com\/wday\/drs\/outage(?:[/?]|$)/i;
+const CONFIRMED_DEAD_API_STATUSES = new Set([422, 401, 403]);
+
+/**
+ * A page-0 CXS failure with one of these statuses is worth the one extra
+ * careers-page fetch to check for Workday's own dead-board signals. Errors
+ * are swallowed here (a failed probe proves nothing) — the caller rethrows
+ * the original error either way, this only decides whether to relabel it as
+ * a synthetic 404 so dead-boards.mjs's existing 404 path (shared with every
+ * other provider) picks it up.
+ */
+async function confirmDeadViaCareersPage(ep, ctx) {
+  try {
+    const body = await ctx.fetchText(ep.jobBase, {
+      redirect: 'manual',
+      headers: { 'user-agent': BROWSER_LIKE_USER_AGENT, 'accept-language': 'en-US,en;q=0.9' },
+    });
+    // Every confirmed case so far reaches the marker through the catch below
+    // (a non-2xx status) — this only guards the shape where a tenant serves
+    // it on a 200 instead. Safe to check unconditionally: a known-live tenant
+    // (tempus, 2026-09) does NOT carry this string on its 200 response, unlike
+    // the outage-page URL, which is boilerplate present on every Workday page
+    // regardless of health and is deliberately never checked on a 200 body.
+    return typeof body === 'string' && body.includes(WORKDAY_MAINTENANCE_MARKER);
+  } catch (err) {
+    if (err.status >= 300 && err.status < 400) return WORKDAY_OUTAGE_REDIRECT_RE.test(err.location || '');
+    return typeof err.body === 'string' && err.body.includes(WORKDAY_MAINTENANCE_MARKER);
+  }
+}
+
 // ── Facet split ───────────────────────────────────────────────────
 //
 // Workday's CXS backend refuses to paginate past offset 2000 on some tenants,
@@ -106,7 +178,12 @@ function resolveMaxPages(entry) {
 // unfaceted crawl, and a board it could not finish keeps the workdayTruncated
 // tag rather than being reported as complete.
 
-/** Sum one facet's value counts; null when none of its values carry a count. */
+/**
+ * Sum one facet's value counts; null when none of its values carry a count.
+ *
+ * Reads a facet's own `values` only. Nested children are deliberately not
+ * summed — see the trap documented on `chooseSplitFacet()` (#3875).
+ */
 function facetCoverage(facet) {
   const values = Array.isArray(facet?.values) ? facet.values : [];
   let sum = 0;
@@ -152,6 +229,20 @@ export function trueTotalFromFacets(facets) {
  *
  * `exclude` carries the facet parameters already applied further up the split,
  * without which re-splitting a slice would keep re-deriving the same partition.
+ *
+ * Descending into those id-less headers' nested children looks like a free
+ * improvement — more values, a finer partition — and is a trap. On
+ * dickssportinggoods|wd1|dsg (measured 2026-08-28) `locationMainGroup` carries
+ * 2 group parents whose 938 nested children sum to 16,732 against a board of
+ * ~8,366: almost exactly 2.00x, because a requisition open in several locations
+ * is counted once per location. Every other counted facet on that board agrees
+ * within 0.9% and errs downward. Since `trueTotalFromFacets()` takes the
+ * maximum, recursing would double the true total, make every healthy board
+ * compare its honest `total` against it and read as offset-clamped, and hand
+ * `workdayTruncated` to boards that were complete — a silent failure that looks
+ * like success. The `id` filter below is what keeps that shut; it is
+ * load-bearing, not tidiness. See #3875; pinned by the nested-shape fixture in
+ * tests/providers/workday-facet-split.test.mjs.
  *
  * Exported for the test suite.
  */
@@ -225,11 +316,6 @@ export function chooseSplitFacet(facets, { exclude = [], locationHints } = {}) {
   return best ? { facetParameter: best.facetParameter, values: best.values } : null;
 }
 
-function sleep(ms, ctx) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /**
  * True once a page's oldest unambiguously-dated posting is past the --since window.
  *
@@ -264,6 +350,11 @@ function makeEndpoint(origin, tenant, site) {
     // externalPath is relative to the site, not the host root — without the
     // site segment the URL 404s.
     jobBase: `${origin}/${site}`,
+    // Same externalPath against the CXS host instead of the careers host
+    // returns the posting's DETAIL document (GET, no body). That is the only
+    // place a multi-location posting's real places exist — see
+    // MULTI_LOCATION_PLACEHOLDER_RE.
+    cxsBase: `${origin}/wday/cxs/${tenant}/${site}`,
     origin,
   };
 }
@@ -334,33 +425,210 @@ function locationFromPath(externalPath) {
 // requisition filled 3 of 7 results in a sweep). Left un-stripped, that
 // disambiguator defeats the entire point of this function: the three sites'
 // URLs would each key to a different requisition ID and never collapse.
-export function workdayDedupKey(job) {
+/**
+ * Lowercase a raw requisition token and drop Workday's cross-site repost
+ * disambiguator (a trailing `-N`, one or two digits).
+ *
+ * Only treat the suffix as a disambiguator when what precedes it is already
+ * requisition-ID-shaped on its own (a leading digit, 2+ trailing digits,
+ * underscores allowed in between) — otherwise the hyphen digits ARE the
+ * requisition ID and must be kept, e.g. Walmart's "R-2593225" (credit:
+ * ronanime-arch, PR #3446).
+ *
+ * Shared with scan.mjs's `requisitionIdForDedup` so that a tracker note which
+ * copied the URL tail (`req JR25919-1`) and the URL itself name the same
+ * requisition: without one rule for both, the note read as `259191` while the
+ * URL read as `25919`, and the already-applied posting was re-queued as a new
+ * requisition (PR #4267 review).
+ *
+ * @param {unknown} raw - Token as found after the URL's `_` or a note's label.
+ * @returns {string} Lowercased requisition ID ('' when `raw` is empty).
+ */
+export function stripWorkdayRepostSuffix(raw) {
+  const token = raw == null ? '' : String(raw).toLowerCase();
+  const m = token.match(/^(.*?)-(\d{1,2})$/);
+  return m && /^[a-z]*\d[a-z0-9_]*\d{2,}$/.test(m[1]) ? m[1] : token;
+}
+
+/**
+ * Whether a URL points at a Workday-hosted posting.
+ *
+ * @param {unknown} url
+ * @returns {boolean|null} `true`/`false` for a parseable URL, `null` when
+ *   `url` is absent or unparseable (no evidence either way).
+ */
+export function isWorkdayJobUrl(url) {
   let parsed;
   try {
-    parsed = new URL(job?.url);
+    parsed = new URL(url);
   } catch {
     return null;
   }
+  return parsed.hostname.toLowerCase().endsWith('.myworkdayjobs.com');
+}
+
+export function workdayDedupKey(job) {
   // Non-Workday URLs must fall back to normalized-URL dedup, not produce a
   // bogus workday: key just because their last path segment happens to
   // contain an underscore (e.g. a Lever/Greenhouse job whose slug does) —
   // reported by CodeRabbit against this exact function.
-  if (!parsed.hostname.toLowerCase().endsWith('.myworkdayjobs.com')) return null;
+  if (!isWorkdayJobUrl(job?.url)) return null;
+  const parsed = new URL(job.url);
   const segments = parsed.pathname.split('/').filter(Boolean);
   const lastSegment = segments[segments.length - 1];
   if (!lastSegment) return null;
   const underscoreIdx = lastSegment.indexOf('_');
   if (underscoreIdx === -1) return null; // no title/requisition-ID separator — nothing to key on
-  const raw = lastSegment.slice(underscoreIdx + 1).toLowerCase();
-  // Only treat a trailing "-N" as Workday's cross-site disambiguator when what
-  // precedes it is already requisition-ID-shaped on its own (a leading digit,
-  // 2+ trailing digits, underscores allowed in between) — otherwise the hyphen
-  // digits ARE the requisition ID and must be kept, e.g. Walmart's "R-2593225"
-  // (credit: ronanime-arch, PR #3446).
-  const m = raw.match(/^(.*?)-(\d{1,2})$/);
-  const reqId = m && /^[a-z]*\d[a-z0-9_]*\d{2,}$/.test(m[1]) ? m[1] : raw;
+  const reqId = stripWorkdayRepostSuffix(lastSegment.slice(underscoreIdx + 1));
   if (!reqId) return null;
   return `workday:${parsed.hostname.toLowerCase()}:${reqId}`;
+}
+
+// Workday's LIST endpoint answers a posting attached to more than one location
+// with a COUNT where every other posting carries a place: `"53 Locations"`. It
+// is not a location, and `buildLocationFilter` matches locations by
+// case-insensitive substring, so the string contributes nothing to any tier —
+// the posting is then judged on `locationHintFromUrl` alone, which carries only
+// the posting's PRIMARY location (`/job/USA---Sunnyvale-CA/…`). A role open in
+// Sunnyvale AND Austin is therefore invisible to an `allow: [austin]` config
+// (#3860).
+//
+// Measured live on three tenants (60 page-0/1/2 postings each, 2026-09-07):
+// placeholders are 53 of 291 postings — crowdstrike 23, nvidia 29, cvshealth 1
+// — so this is an ordinary case, not an edge one. Against `allow:
+// [united states, usa, remote]`, 23 of those 53 were rejected while a real
+// location would have passed; against `allow: [austin, new york]`, 17.
+//
+// Anchored, and `Locations?` singular-tolerant: it must not fire on a real
+// place that merely contains a digit and the word ("100 Locations Plaza").
+const MULTI_LOCATION_PLACEHOLDER_RE = /^\s*\d+\s+locations?\s*$/i;
+
+/**
+ * True when a Workday list location is the count-placeholder rather than a place.
+ * Exported for tests/providers/workday-multi-location.test.mjs, which pins the boundary cases.
+ *
+ * @param {unknown} location - `locationsText` as the list endpoint returned it.
+ * @returns {boolean}
+ */
+export function isMultiLocationPlaceholder(location) {
+  return typeof location === 'string' && MULTI_LOCATION_PLACEHOLDER_RE.test(location);
+}
+
+// How many detail GETs one entry may spend to resolve placeholders — every
+// request the tenant sees, retries included, not one per posting. The
+// enrichment is one extra GET per placeholder posting, and nvidia ran 29
+// placeholders in 60 postings — a 2,000-posting tenant at that rate would add
+// ~1,000 requests, which is a different kind of scan than the one the caller
+// asked for. The cap bounds that; it is deliberately loud rather than silent
+// (see the console.error below), because a silent cap reads as "all locations
+// resolved" when it isn't.
+const MAX_DETAIL_REQUESTS = 200;
+
+/**
+ * The real places behind a multi-location placeholder, from the detail document.
+ *
+ * Measured on cvshealth/crowdstrike/nvidia (7 of 7 probes, then 53 of 53):
+ * `jobPostingInfo.location` holds the primary place and
+ * `jobPostingInfo.additionalLocations` the rest, and
+ * `1 + additionalLocations.length` equals the number the placeholder announced
+ * every single time. `jobPostingInfo.locationsText` does not exist at this
+ * level, so there is nothing else to read.
+ *
+ * Joined with `' · '` — the separator greenhouse/ashby/eightfold/gem/ibm/
+ * echojobs already use for exactly this, and the one
+ * `normalizeLocationForDedup` (scan.mjs) splits back into a sorted SET, so the
+ * order Workday happens to return does not reach a dedupe key.
+ *
+ * @param {unknown} detail - Parsed detail document.
+ * @returns {string} `' · '`-joined places, or '' when the document has none.
+ */
+export function locationsFromDetail(detail) {
+  const info = detail?.jobPostingInfo;
+  if (!info || typeof info !== 'object') return '';
+  const extra = Array.isArray(info.additionalLocations) ? info.additionalLocations : [];
+  const places = [info.location, ...extra]
+    .filter((p) => typeof p === 'string' && p.trim() !== '')
+    .map((p) => p.trim());
+  // Deduped: a tenant that repeats the primary place inside additionalLocations
+  // would otherwise ship it twice into a user-visible field.
+  return [...new Set(places)].join(' · ');
+}
+
+/**
+ * The posting's real publication date, from the detail document.
+ *
+ * The list endpoint offers only `postedOn`, relative prose that `parsePostedOn`
+ * turns into a coarse timestamp and that tops out at an unbounded "30+ Days
+ * Ago" (→ `undefined`). The detail document carries `jobPostingInfo.startDate`,
+ * an absolute date — so a posting we already paid a GET for can be dated
+ * exactly instead of approximately.
+ *
+ * Deliberately stricter than `Date.parse` alone: `Date.parse` falls back to an
+ * implementation-defined parse for anything non-ISO, so a tenant emitting some
+ * other date format could yield a plausible-looking timestamp on one Node build
+ * and NaN on another. Measured on cvshealth/crowdstrike/nvidia, 11 of 11 detail
+ * documents returned a bare `YYYY-MM-DD` and none carried a time — but 11 is a
+ * small sample and three further tenants could not be measured (their list
+ * endpoint answers HTTP 422), so anything that is not an ISO-8601 date is left
+ * alone rather than guessed at. `postedAt` then keeps its `parsePostedOn`
+ * value, which is the pre-existing behaviour.
+ *
+ * Note the granularity change this implies for a posting whose `postedOn` said
+ * "Posted Today": `Date.now()` becomes that day's UTC midnight, i.e. slightly
+ * EARLIER. That cannot cost a posting its place in a `--since` window —
+ * `resolveEffectiveAfter` truncates the cutoff to a date and
+ * `buildPostedDateFilter` parses it as UTC midnight too (scan.mjs), so both
+ * sides of the comparison are day-aligned.
+ *
+ * A second direction applies to the "Posted 30+ Days Ago" bucket.
+ * `parsePostedOn` returns `undefined` for that label, so without enrichment the
+ * posting carries no `postedAt` and passes any age-based filter
+ * ("don't penalize missing data"). Once `startDate` provides the real date, the
+ * posting is accurately dated and a `max_posting_age_days: 30` window can now
+ * legitimately exclude it. The "undated passes" rule is a fallback for
+ * ignorance, not a policy of inclusion; once the real date is in hand the filter
+ * decision is correct, not stricter.
+ *
+ * @param {unknown} detail - Parsed detail document.
+ * @returns {number|undefined} Epoch ms, or undefined when there is no usable date.
+ */
+export function postedAtFromDetail(detail) {
+  const raw = detail?.jobPostingInfo?.startDate;
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  // `YYYY-MM-DD`, or a time form that states its offset (`Z` / `±HH:MM`).
+  //
+  // The offset is REQUIRED once a time is present, and that is the whole point
+  // of this branch: Date.parse resolves a date-only string as UTC, and a
+  // date-time carrying Z or an offset as that offset, but a date-time WITHOUT
+  // one as the local time of whatever machine is scanning (ECMAScript
+  // §21.4.3.2). Measured: `2026-09-04T08:30:00` is 08:30Z on a UTC box, 12:30Z
+  // in America/New_York and 2026-09-**03**T23:30Z in Asia/Tokyo — the day
+  // itself moves. Since `--since` is compared day-against-day, that would make
+  // the same posting eligible on one machine and not on another. Such a string
+  // does not say which day it means, so it is left unparsed and `postedAt`
+  // keeps its `parsePostedOn` value.
+  const shape = /^(\d{4})-(\d{2})-(\d{2})(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2}))?$/.exec(trimmed);
+  if (!shape) return undefined;
+  // The shape above still admits a date that does not exist, and `Date.parse`
+  // does NOT reject those — it rolls them over (`2026-02-30` parses as
+  // 2026-03-02; measured on this Node, not assumed). A silently shifted date is
+  // worse than no date, so the calendar is checked on the Y-M-D components
+  // themselves. Doing it on the components rather than on the parsed timestamp
+  // keeps a legitimate offset form like `...T23:00:00-05:00`, whose UTC day is
+  // the NEXT one, from being thrown away as a rollover.
+  const [, y, m, d] = shape;
+  const asUtc = new Date(0);
+  // setUTCFullYear, not Date.UTC: Date.UTC maps a year of 0..99 onto 19xx, so
+  // Date.UTC(26, ...) is 1926 and the equality check below would reject the
+  // perfectly real date `0026-05-05`. Irrelevant to any live job posting, but
+  // this reads as a general ISO-8601 check and should not lie about one.
+  asUtc.setUTCFullYear(Number(y), Number(m) - 1, Number(d));
+  if (asUtc.getUTCFullYear() !== Number(y) || asUtc.getUTCMonth() !== Number(m) - 1 || asUtc.getUTCDate() !== Number(d)) {
+    return undefined;
+  }
+  const ms = Date.parse(trimmed);
+  return Number.isFinite(ms) ? ms : undefined;
 }
 
 export function parseWorkdayResponse(json, entry) {
@@ -485,10 +753,10 @@ export default {
       pagesToFetch = Math.min(pagesToFetch, ctxCap);
 
       // Why pagination stopped — drives which warning (if any) fires below.
-      // 'fetch-error' must NOT produce the "raise max_pages" advice: that knob
+      // FETCH_ERROR must NOT produce the "raise max_pages" advice: that knob
       // does nothing for a tenant that died on a rate limit rather than hit the cap.
-      let stopReason = 'complete';
-      if (pageIsPastWindow(jobs, sinceMs)) stopReason = 'early-stop';
+      let stopReason = STOP_REASON.COMPLETE;
+      if (pageIsPastWindow(jobs, sinceMs)) stopReason = STOP_REASON.EARLY_STOP;
       // Some tenants' CXS responses never include postedOn at all (e.g.
       // adventhealth, on every page). Early-stop can't apply then — there's
       // no dated posting to recognize as "past the window".
@@ -499,16 +767,16 @@ export default {
       // tenant will be dropped downstream as undated regardless of page count
       // (newest-first sort means if the *freshest* postings lack a date, older
       // ones will too). Return page 0's results instead of grinding to maxPages.
-      if (stopReason === 'complete' && sinceMs !== null && ctx?.includeUndated !== true
+      if (stopReason === STOP_REASON.COMPLETE && sinceMs !== null && ctx?.includeUndated !== true
         && !sawAnyDatedPosting && jobs.length > 0) {
-        stopReason = 'no-date-skip';
+        stopReason = STOP_REASON.NO_DATE_SKIP;
       }
 
       // A clamped query is still worth paginating: everything up to the ceiling
       // is real and distinct, and it is the coverage floor the split builds on.
       // Only the pages *past* the ceiling are duplicates, and `total` being
       // clamped to the ceiling already stops pagination there.
-      const clamped = stopReason === 'complete' && isClamped(total, facets);
+      const clamped = stopReason === STOP_REASON.COMPLETE && isClamped(total, facets);
 
       // Sequential, not concurrent (mirrors providers/4dayweek.mjs, thehub.mjs,
       // arbeitnow.mjs, jibeapply.mjs) — a single tenant's API has no reason to
@@ -516,7 +784,7 @@ export default {
       // cleanly with whatever pages were already gathered instead of
       // discarding them (Promise.all would fail the whole batch on one error).
       let page = 1;
-      if (stopReason === 'complete') {
+      if (stopReason === STOP_REASON.COMPLETE) {
         for (; page < pagesToFetch; page++) {
           if (pagesSpent >= pageBudget) { budgetExhausted = true; break; }
           await sleep(INTER_PAGE_DELAY_MS, ctx);
@@ -531,7 +799,7 @@ export default {
             // short of RETRY_POLICY.retries + 1.
             const attempts = err.attempts ?? RETRY_POLICY.retries + 1;
             console.error(`⚠️  workday: ${entry.name} truncated at ${page + 1} of ${pagesToFetch} pages after ${attempts} attempts (${jobsSummary}): ${err.message}`);
-            stopReason = 'fetch-error';
+            stopReason = STOP_REASON.FETCH_ERROR;
             break;
           }
           const pageJobs = parseWorkdayResponse(json, entry);
@@ -540,23 +808,38 @@ export default {
             const postings = Array.isArray(json?.jobPostings) ? json.jobPostings : [];
             if (postings.length < PAGE_SIZE) break; // short page → last page reached
           }
-          if (pageIsPastWindow(pageJobs, sinceMs)) { stopReason = 'early-stop'; break; }
+          if (pageIsPastWindow(pageJobs, sinceMs)) { stopReason = STOP_REASON.EARLY_STOP; break; }
         }
-        if (stopReason === 'complete' && page === pagesToFetch && pagesToFetch === maxPages) {
-          stopReason = 'cap';
+        if (stopReason === STOP_REASON.COMPLETE && page === pagesToFetch && pagesToFetch === maxPages) {
+          stopReason = STOP_REASON.CAP;
         }
       }
 
       return { jobs, total, facets, stopReason, clamped };
     };
 
-    const root = await runQuery({});
+    let root;
+    try {
+      root = await runQuery({});
+    } catch (err) {
+      if (CONFIRMED_DEAD_API_STATUSES.has(err.status) && await confirmDeadViaCareersPage(ep, ctx)) {
+        const notFound = new Error(`workday: ${entry.name} confirmed dead (maintenance page)`);
+        notFound.status = 404;
+        throw notFound;
+      }
+      throw err;
+    }
     const { total, stopReason } = root;
 
     // Set when the split ran out of depth, slices, or splittable facets with
     // part of the board still unreached — the difference between "this is the
     // whole board" and "this is as much of it as we could get".
     let splitIncomplete = false;
+    // Distinguishes the two ways a split can stay incomplete: a fixed bound
+    // (slice/depth/facet budget) versus a transient fetch failure. Retrying a
+    // structural exhaustion just re-runs the same slices into the same wall —
+    // only a transient one is worth scan-ats-full.mjs's sequential retry pass.
+    let splitStructural = false;
     let slicesSpent = 0;
     let jobs = root.jobs;
 
@@ -597,17 +880,20 @@ export default {
         // the clamp being detected, not pages going unread, and it is what the
         // split then recovers. Tagging it would put "(still incomplete)" on
         // every clamped board and say nothing.
-        if (result.stopReason === 'fetch-error' || (result.stopReason === 'cap' && !result.clamped)) {
+        if (result.stopReason === STOP_REASON.FETCH_ERROR) {
+          splitIncomplete = true; // transient — worth a retry
+        } else if (result.stopReason === STOP_REASON.CAP && !result.clamped) {
           splitIncomplete = true;
+          splitStructural = true; // a fixed bound (max_pages), retrying reaches it again
         }
         if (!result.clamped) return;
 
-        if (depth >= MAX_SPLIT_DEPTH) { splitIncomplete = true; return; }
+        if (depth >= MAX_SPLIT_DEPTH) { splitIncomplete = true; splitStructural = true; return; }
         const facet = chooseSplitFacet(result.facets, {
           exclude: excluded,
           locationHints: ctx?.locationHints,
         });
-        if (!facet) { splitIncomplete = true; return; }
+        if (!facet) { splitIncomplete = true; splitStructural = true; return; }
 
         // The clamp is detected against the LARGEST facet sum, but the split
         // runs on whichever facet partitions most finely. Postings outside the
@@ -637,12 +923,12 @@ export default {
             if (coverage !== null) others.push(coverage);
           }
           const spread = others.length > 0 ? Math.max(...others) - Math.min(...others) : 0;
-          if (trueTotal - chosenCoverage > spread) splitIncomplete = true;
+          if (trueTotal - chosenCoverage > spread) { splitIncomplete = true; splitStructural = true; }
         }
 
         for (const value of facet.values) {
-          if (slicesSpent >= MAX_SPLIT_SLICES) { splitIncomplete = true; break; }
-          if (pagesSpent >= pageBudget) { splitIncomplete = true; break; }
+          if (slicesSpent >= MAX_SPLIT_SLICES) { splitIncomplete = true; splitStructural = true; break; }
+          if (pagesSpent >= pageBudget) { splitIncomplete = true; splitStructural = true; break; }
           slicesSpent++;
           await sleep(INTER_PAGE_DELAY_MS, ctx);
           const nextApplied = { ...applied, [facet.facetParameter]: [value.id] };
@@ -681,6 +967,110 @@ export default {
       console.error(`⚠️  workday: ${entry.name} offset-clamped at ${WORKDAY_OFFSET_CEILING} — recovered ${jobs.length} jobs via ${slicesSpent} facet slices${short}`);
     }
 
+    // Resolve `"53 Locations"` placeholders into the real places (#3860). Runs
+    // on the FINAL job list, after the facet split has deduped its overlapping
+    // slices — enriching before that would pay for the same posting once per
+    // slice it appears in.
+    //
+    // Skipped for a probe (`ctx.maxPages`): verify-portals/discover-ats only
+    // need to know the board answers and how many postings page 0 has, and
+    // charging a liveness check one GET per multi-location posting would make
+    // the probe cost scale with the board instead of staying at one request.
+    if (ctxCap === Infinity) {
+      const detailOpts = {
+        redirect: 'error',
+        headers: {
+          accept: 'application/json',
+          'user-agent': BROWSER_LIKE_USER_AGENT,
+          'accept-language': 'en-US,en;q=0.9',
+          referer: `${ep.jobBase}/`,
+        },
+      };
+      const placeholders = jobs.filter((j) => isMultiLocationPlaceholder(j.location));
+      // The detail document lives at the same externalPath under the CXS host.
+      // `job.url` is `jobBase + externalPath` (parseWorkdayResponse), so the
+      // path is recovered by removing the prefix rather than by re-parsing a
+      // URL whose site segment can itself contain slashes. A posting whose URL
+      // is not jobBase-relative has no recoverable path and is filtered out
+      // HERE rather than skipped inside the loop, so that the "left unresolved
+      // by the cap" count below cannot absorb it and report the wrong reason.
+      const pending = placeholders.filter((j) => j.url.startsWith(`${ep.jobBase}/`));
+      const unaddressable = placeholders.length - pending.length;
+      let resolved = 0;
+      let redated = 0;
+      let failed = 0;
+      // Two counters, because a retry is a request the tenant sees but not a
+      // posting the caller gets. `requests` is what MAX_DETAIL_REQUESTS bounds
+      // — every attempt, retries included — and `attempted` is how far down
+      // `pending` the loop reached, which is what "left unresolved" reports.
+      // Counting only postings made the cap a per-posting count wearing a
+      // request cap's name: with RETRY_POLICY at 3 retries, a tenant answering
+      // 503 turned a promised 200 GETs into 800 (measured, not reasoned) —
+      // and a failing tenant is exactly where restraint matters most.
+      let requests = 0;
+      let attempted = 0;
+      // Meters the transport itself rather than trusting a post-hoc count:
+      // withRetry calls ctx.fetchJson once per attempt, and on a SUCCESSFUL
+      // call after a transient failure it reports no attempt count anywhere
+      // (`err.attempts` only exists on the error it rethrows). Object.create
+      // rather than a spread so anything the caller's ctx carries — including
+      // accessors and prototype methods — stays reachable.
+      const meteredCtx = Object.create(ctx);
+      meteredCtx.fetchJson = (url, opts) => { requests++; return ctx.fetchJson(url, opts); };
+      for (const job of pending) {
+        if (requests >= MAX_DETAIL_REQUESTS) break;
+        const externalPath = job.url.slice(ep.jobBase.length);
+        attempted++;
+        // Same politeness as the pagination loop: one tenant, one request at a
+        // time, spaced. A burst of same-host GETs is what its WAF watches for.
+        if (attempted > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
+        // The last postings under the cap get fewer retries rather than the cap
+        // getting more requests: `remaining` is at least 1 (the loop broke
+        // otherwise), so this posting spends at most what is left and the
+        // documented ceiling holds for every tenant, not just healthy ones.
+        const remaining = MAX_DETAIL_REQUESTS - requests;
+        const policy = { ...RETRY_POLICY, retries: Math.min(RETRY_POLICY.retries, remaining - 1) };
+        // Fetched once and parsed twice: the location and the date both live in
+        // this one document, and a second GET for the date would double the
+        // cost of the enrichment for a field that is already in hand.
+        let detail;
+        try {
+          detail = await fetchJsonWithRetry(meteredCtx, `${ep.cxsBase}${externalPath}`, detailOpts, policy);
+        } catch {
+          // Fail soft, per posting. A detail document that 404s, rate-limits or
+          // returns something unexpected leaves the placeholder exactly as it
+          // was, which is the pre-#3860 behaviour — never a dropped posting and
+          // never an empty location, which reads as "location unknown"
+          // downstream and would be a worse lie than the count.
+          failed++;
+          continue;
+        }
+        const places = locationsFromDetail(detail);
+        if (places === '') { failed++; continue; }
+        job.location = places;
+        resolved++;
+        // Only on a posting whose location actually resolved: the date is a
+        // by-product of a request made for the location, never a reason to make
+        // one. A document with no usable startDate leaves postedAt as
+        // parsePostedOn left it — an absent date must not erase a present one.
+        const started = postedAtFromDetail(detail);
+        if (started !== undefined) {
+          job.postedAt = started;
+          redated++;
+        }
+      }
+      if (placeholders.length > 0) {
+        const capped = pending.length > attempted ? `, ${pending.length - attempted} left unresolved by the ${MAX_DETAIL_REQUESTS}-request cap` : '';
+        const unreadable = failed > 0 ? `, ${failed} detail document(s) unreadable` : '';
+        const unroutable = unaddressable > 0 ? `, ${unaddressable} with no site-relative path` : '';
+        // Reported separately from `resolved` because the two can differ: a
+        // detail document can carry places but no parseable startDate. Folding
+        // them into one number would hide that.
+        const dated = redated > 0 ? `, ${redated} dated exactly from the detail document` : '';
+        console.error(`ℹ️  workday: ${entry.name} resolved ${resolved} of ${placeholders.length} multi-location placeholder(s)${unreadable}${unroutable}${capped}${dated}`);
+      }
+    }
+
     // The cap is a safety net, not a working limit — silent by design, but a
     // tenant that actually hits it needs to be surfaced, in one short line
     // (a full-directory scan can hit this on dozens of tenants).
@@ -704,7 +1094,7 @@ export default {
     // verify-portals.mjs both probe with ctx.maxPages: 1, which never sets
     // stopReason to 'cap'), so it is the one place that opts out.
     const syntheticEntries = ctx?.syntheticEntries === true;
-    if (stopReason === 'cap' && !root.clamped) {
+    if (stopReason === STOP_REASON.CAP && !root.clamped) {
       const jobsSummary = `${jobs.length}${total !== null ? ` of ${total}` : ''} jobs`;
       if (!syntheticEntries) {
         console.error(`⚠️  workday: ${entry.name} truncated at max_pages=${maxPages} (${jobsSummary}) — raise max_pages on this entry for more`);
@@ -724,16 +1114,23 @@ export default {
     // once per site) — a console.error per hit would repeat thousands of
     // times, so tag the array instead; scan-ats-full.mjs aggregates it into
     // one summary line.
-    if (stopReason === 'no-date-skip') jobs.workdayNoDateSkip = true;
+    if (stopReason === STOP_REASON.NO_DATE_SKIP) jobs.workdayNoDateSkip = true;
     // 'fetch-error' means retries were exhausted mid-pagination while 19
     // other tenants were hammering the same uplink. scan-ats-full.mjs
-    // collects tagged tenants and retries them sequentially after the
-    // parallel sweep, when the line is quiet — same array-tag pattern as
+    // collects tenants tagged 'transient' and retries them sequentially after
+    // the parallel sweep, when the line is quiet — same array-tag pattern as
     // workdayNoDateSkip (no extra per-tenant logging here).
-    if (stopReason === 'fetch-error') jobs.workdayTruncated = true;
+    if (stopReason === STOP_REASON.FETCH_ERROR) jobs.workdayTruncated = WORKDAY_TRUNCATED_REASON.TRANSIENT;
     // A split that could not reach the whole board is the same kind of partial
-    // result, and scan-ats-full.mjs already knows how to report that tag.
-    if (splitIncomplete || budgetExhausted) jobs.workdayTruncated = true;
+    // result. Structural causes (slice/depth/facet/page budget exhausted) win
+    // over a transient one in the mix — a board that hit MAX_SPLIT_SLICES
+    // *and* had one slice die mid-fetch is still a wall a retry can't clear,
+    // so scan-ats-full.mjs must not spend a second full split on it.
+    if (splitIncomplete || budgetExhausted) {
+      jobs.workdayTruncated = (splitStructural || budgetExhausted)
+        ? WORKDAY_TRUNCATED_REASON.STRUCTURAL
+        : WORKDAY_TRUNCATED_REASON.TRANSIENT;
+    }
 
     return jobs;
   },

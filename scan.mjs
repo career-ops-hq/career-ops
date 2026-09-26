@@ -64,11 +64,12 @@ import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { mergeProviderPlugins } from './plugins/_engine.mjs';
 import { classifyFetchError } from './verify-portals.mjs';
 import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
-import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, normalizeTextKey, extractReqNumber, REQ_NUMBER_RE } from './tracker-parse.mjs';
+import { workdayDedupKey, stripWorkdayRepostSuffix, isWorkdayJobUrl } from './providers/workday.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
-import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter } from './title-keywords.mjs';
+import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter, foldAccents } from './title-keywords.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -107,18 +108,17 @@ const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(DATA_ROOT, 'con
 // anchored one (#3510). One resolution, imported, cannot drift.
 export const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(DATA_ROOT, 'data/scan-history.tsv');
 export const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data/pipeline.md');
+
 const APPLICATIONS_PATH = path.join(DATA_ROOT, 'data/applications.md');
 const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 
-// Ensure required directories exist (fresh setup). Stays rooted in the user-data
-// directory; override parents are created by their writers before first write.
-const targetDataDir = path.join(DATA_ROOT, 'data');
-try {
-  mkdirSync(targetDataDir, { recursive: true });
-} catch (err) {
-  console.error(`ERROR: Could not create data directory at "${targetDataDir}": ${err.message}`);
-  process.exit(1);
-}
+// No directory creation at import time (#3159). Every writer below creates its
+// own parent before its first write — scan-history (appendToScanHistory),
+// scan-runs (appendScanRunSummary), portal-health (appendPortalHealth) — and
+// pipeline.md goes through pipeline-lock.mjs, which creates data/ for the same
+// reason. applications.md and blacklist.md are read-only here. Importing this
+// module must stay side-effect free: a sibling that only reads a constant used
+// to leave a stray data/ in whatever cwd it ran from.
 
 const CONCURRENCY = 10;
 
@@ -265,7 +265,7 @@ function compiledPositiveMatchers(positiveList) {
   if (compiledPositiveCache.has(positiveList)) return compiledPositiveCache.get(positiveList);
   const compiled = positiveList
     .filter(k => typeof k === 'string' && k.trim().length > 0)
-    .map(k => ({ raw: k, match: compilePositiveKeyword(k.trim().toLowerCase()) }));
+    .map(k => ({ raw: k, match: compilePositiveKeyword(foldAccents(k.trim().toLowerCase())) }));
   compiledPositiveCache.set(positiveList, compiled);
   return compiled;
 }
@@ -277,7 +277,7 @@ function compiledPositiveMatchers(positiveList) {
 // `by_title_keyword` key must be written exactly as the positive entry is.
 export function matchedTitleKeywords(title, titleFilter) {
   const raw = Array.isArray(titleFilter?.positive) ? titleFilter.positive : [];
-  const lower = (title || '').toLowerCase();
+  const lower = foldAccents((title || '').toLowerCase());
   return compiledPositiveMatchers(raw)
     .filter(({ match }) => match(lower))
     .map(({ raw: kw }) => kw);
@@ -286,8 +286,13 @@ export function matchedTitleKeywords(title, titleFilter) {
 // ── Location filter ─────────────────────────────────────────────────
 // Optional. If `location_filter` is absent from portals.yml, all locations pass.
 // Semantics (case-insensitive substring, in this order):
-//   - Empty / whitespace-only / non-string location → pass (don't penalize
-//     missing or malformed provider data)
+//   - Empty / whitespace-only / non-string location AND no URL hint → pass
+//     (don't penalize missing or malformed provider data), UNLESS
+//     `location_filter.strict: true` and a restricting tier (`allow`, `block`,
+//     or `block_hard`) is configured — then reject, because a location-
+//     restricted sweep against a provider that does not return locations
+//     (iCIMS) otherwise silently inverts into "everything, plus matches from
+//     everywhere else" (#3276). Opt-in and default-unchanged.
 //   - `block_hard` matches → reject (the only tier `always_allow` cannot
 //     override; for country-level terms that are never a false rejection)
 //   - `always_allow` matches → pass (takes precedence over `block` — lets a
@@ -327,17 +332,25 @@ function normalizeKeywordList(value) {
 // Lookarounds rather than \b so keywords that begin or end with punctuation
 // (", IND", "UK -") still anchor correctly — \b is defined relative to word
 // characters and behaves surprisingly at a punctuation edge.
+// Letters, combining marks and numbers form words in every script; ASCII-only
+// boundaries let "al," match inside "Montréal," (including decomposed accents).
 // Note: distinct from compileKeyword() above, which serves the *title* filter and
 // only boundary-anchors 2-3 letter acronyms. Location keywords need boundaries on
 // every keyword, so they get their own compiler rather than changing title-matching
 // behaviour. Returns a predicate, mirroring compileKeyword()'s shape.
+// Edges are tested one code point at a time against a fully anchored class:
+// V8 in Node 26 returns false for /[\p{L}]$/u against an astral letter at
+// end-of-string (#4478), so "𐐀" lost its trailing boundary and matched "𐐀x".
+const LOCATION_WORD_CP = /^[\p{L}\p{M}\p{N}]$/u;
+
 function compileLocationKeyword(keyword) {
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const startsWord = /[a-z0-9]/.test(keyword[0]);
-  const endsWord = /[a-z0-9]/.test(keyword[keyword.length - 1]);
-  const prefix = startsWord ? '(?<![a-z0-9])' : '';
-  const suffix = endsWord ? '(?![a-z0-9])' : '';
-  const re = new RegExp(`${prefix}${escaped}${suffix}`);
+  const codePoints = [...keyword];
+  const startsWord = LOCATION_WORD_CP.test(codePoints[0] ?? '');
+  const endsWord = LOCATION_WORD_CP.test(codePoints.at(-1) ?? '');
+  const prefix = startsWord ? '(?<![\\p{L}\\p{M}\\p{N}])' : '';
+  const suffix = endsWord ? '(?![\\p{L}\\p{M}\\p{N}])' : '';
+  const re = new RegExp(`${prefix}${escaped}${suffix}`, 'u');
   return (lower) => re.test(lower);
 }
 
@@ -406,9 +419,10 @@ const USPS_STATES = Object.freeze([
 // ("Dublin OH", Workday URL hint "dublin oh"). Not a generic word-boundary —
 // English "in"/"or"/"me" in "Remote, Belgium or France" must not impersonate
 // Indiana/Oregon/Maine. State *names* still use compileLocationKeyword.
+// Unicode letters and marks are part of the token: "Montréal" is not "AL".
 function compileUsStateAbbrev(abbr) {
   const escaped = abbr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(`(?:,\\s*${escaped}(?![a-z0-9])|(?:^|[^a-z0-9])${escaped}[^a-z0-9]*$)`);
+  const re = new RegExp(`(?:,\\s*${escaped}(?![\\p{L}\\p{M}\\p{N}])|(?:^|[^\\p{L}\\p{M}\\p{N}])${escaped}[^\\p{L}\\p{M}\\p{N}]*$)`, 'u');
   return (lower) => re.test(lower);
 }
 
@@ -439,7 +453,8 @@ export function locationHintFromUrl(url) {
   if (!parsed.hostname.toLowerCase().endsWith('.myworkdayjobs.com')) return '';
   const segments = parsed.pathname.split('/').filter(Boolean);
   const jobIdx = segments.lastIndexOf('job');
-  if (jobIdx === -1 || jobIdx === segments.length - 1) return '';
+  // Workday also emits /job/{Title}_{ReqId}; a location needs a title after it.
+  if (jobIdx === -1 || segments.length - jobIdx - 1 < 2) return '';
   let segment = segments[jobIdx + 1];
   try {
     segment = decodeURIComponent(segment);
@@ -512,12 +527,20 @@ export function buildLocationFilter(locationFilter) {
   const allow = compileLocationKeywordList(locationFilter.allow);
   const block = compileLocationKeywordList(locationFilter.block);
   const blockHard = compileLocationKeywordList(locationFilter.block_hard);
+  // Opt-in: fail closed when there is nothing to judge on. Only meaningful when
+  // a restricting tier is configured — `{ strict: true }` alone restricts
+  // nothing and must not reject every location-less posting (#3276).
+  const strict = locationFilter.strict === true
+    && (allow.length > 0 || block.length > 0 || blockHard.length > 0);
 
   return (location, url, title) => {
     const lower = typeof location === 'string' ? location.trim().toLowerCase() : '';
     const hint = locationHintFromUrl(url);
-    // Nothing to judge on either field → pass (don't penalize missing data).
-    if (lower === '' && hint === '') return true;
+    // Nothing to judge on either field → pass (don't penalize missing data),
+    // unless the config opted into strict mode: a location-restricted sweep
+    // against a provider that never returns a location would otherwise let
+    // every out-of-region posting through (#3276).
+    if (lower === '' && hint === '') return !strict;
     const matches = (m) => (lower !== '' && m(lower)) || (hint !== '' && m(hint));
     // `block_hard` is the ONE tier always_allow cannot override. It exists because
     // a European city name can be a whole word inside a non-European location, so
@@ -974,18 +997,85 @@ export function buildSalaryFilter(salaryFilter) {
   };
 }
 
+// CJK/Korean corporate-form markers (#2570), kept as a list local to this
+// file rather than folded into invite-match.mjs's LEGAL_SUFFIXES. Two reasons
+// they can't share one list: LEGAL_SUFFIXES strips a *trailing, space-
+// delimited* word (`\s${suffix}$`), but 株式会社 is usually written unspaced,
+// as a *prefix* (株式会社メルカリ) and sometimes as a suffix (メルカリ株式会社),
+// so LEGAL_SUFFIXES's anchor fires on neither. (The spaced variant
+// 株式会社 メルカリ is ordinary orthography too, and it already matched before
+// this change — via the punctuation-to-space key and the containment
+// fallback. The unspaced form is the actual gap.) And
+// invite-match.mjs's normalizeCompanyName is deliberately stricter than
+// companyMatch (loosely-quoted email text vs. an identity key that must never
+// merge two different companies) — folding a CJK list into that stricter
+// normalizer risks loosening its callers too, which the "splits, never
+// merges" rule #2445/#2569 protects was written to prevent.
+const CORPORATE_FORMS = [
+  '株式会社', '合同会社', '有限会社',   // Japanese
+  '股份有限公司', '有限公司',           // Chinese (longer form first)
+  '주식회사',                           // Korean
+];
+
+// Split an already normalizeTextKey'd string into [form, remainder], where
+// `form` is the one leading or trailing corporate-form marker found, or null.
+// No space anchor: unlike LEGAL_SUFFIXES these forms are frequently written
+// unspaced (株式会社メルカリ), which is exactly the case the \b-based approach
+// cannot reach. The spaced variant (株式会社 メルカリ) already matched before
+// #2570, through the punctuation-to-space key and the containment fallback
+// below; the unspaced one is the gap. At most one strip — a name is not
+// expected to carry two forms — and longer forms are checked first
+// (股份有限公司 before 有限公司) so a strip cannot leave a dangling 股份 behind.
+//
+// Returning the form rather than just the remainder is what lets companyMatch
+// tell "one side omitted the form" from "the two sides carry DIFFERENT forms".
+// A bare remainder cannot express that difference, and collapsing it merges
+// 株式会社アカネ with 合同会社アカネ — a KK and a GK are two different legal
+// entities sharing a trade name, so that is a false merge, the one direction
+// #2445/#2569's "splits, never merges" rule exists to forbid.
+function stripCorporateForm(key) {
+  for (const form of CORPORATE_FORMS) {
+    if (key.startsWith(form)) return [form, key.slice(form.length)];
+    if (key.endsWith(form)) return [form, key.slice(0, -form.length)];
+  }
+  return [null, key];
+}
+
+// Apply the strip to a pair of keys, or decline to. Two DIFFERENT explicit
+// forms are positive evidence of two different entities, the same way a
+// mismatched req number is (#1524), so the raw keys are kept and the pair is
+// left to fail on its own merits. Otherwise strip, falling back to the raw key
+// when the strip empties it (a name that IS just the marker, e.g. "株式会社"
+// alone) so neither the equality check nor the containment fallback is ever
+// handed an empty "no signal" string.
+function stripFormPair(rawA, rawB) {
+  const [formA, restA] = stripCorporateForm(rawA);
+  const [formB, restB] = stripCorporateForm(rawB);
+  if (formA && formB && formA !== formB) return [rawA, rawB];
+  return [restA || rawA, restB || rawB];
+}
+
 export function companyMatch(jobCompany, windowCompany) {
   // Unicode-aware (#2393 family): the [a-z0-9] strip this used to carry erased
   // non-Latin scripts outright, so 株式会社アカネ and 合同会社ゾロ both cleaned
   // to '' and the equality check below reported two unrelated companies as the
   // same one. The empty guard is part of the fix, not decoration — "no usable
   // signal on either side" must never read as "identical".
-  const c1NoSpaces = normalizeTextKey(jobCompany);
-  const c2NoSpaces = normalizeTextKey(windowCompany);
+  //
+  // Corporate-form stripping (#2570) happens right here, before either the
+  // equality check or the containment fallback below, so both benefit. See
+  // stripFormPair: it declines to strip when the two sides carry different
+  // forms, so this stays a split, never a merge.
+  const [c1NoSpaces, c2NoSpaces] = stripFormPair(
+    normalizeTextKey(jobCompany),
+    normalizeTextKey(windowCompany),
+  );
   if (c1NoSpaces && c1NoSpaces === c2NoSpaces) return true;
 
-  const c1WithSpaces = normalizeTextKey(jobCompany, ' ');
-  const c2WithSpaces = normalizeTextKey(windowCompany, ' ');
+  const [c1WithSpaces, c2WithSpaces] = stripFormPair(
+    normalizeTextKey(jobCompany, ' '),
+    normalizeTextKey(windowCompany, ' '),
+  );
   if (!c1WithSpaces || !c2WithSpaces) return false;
 
   // Containment: a short window name should still match a longer official one
@@ -1003,12 +1093,11 @@ export function companyMatch(jobCompany, windowCompany) {
   // कंपनी mid-word — the key and its boundaries have to agree on what a letter
   // is, or they drift the way #2397 and #2445 fixed elsewhere.
   //
-  // Non-Latin containment does not fire here (株式会社メルカリ vs メルカリ): the
-  // lookbehind sees 社, a letter, so there is no boundary to assert, and
-  // Japanese is not space-delimited so no anchor rule recovers it. Note this
-  // pair DID match before this change, but only via the '' === '' collision
-  // that erased both names — not through this path. Making it match on purpose
-  // needs corporate-form normalisation, tracked separately in #2570.
+  // 株式会社メルカリ vs メルカリ never reaches this containment fallback at
+  // all now (#2570): the corporate-form strip above already resolves it via
+  // the equality check, since 社 being a letter still means no anchor rule
+  // here could have matched it directly — Japanese isn't space-delimited, so
+  // no boundary exists for the lookbehind to find.
   //
   // compileLocationKeyword() above reached for lookarounds too, for a related
   // reason ("\b behaves surprisingly at a punctuation edge"); its escape set is
@@ -1298,11 +1387,12 @@ const DEDUP_STRIP_PARAMS = new Set([
 /**
  * Normalize a job posting URL into a stable dedup key.
  *
- * Strips cosmetic query params (locale/tracking), drops a trailing slash,
- * and lowercases scheme, host, and path. Only used to compute the
- * *comparison* key — callers keep writing/displaying the original URL so
- * links stay clickable and scan-history/pipeline.md stay faithful to what
- * the provider returned.
+ * Strips cosmetic query params (locale/tracking), promotes recognized
+ * hash-route job IDs before dropping other fragments, drops a trailing slash,
+ * and lowercases scheme, host, and path. Only used to compute the *comparison*
+ * key — callers keep writing/displaying the original URL so links stay
+ * clickable and scan-history/pipeline.md stay faithful to what the provider
+ * returned.
  *
  * The path is lowercased because scan.mjs and scan-ats-full.mjs run as
  * separate processes and can independently produce different casing for the
@@ -1518,7 +1608,7 @@ function extractPipelineCompanyRole(line) {
 
   const [company = '', role = '', third = ''] = cells.slice(urlIndex + 1);
   const location = urlIndex === 0 && !PIPELINE_LABELED_SEGMENT_RE.test(third) ? third : '';
-  return { company, role, location };
+  return { company, role, location, url: cells[urlIndex] };
 }
 
 /**
@@ -1539,7 +1629,11 @@ function extractPipelineCompanyRole(line) {
 export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = {}) {
   const { scanHistoryText = '', pipelineText = '', applicationsText = '' } = sources;
   const seen = new Set();
-  let recheckEligible = 0;
+  // Rows the age policy has released. Held rather than counted here: the two
+  // sources parsed below carry no age policy of their own, so a row the TTL has
+  // just freed can be re-pinned a few lines later. The count is taken at the end,
+  // against the finished set, so it reports what is actually rescannable.
+  const recheckCandidates = new Set();
 
   // scan-history.tsv
   for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
@@ -1552,21 +1646,67 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
           if (token) seen.add(token);
         }
       }
-    } else recheckEligible++;
+    } else recheckCandidates.add(normalizeUrlForDedup(url));
   }
 
   // pipeline.md — extract URLs from checkbox lines, wherever the URL sits in the
   // line (see extractPipelineUrl: five of the six documented shapes lead with a
   // report number, a report link, or a strikethrough rather than the URL).
+  //
+  // This loop carried no age policy, which is what made
+  // `scan_history.recheck_after_days` a no-op: on an install that has been
+  // scanning for a while every URL the TTL releases above is listed here too, so
+  // it was re-pinned immediately and the window never freed anything.
+  //
+  // What may be released is decided by whether the row is still ACTIONABLE. A
+  // `- [ ]` row is a line the user can still pull from, and re-scanning it would
+  // append a SECOND copy of a job already on the list. A `- [x]` row, or any row
+  // under `## Processed`, is finished work: no queue entry can be duplicated, so
+  // the scan-history TTL is allowed to govern it alone. Release also requires the
+  // URL to be a recheck candidate, so a pipeline-only URL is never un-pinned.
+  // Sections are `##` in PIPELINE_SKELETON — `# Pipeline` is the document title,
+  // `## Pending` and `## Processed` are the sections. Heading depth decides what
+  // a heading does, in both directions:
+  //
+  //   deeper than a section (`###`)  a subdivision INSIDE it; changes nothing,
+  //                                  so `### August` under `## Processed` stays
+  //                                  released and `### Processed leftovers`
+  //                                  under `## Pending` releases nothing
+  //   at section level (`##`)        ends the previous section and opens this
+  //                                  one; released only if it is `Processed`
+  //   shallower (`#`)                outranks a section, so it ends it too — a
+  //                                  `# Backlog` after `## Processed` must not
+  //                                  inherit the released state
+  //
+  // Both failures are the same failure: a row that is still queued gets handed
+  // back to the scanner, which appends a second copy of a job already on the
+  // list. That duplication is what this function exists to prevent.
+  const SECTION_LEVEL = 2;
+  let inProcessed = false;
   for (const line of pipelineText.split('\n')) {
+    const heading = line.match(/^(#+)\s+(.*)$/);
+    if (heading && heading[1].length <= SECTION_LEVEL) {
+      inProcessed = heading[1].length === SECTION_LEVEL
+        && /^processed\b/i.test(heading[2].trim());
+    }
     const url = extractPipelineUrl(line);
-    if (url) seen.add(normalizeUrlForDedup(url));
+    if (!url) continue;
+    const key = normalizeUrlForDedup(url);
+    const done = /^\s*- \[x\]/i.test(line);
+    if ((done || inProcessed) && recheckCandidates.has(key)) continue;
+    seen.add(key);
   }
 
   // applications.md — extract URLs from report links and any inline URLs
   for (const match of applicationsText.matchAll(/https?:\/\/[^\s|)]+/g)) {
     seen.add(normalizeUrlForDedup(match[0]));
   }
+
+  // Counted against the finished set: a released row that applications.md or an
+  // actionable pipeline row pinned again is not eligible, and saying so keeps the
+  // number the scanners print honest.
+  let recheckEligible = 0;
+  for (const key of recheckCandidates) if (!seen.has(key)) recheckEligible++;
 
   return { seen, recheckEligible };
 }
@@ -1941,6 +2081,156 @@ export function companyRoleDedupKey(company, role, canonicalize = defaultCompany
 }
 
 /**
+ * Marker for a seeded company+role row whose requisition is unknown. A single
+ * such row keeps the key a plain duplicate, exactly as before requisitions were
+ * read at all.
+ */
+export const ANY_REQUISITION = '*';
+
+/**
+ * Canonical requisition IDs for company+role dedupe — every form the source
+ * could name; empty when none is known.
+ *
+ * Two same-titled postings at one employer are not always one role: UBC ran two
+ * "Programmer Analyst I" requisitions at once (JR25919 and JR25853, different
+ * departments), and the second was dropped as a duplicate of the first. The
+ * requisition is the one signal that tells them apart. It is read from:
+ *
+ * - a Workday URL, via `workdayDedupKey` (the same parse the provider uses for
+ *   cross-site dedupe, #3439, including its `-N` repost-suffix stripping);
+ * - labelled free text (tracker Notes, a posting title) via the tracker's own
+ *   `extractReqNumber`, the vocabulary merge-tracker.mjs already relies on to
+ *   keep same-title rows apart (#1524).
+ *
+ * Only these explicit forms count. A generic board's numeric posting ID is not
+ * read: a repost gets a new one, and treating it as a requisition would disable
+ * the company+role key it is layered on.
+ *
+ * A labelled ID with a trailing `-N` is ambiguous. On Workday the suffix is a
+ * cross-site repost disambiguator and `JR25919-1` IS JR25919 (the URL path
+ * strips it via `workdayDedupKey`); on Lever or Greenhouse `ABC123-1` and
+ * `ABC123-2` are two requisitions. The source decides how many forms come
+ * back:
+ *
+ * - Workday URL: one form, the suffix stripped.
+ * - Known non-Workday URL: one form, the label kept whole.
+ * - No URL (a tracker note on a layout without a URL column): BOTH forms, as
+ *   labelled and suffix-stripped. Nothing is guessed. A seeded row records
+ *   every form and a candidate is distinct only when NONE of its forms was
+ *   seen, so the ambiguous note matches whichever board the posting turns out
+ *   to live on: note `req JR25919-1` recognises Workday `_JR25919`, and note
+ *   `req ABC123-1` recognises a Lever title carrying `req ABC123-1` (whose
+ *   own single form is `ABC123-1`), so neither applied posting is re-queued.
+ *   Guessing one form was wrong in both directions: stripping changed the
+ *   Lever ID, while keeping only the suffix-bearing form missed Workday.
+ *
+ * The suffix rule (`stripWorkdayRepostSuffix`) only fires when the part before
+ * the hyphen is already requisition-shaped, so Walmart's `R-2593225` is one
+ * form on every path.
+ *
+ * Comparison ignores case only: prefixes and punctuation identify distinct
+ * requisitions. Bare JR/R_ tokens retain the prefix consumed as a label by
+ * the shared tracker parser, including label separators such as `JR: 25919`.
+ * Glued punctuation (`JR-25919`) remains part of the identifier. Numeric-only
+ * text (`Req #25919`) may omit a prefix, so it supplies no proof of a distinct
+ * requisition. A numeric ID extracted from a Workday URL is authoritative.
+ *
+ * @param {{url?: unknown, text?: unknown}} [source] - Posting URL and/or free text.
+ * @returns {string[]} Canonical requisition IDs, as-labelled form first.
+ */
+export function requisitionIdsForDedup({ url, text } = {}) {
+  const workdayKey = typeof url === 'string' ? workdayDedupKey({ url }) : null;
+  let raws;
+  if (workdayKey) {
+    // `workday:{hostname}:{reqId}` — a hostname has no colon, so the ID is
+    // everything after the second one.
+    raws = [workdayKey.split(':').slice(2).join(':')];
+  } else {
+    const match = String(text ?? '').match(REQ_NUMBER_RE);
+    const separatedPrefix = match?.[0].match(/^(JR|R_)[\s:#]+/i);
+    const labelled = match && /^(?:JR[-_]?|R_)\d/i.test(match[0])
+      ? match[0].toUpperCase()
+      : separatedPrefix && /^\d/.test(match[1])
+        ? `${separatedPrefix[1]}${match[1]}`.toUpperCase()
+        : extractReqNumber(text);
+    if (!labelled) return [];
+    if (/^[\d-]+$/.test(labelled)) return [];
+    const workdayUrl = isWorkdayJobUrl(url);
+    raws = workdayUrl === true
+      ? [stripWorkdayRepostSuffix(labelled)]
+      : workdayUrl === false ? [labelled] : [labelled, stripWorkdayRepostSuffix(labelled)];
+  }
+  const forms = [];
+  for (const raw of raws) {
+    const id = String(raw ?? '').toUpperCase();
+    if (/\d/.test(id) && !forms.includes(id)) forms.push(id);
+  }
+  return forms;
+}
+
+/**
+ * The source's requisition ID as labelled — the first form of
+ * {@link requisitionIdsForDedup} — or null. A convenience for callers that
+ * want one ID to print; the dedupe decision itself compares every form.
+ *
+ * @param {{url?: unknown, text?: unknown}} [source]
+ * @returns {string|null}
+ */
+export function requisitionIdForDedup(source) {
+  return requisitionIdsForDedup(source)[0] ?? null;
+}
+
+/**
+ * Whether a candidate that matched a seen company+role key is nevertheless a
+ * different requisition.
+ *
+ * True only when every seeded row for the key named its requisition and none of
+ * the candidate's forms was seen. Any unknown on either side keeps the
+ * historical answer — a duplicate — so the check can only let through postings
+ * the company itself labelled as distinct. An ambiguous source contributes
+ * every form it could mean (see {@link requisitionIdsForDedup}), and one hit
+ * on any of them is a duplicate.
+ *
+ * @param {Set<string>|undefined} seededRequisitions - Requisitions seen for matching keys.
+ * @param {string[]|string|null} candidateRequisitions - From {@link requisitionIdsForDedup}.
+ * @returns {boolean}
+ */
+export function isDistinctRequisition(seededRequisitions, candidateRequisitions) {
+  const forms = toRequisitionForms(candidateRequisitions);
+  return forms.length > 0
+    && seededRequisitions instanceof Set
+    && seededRequisitions.size > 0
+    && !seededRequisitions.has(ANY_REQUISITION)
+    && forms.every(form => !seededRequisitions.has(form));
+}
+
+function toRequisitionForms(requisitions) {
+  if (Array.isArray(requisitions)) return requisitions.filter(Boolean);
+  return requisitions ? [requisitions] : [];
+}
+
+/** Match only the requisition sets belonging to keys that match this location.
+ * A locationless candidate overlaps every located row, but a located candidate
+ * overlaps only its exact key and genuinely locationless wildcard rows.
+ */
+export function matchesSeenCompanyRole({ key, baseKey, seen, requisitions, locatedRequisitions }, candidate) {
+  if (key === null) return false;
+  if (seen.has(key) && !isDistinctRequisition(requisitions.get(key), candidate)) return true;
+  if (key !== baseKey && seen.has(baseKey)
+    && !isDistinctRequisition(requisitions.get(baseKey), candidate)) return true;
+  return key === baseKey && locatedRequisitions.has(baseKey)
+    && !isDistinctRequisition(locatedRequisitions.get(baseKey), candidate);
+}
+
+function recordRequisition(requisitionsByBase, baseKey, requisitions) {
+  let seen = requisitionsByBase.get(baseKey);
+  if (!seen) requisitionsByBase.set(baseKey, (seen = new Set()));
+  const forms = toRequisitionForms(requisitions);
+  if (forms.length === 0) seen.add(ANY_REQUISITION);
+  for (const form of forms) seen.add(form);
+}
+
+/**
  * Build the seen-role set from the same three sources as `loadSeenUrls`.
  *
  * Existing rows are canonicalized with the same company aliasing and role-title
@@ -1978,13 +2268,18 @@ export function companyRoleDedupKey(company, role, canonicalize = defaultCompany
  *   the bare wildcard key where it does not. Default false = the historical keys,
  *   byte for byte. `locatedBases`, when a Set is supplied, additionally collects
  *   the BARE key of every row that seeded a located one — see
- *   {@link loadDedupSnapshot} for what reads it.
+ *   {@link loadDedupSnapshot} for what reads it. `requisitionsByBase`, when a Map
+ *   is supplied, collects every requisition seen per actual dedup key (or
+ *   {@link ANY_REQUISITION} for a row that named none) — see
+ *   {@link isDistinctRequisition}. `locatedRequisitionsByBase` separately
+ *   aggregates located rows for matching a locationless candidate; it never
+ *   acts as a bare wildcard against a located candidate.
  * @returns {Set<string>} Existing company+role dedupe keys.
  */
-export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer, { includeLocation = false, locatedBases = null } = {}) {
+export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer, { includeLocation = false, locatedBases = null, requisitionsByBase = null, locatedRequisitionsByBase = null } = {}) {
   const { applicationsText = '', scanHistoryText = '', pipelineText = '' } = sources;
   const seen = new Set();
-  const add = (company, role, location) => {
+  const add = (company, role, location, requisition = null) => {
     const c = String(company ?? '').trim();
     const r = String(role ?? '').trim();
     if (!c || !r) return;
@@ -2003,6 +2298,13 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
       const base = companyRoleDedupKey(c, r, canonicalize);
       if (key !== base) locatedBases.add(base);
     }
+    if (requisitionsByBase) {
+      recordRequisition(requisitionsByBase, key, requisition);
+    }
+    const base = companyRoleDedupKey(c, r, canonicalize);
+    if (locatedRequisitionsByBase && key !== base) {
+      recordRequisition(locatedRequisitionsByBase, base, requisition);
+    }
   };
 
   // applications.md — header-aware parse (tracker-parse.mjs, #954). The old
@@ -2018,7 +2320,7 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
     for (const line of lines) {
       const row = parseTrackerRow(line, colmap);
       if (!row) continue;
-      add(row.company, row.role, row.location);
+      add(row.company, row.role, row.location, requisitionIdsForDedup({ url: row.url, text: row.notes }));
     }
   }
 
@@ -2030,7 +2332,7 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
     if (!url) continue;
     if (status !== 'added') continue;
     if (!shouldDedupScanHistoryRow({ firstSeen, status }, policy)) continue;
-    add(company, title, location);
+    add(company, title, location, requisitionIdsForDedup({ url }));
   }
 
   // pipeline.md — company/title are the two cells after the URL cell, plus
@@ -2041,7 +2343,7 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
   // wrong cells, so the seen-set keyed on garbage.
   for (const line of pipelineText.split('\n')) {
     const pair = extractPipelineCompanyRole(line);
-    if (pair) add(pair.company, pair.role, pair.location);
+    if (pair) add(pair.company, pair.role, pair.location, requisitionIdsForDedup({ url: pair.url }));
   }
 
   return seen;
@@ -2298,7 +2600,7 @@ export function loadFingerprintHistory(historyPath = SCAN_HISTORY_PATH) {
  *   Scan-history recheck policy, shared by the URL and company+role sets.
  * @param {(name: unknown) => string} [canonicalize=defaultCompanyNormalizer] -
  *   Company canonicalizer for the role keys.
- * @returns {{seen: Set<string>, recheckEligible: number, seenCompanyRoles: Set<string>, seenCompanyRoleBases: Set<string>, fingerprintHistory: Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}}
+ * @returns {{seen: Set<string>, recheckEligible: number, seenCompanyRoles: Set<string>, seenCompanyRoleBases: Set<string>, seenCompanyRoleRequisitions: Map<string, Set<string>>, fingerprintHistory: Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}}
  */
 // Same path seam as loadSeenUrls/appendToPipeline: anchored defaults, explicit
 // paths for a caller with its own lane or a test with a fixture.
@@ -2312,13 +2614,16 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
   const pipelineText = readIfExists(pipelinePath);
   const applicationsText = readIfExists(applicationsPath);
   const { seen, recheckEligible } = collectSeenUrls({ scanHistoryText, pipelineText, applicationsText }, policy);
-  // Companion index: the bare key of every seeded row that carried a location.
-  // It makes the wildcard rule symmetric in O(1) — see the dedupe check in
-  // main() for the direction it closes. Empty whenever the flag is off.
+  // Preserve the exported snapshot field for existing callers. The scanner's
+  // decision uses locatedRequisitionsByBase, not this legacy set.
   const seenCompanyRoleBases = new Set();
-  const seenCompanyRoles = collectSeenCompanyRoles({ applicationsText, scanHistoryText, pipelineText }, policy, canonicalize, { includeLocation, locatedBases: seenCompanyRoleBases });
+  // Keep exact/wildcard keys separate from the aggregate of located rows.
+  // Only locationless candidates consult the latter.
+  const seenCompanyRoleRequisitions = new Map();
+  const locatedRequisitionsByBase = new Map();
+  const seenCompanyRoles = collectSeenCompanyRoles({ applicationsText, scanHistoryText, pipelineText }, policy, canonicalize, { includeLocation, locatedBases: seenCompanyRoleBases, requisitionsByBase: seenCompanyRoleRequisitions, locatedRequisitionsByBase });
   const fingerprintHistory = collectFingerprintHistory(scanHistoryText);
-  return { seen, recheckEligible, seenCompanyRoles, seenCompanyRoleBases, fingerprintHistory };
+  return { seen, recheckEligible, seenCompanyRoles, seenCompanyRoleBases, seenCompanyRoleRequisitions, locatedRequisitionsByBase, fingerprintHistory };
 }
 
 // Standard skeleton created on fresh install — matches the format documented
@@ -2418,6 +2723,10 @@ export async function appendToScanHistory(offers, date, status = 'added') {
 // list was silently empty while the run reported no filtering at all.
 const BLACKLIST_PATH = path.join(DATA_ROOT, 'data/blacklist.md');
 
+function normalizeBlacklistDomain(domain) {
+  return String(domain || '').trim().toLowerCase().replace(/\.$/, '');
+}
+
 /**
  * Parse the user's do-not-apply list (data/blacklist.md, user layer, opt-in).
  *
@@ -2428,8 +2737,8 @@ const BLACKLIST_PATH = path.join(DATA_ROOT, 'data/blacklist.md');
  * blacklist row "Acme Corp." still catches an ATS feed that says "acme corp".
  *
  * @param {string} text - Raw data/blacklist.md content.
- * @returns {Map<string, {company: string, since: string, scope: string, reason: string}>}
- *          Normalized company key → entry. First row wins on duplicate keys.
+ * @returns {Map<string, {company: string, since: string, scope: 'company'|'domain', reason: string}>}
+ *          Normalized company key or domain:<hostname> → entry. First row wins on duplicate keys.
  */
 export function parseBlacklist(text) {
   const entries = new Map();
@@ -2439,16 +2748,54 @@ export function parseBlacklist(text) {
     const company = cells[1] || '';
     if (!company || /^[-: ]+$/.test(company)) continue; // separator row
     if (company.toLowerCase() === 'company') continue;  // header row
-    const key = normalizeCompany(company);
-    if (!key || entries.has(key)) continue;
+    const scope = (cells[3] || 'company').toLowerCase();
+    const value = scope === 'domain' ? normalizeBlacklistDomain(company) : normalizeCompany(company);
+    const key = scope === 'domain' ? `domain:${value}` : value;
+    if (!value || entries.has(key)) continue;
     entries.set(key, {
       company,
       since: cells[2] || '',
-      scope: cells[3] || '',
+      // A blank or unsupported scope keeps the long-standing company-name
+      // behavior. Only the documented `domain` value enables host matching.
+      scope: scope === 'domain' ? 'domain' : 'company',
       reason: cells[4] || '',
     });
   }
   return entries;
+}
+
+/**
+ * Find the blacklist entry that applies to one posting.
+ *
+ * `company` is the established default: compare the feed's company label with
+ * the normalized table value. `domain` is opt-in: the table's Company cell is
+ * a hostname suffix, so `ibm.com` matches `jobs.ibm.com` but not `notibm.com`.
+ * This deliberately does not infer parent/subsidiary ownership from a URL.
+ *
+ * @param {Map<string, {company: string, since: string, scope?: string, reason: string}>} blacklist
+ * @param {string} company - Feed-provided company label.
+ * @param {string} url - Posting URL.
+ * @returns {{company: string, since: string, scope?: string, reason: string}|null}
+ */
+export function findBlacklistEntry(blacklist, company, url) {
+  if (!blacklist || blacklist.size === 0) return null;
+
+  const companyEntry = blacklist.get(normalizeCompany(company || ''));
+  if (companyEntry && companyEntry.scope !== 'domain') return companyEntry;
+
+  let hostname;
+  try {
+    hostname = normalizeBlacklistDomain(new URL(url).hostname);
+  } catch {
+    return null;
+  }
+
+  for (const entry of blacklist.values()) {
+    if (entry.scope !== 'domain') continue;
+    const suffix = normalizeBlacklistDomain(entry.company);
+    if (suffix && (hostname === suffix || hostname.endsWith(`.${suffix}`))) return entry;
+  }
+  return null;
 }
 
 /**
@@ -2461,6 +2808,75 @@ export function parseBlacklist(text) {
 export function loadBlacklist(filePath = BLACKLIST_PATH) {
   if (!existsSync(filePath)) return new Map();
   return parseBlacklist(readFileSync(filePath, 'utf-8'));
+}
+
+/**
+ * Parse data-static/aggregator-domains.txt into a Map keyed by domain.
+ * Format: `domain.com # reason`
+ * Skips blank lines and lines starting with `#`.
+ *
+ * @param {string} text - Raw data-static/aggregator-domains.txt content.
+ * @returns {Map<string, {domain: string, reason: string}>}
+ */
+export function parseAggregatorDomains(text) {
+  const entries = new Map();
+  for (let line of String(text ?? '').replace(/\r/g, '').split('\n')) {
+    line = line.trim();
+    if (!line || line.startsWith('#')) continue;
+    const hashIdx = line.indexOf('#');
+    let domain = line;
+    let reason = '';
+    if (hashIdx !== -1) {
+      domain = line.slice(0, hashIdx);
+      reason = line.slice(hashIdx + 1);
+    }
+    domain = domain.trim().toLowerCase();
+    reason = reason.trim();
+    if (!domain) continue;
+    entries.set(domain, { domain, reason });
+  }
+  return entries;
+}
+
+export const AGGREGATOR_DOMAINS_PATH = process.env.CAREER_OPS_AGGREGATOR_DOMAINS || path.join(CODE_ROOT, 'data-static/aggregator-domains.txt');
+
+/**
+ * Load data-static/aggregator-domains.txt dataset.
+ *
+ * @param {string} [filePath] - Override for tests.
+ * @returns {Map<string, {domain: string, reason: string}>}
+ */
+export function loadAggregatorDomains(filePath = AGGREGATOR_DOMAINS_PATH) {
+  if (!existsSync(filePath)) return new Map();
+  return parseAggregatorDomains(readFileSync(filePath, 'utf-8'));
+}
+
+/**
+ * Check if an offer's URL hostname matches a known aggregator domain.
+ * Uses the same `new URL(offer.url).hostname` pattern as `extractCareersUrlDomain()`.
+ *
+ * @param {{url: string}} offer - Offer object with a url property.
+ * @param {Map<string, {domain: string, reason: string}>} [domainsMap] - Optional map of aggregator domains.
+ * @returns {{domain: string, reason: string}|null} Matched entry or null.
+ */
+export function checkAggregatorRepost(offer, domainsMap = loadAggregatorDomains()) {
+  if (!offer || !offer.url || !domainsMap || domainsMap.size === 0) return null;
+  let hostname;
+  try {
+    hostname = new URL(offer.url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  if (hostname.endsWith('.')) {
+    hostname = hostname.slice(0, -1);
+  }
+  if (!hostname) return null;
+  for (const [domain, entry] of domainsMap) {
+    if (hostname === domain || hostname.endsWith('.' + domain)) {
+      return entry;
+    }
+  }
+  return null;
 }
 
 // ── Scan-run persistence (#1604) ────────────────────────────────────
@@ -2492,6 +2908,13 @@ export function registerRunFailureSnapshot(fn) {
   runFailureSnapshot = typeof fn === 'function' ? fn : null;
 }
 
+// NOT locked, deliberately. This runs from the SIGINT handler and the fatal
+// path, which call process.exit() with nothing able to await first, and every
+// lock entry point in pipeline-lock.mjs is async. It is already best-effort and
+// swallows its own errors. So a failure row written while a migration is
+// swapping the file can still be lost; the completed-run path above is the one
+// that is covered. Stated rather than implied, because the alternative is a
+// comment claiming a guarantee this function does not provide.
 export function writeRunFailureRow(status = 'failed', filePath = SCAN_RUNS_PATH) {
   const snapshot = runFailureSnapshot;
   runFailureSnapshot = null;
@@ -2505,6 +2928,9 @@ export function writeRunFailureRow(status = 'failed', filePath = SCAN_RUNS_PATH)
 }
 
 export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
+
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  if (!existsSync(filePath)) writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
   // The header is written only on first creation, so a release that appends or inserts a counter
   // leaves existing files with a header that no longer describes the rows below it. Nothing
   // migrates it and nothing notices: stats.mjs reads by column NAME, so it silently returns a
@@ -2600,6 +3026,13 @@ export function computeConsecutiveFailures(healthRecords) {
     }
   }
   return streaks;
+}
+
+export function emptyTargetStatus(observation) {
+  // A provider outside this HTTP context (local-parser or a keyed plugin)
+  // gives no transport evidence. Preserve its previous empty classification.
+  return observation.requests > 0 && observation.successfulResponses === 0
+    ? 'unverified_zero' : 'empty';
 }
 
 // ── Parallel fetch with concurrency limit ───────────────────────────
@@ -2984,7 +3417,8 @@ async function main() {
   const dedupSnapshot = loadDedupSnapshot(historyPolicy, canonicalizeCompany, { includeLocation: dedupIncludeLocation });
   const seenUrls = dedupSnapshot.seen;
   const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
-  const seenCompanyRoleBases = dedupSnapshot.seenCompanyRoleBases ?? new Set();
+  const seenCompanyRoleRequisitions = dedupSnapshot.seenCompanyRoleRequisitions ?? new Map();
+  const locatedRequisitionsByBase = dedupSnapshot.locatedRequisitionsByBase ?? new Map();
 
   // 5. Fetch from each target
   // LOCAL day. This one value does two things that both care which day it is:
@@ -3013,6 +3447,7 @@ async function main() {
   const newOffers = [];
   const errors = [...resolveErrors];
   const emptyTargets = [];
+  const unverifiedZeroTargets = [];
 
   // Arm the failure-path row (#2643) now that the sweep is about to start and
   // every counter it reads is in scope. new_added is hardcoded 0 on a failed
@@ -3042,6 +3477,7 @@ async function main() {
 
   const tasks = targets.map(company => async () => {
     let provider = company._provider;
+    const observation = { requests: 0, successfulResponses: 0, lastStatus: null };
     // includeUndated is deliberately ALWAYS true, independent of the window.
     // It does not mean "include undated postings in the results" — scan.mjs
     // already decides that downstream, where buildPostedDateFilter passes a
@@ -3057,7 +3493,13 @@ async function main() {
     // fix belongs in workday.mjs, where closing it costs the optimisation on
     // every tenant that mixes.
     const ctx = {
-      ...makeHttpCtx(),
+      ...makeHttpCtx({
+        onRequest: () => { observation.requests++; },
+        onResponse: status => {
+          observation.lastStatus = status;
+          if (status >= 200 && status < 300) observation.successfulResponses++;
+        },
+      }),
       sinceMs: earlyStopSinceMs,
       includeUndated: true,
       locationHints: config.location_filter,
@@ -3084,7 +3526,8 @@ async function main() {
       }
       totalFound += jobs.length;
       if (!company._isBoard && jobs.length === 0) {
-        emptyTargets.push(company.name);
+        if (emptyTargetStatus(observation) === 'empty') emptyTargets.push(company.name);
+        else unverifiedZeroTargets.push(company.name);
       }
 
       for (const job of jobs) {
@@ -3099,7 +3542,7 @@ async function main() {
         // silent: skips are counted and reported in the run summary, and
         // --include-blacklisted lets the posting through annotated instead.
         if (blacklist.size > 0) {
-          const blEntry = blacklist.get(normalizeCompany(job.company || company.name || ''));
+          const blEntry = findBlacklistEntry(blacklist, job.company || company.name || '', job.url);
           if (blEntry) {
             if (!includeBlacklisted) {
               totalFilteredBlacklist++;
@@ -3157,49 +3600,19 @@ async function main() {
           totalDupes++;
           continue;
         }
-        // Three lookups, not one, when the location joins the key. A bare key is
-        // a wildcard (see companyRoleDedupKey) and a wildcard has to match in
-        // BOTH directions, but the two directions are stored differently:
-        //
-        //   1. seed bare → candidate located. A source that recorded no location
-        //      (applications.md rarely has a Location column) contributed
-        //      `company::role`; a candidate keyed `company::role@@london` must
-        //      still be suppressed by it. That is the `has(baseKey)` lookup.
-        //   2. seed located → candidate bare. The reverse: history holds
-        //      `company::role@@london` and a provider now returns the same role
-        //      with its location field empty, so the candidate's own key IS
-        //      `baseKey` and matches neither stored entry. Without the third
-        //      lookup it is added as new — an already-applied role resurfacing,
-        //      which is the very thing the wildcard exists to stop.
-        //
-        // Case 2 is answered from a prebuilt index rather than by scanning
-        // seenCompanyRoles for the `${baseKey}@@` prefix: that set holds one
-        // entry per historical posting (thousands on an established install) and
-        // a prefix scan would walk all of them for every candidate of every
-        // company — O(candidates x history) added to a zero-token scan people
-        // run daily. seenCompanyRoleBases answers it in one hash lookup.
-        //
-        // Guarded on `key === baseKey` so it fires only for a locationless
-        // candidate: two candidates with DIFFERENT cities must stay distinct.
-        // `key === baseKey` whenever the flag is off, and the index is empty in
-        // that case, so the default path is unchanged.
-        //
-        // An aggregator feed (portals.yml `aggregator: true`) names itself as
-        // the company, so two same-titled posts are two employers' jobs: only
-        // the URL dedups there, and the key is null.
+        // Compare requisitions only in overlapping locations: the exact key,
+        // truly locationless wildcard rows, and (for a locationless candidate)
+        // the prebuilt aggregate of located rows. An unknown ID keeps the
+        // historical duplicate decision. Aggregators use URL dedup only.
         const baseKey = companyRoleDedupKey(job.company, job.title, canonicalizeCompany);
         const key = company.aggregator === true
           ? null
           : (dedupIncludeLocation
             ? companyRoleDedupKey(job.company, job.title, canonicalizeCompany, job.location)
             : baseKey);
-        if (
-          key !== null && (
-            seenCompanyRoles.has(key) ||
-            seenCompanyRoles.has(baseKey) ||
-            (key === baseKey && seenCompanyRoleBases.has(baseKey))
-          )
-        ) {
+        const requisition = requisitionIdsForDedup({ url: job.url, text: job.title });
+        if (matchesSeenCompanyRole({ key, baseKey, seen: seenCompanyRoles,
+          requisitions: seenCompanyRoleRequisitions, locatedRequisitions: locatedRequisitionsByBase }, requisition)) {
           totalDupes++;
           continue;
         }
@@ -3219,7 +3632,8 @@ async function main() {
         seenUrls.add(dedupUrl);
         if (key !== null) {
           seenCompanyRoles.add(key);
-          if (key !== baseKey) seenCompanyRoleBases.add(baseKey);
+          recordRequisition(seenCompanyRoleRequisitions, key, requisition);
+          if (key !== baseKey) recordRequisition(locatedRequisitionsByBase, baseKey, requisition);
         }
         // Tag with the company's careers domain so verify can offer a 404/410
         // rediscovery fallback. A null domain (no careers_url) marks the offer
@@ -3237,6 +3651,7 @@ async function main() {
         company: company.name,
         error: err.message,
         kind: classifyFetchError(err),
+        status: err.status ?? observation.lastStatus,
       });
     }
   });
@@ -3380,6 +3795,25 @@ async function main() {
     }
     console.log(`  If one side is an agency, apply through ONE channel only — a double submission burns both (#1596).`);
   }
+  const aggregatorMap = loadAggregatorDomains();
+  if (aggregatorMap.size > 0 && verifiedOffers.length > 0) {
+    const aggregatorMatches = [];
+    for (const offer of verifiedOffers) {
+      const match = checkAggregatorRepost(offer, aggregatorMap);
+      if (match) {
+        aggregatorMatches.push({ offer, match });
+      }
+    }
+    if (aggregatorMatches.length > 0) {
+      console.log(`\n⚠️  Possible aggregator reposts (listed on a known aggregator domain) — warn only, nothing was dropped:`);
+      for (const { offer, match } of aggregatorMatches) {
+        console.log(`  - ${offer.company} — ${offer.title}`);
+        console.log(`    ${offer.url}`);
+        console.log(`    (${match.domain}: ${match.reason || 'known aggregator'})`);
+      }
+      console.log(`  Aggregators often scrape primary boards — consider applying directly on the employer's career site (#3577).`);
+    }
+  }
   if (historyPolicy.recheckAfterDays != null) {
     console.log(`Recheck eligible:      ${dedupSnapshot.recheckEligible} old scan-history URL(s)`);
   }
@@ -3425,11 +3859,11 @@ async function main() {
   const unreachableTargets = errors.filter((e) => e.kind === 'slug_gone');
   const networkTargets = errors.filter((e) => e.kind === 'network');
   const otherErrors = errors.filter((e) => e.kind !== 'slug_gone' && e.kind !== 'network');
-  
+
   const STREAK_THRESHOLD = config.portal_health_threshold || 3;
   const nowStr = new Date().toISOString();
   const healthRecords = [];
-  
+
   // Record each errored target under its real classifyFetchError kind. Before
   // this, only slug_gone/network were recorded and auth (401/403), server
   // (5xx), and unknown fell through to 'reachable' — so a portal WAF-403ing
@@ -3441,9 +3875,11 @@ async function main() {
   );
   for (const t of targets) {
     const isEmpty = emptyTargets.includes(t.name);
+    const isUnverifiedZero = unverifiedZeroTargets.includes(t.name);
 
     let status = errorKindByCompany.get(t.name) || 'reachable';
     if (status === 'reachable' && isEmpty) status = 'empty';
+    if (status === 'reachable' && isUnverifiedZero) status = 'unverified_zero';
 
     healthRecords.push({ timestamp: nowStr, company: t.name, status });
   }
@@ -3454,12 +3890,13 @@ async function main() {
   const persistentlyDead = [];
   const newlyDeadSlug = [];
   const newlyDeadNetwork = [];
-  
+
   // All error kinds can reach the 🚨 persistent list (auth/server/unknown
   // included — a WAF that 403s the scanner every run is coverage decay too).
   // Below threshold, only slug_gone/network keep their dedicated warnings;
   // auth/server/unknown stay in the one-off `Errors (N):` print below.
-  for (const e of [...unreachableTargets, ...networkTargets, ...otherErrors.filter((x) => x.kind)]) {
+  for (const e of [...unreachableTargets, ...networkTargets, ...otherErrors.filter((x) => x.kind),
+    ...unverifiedZeroTargets.map(company => ({ company, kind: 'unverified_zero' }))]) {
     const streak = currentStreaks.get(e.company) || 1;
     if (streak >= STREAK_THRESHOLD) {
       if (!persistentlyDead.includes(e.company)) persistentlyDead.push(e.company);
@@ -3481,6 +3918,9 @@ async function main() {
   }
   if (emptyTargets.length > 0) {
     console.log(`🟡 ${emptyTargets.length} target(s) live but empty: ${emptyTargets.join(', ')}`);
+  }
+  if (unverifiedZeroTargets.length > 0) {
+    console.log(`⚠️  ${unverifiedZeroTargets.length} target(s) returned zero jobs without a successful HTTP response: ${unverifiedZeroTargets.join(', ')}`);
   }
   if (newlyDeadNetwork.length > 0) {
     console.log(`\nNetwork errors (${newlyDeadNetwork.length}):`);
@@ -3515,7 +3955,14 @@ async function main() {
   // writes; a --dry-run must leave no trace.
   if (!dryRun) {
     await appendPortalHealth(healthRecords);
-    appendScanRunSummary({
+    // Locked on the same file the migration locks, for the reason the sibling
+    // append at appendToScanHistory already gives: two writers interleaving a
+    // read-modify-write on an append-only TSV silently drop each other's rows.
+    // migrate-scan-runs.mjs rewrites this file wholesale, so without the lock a
+    // run finishing mid-migration is written into a file that is then replaced
+    // by a snapshot taken before it, and the row is gone from the live file and
+    // from the .bak. Measured at ~9ms of exposure, and reproduced.
+    await withPipelineLock(SCAN_RUNS_PATH, () => appendScanRunSummary({
       timestamp: new Date().toISOString(), status: 'completed',
       companies: summaryCompanies, boards: summaryBoards, found: totalFound,
       filteredTitle: totalFilteredTitle, filteredTier: totalFilteredTier,
@@ -3527,7 +3974,7 @@ async function main() {
       filteredVisa: totalFilteredVisa,
       filteredPostedDate: totalFilteredPostedDate,
       filteredCountryEligibility: totalFilteredCountryEligibility,
-    });
+    }));
   }
   // The run completed (or was a dry run) — disarm the failure row.
   registerRunFailureSnapshot(null);
@@ -3551,6 +3998,7 @@ async function main() {
       added: verifiedOffers.length,
       added_urls: verifiedOffers.map(offer => offer.url),
       errors: errors.map(({ company, error }) => ({ company, error })),
+      unverified_zero: unverifiedZeroTargets,
       dry_run: dryRun,
     }, errors.length > 0 ? 2 : 0);
   }

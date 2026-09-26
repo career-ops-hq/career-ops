@@ -14,6 +14,7 @@ import * as yaml from 'js-yaml';
 import dotenv from 'dotenv';
 import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { validateProfile, EXAMPLE_PATH } from './validate-profile.mjs';
 import { resolveExtractorMode } from './browser-extract.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
@@ -54,8 +55,16 @@ CLIs: ${VALID_CLIS.join(', ')}`;
 validateFlags(argv, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
 const targetIdx = argv.indexOf('--target');
-const projectRoot =
-  targetIdx !== -1 && argv[targetIdx + 1] ? argv[targetIdx + 1] : getCareerOpsRoot();
+const explicitTarget = targetIdx !== -1 && argv[targetIdx + 1] ? argv[targetIdx + 1] : null;
+const projectRoot = explicitTarget || getCareerOpsRoot();
+// node_modules and .git belong to the CODE checkout, not the resolved data
+// root — under a split checkout (CAREER_OPS_ROOT/CAREER_OPS_DATA_DIR or the
+// .career-ops-data marker) those are two different directories, and neither
+// ever holds the other's artifacts (career-ops#3867 finding 6). --target is
+// the one case that means "diagnose this whole other checkout" — code layer
+// included — so it keeps pointing both roots at the same place, matching how
+// tests/doctor-tracked-bak-files.test.mjs already exercises it.
+const codeRoot = explicitTarget || __dirname;
 const JSON_OUT = argv.includes('--json');
 // --strict adds a live reachability probe of every portals.yml entry (network).
 // Opt-in so the default `npm run doctor` stays fast and fully offline.
@@ -145,7 +154,7 @@ function checkBillingSource() {
 }
 
 function checkDependencies() {
-  if (existsSync(join(projectRoot, 'node_modules'))) {
+  if (existsSync(join(codeRoot, 'node_modules'))) {
     return { pass: true, label: 'Dependencies installed' };
   }
   return {
@@ -415,7 +424,7 @@ function checkPlaywrightMcp(root, activeCli) {
 function checkScanExtractor(root) {
   const mode = resolveExtractorMode(join(root, 'config', 'profile.yml'));
   if (mode === 'cli') {
-    if (existsSync(join(root, 'browser-extract.mjs'))) {
+    if (existsSync(join(__dirname, 'browser-extract.mjs'))) {
       return { pass: true, label: 'Scan extractor: cli (browser-extract.mjs)' };
     }
     return {
@@ -640,6 +649,34 @@ function checkPlugins(root) {
   return fixes.length ? { warn: true, label, fix: fixes } : { pass: true, label };
 }
 
+// profile.yml steers scoring targets, output language, spend tier, CV format and
+// location policy — and the existence check above is all that ever looked at it.
+// Every reader does `profile?.language?.output` and takes the fallback when the
+// key is missing, which is indistinguishable from the key being MISSPELLED. So
+// `langauge: {output: ja}` produces English output and no signal anywhere.
+//
+// WARN, never FAIL, like the plugin check below it: an unknown key is a typo,
+// not a broken install, and refusing to run would be a worse answer than naming
+// it.
+function checkProfileShape(root) {
+  const profilePath = process.env.CAREER_OPS_PROFILE || join(root, 'config', 'profile.yml');
+  if (!existsSync(profilePath)) return null;   // the prereq check owns "absent"
+  let findings;
+  try {
+    const example = existsSync(EXAMPLE_PATH) ? readFileSync(EXAMPLE_PATH, 'utf-8') : '';
+    findings = validateProfile(readFileSync(profilePath, 'utf-8'), example).findings;
+  } catch (err) {
+    return { warn: true, label: `config/profile.yml could not be read (${err.message})` };
+  }
+  const actionable = findings.filter((f) => f.level !== 'info');
+  if (actionable.length === 0) return { pass: true, label: 'config/profile.yml: shape OK' };
+  return {
+    warn: true,
+    label: `config/profile.yml: ${actionable.length} issue${actionable.length === 1 ? '' : 's'} — settings under an unrecognized key have no effect`,
+    fix: actionable.map((f) => f.message),
+  };
+}
+
 async function main() {
   console.log('\ncareer-ops doctor');
   console.log('================\n');
@@ -653,13 +690,14 @@ async function main() {
     geminiNodeFloor(activeCli, process.versions.node),
     checkBillingSource(),
     checkDependencies(),
-    checkTrackedBakFiles(projectRoot),
+    checkTrackedBakFiles(codeRoot),
     await checkPlaywright(),
-    checkPlaywrightMcp(projectRoot, activeCli),
+    checkPlaywrightMcp(process.cwd(), activeCli),
     checkScanExtractor(projectRoot),
     ...USER_LAYER_PREREQS.map(checkPrereq),
     checkFonts(),
     checkPersonalization(projectRoot),
+    checkProfileShape(projectRoot),
     checkAutoDir('data'),
     checkPipelineFile(),
     checkAutoDir('output'),
@@ -819,9 +857,16 @@ function onboardingState(root) {
 
   const { cli: activeCli, source: cliSource, warning: cliWarning } = resolveActiveCli();
 
-  const mcpCheck = checkPlaywrightMcp(root, activeCli);
+  // MCP project configuration belongs to the launch checkout. `root` is the
+  // user-data layer and may point elsewhere under split-checkout installs.
+  const mcpCheck = checkPlaywrightMcp(process.cwd(), activeCli);
   const unpersonalized = unpersonalizedFiles(root);
-  const bakCheck = checkTrackedBakFiles(root);
+  // Every other check in this function is data-layer and correctly uses this
+  // function's own `root` parameter. The tracked-.bak check is the one
+  // code-layer exception (#3867 finding 6) — it must read the module-level
+  // codeRoot (the code checkout), which only differs from `root` when a real
+  // split-checkout data root is in play and no --target was given.
+  const bakCheck = checkTrackedBakFiles(codeRoot);
   const warnings = [
     ...(cliWarning ? [cliWarning] : []),
     ...(mcpCheck?.warn ? [`${mcpCheck.label}\n→ ${[].concat(mcpCheck.fix || []).join('\n  ')}`] : []),

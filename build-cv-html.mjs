@@ -33,6 +33,7 @@ import { tmpdir } from 'os';
 import { stripEmptySections } from './cv-sections-core.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { hasRequiredFields, validatePayload } from './lib/cv-payload-schema.mjs';
+import { PAGE_WIDTHS, resolvePageFormat } from './lib/page-format.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -40,7 +41,7 @@ const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.html');
 const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
 const CONTACT_ROW_RE = /<div class="contact-row">[\s\S]*?<\/div>/;
 
-const PAGE_WIDTHS = { letter: '8.5in', a4: '210mm' };
+const PROFILE_PATH = resolve(DATA_ROOT, 'config', 'profile.yml');
 const PHOTO_MIME_BY_EXT = new Map([
   ['.png', 'image/png'],
   ['.jpg', 'image/jpeg'],
@@ -429,7 +430,25 @@ function buildProjects(entries, partial) {
     const nameHtml = url
       ? `<a href="${url}">${nameText}</a>`
       : nameText;
-    return fillEntry(entryTemplate, blocks, {
+    // A bullets array with 2+ items and no description renders one DESC_BLOCK
+    // per bullet, matching how experience renders one <li> per bullet, instead
+    // of joining them into a single block.
+    let entryBlocks = blocks;
+    const multi = !e.description && Array.isArray(e.bullets)
+      ? e.bullets.filter(Boolean) : [];
+    const descBlock = blocks.get('DESC_BLOCK');
+    if (multi.length > 1 && descBlock) {
+      // The expanded block is scanned again by fillEntry, so encode braces in
+      // the bullet text: a literal {{DESC}} must render as text, not be treated
+      // as a template reference.
+      const literalBraces = (t) => escapeHtml(t).replace(/\{/g, '&#123;').replace(/\}/g, '&#125;');
+      const present = multi
+        .map(b => descBlock.present.replace(/\{\{(DESC_BLOCK|DESC)\}\}/g, () => literalBraces(b)))
+        .join('\n  ');
+      entryBlocks = new Map(blocks);
+      entryBlocks.set('DESC_BLOCK', { ...descBlock, present });
+    }
+    return fillEntry(entryTemplate, entryBlocks, {
       NAME:  nameHtml,
       BADGE: escapeHtml(e.badge || ''),
       DESC:  escapeHtml(descText),
@@ -629,7 +648,9 @@ function buildPhoto(candidate, name) {
 function renderReport(payload, partials) {
   const sectionTitles = { ...DEFAULT_SECTION_TITLES, ...(payload.sections || {}) };
   const candidate = payload.candidate || {};
-  const pageWidth = PAGE_WIDTHS[payload.page_format] || PAGE_WIDTHS.letter;
+  // The sheet this body has to fit is chosen by generate-pdf.mjs, so both read
+  // the same resolver rather than each keeping a fallback of their own.
+  const pageWidth = PAGE_WIDTHS[resolvePageFormat(payload.page_format, { profilePath: PROFILE_PATH })];
 
   const substitutions = {
     LANG: escapeHtml(payload.lang || 'en'),
@@ -968,6 +989,37 @@ async function runSelfTest() {
   }
   if (!html.includes('class="edu-location"')) {
     console.error('Self-test failed: edu-location block not rendered when education location is present');
+    process.exit(1);
+  }
+
+  // Guard that a project's bullets array renders one DESC_BLOCK per bullet
+  // (2+ bullets, no description), while a plain description stays a single block.
+  const multiBulletHtml = renderHtml(template, {
+    ...sample,
+    projects: [{ name: 'Multi', bullets: ['First bullet', 'Second bullet', 'Third bullet'] }],
+  }, TEMPLATE_PATH);
+  // Literal placeholder text inside a bullet must render as text, not be
+  // re-read as a template reference (which would fail as an unresolved marker).
+  let literalHtml;
+  try {
+    literalHtml = renderHtml(template, {
+      ...sample,
+      projects: [{ name: 'Literal', bullets: ['Uses {{DESC}} syntax', 'Also {{DESC_BLOCK}} here'] }],
+    }, TEMPLATE_PATH);
+  } catch (err) {
+    console.error(`Self-test failed: literal placeholder text in a project bullet: ${err.message}`);
+    process.exit(1);
+  }
+  if (!literalHtml.includes('&#123;&#123;DESC&#125;&#125;') || !literalHtml.includes('&#123;&#123;DESC_BLOCK&#125;&#125;')) {
+    console.error('Self-test failed: literal placeholders in project bullets were not preserved');
+    process.exit(1);
+  }
+  if ((multiBulletHtml.match(/class="project-desc"/g) || []).length !== 3) {
+    console.error('Self-test failed: project bullets did not render one block per bullet');
+    process.exit(1);
+  }
+  if ((html.match(/class="project-desc"/g) || []).length !== 1) {
+    console.error('Self-test failed: project description should render as a single block');
     process.exit(1);
   }
 

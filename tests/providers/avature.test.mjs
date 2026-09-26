@@ -9,7 +9,7 @@ console.log('\nProvider — avature (career-site SearchJobs parser)');
 try {
   const avatureModule = await import(pathToFileURL(join(ROOT, 'providers/avature.mjs')).href);
   const avature = avatureModule.default;
-  const { parseArticles } = avatureModule;
+  const { parseArticles, assertParsedSomething } = avatureModule;
 
   if (avature.id === 'avature') pass('avature.id is "avature"');
   else fail(`avature.id is ${JSON.stringify(avature.id)}`);
@@ -166,6 +166,118 @@ try {
   const emptyHealed = await avature.fetch({ name: 'X', api: base }, emptyP1Ctx);
   if (emptyHealed.length === 14 && emptyP1Ctx.calls.some((u) => /[?&]offset=/.test(u))) pass('avature.fetch() self-heals when the inert key returns an empty page 1');
   else fail(`avature.fetch() failed to heal empty page 1: ${emptyHealed.length} jobs`);
+
+  // Facet pass-through (Siemens) — an entry pinned to a pre-narrowed board
+  // (e.g. ?42386=[812132]&42390=[102157,102158] — country/experience facets
+  // picked in the site's own filter UI) must keep those facets on EVERY
+  // paginated request, not just page 0, or the "narrowed" board silently
+  // widens back out to the full unfiltered board past page 1.
+  {
+    const facetBase = 'https://acme.avature.net/careers/SearchJobs/?42386=%5B812132%5D&listFilterMode=1&folderRecordsPerPage=6';
+    const capturedUrls = [];
+    const facetCtx = {
+      sleep: async () => {},
+      fetchText: async (url) => { capturedUrls.push(url); return '<div>no articles</div>'; },
+    };
+    await avature.fetch({ name: 'X', api: facetBase }, facetCtx);
+    const firstUrl = capturedUrls[0] ? new URL(capturedUrls[0]) : null;
+    if (firstUrl && firstUrl.searchParams.get('42386') === '[812132]' && firstUrl.searchParams.get('jobOffset') === '0') {
+      pass('avature.fetch() carries a pinned facet query param through to the request');
+    } else {
+      fail(`avature.fetch() dropped the facet param: ${JSON.stringify(capturedUrls[0])}`);
+    }
+
+    // A facet named the same as our own pagination key must never win —
+    // our per-page offset always overwrites it.
+    const collideBase = 'https://acme.avature.net/careers/SearchJobs/?jobOffset=999&42386=%5B812132%5D';
+    const collideUrls = [];
+    const collideCtx = {
+      sleep: async () => {},
+      fetchText: async (url) => { collideUrls.push(url); return '<div>no articles</div>'; },
+    };
+    await avature.fetch({ name: 'X', api: collideBase }, collideCtx);
+    const collideUrl = collideUrls[0] ? new URL(collideUrls[0]) : null;
+    if (collideUrl && collideUrl.searchParams.get('jobOffset') === '0' && collideUrl.searchParams.get('42386') === '[812132]') {
+      pass('avature.fetch() strips a facet colliding with the pagination key, keeping unrelated facets');
+    } else {
+      fail(`avature.fetch() facet/pagination-key collision handled wrong: ${JSON.stringify(collideUrls[0])}`);
+    }
+  }
+
+  // Empty board vs a broken selector — a first page carrying posting-shaped
+  // JobDetail links but zero parsed articles is a markup change, not a quiet
+  // board; assertParsedSomething is the guard, mirrored by itviec.mjs's
+  // assertParsedSomething.
+  {
+    let threw = false;
+    try {
+      assertParsedSomething('<a href="/careers/JobDetail/Some-Role/123">Some Role</a>', 'https://acme.avature.net/careers/SearchJobs');
+    } catch {
+      threw = true;
+    }
+    if (threw) pass('assertParsedSomething() throws when JobDetail links are present but unparsed');
+    else fail('a page still carrying JobDetail links must not be reported as empty');
+
+    let threwOnEmpty = false;
+    try {
+      assertParsedSomething('<html><body>No open roles right now.</body></html>', 'https://acme.avature.net/careers/SearchJobs');
+    } catch {
+      threwOnEmpty = true;
+    }
+    if (!threwOnEmpty) pass('assertParsedSomething() does not throw on a genuinely empty page (no JobDetail links)');
+    else fail('a genuinely empty listing page must be allowed, or a quiet board reads as broken');
+  }
+
+  // fetch()-level: the same split, wired into the pagination loop. A first
+  // page whose markup broke (JobDetail links present, no <article> the
+  // parser recognizes) must fail the whole fetch() loud, not return []
+  // silently.
+  {
+    const brokenMarkupCtx = {
+      sleep: async () => {},
+      fetchText: async () => '<a href="/careers/JobDetail/Some-Role/123">Some Role</a>',
+    };
+    let threw = false;
+    try {
+      await avature.fetch({ name: 'X', api: base }, brokenMarkupCtx);
+    } catch {
+      threw = true;
+    }
+    if (threw) pass('avature.fetch() throws when the first page has JobDetail links but the parser matched nothing');
+    else fail('avature.fetch() should surface a broken selector as an error, not an empty board');
+
+    const genuinelyEmptyCtx = {
+      sleep: async () => {},
+      fetchText: async () => '<html><body>No open roles right now.</body></html>',
+    };
+    let jobs;
+    let threwOnEmpty = false;
+    try {
+      jobs = await avature.fetch({ name: 'X', api: base }, genuinelyEmptyCtx);
+    } catch {
+      threwOnEmpty = true;
+    }
+    if (!threwOnEmpty && Array.isArray(jobs) && jobs.length === 0) {
+      pass('avature.fetch() returns [] for a genuinely empty first page (no JobDetail links)');
+    } else {
+      fail(`avature.fetch() mishandled a genuinely empty board: threw=${threwOnEmpty}, jobs=${JSON.stringify(jobs)}`);
+    }
+  }
+
+  // fetch(): redirect:'error' pinned on every request the provider issues —
+  // list, pagination, self-heal, and facet-filtered alike.
+  {
+    /** @type {any[]} */
+    const opts = [];
+    const pinnedCtx = {
+      sleep: async () => {},
+      fetchText: async (url, o) => { opts.push(o); return mkHtml([1, 2, 3, 4, 5, 6]); },
+    };
+    await avature.fetch({ name: 'X', api: `${base}?42386=%5B812132%5D` }, pinnedCtx);
+    const pinned = opts.length > 0 && opts.every((o) => o && o.redirect === 'error');
+    if (pinned) pass('avature.fetch() sends redirect:error on every request (list, pagination, facet-filtered)');
+    else fail(`avature.fetch() redirect pin drift: ${JSON.stringify(opts)}`);
+  }
 
   // Regression (#1639 lineage) — a numeric entity above U+10FFFF must not throw
   // RangeError out of the whole parse. The local decodeEntities copy guarded

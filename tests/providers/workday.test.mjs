@@ -5,6 +5,10 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — workday');
 
+// Expected jobs.workdayTruncated value, spelled out locally rather than
+// imported from providers/workday.mjs — see the same constant in
+// workday-facet-split.test.mjs for why.
+const TRANSIENT = 'transient';
 
 try {
   const workdayModule = await import(pathToFileURL(join(ROOT, 'providers/workday.mjs')).href);
@@ -659,10 +663,10 @@ try {
       throw new Error('fetch failed'); // every page-2 attempt dies
     });
     const { result: jobs } = await captureConsoleErrors(() => workday.fetch(entry, ctx));
-    if (jobs.workdayTruncated === true && jobs.length === 20) {
-      pass('fetch-error truncation tags jobs.workdayTruncated');
+    if (jobs.workdayTruncated === TRANSIENT && jobs.length === 20) {
+      pass(`fetch-error truncation tags jobs.workdayTruncated='${TRANSIENT}'`);
     } else {
-      fail(`expected workdayTruncated tag on 20 partial jobs, got tag=${jobs.workdayTruncated} len=${jobs.length}`);
+      fail(`expected workdayTruncated='${TRANSIENT}' tag on 20 partial jobs, got tag=${jobs.workdayTruncated} len=${jobs.length}`);
     }
   }
 
@@ -743,6 +747,88 @@ try {
     pass('workday.fetch() truncation warning reports the real attempt count for a non-retryable failure (1, not the retry-cap upper bound)');
   } else {
     fail(`workday non-retryable 4xx warning: expected "after 1 attempts", got ${JSON.stringify(non429Warnings)}`);
+  }
+
+  // fetch() dead-tenant detection — a page-0 422 followed by a careers page
+  // carrying Workday's maintenance marker is relabeled as a synthetic 404, so
+  // dead-boards.mjs's existing 404 path (shared with every other provider)
+  // picks it up with no separate counter or threshold.
+  const deadEntry = { name: 'DeadCo', careers_url: 'https://deadco.wd5.myworkdayjobs.com/careers' };
+  let deadFetchTextOpts;
+  try {
+    await workday.fetch(deadEntry, mkWorkdayCtx(
+      async () => { const err = new Error('HTTP 422'); err.status = 422; throw err; },
+      { fetchText: async (_url, opts) => { deadFetchTextOpts = opts; const err = new Error('HTTP 500'); err.status = 500; err.body = '<script>window.location.href = "https://community.workday.com/maintenance-page";</script>'; throw err; } },
+    ));
+    fail('workday.fetch() should have thrown for a confirmed-dead tenant');
+  } catch (err) {
+    if (err.status === 404) pass('workday.fetch() relabels a 422 + maintenance-page careers body as a synthetic 404');
+    else fail(`workday dead-tenant relabel: expected status 404, got ${JSON.stringify(err.status)}`);
+  }
+  if (deadFetchTextOpts?.redirect === 'manual') pass('workday.fetch() passes redirect:"manual" on the careers-page confirmation fetch (inspects Location, never follows it — SSRF guard)');
+  else fail(`workday dead-tenant confirmation fetch: expected redirect:"manual", got ${JSON.stringify(deadFetchTextOpts)}`);
+
+  // fetch() dead-board detection — a page-0 401/403 followed by a careers
+  // page redirecting to Workday's own outage page is also relabeled as a
+  // synthetic 404 (a per-board signal: a restricted/retired board redirects
+  // here even while other boards on the same tenant answer normally).
+  const outageEntry = { name: 'OutageCo', careers_url: 'https://outageco.wd105.myworkdayjobs.com/careers' };
+  try {
+    await workday.fetch(outageEntry, mkWorkdayCtx(
+      async () => { const err = new Error('HTTP 403'); err.status = 403; throw err; },
+      { fetchText: async () => { const err = new Error('HTTP 302'); err.status = 302; err.location = 'https://wd105.myworkday.com/wday/drs/outage?t=outageco&s=careers'; throw err; } },
+    ));
+    fail('workday.fetch() should have thrown for a confirmed-dead board');
+  } catch (err) {
+    if (err.status === 404) pass('workday.fetch() relabels a 403 + outage-page redirect as a synthetic 404');
+    else fail(`workday outage-redirect relabel: expected status 404, got ${JSON.stringify(err.status)}`);
+  }
+
+  // A redirect to anywhere else (e.g. a tenant rename) must not be mistaken
+  // for the outage page.
+  const renamedEntry = { name: 'RenamedCo', careers_url: 'https://renamedco.wd5.myworkdayjobs.com/careers' };
+  try {
+    await workday.fetch(renamedEntry, mkWorkdayCtx(
+      async () => { const err = new Error('HTTP 401'); err.status = 401; throw err; },
+      { fetchText: async () => { const err = new Error('HTTP 302'); err.status = 302; err.location = 'https://renamedco.wd5.myworkdayjobs.com/NewSiteName'; throw err; } },
+    ));
+    fail('workday.fetch() should have thrown the original 401 for an unrelated redirect');
+  } catch (err) {
+    if (err.status === 401) pass('workday.fetch() leaves a 401 with a non-outage redirect unrelabeled');
+    else fail(`workday non-outage redirect: expected status 401, got ${JSON.stringify(err.status)}`);
+  }
+
+  // A 200 careers page whose body still carries the maintenance marker is
+  // also relabeled — every confirmed case so far reaches the marker through
+  // a non-2xx status, but a 200-status variant is worth covering since the
+  // marker is safe to check unconditionally (confirmed live: a known-alive
+  // tenant's 200 body does NOT carry this string, unlike the outage-page URL,
+  // which is boilerplate present on every Workday page regardless of health).
+  const dead200Entry = { name: 'Dead200Co', careers_url: 'https://dead200co.wd5.myworkdayjobs.com/careers' };
+  try {
+    await workday.fetch(dead200Entry, mkWorkdayCtx(
+      async () => { const err = new Error('HTTP 422'); err.status = 422; throw err; },
+      { fetchText: async () => '<script>window.location.href = "https://community.workday.com/maintenance-page";</script>' },
+    ));
+    fail('workday.fetch() should have thrown for a confirmed-dead tenant on a 200 careers page');
+  } catch (err) {
+    if (err.status === 404) pass('workday.fetch() relabels a 422 + maintenance-page marker on a 200 careers body as a synthetic 404');
+    else fail(`workday dead-tenant relabel (200 body): expected status 404, got ${JSON.stringify(err.status)}`);
+  }
+
+  // Same 422, but the careers page is clean (no maintenance marker) — the
+  // original 422 must propagate unchanged, not get swept into "dead" on the
+  // status code alone (measured live: 2 of 614 raw-422 tenants were like this).
+  const flakyEntry = { name: 'FlakyCo', careers_url: 'https://flakyco.wd5.myworkdayjobs.com/careers' };
+  try {
+    await workday.fetch(flakyEntry, mkWorkdayCtx(
+      async () => { const err = new Error('HTTP 422'); err.status = 422; throw err; },
+      { fetchText: async () => '<html><body><div id="root">FlakyCo careers</div></body></html>' },
+    ));
+    fail('workday.fetch() should have thrown the original 422 for a live tenant');
+  } catch (err) {
+    if (err.status === 422) pass('workday.fetch() leaves a 422 with a clean careers page unrelabeled');
+    else fail(`workday flaky-422: expected status 422, got ${JSON.stringify(err.status)}`);
   }
 
   // fetch() early-stop — once a page's postings are all clearly past

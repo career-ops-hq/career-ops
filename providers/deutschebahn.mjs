@@ -1,6 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 import { decodeEntities } from './_html-entities.mjs';
+import { fetchTextWithRetry, sleep } from './_http.mjs';
 
 // Deutsche Bahn provider — single-company (pattern: ibm/dassault/rheinmetall).
 // DB's careers run on the custom db.jobs portal (the branded Avature front,
@@ -111,15 +112,18 @@ export default {
     const cfg = resolveConfig(entry);
     if (!cfg) throw new Error(`deutschebahn: cannot resolve db.jobs search id for ${entry.name}`);
 
-    const wait = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     const maxPages = resolveMaxPages(entry);
     const jobs = [];
     const seen = new Set();
 
+    // Each page is a ~450KB HTML fragment; on a walk of up to 60 pages, an
+    // occasional single-page timeout/abort is a transient blip, not a board
+    // failure — fetchTextWithRetry absorbs it instead of failing the whole scan.
+
     for (let page = 0; page < maxPages; page++) {
-      if (page > 0) await wait(PAGE_DELAY_MS);
+      if (page > 0) await sleep(PAGE_DELAY_MS, ctx);
       const url = `${cfg.searchBase}?qli=true&query=&sort=score&itemsPerPage=${ITEMS_PER_PAGE}&pageNum=${page}`;
-      const html = await ctx.fetchText(url, { headers: { accept: 'text/html' } });
+      const html = await fetchTextWithRetry(ctx, url, { headers: { accept: 'text/html' }, redirect: 'error' });
       const rows = parseHits(html, cfg.origin);
       if (rows.length === 0) break; // past the last page
 
