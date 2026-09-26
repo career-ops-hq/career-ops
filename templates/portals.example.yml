@@ -993,6 +993,11 @@ search_queries:
 #   icims           careers-<tenant>.icims.com / *.icims.com
 #   pythonorg       python.org/jobs
 #   generalist-world generalist.world/jobs/  (curated generalist / operator roles board; SSR HTML, one fetch; or provider: generalist-world)
+#   applitrack      www.applitrack.com/<district>/onlineapp/  (Frontline AppliTrack K-12 board; optional default_location: "City, ST" is appended to site names that name no place)
+#   schoolspring    <district>.schoolspring.com  (K-12 board; public JSON API)
+#   neogov          www.schooljobs.com/careers/<agency>[/<folder>] or www.governmentjobs.com/careers/<agency>[/<folder>]
+#                   (community colleges, school districts, public agencies; a <folder> scopes to one custom careers page)
+#   redrover        jobs.redroverk12.com/org/<orgId>  (K-12 board; public postings only)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -1250,6 +1255,26 @@ search_queries:
 # - name: Mercedes-Benz                   # BeeSite (milch & zucker) search backend
 #   careers_url: https://mercedes-benz-beesite-production-gjb.app.beesite.de   # the *.app.beesite.de host, not the branded front (jobs.mercedes-benz.com)
 #   provider: beesite
+#   enabled: true
+#
+# - name: Example AppliTrack District
+#   careers_url: https://www.applitrack.com/exampledistrict/onlineapp/default.aspx   # any www.applitrack.com/<district>/... URL
+#   default_location: "Exampleville, WA"   # optional: appended to site names that name no place
+#   enabled: true
+#
+# - name: Example NEOGOV College
+#   careers_url: https://www.schooljobs.com/careers/examplecollege/facultypositions   # /careers/<agency>[/<folder>]; schooljobs.com or governmentjobs.com
+#   max_pages: 30          # optional page cap (10 postings/page, default 30, max 200) —
+#                          # a warning is logged if the cap truncates real results
+#   enabled: true
+#
+# - name: Example Red Rover District
+#   careers_url: https://jobs.redroverk12.com/org/1234   # the numeric org id from the district's board URL
+#   enabled: true
+#
+# - name: Example SchoolSpring District
+#   careers_url: https://exampledistrict.schoolspring.com/   # any <district>.schoolspring.com host
+#   max_pages: 20          # optional page cap (100 postings/page, default 20, max 100)
 #   enabled: true
 #
 # -- Job boards / aggregators  (→ job_boards:; set provider: explicitly unless the host auto-detects) --
@@ -2555,6 +2580,31 @@ tracked_companies:
     careers_url: https://jobs.ashbyhq.com/andela
     api: https://api.ashbyhq.com/posting-api/job-board/andela
     notes: "African-founded talent marketplace. Verified 2026-08-17: 19 postings, but mostly North America and the UK with a single Kenya role — enable it for the company, not for African coverage."
+    enabled: false
+
+  # -- US K-12 school districts & community colleges (single-employer boards) --
+  # Examples of the applitrack / neogov / redrover / schoolspring providers.
+  # Disabled: these are one region's boards — copy the pattern for your own
+  # district or college. Verified 2026-09-21 (postings when checked).
+  - name: Clark College (Faculty)
+    careers_url: https://www.schooljobs.com/careers/clarkcollege/facultypositions
+    notes: "NEOGOV, scoped to the faculty careers page. 28 postings when checked."
+    enabled: false
+
+  - name: Vancouver Public Schools
+    careers_url: https://vansd.schoolspring.com/
+    notes: "SchoolSpring. 65 postings when checked."
+    enabled: false
+
+  - name: Ridgefield School District
+    careers_url: https://jobs.redroverk12.com/org/1651
+    notes: "Red Rover K12. 4 public postings (5 more are internal-only) when checked."
+    enabled: false
+
+  - name: Camas School District
+    careers_url: https://www.applitrack.com/camas/onlineapp/default.aspx?all=1
+    default_location: "Camas, WA"
+    notes: "Frontline AppliTrack. 25 postings when checked."
     enabled: false
 
 # ── Job Boards ────────────────────────────────────────────────────────
