@@ -34,6 +34,15 @@ test('Hacker News AI Extraction Logic', async (t) => {
     assert.strictEqual(res, null);
   });
 
+  await t.test('should let a failed API call reach the caller instead of returning null', async () => {
+    // An invalid key, exhausted quota or retired model makes generateContent
+    // throw. Returning null for that is indistinguishable from "no match".
+    const failingModel = {
+      generateContent: async () => { throw new Error('[404 Not Found] models/gemini-1.5-flash is not found'); },
+    };
+    await assert.rejects(() => extractWithAI('Stripe post', failingModel), /404 Not Found/);
+  });
+
   await t.test('should handle objects missing required keys gracefully', async () => {
     const res = await extractWithAI('MISSING_KEYS', mockModel);
     assert.strictEqual(res.company, '');
