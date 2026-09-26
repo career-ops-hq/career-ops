@@ -8,11 +8,12 @@ const MONTHS = new Map([
   ['jan', 1], ['feb', 2], ['mar', 3], ['apr', 4], ['may', 5], ['jun', 6],
   ['jul', 7], ['aug', 8], ['sep', 9], ['oct', 10], ['nov', 11], ['dec', 12],
 ]);
-// Any element whose class list includes job-period, in either quote style:
-// template packs may change tag names inside the ENTRY zone of their
-// experience partial (the ATS pack renders the period in a <div>, the default
-// pack in a <span>).
-const JOB_PERIOD_RE = /<([a-z][a-z0-9]*)\b[^>]*?\sclass=(["'])(?:[^"'\s]+\s+)*job-period(?:\s[^"']*)?\2[^>]*>([\s\S]*?)<\/\1\s*>/gi;
+// Any element whose class list includes job-period: template packs may change
+// tag names inside the ENTRY zone of their experience partial (the ATS pack
+// renders the period in a <div>, the default pack in a <span>). The class
+// attribute is read the ways HTML allows it to be written: either quote style
+// or none, and whitespace around `=` or inside the quotes.
+const JOB_PERIOD_RE = /<([a-z][a-z0-9]*)\b[^>]*?\sclass\s*=\s*(?:(["'])\s*(?:[^"'\s]+\s+)*job-period(?:\s[^"']*)?\2|job-period(?=[\s>]))[^>]*>([\s\S]*?)<\/\1\s*>/gi;
 const DISPLAY_PERIOD_MAX = 60;
 
 /**

@@ -139,6 +139,22 @@ expectThrows('reads a single-quoted job-period class', () =>
   validateCvExperienceOrder(
     "<span class='job-period'>2015 – 2018</span><span class='job-period'>2019 – 2022</span>"));
 
+expectThrows('reads a job-period class with whitespace around the equals sign', () =>
+  validateCvExperienceOrder(
+    '<span class = "job-period">2015 – 2018</span><span class = "job-period">2019 – 2022</span>'));
+
+expectThrows('reads a job-period class with leading whitespace inside the quotes', () =>
+  validateCvExperienceOrder(
+    '<span class=" job-period">2015 – 2018</span><span class=" job-period">2019 – 2022</span>'));
+
+expectThrows('reads an unquoted job-period class', () =>
+  validateCvExperienceOrder(
+    '<span class=job-period>2015 – 2018</span><span class=job-period>2019 – 2022</span>'));
+
+expectOk('does not read an unquoted class that only starts with job-period', () =>
+  validateCvExperienceOrder(
+    '<span class=job-periods>2015 – 2018</span><span class=job-periods>2019 – 2022</span>'));
+
 expectThrows('decodes a decimal entity between month and year before reading the month', () =>
   validateCvExperienceOrder(html(['Jan&#160;2021 – Dec 2021', 'Feb 2021 – Present'])));
 
@@ -172,8 +188,9 @@ function thrownMessage(fn) {
   const originalWarn = console.warn;
   console.warn = (...args) => { warnings.push(args.join(' ')); };
   try {
-    validateCvExperienceOrder(html(['2015 – 2018\u001b]0;pwned\u0007', '2019 – 2022']), { allowNonChronological: true });
-  } catch { /* asserted below */ } finally {
+    expectOk('still proceeds under the escape hatch when a quoted period carries terminal controls', () =>
+      validateCvExperienceOrder(html(['2015 – 2018\u001b]0;pwned\u0007', '2019 – 2022']), { allowNonChronological: true }));
+  } finally {
     console.warn = originalWarn;
   }
   if (warnings.length === 1 && !CONTROL_OR_BIDI.test(warnings[0].replace(/^⚠️\s+/, ''))) {
