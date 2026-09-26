@@ -106,6 +106,18 @@ function compilePrefixedKeyword(kw) {
  * @param {string} kw - already trimmed and lowercased.
  * @returns {(lower: string) => boolean}
  */
+// Fold diacritics so a keyword and a title compare equal regardless of accents.
+// Spanish/Portuguese boards routinely publish titles in UPPERCASE WITHOUT
+// accents ("TECNICO CONTROL DE PRODUCCION") while portals.yml is written with
+// them ("Producción"); with toLowerCase() alone they never match, and every
+// such posting is silently counted as filtered_title. BOTH sides are folded,
+// so the comparison stays symmetric.
+// Not lib/ascii-fold.mjs: that one deletes everything outside [a-z0-9]
+// (spaces, ".NET", "L&D"), and here those characters are part of the keyword.
+export function foldAccents(s) {
+  return String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 export function compileKeyword(kw) {
   const prefixed = compilePrefixedKeyword(kw);
   if (prefixed) return prefixed;
@@ -208,7 +220,7 @@ export function buildTitleFilter(titleFilter) {
   // non-string entry in the YAML) must not crash the scan via k.toLowerCase().
   const normalize = (arr, compile) => (Array.isArray(arr) ? arr : [])
     .filter(k => typeof k === 'string')
-    .map(k => k.trim().toLowerCase())
+    .map(k => foldAccents(k.trim().toLowerCase()))
     .filter(k => k.length > 0)
     .map(compile);
   // AND-groups are a POSITIVE-side feature only. On the negative side an entry
@@ -223,7 +235,7 @@ export function buildTitleFilter(titleFilter) {
     // non-string. Consolidating on scan.mjs's version would have carried that
     // throw onto a path that never had it, where it aborts jobs.filter and
     // drops a whole company's results for one malformed title.
-    const lower = String(title ?? '').toLowerCase();
+    const lower = foldAccents(String(title ?? '').toLowerCase());
     // An empty positive list is "no positive constraint", not "match nothing":
     // a negative-only title_filter is a legitimate config that rejects a few
     // roles and keeps the rest.

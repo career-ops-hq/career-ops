@@ -32,6 +32,9 @@ batch/batch-state-recovery.d/
 batch/batch-input.tsv
 batch/tracker-additions/**/*.tsv
 !batch/tracker-additions/.gitkeep
+# Worker scratch: prefetched JD text plus whatever compile cache the worker CLI
+# drops here. Fetched postings are user data — never stage them.
+batch/tmp/
 jds/*
 !jds/.gitkeep
 
@@ -90,7 +93,7 @@ plugins.lock
 
 # Generated
 .resolved-prompt-*
-node_modules/
+node_modules
 bun.lock
 # Working copy the test suite makes under the repo root (test-all.mjs
 # `mkdtempSync(join(ROOT, '.tmp-script-test-'))`). A clean run deletes it; a

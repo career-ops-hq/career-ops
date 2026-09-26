@@ -3,7 +3,7 @@
  * openai-eval.mjs — OpenAI-compatible Job Offer Evaluator for career-ops
  *
  * Evaluate job offers with ANY OpenAI-compatible chat endpoint instead of Claude.
- * Works with OpenAI, OpenRouter, Together, Groq, DeepSeek, Zhipu GLM, MiniMax,
+ * Works with OpenAI, OpenRouter, Requesty, Together, Groq, DeepSeek, Zhipu GLM, MiniMax,
  * Fireworks, and local servers that speak the OpenAI API (LM Studio, llama.cpp,
  * vLLM, Ollama's /v1). Point it at a base URL + model + key and go.
  *
@@ -31,6 +31,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
 import {
@@ -106,6 +107,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
   PROVIDER EXAMPLES (cheap / free-tier friendly — addresses token cost)
     OpenRouter:  --url https://openrouter.ai/api/v1   --model deepseek/deepseek-chat
+    Requesty:    --url https://router.requesty.ai/v1  --model deepseek/deepseek-chat
     Together:    --url https://api.together.xyz/v1     --model meta-llama/Llama-3.3-70B-Instruct-Turbo
     Groq:        --url https://api.groq.com/openai/v1  --model llama-3.3-70b-versatile
     DeepSeek:    --url https://api.deepseek.com/v1     --model deepseek-chat
@@ -306,7 +308,7 @@ LEGITIMACY: <High Confidence | Proceed with Caution | Suspicious>
 // OpenRouter runner. The static prefix (shared + oferta + cv, ~12K tokens) is
 // byte-identical across every offer, yet was re-sent and re-billed each call.
 //
-// Host-gated on purpose: OpenAI-compatible gateways (OpenRouter, DeepSeek, …)
+// Host-gated on purpose: OpenAI-compatible gateways (OpenRouter, Requesty, DeepSeek, …)
 // honor an ephemeral `cache_control` breakpoint on the prefix and reuse it
 // across back-to-back calls within the cache TTL. api.openai.com instead caches
 // long prefixes automatically and may reject the non-standard field, so it gets
@@ -454,7 +456,17 @@ if (saveReport) {
 
     reservedNumbers   = await reserveReportNumbers(1, { rootDir: ROOT, reportsDir: PATHS.reports });
     const num         = formatReportNumber(reservedNumbers[0]);
-    const today       = new Date().toISOString().split('T')[0];
+    // LOCAL calendar day (#3070). This one value becomes three things that have to
+    // agree with each other and with the user's calendar: the report FILENAME
+    // ({num}-{slug}-{today}.md), the report's own `**Date:**` header, and the date
+    // column of the tracker row written for it.
+    //
+    // On the UTC day an evaluation run on a Sunday evening in the Americas produces
+    // 042-acme-2026-08-18.md, dated the 18th, in a tracker row dated the 18th —
+    // while every other date the user sees, and every date the other scripts now
+    // stamp, says the 17th. The filename is the part that cannot be corrected
+    // later: reports are addressed by it.
+    const today       = localToday();
     const companySlug = slugifyCompany(company);
     const filename    = `${num}-${companySlug}-${today}.md`;
     const reportPath  = join(PATHS.reports, filename);

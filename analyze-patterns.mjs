@@ -20,7 +20,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
-import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -84,21 +84,11 @@ const USAGE = `Usage:
 
 // --- CLI args ---
 const summaryMode = args.includes('--summary');
-const MIN_THRESHOLD = (() => {
-  const raw = flagValue(args, '--min-threshold');
-  if (raw === undefined) return 5;
 
-  const value = parseInt(raw, 10);
-  return Number.isNaN(value) ? 5 : value;
-})();
-
-const MIN_VENDOR_N = (() => {
-  const raw = flagValue(args, '--min-vendor-n');
-  if (raw === undefined) return 8;
-
-  const value = parseInt(raw, 10);
-  return Number.isNaN(value) || value < 1 ? 8 : value;
-})();
+// CLI values stay at their defaults when this module is imported by tests.
+// Parsing/validation is performed only in the main-module guard below.
+let MIN_THRESHOLD = 5;
+let MIN_VENDOR_N = 8;
 
 // --- Status normalization (mirrors verify-pipeline.mjs) ---
 const ALIASES = {
@@ -1162,6 +1152,59 @@ function extractBlockerType(gap) {
   return 'other';
 }
 
+function recordedDiscardReasons(entry) {
+  if (!REASON_BEARING.has(entry.outcome)) return new Set();
+  const matches = (entry.notes || '').match(/(?:DISCARD|SKIP):\s*([^,;\n]+)/gi) || [];
+  return new Set(matches
+    .map(match => match.replace(/^(?:DISCARD|SKIP):\s*/i, '').trim().toLowerCase())
+    .filter(Boolean));
+}
+
+/**
+ * Forecasts stay separate from recorded outcomes (#2785). The base is tracker
+ * entries whose linked report explicitly supplies prediction data, including
+ * an empty list; a missing or malformed field is unknown, not an empty forecast.
+ * All statuses remain eligible: advancing later does not erase a prediction.
+ * Labels stay open-ended; only case and surrounding whitespace are normalized.
+ */
+export function buildPredictedDiscardReasonSignals(enriched) {
+  const counts = new Map();
+  const coverage = {
+    entriesWithReports: 0,
+    entriesWithPredictionData: 0,
+    entriesWithPredictions: 0,
+    entriesWithRecordedReasons: 0,
+    // Valid prediction data (even []) plus an eligible recorded reason. This
+    // measures comparison coverage, never agreement between the two sources.
+    entriesWithBothSources: 0,
+  };
+  for (const entry of enriched) {
+    const hasRecordedReasons = recordedDiscardReasons(entry).size > 0;
+    if (hasRecordedReasons) coverage.entriesWithRecordedReasons++;
+    if (!entry.report) continue;
+    coverage.entriesWithReports++;
+    const raw = entry.report.machineSummary?.discard_reasons;
+    // normalizeList accepts scalars for older reports, but also stringifies
+    // objects inside lists. Do not publish those coercions as predicted reasons.
+    if (typeof raw !== 'string'
+        && !(Array.isArray(raw) && raw.every(reason => typeof reason === 'string'))) continue;
+    coverage.entriesWithPredictionData++;
+    if (hasRecordedReasons) coverage.entriesWithBothSources++;
+    const reasons = new Set((entry.report.discardReasons || [])
+      .map(reason => reason.trim().toLowerCase()).filter(Boolean));
+    if (reasons.size > 0) coverage.entriesWithPredictions++;
+    for (const reason of reasons) counts.set(reason, (counts.get(reason) || 0) + 1);
+  }
+  const base = coverage.entriesWithPredictionData;
+  return {
+    predictedDiscardReasonStats: [...counts.entries()]
+      .map(([reason, frequency]) => ({ reason, frequency, percentage: Math.round(frequency / base * 100) }))
+      .sort((a, b) => b.frequency - a.frequency || a.reason.localeCompare(b.reason)),
+    predictedDiscardReasonBase: base,
+    discardReasonCoverage: coverage,
+  };
+}
+
 /**
  * Build the blocker, discard-reason, and technology signals used by both the
  * production analysis and regression fixtures.
@@ -1192,15 +1235,7 @@ function buildPatternSignals(enriched) {
 
   const discardReasonCounts = new Map();
   for (const e of enriched) {
-    if (!REASON_BEARING.has(e.outcome)) continue;
-    const notesMatch = (e.notes || '').match(/(?:DISCARD|SKIP):\s*([^,;\n]+)/gi);
-    if (!notesMatch) continue;
-    const entryReasons = new Set();
-    for (const match of notesMatch) {
-      const key = match.replace(/^(?:DISCARD|SKIP):\s*/i, '').trim().toLowerCase();
-      if (key) entryReasons.add(key);
-    }
-    for (const key of entryReasons) {
+    for (const key of recordedDiscardReasons(e)) {
       discardReasonCounts.set(key, (discardReasonCounts.get(key) || 0) + 1);
     }
   }
@@ -1546,6 +1581,7 @@ function analyze() {
     scoreThreshold,
     techStackGaps,
     discardReasonStats,
+    ...buildPredictedDiscardReasonSignals(enriched),
     // Populations the percentages above are shares of. Exported because a
     // consumer cannot sanity-check a rate whose denominator is invisible —
     // that opacity is precisely what let the wrong base survive unnoticed.
@@ -1624,6 +1660,23 @@ function printSummary(result) {
     }
   }
 
+  const coverage = result.discardReasonCoverage;
+  console.log(`\nPREDICTED DISCARD / SKIP REASONS (of ${result.predictedDiscardReasonBase} entries with prediction data)`);
+  console.log('-'.repeat(40));
+  console.log(`  Prediction data: ${coverage.entriesWithPredictionData}/${coverage.entriesWithReports} entries with linked reports; ${coverage.entriesWithPredictions} contain reasons.`);
+  console.log(`  Recorded reasons: ${coverage.entriesWithRecordedReasons}/${result.discardReasonBase} eligible entries; ${coverage.entriesWithBothSources} entries have both sources.`);
+  console.log('  Forecasts cover all statuses; recorded reasons cover skipped, discarded, and rejected entries.');
+  console.log('  Predictions are not outcomes. Missing data is unknown; labels are grouped by spelling, not meaning.');
+  if (result.predictedDiscardReasonBase === 0) {
+    console.log('  No prediction data recorded yet.');
+  } else if (result.predictedDiscardReasonStats.length === 0) {
+    console.log('  No reasons predicted in the recorded data.');
+  } else {
+    for (const d of result.predictedDiscardReasonStats.slice(0, 10)) {
+      console.log(`  ${d.reason.padEnd(30)} ${String(d.frequency).padStart(2)}x (${d.percentage}%)`);
+    }
+  }
+
   // ATS vendor / channel analysis
   const va = result.vendorAnalysis;
   if (va && va.breakdown.length > 0) {
@@ -1684,6 +1737,27 @@ if (isMainModule(import.meta.url)) {
     valueFlags: VALUE_FLAGS,
     requireOperand: true,
   });
+
+  const rawMinThreshold = flagValue(args, '--min-threshold');
+  const rawMinVendorN = flagValue(args, '--min-vendor-n');
+
+  if (hasFlag(args, '--min-threshold')) {
+    if (rawMinThreshold === undefined || !/^\d+$/.test(String(rawMinThreshold)) ||
+        !Number.isSafeInteger(Number(rawMinThreshold))) {
+      console.error(`Error: --min-threshold requires a non-negative integer, got "${rawMinThreshold ?? ''}"`);
+      process.exit(1);
+    }
+    MIN_THRESHOLD = Number(rawMinThreshold);
+  }
+
+  if (hasFlag(args, '--min-vendor-n')) {
+    if (rawMinVendorN === undefined || !/^\d+$/.test(String(rawMinVendorN)) ||
+        !Number.isSafeInteger(Number(rawMinVendorN)) || Number(rawMinVendorN) < 1) {
+      console.error(`Error: --min-vendor-n requires a positive integer, got "${rawMinVendorN ?? ''}"`);
+      process.exit(1);
+    }
+    MIN_VENDOR_N = Number(rawMinVendorN);
+  }
 
   if (args.includes('--self-test')) {
     runSelfTest();

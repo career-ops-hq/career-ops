@@ -106,13 +106,20 @@ export function ExplorerView({
   );
 
   const isAi = mode === "ai";
-  if (running) return isAi ? <AiHuntView cliName={cli.name} /> : <DiscoveringState />;
-
-  const canDiscover = filters.ats.length > 0;
   const isResults = phase === "results";
+  const canDiscover = filters.ats.length > 0;
+  const scanRunning = running && !isAi;
+  // Keep one ResultsList mounted across scanning → revealing → results so
+  // filter/sort/scroll and co-rise survive the 850ms reveal handoff.
+  const showScanList = !isAi && offers.length > 0 && (scanRunning || isResults);
+
+  if (running && isAi) return <AiHuntView cliName={cli.name} />;
 
   return (
-    <div className="mx-auto max-w-5xl px-5 py-8 md:px-8">
+    <div className={scanRunning ? undefined : "mx-auto max-w-5xl px-5 py-8 md:px-8"}>
+      {scanRunning && <DiscoveringState />}
+      {!scanRunning && (
+        <>
       <header className="mb-6">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2.5">
@@ -201,8 +208,19 @@ export function ExplorerView({
           {isResults && capHit && (
             <CappedBanner companiesScanned={companiesScanned} companiesAvailable={companiesAvailable} onRefine={() => setRefineOpen(true)} />
           )}
-          {isResults && <ResultsList offers={enriched} />}
+        </>
+      )}
+      </>
+      )}
 
+      {showScanList && (
+        <div className={scanRunning ? "relative z-[1] mx-auto max-w-5xl px-5 pb-10 md:px-8" : undefined}>
+          <ResultsList offers={enriched} />
+        </div>
+      )}
+
+      {!scanRunning && !isAi && (
+        <>
           {phase === "empty-current" && (
             <EmptyState
               tone="good"
