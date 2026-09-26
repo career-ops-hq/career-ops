@@ -32,6 +32,21 @@ learned. Newest entry on top. Keep the zh-TW twin in sync in the same commit.
 
 ## Entries
 
+### 2026-09-26 — First evaluation: IT Product Manager, report #001
+
+- **Stage:** evaluation
+- **Done:** Searched `careers.tsmc.com` through the headful browser for manager/director-level software roles:
+  9 candidates, 3 worth a look, 6 out of scope (US semiconductor customer-technical and business roles, IT security).
+  Ran a full A–H evaluation on IT Product Manager (Engineer Role), jobId 4981.
+- **System output:** report #001, **3.4/5, "Research first"**. EN report in `reports/`, zh-TW twin in
+  `output/zh-TW/reports/`, tracker row via `merge-tracker.mjs`. No PDF (below threshold).
+  `check-jd-archive.mjs` and `verify-pipeline.mjs` are clean.
+- **Learned:** strong fit on the work itself, but two open questions decide it. (1) Third-party accounts say TSMC's
+  IT *engineer-track* process starts with a HackerRank test, and this role is labelled "Engineer Role". That's
+  indirect evidence, so it's a recruiter question rather than a disqualification. A sibling PM posting (jobId 16064)
+  lists its process with no coding test. (2) The engineer-track grade may sit below the director-level target.
+- **Next:** ask the recruiter about the coding test and the grade before applying; consider evaluating jobId 16064.
+
 ### 2026-09-26 — Targeting rules settled
 
 - **Stage:** setup
