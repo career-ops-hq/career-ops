@@ -20,9 +20,10 @@ let proxySignature;
 async function proxyFor(url) {
   if (process.env.CAREER_OPS_TRUST_PROXY_EGRESS !== '1') return { dispatcher: undefined, proxyHost: undefined };
   const target = new URL(url);
-  const proxyUrl = target.protocol === 'https:'
-    ? process.env.https_proxy || process.env.HTTPS_PROXY || process.env.http_proxy || process.env.HTTP_PROXY
-    : process.env.http_proxy || process.env.HTTP_PROXY;
+  const httpProxy = process.env.http_proxy || process.env.HTTP_PROXY || '';
+  const httpsProxy = process.env.https_proxy || process.env.HTTPS_PROXY || httpProxy;
+  const noProxy = process.env.no_proxy || process.env.NO_PROXY || '';
+  const proxyUrl = target.protocol === 'https:' ? httpsProxy : httpProxy;
   if (!proxyUrl) return { dispatcher: undefined, proxyHost: undefined };
   const proxyHost = new URL(proxyUrl).hostname.replace(/^\[|\]$/g, '');
   // The agent honours NO_PROXY and is scoped to this one provider request.
@@ -36,7 +37,7 @@ async function proxyFor(url) {
     throw new Error('Trusted proxy egress requires undici; run npm install in the career-ops directory, then retry.', { cause });
   });
   if (signature !== proxySignature) {
-    proxyAgent = new EnvHttpProxyAgent();
+    proxyAgent = new EnvHttpProxyAgent({ httpProxy, httpsProxy, noProxy });
     proxySignature = signature;
   }
   return { dispatcher: proxyAgent, proxyHost };

@@ -24,7 +24,8 @@ async function withProxyEnv(values, run) {
   }
 }
 
-test('opted-in provider request uses a scoped proxy without local target DNS', async () => {
+for (const emptyLowercase of [false, true]) {
+test(`opted-in provider request uses a scoped proxy (empty lowercase: ${emptyLowercase})`, async () => {
   const destinations = [];
   const proxy = http.createServer();
   proxy.on('connect', (req, socket) => {
@@ -34,7 +35,7 @@ test('opted-in provider request uses a scoped proxy without local target DNS', a
   });
   const proxyUrl = await listening(proxy);
   try {
-    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTP_PROXY: proxyUrl.replace('127.0.0.1', 'localhost'), NO_PROXY: 'localhost,127.0.0.1' }, async () => {
+    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTP_PROXY: proxyUrl.replace('127.0.0.1', 'localhost'), NO_PROXY: 'localhost,127.0.0.1', ...(emptyLowercase ? { http_proxy: '', no_proxy: '' } : {}) }, async () => {
       assert.equal(await fetchText('http://unresolvable.invalid/job', { redirect: 'error' }), 'PROXIED!');
       assert.deepEqual(destinations, ['unresolvable.invalid:80']);
       // NO_PROXY goes direct and still meets the private-address guard.
@@ -46,6 +47,8 @@ test('opted-in provider request uses a scoped proxy without local target DNS', a
     });
   } finally { proxy.close(); }
 });
+
+}
 
 test('unrelated fetch is never assigned the provider proxy', async () => {
   const server = http.createServer((_req, res) => res.end('LOCAL'));
