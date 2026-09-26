@@ -15,7 +15,7 @@
 
 ```
 104 履歷 ──匯出 PDF──▶ documents/cv/ ──intake──▶ cv.md（英文，正本）
-                                              └──▶ local/cv.zh-TW.md（繁中譯本）
+                                              └──▶ cv.zh-TW.md（繁中譯本）
 config/profile.yml  ◀── language: en + modes/zh-TW（台灣市場規則）
 modes/_custom.md    ◀── 雙語產出規則（snippets/custom-bilingual.md）
 portals.yml         ◀── 台積電職缺網站設定（snippets/portals-tsmc.yml）
@@ -60,7 +60,7 @@ career-ops 無法登入 104，也沒有 104 的串接程式，所以要手動搬
 1. 在 104 打開你的履歷，**下載或列印成 PDF**。找不到下載選項的話，就用瀏覽器把頁面列印成 PDF。
 2. 存成 `documents/cv/104-resume.pdf`。`documents/` 已被 gitignore，檔案不會離開你的電腦。
 3. 在對話中說：**「執行 intake 模式」**。助理會在本機擷取文字並提出 `cv.md` 草稿，你確認之前什麼都不會寫入。
-4. **英文版是正本。** 104 履歷通常是中文，請助理把 `cv.md` 寫成英文，另外把忠實的繁中版存到 `local/cv.zh-TW.md`（`local/` 已被 gitignore）。
+4. **英文版是正本。** 104 履歷通常是中文，請助理把 `cv.md` 寫成英文，另外把忠實的繁中版存成 `cv.zh-TW.md`。兩份都放在私人資料 repo（見文末表格）。
    **兩份的每一項事實都要親自核對。** 翻譯可以調整措辭，但絕不能新增任何主張。兩份內容不一致時以 `cv.md` 為準。
 
 備案：掃描檔或純圖片 PDF 無法擷取文字。改把履歷文字直接貼進對話，說「把這份轉成 cv.md」。
@@ -118,7 +118,7 @@ node scan.mjs                        # 零 token 掃描讀得懂的網站
 在對話中說：**「幫報告 ### 產生英文和繁中版的履歷 PDF。」**
 
 - 英文：`output/cv-{candidate}-tsmc-….pdf`，由 `cv.md` 產生。
-- 繁中：`output/zh-TW/` 下同名檔案，由 `local/cv.zh-TW.md` 用相同的客製方式產生。
+- 繁中：`output/zh-TW/` 下同名檔案，由 `cv.zh-TW.md` 用相同的客製方式產生。
 - 中文字形來自系統字型（Windows 為微軟正黑體，macOS 為蘋方-繁）。Linux 請先安裝 `fonts-noto-cjk`，否則中文會變成方框。
 - 選用檢查：用 `ats` 模式確認每份 PDF 能被 ATS 正確解析。
 
@@ -131,16 +131,33 @@ node scan.mjs                        # 零 token 掃描讀得懂的網站
 
 ## 檔案位置總表
 
-| 項目 | 路徑 | 會 commit 嗎？ |
-|------|------|---------------|
-| 這些筆記 | `fork-notes/` | 會，公開在這個 fork 中，不含隱私資料 |
-| 履歷正本（英文） | `cv.md` | 不會（已 gitignore） |
-| 履歷譯本（繁中） | `local/cv.zh-TW.md` | 不會 |
-| 104 匯出檔 | `documents/cv/` | 不會 |
-| 個人設定、角色原型、自訂規則 | `config/profile.yml`、`modes/_profile.md`、`modes/_custom.md` | 不會 |
-| 評估報告（英文） | `reports/` | 不會 |
-| 繁中版、PDF | `output/`、`output/zh-TW/` | 不會 |
-| 追蹤表 | `data/applications.md` | 不會 |
+個人檔案都放在**私人資料 repo** `rojarsmith/career-ops-max-rojarsmith`，clone 在這個 repo 的旁邊。
+環境變數 `CAREER_OPS_ROOT=../career-ops-max-rojarsmith` 把 `{DATA_ROOT}` 指向那裡，
+所以每個模式讀寫下列檔案時，都是在私人 repo 裡進行，絕不會寫進這個公開的 fork。
+
+刻意使用環境變數，而不是 commit `.career-ops-data` 標記檔：測試會檢查「沒有設定變數時，資料目錄預設就是 repo 本身」，
+commit 標記檔會讓這項檢查失敗（`test-all.mjs` 第 20 節）。
+
+> **跑測試時要拿掉這個變數：** `env -u CAREER_OPS_ROOT node test-all.mjs --quick`。設了變數的話，有些測試會把測試用檔案
+> （例如一筆假的 `Acme-Co` 評量紀錄）寫進資料目錄，也就是你的私人 repo。
+
+| 項目 | 路徑（位於 `{DATA_ROOT}` 底下） | 存放位置 |
+|------|-------------------------------|---------|
+| 這些筆記 | `fork-notes/`，在本 repo，不在資料目錄 | 公開 fork，不含隱私資料 |
+| 履歷正本（英文） | `cv.md` | 私人 repo |
+| 履歷譯本（繁中） | `cv.zh-TW.md` | 私人 repo |
+| 104 匯出檔 | `documents/cv/`（或 repo 根目錄） | 私人 repo |
+| 個人設定、角色原型、自訂規則 | `config/profile.yml`、`modes/_profile.md`、`modes/_custom.md` | 私人 repo |
+| 評估報告（英文） | `reports/` | 私人 repo |
+| 繁中版、PDF | `output/`、`output/zh-TW/` | 私人 repo |
+| 追蹤表 | `data/applications.md` | 私人 repo |
+
+**雲端工作階段：** 在雲端環境設定的 **Environment variables**（和 Network access 在同一個視窗）加入 `CAREER_OPS_ROOT=../career-ops-max-rojarsmith`。
+每次開新工作階段時同時選取兩個 repo，或請 Claude 接上 `rojarsmith/career-ops-max-rojarsmith`。
+工作結束前，請它把私人 repo commit 並 push。容器會被回收，沒有 push 的內容都會消失。
+
+**自己的電腦：** 把兩個 repo clone 在同一個上層資料夾（`career-ops-max/` 與 `career-ops-max-rojarsmith/` 並排），並在 shell 設定同一個環境變數。
+也可以改用內容為 `../career-ops-max-rojarsmith` 的 `.career-ops-data` 檔，但不要 commit 它。
 
 ## 命令列速查
 

@@ -15,7 +15,7 @@ twice: **English (primary)** and **Taiwan Traditional Chinese (zh-TW)**.
 
 ```
 104 resume ──export PDF──▶ documents/cv/ ──intake──▶ cv.md (EN, canonical)
-                                                     └──▶ local/cv.zh-TW.md (zh-TW translation)
+                                                     └──▶ cv.zh-TW.md (zh-TW translation)
 config/profile.yml  ◀── language: en + modes/zh-TW (Taiwan market rules)
 modes/_custom.md    ◀── bilingual house rules (snippets/custom-bilingual.md)
 portals.yml         ◀── TSMC careers entry (snippets/portals-tsmc.yml)
@@ -63,7 +63,7 @@ career-ops cannot log in to 104 and has no 104 provider. Move the resume across 
 3. In the chat: **"Run intake mode."** The agent extracts the text locally and proposes a `cv.md`. It
    writes nothing until you confirm.
 4. **English is canonical.** A 104 resume is usually in Chinese, so ask the agent to write `cv.md` in
-   English and put a faithful zh-TW version at `local/cv.zh-TW.md` (`local/` is gitignored).
+   English and put a faithful zh-TW version at `cv.zh-TW.md`. Both live in the private data repo (see the table at the end).
    **Check every fact in both files.** Translating may reword a line, but must never add a claim.
    If the two versions disagree, `cv.md` wins.
 
@@ -133,7 +133,7 @@ Paste a TSMC or 104 posting URL (or the JD text) into the chat. The auto-pipelin
 In the chat: **"Generate the CV PDF for report ###, in English and zh-TW."**
 
 - English: `output/cv-{candidate}-tsmc-….pdf`, built from `cv.md`.
-- zh-TW: `output/zh-TW/` with the same file name, built from `local/cv.zh-TW.md` with the same tailoring.
+- zh-TW: `output/zh-TW/` with the same file name, built from `cv.zh-TW.md` with the same tailoring.
 - Chinese glyphs come from the system font (Microsoft JhengHei on Windows, PingFang TC on macOS).
   On Linux, install `fonts-noto-cjk` first or the Chinese text renders as boxes.
 - Optional check: `ats` mode for parseability of each PDF.
@@ -149,16 +149,37 @@ In the chat: **"Generate the CV PDF for report ###, in English and zh-TW."**
 
 ## Where everything lives
 
-| Artifact | Path | Committed? |
-|----------|------|-----------|
-| These notes | `fork-notes/` | Yes, public in this fork. No private data. |
-| Canonical CV (EN) | `cv.md` | No (gitignored) |
-| CV translation (zh-TW) | `local/cv.zh-TW.md` | No |
-| 104 export | `documents/cv/` | No |
-| Profile, archetypes, house rules | `config/profile.yml`, `modes/_profile.md`, `modes/_custom.md` | No |
-| Reports (EN) | `reports/` | No |
-| zh-TW twins, PDFs | `output/`, `output/zh-TW/` | No |
-| Tracker | `data/applications.md` | No |
+Personal files live in the **private data repo** `rojarsmith/career-ops-max-rojarsmith`, cloned next to
+this one. The environment variable `CAREER_OPS_ROOT=../career-ops-max-rojarsmith` points `{DATA_ROOT}`
+there, so every mode reads and writes the files below in the private repo, never in this public fork.
+
+It's an environment variable rather than a committed `.career-ops-data` marker on purpose. The test
+suite expects the data root to default to the repo itself when no variable is set, and a committed marker
+fails that check (`test-all.mjs` section 20).
+
+> **Run the test suite without it:** `env -u CAREER_OPS_ROOT node test-all.mjs --quick`. With the variable
+> set, some tests write fixture files (for example a fake `Acme-Co` assessment row) into the data root,
+> which is your private repo.
+
+| Artifact | Path (under `{DATA_ROOT}`) | Where it's kept |
+|----------|----------------------------|-----------------|
+| These notes | `fork-notes/`, in this repo, not the data root | Public fork. No private data. |
+| Canonical CV (EN) | `cv.md` | Private repo |
+| CV translation (zh-TW) | `cv.zh-TW.md` | Private repo |
+| 104 export | `documents/cv/` (or the repo root) | Private repo |
+| Profile, archetypes, house rules | `config/profile.yml`, `modes/_profile.md`, `modes/_custom.md` | Private repo |
+| Reports (EN) | `reports/` | Private repo |
+| zh-TW twins, PDFs | `output/`, `output/zh-TW/` | Private repo |
+| Tracker | `data/applications.md` | Private repo |
+
+**Cloud sessions:** add `CAREER_OPS_ROOT=../career-ops-max-rojarsmith` under **Environment variables** in the
+cloud environment's settings (the same dialog as Network access). Start each session with both repos
+selected, or ask Claude to attach `rojarsmith/career-ops-max-rojarsmith`. At the end of a session, have it commit and push the private repo.
+The container is discarded, and anything not pushed is lost.
+
+**Local machine:** clone both repos side by side (`career-ops-max/` and `career-ops-max-rojarsmith/` in
+the same parent folder) and set the same variable in your shell. You can use an untracked
+`.career-ops-data` file containing `../career-ops-max-rojarsmith` instead, but don't commit it.
 
 ## Console cheat sheet
 

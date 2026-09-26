@@ -32,6 +32,19 @@ learned. Newest entry on top. Keep the zh-TW twin in sync in the same commit.
 
 ## Entries
 
+### 2026-09-26 — Private data repo connected
+
+- **Stage:** setup
+- **Done:** Created a private GitHub repo for personal data and connected it to the cloud session. `CAREER_OPS_ROOT=../career-ops-max-rojarsmith`
+  points `{DATA_ROOT}` at it, and `node doctor.mjs` then finds `cv.md` there. A committed `.career-ops-data`
+  marker was tried first and rejected: it fails `test-all.mjs` section 20, which expects the default root
+  when no variable is set. The environment variable passes the quick suite, but with it set some tests write fixtures into the
+  data root, so run tests with `env -u CAREER_OPS_ROOT`.
+- **System output:** none yet. Still missing: `config/profile.yml`, `modes/_profile.md`, `portals.yml`.
+- **Learned:** the Claude GitHub App only sees the repos it was granted, so a new private repo has to be
+  added under the app's repository access before a session can attach it.
+- **Next:** set `CAREER_OPS_ROOT` in the cloud environment's settings; onboarding: profile, archetypes, portals, from the existing `cv.md` and `cv.zh-TW.md`.
+
 ### 2026-09-26 — Connectivity test from the cloud environment
 
 - **Stage:** setup

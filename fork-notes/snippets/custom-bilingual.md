@@ -27,7 +27,7 @@
 5. **A translation adds nothing.** The zh-TW twin restates the English content. No new claims, metrics,
    titles or skills. Numbers, dates, company and product names stay identical. If a phrase has no clean
    translation, keep the English term and add the Chinese in parentheses.
-6. **The zh-TW CV comes from `local/cv.zh-TW.md`,** the user-reviewed translation of `cv.md`, with the
+6. **The zh-TW CV comes from `{DATA_ROOT}/cv.zh-TW.md`,** the user-reviewed translation of `cv.md`, with the
    same tailoring as the English CV for that report. If it disagrees with `cv.md`, `cv.md` wins. Flag the
    discrepancy to the user; don't resolve it silently.
 7. **Machine-parsed data stays English-only.** Tracker rows (`data/applications.md`), TSV files in

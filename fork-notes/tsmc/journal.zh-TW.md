@@ -34,6 +34,16 @@
 
 ## 紀錄
 
+### 2026-09-26 — 接上私人資料 repo
+
+- **階段：** 設定
+- **完成事項：** 建立存放個人資料的私人 GitHub repo，並接上雲端工作階段。用環境變數
+  `CAREER_OPS_ROOT=../career-ops-max-rojarsmith` 把 `{DATA_ROOT}` 指向它，`node doctor.mjs` 就能在那裡找到 `cv.md`。
+  一開始試過 commit `.career-ops-data` 標記檔，但放棄了：它會讓 `test-all.mjs` 第 20 節失敗（該節檢查沒設變數時資料目錄為預設值）。改用環境變數後快速測試全部通過；但設了變數時，有些測試會把測試檔寫進資料目錄，所以跑測試要用 `env -u CAREER_OPS_ROOT`。
+- **系統產出：** 尚無。還缺 `config/profile.yml`、`modes/_profile.md`、`portals.yml`。
+- **心得：** Claude GitHub App 只看得到被授權的 repo，新建的私人 repo 要先加進 App 的存取清單，工作階段才接得上。
+- **下一步：** 在雲端環境設定加入 `CAREER_OPS_ROOT`；初始設定：用現有的 `cv.md` 和 `cv.zh-TW.md` 建立個人設定、角色原型與職缺來源。
+
 ### 2026-09-26 — 從雲端環境測試連線
 
 - **階段：** 設定
