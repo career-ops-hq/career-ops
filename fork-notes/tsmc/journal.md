@@ -32,6 +32,19 @@ learned. Newest entry on top. Keep the zh-TW twin in sync in the same commit.
 
 ## Entries
 
+### 2026-09-26 — Second evaluation: Enterprise Business Systems PM, report #002
+
+- **Stage:** evaluation
+- **Done:** Full A–H evaluation of IT Product Manager of Enterprise Business Systems (jobId 16064). Cloudflare
+  showed its bot check on the first load; opening the careers home page first and then the posting got through.
+- **System output:** report #002, **3.3/5, "Research first"**, EN + zh-TW. Added a `URL` column to the tracker and ran
+  `merge-tracker.mjs --backfill-urls`, so later TSMC postings dedupe by URL instead of fuzzy title matching.
+- **Learned:** this posting states its complete interview process on the page, with no coding test, and names
+  Hsinchu/Taipei. So it passes both hard rules. It loses on level (a "2+ years" bar) and domain (ERP-style
+  enterprise systems). Comparison: #001 fits the product record better but has an unconfirmed coding test; #002 is
+  process-safe but a lower grade.
+- **Next:** one recruiter call covering both postings: coding test for #001, grade and base band for both.
+
 ### 2026-09-26 — First evaluation: IT Product Manager, report #001
 
 - **Stage:** evaluation
