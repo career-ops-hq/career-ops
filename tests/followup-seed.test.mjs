@@ -1,23 +1,25 @@
 #!/usr/bin/env node
 
 /**
- * followup-seed-tests.mjs — regression tests for followup-seed.mjs (#1430).
+ * tests/followup-seed.test.mjs — regression tests for followup-seed.mjs (#1430).
  *
  * Marking a tracker row Applied used to leave data/follow-ups.md untouched
  * until the user ran the `followup` mode by hand — the seed step never ran on
  * its own. These tests drive followup-seed.mjs's CLI (via execFileSync, like
- * tracker-columns-tests.mjs) end-to-end against sandboxed fixtures, plus a few
+ * tests/tracker-columns.test.mjs) end-to-end against sandboxed fixtures, plus a few
  * direct unit-level imports of the exported functions.
  *
- * Run: node followup-seed-tests.mjs
+ * Run: node test-all.mjs --only followup-seed
  */
 
 import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, existsSync, utimesSync } from 'fs';
-import { join, dirname } from 'path';
+import { join } from 'path';
 import { tmpdir } from 'os';
-import { fileURLToPath, pathToFileURL } from 'url';
-const ROOT = dirname(fileURLToPath(import.meta.url));
+import { pathToFileURL } from 'url';
+import { pass, fail, ROOT } from './helpers.mjs';
+
+console.log('\nfollowup-seed.mjs — pinned first follow-up on Applied');
 const DEFAULT_CADENCE_PROFILE = join(ROOT, 'tests', 'fixtures', 'profile-default-cadence.yml');
 
 // Pin the cadence source BEFORE followup-cadence.mjs is evaluated: it resolves
@@ -29,17 +31,34 @@ const DEFAULT_CADENCE_PROFILE = join(ROOT, 'tests', 'fixtures', 'profile-default
 // The import below must stay DYNAMIC: ESM hoists static imports above every
 // statement here, so a static one would run the module first and the pin would
 // do nothing.
+//
+// The pin is also RESTORED the moment that import resolves, and this is not
+// tidiness. As a root suite this ran in its own process, so a leaked env var
+// died with it; discovery runs every suite in ONE process, and
+// providers/_profile-keywords.mjs reads CAREER_OPS_PROFILE at module scope to
+// pick its fallback profile. Leaving the pin set poisons every provider suite
+// that sorts after this one — they went red together with "no
+// config/profile.yml target_roles to fall back to" while passing alone, which
+// is the #3411 failure exactly, and the reason it is worth restoring in a
+// `finally`: #3411's own restore turned out to be skippable on a throw.
+// followup-cadence.mjs has captured its value by the time the import resolves,
+// and run()'s child env sets CAREER_OPS_PROFILE explicitly rather than
+// inheriting it, so nothing below needs the process-wide pin.
+const PRIOR_PROFILE = process.env.CAREER_OPS_PROFILE;
 process.env.CAREER_OPS_PROFILE = DEFAULT_CADENCE_PROFILE;
 
-const { parseNextOverrides, resolveNextOverride, normalizeStatus, addDays, parseDate } =
-  await import('./followup-cadence.mjs');
+let cadence;
+try {
+  cadence = await import('../followup-cadence.mjs');
+} finally {
+  if (PRIOR_PROFILE === undefined) delete process.env.CAREER_OPS_PROFILE;
+  else process.env.CAREER_OPS_PROFILE = PRIOR_PROFILE;
+}
+
+const { parseNextOverrides, resolveNextOverride, normalizeStatus, addDays, parseDate } = cadence;
 const NODE = process.execPath;
 const SCRIPT = join(ROOT, 'followup-seed.mjs');
 
-let passed = 0;
-let failed = 0;
-function pass(m) { console.log(`PASS ${m}`); passed++; }
-function fail(m) { console.error(`FAIL ${m}`); failed++; }
 
 // Mirror of followup-seed.mjs's todayStr(): the LOCAL date, not the UTC one.
 // This helper used toISOString() too, so tests 1 and 4 asserted the seed's
@@ -572,5 +591,3 @@ function cleanup(sandbox) {
   });
 }
 
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed > 0 ? 1 : 0);
