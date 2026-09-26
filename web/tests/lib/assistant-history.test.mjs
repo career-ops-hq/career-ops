@@ -24,4 +24,5 @@ test('migration preserves all messages and strips transient confirmations withou
   ] }]);
   assert.deepEqual(cleaned[0].parts, [{ type: 'text', text: 'Reply' }, { type: 'note', text: 'Updated status (done)' }, { type: 'card', jobId: 'j1' }]);
   assert.throws(() => cleanMessages([{ role: 'user', parts: [null] }]));
+  assert.throws(() => cleanMessages(Array.from({ length: 2001 }, () => ({ role: 'user', content: 'text' }))));
 });

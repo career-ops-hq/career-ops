@@ -228,7 +228,13 @@ export function AssistantConsole() {
   }
   function flushChat(title?: string): Promise<void> {
     const current = activeChat.current;
-    const snapshot = cleanMessages(messagesRef.current) as Msg[];
+    let snapshot: Msg[];
+    try { snapshot = cleanMessages(messagesRef.current) as Msg[]; }
+    catch (e) {
+      const error = e instanceof Error ? e : new Error("Conversation could not be saved");
+      setSaveError(error.message);
+      return Promise.reject(error);
+    }
     if (!snapshot.some(m => m.role === "user")) return Promise.resolve();
     const encoded = JSON.stringify(snapshot);
     const operation = saveQueue.current.catch(() => {}).then(async () => {
