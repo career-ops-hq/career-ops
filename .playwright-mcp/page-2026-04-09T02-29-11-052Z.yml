@@ -1,0 +1,91 @@
+- generic [active] [ref=e1]:
+  - link "HighLevel logo" [ref=e4] [cursor=pointer]:
+    - /url: https://jobs.lever.co/gohighlevel
+    - img "HighLevel logo" [ref=e5]
+  - generic [ref=e7]:
+    - generic [ref=e9]:
+      - generic [ref=e10]:
+        - heading "Lead Software Development Engineer in Test - Lead Gen" [level=2] [ref=e11]
+        - generic [ref=e12]:
+          - generic [ref=e13]: India
+          - generic [ref=e14]: Engineering – SDET /
+          - generic [ref=e15]: Employee India /
+          - generic [ref=e16]: Remote
+      - link "apply for this job" [ref=e18] [cursor=pointer]:
+        - /url: https://jobs.lever.co/gohighlevel/ca4ef37c-f259-4b6b-8d28-c034feed8874/apply
+    - generic [ref=e19]:
+      - generic [ref=e20]:
+        - strong [ref=e22]: "About HighLevel:"
+        - generic [ref=e23]: HighLevel is an AI powered, all-in-one white-label sales & marketing platform that empowers agencies, entrepreneurs, and businesses to elevate their digital presence and drive growth. We are proud to support a global and growing community of over 1 million businesses, comprised of agencies, consultants, and businesses of all sizes and industries. HighLevel empowers users with all the tools needed to capture, nurture, and close new leads into repeat customers. As of mid 2025, HighLevel processes over 4 billion API hits and handles more than 2.5 billion message events every day. Our platform manages over 470 terabytes of data distributed across five databases, operates with a network of over 250 microservices, and supports over 1 million hostnames.
+        - strong [ref=e26]: "Our People:"
+        - generic [ref=e27]: With over 1,500 team members across 15+ countries, we operate in a global, remote-first environment. We are building more than software; we are building a global community rooted in creativity, collaboration, and impact. We take pride in cultivating a culture where innovation thrives, ideas are celebrated, and people come first, no matter where they call home.
+        - strong [ref=e30]: "Our Impact:"
+        - generic [ref=e31]: As of mid 2025, our platform powers over 1.5 billion messages, helps generate over 200 million leads, and facilitates over 20 million conversations for the more than 1 million businesses we serve each month. Behind those numbers are real people growing their companies, connecting with customers, and making their mark - and we get to help make that happen.
+        - strong [ref=e34]: "About the Role:"
+        - generic [ref=e35]: We are looking for a hands-on Lead SDET with a strong product and engineering mindset to own, build, and scale the end-to-end quality function in a fast-growing startup environment.
+        - generic [ref=e37]: This role goes beyond traditional QA leadership. You will design and build automation frameworks, influence architecture and design for testability, drive shift-left quality practices, and mentor a high-performing SDET team. You will work closely with Group, Product Managers, Engineering Managers, Security, and DevOps teams to ensure fast, reliable, and scalable product releases with minimal defect leakage.
+      - generic [ref=e39]:
+        - heading "Responsibilities:" [level=3] [ref=e40]
+        - list [ref=e43]:
+          - listitem [ref=e44]: Own the end-to-end QA lifecycle across web and mobile products
+          - listitem [ref=e45]: Define, implement, and continuously evolve QA strategy, processes, and best practices
+          - listitem [ref=e46]: Establish quality standards, release criteria, and risk assessment frameworks
+          - listitem [ref=e47]: Provide release readiness reports, quality metrics, defect trends, and risk insights to leadership
+          - listitem [ref=e48]: Identify quality gaps, systemic risks, and proactively drive resolution
+          - listitem [ref=e49]: Actively contribute as an individual contributor in manual and automated testing
+          - listitem [ref=e50]: "Design, build, and maintain scalable automation frameworks across: UI (Web)API & Backend, Integration and End-to-End layers"
+          - listitem [ref=e51]: Develop and execute functional and non-functional test cases
+          - listitem [ref=e52]: Perform regression, smoke, sanity, API, performance, load, security, and accessibility testing
+          - listitem [ref=e53]: Ensure high-quality UI/UX, pixel-perfect validation
+          - listitem [ref=e54]: Drive and support BDD-based testing practices
+          - listitem [ref=e55]: Own and evolve the test automation platform for scalability, reliability, and ease of use
+          - listitem [ref=e56]: Build and enhance internal QA tools to improve test efficiency and productivity
+          - listitem [ref=e57]: Implement test observability and reporting systems for analytics, dashboards, and alerts
+          - listitem [ref=e58]: Reduce test flakiness through intelligent retries, failure analysis, and stability improvements
+          - listitem [ref=e59]: Contribute to CI/CD quality gates and continuous testing pipelines
+          - listitem [ref=e60]: Research and apply emerging technologies (AI/ML, LLM-based testing, smart test generation) to advance automation maturity
+          - listitem [ref=e61]: Lead performance, load, and scalability testing for critical features and services
+          - listitem [ref=e62]: Validate infrastructure-level quality in containerized and distributed environments
+          - listitem [ref=e63]: Partner with Engineering and DevOps to ensure systems meet scalability and reliability SLAs
+          - listitem [ref=e64]: Advocate and implement shift-left testing by embedding quality early in design and development
+          - listitem [ref=e65]: Participate in architecture, design, and requirement reviews to improve testability
+          - listitem [ref=e66]: Provide quality insights on microservices, micro-frontends, databases, and data flows
+          - listitem [ref=e67]: Drive root cause analysis (RCA) for production issues and close defect leakage loops
+          - listitem [ref=e68]: Lead, mentor, and grow a team of 3–4 QA/SDET engineers
+          - listitem [ref=e69]: Review test cases, automation code, and defect reports
+          - listitem [ref=e70]: Set coding standards, automation patterns, and best practices
+          - listitem [ref=e71]: Ensure timely delivery of testing activities aligned with sprint and release schedules
+          - listitem [ref=e72]: Build onboarding documentation and training materials for frameworks and tools
+          - listitem [ref=e73]: Inspire a quality-first, ownership-driven mindset across the team
+          - listitem [ref=e74]: Work closely with Group Product Managers, Engineering Managers, Developers, Security, and DevOps teams
+          - listitem [ref=e75]: Act as a quality advocate across the organization, ensuring quality is owned throughout the product lifecycle
+          - listitem [ref=e76]: Ensure customer impact and real-world reliability remain central to all quality decisions
+      - generic [ref=e78]:
+        - heading "Requirements:" [level=3] [ref=e79]
+        - list [ref=e82]:
+          - listitem [ref=e83]: 7+ years of experience in QA, Software Testing, or SDET roles
+          - listitem [ref=e84]: 2+ years of experience in a senior or lead testing role
+          - listitem [ref=e85]: Strong hands-on experience in manual and automation testing
+          - listitem [ref=e86]: Proven experience building and scaling automation frameworks from scratch
+          - listitem [ref=e87]: Strong programming skills in JavaScript/TypeScript, Python, or Java
+          - listitem [ref=e88]: Solid understanding of API, backend, and integration testing
+          - listitem [ref=e89]: Experience with performance, load, and scalability testing
+          - listitem [ref=e90]: Hands-on experience with CI/CD pipelines and continuous testing
+          - listitem [ref=e91]: Ability to independently own quality end-to-end in a fast-paced environment
+          - listitem [ref=e92]: Strong attention to detail with a quality-first and customer-first mindset
+          - listitem [ref=e93]: Excellent communication, leadership, and mentoring skills
+      - generic [ref=e94]:
+        - strong [ref=e96]: "EEO Statement:"
+        - generic [ref=e97]: The company is an Equal Opportunity Employer. As an employer subject to affirmative action regulations, we invite you to voluntarily provide the following demographic information. This information is used solely for compliance with government recordkeeping, reporting, and other legal requirements. Providing this information is voluntary and refusal to do so will not affect your application status. This data will be kept separate from your application and will not be used in the hiring decision.
+        - generic [ref=e99]: "#LI-Remote #LI-JM1"
+      - generic [ref=e101]: We may use artificial intelligence (AI) tools to support parts of the hiring process, such as reviewing applications, analyzing resumes, or assessing responses. These tools assist our recruitment team but do not replace human judgment. Final hiring decisions are ultimately made by humans. If you would like more information about how your data is processed, please contact us.
+      - link "apply for this job" [ref=e103] [cursor=pointer]:
+        - /url: https://jobs.lever.co/gohighlevel/ca4ef37c-f259-4b6b-8d28-c034feed8874/apply
+  - generic [ref=e105]:
+    - paragraph [ref=e106]:
+      - link "HighLevel Home Page" [ref=e107] [cursor=pointer]:
+        - /url: https://www.gohighlevel.com/
+    - link "Jobs powered by Lever logo" [ref=e108] [cursor=pointer]:
+      - /url: https://www.lever.co/job-seeker-support/
+      - generic [ref=e109]: Jobs powered by
+      - img "Lever logo" [ref=e110]

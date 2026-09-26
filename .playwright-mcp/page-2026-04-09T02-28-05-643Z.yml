@@ -1,0 +1,835 @@
+- generic [ref=e2]:
+  - list [ref=e4]:
+    - listitem [ref=e5]:
+      - link "Cohere" [ref=e6] [cursor=pointer]:
+        - /url: https://cohere.com/
+        - img "Cohere" [ref=e7]
+    - listitem
+    - listitem
+  - generic [ref=e8]:
+    - status [ref=e10]:
+      - text: Open Positions
+      - generic [ref=e11]: (120)
+    - generic [ref=e12]:
+      - generic [ref=e13]:
+        - generic [ref=e14]:
+          - generic [ref=e15]: "Filters:"
+          - button "Reset filters" [disabled]:
+            - img
+            - text: Reset filters
+        - generic [ref=e16]:
+          - generic [ref=e17]:
+            - combobox "Department" [ref=e18]:
+              - option "All Departments"
+              - option "Agentic Platform (13)"
+              - option "Business Operations (4)"
+              - option "Finance (1)"
+              - option "Legal (2)"
+              - option "Cohere Labs (2)"
+              - option "Data Quality (Contract) (4)"
+              - option "Multilingual Annotation - Chinese (1)"
+              - option "Multilingual Annotation - French (1)"
+              - option "Multilingual Annotation - German (1)"
+              - option "Multilingual Annotation - Hindi (1)"
+              - option "Design (1)"
+              - option "Embeddings & Search (2)"
+              - option "Government & Public Policy (1)"
+              - option "Inference (4)"
+              - option "Model Serving (2)"
+              - option "Internships (4)"
+              - option "Marketing (5)"
+              - option "Marketing (5)"
+              - option "Modeling (32)"
+              - option "Applied-ML (10)"
+              - option "Modeling (21)"
+              - option "People Operations (4)"
+              - option "HR (2)"
+              - option "Talent Acquisition (2)"
+              - option "PR & Communications (1)"
+              - option "Product (13)"
+              - option "Infrastructure (3)"
+              - option "IT (2)"
+              - option "Security (7)"
+              - option "Product Management & Program Management (9)"
+              - option "Engineering Program Management (3)"
+              - option "Product Management (6)"
+              - option "Revenue (21)"
+              - option "Customer Success (4)"
+              - option "Solutions Architecture (6)"
+            - generic:
+              - img
+          - generic [ref=e19]:
+            - combobox "Employment" [ref=e20]:
+              - option "All Employment Types"
+              - option "Contract (5)"
+              - option "Full time (112)"
+              - option "Intern (3)"
+            - generic:
+              - img
+          - generic [ref=e21]:
+            - combobox "Location" [ref=e22]:
+              - option "All Locations"
+              - option "Austin (1)"
+              - option "Berlin (1)"
+              - option "Boston (1)"
+              - option "Calgary (5)"
+              - option "Canada (22)"
+              - option "Dallas (2)"
+              - option "Dubai (3)"
+              - option "Edinburgh (1)"
+              - option "Europe (15)"
+              - option "France (1)"
+              - option "Germany (1)"
+              - option "Houston (1)"
+              - option "Japan (3)"
+              - option "Korea (5)"
+              - option "London (44)"
+              - option "Middle East (2)"
+              - option "Montreal (49)"
+              - option "Nashville (1)"
+              - option "New York (59)"
+              - option "New York (2)"
+              - option "North America | Utah (1)"
+              - option "Ottawa (9)"
+              - option "Paris (18)"
+              - option "Phoenix (1)"
+              - option "Richmond, VA (1)"
+              - option "Riyadh (2)"
+              - option "San Antonio (1)"
+              - option "San Francisco (44)"
+              - option "San Francisco (1)"
+              - option "Seattle (3)"
+              - option "Singapore (5)"
+              - option "Tokyo (1)"
+              - option "Toronto (73)"
+              - option "Toronto (2)"
+              - option "United Arab Emirates (1)"
+              - option "United Kingdom (9)"
+              - option "United States (16)"
+              - option "Vancouver (5)"
+              - option "Washington, DC (2)"
+            - generic:
+              - img
+          - generic [ref=e23]:
+            - combobox "Location Type" [ref=e24]:
+              - option "All Location Types"
+              - option "Hybrid (42)"
+              - option "On-site (8)"
+              - option "Remote (69)"
+            - generic:
+              - img
+        - status [ref=e25]: No filters applied
+      - generic [ref=e26]:
+        - heading "Agentic Platform" [level=2] [ref=e27]:
+          - generic [ref=e28]: Agentic Platform
+        - generic [ref=e29]:
+          - link "Engineering Manager, North Agentic Platform • London; Europe; Toronto • Full time • Hybrid" [ref=e30] [cursor=pointer]:
+            - /url: /cohere/2166a40a-1e80-4966-9082-aa4640fc4ac5
+            - generic [ref=e31]:
+              - heading "Engineering Manager, North" [level=3] [ref=e32]
+              - paragraph [ref=e34]: Agentic Platform • London; Europe; Toronto • Full time • Hybrid
+          - link "Forward Deployed Engineer, Agentic Platform Agentic Platform • Toronto; United States • Full time • Hybrid" [ref=e35] [cursor=pointer]:
+            - /url: /cohere/b0bcef37-1d20-414f-aade-c54942d63df9
+            - generic [ref=e36]:
+              - heading "Forward Deployed Engineer, Agentic Platform" [level=3] [ref=e37]
+              - paragraph [ref=e39]: Agentic Platform • Toronto; United States • Full time • Hybrid
+          - link "Forward Deployed Engineer, Agentic Platform Agentic Platform • Middle East • Full time • Hybrid" [ref=e40] [cursor=pointer]:
+            - /url: /cohere/75c0032c-7200-48bf-9d6d-355880dd93d9
+            - generic [ref=e41]:
+              - heading "Forward Deployed Engineer, Agentic Platform" [level=3] [ref=e42]
+              - paragraph [ref=e44]: Agentic Platform • Middle East • Full time • Hybrid
+          - link "Forward Deployed Engineer, Agentic Platform (Public Sector) Agentic Platform • Ottawa • Full time • Hybrid" [ref=e45] [cursor=pointer]:
+            - /url: /cohere/556467eb-3dc8-46e2-b015-277872210997
+            - generic [ref=e46]:
+              - heading "Forward Deployed Engineer, Agentic Platform (Public Sector)" [level=3] [ref=e47]
+              - paragraph [ref=e49]: Agentic Platform • Ottawa • Full time • Hybrid
+          - link "Forward Deployed Engineer, Infrastructure Specialist Agentic Platform • Japan; Korea; Singapore • Full time • Remote" [ref=e50] [cursor=pointer]:
+            - /url: /cohere/38f75a48-199c-4325-a7f8-2af6ed6a1b3b
+            - generic [ref=e51]:
+              - heading "Forward Deployed Engineer, Infrastructure Specialist" [level=3] [ref=e52]
+              - paragraph [ref=e54]: Agentic Platform • Japan; Korea; Singapore • Full time • Remote
+          - link "Forward Deployed Engineer, Infrastructure Specialist Agentic Platform • Dubai; United Arab Emirates • Full time • Remote" [ref=e55] [cursor=pointer]:
+            - /url: /cohere/fea8cc38-1a55-4f1c-a652-8c39c66138fc
+            - generic [ref=e56]:
+              - heading "Forward Deployed Engineer, Infrastructure Specialist" [level=3] [ref=e57]
+              - paragraph [ref=e59]: Agentic Platform • Dubai; United Arab Emirates • Full time • Remote
+          - link "Forward Deployed Engineer, Infrastructure Specialist (North America) Agentic Platform • Toronto; Canada; Montreal; Ottawa; Vancouver • Full time • Hybrid" [ref=e60] [cursor=pointer]:
+            - /url: /cohere/be48aafc-9610-4ebd-8414-a0722a3cd59a
+            - generic [ref=e61]:
+              - heading "Forward Deployed Engineer, Infrastructure Specialist (North America)" [level=3] [ref=e62]
+              - paragraph [ref=e64]: Agentic Platform • Toronto; Canada; Montreal; Ottawa; Vancouver • Full time • Hybrid
+          - link "Forward Deployed Engineer, Infrastructure Specialist (UK/EU/ME) Agentic Platform • United Kingdom; Europe • Full time • Remote" [ref=e65] [cursor=pointer]:
+            - /url: /cohere/69a9ab2e-a7eb-4c4f-825a-5c25cf063900
+            - generic [ref=e66]:
+              - heading "Forward Deployed Engineer, Infrastructure Specialist (UK/EU/ME)" [level=3] [ref=e67]
+              - paragraph [ref=e69]: Agentic Platform • United Kingdom; Europe • Full time • Remote
+          - link "Forward Deployed Engineer, Prompt Specialist Agentic Platform • Toronto; Montreal; New York; San Francisco • Full time • Hybrid" [ref=e70] [cursor=pointer]:
+            - /url: /cohere/6745547c-cc72-466c-867c-a0539b04909b
+            - generic [ref=e71]:
+              - heading "Forward Deployed Engineer, Prompt Specialist" [level=3] [ref=e72]
+              - paragraph [ref=e74]: Agentic Platform • Toronto; Montreal; New York; San Francisco • Full time • Hybrid
+          - link "Lead Data Scientist Agentic Platform • United States; Canada • Full time • Remote" [ref=e75] [cursor=pointer]:
+            - /url: /cohere/39cab400-c976-41d9-9002-880ac6985b64
+            - generic [ref=e76]:
+              - heading "Lead Data Scientist" [level=3] [ref=e77]
+              - paragraph [ref=e79]: Agentic Platform • United States; Canada • Full time • Remote
+          - link "Senior Software Engineer, Agent Infrastructure Agentic Platform • Toronto; Canada; United States • Full time • Remote" [ref=e80] [cursor=pointer]:
+            - /url: /cohere/70664617-84f6-4ee8-a4f6-4037ebfda9db
+            - generic [ref=e81]:
+              - heading "Senior Software Engineer, Agent Infrastructure" [level=3] [ref=e82]
+              - paragraph [ref=e84]: Agentic Platform • Toronto; Canada; United States • Full time • Remote
+          - link "Senior/Staff Backend Engineer Agentic Platform • Toronto; Canada; Montreal; New York; Ottawa • Full time • Hybrid" [ref=e85] [cursor=pointer]:
+            - /url: /cohere/ea5662f4-c27e-475e-a502-4ad8015a2906
+            - generic [ref=e86]:
+              - heading "Senior/Staff Backend Engineer" [level=3] [ref=e87]
+              - paragraph [ref=e89]: Agentic Platform • Toronto; Canada; Montreal; New York; Ottawa • Full time • Hybrid
+          - link "Senior/Staff Full-Stack Engineer Agentic Platform • Toronto; Canada; Montreal; New York • Full time • Hybrid" [ref=e90] [cursor=pointer]:
+            - /url: /cohere/4b000aff-7c0f-45a0-b67d-cf0cb2ea16a6
+            - generic [ref=e91]:
+              - heading "Senior/Staff Full-Stack Engineer" [level=3] [ref=e92]
+              - paragraph [ref=e94]: Agentic Platform • Toronto; Canada; Montreal; New York • Full time • Hybrid
+        - heading "Business Operations" [level=2] [ref=e95]:
+          - generic [ref=e96]: Business Operations
+        - link "Business Operations Lead Business Operations • New York; San Francisco; Toronto • Full time" [ref=e98] [cursor=pointer]:
+          - /url: /cohere/a3a69960-3c85-4b11-b9b7-d4056d406c2e
+          - generic [ref=e99]:
+            - heading "Business Operations Lead" [level=3] [ref=e100]
+            - paragraph [ref=e102]: Business Operations • New York; San Francisco; Toronto • Full time
+        - heading "Business Operations › Finance" [level=2] [ref=e103]:
+          - generic [ref=e104]: Business Operations ›
+          - generic [ref=e105]: Finance
+        - link "Senior Revenue Accountant Finance • Toronto; New York; San Francisco • Full time • Remote" [ref=e107] [cursor=pointer]:
+          - /url: /cohere/1e2d0f32-774f-4061-954d-0e28bfe054ca
+          - generic [ref=e108]:
+            - heading "Senior Revenue Accountant" [level=3] [ref=e109]
+            - paragraph [ref=e111]: Finance • Toronto; New York; San Francisco • Full time • Remote
+        - heading "Business Operations › Legal" [level=2] [ref=e112]:
+          - generic [ref=e113]: Business Operations ›
+          - generic [ref=e114]: Legal
+        - generic [ref=e115]:
+          - link "Senior Counsel, Commercial Technology Legal • London; New York; San Francisco; Toronto • Full time • Hybrid" [ref=e116] [cursor=pointer]:
+            - /url: /cohere/d9dc385c-8895-4daf-aed4-2a0dc6587fab
+            - generic [ref=e117]:
+              - heading "Senior Counsel, Commercial Technology" [level=3] [ref=e118]
+              - paragraph [ref=e120]: Legal • London; New York; San Francisco; Toronto • Full time • Hybrid
+          - link "Senior Counsel, Commercial Technology Legal • London; New York; San Francisco; Toronto • Full time • Remote" [ref=e121] [cursor=pointer]:
+            - /url: /cohere/ad14cd1d-f0fd-419d-842e-dae84801588a
+            - generic [ref=e122]:
+              - heading "Senior Counsel, Commercial Technology" [level=3] [ref=e123]
+              - paragraph [ref=e125]: Legal • London; New York; San Francisco; Toronto • Full time • Remote
+        - heading "Cohere Labs" [level=2] [ref=e126]:
+          - generic [ref=e127]: Cohere Labs
+        - generic [ref=e128]:
+          - link "Research Engineer Cohere Labs • Toronto • Full time • Remote" [ref=e129] [cursor=pointer]:
+            - /url: /cohere/1a5925d0-41bd-4549-9b78-f427a2dda922
+            - generic [ref=e130]:
+              - heading "Research Engineer" [level=3] [ref=e131]
+              - paragraph [ref=e133]: Cohere Labs • Toronto • Full time • Remote
+          - link "Senior Research Scientist, Cohere Labs Cohere Labs • London; Canada; Europe; United Kingdom; United States • Full time • Remote" [ref=e134] [cursor=pointer]:
+            - /url: /cohere/7ec9eaf4-8cfc-4977-9041-86f73e7ab10b
+            - generic [ref=e135]:
+              - heading "Senior Research Scientist, Cohere Labs" [level=3] [ref=e136]
+              - paragraph [ref=e138]: Cohere Labs • London; Canada; Europe; United Kingdom; United States • Full time • Remote
+        - heading "Data Quality (Contract) › Multilingual Annotation - Chinese" [level=2] [ref=e139]:
+          - generic [ref=e140]: Data Quality (Contract) ›
+          - generic [ref=e141]: Multilingual Annotation - Chinese
+        - link "Data Annotation Specialist, Simplified Chinese / Mandarin Writer Multilingual Annotation - Chinese • Canada; Calgary; Montreal; Toronto; Vancouver • Contract • Remote" [ref=e143] [cursor=pointer]:
+          - /url: /cohere/34533921-d731-4529-89e7-cf4939055a20
+          - generic [ref=e144]:
+            - heading "Data Annotation Specialist, Simplified Chinese / Mandarin Writer" [level=3] [ref=e145]
+            - paragraph [ref=e147]: Multilingual Annotation - Chinese • Canada; Calgary; Montreal; Toronto; Vancouver • Contract • Remote
+        - heading "Data Quality (Contract) › Multilingual Annotation - French" [level=2] [ref=e148]:
+          - generic [ref=e149]: Data Quality (Contract) ›
+          - generic [ref=e150]: Multilingual Annotation - French
+        - link "Data Annotation Specialist - French / Quebecois Writer Multilingual Annotation - French • Canada; Calgary; Montreal; Ottawa; Toronto; Vancouver • Contract • Remote" [ref=e152] [cursor=pointer]:
+          - /url: /cohere/3c32e694-be54-45f7-b326-dcf056f31aa2
+          - generic [ref=e153]:
+            - heading "Data Annotation Specialist - French / Quebecois Writer" [level=3] [ref=e154]
+            - paragraph [ref=e156]: Multilingual Annotation - French • Canada; Calgary; Montreal; Ottawa; Toronto; Vancouver • Contract • Remote
+        - heading "Data Quality (Contract) › Multilingual Annotation - German" [level=2] [ref=e157]:
+          - generic [ref=e158]: Data Quality (Contract) ›
+          - generic [ref=e159]: Multilingual Annotation - German
+        - link "Data Annotation Specialist - German Writer/Translator Multilingual Annotation - German • Canada; Boston; Calgary; Montreal; Nashville; North America | Utah; Ottawa; Phoenix; Richmond, VA; Seattle; Toronto; United States; Vancouver • Contract • Remote" [ref=e161] [cursor=pointer]:
+          - /url: /cohere/acec6038-117b-400b-92e3-0745fbb4cf53
+          - generic [ref=e162]:
+            - heading "Data Annotation Specialist - German Writer/Translator" [level=3] [ref=e163]
+            - paragraph [ref=e165]: Multilingual Annotation - German • Canada; Boston; Calgary; Montreal; Nashville; North America | Utah; Ottawa; Phoenix; Richmond, VA; Seattle; Toronto; United States; Vancouver • Contract • Remote
+        - heading "Data Quality (Contract) › Multilingual Annotation - Hindi" [level=2] [ref=e166]:
+          - generic [ref=e167]: Data Quality (Contract) ›
+          - generic [ref=e168]: Multilingual Annotation - Hindi
+        - link "Data Annotation Specialist, Hindi Writer/Translator Multilingual Annotation - Hindi • Canada; Calgary; Montreal; Toronto; Vancouver • Contract • Remote" [ref=e170] [cursor=pointer]:
+          - /url: /cohere/362c4904-7fa4-4793-b27b-070e6d70b4c5
+          - generic [ref=e171]:
+            - heading "Data Annotation Specialist, Hindi Writer/Translator" [level=3] [ref=e172]
+            - paragraph [ref=e174]: Multilingual Annotation - Hindi • Canada; Calgary; Montreal; Toronto; Vancouver • Contract • Remote
+        - heading "Design" [level=2] [ref=e175]:
+          - generic [ref=e176]: Design
+        - link "Senior Product Designer, North Design • Europe; London; New York; Paris; Toronto • Full time • Remote" [ref=e178] [cursor=pointer]:
+          - /url: /cohere/127141d2-3fac-44c2-a10b-7c7f5484551f
+          - generic [ref=e179]:
+            - heading "Senior Product Designer, North" [level=3] [ref=e180]
+            - paragraph [ref=e182]: Design • Europe; London; New York; Paris; Toronto • Full time • Remote
+        - heading "Embeddings & Search" [level=2] [ref=e183]:
+          - generic [ref=e184]: Embeddings & Search
+        - generic [ref=e185]:
+          - link "Member of Technical Staff, Search Embeddings & Search • United States; Canada; Europe; London; Montreal; New York; San Francisco; Toronto; United Kingdom • Full time • Remote" [ref=e186] [cursor=pointer]:
+            - /url: /cohere/d5cc437c-2397-4c1a-9d12-3a2bf64d98ea
+            - generic [ref=e187]:
+              - heading "Member of Technical Staff, Search" [level=3] [ref=e188]
+              - paragraph [ref=e190]: Embeddings & Search • United States; Canada; Europe; London; Montreal; New York; San Francisco; Toronto; United Kingdom • Full time • Remote
+          - link "Software Engineer, Search Applications Embeddings & Search • Toronto; Canada; Europe; United Kingdom • Full time • Remote" [ref=e191] [cursor=pointer]:
+            - /url: /cohere/64fb905c-b3b4-4fcf-9e1c-a806c9c40068
+            - generic [ref=e192]:
+              - heading "Software Engineer, Search Applications" [level=3] [ref=e193]
+              - paragraph [ref=e195]: Embeddings & Search • Toronto; Canada; Europe; United Kingdom • Full time • Remote
+        - heading "Government & Public Policy" [level=2] [ref=e196]:
+          - generic [ref=e197]: Government & Public Policy
+        - link "Lead, Government Affairs - APAC Government & Public Policy • Korea; Singapore; Tokyo • Full time • Hybrid" [ref=e199] [cursor=pointer]:
+          - /url: /cohere/7340d993-45eb-4a3b-925e-e4b10035544c
+          - generic [ref=e200]:
+            - heading "Lead, Government Affairs - APAC" [level=3] [ref=e201]
+            - paragraph [ref=e203]: Government & Public Policy • Korea; Singapore; Tokyo • Full time • Hybrid
+        - heading "Inference" [level=2] [ref=e204]:
+          - generic [ref=e205]: Inference
+        - generic [ref=e206]:
+          - link "Full-Stack Software Engineer, Inference Inference • Toronto; London; Montreal; New York; San Francisco • Full time • Hybrid" [ref=e207] [cursor=pointer]:
+            - /url: /cohere/f5f727bc-9eab-4fcc-9fdd-92a9ce47c37c
+            - generic [ref=e208]:
+              - heading "Full-Stack Software Engineer, Inference" [level=3] [ref=e209]
+              - paragraph [ref=e211]: Inference • Toronto; London; Montreal; New York; San Francisco • Full time • Hybrid
+          - link "Software Engineer, Collect Inference • Toronto • Full time • Hybrid" [ref=e212] [cursor=pointer]:
+            - /url: /cohere/2786dc50-5662-461a-9946-a821ad42816f
+            - generic [ref=e213]:
+              - heading "Software Engineer, Collect" [level=3] [ref=e214]
+              - paragraph [ref=e216]: Inference • Toronto • Full time • Hybrid
+        - heading "Inference › Model Serving" [level=2] [ref=e217]:
+          - generic [ref=e218]: Inference ›
+          - generic [ref=e219]: Model Serving
+        - generic [ref=e220]:
+          - link "Site Reliability Engineer, Inference Infrastructure Model Serving • Toronto; London; Montreal; New York; San Francisco • Full time • Remote" [ref=e221] [cursor=pointer]:
+            - /url: /cohere/8b6696e1-f1c4-4010-bde9-3cec1340a2a6
+            - generic [ref=e222]:
+              - heading "Site Reliability Engineer, Inference Infrastructure" [level=3] [ref=e223]
+              - paragraph [ref=e225]: Model Serving • Toronto; London; Montreal; New York; San Francisco • Full time • Remote
+          - link "Staff Software Engineer, Inference Infrastructure Model Serving • San Francisco; London; Montreal; New York; Toronto • Full time • Hybrid" [ref=e226] [cursor=pointer]:
+            - /url: /cohere/41f23dad-9da2-451a-bd1e-a1800437cb64
+            - generic [ref=e227]:
+              - heading "Staff Software Engineer, Inference Infrastructure" [level=3] [ref=e228]
+              - paragraph [ref=e230]: Model Serving • San Francisco; London; Montreal; New York; Toronto • Full time • Hybrid
+        - heading "Internships" [level=2] [ref=e231]:
+          - generic [ref=e232]: Internships
+        - generic [ref=e233]:
+          - link "Machine Learning Intern/Co-op (Spring/Summer 2026) Internships • Canada; Europe; United Kingdom; United States • Intern • Remote" [ref=e234] [cursor=pointer]:
+            - /url: /cohere/2c669d85-e3d7-43f1-aa43-be33e12ff8a5
+            - generic [ref=e235]:
+              - heading "Machine Learning Intern/Co-op (Spring/Summer 2026)" [level=3] [ref=e236]
+              - paragraph [ref=e238]: Internships • Canada; Europe; United Kingdom; United States • Intern • Remote
+          - link "Research Internship (Spring/Summer 2026) Internships • Canada; Europe; London; Montreal; San Francisco; Toronto; United Kingdom; United States • Full time • Remote" [ref=e239] [cursor=pointer]:
+            - /url: /cohere/6e850172-a79d-4128-abd2-677731312857
+            - generic [ref=e240]:
+              - heading "Research Internship (Spring/Summer 2026)" [level=3] [ref=e241]
+              - paragraph [ref=e243]: Internships • Canada; Europe; London; Montreal; San Francisco; Toronto; United Kingdom; United States • Full time • Remote
+          - link "Safety Research Internship (Spring/Summer 2026) Internships • Canada; Europe; London; Montreal; San Francisco; Toronto; United Kingdom; United States • Intern • Remote" [ref=e244] [cursor=pointer]:
+            - /url: /cohere/f172c484-071a-4a90-a138-e064d69608ba
+            - generic [ref=e245]:
+              - heading "Safety Research Internship (Spring/Summer 2026)" [level=3] [ref=e246]
+              - paragraph [ref=e248]: Internships • Canada; Europe; London; Montreal; San Francisco; Toronto; United Kingdom; United States • Intern • Remote
+          - link "Software Engineer Intern (Spring/Summer 2026) Internships • Canada; Europe; London; United States • Intern • Remote" [ref=e249] [cursor=pointer]:
+            - /url: /cohere/66c98ca3-334b-4a6a-a27c-5807b3686121
+            - generic [ref=e250]:
+              - heading "Software Engineer Intern (Spring/Summer 2026)" [level=3] [ref=e251]
+              - paragraph [ref=e253]: Internships • Canada; Europe; London; United States • Intern • Remote
+        - heading "Marketing › Marketing" [level=2] [ref=e254]:
+          - generic [ref=e255]: Marketing ›
+          - generic [ref=e256]: Marketing
+        - generic [ref=e257]:
+          - link "Brand Marketing Manager - Campaigns Marketing • New York; London; Montreal; San Francisco; Toronto • Full time • Remote" [ref=e258] [cursor=pointer]:
+            - /url: /cohere/729ed902-0026-4f38-881e-aff0022cf464
+            - generic [ref=e259]:
+              - heading "Brand Marketing Manager - Campaigns" [level=3] [ref=e260]
+              - paragraph [ref=e262]: Marketing • New York; London; Montreal; San Francisco; Toronto • Full time • Remote
+          - link "Content Creator - Social Media Marketing • New York; London; Montreal; San Francisco; Toronto • Full time • Remote" [ref=e263] [cursor=pointer]:
+            - /url: /cohere/d5f02d16-69e6-4092-a5b4-7e96c8932541
+            - generic [ref=e264]:
+              - heading "Content Creator - Social Media" [level=3] [ref=e265]
+              - paragraph [ref=e267]: Marketing • New York; London; Montreal; San Francisco; Toronto • Full time • Remote
+          - link "Partner Marketing Manager Marketing • Toronto; New York • Full time • Hybrid" [ref=e268] [cursor=pointer]:
+            - /url: /cohere/f54c0ca3-9fe3-4df7-b7dd-bf432c0425cb
+            - generic [ref=e269]:
+              - heading "Partner Marketing Manager" [level=3] [ref=e270]
+              - paragraph [ref=e272]: Marketing • Toronto; New York • Full time • Hybrid
+          - link "Social Media Community Specialist (Reddit, Twitter/X) Marketing • Toronto; London; Montreal; New York; San Francisco • Full time • Remote" [ref=e273] [cursor=pointer]:
+            - /url: /cohere/48d24892-f657-4645-a41f-981cbfd86479
+            - generic [ref=e274]:
+              - heading "Social Media Community Specialist (Reddit, Twitter/X)" [level=3] [ref=e275]
+              - paragraph [ref=e277]: Marketing • Toronto; London; Montreal; New York; San Francisco • Full time • Remote
+          - link "Solutions Marketing Manager Marketing • Toronto; London; New York; San Francisco • Full time • Remote" [ref=e278] [cursor=pointer]:
+            - /url: /cohere/527c455c-4cdd-4a3a-b537-61ca36dbf7a9
+            - generic [ref=e279]:
+              - heading "Solutions Marketing Manager" [level=3] [ref=e280]
+              - paragraph [ref=e282]: Marketing • Toronto; London; New York; San Francisco • Full time • Remote
+        - heading "Modeling" [level=2] [ref=e283]:
+          - generic [ref=e284]: Modeling
+        - link "Senior ML Systems Engineer, Frameworks & Tooling Modeling • London; Montreal; New York; Paris; San Francisco; Toronto • Full time • Remote" [ref=e286] [cursor=pointer]:
+          - /url: /cohere/c99e61c9-ed92-426d-9711-188dfc0f729f
+          - generic [ref=e287]:
+            - heading "Senior ML Systems Engineer, Frameworks & Tooling" [level=3] [ref=e288]
+            - paragraph [ref=e290]: Modeling • London; Montreal; New York; Paris; San Francisco; Toronto • Full time • Remote
+        - heading "Modeling › Applied-ML" [level=2] [ref=e291]:
+          - generic [ref=e292]: Modeling ›
+          - generic [ref=e293]: Applied-ML
+        - generic [ref=e294]:
+          - link "Applied AI Engineer - Agentic Workflows (Singapore) Applied-ML • Singapore • Full time • Remote" [ref=e295] [cursor=pointer]:
+            - /url: /cohere/9c18b199-cd1f-4ef3-9fab-ce05589348ae
+            - generic [ref=e296]:
+              - heading "Applied AI Engineer - Agentic Workflows (Singapore)" [level=3] [ref=e297]
+              - paragraph [ref=e299]: Applied-ML • Singapore • Full time • Remote
+          - link "Applied AI Engineer – Agentic Workflows Applied-ML • San Francisco; London; Montreal; New York; Toronto • Full time • Remote" [ref=e300] [cursor=pointer]:
+            - /url: /cohere/1fa01a03-9253-4f62-8f10-0fe368b38cb9
+            - generic [ref=e301]:
+              - heading "Applied AI Engineer – Agentic Workflows" [level=3] [ref=e302]
+              - paragraph [ref=e304]: Applied-ML • San Francisco; London; Montreal; New York; Toronto • Full time • Remote
+          - link "Applied AI Engineer – Agentic Workflows (Korea) Applied-ML • Korea • Full time • Remote" [ref=e305] [cursor=pointer]:
+            - /url: /cohere/031c2335-db85-4265-8a88-a54b911be36a
+            - generic [ref=e306]:
+              - heading "Applied AI Engineer – Agentic Workflows (Korea)" [level=3] [ref=e307]
+              - paragraph [ref=e309]: Applied-ML • Korea • Full time • Remote
+          - link "Member of Technical Staff, MLE Applied-ML • San Francisco; Montreal; New York; Toronto • Full time • Remote" [ref=e310] [cursor=pointer]:
+            - /url: /cohere/110ba167-4efd-43b7-85d2-3ff719a28b0f
+            - generic [ref=e311]:
+              - heading "Member of Technical Staff, MLE" [level=3] [ref=e312]
+              - paragraph [ref=e314]: Applied-ML • San Francisco; Montreal; New York; Toronto • Full time • Remote
+          - link "Member of Technical Staff, MLE (Korea) Applied-ML • Korea • Full time • Remote" [ref=e315] [cursor=pointer]:
+            - /url: /cohere/31c47498-0ccf-4d23-a418-0d2c616ba909
+            - generic [ref=e316]:
+              - heading "Member of Technical Staff, MLE (Korea)" [level=3] [ref=e317]
+              - paragraph [ref=e319]: Applied-ML • Korea • Full time • Remote
+          - link "Member of Technical Staff, MLE (UK/EU) Applied-ML • London; Paris • Full time • Hybrid" [ref=e320] [cursor=pointer]:
+            - /url: /cohere/876a2d31-e6c3-497b-9c8e-0b7d111fb4cd
+            - generic [ref=e321]:
+              - heading "Member of Technical Staff, MLE (UK/EU)" [level=3] [ref=e322]
+              - paragraph [ref=e324]: Applied-ML • London; Paris • Full time • Hybrid
+          - link "Member of Technical Staff, MLE [Singapore] Applied-ML • Singapore • Full time • Remote" [ref=e325] [cursor=pointer]:
+            - /url: /cohere/a29a310d-074e-46f2-bdad-308d458d4011
+            - generic [ref=e326]:
+              - heading "Member of Technical Staff, MLE [Singapore]" [level=3] [ref=e327]
+              - paragraph [ref=e329]: Applied-ML • Singapore • Full time • Remote
+          - link "Member of Technical Staff, Senior/Staff MLE Applied-ML • San Francisco; Montreal; New York; Toronto • Full time • Remote" [ref=e330] [cursor=pointer]:
+            - /url: /cohere/86b305e5-84fe-47ab-bc5c-b79a74a63194
+            - generic [ref=e331]:
+              - heading "Member of Technical Staff, Senior/Staff MLE" [level=3] [ref=e332]
+              - paragraph [ref=e334]: Applied-ML • San Francisco; Montreal; New York; Toronto • Full time • Remote
+          - link "Senior Member of Technical Staff, MLE (Middle East) Applied-ML • Riyadh; Dubai • Full time • Remote" [ref=e335] [cursor=pointer]:
+            - /url: /cohere/6142564c-1e47-48f7-9519-2ce857c92ed9
+            - generic [ref=e336]:
+              - heading "Senior Member of Technical Staff, MLE (Middle East)" [level=3] [ref=e337]
+              - paragraph [ref=e339]: Applied-ML • Riyadh; Dubai • Full time • Remote
+          - link "Software Engineer - Applied ML - UK Public Sector Applied-ML • London • Full time • Hybrid" [ref=e340] [cursor=pointer]:
+            - /url: /cohere/df93ec57-d51e-4466-93be-4878c5fda4da
+            - generic [ref=e341]:
+              - heading "Software Engineer - Applied ML - UK Public Sector" [level=3] [ref=e342]
+              - paragraph [ref=e344]: Applied-ML • London • Full time • Hybrid
+        - heading "Modeling › Modeling" [level=2] [ref=e345]:
+          - generic [ref=e346]: Modeling ›
+          - generic [ref=e347]: Modeling
+        - generic [ref=e348]:
+          - link "Audio Inference Engineer, Model Efficiency Modeling • New York; Montreal; San Francisco; Toronto • Full time • Remote" [ref=e349] [cursor=pointer]:
+            - /url: /cohere/e912d84c-8399-422d-8a7d-918422a3e4b1
+            - generic [ref=e350]:
+              - heading "Audio Inference Engineer, Model Efficiency" [level=3] [ref=e351]
+              - paragraph [ref=e353]: Modeling • New York; Montreal; San Francisco; Toronto • Full time • Remote
+          - link "Member of Technical Staff - Sovereign AI Modeling • Canada; Toronto • Full time • Remote" [ref=e354] [cursor=pointer]:
+            - /url: /cohere/b9306620-a110-46b5-b4c4-7363e1d03a8d
+            - generic [ref=e355]:
+              - heading "Member of Technical Staff - Sovereign AI" [level=3] [ref=e356]
+              - paragraph [ref=e358]: Modeling • Canada; Toronto • Full time • Remote
+          - link "Member of Technical Staff, Agent Code Modeling • London; Europe; New York; Paris; Toronto • Full time • Hybrid" [ref=e359] [cursor=pointer]:
+            - /url: /cohere/70a8dc77-ac84-4790-aff6-13b4dcd4554a
+            - generic [ref=e360]:
+              - heading "Member of Technical Staff, Agent Code" [level=3] [ref=e361]
+              - paragraph [ref=e363]: Modeling • London; Europe; New York; Paris; Toronto • Full time • Hybrid
+          - link "Member of Technical Staff, Agents Modeling Modeling • New York • Full time • Remote" [ref=e364] [cursor=pointer]:
+            - /url: /cohere/24fe6a0b-6209-4ee0-b622-49c18636d99c
+            - generic [ref=e365]:
+              - heading "Member of Technical Staff, Agents Modeling" [level=3] [ref=e366]
+              - paragraph [ref=e368]: Modeling • New York • Full time • Remote
+          - link "Member of Technical Staff, Data Analysis and Evaluation Modeling • London; Montreal; New York; Paris; San Francisco; Toronto • Full time • Remote" [ref=e369] [cursor=pointer]:
+            - /url: /cohere/61703710-4379-42fd-a508-946f2a5fb6bc
+            - generic [ref=e370]:
+              - heading "Member of Technical Staff, Data Analysis and Evaluation" [level=3] [ref=e371]
+              - paragraph [ref=e373]: Modeling • London; Montreal; New York; Paris; San Francisco; Toronto • Full time • Remote
+          - link "Member of Technical Staff, Data Engineering Modeling • Toronto; London; Montreal; New York; Paris • Full time • Remote" [ref=e374] [cursor=pointer]:
+            - /url: /cohere/0885b39d-b2f8-44be-af4c-e533be2b34af
+            - generic [ref=e375]:
+              - heading "Member of Technical Staff, Data Engineering" [level=3] [ref=e376]
+              - paragraph [ref=e378]: Modeling • Toronto; London; Montreal; New York; Paris • Full time • Remote
+          - link "Member of Technical Staff, Integration/RL Team (Research Engineer) Modeling • Paris; London; Montreal; New York; Toronto • Full time • Remote" [ref=e379] [cursor=pointer]:
+            - /url: /cohere/e9ef9420-88e5-403b-82e8-1c36fa010d4d
+            - generic [ref=e380]:
+              - heading "Member of Technical Staff, Integration/RL Team (Research Engineer)" [level=3] [ref=e381]
+              - paragraph [ref=e383]: Modeling • Paris; London; Montreal; New York; Toronto • Full time • Remote
+          - link "Member of Technical Staff, MLE (North) Modeling • London; Europe; Montreal; New York; Paris; Toronto • Full time • Hybrid" [ref=e384] [cursor=pointer]:
+            - /url: /cohere/bda8d35e-92c2-4b01-b4ed-e43fe0a49aba
+            - generic [ref=e385]:
+              - heading "Member of Technical Staff, MLE (North)" [level=3] [ref=e386]
+              - paragraph [ref=e388]: Modeling • London; Europe; Montreal; New York; Paris; Toronto • Full time • Hybrid
+          - link "Member of Technical Staff, Model Efficiency Modeling • New York; Montreal; San Francisco; Toronto • Full time • Remote" [ref=e389] [cursor=pointer]:
+            - /url: /cohere/2a989030-6d14-4924-88c1-d878911e26fa
+            - generic [ref=e390]:
+              - heading "Member of Technical Staff, Model Efficiency" [level=3] [ref=e391]
+              - paragraph [ref=e393]: Modeling • New York; Montreal; San Francisco; Toronto • Full time • Remote
+          - link "Member of Technical Staff, Modeling Modeling • London; Montreal; New York; Paris; San Francisco; Toronto • Full time • Remote" [ref=e394] [cursor=pointer]:
+            - /url: /cohere/3136a5a5-06fd-4c82-8b72-a43467e6b128
+            - generic [ref=e395]:
+              - heading "Member of Technical Staff, Modeling" [level=3] [ref=e396]
+              - paragraph [ref=e398]: Modeling • London; Montreal; New York; Paris; San Francisco; Toronto • Full time • Remote
+          - link "Member of Technical Staff, Next Generation Agents Modeling • London; Montreal; New York; Paris; Toronto • Full time • Remote" [ref=e399] [cursor=pointer]:
+            - /url: /cohere/f931c326-4d16-44b3-812c-99378c60280f
+            - generic [ref=e400]:
+              - heading "Member of Technical Staff, Next Generation Agents" [level=3] [ref=e401]
+              - paragraph [ref=e403]: Modeling • London; Montreal; New York; Paris; Toronto • Full time • Remote
+          - link "Member of Technical Staff, Post-Training Modeling • London; Montreal; New York; Paris; San Francisco; Toronto • Full time • Hybrid" [ref=e404] [cursor=pointer]:
+            - /url: /cohere/554a9380-ab50-4338-88a9-c6b8ab19d92e
+            - generic [ref=e405]:
+              - heading "Member of Technical Staff, Post-Training" [level=3] [ref=e406]
+              - paragraph [ref=e408]: Modeling • London; Montreal; New York; Paris; San Francisco; Toronto • Full time • Hybrid
+          - link "Member of Technical Staff, Pre-Training Data Modeling • Toronto; London; Montreal; New York; Paris; San Francisco • Full time • Remote" [ref=e409] [cursor=pointer]:
+            - /url: /cohere/859e2e47-02fb-4afe-bb8a-e83bf4d8c265
+            - generic [ref=e410]:
+              - heading "Member of Technical Staff, Pre-Training Data" [level=3] [ref=e411]
+              - paragraph [ref=e413]: Modeling • Toronto; London; Montreal; New York; Paris; San Francisco • Full time • Remote
+          - link "Member of Technical Staff, Safety for Agents Modeling • London; Edinburgh; Montreal; New York; Paris; Toronto • Full time • Hybrid" [ref=e414] [cursor=pointer]:
+            - /url: /cohere/1f7cc5e6-5f31-40d8-ad49-fe22c98a3ea4
+            - generic [ref=e415]:
+              - heading "Member of Technical Staff, Safety for Agents" [level=3] [ref=e416]
+              - paragraph [ref=e418]: Modeling • London; Edinburgh; Montreal; New York; Paris; Toronto • Full time • Hybrid
+          - link "Member of Technical Staff, Synthetic Data Modeling • Toronto; London; Montreal; New York; Paris • Full time • Remote" [ref=e419] [cursor=pointer]:
+            - /url: /cohere/2df2da3c-fb69-4d4d-b3c9-077b3df2ba3d
+            - generic [ref=e420]:
+              - heading "Member of Technical Staff, Synthetic Data" [level=3] [ref=e421]
+              - paragraph [ref=e423]: Modeling • Toronto; London; Montreal; New York; Paris • Full time • Remote
+          - link "Member of Technical Staff, Training Infra Engineer Modeling • Paris; London; Montreal; New York; San Francisco; Toronto • Full time • Remote" [ref=e424] [cursor=pointer]:
+            - /url: /cohere/a13207e7-dc82-473f-8ca4-e832452fe8c3
+            - generic [ref=e425]:
+              - heading "Member of Technical Staff, Training Infra Engineer" [level=3] [ref=e426]
+              - paragraph [ref=e428]: Modeling • Paris; London; Montreal; New York; San Francisco; Toronto • Full time • Remote
+          - link "Member of Technical Staff, Training Performance Engineer Modeling • London; Montreal; New York; Paris; Toronto • Full time • Hybrid" [ref=e429] [cursor=pointer]:
+            - /url: /cohere/d42f5fd4-1ffc-45b9-957c-f09862db6af6
+            - generic [ref=e430]:
+              - heading "Member of Technical Staff, Training Performance Engineer" [level=3] [ref=e431]
+              - paragraph [ref=e433]: Modeling • London; Montreal; New York; Paris; Toronto • Full time • Hybrid
+          - link "Senior Member of Technical Staff, Multimodal AI Modeling • San Francisco; Montreal; New York; Paris; San Francisco; Toronto • Full time • Remote" [ref=e434] [cursor=pointer]:
+            - /url: /cohere/443368a3-6276-4b90-9671-27fed40fd6d2
+            - generic [ref=e435]:
+              - heading "Senior Member of Technical Staff, Multimodal AI" [level=3] [ref=e436]
+              - paragraph [ref=e438]: Modeling • San Francisco; Montreal; New York; Paris; San Francisco; Toronto • Full time • Remote
+          - link "Senior Research Engineer, Model Evaluation Modeling • Toronto; Canada; London; New York; San Francisco; Seattle; United States • Full time • Hybrid" [ref=e439] [cursor=pointer]:
+            - /url: /cohere/cb5d588c-5637-423a-968b-bf637ee2caf9
+            - generic [ref=e440]:
+              - heading "Senior Research Engineer, Model Evaluation" [level=3] [ref=e441]
+              - paragraph [ref=e443]: Modeling • Toronto; Canada; London; New York; San Francisco; Seattle; United States • Full time • Hybrid
+          - link "Senior Research Scientist, Model Evaluation Modeling • Toronto; Canada; London; New York; San Francisco; Seattle; United States • Full time • Hybrid" [ref=e444] [cursor=pointer]:
+            - /url: /cohere/830c613b-d4bf-4673-ab33-46ccc12cc415
+            - generic [ref=e445]:
+              - heading "Senior Research Scientist, Model Evaluation" [level=3] [ref=e446]
+              - paragraph [ref=e448]: Modeling • Toronto; Canada; London; New York; San Francisco; Seattle; United States • Full time • Hybrid
+          - link "Staff Research Engineer, Model Efficiency Modeling • New York; Montreal; San Francisco; Toronto • Full time • Remote" [ref=e449] [cursor=pointer]:
+            - /url: /cohere/c80f0fe9-3fc4-49fe-9f26-a7115350b1fc
+            - generic [ref=e450]:
+              - heading "Staff Research Engineer, Model Efficiency" [level=3] [ref=e451]
+              - paragraph [ref=e453]: Modeling • New York; Montreal; San Francisco; Toronto • Full time • Remote
+        - heading "People Operations › HR" [level=2] [ref=e454]:
+          - generic [ref=e455]: People Operations ›
+          - generic [ref=e456]: HR
+        - generic [ref=e457]:
+          - link "Human Resources Specialist HR • Paris • Full time • On-site" [ref=e458] [cursor=pointer]:
+            - /url: /cohere/a43e5434-1332-4d52-b95d-33d51df43ae2
+            - generic [ref=e459]:
+              - heading "Human Resources Specialist" [level=3] [ref=e460]
+              - paragraph [ref=e462]: HR • Paris • Full time • On-site
+          - link "Senior HR Business Partner HR • London • Full time • Hybrid" [ref=e463] [cursor=pointer]:
+            - /url: /cohere/1517638d-6b35-4374-b9a1-d117cf88537b
+            - generic [ref=e464]:
+              - heading "Senior HR Business Partner" [level=3] [ref=e465]
+              - paragraph [ref=e467]: HR • London • Full time • Hybrid
+        - heading "People Operations › Talent Acquisition" [level=2] [ref=e468]:
+          - generic [ref=e469]: People Operations ›
+          - generic [ref=e470]: Talent Acquisition
+        - generic [ref=e471]:
+          - link "Talent Acquisition Partner - GTM / G&A Recruiter Talent Acquisition • London • Full time • Hybrid" [ref=e472] [cursor=pointer]:
+            - /url: /cohere/df00a944-e9cf-44e2-85fe-15144212ebca
+            - generic [ref=e473]:
+              - heading "Talent Acquisition Partner - GTM / G&A Recruiter" [level=3] [ref=e474]
+              - paragraph [ref=e476]: Talent Acquisition • London • Full time • Hybrid
+          - link "Talent Acquisition Partner - Tech Recruiter Talent Acquisition • Toronto; Montreal; New York; San Francisco • Full time • Hybrid" [ref=e477] [cursor=pointer]:
+            - /url: /cohere/19d54181-08ac-41ba-a0d1-9b6297f43671
+            - generic [ref=e478]:
+              - heading "Talent Acquisition Partner - Tech Recruiter" [level=3] [ref=e479]
+              - paragraph [ref=e481]: Talent Acquisition • Toronto; Montreal; New York; San Francisco • Full time • Hybrid
+        - heading "PR & Communications" [level=2] [ref=e482]:
+          - generic [ref=e483]: PR & Communications
+        - link "Internal Communications Manager PR & Communications • New York; London; San Francisco • Full time • Hybrid" [ref=e485] [cursor=pointer]:
+          - /url: /cohere/15db0852-d994-4362-ae5e-bd2b9ae3d264
+          - generic [ref=e486]:
+            - heading "Internal Communications Manager" [level=3] [ref=e487]
+            - paragraph [ref=e489]: PR & Communications • New York; London; San Francisco • Full time • Hybrid
+        - heading "Product" [level=2] [ref=e490]:
+          - generic [ref=e491]: Product
+        - link "VP of AI Product Product • Toronto; London; Montreal; New York • Full time • Hybrid" [ref=e493] [cursor=pointer]:
+          - /url: /cohere/c131694b-e0b0-4b43-8cba-d10641b6c4c1
+          - generic [ref=e494]:
+            - heading "VP of AI Product" [level=3] [ref=e495]
+            - paragraph [ref=e497]: Product • Toronto; London; Montreal; New York • Full time • Hybrid
+        - heading "Product › Infrastructure" [level=2] [ref=e498]:
+          - generic [ref=e499]: Product ›
+          - generic [ref=e500]: Infrastructure
+        - generic [ref=e501]:
+          - link "Software Engineer, Internal Infrastructure (Europe & UK) Infrastructure • United Kingdom; Europe; London • Full time • Remote" [ref=e502] [cursor=pointer]:
+            - /url: /cohere/4dd749aa-a675-4430-98fb-6701c8e14ab6
+            - generic [ref=e503]:
+              - heading "Software Engineer, Internal Infrastructure (Europe & UK)" [level=3] [ref=e504]
+              - paragraph [ref=e506]: Infrastructure • United Kingdom; Europe; London • Full time • Remote
+          - link "Software Engineer, Internal Infrastructure (North America) Infrastructure • Toronto; New York; San Francisco • Full time • Hybrid" [ref=e507] [cursor=pointer]:
+            - /url: /cohere/02c92e66-c89d-4a62-8961-c260d651afe1
+            - generic [ref=e508]:
+              - heading "Software Engineer, Internal Infrastructure (North America)" [level=3] [ref=e509]
+              - paragraph [ref=e511]: Infrastructure • Toronto; New York; San Francisco • Full time • Hybrid
+          - link "Staff Software Engineer, GPU Infrastructure (HPC) Infrastructure • Canada; United States • Full time • Hybrid" [ref=e512] [cursor=pointer]:
+            - /url: /cohere/ef9b939d-da66-464c-a878-ef45616c0473
+            - generic [ref=e513]:
+              - heading "Staff Software Engineer, GPU Infrastructure (HPC)" [level=3] [ref=e514]
+              - paragraph [ref=e516]: Infrastructure • Canada; United States • Full time • Hybrid
+        - heading "Product › IT" [level=2] [ref=e517]:
+          - generic [ref=e518]: Product ›
+          - generic [ref=e519]: IT
+        - generic [ref=e520]:
+          - link "IT Operations Specialist (12 month contract) IT • London • Contract • Hybrid" [ref=e521] [cursor=pointer]:
+            - /url: /cohere/686ef280-eea8-4012-b9e6-9cb23c0c22ab
+            - generic [ref=e522]:
+              - heading "IT Operations Specialist (12 month contract)" [level=3] [ref=e523]
+              - paragraph [ref=e525]: IT • London • Contract • Hybrid
+          - link "IT Support Engineer IT • New York • Full time • On-site" [ref=e526] [cursor=pointer]:
+            - /url: /cohere/43e8ed06-4f3b-460e-aa8a-a0bde93f7bb5
+            - generic [ref=e527]:
+              - heading "IT Support Engineer" [level=3] [ref=e528]
+              - paragraph [ref=e530]: IT • New York • Full time • On-site
+        - heading "Product › Security" [level=2] [ref=e531]:
+          - generic [ref=e532]: Product ›
+          - generic [ref=e533]: Security
+        - generic [ref=e534]:
+          - link "GRC Specialist Security • Toronto; Montreal; New York; San Francisco • Full time • Remote" [ref=e535] [cursor=pointer]:
+            - /url: /cohere/3a964b79-ddd3-4c50-8a76-c39e978289b1
+            - generic [ref=e536]:
+              - heading "GRC Specialist" [level=3] [ref=e537]
+              - paragraph [ref=e539]: Security • Toronto; Montreal; New York; San Francisco • Full time • Remote
+          - link "Security Operations Engineer, EMEA Security • London; Europe; Middle East • Full time • Hybrid" [ref=e540] [cursor=pointer]:
+            - /url: /cohere/d277180e-6528-4745-99e8-328c17530412
+            - generic [ref=e541]:
+              - heading "Security Operations Engineer, EMEA" [level=3] [ref=e542]
+              - paragraph [ref=e544]: Security • London; Europe; Middle East • Full time • Hybrid
+          - link "Security Operations Manager Security • Toronto; Montreal; New York; San Francisco • Full time • Remote" [ref=e545] [cursor=pointer]:
+            - /url: /cohere/5585a326-9ec0-488d-b395-45e6f9eee596
+            - generic [ref=e546]:
+              - heading "Security Operations Manager" [level=3] [ref=e547]
+              - paragraph [ref=e549]: Security • Toronto; Montreal; New York; San Francisco • Full time • Remote
+          - link "Senior Security Engineer Security • Toronto; Montreal; New York; San Francisco • Full time • Remote" [ref=e550] [cursor=pointer]:
+            - /url: /cohere/cb981ecd-a161-482c-8d8e-5f19bb6e7fdd
+            - generic [ref=e551]:
+              - heading "Senior Security Engineer" [level=3] [ref=e552]
+              - paragraph [ref=e554]: Security • Toronto; Montreal; New York; San Francisco • Full time • Remote
+          - link "Senior Security Operations Engineer Security • Toronto; Montreal; New York; San Francisco • Full time • Remote" [ref=e555] [cursor=pointer]:
+            - /url: /cohere/9dddbce5-5cf8-41e9-b016-d801fb3ce5d8
+            - generic [ref=e556]:
+              - heading "Senior Security Operations Engineer" [level=3] [ref=e557]
+              - paragraph [ref=e559]: Security • Toronto; Montreal; New York; San Francisco • Full time • Remote
+          - link "Senior Software Engineer, Security Agents Security • Toronto; Montreal; New York; San Francisco • Full time • Remote" [ref=e560] [cursor=pointer]:
+            - /url: /cohere/a5bbd015-65a9-48a1-aab1-b266bdbc9905
+            - generic [ref=e561]:
+              - heading "Senior Software Engineer, Security Agents" [level=3] [ref=e562]
+              - paragraph [ref=e564]: Security • Toronto; Montreal; New York; San Francisco • Full time • Remote
+          - link "Software Engineer, Security Security • Toronto; Montreal; New York; San Francisco • Full time • Hybrid" [ref=e565] [cursor=pointer]:
+            - /url: /cohere/b9c8c98e-b0fa-43b6-93b0-fa780d956066
+            - generic [ref=e566]:
+              - heading "Software Engineer, Security" [level=3] [ref=e567]
+              - paragraph [ref=e569]: Security • Toronto; Montreal; New York; San Francisco • Full time • Hybrid
+        - heading "Product Management & Program Management › Engineering Program Management" [level=2] [ref=e570]:
+          - generic [ref=e571]: Product Management & Program Management ›
+          - generic [ref=e572]: Engineering Program Management
+        - generic [ref=e573]:
+          - link "Technical Program Manager, AI Delivery for Public Sector & Defence Engineering Program Management • Germany • Full time • On-site" [ref=e574] [cursor=pointer]:
+            - /url: /cohere/f8e85a7c-1eb0-47f8-8140-1c4e7892f17d
+            - generic [ref=e575]:
+              - heading "Technical Program Manager, AI Delivery for Public Sector & Defence" [level=3] [ref=e576]
+              - paragraph [ref=e578]: Engineering Program Management • Germany • Full time • On-site
+          - link "Technical Program Manager, Forward Deployed Engineering (Japan) Engineering Program Management • Japan • Full time • Hybrid" [ref=e579] [cursor=pointer]:
+            - /url: /cohere/a4932259-054b-4d92-90a0-cbac627abc9a
+            - generic [ref=e580]:
+              - heading "Technical Program Manager, Forward Deployed Engineering (Japan)" [level=3] [ref=e581]
+              - paragraph [ref=e583]: Engineering Program Management • Japan • Full time • Hybrid
+          - link "Technical Program Manager, North Delivery & Release Operations Engineering Program Management • United States; Canada; London; Montreal; New York; Toronto; United Kingdom • Full time • Hybrid" [ref=e584] [cursor=pointer]:
+            - /url: /cohere/929b6c8e-a47c-4512-bb17-99fa9581f23e
+            - generic [ref=e585]:
+              - heading "Technical Program Manager, North Delivery & Release Operations" [level=3] [ref=e586]
+              - paragraph [ref=e588]: Engineering Program Management • United States; Canada; London; Montreal; New York; Toronto; United Kingdom • Full time • Hybrid
+        - heading "Product Management & Program Management › Product Management" [level=2] [ref=e589]:
+          - generic [ref=e590]: Product Management & Program Management ›
+          - generic [ref=e591]: Product Management
+        - generic [ref=e592]:
+          - link "Product Manager, Native Experience & Growth Product Management • United States; New York; San Francisco; Toronto • Full time • Remote" [ref=e593] [cursor=pointer]:
+            - /url: /cohere/d9d2740b-8869-462d-85df-21c1941bc13d
+            - generic [ref=e594]:
+              - heading "Product Manager, Native Experience & Growth" [level=3] [ref=e595]
+              - paragraph [ref=e597]: Product Management • United States; New York; San Francisco; Toronto • Full time • Remote
+          - link "Product Manager, Platform Experience & Developer Product Product Management • Toronto; New York; San Francisco • Full time • Remote" [ref=e598] [cursor=pointer]:
+            - /url: /cohere/fe2e2971-e2c0-43fd-9ab1-187571776a5d
+            - generic [ref=e599]:
+              - heading "Product Manager, Platform Experience & Developer Product" [level=3] [ref=e600]
+              - paragraph [ref=e602]: Product Management • Toronto; New York; San Francisco • Full time • Remote
+          - link "Product Manager, Agent Harness & Modelling Product Management • Toronto; London; Montreal; New York • Full time • Remote" [ref=e603] [cursor=pointer]:
+            - /url: /cohere/1d1b300d-254b-48c4-958f-99c6b907f295
+            - generic [ref=e604]:
+              - heading "Product Manager, Agent Harness & Modelling" [level=3] [ref=e605]
+              - paragraph [ref=e607]: Product Management • Toronto; London; Montreal; New York • Full time • Remote
+          - link "Product Manager, Public Sector & Defence Product Management • Canada; Ottawa; Toronto • Full time • Hybrid" [ref=e608] [cursor=pointer]:
+            - /url: /cohere/2a7f1fad-05ff-4260-af36-556d1d694775
+            - generic [ref=e609]:
+              - heading "Product Manager, Public Sector & Defence" [level=3] [ref=e610]
+              - paragraph [ref=e612]: Product Management • Canada; Ottawa; Toronto • Full time • Hybrid
+          - link "Product Manager, Safety Research Product Management • United States; Europe; New York; Toronto • Full time • Remote" [ref=e613] [cursor=pointer]:
+            - /url: /cohere/a8122632-cc3b-4a1a-bd78-4b4b9466cb38
+            - generic [ref=e614]:
+              - heading "Product Manager, Safety Research" [level=3] [ref=e615]
+              - paragraph [ref=e617]: Product Management • United States; Europe; New York; Toronto • Full time • Remote
+          - link "Product Manager, Search and Embeddings Product Management • New York; Toronto • Full time • Hybrid" [ref=e618] [cursor=pointer]:
+            - /url: /cohere/2a179d34-c391-48bd-b2a3-b04f468a3840
+            - generic [ref=e619]:
+              - heading "Product Manager, Search and Embeddings" [level=3] [ref=e620]
+              - paragraph [ref=e622]: Product Management • New York; Toronto • Full time • Hybrid
+        - heading "Revenue" [level=2] [ref=e623]:
+          - generic [ref=e624]: Revenue
+        - generic [ref=e625]:
+          - link "Customer Support Engineer - Bilingual Revenue • Montreal; Ottawa; Toronto • Full time • Remote" [ref=e626] [cursor=pointer]:
+            - /url: /cohere/a41a65cf-d154-44a4-b0e0-de9e6cc1786f
+            - generic [ref=e627]:
+              - heading "Customer Support Engineer - Bilingual" [level=3] [ref=e628]
+              - paragraph [ref=e630]: Revenue • Montreal; Ottawa; Toronto • Full time • Remote
+          - link "Customer Support Engineer - Seoul Revenue • Korea • Full time • Remote" [ref=e631] [cursor=pointer]:
+            - /url: /cohere/a81f35cc-9c54-415e-8ef5-ed40234cba15
+            - generic [ref=e632]:
+              - heading "Customer Support Engineer - Seoul" [level=3] [ref=e633]
+              - paragraph [ref=e635]: Revenue • Korea • Full time • Remote
+          - link "Head of Global Partner Ecosystem Revenue • Toronto; New York; San Francisco • Full time • Hybrid" [ref=e636] [cursor=pointer]:
+            - /url: /cohere/7f4a3a24-cb30-4265-8aa0-7814f9124ee1
+            - generic [ref=e637]:
+              - heading "Head of Global Partner Ecosystem" [level=3] [ref=e638]
+              - paragraph [ref=e640]: Revenue • Toronto; New York; San Francisco • Full time • Hybrid
+          - link "Partner Success Specialist Revenue • Toronto; New York; San Francisco • Full time • Remote" [ref=e641] [cursor=pointer]:
+            - /url: /cohere/eeeac26a-e901-4e5d-98aa-3c64be7a8e41
+            - generic [ref=e642]:
+              - heading "Partner Success Specialist" [level=3] [ref=e643]
+              - paragraph [ref=e645]: Revenue • Toronto; New York; San Francisco • Full time • Remote
+          - link "Senior Account Executive - Energy & Utilities Revenue • Calgary • Full time • Remote" [ref=e646] [cursor=pointer]:
+            - /url: /cohere/e550c9f7-db88-408b-a1ad-3aad9fd77bf1
+            - generic [ref=e647]:
+              - heading "Senior Account Executive - Energy & Utilities" [level=3] [ref=e648]
+              - paragraph [ref=e650]: Revenue • Calgary • Full time • Remote
+          - link "Senior Account Executive - France Revenue • France • Full time • Remote" [ref=e651] [cursor=pointer]:
+            - /url: /cohere/c3f570f3-d5b6-4202-8d5b-4d5260a38d61
+            - generic [ref=e652]:
+              - heading "Senior Account Executive - France" [level=3] [ref=e653]
+              - paragraph [ref=e655]: Revenue • France • Full time • Remote
+          - link "Senior Account Executive - KSA Revenue • Riyadh • Full time • On-site" [ref=e656] [cursor=pointer]:
+            - /url: /cohere/c199be74-1770-4db2-a06e-474bad4716fe
+            - generic [ref=e657]:
+              - heading "Senior Account Executive - KSA" [level=3] [ref=e658]
+              - paragraph [ref=e660]: Revenue • Riyadh • Full time • On-site
+          - link "Senior Account Executive - UAE Revenue • Dubai • Full time • Remote" [ref=e661] [cursor=pointer]:
+            - /url: /cohere/ea0c1852-0d9b-47da-a560-d735e3ff9b7e
+            - generic [ref=e662]:
+              - heading "Senior Account Executive - UAE" [level=3] [ref=e663]
+              - paragraph [ref=e665]: Revenue • Dubai • Full time • Remote
+          - link "Senior Account Executive - US Public Sector (SLED, Civilian and Federal) Revenue • Washington, DC • Full time • Remote" [ref=e666] [cursor=pointer]:
+            - /url: /cohere/98f69f63-2f54-4813-86ea-13d67336326e
+            - generic [ref=e667]:
+              - heading "Senior Account Executive - US Public Sector (SLED, Civilian and Federal)" [level=3] [ref=e668]
+              - paragraph [ref=e670]: Revenue • Washington, DC • Full time • Remote
+          - link "Strategic Account Executive - Energy (oil and gas) & Utilities Revenue • Houston; Austin; Dallas; San Antonio • Full time • Remote" [ref=e671] [cursor=pointer]:
+            - /url: /cohere/c0cab8c2-7215-449b-92c8-44b48c313514
+            - generic [ref=e672]:
+              - heading "Strategic Account Executive - Energy (oil and gas) & Utilities" [level=3] [ref=e673]
+              - paragraph [ref=e675]: Revenue • Houston; Austin; Dallas; San Antonio • Full time • Remote
+          - link "Strategic Account Executive - Telecommunications Revenue • Dallas; New York • Full time • Remote" [ref=e676] [cursor=pointer]:
+            - /url: /cohere/995f4f08-d0db-42f1-ba44-f8f1a7e5a4d1
+            - generic [ref=e677]:
+              - heading "Strategic Account Executive - Telecommunications" [level=3] [ref=e678]
+              - paragraph [ref=e680]: Revenue • Dallas; New York • Full time • Remote
+        - heading "Revenue › Customer Success" [level=2] [ref=e681]:
+          - generic [ref=e682]: Revenue ›
+          - generic [ref=e683]: Customer Success
+        - generic [ref=e684]:
+          - link "Customer Success Manager (Berlin) Customer Success • Berlin • Full time • On-site" [ref=e685] [cursor=pointer]:
+            - /url: /cohere/0b5ef8ed-a65d-4319-b67c-e96298d9d056
+            - generic [ref=e686]:
+              - heading "Customer Success Manager (Berlin)" [level=3] [ref=e687]
+              - paragraph [ref=e689]: Customer Success • Berlin • Full time • On-site
+          - link "Customer Success Manager (Montreal - French Speaking) Customer Success • Montreal • Full time • On-site" [ref=e690] [cursor=pointer]:
+            - /url: /cohere/e09a69b2-55ee-4141-99f6-cc4d8e39347a
+            - generic [ref=e691]:
+              - heading "Customer Success Manager (Montreal - French Speaking)" [level=3] [ref=e692]
+              - paragraph [ref=e694]: Customer Success • Montreal • Full time • On-site
+          - link "Customer Success Manager (Toronto) Customer Success • Toronto • Full time • On-site" [ref=e695] [cursor=pointer]:
+            - /url: /cohere/3b4fe0f8-059c-4dde-8d1e-7e84a2a59fe5
+            - generic [ref=e696]:
+              - heading "Customer Success Manager (Toronto)" [level=3] [ref=e697]
+              - paragraph [ref=e699]: Customer Success • Toronto • Full time • On-site
+          - link "Customer Success Manager, Public Sector & Defence Customer Success • Ottawa • Full time • On-site" [ref=e700] [cursor=pointer]:
+            - /url: /cohere/ffe6e95a-8055-48b1-abda-2389ad1b9827
+            - generic [ref=e701]:
+              - heading "Customer Success Manager, Public Sector & Defence" [level=3] [ref=e702]
+              - paragraph [ref=e704]: Customer Success • Ottawa • Full time • On-site
+        - heading "Revenue › Solutions Architecture" [level=2] [ref=e705]:
+          - generic [ref=e706]: Revenue ›
+          - generic [ref=e707]: Solutions Architecture
+        - generic [ref=e708]:
+          - link "Solutions Architect Solutions Architecture • Singapore • Full time • Remote" [ref=e709] [cursor=pointer]:
+            - /url: /cohere/afba8779-3bb1-4cf6-81be-705fb36f0ac9
+            - generic [ref=e710]:
+              - heading "Solutions Architect" [level=3] [ref=e711]
+              - paragraph [ref=e713]: Solutions Architecture • Singapore • Full time • Remote
+          - link "Solutions Architect Solutions Architecture • Toronto • Full time • Hybrid" [ref=e714] [cursor=pointer]:
+            - /url: /cohere/ab11983e-2657-45b4-8f4b-318415e3d0c6
+            - generic [ref=e715]:
+              - heading "Solutions Architect" [level=3] [ref=e716]
+              - paragraph [ref=e718]: Solutions Architecture • Toronto • Full time • Hybrid
+          - link "Solutions Architect Solutions Architecture • Japan • Full time • Remote" [ref=e719] [cursor=pointer]:
+            - /url: /cohere/ca446389-c793-459b-b07a-a3544defea04
+            - generic [ref=e720]:
+              - heading "Solutions Architect" [level=3] [ref=e721]
+              - paragraph [ref=e723]: Solutions Architecture • Japan • Full time • Remote
+          - link "Solutions Architect - Public Sector Solutions Architecture • Washington, DC • Full time • Hybrid" [ref=e724] [cursor=pointer]:
+            - /url: /cohere/6d0f0753-ff22-46fd-90e9-08998914a8e7
+            - generic [ref=e725]:
+              - heading "Solutions Architect - Public Sector" [level=3] [ref=e726]
+              - paragraph [ref=e728]: Solutions Architecture • Washington, DC • Full time • Hybrid
+          - link "Solutions Architect - Public Sector Solutions Architecture • Ottawa • Full time • Hybrid" [ref=e729] [cursor=pointer]:
+            - /url: /cohere/1bc73d85-e6f4-4338-b53a-9ffb609a950d
+            - generic [ref=e730]:
+              - heading "Solutions Architect - Public Sector" [level=3] [ref=e731]
+              - paragraph [ref=e733]: Solutions Architecture • Ottawa • Full time • Hybrid
+          - link "Solutions Architect - San Francisco Solutions Architecture • San Francisco • Full time • Hybrid" [ref=e734] [cursor=pointer]:
+            - /url: /cohere/eb58bff6-645c-4434-9893-b34586d69be7
+            - generic [ref=e735]:
+              - heading "Solutions Architect - San Francisco" [level=3] [ref=e736]
+              - paragraph [ref=e738]: Solutions Architecture • San Francisco • Full time • Hybrid
+  - contentinfo [ref=e739]:
+    - link "Learn more about Ashby" [ref=e740] [cursor=pointer]:
+      - /url: https://www.ashbyhq.com
+      - generic [ref=e741]: Powered by
+      - img "Ashby" [ref=e742]
+    - paragraph [ref=e748]:
+      - link "Privacy Policy" [ref=e749] [cursor=pointer]:
+        - /url: https://www.ashbyhq.com/privacy
+      - link "Security" [ref=e750] [cursor=pointer]:
+        - /url: https://www.ashbyhq.com/security
+      - link "Vulnerability Disclosure" [ref=e751] [cursor=pointer]:
+        - /url: https://www.ashbyhq.com/disclosure
