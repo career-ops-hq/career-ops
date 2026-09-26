@@ -1227,7 +1227,17 @@ func (m PipelineModel) sortLess() func(a, b model.CareerApplication) bool {
 		// Most recent contact first; empty dates sink to the bottom.
 		return func(a, b model.CareerApplication) bool { return a.LastContact > b.LastContact }
 	default: // sortScore
-		return func(a, b model.CareerApplication) bool { return a.Score > b.Score }
+		// Unevaluated rows float to the TOP, not the bottom. Their Score is
+		// Go's zero value, so a plain `a.Score > b.Score` ranks them below the
+		// worst-scoring role in the pipeline — which reads as "these are the
+		// weakest" when it means "these have not been looked at yet".
+		// "Needs evaluating" is more actionable than "scored badly".
+		return func(a, b model.CareerApplication) bool {
+			if a.HasScore != b.HasScore {
+				return !a.HasScore
+			}
+			return a.Score > b.Score
+		}
 	}
 }
 
@@ -1783,9 +1793,22 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 	}
 	numStyle := lipgloss.NewStyle().Foreground(m.theme.Blue).Bold(true).Width(cw.num)
 
-	// Score with color
+	// Score with color. An unevaluated row carries no number: print the
+	// sentinel rather than %.1f of a zero value, which reads as a 0.0 fit.
 	scoreStyle := m.scoreStyle(app.Score)
-	score := scoreStyle.Render(fmt.Sprintf("%.1f", app.Score))
+	scoreText := fmt.Sprintf("%.1f", app.Score)
+	if !app.HasScore {
+		// Show the tracker's own sentinel (— / N/A / -). Fall back to an em
+		// dash when the cell is empty or too wide for the score column.
+		scoreStyle = lipgloss.NewStyle().Foreground(m.theme.Subtext)
+		scoreText = strings.TrimSpace(app.ScoreRaw)
+		if scoreText == "" || lipgloss.Width(scoreText) > 3 {
+			scoreText = "\u2014"
+		}
+	}
+	// Width(3) so the sentinel occupies the same column as "4.2" and the
+	// row keeps its measured width.
+	score := scoreStyle.Width(3).Render(scoreText)
 
 	// Company (truncate)
 	company := truncateRunes(app.Company, cw.company)

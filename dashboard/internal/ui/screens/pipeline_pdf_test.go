@@ -45,7 +45,7 @@ func writePDFFixture(t *testing.T, root, rel string) {
 func TestPDFKeyFlashesWhenNoPDFExists(t *testing.T) {
 	root := t.TempDir()
 	apps := []model.CareerApplication{
-		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0},
+		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, HasScore: true},
 	}
 
 	pm := newPDFTestModel(t, root, apps)
@@ -66,7 +66,7 @@ func TestPDFKeyOpensSingleMatchDirectly(t *testing.T) {
 	root := t.TempDir()
 	writePDFFixture(t, root, "output/cv-jane-doe-globex-2026-06-05.pdf")
 	apps := []model.CareerApplication{
-		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0},
+		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, HasScore: true},
 	}
 
 	pm := newPDFTestModel(t, root, apps)
@@ -93,7 +93,7 @@ func TestPDFKeyOpensNewestForMultipleMatches(t *testing.T) {
 	writePDFFixture(t, root, "output/cv-jane-doe-anthropic-2026-06-05.pdf")
 	writePDFFixture(t, root, "output/cv-jane-doe-anthropic-2026-06-10.pdf")
 	apps := []model.CareerApplication{
-		{Company: "Anthropic", Role: "Staff UI Engineer", Status: "Evaluated", Score: 4.6},
+		{Company: "Anthropic", Role: "Staff UI Engineer", Status: "Evaluated", Score: 4.6, HasScore: true},
 	}
 
 	pm := newPDFTestModel(t, root, apps)
@@ -119,7 +119,7 @@ func TestPDFKeyDoesNotOpenCompanyPrefixMatch(t *testing.T) {
 	root := t.TempDir()
 	writePDFFixture(t, root, "output/cv-jane-doe-metabase-2026-06-05.pdf")
 	apps := []model.CareerApplication{
-		{Company: "Meta", Role: "Engineer", Status: "Evaluated", Score: 4.0},
+		{Company: "Meta", Role: "Engineer", Status: "Evaluated", Score: 4.0, HasScore: true},
 	}
 
 	pm := newPDFTestModel(t, root, apps)
@@ -136,7 +136,7 @@ func TestPDFKeyDoesNotOpenCompanyPrefixMatch(t *testing.T) {
 func TestRegenerateKeyFlashesWithoutManifestEntry(t *testing.T) {
 	root := t.TempDir()
 	apps := []model.CareerApplication{
-		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, ReportNumber: "001"},
+		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, HasScore: true, ReportNumber: "001"},
 	}
 
 	pm := newPDFTestModel(t, root, apps)
@@ -162,7 +162,7 @@ func TestRegenerateKeyDoesNotUseCompanyPrefixMatch(t *testing.T) {
 		t.Fatalf("write manifest: %v", err)
 	}
 	apps := []model.CareerApplication{
-		{Company: "Meta", Role: "Engineer", Status: "Evaluated", Score: 4.0},
+		{Company: "Meta", Role: "Engineer", Status: "Evaluated", Score: 4.0, HasScore: true},
 	}
 
 	pm := newPDFTestModel(t, root, apps)
@@ -185,7 +185,7 @@ func TestRegenerateKeyEmitsGenerateMsgFromManifest(t *testing.T) {
 		t.Fatalf("write manifest: %v", err)
 	}
 	apps := []model.CareerApplication{
-		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, ReportNumber: "001"},
+		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, HasScore: true, ReportNumber: "001"},
 	}
 
 	pm := newPDFTestModel(t, root, apps)
