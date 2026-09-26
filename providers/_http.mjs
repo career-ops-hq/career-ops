@@ -3,13 +3,13 @@
 
 import './_dns-cache.mjs'; // memoize dns.lookup process-wide (see that file)
 import { isIP } from 'node:net';
-import { EnvHttpProxyAgent } from 'undici';
 import {
   DEFAULT_USER_AGENT,
   BROWSER_LIKE_USER_AGENT,
   MACOS_BROWSER_LIKE_USER_AGENT,
 } from '../user-agent.mjs';
 import { providerFetchContext, isBlockedAddress, blockedAddressError } from './_ip-guard.mjs';
+import { normalizeUrl } from '../url-key.mjs';
 
 export { BROWSER_LIKE_USER_AGENT, MACOS_BROWSER_LIKE_USER_AGENT };
 
@@ -17,7 +17,7 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 let proxyAgent;
 let proxySignature;
 
-function proxyFor(url) {
+async function proxyFor(url) {
   if (process.env.CAREER_OPS_TRUST_PROXY_EGRESS !== '1') return { dispatcher: undefined, proxyHost: undefined };
   const target = new URL(url);
   const proxyUrl = target.protocol === 'https:'
@@ -30,6 +30,11 @@ function proxyFor(url) {
   // still resolves its destination under the provider DNS guard.
   const signature = [process.env.http_proxy, process.env.HTTP_PROXY, process.env.https_proxy,
     process.env.HTTPS_PROXY, process.env.no_proxy, process.env.NO_PROXY].join('\0');
+  // Existing installations can keep direct transport without installing undici.
+  // Resolve the optional transport only after both the trust flag and proxy URL.
+  const { EnvHttpProxyAgent } = await import('undici').catch((cause) => {
+    throw new Error('Trusted proxy egress requires undici; run npm install in the career-ops directory, then retry.', { cause });
+  });
   if (signature !== proxySignature) {
     proxyAgent = new EnvHttpProxyAgent();
     proxySignature = signature;
@@ -39,7 +44,7 @@ function proxyFor(url) {
 
 async function fetchWithTimeout(url, opts = {}, consume) {
   const targetHost = new URL(url).hostname.replace(/^\[|\]$/g, '');
-  const { dispatcher, proxyHost } = proxyFor(url);
+  const { dispatcher, proxyHost } = await proxyFor(url);
   if (dispatcher && isIP(targetHost) && isBlockedAddress(targetHost)) throw blockedAddressError(targetHost, targetHost);
   // Mark this request as provider traffic for the whole of its async life, so
   // the patched dns.lookup validates the addresses it resolves (#3096). The
@@ -55,7 +60,11 @@ async function fetchWithTimeout(url, opts = {}, consume) {
     () => fetchInContext(url, opts, consume, dispatcher));
 }
 
-async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow' } = {}, consume, dispatcher) {
+// redirect defaults to 'error': a provider fetch must never follow a 3xx, or a
+// server-side redirect could point the request at a private address after the
+// ip guard already passed the original host (#4079). Callers that really need
+// to follow redirects opt in explicitly.
+async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'error', onResponse } = {}, consume, dispatcher) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -89,6 +98,7 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
       }
       throw err;
     }
+    onResponse?.(res);
     if (!res.ok) {
       const responseText = await res.text().catch(() => '');
       // WAF/CDN challenge pages (seen live: Workday 429s) carry no actionable
@@ -169,8 +179,8 @@ export async function fetchText(url, opts = {}) {
 // Returns a Response (after the timeout + non-2xx guard) so providers that need
 // response headers — csod.mjs reads Set-Cookie to prime the session its search
 // API requires — can route through ctx instead of re-implementing fetch. Pass
-// redirect:'error' like every other provider call so a 3xx can't be followed to
-// a private IP.
+// redirect:'error' is the default here like everywhere else, so a 3xx can't be
+// followed to a private IP.
 //
 // The body is read here, inside the timer window, and handed back as an
 // equivalent Response. Two reasons: returning the live Response would let a
@@ -370,11 +380,32 @@ export async function fetchTextWithRetry(ctx, url, opts = {}, policy = {}) {
   return withRetry(() => ctx.fetchText(url, opts), ctx, policy);
 }
 
-export function makeHttpCtx() {
-  return {
+export function makeHttpCtx(observer) {
+  const ctx = {
     transport: 'http',
     fetchJson,
     fetchText,
     fetchResponse,
+    // The canonical posting-URL key, so a provider can deduplicate its own
+    // results the way the tracker and scanner do. Handing it over through ctx
+    // is what keeps the behaviour identical: `url-key.mjs` is dependency-free,
+    // so a standalone provider receives the same function the core calls rather
+    // than importing the file or copying its body (#4218).
+    normalizePostingUrl: normalizeUrl,
   };
+  if (!observer) return ctx;
+  for (const method of ['fetchJson', 'fetchText', 'fetchResponse']) {
+    const original = ctx[method];
+    ctx[method] = (url, opts = {}) => {
+      observer.onRequest?.();
+      return original(url, {
+        ...opts,
+        onResponse: response => {
+          opts.onResponse?.(response);
+          observer.onResponse?.(response.status);
+        },
+      });
+    };
+  }
+  return ctx;
 }

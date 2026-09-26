@@ -86,3 +86,23 @@ test('HTTPS_PROXY receives HTTPS provider destinations without local DNS', async
     });
   } finally { proxy.close(); }
 });
+
+test('direct requests work without undici; opting in explains how to install it', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const loader = 'data:text/javascript,' + encodeURIComponent(
+    'export async function resolve(s, c, next) { if (s === "undici") throw new Error("undici unavailable"); return next(s, c); }',
+  );
+  const moduleUrl = new URL('../../providers/_http.mjs', import.meta.url).href;
+  const script = `
+    import assert from 'node:assert/strict';
+    const { fetchText } = await import(${JSON.stringify(moduleUrl)});
+    globalThis.fetch = async () => new Response('DIRECT');
+    delete process.env.CAREER_OPS_TRUST_PROXY_EGRESS;
+    process.env.HTTP_PROXY = 'http://localhost:3128';
+    assert.equal(await fetchText('http://public.example/'), 'DIRECT');
+    process.env.CAREER_OPS_TRUST_PROXY_EGRESS = '1';
+    await assert.rejects(fetchText('http://public.example/'), /run npm install/);
+  `;
+  const result = spawnSync(process.execPath, ['--experimental-loader', loader, '--input-type=module', '-e', script], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+});

@@ -56,6 +56,12 @@
  * @property {Readonly<Object<string,unknown>>} settings  Frozen non-secret settings block for this plugin from config/plugins.yml (e.g. { label, days_back, actor }). Secrets never live here — they go in .env via requiredEnv.
  * @property {(...args: unknown[]) => void} log  Console logger that redacts declared env values from output (accidental-leak hygiene, not an exfiltration control).
  * @property {boolean} dryRun  True when invoked with --dry-run; side-effecting hooks must honor it.
+ * @property {(raw: string) => string} normalizePostingUrl  The canonical
+ *   posting-URL key the tracker and scanner key on, so a plugin can deduplicate
+ *   its own results the same way core does. Returns '' when there is nothing to
+ *   key on; '' means NO KEY and must never be matched against another ''.
+ *   Stable across the v1 plugin contract: its behaviour changes only with a
+ *   documented note here, and existing plugins that never call it are unaffected.
  */
 
 /**

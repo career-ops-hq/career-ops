@@ -13,7 +13,7 @@ import {
 import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
 import { persistCliId, readSavedCliId } from "@/lib/saved-cli";
-import { pickDefaultInstalled } from "@/lib/cli-pick.mjs";
+import { keepIfInstalled, pickDefaultInstalled } from "@/lib/cli-pick.mjs";
 
 type Cli = {
   id: string;
@@ -76,7 +76,10 @@ export function ConfigForm() {
         // left every multi-CLI machine (claude + codex, say) in exactly the
         // broken state the highlight was meant to avoid.
         setCliId((prev) => {
-          if (prev) return prev;
+          // A restored id whose CLI is no longer installed must not stick: it
+          // would stay selected and save() would write it straight back, so
+          // "open Config and click Save config" could never clear it (#4012).
+          if (keepIfInstalled(prev, list)) return prev;
           const auto = pickDefaultInstalled(list);
           if (!auto) return "";
           if (!readSavedCliId()) persistCliId(auto);

@@ -71,6 +71,7 @@ Each invocation creates or appends to `data/outcomes/{num}_{company_slug}_{role_
 2. **Append-Only History:** `outcome.md` and tracker notes are strictly append-only. Re-running for an updated stage adds a new entry section without modifying previous logs.
 3. **Idempotency:** Re-running the same command with identical arguments produces clean, duplicate-safe output and safe tracker updates.
 4. **Posting Archiving Stub:** If the live job posting URL cannot be reached or is un-archivable, an explicit stub `posting_missing.md` is created documenting the attempt.
+5. **On a `hired` outcome — celebrate, then offer the Hired Wall once.** A landed job is the whole point of this tool, so the congratulation comes first and the offer second. The wording, the anonymity question, the `hired-share.mjs` invocation and the cadence rules live in one place: **`AGENTS.md` → "Celebrating a hire (the Hired Wall)"**. Two constraints from there are worth repeating because this mode is where they are violated: the ask happens **once per hire, at outcome time**, and **never at `offer_received`** — an offer can still fall through, so the ask belongs to the signed outcome only. Nothing is ever submitted from this machine; the user opens the issue themselves.
 
 ## `output/` Cleanup (`--clean-output`, opt-in, #2653)
 

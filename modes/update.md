@@ -4,19 +4,19 @@ When the user runs `/career-ops update`, execute this interactive update flow.
 
 ## Step 1 — Check for Updates
 
-Run `node update-system.mjs check` and parse the JSON output.
+Run `node update-system.mjs check --force` and parse the JSON output. `--force` because the user asked: a release they said no to earlier is shown too.
 
 - If `up-to-date`: Tell the user "career-ops is up to date (v{version})." and stop.
 - If `offline`: Tell the user "Cannot reach GitHub to check for updates. Try again later." and stop.
-- If `dismissed`: Tell the user "Update check was previously dismissed. Clearing the dismissal and re-checking now." Remove `.update-dismissed`, then re-run `node update-system.mjs check` and branch on the new status.
+- If `no-remote-version`: Tell the user "Couldn't determine the latest career-ops release right now. Try again later." and stop.
 - If `update-available`: Continue to Step 2.
 
 ## Step 2 — Show What Changed
 
-Show the user what will change. Run:
+Show the user what will change: the release `apply` installs, `career-ops-v{remote}`, not `main`. Run:
 
 ```bash
-git fetch https://github.com/career-ops-hq/career-ops.git main || {
+git fetch https://github.com/career-ops-hq/career-ops.git career-ops-v{remote} || {
   echo "Failed to fetch latest changes. Cannot generate an accurate diff preview."
   exit 1
 }
@@ -106,8 +106,8 @@ If yes:
    > "One more thing: this project ships with the CareerOps Manifesto — a new way of job searching is taking shape, and you are already practicing it. Run `npm run manifesto` to read it and sign it if you want to help. No action needed."
 
 If no:
-1. Run `node update-system.mjs dismiss`
-2. Tell the user they can run `/career-ops update` anytime to check again.
+1. Run `node update-system.mjs dismiss --version {remote}`
+2. Tell the user they will be asked again when a newer release is out, and can run `/career-ops update` anytime to check again.
 
 ## Step 5 — Rollback (if requested)
 
@@ -122,5 +122,6 @@ If the user says "rollback" or runs `/career-ops update rollback`:
 - Exception: `modes/_profile.md` may be edited **only** in Step 4.7, and **only** after the user explicitly confirms each individual rename/removal. Never batch-edit without per-change consent.
 - User-specific customizations (archetypes, scoring weights, narrative) belong in `modes/_profile.md` or `config/profile.yml`, never in `modes/_shared.md`
 - CLAUDE.md's local additions (everything after the two-line `@AGENTS.md` header) MUST be saved before apply and restored immediately after — on both the success AND failure path (Step 4.2, Step 4.4). `update-system.mjs apply` resets CLAUDE.md before it can fail partway through, so a failed apply still needs the restore. `apply` has no awareness of this content and will silently discard it otherwise.
+- After a successful apply, `node hired-share.mjs --status` may report a hire that was never asked about, or one marked "later" more than 30 days ago. That earns **at most ONE** gentle mention of the Hired Wall, then the answer is respected — never a scheduled reminder. Cadence and wording: `AGENTS.md` → "Celebrating a hire (the Hired Wall)".
 - If anything goes wrong, tell the user to run `node update-system.mjs rollback`
 - Keep the output concise — users don't want walls of text during an update

@@ -61,20 +61,25 @@ export async function main() {
     if (!data?.pull_request) throw new Error(`#${op.pr} es una issue: label-bot solo etiqueta PRs (mínimo privilegio: pull-requests, no issues)`);
   }
   const regate = [], failed = [];
+  let full = 0;
   for (const op of ops) {
-    let changed = false;
+    const done = [];   // cada +label y -label que sí quedó escrito
     try {
-      if (op.add.length) { await rest('POST', `repos/${REPO}/issues/${op.pr}/labels`, { labels: op.add }); changed = true; }
-      for (const l of op.remove) { try { await rest('DELETE', `repos/${REPO}/issues/${op.pr}/labels/${encodeURIComponent(l)}`); changed = true; } catch (e) { if (e.status !== 404) throw e; } }
-      log(`#${op.pr} +${op.add.join(',') || '∅'} -${op.remove.join(',') || '∅'}`);
-    } catch (e) { failed.push(op.pr); log(`#${op.pr}: fallo al escribir (${e.message.slice(0, 120)})${changed ? '; parte del cambio sí quedó aplicado' : ''}`); }
-    if (changed && touchesDirection(op)) regate.push(op.pr); // aunque otra escritura de esta PR fallara: el gate debe ver lo que cambió
+      if (op.add.length) { await rest('POST', `repos/${REPO}/issues/${op.pr}/labels`, { labels: op.add }); done.push(...op.add.map((l) => `+${l}`)); }
+      for (const l of op.remove) { try { await rest('DELETE', `repos/${REPO}/issues/${op.pr}/labels/${encodeURIComponent(l)}`); done.push(`-${l}`); } catch (e) { if (e.status !== 404) throw e; } } // 404: ya no estaba; no es una retirada
+      full++; log(`#${op.pr} ${done.join(' ') || 'sin cambios'}`);
+    } catch (e) { failed.push({ pr: op.pr, done }); log(`#${op.pr}: fallo al escribir (${e.message.slice(0, 120)})${done.length ? `; sí quedó: ${done.join(' ')}` : '; no quedó nada'}`); }
+    if (done.some((x) => x.slice(1).startsWith('direction/'))) regate.push(op.pr); // solo si cambió de verdad una label direction/*, aunque el resto fallara
   }
   for (const pr of [...new Set(regate)]) {
     try { await rest('POST', `repos/${REPO}/actions/workflows/direction-gate.yml/dispatches`, { ref: 'main', inputs: { pr: String(pr) } }); log(`#${pr}: direction-gate redisparado (cambió una label direction/*)`); }
     catch (e) { log(`#${pr}: no pude redisparar direction-gate (${e.message.slice(0, 120)})`); process.exitCode = 1; }
   }
-  if (failed.length) { log(`PARCIAL: ${ops.length - failed.length} de ${ops.length} cambios aplicados como github-actions[bot]; fallaron ${failed.map((n) => `#${n}`).join(', ')}`); process.exitCode = 1; }
+  if (failed.length) {
+    const some = failed.filter((f) => f.done.length);
+    log(`PARCIAL: ${full} de ${ops.length} cambios aplicados enteros como github-actions[bot]${some.length ? `, ${some.length} a medias (${some.map((f) => `#${f.pr} ${f.done.join(' ')}`).join('; ')})` : ''}; fallaron ${failed.map((f) => `#${f.pr}`).join(', ')}`);
+    process.exitCode = 1;
+  }
   else log(`${ops.length} cambios aplicados como github-actions[bot]`);
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### label-bot\n\n${lines.map((l) => `- ${l}`).join('\n')}\n`);
 }

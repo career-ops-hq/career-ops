@@ -9,7 +9,8 @@ name: Approve CI for fork PRs
 #
 # Token: `CI_APPROVE_TOKEN` si está definido; si no, `GITHUB_TOKEN` con `actions: write`, que aprueba como github-actions[bot]
 # (comprobado el 23-sep). Un 403 de permisos para la pasada y la deja en rojo, sin reintentar con el otro token; un límite de tasa
-# la para sin rojo y la siguiente reintenta. Un PAT personal en CI_APPROVE_TOKEN aprobaría a nombre de esa persona: no se usa.
+# la para sin rojo y la siguiente reintenta. CI_APPROVE_TOKEN tiene prioridad y firma las aprobaciones: déjalo sin definir, o pon
+# solo un token que no sea de una persona (GitHub App). Con un PAT personal, cada aprobación saldría a nombre de su dueño.
 # vars.TRIAGE_DRY_RUN = "true" -> solo informa en el job summary.
 
 on:
