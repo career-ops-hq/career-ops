@@ -32,6 +32,22 @@ learned. Newest entry on top. Keep the zh-TW twin in sync in the same commit.
 
 ## Entries
 
+### 2026-09-26 — Re-score of #003 and a US role, report #004
+
+- **Stage:** evaluation
+- **Done:** The user confirmed several engineering practices and tools, and they were added to both CVs:
+  AI coding tools, Agile with SDD, CI/CD and build systems, and hands-on architecture with PR review.
+  The user also confirmed two facts that limit targeting: no US work authorization, and a small largest-team size.
+  Report #003 was re-scored in place. `merge-tracker.mjs` updated the existing row by URL and did not add a duplicate.
+  The manager-titled Arizona posting had closed, so a live TSMC Arizona AI tech-lead posting was evaluated instead.
+- **System output:** #003 **3.5 → 3.8**, still "Research first" (HackerRank risk unchanged). Report #004
+  **2.4/5, SKIP**. EN + zh-TW for both. `check-jd-archive.mjs` and `verify-pipeline.mjs` are clean.
+- **Learned:** filling CV gaps with *confirmed* facts moves scores. A quantified fact can also expose a hard
+  gap: #004 requires leading 7+ engineers. For US roles, silence about sponsorship is neutral in scoring,
+  but in practice it now means an H-1B lottery and, from Sep 2026, a contested US$100,000 fee on new petitions for
+  people abroad. So US roles are realistic only where the candidate clearly exceeds every bar.
+- **Next:** the recruiter call for #001–#003 remains the deciding step.
+
 ### 2026-09-26 — Software-role sweep and third evaluation, report #003
 
 - **Stage:** sourcing + evaluation
