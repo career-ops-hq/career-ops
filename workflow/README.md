@@ -50,5 +50,10 @@ valid results are reused; changed inputs require `--re-evaluate`.
 
 Tasks use `running`, `waiting`, `completed`, and `cancelled`. Business tables in
 `opportunities.db` are authoritative; `workflow-checkpoints.db` records execution
-progress only. Apply pauses for review/confirmation. No path submits an
+progress only. After independent apply review, the graph calls the retained
+Reactive Resume tool to update a task-owned copy and export a PDF. Readable
+PDF pages, candidate identity, and every package file hash are recorded with
+the draft. Confirmation checks the current inputs, review, PDF, and actual file
+bytes before committing the whole package; failed exports can resume on the
+same task. Apply pauses for user review/confirmation. No path submits an
 application or sends a message.

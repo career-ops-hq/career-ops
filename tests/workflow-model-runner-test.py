@@ -21,6 +21,23 @@ normalized = runner.normalize_resume_payload(flattened)
 assert normalized["candidate"] == {"name": "Jiaming Zhang", "email": "candidate@example.com"}
 assert "name" not in normalized
 
+nested = {
+    "basics": {"name": "Jiaming Zhang", "email": "candidate@example.com"},
+    "sections": {
+        "summary": {"headline": "Engineer", "summary": "Grounded"},
+        "experience": [], "projects": [], "education": [], "skills": [],
+        "projects_start_on_new_page": True,
+    },
+}
+assert runner.application_package_error({"resume_payload": nested, **{
+    key: "Grounded" for key in ("changes", "cover_letter", "upskill", "interview_prep", "questions")
+}}) is None
+assert nested == {
+    "candidate": {"name": "Jiaming Zhang", "email": "candidate@example.com"},
+    "headline": "Engineer", "summary": "Grounded", "experience": [], "projects": [],
+    "education": [], "skills": [], "projects_start_on_new_page": True,
+}
+
 complete_package = {
     "resume_payload": {
         "candidate": {"name": "Jiaming Zhang"}, "summary": "Grounded",
@@ -30,10 +47,13 @@ complete_package = {
     "upskill": "Grounded plan", "interview_prep": "Grounded preparation",
     "questions": "Grounded questions",
 }
+assert runner.application_package_error({**complete_package, "upskill": {"topics": []}}) == "upskill must be a nonempty Markdown string"
 package_phases = []
+package_prompts = []
 original_call_agent = model_adapter.call_agent
 def package_call(phase, *_args):
     package_phases.append(phase)
+    package_prompts.append(_args[0])
     return ({"resume_payload": complete_package["resume_payload"], "changes": "partial"}
             if phase == "apply_evaluate" else complete_package), f"{phase}-session"
 model_adapter.call_agent = package_call
@@ -42,8 +62,22 @@ try:
 finally:
     model_adapter.call_agent = original_call_agent
 assert package_phases == ["apply_evaluate", "apply_repair"]
+assert "configured language.output" in package_prompts[0] and "JD language" not in package_prompts[0]
 assert package["artifact"] == complete_package
 assert package["tool_calls"] == 2
+
+revision_phases = []
+def revision_call(phase, *_args):
+    revision_phases.append(phase)
+    return {"questions": "# Corrected grounded questions"}, "revision-session"
+model_adapter.call_agent = revision_call
+try:
+    revised = runner.apply_evaluate({"inputs": {}, "previous_artifact": complete_package})
+finally:
+    model_adapter.call_agent = original_call_agent
+assert revision_phases == ["apply_evaluate"]
+assert revised["artifact"] == {**complete_package, "questions": "# Corrected grounded questions"}
+assert complete_package["questions"] == "Grounded questions"
 
 review_checks = [
     {"id": item, "status": "pass", "finding": "Grounded"}
@@ -116,11 +150,13 @@ with tempfile.TemporaryDirectory(prefix="career-ops-runner-") as temporary:
     original_create_agent = model_adapter.create_agent
     model_adapter.create_agent = lambda **kwargs: calls.append(kwargs) or Agent()
     try:
-        repaired, _ = model_adapter.call_agent("repair", "prompt", [], Path(temporary))
+        calls_dir = Path(temporary) / "new-draft-root"
+        repaired, _ = model_adapter.call_agent("repair", "prompt", [], calls_dir)
     finally:
         model_adapter.create_agent = original_create_agent
     assert repaired["sections"] == {}
     assert len(calls) == 2
+    assert len((calls_dir / "calls.jsonl").read_text().splitlines()) == 2
 
 with tempfile.TemporaryDirectory(prefix="career-ops-render-repair-", dir=ROOT / "data") as temporary:
     runner.DRAFT_ROOT = Path(temporary)

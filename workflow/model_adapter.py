@@ -237,6 +237,7 @@ def call_agent(phase, prompt, tools, directory):
             metrics = {'phase': phase, 'seconds': round(time.monotonic() - started, 3),
                        'prompt_chars': len(BASE) + len(prompt), 'api_calls': result.get('api_calls'), 'session': session}
             metrics_path = directory / 'calls.jsonl'
+            metrics_path.parent.mkdir(parents=True, exist_ok=True)
             with metrics_path.open('a') as stream:
                 stream.write(json.dumps(metrics) + '\n')
             save(directory / f'{phase}-trace.json', result.get('messages', []))

@@ -9,6 +9,7 @@ import fcntl
 import hashlib
 import json
 import os
+import shutil
 import shlex
 import sqlite3
 import subprocess
@@ -24,9 +25,11 @@ from langgraph.graph import END, START, StateGraph
 try:
     from workflow.discovery import capture_jd, discover
     from workflow.application_lifecycle import ApplicationStore, mutate as mutate_application
+    from workflow.resume_renderer import render_resume
 except ModuleNotFoundError:  # Direct script invocation keeps only workflow/ on sys.path.
     from discovery import capture_jd, discover
     from application_lifecycle import ApplicationStore, mutate as mutate_application
+    from resume_renderer import render_resume
 
 os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
 
@@ -34,6 +37,8 @@ ROOT = Path(__file__).resolve().parents[1]
 INPUT_ROOT = Path(os.environ.get("CAREER_OPS_INPUT_ROOT", ROOT))
 WORKFLOW_VERSION = "oii-333-v1"
 MAX_CORRECTIONS = 2
+ATTEMPT_SECONDS = 900
+ATTEMPT_CALLS = 20
 MODEL_RUNNER = "workflow.model_runner"
 SCORE_REVIEW_CHECKS = {
     "jd_complete", "source_grounding", "dimension_support",
@@ -120,13 +125,25 @@ def canonical_scan_input(value: str) -> str:
 def apply_inputs(jd_report: dict, score_result: dict, feedback: list[str]) -> str:
     score_inputs(jd_report)
     inputs = {
+        "artifact_contract_version": 4,
         "jd_report": jd_report,
         "score_result": score_result,
         "cv": (INPUT_ROOT / "cv.md").read_text(),
         "profile": (INPUT_ROOT / "config" / "profile.yml").read_text(),
         "targeting": (INPUT_ROOT / "modes" / "_profile.md").read_text(),
         "rules": (INPUT_ROOT / "modes" / "_custom.md").read_text(),
+        "contract": (INPUT_ROOT / "prompts" / "shared" / "contract.md").read_text(),
         "requirements": (INPUT_ROOT / "prompts" / "applications" / "workflow.md").read_text(),
+        "articles": (INPUT_ROOT / "article-digest.md").read_text() if (INPUT_ROOT / "article-digest.md").is_file() else None,
+        "voice": (INPUT_ROOT / "voice-dna.md").read_text() if (INPUT_ROOT / "voice-dna.md").is_file() else None,
+        "writing_samples": {
+            str(path.relative_to(INPUT_ROOT)): path.read_text()
+            for path in sorted((INPUT_ROOT / "writing-samples").glob("**/*")) if path.is_file()
+        } if (INPUT_ROOT / "writing-samples").is_dir() else {},
+        "market_rules": {
+            market: (INPUT_ROOT / "markets" / market / "employment.md").read_text()
+            for market in ("cn", "hk", "remote")
+        },
         "feedback": feedback,
     }
     return json.dumps(inputs, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -135,6 +152,8 @@ def apply_inputs(jd_report: dict, score_result: dict, feedback: list[str]) -> st
 def validate_resume_payload(payload: dict) -> None:
     if not payload.get("candidate", {}).get("name") or not isinstance(payload.get("summary"), str):
         raise ValueError("resume_payload requires candidate.name and summary")
+    if "projects_start_on_new_page" in payload and not isinstance(payload["projects_start_on_new_page"], bool):
+        raise ValueError("resume_payload projects_start_on_new_page must be boolean")
     for entry in payload.get("experience", []):
         if not all(key in entry for key in ("company", "role", "dates", "bullets")) or not isinstance(entry["bullets"], list):
             raise ValueError("resume experience requires company, role, dates and bullets")
@@ -147,6 +166,31 @@ def validate_resume_payload(payload: dict) -> None:
     for entry in payload.get("skills", []):
         if "category" not in entry or "items" not in entry:
             raise ValueError("resume skills require category and items")
+
+
+def verify_package_files(draft: dict, *, require_pdf: bool) -> None:
+    files = draft.get("files", {})
+    required = {"resume_payload", "changes", "cover_letter", "upskill", "interview_prep", "questions"}
+    if require_pdf:
+        required |= {"resume_pdf", "resume_metadata"}
+    if not isinstance(files, dict) or set(files) != required:
+        raise ValueError("Current package file manifest is incomplete")
+    if require_pdf and (not isinstance(draft.get("pdf_receipt"), dict)
+                        or not isinstance(draft["pdf_receipt"].get("pages"), int)
+                        or draft["pdf_receipt"]["pages"] < 1):
+        raise ValueError("Current package has no validated resume PDF")
+    if not isinstance(draft.get("file_hashes"), dict) or set(draft["file_hashes"]) != required:
+        raise ValueError("Current package file manifest is incomplete")
+    artifact = {name: draft.get(name) for name in ("files", "file_hashes", "package", "pdf_receipt")}
+    if digest(json.dumps(artifact, ensure_ascii=False, sort_keys=True)) != draft.get("package_hash"):
+        raise ValueError("Current package changed since review")
+    for name, path in files.items():
+        try:
+            current_hash = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        except OSError as error:
+            raise ValueError(f"Current package file is unavailable: {name}") from error
+        if current_hash != draft["file_hashes"][name]:
+            raise ValueError(f"Current package file changed: {name}")
 
 
 def review_approved(module: str, review: dict) -> bool:
@@ -193,6 +237,7 @@ class WorkflowState(TypedDict):
     waiting_reason: str | None
     material_hash: str
     tool_calls: int
+    has_prior_package: bool
 
 
 class BusinessStore:
@@ -243,7 +288,9 @@ class BusinessStore:
               workflow_version TEXT NOT NULL,
               input_payload TEXT NOT NULL,
               elapsed_seconds REAL NOT NULL DEFAULT 0,
-              tool_calls INTEGER NOT NULL DEFAULT 0
+              tool_calls INTEGER NOT NULL DEFAULT 0,
+              attempt_elapsed_seconds REAL NOT NULL DEFAULT 0,
+              attempt_tool_calls INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS results (
               result_key TEXT PRIMARY KEY,
@@ -302,6 +349,12 @@ class BusinessStore:
             self.db.execute("ALTER TABLE tasks ADD COLUMN elapsed_seconds REAL NOT NULL DEFAULT 0")
         if "tool_calls" not in task_columns:
             self.db.execute("ALTER TABLE tasks ADD COLUMN tool_calls INTEGER NOT NULL DEFAULT 0")
+        if "attempt_elapsed_seconds" not in task_columns:
+            self.db.execute("ALTER TABLE tasks ADD COLUMN attempt_elapsed_seconds REAL NOT NULL DEFAULT 0")
+            self.db.execute("UPDATE tasks SET attempt_elapsed_seconds=elapsed_seconds")
+        if "attempt_tool_calls" not in task_columns:
+            self.db.execute("ALTER TABLE tasks ADD COLUMN attempt_tool_calls INTEGER NOT NULL DEFAULT 0")
+            self.db.execute("UPDATE tasks SET attempt_tool_calls=tool_calls")
         self.db.executescript(
             """
             DROP INDEX IF EXISTS one_active_task_per_opportunity;
@@ -425,38 +478,52 @@ class BusinessStore:
         }
 
     def stage_draft(self, state: WorkflowState, artifact: dict, review: dict, approved: bool) -> dict:
-        version = self.db.execute(
-            "SELECT COALESCE(MAX(version),0)+1 FROM drafts WHERE task_id=?", (state["task_id"],)
-        ).fetchone()[0]
-        package_hash = digest(json.dumps(artifact, ensure_ascii=False, sort_keys=True))
-        self.db.execute(
-            "INSERT INTO drafts(task_id,version,input_hash,package_hash,payload,review,approved) VALUES(?,?,?,?,?,?,?)",
-            (
-                state["task_id"], version, state["input_hash"], package_hash,
-                json.dumps(artifact, ensure_ascii=False, sort_keys=True),
-                json.dumps(review, ensure_ascii=False, sort_keys=True), int(approved),
-            ),
-        )
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            task = self.task(state["task_id"])
+            if task["status"] != "running" or task["input_hash"] != state["input_hash"]:
+                raise ValueError("Apply task is no longer running with the reviewed input")
+            version = self.db.execute(
+                "SELECT COALESCE(MAX(version),0)+1 FROM drafts WHERE task_id=?", (state["task_id"],)
+            ).fetchone()[0]
+            package_hash = digest(json.dumps(artifact, ensure_ascii=False, sort_keys=True))
+            self.db.execute(
+                "INSERT INTO drafts(task_id,version,input_hash,package_hash,payload,review,approved) VALUES(?,?,?,?,?,?,?)",
+                (
+                    state["task_id"], version, state["input_hash"], package_hash,
+                    json.dumps(artifact, ensure_ascii=False, sort_keys=True),
+                    json.dumps(review, ensure_ascii=False, sort_keys=True), int(approved),
+                ),
+            )
+            self.db.execute("COMMIT")
+        except Exception:
+            self.db.execute("ROLLBACK")
+            raise
         return self.draft(state["task_id"])
 
     def confirm_apply(self, task_id: str, current_input: str) -> dict:
         task = self.task(task_id)
-        if task["status"] == "completed":
-            return self.result(task_id)
         draft = self.draft(task_id)
-        if task["module"] != "apply" or task["status"] != "waiting" or not draft:
-            raise ValueError("apply task is not waiting for review")
+        if task["module"] != "apply" or task["status"] not in ("waiting", "completed") or not draft:
+            raise ValueError("apply task has no reviewable package")
         if task["input_hash"] != digest(current_input) or draft["input_hash"] != task["input_hash"]:
-            self.wait(task_id, "input_changed")
+            if task["status"] == "waiting":
+                self.wait(task_id, "input_changed")
             raise ValueError("apply inputs changed; regenerate before confirmation")
         if not draft["approved"] or draft["review"].get("verdict") != "approve":
             raise ValueError("current package has not passed independent review")
+        verify_package_files(draft, require_pdf=True)
+        if task["status"] == "completed":
+            return self.result(task_id)
         payload = {
             "module": "apply", "outcome": "package_confirmed", "artifact": draft,
             "input_hash": task["input_hash"], "material_hash": draft["package_hash"],
         }
         self.db.execute("BEGIN IMMEDIATE")
         try:
+            current = self.task(task_id)
+            if current["status"] != "waiting" or current["input_hash"] != task["input_hash"]:
+                raise ValueError("Apply task changed before confirmation")
             self.db.execute(
                 "INSERT INTO results(result_key,task_id,opportunity_id,module,input_hash,payload) VALUES(?,?,?,?,?,?)",
                 (task_id, task_id, task["opportunity_id"], "apply", task["input_hash"], json.dumps(payload, sort_keys=True)),
@@ -490,20 +557,25 @@ class BusinessStore:
         return self.db.execute("SELECT * FROM tasks ORDER BY rowid").fetchall()
 
     def cancel(self, task_id: str) -> sqlite3.Row:
-        task = self.task(task_id)
-        if task["status"] in ("completed", "cancelled"):
-            return task
-        self.db.execute(
-            "UPDATE tasks SET status='cancelled',waiting_reason=NULL WHERE task_id=?", (task_id,)
-        )
-        self.db.execute(
-            "INSERT INTO events(task_id,type) VALUES(?, 'cancelled')", (task_id,)
-        )
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            task = self.task(task_id)
+            if task["status"] in ("running", "waiting"):
+                self.db.execute(
+                    "UPDATE tasks SET status='cancelled',waiting_reason=NULL WHERE task_id=?", (task_id,)
+                )
+                self.db.execute(
+                    "INSERT INTO events(task_id,type) VALUES(?, 'cancelled')", (task_id,)
+                )
+            self.db.execute("COMMIT")
+        except Exception:
+            self.db.execute("ROLLBACK")
+            raise
         return self.task(task_id)
 
     def wait(self, task_id: str, reason: str) -> None:
         self.db.execute(
-            "UPDATE tasks SET status='waiting',waiting_reason=? WHERE task_id=? AND status!='completed'",
+            "UPDATE tasks SET status='waiting',waiting_reason=? WHERE task_id=? AND status IN ('running','waiting')",
             (reason, task_id),
         )
 
@@ -513,28 +585,43 @@ class BusinessStore:
             raise ValueError(f"Only a waiting task can resume; task is {row['status']}")
         input_hash = digest(input_text)
         if input_hash != row["input_hash"]:
-            self.db.execute(
-                "UPDATE tasks SET input_hash=?,input_payload=?,attempt=attempt+1,status='running',waiting_reason=NULL WHERE task_id=?",
+            updated = self.db.execute(
+                "UPDATE tasks SET input_hash=?,input_payload=?,attempt=attempt+1,attempt_elapsed_seconds=0,attempt_tool_calls=0,status='running',waiting_reason=NULL "
+                "WHERE task_id=? AND status='waiting'",
                 (input_hash, input_text, task_id),
             )
-        elif row["status"] == "waiting":
-            self.db.execute(
-                "UPDATE tasks SET attempt=attempt+1,status='running',waiting_reason=NULL WHERE task_id=?",
+        else:
+            updated = self.db.execute(
+                "UPDATE tasks SET attempt=attempt+1,attempt_elapsed_seconds=0,attempt_tool_calls=0,status='running',waiting_reason=NULL "
+                "WHERE task_id=? AND status='waiting'",
                 (task_id,),
             )
+        if updated.rowcount != 1:
+            raise ValueError("Task is no longer waiting; refresh before resuming")
         return self.task(task_id)
 
     def resume_current(self, task_id: str) -> sqlite3.Row:
         row = self.task(task_id)
         if row["status"] != "waiting":
             raise ValueError(f"Only a waiting task can resume; task is {row['status']}")
-        self.db.execute("UPDATE tasks SET status='running',waiting_reason=NULL,attempt=attempt+1 WHERE task_id=? AND status='waiting'", (task_id,))
+        updated = self.db.execute("UPDATE tasks SET status='running',waiting_reason=NULL,attempt=attempt+1,attempt_elapsed_seconds=0,attempt_tool_calls=0 WHERE task_id=? AND status='waiting'", (task_id,))
+        if updated.rowcount != 1:
+            raise ValueError("Task is no longer waiting; refresh before resuming")
+        return self.task(task_id)
+
+    def resume_failed_checkpoint(self, task_id: str) -> sqlite3.Row:
+        updated = self.db.execute(
+            "UPDATE tasks SET status='running',waiting_reason=NULL WHERE task_id=? "
+            "AND status='waiting' AND waiting_reason LIKE 'failure:%'", (task_id,),
+        )
+        if updated.rowcount != 1:
+            raise ValueError("Task is no longer waiting after a failed checkpoint")
         return self.task(task_id)
 
     def add_usage(self, task_id: str, seconds: float, tool_calls: int) -> sqlite3.Row:
         self.db.execute(
-            "UPDATE tasks SET elapsed_seconds=elapsed_seconds+?,tool_calls=tool_calls+? WHERE task_id=?",
-            (max(0, seconds), max(0, tool_calls), task_id),
+            "UPDATE tasks SET elapsed_seconds=elapsed_seconds+?,tool_calls=tool_calls+?,attempt_elapsed_seconds=attempt_elapsed_seconds+?,attempt_tool_calls=attempt_tool_calls+? WHERE task_id=?",
+            (max(0, seconds), max(0, tool_calls), max(0, seconds), max(0, tool_calls), task_id),
         )
         return self.task(task_id)
 
@@ -580,6 +667,9 @@ class BusinessStore:
         }
         self.db.execute("BEGIN IMMEDIATE")
         try:
+            current = self.task(state["task_id"])
+            if current["status"] != "running" or current["input_hash"] != state["input_hash"]:
+                raise ValueError("Task is no longer running with the reviewed input")
             self.db.execute(
                 "INSERT INTO results(result_key,task_id,opportunity_id,module,input_hash,payload) VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING",
                 (
@@ -727,7 +817,7 @@ class Runtime:
     def run_model(self, phase: str, payload: dict, state: WorkflowState) -> dict:
         """Call one fresh model process while enforcing the module budget."""
         task = self.store.task(state["task_id"])
-        if task["tool_calls"] >= 20:
+        if task["attempt_tool_calls"] >= ATTEMPT_CALLS:
             raise TimeoutError("tool_budget_exhausted")
         configured = os.environ.get("CAREER_OPS_MODEL_RUNNER")
         command = shlex.split(configured) if configured else [
@@ -736,7 +826,7 @@ class Runtime:
             MODEL_RUNNER,
         ]
         try:
-            remaining = 900 - task["elapsed_seconds"] - (time.monotonic() - self.started_at)
+            remaining = ATTEMPT_SECONDS - task["attempt_elapsed_seconds"] - (time.monotonic() - self.started_at)
             if remaining <= 0:
                 raise TimeoutError("time_budget_exhausted")
             result = subprocess.run(
@@ -758,7 +848,7 @@ class Runtime:
         calls = int(value.pop("tool_calls", 0))
         task = self.store.add_usage(state["task_id"], time.monotonic() - self.started_at, calls)
         self.started_at = time.monotonic()
-        if task["tool_calls"] > 20:
+        if task["attempt_tool_calls"] >= ATTEMPT_CALLS:
             raise TimeoutError("tool_budget_exhausted")
         value["tool_calls"] = task["tool_calls"]
         return value
@@ -773,7 +863,7 @@ class Runtime:
                     {
                         "inputs": inputs, "revision": state["revision"],
                         "previous_review": state.get("review"),
-                        "previous_artifact": json.loads(state["draft"]) if state["revision"] else None,
+                        "previous_artifact": json.loads(state["draft"]) if state["revision"] or state.get("has_prior_package") else None,
                     },
                     state,
                 )
@@ -822,7 +912,7 @@ class Runtime:
     def review(self, state: WorkflowState) -> dict:
         self.crash_once(state, "review")
         task = self.store.task(state["task_id"])
-        if task["module"] == "apply" and (task["tool_calls"] >= 20 or task["elapsed_seconds"] >= 900):
+        if task["module"] == "apply" and (task["attempt_tool_calls"] >= ATTEMPT_CALLS or task["attempt_elapsed_seconds"] >= ATTEMPT_SECONDS):
             return {
                 "review_approved": False,
                 "revision": MAX_CORRECTIONS + 1,
@@ -892,8 +982,18 @@ class Runtime:
         missing = sorted(required - package.keys())
         if missing or not package.get("resume_payload", {}).get("candidate", {}).get("name"):
             raise ValueError("Invalid application package: " + ", ".join(missing or ["resume candidate name"]))
+        for key in required - {"resume_payload"}:
+            if not isinstance(package[key], str) or not package[key].strip():
+                raise ValueError(f"Invalid application package: {key} must be a nonempty Markdown string")
         validate_resume_payload(package["resume_payload"])
         current = self.store.draft(state["task_id"])
+        if current and current["input_hash"] == state["input_hash"] and current["package"] == package and current["review"] == state["review"] and current["approved"] == approved:
+            try:
+                verify_package_files(current, require_pdf=approved)
+            except ValueError:
+                pass
+            else:
+                return {"waiting_reason": "user_review" if approved else "review_budget_exhausted"}
         version = (current["version"] if current else 0) + 1
         root = self.fault_dir / "artifacts" / state["task_id"] / state["input_hash"] / f"package-v{version:03d}"
         root.mkdir(parents=True, exist_ok=True)
@@ -909,7 +1009,37 @@ class Runtime:
                 json.dumps(value, ensure_ascii=False, indent=2) + "\n" if key == "resume_payload" else str(value)
             )
             files[key] = str(path)
-        artifact = {"files": files, "package": package}
+        pdf_receipt = None
+        if approved:
+            remaining = ATTEMPT_SECONDS - self.store.task(state["task_id"])["attempt_elapsed_seconds"] - (time.monotonic() - self.started_at)
+            if remaining <= 0:
+                raise TimeoutError("time_budget_exhausted")
+            pdf_path = root / "resume.pdf"
+            metadata_path = root / "reactive-resume.json"
+            previous_metadata = current.get("files", {}).get("resume_metadata") if current else None
+            previous_metadata = previous_metadata or str(root.parents[1] / "reactive-resume.json")
+            if not metadata_path.exists() and Path(previous_metadata).is_file():
+                shutil.copyfile(previous_metadata, metadata_path)
+            started = time.monotonic()
+            try:
+                inputs = json.loads(self.store.task(state["task_id"])["input_payload"])
+                pdf_receipt = render_resume(
+                    state["task_id"], version, root.parents[1], Path(files["resume_payload"]),
+                    pdf_path, INPUT_ROOT / "config" / "profile.yml",
+                    package["resume_payload"]["candidate"]["name"],
+                    inputs["jd_report"]["company"], inputs["jd_report"]["role"],
+                    timeout_seconds=min(120, max(1, int(remaining))),
+                )
+            finally:
+                self.store.add_usage(state["task_id"], time.monotonic() - started, 1)
+            files["resume_pdf"] = str(pdf_path)
+            files["resume_metadata"] = pdf_receipt["metadata_path"]
+        artifact = {
+            "files": files, "file_hashes": {
+                name: hashlib.sha256(Path(path).read_bytes()).hexdigest()
+                for name, path in files.items()
+            }, "package": package, "pdf_receipt": pdf_receipt,
+        }
         self.store.stage_draft(state, artifact, state["review"], approved)
         return {"waiting_reason": "user_review" if approved else "review_budget_exhausted"}
 
@@ -954,6 +1084,7 @@ def initial_state(task: sqlite3.Row) -> WorkflowState:
         "waiting_reason": None,
         "material_hash": "",
         "tool_calls": 0,
+        "has_prior_package": False,
     }
 
 
@@ -979,6 +1110,9 @@ def _run_task(
         config = {"configurable": {"thread_id": f"{task_id}:{task['attempt']}"}}
         with SqliteSaver.from_conn_string(str(directory / "workflow-checkpoints.db")) as saver:
             graph = runtime.graph(saver)
+            if start_state is None and task["status"] == "waiting" and (task["waiting_reason"] or "").startswith("failure:"):
+                if graph.get_state(config).next:
+                    store.resume_failed_checkpoint(task_id)
             value = graph.invoke(start_state, config)
         if value.get("waiting_reason"):
             store.wait(task_id, value["waiting_reason"])
@@ -1237,8 +1371,12 @@ def resume_task(
     task = store.task(task_id)
     if task["module"] == "apply":
         if task["status"] == "completed" and decision == "confirm":
+            store.confirm_apply(task_id, current_apply_input(store, task))
             store.close()
             return {"task_id": task_id, "status": "completed"}
+        if task["status"] in ("completed", "cancelled"):
+            store.close()
+            raise ValueError(f"Terminal task cannot resume: {task['status']}")
         if input_text is not None:
             report_input = canonical_score_input(input_text)
             if not report_input.startswith("{"):
@@ -1268,24 +1406,56 @@ def resume_task(
             store.close()
             return {"task_id": task_id, "status": "completed"}
         if decision == "accept-jd-change":
-            change = store.context(task_id, "input_change")
-            if not change:
+            store.db.execute("BEGIN IMMEDIATE")
+            try:
+                task = store.task(task_id)
+                if task["status"] != "waiting":
+                    raise ValueError("Apply task is no longer waiting")
+                change = store.context(task_id, "input_change")
+                if not change:
+                    raise ValueError("No pending JD change")
+                input_text = current_apply_input(store, task, change["jd_report"])
+                store.clear_context(task_id, "input_change")
+                task = store.reset_input(task_id, input_text)
+                store.db.execute("COMMIT")
+            except Exception:
+                store.db.execute("ROLLBACK")
                 store.close()
-                raise ValueError("No pending JD change")
-            input_text = current_apply_input(store, task, change["jd_report"])
-            store.clear_context(task_id, "input_change")
-            task = store.reset_input(task_id, input_text)
+                raise
             store.close()
             return run_task(directory, task_id, start_state=initial_state(task), crash_at=crash_at)
         if feedback is not None:
-            if store.context(task_id, "input_change"):
+            store.db.execute("BEGIN IMMEDIATE")
+            try:
+                task = store.task(task_id)
+                if task["status"] != "waiting":
+                    raise ValueError("Apply task is no longer waiting")
+                if store.context(task_id, "input_change"):
+                    raise ValueError("Resolve the pending JD change before feedback")
+                previous = store.draft(task_id)
+                store.add_feedback(task_id, feedback)
+                input_text = current_apply_input(store, task)
+                new_inputs = json.loads(input_text)
+                feedbacks = new_inputs.get("feedback", [])
+                reuse_previous = bool(previous and any(
+                    digest(json.dumps({**new_inputs, "feedback": feedbacks[:index]}, ensure_ascii=False,
+                                      sort_keys=True, separators=(",", ":"))) == previous["input_hash"]
+                    for index in range(len(feedbacks))
+                ))
+                task = store.reset_input(task_id, input_text)
+                store.db.execute("COMMIT")
+            except Exception:
+                store.db.execute("ROLLBACK")
                 store.close()
-                raise ValueError("Resolve the pending JD change before feedback")
-            store.add_feedback(task_id, feedback)
-            input_text = current_apply_input(store, task)
-            task = store.reset_input(task_id, input_text)
+                raise
             store.close()
-            return run_task(directory, task_id, start_state=initial_state(task), crash_at=crash_at)
+            state = initial_state(task)
+            if reuse_previous:
+                state.update(
+                    draft=json.dumps(previous["package"], ensure_ascii=False, sort_keys=True),
+                    review=previous["review"], has_prior_package=True,
+                )
+            return run_task(directory, task_id, start_state=state, crash_at=crash_at)
         store.close()
         raise ValueError("apply resume requires --feedback, --input, or --decision")
     if task["status"] in ("completed", "cancelled"):

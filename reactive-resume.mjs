@@ -129,6 +129,9 @@ function validatePayload(payload) {
   for (const key of ['competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'skills']) {
     if (payload[key] !== undefined && !Array.isArray(payload[key])) throw new Error(`CV payload ${key} must be an array`);
   }
+  if (payload.projects_start_on_new_page !== undefined && typeof payload.projects_start_on_new_page !== 'boolean') {
+    throw new Error('CV payload projects_start_on_new_page must be a boolean');
+  }
 }
 
 function assertLocalApiBase(value) {
@@ -186,23 +189,24 @@ async function recordPdf(report, pdfPath, inputPath) {
 }
 
 export async function renderReactiveResume({
-  payload, inputPath, outputPath, metadataPath = defaultMetadataPath(inputPath), reportNum,
+  payload, inputPath, outputPath, metadataPath = defaultMetadataPath(inputPath), reportNum, taskId,
   company, role, version = 1, baseResumeId, apiBaseUrl, apiKey, fetchImpl = fetch,
   recordManifest = true,
 }) {
-  if (!/^\d+$/.test(String(reportNum ?? ''))) throw new Error('--report must be a numeric report number');
+  if (taskId ? !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(taskId) : !/^\d+$/.test(String(reportNum ?? '')))
+    throw new Error('A numeric --report or UUID --task-id is required');
   if (!baseResumeId) throw new Error('cv.reactive_resume.base_resume_id is required');
   if (!apiKey) throw new Error('REACTIVE_RESUME_API_KEY is required');
   if (!/^\d+$/.test(String(version)) || Number(version) < 1) throw new Error('--version must be a positive integer');
   validatePayload(payload);
   const baseUrl = assertLocalApiBase(apiBaseUrl);
-  const report = String(reportNum).padStart(3, '0');
-  const slug = `career-ops-r${report}`;
-  const displayName = `Career Ops #${report}${company ? ` — ${company}` : ''}${role ? ` — ${role}` : ''}`;
-  const tags = ['career-ops', `report-${report}`];
+  const report = taskId ? null : String(reportNum).padStart(3, '0');
+  const slug = taskId ? `career-ops-workflow-${taskId}` : `career-ops-r${report}`;
+  const displayName = `Career Ops ${taskId ? 'workflow' : `#${report}`}${company ? ` — ${company}` : ''}${role ? ` — ${role}` : ''}`;
+  const tags = ['career-ops', taskId ? 'workflow' : `report-${report}`];
   let metadata = null;
   if (existsSync(metadataPath)) metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
-  if (metadata && (metadata.provider !== PROVIDER || metadata.base_resume_id !== baseResumeId)) {
+  if (metadata && (metadata.provider !== PROVIDER || metadata.base_resume_id !== baseResumeId || metadata.slug !== slug)) {
     throw new Error(`Existing Reactive Resume metadata does not match configured base resume: ${metadataPath}`);
   }
 
@@ -224,44 +228,64 @@ export async function renderReactiveResume({
     report_num: report, name: current.name ?? displayName, slug: current.slug ?? slug,
     linked_at: linkedAt, updated_at: new Date().toISOString(), last_artifact_version: Number(version),
   };
-  await writeJsonAtomic(metadataPath, metadata);
-
+  const operations = buildResumePatch(payload);
+  if (taskId) operations.push(
+    { op: 'replace', path: '/sections/projects/startOnNewPage', value: payload.projects_start_on_new_page === true },
+    { op: 'replace', path: '/sections/profiles/columns', value: 2 },
+    { op: 'replace', path: '/metadata/typography/body/lineHeight', value: 1.3 },
+    { op: 'replace', path: '/metadata/typography/heading/lineHeight', value: 1.3 },
+    { op: 'replace', path: '/metadata/page/gapY', value: 4 },
+    { op: 'replace', path: '/metadata/page/marginY', value: 12 },
+  );
   await request(fetchImpl, baseUrl, apiKey, `/resumes/${encodeURIComponent(resumeId)}`, {
     method: 'PATCH',
-    body: JSON.stringify({ expectedUpdatedAt: current.updatedAt, operations: buildResumePatch(payload) }),
+    body: JSON.stringify({ expectedUpdatedAt: current.updatedAt, operations }),
   });
   const pdf = await request(fetchImpl, baseUrl, apiKey, `/resumes/${encodeURIComponent(resumeId)}/pdf`);
-  await mkdir(dirname(resolve(outputPath)), { recursive: true });
-  await writeFile(resolve(outputPath), Buffer.from(pdf));
-  if (recordManifest) await recordPdf(report, resolve(outputPath), resolve(inputPath));
-  return { resumeId, metadataPath: resolve(metadataPath), outputPath: resolve(outputPath) };
+  const pdfPath = resolve(outputPath);
+  await mkdir(dirname(pdfPath), { recursive: true });
+  const temporary = `${pdfPath}.${process.pid}.tmp`;
+  await writeFile(temporary, Buffer.from(pdf));
+  await rename(temporary, pdfPath);
+  await writeJsonAtomic(metadataPath, metadata);
+  if (recordManifest) await recordPdf(report, pdfPath, resolve(inputPath));
+  return { resumeId, metadataPath: resolve(metadataPath), outputPath: pdfPath };
 }
 
 async function main() {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
     options: {
-      report: { type: 'string' }, company: { type: 'string' }, role: { type: 'string' },
-      version: { type: 'string', default: '1' }, metadata: { type: 'string' }, profile: { type: 'string', default: 'config/profile.yml' },
+      report: { type: 'string' }, 'task-id': { type: 'string' }, 'artifact-root': { type: 'string' },
+      company: { type: 'string' }, role: { type: 'string' }, version: { type: 'string', default: '1' },
+      metadata: { type: 'string' }, profile: { type: 'string', default: 'config/profile.yml' },
     },
   });
-  if (positionals.length !== 2) throw new Error('Usage: node reactive-resume.mjs <cv.json> <cv.pdf> --report=N [--company=NAME] [--role=ROLE] [--version=N]');
+  if (positionals.length !== 2) throw new Error('Usage: node reactive-resume.mjs <cv.json> <cv.pdf> --report=N | --task-id=UUID --artifact-root=DIR');
   dotenv.config({ path: resolve('.env'), quiet: true });
   const profile = yaml.load(await readFile(resolve(values.profile), 'utf8'));
   const config = profile?.cv?.reactive_resume ?? {};
   const inputPath = resolve(positionals[0]);
   const outputPath = resolve(positionals[1]);
-  if (!isOutputArtifact(inputPath) || !isOutputArtifact(outputPath)) {
-    throw new Error('Reactive Resume input and output must stay inside output/');
+  const artifactRoot = values['task-id'] && values['artifact-root'] ? resolve(values['artifact-root']) : null;
+  const isWithin = (root, target) => { const rel = relative(root, target); return rel && rel !== '..' && !rel.startsWith(`..${sep}`); };
+  const metadataPath = values.metadata ? resolve(values.metadata) : artifactRoot ? resolve(artifactRoot, 'reactive-resume.json') : undefined;
+  if (values['task-id'] ? !artifactRoot || !isWithin(artifactRoot, inputPath) || !isWithin(artifactRoot, outputPath) || !isWithin(artifactRoot, metadataPath)
+    : !isOutputArtifact(inputPath) || !isOutputArtifact(outputPath)) {
+    throw new Error('Reactive Resume artifacts must stay inside their output root');
   }
   const result = await renderReactiveResume({
     payload: JSON.parse(await readFile(inputPath, 'utf8')), inputPath, outputPath,
-    metadataPath: values.metadata ? resolve(values.metadata) : undefined,
-    reportNum: values.report, company: values.company, role: values.role, version: values.version,
+    metadataPath, reportNum: values.report, taskId: values['task-id'],
+    company: values.company, role: values.role, version: values.version,
     baseResumeId: config.base_resume_id, apiBaseUrl: config.api_base_url, apiKey: process.env.REACTIVE_RESUME_API_KEY,
+    recordManifest: !values['task-id'],
   });
-  console.log(`✅ Reactive Resume PDF: ${relative(process.cwd(), result.outputPath)}`);
-  console.log(`🔗 Resume: ${String(config.api_base_url).replace(/\/api\/openapi\/?$/, '')}/builder/${result.resumeId}`);
+  if (values['task-id']) console.log(JSON.stringify(result));
+  else {
+    console.log(`✅ Reactive Resume PDF: ${relative(process.cwd(), result.outputPath)}`);
+    console.log(`🔗 Resume: ${String(config.api_base_url).replace(/\/api\/openapi\/?$/, '')}/builder/${result.resumeId}`);
+  }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

@@ -41,6 +41,12 @@ elif phase == "scan_review":
     print(json.dumps({"verdict": "approve", "checks": {"grounded": "pass"}, "tool_calls": 1}))
 elif phase == "apply_evaluate":
     feedback = payload["inputs"].get("feedback", [])
+    if "Emphasize verified testing work" in feedback and "Regenerate for current facts" not in feedback:
+        assert payload.get("previous_artifact", {}).get("cover_letter") == "Grounded cover letter"
+    if "Regenerate for current facts" in feedback:
+        assert payload.get("previous_artifact") is None
+    if "force-budget" in feedback:
+        assert payload.get("previous_artifact", {}).get("cover_letter") == "Grounded cover letter"
     print(json.dumps({
         "outcome": "package",
         "artifact": {

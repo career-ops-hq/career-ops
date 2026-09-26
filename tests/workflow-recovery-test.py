@@ -5,11 +5,16 @@ import os
 from pathlib import Path
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import time
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from workflow.career_ops import BusinessStore, digest, resume_task
+
 PYTHON = ROOT / "workflow" / ".venv" / "bin" / "python"
 CLI = ROOT / "workflow" / "career_ops.py"
 
@@ -106,5 +111,99 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
     assert duplicate_runner.returncode == 1 and "already executing" in duplicate_runner.stderr
     stdout, stderr = running.communicate(timeout=10)
     assert running.returncode == 0, (stdout, stderr)
+
+    store = BusinessStore(directory / "opportunities.db")
+    pending = store.start("cancel-race", "scan", "{}")
+    store.cancel(pending["task_id"])
+    artifact = {"reason": "Closed", "evidence": "Verified source"}
+    state = {"task_id": pending["task_id"], "input_hash": digest("{}"), "outcome": "exclude",
+             "draft": json.dumps(artifact), "material_hash": digest(json.dumps(artifact)),
+             "review": {"verdict": "approve", "checks": {"grounded": "pass"}}}
+    try:
+        store.publish(state)
+    except ValueError as error:
+        assert "no longer running" in str(error)
+    else:
+        raise AssertionError("Cancelled task published a result")
+    assert store.task(pending["task_id"])["status"] == "cancelled"
+    assert store.result(pending["task_id"]) is None
+    for input_text in ("{}", '{"changed":true}'):
+        stale = store.start(f"reset-race-{input_text}", "scan", "{}")
+        store.wait(stale["task_id"], "user_deferred")
+        observed = store.task(stale["task_id"])
+        store.cancel(stale["task_id"])
+        original_task = store.task
+        reads = [observed]
+        store.task = lambda task_id: reads.pop(0) if reads else original_task(task_id)
+        try:
+            store.reset_input(stale["task_id"], input_text)
+        except ValueError as error:
+            assert "no longer waiting" in str(error)
+        else:
+            raise AssertionError("Cancelled task was reopened from a stale waiting snapshot")
+        finally:
+            store.task = original_task
+        assert store.task(stale["task_id"])["status"] == "cancelled"
+    current_resume = store.start("current-resume-race", "scan", "{}")
+    store.wait(current_resume["task_id"], "user_deferred")
+    observed = store.task(current_resume["task_id"])
+    store.cancel(current_resume["task_id"])
+    original_task = store.task
+    reads = [observed]
+    store.task = lambda task_id: reads.pop(0) if reads else original_task(task_id)
+    try:
+        store.resume_current(current_resume["task_id"])
+    except ValueError as error:
+        assert "no longer waiting" in str(error)
+    else:
+        raise AssertionError("Cancelled current-input resume was accepted")
+    finally:
+        store.task = original_task
+    failed_resume = store.start("failed-resume-race", "scan", "{}")
+    store.wait(failed_resume["task_id"], "failure:RuntimeError")
+    store.cancel(failed_resume["task_id"])
+    try:
+        store.resume_failed_checkpoint(failed_resume["task_id"])
+    except ValueError as error:
+        assert "no longer waiting" in str(error)
+    else:
+        raise AssertionError("Cancelled checkpoint resume was accepted")
+    budget_task = store.start("attempt-budget", "apply", "{}")
+    store.add_usage(budget_task["task_id"], 899, 19)
+    store.wait(budget_task["task_id"], "user_review")
+    continued = store.reset_input(budget_task["task_id"], '{"feedback":"revise"}')
+    assert continued["elapsed_seconds"] == 899 and continued["tool_calls"] == 19
+    assert continued["attempt_elapsed_seconds"] == 0 and continued["attempt_tool_calls"] == 0
+    store.add_usage(budget_task["task_id"], 2, 1)
+    store.wait(budget_task["task_id"], "failure:RuntimeError")
+    recovered = store.resume_failed_checkpoint(budget_task["task_id"])
+    assert recovered["attempt_elapsed_seconds"] == 2 and recovered["attempt_tool_calls"] == 1
+    store.wait(budget_task["task_id"], "user_deferred")
+    resumed = store.resume_current(budget_task["task_id"])
+    assert resumed["elapsed_seconds"] == 901 and resumed["tool_calls"] == 20
+    assert resumed["attempt_elapsed_seconds"] == 0 and resumed["attempt_tool_calls"] == 0
+    feedback_task = store.start("feedback-rollback", "apply", "{}")
+    store.wait(feedback_task["task_id"], "user_review")
+    with patch("workflow.career_ops.current_apply_input", return_value="{}"), \
+         patch.object(BusinessStore, "reset_input", side_effect=ValueError("simulated reset failure")):
+        try:
+            resume_task(directory, feedback_task["task_id"], None, None, feedback="Source-backed revision")
+        except ValueError as error:
+            assert "simulated reset failure" in str(error)
+        else:
+            raise AssertionError("Expected reset failure after feedback")
+    assert store.feedback(feedback_task["task_id"]) == []
+    assert store.task(feedback_task["task_id"])["status"] == "waiting"
+    store.set_context(feedback_task["task_id"], "input_change", {"jd_report": {}, "diff": "changed JD"})
+    with patch("workflow.career_ops.current_apply_input", return_value="{}"), \
+         patch.object(BusinessStore, "reset_input", side_effect=ValueError("simulated JD reset failure")):
+        try:
+            resume_task(directory, feedback_task["task_id"], None, None, decision="accept-jd-change")
+        except ValueError as error:
+            assert "simulated JD reset failure" in str(error)
+        else:
+            raise AssertionError("Expected reset failure after JD choice")
+    assert store.context(feedback_task["task_id"], "input_change") == {"jd_report": {}, "diff": "changed JD"}
+    store.close()
 
 print("workflow recovery: crash resume, commit reconciliation and job isolation passed")
