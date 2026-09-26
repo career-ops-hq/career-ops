@@ -109,3 +109,31 @@ test('direct requests work without undici; opting in explains how to install it'
   const result = spawnSync(process.execPath, ['--experimental-loader', loader, '--input-type=module', '-e', script], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
 });
+
+test('credential-bearing HTTP proxies are rejected without exposing their credentials', async () => {
+  for (const proxyVariable of ['HTTP_PROXY', 'HTTPS_PROXY']) {
+    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', [proxyVariable]: 'http://user:secret@proxy.example:3128' }, async () => {
+      await assert.rejects(fetchText('https://public.example/'), (error) => {
+        assert.match(error.message, /credentials must use HTTPS/);
+        assert.ok(!error.message.includes('secret'));
+        assert.ok(!error.message.includes('user:'));
+        return true;
+      });
+    });
+  }
+});
+
+test('credential-bearing HTTPS proxies remain available to provider requests', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (_url, options) => {
+      assert.ok(options.dispatcher);
+      return new Response('TLS PROXY CONFIGURED');
+    };
+    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTPS_PROXY: 'https://user:secret@proxy.example:3128' }, async () => {
+      assert.equal(await fetchText('https://public.example/'), 'TLS PROXY CONFIGURED');
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

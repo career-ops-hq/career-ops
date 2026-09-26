@@ -25,6 +25,13 @@ async function proxyFor(url) {
   const noProxy = process.env.no_proxy || process.env.NO_PROXY || '';
   const proxyUrl = target.protocol === 'https:' ? httpsProxy : httpProxy;
   if (!proxyUrl) return { dispatcher: undefined, proxyHost: undefined };
+  for (const configuredProxy of [httpProxy, httpsProxy]) {
+    if (!configuredProxy) continue;
+    const parsed = new URL(configuredProxy);
+    if ((parsed.username || parsed.password) && parsed.protocol !== 'https:') {
+      throw new Error('Proxy URLs containing credentials must use HTTPS to protect proxy authentication.');
+    }
+  }
   const proxyHost = new URL(proxyUrl).hostname.replace(/^\[|\]$/g, '');
   // The agent honours NO_PROXY and is scoped to this one provider request.
   // Unrelated fetches keep their normal dispatcher. A direct NO_PROXY request
