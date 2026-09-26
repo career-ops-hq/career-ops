@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { profilePatchError } from "@/lib/profile-patch.mjs";
 import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
@@ -57,13 +58,15 @@ function patchToProfile(p: ProfilePatch): Record<string, unknown> {
 }
 
 export async function POST(req: Request) {
-  let patch: ProfilePatch;
+  let payload: unknown;
   try {
-    patch = (await req.json()) as ProfilePatch;
+    payload = await req.json();
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const proposed = patchToProfile(patch);
+  const error = profilePatchError(payload);
+  if (error) return Response.json({ error }, { status: 400 });
+  const proposed = patchToProfile(payload as ProfilePatch);
   if (Object.keys(proposed).length === 0) return Response.json({ error: "nothing to write" }, { status: 400 });
 
   const root = careerOpsRoot();
