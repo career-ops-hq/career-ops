@@ -1,5 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { extractWithAI } from '../scan-hn.mjs';
 
 test('Hacker News AI Extraction Logic', async (t) => {
@@ -49,4 +54,59 @@ test('Hacker News AI Extraction Logic', async (t) => {
     assert.strictEqual(res.title, '');
     assert.strictEqual(res.location, 'Remote/Unknown');
   });
+});
+
+// The test above proves extractWithAI rethrows. This one runs the real scanner,
+// so a regression in the caller (the summary line or the exit code) fails here
+// too. Every Gemini call fails the way an invalid key does; HN is served from a
+// fixture, and any other request is refused.
+test('scan-hn reports AI errors and exits non-zero when every Gemini call fails', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-scanhn-'));
+  try {
+    mkdirSync(join(dir, 'data'), { recursive: true });
+    const unexpected = join(dir, 'unexpected-requests');
+    const preload = join(dir, 'fetch-fixture.cjs');
+    writeFileSync(preload, `
+      const { appendFileSync } = require('node:fs');
+      const json = (body, status = 200) => new Response(JSON.stringify(body), {
+        status, headers: { 'content-type': 'application/json' },
+      });
+      globalThis.fetch = async (input) => {
+        const url = String(input?.url ?? input);
+        if (url.includes('hn.algolia.com/api/v1/search_by_date')) {
+          return json({ hits: [{ objectID: '424242', title: 'Ask HN: Who is hiring? (September 2026)' }] });
+        }
+        if (url.includes('hn.algolia.com/api/v1/items/424242')) {
+          return json({ children: [
+            { text: 'Stripe | Software Engineer | Remote | https://stripe.com/jobs/1' },
+            { text: 'Acme | Software Engineer | Berlin | https://acme.example/jobs/2' },
+          ] });
+        }
+        if (url.includes('generativelanguage.googleapis.com')) {
+          return json({ error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } }, 400);
+        }
+        appendFileSync(${JSON.stringify(unexpected)}, url + '\\n');
+        throw new Error('network forbidden in test: ' + url);
+      };
+    `);
+
+    const env = { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', GEMINI_API_KEY: 'invalid-test-key' };
+    delete env.CAREER_OPS_PORTALS;
+    delete env.GEMINI_MODEL;
+    const r = spawnSync(process.execPath, [
+      '--require', preload,
+      fileURLToPath(new URL('../scan-hn.mjs', import.meta.url)),
+    ], { cwd: dir, encoding: 'utf8', timeout: 30000, env });
+
+    assert.equal(r.error, undefined, `scan-hn failed to spawn: ${r.error?.message}`);
+    assert.equal(existsSync(unexpected), false, 'scan-hn made a request outside the fixture');
+    assert.match(r.stdout, /Postings fetched:\s+2/);
+    assert.match(r.stdout, /New offers:\s+0/);
+    assert.match(r.stdout, /AI errors:\s+2 of 2/, `summary line missing:\n${r.stdout}`);
+    assert.match(r.stderr, /2 of 2 Gemini extractions failed/);
+    assert.match(r.stderr, /API key not valid/);
+    assert.equal(r.status, 1, `expected exit 1 when every Gemini call fails, got ${r.status}\n${r.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
 });
