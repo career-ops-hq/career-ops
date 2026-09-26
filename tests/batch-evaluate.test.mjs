@@ -129,13 +129,13 @@ async function testDeadPostingOutcome() {
           url: () => 'https://example.com/job', route: async () => {},
           goto: async () => ({ status: () => 410 }),
           waitForTimeout: async () => {},
-          evaluate: async () => ++reads === 1 ? 'This job has expired. '.repeat(8) : [],
+          evaluate: async () => ++reads === 1 ? 'Job not found' : [],
           close: async () => { pagesClosed++; }
         };
       }
     };
     const verified = await processOffer(goneBrowser,
-      '- [ ] https://example.com/job', 2, async () => '---DEAD_POSTING---');
+      '- [ ] https://example.com/job', 2, async () => { throw new Error('short page must bypass model'); });
     if (verified.processed && verified.outcome === 'dead-posting' && pagesClosed === 2) {
       pass('default liveness verifier confirms HTTP 410 and closes both pages');
     } else { fail(`default verifier failed: ${JSON.stringify(verified)}, closed=${pagesClosed}`); }
@@ -154,6 +154,24 @@ async function testDeadPostingOutcome() {
       if (!pending.processed && pending.line === urlOnly) {
         pass(`${verdict} posting stays pending despite model closure marker`);
       } else { fail(`model closed ${verdict} posting`); }
+    }
+    for (const scrapeFails of [false, true]) {
+      for (const verdict of ['active', 'uncertain', 'expired']) {
+        let evaluated = false;
+        const browser = { newPage: async () => ({
+          url: () => 'https://example.com/job', route: async () => {},
+          goto: async () => { if (scrapeFails) throw new Error('navigation failed'); },
+          waitForTimeout: async () => {}, evaluate: async () => 'Job not found', close: async () => {}
+        }) };
+        const result = await processOffer(browser, urlOnly, 5,
+          async () => { evaluated = true; return '---DEAD_POSTING---'; },
+          async () => ({ result: verdict }));
+        if (!evaluated && (verdict === 'expired'
+          ? result.processed && result.outcome === 'dead-posting'
+          : !result.processed && result.line === urlOnly)) {
+          pass(`${scrapeFails ? 'failed' : 'short'} scrape respects independent ${verdict} verdict`);
+        } else { fail(`unsafe scrape fallback: ${JSON.stringify(result)}`); }
+      }
     }
     const failedCheck = await processOffer(mockBrowser, urlOnly, 4,
       async () => '---DEAD_POSTING---', async () => { throw new Error('verification unavailable'); });

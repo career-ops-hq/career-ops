@@ -259,10 +259,28 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
   console.log(`🔄 Processing [${idx}]: ${companyHint} - ${titleHint}`);
   console.log(`🔗 URL: ${url}`);
 
+  async function resolveDeadPosting() {
+    // Neither model output nor a failed scrape proves closure. Verify the URL
+    // independently; active/uncertain results preserve pending work.
+    const liveness = await _checkLiveness(browser, url);
+    if (liveness?.result !== 'expired') {
+      return { line, processed: false, outcome: 'unconfirmed-dead-posting' };
+    }
+    const label = match[2] ? `${companyHint} | ${titleHint}` : url;
+    const newLine = `- [x] ~~${label}~~ — oferta nieaktywna`;
+    console.log(`⏭️ Closed posting: ${companyHint} - ${titleHint}`);
+    return { line: newLine, processed: true, outcome: 'dead-posting' };
+  }
+
   try {
-    const jdText = await scrapeUrl(browser, url);
+    let jdText;
+    try {
+      jdText = await scrapeUrl(browser, url);
+    } catch {
+      return await resolveDeadPosting();
+    }
     if (!jdText || jdText.length < 100) {
-      throw new Error('Extracted text too short (likely blocked or empty)');
+      return await resolveDeadPosting();
     }
 
     console.log(`🧠 Calling Gemini (${modelName})...`);
@@ -270,16 +288,7 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
 
     // Parse output
     if (/^---DEAD_POSTING---\s*$/m.test(evaluationText)) {
-      // Model output is not evidence: verify the URL independently before
-      // removing an entry from pending work. Uncertain/active entries stay open.
-      const liveness = await _checkLiveness(browser, url);
-      if (liveness?.result !== 'expired') {
-        return { line, processed: false, outcome: 'unconfirmed-dead-posting' };
-      }
-      const label = match[2] ? `${companyHint} | ${titleHint}` : url;
-      const newLine = `- [x] ~~${label}~~ — oferta nieaktywna`;
-      console.log(`⏭️ Closed posting: ${companyHint} - ${titleHint}`);
-      return { line: newLine, processed: true, outcome: 'dead-posting' };
+      return await resolveDeadPosting();
     }
 
     const summaryMatch = evaluationText.match(/---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/);
