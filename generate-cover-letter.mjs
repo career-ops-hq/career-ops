@@ -124,9 +124,22 @@ function buildCredentialsBlock(candidate) {
 }
 
 /** Build the escaped company, city, and date line for the letter. */
-function buildDateline(letter) {
-  const parts = [letter.company, letter.city, letter.date].filter(Boolean).map(escapeHtml);
-  return parts.join(" &nbsp;&nbsp; ");
+function buildDateline(letter, hasRecipientBlock = false) {
+  // The pack contract gives {{DATELINE}} the date and leaves the company and
+  // city to the address block directly beneath it, so joining all three prints
+  // the company twice, three lines apart.
+  //
+  // Gated on the block actually RENDERING, not on `letter.recipient` merely
+  // being set — see the caller, which needs both the data and a template slot
+  // to conclude that. An empty or whitespace-only recipient produces no address
+  // block, and a template without a {{RECIPIENT_BLOCK}} slot has nowhere to put
+  // one; either way, dropping company and city would lose them with nothing
+  // taking their place. The shipped base template is the second case, so it
+  // keeps the full join exactly as before.
+  const parts = hasRecipientBlock
+    ? [letter.date]
+    : [letter.company, letter.city, letter.date];
+  return parts.filter(Boolean).map(escapeHtml).join(" &nbsp;&nbsp; ");
 }
 
 /**
@@ -156,13 +169,77 @@ function buildRecipientBlock(letter) {
       : [];
   // Trim before filtering: `filter(Boolean)` alone keeps "   ", which renders as
   // a blank line inside the wrapper rather than as the absent field it is.
+  // Falsy first, so 0 / "" / null drop out as they always have, THEN coerce.
+  // Coercing first would turn 0 into the string "0" and keep it as an address
+  // line; leaving a truthy non-string uncoerced crashes the compare below.
   const lines = [r.name, r.title, r.company, ...addressLines]
-    .map((v) => (typeof v === "string" ? v.trim() : v))
     .filter(Boolean)
-    .map(escapeHtml);
+    .map((v) => String(v).trim())
+    .filter(Boolean);
   if (!lines.length) return "";
-  return `<div class="recipient">\n${lines.map((l) => `    <div>${l}</div>`).join("\n")}\n  </div>`;
+
+  // Once this block renders, the dateline drops the company and city, so they
+  // have to land here or they leave the letter entirely. A recipient given as a
+  // bare name is the case that exposed it: the block held one line, the dateline
+  // went date-only, and both values were simply gone from the output.
+  //
+  // Appended only when the recipient did not already supply them, compared
+  // case-insensitively against every line including the address, so a recipient
+  // that names its own company keeps exactly one copy.
+  // Compared by comma-delimited component, not by whole line. An address line
+  // is routinely "123 Main St, Boston, MA" while letter.city is "Boston, MA":
+  // the lines differ, so a whole-line compare appends the city a second time,
+  // which is the duplication this whole change exists to stop.
+  // A trailing US ZIP is stripped from the LAST component only. "Boston, MA
+  // 02101" and the city "Boston, MA" otherwise differ in that component and the
+  // city gets appended a second time, and an address carrying a ZIP is the
+  // ordinary case rather than an edge one. Confined to the final component and
+  // to a recognisable ZIP shape, so a street number cannot be eaten; formats
+  // this cannot recognise simply keep today's behaviour.
+  const components = (v) => {
+    const parts = String(v)
+      .split(",")
+      .map((part) => part.toLowerCase().replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    if (parts.length) {
+      const last = parts[parts.length - 1].replace(/\s+\d{5}(?:-\d{4})?$/, "").trim();
+      if (last) parts[parts.length - 1] = last;
+    }
+    return parts;
+  };
+
+  /** Does `hay` contain `needle` as a contiguous run of components? */
+  const containsRun = (hay, needle) => {
+    if (!needle.length || needle.length > hay.length) return false;
+    for (let i = 0; i + needle.length <= hay.length; i++) {
+      if (needle.every((n, j) => hay[i + j] === n)) return true;
+    }
+    return false;
+  };
+
+  // Where each one belongs differs, so they are not both appended. A company
+  // goes straight after the recipient's name and title and ABOVE the street
+  // address; pushing it to the end put it below the street, which is not an
+  // address block (#4069 review). The city stays last, where it already sat.
+  // `lines` starts as name, title, company, then the address lines, all through
+  // the same filters, so the first `headCount` entries are exactly that head.
+  const headCount = [r.name, r.title, r.company]
+    .filter(Boolean)
+    .map((v) => String(v).trim())
+    .filter(Boolean).length;
+  for (const [extra, insertAt] of [[letter.company, headCount], [letter.city, null]]) {
+    const v = typeof extra === "string" ? extra.trim() : "";
+    if (!v) continue;
+    const want = components(v);
+    if (lines.some((l) => containsRun(components(l), want))) continue;
+    if (insertAt === null) lines.push(v);
+    else lines.splice(insertAt, 0, v);
+  }
+
+  const escaped = lines.map(escapeHtml);
+  return `<div class="recipient">\n${escaped.map((l) => `    <div>${l}</div>`).join("\n")}\n  </div>`;
 }
+
 
 /** Build the optional achievements list for the letter body. */
 function buildAchievementsBlock(achievements) {
@@ -255,13 +332,21 @@ export function buildHtml(payload, templatePath) {
   // valediction. The <br> is emitted around escaped values, never inside one.
   const signatureBlock = buildSignatureBlock(letter.signature, candidate.name);
 
+  const recipientBlock = buildRecipientBlock(letter);
+  // The gate's predicate is "the address block will RENDER", which needs both
+  // halves: recipient data to put in it, and a slot in the loaded template to
+  // put it in. The shipped base template has {{DATELINE}} and no
+  // {{RECIPIENT_BLOCK}}, so a payload carrying a recipient would otherwise lose
+  // the company and city entirely — dropped from the dateline, with no address
+  // block downstream to reprint them.
+  const rendersRecipientBlock = Boolean(recipientBlock) && html.includes("{{RECIPIENT_BLOCK}}");
   const replacements = {
     "{{NAME}}": escapeHtml(candidate.name),
     "{{CONTACT_LINE}}": buildContactLine(candidate),
     "{{CREDENTIALS_BLOCK}}": buildCredentialsBlock(candidate),
     "{{ROLE_TITLE}}": escapeHtml(letter.role_title),
-    "{{DATELINE}}": buildDateline(letter),
-    "{{RECIPIENT_BLOCK}}": buildRecipientBlock(letter),
+    "{{DATELINE}}": buildDateline(letter, rendersRecipientBlock),
+    "{{RECIPIENT_BLOCK}}": recipientBlock,
     "{{GREETING_BLOCK}}": greetingBlock,
     "{{OPENING}}": escapeHtml(letter.opening),
     "{{PROFILE_INTRO}}": escapeHtml(letter.profile_intro),
